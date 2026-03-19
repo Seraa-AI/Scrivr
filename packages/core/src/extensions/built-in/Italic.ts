@@ -28,13 +28,13 @@ export const Italic = Extension.create<ItalicOptions>({
   addKeymap() {
     if (!this.options.shortcut) return {};
     return {
-      "Mod-i": toggleMark(this.schema.marks.italic),
+      "Mod-i": toggleMark(this.schema.marks["italic"]!),
     };
   },
 
   addCommands() {
     return {
-      toggleItalic: () => toggleMark(this.schema.marks.italic),
+      toggleItalic: () => toggleMark(this.schema.marks["italic"]!),
     };
   },
 });

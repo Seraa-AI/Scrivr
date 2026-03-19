@@ -57,16 +57,16 @@ export const Highlight = Extension.create<HighlightOptions>({
 
   addKeymap() {
     return {
-      "Mod-Shift-h": toggleMark(this.schema.marks.highlight),
+      "Mod-Shift-h": toggleMark(this.schema.marks["highlight"]!),
     };
   },
 
   addCommands() {
     return {
       toggleHighlight:
-        (color?: string) =>
+        (color?: unknown) =>
         toggleMark(
-          this.schema.marks.highlight,
+          this.schema.marks["highlight"]!,
           this.options.multicolor && color ? { color } : undefined
         ),
     };

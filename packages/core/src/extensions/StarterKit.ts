@@ -5,9 +5,11 @@ import { Heading } from "./built-in/Heading";
 import { Bold } from "./built-in/Bold";
 import { Italic } from "./built-in/Italic";
 import { History } from "./built-in/History";
+import type { Command } from "prosemirror-state";
+import type { NodeSpec, MarkSpec } from "prosemirror-model";
 
 interface StarterKitOptions {
-  /** Pass false to exclude, or an options object to configure */
+  /** Pass false to exclude this extension entirely */
   document?: false;
   paragraph?: false;
   heading?: false | { levels?: number[] };
@@ -19,36 +21,17 @@ interface StarterKitOptions {
 /**
  * StarterKit — batteries-included default for new editors.
  *
- * Bundles the essential extensions so consumers don't have to list them
- * individually. Any extension can be disabled or configured via options.
- *
  * @example
- * // Minimal editor
  * new Editor({ extensions: [StarterKit] })
- *
- * // Disable undo/redo (e.g. collaborative editing where server owns history)
  * new Editor({ extensions: [StarterKit.configure({ history: false })] })
- *
- * // Only h1, h2, h3
  * new Editor({ extensions: [StarterKit.configure({ heading: { levels: [1, 2, 3] } })] })
- *
- * // Add custom extensions alongside StarterKit
  * new Editor({ extensions: [StarterKit, Highlight, MyImageExtension] })
  */
 export const StarterKit = Extension.create<StarterKitOptions>({
   name: "starterKit",
 
-  defaultOptions: {
-    document: undefined,
-    paragraph: undefined,
-    heading: undefined,
-    bold: undefined,
-    italic: undefined,
-    history: undefined,
-  },
-
   addNodes() {
-    const nodes: Record<string, object> = {};
+    const nodes: Record<string, NodeSpec> = {};
     const opts = this.options;
 
     if (opts.document !== false) {
@@ -58,18 +41,17 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       Object.assign(nodes, Paragraph.resolve().nodes);
     }
     if (opts.heading !== false) {
-      const headingExt =
-        opts.heading && opts.heading !== false
-          ? Heading.configure(opts.heading)
-          : Heading;
-      Object.assign(nodes, headingExt.resolve().nodes);
+      const ext = typeof opts.heading === "object"
+        ? Heading.configure(opts.heading)
+        : Heading;
+      Object.assign(nodes, ext.resolve().nodes);
     }
 
     return nodes;
   },
 
   addMarks() {
-    const marks: Record<string, object> = {};
+    const marks: Record<string, MarkSpec> = {};
     const opts = this.options;
 
     if (opts.bold !== false) {
@@ -83,64 +65,55 @@ export const StarterKit = Extension.create<StarterKitOptions>({
   },
 
   addProseMirrorPlugins() {
-    const plugins = [];
     const opts = this.options;
+    if (opts.history === false) return [];
 
-    if (opts.history !== false) {
-      const historyExt =
-        opts.history && opts.history !== false
-          ? History.configure(opts.history)
-          : History;
-      plugins.push(...historyExt.resolve(this.schema).plugins);
-    }
-
-    return plugins;
+    const ext = typeof opts.history === "object"
+      ? History.configure(opts.history)
+      : History;
+    return ext.resolve(this.schema).plugins;
   },
 
   addKeymap() {
-    const km: Record<string, unknown> = {};
+    const km: Record<string, Command> = {};
     const opts = this.options;
 
     if (opts.paragraph !== false) {
       Object.assign(km, Paragraph.resolve(this.schema).keymap);
     }
     if (opts.bold !== false) {
-      const boldExt =
-        opts.bold && opts.bold !== false ? Bold.configure(opts.bold) : Bold;
-      Object.assign(km, boldExt.resolve(this.schema).keymap);
+      const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
+      Object.assign(km, ext.resolve(this.schema).keymap);
     }
     if (opts.italic !== false) {
-      const italicExt =
-        opts.italic && opts.italic !== false
-          ? Italic.configure(opts.italic)
-          : Italic;
-      Object.assign(km, italicExt.resolve(this.schema).keymap);
+      const ext = typeof opts.italic === "object" ? Italic.configure(opts.italic) : Italic;
+      Object.assign(km, ext.resolve(this.schema).keymap);
     }
     if (opts.history !== false) {
-      const historyExt =
-        opts.history && opts.history !== false
-          ? History.configure(opts.history)
-          : History;
-      Object.assign(km, historyExt.resolve(this.schema).keymap);
+      const ext = typeof opts.history === "object" ? History.configure(opts.history) : History;
+      Object.assign(km, ext.resolve(this.schema).keymap);
     }
 
-    return km as Record<string, import("prosemirror-state").Command>;
+    return km;
   },
 
   addCommands() {
-    const cmds: Record<string, unknown> = {};
+    const cmds: Record<string, (...args: unknown[]) => Command> = {};
     const opts = this.options;
 
     if (opts.bold !== false) {
-      Object.assign(cmds, Bold.resolve(this.schema).commands);
+      const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
+      Object.assign(cmds, ext.resolve(this.schema).commands);
     }
     if (opts.italic !== false) {
-      Object.assign(cmds, Italic.resolve(this.schema).commands);
+      const ext = typeof opts.italic === "object" ? Italic.configure(opts.italic) : Italic;
+      Object.assign(cmds, ext.resolve(this.schema).commands);
     }
     if (opts.history !== false) {
-      Object.assign(cmds, History.resolve(this.schema).commands);
+      const ext = typeof opts.history === "object" ? History.configure(opts.history) : History;
+      Object.assign(cmds, ext.resolve(this.schema).commands);
     }
 
-    return cmds as Record<string, (...args: unknown[]) => import("prosemirror-state").Command>;
+    return cmds;
   },
 });

@@ -13,8 +13,8 @@
  *   Phase 3 — addLayoutHandler / addMarkDecorators → wired into BlockRegistry + renderer
  */
 
-import type { NodeSpec, MarkSpec, Schema, Plugin } from "prosemirror-model";
-import type { Command } from "prosemirror-state";
+import type { NodeSpec, MarkSpec, Schema } from "prosemirror-model";
+import type { Command, Plugin } from "prosemirror-state";
 import type { BlockStrategy } from "../layout/BlockRegistry";
 
 // ── Mark decorator ─────────────────────────────────────────────────────────────
@@ -49,34 +49,41 @@ export interface MarkDecorator {
   decoratePost?(ctx: CanvasRenderingContext2D, rect: SpanRect): void;
 }
 
-// ── Extension context (available inside addKeymap / addCommands / addProseMirrorPlugins) ──
+// ── Extension context ─────────────────────────────────────────────────────────
 
 /**
- * Context passed as `this` to behaviour-phase callbacks.
- * The Schema is available because it has already been built from all extensions.
+ * Context available in Phase 1 callbacks (addNodes, addMarks).
+ * Schema is not available yet — it's still being built.
  */
-export interface ExtensionContext<Options = Record<string, unknown>> {
+export interface Phase1Context<Options = object> {
   readonly name: string;
   readonly options: Options;
+}
+
+/**
+ * Context passed as `this` to Phase 2 callbacks (addKeymap, addCommands, addProseMirrorPlugins).
+ * The Schema is available because Phase 1 has already run for all extensions.
+ */
+export interface ExtensionContext<Options = object> extends Phase1Context<Options> {
   readonly schema: Schema;
 }
 
 // ── Extension config (what you pass to Extension.create) ─────────────────────
 
-export interface ExtensionConfig<Options = Record<string, unknown>> {
+export interface ExtensionConfig<Options = object> {
   name: string;
 
   /** Default options — shallow-merged with consumer overrides via configure() */
   defaultOptions?: Partial<Options>;
 
   // ── Phase 1: Schema ─────────────────────────────────────────────────────────
-  // Called with NO schema context (we're still building the schema).
+  // Called with `this = Phase1Context` — options available, schema is not yet built.
 
   /** Contribute ProseMirror node specs. Keys become schema node type names. */
-  addNodes?(): Record<string, NodeSpec>;
+  addNodes?(this: Phase1Context<Options>): Record<string, NodeSpec>;
 
   /** Contribute ProseMirror mark specs. Keys become schema mark type names. */
-  addMarks?(): Record<string, MarkSpec>;
+  addMarks?(this: Phase1Context<Options>): Record<string, MarkSpec>;
 
   // ── Phase 2: Behaviour ──────────────────────────────────────────────────────
   // Called with `this = ExtensionContext` — the built schema is available.
@@ -113,7 +120,7 @@ export interface ExtensionConfig<Options = Record<string, unknown>> {
    * Only implement this for block node extensions (paragraph, image, etc.).
    * The node type name registered must match this extension's `name`.
    */
-  addLayoutHandler?(): BlockStrategy;
+  addLayoutHandler?(this: Phase1Context<Options>): BlockStrategy;
 
   // ── Phase 4: Render ─────────────────────────────────────────────────────────
 
@@ -124,7 +131,7 @@ export interface ExtensionConfig<Options = Record<string, unknown>> {
    * Bold and italic don't need decorators — they're handled by StyleResolver
    * changing the font string. Use decorators for visual-only effects.
    */
-  addMarkDecorators?(): Record<string, MarkDecorator>;
+  addMarkDecorators?(this: Phase1Context<Options>): Record<string, MarkDecorator>;
 }
 
 // ── Resolved extension (internal — produced by Extension.resolve()) ───────────

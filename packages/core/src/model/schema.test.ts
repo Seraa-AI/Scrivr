@@ -27,17 +27,17 @@ describe("schema — nodes", () => {
 
   it("heading has a level attribute defaulting to 1", () => {
     const heading = schema.nodes["heading"]!;
-    expect(heading.attrs["level"]?.default).toBe(1);
+    expect(heading.spec.attrs?.["level"]?.default).toBe(1);
   });
 
   it("form_field has fieldType attribute defaulting to text", () => {
     const field = schema.nodes["form_field"]!;
-    expect(field.attrs["fieldType"]?.default).toBe("text");
+    expect(field.spec.attrs?.["fieldType"]?.default).toBe("text");
   });
 
   it("table has columnWidths attribute defaulting to empty array", () => {
     const table = schema.nodes["table"]!;
-    expect(table.attrs["columnWidths"]?.default).toEqual([]);
+    expect(table.spec.attrs?.["columnWidths"]?.default).toEqual([]);
   });
 });
 
@@ -70,8 +70,8 @@ describe("schema — marks", () => {
 
   it("track_insert has author and date attributes", () => {
     const mark = schema.marks["track_insert"]!;
-    expect(mark.attrs["author"]).toBeDefined();
-    expect(mark.attrs["date"]).toBeDefined();
+    expect(mark.spec.attrs?.["author"]).toBeDefined();
+    expect(mark.spec.attrs?.["date"]).toBeDefined();
   });
 });
 

@@ -182,6 +182,7 @@ export const schema = new Schema({
   },
 });
 
-// Convenience type exports — use these instead of raw strings throughout the codebase
-export type NodeType = keyof typeof schema.nodes;
-export type MarkType = keyof typeof schema.marks;
+// Convenience string-union type exports for the built-in schema node/mark names.
+// Named with "Name" suffix to avoid collision with ProseMirror's NodeType/MarkType classes.
+export type NodeTypeName = keyof typeof schema.nodes;
+export type MarkTypeName = keyof typeof schema.marks;

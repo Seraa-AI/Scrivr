@@ -124,8 +124,8 @@ export function layoutBlock(node: Node, options: BlockLayoutOptions): LayoutBloc
         height: line.lineHeight,
         startDocPos: line.spans[0]?.docPos ?? nodePos + 1,
         endDocPos:
-          (line.spans.at(-1)?.docPos ?? nodePos + 1) +
-          (line.spans.at(-1)?.text.length ?? 0),
+          (line.spans[line.spans.length - 1]?.docPos ?? nodePos + 1) +
+          (line.spans[line.spans.length - 1]?.text.length ?? 0),
       });
 
       for (const span of line.spans) {

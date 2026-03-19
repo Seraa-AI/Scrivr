@@ -36,13 +36,13 @@ export const Bold = Extension.create<BoldOptions>({
   addKeymap() {
     if (!this.options.shortcut) return {};
     return {
-      "Mod-b": toggleMark(this.schema.marks.bold),
+      "Mod-b": toggleMark(this.schema.marks["bold"]!),
     };
   },
 
   addCommands() {
     return {
-      toggleBold: () => toggleMark(this.schema.marks.bold),
+      toggleBold: () => toggleMark(this.schema.marks["bold"]!),
     };
   },
 });

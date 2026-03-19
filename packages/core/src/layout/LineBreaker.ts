@@ -136,7 +136,7 @@ export class LineBreaker {
         y,
         height: line.lineHeight,
         startDocPos: line.spans[0]?.docPos ?? 0,
-        endDocPos: (line.spans.at(-1)?.docPos ?? 0) + (line.spans.at(-1)?.text.length ?? 0),
+        endDocPos: (line.spans[line.spans.length - 1]?.docPos ?? 0) + (line.spans[line.spans.length - 1]?.text.length ?? 0),
       });
 
       for (const span of line.spans) {

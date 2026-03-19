@@ -2,6 +2,7 @@ import type { Schema } from "prosemirror-model";
 import type {
   ExtensionConfig,
   ExtensionContext,
+  Phase1Context,
   ResolvedExtension,
 } from "./types";
 
@@ -15,9 +16,9 @@ import type {
  *   new Editor({ extensions: [Bold] });
  *
  *   // Configure before use
- *   new Editor({ extensions: [Bold.configure({ shortcuts: false })] });
+ *   new Editor({ extensions: [Bold.configure({ shortcut: false })] });
  */
-export class Extension<Options extends Record<string, unknown> = Record<string, unknown>> {
+export class Extension<Options extends object = object> {
   readonly name: string;
   readonly options: Options;
 
@@ -31,11 +32,9 @@ export class Extension<Options extends Record<string, unknown> = Record<string, 
 
   /**
    * Create a new Extension from a config object.
-   *
    * Returns an Extension instance with `defaultOptions` applied.
-   * Call `.configure()` to override specific options before passing to Editor.
    */
-  static create<Opts extends Record<string, unknown> = Record<string, unknown>>(
+  static create<Opts extends object = object>(
     config: ExtensionConfig<Opts>
   ): Extension<Opts> {
     return new Extension<Opts>(config, (config.defaultOptions ?? {}) as Opts);
@@ -45,8 +44,7 @@ export class Extension<Options extends Record<string, unknown> = Record<string, 
    * Returns a new Extension with the given options shallow-merged over the current ones.
    *
    * @example
-   * // Disable default keyboard shortcuts for this extension
-   * StarterKit.configure({ history: false })
+   * Heading.configure({ levels: [1, 2, 3] })
    */
   configure(options: Partial<Options>): Extension<Options> {
     return new Extension(this.config, { ...this.options, ...options });
@@ -55,31 +53,30 @@ export class Extension<Options extends Record<string, unknown> = Record<string, 
   /**
    * Resolve this extension into a plain object that ExtensionManager can consume.
    *
-   * @param schema — the fully built ProseMirror Schema (from Phase 1 of all extensions)
-   *                 Only needed for Phase 2 callbacks. Pass undefined during schema build.
+   * @param schema — the fully built ProseMirror Schema.
+   *                 Required for Phase 2 callbacks. Omit during schema-build phase.
    */
   resolve(schema?: Schema): ResolvedExtension {
     const { config, name, options } = this;
 
-    // Phase 2 context — available to addKeymap, addCommands, addProseMirrorPlugins
-    const ctx: ExtensionContext<Options> = {
-      name,
-      options,
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      schema: schema!,
-    };
+    // Phase 1 context — options available, schema not yet built
+    const p1: Phase1Context<Options> = { name, options };
+
+    // Phase 2 context — schema now available
+    const p2: ExtensionContext<Options> = { name, options, schema: schema! };
 
     return {
       name,
-      nodes: config.addNodes?.() ?? {},
-      marks: config.addMarks?.() ?? {},
-      // Phase 2 callbacks called with context bound as `this`
-      plugins: schema ? (config.addProseMirrorPlugins?.call(ctx) ?? []) : [],
-      keymap:  schema ? (config.addKeymap?.call(ctx) ?? {}) : {},
-      commands: schema ? (config.addCommands?.call(ctx) ?? {}) : {},
-      // Phase 3 / 4 — no schema dependency
-      layoutHandler: config.addLayoutHandler?.() ?? null,
-      markDecorators: new Map(Object.entries(config.addMarkDecorators?.() ?? {})),
+      // Phase 1: called with p1 so addNodes/addMarks can access this.options
+      nodes: config.addNodes?.call(p1) ?? {},
+      marks: config.addMarks?.call(p1) ?? {},
+      // Phase 2: only when schema is available
+      plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
+      keymap:  schema ? (config.addKeymap?.call(p2) ?? {}) : {},
+      commands: schema ? (config.addCommands?.call(p2) ?? {}) : {},
+      // Phase 3/4: options available, no schema needed
+      layoutHandler: config.addLayoutHandler?.call(p1) ?? null,
+      markDecorators: new Map(Object.entries(config.addMarkDecorators?.call(p1) ?? {})),
     };
   }
 }
