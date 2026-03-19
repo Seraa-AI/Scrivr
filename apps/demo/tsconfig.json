@@ -2,7 +2,13 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@canvas-editor/core": ["../../packages/core/src/index.ts"],
+      "@canvas-editor/plugins": ["../../packages/plugins/src/index.ts"],
+      "@canvas-editor/export": ["../../packages/export/src/index.ts"],
+      "@canvas-editor/react": ["../../packages/react/src/index.ts"]
+    }
   },
   "include": ["src"]
 }

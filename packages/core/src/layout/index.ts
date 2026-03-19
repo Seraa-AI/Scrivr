@@ -1,4 +1,13 @@
-// Layout engine — text measurement, line breaking, block layout, pagination
-// This is the core differentiator vs DOM-based editors
-
-export {};
+export { CharacterMap } from "./CharacterMap";
+export type { GlyphEntry, LineEntry, CoordsResult } from "./CharacterMap";
+export { TextMeasurer } from "./TextMeasurer";
+export type { FontMetrics, RunMetrics } from "./TextMeasurer";
+export { LineBreaker } from "./LineBreaker";
+export type { InputSpan, LayoutSpan, LayoutLine } from "./LineBreaker";
+export { layoutBlock } from "./BlockLayout";
+export type { LayoutBlock, BlockLayoutOptions } from "./BlockLayout";
+export { layoutDocument, defaultPageConfig, collapseMargins } from "./PageLayout";
+export type { PageConfig, LayoutPage, DocumentLayout, PageLayoutOptions } from "./PageLayout";
+export { defaultFontConfig, getBlockStyle } from "./FontConfig";
+export type { FontConfig, BlockStyle } from "./FontConfig";
+export { resolveFont } from "./StyleResolver";

@@ -1,121 +1,113 @@
-import { useRef, useEffect, useState, useCallback } from "react";
-import { EditorState } from "prosemirror-state";
-import { Editor, setupCanvas, clearCanvas } from "@canvas-editor/core";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import {
+  Editor,
+  EditorState,
+  TextMeasurer,
+  CharacterMap,
+  layoutDocument,
+  defaultPageConfig,
+  createEditorState,
+} from "@canvas-editor/core";
+import { PageView } from "./PageView";
+import { useVirtualPages } from "./useVirtualPages";
+import type { LayoutPage } from "@canvas-editor/core";
 
-// A4 at 96dpi — logical CSS pixels
-const PAGE_W = 794;
-const PAGE_H = 1123;
-const MARGIN = 72; // ~1 inch
+const PAGE_GAP = 24;
 
-// Stored across renders — set once in useEffect
-let canvasDpr = 1;
+// Shared instances — created once, live for the app lifetime
+const measurer = new TextMeasurer({ lineHeightMultiplier: 1.2 });
+const charMap = new CharacterMap();
+
+// Initial layout from an empty doc
+const initialLayout = layoutDocument(createEditorState().doc, {
+  pageConfig: defaultPageConfig,
+  measurer,
+  previousVersion: 0,
+});
 
 export function App() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Editor | null>(null);
-  const [docState, setDocState] = useState<DocStats>({ text: "", blocks: 0, chars: 0 });
+  const versionRef = useRef(initialLayout.version);
 
-  const render = useCallback((state: EditorState) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d", { alpha: false })!;
+  const [layout, setLayout] = useState(initialLayout);
 
-    clearCanvas(ctx, PAGE_W, PAGE_H, canvasDpr);
+  const getCurrentVersion = useCallback(() => versionRef.current, []);
 
-    // Page margin guides
-    ctx.strokeStyle = "#dbeafe";
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.strokeRect(MARGIN, MARGIN, PAGE_W - MARGIN * 2, PAGE_H - MARGIN * 2);
-    ctx.setLineDash([]);
-
-    // Status line
-    ctx.fillStyle = "#94a3b8";
-    ctx.font = "12px 'SF Mono', 'Fira Code', monospace";
-    ctx.fillText("Layout engine not yet built — document model is live.", MARGIN, MARGIN + 20);
-
-    // Render text content with basic word wrap
-    const text = state.doc.textContent;
-    if (text) {
-      ctx.fillStyle = "#1e293b";
-      ctx.font = "15px Georgia, 'Times New Roman', serif";
-
-      const words = text.split(" ");
-      let line = "";
-      let y = MARGIN + 56;
-      const maxWidth = PAGE_W - MARGIN * 2;
-
-      for (const word of words) {
-        const test = line ? `${line} ${word}` : word;
-        if (ctx.measureText(test).width > maxWidth && line) {
-          ctx.fillText(line, MARGIN, y);
-          line = word;
-          y += 24;
-        } else {
-          line = test;
-        }
-      }
-      if (line) ctx.fillText(line, MARGIN, y);
-    }
-
-    setDocState({
-      text: state.doc.textContent,
-      blocks: state.doc.childCount,
-      chars: state.doc.textContent.length,
+  const onDocChange = useCallback((state: EditorState) => {
+    charMap.clear();
+    const next = layoutDocument(state.doc, {
+      pageConfig: defaultPageConfig,
+      measurer,
+      previousVersion: versionRef.current,
     });
+    versionRef.current = next.version;
+    setLayout(next);
   }, []);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-
-    // One-time high-DPI setup
-    const { dpr } = setupCanvas(canvas, { width: PAGE_W, height: PAGE_H });
-    canvasDpr = dpr;
-
-    const editor = new Editor({ onChange: render });
+    const container = editorContainerRef.current;
+    if (!container) return;
+    const editor = new Editor({ onChange: onDocChange });
     editorRef.current = editor;
     editor.mount(container);
-    render(editor.getState());
-
+    onDocChange(editor.getState());
     return () => editor.destroy();
-  }, [render]);
+  }, [onDocChange]);
+
+  const { visiblePages, observePage } = useVirtualPages(layout.pages, 500);
+
+  const stats = useMemo(() => ({
+    pages: layout.pages.length,
+    version: layout.version,
+  }), [layout]);
 
   return (
     <div style={styles.shell}>
       <header style={styles.header}>
         <span style={styles.title}>canvas-editor</span>
-        <span style={styles.badge}>Phase 1 — model connected</span>
+        <span style={styles.badge}>Phase 1 — virtual pages</span>
+        <span style={styles.stat}>pages: {stats.pages}</span>
+        <span style={styles.stat}>v{stats.version}</span>
       </header>
 
       <div style={styles.body}>
-        <main style={styles.main}>
-          <div
-            ref={containerRef}
-            style={styles.pageWrapper}
-            onClick={() => editorRef.current?.focus()}
-          >
-            {/* No width/height here — setupCanvas writes them as inline styles */}
-            <canvas ref={canvasRef} style={styles.canvas} />
+        <main
+          ref={scrollRef}
+          style={styles.main}
+          onClick={() => editorRef.current?.focus()}
+        >
+          <div ref={editorContainerRef} style={styles.editorContainer} />
+
+          <div style={styles.pageStack}>
+            {layout.pages.map((page: LayoutPage) => (
+              <PageView
+                key={page.pageNumber}
+                page={page}
+                pageConfig={layout.pageConfig}
+                layoutVersion={layout.version}
+                currentVersion={getCurrentVersion}
+                measurer={measurer}
+                map={charMap}
+                isVisible={visiblePages.has(page.pageNumber)}
+                observeRef={observePage(page.pageNumber)}
+                gap={PAGE_GAP}
+              />
+            ))}
           </div>
         </main>
 
         <aside style={styles.sidebar}>
-          <h3 style={styles.sidebarTitle}>Doc State</h3>
-          <StatRow label="Blocks" value={docState.blocks} />
-          <StatRow label="Characters" value={docState.chars} />
-
-          <h3 style={{ ...styles.sidebarTitle, marginTop: 24 }}>Raw text</h3>
-          <pre style={styles.pre}>
-            {docState.text || <span style={{ color: "#64748b" }}>(empty)</span>}
-          </pre>
+          <h3 style={styles.sidebarTitle}>Layout</h3>
+          <StatRow label="Pages" value={stats.pages} />
+          <StatRow label="Version" value={stats.version} />
+          <StatRow label="Visible" value={visiblePages.size} />
 
           <h3 style={{ ...styles.sidebarTitle, marginTop: 24 }}>Keyboard</h3>
-          <kbd style={styles.kbd}>Type</kbd> to insert<br />
+          <kbd style={styles.kbd}>Type</kbd> insert<br />
           <kbd style={styles.kbd}>Backspace</kbd> delete<br />
-          <kbd style={styles.kbd}>Enter</kbd> split block<br />
+          <kbd style={styles.kbd}>Enter</kbd> new block<br />
           <kbd style={styles.kbd}>⌘Z</kbd> undo<br />
           <kbd style={styles.kbd}>⌘⇧Z</kbd> redo
         </aside>
@@ -123,8 +115,6 @@ export function App() {
     </div>
   );
 }
-
-interface DocStats { text: string; blocks: number; chars: number }
 
 function StatRow({ label, value }: { label: string; value: number }) {
   return (
@@ -136,53 +126,25 @@ function StatRow({ label, value }: { label: string; value: number }) {
 }
 
 const styles = {
-  shell: { display: "flex", flexDirection: "column" as const, height: "100vh", background: "#f8fafc" },
+  shell: { display: "flex", flexDirection: "column" as const, height: "100vh", background: "#f1f5f9" },
   header: {
     background: "#0f172a", color: "#e2e8f0",
-    padding: "10px 24px", display: "flex", alignItems: "center", gap: 16,
+    padding: "10px 24px", display: "flex", alignItems: "center", gap: 16, flexShrink: 0,
   },
   title: { fontFamily: "monospace", fontSize: 15, fontWeight: 600 },
-  badge: {
-    fontSize: 11, background: "#1e40af", color: "#bfdbfe",
-    padding: "2px 8px", borderRadius: 4, fontFamily: "monospace",
-  },
+  badge: { fontSize: 11, background: "#1e40af", color: "#bfdbfe", padding: "2px 8px", borderRadius: 4, fontFamily: "monospace" },
+  stat: { fontSize: 11, color: "#64748b", fontFamily: "monospace" },
   body: { flex: 1, display: "flex", overflow: "hidden" },
-  main: {
-    flex: 1, overflow: "auto", padding: 40,
-    display: "flex", justifyContent: "center", alignItems: "flex-start",
-  },
-  pageWrapper: {
-    position: "relative" as const,
-    boxShadow: "0 4px 32px rgba(0,0,0,0.12)",
-    cursor: "text",
-    userSelect: "none" as const,
-  },
-  canvas: { display: "block", background: "#fff" },
+  main: { flex: 1, overflow: "auto", padding: 40, cursor: "text" },
+  editorContainer: { position: "absolute" as const, top: 0, left: 0, pointerEvents: "none" as const },
+  pageStack: { display: "flex", flexDirection: "column" as const, alignItems: "center" },
   sidebar: {
-    width: 260, borderLeft: "1px solid #e2e8f0",
-    background: "#fff", padding: 20, overflow: "auto",
-    fontSize: 13, fontFamily: "monospace",
+    width: 220, borderLeft: "1px solid #e2e8f0", background: "#fff",
+    padding: 20, overflow: "auto", fontSize: 13, fontFamily: "monospace", flexShrink: 0,
   },
-  sidebarTitle: {
-    fontSize: 11, color: "#64748b",
-    textTransform: "uppercase" as const,
-    letterSpacing: 1, margin: "0 0 10px",
-  },
-  statRow: {
-    display: "flex", justifyContent: "space-between",
-    padding: "4px 0", borderBottom: "1px solid #f1f5f9",
-  },
+  sidebarTitle: { fontSize: 11, color: "#64748b", textTransform: "uppercase" as const, letterSpacing: 1, margin: "0 0 10px" },
+  statRow: { display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid #f1f5f9" },
   statLabel: { color: "#64748b" },
   statValue: { color: "#0f172a", fontWeight: 600 },
-  pre: {
-    background: "#f8fafc", border: "1px solid #e2e8f0",
-    borderRadius: 4, padding: 10, fontSize: 12,
-    whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const,
-    minHeight: 60, margin: 0,
-  },
-  kbd: {
-    display: "inline-block", background: "#f1f5f9",
-    border: "1px solid #cbd5e1", borderRadius: 3,
-    padding: "1px 5px", fontSize: 11, marginRight: 4, marginBottom: 6,
-  },
+  kbd: { display: "inline-block", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 3, padding: "1px 5px", fontSize: 11, marginRight: 4, marginBottom: 6 },
 } as const;

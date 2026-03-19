@@ -143,6 +143,16 @@ export class CharacterMap {
     return this.glyphs.filter((g) => g.docPos >= from && g.docPos < to);
   }
 
+  /** Returns true if a glyph at this docPos is already registered */
+  hasGlyph(docPos: number): boolean {
+    return this.glyphs.some((g) => g.docPos === docPos);
+  }
+
+  /** Returns true if a line entry exists for this page + lineIndex */
+  hasLine(page: number, lineIndex: number): boolean {
+    return this.lines.some((l) => l.page === page && l.lineIndex === lineIndex);
+  }
+
   // Internal — find which line a y coordinate lands on
   private lineAtCoords(y: number, page: number): LineEntry | undefined {
     return this.lines.find(

@@ -1,65 +1,176 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TextMeasurer } from "./TextMeasurer";
 
 /**
- * TextMeasurer unit tests.
+ * TextMeasurer tests.
  *
- * canvas.measureText() is mocked here — happy-dom provides a canvas
- * implementation but its text metrics are zeroed out. We mock it explicitly
- * so tests assert our caching + logic, not browser measurement fidelity.
- * Real measurement fidelity is validated manually in the demo app.
+ * happy-dom provides a canvas with measureText() — but it returns zeroed
+ * metrics. We mock it with predictable values so tests assert our caching
+ * and logic, not browser measurement fidelity.
+ *
+ * Real measurement fidelity is validated visually in the demo app.
  */
 
-// Stub type until the real class is built
-interface TextMeasurer {
-  measure(text: string, font: string): { width: number; ascent: number; descent: number };
+const MOCK_CHAR_WIDTH = 8; // px per character
+const MOCK_FONT_ASCENT = 12;
+const MOCK_FONT_DESCENT = 3;
+
+function mockMeasureText(text: string) {
+  return {
+    width: text.length * MOCK_CHAR_WIDTH,
+    actualBoundingBoxAscent: MOCK_FONT_ASCENT,
+    actualBoundingBoxDescent: MOCK_FONT_DESCENT,
+    fontBoundingBoxAscent: MOCK_FONT_ASCENT,
+    fontBoundingBoxDescent: MOCK_FONT_DESCENT,
+  };
 }
 
-// Temporary factory — replace with real import once built:
-// import { TextMeasurer } from "./TextMeasurer";
-function createTextMeasurer(): TextMeasurer {
-  throw new Error("Not implemented yet — build TextMeasurer in Phase 1");
-}
+beforeEach(() => {
+  // happy-dom doesn't implement OffscreenCanvas — TextMeasurer falls back to
+  // HTMLCanvasElement. Mock that fallback path.
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    measureText: vi.fn(mockMeasureText),
+    font: "",
+  } as unknown as CanvasRenderingContext2D);
+});
 
-describe("TextMeasurer", () => {
-  beforeEach(() => {
-    // Mock canvas measureText to return predictable values
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-      measureText: vi.fn((text: string) => ({
-        width: text.length * 8, // 8px per character (predictable for tests)
-        actualBoundingBoxAscent: 12,
-        actualBoundingBoxDescent: 3,
-      })),
-    } as unknown as CanvasRenderingContext2D);
+describe("TextMeasurer.measureWidth", () => {
+  it("returns width proportional to text length", () => {
+    const m = new TextMeasurer();
+    expect(m.measureWidth("hello", "14px serif")).toBe(5 * MOCK_CHAR_WIDTH);
   });
 
-  it("measures text width based on font and content", () => {
-    const measurer = createTextMeasurer();
-    const result = measurer.measure("hello", "14px serif");
-    expect(result.width).toBe(40); // 5 chars × 8px
-  });
-
-  it("returns ascent and descent", () => {
-    const measurer = createTextMeasurer();
-    const result = measurer.measure("hello", "14px serif");
-    expect(result.ascent).toBe(12);
-    expect(result.descent).toBe(3);
-  });
-
-  it("caches results — measureText is not called twice for the same input", () => {
-    const measurer = createTextMeasurer();
-    measurer.measure("hello", "14px serif");
-    measurer.measure("hello", "14px serif");
-
-    const ctx = HTMLCanvasElement.prototype.getContext("2d") as CanvasRenderingContext2D;
+  it("caches — measureText is not called twice for the same input", () => {
+    const m = new TextMeasurer();
+    m.measureWidth("hello", "14px serif");
+    m.measureWidth("hello", "14px serif");
+    const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
     expect(ctx.measureText).toHaveBeenCalledTimes(1);
   });
 
-  it("treats different fonts as different cache keys", () => {
-    const measurer = createTextMeasurer();
-    measurer.measure("hello", "14px serif");
-    measurer.measure("hello", "16px serif");
-
-    const ctx = HTMLCanvasElement.prototype.getContext("2d") as CanvasRenderingContext2D;
+  it("treats different fonts as separate cache keys", () => {
+    const m = new TextMeasurer();
+    m.measureWidth("hello", "14px serif");
+    m.measureWidth("hello", "16px serif");
+    const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
     expect(ctx.measureText).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT trim text — trailing space is part of the measurement", () => {
+    const m = new TextMeasurer();
+    const withSpace = m.measureWidth("word ", "14px serif");
+    const withoutSpace = m.measureWidth("word", "14px serif");
+    expect(withSpace).toBeGreaterThan(withoutSpace);
+  });
+});
+
+describe("TextMeasurer.getFontMetrics", () => {
+  it("returns ascent and descent", () => {
+    const m = new TextMeasurer();
+    const metrics = m.getFontMetrics("14px serif");
+    expect(metrics.ascent).toBe(MOCK_FONT_ASCENT);
+    expect(metrics.descent).toBe(MOCK_FONT_DESCENT);
+  });
+
+  it("lineHeight includes the multiplier", () => {
+    const m = new TextMeasurer({ lineHeightMultiplier: 1.5 });
+    const metrics = m.getFontMetrics("14px serif");
+    expect(metrics.lineHeight).toBeCloseTo((MOCK_FONT_ASCENT + MOCK_FONT_DESCENT) * 1.5);
+  });
+
+  it("defaults lineHeightMultiplier to 1.2", () => {
+    const m = new TextMeasurer();
+    const metrics = m.getFontMetrics("14px serif");
+    expect(metrics.lineHeight).toBeCloseTo((MOCK_FONT_ASCENT + MOCK_FONT_DESCENT) * 1.2);
+  });
+
+  it("caches — measureText is not called twice for the same font", () => {
+    const m = new TextMeasurer();
+    m.getFontMetrics("14px serif");
+    m.getFontMetrics("14px serif");
+    const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
+    expect(ctx.measureText).toHaveBeenCalledTimes(1);
+  });
+
+  it("font metrics are stable — same result regardless of what text is measured after", () => {
+    const m = new TextMeasurer();
+    const before = m.getFontMetrics("14px serif");
+    m.measureWidth("Agpyjq", "14px serif"); // different chars, different actual bounds
+    const after = m.getFontMetrics("14px serif");
+    expect(before.ascent).toBe(after.ascent);
+    expect(before.lineHeight).toBe(after.lineHeight);
+  });
+});
+
+describe("TextMeasurer.measureRun", () => {
+  it("returns totalWidth equal to measureWidth for the full string", () => {
+    const m = new TextMeasurer();
+    const run = m.measureRun("hello", "14px serif");
+    expect(run.totalWidth).toBe(m.measureWidth("hello", "14px serif"));
+  });
+
+  it("charPositions has the same length as the text", () => {
+    const m = new TextMeasurer();
+    const run = m.measureRun("hello", "14px serif");
+    expect(run.charPositions).toHaveLength(5);
+  });
+
+  it("first charPosition is always 0", () => {
+    const m = new TextMeasurer();
+    const run = m.measureRun("hello", "14px serif");
+    expect(run.charPositions[0]).toBe(0);
+  });
+
+  it("charPositions are strictly increasing", () => {
+    const m = new TextMeasurer();
+    const run = m.measureRun("hello", "14px serif");
+    for (let i = 1; i < run.charPositions.length; i++) {
+      expect(run.charPositions[i]).toBeGreaterThan(run.charPositions[i - 1]!);
+    }
+  });
+
+  it("returns empty arrays for empty string", () => {
+    const m = new TextMeasurer();
+    const run = m.measureRun("", "14px serif");
+    expect(run.totalWidth).toBe(0);
+    expect(run.charPositions).toHaveLength(0);
+  });
+});
+
+describe("TextMeasurer.invalidate", () => {
+  it("invalidating a specific font causes re-measurement", () => {
+    const m = new TextMeasurer();
+    m.measureWidth("hello", "14px serif");
+    m.invalidate("14px serif");
+    m.measureWidth("hello", "14px serif");
+    const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
+    expect(ctx.measureText).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidating all clears every font cache", () => {
+    const m = new TextMeasurer();
+    m.measureWidth("hello", "14px serif");
+    m.measureWidth("hello", "16px serif");
+    m.invalidate();
+    m.measureWidth("hello", "14px serif");
+    m.measureWidth("hello", "16px serif");
+    const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
+    expect(ctx.measureText).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not affect other fonts when invalidating one", () => {
+    const m = new TextMeasurer();
+    m.measureWidth("hello", "14px serif");
+    m.measureWidth("hello", "16px serif");
+
+    const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
+    const callsAfterInitial = ctx.measureText.mock.calls.length;
+
+    m.invalidate("14px serif");
+    m.measureWidth("hello", "16px serif"); // cache intact — no new call
+    expect(ctx.measureText).toHaveBeenCalledTimes(callsAfterInitial); // unchanged
+
+    m.measureWidth("hello", "14px serif"); // invalidated — must re-measure
+    expect(ctx.measureText).toHaveBeenCalledTimes(callsAfterInitial + 1);
   });
 });
