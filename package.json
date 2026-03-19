@@ -1,0 +1,23 @@
+{
+  "name": "canvas-editor",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Canvas-based document editor with legal document primitives",
+  "scripts": {
+    "dev": "pnpm --filter @canvas-editor/demo dev",
+    "build": "pnpm -r --filter './packages/**' run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "coverage": "vitest run --coverage",
+    "clean": "pnpm -r run clean"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^2.0.0",
+    "@vitest/ui": "^2.0.0",
+    "happy-dom": "^20.8.4",
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  }
+}
