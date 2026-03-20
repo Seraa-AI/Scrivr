@@ -80,8 +80,11 @@ describe("CharacterMap", () => {
       expect(map.posAtCoords(200, 65, 1)).toBe(5);
     });
 
-    it("returns 0 when clicking on a y coordinate with no line", () => {
-      expect(map.posAtCoords(50, 200, 1)).toBe(0);
+    it("snaps to nearest line when clicking below all lines (not returning 0)", () => {
+      // y=200 is below the only line (y=60, height=20). Should snap to that
+      // line and return a position within it, not 0 (document start).
+      const pos = map.posAtCoords(50, 200, 1);
+      expect(pos).toBeGreaterThan(0);
     });
 
     it("returns 0 when clicking on the wrong page", () => {

@@ -27,27 +27,7 @@ Every step of this loop already exists in skeleton form from Phase 1. Phase 2 wi
 
 ---
 
-## Step 1 — Fix Editor Container Positioning
-
-**Problem:** The hidden `<textarea>` currently sits at `position: absolute; top: 0; left: 0` and is invisible. This is fine for input, but the browser's native spell-check, autocomplete, and virtual keyboard on mobile all position relative to the textarea's bounding rect. If the textarea doesn't move with the cursor, these UI elements appear in the wrong place.
-
-**What to do:**
-
-1. After every cursor move, compute the cursor's pixel position via `CharacterMap.coordsAtPos(selection.head)`.
-2. Translate that position from page-local coordinates to scroll-container coordinates (add the page's `offsetTop` + the scroll container's `scrollTop`).
-3. Move the textarea to that position: `textarea.style.transform = "translate(x px, y px)"`.
-
-This keeps the textarea at the cursor without affecting layout (transforms don't trigger reflow).
-
-**Files to touch:**
-- `packages/core/src/Editor.ts` — `updateTextareaPosition()`
-- `apps/demo/src/App.tsx` — pass scroll container ref to Editor so it can compute offsets
-
-**Test:** Click in the middle of a word. Open DevTools → inspect the textarea element. Its transform should match the cursor pixel position.
-
----
-
-## Step 2 — Cursor Rendering
+## Step 1 — Cursor Rendering
 
 **Architectural decision: dual-canvas overlay per page**
 
@@ -336,16 +316,17 @@ Note: `onMouseDown` + `e.preventDefault()` prevents the editor from losing focus
 
 | Commit | What's in it |
 |---|---|
-| `feat: fix textarea positioning to track cursor` | Step 1 — textarea tracks cursor pixel position |
-| `feat: dual-canvas overlay with cursor rendering and blink` | Step 2 — overlay canvas, OverlayRenderer, blink timer |
-| `feat: click-to-cursor via CharacterMap hit testing` | Step 3 — mouse click → ProseMirror position → cursor |
-| `feat: arrow key navigation with selection support` | Step 4 — ← → ↑ ↓ and shift variants |
-| `feat: text selection model, drag select, selection rendering` | Step 5 — selection rectangles, drag, shift+click |
-| `feat: bold/italic toolbar with active-state detection` | Step 6 — toolbar component, mark detection |
+| `feat: dual-canvas overlay with cursor rendering and blink` | Step 1 — overlay canvas, OverlayRenderer, blink timer |
+| `feat: click-to-cursor via CharacterMap hit testing` | Step 2 — mouse click → ProseMirror position → cursor |
+| `feat: arrow key navigation with selection support` | Step 3 — ← → ↑ ↓ and shift variants |
+| `feat: text selection model, drag select, selection rendering` | Step 4 — selection rectangles, drag, shift+click |
+| `feat: bold/italic toolbar with active-state detection` | Step 5 — toolbar component, mark detection |
+| `feat: paste via textarea portal with transformPaste hook` | Step 6 — HTML + plain text paste, filter hook |
+| `feat: textarea tracks cursor position` | Step 7 — IME + mobile polish, last |
 
 ---
 
-## Step 7 — Paste Handling (The "Portal" Pattern)
+## Step 6 — Paste Handling (The "Portal" Pattern)
 
 The hidden `<textarea>` is our input bridge. Because it's a real DOM element, it naturally receives `paste` events — we just need to intercept and route them.
 
@@ -437,16 +418,17 @@ This is the hook that makes paste useful for open source consumers. A legal SaaS
 | `feat: fix textarea positioning to track cursor` | Step 1 — textarea tracks cursor pixel position |
 | `feat: dual-canvas overlay with cursor rendering and blink` | Step 2 — overlay canvas, OverlayRenderer, blink timer |
 | `feat: click-to-cursor via CharacterMap hit testing` | Step 3 — mouse click → ProseMirror position → cursor |
-| `feat: arrow key navigation with selection support` | Step 4 — ← → ↑ ↓ and shift variants |
-| `feat: text selection model, drag select, selection rendering` | Step 5 — selection rectangles, drag, shift+click |
-| `feat: bold/italic toolbar with active-state detection` | Step 6 — toolbar component, mark detection |
-| `feat: paste via textarea portal with transformPaste hook` | Step 7 — HTML + plain text paste, filter hook |
+| `feat: arrow key navigation with selection support` | Step 3 — ← → ↑ ↓ and shift variants |
+| `feat: text selection model, drag select, selection rendering` | Step 4 — selection rectangles, drag, shift+click |
+| `feat: bold/italic toolbar with active-state detection` | Step 5 — toolbar component, mark detection |
+| `feat: paste via textarea portal with transformPaste hook` | Step 6 — HTML + plain text paste, filter hook |
+| `feat: textarea tracks cursor position` | Step 7 — IME + mobile polish, last |
 
 ---
 
 ## What We Are NOT Doing in Phase 2
 
-These are deferred to Phase 3 unless they block the success criteria:
+These are deferred unless they block the success criteria:
 
 - Double-click word selection, triple-click line selection
 - IME composition display (in-progress characters shown on canvas)
@@ -454,6 +436,7 @@ These are deferred to Phase 3 unless they block the success criteria:
 - Home/End keys
 - Tables, lists, headings formatting
 - `BlockRegistry` for custom block types (design is in `docs/extensibility.md`)
+- Textarea cursor tracking — Step 7, last item, ships with open source release as polish
 
 ---
 

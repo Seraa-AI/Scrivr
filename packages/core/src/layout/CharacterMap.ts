@@ -81,7 +81,8 @@ export class CharacterMap {
    *      after it; otherwise snap to the position before it.
    */
   posAtCoords(x: number, y: number, page: number): number {
-    const line = this.lineAtCoords(y, page);
+    // Try exact hit first; fall back to nearest line if click is in a margin
+    const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
     if (!line) return 0;
 
     const lineGlyphs = this.glyphs.filter(
@@ -158,5 +159,23 @@ export class CharacterMap {
     return this.lines.find(
       (l) => l.page === page && y >= l.y && y < l.y + l.height
     );
+  }
+
+  // Internal — find the closest line when y is outside all line ranges.
+  // Click above first line → first line. Click below last line → last line.
+  private nearestLine(y: number, page: number): LineEntry | undefined {
+    const pageLines = this.lines.filter((l) => l.page === page);
+    if (pageLines.length === 0) return undefined;
+    return pageLines.reduce((closest, line) => {
+      const closestDist = Math.min(
+        Math.abs(y - closest.y),
+        Math.abs(y - (closest.y + closest.height))
+      );
+      const lineDist = Math.min(
+        Math.abs(y - line.y),
+        Math.abs(y - (line.y + line.height))
+      );
+      return lineDist < closestDist ? line : closest;
+    });
   }
 }

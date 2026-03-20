@@ -1,7 +1,8 @@
 import { Schema } from "prosemirror-model";
+import { EditorState } from "prosemirror-state";
 import { keymap } from "prosemirror-keymap";
-import type { Plugin } from "prosemirror-state";
-import type { Command } from "prosemirror-state";
+import type { Plugin, Command } from "prosemirror-state";
+import type { Node as ProseMirrorNode } from "prosemirror-model";
 import type { Extension } from "./Extension";
 import type { MarkDecorator, ResolvedExtension } from "./types";
 
@@ -50,6 +51,20 @@ export class ExtensionManager {
   }
 
   // ── Plugins ────────────────────────────────────────────────────────────────
+
+  /**
+   * Create an EditorState using this manager's schema and plugins.
+   * Optionally seed with an existing doc (e.g. when restoring from JSON).
+   *
+   * Consumers use this instead of importing EditorState from prosemirror-state.
+   */
+  createState(doc?: ProseMirrorNode): EditorState {
+    return EditorState.create({
+      schema: this.schema,
+      plugins: this.buildPlugins(),
+      ...(doc ? { doc } : {}),
+    });
+  }
 
   /**
    * Returns all ProseMirror plugins to pass to EditorState.create().

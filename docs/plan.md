@@ -130,7 +130,7 @@ Canvas   PDF/DOCX     ← same render tree, different output targets
 - [x] `Editor` class — hidden textarea input bridge, keyboard handling, undo/redo
 - [x] Virtual page rendering — IntersectionObserver + 500px overscan, placeholder divs, Option C
 - [x] Demo app wired up — `App.tsx`, `PageView.tsx`, `useVirtualPages.ts`
-- [x] 104 unit/integration tests passing (vitest + happy-dom)
+- [x] 107 unit/integration tests passing (vitest + happy-dom)
 - [x] pnpm workspace + Vite aliases + tsconfig paths all aligned
 
 **Success criteria:** ✅ Same pixel output across all three browsers for a static document.
@@ -176,7 +176,28 @@ Canvas   PDF/DOCX     ← same render tree, different output targets
 
 ---
 
-### Phase 4 — Export Layer (~3–4 sessions)
+### Phase 4 — Collaboration (~2–3 sessions)
+**Goal:** Real-time multi-user editing via Hocuspocus + Y.js, as an opt-in extension.
+
+- [ ] `Collaboration` extension — wraps `y-prosemirror` (`ySyncPlugin`, `yCursorPlugin`, `yUndoPlugin`)
+- [ ] Swap `History` for Y.js `UndoManager` when collaboration is active (`StarterKit.configure({ history: false })`)
+- [ ] `HocuspocusProvider` wired into the extension options
+- [ ] Awareness — other users' cursors rendered as canvas overlays on the overlay canvas
+- [ ] Offline-first: editor works without collaboration extension, no code change required
+
+**Key decisions:**
+- Collaboration is a single `Extension.create()` — consumers opt in by adding it to the extensions array
+- `addProseMirrorPlugins` is the only hook needed — schema, input handling, and rendering are unchanged
+- One Hocuspocus room = one document ID = all sections of that document (future: named sections per `Y.XmlFragment`)
+
+**Named sections (deferred — design only):**
+Headers, footers, footnotes, and endnotes are each a separate `Y.XmlFragment` within the same `Y.Doc`. A future `CanvasDocument` wrapper will coordinate multiple `Editor` instances (one per section) sharing a single `Y.Doc` and `pageConfig`. The current `Editor` class stays as-is — `CanvasDocument` sits above it. Not built now, but the architecture supports it without changes.
+
+**Success criteria:** Two browser tabs editing the same document simultaneously, changes appear in real time, undo only affects your own changes.
+
+---
+
+### Phase 5 — Export Layer (~3–4 sessions)
 **Goal:** PDF and DOCX output that matches screen exactly.
 
 #### PDF
@@ -195,7 +216,7 @@ Canvas   PDF/DOCX     ← same render tree, different output targets
 
 ---
 
-### Phase 5 — Open Source Release
+### Phase 6 — Open Source Release
 - [ ] Write API documentation
 - [ ] Build a demo/playground (Vite app in `/demo`)
 - [ ] Write migration guide from ProseMirror
@@ -222,6 +243,8 @@ Canvas   PDF/DOCX     ← same render tree, different output targets
 | Block extensibility | `BlockRegistry` with measure+render strategies | Avoids hardcoding block types in core; lets consumers register image, code_block, etc. without forking |
 | Lifecycle hooks | `onLayout`, `onBeforeRenderPage`, `onAfterRenderPage`, `transformPaste` | Watermarks, page numbers, word count, paste filtering — all without touching core |
 | Theme system | `Theme` object into renderer (additive to `FontConfig`) | `FontConfig` = type metrics for layout; `Theme` = visual presentation; kept separate to preserve layout purity |
+| Collaboration | `Collaboration` extension wrapping `y-prosemirror` + Hocuspocus | Opt-in via extensions array; swaps `History` for Y.js `UndoManager`; `addProseMirrorPlugins` is the only hook needed |
+| Named sections (future) | `CanvasDocument` wrapper, one `Y.XmlFragment` per section | Headers/footers/footnotes are full editable ProseMirror docs, not render callbacks; deferred to post-Phase 4 |
 
 ---
 

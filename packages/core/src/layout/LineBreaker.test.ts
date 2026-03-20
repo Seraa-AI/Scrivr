@@ -145,6 +145,48 @@ describe("LineBreaker — vertical metrics", () => {
   });
 });
 
+describe("LineBreaker — overflow / wide words (regression)", () => {
+  it("breaks a word wider than maxWidth at the character level (splitWideWord)", () => {
+    const lb = new LineBreaker(makeMeasurer());
+    // "ABCDEFGHIJ" = 10 chars × 8px = 80px, but maxWidth is 40px (5 chars)
+    // Expected: each line is ≤ 40px wide
+    const lines = lb.breakIntoLines(
+      [{ text: "ABCDEFGHIJ", font: "14px serif", docPos: 1 }],
+      40
+    );
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    for (const line of lines) {
+      expect(line.width).toBeLessThanOrEqual(40);
+    }
+  });
+
+  it("preserves all characters when a word is split across lines", () => {
+    const lb = new LineBreaker(makeMeasurer());
+    const text = "ABCDEFGHIJ";
+    const lines = lb.breakIntoLines(
+      [{ text, font: "14px serif", docPos: 1 }],
+      40
+    );
+    const reconstructed = lines
+      .flatMap((l) => l.spans.map((s) => s.text))
+      .join("");
+    expect(reconstructed).toBe(text);
+  });
+
+  it("does not overflow the page when a long unbreakable string is typed", () => {
+    const lb = new LineBreaker(makeMeasurer());
+    // Simulates a long URL or identifier with no spaces
+    const text = "a".repeat(50); // 50 chars × 8px = 400px, maxWidth = 100px
+    const lines = lb.breakIntoLines(
+      [{ text, font: "14px serif", docPos: 1 }],
+      100
+    );
+    for (const line of lines) {
+      expect(line.width).toBeLessThanOrEqual(100);
+    }
+  });
+});
+
 describe("LineBreaker — CharacterMap population", () => {
   it("registers one glyph per character", () => {
     const lb = new LineBreaker(makeMeasurer());

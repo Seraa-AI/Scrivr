@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import {
   LayoutPage,
   PageConfig,
@@ -6,6 +6,8 @@ import {
   TextMeasurer,
   renderPage,
   setupCanvas,
+  clearOverlay,
+  renderCursor,
 } from "@canvas-editor/core";
 
 interface PageViewProps {
@@ -18,16 +20,33 @@ interface PageViewProps {
   isVisible: boolean;
   observeRef: (el: HTMLDivElement | null) => void;
   gap: number;
+  /** ProseMirror doc position of the cursor (selection.head) */
+  cursorDocPos: number;
+  /** Whether the editor textarea is focused */
+  isFocused: boolean;
+  /**
+   * Current blink visibility — driven by CursorManager, not managed here.
+   * PageView redraws the overlay whenever this prop changes.
+   */
+  cursorVisible: boolean;
+  /**
+   * Called when the user clicks on this page.
+   * Receives coordinates relative to the page's top-left corner (CSS pixels).
+   * Caller converts to a doc position via CharacterMap and calls moveCursorTo.
+   */
+  onPageClick: (x: number, y: number) => void;
 }
 
 /**
  * PageView — renders one page of the document.
  *
- * Visible  → mounts a <canvas>, calls renderPage
- * Invisible → renders a plain <div> placeholder of the correct height
+ * Two stacked canvases per visible page:
+ *   1. Content canvas  — text, drawn by renderPage (alpha: false, opaque)
+ *   2. Overlay canvas  — cursor + selection (alpha: true, transparent)
+ *      pointer-events: none so clicks pass through to the page div below.
  *
- * The placeholder keeps the scrollbar accurate even for unrendered pages.
- * The canvas is created and destroyed as visibility changes (Option C).
+ * Blink timing is NOT managed here — CursorManager on the Editor owns it.
+ * PageView just reacts to cursorVisible prop changes and redraws.
  */
 export function PageView({
   page,
@@ -39,20 +58,53 @@ export function PageView({
   isVisible,
   observeRef,
   gap,
+  cursorDocPos,
+  isFocused,
+  cursorVisible,
+  onPageClick,
 }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const dprRef = useRef(1);
+
+  // ── Overlay draw ─────────────────────────────────────────────────────────
+
+  const drawOverlay = useCallback(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    const ctx = overlay.getContext("2d")!;
+    clearOverlay(ctx, pageConfig.pageWidth, pageConfig.pageHeight, dprRef.current);
+
+    if (isFocused && cursorVisible) {
+      const coords = map.coordsAtPos(cursorDocPos);
+      if (coords && coords.page === page.pageNumber) {
+        renderCursor(ctx, coords);
+      }
+    }
+  }, [pageConfig.pageWidth, pageConfig.pageHeight, map, page.pageNumber, isFocused, cursorVisible, cursorDocPos]);
+
+  // ── Content canvas + overlay setup ────────────────────────────────────────
 
   useEffect(() => {
     if (!isVisible) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
 
+    const canvas = canvasRef.current;
+    const overlay = overlayRef.current;
+    if (!canvas || !overlay) return;
+
+    // Content canvas — opaque, handles DPR scaling
     const { dpr } = setupCanvas(canvas, {
       width: pageConfig.pageWidth,
       height: pageConfig.pageHeight,
     });
     dprRef.current = dpr;
+
+    // Overlay canvas — transparent, manually sized (alpha: true by default)
+    overlay.width = Math.round(pageConfig.pageWidth * dpr);
+    overlay.height = Math.round(pageConfig.pageHeight * dpr);
+    overlay.style.width = `${pageConfig.pageWidth}px`;
+    overlay.style.height = `${pageConfig.pageHeight}px`;
 
     renderPage({
       ctx: canvas.getContext("2d", { alpha: false })!,
@@ -65,7 +117,17 @@ export function PageView({
       map,
       showMarginGuides: true,
     });
-  }, [isVisible, page, pageConfig, layoutVersion, currentVersion, measurer, map]);
+
+    drawOverlay();
+  }, [isVisible, page, pageConfig, layoutVersion, currentVersion, measurer, map, drawOverlay]);
+
+  // ── Overlay redraw on blink tick or cursor move ───────────────────────────
+
+  useEffect(() => {
+    drawOverlay();
+  }, [drawOverlay]);
+
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div
@@ -78,22 +140,35 @@ export function PageView({
         background: "#fff",
         position: "relative",
         flexShrink: 0,
+        cursor: "text",
+      }}
+      onClick={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        onPageClick(e.clientX - rect.left, e.clientY - rect.top);
       }}
     >
       {isVisible ? (
-        <canvas
-          ref={canvasRef}
-          style={{ display: "block", position: "absolute", top: 0, left: 0 }}
-        />
+        <>
+          {/* Content canvas — text */}
+          <canvas
+            ref={canvasRef}
+            style={{ display: "block", position: "absolute", top: 0, left: 0 }}
+          />
+          {/* Overlay canvas — cursor + selection; pointer-events: none so clicks pass through */}
+          <canvas
+            ref={overlayRef}
+            style={{
+              display: "block",
+              position: "absolute",
+              top: 0,
+              left: 0,
+              pointerEvents: "none",
+            }}
+          />
+        </>
       ) : (
         // Placeholder — correct height, no pixels
-        <div
-          style={{
-            width: "100%",
-            height: "100%",
-            background: "#fff",
-          }}
-        />
+        <div style={{ width: "100%", height: "100%", background: "#fff" }} />
       )}
     </div>
   );

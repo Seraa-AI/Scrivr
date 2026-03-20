@@ -1,25 +1,30 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import {
   Editor,
-  EditorState,
+  ExtensionManager,
+  StarterKit,
   TextMeasurer,
   CharacterMap,
   layoutDocument,
   defaultPageConfig,
-  createEditorState,
 } from "@canvas-editor/core";
+import type { EditorState } from "@canvas-editor/core";
 import { PageView } from "./PageView";
 import { useVirtualPages } from "./useVirtualPages";
 import type { LayoutPage } from "@canvas-editor/core";
 
 const PAGE_GAP = 24;
 
+// Extensions used by this editor instance
+const extensions = [StarterKit];
+
 // Shared instances — created once, live for the app lifetime
 const measurer = new TextMeasurer({ lineHeightMultiplier: 1.2 });
 const charMap = new CharacterMap();
 
-// Initial layout from an empty doc
-const initialLayout = layoutDocument(createEditorState().doc, {
+// Initial layout — use the same schema that the Editor will build
+const _initManager = new ExtensionManager(extensions);
+const initialLayout = layoutDocument(_initManager.createState().doc, {
   pageConfig: defaultPageConfig,
   measurer,
   previousVersion: 0,
@@ -32,6 +37,10 @@ export function App() {
   const versionRef = useRef(initialLayout.version);
 
   const [layout, setLayout] = useState(initialLayout);
+  const [cursorDocPos, setCursorDocPos] = useState(0);
+  const [isFocused, setIsFocused] = useState(false);
+  // cursorVisible is driven by CursorManager via onCursorTick — not a timer in PageView
+  const [cursorVisible, setCursorVisible] = useState(true);
 
   const getCurrentVersion = useCallback(() => versionRef.current, []);
 
@@ -44,12 +53,18 @@ export function App() {
     });
     versionRef.current = next.version;
     setLayout(next);
+    setCursorDocPos(state.selection.head);
   }, []);
 
   useEffect(() => {
     const container = editorContainerRef.current;
     if (!container) return;
-    const editor = new Editor({ onChange: onDocChange });
+    const editor = new Editor({
+      extensions,
+      onChange: onDocChange,
+      onFocusChange: setIsFocused,
+      onCursorTick: setCursorVisible,
+    });
     editorRef.current = editor;
     editor.mount(container);
     onDocChange(editor.getState());
@@ -57,6 +72,11 @@ export function App() {
   }, [onDocChange]);
 
   const { visiblePages, observePage } = useVirtualPages(layout.pages, 500);
+
+  const handlePageClick = useCallback((pageNumber: number, x: number, y: number) => {
+    const pos = charMap.posAtCoords(x, y, pageNumber);
+    editorRef.current?.moveCursorTo(pos);
+  }, []);
 
   const stats = useMemo(() => ({
     pages: layout.pages.length,
@@ -67,7 +87,7 @@ export function App() {
     <div style={styles.shell}>
       <header style={styles.header}>
         <span style={styles.title}>canvas-editor</span>
-        <span style={styles.badge}>Phase 1 — virtual pages</span>
+        <span style={styles.badge}>Phase 2 — interactive</span>
         <span style={styles.stat}>pages: {stats.pages}</span>
         <span style={styles.stat}>v{stats.version}</span>
       </header>
@@ -76,7 +96,6 @@ export function App() {
         <main
           ref={scrollRef}
           style={styles.main}
-          onClick={() => editorRef.current?.focus()}
         >
           <div ref={editorContainerRef} style={styles.editorContainer} />
 
@@ -93,6 +112,10 @@ export function App() {
                 isVisible={visiblePages.has(page.pageNumber)}
                 observeRef={observePage(page.pageNumber)}
                 gap={PAGE_GAP}
+                cursorDocPos={cursorDocPos}
+                isFocused={isFocused}
+                cursorVisible={cursorVisible}
+                onPageClick={(x, y) => handlePageClick(page.pageNumber, x, y)}
               />
             ))}
           </div>
@@ -135,7 +158,7 @@ const styles = {
   badge: { fontSize: 11, background: "#1e40af", color: "#bfdbfe", padding: "2px 8px", borderRadius: 4, fontFamily: "monospace" },
   stat: { fontSize: 11, color: "#64748b", fontFamily: "monospace" },
   body: { flex: 1, display: "flex", overflow: "hidden" },
-  main: { flex: 1, overflow: "auto", padding: 40, cursor: "text" },
+  main: { flex: 1, overflow: "auto", padding: 40 },
   editorContainer: { position: "absolute" as const, top: 0, left: 0, pointerEvents: "none" as const },
   pageStack: { display: "flex", flexDirection: "column" as const, alignItems: "center" },
   sidebar: {

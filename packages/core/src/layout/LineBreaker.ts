@@ -72,8 +72,19 @@ export class LineBreaker {
     let currentLine: LayoutSpan[] = [];
     let currentWidth = 0;
 
-    // Tokenise all spans into words, preserving font and docPos per word
-    const words = tokenise(spans);
+    // Tokenise all spans into words, preserving font and docPos per word.
+    // Pre-process: any word wider than maxWidth is split into character-level
+    // chunks so the main loop never has to deal with unbreakable overflow.
+    const rawWords = tokenise(spans);
+    const words: Token[] = [];
+    for (const word of rawWords) {
+      const wordWidth = this.measurer.measureWidth(word.text, word.font);
+      if (wordWidth > maxWidth) {
+        words.push(...this.splitWideWord(word, maxWidth));
+      } else {
+        words.push(word);
+      }
+    }
 
     for (const word of words) {
       const wordWidth = this.measurer.measureWidth(word.text, word.font);
@@ -111,6 +122,36 @@ export class LineBreaker {
     }
 
     return lines;
+  }
+
+  /**
+   * Splits a token that is wider than maxWidth into the largest character-level
+   * chunks that each fit within maxWidth (greedy, left to right).
+   *
+   * This is the canvas equivalent of CSS `overflow-wrap: break-word` —
+   * a word only breaks at the character level when it cannot fit on any line.
+   */
+  private splitWideWord(word: Token, maxWidth: number): Token[] {
+    const result: Token[] = [];
+    let start = 0;
+
+    while (start < word.text.length) {
+      // Greedily extend the chunk as far as it fits
+      let end = start + 1;
+      while (end < word.text.length) {
+        const w = this.measurer.measureWidth(word.text.slice(start, end + 1), word.font);
+        if (w > maxWidth) break;
+        end++;
+      }
+      result.push({
+        text: word.text.slice(start, end),
+        font: word.font,
+        docPos: word.docPos + start,
+      });
+      start = end;
+    }
+
+    return result;
   }
 
   /**
