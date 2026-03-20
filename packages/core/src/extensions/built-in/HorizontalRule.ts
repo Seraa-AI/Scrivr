@@ -107,10 +107,25 @@ export const HorizontalRule = Extension.create({
     ];
   },
 
+  addMarkdownParserTokens() {
+    return { hr: { node: "horizontalRule" } };
+  },
+
+  addMarkdownSerializerRules() {
+    return {
+      nodes: {
+        horizontalRule(state, node) {
+          state.write("---");
+          state.closeBlock(node);
+        },
+      },
+    };
+  },
+
   addMarkdownRules() {
     return [
       {
-        // "---" (or more dashes) on its own line → horizontal rule
+        // "---" (or more dashes) on its own line → horizontal rule (legacy paste fallback)
         pattern: /^-{3,}$/,
         createNode(_match, schema) {
           return schema.nodes["horizontalRule"]?.create() ?? null;

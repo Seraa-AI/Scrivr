@@ -15,11 +15,12 @@ import { List } from "./built-in/List";
 import { Alignment } from "./built-in/Alignment";
 import { CodeBlock, insertCodeIndent } from "./built-in/CodeBlock";
 import { HorizontalRule } from "./built-in/HorizontalRule";
+import { Typography } from "./built-in/Typography";
 import { chainCommands } from "prosemirror-commands";
 import type { InputRule } from "prosemirror-inputrules";
 import type { Command } from "prosemirror-state";
 import type { NodeSpec, MarkSpec } from "prosemirror-model";
-import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule } from "./types";
+import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules } from "./types";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { BlockStrategy } from "../layout/BlockRegistry";
 
@@ -40,6 +41,7 @@ interface StarterKitOptions {
   alignment?: false;
   codeBlock?: false;
   horizontalRule?: false;
+  typography?: false;
 }
 
 /**
@@ -401,12 +403,72 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
       rules.push(...ext.resolve(this.schema).inputRules);
     }
+    if (opts.list !== false) {
+      rules.push(...List.resolve(this.schema).inputRules);
+    }
     if (opts.codeBlock !== false) {
       rules.push(...CodeBlock.resolve(this.schema).inputRules);
     }
     if (opts.horizontalRule !== false) {
       rules.push(...HorizontalRule.resolve(this.schema).inputRules);
     }
+    if (opts.typography !== false) {
+      rules.push(...Typography.resolve(this.schema).inputRules);
+    }
     return rules;
+  },
+
+  addMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec> {
+    const tokens: Record<string, MarkdownParserTokenSpec> = {};
+    const opts = this.options;
+    if (opts.paragraph !== false) Object.assign(tokens, Paragraph.resolve().markdownParserTokens);
+    if (opts.heading !== false) {
+      const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
+      Object.assign(tokens, ext.resolve().markdownParserTokens);
+    }
+    if (opts.bold !== false) {
+      const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
+      Object.assign(tokens, ext.resolve().markdownParserTokens);
+    }
+    if (opts.italic !== false) {
+      const ext = typeof opts.italic === "object" ? Italic.configure(opts.italic) : Italic;
+      Object.assign(tokens, ext.resolve().markdownParserTokens);
+    }
+    if (opts.list !== false) Object.assign(tokens, List.resolve().markdownParserTokens);
+    if (opts.codeBlock !== false) Object.assign(tokens, CodeBlock.resolve().markdownParserTokens);
+    if (opts.horizontalRule !== false) Object.assign(tokens, HorizontalRule.resolve().markdownParserTokens);
+    return tokens;
+  },
+
+  addMarkdownSerializerRules(): MarkdownSerializerRules {
+    const nodes: Required<MarkdownSerializerRules>["nodes"] = {};
+    const marks: Required<MarkdownSerializerRules>["marks"] = {};
+    const opts = this.options;
+
+    const merge = (rules: MarkdownSerializerRules) => {
+      Object.assign(nodes, rules.nodes ?? {});
+      Object.assign(marks, rules.marks ?? {});
+    };
+
+    if (opts.paragraph !== false) merge(Paragraph.resolve().markdownSerializerRules);
+    if (opts.heading !== false) {
+      const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
+      merge(ext.resolve().markdownSerializerRules);
+    }
+    if (opts.bold !== false) {
+      const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
+      merge(ext.resolve().markdownSerializerRules);
+    }
+    if (opts.italic !== false) {
+      const ext = typeof opts.italic === "object" ? Italic.configure(opts.italic) : Italic;
+      merge(ext.resolve().markdownSerializerRules);
+    }
+    if (opts.underline !== false) merge(Underline.resolve().markdownSerializerRules);
+    if (opts.strikethrough !== false) merge(Strikethrough.resolve().markdownSerializerRules);
+    if (opts.list !== false) merge(List.resolve().markdownSerializerRules);
+    if (opts.codeBlock !== false) merge(CodeBlock.resolve().markdownSerializerRules);
+    if (opts.horizontalRule !== false) merge(HorizontalRule.resolve().markdownSerializerRules);
+
+    return { nodes, marks };
   },
 });

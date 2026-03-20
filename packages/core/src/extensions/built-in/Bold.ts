@@ -62,4 +62,16 @@ export const Bold = Extension.create<BoldOptions>({
       isActive: (marks: string[]) => marks.includes("bold"),
     }];
   },
+
+  addMarkdownParserTokens() {
+    return { strong: { mark: "bold" } };
+  },
+
+  addMarkdownSerializerRules() {
+    return {
+      marks: {
+        bold: { open: "**", close: "**", mixable: true, expelEnclosingWhitespace: true },
+      },
+    };
+  },
 });

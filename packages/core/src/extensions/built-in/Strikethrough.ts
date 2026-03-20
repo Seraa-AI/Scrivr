@@ -55,4 +55,14 @@ export const Strikethrough = Extension.create({
       isActive: (marks: string[]) => marks.includes("strikethrough"),
     }];
   },
+
+  // GFM strikethrough (~~text~~) — parser token requires markdown-it-strikethrough plugin,
+  // so we only add the serializer rule for now. HTML paste handles <s>/<del> via parseDOM.
+  addMarkdownSerializerRules() {
+    return {
+      marks: {
+        strikethrough: { open: "~~", close: "~~", mixable: true },
+      },
+    };
+  },
 });

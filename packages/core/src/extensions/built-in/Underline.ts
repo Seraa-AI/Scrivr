@@ -54,4 +54,13 @@ export const Underline = Extension.create({
       isActive: (marks: string[]) => marks.includes("underline"),
     }];
   },
+
+  // No standard markdown syntax for underline — serialize as HTML <u> tag
+  addMarkdownSerializerRules() {
+    return {
+      marks: {
+        underline: { open: "<u>", close: "</u>", mixable: true },
+      },
+    };
+  },
 });

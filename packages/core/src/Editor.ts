@@ -2,6 +2,7 @@ import { EditorState, Transaction, TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
 import type { InputHandler, FontModifier, MarkDecorator, ToolbarItemSpec } from "./extensions/types";
 import type { Schema } from "prosemirror-model";
+import { MarkdownSerializer } from "prosemirror-markdown";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry } from "./layout/BlockRegistry";
@@ -252,7 +253,11 @@ export class Editor {
     this.keymap = this.manager.buildKeymap();
     this.inputHandlers = this.manager.buildInputHandlers();
     this.commands = this.buildCommands();
-    this.pasteTransformer = new PasteTransformer(this.manager.schema, this.manager.buildMarkdownRules());
+    this.pasteTransformer = new PasteTransformer(
+      this.manager.schema,
+      this.manager.buildMarkdownRules(),
+      this.manager.buildMarkdownParserTokens(),
+    );
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -502,6 +507,15 @@ export class Editor {
    * - Range selection: a mark is considered active only if it spans every text
    *   node in the range (matches toggleMark's "all-or-nothing" toggle logic).
    */
+  /**
+   * Returns a MarkdownSerializer configured with all extension-contributed rules.
+   * Use this with exportToMarkdown() from @inscribe/export.
+   */
+  getMarkdownSerializer(): MarkdownSerializer {
+    const { nodes, marks } = this.manager.buildMarkdownSerializerRules();
+    return new MarkdownSerializer(nodes, marks);
+  }
+
   getActiveMarks(): string[] {
     const { selection, storedMarks } = this.state;
     const { from, to, empty } = selection;

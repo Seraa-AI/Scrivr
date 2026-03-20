@@ -54,4 +54,16 @@ export const Italic = Extension.create<ItalicOptions>({
       isActive: (marks: string[]) => marks.includes("italic"),
     }];
   },
+
+  addMarkdownParserTokens() {
+    return { em: { mark: "italic" } };
+  },
+
+  addMarkdownSerializerRules() {
+    return {
+      marks: {
+        italic: { open: "*", close: "*", mixable: true, expelEnclosingWhitespace: true },
+      },
+    };
+  },
 });

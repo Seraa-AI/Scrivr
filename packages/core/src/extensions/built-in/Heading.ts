@@ -73,6 +73,27 @@ export const Heading = Extension.create<HeadingOptions>({
     return styles;
   },
 
+  addMarkdownParserTokens() {
+    return {
+      heading: {
+        block: "heading",
+        getAttrs: (tok) => ({ level: +tok.tag.slice(1) }),
+      },
+    };
+  },
+
+  addMarkdownSerializerRules() {
+    return {
+      nodes: {
+        heading(state, node) {
+          state.write("#".repeat(node.attrs["level"] as number) + " ");
+          state.renderInline(node);
+          state.closeBlock(node);
+        },
+      },
+    };
+  },
+
   addMarkdownRules() {
     // These back up the built-in heading handler in PasteTransformer.
     // They're intentionally not registered since PasteTransformer already handles "# "

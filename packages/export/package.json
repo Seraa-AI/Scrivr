@@ -18,7 +18,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@inscribe/core": "workspace:*"
+    "@inscribe/core": "workspace:*",
+    "prosemirror-markdown": "^1.13.4"
   },
   "devDependencies": {
     "tsup": "^8.0.0",

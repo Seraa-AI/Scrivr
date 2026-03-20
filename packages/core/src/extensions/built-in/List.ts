@@ -1,5 +1,6 @@
 import { wrapInList, splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { chainCommands, splitBlock } from "prosemirror-commands";
+import { wrappingInputRule } from "prosemirror-inputrules";
 import type { NodeType } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
@@ -144,5 +145,59 @@ export const List = Extension.create({
         isActive: (_marks, blockType) => blockType === "orderedList",
       },
     ];
+  },
+
+  addInputRules() {
+    const { bulletList, orderedList, listItem } = this.schema.nodes;
+    const rules = [];
+    if (bulletList && listItem) {
+      // "- " or "* " at start of paragraph → bullet list
+      rules.push(wrappingInputRule(/^\s*([-*])\s$/, bulletList));
+    }
+    if (orderedList && listItem) {
+      // "1. " at start → ordered list (number is preserved as the start attr)
+      rules.push(
+        wrappingInputRule(
+          /^(\d+)\.\s$/,
+          orderedList,
+          (match) => ({ order: +match[1]! }),
+          (match, node) => node.childCount + (node.attrs["order"] as number) === +match[1]!,
+        ),
+      );
+    }
+    return rules;
+  },
+
+  addMarkdownParserTokens() {
+    return {
+      bullet_list: { block: "bulletList" },
+      ordered_list: {
+        block: "orderedList",
+        getAttrs: (tok) => ({ order: +(tok.attrGet("start") ?? 1) }),
+      },
+      list_item: { block: "listItem" },
+    };
+  },
+
+  addMarkdownSerializerRules() {
+    return {
+      nodes: {
+        bulletList(state, node) {
+          state.renderList(node, "  ", () => "- ");
+        },
+        orderedList(state, node) {
+          const start = (node.attrs["order"] as number) || 1;
+          const maxW = String(start + node.childCount - 1).length;
+          const pad = " ".repeat(maxW + 2);
+          state.renderList(node, pad, (i) => {
+            const n = String(start + i);
+            return " ".repeat(maxW - n.length) + n + ". ";
+          });
+        },
+        listItem(state, node) {
+          state.renderContent(node);
+        },
+      },
+    };
   },
 });

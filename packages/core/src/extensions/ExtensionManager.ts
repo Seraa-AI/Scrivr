@@ -5,7 +5,7 @@ import { inputRules } from "prosemirror-inputrules";
 import type { Plugin, Command } from "prosemirror-state";
 import type { Node as ProseMirrorNode } from "prosemirror-model";
 import type { Extension } from "./Extension";
-import type { MarkDecorator, ResolvedExtension, FontModifier, ToolbarItemSpec, InputHandler, MarkdownBlockRule } from "./types";
+import type { MarkDecorator, ResolvedExtension, FontModifier, ToolbarItemSpec, InputHandler, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules, MarkdownNodeSerializer, MarkdownMarkSerializer } from "./types";
 import { BlockRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
 
@@ -206,5 +206,31 @@ export class ExtensionManager {
    */
   buildInputRules() {
     return this.resolved.flatMap((ext) => ext.inputRules);
+  }
+
+  /**
+   * Merged markdown parser token map from all extensions.
+   * Passed to PasteTransformer to build a prosemirror-markdown MarkdownParser.
+   */
+  buildMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec> {
+    const merged: Record<string, MarkdownParserTokenSpec> = {};
+    for (const ext of this.resolved) {
+      Object.assign(merged, ext.markdownParserTokens);
+    }
+    return merged;
+  }
+
+  /**
+   * Merged markdown serializer rules from all extensions.
+   * Used by Editor.getMarkdownSerializer() to build a MarkdownSerializer.
+   */
+  buildMarkdownSerializerRules(): Required<MarkdownSerializerRules> {
+    const nodes: Record<string, MarkdownNodeSerializer> = {};
+    const marks: Record<string, MarkdownMarkSerializer> = {};
+    for (const ext of this.resolved) {
+      Object.assign(nodes, ext.markdownSerializerRules.nodes ?? {});
+      Object.assign(marks, ext.markdownSerializerRules.marks ?? {});
+    }
+    return { nodes, marks };
   }
 }

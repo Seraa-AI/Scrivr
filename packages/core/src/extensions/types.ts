@@ -26,6 +26,77 @@ import type { ParsedFont } from "../layout/StyleResolver";
  */
 export type FontModifier = (parsed: ParsedFont, attrs: Record<string, unknown>) => void;
 
+// ── Markdown parser / serializer types ────────────────────────────────────────
+
+/**
+ * Minimal markdown-it Token interface.
+ * Avoids @types/markdown-it as a hard peer dep — covers all attributes used
+ * by built-in token handlers (tag, info, attrGet).
+ */
+export interface MarkdownToken {
+  attrGet(name: string): string | null;
+  /** e.g. "h1", "h2" for heading tokens */
+  tag: string;
+  /** Fenced code block language hint */
+  info: string;
+}
+
+/**
+ * ParseSpec for prosemirror-markdown's MarkdownParser.
+ * Maps a markdown-it token name to a ProseMirror node or mark.
+ */
+export interface MarkdownParserTokenSpec {
+  /** Map to a self-closing ProseMirror node (e.g. "horizontalRule") */
+  node?: string;
+  /** Map to a ProseMirror block node — the parser looks for <name>_open / <name>_close tokens */
+  block?: string;
+  /** Map to a ProseMirror mark — the parser looks for <name>_open / <name>_close tokens */
+  mark?: string;
+  attrs?: Record<string, unknown> | null;
+  getAttrs?: (tok: MarkdownToken) => Record<string, unknown> | null;
+  /** Silently skip this token (for self-closing tokens without a schema equivalent) */
+  ignore?: boolean;
+  /** Token has no separate close token (e.g. code_block) */
+  noCloseToken?: boolean;
+}
+
+/** Node serializer function for prosemirror-markdown's MarkdownSerializer. */
+export type MarkdownNodeSerializer = (
+  state: import("prosemirror-markdown").MarkdownSerializerState,
+  node: import("prosemirror-model").Node,
+  parent: import("prosemirror-model").Node,
+  index: number,
+) => void;
+
+/** Mark serializer spec for prosemirror-markdown's MarkdownSerializer. */
+export interface MarkdownMarkSerializer {
+  open:
+    | string
+    | ((
+        state: import("prosemirror-markdown").MarkdownSerializerState,
+        mark: import("prosemirror-model").Mark,
+        parent: import("prosemirror-model").Node,
+        index: number,
+      ) => string);
+  close:
+    | string
+    | ((
+        state: import("prosemirror-markdown").MarkdownSerializerState,
+        mark: import("prosemirror-model").Mark,
+        parent: import("prosemirror-model").Node,
+        index: number,
+      ) => string);
+  mixable?: boolean;
+  expelEnclosingWhitespace?: boolean;
+  escape?: boolean;
+}
+
+/** Combined serializer rules contributed by one extension. */
+export interface MarkdownSerializerRules {
+  nodes?: Record<string, MarkdownNodeSerializer>;
+  marks?: Record<string, MarkdownMarkSerializer>;
+}
+
 /**
  * A single block-level markdown pattern contributed by an extension.
  * PasteTransformer tries custom rules before its built-in heading/list handlers.
@@ -269,6 +340,21 @@ export interface ExtensionConfig<Options = object> {
   addInputRules?(this: ExtensionContext<Options>): InputRule[];
 
   /**
+   * Token handlers for prosemirror-markdown's MarkdownParser.
+   * Maps markdown-it token names to ProseMirror node/mark names.
+   * Called during paste to parse incoming markdown text.
+   * Phase 1 — no schema needed; schema is used at parse time.
+   */
+  addMarkdownParserTokens?(this: Phase1Context<Options>): Record<string, MarkdownParserTokenSpec>;
+
+  /**
+   * Serializer rules for prosemirror-markdown's MarkdownSerializer.
+   * Used by exportToMarkdown() to convert this extension's nodes/marks to markdown text.
+   * Phase 1 — no schema needed.
+   */
+  addMarkdownSerializerRules?(this: Phase1Context<Options>): MarkdownSerializerRules;
+
+  /**
    * Editor-level input handlers — for keys that need access to the editor
    * instance rather than just the ProseMirror state.
    *
@@ -299,4 +385,6 @@ export interface ResolvedExtension {
   inputHandlers: Record<string, InputHandler>;
   markdownRules: MarkdownBlockRule[];
   inputRules: InputRule[];
+  markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
+  markdownSerializerRules: MarkdownSerializerRules;
 }

@@ -1,25 +1,45 @@
 import { DOMParser as PMDOMParser, Fragment, Mark, Slice } from "prosemirror-model";
 import type { Schema, Node } from "prosemirror-model";
 import type { EditorState, Transaction } from "prosemirror-state";
-import type { MarkdownBlockRule } from "../extensions/types";
+import { MarkdownParser } from "prosemirror-markdown";
+import MarkdownIt from "markdown-it";
+import type { MarkdownBlockRule, MarkdownParserTokenSpec } from "../extensions/types";
 import { insertText } from "../model/commands";
 
-// Matches built-in markdown block-level patterns at the start of a line.
-const MARKDOWN_PATTERN = /^(#{1,6} |[*-] |\d+\. )/m;
+// ── Markdown detection heuristic ──────────────────────────────────────────────
+// Require intentional block-level structure — mid-sentence asterisks are NOT markdown.
+const MARKDOWN_PATTERN = /^(#{1,6} |[*-] |\d+\. |`{3}|---)/m;
+
+// Tokens that markdown-it emits but our schema has no equivalent for.
+// These are self-closing inline tokens — { ignore: true } silently skips them.
+const IGNORE_TOKENS: Record<string, MarkdownParserTokenSpec> = {
+  hardbreak: { ignore: true },
+  code_inline: { ignore: true },
+  image: { ignore: true },
+};
 
 /**
  * PasteTransformer — converts clipboard content into a ProseMirror Transaction.
  *
  * Priority:
  *   1. text/html  → ProseMirror DOMParser (handles bold, headings, lists, etc.)
- *   2. text/plain → markdown parser (built-in rules + extension-contributed rules)
- *   3. text/plain → plain text insertion (existing behaviour)
+ *   2. text/plain → prosemirror-markdown MarkdownParser (full CommonMark support)
+ *   3. text/plain → legacy line-by-line parser (fallback for unsupported constructs)
+ *   4. text/plain → plain text insertion
  */
 export class PasteTransformer {
+  private readonly md: InstanceType<typeof MarkdownIt>;
+
   constructor(
     private readonly schema: Schema,
     private readonly extraMarkdownRules: MarkdownBlockRule[] = [],
-  ) {}
+    private readonly markdownParserTokens: Record<string, MarkdownParserTokenSpec> = {},
+  ) {
+    // Disable rules that generate tokens our schema can't handle (blockquote, link, image).
+    // Their content still renders as plain text — no data loss, just no special formatting.
+    this.md = new MarkdownIt({ html: false });
+    this.md.disable(["blockquote", "image", "link"]);
+  }
 
   transform(clipboardData: DataTransfer, state: EditorState): Transaction | null {
     const html = clipboardData.getData("text/html").trim();
@@ -62,7 +82,6 @@ export class PasteTransformer {
 
   private looksLikeMarkdown(text: string): boolean {
     if (MARKDOWN_PATTERN.test(text)) return true;
-    // Also trigger for any custom extension rule pattern
     for (const line of text.split("\n")) {
       const trimmed = line.trimEnd();
       for (const rule of this.extraMarkdownRules) {
@@ -73,25 +92,42 @@ export class PasteTransformer {
   }
 
   private fromMarkdown(text: string, state: EditorState): Transaction | null {
+    // Try prosemirror-markdown's full parser when we have token handlers
+    if (Object.keys(this.markdownParserTokens).length > 0) {
+      try {
+        const tokens = { ...IGNORE_TOKENS, ...this.markdownParserTokens };
+        const parser = new MarkdownParser(this.schema, this.md, tokens);
+        const doc = parser.parse(text);
+        if (doc) {
+          return state.tr.replaceSelection(new Slice(doc.content, 0, 0));
+        }
+      } catch {
+        // Unknown token or schema mismatch — fall through to legacy parser
+      }
+    }
+
+    // Legacy line-by-line parser (handles extension addMarkdownRules + built-in patterns)
     const nodes = this.parseMarkdownBlocks(text);
     if (nodes.length === 0) return insertText(state, text);
-    const slice = new Slice(Fragment.from(nodes), 0, 0);
-    return state.tr.replaceSelection(slice);
+    return state.tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0));
   }
+
+  // ── Legacy line-by-line parser ────────────────────────────────────────────
 
   /**
    * Line-by-line block parser. Produces paragraph, heading, bulletList,
    * and orderedList nodes. Inline marks (bold, italic) are handled within
    * paragraph and heading text content.
+   *
+   * Kept as a fallback for when the MarkdownParser encounters tokens our
+   * schema doesn't support (blockquotes, nested structures, etc.).
    */
   private parseMarkdownBlocks(text: string): Node[] {
     const lines = text.split("\n");
     const nodes: Node[] = [];
 
-    // Accumulator for multi-line paragraphs
     let paraLines: string[] = [];
 
-    // Accumulator for list items
     type ListState = { type: "bullet" | "ordered"; items: string[] };
     let list: ListState | null = null;
 
@@ -121,7 +157,6 @@ export class PasteTransformer {
     for (const raw of lines) {
       const line = raw.trimEnd();
 
-      // Blank line — flush accumulators
       if (line.trim() === "") {
         flushPara();
         flushList();
@@ -145,7 +180,7 @@ export class PasteTransformer {
       }
       if (customMatched) continue;
 
-      // ATX heading: # through ######
+      // ATX heading
       const headingMatch = /^(#{1,6}) (.+)/.exec(line);
       if (headingMatch) {
         flushPara();
@@ -156,13 +191,12 @@ export class PasteTransformer {
         if (headingNode) {
           nodes.push(headingNode.create({ level }, this.parseInline(content)));
         } else {
-          // Schema has no heading — fall back to paragraph
           nodes.push(this.makeParagraph(content));
         }
         continue;
       }
 
-      // Bullet list item: "- " or "* "
+      // Bullet list item
       const bulletMatch = /^[*-] (.+)/.exec(line);
       if (bulletMatch) {
         flushPara();
@@ -172,7 +206,7 @@ export class PasteTransformer {
         continue;
       }
 
-      // Ordered list item: "1. " "2. " etc.
+      // Ordered list item
       const orderedMatch = /^\d+\. (.+)/.exec(line);
       if (orderedMatch) {
         flushPara();
@@ -182,7 +216,6 @@ export class PasteTransformer {
         continue;
       }
 
-      // Regular text — close any open list, accumulate into paragraph
       if (list) flushList();
       paraLines.push(line);
     }
@@ -199,12 +232,10 @@ export class PasteTransformer {
 
   /**
    * Inline mark parser — handles **bold**, *italic*, __bold__, _italic_.
-   * Returns an array of text nodes with the appropriate marks applied.
    */
   private parseInline(text: string): Node[] {
     const nodes: Node[] = [];
-    // Tokenise: split on bold/italic delimiters while preserving them
-    const tokens = text.split(/(\*\*|__|\*|_)/);
+    const tokens = text.split(/(\*\*|__|[*_])/);
     const boldMark = this.schema.marks["bold"];
     const italicMark = this.schema.marks["italic"];
 
@@ -228,8 +259,6 @@ export class PasteTransformer {
       nodes.push(this.schema.text(token, marks));
     }
 
-    // If no nodes produced (e.g. empty string), return a zero-width space
-    // so the paragraph node is always valid.
     return nodes.length > 0 ? nodes : [this.schema.text("\u200B")];
   }
 }

@@ -135,6 +135,27 @@ export const CodeBlock = Extension.create({
     // Typing "```" at the start of a block converts it to a code block
     return [textblockTypeInputRule(/^```$/, codeBlock)];
   },
+
+  addMarkdownParserTokens() {
+    return {
+      code_block: { block: "codeBlock", noCloseToken: true },
+      fence: { block: "codeBlock", noCloseToken: true },
+    };
+  },
+
+  addMarkdownSerializerRules() {
+    return {
+      nodes: {
+        codeBlock(state, node) {
+          state.write("```\n");
+          state.text(node.textContent, false);
+          state.ensureNewLine();
+          state.write("```");
+          state.closeBlock(node);
+        },
+      },
+    };
+  },
 });
 
 // Re-export strategy for use in tests / custom renderers

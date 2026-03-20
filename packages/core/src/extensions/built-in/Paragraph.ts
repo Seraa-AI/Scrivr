@@ -40,4 +40,21 @@ export const Paragraph = Extension.create({
       paragraph: { font: "14px Georgia, serif", spaceBefore: 0, spaceAfter: 10, align: "left" as const },
     };
   },
+
+  addMarkdownParserTokens() {
+    return {
+      paragraph: { block: "paragraph" },
+    };
+  },
+
+  addMarkdownSerializerRules() {
+    return {
+      nodes: {
+        paragraph(state, node) {
+          state.renderInline(node);
+          state.closeBlock(node);
+        },
+      },
+    };
+  },
 });
