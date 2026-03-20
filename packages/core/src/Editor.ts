@@ -252,7 +252,7 @@ export class Editor {
     this.keymap = this.manager.buildKeymap();
     this.inputHandlers = this.manager.buildInputHandlers();
     this.commands = this.buildCommands();
-    this.pasteTransformer = new PasteTransformer(this.manager.schema);
+    this.pasteTransformer = new PasteTransformer(this.manager.schema, this.manager.buildMarkdownRules());
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────

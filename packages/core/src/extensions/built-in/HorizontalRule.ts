@@ -1,6 +1,7 @@
 import { Extension } from "../Extension";
 import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
+import { InputRule } from "prosemirror-inputrules";
 import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
 import type { CharacterMap } from "../../layout/CharacterMap";
 import type { LayoutBlock } from "../../layout/BlockLayout";
@@ -103,6 +104,37 @@ export const HorizontalRule = Extension.create({
         title: "Horizontal rule",
         isActive: () => false,
       },
+    ];
+  },
+
+  addMarkdownRules() {
+    return [
+      {
+        // "---" (or more dashes) on its own line → horizontal rule
+        pattern: /^-{3,}$/,
+        createNode(_match, schema) {
+          return schema.nodes["horizontalRule"]?.create() ?? null;
+        },
+      },
+    ];
+  },
+
+  addInputRules() {
+    const hr = this.schema.nodes["horizontalRule"];
+    const paragraph = this.schema.nodes["paragraph"];
+    if (!hr) return [];
+
+    // Typing "--- " (three dashes + space) in an empty paragraph inserts an HR
+    return [
+      new InputRule(/^---\s$/, (state, _match, start) => {
+        const $from = state.doc.resolve(start);
+        const blockStart = $from.before($from.depth);
+        const blockEnd = $from.after($from.depth);
+        const replacement = paragraph
+          ? [hr.create(), paragraph.create()]
+          : [hr.create()];
+        return state.tr.replaceWith(blockStart, blockEnd, replacement);
+      }),
     ];
   },
 });

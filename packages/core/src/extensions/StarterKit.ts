@@ -16,9 +16,10 @@ import { Alignment } from "./built-in/Alignment";
 import { CodeBlock, insertCodeIndent } from "./built-in/CodeBlock";
 import { HorizontalRule } from "./built-in/HorizontalRule";
 import { chainCommands } from "prosemirror-commands";
+import type { InputRule } from "prosemirror-inputrules";
 import type { Command } from "prosemirror-state";
 import type { NodeSpec, MarkSpec } from "prosemirror-model";
-import type { FontModifier, MarkDecorator, ToolbarItemSpec } from "./types";
+import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule } from "./types";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { BlockStrategy } from "../layout/BlockRegistry";
 
@@ -378,5 +379,34 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
 
     return items;
+  },
+
+  addMarkdownRules(): MarkdownBlockRule[] {
+    const rules: MarkdownBlockRule[] = [];
+    const opts = this.options;
+    // Heading markdown rules are handled natively by PasteTransformer; skip here.
+    if (opts.codeBlock !== false) {
+      rules.push(...CodeBlock.resolve().markdownRules);
+    }
+    if (opts.horizontalRule !== false) {
+      rules.push(...HorizontalRule.resolve().markdownRules);
+    }
+    return rules;
+  },
+
+  addInputRules(): InputRule[] {
+    const rules: InputRule[] = [];
+    const opts = this.options;
+    if (opts.heading !== false) {
+      const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
+      rules.push(...ext.resolve(this.schema).inputRules);
+    }
+    if (opts.codeBlock !== false) {
+      rules.push(...CodeBlock.resolve(this.schema).inputRules);
+    }
+    if (opts.horizontalRule !== false) {
+      rules.push(...HorizontalRule.resolve(this.schema).inputRules);
+    }
+    return rules;
   },
 });

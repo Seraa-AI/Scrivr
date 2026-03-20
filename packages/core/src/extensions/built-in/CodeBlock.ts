@@ -1,5 +1,6 @@
 import { Extension } from "../Extension";
 import { setBlockType } from "prosemirror-commands";
+import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import type { Command } from "prosemirror-state";
 import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
@@ -127,9 +128,17 @@ export const CodeBlock = Extension.create({
       },
     ];
   },
+
+  addInputRules() {
+    const codeBlock = this.schema.nodes["codeBlock"];
+    if (!codeBlock) return [];
+    // Typing "```" at the start of a block converts it to a code block
+    return [textblockTypeInputRule(/^```$/, codeBlock)];
+  },
 });
 
 // Re-export strategy for use in tests / custom renderers
 export { CodeBlockStrategy };
 // Re-export Tab command for StarterKit chaining
 export { insertCodeIndent };
+

@@ -1,10 +1,11 @@
 import { Schema } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { keymap } from "prosemirror-keymap";
+import { inputRules } from "prosemirror-inputrules";
 import type { Plugin, Command } from "prosemirror-state";
 import type { Node as ProseMirrorNode } from "prosemirror-model";
 import type { Extension } from "./Extension";
-import type { MarkDecorator, ResolvedExtension, FontModifier, ToolbarItemSpec, InputHandler } from "./types";
+import type { MarkDecorator, ResolvedExtension, FontModifier, ToolbarItemSpec, InputHandler, MarkdownBlockRule } from "./types";
 import { BlockRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
 
@@ -80,6 +81,10 @@ export class ExtensionManager {
     const km = this.buildKeymap();
     if (Object.keys(km).length > 0) {
       plugins.push(keymap(km));
+    }
+    const rules = this.buildInputRules();
+    if (rules.length > 0) {
+      plugins.push(inputRules({ rules }));
     }
     return plugins;
   }
@@ -185,5 +190,21 @@ export class ExtensionManager {
       Object.assign(merged, ext.inputHandlers);
     }
     return merged;
+  }
+
+  /**
+   * All markdown block rules from all extensions, in registration order.
+   * Passed to PasteTransformer so custom nodes are recognised on paste.
+   */
+  buildMarkdownRules(): MarkdownBlockRule[] {
+    return this.resolved.flatMap((ext) => ext.markdownRules);
+  }
+
+  /**
+   * All input rules from all extensions, in registration order.
+   * Consumed by buildPlugins() — exposed here for testing.
+   */
+  buildInputRules() {
+    return this.resolved.flatMap((ext) => ext.inputRules);
   }
 }

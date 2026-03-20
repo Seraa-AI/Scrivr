@@ -1,4 +1,5 @@
 import { setBlockType } from "prosemirror-commands";
+import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
 import type { ToolbarItemSpec } from "../types";
 import type { BlockStyle } from "../../layout/FontConfig";
@@ -70,6 +71,39 @@ export const Heading = Extension.create<HeadingOptions>({
       styles[`heading_${level}`] = levelStyles[level]!;
     }
     return styles;
+  },
+
+  addMarkdownRules() {
+    // These back up the built-in heading handler in PasteTransformer.
+    // They're intentionally not registered since PasteTransformer already handles "# "
+    // natively — returning [] here avoids double-processing.
+    // Custom extensions that want heading-like behaviour can use this hook instead.
+    return [];
+  },
+
+  addInputRules() {
+    const heading = this.schema.nodes["heading"];
+    const paragraph = this.schema.nodes["paragraph"];
+    if (!heading) return [];
+
+    const rules = this.options.levels.map((level) =>
+      textblockTypeInputRule(
+        new RegExp(`^(#{${level}})\\s$`),
+        heading,
+        { level },
+      )
+    );
+
+    // "# " with too many hashes (beyond configured levels) — ignore
+    // "## " → h2, etc. Each rule is specific to its level count.
+
+    // Also: typing "###### " then space in a paragraph that's already a heading
+    // of a different level converts it. setBlockType handles this correctly.
+
+    // Bonus: Mod-Alt-0 already converts heading → paragraph via keymap.
+    // Input rule for "paragraph": not needed (no markdown prefix for plain text).
+    void paragraph; // unused but kept for symmetry
+    return rules;
   },
 
   addToolbarItems(): ToolbarItemSpec[] {

@@ -81,6 +81,8 @@ export class Extension<Options extends object = object> {
       fontModifiers: config.addFontModifiers?.call(p1) ?? new Map(),
       toolbarItems: config.addToolbarItems?.call(p1) ?? [],
       inputHandlers: config.addInputHandlers?.call(p1) ?? {},
+      markdownRules: config.addMarkdownRules?.call(p1) ?? [],
+      inputRules: schema ? (config.addInputRules?.call(p2) ?? []) : [],
     };
   }
 }

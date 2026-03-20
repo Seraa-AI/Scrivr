@@ -1,10 +1,10 @@
 import { DOMParser as PMDOMParser, Fragment, Mark, Slice } from "prosemirror-model";
 import type { Schema, Node } from "prosemirror-model";
 import type { EditorState, Transaction } from "prosemirror-state";
+import type { MarkdownBlockRule } from "../extensions/types";
 import { insertText } from "../model/commands";
 
-// Matches markdown block-level patterns at the start of a line.
-// Requires intentional structure — mid-sentence asterisks are NOT treated as markdown.
+// Matches built-in markdown block-level patterns at the start of a line.
 const MARKDOWN_PATTERN = /^(#{1,6} |[*-] |\d+\. )/m;
 
 /**
@@ -12,11 +12,14 @@ const MARKDOWN_PATTERN = /^(#{1,6} |[*-] |\d+\. )/m;
  *
  * Priority:
  *   1. text/html  → ProseMirror DOMParser (handles bold, headings, lists, etc.)
- *   2. text/plain → minimal markdown parser (when block-level patterns are present)
+ *   2. text/plain → markdown parser (built-in rules + extension-contributed rules)
  *   3. text/plain → plain text insertion (existing behaviour)
  */
 export class PasteTransformer {
-  constructor(private readonly schema: Schema) {}
+  constructor(
+    private readonly schema: Schema,
+    private readonly extraMarkdownRules: MarkdownBlockRule[] = [],
+  ) {}
 
   transform(clipboardData: DataTransfer, state: EditorState): Transaction | null {
     const html = clipboardData.getData("text/html").trim();
@@ -58,7 +61,15 @@ export class PasteTransformer {
   // ── Markdown ──────────────────────────────────────────────────────────────
 
   private looksLikeMarkdown(text: string): boolean {
-    return MARKDOWN_PATTERN.test(text);
+    if (MARKDOWN_PATTERN.test(text)) return true;
+    // Also trigger for any custom extension rule pattern
+    for (const line of text.split("\n")) {
+      const trimmed = line.trimEnd();
+      for (const rule of this.extraMarkdownRules) {
+        if (rule.pattern.test(trimmed)) return true;
+      }
+    }
+    return false;
   }
 
   private fromMarkdown(text: string, state: EditorState): Transaction | null {
@@ -116,6 +127,23 @@ export class PasteTransformer {
         flushList();
         continue;
       }
+
+      // Extension-contributed rules — tried before built-in handlers
+      let customMatched = false;
+      for (const rule of this.extraMarkdownRules) {
+        const match = rule.pattern.exec(line);
+        if (match) {
+          const node = rule.createNode(match, this.schema, this.parseInline.bind(this));
+          if (node) {
+            flushPara();
+            flushList();
+            nodes.push(node);
+            customMatched = true;
+            break;
+          }
+        }
+      }
+      if (customMatched) continue;
 
       // ATX heading: # through ######
       const headingMatch = /^(#{1,6}) (.+)/.exec(line);

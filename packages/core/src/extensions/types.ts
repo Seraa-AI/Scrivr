@@ -13,8 +13,9 @@
  *   Phase 3 — addLayoutHandler / addMarkDecorators → wired into BlockRegistry + renderer
  */
 
-import type { NodeSpec, MarkSpec, Schema } from "prosemirror-model";
+import type { NodeSpec, MarkSpec, Schema, Node } from "prosemirror-model";
 import type { Command, Plugin } from "prosemirror-state";
+import type { InputRule } from "prosemirror-inputrules";
 import type { BlockStrategy } from "../layout/BlockRegistry";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
@@ -24,6 +25,32 @@ import type { ParsedFont } from "../layout/StyleResolver";
  * Called by resolveFont for each mark on a text node.
  */
 export type FontModifier = (parsed: ParsedFont, attrs: Record<string, unknown>) => void;
+
+/**
+ * A single block-level markdown pattern contributed by an extension.
+ * PasteTransformer tries custom rules before its built-in heading/list handlers.
+ *
+ * @example
+ * // HorizontalRule contributing "---" → horizontalRule node
+ * {
+ *   pattern: /^---+$/,
+ *   createNode(match, schema) { return schema.nodes.horizontalRule?.create() ?? null; },
+ * }
+ */
+export interface MarkdownBlockRule {
+  /** Tested against each trimmed line of pasted text. */
+  pattern: RegExp;
+  /**
+   * Called when pattern matches. Return a ProseMirror Node or null to fall through.
+   * parseInline is the paste transformer's inline parser — use it to support
+   * **bold** / *italic* inside custom block content.
+   */
+  createNode(
+    match: RegExpMatchArray,
+    schema: Schema,
+    parseInline: (text: string) => Node[],
+  ): Node | null;
+}
 
 /**
  * Describes a toolbar button declared by an extension.
@@ -224,6 +251,24 @@ export interface ExtensionConfig<Options = object> {
   addToolbarItems?(this: Phase1Context<Options>): ToolbarItemSpec[];
 
   /**
+   * Custom markdown block rules for PasteTransformer.
+   * Tried before built-in heading/bullet/ordered rules on each pasted line.
+   * Phase 1 — no schema needed at definition time; schema is passed to createNode at runtime.
+   */
+  addMarkdownRules?(this: Phase1Context<Options>): MarkdownBlockRule[];
+
+  /**
+   * ProseMirror input rules (auto-format while typing).
+   * Collected by ExtensionManager and wrapped in a single inputRules() plugin.
+   * Phase 2 — schema is available via this.schema.
+   *
+   * @example
+   * // Heading: "# " at start of block → heading level 1
+   * textblockTypeInputRule(/^#\s$/, this.schema.nodes.heading, { level: 1 })
+   */
+  addInputRules?(this: ExtensionContext<Options>): InputRule[];
+
+  /**
    * Editor-level input handlers — for keys that need access to the editor
    * instance rather than just the ProseMirror state.
    *
@@ -252,4 +297,6 @@ export interface ResolvedExtension {
   fontModifiers: Map<string, FontModifier>;
   toolbarItems: ToolbarItemSpec[];
   inputHandlers: Record<string, InputHandler>;
+  markdownRules: MarkdownBlockRule[];
+  inputRules: InputRule[];
 }
