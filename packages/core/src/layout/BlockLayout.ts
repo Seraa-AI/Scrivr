@@ -5,6 +5,37 @@ import { CharacterMap } from "./CharacterMap";
 import { FontConfig, defaultFontConfig, getBlockStyle, BlockStyle } from "./FontConfig";
 import { resolveFont } from "./StyleResolver";
 
+// ── Table layout types ────────────────────────────────────────────────────────
+
+/** A single laid-out cell inside a table. */
+export interface TableCellLayout {
+  /** Absolute ProseMirror position of the tableCell node. */
+  nodePos: number;
+  /** Left edge of the cell (border-box, includes left border). */
+  x: number;
+  /** Top edge of the cell (border-box, includes top border). */
+  y: number;
+  /** Cell width (content + padding, excludes borders). */
+  width: number;
+  /** Cell height (content + padding, normalised to row max). */
+  height: number;
+  /** Laid-out content blocks inside the cell (one per child paragraph/block). */
+  contentBlocks: LayoutBlock[];
+  rowIndex: number;
+  colIndex: number;
+}
+
+/** Attached to a "table" LayoutBlock so the render strategy can access grid data. */
+export interface TableData {
+  cells: TableCellLayout[];
+  numRows: number;
+  numCols: number;
+  colWidths: number[];
+  rowHeights: number[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface LayoutBlock {
   /** The original ProseMirror node — used by BlockStrategy.render() */
   node: Node;
@@ -29,6 +60,8 @@ export interface LayoutBlock {
   listMarker?: string;
   /** Absolute x position to draw the list marker — to the left of the indented text. */
   listMarkerX?: number;
+  /** Grid data attached by layoutTable(). Present on "table" blocks only. */
+  tableData?: TableData;
 }
 
 export interface BlockLayoutOptions {

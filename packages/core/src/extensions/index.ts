@@ -16,6 +16,7 @@ export { Color } from "./built-in/Color";
 export { FontSize } from "./built-in/FontSize";
 export { Alignment } from "./built-in/Alignment";
 export { List } from "./built-in/List";
+export { Table } from "./built-in/Table";
 
 export type {
   ExtensionConfig,

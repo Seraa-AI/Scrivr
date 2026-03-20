@@ -89,9 +89,12 @@ export class CharacterMap {
     const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
     if (!line) return 0;
 
-    const lineGlyphs = this.glyphs.filter(
-      (g) => g.page === page && g.lineIndex === line.lineIndex
-    );
+    // Filter by y coordinate rather than lineIndex so that table cells —
+    // which share the same y but have different lineIndex values — all
+    // participate in the x hit-test. Sort left-to-right for safety.
+    const lineGlyphs = this.glyphs
+      .filter((g) => g.page === page && g.y === line.y)
+      .sort((a, b) => a.x - b.x);
 
     if (lineGlyphs.length === 0) return line.startDocPos;
 
@@ -103,8 +106,13 @@ export class CharacterMap {
       }
     }
 
-    // Click is past all glyphs on the line — position is end of line
-    return line.endDocPos;
+    // Click is past all glyphs at this y — return end of whichever line
+    // owns the rightmost glyph (handles multi-cell rows correctly).
+    const rightmost = lineGlyphs[lineGlyphs.length - 1]!;
+    const rightLine = this.lines.find(
+      (l) => l.page === page && l.lineIndex === rightmost.lineIndex,
+    );
+    return rightLine?.endDocPos ?? rightmost.docPos + 1;
   }
 
   /**
@@ -143,9 +151,10 @@ export class CharacterMap {
   /**
    * Find the doc position directly above the current cursor, preserving x.
    *
-   * Used for ↑ arrow key navigation. Finds the line above (crossing page
-   * boundaries if the previous page is in the CharacterMap) and hit-tests
-   * the same x coordinate on it.
+   * Uses y-coordinate comparison rather than lineIndex arithmetic so that
+   * table cells (which share the same y but have different lineIndex values)
+   * navigate correctly — ↑ from any cell in a table row moves to the row
+   * above, not to a sibling cell.
    *
    * Returns null if no line above is registered (top of document, or the
    * page above hasn't been rendered yet by the virtual page system).
@@ -157,30 +166,31 @@ export class CharacterMap {
     const currentLine = this.lineAtCoords(coords.y, coords.page);
     if (!currentLine) return null;
 
-    let targetLine: LineEntry | undefined;
+    // Find the highest line on this page that is strictly above currentLine.y
+    const above = this.lines
+      .filter((l) => l.page === currentLine.page && l.y < currentLine.y)
+      .reduce<LineEntry | undefined>(
+        (best, l) => (best === undefined || l.y > best.y ? l : best),
+        undefined,
+      );
 
-    if (currentLine.lineIndex > 0) {
-      // Previous line on the same page
-      targetLine = this.lines.find(
-        (l) => l.page === currentLine.page && l.lineIndex === currentLine.lineIndex - 1
-      );
-    } else {
-      // First line on this page — jump to the last line of the previous page
-      const prevPageLines = this.lines.filter((l) => l.page === currentLine.page - 1);
-      if (prevPageLines.length === 0) return null;
-      targetLine = prevPageLines.reduce((max, l) =>
-        l.lineIndex > max.lineIndex ? l : max
-      );
+    if (above) {
+      return this.posAtCoords(x, above.y + above.height / 2, above.page);
     }
 
-    if (!targetLine) return null;
-    return this.posAtCoords(x, targetLine.y + targetLine.height / 2, targetLine.page);
+    // First visual row on this page — jump to the last line of the previous page
+    const prevPageLines = this.lines.filter((l) => l.page === currentLine.page - 1);
+    if (prevPageLines.length === 0) return null;
+    const lastOnPrev = prevPageLines.reduce((max, l) => (l.y > max.y ? l : max));
+    return this.posAtCoords(x, lastOnPrev.y + lastOnPrev.height / 2, lastOnPrev.page);
   }
 
   /**
    * Find the doc position directly below the current cursor, preserving x.
    *
-   * Used for ↓ arrow key navigation. Mirrors posAbove.
+   * Uses y-coordinate comparison (mirrors posAbove) so table row navigation
+   * works correctly.
+   *
    * Returns null if no line below is registered (bottom of document, or the
    * next page hasn't been rendered yet).
    */
@@ -191,21 +201,24 @@ export class CharacterMap {
     const currentLine = this.lineAtCoords(coords.y, coords.page);
     if (!currentLine) return null;
 
-    // Try the next line on the same page first
-    let targetLine = this.lines.find(
-      (l) => l.page === currentLine.page && l.lineIndex === currentLine.lineIndex + 1
-    );
-
-    if (!targetLine) {
-      // Last line on this page — jump to the first line of the next page
-      const nextPageLines = this.lines.filter((l) => l.page === currentLine.page + 1);
-      if (nextPageLines.length === 0) return null;
-      targetLine = nextPageLines.reduce((min, l) =>
-        l.lineIndex < min.lineIndex ? l : min
+    // Find the lowest line on this page that starts strictly below currentLine's bottom
+    const currentBottom = currentLine.y + currentLine.height;
+    const below = this.lines
+      .filter((l) => l.page === currentLine.page && l.y >= currentBottom)
+      .reduce<LineEntry | undefined>(
+        (best, l) => (best === undefined || l.y < best.y ? l : best),
+        undefined,
       );
+
+    if (below) {
+      return this.posAtCoords(x, below.y + below.height / 2, below.page);
     }
 
-    return this.posAtCoords(x, targetLine.y + targetLine.height / 2, targetLine.page);
+    // Last visual row on this page — jump to the first line of the next page
+    const nextPageLines = this.lines.filter((l) => l.page === currentLine.page + 1);
+    if (nextPageLines.length === 0) return null;
+    const firstOnNext = nextPageLines.reduce((min, l) => (l.y < min.y ? l : min));
+    return this.posAtCoords(x, firstOnNext.y + firstOnNext.height / 2, firstOnNext.page);
   }
 
   /**
