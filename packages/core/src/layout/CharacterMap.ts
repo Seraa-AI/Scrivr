@@ -137,6 +137,74 @@ export class CharacterMap {
   }
 
   /**
+   * Find the doc position directly above the current cursor, preserving x.
+   *
+   * Used for ↑ arrow key navigation. Finds the line above (crossing page
+   * boundaries if the previous page is in the CharacterMap) and hit-tests
+   * the same x coordinate on it.
+   *
+   * Returns null if no line above is registered (top of document, or the
+   * page above hasn't been rendered yet by the virtual page system).
+   */
+  posAbove(docPos: number, x: number): number | null {
+    const coords = this.coordsAtPos(docPos);
+    if (!coords) return null;
+
+    const currentLine = this.lineAtCoords(coords.y, coords.page);
+    if (!currentLine) return null;
+
+    let targetLine: LineEntry | undefined;
+
+    if (currentLine.lineIndex > 0) {
+      // Previous line on the same page
+      targetLine = this.lines.find(
+        (l) => l.page === currentLine.page && l.lineIndex === currentLine.lineIndex - 1
+      );
+    } else {
+      // First line on this page — jump to the last line of the previous page
+      const prevPageLines = this.lines.filter((l) => l.page === currentLine.page - 1);
+      if (prevPageLines.length === 0) return null;
+      targetLine = prevPageLines.reduce((max, l) =>
+        l.lineIndex > max.lineIndex ? l : max
+      );
+    }
+
+    if (!targetLine) return null;
+    return this.posAtCoords(x, targetLine.y + targetLine.height / 2, targetLine.page);
+  }
+
+  /**
+   * Find the doc position directly below the current cursor, preserving x.
+   *
+   * Used for ↓ arrow key navigation. Mirrors posAbove.
+   * Returns null if no line below is registered (bottom of document, or the
+   * next page hasn't been rendered yet).
+   */
+  posBelow(docPos: number, x: number): number | null {
+    const coords = this.coordsAtPos(docPos);
+    if (!coords) return null;
+
+    const currentLine = this.lineAtCoords(coords.y, coords.page);
+    if (!currentLine) return null;
+
+    // Try the next line on the same page first
+    let targetLine = this.lines.find(
+      (l) => l.page === currentLine.page && l.lineIndex === currentLine.lineIndex + 1
+    );
+
+    if (!targetLine) {
+      // Last line on this page — jump to the first line of the next page
+      const nextPageLines = this.lines.filter((l) => l.page === currentLine.page + 1);
+      if (nextPageLines.length === 0) return null;
+      targetLine = nextPageLines.reduce((min, l) =>
+        l.lineIndex < min.lineIndex ? l : min
+      );
+    }
+
+    return this.posAtCoords(x, targetLine.y + targetLine.height / 2, targetLine.page);
+  }
+
+  /**
    * Returns all glyphs that fall within the given ProseMirror position range.
    * Used by the renderer to draw selection highlight rectangles.
    */

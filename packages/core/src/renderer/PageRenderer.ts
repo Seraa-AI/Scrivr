@@ -75,27 +75,41 @@ export function renderPage(options: RenderPageOptions): void {
   if (renderVersion !== currentVersion()) return;
 
   // ── Draw blocks ───────────────────────────────────────────────────────────
+  // lineIndexOffset accumulates across blocks so every line on the page has
+  // a unique index in the CharacterMap. Without this, each block resets to 0
+  // and posAtCoords can't distinguish lines in different paragraphs.
+  let lineIndexOffset = 0;
   for (const block of page.blocks) {
-    drawBlock(ctx, block, measurer, map, page.pageNumber);
+    lineIndexOffset = drawBlock(ctx, block, measurer, map, page.pageNumber, lineIndexOffset);
   }
 }
 
 // ── Private ───────────────────────────────────────────────────────────────────
 
+/**
+ * Draws one block and registers its glyphs + lines into the CharacterMap.
+ *
+ * @param lineIndexOffset — page-global line count before this block.
+ * @returns updated offset (lineIndexOffset + block.lines.length) for the
+ *          next block to continue from.
+ */
 function drawBlock(
   ctx: CanvasRenderingContext2D,
   block: LayoutBlock,
   measurer: TextMeasurer,
   map: CharacterMap,
-  pageNumber: number
-): void {
+  pageNumber: number,
+  lineIndexOffset: number
+): number {
   const contentWidth = block.availableWidth;
-  let lineIndex = 0;
 
-  for (const line of block.lines) {
+  for (let li = 0; li < block.lines.length; li++) {
+    const line = block.lines[li]!;
+    const globalLineIndex = lineIndexOffset + li;
+
     // Alignment offset — must match what BlockLayout computed
     const lineOffsetX = computeAlignmentOffset(block.align, contentWidth, line.width);
-    const lineY = block.y + getTotalLineHeight(block.lines, lineIndex);
+    const lineY = block.y + getTotalLineHeight(block.lines, li);
     const baseline = lineY + line.ascent;
 
     for (const span of line.spans) {
@@ -122,32 +136,28 @@ function drawBlock(
             width: charWidth,
             height: line.lineHeight,
             page: pageNumber,
-            lineIndex: lineIndex + (block.lines.indexOf(line)),
+            lineIndex: globalLineIndex,
           });
         }
       }
     }
 
-    lineIndex++;
-  }
-
-  // Register lines if not yet registered
-  let runningY = block.y;
-  for (let li = 0; li < block.lines.length; li++) {
-    const line = block.lines[li]!;
-    if (!map.hasLine(pageNumber, li)) {
+    // Register line entry with the page-global index
+    if (!map.hasLine(pageNumber, globalLineIndex)) {
       map.registerLine({
         page: pageNumber,
-        lineIndex: li,
-        y: runningY,
+        lineIndex: globalLineIndex,
+        y: lineY,
         height: line.lineHeight,
         startDocPos: line.spans[0]?.docPos ?? 0,
         endDocPos:
-          (line.spans[line.spans.length - 1]?.docPos ?? 0) + (line.spans[line.spans.length - 1]?.text.length ?? 0),
+          (line.spans[line.spans.length - 1]?.docPos ?? 0) +
+          (line.spans[line.spans.length - 1]?.text.length ?? 0),
       });
     }
-    runningY += line.lineHeight;
   }
+
+  return lineIndexOffset + block.lines.length;
 }
 
 function getTotalLineHeight(

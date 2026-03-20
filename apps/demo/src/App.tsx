@@ -8,8 +8,9 @@ import {
   layoutDocument,
   defaultPageConfig,
 } from "@canvas-editor/core";
-import type { EditorState } from "@canvas-editor/core";
+import type { EditorState, SelectionSnapshot } from "@canvas-editor/core";
 import { PageView } from "./PageView";
+import { Toolbar } from "./Toolbar";
 import { useVirtualPages } from "./useVirtualPages";
 import type { LayoutPage } from "@canvas-editor/core";
 
@@ -37,10 +38,14 @@ export function App() {
   const versionRef = useRef(initialLayout.version);
 
   const [layout, setLayout] = useState(initialLayout);
-  const [cursorDocPos, setCursorDocPos] = useState(0);
+  const [selection, setSelection] = useState<SelectionSnapshot>({
+    anchor: 0, head: 0, from: 0, to: 0, empty: true, activeMarks: [],
+  });
   const [isFocused, setIsFocused] = useState(false);
-  // cursorVisible is driven by CursorManager via onCursorTick — not a timer in PageView
   const [cursorVisible, setCursorVisible] = useState(true);
+
+  // Drag state — refs so mousemove doesn't cause re-renders
+  const isDraggingRef = useRef(false);
 
   const getCurrentVersion = useCallback(() => versionRef.current, []);
 
@@ -53,7 +58,15 @@ export function App() {
     });
     versionRef.current = next.version;
     setLayout(next);
-    setCursorDocPos(state.selection.head);
+    const editor = editorRef.current;
+    setSelection({
+      anchor: state.selection.anchor,
+      head: state.selection.head,
+      from: state.selection.from,
+      to: state.selection.to,
+      empty: state.selection.empty,
+      activeMarks: editor ? editor.getActiveMarks() : [],
+    });
   }, []);
 
   useEffect(() => {
@@ -64,6 +77,7 @@ export function App() {
       onChange: onDocChange,
       onFocusChange: setIsFocused,
       onCursorTick: setCursorVisible,
+      charMap,
     });
     editorRef.current = editor;
     editor.mount(container);
@@ -73,9 +87,32 @@ export function App() {
 
   const { visiblePages, observePage } = useVirtualPages(layout.pages, 500);
 
-  const handlePageClick = useCallback((pageNumber: number, x: number, y: number) => {
+  const handlePageMouseDown = useCallback((pageNumber: number, x: number, y: number, shiftKey: boolean) => {
+    isDraggingRef.current = true;
     const pos = charMap.posAtCoords(x, y, pageNumber);
-    editorRef.current?.moveCursorTo(pos);
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (shiftKey) {
+      // Shift+click: extend selection from current anchor to clicked position
+      editor.setSelection(editor.getState().selection.anchor, pos);
+    } else {
+      editor.moveCursorTo(pos);
+    }
+  }, []);
+
+  const handlePageMouseMove = useCallback((pageNumber: number, x: number, y: number) => {
+    if (!isDraggingRef.current) return;
+    const pos = charMap.posAtCoords(x, y, pageNumber);
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.setSelection(editor.getState().selection.anchor, pos);
+  }, []);
+
+  // Stop drag on mouseup anywhere (user may drag outside the page div)
+  useEffect(() => {
+    const onMouseUp = () => { isDraggingRef.current = false; };
+    document.addEventListener("mouseup", onMouseUp);
+    return () => document.removeEventListener("mouseup", onMouseUp);
   }, []);
 
   const stats = useMemo(() => ({
@@ -91,6 +128,12 @@ export function App() {
         <span style={styles.stat}>pages: {stats.pages}</span>
         <span style={styles.stat}>v{stats.version}</span>
       </header>
+
+      <Toolbar
+        activeMarks={selection.activeMarks}
+        onToggleBold={() => editorRef.current?.commands["toggleBold"]?.()}
+        onToggleItalic={() => editorRef.current?.commands["toggleItalic"]?.()}
+      />
 
       <div style={styles.body}>
         <main
@@ -112,10 +155,11 @@ export function App() {
                 isVisible={visiblePages.has(page.pageNumber)}
                 observeRef={observePage(page.pageNumber)}
                 gap={PAGE_GAP}
-                cursorDocPos={cursorDocPos}
+                selection={selection}
                 isFocused={isFocused}
                 cursorVisible={cursorVisible}
-                onPageClick={(x, y) => handlePageClick(page.pageNumber, x, y)}
+                onPageMouseDown={(x, y, shiftKey) => handlePageMouseDown(page.pageNumber, x, y, shiftKey)}
+                onPageMouseMove={(x, y) => handlePageMouseMove(page.pageNumber, x, y)}
               />
             ))}
           </div>

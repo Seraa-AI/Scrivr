@@ -4,6 +4,7 @@ import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import { CursorManager } from "./renderer/CursorManager";
+import { CharacterMap } from "./layout/CharacterMap";
 import {
   insertText,
   deleteBackward,
@@ -12,6 +13,29 @@ import {
 } from "./model/commands";
 
 export type EditorChangeHandler = (state: EditorState) => void;
+
+/**
+ * Snapshot of the current selection — passed to the rendering layer so it
+ * can draw both the cursor and selection highlights without importing
+ * ProseMirror types.
+ */
+export interface SelectionSnapshot {
+  /** The fixed end of the selection (doesn't move when you Shift+arrow) */
+  anchor: number;
+  /** The moving end — where the cursor is drawn */
+  head: number;
+  /** Math.min(anchor, head) — start of the highlighted range */
+  from: number;
+  /** Math.max(anchor, head) — end of the highlighted range */
+  to: number;
+  /** True when anchor === head (cursor only, no highlight) */
+  empty: boolean;
+  /**
+   * Names of marks active at the cursor (or present anywhere in the selection).
+   * Use this to show toolbar button active states without importing ProseMirror.
+   */
+  activeMarks: string[];
+}
 
 export interface EditorOptions {
   /**
@@ -35,6 +59,12 @@ export interface EditorOptions {
    * or clear the cursor.
    */
   onCursorTick?: (isVisible: boolean) => void;
+  /**
+   * The shared CharacterMap used by the renderer.
+   * Required for ↑ ↓ vertical navigation — the editor needs to know glyph
+   * positions to find the line above/below at the same x coordinate.
+   */
+  charMap?: CharacterMap;
 }
 
 /**
@@ -65,6 +95,7 @@ export class Editor {
   private container: HTMLElement | null = null;
   private readonly onChange: EditorChangeHandler;
   private readonly onFocusChange: ((focused: boolean) => void) | undefined;
+  private readonly charMap: CharacterMap | undefined;
 
   /** Owns the cursor blink timer. Public so adapters can read isVisible. */
   readonly cursorManager: CursorManager;
@@ -76,10 +107,11 @@ export class Editor {
    */
   readonly commands: Record<string, (...args: unknown[]) => void>;
 
-  constructor({ extensions = [StarterKit], onChange, onFocusChange, onCursorTick }: EditorOptions) {
+  constructor({ extensions = [StarterKit], onChange, onFocusChange, onCursorTick, charMap }: EditorOptions) {
     this.manager = new ExtensionManager(extensions);
     this.onChange = onChange;
     this.onFocusChange = onFocusChange;
+    this.charMap = charMap;
     this.cursorManager = new CursorManager(() => {
       onCursorTick?.(this.cursorManager.isVisible);
     });
@@ -134,26 +166,119 @@ export class Editor {
   }
 
   /**
-   * Move the cursor (collapsed selection) to a specific ProseMirror doc position.
-   *
-   * Call this after hit-testing a click against the CharacterMap:
-   *   const pos = charMap.posAtCoords(x, y, pageNumber);
-   *   editor.moveCursorTo(pos);
+   * Collapse the cursor to a specific doc position.
+   * Safe to call with any integer — clamps and resolves to nearest valid text pos.
    */
   moveCursorTo(docPos: number): void {
-    // Clamp to document bounds then resolve — position 0 is before the doc
-    // node itself and not valid for a TextSelection. TextSelection.near()
-    // finds the closest valid inline position from any resolved pos.
-    const size = this.state.doc.content.size;
-    const clamped = Math.max(0, Math.min(docPos, size));
-    const $pos = this.state.doc.resolve(clamped);
-    const sel = TextSelection.near($pos);
-    const tr = this.state.tr.setSelection(sel);
-    this.dispatch(tr);
+    this.applyMovement(docPos, false);
     this.focus();
   }
 
+  /**
+   * Set an explicit anchor + head, creating a non-collapsed selection.
+   * Used for Shift+click and click+drag.
+   */
+  setSelection(anchor: number, head: number): void {
+    const size = this.state.doc.content.size;
+    const a = Math.max(0, Math.min(anchor, size));
+    const h = Math.max(0, Math.min(head, size));
+    const $a = this.state.doc.resolve(a);
+    const $h = this.state.doc.resolve(h);
+    this.dispatch(
+      this.state.tr.setSelection(TextSelection.between($a, $h))
+    );
+    this.focus();
+  }
+
+  /** Move left one position. Pass extend=true to grow the selection (Shift+←). */
+  moveLeft(extend = false): void {
+    const head = this.state.selection.head;
+    if (head <= 0) return;
+    const $pos = this.state.doc.resolve(Math.max(0, head - 1));
+    this.applyMovement(TextSelection.near($pos, -1).head, extend);
+  }
+
+  /** Move right one position. Pass extend=true to grow the selection (Shift+→). */
+  moveRight(extend = false): void {
+    const head = this.state.selection.head;
+    const size = this.state.doc.content.size;
+    if (head >= size) return;
+    const $pos = this.state.doc.resolve(Math.min(size, head + 1));
+    this.applyMovement(TextSelection.near($pos, 1).head, extend);
+  }
+
+  /** Move up one line preserving x. Pass extend=true for Shift+↑. */
+  moveUp(extend = false): void {
+    if (!this.charMap) return;
+    const head = this.state.selection.head;
+    const coords = this.charMap.coordsAtPos(head);
+    if (!coords) return;
+    const pos = this.charMap.posAbove(head, coords.x);
+    if (pos !== null) this.applyMovement(pos, extend);
+  }
+
+  /**
+   * Returns the names of marks active at the current cursor/selection.
+   *
+   * - Collapsed cursor: uses stored marks (pending marks set by toggleMark) or
+   *   the marks of the text node immediately before the cursor.
+   * - Range selection: a mark is considered active only if it spans every text
+   *   node in the range (matches toggleMark's "all-or-nothing" toggle logic).
+   */
+  getActiveMarks(): string[] {
+    const { selection, storedMarks } = this.state;
+    const { from, to, empty } = selection;
+
+    if (empty) {
+      const marks = storedMarks ?? selection.$from.marks();
+      return marks.map((m) => m.type.name);
+    }
+
+    // Range: active = present on every text node in [from, to)
+    return Object.keys(this.schema.marks).filter((name) => {
+      const markType = this.schema.marks[name]!;
+      let hasText = false;
+      let allHaveMark = true;
+      this.state.doc.nodesBetween(from, to, (node) => {
+        if (node.isText) {
+          hasText = true;
+          if (!markType.isInSet(node.marks)) allHaveMark = false;
+        }
+      });
+      return hasText && allHaveMark;
+    });
+  }
+
+  /** Move down one line preserving x. Pass extend=true for Shift+↓. */
+  moveDown(extend = false): void {
+    if (!this.charMap) return;
+    const head = this.state.selection.head;
+    const coords = this.charMap.coordsAtPos(head);
+    if (!coords) return;
+    const pos = this.charMap.posBelow(head, coords.x);
+    if (pos !== null) this.applyMovement(pos, extend);
+  }
+
   // ── Private ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Core movement primitive.
+   *
+   * extend=false → collapsed cursor at newHead
+   * extend=true  → selection from current anchor to newHead (Shift+arrow / drag)
+   */
+  private applyMovement(newHead: number, extend: boolean): void {
+    const size = this.state.doc.content.size;
+    const h = Math.max(0, Math.min(newHead, size));
+    const a = extend ? this.state.selection.anchor : h;
+    // TextSelection.between resolves positions safely — handles node boundaries
+    // and position 0 without throwing, unlike TextSelection.create.
+    const $a = this.state.doc.resolve(Math.max(0, Math.min(a, size)));
+    const $h = this.state.doc.resolve(h);
+    this.dispatch(
+      this.state.tr.setSelection(TextSelection.between($a, $h))
+    );
+  }
 
   private dispatch(tr: Transaction | null): void {
     if (!tr) return;
@@ -219,6 +344,7 @@ export class Editor {
     ta.addEventListener("keydown", this.handleKeydown);
     ta.addEventListener("input", this.handleInput);
     ta.addEventListener("compositionend", this.handleCompositionEnd);
+    ta.addEventListener("paste", this.handlePaste);
     ta.addEventListener("focus", this.handleFocus);
     ta.addEventListener("blur", this.handleBlur);
   }
@@ -228,6 +354,7 @@ export class Editor {
     ta.removeEventListener("keydown", this.handleKeydown);
     ta.removeEventListener("input", this.handleInput);
     ta.removeEventListener("compositionend", this.handleCompositionEnd);
+    ta.removeEventListener("paste", this.handlePaste);
     ta.removeEventListener("focus", this.handleFocus);
     ta.removeEventListener("blur", this.handleBlur);
   }
@@ -244,6 +371,42 @@ export class Editor {
 
   private handleKeydown = (e: KeyboardEvent): void => {
     const mod = e.metaKey || e.ctrlKey;
+
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      this.moveLeft(e.shiftKey);
+      return;
+    }
+
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      this.moveRight(e.shiftKey);
+      return;
+    }
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      this.moveUp(e.shiftKey);
+      return;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      this.moveDown(e.shiftKey);
+      return;
+    }
+
+    if (mod && e.key === "b") {
+      e.preventDefault();
+      this.commands["toggleBold"]?.();
+      return;
+    }
+
+    if (mod && e.key === "i") {
+      e.preventDefault();
+      this.commands["toggleItalic"]?.();
+      return;
+    }
 
     if (mod && e.key === "z" && !e.shiftKey) {
       e.preventDefault();
@@ -294,6 +457,13 @@ export class Editor {
     if (!text) return;
     this.dispatch(insertText(this.state, text));
     this.clearTextarea();
+  };
+
+  private handlePaste = (e: ClipboardEvent): void => {
+    e.preventDefault();
+    const text = e.clipboardData?.getData("text/plain");
+    if (!text) return;
+    this.dispatch(insertText(this.state, text));
   };
 
   private clearTextarea(): void {
