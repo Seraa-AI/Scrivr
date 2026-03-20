@@ -34,21 +34,11 @@ const EMPTY_TOOLBAR: ToolbarSlice = {
   blockAttrs: {},
 };
 
-/** Content-aware equality for ToolbarSlice — prevents infinite loops in useSyncExternalStore. */
-function toolbarEqual(a: ToolbarSlice, b: ToolbarSlice): boolean {
-  return (
-    a.blockType === b.blockType &&
-    a.activeMarks.length === b.activeMarks.length &&
-    a.activeMarks.every((m, i) => m === b.activeMarks[i]) &&
-    JSON.stringify(a.activeMarkAttrs) === JSON.stringify(b.activeMarkAttrs) &&
-    JSON.stringify(a.blockAttrs) === JSON.stringify(b.blockAttrs)
-  );
-}
-
 export function App() {
   const editor = useCanvasEditor({ extensions: EXTENSIONS });
 
-  const toolbar = useEditorState({ editor, selector: selectToolbar, equalityFn: toolbarEqual }) ?? EMPTY_TOOLBAR;
+  // deepEqual is the default — handles string[], nested objects correctly.
+  const toolbar = useEditorState({ editor, selector: selectToolbar }) ?? EMPTY_TOOLBAR;
 
   return (
     <div style={styles.shell}>
