@@ -1,4 +1,4 @@
-import { useSyncExternalStore, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Editor } from "@inscribe/core";
 
 /** Context passed to the selector function. */
@@ -19,7 +19,13 @@ export interface UseEditorStateOptions<T> {
   selector: (ctx: EditorStateContext) => T;
   /**
    * Custom equality check. Defaults to Object.is (reference equality).
-   * Use shallowEqual for object selectors to avoid unnecessary re-renders.
+   *
+   * When your selector returns a new object or array on every call
+   * (e.g. getActiveMarks() returns a new array), pass a value-aware
+   * equality function so React skips unnecessary re-renders.
+   *
+   * Use shallowEqual for flat objects whose values are primitives.
+   * Write a custom function for objects that contain arrays.
    *
    * @example
    * equalityFn: shallowEqual
@@ -27,13 +33,13 @@ export interface UseEditorStateOptions<T> {
   equalityFn?: (a: T, b: T) => boolean;
 }
 
-const UNSET = Symbol("unset");
-
 /**
  * useEditorState — subscribe to editor state with fine-grained re-render control.
  *
- * Uses useSyncExternalStore so React only re-renders when the selected slice
- * of state actually changes — not on every keystroke or cursor blink.
+ * Uses useState + useEffect (not useSyncExternalStore) so the equality check
+ * works correctly even when the selector returns new objects on every call
+ * (e.g. getActiveMarks() returns a new array each time). setState is only
+ * called when equalityFn says the value actually changed.
  *
  * Returns null when editor is null (not yet initialized).
  *
@@ -45,7 +51,7 @@ const UNSET = Symbol("unset");
  * })
  *
  * @example
- * // Multiple values — re-renders only when one of these three changes
+ * // Multiple values — re-renders only when something actually changes
  * const state = useEditorState({
  *   editor,
  *   selector: (ctx) => ({
@@ -61,37 +67,55 @@ export function useEditorState<T>(
 ): T | null {
   const { editor, selector, equalityFn = Object.is } = options;
 
-  // Cache the last computed value — returned when the selected slice hasn't changed.
-  const lastValueRef = useRef<T | typeof UNSET>(UNSET);
+  // Keep selector and equalityFn in refs — stable closure, never stale.
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+  const equalityFnRef = useRef(equalityFn);
+  equalityFnRef.current = equalityFn;
 
-  const subscribe = useCallback(
-    (onStoreChange: () => void) => {
-      if (!editor) return () => {};
-      return editor.subscribe(onStoreChange);
-    },
-    [editor]
+  const [value, setValue] = useState<T | null>(() =>
+    editor ? selector({ editor }) : null
   );
 
-  const getSnapshot = useCallback((): T | null => {
-    if (!editor) return null;
-    const next = selector({ editor });
-    if (
-      lastValueRef.current !== UNSET &&
-      equalityFn(lastValueRef.current as T, next)
-    ) {
-      // Same value — return the cached reference so React skips the re-render
-      return lastValueRef.current as T;
-    }
-    lastValueRef.current = next;
-    return next;
-  }, [editor, selector, equalityFn]);
+  // Ref-track the latest value so the subscription handler can compare
+  // without needing `value` in its dependency array (avoids stale closure).
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  useEffect(() => {
+    if (!editor) {
+      setValue(null);
+      return;
+    }
+
+    // Compute immediately so the initial value reflects the current editor state.
+    const initial = selectorRef.current({ editor });
+    setValue(initial);
+    valueRef.current = initial;
+
+    return editor.subscribe(() => {
+      const next = selectorRef.current({ editor });
+      if (
+        valueRef.current !== null &&
+        equalityFnRef.current(valueRef.current, next)
+      ) {
+        return; // Nothing changed — skip re-render.
+      }
+      valueRef.current = next;
+      setValue(next);
+    });
+  }, [editor]);
+
+  return value;
 }
 
 /**
- * Shallow equality helper for object selectors.
- * Pass as equalityFn when your selector returns a plain object.
+ * Shallow equality helper for flat object selectors.
+ * Pass as equalityFn when your selector returns a plain object whose
+ * values are primitives (strings, numbers, booleans).
+ *
+ * Note: does NOT compare array contents — use a custom function when
+ * your selector includes arrays (e.g. activeMarks: string[]).
  */
 export function shallowEqual<T extends Record<string, unknown>>(
   a: T,
