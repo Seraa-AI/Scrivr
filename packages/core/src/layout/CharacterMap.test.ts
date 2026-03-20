@@ -11,8 +11,8 @@ function buildTwoLinePage(map: CharacterMap) {
   for (let i = 0; i < 5; i++) {
     map.registerGlyph({ docPos: 6 + i, x: i * 10, y: 80, width: 10, height: 20, page: 1, lineIndex: 1 });
   }
-  map.registerLine({ page: 1, lineIndex: 0, y: 60, height: 20, startDocPos: 1, endDocPos: 6 });
-  map.registerLine({ page: 1, lineIndex: 1, y: 80, height: 20, startDocPos: 6, endDocPos: 11 });
+  map.registerLine({ page: 1, lineIndex: 0, y: 60, height: 20, x: 0, contentWidth: 400, startDocPos: 1, endDocPos: 6 });
+  map.registerLine({ page: 1, lineIndex: 1, y: 80, height: 20, x: 0, contentWidth: 400, startDocPos: 6, endDocPos: 11 });
 }
 
 /**
@@ -43,6 +43,8 @@ function buildSingleLinePage(map: CharacterMap) {
     lineIndex: 0,
     y: 60,
     height: 20,
+    x: 40,
+    contentWidth: 400,
     startDocPos: 1,
     endDocPos: 5,
   });
@@ -222,10 +224,10 @@ describe("CharacterMap — posAbove / posBelow (vertical navigation)", () => {
       const crossMap = new CharacterMap();
       // Page 1 has only one line (lineIndex 0)
       crossMap.registerGlyph({ docPos: 1, x: 0, y: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
-      crossMap.registerLine({ page: 1, lineIndex: 0, y: 60, height: 20, startDocPos: 1, endDocPos: 2 });
+      crossMap.registerLine({ page: 1, lineIndex: 0, y: 60, height: 20, x: 0, contentWidth: 400, startDocPos: 1, endDocPos: 2 });
       // Page 2 has its own line (lineIndex 0 — page-global within page 2)
       crossMap.registerGlyph({ docPos: 5, x: 0, y: 60, width: 10, height: 20, page: 2, lineIndex: 0 });
-      crossMap.registerLine({ page: 2, lineIndex: 0, y: 60, height: 20, startDocPos: 5, endDocPos: 6 });
+      crossMap.registerLine({ page: 2, lineIndex: 0, y: 60, height: 20, x: 0, contentWidth: 400, startDocPos: 5, endDocPos: 6 });
 
       const pos = crossMap.posBelow(1, 0);
       expect(pos).toBeGreaterThanOrEqual(5);

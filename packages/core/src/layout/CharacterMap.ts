@@ -34,6 +34,10 @@ export interface LineEntry {
   y: number;
   /** Total height of this line */
   height: number;
+  /** Left edge of the content area (page margin x) */
+  x: number;
+  /** Full available width of the content area */
+  contentWidth: number;
   /** ProseMirror position at the very start of this line */
   startDocPos: number;
   /** ProseMirror position just past the last glyph on this line */
@@ -210,6 +214,23 @@ export class CharacterMap {
    */
   glyphsInRange(from: number, to: number): GlyphEntry[] {
     return this.glyphs.filter((g) => g.docPos >= from && g.docPos < to);
+  }
+
+  /**
+   * Returns all lines that overlap the given ProseMirror position range.
+   * Includes empty lines (startDocPos === endDocPos) when the cursor position
+   * falls within [from, to). Used by the renderer to draw full-line selection
+   * highlights, including for empty paragraphs.
+   */
+  linesInRange(from: number, to: number): LineEntry[] {
+    return this.lines.filter((l) => {
+      if (l.startDocPos === l.endDocPos) {
+        // Empty line — include when the cursor position is within the selection
+        return l.startDocPos >= from && l.startDocPos < to;
+      }
+      // Non-empty line — include when any character is within the selection
+      return l.startDocPos < to && l.endDocPos > from;
+    });
   }
 
   /** Returns true if a glyph at this docPos is already registered */

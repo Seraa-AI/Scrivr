@@ -268,10 +268,13 @@ export class ViewManager {
     const selection = this.editor.getSelectionSnapshot();
 
     if (!selection.empty) {
+      const lines = this.editor.charMap
+        .linesInRange(selection.from, selection.to)
+        .filter((l) => l.page === page.pageNumber);
       const glyphs = this.editor.charMap
         .glyphsInRange(selection.from, selection.to)
         .filter((g) => g.page === page.pageNumber);
-      renderSelection(ctx, glyphs);
+      renderSelection(ctx, lines, glyphs, selection.from, selection.to);
     }
 
     if (this.editor.isFocused && this.editor.cursorManager.isVisible) {

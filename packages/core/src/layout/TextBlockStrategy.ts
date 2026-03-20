@@ -129,6 +129,8 @@ export const TextBlockStrategy: BlockStrategy = {
           lineIndex: globalLineIndex,
           y: lineY,
           height: line.lineHeight,
+          x,
+          contentWidth: availableWidth,
           startDocPos: line.spans[0]?.docPos ?? 0,
           endDocPos:
             (line.spans[line.spans.length - 1]?.docPos ?? 0) +

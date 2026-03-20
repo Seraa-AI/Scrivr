@@ -1,4 +1,4 @@
-import type { CoordsResult, GlyphEntry } from "../layout/CharacterMap";
+import type { CoordsResult, GlyphEntry, LineEntry } from "../layout/CharacterMap";
 
 /**
  * Clears the overlay canvas back to fully transparent.
@@ -46,21 +46,46 @@ export function renderCursor(
 }
 
 /**
- * Draws selection highlight rectangles for a set of glyphs.
+ * Draws selection highlight rectangles.
  *
- * Caller provides glyphs already filtered to the current page and
- * within the selection range (from CharacterMap.glyphsInRange).
+ * Two-pass approach:
+ *   1. Glyph pass  — draws a highlight rect for every selected glyph (original
+ *      behaviour, proven correct for non-empty text).
+ *   2. Empty-line pass — for lines that fall within the selection but have no
+ *      glyphs (empty paragraphs), draws a small indicator rect so the empty
+ *      line is visually highlighted, matching Word / Google Docs behaviour.
+ *
+ * @param lines   Lines in range, already filtered to the current page.
+ * @param glyphs  Glyphs in range, already filtered to the current page.
+ * @param from    ProseMirror selection start position (used to find empty lines).
+ * @param to      ProseMirror selection end position.
  */
 export function renderSelection(
   ctx: CanvasRenderingContext2D,
-  glyphs: GlyphEntry[]
+  lines: LineEntry[],
+  glyphs: GlyphEntry[],
+  from: number,
+  to: number,
 ): void {
-  if (glyphs.length === 0) return;
+  if (lines.length === 0 && glyphs.length === 0) return;
 
   ctx.save();
   ctx.fillStyle = "rgba(59, 130, 246, 0.25)"; // blue-500 @ 25% opacity
+
+  // Pass 1 — glyph-based highlights (existing behaviour, unchanged)
   for (const glyph of glyphs) {
     ctx.fillRect(glyph.x, glyph.y, glyph.width, glyph.height);
   }
+
+  // Pass 2 — empty-line highlights
+  // Build a set of lineIndex values that already have at least one glyph drawn
+  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
+  for (const line of lines) {
+    if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
+      // Empty paragraph — draw a narrow rect (line-height wide) at the left margin
+      ctx.fillRect(line.x, line.y, line.height, line.height);
+    }
+  }
+
   ctx.restore();
 }

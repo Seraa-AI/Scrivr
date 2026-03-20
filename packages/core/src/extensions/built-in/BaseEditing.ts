@@ -1,5 +1,6 @@
 import { Extension } from "../Extension";
 import { deleteBackward, deleteForward } from "../../model/commands";
+import { selectAll } from "prosemirror-commands";
 
 /**
  * BaseEditing — the minimum editing bindings every editor needs.
@@ -26,6 +27,7 @@ export const BaseEditing = Extension.create({
         if (tr && dispatch) dispatch(tr);
         return tr !== null;
       },
+      "Mod-a": selectAll,
     };
   },
 

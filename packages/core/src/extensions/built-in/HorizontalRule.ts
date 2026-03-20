@@ -33,6 +33,8 @@ const HorizontalRuleStrategy: BlockStrategy = {
         lineIndex: lineIndexOffset,
         y: block.y,
         height: block.height,
+        x: block.x,
+        contentWidth: block.availableWidth,
         startDocPos: line.spans[0]?.docPos ?? 0,
         endDocPos: (line.spans[0]?.docPos ?? 0) + 1,
       });

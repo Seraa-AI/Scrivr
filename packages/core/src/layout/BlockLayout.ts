@@ -140,6 +140,8 @@ export function layoutBlock(node: Node, options: BlockLayoutOptions): LayoutBloc
         lineIndex,
         y: lineY,
         height: line.lineHeight,
+        x,
+        contentWidth: availableWidth,
         startDocPos: line.spans[0]?.docPos ?? nodePos + 1,
         endDocPos:
           (line.spans[line.spans.length - 1]?.docPos ?? nodePos + 1) +
@@ -313,6 +315,8 @@ export function populateCharMap(
       lineIndex: globalLineIndex,
       y: lineY,
       height: line.lineHeight,
+      x: block.x,
+      contentWidth: block.availableWidth,
       startDocPos: line.spans[0]?.docPos ?? 0,
       endDocPos:
         (line.spans[line.spans.length - 1]?.docPos ?? 0) +

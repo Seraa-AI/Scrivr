@@ -181,6 +181,8 @@ export class LineBreaker {
         lineIndex,
         y,
         height: line.lineHeight,
+        x: 0,
+        contentWidth: 0,
         startDocPos: line.spans[0]?.docPos ?? 0,
         endDocPos: (line.spans[line.spans.length - 1]?.docPos ?? 0) + (line.spans[line.spans.length - 1]?.text.length ?? 0),
       });
