@@ -136,12 +136,14 @@ export const List = Extension.create({
         command: "toggleBulletList",
         label: "•",
         title: "Bullet list (⌘⇧8)",
+        group: "list",
         isActive: (_marks, blockType) => blockType === "bulletList",
       },
       {
         command: "toggleOrderedList",
         label: "1.",
         title: "Ordered list (⌘⇧9)",
+        group: "list",
         isActive: (_marks, blockType) => blockType === "orderedList",
       },
     ];

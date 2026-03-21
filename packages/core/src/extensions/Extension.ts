@@ -73,6 +73,9 @@ export class Extension<Options extends object = object> {
       marks: config.addMarks?.call(p1) ?? {},
       // Phase 2: only when schema is available
       plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
+      ...(schema && config.addInitialDoc
+        ? (() => { const d = config.addInitialDoc.call(p2); return d != null ? { initialDoc: d } : {}; })()
+        : {}),
       keymap:  schema ? (config.addKeymap?.call(p2) ?? {}) : {},
       commands: schema ? (config.addCommands?.call(p2) ?? {}) : {},
       // Phase 3/4: options available, no schema needed

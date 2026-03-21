@@ -7,11 +7,11 @@
  */
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import type * as Y from "yjs";
+import { IEditor } from "./types";
 
 export interface CollabState {
   ydoc: Y.Doc;
   provider: HocuspocusProvider;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const collaborationRegistry = new WeakMap<object, CollabState>();
+export const collaborationRegistry = new WeakMap<IEditor, CollabState>();

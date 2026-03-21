@@ -51,6 +51,7 @@ export const Italic = Extension.create<ItalicOptions>({
       command: "toggleItalic",
       label: "I",
       title: "Italic (⌘I)",
+      group: "format",
       isActive: (marks: string[]) => marks.includes("italic"),
     }];
   },

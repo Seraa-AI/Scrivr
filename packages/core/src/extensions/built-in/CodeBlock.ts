@@ -124,6 +124,7 @@ export const CodeBlock = Extension.create({
         command: "toggleCodeBlock",
         label: "</>",
         title: "Code block (⌥⌘C)",
+        group: "insert",
         isActive: (_marks: string[], blockType: string) => blockType === "codeBlock",
       },
     ];

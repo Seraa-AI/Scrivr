@@ -104,6 +104,7 @@ export const HorizontalRule = Extension.create({
         command: "insertHorizontalRule",
         label: "—",
         title: "Horizontal rule",
+        group: "insert",
         isActive: () => false,
       },
     ];

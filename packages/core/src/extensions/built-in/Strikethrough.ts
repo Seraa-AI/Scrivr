@@ -52,6 +52,7 @@ export const Strikethrough = Extension.create({
       command: "toggleStrikethrough",
       label: "S\u0336",
       title: "Strikethrough (⌘⇧S)",
+      group: "format",
       isActive: (marks: string[]) => marks.includes("strikethrough"),
     }];
   },

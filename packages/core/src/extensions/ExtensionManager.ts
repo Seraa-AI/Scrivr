@@ -9,6 +9,8 @@ import type { MarkDecorator, ResolvedExtension, FontModifier, ToolbarItemSpec, I
 import type { IEditor } from "./types";
 import { BlockRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
+import { defaultPageConfig } from "../layout/PageLayout";
+import type { PageConfig } from "../layout/PageLayout";
 
 /**
  * ExtensionManager — orchestrates all registered extensions.
@@ -26,8 +28,11 @@ import type { FontConfig } from "../layout/FontConfig";
 export class ExtensionManager {
   readonly schema: Schema;
   private resolved: ResolvedExtension[];
+  private readonly extensions: Extension[];
 
   constructor(extensions: Extension[]) {
+    this.extensions = extensions;
+
     // Phase 1: build schema (no schema context yet — addNodes/addMarks only)
     this.schema = this.buildSchema(extensions);
 
@@ -68,6 +73,51 @@ export class ExtensionManager {
       plugins: this.buildPlugins(),
       ...(doc ? { doc } : {}),
     });
+  }
+
+  /**
+   * Returns the first non-null initial doc contributed by any extension.
+   * Used by Editor to seed EditorState.create() with a doc that matches
+   * a plugin's internal mapping (e.g. initProseMirrorDoc for ySyncPlugin).
+   */
+  buildInitialDoc(): ProseMirrorNode | undefined {
+    for (const ext of this.resolved) {
+      if (ext.initialDoc) return ext.initialDoc;
+    }
+    return undefined;
+  }
+
+  /**
+   * Returns the PageConfig from a "pagination" extension if one is present,
+   * otherwise returns undefined (Editor falls back to EditorOptions.pageConfig).
+   *
+   * The Pagination extension's options ARE the PageConfig — no extra hook needed.
+   */
+  /**
+   * Returns the PageConfig from the extension list.
+   *
+   * Resolution order:
+   *   1. A standalone "pagination" extension (Pagination.configure({...}))
+   *   2. StarterKit's `pagination` option (StarterKit.configure({ pagination: {...} }))
+   *   3. undefined → Editor falls back to EditorOptions.pageConfig → defaultPageConfig
+   */
+  buildPageConfig(): PageConfig | undefined {
+    const pagination = this.extensions.find((e) => e.name === "pagination");
+    if (pagination) return pagination.options as PageConfig;
+
+    const starterKit = this.extensions.find((e) => e.name === "starterKit");
+    if (starterKit) {
+      const { pagination: pkOpt } = starterKit.options as { pagination?: false | Partial<PageConfig> };
+      if (pkOpt !== false && pkOpt !== undefined) {
+        return { ...defaultPageConfig, ...pkOpt } as PageConfig;
+      }
+      // pagination not explicitly set → StarterKit default includes Pagination with defaultPageConfig
+      if (pkOpt === undefined) {
+        return defaultPageConfig;
+      }
+    }
+
+    return undefined;
   }
 
   /**

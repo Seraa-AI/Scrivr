@@ -11,11 +11,14 @@ import { Strikethrough } from "./built-in/Strikethrough";
 import { Highlight } from "./built-in/Highlight";
 import { Color } from "./built-in/Color";
 import { FontSize } from "./built-in/FontSize";
+import { FontFamily } from "./built-in/FontFamily";
+import { Link } from "./built-in/Link";
 import { List } from "./built-in/List";
 import { Alignment } from "./built-in/Alignment";
 import { CodeBlock, insertCodeIndent } from "./built-in/CodeBlock";
 import { HorizontalRule } from "./built-in/HorizontalRule";
 import { Typography } from "./built-in/Typography";
+import { Pagination } from "./built-in/Pagination";
 import { chainCommands } from "prosemirror-commands";
 import type { InputRule } from "prosemirror-inputrules";
 import type { Command } from "prosemirror-state";
@@ -23,8 +26,11 @@ import type { NodeSpec, MarkSpec } from "prosemirror-model";
 import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules } from "./types";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { BlockStrategy } from "../layout/BlockRegistry";
+import type { PageConfig } from "../layout/PageLayout";
 
 interface StarterKitOptions {
+  /** Page dimensions and margins. Pass false to exclude the Pagination extension entirely. Defaults to A4 with 1-inch margins. */
+  pagination?: false | Partial<PageConfig>;
   /** Pass false to exclude this extension entirely */
   document?: false;
   paragraph?: false;
@@ -37,6 +43,8 @@ interface StarterKitOptions {
   highlight?: false | { color?: string; multicolor?: boolean };
   color?: false | { colors?: string[] };
   fontSize?: false | { sizes?: number[] };
+  fontFamily?: false | { families?: string[] };
+  link?: false;
   list?: false;
   alignment?: false;
   codeBlock?: false;
@@ -112,6 +120,13 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.fontSize !== false) {
       const ext = typeof opts.fontSize === "object" ? FontSize.configure(opts.fontSize) : FontSize;
       Object.assign(marks, ext.resolve().marks);
+    }
+    if (opts.fontFamily !== false) {
+      const ext = typeof opts.fontFamily === "object" ? FontFamily.configure(opts.fontFamily) : FontFamily;
+      Object.assign(marks, ext.resolve().marks);
+    }
+    if (opts.link !== false) {
+      Object.assign(marks, Link.resolve().marks);
     }
 
     return marks;
@@ -229,6 +244,13 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       const ext = typeof opts.fontSize === "object" ? FontSize.configure(opts.fontSize) : FontSize;
       Object.assign(cmds, ext.resolve(this.schema).commands);
     }
+    if (opts.fontFamily !== false) {
+      const ext = typeof opts.fontFamily === "object" ? FontFamily.configure(opts.fontFamily) : FontFamily;
+      Object.assign(cmds, ext.resolve(this.schema).commands);
+    }
+    if (opts.link !== false) {
+      Object.assign(cmds, Link.resolve(this.schema).commands);
+    }
     if (opts.list !== false) {
       Object.assign(cmds, List.resolve(this.schema).commands);
     }
@@ -266,6 +288,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       const ext = typeof opts.fontSize === "object" ? FontSize.configure(opts.fontSize) : FontSize;
       for (const [k, v] of ext.resolve().fontModifiers) map.set(k, v);
     }
+    if (opts.fontFamily !== false) {
+      const ext = typeof opts.fontFamily === "object" ? FontFamily.configure(opts.fontFamily) : FontFamily;
+      for (const [k, v] of ext.resolve().fontModifiers) map.set(k, v);
+    }
 
     return map;
   },
@@ -285,6 +311,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.color !== false) {
       for (const [k, v] of Color.resolve().markDecorators) result[k] = v;
+    }
+    if (opts.link !== false) {
+      for (const [k, v] of Link.resolve().markDecorators) result[k] = v;
     }
     return result;
   },
@@ -369,6 +398,13 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.fontSize !== false) {
       const ext = typeof opts.fontSize === "object" ? FontSize.configure(opts.fontSize) : FontSize;
       items.push(...ext.resolve().toolbarItems);
+    }
+    if (opts.fontFamily !== false) {
+      const ext = typeof opts.fontFamily === "object" ? FontFamily.configure(opts.fontFamily) : FontFamily;
+      items.push(...ext.resolve().toolbarItems);
+    }
+    if (opts.link !== false) {
+      items.push(...Link.resolve().toolbarItems);
     }
     if (opts.list !== false) {
       items.push(...List.resolve().toolbarItems);
@@ -465,6 +501,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.underline !== false) merge(Underline.resolve().markdownSerializerRules);
     if (opts.strikethrough !== false) merge(Strikethrough.resolve().markdownSerializerRules);
+    if (opts.link !== false) merge(Link.resolve().markdownSerializerRules);
     if (opts.list !== false) merge(List.resolve().markdownSerializerRules);
     if (opts.codeBlock !== false) merge(CodeBlock.resolve().markdownSerializerRules);
     if (opts.horizontalRule !== false) merge(HorizontalRule.resolve().markdownSerializerRules);

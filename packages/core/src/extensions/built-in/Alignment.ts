@@ -67,24 +67,28 @@ export const Alignment = Extension.create({
         command: "setAlignLeft",
         label: "L",
         title: "Align left (⌘⇧L)",
+        group: "align",
         isActive: (_m, _t, ba) => ba["align"] === "left" || ba["align"] === undefined,
       },
       {
         command: "setAlignCenter",
         label: "C",
         title: "Align center (⌘⇧E)",
+        group: "align",
         isActive: (_m, _t, ba) => ba["align"] === "center",
       },
       {
         command: "setAlignRight",
         label: "R",
         title: "Align right (⌘⇧R)",
+        group: "align",
         isActive: (_m, _t, ba) => ba["align"] === "right",
       },
       {
         command: "setAlignJustify",
         label: "J",
         title: "Justify (⌘⇧J)",
+        group: "align",
         isActive: (_m, _t, ba) => ba["align"] === "justify",
       },
     ];

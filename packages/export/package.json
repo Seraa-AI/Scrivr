@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@inscribe/core": "workspace:*",
+    "pdf-lib": "^1.17.1",
     "prosemirror-markdown": "^1.13.4"
   },
   "devDependencies": {

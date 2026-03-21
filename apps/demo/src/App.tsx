@@ -8,6 +8,7 @@ import {
   defaultPageConfig,
 } from "@inscribe/react";
 import type { EditorStateContext } from "@inscribe/react";
+import { PdfExport } from "@inscribe/export";
 import { Toolbar } from "./Toolbar";
 
 // ── Room + user identity from URL params ──────────────────────────────────────
@@ -31,6 +32,7 @@ const EXTENSIONS = [
   StarterKit.configure({ history: false }), // Y.js undo replaces PM history
   Collaboration.configure({ url: wsUrl, name: room }),
   CollaborationCursor.configure({ user: { name: userName, color: userColor } }),
+  PdfExport.configure({ filename: room }),
 ];
 
 interface ToolbarSlice {

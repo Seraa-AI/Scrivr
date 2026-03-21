@@ -97,6 +97,7 @@ export const Color = Extension.create<ColorOptions>({
       label: "\u25cf",
       labelStyle: { color, fontSize: 16, lineHeight: 1 },
       title: `${colorMeta[color] ?? color} text`,
+      group: "color",
       isActive: (_activeMarks, _blockType, _blockAttrs, activeMarkAttrs) =>
         activeMarkAttrs?.["color"]?.["color"] === color,
     }));

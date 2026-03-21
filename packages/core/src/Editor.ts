@@ -233,7 +233,7 @@ export class Editor {
     this.manager = new ExtensionManager(extensions);
     this.onChange = onChange;
     this.onFocusChange = onFocusChange;
-    this.pageConfig = pageConfig ?? defaultPageConfig;
+    this.pageConfig = this.manager.buildPageConfig() ?? pageConfig ?? defaultPageConfig;
     this.measurer = new TextMeasurer({ lineHeightMultiplier: 1.2 });
     this.charMap = new CharacterMap();
     this.fontModifiers = this.manager.buildFontModifiers();
@@ -245,9 +245,11 @@ export class Editor {
       this.notifyListeners();
     });
 
+    const initialDoc = this.manager.buildInitialDoc();
     this.state = EditorState.create({
       schema: this.manager.schema,
       plugins: this.manager.buildPlugins(),
+      ...(initialDoc ? { doc: initialDoc } : {}),
     });
 
     // Initial layout — run synchronously so editor.layout is available immediately

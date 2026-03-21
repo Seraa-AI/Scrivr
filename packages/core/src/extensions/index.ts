@@ -14,14 +14,18 @@ export { Underline } from "./built-in/Underline";
 export { Strikethrough } from "./built-in/Strikethrough";
 export { Color } from "./built-in/Color";
 export { FontSize } from "./built-in/FontSize";
+export { FontFamily } from "./built-in/FontFamily";
+export { Link } from "./built-in/Link";
 export { Alignment } from "./built-in/Alignment";
 export { List } from "./built-in/List";
+export { Pagination } from "./built-in/Pagination";
 export { Collaboration } from "./built-in/Collaboration";
 export { CollaborationCursor } from "./built-in/CollaborationCursor";
 
 export type {
   ExtensionConfig,
   ExtensionContext,
+  IEditor,
   ResolvedExtension,
   MarkDecorator,
   SpanRect,

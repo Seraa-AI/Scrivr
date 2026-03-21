@@ -59,6 +59,7 @@ export const Bold = Extension.create<BoldOptions>({
       command: "toggleBold",
       label: "B",
       title: "Bold (⌘B)",
+      group: "format",
       isActive: (marks: string[]) => marks.includes("bold"),
     }];
   },

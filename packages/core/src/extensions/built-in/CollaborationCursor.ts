@@ -25,7 +25,7 @@ export const CollaborationCursor = Extension.create<CollaborationCursorOptions>(
   },
 
   onEditorReady(editor: IEditor) {
-    const collab = collaborationRegistry.get(editor as object);
+    const collab = collaborationRegistry.get(editor);
     if (!collab) {
       console.warn(
         "[CollaborationCursor] Collaboration extension not found — " +

@@ -17,7 +17,7 @@ import type { NodeSpec, MarkSpec, Schema, Node } from "prosemirror-model";
 import type { Command, Plugin, Transaction, EditorState } from "prosemirror-state";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
-import type { PageConfig } from "../layout/PageLayout";
+import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy } from "../layout/BlockRegistry";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
@@ -57,6 +57,8 @@ export interface IEditor {
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void;
   /** Current ProseMirror state. */
   getState(): EditorState;
+  /** Current document layout (lazily recomputed when dirty). */
+  get layout(): DocumentLayout;
   /** Apply a transaction from an external source (e.g. Y.js remote sync). */
   _applyTransaction(tr: Transaction): void;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
@@ -182,6 +184,12 @@ export interface ToolbarItemSpec {
   /** Inline style applied to the label element — useful for color swatches */
   labelStyle?: Record<string, string | number>;
   /**
+   * Logical group name — the Toolbar renders a divider between adjacent items
+   * that belong to different groups. Extensions in the same visual section
+   * should share a group name (e.g. "format", "heading", "size", "family").
+   */
+  group?: string;
+  /**
    * Returns true when this item should appear active/pressed.
    * The 4th param (activeMarkAttrs) is optional — existing 3-param functions still work.
    */
@@ -293,6 +301,15 @@ export interface ExtensionConfig<Options = object> {
 
   /** Return ProseMirror plugins (input rules, decorations, state fields, etc.) */
   addProseMirrorPlugins?(this: ExtensionContext<Options>): Plugin[];
+
+  /**
+   * Return an initial ProseMirror document to seed EditorState.create().
+   * Called after addProseMirrorPlugins — use this when a plugin (e.g. ySyncPlugin)
+   * needs the EditorState to start with a specific doc instance that matches
+   * its internal mapping (e.g. the doc returned by initProseMirrorDoc).
+   * Return null to use the schema default.
+   */
+  addInitialDoc?(this: ExtensionContext<Options>): Node | null;
 
   /**
    * Keymap bindings. Keys are platform-agnostic shortcuts: "Mod-b", "Shift-Enter".
@@ -451,4 +468,6 @@ export interface ResolvedExtension {
   markdownSerializerRules: MarkdownSerializerRules;
   /** Runtime lifecycle callback — undefined when extension has no onEditorReady. */
   editorReadyCallback?: (editor: IEditor) => (() => void) | void;
+  /** Optional initial ProseMirror document — provided by addInitialDoc(). */
+  initialDoc?: Node;
 }

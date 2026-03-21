@@ -132,6 +132,7 @@ export const Heading = Extension.create<HeadingOptions>({
       command: `setHeading${level}`,
       label: `H${level}`,
       title: `Heading ${level} (⌘⌥${level})`,
+      group: "heading",
       isActive: (_marks: string[], blockType: string, blockAttrs: Record<string, unknown>) =>
         blockType === "heading" && blockAttrs["level"] === level,
     }));
@@ -139,6 +140,7 @@ export const Heading = Extension.create<HeadingOptions>({
       command: "setParagraph",
       label: "¶",
       title: "Paragraph (⌘⌥0)",
+      group: "heading",
       isActive: (_marks: string[], blockType: string) => blockType === "paragraph",
     });
     return items;

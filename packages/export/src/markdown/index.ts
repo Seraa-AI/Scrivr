@@ -13,5 +13,5 @@ import type { Editor } from "@inscribe/core";
  */
 export function exportToMarkdown(editor: Editor): string {
   const serializer = editor.getMarkdownSerializer();
-  return serializer.serialize(editor.state.doc);
+  return serializer.serialize(editor.getState().doc);
 }
