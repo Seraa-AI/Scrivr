@@ -17,13 +17,14 @@ import { List } from "./built-in/List";
 import { Alignment } from "./built-in/Alignment";
 import { CodeBlock, insertCodeIndent } from "./built-in/CodeBlock";
 import { HorizontalRule } from "./built-in/HorizontalRule";
+import { Image } from "./built-in/Image";
 import { Typography } from "./built-in/Typography";
 import { Pagination } from "./built-in/Pagination";
 import { chainCommands } from "prosemirror-commands";
 import type { InputRule } from "prosemirror-inputrules";
 import type { Command } from "prosemirror-state";
 import type { NodeSpec, MarkSpec } from "prosemirror-model";
-import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules } from "./types";
+import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules, IEditor } from "./types";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { BlockStrategy } from "../layout/BlockRegistry";
 import type { PageConfig } from "../layout/PageLayout";
@@ -49,6 +50,7 @@ interface StarterKitOptions {
   alignment?: false;
   codeBlock?: false;
   horizontalRule?: false;
+  image?: false;
   typography?: false;
 }
 
@@ -88,6 +90,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.horizontalRule !== false) {
       Object.assign(nodes, HorizontalRule.resolve().nodes);
+    }
+    if (opts.image !== false) {
+      Object.assign(nodes, Image.resolve().nodes);
     }
 
     return nodes;
@@ -263,6 +268,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.horizontalRule !== false) {
       Object.assign(cmds, HorizontalRule.resolve(this.schema).commands);
     }
+    if (opts.image !== false) {
+      Object.assign(cmds, Image.resolve(this.schema).commands);
+    }
 
     return cmds;
   },
@@ -337,6 +345,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.horizontalRule !== false) {
       Object.assign(handlers, HorizontalRule.resolve().layoutHandlers);
     }
+    if (opts.image !== false) {
+      Object.assign(handlers, Image.resolve().layoutHandlers);
+    }
     return handlers;
   },
 
@@ -358,6 +369,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.horizontalRule !== false) {
       Object.assign(styles, HorizontalRule.resolve().blockStyles);
+    }
+    if (opts.image !== false) {
+      Object.assign(styles, Image.resolve().blockStyles);
     }
     return styles;
   },
@@ -414,6 +428,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.horizontalRule !== false) {
       items.push(...HorizontalRule.resolve().toolbarItems);
+    }
+    if (opts.image !== false) {
+      items.push(...Image.resolve().toolbarItems);
     }
 
     return items;
@@ -476,6 +493,20 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     return tokens;
   },
 
+  onEditorReady(editor: IEditor) {
+    const cleanups: Array<() => void> = [];
+    const opts = this.options;
+
+    // Aggregate onEditorReady from sub-extensions that need runtime setup.
+    if (opts.image !== false) {
+      const resolved = Image.resolve();
+      const cleanup = resolved.editorReadyCallback?.(editor);
+      if (cleanup) cleanups.push(cleanup);
+    }
+
+    return cleanups.length > 0 ? () => cleanups.forEach((c) => c()) : undefined;
+  },
+
   addMarkdownSerializerRules(): MarkdownSerializerRules {
     const nodes: Required<MarkdownSerializerRules>["nodes"] = {};
     const marks: Required<MarkdownSerializerRules>["marks"] = {};
@@ -505,6 +536,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.list !== false) merge(List.resolve().markdownSerializerRules);
     if (opts.codeBlock !== false) merge(CodeBlock.resolve().markdownSerializerRules);
     if (opts.horizontalRule !== false) merge(HorizontalRule.resolve().markdownSerializerRules);
+    if (opts.image !== false) merge(Image.resolve().markdownSerializerRules);
 
     return { nodes, marks };
   },

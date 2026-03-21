@@ -72,7 +72,56 @@ export interface BlockLayoutOptions {
  *   - Handle margin collapsing
  *   - Render anything
  */
+const IMAGE_DEFAULT_HEIGHT = 200;
+const IMAGE_SPACE = 8;
+
+/**
+ * Layout for leaf block nodes that have no inline content (images, embeds).
+ * Height comes from the node's `height` attr; a single line is registered in
+ * the CharacterMap so click-to-place-cursor works near the block.
+ */
+export function layoutLeafBlock(node: Node, options: BlockLayoutOptions): LayoutBlock {
+  const { nodePos, x, y, availableWidth, page, map, lineIndexOffset = 0 } = options;
+
+  const attrH = node.attrs["height"];
+  const height = (typeof attrH === "number" && attrH > 0) ? attrH : IMAGE_DEFAULT_HEIGHT;
+  const cursorDocPos = nodePos + 1; // inside the 2-token leaf block
+
+  if (map) {
+    const li = lineIndexOffset;
+    if (!map.hasLine(page, li)) {
+      map.registerLine({
+        page, lineIndex: li,
+        y, height, x,
+        contentWidth: availableWidth,
+        startDocPos: cursorDocPos,
+        endDocPos:   cursorDocPos + 1,
+      });
+    }
+    if (!map.hasGlyph(cursorDocPos)) {
+      map.registerGlyph({ docPos: cursorDocPos, x, y, width: availableWidth, height, page, lineIndex: li });
+    }
+  }
+
+  return {
+    node, x, y,
+    width:     availableWidth,
+    height,
+    lines:     [],
+    spaceBefore: IMAGE_SPACE,
+    spaceAfter:  IMAGE_SPACE,
+    blockType: node.type.name,
+    align:     "left" as const,
+    availableWidth,
+  };
+}
+
 export function layoutBlock(node: Node, options: BlockLayoutOptions): LayoutBlock {
+  // Leaf block nodes (no inline content): use fixed-height path.
+  if (node.childCount === 0 && !node.isTextblock) {
+    return layoutLeafBlock(node, options);
+  }
+
   const {
     nodePos,
     x,

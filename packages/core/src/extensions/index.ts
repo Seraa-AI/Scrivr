@@ -21,6 +21,7 @@ export { List } from "./built-in/List";
 export { Pagination } from "./built-in/Pagination";
 export { Collaboration } from "./built-in/Collaboration";
 export { CollaborationCursor } from "./built-in/CollaborationCursor";
+export { Image } from "./built-in/Image";
 
 export type {
   ExtensionConfig,
