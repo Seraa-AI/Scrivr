@@ -82,9 +82,22 @@ export const CodeBlock = Extension.create({
         group: "block",
         code: true,
         marks: "",
-        attrs: {},
-        parseDOM: [{ tag: "pre", preserveWhitespace: "full" as const }],
-        toDOM() { return ["pre", ["code", 0]]; },
+        attrs: {
+          nodeId:      { default: null },
+          dataTracked: { default: [] },
+        },
+        parseDOM: [{
+          tag: "pre",
+          preserveWhitespace: "full" as const,
+          getAttrs(dom) {
+            return { nodeId: (dom as HTMLElement).getAttribute("data-node-id") ?? null };
+          },
+        }],
+        toDOM(node) {
+          const attrs: Record<string, string> = {};
+          if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+          return ["pre", attrs, ["code", 0]];
+        },
       },
     };
   },

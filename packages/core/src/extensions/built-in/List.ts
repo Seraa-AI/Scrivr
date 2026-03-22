@@ -84,8 +84,21 @@ export const List = Extension.create({
       listItem: {
         content: "paragraph block*",
         defining: true,
-        parseDOM: [{ tag: "li" }],
-        toDOM: () => ["li", 0],
+        attrs: {
+          nodeId:      { default: null },
+          dataTracked: { default: [] },
+        },
+        parseDOM: [{
+          tag: "li",
+          getAttrs(dom) {
+            return { nodeId: (dom as HTMLElement).getAttribute("data-node-id") ?? null };
+          },
+        }],
+        toDOM: (node) => {
+          const attrs: Record<string, string> = {};
+          if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+          return ["li", attrs, 0];
+        },
       },
     };
   },

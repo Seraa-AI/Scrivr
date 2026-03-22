@@ -23,6 +23,13 @@ export { Collaboration } from "./built-in/Collaboration";
 export { CollaborationCursor } from "./built-in/CollaborationCursor";
 export { Image } from "./built-in/Image";
 
+// AI Toolkit — Phase 1-3
+export { UniqueId, findNodeById } from "./built-in/UniqueId";
+export { GhostText, ghostTextPluginKey } from "./built-in/GhostText";
+export { AiCaret, aiCaretPluginKey } from "./built-in/AiCaret";
+export type { GhostTextState } from "./built-in/GhostText";
+export type { AiCaretState } from "./built-in/AiCaret";
+
 export type {
   ExtensionConfig,
   ExtensionContext,

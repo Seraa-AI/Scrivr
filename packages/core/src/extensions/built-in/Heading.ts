@@ -22,15 +22,24 @@ export const Heading = Extension.create<HeadingOptions>({
         group: "block",
         content: "inline*",
         attrs: {
-          level: { default: 1 },
-          align: { default: "left" },
+          level:       { default: 1 },
+          align:       { default: "left" },
+          nodeId:      { default: null },
+          dataTracked: { default: [] },
         },
         defining: true,
         parseDOM: this.options.levels.map((level) => ({
           tag: `h${level}`,
-          attrs: { level },
+          getAttrs(dom) {
+            const el = dom as HTMLElement;
+            return { level, nodeId: el.getAttribute("data-node-id") ?? null };
+          },
         })),
-        toDOM: (node) => [`h${node.attrs.level}`, 0],
+        toDOM: (node) => {
+          const attrs: Record<string, string> = {};
+          if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+          return [`h${node.attrs.level}`, attrs, 0];
+        },
       },
     };
   },

@@ -1,5 +1,203 @@
 import type { CoordsResult, GlyphEntry, LineEntry } from "../layout/CharacterMap";
 
+// ── AI / Track-changes overlay helpers ───────────────────────────────────────
+
+/**
+ * Draws ghost text (italic, muted) after a block's last line.
+ * Used during AI streaming — the document is unchanged, this is cosmetic only.
+ *
+ * @param x         Left edge of the text (usually the block's left margin)
+ * @param y         Top of the virtual line to draw on (usually lastLine.y + lastLine.height)
+ * @param maxWidth  Available width before clipping
+ * @param lineHeight Approximate line height for measuring
+ */
+export function renderGhostText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  options?: { fontSize?: number; color?: string; fontFamily?: string },
+): void {
+  if (!text) return;
+
+  const fontSize   = options?.fontSize   ?? 14;
+  const color      = options?.color      ?? "rgba(100, 116, 139, 0.65)"; // slate-500, muted
+  const fontFamily = options?.fontFamily ?? "Georgia, serif";
+
+  ctx.save();
+  ctx.font          = `italic ${fontSize}px ${fontFamily}`;
+  ctx.fillStyle     = color;
+  ctx.textBaseline  = "top";
+  ctx.textAlign     = "left";
+  // Clip to available width so ghost text never bleeds into the margin
+  ctx.fillText(text, x, y + (lineHeight - fontSize) / 2, maxWidth);
+  ctx.restore();
+}
+
+/**
+ * Draws a pulsing AI caret line + "AI" label bubble above it.
+ * Call on every overlay repaint; pass `visible` to implement blink.
+ */
+export function renderAiCaret(
+  ctx: CanvasRenderingContext2D,
+  coords: CoordsResult,
+  options?: { color?: string; label?: string; visible?: boolean },
+): void {
+  const color   = options?.color   ?? "#a5b4fc"; // indigo-300
+  const label   = options?.label   ?? "AI";
+  const visible = options?.visible ?? true;
+
+  const x = Math.round(coords.x) + 0.5;
+
+  ctx.save();
+
+  if (visible) {
+    // Caret line (slightly thicker than user cursor to distinguish)
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 2;
+    ctx.lineCap     = "round";
+    ctx.beginPath();
+    ctx.moveTo(x, coords.y + 1);
+    ctx.lineTo(x, coords.y + coords.height - 1);
+    ctx.stroke();
+  }
+
+  // Label bubble (always visible while AI caret is active)
+  ctx.font = "bold 10px system-ui, -apple-system, sans-serif";
+  const textW  = ctx.measureText(label).width;
+  const pad    = 4;
+  const labelW = textW + pad * 2;
+  const labelH = 15;
+  const labelX = coords.x;
+  const labelY = Math.max(0, coords.y - labelH - 2);
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(labelX, labelY, labelW, labelH, 3);
+  } else {
+    ctx.rect(labelX, labelY, labelW, labelH);
+  }
+  ctx.fill();
+
+  ctx.fillStyle    = "#1e1b4b"; // indigo-950 for contrast
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, labelX + pad, labelY + labelH / 2);
+
+  ctx.restore();
+}
+
+/**
+ * Draws colored highlight bands over glyphs for a tracked insertion.
+ * Same two-pass structure as renderSelection but uses the author color.
+ */
+export function renderTrackedInsert(
+  ctx: CanvasRenderingContext2D,
+  glyphs: GlyphEntry[],
+  lines: LineEntry[],
+  color: string,
+): void {
+  if (glyphs.length === 0 && lines.length === 0) return;
+
+  ctx.save();
+  // Underline + faint fill — distinguishable from selection blue
+  ctx.fillStyle = color.startsWith("#")
+    ? hexToRgba(color, 0.15)
+    : color;
+
+  // Pass 1 — glyph highlights
+  for (const g of glyphs) {
+    ctx.fillRect(g.x, g.y, g.width, g.height);
+  }
+
+  // Pass 2 — empty lines
+  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
+  for (const line of lines) {
+    if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
+      ctx.fillRect(line.x, line.y, line.height, line.height);
+    }
+  }
+
+  // Underline
+  ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.8) : color;
+  ctx.lineWidth   = 1.5;
+  for (const g of glyphs) {
+    ctx.beginPath();
+    ctx.moveTo(g.x, g.y + g.height - 1);
+    ctx.lineTo(g.x + g.width, g.y + g.height - 1);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Draws colored bands with strikethrough over glyphs for a tracked deletion.
+ */
+export function renderTrackedDelete(
+  ctx: CanvasRenderingContext2D,
+  glyphs: GlyphEntry[],
+  lines: LineEntry[],
+  color: string,
+): void {
+  if (glyphs.length === 0 && lines.length === 0) return;
+
+  ctx.save();
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.12) : color;
+
+  // Pass 1 — glyph highlights
+  for (const g of glyphs) {
+    ctx.fillRect(g.x, g.y, g.width, g.height);
+  }
+
+  // Pass 2 — empty lines
+  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
+  for (const line of lines) {
+    if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
+      ctx.fillRect(line.x, line.y, line.height, line.height);
+    }
+  }
+
+  // Strikethrough — group by line to draw one line per row
+  const byLine = new Map<number, { minX: number; maxX: number; midY: number }>();
+  for (const g of glyphs) {
+    const existing = byLine.get(g.lineIndex);
+    if (existing) {
+      existing.minX = Math.min(existing.minX, g.x);
+      existing.maxX = Math.max(existing.maxX, g.x + g.width);
+    } else {
+      byLine.set(g.lineIndex, {
+        minX: g.x,
+        maxX: g.x + g.width,
+        midY: g.y + g.height / 2,
+      });
+    }
+  }
+
+  ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
+  ctx.lineWidth   = 1.5;
+  for (const { minX, maxX, midY } of byLine.values()) {
+    ctx.beginPath();
+    ctx.moveTo(minX, midY);
+    ctx.lineTo(maxX, midY);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
+
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 /**
  * Clears the overlay canvas back to fully transparent.
  *

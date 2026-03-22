@@ -17,10 +17,25 @@ export const Paragraph = Extension.create({
         group: "block",
         content: "inline*",
         attrs: {
-          align: { default: "left" },
+          align:       { default: "left" },
+          nodeId:      { default: null },
+          dataTracked: { default: [] },
         },
-        parseDOM: [{ tag: "p" }],
-        toDOM: (node) => ["p", { style: `text-align:${node.attrs.align}` }, 0],
+        parseDOM: [{
+          tag: "p",
+          getAttrs(dom) {
+            const el = dom as HTMLElement;
+            return {
+              align:  el.style.textAlign || "left",
+              nodeId: el.getAttribute("data-node-id") ?? null,
+            };
+          },
+        }],
+        toDOM: (node) => {
+          const attrs: Record<string, string> = { style: `text-align:${node.attrs.align}` };
+          if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+          return ["p", attrs, 0];
+        },
       },
     };
   },

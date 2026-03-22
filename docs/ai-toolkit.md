@@ -1,0 +1,782 @@
+# AI Toolkit — Implementation Plan
+
+> Inscribe's native AI integration: suggestion mode for users + AI-generated suggestions.
+> Inspired by the Seraa/Tiptap AI Toolkit plan but adapted for canvas-based rendering.
+
+## Table of Contents
+
+1. [Core Principles](#core-principles)
+2. [Unified Architecture](#unified-architecture)
+3. [Phase Map](#phase-map)
+4. [Phase 1 — UniqueId](#phase-1--uniqueid)
+5. [Phase 2 — OverlayRenderer Primitives](#phase-2--overlayrenderer-primitives)
+6. [Phase 3 — GhostText + AiCaret](#phase-3--ghosttext--aicaret)
+7. [Phase 4 — TrackChanges Engine](#phase-4--trackchanges-engine)
+8. [Phase 5 — Read API](#phase-5--read-api)
+9. [Phase 6 — Suggestion Mode](#phase-6--suggestion-mode)
+10. [Phase 7 — AiToolkit Aggregator](#phase-7--aitoolkit-aggregator)
+11. [Phase 8 — React Layer](#phase-8--react-layer)
+12. [File Map](#file-map)
+13. [Key TypeScript Interfaces](#key-typescript-interfaces)
+14. [Data Flow](#data-flow)
+
+---
+
+## Core Principles
+
+1. **Atomic commits** — AI streaming is cosmetic only (canvas overlay decorations). The document is unchanged until a suggestion is accepted.
+2. **Structural anchors (Node IDs)** — every block node gets a stable `nodeId` attr, eliminating position drift when content is inserted/deleted.
+3. **One engine, two authors** — user suggestions (Suggestion Mode) and AI suggestions flow through the same TrackChanges engine. They are tracked changes with different `authorId` values.
+4. **Canvas-native rendering** — no DOM decorations. All overlays (ghost text, AI caret, tracked change highlights) are drawn on the canvas overlay via `addOverlayRenderHandler`.
+5. **Grouped operations** — each AI action produces one logical tracked change, not micro-transactions.
+
+---
+
+## Unified Architecture
+
+```
+                    ONE TRACK-CHANGES ENGINE
+                            │
+          ┌─────────────────┼─────────────────┐
+          │                 │                 │
+   User in Suggesting   AI generates     Collaborator
+   mode types text      content          edits (future)
+          │                 │                 │
+          └────────────────►│◄────────────────┘
+                            │
+              appendTransaction intercepts
+              wraps with { authorId, operation, status: "pending" }
+                            │
+              ChangeSet.findChanges() collects all pending
+                            │
+              Canvas overlay draws colored bands
+              (color = author's collaboration color)
+                            │
+              ChangeReviewPanel shows grouped list
+              with Accept / Reject per change
+```
+
+The user experience matches Google Docs / Word:
+- Toggle "Suggesting" → user edits become colored suggestions
+- AI generates → appears as "AI Assistant" suggestions (indigo, distinct color)
+- Review panel lets you accept all AI changes at once, or go one by one
+- Collaborators see each other's suggestions in their respective cursor colors
+
+---
+
+## Phase Map
+
+```
+Phase 1: UniqueId + dataTracked attr on all block nodes    (foundation, no UI)
+Phase 2: OverlayRenderer draw primitives                   (pure functions, no state)
+Phase 3: GhostText + AiCaret                               (cosmetic streaming overlays)
+Phase 4: TrackChanges Engine                               (port DiffExtension core)
+  4a: data model + ChangeSet
+  4b: appendTransaction interceptor
+  4c: accept/reject commands
+  4d: canvas overlay rendering for tracked changes
+Phase 5: Read API                                          (getTextRange, getContext, etc.)
+Phase 6: Suggestion Mode                                   (user-facing toggle + toolbar)
+Phase 7: AiToolkit aggregator + generateSuggestion flow    (bundles everything)
+Phase 8: React layer                                       (hooks + ChangeReviewPanel + ModeToggle)
+```
+
+**Dependencies:**
+- Phase 1 must precede everything (schema changes needed by all phases)
+- Phase 2 must precede Phase 3 and Phase 4d (draw functions needed by overlay handlers)
+- Phase 4 must precede Phase 6 and Phase 7 (engine needed by both)
+- Phase 5 is independent — can be built in parallel with 3 and 4
+- Phase 7 must be last (aggregates 1–6)
+- Phase 8 depends on Phase 7
+
+---
+
+## Phase 1 — UniqueId
+
+**File:** `packages/core/src/extensions/built-in/UniqueId.ts`
+
+Every block node gets two new attrs: `nodeId` (stable anchor) and `dataTracked` (tracked changes array). These are added to the schema of Paragraph, Heading, ListItem, CodeBlock, and any other block nodes.
+
+```typescript
+// Every block node spec gets:
+attrs: {
+  nodeId:      { default: null },   // "node-{nanoid8}", set by UniqueId plugin
+  dataTracked: { default: [] },     // DataTrackedAttrs[], set by TrackChanges plugin
+}
+```
+
+The UniqueId extension uses `appendTransaction` to stamp newly created nodes that have `nodeId: null`:
+
+```typescript
+export const UniqueId = Extension.create({
+  name: "uniqueId",
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      appendTransaction(transactions, _oldState, newState) {
+        if (!transactions.some(tr => tr.docChanged)) return null;
+        const tr = newState.tr;
+        let modified = false;
+        newState.doc.descendants((node, pos) => {
+          if (node.isBlock && node.attrs["nodeId"] === null &&
+              "nodeId" in (node.type.spec.attrs ?? {})) {
+            tr.setNodeMarkup(pos, undefined, {
+              ...node.attrs,
+              nodeId: `node-${nanoid(8)}`,
+            });
+            modified = true;
+          }
+        });
+        return modified ? tr : null;
+      }
+    })];
+  }
+});
+
+export function findNodeById(
+  doc: Node,
+  nodeId: string
+): { node: Node; pos: number } | null
+```
+
+---
+
+## Phase 2 — OverlayRenderer Primitives
+
+**File:** `packages/core/src/renderer/OverlayRenderer.ts` (additions only)
+
+Add four pure draw functions. These have no state — callers (overlay handlers in extensions) pass in everything needed.
+
+```typescript
+// Draw italic ghost text after a block's last line (cosmetic streaming preview)
+export function renderGhostText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  afterCoords: CoordsResult,
+  options?: { fontSize?: number; color?: string; fontFamily?: string }
+): void
+
+// Draw a pulsing AI caret line + "AI" label bubble
+export function renderAiCaret(
+  ctx: CanvasRenderingContext2D,
+  coords: CoordsResult,
+  options?: { color?: string }
+): void
+
+// Draw a colored highlight band over a range of glyphs (tracked insert)
+export function renderTrackedInsert(
+  ctx: CanvasRenderingContext2D,
+  glyphs: GlyphEntry[],
+  lines: LineEntry[],
+  color: string,    // author color, semi-transparent fill
+): void
+
+// Draw a colored band with strikethrough over a range of glyphs (tracked delete)
+export function renderTrackedDelete(
+  ctx: CanvasRenderingContext2D,
+  glyphs: GlyphEntry[],
+  lines: LineEntry[],
+  color: string,
+): void
+```
+
+`renderTrackedInsert` / `renderTrackedDelete` are structurally identical to `renderSelection` but use different colors and stroke styles. They reuse the same two-pass (glyphs + empty lines) approach.
+
+**No changes to ViewManager.ts** — the existing `runOverlayHandlers` call already handles everything.
+
+---
+
+## Phase 3 — GhostText + AiCaret
+
+Both extensions follow the exact same pattern as `CollaborationCursor`: register an overlay handler in `onEditorReady`, read ProseMirror plugin state, look up coords via `charMap`, call Phase 2 draw functions.
+
+### GhostText
+
+**File:** `packages/core/src/extensions/built-in/GhostText.ts`
+
+```typescript
+export interface GhostTextPluginState {
+  nodeId: string | null;
+  content: string;
+}
+
+export const ghostTextPluginKey = new PluginKey<GhostTextPluginState>("ghostText");
+
+export const GhostText = Extension.create({
+  name: "ghostText",
+  // Plugin: stores { nodeId, content } via tr.setMeta
+  // Commands: setGhostText(nodeId, content), clearGhostText()
+  // onEditorReady: registers overlay handler that calls renderGhostText()
+});
+```
+
+### AiCaret
+
+**File:** `packages/core/src/extensions/built-in/AiCaret.ts`
+
+```typescript
+export interface AiCaretPluginState {
+  position: number | null;  // mapped through doc changes via tr.mapping
+}
+
+export const aiCaretPluginKey = new PluginKey<AiCaretPluginState>("aiCaret");
+
+export const AiCaret = Extension.create({
+  name: "aiCaret",
+  // Plugin: stores { position }, maps position on docChanged
+  // Commands: setAiCaret(position), clearAiCaret()
+  // onEditorReady: registers overlay handler that calls renderAiCaret()
+});
+```
+
+**Streaming debounce:** `streamGhostText` batches chunk dispatches to a 16ms window to avoid per-token repaints during fast LLM streams.
+
+---
+
+## Phase 4 — TrackChanges Engine
+
+Port of the DiffExtension's pure ProseMirror core. The Tiptap shell (`@tiptap/core` imports) is replaced with Inscribe's `Extension.create`. The DOM decoration/widget code is replaced with canvas overlay rendering.
+
+### 4a — Data Model + ChangeSet
+
+**Files:**
+- `packages/core/src/extensions/built-in/track-changes/types.ts`
+- `packages/core/src/extensions/built-in/track-changes/ChangeSet.ts`
+- `packages/core/src/extensions/built-in/track-changes/helpers.ts`
+
+```typescript
+export interface DataTrackedAttrs {
+  id: string;
+  authorId: string;        // "user:john" | "ai:drafting-agent"
+  operation: CHANGE_OPERATION;
+  status: CHANGE_STATUS;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export enum CHANGE_OPERATION {
+  insert    = "insert",
+  delete    = "delete",
+  set_attrs = "set_attrs",
+}
+
+export enum CHANGE_STATUS {
+  pending  = "pending",
+  accepted = "accepted",
+  rejected = "rejected",
+}
+
+export interface TrackedChange {
+  id: string;
+  dataTracked: DataTrackedAttrs;
+  node?: Node;          // for block-level changes
+  mark?: Mark;          // for inline changes
+  from: number;
+  to: number;
+}
+
+// ChangeSet: collected view of all tracked changes in the doc
+export class ChangeSet {
+  static fromDoc(doc: Node): ChangeSet
+  get changes(): TrackedChange[]
+  get pending(): TrackedChange[]
+  get byAuthor(): Map<string, TrackedChange[]>
+  get aiChanges(): TrackedChange[]   // authorId.startsWith("ai:")
+}
+```
+
+### 4b — Transaction Interceptor
+
+**Files:**
+- `packages/core/src/extensions/built-in/track-changes/trackChangesPlugin.ts`
+- `packages/core/src/extensions/built-in/track-changes/trackTransaction.ts`
+
+The plugin's `appendTransaction` hook intercepts every transaction. Skip conditions:
+- `trackChangesPlugin` state has `enabled: false` AND the transaction has no `track-author` meta
+- Transaction is a collaboration sync (`y-sync$`, `isRemote`)
+- Transaction is history undo/redo
+- Transaction has explicit `skipTrack: true` meta
+
+The `track-author` meta allows AI to always produce tracked changes regardless of mode:
+```typescript
+// AI bypass: always tracked even when mode is off
+tr.setMeta("track-author", "ai:drafting-agent")
+
+// User bypass: skip tracking even when mode is on
+tr.setMeta("skipTrack", true)
+```
+
+### 4c — Accept/Reject Commands
+
+**File:** `packages/core/src/extensions/built-in/track-changes/applyChanges.ts`
+
+```typescript
+// Accept/reject mutation table:
+// Accept insert  → remove tracking mark/attr, keep content
+// Reject insert  → delete the inserted content
+// Accept delete  → confirm deletion (remove content)
+// Reject delete  → restore content, remove tracking mark/attr
+// Accept set_attrs → keep new attrs, remove tracking
+// Reject set_attrs → restore old attrs, remove tracking
+```
+
+Commands on the extension:
+```typescript
+acceptChange(id: string): void
+rejectChange(id: string): void
+acceptAllChanges(): void
+rejectAllChanges(): void
+acceptChangesByAuthor(authorId: string): void   // e.g. accept all AI changes
+rejectChangesByAuthor(authorId: string): void
+```
+
+Each accept/reject is a single atomic transaction (one undo step).
+
+### 4d — Canvas Overlay for Tracked Changes
+
+The TrackChanges extension registers an overlay handler in `onEditorReady`. The handler reads the `ChangeSet` from plugin state on every repaint:
+
+```typescript
+// Inline tracked_insert mark → renderTrackedInsert (colored underline + tint)
+// Inline tracked_delete mark → renderTrackedDelete (red strikethrough)
+// Block dataTracked insert   → colored left border on block y-range
+// Block dataTracked delete   → desaturated + hatched pattern on block y-range
+```
+
+Author colors:
+- Human authors: use their collaboration cursor color (from Collaboration awareness)
+- AI agent: fixed indigo `#a5b4fc`
+- Unknown/default: slate `#94a3b8`
+
+---
+
+## Phase 5 — Read API
+
+**File:** `packages/core/src/Editor.ts` (additions)
+**File:** `packages/core/src/extensions/types.ts` (IEditor interface additions)
+
+```typescript
+// Plain text for a doc range
+getTextRange(from: number, to: number): string
+
+// Markdown for a doc range (uses existing markdown serializer)
+getMarkdownRange(from: number, to: number): string
+
+// Cursor-relative context for AI prompts
+getContext(options?: {
+  beforeChars?: number;       // default 2000
+  afterChars?:  number;       // default 500
+  includeSelection?: boolean; // default true
+}): {
+  before:    string;
+  after:     string;
+  selection: string;
+  cursorPos: number;
+  totalLength: number;
+}
+
+// Split the document into chunks (for large docs exceeding AI context windows)
+getTextChunks(chunkSize: number): string[]
+
+// Describe node/mark types for AI system prompts
+getSchemaDescription(): {
+  nodes: Array<{ name: string; isBlock: boolean; attrs: string[] }>;
+  marks: Array<{ name: string; attrs: string[] }>;
+}
+```
+
+---
+
+## Phase 6 — Suggestion Mode
+
+User-facing "Suggesting" toggle — same as Google Docs' suggestion mode. When enabled, the user's own edits go through the TrackChanges engine and appear as pending suggestions.
+
+**State** — stored in `trackChangesPlugin`:
+```typescript
+interface TrackChangesPluginState {
+  enabled:  boolean;       // is suggestion mode on?
+  authorId: string | null; // resolved from Collaboration awareness
+  changeSet: ChangeSet;    // rebuilt on every docChanged transaction
+}
+```
+
+**Commands:**
+```typescript
+enableSuggestionMode(): void
+disableSuggestionMode(): void
+toggleSuggestionMode(): void
+```
+
+**Toolbar integration:**
+```typescript
+addToolbarItems() {
+  return [{
+    command:  "toggleSuggestionMode",
+    label:    "💬",
+    title:    "Toggle suggestion mode",
+    group:    "mode",
+    isActive: (state) => trackChangesPluginKey.getState(state)?.enabled ?? false,
+  }];
+}
+```
+
+Keyboard shortcut: Cmd+Shift+S
+
+**When disabled (Editing mode):**
+- Transactions pass through unmodified (current default behavior)
+- Existing pending changes remain visible and reviewable
+- AI suggestions still work — they use `tr.setMeta("track-author", ...)` which bypasses the mode flag
+
+---
+
+## Phase 7 — AiToolkit Aggregator
+
+**Files:**
+- `packages/core/src/extensions/built-in/AiToolkit.ts` — aggregator extension
+- `packages/core/src/extensions/aiToolkitRegistry.ts` — WeakMap<IEditor, AiToolkitAPI>
+
+`AiToolkit.ts` bundles all sub-extensions (UniqueId, GhostText, AiCaret, TrackChanges, SuggestionMode) following the StarterKit aggregator pattern.
+
+### AiToolkitAPI
+
+The primary entry point for AI code. Stored in `aiToolkitRegistry` so the React layer can access it.
+
+```typescript
+class AiToolkitAPI {
+  // Stream ghost text cosmetically, then commit as a tracked change atomically
+  async generateSuggestion(
+    nodeId: string,
+    stream: AsyncIterable<string>,
+    options?: { authorId?: string; insertAfter?: boolean }
+  ): Promise<void>
+
+  // Streaming only — no commit (for preview use cases)
+  async streamGhostText(nodeId: string, stream: AsyncIterable<string>): Promise<void>
+  clearGhostText(): void
+
+  // Direct suggestion (no streaming — AI already has the full content)
+  addSuggestion(nodeId: string, replacement: string, options?: {
+    authorId?: string;
+    operation?: CHANGE_OPERATION;
+  }): void
+
+  // Change management (delegates to TrackChanges commands)
+  getSuggestions(): TrackedChange[]
+  getAiSuggestions(): TrackedChange[]
+  acceptSuggestion(id: string): void
+  rejectSuggestion(id: string): void
+  acceptAllAiSuggestions(): void
+  rejectAllAiSuggestions(): void
+}
+```
+
+### `generateSuggestion` flow
+
+```typescript
+async generateSuggestion(nodeId, stream, options) {
+  // 1. Stream cosmetically (GhostText + AiCaret, doc unchanged)
+  await this.streamGhostText(nodeId, stream);
+
+  // 2. Streaming complete — apply atomically with track-author meta
+  const content = this.getAccumulatedGhostText();
+  const found = findNodeById(editor.getState().doc, nodeId);
+
+  const tr = editor.getState().tr
+    .setMeta(ghostTextPluginKey, { nodeId: null, content: "" })   // clear ghost text
+    .setMeta(aiCaretPluginKey, { position: null })                // clear AI caret
+    .setMeta("track-author", options?.authorId ?? "ai:assistant") // always tracked
+    .insert(found.pos + found.node.nodeSize, parsedContent);      // real insert
+
+  editor._applyTransaction(tr);
+  // trackChangesPlugin.appendTransaction intercepts → wraps with dataTracked
+}
+```
+
+---
+
+## Phase 8 — React Layer
+
+### `useTrackChanges(editor)`
+
+**File:** `packages/react/src/useTrackChanges.ts`
+
+```typescript
+interface TrackChangesHookResult {
+  // Mode
+  mode: "editing" | "suggesting";
+  enableSuggestionMode:  () => void;
+  disableSuggestionMode: () => void;
+  toggleSuggestionMode:  () => void;
+
+  // Changes
+  changes:         TrackedChange[];
+  aiChanges:       TrackedChange[];
+  userChanges:     TrackedChange[];
+  changesByAuthor: Map<string, TrackedChange[]>;
+
+  // Single actions
+  acceptChange: (id: string) => void;
+  rejectChange: (id: string) => void;
+
+  // Bulk actions
+  acceptAll:        () => void;
+  rejectAll:        () => void;
+  acceptAllAi:      () => void;
+  rejectAllAi:      () => void;
+  acceptByAuthor:   (authorId: string) => void;
+  rejectByAuthor:   (authorId: string) => void;
+}
+```
+
+Subscribes to `trackChangesPluginKey` state via the existing `useSyncExternalStore` pattern.
+
+### `useAiToolkit(editor)`
+
+**File:** `packages/react/src/useAiToolkit.ts`
+
+Thin wrapper — exposes the AI-specific subset:
+
+```typescript
+interface AiToolkitHookResult {
+  streamSuggestion:     (nodeId: string, stream: AsyncIterable<string>) => Promise<void>;
+  addSuggestion:        (nodeId: string, replacement: string) => void;
+  aiChanges:            TrackedChange[];
+  acceptAllAiChanges:   () => void;
+  rejectAllAiChanges:   () => void;
+}
+```
+
+### `ModeToggle`
+
+**File:** `packages/react/src/ModeToggle.tsx`
+
+```tsx
+<ModeToggle editor={editor} />
+// Renders a dropdown: "✏️ Editing" | "💬 Suggesting"
+// Dispatches enableSuggestionMode / disableSuggestionMode
+```
+
+### `ChangeReviewPanel`
+
+**File:** `packages/react/src/ChangeReviewPanel.tsx`
+
+```tsx
+<ChangeReviewPanel
+  editor={editor}
+  groupBy="author"           // "author" | "time" | "type"
+  showAiChanges={true}
+  renderChangeItem={...}     // optional render prop
+/>
+```
+
+Shows per-change:
+- Author color dot + name ("AI Assistant" for `ai:*` authors)
+- Change type badge (Insert / Delete / Format)
+- Content preview: `~~original~~` → `replacement`
+- Accept / Reject buttons
+- Bulk action bar at top: "Accept all AI" / "Reject all" / "Accept all"
+
+---
+
+## File Map
+
+### New files (create)
+
+```
+packages/core/src/extensions/built-in/
+  UniqueId.ts
+  GhostText.ts
+  AiCaret.ts
+  AiToolkit.ts                                  (aggregator)
+  track-changes/
+    types.ts
+    ChangeSet.ts
+    helpers.ts
+    trackChangesPlugin.ts
+    trackTransaction.ts
+    applyChanges.ts
+
+packages/core/src/extensions/
+  aiToolkitRegistry.ts                          (WeakMap<IEditor, AiToolkitAPI>)
+
+packages/react/src/
+  useTrackChanges.ts
+  useAiToolkit.ts
+  ModeToggle.tsx
+  ChangeReviewPanel.tsx
+```
+
+### Existing files to modify
+
+```
+packages/core/src/renderer/OverlayRenderer.ts   add renderGhostText, renderAiCaret,
+                                                renderTrackedInsert, renderTrackedDelete
+
+packages/core/src/Editor.ts                     add getTextRange, getMarkdownRange,
+                                                getContext, getTextChunks, getSchemaDescription
+
+packages/core/src/extensions/types.ts           add read API to IEditor interface
+
+packages/core/src/extensions/built-in/
+  Paragraph.ts                                  add nodeId + dataTracked attrs
+  Heading.ts                                    add nodeId + dataTracked attrs
+  List.ts                                       add nodeId + dataTracked attrs (listItem)
+  CodeBlock.ts                                  add nodeId + dataTracked attrs
+  Image.ts                                      add nodeId attr (no dataTracked needed)
+
+packages/core/src/extensions/index.ts           export new AI extensions + types
+packages/core/src/index.ts                      export AI types
+packages/react/src/index.ts                     export AI hooks + components
+```
+
+---
+
+## Key TypeScript Interfaces
+
+```typescript
+// ── Tracked change data model ──────────────────────────────────────────────
+
+interface DataTrackedAttrs {
+  id:         string;
+  authorId:   string;           // "user:john" | "ai:drafting-agent"
+  operation:  CHANGE_OPERATION; // insert | delete | set_attrs
+  status:     CHANGE_STATUS;    // pending | accepted | rejected
+  createdAt:  number;
+  updatedAt:  number;
+}
+
+interface TrackedChange {
+  id:          string;
+  dataTracked: DataTrackedAttrs;
+  from:        number;
+  to:          number;
+  node?:       Node;  // for block-level changes
+  mark?:       Mark;  // for inline changes
+}
+
+// ── Plugin states ──────────────────────────────────────────────────────────
+
+interface GhostTextPluginState   { nodeId: string | null; content: string }
+interface AiCaretPluginState     { position: number | null }
+
+interface TrackChangesPluginState {
+  enabled:   boolean;
+  authorId:  string | null;
+  changeSet: ChangeSet;
+}
+
+// ── AiToolkitAPI ──────────────────────────────────────────────────────────
+
+interface AiToolkitAPI {
+  generateSuggestion(nodeId: string, stream: AsyncIterable<string>, options?: {
+    authorId?:     string;
+    insertAfter?:  boolean;
+  }): Promise<void>;
+  streamGhostText(nodeId: string, stream: AsyncIterable<string>): Promise<void>;
+  clearGhostText(): void;
+  addSuggestion(nodeId: string, replacement: string, options?: {
+    authorId?:   string;
+    operation?:  CHANGE_OPERATION;
+  }): void;
+  getSuggestions(): TrackedChange[];
+  getAiSuggestions(): TrackedChange[];
+  acceptSuggestion(id: string): void;
+  rejectSuggestion(id: string): void;
+  acceptAllAiSuggestions(): void;
+  rejectAllAiSuggestions(): void;
+}
+
+// ── Read API additions to IEditor ─────────────────────────────────────────
+
+interface IEditor {
+  getTextRange(from: number, to: number): string;
+  getMarkdownRange(from: number, to: number): string;
+  getContext(options?: {
+    beforeChars?:      number;
+    afterChars?:       number;
+    includeSelection?: boolean;
+  }): { before: string; after: string; selection: string; cursorPos: number; totalLength: number };
+  getTextChunks(chunkSize: number): string[];
+  getSchemaDescription(): {
+    nodes: Array<{ name: string; isBlock: boolean; attrs: string[] }>;
+    marks: Array<{ name: string; attrs: string[] }>;
+  };
+}
+```
+
+---
+
+## Data Flow
+
+### AI Suggestion Flow
+
+```
+User calls: aiToolkit.generateSuggestion(nodeId, stream)
+  │
+  ├─ streamGhostText(nodeId, stream)
+  │    for each chunk:
+  │      tr.setMeta(ghostTextPluginKey, { nodeId, content: accumulated })
+  │      tr.setMeta(aiCaretPluginKey, { position: endOfBlock })
+  │      editor._applyTransaction(tr)          ← doc unchanged
+  │         → overlay handler reads GhostText state → renderGhostText on canvas
+  │         → overlay handler reads AiCaret state   → renderAiCaret on canvas
+  │
+  └─ on stream complete:
+       tr.setMeta(ghostTextPluginKey, { nodeId: null, content: "" })  // clear ghost
+       tr.setMeta(aiCaretPluginKey, { position: null })               // clear caret
+       tr.setMeta("track-author", "ai:assistant")                     // tag for tracking
+       tr.insert(afterPos, parsedContent)                             // real doc change
+       editor._applyTransaction(tr)
+          → trackChangesPlugin.appendTransaction intercepts
+          → wraps inserted content with tracked_insert mark { authorId: "ai:assistant" }
+          → ChangeSet.fromDoc() rebuilds change list
+          → overlay handler reads ChangeSet → renderTrackedInsert on canvas
+          → React: useTrackChanges() re-renders ChangeReviewPanel
+```
+
+### User Suggestion Mode Flow
+
+```
+User enables: editor.commands.enableSuggestionMode()
+  → trackChangesPlugin state: { enabled: true, authorId: "user:john" }
+
+User types: "new text"
+  → ProseMirror produces ReplaceStep
+  → trackChangesPlugin.appendTransaction intercepts (enabled: true)
+  → trackTransaction wraps the insert with tracked_insert mark { authorId: "user:john" }
+  → overlay handler → renderTrackedInsert with user's collaboration color
+  → ChangeReviewPanel shows "John: inserted 'new text'"
+
+Collaborator clicks "Accept":
+  → acceptChange(id)
+  → applyChanges: removes tracked_insert mark, keeps content
+  → single atomic transaction (one undo step)
+```
+
+### Accept/Reject Mutation Table
+
+| Status | Operation | Document mutation |
+|--------|-----------|-------------------|
+| Accept | insert    | Remove tracking mark/attr, keep content |
+| Reject | insert    | Delete the inserted content |
+| Accept | delete    | Confirm deletion (remove content) |
+| Reject | delete    | Remove tracking mark, restore content |
+| Accept | set_attrs | Keep new attrs, remove tracking |
+| Reject | set_attrs | Restore old attrs, remove tracking |
+
+---
+
+## Source References
+
+- `docs/pageless-mode.md` — TileManager plan (separate feature, no dependency on AI toolkit)
+- Seraa AI Toolkit plan — original Tiptap-based plan; core principles borrowed, DOM rendering replaced with canvas
+- DiffExtension (Seraa codebase) — Phases 4a–4c are a direct port of the pure ProseMirror core; original work by Atypon (Apache 2.0)
+
+---
+
+## Open Questions
+
+1. **DiffExtension code sharing** — User has access to the full DiffExtension source. Port of Phases 4a–4c should start from there to avoid reinventing the accept/reject logic.
+2. **Author color resolution** — When Collaboration extension is not active, AI author color falls back to fixed indigo. Human author color falls back to slate. To be resolved when wiring up Collaboration awareness.
+3. **Markdown serialization of tracked changes** — Should `getMarkdownRange` include or exclude pending tracked changes? Likely two modes: `clean` (accepted content only) and `annotated` (include deletion markers).
+4. **Suggestion mode and undo** — When user undoes a tracked change, should the tracking mark be removed too? Standard behavior: undo removes the content AND the tracking mark (ProseMirror history handles this naturally since both are in the same transaction).
+5. **HTTP API for AI agents** — `AiDocumentClient` pattern from Seraa plan. Out of scope for this document — separate server-side concern.

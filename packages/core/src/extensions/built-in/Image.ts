@@ -151,6 +151,7 @@ export const Image = Extension.create({
           alt:    { default: "" },
           width:  { default: null },
           height: { default: 200 },
+          nodeId: { default: null },
         },
         parseDOM: [
           {
