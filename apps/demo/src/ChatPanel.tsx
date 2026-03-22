@@ -3,17 +3,35 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import type { Editor } from "@inscribe/core";
+import { buildParagraphContexts, applyDiffAsSuggestion } from "@inscribe/plugins";
 
 interface ChatPanelProps {
   editor: Editor | null;
 }
 
-function getDocContext(editor: Editor | null): string | undefined {
-  if (!editor) return undefined;
+function getDocContext(editor: Editor | null): {
+  context?: string;
+  paragraphContexts?: ReturnType<typeof buildParagraphContexts>;
+} {
+  if (!editor) return {};
+  // Prefer structured paragraph contexts (used by edit_paragraph tool).
+  // Fall back to plain text for selection context.
+  const paragraphContexts = buildParagraphContexts(editor);
+  if (paragraphContexts.length > 0) {
+    const state = editor.getState();
+    const { from, to } = state.selection;
+    const selected = from !== to ? state.doc.textBetween(from, to, "\n") : undefined;
+    const result: { paragraphContexts: typeof paragraphContexts; context?: string } = { paragraphContexts };
+    if (selected) result.context = selected;
+    return result;
+  }
   const state = editor.getState();
   const { from, to } = state.selection;
   const selected = from !== to ? state.doc.textBetween(from, to, "\n") : "";
-  return selected || state.doc.textContent.slice(0, 600) || undefined;
+  const fallback = selected || state.doc.textContent.slice(0, 600);
+  const result: { context?: string } = {};
+  if (fallback) result.context = fallback;
+  return result;
 }
 
 export function ChatPanel({ editor }: ChatPanelProps) {
@@ -29,7 +47,8 @@ export function ChatPanel({ editor }: ChatPanelProps) {
         api: "/api/ai",
         fetch: async (input, init) => {
           const body = JSON.parse((init?.body as string) ?? "{}");
-          body.context = getDocContext(editorRef.current);
+          const docCtx = getDocContext(editorRef.current);
+          Object.assign(body, docCtx);
           return fetch(input, { ...init, body: JSON.stringify(body) });
         },
       }),
@@ -57,12 +76,31 @@ export function ChatPanel({ editor }: ChatPanelProps) {
     for (const msg of messages) {
       if (msg.role !== "assistant") continue;
       for (const part of msg.parts) {
-        const p = part as { type: string; toolCallId?: string; output?: { text?: string } };
+        const p = part as {
+          type: string;
+          toolCallId?: string;
+          output?: { text?: string; nodeId?: string; proposedText?: string };
+        };
+        if (!p.toolCallId) continue;
+        if (appliedToolCalls.current.has(p.toolCallId)) continue;
+
+        if (p.type === "tool-edit_paragraph") {
+          const { nodeId, proposedText } = p.output ?? {};
+          if (!nodeId || !proposedText) continue;
+          appliedToolCalls.current.add(p.toolCallId);
+          const state = ed.getState();
+          applyDiffAsSuggestion(state, (tr) => ed._applyTransaction(tr), {
+            nodeId,
+            proposedText,
+            authorID: "AI Assistant",
+          });
+          continue;
+        }
+
         const isInsert = p.type === "tool-insert_text";
         const isReplace = p.type === "tool-replace_selection";
         if (!(isInsert || isReplace)) continue;
-        if (!p.output?.text || !p.toolCallId) continue;
-        if (appliedToolCalls.current.has(p.toolCallId)) continue;
+        if (!p.output?.text) continue;
 
         appliedToolCalls.current.add(p.toolCallId);
 
@@ -175,7 +213,17 @@ function MessageRow({ msg }: { msg: UIMessage }) {
           );
         }
 
-        // Tool parts: type === 'tool-insert_text' | 'tool-replace_selection'
+        if (part.type === "tool-edit_paragraph") {
+          const p = part as { type: string; output?: { nodeId?: string; proposedText?: string } };
+          return (
+            <SuggestionCard
+              key={i}
+              label="Edit paragraph"
+              text={p.output?.proposedText ?? ""}
+            />
+          );
+        }
+
         if (part.type === "tool-insert_text" || part.type === "tool-replace_selection") {
           const isInsert = part.type === "tool-insert_text";
           const p = part as { type: string; output?: { text?: string } };
