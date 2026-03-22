@@ -30,6 +30,10 @@ export { AiCaret, aiCaretPluginKey } from "./built-in/AiCaret";
 export type { GhostTextState } from "./built-in/GhostText";
 export type { AiCaretState } from "./built-in/AiCaret";
 
+// AI Toolkit — Phase 6 aggregator
+export { AiToolkit, AiToolkitAPI } from "./built-in/AiToolkit";
+export { getAiToolkit } from "./aiToolkitRegistry";
+
 export type {
   ExtensionConfig,
   ExtensionContext,

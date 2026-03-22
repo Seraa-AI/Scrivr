@@ -69,6 +69,8 @@ export interface IEditor {
   _applyTransaction(tr: Transaction): void;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
   redraw(): void;
+  /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
+  getMarkdown(): string;
 }
 
 /**

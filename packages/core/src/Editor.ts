@@ -623,6 +623,11 @@ export class Editor {
     return new MarkdownSerializer(nodes, marks);
   }
 
+  /** Serialize the full document to Markdown. Implements IEditor.getMarkdown(). */
+  getMarkdown(): string {
+    return this.getMarkdownSerializer().serialize(this.state.doc);
+  }
+
   getActiveMarks(): string[] {
     const { selection, storedMarks } = this.state;
     const { from, to, empty } = selection;
