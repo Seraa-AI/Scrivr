@@ -10,18 +10,18 @@ interface TrackChangesPopoverProps {
 }
 
 const OPERATION_LABEL: Partial<Record<CHANGE_OPERATION, string>> = {
-  [CHANGE_OPERATION.insert]:           "Insertion",
-  [CHANGE_OPERATION.delete]:           "Deletion",
-  [CHANGE_OPERATION.move]:             "Move",
-  [CHANGE_OPERATION.wrap_with_node]:   "Wrap",
+  [CHANGE_OPERATION.insert]:              "Insertion",
+  [CHANGE_OPERATION.delete]:              "Deletion",
+  [CHANGE_OPERATION.move]:                "Move",
+  [CHANGE_OPERATION.wrap_with_node]:      "Wrap",
   [CHANGE_OPERATION.set_node_attributes]: "Attribute change",
 };
 
 export function TrackChangesPopover({ editor }: TrackChangesPopoverProps) {
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const [info, setInfo] = useState<ChangePopoverInfo | null>(null);
-  const [pos,  setPos]  = useState<{ x: number; y: number } | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [rect, setRect]   = useState<DOMRect | null>(null);
+  const [info, setInfo]   = useState<ChangePopoverInfo | null>(null);
+  const [pos,  setPos]    = useState<{ x: number; y: number } | null>(null);
+  const menuRef           = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!editor) return;
@@ -42,22 +42,9 @@ export function TrackChangesPopover({ editor }: TrackChangesPopoverProps) {
       placement: "bottom-start",
       middleware: [offset(8), flip(), shift({ padding: 8 })],
     }).then(({ x, y }) => setPos({ x, y }));
-  }, [rect]);
+  }, [rect, info]);
 
   if (!rect || !info) return null;
-
-  const label = OPERATION_LABEL[info.operation] ?? info.operation;
-  const author = info.authorID.split(":").pop() ?? info.authorID;
-
-  function handleAccept() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [info!.id]);
-    setRect(null);
-  }
-
-  function handleReject() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [info!.id]);
-    setRect(null);
-  }
 
   return createPortal(
     <div
@@ -70,19 +57,46 @@ export function TrackChangesPopover({ editor }: TrackChangesPopoverProps) {
         zIndex:       60,
         visibility:   pos ? "visible" : "hidden",
         background:   "#fff",
-        border:       "1px solid #e2e8f0",
+        border:       `1px solid ${info.isConflict ? "#f59e0b" : "#e2e8f0"}`,
         borderRadius: 8,
-        boxShadow:    "0 4px 16px rgba(0,0,0,0.12)",
-        padding:      "8px 10px",
+        boxShadow:    info.isConflict
+          ? "0 4px 16px rgba(245,158,11,0.18)"
+          : "0 4px 16px rgba(0,0,0,0.12)",
+        padding:      info.isConflict ? "10px 12px" : "8px 10px",
         display:      "flex",
-        alignItems:   "center",
-        gap:          8,
+        flexDirection: info.isConflict ? "column" : "row",
+        alignItems:   info.isConflict ? "stretch" : "center",
+        gap:          info.isConflict ? 8 : 8,
         fontSize:     13,
         whiteSpace:   "nowrap",
-        minWidth:     220,
+        minWidth:     info.isConflict ? 280 : 220,
       }}
     >
-      {/* Operation badge */}
+      {info.isConflict
+        ? <ConflictPopover info={info} editor={editor} onClose={() => setRect(null)} />
+        : <SingleChangePopover info={info} editor={editor} onClose={() => setRect(null)} />
+      }
+    </div>,
+    document.body,
+  );
+}
+
+// ── Single-change popover ──────────────────────────────────────────────────────
+
+function SingleChangePopover({
+  info,
+  editor,
+  onClose,
+}: {
+  info: ChangePopoverInfo;
+  editor: Editor | null;
+  onClose: () => void;
+}) {
+  const label  = OPERATION_LABEL[info.operation] ?? info.operation;
+  const author = info.authorID.split(":").pop() ?? info.authorID;
+
+  return (
+    <>
       <span style={{
         ...badge,
         background: info.operation === CHANGE_OPERATION.delete ? "#fee2e2" : "#dcfce7",
@@ -91,22 +105,121 @@ export function TrackChangesPopover({ editor }: TrackChangesPopoverProps) {
         {info.operation === CHANGE_OPERATION.delete ? "−" : "+"} {label}
       </span>
 
-      {/* Author */}
       <span style={{ color: "#64748b", fontSize: 12, flex: 1 }}>
         {author}
       </span>
 
-      {/* Actions */}
-      <button onClick={handleAccept} style={btnStyle("#15803d", "#fff")} title="Accept change">
+      <button
+        onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [info.id]); onClose(); }}
+        style={btnStyle("#15803d", "#fff")}
+        title="Accept change"
+      >
         ✓ Accept
       </button>
-      <button onClick={handleReject} style={btnStyle("#b91c1c", "#fff")} title="Reject change">
+      <button
+        onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [info.id]); onClose(); }}
+        style={btnStyle("#b91c1c", "#fff")}
+        title="Reject change"
+      >
         ✗ Reject
       </button>
-    </div>,
-    document.body,
+    </>
   );
 }
+
+// ── Conflict popover ───────────────────────────────────────────────────────────
+
+function ConflictPopover({
+  info,
+  editor,
+  onClose,
+}: {
+  info: ChangePopoverInfo;
+  editor: Editor | null;
+  onClose: () => void;
+}) {
+  const changes = info.conflictChanges.length > 0 ? info.conflictChanges : [info];
+
+  function acceptOne(id: string) {
+    // Accept the chosen change, reject all others in the conflict group
+    const others = changes.filter(c => c.id !== id).map(c => c.id);
+    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [id]);
+    if (others.length > 0) editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, others);
+    onClose();
+  }
+
+  function rejectAll() {
+    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, changes.map(c => c.id));
+    onClose();
+  }
+
+  return (
+    <>
+      {/* Conflict header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ ...badge, background: "#fef3c7", color: "#92400e" }}>
+          ⚡ Conflict
+        </span>
+        <span style={{ fontSize: 11, color: "#92400e" }}>
+          {changes.length} overlapping changes
+        </span>
+      </div>
+
+      {/* Per-author rows */}
+      {changes.map((c) => {
+        const author = c.authorID.split(":").pop() ?? c.authorID;
+        const isDelete = c.operation === CHANGE_OPERATION.delete;
+        return (
+          <div
+            key={c.id}
+            style={{
+              display:       "flex",
+              alignItems:    "center",
+              gap:           6,
+              padding:       "4px 0",
+              borderTop:     "1px solid #fde68a",
+            }}
+          >
+            <span style={{
+              ...badge,
+              background: isDelete ? "#fee2e2" : "#dcfce7",
+              color:      isDelete ? "#b91c1c" : "#15803d",
+              flexShrink: 0,
+            }}>
+              {isDelete ? "−" : "+"} {OPERATION_LABEL[c.operation] ?? c.operation}
+            </span>
+            <span style={{ color: "#64748b", fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+              {author}
+            </span>
+            <button
+              onClick={() => acceptOne(c.id)}
+              style={btnStyle("#15803d", "#fff")}
+              title={`Accept ${author}'s change`}
+            >
+              Use this
+            </button>
+            <button
+              onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [c.id]); onClose(); }}
+              style={btnStyle("#64748b", "#fff")}
+              title={`Reject ${author}'s change`}
+            >
+              ✗
+            </button>
+          </div>
+        );
+      })}
+
+      {/* Reject all */}
+      <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 2 }}>
+        <button onClick={rejectAll} style={btnStyle("#b91c1c", "#fff")}>
+          Reject All
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ── Shared styles ─────────────────────────────────────────────────────────────
 
 const badge = {
   display:      "inline-flex",
@@ -128,5 +241,6 @@ function btnStyle(bg: string, color: string) {
     cursor:       "pointer",
     fontSize:     12,
     fontWeight:   600,
+    flexShrink:   0,
   } as const;
 }

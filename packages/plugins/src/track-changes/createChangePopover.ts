@@ -10,6 +10,17 @@ export interface ChangePopoverInfo {
   status: CHANGE_STATUS;
   from: number;
   to: number;
+  /**
+   * True when two or more authors' marks overlap this exact segment.
+   * When true, `conflictChanges` contains all overlapping changes so the UI
+   * can render per-author accept/reject controls.
+   */
+  isConflict: boolean;
+  /**
+   * All pending changes that overlap the cursor position when isConflict is true.
+   * Empty array for normal (non-conflict) changes.
+   */
+  conflictChanges: ChangePopoverInfo[];
 }
 
 export interface ChangePopoverCallbacks {
@@ -24,6 +35,10 @@ export interface ChangePopoverCallbacks {
  * Subscribes to editor state changes and fires onShow/onMove/onHide whenever
  * the cursor lands inside a pending tracked change.
  *
+ * When multiple authors' marks overlap (isConflict), info.conflictChanges
+ * contains all overlapping changes so the UI can render a conflict popover
+ * with per-author accept/reject buttons.
+ *
  * @example
  *   const cleanup = createChangePopover(editor, {
  *     onShow: (rect, info) => { popover.style.display = "block"; ... },
@@ -37,53 +52,68 @@ export function createChangePopover(
 ): () => void {
   const { onShow, onMove, onHide } = options;
   let visible = false;
-  let lastId: string | null = null;
+  let lastKey: string | null = null;
 
   function update() {
     const state = editor.getState();
     const pluginState = trackChangesPluginKey.getState(state);
     if (!pluginState) {
-      if (visible) { visible = false; lastId = null; onHide(); }
+      if (visible) { visible = false; lastKey = null; onHide(); }
       return;
     }
 
     const { head } = state.selection;
     const { changes } = pluginState.changeSet;
 
-    // Find first pending change whose range contains the cursor
-    const change = changes.find(
+    // All pending changes that contain the cursor
+    const atCursor = changes.filter(
       c =>
         c.dataTracked.status === CHANGE_STATUS.pending &&
         head >= c.from &&
         head <= c.to,
     );
 
-    if (!change) {
-      if (visible) { visible = false; lastId = null; onHide(); }
+    if (atCursor.length === 0) {
+      if (visible) { visible = false; lastKey = null; onHide(); }
       return;
     }
 
-    const rect = editor.getViewportRect(change.from, change.to);
+    // Primary change — the first one (determines the popover anchor rect)
+    const primary = atCursor[0]!;
+    const rect = editor.getViewportRect(primary.from, primary.to);
     if (!rect) {
-      if (visible) { visible = false; lastId = null; onHide(); }
+      if (visible) { visible = false; lastKey = null; onHide(); }
       return;
     }
 
-    const info: ChangePopoverInfo = {
-      id:        change.id,
-      operation: change.dataTracked.operation as CHANGE_OPERATION,
-      authorID:  change.dataTracked.authorID ?? "unknown",
-      status:    change.dataTracked.status as CHANGE_STATUS,
-      from:      change.from,
-      to:        change.to,
-    };
+    const isConflict = atCursor.length > 1 ||
+      !!(primary.dataTracked as { isConflict?: boolean }).isConflict;
 
-    if (visible && lastId === change.id) {
-      onMove(rect, info);
+    // Build info objects for all changes at the cursor
+    const toInfo = (c: typeof primary): ChangePopoverInfo => ({
+      id:               c.id,
+      operation:        c.dataTracked.operation as CHANGE_OPERATION,
+      authorID:         c.dataTracked.authorID ?? "unknown",
+      status:           c.dataTracked.status as CHANGE_STATUS,
+      from:             c.from,
+      to:               c.to,
+      isConflict:       !!(c.dataTracked as { isConflict?: boolean }).isConflict,
+      conflictChanges:  [],
+    });
+
+    const primaryInfo = toInfo(primary);
+    primaryInfo.isConflict = isConflict;
+    primaryInfo.conflictChanges = isConflict ? atCursor.map(toInfo) : [];
+
+    // Stable key: sorted ids of all changes at cursor
+    const key = atCursor.map(c => c.id).sort().join("|");
+
+    if (visible && lastKey === key) {
+      onMove(rect, primaryInfo);
     } else {
       visible = true;
-      lastId = change.id;
-      onShow(rect, info);
+      lastKey = key;
+      onShow(rect, primaryInfo);
     }
   }
 
@@ -91,6 +121,6 @@ export function createChangePopover(
 
   return () => {
     unsubscribe();
-    if (visible) { visible = false; lastId = null; onHide(); }
+    if (visible) { visible = false; lastKey = null; onHide(); }
   };
 }

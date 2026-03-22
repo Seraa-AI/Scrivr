@@ -13,6 +13,7 @@ import {
 import type { EditorStateContext } from "@inscribe/react";
 import { PdfExport } from "@inscribe/export";
 import { TrackChanges } from "@inscribe/plugins";
+import { UniqueId } from "@inscribe/plugins";
 import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
 import { FloatingMenuBar } from "./FloatingMenuBar";
@@ -78,6 +79,7 @@ export function App() {
         CollaborationCursor.configure({ user: { name: identity.userName, color: identity.userColor } }),
         PdfExport.configure({ filename: identity.room }),
         TrackChanges.configure({ userID: identity.userName, canAcceptReject: true }),
+        UniqueId,
       ],
     };
   });
