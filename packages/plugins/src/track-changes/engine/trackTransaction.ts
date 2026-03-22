@@ -105,7 +105,7 @@ export function trackTransaction(
         trackedContent,
         newTr,
         trContext.stepsByGroupIDMap.has(step)
-          ? { ...emptyAttrs, moveNodeId: trContext.stepsByGroupIDMap.get(step) }
+          ? { ...emptyAttrs, moveNodeId: trContext.stepsByGroupIDMap.get(step)! }
           : emptyAttrs,
         oldState.schema,
         deletedNodeMapping,

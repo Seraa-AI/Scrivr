@@ -117,7 +117,7 @@ export function trackReplaceAroundStep(
   ) {
     trContext.prevLiftStep = step;
   } else {
-    trContext.prevLiftStep = undefined;
+    delete trContext.prevLiftStep;
   }
 
   if (

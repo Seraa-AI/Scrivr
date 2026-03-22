@@ -1,12 +1,13 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import viteReact from "@vitejs/plugin-react";
 import { resolve } from "path";
 
 export default defineConfig({
-  plugins: [react()],
+  server: {
+    port: 3000,
+  },
   resolve: {
-    // In dev/build, point workspace packages directly at their source.
-    // This means we don't need to run `tsup` on core before starting the demo.
     alias: {
       "@inscribe/core": resolve(__dirname, "../../packages/core/src/index.ts"),
       "@inscribe/plugins": resolve(__dirname, "../../packages/plugins/src/index.ts"),
@@ -14,4 +15,9 @@ export default defineConfig({
       "@inscribe/react": resolve(__dirname, "../../packages/react/src/index.ts"),
     },
   },
+  plugins: [
+    tanstackStart(),
+    // react's vite plugin must come after start's vite plugin
+    viteReact(),
+  ],
 });

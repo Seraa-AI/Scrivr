@@ -165,7 +165,7 @@ export const joinStructureChanges = (
     c => c.dataTracked.moveNodeId && idsSet.has(c.dataTracked.moveNodeId),
   );
   relatedChanges.map(c =>
-    updateChangeAttrs(newTr, c, { ...c.dataTracked, moveNodeId }, newTr.doc.type.schema),
+    updateChangeAttrs(newTr, c, { ...c.dataTracked, ...(moveNodeId !== undefined ? { moveNodeId } : {}) }, newTr.doc.type.schema),
   );
 
   const toInsertChange =
@@ -180,7 +180,7 @@ export const joinStructureChanges = (
 
   return updateBlockNodesAttrs(sliceContent, (_, _node) => ({
     ..._,
-    dataTracked: [addTrackIdIfDoesntExist(createNewStructureAttrs({ ...attrs, moveNodeId }))],
+    dataTracked: [addTrackIdIfDoesntExist(createNewStructureAttrs({ ...attrs, ...(moveNodeId !== undefined ? { moveNodeId } : {}) }))],
   }));
 };
 

@@ -128,7 +128,6 @@ export function trackReplaceStep(
           slice: new Slice(fragment, openStart, openEnd) as ExposedSlice,
         });
       } else {
-        // @ts-expect-error window.event is deprecated
         const isDeleteEvent = (window.event as KeyboardEvent)?.code === "Delete";
         const isDeleteContentForward =
           // @ts-expect-error window.event.inputType missing in TS DOM defs

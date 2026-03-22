@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   useCanvasEditor,
   Canvas,
@@ -17,6 +18,7 @@ import { BubbleMenuBar } from "./BubbleMenuBar";
 import { FloatingMenuBar } from "./FloatingMenuBar";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { TrackChangesPopover } from "./TrackChangesPopover";
+import { ChatPanel } from "./ChatPanel";
 
 // ── Room + user identity from URL params ──────────────────────────────────────
 // Open the same URL in two tabs to collaborate.
@@ -26,22 +28,19 @@ import { TrackChangesPopover } from "./TrackChangesPopover";
 
 const COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"];
 
+// Guard against SSR (TanStack Start runs this on the server where window is absent)
 function getParam(key: string): string | null {
+  if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get(key);
 }
 
-const room = getParam("room") ?? "default";
-const userName = getParam("user") ?? `User ${Math.floor(Math.random() * 100)}`;
-const userColor = getParam("color") ?? COLORS[Math.floor(Math.random() * COLORS.length)]!;
-const wsUrl = (import.meta as unknown as { env: Record<string, string> }).env.VITE_WS_URL ?? "ws://localhost:1234";
-
-const EXTENSIONS = [
-  StarterKit.configure({ history: false }), // Y.js undo replaces PM history
-  Collaboration.configure({ url: wsUrl, name: room }),
-  CollaborationCursor.configure({ user: { name: userName, color: userColor } }),
-  PdfExport.configure({ filename: room }),
-  TrackChanges.configure({ userID: userName, canAcceptReject: true }),
-];
+function makeIdentity() {
+  const room = getParam("room") ?? "default";
+  const userName = getParam("user") ?? `User ${Math.floor(Math.random() * 100)}`;
+  const userColor = getParam("color") ?? COLORS[Math.floor(Math.random() * COLORS.length)]!;
+  const wsUrl = (import.meta as unknown as { env: Record<string, string> }).env.VITE_WS_URL ?? "ws://localhost:1234";
+  return { room, userName, userColor, wsUrl };
+}
 
 interface ToolbarSlice {
   activeMarks: string[];
@@ -68,7 +67,22 @@ const EMPTY_TOOLBAR: ToolbarSlice = {
 };
 
 export function App() {
-  const editor = useCanvasEditor({ extensions: EXTENSIONS, pageConfig: defaultPageConfig });
+  // Lazy init — runs once on the client, never on the server
+  const [{ room, userName, userColor, extensions }] = useState(() => {
+    const identity = makeIdentity();
+    return {
+      ...identity,
+      extensions: [
+        StarterKit.configure({ history: false }), // Y.js undo replaces PM history
+        Collaboration.configure({ url: identity.wsUrl, name: identity.room }),
+        CollaborationCursor.configure({ user: { name: identity.userName, color: identity.userColor } }),
+        PdfExport.configure({ filename: identity.room }),
+        TrackChanges.configure({ userID: identity.userName, canAcceptReject: true }),
+      ],
+    };
+  });
+
+  const editor = useCanvasEditor({ extensions, pageConfig: defaultPageConfig });
 
   // deepEqual is the default — handles string[], nested objects correctly.
   const toolbar = useEditorState({ editor, selector: selectToolbar }) ?? EMPTY_TOOLBAR;
@@ -98,9 +112,12 @@ export function App() {
         </div>
       </div>
 
-      <main style={styles.main}>
-        <Canvas editor={editor} style={styles.canvas} />
-      </main>
+      <div style={styles.body}>
+        <main style={styles.main}>
+          <Canvas editor={editor} style={styles.canvas} />
+        </main>
+        <ChatPanel editor={editor} />
+      </div>
 
       <BubbleMenuBar editor={editor} />
       <FloatingMenuBar editor={editor} />
@@ -164,6 +181,11 @@ const styles = {
     background: "#fff",
     borderBottom: "1px solid #e2e8f0",
     flexShrink: 0,
+  },
+  body: {
+    flex: 1,
+    display: "flex",
+    overflow: "hidden",
   },
   main: {
     flex: 1,
