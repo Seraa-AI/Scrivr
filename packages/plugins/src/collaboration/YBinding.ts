@@ -17,7 +17,7 @@ import * as Y from "yjs";
 import { yXmlFragmentToProseMirrorRootNode, prosemirrorToYXmlFragment } from "y-prosemirror";
 import type { Node } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
-import type { IEditor } from "./types";
+import type { IEditor } from "@inscribe/core";
 
 // ── Inline mutex (from lib0/mutex — avoids an unlisted direct dep) ────────────
 

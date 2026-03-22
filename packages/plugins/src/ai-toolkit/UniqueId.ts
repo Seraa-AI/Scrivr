@@ -1,6 +1,6 @@
 import { Plugin } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
-import { Extension } from "../Extension";
+import { Extension } from "@inscribe/core";
 
 // ── ID generator ──────────────────────────────────────────────────────────────
 

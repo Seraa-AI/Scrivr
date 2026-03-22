@@ -9,9 +9,9 @@
  *     user: { name: "Alice", color: "#ef4444" },
  *   })
  */
-import { Extension } from "../Extension";
-import type { IEditor, OverlayRenderHandler } from "../types";
-import { collaborationRegistry } from "../collaborationState";
+import { Extension } from "@inscribe/core";
+import type { IEditor, OverlayRenderHandler } from "@inscribe/core";
+import { collaborationRegistry } from "./collaborationState";
 
 interface CollaborationCursorOptions {
   user?: { name: string; color: string };

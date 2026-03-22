@@ -1,10 +1,10 @@
-import { Extension } from "../Extension";
-import type { IEditor } from "../types";
+import { Extension } from "@inscribe/core";
+import type { IEditor } from "@inscribe/core";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
 import { findNodeById } from "./UniqueId";
-import { aiToolkitRegistry } from "../aiToolkitRegistry";
+import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import type { Schema } from "prosemirror-model";
 
 // ── AiToolkitAPI ─────────────────────────────────────────────────────────────

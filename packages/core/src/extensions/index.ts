@@ -19,20 +19,7 @@ export { Link } from "./built-in/Link";
 export { Alignment } from "./built-in/Alignment";
 export { List } from "./built-in/List";
 export { Pagination } from "./built-in/Pagination";
-export { Collaboration } from "./built-in/Collaboration";
-export { CollaborationCursor } from "./built-in/CollaborationCursor";
 export { Image } from "./built-in/Image";
-
-// AI Toolkit — Phase 1-3
-export { UniqueId, findNodeById } from "./built-in/UniqueId";
-export { GhostText, ghostTextPluginKey } from "./built-in/GhostText";
-export { AiCaret, aiCaretPluginKey } from "./built-in/AiCaret";
-export type { GhostTextState } from "./built-in/GhostText";
-export type { AiCaretState } from "./built-in/AiCaret";
-
-// AI Toolkit — Phase 6 aggregator
-export { AiToolkit, AiToolkitAPI } from "./built-in/AiToolkit";
-export { getAiToolkit } from "./aiToolkitRegistry";
 
 export type {
   ExtensionConfig,
@@ -43,4 +30,5 @@ export type {
   SpanRect,
   FontModifier,
   ToolbarItemSpec,
+  OverlayRenderHandler,
 } from "./types";

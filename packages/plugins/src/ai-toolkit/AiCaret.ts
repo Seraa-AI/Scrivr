@@ -1,7 +1,6 @@
 import { Plugin, PluginKey } from "prosemirror-state";
-import { Extension } from "../Extension";
-import type { IEditor, OverlayRenderHandler } from "../types";
-import { renderAiCaret } from "../../renderer/OverlayRenderer";
+import { Extension, renderAiCaret } from "@inscribe/core";
+import type { IEditor, OverlayRenderHandler } from "@inscribe/core";
 
 // ── Plugin state ──────────────────────────────────────────────────────────────
 

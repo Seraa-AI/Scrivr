@@ -16,10 +16,10 @@
  */
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { Extension } from "../Extension";
-import { YBinding } from "../YBinding";
-import type { IEditor } from "../types";
-import { collaborationRegistry } from "../collaborationState";
+import { Extension } from "@inscribe/core";
+import type { IEditor } from "@inscribe/core";
+import { YBinding } from "./YBinding";
+import { collaborationRegistry } from "./collaborationState";
 
 interface CollaborationOptions {
   /** WebSocket URL of the HocusPocus server. Default: "ws://localhost:1234" */

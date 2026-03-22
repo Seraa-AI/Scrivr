@@ -1,8 +1,7 @@
 import { Plugin, PluginKey } from "prosemirror-state";
-import { Extension } from "../Extension";
-import type { IEditor, OverlayRenderHandler } from "../types";
+import { Extension, renderGhostText } from "@inscribe/core";
+import type { IEditor, OverlayRenderHandler } from "@inscribe/core";
 import { findNodeById } from "./UniqueId";
-import { renderGhostText } from "../../renderer/OverlayRenderer";
 
 // ── Plugin state ──────────────────────────────────────────────────────────────
 

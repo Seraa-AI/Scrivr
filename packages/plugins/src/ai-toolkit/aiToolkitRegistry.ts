@@ -1,5 +1,5 @@
-import type { IEditor } from "./types";
-import type { AiToolkitAPI } from "./built-in/AiToolkit";
+import type { IEditor } from "@inscribe/core";
+import type { AiToolkitAPI } from "./AiToolkit";
 
 /**
  * Registry that maps each Editor instance to its AiToolkitAPI.
