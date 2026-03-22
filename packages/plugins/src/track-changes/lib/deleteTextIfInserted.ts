@@ -2,15 +2,16 @@ import { Fragment, Node as PMNode, Schema } from "prosemirror-model";
 import type { Transaction } from "prosemirror-state";
 
 import { addTrackIdIfDoesntExist, getMergeableMarkTrackedAttrs, NewDeleteAttrs } from "../helpers";
-import { splitRangeForNewMark } from "./splitRangeForNewMark";
 
 /**
  * Deletes inserted text directly (same-author cancel); otherwise wraps it with
- * a tracked_delete mark.
+ * a tracked_delete mark — preserving the full grouping behaviour.
  *
- * When the node already carries a tracked_insert from a DIFFERENT author,
- * we do NOT remove the text — instead we stack a tracked_delete on top and
- * let splitRangeForNewMark flag both marks as isConflict: true.
+ * Author-awareness: only cancel the insert outright if it belongs to the SAME
+ * author. A different author's insert is left in place and receives a
+ * tracked_delete mark on top — the conflict will be detected and flagged at
+ * read-time by findChanges (isConflict is a computed property, not stored in
+ * mark attrs, so no fragmentation here).
  *
  * Returns the position at the end of the possibly deleted text.
  */
@@ -37,10 +38,12 @@ export function deleteTextIfInserted(
       newTr.replaceWith(start, end, Fragment.empty);
       return start;
     }
-    // Different author's insert — fall through to apply tracked_delete via
-    // splitRangeForNewMark, which will flag both marks as isConflict: true.
+    // Different author's insert: fall through so we apply tracked_delete on top.
+    // findChanges will compute isConflict when it sees overlapping ranges from
+    // different authors — no mark mutation needed here.
   }
 
+  // ── Original grouping logic — unchanged ────────────────────────────────────
   const leftNode = newTr.doc.resolve(start).nodeBefore;
   const leftMarks = getMergeableMarkTrackedAttrs(leftNode, deleteAttrs, schema);
   const rightNode = newTr.doc.resolve(end).nodeAfter;
@@ -54,24 +57,13 @@ export function deleteTextIfInserted(
     deleteAttrs.createdAt,
   );
 
-  const dataTracked = addTrackIdIfDoesntExist({
-    ...leftMarks,
-    ...rightMarks,
-    ...deleteAttrs,
-    createdAt,
-  });
+  const dataTracked = addTrackIdIfDoesntExist({ ...leftMarks, ...rightMarks, ...deleteAttrs, createdAt });
 
-  const deleteMark = schema.marks!.tracked_delete!.create({ dataTracked });
-
-  // splitRangeForNewMark handles conflict detection:
-  // - same author already marked → skip (no duplicate stacking)
-  // - different author already marked → set isConflict: true on both marks
-  splitRangeForNewMark(newTr, {
-    mark: deleteMark,
-    from: fromStartOfMark,
-    to: toEndOfMark,
-    schema,
-  });
+  newTr.addMark(
+    fromStartOfMark,
+    toEndOfMark,
+    schema.marks!.tracked_delete!.create({ dataTracked }),
+  );
 
   return toEndOfMark;
 }

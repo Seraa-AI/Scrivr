@@ -9,14 +9,6 @@ interface TrackChangesPopoverProps {
   editor: Editor | null;
 }
 
-const OPERATION_LABEL: Partial<Record<CHANGE_OPERATION, string>> = {
-  [CHANGE_OPERATION.insert]:              "Insertion",
-  [CHANGE_OPERATION.delete]:              "Deletion",
-  [CHANGE_OPERATION.move]:                "Move",
-  [CHANGE_OPERATION.wrap_with_node]:      "Wrap",
-  [CHANGE_OPERATION.set_node_attributes]: "Attribute change",
-};
-
 export function TrackChangesPopover({ editor }: TrackChangesPopoverProps) {
   const [rect, setRect]   = useState<DOMRect | null>(null);
   const [info, setInfo]   = useState<ChangePopoverInfo | null>(null);
@@ -51,25 +43,24 @@ export function TrackChangesPopover({ editor }: TrackChangesPopoverProps) {
       ref={menuRef}
       onMouseDown={(e) => e.preventDefault()}
       style={{
-        position:     "fixed",
-        left:         pos?.x ?? 0,
-        top:          pos?.y ?? 0,
-        zIndex:       60,
-        visibility:   pos ? "visible" : "hidden",
-        background:   "#fff",
-        border:       `1px solid ${info.isConflict ? "#f59e0b" : "#e2e8f0"}`,
-        borderRadius: 8,
-        boxShadow:    info.isConflict
-          ? "0 4px 16px rgba(245,158,11,0.18)"
+        position:      "fixed",
+        left:          pos?.x ?? 0,
+        top:           pos?.y ?? 0,
+        zIndex:        60,
+        visibility:    pos ? "visible" : "hidden",
+        background:    "#fff",
+        border:        `1.5px solid ${info.isConflict ? "#f59e0b" : "#e2e8f0"}`,
+        borderRadius:  10,
+        boxShadow:     info.isConflict
+          ? "0 6px 24px rgba(245,158,11,0.18)"
           : "0 4px 16px rgba(0,0,0,0.12)",
-        padding:      info.isConflict ? "10px 12px" : "8px 10px",
-        display:      "flex",
-        flexDirection: info.isConflict ? "column" : "row",
-        alignItems:   info.isConflict ? "stretch" : "center",
-        gap:          info.isConflict ? 8 : 8,
-        fontSize:     13,
-        whiteSpace:   "nowrap",
-        minWidth:     info.isConflict ? 280 : 220,
+        padding:       info.isConflict ? "12px 14px" : "8px 10px",
+        display:       "flex",
+        flexDirection: "column",
+        gap:           info.isConflict ? 10 : 8,
+        fontSize:      13,
+        minWidth:      info.isConflict ? 320 : 220,
+        maxWidth:      420,
       }}
     >
       {info.isConflict
@@ -83,6 +74,14 @@ export function TrackChangesPopover({ editor }: TrackChangesPopoverProps) {
 
 // ── Single-change popover ──────────────────────────────────────────────────────
 
+const OPERATION_LABEL: Partial<Record<CHANGE_OPERATION, string>> = {
+  [CHANGE_OPERATION.insert]:              "Insertion",
+  [CHANGE_OPERATION.delete]:              "Deletion",
+  [CHANGE_OPERATION.move]:                "Move",
+  [CHANGE_OPERATION.wrap_with_node]:      "Wrap",
+  [CHANGE_OPERATION.set_node_attributes]: "Attribute change",
+};
+
 function SingleChangePopover({
   info,
   editor,
@@ -93,36 +92,29 @@ function SingleChangePopover({
   onClose: () => void;
 }) {
   const label  = OPERATION_LABEL[info.operation] ?? info.operation;
-  const author = info.authorID.split(":").pop() ?? info.authorID;
+  const author = shortName(info.authorID);
+  const isDelete = info.operation === CHANGE_OPERATION.delete;
 
   return (
     <>
-      <span style={{
-        ...badge,
-        background: info.operation === CHANGE_OPERATION.delete ? "#fee2e2" : "#dcfce7",
-        color:      info.operation === CHANGE_OPERATION.delete ? "#b91c1c" : "#15803d",
-      }}>
-        {info.operation === CHANGE_OPERATION.delete ? "−" : "+"} {label}
-      </span>
-
-      <span style={{ color: "#64748b", fontSize: 12, flex: 1 }}>
-        {author}
-      </span>
-
-      <button
-        onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [info.id]); onClose(); }}
-        style={btnStyle("#15803d", "#fff")}
-        title="Accept change"
-      >
-        ✓ Accept
-      </button>
-      <button
-        onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [info.id]); onClose(); }}
-        style={btnStyle("#b91c1c", "#fff")}
-        title="Reject change"
-      >
-        ✗ Reject
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{
+          ...badge,
+          background: isDelete ? "#fee2e2" : "#dcfce7",
+          color:      isDelete ? "#b91c1c" : "#15803d",
+        }}>
+          {isDelete ? "−" : "+"} {label}
+        </span>
+        <span style={{ color: "#64748b", fontSize: 12, flex: 1 }}>{author}</span>
+        <button onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [info.id]); onClose(); }} style={btnStyle("#15803d", "#fff")}>✓ Accept</button>
+        <button onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [info.id]); onClose(); }} style={btnStyle("#b91c1c", "#fff")}>✗ Reject</button>
+      </div>
+      {info.text ? (
+        <div style={textPreview(isDelete ? "#fee2e2" : "#f0fdf4", isDelete ? "#b91c1c" : "#15803d")}>
+          {isDelete ? "Removing: " : "Adding: "}
+          <em>"{info.text}"</em>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -141,7 +133,6 @@ function ConflictPopover({
   const changes = info.conflictChanges.length > 0 ? info.conflictChanges : [info];
 
   function acceptOne(id: string) {
-    // Accept the chosen change, reject all others in the conflict group
     const others = changes.filter(c => c.id !== id).map(c => c.id);
     editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [id]);
     if (others.length > 0) editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, others);
@@ -155,62 +146,88 @@ function ConflictPopover({
 
   return (
     <>
-      {/* Conflict header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ ...badge, background: "#fef3c7", color: "#92400e" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ ...badge, background: "#fef3c7", color: "#92400e", fontSize: 12 }}>
           ⚡ Conflict
         </span>
-        <span style={{ fontSize: 11, color: "#92400e" }}>
-          {changes.length} overlapping changes
+        <span style={{ fontSize: 12, color: "#78350f", fontWeight: 500 }}>
+          {changes.length} conflicting changes — choose how to resolve
         </span>
       </div>
 
       {/* Per-author rows */}
-      {changes.map((c) => {
-        const author = c.authorID.split(":").pop() ?? c.authorID;
+      {changes.map((c, idx) => {
         const isDelete = c.operation === CHANGE_OPERATION.delete;
+        const author = shortName(c.authorID);
+        const actionLabel = isDelete ? "wants to remove" : "wants to add";
+        const accentColor = isDelete ? "#b91c1c" : "#15803d";
+        const bgColor = isDelete ? "#fff5f5" : "#f0fdf4";
+        const borderColor = isDelete ? "#fecaca" : "#bbf7d0";
+
         return (
           <div
             key={c.id}
             style={{
-              display:       "flex",
-              alignItems:    "center",
-              gap:           6,
-              padding:       "4px 0",
-              borderTop:     "1px solid #fde68a",
+              border:       `1px solid ${borderColor}`,
+              borderRadius: 8,
+              background:   bgColor,
+              padding:      "8px 10px",
+              display:      "flex",
+              flexDirection: "column",
+              gap:          6,
             }}
           >
-            <span style={{
-              ...badge,
-              background: isDelete ? "#fee2e2" : "#dcfce7",
-              color:      isDelete ? "#b91c1c" : "#15803d",
-              flexShrink: 0,
-            }}>
-              {isDelete ? "−" : "+"} {OPERATION_LABEL[c.operation] ?? c.operation}
-            </span>
-            <span style={{ color: "#64748b", fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-              {author}
-            </span>
-            <button
-              onClick={() => acceptOne(c.id)}
-              style={btnStyle("#15803d", "#fff")}
-              title={`Accept ${author}'s change`}
-            >
-              Use this
-            </button>
-            <button
-              onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [c.id]); onClose(); }}
-              style={btnStyle("#64748b", "#fff")}
-              title={`Reject ${author}'s change`}
-            >
-              ✗
-            </button>
+            {/* Author + action label */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{
+                ...badge,
+                background: isDelete ? "#fee2e2" : "#dcfce7",
+                color:      accentColor,
+              }}>
+                {isDelete ? "−" : "+"} {OPERATION_LABEL[c.operation] ?? c.operation}
+              </span>
+              <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 12 }}>{author}</span>
+              <span style={{ color: "#64748b", fontSize: 11 }}>{actionLabel}</span>
+            </div>
+
+            {/* Text preview */}
+            {c.text ? (
+              <div style={textPreview(isDelete ? "#fee2e2" : "#dcfce7", accentColor)}>
+                "{c.text}"
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, color: "#94a3b8", fontStyle: "italic" }}>
+                {isDelete ? "(paragraph / node deletion)" : "(new content)"}
+              </div>
+            )}
+
+            {/* Row actions */}
+            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+              <button
+                onClick={() => acceptOne(c.id)}
+                style={btnStyle(accentColor, "#fff")}
+                title={`Accept ${author}'s ${isDelete ? "deletion" : "insertion"}, reject others`}
+              >
+                {isDelete ? "Keep deletion" : "Keep insertion"}
+              </button>
+              <button
+                onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [c.id]); onClose(); }}
+                style={btnStyle("#94a3b8", "#fff")}
+                title={`Reject only ${author}'s change`}
+              >
+                Ignore
+              </button>
+            </div>
           </div>
         );
       })}
 
-      {/* Reject all */}
-      <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 2 }}>
+      {/* Footer */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 2 }}>
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>
+          Or reject all changes in this range
+        </span>
         <button onClick={rejectAll} style={btnStyle("#b91c1c", "#fff")}>
           Reject All
         </button>
@@ -219,7 +236,13 @@ function ConflictPopover({
   );
 }
 
-// ── Shared styles ─────────────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/** Display name: strip "user:" prefix if present, cap length. */
+function shortName(authorID: string): string {
+  const name = authorID.split(":").pop() ?? authorID;
+  return name.length > 20 ? name.slice(0, 20) + "…" : name;
+}
 
 const badge = {
   display:      "inline-flex",
@@ -229,15 +252,31 @@ const badge = {
   borderRadius: 99,
   fontSize:     11,
   fontWeight:   600,
+  flexShrink:   0,
 } as const;
+
+function textPreview(bg: string, color: string) {
+  return {
+    background:   bg,
+    color,
+    borderRadius: 4,
+    padding:      "4px 8px",
+    fontSize:     12,
+    lineHeight:   1.4,
+    fontFamily:   "Georgia, serif",
+    wordBreak:    "break-word" as const,
+    maxHeight:    60,
+    overflowY:    "auto" as const,
+  };
+}
 
 function btnStyle(bg: string, color: string) {
   return {
     background:   bg,
     color,
     border:       "none",
-    borderRadius: 4,
-    padding:      "3px 9px",
+    borderRadius: 5,
+    padding:      "4px 10px",
     cursor:       "pointer",
     fontSize:     12,
     fontWeight:   600,

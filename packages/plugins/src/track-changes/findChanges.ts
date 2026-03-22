@@ -5,6 +5,7 @@ import { ChangeSet } from "./ChangeSet";
 import { getMarkTrackedData, getNodeTrackedData } from "./helpers";
 import {
   CHANGE_OPERATION,
+  CHANGE_STATUS,
   IncompleteChange,
   MarkChange,
   NodeAttrChange,
@@ -106,5 +107,24 @@ export function findChanges(state: EditorState): ChangeSet {
   });
 
   current && changes.push(current.change);
+
+  // ── Conflict detection (computed, no mark mutations) ───────────────────────
+  // Two pending changes conflict when they overlap in document range AND belong
+  // to different authors. This is the authoritative source of isConflict — we
+  // set it on the dataTracked copy inside the ChangeSet so the renderer and
+  // popover pick it up without any mark fragmentation.
+  const pending = changes.filter(c => c.dataTracked.status === CHANGE_STATUS.pending);
+  for (let i = 0; i < pending.length; i++) {
+    for (let j = i + 1; j < pending.length; j++) {
+      const a = pending[i]!;
+      const b = pending[j]!;
+      if (a.dataTracked.authorID === b.dataTracked.authorID) continue;
+      if (a.from < b.to && a.to > b.from) {
+        (a.dataTracked as Record<string, unknown>).isConflict = true;
+        (b.dataTracked as Record<string, unknown>).isConflict = true;
+      }
+    }
+  }
+
   return new ChangeSet(changes);
 }

@@ -10,16 +10,15 @@ export interface ChangePopoverInfo {
   status: CHANGE_STATUS;
   from: number;
   to: number;
+  /** The actual text content involved in this change (preview for the UI). */
+  text: string;
   /**
-   * True when two or more authors' marks overlap this exact segment.
-   * When true, `conflictChanges` contains all overlapping changes so the UI
-   * can render per-author accept/reject controls.
+   * True when two or more authors' marks overlap this segment.
+   * When true, `conflictChanges` contains all parties so the UI can render
+   * per-author accept/reject controls.
    */
   isConflict: boolean;
-  /**
-   * All pending changes that overlap the cursor position when isConflict is true.
-   * Empty array for normal (non-conflict) changes.
-   */
+  /** All pending changes that overlap this conflict range. Empty for normal changes. */
   conflictChanges: ChangePopoverInfo[];
 }
 
@@ -35,16 +34,9 @@ export interface ChangePopoverCallbacks {
  * Subscribes to editor state changes and fires onShow/onMove/onHide whenever
  * the cursor lands inside a pending tracked change.
  *
- * When multiple authors' marks overlap (isConflict), info.conflictChanges
- * contains all overlapping changes so the UI can render a conflict popover
- * with per-author accept/reject buttons.
- *
- * @example
- *   const cleanup = createChangePopover(editor, {
- *     onShow: (rect, info) => { popover.style.display = "block"; ... },
- *     onMove: (rect, info) => { popover.style.top = rect.bottom + "px"; },
- *     onHide: () => { popover.style.display = "none"; },
- *   });
+ * When isConflict is true, info.conflictChanges contains ALL parties whose
+ * marks overlap the conflict range (not just those at the cursor position),
+ * so the UI can show per-author previews and accept/reject buttons.
  */
 export function createChangePopover(
   editor: IEditor,
@@ -64,49 +56,68 @@ export function createChangePopover(
 
     const { head } = state.selection;
     const { changes } = pluginState.changeSet;
+    const pending = changes.filter(c => c.dataTracked.status === CHANGE_STATUS.pending);
 
-    // All pending changes that contain the cursor
-    const atCursor = changes.filter(
-      c =>
-        c.dataTracked.status === CHANGE_STATUS.pending &&
-        head >= c.from &&
-        head <= c.to,
-    );
+    // Primary: first pending change whose range contains the cursor
+    const primary = pending.find(c => head >= c.from && head <= c.to);
 
-    if (atCursor.length === 0) {
+    if (!primary) {
       if (visible) { visible = false; lastKey = null; onHide(); }
       return;
     }
 
-    // Primary change — the first one (determines the popover anchor rect)
-    const primary = atCursor[0]!;
     const rect = editor.getViewportRect(primary.from, primary.to);
     if (!rect) {
       if (visible) { visible = false; lastKey = null; onHide(); }
       return;
     }
 
-    const isConflict = atCursor.length > 1 ||
-      !!(primary.dataTracked as { isConflict?: boolean }).isConflict;
+    const primaryIsConflict = !!(primary.dataTracked as { isConflict?: boolean }).isConflict;
 
-    // Build info objects for all changes at the cursor
+    // When the primary change is flagged as a conflict, collect ALL pending
+    // changes that overlap its range — not just those at the cursor.
+    // This ensures both parties are always shown (e.g. user's deletion at
+    // [4,11] and AI's insertion at [4,4] share the conflict range).
+    let conflictGroup: typeof pending = [];
+    let isConflict = false;
+
+    if (primaryIsConflict) {
+      conflictGroup = pending.filter(
+        c => c.from <= primary.to && c.to >= primary.from,
+      );
+      isConflict = conflictGroup.length > 1 || primaryIsConflict;
+    } else {
+      // Check if multiple pending changes overlap the cursor (non-flagged overlap)
+      const atCursor = pending.filter(c => head >= c.from && head <= c.to);
+      if (atCursor.length > 1) {
+        conflictGroup = atCursor;
+        isConflict = true;
+      }
+    }
+
+    const readText = (from: number, to: number): string => {
+      if (from >= to) return "";
+      try { return state.doc.textBetween(from, to, " "); } catch { return ""; }
+    };
+
     const toInfo = (c: typeof primary): ChangePopoverInfo => ({
-      id:               c.id,
-      operation:        c.dataTracked.operation as CHANGE_OPERATION,
-      authorID:         c.dataTracked.authorID ?? "unknown",
-      status:           c.dataTracked.status as CHANGE_STATUS,
-      from:             c.from,
-      to:               c.to,
-      isConflict:       !!(c.dataTracked as { isConflict?: boolean }).isConflict,
-      conflictChanges:  [],
+      id:              c.id,
+      operation:       c.dataTracked.operation as CHANGE_OPERATION,
+      authorID:        c.dataTracked.authorID ?? "unknown",
+      status:          c.dataTracked.status as CHANGE_STATUS,
+      from:            c.from,
+      to:              c.to,
+      text:            readText(c.from, c.to),
+      isConflict:      !!(c.dataTracked as { isConflict?: boolean }).isConflict,
+      conflictChanges: [],
     });
 
     const primaryInfo = toInfo(primary);
     primaryInfo.isConflict = isConflict;
-    primaryInfo.conflictChanges = isConflict ? atCursor.map(toInfo) : [];
+    primaryInfo.conflictChanges = isConflict ? conflictGroup.map(toInfo) : [];
 
-    // Stable key: sorted ids of all changes at cursor
-    const key = atCursor.map(c => c.id).sort().join("|");
+    // Stable key: sorted ids of the conflict group (or just primary)
+    const key = (isConflict ? conflictGroup : [primary]).map(c => c.id).sort().join("|");
 
     if (visible && lastKey === key) {
       onMove(rect, primaryInfo);

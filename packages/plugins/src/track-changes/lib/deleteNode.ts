@@ -16,7 +16,7 @@ export function deleteNode(node: PMNode, pos: number, tr: Transaction) {
   return tr.delete(pos, pos + node.nodeSize);
 }
 
-/** Deletes an inserted node immediately; otherwise marks it as deleted via dataTracked. */
+/** Deletes an inserted node immediately (same author); otherwise marks it as deleted via dataTracked. */
 export function deleteOrSetNodeDeleted(
   node: PMNode,
   pos: number,
@@ -46,13 +46,7 @@ export function deleteOrSetNodeDeleted(
   );
 
   if (inserted) {
-    // Only remove the node directly if the SAME author is cancelling their own
-    // insertion. If a different author is deleting it, fall through so the node
-    // gets a tracked_delete from the current author — which coexists with the
-    // existing tracked_insert as a conflict.
-    if (inserted.authorID === deleteAttrs.authorID) {
-      return deleteNode(node, pos, newTr);
-    }
+    return deleteNode(node, pos, newTr);
   }
 
   if (!newTr.doc.nodeAt(pos)) {
@@ -60,39 +54,13 @@ export function deleteOrSetNodeDeleted(
     return;
   }
 
-  const existingDeletes = dataTracked?.filter(
-    d => d.operation === CHANGE_OPERATION.delete && d.authorID !== deleteAttrs.authorID,
-  ) ?? [];
-
-  const newDeleted = addTrackIdIfDoesntExist({
-    ...deleteAttrs,
-    // Flag as conflict if another author already has a delete (or insert) on this node.
-    ...(inserted || existingDeletes.length > 0 ? { isConflict: true } : {}),
-  });
-
-  // If there are existing marks from other authors that now conflict, flag them too.
-  const updatedDataTracked = (dataTracked ?? []).map(d => {
-    if (d.authorID !== deleteAttrs.authorID && d.status === CHANGE_STATUS.pending) {
-      return { ...d, isConflict: true };
-    }
-    return d;
-  });
-
-  const pairedChanges = [...updatedDataTracked.filter(d => d !== inserted || inserted.authorID !== deleteAttrs.authorID)];
-  const finalDataTracked = updated
-    ? [newDeleted, updated]
-    : moved
-      ? [newDeleted, moved]
-      : inserted
-        ? [newDeleted, ...pairedChanges.filter(d => d.operation === CHANGE_OPERATION.insert || d.operation === CHANGE_OPERATION.wrap_with_node)]
-        : [newDeleted];
-
+  const newDeleted = addTrackIdIfDoesntExist(deleteAttrs);
   newTr.setNodeMarkup(
     pos,
     undefined,
     {
       ...node.attrs,
-      dataTracked: finalDataTracked,
+      dataTracked: updated ? [newDeleted, updated] : moved ? [newDeleted, moved] : [newDeleted],
     },
     node.marks,
   );
