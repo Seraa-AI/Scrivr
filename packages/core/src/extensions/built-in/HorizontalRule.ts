@@ -86,9 +86,9 @@ export const HorizontalRule = Extension.create({
   addBlockStyles() {
     return {
       horizontalRule: {
-        font: "20px Georgia, serif",   // line height determines the visual space
-        spaceBefore: 10,
-        spaceAfter: 10,
+        font: "8px Georgia, serif",  // keep block height tight; only the rule line is drawn
+        spaceBefore: 8,
+        spaceAfter: 8,
         align: "left" as const,
       },
     };

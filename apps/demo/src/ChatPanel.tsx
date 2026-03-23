@@ -1,125 +1,147 @@
 import { useRef, useEffect, useMemo, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import type { UIMessage } from "ai";
+import type { UIMessage, DataUIPart } from "ai";
 import type { Editor } from "@inscribe/core";
-import { buildParagraphContexts, applyDiffAsSuggestion } from "@inscribe/plugins";
+import { getAiToolkit, applyDiffAsSuggestion, applyMultiBlockDiff } from "@inscribe/plugins";
+import type { ToolOutputData } from "./routes/api/ai";
+
+// ── Typed data layer ─────────────────────────────────────────────────────────
+// AppDataTypes maps each data-part name to its payload shape.
+// The server emits 'data-tool_result' chunks via onStepFinish.
+type AppDataTypes = { tool_result: ToolOutputData };
+type AppUIMessage = UIMessage<unknown, AppDataTypes>;
 
 interface ChatPanelProps {
   editor: Editor | null;
 }
 
+// ── Document context ────────────────────────────────────────────────────────
+
 function getDocContext(editor: Editor | null): {
+  blocks?: Array<{ nodeId: string; text: string }>;
   context?: string;
-  paragraphContexts?: ReturnType<typeof buildParagraphContexts>;
 } {
   if (!editor) return {};
-  // Prefer structured paragraph contexts (used by edit_paragraph tool).
-  // Fall back to plain text for selection context.
-  const paragraphContexts = buildParagraphContexts(editor);
-  if (paragraphContexts.length > 0) {
-    const state = editor.getState();
-    const { from, to } = state.selection;
-    const selected = from !== to ? state.doc.textBetween(from, to, "\n") : undefined;
-    const result: { paragraphContexts: typeof paragraphContexts; context?: string } = { paragraphContexts };
-    if (selected) result.context = selected;
-    return result;
+
+  const ai = getAiToolkit(editor);
+  if (!ai) {
+    const text = editor.getState().doc.textContent.slice(0, 600);
+    return text ? { context: text } : {};
   }
+
   const state = editor.getState();
   const { from, to } = state.selection;
-  const selected = from !== to ? state.doc.textBetween(from, to, "\n") : "";
-  const fallback = selected || state.doc.textContent.slice(0, 600);
-  const result: { context?: string } = {};
-  if (fallback) result.context = fallback;
-  return result;
+  const hasSelection = from !== to;
+
+  // Selection → send only the selected blocks so the agent works in scope.
+  // No selection → send all blocks (full document context).
+  const blocks = hasSelection ? ai.getBlocks(from, to) : ai.getBlocks();
+  return blocks.length > 0 ? { blocks } : {};
 }
+
+// ── Component ───────────────────────────────────────────────────────────────
 
 export function ChatPanel({ editor }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef  = useRef<HTMLTextAreaElement>(null);
   const editorRef = useRef(editor);
   editorRef.current = editor;
 
-  // Stable transport — injects current document context on every request
+  // Selection preview shown above the input when the user has text selected.
+  const [selectionPreview, setSelectionPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!editor) return;
+    const update = () => {
+      const state = editor.getState();
+      const { from, to } = state.selection;
+      if (from !== to) {
+        const text = state.doc.textBetween(from, to, " ");
+        setSelectionPreview(text.length > 120 ? text.slice(0, 120) + "…" : text);
+      } else {
+        setSelectionPreview(null);
+      }
+    };
+    update();
+    return editor.subscribe(update);
+  }, [editor]);
+
+  // Stable transport — injects current document context on every request.
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: "/api/ai",
         fetch: async (input, init) => {
           const body = JSON.parse((init?.body as string) ?? "{}");
-          const docCtx = getDocContext(editorRef.current);
-          Object.assign(body, docCtx);
+          Object.assign(body, getDocContext(editorRef.current));
           return fetch(input, { ...init, body: JSON.stringify(body) });
         },
       }),
     [],
   );
 
-  const { messages, sendMessage, status } = useChat({ transport });
-  const isLoading = status === "streaming" || status === "submitted";
-
   const [inputValue, setInputValue] = useState("");
 
-  // Track which tool call IDs have already been applied to the document.
-  const appliedToolCalls = useRef(new Set<string>());
-  // Capture the selection at the time the user hits Send, so we know where to insert.
+  // Capture the selection at Send time so insert/replace tools know where to go.
   const pendingSelection = useRef<{ from: number; to: number } | null>(null);
+
+  // Called by useChat's onData as each tool-result data part streams in.
+  // Fires exactly once per tool completion — no deduplication needed.
+  function applyToolResult(dataPart: DataUIPart<AppDataTypes>) {
+    if (dataPart.type !== "data-tool_result") return;
+    const ed = editorRef.current;
+    if (!ed) return;
+
+    const { toolType, output } = dataPart.data;
+
+    if (toolType === "edit_paragraph") {
+      const { nodeId, proposedText } = output as { nodeId?: string; proposedText?: string };
+      if (!nodeId || !proposedText) return;
+      applyDiffAsSuggestion(ed.getState(), (tr) => ed._applyTransaction(tr), {
+        nodeId,
+        proposedText,
+        authorID: "AI Assistant",
+      });
+      return;
+    }
+
+    if (toolType === "edit_section") {
+      const { edits } = output as { edits?: Array<{ nodeId: string; proposedText: string }> };
+      if (!edits?.length) return;
+      applyMultiBlockDiff(ed.getState(), (tr) => ed._applyTransaction(tr), {
+        blocks: edits,
+        authorID: "AI Assistant",
+      });
+      return;
+    }
+
+    const isInsert  = toolType === "insert_text";
+    const isReplace = toolType === "replace_selection";
+    if (!(isInsert || isReplace)) return;
+    const { text } = output as { text?: string };
+    if (!text) return;
+
+    const state = ed.getState();
+    const sel   = pendingSelection.current ?? { from: state.selection.from, to: state.selection.from };
+    const from  = sel.from;
+    const to    = isReplace && sel.from !== sel.to ? sel.to : sel.from;
+    ed.commands["insertAsSuggestion"]?.(text, from, to, "AI Assistant");
+  }
+
+  const { messages, sendMessage, status } = useChat<AppUIMessage>({
+    transport,
+    onData: applyToolResult,
+  });
+  const isLoading = status === "streaming" || status === "submitted";
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Auto-apply AI tool results as tracked changes the moment they arrive.
-  useEffect(() => {
-    const ed = editorRef.current;
-    if (!ed) return;
-    for (const msg of messages) {
-      if (msg.role !== "assistant") continue;
-      for (const part of msg.parts) {
-        const p = part as {
-          type: string;
-          toolCallId?: string;
-          output?: { text?: string; nodeId?: string; proposedText?: string };
-        };
-        if (!p.toolCallId) continue;
-        if (appliedToolCalls.current.has(p.toolCallId)) continue;
-
-        if (p.type === "tool-edit_paragraph") {
-          const { nodeId, proposedText } = p.output ?? {};
-          if (!nodeId || !proposedText) continue;
-          appliedToolCalls.current.add(p.toolCallId);
-          const state = ed.getState();
-          applyDiffAsSuggestion(state, (tr) => ed._applyTransaction(tr), {
-            nodeId,
-            proposedText,
-            authorID: "AI Assistant",
-          });
-          continue;
-        }
-
-        const isInsert = p.type === "tool-insert_text";
-        const isReplace = p.type === "tool-replace_selection";
-        if (!(isInsert || isReplace)) continue;
-        if (!p.output?.text) continue;
-
-        appliedToolCalls.current.add(p.toolCallId);
-
-        const state = ed.getState();
-        const sel = pendingSelection.current ?? { from: state.selection.from, to: state.selection.from };
-        const from = sel.from;
-        const to = isReplace && sel.from !== sel.to ? sel.to : sel.from;
-
-        // Route through TrackChanges.insertAsSuggestion so the edit always
-        // appears as a pending suggestion regardless of tracking mode.
-        ed.commands["insertAsSuggestion"]?.(p.output.text, from, to, "AI Assistant");
-      }
-    }
-  }, [messages]);
-
   function submit() {
     const text = inputValue.trim();
     if (!text || isLoading) return;
-    // Snapshot the current selection before sending — used when applying the suggestion.
     if (editorRef.current) {
       const s = editorRef.current.getState().selection;
       pendingSelection.current = { from: s.from, to: s.to };
@@ -145,7 +167,7 @@ export function ChatPanel({ editor }: ChatPanelProps) {
       <div style={styles.messages}>
         {messages.length === 0 && (
           <div style={styles.empty}>
-            Ask anything — Claude has your document context and can insert text directly.
+            Ask anything — Claude has your document context and can edit text directly.
           </div>
         )}
 
@@ -163,6 +185,12 @@ export function ChatPanel({ editor }: ChatPanelProps) {
       </div>
 
       <div style={styles.inputArea}>
+        {selectionPreview && (
+          <div style={styles.selectionPill}>
+            <span style={styles.selectionPillLabel}>Selection</span>
+            <span style={styles.selectionPillText}>{selectionPreview}</span>
+          </div>
+        )}
         <textarea
           ref={inputRef}
           style={styles.textarea}
@@ -185,7 +213,7 @@ export function ChatPanel({ editor }: ChatPanelProps) {
   );
 }
 
-// ── Per-message row ────────────────────────────────────────────────────────────
+// ── Per-message row ─────────────────────────────────────────────────────────
 
 function MessageRow({ msg }: { msg: UIMessage }) {
   if (msg.role === "user") {
@@ -193,9 +221,7 @@ function MessageRow({ msg }: { msg: UIMessage }) {
       <div style={styles.userBubble}>
         {msg.parts.map((part, i) =>
           part.type === "text" ? (
-            <div key={i} style={styles.bubbleText}>
-              {part.text}
-            </div>
+            <div key={i} style={styles.bubbleText}>{part.text}</div>
           ) : null,
         )}
       </div>
@@ -206,20 +232,25 @@ function MessageRow({ msg }: { msg: UIMessage }) {
     <div style={styles.aiBubble}>
       {msg.parts.map((part, i) => {
         if (part.type === "text") {
-          return (
-            <div key={i} style={styles.bubbleText}>
-              {part.text}
-            </div>
-          );
+          return <div key={i} style={styles.bubbleText}>{part.text}</div>;
         }
 
         if (part.type === "tool-edit_paragraph") {
-          const p = part as { type: string; output?: { nodeId?: string; proposedText?: string } };
+          const p = part as { type: string; output?: { proposedText?: string } };
+          return (
+            <SuggestionCard key={i} label="Edit paragraph" text={p.output?.proposedText ?? ""} />
+          );
+        }
+
+        if (part.type === "tool-edit_section") {
+          const p = part as { type: string; output?: { edits?: Array<{ nodeId: string; proposedText: string }> } };
+          const count = p.output?.edits?.length ?? 0;
+          const preview = p.output?.edits?.map((e) => e.proposedText).join("\n\n") ?? "";
           return (
             <SuggestionCard
               key={i}
-              label="Edit paragraph"
-              text={p.output?.proposedText ?? ""}
+              label={`Edit section (${count} paragraph${count !== 1 ? "s" : ""})`}
+              text={preview}
             />
           );
         }
@@ -227,12 +258,11 @@ function MessageRow({ msg }: { msg: UIMessage }) {
         if (part.type === "tool-insert_text" || part.type === "tool-replace_selection") {
           const isInsert = part.type === "tool-insert_text";
           const p = part as { type: string; output?: { text?: string } };
-          const text = p.output?.text ?? "";
           return (
             <SuggestionCard
               key={i}
               label={isInsert ? "Insert suggestion" : "Replace suggestion"}
-              text={text}
+              text={p.output?.text ?? ""}
             />
           );
         }
@@ -243,7 +273,7 @@ function MessageRow({ msg }: { msg: UIMessage }) {
   );
 }
 
-// ── Suggestion card ────────────────────────────────────────────────────────────
+// ── Suggestion card ─────────────────────────────────────────────────────────
 
 function SuggestionCard({ label, text }: { label: string; text: string }) {
   if (!text) {
@@ -254,7 +284,6 @@ function SuggestionCard({ label, text }: { label: string; text: string }) {
       </div>
     );
   }
-
   return (
     <div style={styles.toolCard}>
       <div style={styles.toolCardHeader}>
@@ -266,7 +295,7 @@ function SuggestionCard({ label, text }: { label: string; text: string }) {
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────────────────────
+// ── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = {
   panel: {
@@ -406,6 +435,33 @@ const styles = {
     gap: 8,
     flexShrink: 0,
   },
+  selectionPill: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 6,
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    borderRadius: 6,
+    padding: "5px 8px",
+    fontSize: 11,
+    lineHeight: 1.4,
+  },
+  selectionPillLabel: {
+    fontWeight: 700,
+    color: "#1d4ed8",
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.05em",
+    flexShrink: 0,
+    fontSize: 10,
+    paddingTop: 1,
+  },
+  selectionPillText: {
+    color: "#1e40af",
+    fontStyle: "italic" as const,
+    overflow: "hidden" as const,
+    textOverflow: "ellipsis" as const,
+    whiteSpace: "nowrap" as const,
+  },
   textarea: {
     width: "100%",
     resize: "none" as const,
@@ -431,4 +487,3 @@ const styles = {
     alignSelf: "flex-end" as const,
   },
 } as const;
-
