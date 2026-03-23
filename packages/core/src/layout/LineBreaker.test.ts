@@ -3,6 +3,7 @@ import { LineBreaker } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import { createMeasurer, MOCK_CHAR_WIDTH, MOCK_ASCENT } from "../test-utils";
 
+
 /**
  * LineBreaker tests.
  *
