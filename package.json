@@ -2,22 +2,24 @@
   "name": "inscribe",
   "private": true,
   "version": "0.0.1",
+  "packageManager": "pnpm@10.32.1",
   "description": "Inscribe — canvas-based document editor",
   "scripts": {
-    "dev": "pnpm --filter @inscribe/demo dev",
-    "server": "pnpm --filter @inscribe/server dev",
-    "build": "pnpm -r --filter './packages/**' run build",
-    "typecheck": "pnpm -r run typecheck",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "dev": "turbo dev --filter=@inscribe/demo",
+    "server": "turbo dev --filter=@inscribe/server",
+    "build": "turbo build --filter='./packages/**'",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "test:watch": "turbo test:watch",
     "test:ui": "vitest --ui",
-    "coverage": "vitest run --coverage",
-    "clean": "pnpm -r run clean"
+    "coverage": "turbo test -- --coverage",
+    "clean": "rm -rf {dist,node_modules} apps/*/{dist,node_modules} packages/*/{dist,node_modules}"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^2.0.0",
     "@vitest/ui": "^2.0.0",
     "happy-dom": "^20.8.4",
+    "turbo": "^2.8.20",
     "typescript": "^5.4.0",
     "vitest": "^2.0.0",
     "vitest-canvas-mock": "^1.1.3"

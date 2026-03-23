@@ -5,3 +5,5 @@ dist/
 coverage/
 data/
 apps/server/data/
+.turbo/
+.pnpm-store/
