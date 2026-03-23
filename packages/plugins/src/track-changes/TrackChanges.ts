@@ -1,5 +1,6 @@
 import { Extension, renderTrackedInsert, renderTrackedDelete, renderTrackedConflict } from "@inscribe/core";
 import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler } from "@inscribe/core";
+import type { EditorState, Transaction } from "prosemirror-state";
 
 import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
@@ -102,7 +103,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
     return {
       setTrackingStatus:
         (...args: unknown[]) =>
-        (state: import("prosemirror-state").EditorState, dispatch: ((tr: import("prosemirror-state").Transaction) => void) | undefined) => {
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           const status = args[0] as TrackChangesStatus | undefined;
           const currentStatus = trackChangesPluginKey.getState(state)?.status;
           if (!currentStatus) return false;
@@ -124,7 +125,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
 
       setChangeStatuses:
         (...args: unknown[]) =>
-        (state: import("prosemirror-state").EditorState, dispatch: ((tr: import("prosemirror-state").Transaction) => void) | undefined) => {
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           const status = args[0] as CHANGE_STATUS;
           const ids = args[1] as string[];
           const pluginState = trackChangesPluginKey.getState(state);
@@ -141,7 +142,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
 
       setTrackChangesUserID:
         (...args: unknown[]) =>
-        (state: import("prosemirror-state").EditorState, dispatch: ((tr: import("prosemirror-state").Transaction) => void) | undefined) => {
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           const userID = args[0] as string;
           dispatch?.(setAction(state.tr, TrackChangesAction.setUserID, userID));
           return true;
@@ -149,7 +150,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
 
       refreshChanges:
         (..._args: unknown[]) =>
-        (state: import("prosemirror-state").EditorState, dispatch: ((tr: import("prosemirror-state").Transaction) => void) | undefined) => {
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           dispatch?.(
             setAction(state.tr, TrackChangesAction.refreshChanges, true),
           );
@@ -168,7 +169,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
        */
       insertAsSuggestion:
         (...args: unknown[]) =>
-        (state: import("prosemirror-state").EditorState, dispatch: ((tr: import("prosemirror-state").Transaction) => void) | undefined) => {
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           const [text, from, to, authorID] = args as [string, number, number, string];
           const schema = state.schema;
           const insertMarkType = schema.marks.tracked_insert;

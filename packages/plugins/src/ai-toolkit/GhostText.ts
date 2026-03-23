@@ -1,4 +1,5 @@
 import { Plugin, PluginKey } from "prosemirror-state";
+import type { EditorState, Transaction } from "prosemirror-state";
 import { Extension, renderGhostText } from "@inscribe/core";
 import type { IEditor, OverlayRenderHandler } from "@inscribe/core";
 import { findNodeById } from "./UniqueId";
@@ -52,7 +53,7 @@ export const GhostText = Extension.create({
     return {
       setGhostText:
         (nodeId: unknown, content: unknown) =>
-        (state: import("prosemirror-state").EditorState, dispatch: ((tr: import("prosemirror-state").Transaction) => void) | undefined) => {
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           if (dispatch) {
             const tr = state.tr.setMeta(ghostTextPluginKey, {
               nodeId:  nodeId  as string,
@@ -66,7 +67,7 @@ export const GhostText = Extension.create({
 
       clearGhostText:
         () =>
-        (state: import("prosemirror-state").EditorState, dispatch: ((tr: import("prosemirror-state").Transaction) => void) | undefined) => {
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           if (dispatch) {
             const tr = state.tr.setMeta(ghostTextPluginKey, { nodeId: null, content: "" });
             tr.setMeta("addToHistory", false);

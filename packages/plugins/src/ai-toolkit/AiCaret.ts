@@ -1,4 +1,5 @@
 import { Plugin, PluginKey } from "prosemirror-state";
+import type { EditorState, Transaction } from "prosemirror-state";
 import { Extension, renderAiCaret } from "@inscribe/core";
 import type { IEditor, OverlayRenderHandler } from "@inscribe/core";
 
@@ -57,7 +58,7 @@ export const AiCaret = Extension.create({
     return {
       setAiCaret:
         (position: unknown) =>
-        (state: import("prosemirror-state").EditorState, dispatch: ((tr: import("prosemirror-state").Transaction) => void) | undefined) => {
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           if (dispatch) {
             const tr = state.tr.setMeta(aiCaretPluginKey, { position: position as number });
             tr.setMeta("addToHistory", false);
@@ -68,7 +69,7 @@ export const AiCaret = Extension.create({
 
       clearAiCaret:
         () =>
-        (state: import("prosemirror-state").EditorState, dispatch: ((tr: import("prosemirror-state").Transaction) => void) | undefined) => {
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           if (dispatch) {
             const tr = state.tr.setMeta(aiCaretPluginKey, { position: null });
             tr.setMeta("addToHistory", false);

@@ -1,4 +1,5 @@
 import { Node } from "prosemirror-model";
+import type { FontModifier } from "../extensions/types";
 import { TextMeasurer } from "./TextMeasurer";
 import { FontConfig, defaultFontConfig, getBlockStyle } from "./FontConfig";
 import { layoutBlock, LayoutBlock } from "./BlockLayout";
@@ -34,7 +35,7 @@ export interface PageLayoutOptions {
    */
   previousVersion?: number;
   /** Optional font modifier map from the ExtensionManager. Enables extensions to declare font effects. */
-  fontModifiers?: Map<string, import("../extensions/types").FontModifier>;
+  fontModifiers?: Map<string, FontModifier>;
 }
 
 /** A4 at 96dpi with 1-inch margins */

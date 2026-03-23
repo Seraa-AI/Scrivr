@@ -1,4 +1,5 @@
 import { Node } from "prosemirror-model";
+import type { FontModifier } from "../extensions/types";
 import { TextMeasurer } from "./TextMeasurer";
 import { LineBreaker, LayoutLine, InputSpan } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
@@ -54,7 +55,7 @@ export interface BlockLayoutOptions {
    */
   lineIndexOffset?: number;
   /** Mark name → font modifier. When provided, resolveFont uses it instead of the built-in switch. */
-  fontModifiers?: Map<string, import("../extensions/types").FontModifier>;
+  fontModifiers?: Map<string, FontModifier>;
 }
 
 /**
@@ -260,7 +261,7 @@ function extractSpans(
   nodePos: number,
   baseFont: string,
   _fontConfig: FontConfig,
-  fontModifiers?: Map<string, import("../extensions/types").FontModifier>
+  fontModifiers?: Map<string, FontModifier>
 ): InputSpan[] {
   const spans: InputSpan[] = [];
 

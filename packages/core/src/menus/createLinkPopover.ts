@@ -14,6 +14,7 @@
  *     onHide: () => { popover.style.display = "none" },
  *   });
  */
+import type { Node, MarkType } from "prosemirror-model";
 import type { IEditor } from "../extensions/types";
 
 export interface LinkPopoverInfo {
@@ -88,9 +89,9 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
 
 /** Walk the doc to find the contiguous range covered by a specific mark type around `pos`. */
 function findMarkRange(
-  doc: import("prosemirror-model").Node,
+  doc: Node,
   pos: number,
-  markType: import("prosemirror-model").MarkType,
+  markType: MarkType,
 ): { from: number; to: number } {
   const $pos  = doc.resolve(pos);
   const start = $pos.start();

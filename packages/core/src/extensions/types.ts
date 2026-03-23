@@ -13,7 +13,8 @@
  *   Phase 3 — addLayoutHandler / addMarkDecorators → wired into BlockRegistry + renderer
  */
 
-import type { NodeSpec, MarkSpec, Schema, Node } from "prosemirror-model";
+import type { NodeSpec, MarkSpec, Schema, Node, Mark } from "prosemirror-model";
+import type { MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState } from "prosemirror-state";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
@@ -115,9 +116,9 @@ export interface MarkdownParserTokenSpec {
 
 /** Node serializer function for prosemirror-markdown's MarkdownSerializer. */
 export type MarkdownNodeSerializer = (
-  state: import("prosemirror-markdown").MarkdownSerializerState,
-  node: import("prosemirror-model").Node,
-  parent: import("prosemirror-model").Node,
+  state: MarkdownSerializerState,
+  node: Node,
+  parent: Node,
   index: number,
 ) => void;
 
@@ -126,17 +127,17 @@ export interface MarkdownMarkSerializer {
   open:
     | string
     | ((
-        state: import("prosemirror-markdown").MarkdownSerializerState,
-        mark: import("prosemirror-model").Mark,
-        parent: import("prosemirror-model").Node,
+        state: MarkdownSerializerState,
+        mark: Mark,
+        parent: Node,
         index: number,
       ) => string);
   close:
     | string
     | ((
-        state: import("prosemirror-markdown").MarkdownSerializerState,
-        mark: import("prosemirror-model").Mark,
-        parent: import("prosemirror-model").Node,
+        state: MarkdownSerializerState,
+        mark: Mark,
+        parent: Node,
         index: number,
       ) => string);
   mixable?: boolean;

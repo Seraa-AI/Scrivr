@@ -6,6 +6,7 @@ import { AiCaret, aiCaretPluginKey } from "./AiCaret";
 import { findNodeById } from "./UniqueId";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import type { Schema } from "prosemirror-model";
+import type { Command } from "prosemirror-state";
 
 // ── AiToolkitAPI ─────────────────────────────────────────────────────────────
 
@@ -335,7 +336,7 @@ export const AiToolkit = Extension.create<AiToolkitOptions>({
   },
 
   addCommands() {
-    const cmds: Record<string, (...args: unknown[]) => import("prosemirror-state").Command> = {};
+    const cmds: Record<string, (...args: unknown[]) => Command> = {};
     if (this.options.ghostText !== false) {
       Object.assign(cmds, GhostText.resolve(this.schema).commands);
     }
