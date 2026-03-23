@@ -5,6 +5,8 @@ import { MarkdownSerializer } from "prosemirror-markdown";
 import type { Extension } from "./extensions/Extension";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
+import type { IEditor, OverlayRenderHandler } from "./extensions/types";
+import type { DocumentLayout } from "./layout/PageLayout";
 
 export interface ServerEditorOptions {
   /**
@@ -50,7 +52,7 @@ export interface ServerEditorOptions {
  *
  *   const updatedDoc = editor.toJSON();
  */
-export class ServerEditor {
+export class ServerEditor implements IEditor {
   private readonly manager: ExtensionManager;
   private state: EditorState;
 
@@ -116,4 +118,37 @@ export class ServerEditor {
     const serializer = new MarkdownSerializer(nodes, marks);
     return serializer.serialize(this.state.doc);
   }
+
+  // ── IEditor stubs — no visual surface on the server ────────────────────────
+
+  /** No-op: ServerEditor has no subscribers. */
+  subscribe(_listener: () => void): () => void {
+    return () => {};
+  }
+
+  /** No-op: ServerEditor has no overlay canvas. */
+  addOverlayRenderHandler(_handler: OverlayRenderHandler): () => void {
+    return () => {};
+  }
+
+  /** Not available server-side — throws if called. */
+  get layout(): DocumentLayout {
+    throw new Error("layout is not available on ServerEditor");
+  }
+
+  /** Not available server-side — always returns null. */
+  getViewportRect(_from: number, _to: number): DOMRect | null {
+    return null;
+  }
+
+  /**
+   * Apply a transaction from an external source.
+   * Alias of applyTransaction — satisfies IEditor._applyTransaction.
+   */
+  _applyTransaction(tr: Transaction): void {
+    this.applyTransaction(tr);
+  }
+
+  /** No-op: ServerEditor has no renderer to redraw. */
+  redraw(): void {}
 }

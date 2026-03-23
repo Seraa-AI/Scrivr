@@ -5,6 +5,7 @@ import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
 import { findNodeById } from "./UniqueId";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
+import { buildAcceptedTextMap } from "../track-changes/lib/acceptedTextMap";
 import type { Schema } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 
@@ -140,6 +141,52 @@ export class AiToolkitAPI {
     }));
 
     return { nodes, marks };
+  }
+
+  /**
+   * Returns the accepted text of every top-level block in the document,
+   * each paired with its stable nodeId.
+   *
+   * "Accepted text" means pending deletions are excluded and pending insertions
+   * are included — exactly what a human reader sees. This is what you should
+   * send to the LLM as document context.
+   *
+   * Pass `from` / `to` to restrict to blocks that overlap a doc position range
+   * (e.g. the current selection). Omit both to get all blocks.
+   *
+   * Blocks without a nodeId (e.g. imported docs that predate UniqueId) are
+   * silently skipped — they cannot be targeted by applyMultiBlockDiff anyway.
+   *
+   * @example
+   * // Full document
+   * const blocks = ai.getBlocks();
+   *
+   * // Current selection only
+   * const { from, to } = editor.getState().selection;
+   * const blocks = ai.getBlocks(from, to);
+   */
+  getBlocks(from?: number, to?: number): Array<{ nodeId: string; text: string }> {
+    const state  = this.editor.getState();
+    const schema = state.schema as Schema;
+    const blocks: Array<{ nodeId: string; text: string }> = [];
+
+    state.doc.forEach((node, offset) => {
+      const nodeStart = offset;
+      const nodeEnd   = offset + node.nodeSize;
+
+      // If a range was given, skip blocks that don't overlap it.
+      if (from !== undefined && to !== undefined) {
+        if (nodeEnd <= from || nodeStart >= to) return;
+      }
+
+      const nodeId = node.attrs["nodeId"] as string | null | undefined;
+      if (!nodeId) return;
+
+      const { acceptedText } = buildAcceptedTextMap(node, offset, schema);
+      if (acceptedText) blocks.push({ nodeId, text: acceptedText });
+    });
+
+    return blocks;
   }
 
   // ── Streaming ──────────────────────────────────────────────────────────────
