@@ -64,41 +64,60 @@ const assignId = (
 };
 
 /**
- * Merges adjacent tracked marks at a position when they share the same author, operation, and status.
+ * Merges tracked marks between text nodes at a position
+ *
+ * Will work for any nodes that use tracked_insert or tracked_delete marks which may not be preferrable
+ * if used for block nodes (since we possibly want to show the individual changed nodes).
+ * Merging is done based on the userID, operation type and status.
+ * @param pos
+ * @param doc
+ * @param newTr
+ * @param schema
  */
 export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, schema: Schema) {
   const resolved = doc.resolve(pos);
   const { nodeAfter, nodeBefore } = resolved;
 
-  const leftMark = nodeBefore?.marks.filter(
+  if (!nodeAfter || !nodeBefore) return;
+
+  const leftMarks = nodeBefore.marks.filter(
     m => m.type === schema.marks.tracked_insert || m.type === schema.marks.tracked_delete,
-  )[0];
-  const rightMark = nodeAfter?.marks.filter(
+  );
+  const rightMarks = nodeAfter.marks.filter(
     m => m.type === schema.marks.tracked_insert || m.type === schema.marks.tracked_delete,
-  )[0];
+  );
 
-  if (!nodeAfter || !nodeBefore || !leftMark || !rightMark || leftMark.type !== rightMark.type) {
-    return;
-  }
-
-  const leftDataTracked: Partial<TrackedAttrs> = leftMark.attrs.dataTracked;
-  const rightDataTracked: Partial<TrackedAttrs> = rightMark.attrs.dataTracked;
-
-  if (!shouldMergeTrackedAttributes(leftDataTracked, rightDataTracked)) return;
-
-  const isLeftOlder = (leftDataTracked.createdAt || 0) < (rightDataTracked.createdAt || 0);
-  const ancestorAttrs = isLeftOlder ? leftDataTracked : rightDataTracked;
-  const dataTracked = { ...ancestorAttrs, updatedAt: Date.now() };
+  if (leftMarks.length === 0 || rightMarks.length === 0) return;
 
   const fromStartOfMark = pos - nodeBefore.nodeSize;
   const toEndOfMark = pos + nodeAfter.nodeSize;
 
-  newTr.addMark(
-    fromStartOfMark,
-    toEndOfMark,
-    leftMark.type.create({
+  // Merge all matching pairs across stacked marks (supports multi-author coexistence).
+  for (const leftMark of leftMarks) {
+    const rightMark = rightMarks.find(m => m.type === leftMark.type);
+    if (!rightMark) continue;
+
+    const leftDataTracked: Partial<TrackedAttrs> = leftMark.attrs.dataTracked;
+    const rightDataTracked: Partial<TrackedAttrs> = rightMark.attrs.dataTracked;
+
+    // Already the same change — no need to regenerate the ID (would fragment the group).
+    if (leftDataTracked.id && leftDataTracked.id === rightDataTracked.id) continue;
+
+    if (!shouldMergeTrackedAttributes(leftDataTracked, rightDataTracked)) continue;
+
+    const isLeftOlder = (leftDataTracked.createdAt || 0) < (rightDataTracked.createdAt || 0);
+    const ancestorAttrs = isLeftOlder ? leftDataTracked : rightDataTracked;
+    const dataTracked = { ...ancestorAttrs, updatedAt: Date.now() };
+    const unifiedMark = leftMark.type.create({
       ...leftMark.attrs,
       dataTracked: assignId(dataTracked, leftDataTracked, rightDataTracked),
-    }),
-  );
+    });
+
+    // With excludes:"" marks don't auto-remove each other, so we must explicitly
+    // remove both individual marks before adding the unified one. Otherwise the
+    // old marks stay stacked and the next merge picks up the wrong ID from [0].
+    newTr.removeMark(fromStartOfMark, toEndOfMark, leftMark);
+    newTr.removeMark(fromStartOfMark, toEndOfMark, rightMark);
+    newTr.addMark(fromStartOfMark, toEndOfMark, unifiedMark);
+  }
 }

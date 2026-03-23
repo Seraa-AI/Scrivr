@@ -87,11 +87,20 @@ export function createChangePopover(
       );
       isConflict = conflictGroup.length > 1 || primaryIsConflict;
     } else {
-      // Check if multiple pending changes overlap the cursor (non-flagged overlap)
+      // Check if multiple pending changes overlap the cursor (non-flagged overlap).
+      // Only treat as a conflict when different authors have opposing operations
+      // (insert vs delete). Same-author overlaps or same-operation overlaps are
+      // normal multi-author coexistence, not conflicts.
       const atCursor = pending.filter(c => head >= c.from && head <= c.to);
       if (atCursor.length > 1) {
-        conflictGroup = atCursor;
-        isConflict = true;
+        const uniqueAuthors = new Set(atCursor.map(c => c.dataTracked.authorID));
+        const ops = new Set(atCursor.map(c => c.dataTracked.operation));
+        const hasOpposingOps =
+          ops.has(CHANGE_OPERATION.insert) && ops.has(CHANGE_OPERATION.delete);
+        if (uniqueAuthors.size > 1 && hasOpposingOps) {
+          conflictGroup = atCursor;
+          isConflict = true;
+        }
       }
     }
 

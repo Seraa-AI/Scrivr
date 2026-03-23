@@ -145,7 +145,7 @@ function loopContentAndMergeText(content: Fragment, newTrackAttrs: NewTrackedAtt
       prev?.isText &&
       recursed.isText &&
       equalMarks(prev, recursed) &&
-      getTextNodeTrackedMarkData(prev, schema)?.operation === CHANGE_OPERATION.insert
+      getTextNodeTrackedMarkData(prev, schema)?.some(d => d.operation === CHANGE_OPERATION.insert)
     ) {
       updatedChildren.splice(i - 1, 1, schema.text("" + prev.text + recursed.text, prev.marks));
     } else {

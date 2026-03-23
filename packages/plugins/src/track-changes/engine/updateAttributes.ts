@@ -5,7 +5,6 @@ import { Mapping } from "prosemirror-transform";
 import { ChangeSet } from "../ChangeSet";
 import {
   getBlockInlineTrackedData,
-  getTextNodeTrackedMarkData,
 } from "../helpers";
 import {
   CHANGE_OPERATION,
@@ -30,23 +29,20 @@ export function updateChangeAttrs(
   }
 
   const { operation } = trackedAttrs;
-  const oldTrackData =
-    change.type === "text-change"
-      ? getTextNodeTrackedMarkData(node, schema)
-      : getBlockInlineTrackedData(node);
   if (!operation) {
     console.warn(
       "updateChangeAttrs: unable to determine operation of change ",
       change,
     );
-  } else if (!oldTrackData) {
-    console.warn("updateChangeAttrs: no old dataTracked for change ", change);
   }
   if (change.type === "text-change") {
+    // Find the specific mark that corresponds to this change (matched by id).
     const oldMark = node.marks.find(
       m =>
-        m.type === schema.marks.tracked_insert ||
-        m.type === schema.marks.tracked_delete,
+        (m.type === schema.marks.tracked_insert || m.type === schema.marks.tracked_delete) &&
+        (m.attrs.dataTracked as { id?: string } | null)?.id === change.id,
+    ) ?? node.marks.find(
+      m => m.type === schema.marks.tracked_insert || m.type === schema.marks.tracked_delete,
     );
     if (!oldMark) {
       console.warn(
@@ -67,7 +63,7 @@ export function updateChangeAttrs(
         change.to,
         oldMark.type.create({
           ...oldMark.attrs,
-          dataTracked: { ...oldTrackData, ...trackedAttrs },
+          dataTracked: { ...oldMark.attrs.dataTracked, ...trackedAttrs },
         }),
       );
     }

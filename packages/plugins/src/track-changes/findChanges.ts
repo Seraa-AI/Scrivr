@@ -20,7 +20,9 @@ import {
  */
 export function findChanges(state: EditorState): ChangeSet {
   const changes: IncompleteChange[] = [];
-  let current: { change: IncompleteChange; node: PMNode } | undefined;
+  // Map from change ID → active group. Supports multiple marks per text node
+  // (e.g. tracked_insert + tracked_delete stacked from different authors).
+  const currentMap = new Map<string, { change: IncompleteChange; node: PMNode }>();
 
   state.doc.descendants((node, pos) => {
     const tracked = getNodeTrackedData(node, state.schema) || [];
@@ -42,19 +44,31 @@ export function findChanges(state: EditorState): ChangeSet {
       });
     });
 
+    // Build the set of IDs active in this node so we can flush stale groups.
+    const activeIds = new Set(tracked.map(d => d?.id || "").filter(Boolean));
+
+    // Flush groups whose IDs didn't appear in this node (the mark sequence ended).
+    if (tracked.length > 0) {
+      for (const [id, c] of Array.from(currentMap.entries())) {
+        if (!activeIds.has(id)) {
+          changes.push(c.change);
+          currentMap.delete(id);
+        }
+      }
+    }
+
     for (let i = 0; i < tracked.length; i += 1) {
       const dataTracked = tracked[i];
       const id = dataTracked?.id || "";
 
-      if (current && current.change.id === id) {
-        current.change.to = pos + node.nodeSize;
-        current.node = node;
+      if (currentMap.has(id)) {
+        // Extend the existing group to cover this node.
+        currentMap.get(id)!.change.to = pos + node.nodeSize;
+        currentMap.get(id)!.node = node;
         continue;
       }
 
-      current && changes.push(current.change);
-
-      let change;
+      let change: IncompleteChange;
       if (node.isText) {
         change = {
           id,
@@ -97,16 +111,18 @@ export function findChanges(state: EditorState): ChangeSet {
         } as PartialChange<NodeChange>;
       }
 
-      current = { change, node };
+      currentMap.set(id, { change, node });
     }
 
-    if (tracked.length === 0 && current) {
-      changes.push(current.change);
-      current = undefined;
+    // Node with no tracked data ends all active groups (block boundary).
+    if (tracked.length === 0 && currentMap.size > 0) {
+      currentMap.forEach(c => changes.push(c.change));
+      currentMap.clear();
     }
   });
 
-  current && changes.push(current.change);
+  // Flush any remaining open groups.
+  currentMap.forEach(c => changes.push(c.change));
 
   // ── Conflict detection (computed, no mark mutations) ───────────────────────
   // Two pending changes conflict when they overlap in document range AND belong
@@ -119,6 +135,15 @@ export function findChanges(state: EditorState): ChangeSet {
       const a = pending[i]!;
       const b = pending[j]!;
       if (a.dataTracked.authorID === b.dataTracked.authorID) continue;
+      // Only flag as conflict when operations are opposing (insert vs delete).
+      // Two inserts from different authors coexisting in the same range is normal
+      // multi-author collaboration, not a conflict.
+      const aOp = a.dataTracked.operation;
+      const bOp = b.dataTracked.operation;
+      const areOpposing =
+        (aOp === CHANGE_OPERATION.insert && bOp === CHANGE_OPERATION.delete) ||
+        (aOp === CHANGE_OPERATION.delete && bOp === CHANGE_OPERATION.insert);
+      if (!areOpposing) continue;
       if (a.from < b.to && a.to > b.from) {
         (a.dataTracked as Record<string, unknown>).isConflict = true;
         (b.dataTracked as Record<string, unknown>).isConflict = true;

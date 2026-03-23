@@ -142,11 +142,9 @@ export function getTextNodeTrackedMarkData(node: PMNode | null, schema: Schema) 
     }
   });
 
-  if (marksTrackedData.length > 1) {
-    console.warn("inline node with more than 1 of tracked marks", marksTrackedData);
-  }
-
-  return marksTrackedData[0] || undefined;
+  // Return all tracked mark data — a text node can have stacked marks from
+  // different authors (tracked_insert + tracked_delete coexisting via excludes:"").
+  return marksTrackedData.length > 0 ? marksTrackedData : undefined;
 }
 
 export function getBlockInlineTrackedData(node: PMNode): Partial<TrackedAttrs>[] | undefined {
@@ -200,8 +198,12 @@ export function getMergeableMarkTrackedAttrs(
   attrs: Partial<TrackedAttrs>,
   schema: Schema,
 ) {
-  const nodeAttrs = getTextNodeTrackedMarkData(node, schema);
-  return nodeAttrs && shouldMergeTrackedAttributes(nodeAttrs, attrs) ? nodeAttrs : null;
+  const allAttrs = getTextNodeTrackedMarkData(node, schema);
+  if (!allAttrs) return null;
+  // When marks are stacked (multi-author), find the one that matches the
+  // delete attrs being applied — same author, operation, and status.
+  const matching = allAttrs.find(a => shouldMergeTrackedAttributes(a, attrs));
+  return matching || null;
 }
 
 export const updateBlockNodesAttrs = (
