@@ -58,6 +58,13 @@ type InsertDeleteAttrs = {
    * Set by splitRangeForNewMark when a second author touches the same range.
    */
   isConflict?: boolean;
+  /**
+   * Links a tracked_delete and its paired tracked_insert into one logical
+   * replacement. Set by applyDiffAsSuggestion for adjacent delete+insert pairs
+   * produced by the LCS diff. UI can use this to accept/reject the replacement
+   * as a single atomic operation.
+   */
+  groupId?: string;
 };
 
 export type UpdateAttrs = Omit<InsertDeleteAttrs, "operation"> & {
