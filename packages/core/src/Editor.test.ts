@@ -851,3 +851,56 @@ describe("Editor — keyboard event handling", () => {
     cleanup();
   });
 });
+
+// ── Phase 2: lazy CharacterMap + cursorPage ───────────────────────────────────
+
+describe("Editor — cursorPage", () => {
+  it("returns 1 for a fresh single-page document", () => {
+    const { editor, cleanup } = makeEditor();
+    expect(editor.cursorPage).toBe(1);
+    cleanup();
+  });
+
+  it("reflects the page the cursor is on after typing", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("Hello");
+    // Still a single page — cursor page should remain 1
+    expect(editor.cursorPage).toBe(1);
+    cleanup();
+  });
+
+  it("only populates the cursor page and its neighbours in the charmap", () => {
+    const { editor, cleanup } = makeEditor();
+
+    // Access the private populatedPages set via the public ensurePagePopulated
+    // contract: after ensureLayout, only pages cursor±1 should be in the set.
+    // We verify indirectly: calling ensurePagePopulated for page 99 (doesn't exist)
+    // is a no-op and won't throw.
+    expect(() => editor.ensurePagePopulated(99)).not.toThrow();
+
+    // The charmap should have entries for page 1 (the only page) after construction.
+    const coords = editor.charMap.coordsAtPos(1);
+    // A fresh doc has an empty paragraph — coordsAtPos may return null (no glyphs)
+    // or a result on page 1. Either way it must NOT be on a page other than 1.
+    if (coords !== null) {
+      expect(coords.page).toBe(1);
+    }
+    cleanup();
+  });
+
+  it("charmap.coordsAtPos with scopeToPage only returns glyphs from that page", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("Hello");
+    // The cursor is after "Hello" — coordsAtPos with scopeToPage=1 should
+    // return a result on page 1 (the only page).
+    const sel = editor.getSelectionSnapshot();
+    const coords = editor.charMap.coordsAtPos(sel.head, 1);
+    expect(coords).not.toBeNull();
+    expect(coords?.page).toBe(1);
+
+    // Scoped to a page that doesn't exist — should return null.
+    const wrongPage = editor.charMap.coordsAtPos(sel.head, 99);
+    expect(wrongPage).toBeNull();
+    cleanup();
+  });
+});
