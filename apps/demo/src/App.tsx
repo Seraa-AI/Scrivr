@@ -66,6 +66,22 @@ const EMPTY_TOOLBAR: ToolbarSlice = {
   blockAttrs: {},
 };
 
+function Spinner() {
+  return (
+    <svg width={20} height={20} viewBox="0 0 20 20" style={styles.spinner}>
+      <circle cx={10} cy={10} r={8} fill="none" stroke="#cbd5e1" strokeWidth={2.5} />
+      <circle
+        cx={10} cy={10} r={8}
+        fill="none"
+        stroke="#3b82f6"
+        strokeWidth={2.5}
+        strokeDasharray="16 34"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function App() {
   // Lazy init — runs once on the client, never on the server
   const [{ room, userName, userColor, extensions }] = useState(() => {
@@ -87,6 +103,14 @@ export function App() {
 
   // deepEqual is the default — handles string[], nested objects correctly.
   const toolbar = useEditorState({ editor, selector: selectToolbar }) ?? EMPTY_TOOLBAR;
+
+  // Loading state — driven by Collaboration.ts setReady(false/true) + idle chunks.
+  // Object.is is sufficient — 'syncing' | 'rendering' | 'ready' are string primitives.
+  const loadingState = useEditorState({
+    editor,
+    selector: (ctx) => ctx.editor.loadingState,
+    equalityFn: Object.is,
+  }) ?? "syncing";
 
   return (
     <div style={styles.shell}>
@@ -118,6 +142,15 @@ export function App() {
           <Canvas editor={editor} style={styles.canvas} />
         </main>
         <ChatPanel editor={editor} />
+
+        {loadingState === "syncing" && (
+          <div style={styles.loadingOverlay}>
+            <div style={styles.loadingCard}>
+              <Spinner />
+              <span style={styles.loadingText}>Connecting…</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <BubbleMenuBar editor={editor} />
@@ -187,6 +220,7 @@ const styles = {
     flex: 1,
     display: "flex",
     overflow: "hidden",
+    position: "relative" as const,
   },
   main: {
     flex: 1,
@@ -197,5 +231,37 @@ const styles = {
   },
   canvas: {
     position: "relative" as const,
+  },
+  loadingOverlay: {
+    position: "absolute" as const,
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(241, 245, 249, 0.85)",
+    backdropFilter: "blur(2px)",
+    zIndex: 10,
+    pointerEvents: "none" as const,
+  },
+  loadingCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "#fff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 8,
+    padding: "10px 18px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+    pointerEvents: "none" as const,
+  },
+  loadingText: {
+    fontSize: 13,
+    color: "#475569",
+    fontFamily: "monospace",
+  },
+  spinner: {
+    animation: "spin 0.9s linear infinite",
+    display: "block" as const,
+    flexShrink: 0,
   },
 } as const;

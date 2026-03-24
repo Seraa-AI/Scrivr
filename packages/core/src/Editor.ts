@@ -633,6 +633,36 @@ export class Editor {
   }
 
   /**
+   * Three-phase loading state for collaborative documents.
+   *
+   *  'syncing'   — editor created, waiting for the Y.js / HocusPocus server to
+   *                deliver the document (setReady(false) is in effect). No
+   *                content is visible yet — show a full-screen loading UI.
+   *
+   *  'rendering' — onSynced fired and the first pages are already painted; idle
+   *                callbacks are completing the rest of the layout in the
+   *                background. Content is visible and interactive — you can hide
+   *                the loading UI and show a subtle progress indicator if you want.
+   *
+   *  'ready'     — all pages are laid out. For non-collaborative editors this is
+   *                the initial state (no sync step needed).
+   *
+   * The value changes are surfaced through the normal notifyListeners() cycle,
+   * so useEditorState() picks them up without any extra wiring:
+   *
+   *   const loadingState = useEditorState({
+   *     editor,
+   *     selector: (ctx) => ctx.editor.loadingState,
+   *     equalityFn: Object.is,
+   *   });
+   */
+  get loadingState(): "syncing" | "rendering" | "ready" {
+    if (!this._ready) return "syncing";
+    if (this._layoutIsPartial) return "rendering";
+    return "ready";
+  }
+
+  /**
    * The page number the cursor currently resides on.
    * Computed once per layout cycle in ensureLayout() — free to read on every
    * overlay paint without re-walking the layout.

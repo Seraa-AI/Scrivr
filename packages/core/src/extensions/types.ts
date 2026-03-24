@@ -77,6 +77,21 @@ export interface IEditor {
    * one fast chunked layout of the complete document.
    */
   setReady(ready: boolean): void;
+  /**
+   * Three-phase loading state. Changes are surfaced via subscribe() so
+   * useEditorState() picks them up automatically:
+   *
+   *   const loadingState = useEditorState({
+   *     editor,
+   *     selector: (ctx) => ctx.editor.loadingState,
+   *     equalityFn: Object.is,
+   *   });
+   *
+   *  'syncing'   — waiting for collaborative sync (no content yet)
+   *  'rendering' — first pages visible, idle layout running in background
+   *  'ready'     — fully loaded
+   */
+  get loadingState(): "syncing" | "rendering" | "ready";
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
 }
