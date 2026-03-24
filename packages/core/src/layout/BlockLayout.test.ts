@@ -15,6 +15,19 @@ import {
   heading,
 } from "../test-utils";
 
+// StarterKit schema has the fontFamily attr on paragraph and heading nodes.
+const { schema: skSchema } = buildStarterKitContext();
+
+// Helper: paragraph node with a fontFamily attr set
+function paragraphWithFamily(text: string, fontFamily: string) {
+  return skSchema.node("paragraph", { fontFamily }, text ? [skSchema.text(text)] : []);
+}
+
+// Helper: heading node with a fontFamily attr set
+function headingWithFamily(level: number, text: string, fontFamily: string) {
+  return skSchema.node("heading", { level, fontFamily }, [skSchema.text(text)]);
+}
+
 // lineHeight = (12+3) * 1.2 = 18
 
 
@@ -524,5 +537,57 @@ describe("populateCharMap — end-of-line caret sentinel", () => {
     populateCharMap(block, map, 1, 0, createMeasurer());
     // 11 chars + 1 sentinel (last line only) = 12 total glyphs
     expect(map.glyphsInRange(0, 20)).toHaveLength(12);
+  });
+});
+
+// ── node.attrs.fontFamily override ────────────────────────────────────────────
+
+describe("layoutBlock — node fontFamily attr", () => {
+  it("span font uses the node fontFamily instead of the block style family", () => {
+    const block = layoutBlock(paragraphWithFamily("Hello", "Arial"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    // The span font should contain "Arial", not "Georgia"
+    expect(block.lines[0]?.spans[0]?.font).toContain("Arial");
+    expect(block.lines[0]?.spans[0]?.font).not.toContain("Georgia");
+  });
+
+  it("preserves the block style size when substituting the family", () => {
+    const block = layoutBlock(paragraphWithFamily("Hello", "Arial"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    // Paragraph base size is 14px — must be preserved after family substitution
+    expect(block.lines[0]?.spans[0]?.font).toContain("14px");
+  });
+
+  it("preserves heading size and weight when substituting the family", () => {
+    const block = layoutBlock(headingWithFamily(1, "Title", "Inter"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    const font = block.lines[0]?.spans[0]?.font ?? "";
+    expect(font).toContain("Inter");
+    expect(font).toContain("28px");
+    expect(font).toContain("bold");
+  });
+
+  it("null fontFamily attr falls back to the block style family", () => {
+    // No fontFamily attr — should use default Georgia from block style
+    const block = layoutBlock(paragraph("Hello"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    expect(block.lines[0]?.spans[0]?.font).toContain("Georgia");
+  });
+
+  it("node fontFamily overrides the fontConfig family", () => {
+    const customConfig: FontConfig = {
+      paragraph: { font: "14px Verdana", spaceBefore: 0, spaceAfter: 10, align: "left" },
+    };
+    const block = layoutBlock(paragraphWithFamily("Hello", "Courier New"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1,
+      measurer: createMeasurer(),
+      fontConfig: customConfig,
+    });
+    expect(block.lines[0]?.spans[0]?.font).toContain("Courier New");
+    expect(block.lines[0]?.spans[0]?.font).not.toContain("Verdana");
   });
 });

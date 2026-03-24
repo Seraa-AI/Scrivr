@@ -151,4 +151,12 @@ export class ServerEditor implements IEditor {
 
   /** No-op: ServerEditor has no renderer to redraw. */
   redraw(): void {}
+
+  /** No-op: ServerEditor has no renderer to redraw. */
+  setReady(ready: boolean): void {}
+
+  /** No-op: ServerEditor has no renderer to redraw. */
+  get loadingState(): "syncing" | "rendering" | "ready" {
+    return "ready";
+  }
 }

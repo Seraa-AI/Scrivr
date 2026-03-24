@@ -20,6 +20,7 @@ import { HorizontalRule } from "./built-in/HorizontalRule";
 import { Image } from "./built-in/Image";
 import { Typography } from "./built-in/Typography";
 import { Pagination } from "./built-in/Pagination";
+import { TrailingNode } from "./built-in/TrailingNode";
 import { chainCommands } from "prosemirror-commands";
 import type { InputRule } from "prosemirror-inputrules";
 import type { Command } from "prosemirror-state";
@@ -52,6 +53,7 @@ interface StarterKitOptions {
   horizontalRule?: false;
   image?: false;
   typography?: false;
+  trailingNode?: false;
 }
 
 /**
@@ -139,12 +141,20 @@ export const StarterKit = Extension.create<StarterKitOptions>({
 
   addProseMirrorPlugins() {
     const opts = this.options;
-    if (opts.history === false) return [];
+    const plugins = [];
 
-    const ext = typeof opts.history === "object"
-      ? History.configure(opts.history)
-      : History;
-    return ext.resolve(this.schema).plugins;
+    if (opts.history !== false) {
+      const ext = typeof opts.history === "object"
+        ? History.configure(opts.history)
+        : History;
+      plugins.push(...ext.resolve(this.schema).plugins);
+    }
+
+    if (opts.trailingNode !== false) {
+      plugins.push(...TrailingNode.resolve(this.schema).plugins);
+    }
+
+    return plugins;
   },
 
   addKeymap() {

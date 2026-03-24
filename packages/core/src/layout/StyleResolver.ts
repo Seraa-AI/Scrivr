@@ -41,7 +41,12 @@ function parseFont(font: string): ParsedFont {
 
     if (token === "italic" || token === "oblique") {
       style = token;
-    } else if (token === "bold" || /^\d{3}$/.test(token)) {
+    } else if (
+      token === "bold" ||
+      token === "bolder" ||
+      token === "lighter" ||
+      /^\d{3}$/.test(token)
+    ) {
       weight = token;
     } else if (/^\d+(\.\d+)?(px|pt|em|rem|%)$/.test(token)) {
       sizeIndex = i;
@@ -50,17 +55,21 @@ function parseFont(font: string): ParsedFont {
   }
 
   if (sizeIndex === -1) {
-    // Fallback — treat last token before family as size
-    sizeIndex = tokens.length - 2;
+    return {
+      style,
+      weight,
+      size: "14px",
+      family: font.replace(/^['"]|['"]$/g, ""),
+    };
   }
 
   const size = tokens[sizeIndex] ?? "14px";
-  // Everything after size is the font family (handles multi-word families)
-  const family = tokens.slice(sizeIndex + 1).join(" ") || "serif";
+
+  const rawFamily = tokens.slice(sizeIndex + 1).join(" ") || "serif";
+  const family = rawFamily.replace(/^['"]|['"]$/g, "");
 
   return { style, weight, size, family };
 }
-
 /**
  * Reconstructs a canonical CSS font string from parsed components.
  *
@@ -75,6 +84,31 @@ function buildFont(parsed: ParsedFont): string {
   parts.push(parsed.size);
   parts.push(parsed.family);
   return parts.join(" ");
+}
+
+/**
+ * Returns a copy of `font` with the family replaced by `family`.
+ * Weight, style, and size are preserved.
+ *
+ *   substituteFamily("bold 28px Georgia, serif", "Times New Roman")
+ *   → "bold 28px Times New Roman"
+ */
+export function substituteFamily(font: string, family: string): string {
+  return buildFont({ ...parseFont(font), family });
+}
+
+/**
+ * Returns a font string with weight and style stripped — only size and family
+ * remain. Used by the layout engine to measure vertical metrics (ascent/descent)
+ * independent of bold/italic variants. This prevents bold or italic spans from
+ * inflating line height while still allowing font-size changes to affect it.
+ *
+ *   "bold italic 14px Georgia" → "14px Georgia"
+ *   "bold 28px Georgia, serif" → "28px Georgia, serif"
+ */
+export function normalizeFont(font: string): string {
+  const p = parseFont(font);
+  return `${p.size} ${p.family}`;
 }
 
 /**

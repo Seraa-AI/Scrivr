@@ -1,3 +1,5 @@
+import { substituteFamily } from "./StyleResolver";
+
 /**
  * FontConfig — maps block node types to their base font and spacing.
  *
@@ -64,4 +66,18 @@ export function getBlockStyle(
     spaceAfter: 10,
     align: "left" as const,
   };
+}
+
+/**
+ * Returns a new FontConfig with the font family in every block style replaced
+ * by `fontFamily`. Sizes, weights, and spacing are unchanged.
+ *
+ * Used by layoutDocument to apply the document-level font from PageConfig.
+ */
+export function applyPageFont(config: FontConfig, fontFamily: string): FontConfig {
+  const result: FontConfig = {};
+  for (const [key, style] of Object.entries(config)) {
+    result[key] = { ...style, font: substituteFamily(style.font, fontFamily) };
+  }
+  return result;
 }

@@ -6,6 +6,7 @@ import {
   defaultFontConfig,
   getBlockStyle,
   BlockStyle,
+  applyPageFont,
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock } from "./BlockLayout";
 import type { LayoutLine } from "./LineBreaker";
@@ -14,6 +15,13 @@ export interface PageConfig {
   pageWidth: number;
   pageHeight: number;
   margins: { top: number; right: number; bottom: number; left: number };
+  /**
+   * Document-level default font family (e.g. "Georgia, serif" or "Inter, sans-serif").
+   * When set, overrides the font family in every block style — paragraph, headings, etc.
+   * Font sizes and weights defined by each block style are preserved.
+   * Absent = use whatever family is declared in each block style.
+   */
+  fontFamily?: string;
 }
 
 export interface LayoutPage {
@@ -171,17 +179,17 @@ export function layoutDocument(
   doc: Node,
   options: PageLayoutOptions,
 ): DocumentLayout {
-  const { pageConfig, measurer } = options;
-  const fontConfig = options.fontConfig ?? defaultFontConfig;
-  const { fontModifiers } = options;
+  // Destructured once — avoids repeated property access inside the hot loop.
+  const { fontModifiers, measureCache, previousLayout,pageConfig, measurer } = options;
   const version = (options.previousVersion ?? 0) + 1;
+  const baseConfig = options.fontConfig ?? defaultFontConfig;
+  const fontConfig = pageConfig.fontFamily
+    ? applyPageFont(baseConfig, pageConfig.fontFamily)
+    : baseConfig;
 
   const { pageWidth, pageHeight, margins } = pageConfig;
   const contentWidth = pageWidth - margins.left - margins.right;
   const contentHeight = pageHeight - margins.top - margins.bottom;
-
-  // Destructured once — avoids repeated property access inside the hot loop.
-  const { measureCache, previousLayout } = options;
   const maxBlocks = options.maxBlocks;
 
   // ── Resumption support: O(N) incremental chunked layout ───────────────────
@@ -550,7 +558,7 @@ function resolveBlockEntry(
   const cached = measureCache?.get(node);
   if (cached && cached.availableWidth === blockWidth) {
     const delta = nodePos - cached.nodePos;
-    if (delta === 0) return cached;
+    if (!delta) return cached;
 
     // Block shifted in the document (text inserted/deleted before it).
     // Adjust all span docPos values and update the cache entry.

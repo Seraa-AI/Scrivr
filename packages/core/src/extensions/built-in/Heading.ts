@@ -24,6 +24,7 @@ export const Heading = Extension.create<HeadingOptions>({
         attrs: {
           level:       { default: 1 },
           align:       { default: "left" },
+          fontFamily:  { default: null },
           nodeId:      { default: null },
           dataTracked: { default: [] },
         },

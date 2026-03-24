@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { layoutDocument, defaultPageConfig, collapseMargins } from "./PageLayout";
 import type { MeasureCacheEntry } from "./PageLayout";
+import { applyPageFont } from "./FontConfig";
 import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak } from "../test-utils";
 
 // lineHeight = 18, contentHeight = 1123 - 72 - 72 = 979
@@ -515,5 +516,81 @@ describe("collapseMargins", () => {
 
   it("returns 0 when both are 0", () => {
     expect(collapseMargins(0, 0)).toBe(0);
+  });
+});
+
+// ── applyPageFont ─────────────────────────────────────────────────────────────
+
+describe("applyPageFont", () => {
+  it("replaces the family in every block style", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const result = applyPageFont(fontConfig, "Inter");
+    expect(result["paragraph"]?.font).toContain("Inter");
+    expect(result["heading_1"]?.font).toContain("Inter");
+    expect(result["heading_2"]?.font).toContain("Inter");
+  });
+
+  it("preserves paragraph size after family substitution", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const result = applyPageFont(fontConfig, "Arial");
+    expect(result["paragraph"]?.font).toContain("14px");
+    expect(result["paragraph"]?.font).not.toContain("Georgia");
+  });
+
+  it("preserves heading size and weight after family substitution", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const result = applyPageFont(fontConfig, "Verdana");
+    expect(result["heading_1"]?.font).toContain("28px");
+    expect(result["heading_1"]?.font).toContain("bold");
+    expect(result["heading_1"]?.font).toContain("Verdana");
+  });
+
+  it("preserves spaceBefore, spaceAfter, and align", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const original = fontConfig["heading_1"]!;
+    const result = applyPageFont(fontConfig, "Arial");
+    expect(result["heading_1"]?.spaceBefore).toBe(original.spaceBefore);
+    expect(result["heading_1"]?.spaceAfter).toBe(original.spaceAfter);
+    expect(result["heading_1"]?.align).toBe(original.align);
+  });
+});
+
+// ── pageConfig.fontFamily end-to-end ─────────────────────────────────────────
+
+describe("layoutDocument — pageConfig.fontFamily", () => {
+  it("span fonts in a paragraph use the page fontFamily", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const layout = layoutDocument(doc(p("Hello")), {
+      pageConfig: { ...defaultPageConfig, fontFamily: "Arial" },
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+    const span = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    expect(span?.font).toContain("Arial");
+    expect(span?.font).not.toContain("Georgia");
+  });
+
+  it("span fonts in a heading use the page fontFamily", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const layout = layoutDocument(doc(heading(1, "Title")), {
+      pageConfig: { ...defaultPageConfig, fontFamily: "Verdana" },
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+    const span = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    expect(span?.font).toContain("Verdana");
+    expect(span?.font).toContain("bold");
+    expect(span?.font).toContain("28px");
+  });
+
+  it("absent fontFamily leaves block style fonts unchanged", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const layout = layoutDocument(doc(p("Hello")), {
+      pageConfig: defaultPageConfig, // no fontFamily
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+    const span = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    expect(span?.font).toContain("Georgia");
   });
 });

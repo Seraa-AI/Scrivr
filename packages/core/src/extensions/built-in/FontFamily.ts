@@ -1,3 +1,4 @@
+import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
@@ -55,7 +56,25 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
   },
 
   addCommands() {
+    const setBlockFamily = (family: string | null): Command => (state, dispatch) => {
+      const { $from, $to } = state.selection;
+      let tr = state.tr;
+      let changed = false;
+
+      state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+        if (!node.isTextblock) return;
+        if (!("fontFamily" in node.attrs)) return;
+        tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, fontFamily: family });
+        changed = true;
+      });
+
+      if (!changed) return false;
+      if (dispatch) dispatch(tr);
+      return true;
+    };
+
     return {
+      // Inline (character-level) — applies font_family mark to selected text
       setFontFamily:
         (family: unknown) =>
         (state, dispatch) => {
@@ -78,6 +97,10 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
           }
           return true;
         },
+
+      // Block-level — sets fontFamily attr on every text block in the selection
+      setBlockFontFamily: (family: unknown) => setBlockFamily(family as string),
+      unsetBlockFontFamily: () => setBlockFamily(null),
     };
   },
 
@@ -97,13 +120,16 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
 
   addToolbarItems() {
     const items: ToolbarItemSpec[] = this.options.families.map((family) => ({
-      command: "setFontFamily",
+      command: "setBlockFontFamily",
       args: [family],
       label: family,
       title: `Font: ${family}`,
       labelStyle: { fontFamily: family },
       group: "family",
-      isActive: (_activeMarks, _blockType, _blockAttrs, activeMarkAttrs) =>
+      // Active when the block attr is set, OR when every character in the
+      // selection carries the font_family mark for this family.
+      isActive: (_activeMarks, _blockType, blockAttrs, activeMarkAttrs) =>
+        blockAttrs["fontFamily"] === family ||
         activeMarkAttrs?.["font_family"]?.["family"] === family,
     }));
     return items;

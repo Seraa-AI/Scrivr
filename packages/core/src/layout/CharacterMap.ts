@@ -96,7 +96,7 @@ export class CharacterMap {
       .filter((g) => g.page === page && g.y === line.y)
       .sort((a, b) => a.x - b.x);
 
-    if (lineGlyphs.length === 0) return line.startDocPos;
+    if (!lineGlyphs.length) return line.startDocPos;
 
     for (const glyph of lineGlyphs) {
       const midpoint = glyph.x + glyph.width / 2;
@@ -131,9 +131,10 @@ export class CharacterMap {
    *   jump). Callers that need cross-page data (posAbove, posBelow) omit this.
    */
   coordsAtPos(docPos: number, scopeToPage?: number): CoordsResult | null {
-    const pool = scopeToPage !== undefined
-      ? this.glyphs.filter((g) => g.page === scopeToPage)
-      : this.glyphs;
+    const pool =
+      scopeToPage !== undefined
+        ? this.glyphs.filter((g) => g.page === scopeToPage)
+        : this.glyphs;
 
     // Exact match — start of a glyph
     const exact = pool.find((g) => g.docPos === docPos);
@@ -176,20 +177,26 @@ export class CharacterMap {
     // Find the highest line on this page that is strictly above currentLine.y
     const above = this.lines
       .filter((l) => l.page === currentLine.page && l.y < currentLine.y)
-      .reduce<LineEntry | undefined>(
-        (best, l) => (best === undefined || l.y > best.y ? l : best),
-        undefined,
-      );
+      .reduce<
+        LineEntry | undefined
+      >((best, l) => (best === undefined || l.y > best.y ? l : best), undefined);
 
-    if (above) {
+    if (above)
       return this.posAtCoords(x, above.y + above.height / 2, above.page);
-    }
 
     // First visual row on this page — jump to the last line of the previous page
-    const prevPageLines = this.lines.filter((l) => l.page === currentLine.page - 1);
-    if (prevPageLines.length === 0) return null;
-    const lastOnPrev = prevPageLines.reduce((max, l) => (l.y > max.y ? l : max));
-    return this.posAtCoords(x, lastOnPrev.y + lastOnPrev.height / 2, lastOnPrev.page);
+    const prevPageLines = this.lines.filter(
+      (l) => l.page === currentLine.page - 1,
+    );
+    if (!prevPageLines.length) return null;
+    const lastOnPrev = prevPageLines.reduce((max, l) =>
+      l.y > max.y ? l : max,
+    );
+    return this.posAtCoords(
+      x,
+      lastOnPrev.y + lastOnPrev.height / 2,
+      lastOnPrev.page,
+    );
   }
 
   /**
@@ -212,20 +219,26 @@ export class CharacterMap {
     const currentBottom = currentLine.y + currentLine.height;
     const below = this.lines
       .filter((l) => l.page === currentLine.page && l.y >= currentBottom)
-      .reduce<LineEntry | undefined>(
-        (best, l) => (best === undefined || l.y < best.y ? l : best),
-        undefined,
-      );
+      .reduce<
+        LineEntry | undefined
+      >((best, l) => (best === undefined || l.y < best.y ? l : best), undefined);
 
-    if (below) {
+    if (below)
       return this.posAtCoords(x, below.y + below.height / 2, below.page);
-    }
 
     // Last visual row on this page — jump to the first line of the next page
-    const nextPageLines = this.lines.filter((l) => l.page === currentLine.page + 1);
-    if (nextPageLines.length === 0) return null;
-    const firstOnNext = nextPageLines.reduce((min, l) => (l.y < min.y ? l : min));
-    return this.posAtCoords(x, firstOnNext.y + firstOnNext.height / 2, firstOnNext.page);
+    const nextPageLines = this.lines.filter(
+      (l) => l.page === currentLine.page + 1,
+    );
+    if (!nextPageLines.length) return null;
+    const firstOnNext = nextPageLines.reduce((min, l) =>
+      l.y < min.y ? l : min,
+    );
+    return this.posAtCoords(
+      x,
+      firstOnNext.y + firstOnNext.height / 2,
+      firstOnNext.page,
+    );
   }
 
   /**
@@ -266,7 +279,7 @@ export class CharacterMap {
   // Internal — find which line a y coordinate lands on
   private lineAtCoords(y: number, page: number): LineEntry | undefined {
     return this.lines.find(
-      (l) => l.page === page && y >= l.y && y < l.y + l.height
+      (l) => l.page === page && y >= l.y && y < l.y + l.height,
     );
   }
 
@@ -274,15 +287,15 @@ export class CharacterMap {
   // Click above first line → first line. Click below last line → last line.
   private nearestLine(y: number, page: number): LineEntry | undefined {
     const pageLines = this.lines.filter((l) => l.page === page);
-    if (pageLines.length === 0) return undefined;
+    if (!pageLines.length) return undefined;
     return pageLines.reduce((closest, line) => {
       const closestDist = Math.min(
         Math.abs(y - closest.y),
-        Math.abs(y - (closest.y + closest.height))
+        Math.abs(y - (closest.y + closest.height)),
       );
       const lineDist = Math.min(
         Math.abs(y - line.y),
-        Math.abs(y - (line.y + line.height))
+        Math.abs(y - (line.y + line.height)),
       );
       return lineDist < closestDist ? line : closest;
     });

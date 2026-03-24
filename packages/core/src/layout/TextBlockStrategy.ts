@@ -1,6 +1,6 @@
 import type { CharacterMap } from "./CharacterMap";
 import type { LayoutBlock } from "./BlockLayout";
-import { computeJustifySpaceBonus } from "./BlockLayout";
+import { computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
 import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
 
 /**
@@ -149,20 +149,3 @@ function getTotalLineHeight(lines: LayoutBlock["lines"], upToIndex: number): num
   return lines.slice(0, upToIndex).reduce((sum, l) => sum + l.lineHeight, 0);
 }
 
-function computeAlignmentOffset(
-  align: LayoutBlock["align"],
-  availableWidth: number,
-  lineWidth: number
-): number {
-  switch (align) {
-    case "center": return Math.max(0, (availableWidth - lineWidth) / 2);
-    case "right":  return Math.max(0, availableWidth - lineWidth);
-    default:       return 0;
-  }
-}
-
-function countSpaces(text: string): number {
-  let n = 0;
-  for (const ch of text) if (ch === " ") n++;
-  return n;
-}

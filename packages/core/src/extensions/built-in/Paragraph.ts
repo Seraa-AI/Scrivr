@@ -1,5 +1,5 @@
 import { Extension } from "../Extension";
-import { splitBlock } from "prosemirror-commands";
+import { splitBlockKeepMarks } from "prosemirror-commands";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 
 /**
@@ -18,6 +18,7 @@ export const Paragraph = Extension.create({
         content: "inline*",
         attrs: {
           align:       { default: "left" },
+          fontFamily:  { default: null },
           nodeId:      { default: null },
           dataTracked: { default: [] },
         },
@@ -42,7 +43,7 @@ export const Paragraph = Extension.create({
 
   addKeymap() {
     return {
-      Enter: splitBlock,
+      Enter: splitBlockKeepMarks,
     };
   },
 

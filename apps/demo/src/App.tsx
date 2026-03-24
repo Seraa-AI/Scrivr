@@ -112,11 +112,23 @@ export function App() {
     equalityFn: Object.is,
   }) ?? "syncing";
 
+  const pageInfo = useEditorState({
+    editor,
+    selector: (ctx) => ({
+      current: ctx.editor.cursorPage,
+      total: ctx.editor.layout.pages.length,
+    }),
+    equalityFn: (a, b) => a.current === b.current && a.total === b.total,
+  }) ?? { current: 1, total: 1 };
+
   return (
     <div style={styles.shell}>
       <header style={styles.header}>
         <span style={styles.title}>inscribe</span>
         <span style={styles.badge}>dev</span>
+        <span style={styles.pageInfo}>
+          Page {pageInfo.current} of {pageInfo.total}
+        </span>
         <span style={styles.room}>
           <span style={{ ...styles.dot, background: userColor }} />
           {userName} · {room}
@@ -179,6 +191,11 @@ const styles = {
     flexShrink: 0,
   },
   title: { fontFamily: "monospace", fontSize: 15, fontWeight: 600 },
+  pageInfo: {
+    fontSize: 12,
+    color: "#94a3b8",
+    fontFamily: "monospace",
+  },
   room: {
     marginLeft: "auto",
     fontSize: 12,

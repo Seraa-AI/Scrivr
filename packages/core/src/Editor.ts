@@ -13,6 +13,7 @@ import { CharacterMap } from "./layout/CharacterMap";
 import { TextMeasurer } from "./layout/TextMeasurer";
 import { layoutDocument, defaultPageConfig } from "./layout/PageLayout";
 import type { PageConfig, DocumentLayout, MeasureCacheEntry, LayoutResumption } from "./layout/PageLayout";
+import type { FontConfig } from "./layout/FontConfig";
 import { populateCharMap } from "./layout/BlockLayout";
 import { insertText } from "./model/commands";
 import { PasteTransformer } from "./input/PasteTransformer";
@@ -271,6 +272,12 @@ export class Editor {
   readonly cursorManager: CursorManager;
 
   /**
+   * Merged block styles from all extensions — the fontConfig passed to every
+   * layoutDocument call. Built once at construction from ExtensionManager.
+   */
+  readonly fontConfig: FontConfig;
+
+  /**
    * Font modifier map built from all extensions.
    * Computed once at construction, used by layoutDocument.
    */
@@ -321,6 +328,7 @@ export class Editor {
     this.onChange = onChange;
     this.onFocusChange = onFocusChange;
     this.pageConfig = this.manager.buildPageConfig() ?? pageConfig ?? defaultPageConfig;
+    this.fontConfig = this.manager.buildBlockStyles();
     this.measurer = new TextMeasurer({ lineHeightMultiplier: 1.2 });
     this.charMap = new CharacterMap();
     this.fontModifiers = this.manager.buildFontModifiers();
@@ -345,6 +353,7 @@ export class Editor {
     performance.mark("inscribe:layout-initial-start");
     this._layout = layoutDocument(this.state.doc, {
       pageConfig: this.pageConfig,
+      fontConfig: this.fontConfig,
       measurer: this.measurer,
       fontModifiers: this.fontModifiers,
       previousVersion: 0,
@@ -436,6 +445,7 @@ export class Editor {
       this.populatedPages.clear();
       this._layout = layoutDocument(this.state.doc, {
         pageConfig: this.pageConfig,
+        fontConfig: this.fontConfig,
         measurer: this.measurer,
         fontModifiers: this.fontModifiers,
         previousVersion: this._layout.version,
@@ -539,6 +549,7 @@ export class Editor {
     const previousLayout = this._layout;
     this._layout = layoutDocument(this.state.doc, {
       pageConfig: this.pageConfig,
+      fontConfig: this.fontConfig,
       measurer: this.measurer,
       fontModifiers: this.fontModifiers,
       previousVersion: previousLayout.version,
@@ -607,6 +618,7 @@ export class Editor {
     performance.mark("inscribe:layout-chunk-start");
     this._layout = layoutDocument(this.state.doc, {
       pageConfig: this.pageConfig,
+      fontConfig: this.fontConfig,
       measurer: this.measurer,
       fontModifiers: this.fontModifiers,
       measureCache: this.measureCache,

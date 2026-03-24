@@ -3,8 +3,13 @@ import type { FontModifier } from "../extensions/types";
 import { TextMeasurer } from "./TextMeasurer";
 import { LineBreaker, LayoutLine, InputSpan } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
-import { FontConfig, defaultFontConfig, getBlockStyle, BlockStyle } from "./FontConfig";
-import { resolveFont } from "./StyleResolver";
+import {
+  FontConfig,
+  defaultFontConfig,
+  getBlockStyle,
+  BlockStyle,
+} from "./FontConfig";
+import { resolveFont, substituteFamily } from "./StyleResolver";
 
 /** Extracts px size from a CSS font string like "bold 14px Georgia, serif". Returns null if not found. */
 function parseFontSizePx(font: string): number | null {
@@ -33,7 +38,9 @@ export function resolveLeafBlockDimensions(
   imageDefaultHeight: number,
   imageDefaultSpace: number,
 ): { height: number; spaceBefore: number; spaceAfter: number } {
-  const blockStyle = fontConfig ? getBlockStyle(fontConfig, node.type.name) : null;
+  const blockStyle = fontConfig
+    ? getBlockStyle(fontConfig, node.type.name)
+    : null;
 
   const attrH = node.attrs["height"];
   let height: number;
@@ -49,10 +56,9 @@ export function resolveLeafBlockDimensions(
   return {
     height,
     spaceBefore: blockStyle?.spaceBefore ?? imageDefaultSpace,
-    spaceAfter:  blockStyle?.spaceAfter  ?? imageDefaultSpace,
+    spaceAfter: blockStyle?.spaceAfter ?? imageDefaultSpace,
   };
 }
-
 
 export interface LayoutBlock {
   /** The original ProseMirror node — used by BlockStrategy.render() */
@@ -107,6 +113,88 @@ export interface BlockLayoutOptions {
   fontModifiers?: Map<string, FontModifier>;
 }
 
+// ── Constants ───────────────────────────────────────────────────────────────────
+const IMAGE_DEFAULT_HEIGHT = 200;
+const IMAGE_SPACE = 8;
+
+
+/**
+ * Layout for leaf block nodes that have no inline content (images, embeds).
+ * Height comes from the node's `height` attr; a single line is registered in
+ * the CharacterMap so click-to-place-cursor works near the block.
+ */
+export function layoutLeafBlock(
+  node: Node,
+  options: BlockLayoutOptions,
+): LayoutBlock {
+  const {
+    nodePos,
+    x,
+    y,
+    availableWidth,
+    page,
+    map,
+    lineIndexOffset = 0,
+    fontConfig,
+  } = options;
+
+  const { height, spaceBefore, spaceAfter } = resolveLeafBlockDimensions(
+    node,
+    fontConfig,
+    IMAGE_DEFAULT_HEIGHT,
+    IMAGE_SPACE,
+  );
+
+  const cursorDocPos = nodePos + 1; // inside the 2-token leaf block
+
+  if (map) {
+    const li = lineIndexOffset;
+    if (!map.hasLine(page, li)) {
+      map.registerLine({
+        page,
+        lineIndex: li,
+        y,
+        height,
+        x,
+        contentWidth: availableWidth,
+        startDocPos: cursorDocPos,
+        endDocPos: cursorDocPos + 1,
+      });
+    }
+    if (!map.hasGlyph(cursorDocPos)) {
+      map.registerGlyph({
+        docPos: cursorDocPos,
+        x,
+        y,
+        width: availableWidth,
+        height,
+        page,
+        lineIndex: li,
+      });
+    }
+  }
+
+  const blockStyle = fontConfig
+    ? getBlockStyle(fontConfig, node.type.name)
+    : null;
+
+  return {
+    node,
+    nodePos,
+    x,
+    y,
+    width: availableWidth,
+    height,
+    lines: [],
+    spaceBefore,
+    spaceAfter,
+    blockType: node.type.name,
+    align: blockStyle?.align ?? "left",
+    availableWidth,
+  };
+}
+
+
 /**
  * BlockLayout — positions a single ProseMirror block node.
  *
@@ -122,59 +210,14 @@ export interface BlockLayoutOptions {
  *   - Handle margin collapsing
  *   - Render anything
  */
-const IMAGE_DEFAULT_HEIGHT = 200;
-const IMAGE_SPACE = 8;
-
-/**
- * Layout for leaf block nodes that have no inline content (images, embeds).
- * Height comes from the node's `height` attr; a single line is registered in
- * the CharacterMap so click-to-place-cursor works near the block.
- */
-export function layoutLeafBlock(node: Node, options: BlockLayoutOptions): LayoutBlock {
-  const { nodePos, x, y, availableWidth, page, map, lineIndexOffset = 0, fontConfig } = options;
-
-  const { height, spaceBefore, spaceAfter } = resolveLeafBlockDimensions(
-    node, fontConfig, IMAGE_DEFAULT_HEIGHT, IMAGE_SPACE,
-  );
-
-  const cursorDocPos = nodePos + 1; // inside the 2-token leaf block
-
-  if (map) {
-    const li = lineIndexOffset;
-    if (!map.hasLine(page, li)) {
-      map.registerLine({
-        page, lineIndex: li,
-        y, height, x,
-        contentWidth: availableWidth,
-        startDocPos: cursorDocPos,
-        endDocPos:   cursorDocPos + 1,
-      });
-    }
-    if (!map.hasGlyph(cursorDocPos)) {
-      map.registerGlyph({ docPos: cursorDocPos, x, y, width: availableWidth, height, page, lineIndex: li });
-    }
-  }
-
-  const blockStyle = fontConfig ? getBlockStyle(fontConfig, node.type.name) : null;
-
-  return {
-    node, nodePos, x, y,
-    width:     availableWidth,
-    height,
-    lines:     [],
-    spaceBefore,
-    spaceAfter,
-    blockType: node.type.name,
-    align:     blockStyle?.align ?? "left",
-    availableWidth,
-  };
-}
-
-export function layoutBlock(node: Node, options: BlockLayoutOptions): LayoutBlock {
+export function layoutBlock(
+  node: Node,
+  options: BlockLayoutOptions,
+): LayoutBlock {
   // Leaf block nodes (no inline content): use fixed-height path.
-  if (node.childCount === 0 && !node.isTextblock) {
+  // TODO: Add isInline to extensions and use it here instead of isTextblock
+  if (!node.childCount && !node.isTextblock)
     return layoutLeafBlock(node, options);
-  }
 
   const {
     nodePos,
@@ -192,25 +235,37 @@ export function layoutBlock(node: Node, options: BlockLayoutOptions): LayoutBloc
   const level = node.attrs["level"] as number | undefined;
   const blockStyle = getBlockStyle(fontConfig, node.type.name, level);
 
+  // Node-level fontFamily attr overrides the block style's family.
+  // Priority: node attr > fontConfig (which may already have page font applied) > blockStyle default.
+  const nodeFontFamily = node.attrs["fontFamily"] as string | null | undefined;
+  const baseFont = nodeFontFamily
+    ? substituteFamily(blockStyle.font, nodeFontFamily)
+    : blockStyle.font;
+
   // Per-node alignment attr overrides the static BlockStyle default.
   // Guards against garbage values — only the four known align strings are accepted.
   const VALID_ALIGNS = new Set(["left", "center", "right", "justify"]);
   const rawAlign = node.attrs["align"];
   const resolvedAlign: BlockStyle["align"] =
-    (typeof rawAlign === "string" && VALID_ALIGNS.has(rawAlign))
+    typeof rawAlign === "string" && VALID_ALIGNS.has(rawAlign)
       ? (rawAlign as BlockStyle["align"])
       : blockStyle.align;
 
   // ── 1. Extract spans ──────────────────────────────────────────────────────
-  const spans = extractSpans(node, nodePos, blockStyle.font, fontConfig, fontModifiers);
+  const spans = extractSpans(
+    node,
+    nodePos,
+    baseFont,
+    fontConfig,
+    fontModifiers,
+  );
 
   // ── 2. Empty node fallback ────────────────────────────────────────────────
   // An empty paragraph has no spans. We create a virtual zero-width-space span
   // so LineBreaker returns one line and CharacterMap registers a cursor position.
-  const inputSpans: InputSpan[] =
-    spans.length > 0
-      ? spans
-      : [{ text: "\u200B", font: blockStyle.font, docPos: nodePos + 1 }];
+  const inputSpans: InputSpan[] = spans.length
+    ? spans
+    : [{ text: "\u200B", font: baseFont, docPos: nodePos + 1 }];
 
   // ── 3. Break into lines ───────────────────────────────────────────────────
   const breaker = new LineBreaker(measurer);
@@ -224,7 +279,7 @@ export function layoutBlock(node: Node, options: BlockLayoutOptions): LayoutBloc
   const height = lines.reduce((sum, l) => sum + l.lineHeight, 0);
 
   // ── 5. Populate CharacterMap with alignment-corrected positions ───────────
-  if (map && lines.length > 0) {
+  if (map && lines.length) {
     let lineY = y;
 
     for (let li = 0; li < lines.length; li++) {
@@ -236,7 +291,7 @@ export function layoutBlock(node: Node, options: BlockLayoutOptions): LayoutBloc
       const lineOffsetX = computeAlignmentOffset(
         resolvedAlign,
         availableWidth,
-        line.width
+        line.width,
       );
 
       map.registerLine({
@@ -259,10 +314,10 @@ export function layoutBlock(node: Node, options: BlockLayoutOptions): LayoutBloc
 
         for (let ci = 0; ci < span.text.length; ci++) {
           const charX =
-            x +                          // page left margin
-            lineOffsetX +                // alignment offset
-            span.x +                     // span's x within the line
-            run.charPositions[ci]!;      // char's x within the span (kerning-aware)
+            x + // page left margin
+            lineOffsetX + // alignment offset
+            span.x + // span's x within the line
+            run.charPositions[ci]!; // char's x within the span (kerning-aware)
 
           const charWidth =
             ci < span.text.length - 1
@@ -279,12 +334,21 @@ export function layoutBlock(node: Node, options: BlockLayoutOptions): LayoutBloc
             lineIndex,
           });
 
-          lastGlyph = { x: charX, width: charWidth, docPos: span.docPos + ci, isZws: span.text[ci] === "\u200B" };
+          lastGlyph = {
+            x: charX,
+            width: charWidth,
+            docPos: span.docPos + ci,
+            isZws: span.text[ci] === "\u200B",
+          };
         }
       }
 
       // Sentinel on last line only (same reasoning as populateCharMap above)
-      if (li === lines.length - 1 && lastGlyph.docPos >= 0 && !lastGlyph.isZws) {
+      if (
+        li === lines.length - 1 &&
+        lastGlyph.docPos >= 0 &&
+        !lastGlyph.isZws
+      ) {
         map.registerGlyph({
           docPos: lastGlyph.docPos + 1,
           x: lastGlyph.x + lastGlyph.width,
@@ -332,7 +396,7 @@ function extractSpans(
   nodePos: number,
   baseFont: string,
   _fontConfig: FontConfig,
-  fontModifiers?: Map<string, FontModifier>
+  fontModifiers?: Map<string, FontModifier>,
 ): InputSpan[] {
   const spans: InputSpan[] = [];
 
@@ -361,7 +425,7 @@ function extractSpans(
 export function computeAlignmentOffset(
   align: BlockStyle["align"],
   availableWidth: number,
-  lineWidth: number
+  lineWidth: number,
 ): number {
   switch (align) {
     case "center":
@@ -395,7 +459,8 @@ export function computeJustifySpaceBonus(
   let spaceCount = 0;
   for (let si = 0; si < spans.length; si++) {
     // Trailing spaces on the last span don't get expanded
-    const text = si === spans.length - 1 ? spans[si]!.text.trimEnd() : spans[si]!.text;
+    const text =
+      si === spans.length - 1 ? spans[si]!.text.trimEnd() : spans[si]!.text;
     for (const ch of text) {
       if (ch === " ") spaceCount++;
     }
@@ -427,9 +492,17 @@ export function populateCharMap(
     const globalLineIndex = lineIndexOffset + li;
     const isLastLine = li === block.lines.length - 1;
 
-    const lineOffsetX = computeAlignmentOffset(block.align, block.availableWidth, line.width);
+    const lineOffsetX = computeAlignmentOffset(
+      block.align,
+      block.availableWidth,
+      line.width,
+    );
     const spaceBonus = computeJustifySpaceBonus(
-      block.align, line.spans, block.availableWidth, line.width, isLastLine,
+      block.align,
+      line.spans,
+      block.availableWidth,
+      line.width,
+      isLastLine,
     );
 
     map.registerLine({
@@ -450,7 +523,6 @@ export function populateCharMap(
     // back to the preceding-glyph search which can return a glyph from the
     // wrong page and cause scrollCursorIntoView to scroll to the wrong place.
     let lastGlyph = { x: 0, width: 0, docPos: -1, isZws: false };
-
     let spacesBeforeSpan = 0;
     for (const span of line.spans) {
       const run = measurer.measureRun(span.text, span.font);
@@ -458,7 +530,10 @@ export function populateCharMap(
 
       for (let ci = 0; ci < span.text.length; ci++) {
         const charX =
-          block.x + lineOffsetX + span.x + run.charPositions[ci]! +
+          block.x +
+          lineOffsetX +
+          span.x +
+          run.charPositions[ci]! +
           (spacesBeforeSpan + spacesWithinSpan) * spaceBonus;
         const charWidth =
           ci < span.text.length - 1
@@ -475,7 +550,12 @@ export function populateCharMap(
           lineIndex: globalLineIndex,
         });
 
-        lastGlyph = { x: charX, width: charWidth, docPos: span.docPos + ci, isZws: span.text[ci] === "\u200B" };
+        lastGlyph = {
+          x: charX,
+          width: charWidth,
+          docPos: span.docPos + ci,
+          isZws: span.text[ci] === "\u200B",
+        };
 
         if (span.text[ci] === " ") spacesWithinSpan++;
       }
@@ -517,7 +597,7 @@ export function populateCharMap(
   }
 }
 
-function countSpaces(text: string): number {
+export function countSpaces(text: string): number {
   let n = 0;
   for (const ch of text) if (ch === " ") n++;
   return n;

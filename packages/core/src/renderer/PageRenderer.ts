@@ -1,5 +1,5 @@
 import { LayoutPage, PageConfig } from "../layout/PageLayout";
-import { LayoutBlock } from "../layout/BlockLayout";
+import { LayoutBlock, computeAlignmentOffset } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
 import { TextMeasurer } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
@@ -252,14 +252,3 @@ function getTotalLineHeight(
   return lines.slice(0, upToIndex).reduce((sum, l) => sum + l.lineHeight, 0);
 }
 
-function computeAlignmentOffset(
-  align: LayoutBlock["align"],
-  availableWidth: number,
-  lineWidth: number
-): number {
-  switch (align) {
-    case "center": return Math.max(0, (availableWidth - lineWidth) / 2);
-    case "right":  return Math.max(0, availableWidth - lineWidth);
-    default:       return 0;
-  }
-}

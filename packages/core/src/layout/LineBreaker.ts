@@ -1,5 +1,6 @@
 import { TextMeasurer } from "./TextMeasurer";
 import type { CharacterMap } from "./CharacterMap";
+import { normalizeFont } from "./StyleResolver";
 
 /**
  * A span of text with a consistent font and a known ProseMirror start position.
@@ -44,7 +45,7 @@ export interface LayoutLine {
  *
  * Converts a paragraph's InputSpans into LayoutLines that fit within maxWidth.
  *
- * Performance design (Gemini's O(n²) warning addressed):
+ * Performance design (O(n²) warning addressed):
  *   - measureWidth()  for line-break DECISIONS  → O(1) amortised (cached)
  *   - measureRun()    for CharacterMap POPULATION → O(word_length²) per word
  *
@@ -69,7 +70,7 @@ export class LineBreaker {
     map?: CharacterMap,
     pageContext?: { page: number; lineIndexOffset: number; lineY: number }
   ): LayoutLine[] {
-    if (spans.length === 0) return [];
+    if (!spans.length) return [];
 
     const lines: LayoutLine[] = [];
     let currentLine: LayoutSpan[] = [];
@@ -116,7 +117,7 @@ export class LineBreaker {
     }
 
     // Flush final line
-    if (currentLine.length > 0) {
+    if (currentLine.length) {
       lines.push(buildLine(currentLine, this.measurer));
     }
 
@@ -241,7 +242,7 @@ function tokenise(spans: InputSpan[]): Token[] {
     let offset = 0;
 
     for (const part of parts) {
-      if (part.length === 0) continue;
+      if (!part.length) continue;
       tokens.push({
         text: part,
         font: span.font,
@@ -257,7 +258,19 @@ function tokenise(spans: InputSpan[]): Token[] {
 
 /**
  * Converts placed LayoutSpans into a LayoutLine with correct vertical metrics.
- * Uses the tallest font on the line to determine line height.
+ *
+ * Vertical metrics (ascent, descent, lineHeight) are derived from each span's
+ * font with weight and style stripped — only the font SIZE matters for line
+ * height. This means:
+ *
+ *   - "bold 14px Georgia" and "14px Georgia" → same lineHeight (no jump when
+ *     the user bolds a word)
+ *   - "32px Georgia" → taller lineHeight than "14px Georgia" (font-size marks
+ *     that genuinely change the size are still reflected in the cursor height)
+ *
+ * The max across all normalized span fonts is used so mixed-size lines
+ * (e.g. a subscript or superscript) get a lineHeight tall enough for the
+ * largest glyph present.
  */
 function buildLine(spans: LayoutSpan[], measurer: TextMeasurer): LayoutLine {
   let ascent = 0;
@@ -268,9 +281,10 @@ function buildLine(spans: LayoutSpan[], measurer: TextMeasurer): LayoutLine {
   const seenFonts = new Set<string>();
 
   for (const span of spans) {
-    if (!seenFonts.has(span.font)) {
-      seenFonts.add(span.font);
-      const m = measurer.getFontMetrics(span.font);
+    const normFont = normalizeFont(span.font);
+    if (!seenFonts.has(normFont)) {
+      seenFonts.add(normFont);
+      const m = measurer.getFontMetrics(normFont);
       if (m.ascent > ascent) ascent = m.ascent;
       if (m.descent > descent) descent = m.descent;
       if (m.lineHeight > lineHeight) lineHeight = m.lineHeight;
