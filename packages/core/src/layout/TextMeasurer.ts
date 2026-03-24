@@ -67,6 +67,17 @@ class LRUCache<V> {
     }
   }
 
+  /** Remove all entries whose key satisfies the predicate. O(n). */
+  deleteIf(predicate: (key: string) => boolean): void {
+    for (const key of [...this.map.keys()]) {
+      if (predicate(key)) this.map.delete(key);
+    }
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+
   clear(): void {
     this.map.clear();
   }
@@ -202,9 +213,10 @@ export class TextMeasurer {
     if (font) {
       this.widthCache.delete(font);
       this.metricCache.delete(font);
-      // Run metrics include kerning data specific to each font — must flush too.
-      // Clearing the entire runCache is safe and simpler than per-font filtering.
-      this.runCache.clear();
+      // Evict only run-cache entries for this font — key format is `${font}\x00${text}`.
+      // Clearing all entries would discard valid kerning data for other fonts.
+      const prefix = `${font}\x00`;
+      this.runCache.deleteIf((key) => key.startsWith(prefix));
     } else {
       this.widthCache.clear();
       this.metricCache.clear();
