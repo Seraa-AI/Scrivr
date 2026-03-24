@@ -55,6 +55,18 @@ export interface MeasureCacheEntry {
   spaceAfter: number;
   blockType: string;
   align: BlockStyle["align"];
+  /**
+   * Phase 1b — early termination.
+   *
+   * The targetY (y + gap, page-local, BEFORE overflow) and page number where
+   * this block was last placed. If the current run arrives at the same values,
+   * all downstream blocks are guaranteed to be identical to `previousLayout`
+   * and the loop can exit early.
+   *
+   * Undefined on first layout (cache entries have no placement history yet).
+   */
+  placedTargetY?: number;
+  placedPage?: number;
 }
 
 export interface PageLayoutOptions {
@@ -75,6 +87,15 @@ export interface PageLayoutOptions {
    * The Editor owns this WeakMap and passes it on every layoutDocument call.
    */
   measureCache?: WeakMap<Node, MeasureCacheEntry>;
+  /**
+   * Phase 1b — early termination.
+   *
+   * Pass the layout produced by the immediately preceding run. When the loop
+   * finds a cache-hit block at an identical (targetY, page) as last time, all
+   * downstream blocks are guaranteed unchanged — remaining pages are copied
+   * from this layout instead of re-iterating.
+   */
+  previousLayout?: DocumentLayout;
 }
 
 /** A4 at 96dpi with 1-inch margins */
@@ -115,7 +136,7 @@ export function layoutDocument(
   let prevSpaceAfter = 0;
 
   // Destructured once — avoids repeated property access inside the hot loop.
-  const { measureCache } = options;
+  const { measureCache, previousLayout } = options;
 
   /**
    * Collect the flat sequence of layoutable items from the doc.
@@ -153,6 +174,13 @@ export function layoutDocument(
     const targetY = y + gap;
     const blockX = margins.left + indentLeft;
     const blockWidth = contentWidth - indentLeft;
+
+    // ── Phase 1b: peek at cache BEFORE resolving, to track hit/delta/placement ──
+    const preCached = measureCache?.get(node);
+    const isHit = preCached !== undefined && preCached.availableWidth === blockWidth;
+    const prevNodePos = preCached?.nodePos;
+    const preCachedTargetY = preCached?.placedTargetY;
+    const preCachedPage = preCached?.placedPage;
 
     // ── Measure block (cache-first; no CharacterMap — just dimensions) ────────
     const entry = resolveBlockEntry(
@@ -226,6 +254,61 @@ export function layoutDocument(
       // Use styleKey-resolved spaceAfter so list items use list_item spacing, not paragraph spacing
       prevSpaceAfter = blockStyle.spaceAfter;
     }
+
+    // ── Update placement tracking in cache ────────────────────────────────────
+    entry.placedTargetY = targetY;
+    entry.placedPage = currentPage.pageNumber;
+
+    // ── Phase 1b: early termination ───────────────────────────────────────────
+    // If this block is a cache hit and landed at the exact same (targetY, page)
+    // as the previous layout run, every downstream block is guaranteed identical.
+    // Copy remaining pages from previousLayout and exit the loop early.
+    if (
+      previousLayout &&
+      isHit &&
+      preCachedTargetY !== undefined &&
+      preCachedPage !== undefined &&
+      targetY === preCachedTargetY &&
+      currentPage.pageNumber === preCachedPage
+    ) {
+      // delta: how much all subsequent blocks' nodePos has shifted this run.
+      // Uniform for everything after the edit point.
+      const delta = prevNodePos !== undefined ? nodePos - prevNodePos : 0;
+      const prevPages = previousLayout.pages;
+      const curPageIdx = currentPage.pageNumber - 1;
+
+      if (curPageIdx < prevPages.length) {
+        const prevCurPage = prevPages[curPageIdx]!;
+        // Find this block in previousLayout by its pre-delta nodePos.
+        const oldNodePos = nodePos - delta;
+        const triggerIdx = prevCurPage.blocks.findIndex(
+          (b) => b.nodePos === oldNodePos,
+        );
+
+        if (triggerIdx >= 0) {
+          // Append remaining blocks on the current page from previousLayout.
+          for (let bi = triggerIdx + 1; bi < prevCurPage.blocks.length; bi++) {
+            currentPage.blocks.push(
+              shiftBlock(prevCurPage.blocks[bi]!, delta, measureCache),
+            );
+          }
+          pages.push(currentPage);
+
+          // Append all subsequent pages.
+          for (let pi = curPageIdx + 1; pi < prevPages.length; pi++) {
+            const prevPage = prevPages[pi]!;
+            pages.push({
+              pageNumber: prevPage.pageNumber,
+              blocks: prevPage.blocks.map((b) =>
+                shiftBlock(b, delta, measureCache),
+              ),
+            });
+          }
+
+          return { pages, pageConfig, version };
+        }
+      }
+    }
   }
 
   // Flush last page (always — even if empty, so there's at least one page)
@@ -238,6 +321,52 @@ export function layoutDocument(
 
 function newPage(pageNumber: number): LayoutPage {
   return { pageNumber, blocks: [] };
+}
+
+/**
+ * Returns a LayoutBlock with nodePos and span docPos values shifted by `delta`.
+ * Used by the Phase 1b early-termination path when copying blocks from
+ * `previousLayout` that haven't passed through the main loop this run.
+ *
+ * When `delta === 0` the original block is returned unchanged (no allocation).
+ *
+ * Also updates the measureCache entry for the block so the next layout run
+ * sees a correct nodePos and avoids redundant adjustment.
+ */
+function shiftBlock(
+  block: LayoutBlock,
+  delta: number,
+  measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
+): LayoutBlock {
+  if (delta === 0) return block;
+
+  const adjustedLines = block.lines.map((line) => ({
+    ...line,
+    spans: line.spans.map((span) => ({ ...span, docPos: span.docPos + delta })),
+  }));
+
+  const shifted: LayoutBlock = {
+    ...block,
+    nodePos: block.nodePos + delta,
+    lines: adjustedLines,
+  };
+
+  // Propagate the correction into the cache so the next run's resolveBlockEntry
+  // sees delta === 0 and skips the per-span adjustment.
+  if (measureCache) {
+    const cached = measureCache.get(block.node);
+    if (cached) {
+      // Keep placedTargetY / placedPage intact — they reflect the correct
+      // placement positions from the previous run and are still valid.
+      measureCache.set(block.node, {
+        ...cached,
+        nodePos: cached.nodePos + delta,
+        lines: adjustedLines,
+      });
+    }
+  }
+
+  return shifted;
 }
 
 /** A single item ready for layout — either a plain block or an expanded list item. */

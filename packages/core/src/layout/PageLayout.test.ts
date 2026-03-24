@@ -388,6 +388,67 @@ describe("layoutDocument — measureCache", () => {
   });
 });
 
+// ── Phase 1b: early termination ───────────────────────────────────────────────
+
+describe("layoutDocument — Phase 1b early termination", () => {
+  it("returns the correct layout when early termination fires on second layout run", () => {
+    // Three paragraphs. Edit the first one — the second and third are structurally
+    // shared and should be copied from previousLayout without re-looping.
+    const para2 = p("Second");
+    const para3 = p("Third");
+    const doc1 = doc(p("A"),       para2, para3);
+    const doc2 = doc(p("AAAAAAA"), para2, para3);
+
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    // First layout — warm up the cache AND record placedTargetY/placedPage.
+    const layout1 = layoutDocument(doc1, opts);
+
+    // Second layout — para2 and para3 are same Node objects; second layout
+    // should copy from layout1 via early termination.
+    const layout2 = layoutDocument(doc2, { ...opts, previousLayout: layout1 });
+
+    // Both layouts should have the same number of pages and blocks.
+    expect(layout2.pages.length).toBe(layout1.pages.length);
+    const blocks2 = layout2.pages[0]!.blocks;
+    const blocks1 = layout1.pages[0]!.blocks;
+    expect(blocks2).toHaveLength(blocks1.length);
+
+    // Block positions should be identical (editing first para doesn't shift others vertically).
+    expect(blocks2[1]!.y).toBe(blocks1[1]!.y);
+    expect(blocks2[2]!.y).toBe(blocks1[2]!.y);
+  });
+
+  it("corrects span docPos for blocks copied via early termination when delta !== 0", () => {
+    // Insert text before para2 so its nodePos shifts, then verify span.docPos
+    // in the copied blocks reflects the new absolute positions.
+    const para2 = p("Second");
+    const para3 = p("Third");
+    const doc1 = doc(p("A"),       para2, para3);
+    const doc2 = doc(p("AAAAAAA"), para2, para3);
+
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    const layout1 = layoutDocument(doc1, opts);
+    const layout2 = layoutDocument(doc2, { ...opts, previousLayout: layout1 });
+
+    const block2_1 = layout1.pages[0]!.blocks[1]!;
+    const block2_2 = layout2.pages[0]!.blocks[1]!;
+    const block3_2 = layout2.pages[0]!.blocks[2]!;
+
+    // nodePos shifted for both para2 and para3
+    expect(block2_2.nodePos).toBeGreaterThan(block2_1.nodePos);
+
+    // span.docPos must be anchored to the new absolute positions
+    expect(block2_2.lines[0]!.spans[0]!.docPos).toBe(block2_2.nodePos + 1);
+    expect(block3_2.lines[0]!.spans[0]!.docPos).toBe(block3_2.nodePos + 1);
+  });
+});
+
 // ── collapseMargins helper ────────────────────────────────────────────────────
 
 describe("collapseMargins", () => {

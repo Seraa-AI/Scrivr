@@ -289,7 +289,6 @@ export class ViewManager {
     if (this.editor.isFocused && this.editor.cursorManager.isVisible) {
       const coords = this.editor.charMap.coordsAtPos(selection.head, true);
       if (coords && coords.page === page.pageNumber) {
-        console.log('[cursor draw] page=%d x=%.1f y=%.1f h=%.1f', coords.page, coords.x, coords.y, coords.height);
         renderCursor(ctx, coords);
       }
     }

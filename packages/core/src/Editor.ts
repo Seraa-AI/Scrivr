@@ -376,12 +376,14 @@ export class Editor {
     this.dirty = false;
     this.charMap.clear();
     this.populatedPages.clear();
+    const previousLayout = this._layout;
     this._layout = layoutDocument(this.state.doc, {
       pageConfig: this.pageConfig,
       measurer: this.measurer,
       fontModifiers: this.fontModifiers,
-      previousVersion: this._layout.version,
+      previousVersion: previousLayout.version,
       measureCache: this.measureCache,
+      previousLayout,
     });
     // Populate all pages eagerly — guarantees coordsAtPos always finds the
     // cursor glyph regardless of which page it's on. The measureCache makes
@@ -405,7 +407,6 @@ export class Editor {
     if (!page) return;
     let lineOffset = 0;
     for (const block of page.blocks) {
-      console.log('[populate] page=%d type=%s nodePos=%d y=%.1f h=%.1f lines=%d', pageNumber, block.blockType, block.nodePos, block.y, block.height, block.lines.length);
       populateCharMap(block, this.charMap, page.pageNumber, lineOffset, this.measurer);
       lineOffset += block.lines.length;
     }
