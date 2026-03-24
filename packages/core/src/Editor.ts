@@ -12,7 +12,7 @@ import { CursorManager } from "./renderer/CursorManager";
 import { CharacterMap } from "./layout/CharacterMap";
 import { TextMeasurer } from "./layout/TextMeasurer";
 import { layoutDocument, defaultPageConfig } from "./layout/PageLayout";
-import type { PageConfig, DocumentLayout, MeasureCacheEntry } from "./layout/PageLayout";
+import type { PageConfig, DocumentLayout, MeasureCacheEntry, LayoutResumption } from "./layout/PageLayout";
 import { populateCharMap } from "./layout/BlockLayout";
 import { insertText } from "./model/commands";
 import { PasteTransformer } from "./input/PasteTransformer";
@@ -113,6 +113,20 @@ export interface EditorOptions {
    * or clear the cursor.
    */
   onCursorTick?: (isVisible: boolean) => void;
+  /**
+   * When false, all rAF render flushes are suppressed until setReady(true)
+   * is called. Use this for collaborative documents where a Y.js / HocusPocus
+   * provider will fire hundreds of typeObserver events during initial sync —
+   * suppressing flushes means zero layout work during sync, then a single
+   * full layout + paint once the provider fires its `synced` event.
+   *
+   * Example:
+   *   const editor = new Editor({ startReady: false, ... });
+   *   provider.on('synced', () => editor.setReady(true));
+   *
+   * Defaults to true (standard, non-collaborative use).
+   */
+  startReady?: boolean;
 }
 
 /**
@@ -173,6 +187,46 @@ export class Editor {
    * ensureLayout() clears this flag.
    */
   private dirty = false;
+
+  /**
+   * True when the current _layout is a partial result (streaming initial load).
+   * An idle callback will complete it; cleared immediately when the user
+   * triggers ensureLayout() (which always runs a full layout pass).
+   */
+  private _layoutIsPartial = false;
+
+  /** Handle returned by requestIdleCallback for the pending layout completion. */
+  private _idleLayoutId: number | null = null;
+
+  /**
+   * Tracks how many blocks have been laid out in the current chunked pass.
+   * Incremented by LAYOUT_CHUNK_SIZE on each idle tick. Reset at the start of
+   * each new chunked pass (constructor, setReady).
+   */
+  private _partialLayoutBlocks = 0;
+
+  /**
+   * Resumption state from the last partial layoutDocument() call.
+   * Passed back on the next chunk so layout continues in O(N) rather than
+   * restarting from block 0 each time (which would be O(N²) total).
+   * Null when no chunked pass is in progress.
+   */
+  private _layoutResumption: LayoutResumption | null = null;
+
+  /**
+   * requestAnimationFrame handle for the pending render flush.
+   * Multiple dispatch() calls within the same frame share a single flush,
+   * collapsing e.g. hundreds of Y.js sync operations into one layout + one paint.
+   */
+  private _rafId: number | null = null;
+
+  /**
+   * When false, scheduleFlush() is a no-op — all dispatches accumulate as dirty
+   * state without triggering any layout or paint. Set to false via startReady:false
+   * when a collaborative provider is syncing; call setReady(true) from the
+   * provider's `synced` event to flush once with the complete document.
+   */
+  private _ready = true;
 
   /**
    * The 1-based page number that contains the current cursor.
@@ -259,7 +313,7 @@ export class Editor {
   /** Cleanup functions returned by onEditorReady() callbacks — called on destroy(). */
   private editorReadyCleanup: Array<() => void> = [];
 
-  constructor({ extensions = [StarterKit], pageConfig, onChange, onFocusChange, onCursorTick }: EditorOptions) {
+  constructor({ extensions = [StarterKit], pageConfig, onChange, onFocusChange, onCursorTick, startReady = true }: EditorOptions) {
     this.manager = new ExtensionManager(extensions);
     this.onChange = onChange;
     this.onFocusChange = onFocusChange;
@@ -282,16 +336,49 @@ export class Editor {
       ...(initialDoc ? { doc: initialDoc } : {}),
     });
 
-    // Initial layout — run synchronously so editor.layout is available immediately
+    // Initial layout — measure only the first INITIAL_BLOCKS blocks synchronously
+    // so the browser can paint the visible pages in the first frame. The rest
+    // are completed in an idle callback once the browser is idle.
+    performance.mark("inscribe:layout-initial-start");
     this._layout = layoutDocument(this.state.doc, {
       pageConfig: this.pageConfig,
       measurer: this.measurer,
       fontModifiers: this.fontModifiers,
       previousVersion: 0,
       measureCache: this.measureCache,
+      maxBlocks: Editor.INITIAL_BLOCKS,
     });
+    performance.mark("inscribe:layout-initial-end");
+    performance.measure(
+      `inscribe:layout-initial (${this.state.doc.childCount} blocks, first ${Editor.INITIAL_BLOCKS} sync)`,
+      "inscribe:layout-initial-start",
+      "inscribe:layout-initial-end",
+    );
+    this._layoutIsPartial = this._layout.isPartial ?? false;
+    this._layoutResumption = this._layout.resumption ?? null;
     // Populate page 1 eagerly — the document always starts on page 1.
     this.ensurePagePopulated(1);
+    if (this._layoutIsPartial) {
+      this._partialLayoutBlocks = Editor.INITIAL_BLOCKS;
+      this.scheduleIdleLayout();
+    }
+
+    // If startReady:false, cancel the idle layout and suppress all flushes
+    // until setReady(true) is called (e.g. from provider.on('synced', ...)).
+    // The idle layout would run on a partial Y.js doc and get immediately
+    // invalidated; better to do one full layout after sync completes.
+    if (!startReady) {
+      this._ready = false;
+      if (this._idleLayoutId !== null) {
+        if (typeof cancelIdleCallback !== "undefined") {
+          cancelIdleCallback(this._idleLayoutId);
+        } else {
+          clearTimeout(this._idleLayoutId as unknown as number);
+        }
+        this._idleLayoutId = null;
+      }
+      this._layoutIsPartial = false;
+    }
 
     this.keymap = this.manager.buildKeymap();
     this.inputHandlers = this.manager.buildInputHandlers();
@@ -312,6 +399,65 @@ export class Editor {
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
+
+  /**
+   * Signal that the editor is (or is no longer) ready to render.
+   *
+   * Pass `false` before a collaborative provider connects to suppress all rAF
+   * render flushes during the initial Y.js document sync — prevents O(N²)
+   * layout work while typeObserver fires hundreds of times.
+   *
+   * Pass `true` once the provider fires its `synced` event. The editor will
+   * do a single full layout + paint of the complete document.
+   *
+   * Example (HocusPocus):
+   *   const editor = new Editor({ startReady: false, ... });
+   *   provider.on('synced', () => editor.setReady(true));
+   */
+  setReady(ready: boolean): void {
+    this._ready = ready;
+    if (ready) {
+      // Cancel any stale pending work — we're about to do a fresh chunked layout.
+      if (this._rafId !== null) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+      if (this._idleLayoutId !== null) {
+        if (typeof cancelIdleCallback !== "undefined") cancelIdleCallback(this._idleLayoutId);
+        else clearTimeout(this._idleLayoutId as unknown as number);
+        this._idleLayoutId = null;
+      }
+
+      // First chunk: layout INITIAL_BLOCKS synchronously so visible pages
+      // paint immediately — same strategy as the constructor.
+      this._partialLayoutBlocks = Editor.INITIAL_BLOCKS;
+      this.dirty = false;
+      this.charMap.clear();
+      this.populatedPages.clear();
+      this._layout = layoutDocument(this.state.doc, {
+        pageConfig: this.pageConfig,
+        measurer: this.measurer,
+        fontModifiers: this.fontModifiers,
+        previousVersion: this._layout.version,
+        measureCache: this.measureCache,
+        maxBlocks: Editor.INITIAL_BLOCKS,
+      });
+      this._layoutIsPartial = this._layout.isPartial ?? false;
+      this._layoutResumption = this._layout.resumption ?? null;
+      this._cursorPage = this.cursorPageFromLayout();
+      this.ensurePagePopulated(this._cursorPage);
+      this.ensurePagePopulated(this._cursorPage - 1);
+      this.ensurePagePopulated(this._cursorPage + 1);
+      this.notifyListeners(); // paint first pages right away
+
+      if (this._layoutIsPartial) {
+        this.scheduleIdleLayout(); // continue measuring remaining blocks in idle chunks
+      }
+    } else {
+      // Going unready — cancel any pending flush to prevent a stale render.
+      if (this._rafId !== null) {
+        cancelAnimationFrame(this._rafId);
+        this._rafId = null;
+      }
+    }
+  }
 
   /**
    * The merged ProseMirror Schema built from all extensions.
@@ -382,6 +528,9 @@ export class Editor {
   ensureLayout(): void {
     if (!this.dirty) return;
     this.dirty = false;
+    // A user action triggered a full layout — the idle pass is no longer needed.
+    this._layoutIsPartial = false;
+    this._layoutResumption = null;
     this.charMap.clear();
     this.populatedPages.clear();
     const previousLayout = this._layout;
@@ -403,6 +552,84 @@ export class Editor {
     this.ensurePagePopulated(this._cursorPage);
     this.ensurePagePopulated(this._cursorPage - 1); // no-op when page < 1 or doesn't exist
     this.ensurePagePopulated(this._cursorPage + 1); // no-op when page doesn't exist
+  }
+
+  // ── Streaming layout helpers ───────────────────────────────────────────────
+
+  /** Number of blocks measured synchronously on initial load (~2–3 visible pages). */
+  private static readonly INITIAL_BLOCKS = 100;
+
+  /**
+   * Blocks to process per idle chunk. Small enough to stay within a ~16ms
+   * idle slice; large enough to finish a 1000-block doc in ~20 ticks.
+   */
+  private static readonly LAYOUT_CHUNK_SIZE = 50;
+
+  /**
+   * Schedule the next idle-callback chunk that continues a partial layout.
+   * Uses requestIdleCallback when available; falls back to setTimeout(fn, 16).
+   */
+  private scheduleIdleLayout(): void {
+    const run = (deadline?: IdleDeadline) => this.completeIdleLayout(deadline);
+    if (typeof requestIdleCallback !== "undefined") {
+      this._idleLayoutId = requestIdleCallback(run);
+    } else {
+      this._idleLayoutId = setTimeout(() => run(), 16) as unknown as number;
+    }
+  }
+
+  /**
+   * Processes one chunk of the remaining layout in the idle callback.
+   * Advances _partialLayoutBlocks by LAYOUT_CHUNK_SIZE (or more if the idle
+   * deadline allows), notifies listeners, then re-schedules until done.
+   *
+   * If the user types between chunks, ensureLayout() sets _layoutIsPartial=false
+   * and this becomes a no-op.
+   */
+  private completeIdleLayout(deadline?: IdleDeadline): void {
+    this._idleLayoutId = null;
+    if (!this._layoutIsPartial) return;
+
+    // Determine how many NEW blocks to measure this chunk.
+    // Use the idle deadline when available — process more if browser has budget.
+    let chunkSize = Editor.LAYOUT_CHUNK_SIZE;
+    if (deadline && deadline.timeRemaining() > 8) {
+      // Rough heuristic: ~3 blocks/ms for an average doc.
+      chunkSize = Math.min(300, Math.floor(deadline.timeRemaining() * 3));
+    }
+    this._partialLayoutBlocks += chunkSize;
+
+    this.charMap.clear();
+    this.populatedPages.clear();
+    performance.mark("inscribe:layout-chunk-start");
+    this._layout = layoutDocument(this.state.doc, {
+      pageConfig: this.pageConfig,
+      measurer: this.measurer,
+      fontModifiers: this.fontModifiers,
+      measureCache: this.measureCache,
+      // Pass resumption so layoutDocument() continues from the next unprocessed
+      // block instead of restarting from block 0 — makes each chunk O(chunkSize)
+      // rather than O(totalBlocks), for O(N) total cost across all chunks.
+      ...(this._layoutResumption ? { resumption: this._layoutResumption } : {}),
+      maxBlocks: chunkSize,
+    });
+    performance.mark("inscribe:layout-chunk-end");
+    performance.measure(
+      `inscribe:layout-chunk (next ${chunkSize} blocks, total ${this._partialLayoutBlocks} of ${this.state.doc.childCount})`,
+      "inscribe:layout-chunk-start",
+      "inscribe:layout-chunk-end",
+    );
+    this._layoutIsPartial = this._layout.isPartial ?? false;
+    this._layoutResumption = this._layout.resumption ?? null;
+    this._cursorPage = this.cursorPageFromLayout();
+    this.ensurePagePopulated(this._cursorPage);
+    this.ensurePagePopulated(this._cursorPage - 1);
+    this.ensurePagePopulated(this._cursorPage + 1);
+    this.notifyListeners();
+
+    if (this._layoutIsPartial) {
+      this.scheduleIdleLayout(); // schedule the next chunk
+    }
   }
 
   /**
@@ -501,6 +728,18 @@ export class Editor {
   }
 
   destroy(): void {
+    if (this._rafId !== null) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
+    if (this._idleLayoutId !== null) {
+      if (typeof cancelIdleCallback !== "undefined") {
+        cancelIdleCallback(this._idleLayoutId);
+      } else {
+        clearTimeout(this._idleLayoutId);
+      }
+      this._idleLayoutId = null;
+    }
     for (const cleanup of this.editorReadyCleanup) cleanup();
     this.editorReadyCleanup = [];
     this.overlayRenderHandlers.clear();
@@ -869,14 +1108,34 @@ export class Editor {
     if (!tr) return;
     this.state = this.state.apply(tr);
     this.dirty = true;
-    this.ensureLayout();
-    this.cursorManager.reset();
-    // ViewManager.update() runs inside notifyListeners (via subscribe),
-    // creating any new page DOM elements before we position the textarea.
-    this.notifyListeners();
-    this.syncInputBridge();
-    this.scrollCursorIntoView();
+    // resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
+    // The rAF flush below handles the repaint — calling reset() here was the root cause
+    // of O(N²) repaints during Y.js initial sync (one full canvas paint per dispatch).
+    this.cursorManager.resetSilent();
     this.onChange?.(this.state);
+    // Schedule a single rAF flush rather than rendering immediately.
+    // Multiple dispatches within the same frame (e.g. Y.js initial sync
+    // firing hundreds of typeObserver events) share one layout + one paint,
+    // reducing O(N²) sync cost to O(N).
+    this.scheduleFlush();
+  }
+
+  /**
+   * Schedules a layout + render flush for the next animation frame.
+   * Idempotent — calling it multiple times before the frame fires is free.
+   */
+  private scheduleFlush(): void {
+    if (!this._ready) return; // suppress during collaborative sync
+    if (this._rafId !== null) return;
+    this._rafId = requestAnimationFrame(() => {
+      this._rafId = null;
+      this.ensureLayout();
+      // ViewManager.update() runs inside notifyListeners (via subscribe),
+      // creating any new page DOM elements before we position the textarea.
+      this.notifyListeners();
+      this.syncInputBridge();
+      this.scrollCursorIntoView();
+    });
   }
 
   /**

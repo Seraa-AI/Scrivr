@@ -70,6 +70,13 @@ export interface IEditor {
   _applyTransaction(tr: Transaction): void;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
   redraw(): void;
+  /**
+   * Signal that the editor is (or is no longer) ready to render.
+   * Call setReady(false) before a collaborative provider connects to suppress
+   * layout/paint during Y.js sync. Call setReady(true) from onSynced to do
+   * one fast chunked layout of the complete document.
+   */
+  setReady(ready: boolean): void;
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
 }

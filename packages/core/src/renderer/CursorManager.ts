@@ -62,6 +62,17 @@ export class CursorManager {
     this.onTick();
   }
 
+  /**
+   * Reset the blink cycle without triggering an immediate repaint.
+   *
+   * Use this inside a scheduled flush (e.g. requestAnimationFrame) where
+   * notifyListeners will be called separately — avoids a double repaint.
+   */
+  resetSilent(): void {
+    this._isVisible = true;
+    this.start();
+  }
+
   /** Whether the cursor should be drawn on the current tick. */
   get isVisible(): boolean {
     return this._isVisible;

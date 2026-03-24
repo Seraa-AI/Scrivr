@@ -101,6 +101,8 @@ export class ViewManager {
    *
    * Also called by the IntersectionObserver when page visibility changes.
    */
+  private _firstPaintDone = false;
+
   update(): void {
     const layout = this.editor.layout;
 
@@ -115,8 +117,20 @@ export class ViewManager {
       if (isVisible) {
         this.ensureCanvasesAttached(entry, layout.pageConfig);
         if (entry.lastPaintedVersion !== layout.version) {
+          if (!this._firstPaintDone) {
+            performance.mark("inscribe:first-paint-start");
+          }
           this.paintContent(entry, page, layout);
           entry.lastPaintedVersion = layout.version;
+          if (!this._firstPaintDone) {
+            performance.mark("inscribe:first-paint-end");
+            performance.measure(
+              "inscribe:first-paint (canvas draw, page 1)",
+              "inscribe:first-paint-start",
+              "inscribe:first-paint-end",
+            );
+            this._firstPaintDone = true;
+          }
         }
         this.paintOverlay(entry, page);
       } else {

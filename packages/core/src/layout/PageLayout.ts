@@ -29,6 +29,40 @@ export interface DocumentLayout {
    * to abort stale renders when the document changes mid-scroll.
    */
   version: number;
+  /**
+   * True when the layout was stopped early via `maxBlocks`. The pages
+   * present are correct; blocks beyond the cutoff have not been measured.
+   * Editor schedules a background pass to complete the layout.
+   */
+  isPartial?: boolean;
+  /**
+   * Saved cursor state for O(N) incremental chunked layout.
+   * Present when isPartial:true. Pass back via PageLayoutOptions.resumption
+   * to continue exactly where this run stopped — avoids O(N²) re-iteration.
+   */
+  resumption?: LayoutResumption;
+}
+
+/**
+ * Saved cursor state from a partial layout pass.
+ * Returned with isPartial:true; passed back as PageLayoutOptions.resumption
+ * to resume from the exact item where the previous chunk stopped.
+ */
+export interface LayoutResumption {
+  /** The flat item list — cached to avoid re-walking the doc. */
+  items: LayoutItem[];
+  /** Index of the first item that was NOT yet processed. */
+  nextItemIndex: number;
+  /** Pages completely finished by previous chunks. */
+  completedPages: LayoutPage[];
+  /** The page currently being built (may have partial blocks). */
+  currentPage: LayoutPage;
+  /** Y cursor position on currentPage. */
+  currentY: number;
+  /** spaceAfter of the last placed block, for margin collapsing. */
+  prevSpaceAfter: number;
+  /** Layout version carried through all chunks. */
+  version: number;
 }
 
 /**
@@ -96,6 +130,22 @@ export interface PageLayoutOptions {
    * from this layout instead of re-iterating.
    */
   previousLayout?: DocumentLayout;
+  /**
+   * Streaming layout — stop after measuring this many blocks and return
+   * a partial layout (`isPartial: true`). The Editor uses this to show the
+   * first visible pages immediately, then completes the rest via
+   * requestIdleCallback so the browser can paint without blocking.
+   *
+   * When undefined the full document is always laid out in one pass.
+   */
+  maxBlocks?: number;
+  /**
+   * Resume a chunked layout pass from a previous partial result.
+   * When provided, skips collectLayoutItems() and starts directly from
+   * resumption.nextItemIndex with the saved page/Y cursor state.
+   * Makes each chunk O(chunkSize) instead of O(totalBlocks) — total O(N).
+   */
+  resumption?: LayoutResumption;
 }
 
 /** A4 at 96dpi with 1-inch margins */
@@ -130,20 +180,25 @@ export function layoutDocument(
   const contentWidth = pageWidth - margins.left - margins.right;
   const contentHeight = pageHeight - margins.top - margins.bottom;
 
-  const pages: LayoutPage[] = [];
-  let currentPage: LayoutPage = { pageNumber: 1, blocks: [] };
-  let y = margins.top;
-  let prevSpaceAfter = 0;
-
   // Destructured once — avoids repeated property access inside the hot loop.
   const { measureCache, previousLayout } = options;
+  const maxBlocks = options.maxBlocks;
 
-  /**
-   * Collect the flat sequence of layoutable items from the doc.
-   * List container nodes (bulletList, orderedList) are expanded into their
-   * individual list item paragraphs so each item is a separate LayoutBlock.
-   */
-  const items = collectLayoutItems(doc, fontConfig);
+  // ── Resumption support: O(N) incremental chunked layout ───────────────────
+  // When resumption is provided, restore the cursor state from the previous
+  // chunk rather than re-iterating already-processed blocks. The items array
+  // is cached in the resumption object so collectLayoutItems() is only called
+  // on the first chunk.
+  const r = options.resumption;
+  const items = r ? r.items : collectLayoutItems(doc, fontConfig);
+  const startIndex = r ? r.nextItemIndex : 0;
+
+  // Restore page cursor from previous chunk, or start fresh.
+  const pages: LayoutPage[] = r ? r.completedPages : [];
+  let currentPage: LayoutPage = r ? r.currentPage : { pageNumber: 1, blocks: [] };
+  let y = r ? r.currentY : margins.top;
+  let prevSpaceAfter = r ? r.prevSpaceAfter : 0;
+  const chunkVersion = r ? r.version : version;
 
   // Phase 1b: early termination is only valid after we've seen at least one
   // cache miss. A miss means the node was modified (ProseMirror creates a new
@@ -151,8 +206,10 @@ export function layoutDocument(
   // hits might be UPSTREAM of the change and their placement in previousLayout
   // may still be correct even though downstream blocks have changed.
   let seenCacheMiss = false;
+  let processedBlocks = 0;
 
-  for (const item of items) {
+  for (let itemIdx = startIndex; itemIdx < items.length; itemIdx++) {
+    const item = items[itemIdx]!;
     // ── Hard page break ──────────────────────────────────────────────────────
     if (item.isPageBreak) {
       pages.push(currentPage);
@@ -160,6 +217,24 @@ export function layoutDocument(
       y = margins.top;
       prevSpaceAfter = 0;
       continue;
+    }
+
+    // ── Streaming layout cutoff ───────────────────────────────────────────────
+    // Stop here when maxBlocks is set (initial load optimisation). Save the
+    // cursor state as LayoutResumption so the next chunk can continue in O(N)
+    // without re-iterating already-processed blocks.
+    if (maxBlocks !== undefined && processedBlocks >= maxBlocks) {
+      // Don't push currentPage yet — the next chunk will continue adding to it.
+      const resumption: LayoutResumption = {
+        items,
+        nextItemIndex: itemIdx,
+        completedPages: pages,
+        currentPage: { ...currentPage, blocks: [...currentPage.blocks] },
+        currentY: y,
+        prevSpaceAfter,
+        version: chunkVersion,
+      };
+      return { pages: [...pages, currentPage], pageConfig, version: chunkVersion, isPartial: true, resumption };
     }
 
     const { node, nodePos, listMarker, indentLeft, styleKey } = item;
@@ -264,6 +339,8 @@ export function layoutDocument(
       prevSpaceAfter = blockStyle.spaceAfter;
     }
 
+    processedBlocks++;
+
     // ── Update placement tracking in cache ────────────────────────────────────
     entry.placedTargetY = targetY;
     entry.placedPage = currentPage.pageNumber;
@@ -315,7 +392,7 @@ export function layoutDocument(
             });
           }
 
-          return { pages, pageConfig, version };
+          return { pages, pageConfig, version: chunkVersion };
         }
       }
     }
@@ -324,7 +401,7 @@ export function layoutDocument(
   // Flush last page (always — even if empty, so there's at least one page)
   pages.push(currentPage);
 
-  return { pages, pageConfig, version };
+  return { pages, pageConfig, version: chunkVersion };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -380,7 +457,7 @@ function shiftBlock(
 }
 
 /** A single item ready for layout — either a plain block or an expanded list item. */
-interface LayoutItem {
+export interface LayoutItem {
   isPageBreak?: true;
   node: Node;
   nodePos: number;

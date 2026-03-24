@@ -449,6 +449,58 @@ describe("layoutDocument — Phase 1b early termination", () => {
   });
 });
 
+// ── Streaming layout (maxBlocks) ──────────────────────────────────────────────
+
+describe("layoutDocument — maxBlocks / streaming", () => {
+  it("returns isPartial:true when maxBlocks is smaller than the block count", () => {
+    const testDoc = doc(p("A"), p("B"), p("C"), p("D"), p("E"));
+    const layout = layoutDocument(testDoc, {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+      maxBlocks: 2,
+    });
+    expect(layout.isPartial).toBe(true);
+    // Only the first 2 blocks were laid out
+    const blockCount = layout.pages.reduce((n, pg) => n + pg.blocks.length, 0);
+    expect(blockCount).toBe(2);
+  });
+
+  it("returns isPartial:false (undefined) when maxBlocks >= block count", () => {
+    const testDoc = doc(p("A"), p("B"));
+    const layout = layoutDocument(testDoc, {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+      maxBlocks: 100,
+    });
+    expect(layout.isPartial).toBeUndefined();
+  });
+
+  it("partial + full layout produce identical block positions", () => {
+    const blocks = Array.from({ length: 10 }, (_, i) => p(`Paragraph ${i + 1}`));
+    const testDoc = doc(...blocks);
+    const measurer = createMeasurer();
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    // Partial layout: first 5 blocks
+    const partial = layoutDocument(testDoc, { ...opts, maxBlocks: 5 });
+    expect(partial.isPartial).toBe(true);
+
+    // Full layout with warm cache (simulates idle callback completion)
+    const full = layoutDocument(testDoc, opts);
+    expect(full.isPartial).toBeUndefined();
+
+    // All blocks in the full layout should have the same y/height as a fresh
+    // layout without any cache (positions don't depend on measurement order)
+    const freshFull = layoutDocument(testDoc, { pageConfig: defaultPageConfig, measurer: createMeasurer() });
+    expect(full.pages[0]!.blocks).toHaveLength(freshFull.pages[0]!.blocks.length);
+    for (let i = 0; i < freshFull.pages[0]!.blocks.length; i++) {
+      expect(full.pages[0]!.blocks[i]!.y).toBe(freshFull.pages[0]!.blocks[i]!.y);
+      expect(full.pages[0]!.blocks[i]!.height).toBe(freshFull.pages[0]!.blocks[i]!.height);
+    }
+  });
+});
+
 // ── collapseMargins helper ────────────────────────────────────────────────────
 
 describe("collapseMargins", () => {
