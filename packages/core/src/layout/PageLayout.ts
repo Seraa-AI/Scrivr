@@ -317,34 +317,119 @@ export function layoutDocument(
     const blockBottom = targetY + entry.height;
     const pageBottom = margins.top + contentHeight;
     const overflows = blockBottom > pageBottom && !isFirstOnPage;
-    const tooTallForAnyPage = entry.height > contentHeight;
 
-    if (overflows && !tooTallForAnyPage) {
-      // ── Move to next page ──────────────────────────────────────────────────
-      // The reflow block uses the same cached measurements; only y changes.
-      pages.push(currentPage);
-      currentPage = newPage(pages.length + 1);
-      y = margins.top;
-      prevSpaceAfter = 0;
-
-      const reflow = buildBlock(blockX, margins.top);
-
-      if (listMarker !== undefined) {
-        reflow.listMarker = listMarker;
-        reflow.listMarkerX = blockX - MARKER_RIGHT_GAP;
-        reflow.blockType = "list_item";
-      }
-
-      currentPage.blocks.push(reflow);
-      y = margins.top + entry.height;
-      // Use styleKey-resolved spaceAfter so list items use list_item spacing, not paragraph spacing
-      prevSpaceAfter = blockStyle.spaceAfter;
-    } else {
-      // ── Place on current page ──────────────────────────────────────────────
+    if (!overflows) {
+      // ── Normal placement ───────────────────────────────────────────────────
       currentPage.blocks.push(block);
       y = targetY + entry.height;
-      // Use styleKey-resolved spaceAfter so list items use list_item spacing, not paragraph spacing
       prevSpaceAfter = blockStyle.spaceAfter;
+    } else if (entry.lines.length === 0) {
+      // ── Leaf block (image, HR): move whole block to next page ──────────────
+      // Leaf blocks have no lines to split. If the block exceeds the full page
+      // height, place it anyway (overflow) rather than looping forever.
+      const tooTallForAnyPage = entry.height > contentHeight;
+      if (tooTallForAnyPage) {
+        currentPage.blocks.push(block);
+        y = targetY + entry.height;
+        prevSpaceAfter = blockStyle.spaceAfter;
+      } else {
+        pages.push(currentPage);
+        currentPage = newPage(pages.length + 1);
+        y = margins.top;
+        prevSpaceAfter = 0;
+
+        const reflow = buildBlock(blockX, margins.top);
+
+        if (listMarker !== undefined) {
+          reflow.listMarker = listMarker;
+          reflow.listMarkerX = blockX - MARKER_RIGHT_GAP;
+          reflow.blockType = "list_item";
+        }
+
+        currentPage.blocks.push(reflow);
+        y = margins.top + entry.height;
+        prevSpaceAfter = blockStyle.spaceAfter;
+      }
+    } else {
+      // ── Text block: split lines across page boundaries ─────────────────────
+      // Iterate through remainingLines, placing as many as fit on each page.
+      // Handles blocks that span 2, 3, or more pages in a single pass.
+      let remainingLines = entry.lines;
+      let hasPlacedAnyPart = false;
+      let currentPartStartY = targetY;
+
+      while (remainingLines.length > 0) {
+        const partStartY = currentPartStartY;
+        const pageAvailable = (margins.top + contentHeight) - partStartY;
+
+        let linesFit = 0;
+        let heightFit = 0;
+        for (const line of remainingLines) {
+          if (heightFit + line.lineHeight > pageAvailable) break;
+          linesFit++;
+          heightFit += line.lineHeight;
+        }
+
+        if (linesFit === 0) {
+          if (hasPlacedAnyPart || partStartY === margins.top) {
+            // At the top of a page and still can't fit — force one line so we
+            // never loop forever (handles single lines taller than the page).
+            linesFit = 1;
+            heightFit = remainingLines[0]!.lineHeight;
+          } else {
+            // Nothing placed yet and targetY left no room — advance first.
+            pages.push(currentPage);
+            currentPage = newPage(pages.length + 1);
+            prevSpaceAfter = 0;
+            currentPartStartY = margins.top;
+            continue;
+          }
+        }
+
+        const isLastPart = linesFit >= remainingLines.length;
+        const isCont = hasPlacedAnyPart;
+        const partLines = remainingLines.slice(0, linesFit);
+
+        const partBlock: LayoutBlock = {
+          node,
+          nodePos,
+          x: blockX,
+          y: partStartY,
+          width: blockWidth,
+          height: heightFit,
+          lines: partLines,
+          spaceBefore: isCont ? 0 : entry.spaceBefore,
+          spaceAfter: isLastPart ? blockStyle.spaceAfter : 0,
+          blockType: entry.blockType,
+          align: entry.align,
+          availableWidth: blockWidth,
+          isContinuation: isCont || undefined,
+          continuesOnNextPage: !isLastPart || undefined,
+        };
+
+        if (listMarker !== undefined) {
+          if (!isCont) {
+            partBlock.listMarker = listMarker;
+            partBlock.listMarkerX = blockX - MARKER_RIGHT_GAP;
+          }
+          partBlock.blockType = "list_item";
+        }
+
+        currentPage.blocks.push(partBlock);
+        hasPlacedAnyPart = true;
+
+        if (!isLastPart) {
+          pages.push(currentPage);
+          currentPage = newPage(pages.length + 1);
+          prevSpaceAfter = 0;
+          currentPartStartY = margins.top;
+          remainingLines = remainingLines.slice(linesFit);
+        } else {
+          y = partStartY + heightFit;
+          prevSpaceAfter = blockStyle.spaceAfter;
+          break;
+        }
+      }
     }
 
     processedBlocks++;
@@ -450,7 +535,10 @@ function shiftBlock(
   // sees delta === 0 and skips the per-span adjustment.
   if (measureCache) {
     const cached = measureCache.get(block.node);
-    if (cached) {
+    // Only update the cache when this block holds ALL the cached lines.
+    // Split-part blocks carry a subset of lines; updating with partial data
+    // would corrupt subsequent layout runs that expect the full measurement.
+    if (cached && block.lines.length === cached.lines.length) {
       // Keep placedTargetY / placedPage intact — they reflect the correct
       // placement positions from the previous run and are still valid.
       measureCache.set(block.node, {

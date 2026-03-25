@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { layoutDocument, defaultPageConfig, collapseMargins } from "./PageLayout";
 import type { MeasureCacheEntry } from "./PageLayout";
 import { applyPageFont } from "./FontConfig";
-import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak } from "../test-utils";
+import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, MOCK_LINE_HEIGHT } from "../test-utils";
 
 // lineHeight = 18, contentHeight = 1123 - 72 - 72 = 979
 
@@ -556,6 +556,147 @@ describe("applyPageFont", () => {
 });
 
 // ── pageConfig.fontFamily end-to-end ─────────────────────────────────────────
+
+// ── Line-level page splitting ─────────────────────────────────────────────────
+//
+// Page geometry used throughout this section:
+//   pageWidth  = 120   → contentWidth  = 100px (120 − 2×10 margins)
+//   pageHeight = 74    → contentHeight = 54px  (74 − 2×10 margins) = 3 × MOCK_LINE_HEIGHT
+//   pageBottom = margins.top + contentHeight   = 10 + 54 = 64px
+//
+// Text wrapping: at contentWidth=100px and MOCK_CHAR_WIDTH=8px, a 9-char word
+// (72px) fits alone but never alongside another (144px > 100px). So
+// "aaaaaaaaa bbbbbbbbb ..." reliably produces one line per word.
+//
+// Block layout with a 1-line "intro" paragraph before the tall block:
+//   intro y=10, height=18, spaceAfter=10
+//   tall block: gap=10, targetY=38, spaceAvailable=64-38=26px → 1 line fits (18px)
+//   → part 1 (1 line) on page 1; remaining lines carried to subsequent pages
+//
+describe("layoutDocument — line splitting", () => {
+  const LH = MOCK_LINE_HEIGHT; // 18px
+
+  const splitPage = {
+    pageWidth:  120,
+    pageHeight: Math.round(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
+    margins: { top: 10, right: 10, bottom: 10, left: 10 },
+  };
+
+  const fourLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd"; // 4 × 9-char words → 4 lines
+  const sixLineText  = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff"; // 6 lines
+
+  it("splits a tall paragraph across two pages at the correct line boundary", () => {
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(2);
+
+    // Page 1: intro + first split part (1 line)
+    expect(layout.pages[0]!.blocks).toHaveLength(2);
+    const part1 = layout.pages[0]!.blocks[1]!;
+    expect(part1.lines).toHaveLength(1);
+    expect(part1.continuesOnNextPage).toBe(true);
+    expect(part1.isContinuation).toBeUndefined();
+
+    // Page 2: continuation (remaining 3 lines)
+    expect(layout.pages[1]!.blocks).toHaveLength(1);
+    const part2 = layout.pages[1]!.blocks[0]!;
+    expect(part2.lines).toHaveLength(3);
+    expect(part2.isContinuation).toBe(true);
+    expect(part2.continuesOnNextPage).toBeUndefined();
+  });
+
+  it("lines are conserved — total across all parts equals the full line count", () => {
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const part1 = layout.pages[0]!.blocks[1]!;
+    const part2 = layout.pages[1]!.blocks[0]!;
+    expect(part1.lines.length + part2.lines.length).toBe(4);
+  });
+
+  it("both parts reference the same ProseMirror node and nodePos", () => {
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const part1 = layout.pages[0]!.blocks[1]!;
+    const part2 = layout.pages[1]!.blocks[0]!;
+    expect(part1.node).toBe(part2.node);   // same JS object reference
+    expect(part1.nodePos).toBe(part2.nodePos);
+  });
+
+  it("continuation part starts at margins.top with spaceBefore = 0", () => {
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const cont = layout.pages[1]!.blocks[0]!;
+    expect(cont.y).toBe(splitPage.margins.top);
+    expect(cont.spaceBefore).toBe(0);
+  });
+
+  it("non-last split parts have spaceAfter = 0; last part has the block's natural spaceAfter", () => {
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const part1 = layout.pages[0]!.blocks[1]!;
+    const part2 = layout.pages[1]!.blocks[0]!;
+    expect(part1.spaceAfter).toBe(0);
+    expect(part2.spaceAfter).toBeGreaterThan(0); // paragraph's natural spaceAfter
+  });
+
+  it("splits a block across three pages when it has enough lines", () => {
+    // sixLineText → 6 lines; splitPage fits 3 lines per page content area.
+    // Page 1: intro + 1 line (26px available after gap)
+    // Page 2: 3 lines (54px available, 3 × 18 = 54 ≤ 54)
+    // Page 3: 2 remaining lines
+    const layout = layoutDocument(doc(p("intro"), p(sixLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(3);
+
+    const p1part = layout.pages[0]!.blocks[1]!;
+    const p2part = layout.pages[1]!.blocks[0]!;
+    const p3part = layout.pages[2]!.blocks[0]!;
+
+    // Line counts
+    expect(p1part.lines).toHaveLength(1);
+    expect(p2part.lines).toHaveLength(3);
+    expect(p3part.lines).toHaveLength(2);
+
+    // Flag consistency
+    expect(p1part.continuesOnNextPage).toBe(true);
+    expect(p2part.isContinuation).toBe(true);
+    expect(p2part.continuesOnNextPage).toBe(true);  // middle part
+    expect(p3part.isContinuation).toBe(true);
+    expect(p3part.continuesOnNextPage).toBeUndefined(); // last part
+
+    // Total lines conserved
+    expect(p1part.lines.length + p2part.lines.length + p3part.lines.length).toBe(6);
+  });
+
+  it("block after the split is placed after the last continuation part", () => {
+    // The continuation on page 2 fills the entire content area (3 lines × 18 = 54px).
+    // The "after" paragraph can't fit on page 2 and overflows to page 3.
+    // Key property: it starts at margins.top — not at an incorrect overlapping y.
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText), p("after")), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    // "after" ends up on page 3 (page 2 is exactly full from the continuation)
+    expect(layout.pages.length).toBeGreaterThanOrEqual(3);
+    const afterBlock = layout.pages[2]!.blocks[0]!;
+    expect(afterBlock.y).toBe(splitPage.margins.top);
+  });
+});
 
 describe("layoutDocument — pageConfig.fontFamily", () => {
   it("span fonts in a paragraph use the page fontFamily", () => {

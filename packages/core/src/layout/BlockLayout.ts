@@ -86,6 +86,17 @@ export interface LayoutBlock {
   listMarker?: string;
   /** Absolute x position to draw the list marker — to the left of the indented text. */
   listMarkerX?: number;
+  /**
+   * True on the 2nd, 3rd, … visual parts of a block split across pages.
+   * Suppresses the list marker and sets spaceBefore = 0 for continuation parts.
+   */
+  isContinuation?: boolean;
+  /**
+   * True on the 1st and middle parts of a split block (the block continues on the next page).
+   * Sets spaceAfter = 0 and tells the renderer that the last rendered line here is NOT the
+   * last line of the block (relevant for justify alignment's last-line exception).
+   */
+  continuesOnNextPage?: boolean;
 }
 
 export interface BlockLayoutOptions {

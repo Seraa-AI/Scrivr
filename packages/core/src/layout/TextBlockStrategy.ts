@@ -22,9 +22,13 @@ export const TextBlockStrategy: BlockStrategy = {
       const line = lines[li]!;
       const globalLineIndex = lineIndexOffset + li;
       const isLastLine = li === lines.length - 1;
+      // For justify alignment, the "last line" exception (no stretching) applies only
+      // to the very last line of the whole block — not the last rendered line of a
+      // split part that continues on the next page.
+      const isLastLineOfBlock = isLastLine && !block.continuesOnNextPage;
 
       const lineOffsetX = computeAlignmentOffset(align, availableWidth, line.width);
-      const spaceBonus = computeJustifySpaceBonus(align, line.spans, availableWidth, line.width, isLastLine);
+      const spaceBonus = computeJustifySpaceBonus(align, line.spans, availableWidth, line.width, isLastLineOfBlock);
       const lineY = block.y + getTotalLineHeight(lines, li);
       const baseline = lineY + line.ascent;
 
