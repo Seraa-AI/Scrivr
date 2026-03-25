@@ -37,9 +37,13 @@ export const Heading = Extension.create<HeadingOptions>({
           },
         })),
         toDOM: (node) => {
+          const styles: string[] = [];
+          if (node.attrs.align && node.attrs.align !== "left") styles.push(`text-align:${node.attrs.align as string}`);
+          if (node.attrs.fontFamily) styles.push(`font-family:${node.attrs.fontFamily as string}`);
           const attrs: Record<string, string> = {};
+          if (styles.length) attrs["style"] = styles.join(";");
           if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
-          return [`h${node.attrs.level}`, attrs, 0];
+          return [`h${node.attrs.level as number}`, attrs, 0];
         },
       },
     };

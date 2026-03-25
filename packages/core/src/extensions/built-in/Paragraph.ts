@@ -33,7 +33,9 @@ export const Paragraph = Extension.create({
           },
         }],
         toDOM: (node) => {
-          const attrs: Record<string, string> = { style: `text-align:${node.attrs.align}` };
+          let style = `text-align:${node.attrs.align as string}`;
+          if (node.attrs.fontFamily) style += `;font-family:${node.attrs.fontFamily as string}`;
+          const attrs: Record<string, string> = { style };
           if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
           return ["p", attrs, 0];
         },

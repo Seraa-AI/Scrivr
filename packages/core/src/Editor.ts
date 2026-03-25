@@ -15,8 +15,9 @@ import { layoutDocument, defaultPageConfig } from "./layout/PageLayout";
 import type { PageConfig, DocumentLayout, MeasureCacheEntry, LayoutResumption } from "./layout/PageLayout";
 import type { FontConfig } from "./layout/FontConfig";
 import { populateCharMap } from "./layout/BlockLayout";
-import { insertText } from "./model/commands";
+import { insertText, deleteSelection } from "./model/commands";
 import { PasteTransformer } from "./input/PasteTransformer";
+import { serializeSelectionToHtml } from "./input/ClipboardSerializer";
 
 /**
  * Convert a DOM KeyboardEvent into a ProseMirror key string.
@@ -1255,6 +1256,8 @@ export class Editor {
     ta.addEventListener("input", this.handleInput);
     ta.addEventListener("compositionend", this.handleCompositionEnd);
     ta.addEventListener("paste", this.handlePaste);
+    ta.addEventListener("copy", this.handleCopy);
+    ta.addEventListener("cut", this.handleCut);
     ta.addEventListener("focus", this.handleFocus);
     ta.addEventListener("blur", this.handleBlur);
   }
@@ -1265,6 +1268,8 @@ export class Editor {
     ta.removeEventListener("input", this.handleInput);
     ta.removeEventListener("compositionend", this.handleCompositionEnd);
     ta.removeEventListener("paste", this.handlePaste);
+    ta.removeEventListener("copy", this.handleCopy);
+    ta.removeEventListener("cut", this.handleCut);
     ta.removeEventListener("focus", this.handleFocus);
     ta.removeEventListener("blur", this.handleBlur);
   }
@@ -1341,6 +1346,28 @@ export class Editor {
     if (!cmd) return false;
     return cmd(this.state, (tr) => this.dispatch(tr));
   }
+
+  private handleCopy = (e: ClipboardEvent): void => {
+    const { from, to, empty } = this.state.selection;
+    if (empty || !e.clipboardData) return;
+    e.preventDefault();
+    const text = this.state.doc.textBetween(from, to, "\n");
+    e.clipboardData.setData("text/plain", text);
+    const html = serializeSelectionToHtml(this.state, this.manager.schema);
+    if (html) e.clipboardData.setData("text/html", html);
+  };
+
+  private handleCut = (e: ClipboardEvent): void => {
+    const { from, to, empty } = this.state.selection;
+    if (empty || !e.clipboardData) return;
+    e.preventDefault();
+    const text = this.state.doc.textBetween(from, to, "\n");
+    e.clipboardData.setData("text/plain", text);
+    const html = serializeSelectionToHtml(this.state, this.manager.schema);
+    if (html) e.clipboardData.setData("text/html", html);
+    const tr = deleteSelection(this.state);
+    if (tr) this.dispatch(tr);
+  };
 
   private handlePaste = (e: ClipboardEvent): void => {
     e.preventDefault();

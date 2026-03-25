@@ -920,3 +920,109 @@ describe("Editor — cursorPage", () => {
     cleanup();
   });
 });
+
+// ── copy / cut ────────────────────────────────────────────────────────────────
+
+describe("Editor — copy and cut", () => {
+  /** Dispatch a copy/cut event on the textarea and return the clipboardData. */
+  function dispatchClipboard(
+    container: HTMLElement,
+    type: "copy" | "cut",
+  ): DataTransfer {
+    const ta = container.querySelector("textarea")!;
+    const dt = new DataTransfer();
+    const event = new ClipboardEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dt,
+    });
+    ta.dispatchEvent(event);
+    return dt;
+  }
+
+  it("copy writes text/plain of the selected text", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const container = editor["container"] as HTMLElement;
+    type("Hello");
+    editor.setSelection(1, 6);
+    const dt = dispatchClipboard(container, "copy");
+    expect(dt.getData("text/plain")).toBe("Hello");
+    cleanup();
+  });
+
+  it("copy writes text/html containing the selected text", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const container = editor["container"] as HTMLElement;
+    type("Hello");
+    editor.setSelection(1, 6);
+    const dt = dispatchClipboard(container, "copy");
+    const html = dt.getData("text/html");
+    expect(html).toContain("Hello");
+    cleanup();
+  });
+
+  it("copy with an empty selection writes nothing to clipboard", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const container = editor["container"] as HTMLElement;
+    type("Hello");
+    editor.moveCursorTo(3); // collapsed cursor
+    const dt = dispatchClipboard(container, "copy");
+    expect(dt.getData("text/plain")).toBe("");
+    cleanup();
+  });
+
+  it("cut writes text/plain of the selected text", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const container = editor["container"] as HTMLElement;
+    type("Hello");
+    editor.setSelection(1, 6);
+    const dt = dispatchClipboard(container, "cut");
+    expect(dt.getData("text/plain")).toBe("Hello");
+    cleanup();
+  });
+
+  it("cut removes the selected text from the document", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const container = editor["container"] as HTMLElement;
+    type("Hello World");
+    // Select "Hello " (positions 1–7)
+    editor.setSelection(1, 7);
+    dispatchClipboard(container, "cut");
+    expect(editor.getState().doc.textContent).toBe("World");
+    cleanup();
+  });
+
+  it("cut writes text/html of the selected content", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const container = editor["container"] as HTMLElement;
+    type("Hello");
+    editor.setSelection(1, 6);
+    const dt = dispatchClipboard(container, "cut");
+    const html = dt.getData("text/html");
+    expect(html).toContain("Hello");
+    cleanup();
+  });
+
+  it("cut with an empty selection leaves the document unchanged", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const container = editor["container"] as HTMLElement;
+    type("Hello");
+    editor.moveCursorTo(3); // collapsed cursor
+    dispatchClipboard(container, "cut");
+    expect(editor.getState().doc.textContent).toBe("Hello");
+    cleanup();
+  });
+
+  it("copy of bold text serializes <strong> in the HTML", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const container = editor["container"] as HTMLElement;
+    type("Bold");
+    editor.setSelection(1, 5);
+    editor.commands["toggleBold"]?.();
+    editor.setSelection(1, 5);
+    const dt = dispatchClipboard(container, "copy");
+    const html = dt.getData("text/html");
+    expect(html).toContain("<strong>");
+    cleanup();
+  });
+});
