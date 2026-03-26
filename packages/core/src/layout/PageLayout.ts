@@ -403,8 +403,8 @@ export function layoutDocument(
           blockType: entry.blockType,
           align: entry.align,
           availableWidth: blockWidth,
-          isContinuation: isCont || undefined,
-          continuesOnNextPage: !isLastPart || undefined,
+          ...(isCont ? { isContinuation: true as const } : {}),
+          ...(!isLastPart ? { continuesOnNextPage: true as const } : {}),
         };
 
         if (listMarker !== undefined) {

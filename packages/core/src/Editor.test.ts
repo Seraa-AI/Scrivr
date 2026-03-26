@@ -250,7 +250,7 @@ describe("Editor — paste", () => {
 
   it("inserts pasted plain text at the cursor", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     paste(container, "Hello");
     expect(editor.getState().doc.textContent).toBe("Hello");
     cleanup();
@@ -258,7 +258,7 @@ describe("Editor — paste", () => {
 
   it("replaces the active selection with pasted text", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
     editor.setSelection(1, 4); // select "Hel"
     paste(container, "X");
@@ -268,7 +268,7 @@ describe("Editor — paste", () => {
 
   it("does nothing when paste data is empty", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
     const before = editor.getState().doc.textContent;
     paste(container, "");
@@ -294,7 +294,7 @@ describe("Editor — HTML paste", () => {
 
   it("pastes bold text from HTML", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     pasteHtml(container, "<b>Hello</b>");
     expect(editor.getState().doc.textContent).toBe("Hello");
     let hasBold = false;
@@ -307,7 +307,7 @@ describe("Editor — HTML paste", () => {
 
   it("pastes a heading from HTML", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     pasteHtml(container, "<h2>My Heading</h2>");
     expect(editor.getState().doc.textContent).toBe("My Heading");
     let foundHeading = false;
@@ -320,7 +320,7 @@ describe("Editor — HTML paste", () => {
 
   it("pastes a bullet list from HTML", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     pasteHtml(container, "<ul><li>Alpha</li><li>Beta</li></ul>");
     expect(editor.getState().doc.textContent).toBe("AlphaBeta");
     let foundList = false;
@@ -333,7 +333,7 @@ describe("Editor — HTML paste", () => {
 
   it("strips unsupported tags and preserves text", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     pasteHtml(container, "<meta charset='utf-8'><p>Clean text</p>");
     expect(editor.getState().doc.textContent).toBe("Clean text");
     cleanup();
@@ -341,7 +341,7 @@ describe("Editor — HTML paste", () => {
 
   it("HTML takes priority over plain text", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     pasteHtml(container, "<b>Rich</b>", "plain fallback");
     // Should use HTML path — bold mark present
     let hasBold = false;
@@ -369,7 +369,7 @@ describe("Editor — Markdown paste", () => {
 
   it("pastes a markdown heading as a heading node", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     paste(container, "# Hello World");
     expect(editor.getState().doc.textContent).toBe("Hello World");
     let foundHeading = false;
@@ -382,7 +382,7 @@ describe("Editor — Markdown paste", () => {
 
   it("pastes markdown h2 correctly", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     paste(container, "## Subtitle");
     let level = 0;
     editor.getState().doc.descendants((node) => {
@@ -394,7 +394,7 @@ describe("Editor — Markdown paste", () => {
 
   it("pastes **bold** as bold mark", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     paste(container, "- **bold item**");
     let hasBold = false;
     editor.getState().doc.descendants((node) => {
@@ -406,7 +406,7 @@ describe("Editor — Markdown paste", () => {
 
   it("pastes a bullet list as bulletList node", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     paste(container, "- Alpha\n- Beta\n- Gamma");
     expect(editor.getState().doc.textContent).toBe("AlphaBetaGamma");
     let listItemCount = 0;
@@ -419,7 +419,7 @@ describe("Editor — Markdown paste", () => {
 
   it("pastes an ordered list as orderedList node", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     paste(container, "1. First\n2. Second");
     let foundOrderedList = false;
     editor.getState().doc.descendants((node) => {
@@ -431,7 +431,7 @@ describe("Editor — Markdown paste", () => {
 
   it("does NOT parse plain text without markdown patterns as markdown", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     paste(container, "This is a normal sentence with no markdown.");
     expect(editor.getState().doc.textContent).toBe("This is a normal sentence with no markdown.");
     // No heading or list nodes — just a paragraph
@@ -445,7 +445,7 @@ describe("Editor — Markdown paste", () => {
 
   it("mid-sentence asterisks are NOT treated as markdown", () => {
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     paste(container, "Section 4* applies here. See also clause 2*.");
     // No bold marks created
     let hasBold = false;
@@ -792,7 +792,7 @@ describe("Editor — keyboard event handling", () => {
 
   it("Enter inside a list calls splitListItem and prevents default", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
 
     editor.commands["toggleBulletList"]?.();
     type("Hello");
@@ -811,7 +811,7 @@ describe("Editor — keyboard event handling", () => {
 
   it("Enter outside a list prevents default and does not insert newline text", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
 
     const event = pressKey(container, "Enter");
@@ -825,7 +825,7 @@ describe("Editor — keyboard event handling", () => {
 
   it("Tab is always prevented regardless of context (never shifts browser focus)", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
 
     const event = pressKey(container, "Tab");
@@ -835,7 +835,7 @@ describe("Editor — keyboard event handling", () => {
 
   it("Tab outside a list is prevented and inserts no text", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
 
     pressKey(container, "Tab");
@@ -846,7 +846,7 @@ describe("Editor — keyboard event handling", () => {
 
   it("Tab inside a list is prevented and inserts no text", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
 
     editor.commands["toggleBulletList"]?.();
     type("Item 1");
@@ -862,7 +862,7 @@ describe("Editor — keyboard event handling", () => {
 
   it("Shift-Tab is always prevented", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
 
     const event = pressKey(container, "Tab", { shiftKey: true });
@@ -874,10 +874,10 @@ describe("Editor — keyboard event handling", () => {
     // Register a command under the ProseMirror-convention key "Space"
     // and verify that pressing the space bar dispatches it.
     const { editor, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     let called = false;
     // Inject a one-off "Space" binding directly into the private keymap
-    (editor["keymap"] as Record<string, unknown>)["Space"] = () => {
+    (editor["ib"]["opts"]["keymap"] as Record<string, unknown>)["Space"] = () => {
       called = true;
       return true;
     };
@@ -961,7 +961,7 @@ describe("Editor — copy and cut", () => {
 
   it("copy writes text/plain of the selected text", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
     editor.setSelection(1, 6);
     const dt = dispatchClipboard(container, "copy");
@@ -971,7 +971,7 @@ describe("Editor — copy and cut", () => {
 
   it("copy writes text/html containing the selected text", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
     editor.setSelection(1, 6);
     const dt = dispatchClipboard(container, "copy");
@@ -982,7 +982,7 @@ describe("Editor — copy and cut", () => {
 
   it("copy with an empty selection writes nothing to clipboard", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
     editor.moveCursorTo(3); // collapsed cursor
     const dt = dispatchClipboard(container, "copy");
@@ -992,7 +992,7 @@ describe("Editor — copy and cut", () => {
 
   it("cut writes text/plain of the selected text", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
     editor.setSelection(1, 6);
     const dt = dispatchClipboard(container, "cut");
@@ -1002,7 +1002,7 @@ describe("Editor — copy and cut", () => {
 
   it("cut removes the selected text from the document", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello World");
     // Select "Hello " (positions 1–7)
     editor.setSelection(1, 7);
@@ -1013,7 +1013,7 @@ describe("Editor — copy and cut", () => {
 
   it("cut writes text/html of the selected content", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
     editor.setSelection(1, 6);
     const dt = dispatchClipboard(container, "cut");
@@ -1024,7 +1024,7 @@ describe("Editor — copy and cut", () => {
 
   it("cut with an empty selection leaves the document unchanged", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Hello");
     editor.moveCursorTo(3); // collapsed cursor
     dispatchClipboard(container, "cut");
@@ -1034,7 +1034,7 @@ describe("Editor — copy and cut", () => {
 
   it("copy of bold text serializes <strong> in the HTML", () => {
     const { editor, type, cleanup } = makeEditor();
-    const container = editor["container"] as HTMLElement;
+    const container = editor["ib"].container as HTMLElement;
     type("Bold");
     editor.setSelection(1, 5);
     editor.commands["toggleBold"]?.();

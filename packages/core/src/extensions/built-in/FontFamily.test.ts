@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EditorState, TextSelection } from "prosemirror-state";
+import { EditorState, TextSelection, Transaction } from "prosemirror-state";
 import { ExtensionManager } from "../ExtensionManager";
 import { StarterKit } from "../StarterKit";
 
@@ -21,7 +21,7 @@ function makeContext() {
 /** Returns the state after running a command by name (with optional args). */
 function run(
   state: EditorState,
-  commands: Record<string, (...args: unknown[]) => (s: EditorState, d?: (tr: ReturnType<typeof state.tr.constructor>) => void) => boolean>,
+  commands: Record<string, (...args: unknown[]) => (s: EditorState, d?: (tr: Transaction) => void) => boolean>,
   name: string,
   ...args: unknown[]
 ): EditorState {

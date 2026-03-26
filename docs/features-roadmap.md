@@ -368,6 +368,48 @@ Auto-generated from heading nodes.
 
 ---
 
+## Context Menu
+
+**Status:** Not implemented
+
+Right-click on the canvas should show a context-sensitive menu. This is a fundamental expectation — users instinctively right-click when they don't know where a command lives.
+
+**What it needs to show (context-sensitive):**
+
+| Context | Items |
+|---|---|
+| Cursor in text | Cut, Copy, Paste, Select All \| Bold, Italic \| Paragraph style |
+| Text selected | Cut, Copy, Paste \| Bold, Italic, Clear Formatting \| Link \| Comment |
+| Image selected | Copy, Delete \| Resize options |
+| Inside table cell | Cut, Copy, Paste \| Insert Row Above/Below, Insert Column Left/Right \| Delete Row, Delete Column, Delete Table \| Merge Cells, Split Cell |
+| Spellcheck squiggle | Suggestions list \| Ignore, Add to dictionary |
+
+**Implementation plan:**
+
+1. **Intercept `contextmenu` event** on the container div — `e.preventDefault()` to suppress the browser default, then show our menu:
+   ```typescript
+   container.addEventListener("contextmenu", this.handleContextMenu);
+   ```
+
+2. **Hit-test the click position** — use `charMap.posAtCoords(x, y, page)` (same as mousedown) to determine what was clicked: text, image, table cell, etc.
+
+3. **Build the menu items** from editor state — check `selection.empty`, active marks, node type at cursor. Same logic the toolbar uses for `isActive`.
+
+4. **Render as a DOM overlay** (not canvas) — a `<div>` with `position: fixed`, `z-index: 9999`, `pointer-events: auto`. Positioned at `(e.clientX, e.clientY)` clamped to viewport edges so it never overflows off-screen.
+
+5. **Dismiss on** click outside, Escape, or scroll.
+
+6. **Extension hook** — `addContextMenuItems()` on the Extension API so extensions (Table, Image, SpellCheck) can contribute their own items without coupling to the core menu:
+   ```typescript
+   addContextMenuItems?(): ContextMenuItem[]
+   ```
+
+**Why DOM, not canvas:** Context menus need to be accessible (keyboard nav, screen readers), need to scroll into view, and need to appear above everything including overlays. A DOM `<div>` is the right tool — the menu is not part of the document content.
+
+**Keyboard equivalent:** Shift+F10 (Windows standard) and the Menu key should also open the context menu at the cursor position.
+
+---
+
 ## Editing Quality
 
 | Feature | Status | Notes |
