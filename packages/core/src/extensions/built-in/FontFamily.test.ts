@@ -100,6 +100,29 @@ describe("setBlockFontFamily", () => {
     const after2 = run(after1, commands, "setBlockFontFamily", "Verdana");
     expect(after2.doc.firstChild!.attrs["fontFamily"]).toBe("Verdana");
   });
+
+  it("clears inline font_family marks from the block so they don't override the attr", () => {
+    const { schema, commands, state } = makeContext();
+    // Simulate pasted content: text node with an inline font_family mark
+    const fontFamilyMarkType = schema.marks["font_family"]!;
+    const textWithMark = schema.text("Hello", [fontFamilyMarkType.create({ family: "Arial" })]);
+    const withInlineMark = state.apply(
+      state.tr.replaceWith(1, 1, textWithMark)
+    );
+
+    // Verify the inline mark is present before the command
+    const beforeMarks = withInlineMark.doc.firstChild!.firstChild!.marks;
+    expect(beforeMarks.some((m) => m.type.name === "font_family")).toBe(true);
+
+    // Apply block font family — should set attr AND remove inline marks
+    const next = run(withInlineMark, commands, "setBlockFontFamily", "Georgia");
+    expect(next.doc.firstChild!.attrs["fontFamily"]).toBe("Georgia");
+
+    // Inline font_family marks should be gone so the block attr takes effect
+    next.doc.firstChild!.forEach((inline) => {
+      expect(inline.marks.some((m) => m.type.name === "font_family")).toBe(false);
+    });
+  });
 });
 
 // ── unsetBlockFontFamily ──────────────────────────────────────────────────────

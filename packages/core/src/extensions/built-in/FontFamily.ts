@@ -60,11 +60,19 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
       const { $from, $to } = state.selection;
       let tr = state.tr;
       let changed = false;
+      const fontFamilyMark = state.schema.marks["font_family"];
 
       state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
         if (!node.isTextblock) return;
         if (!("fontFamily" in node.attrs)) return;
         tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, fontFamily: family });
+        // Remove inline font_family marks from this block's entire content.
+        // Pasted content (e.g. from Google Docs) carries font_family marks on
+        // every span — without this, those inline marks override the block attr
+        // and the toolbar font-family change appears to have no effect.
+        if (fontFamilyMark) {
+          tr = tr.removeMark(pos + 1, pos + node.nodeSize - 1, fontFamilyMark);
+        }
         changed = true;
       });
 
