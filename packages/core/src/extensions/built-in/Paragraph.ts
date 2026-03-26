@@ -26,9 +26,14 @@ export const Paragraph = Extension.create({
           tag: "p",
           getAttrs(dom) {
             const el = dom as HTMLElement;
+            const rawFamily = el.style.fontFamily;
+            const fontFamily = rawFamily
+              ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() || null
+              : null;
             return {
-              align:  el.style.textAlign || "left",
-              nodeId: el.getAttribute("data-node-id") ?? null,
+              align:      el.style.textAlign || "left",
+              fontFamily: fontFamily,
+              nodeId:     el.getAttribute("data-node-id") ?? null,
             };
           },
         }],

@@ -33,7 +33,15 @@ export const FontSize = Extension.create<FontSizeOptions>({
           {
             style: "font-size",
             getAttrs: (value) => {
-              const px = parseFloat(value as string);
+              const raw = value as string;
+              let px: number;
+              if (raw.endsWith("pt")) {
+                // 1pt = 96/72 px (≈ 1.333px) at standard 96 DPI
+                px = Math.round(parseFloat(raw) * (96 / 72));
+              } else {
+                // px, or bare number — take as-is
+                px = parseFloat(raw);
+              }
               return isNaN(px) ? false : { size: px };
             },
           },

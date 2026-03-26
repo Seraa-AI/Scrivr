@@ -33,7 +33,16 @@ export const Heading = Extension.create<HeadingOptions>({
           tag: `h${level}`,
           getAttrs(dom) {
             const el = dom as HTMLElement;
-            return { level, nodeId: el.getAttribute("data-node-id") ?? null };
+            const rawFamily = el.style.fontFamily;
+            const fontFamily = rawFamily
+              ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() || null
+              : null;
+            return {
+              level,
+              align:      el.style.textAlign || "left",
+              fontFamily: fontFamily,
+              nodeId:     el.getAttribute("data-node-id") ?? null,
+            };
           },
         })),
         toDOM: (node) => {
