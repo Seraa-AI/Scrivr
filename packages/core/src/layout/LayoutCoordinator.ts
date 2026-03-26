@@ -177,7 +177,8 @@ export class LayoutCoordinator {
     let lineOffset = 0;
     for (const block of page.blocks) {
       populateCharMap(block, this.charMap, page.pageNumber, lineOffset, this.opts.measurer);
-      lineOffset += block.lines.length;
+      // Leaf blocks (lines=[]) register 2 line entries (before + after zones).
+      lineOffset += block.lines.length === 0 ? 2 : block.lines.length;
     }
   }
 

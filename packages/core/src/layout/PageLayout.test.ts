@@ -168,9 +168,9 @@ describe("layoutDocument — horizontal rule", () => {
   }
 
   // HR block style: font "8px Georgia, serif" → height = Math.round(8 × 1.5) = 12
-  // spaceBefore = 16, spaceAfter = 16
+  // spaceBefore = 24, spaceAfter = 24
   const HR_HEIGHT = 12;
-  const HR_SPACE  = 16;
+  const HR_SPACE  = 24;
 
   it("HR block has correct height (derived from 8px font)", () => {
     const layout = layoutDocument(fullDoc(hr()), {
@@ -193,7 +193,7 @@ describe("layoutDocument — horizontal rule", () => {
   });
 
   it("paragraph before HR: HR y accounts for para height and collapsed margin", () => {
-    // para: spaceAfter=10.  HR: spaceBefore=16.  collapsed gap = max(10, 16) = 16
+    // para: spaceAfter=10.  HR: spaceBefore=24.  collapsed gap = max(10, 24) = 24
     const layout = layoutDocument(fullDoc(fullP("Hello"), hr()), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
@@ -205,7 +205,7 @@ describe("layoutDocument — horizontal rule", () => {
   });
 
   it("HR before paragraph: para y accounts for HR height and collapsed margin", () => {
-    // HR: spaceAfter=16.  para: spaceBefore=0.  collapsed gap = max(16, 0) = 16
+    // HR: spaceAfter=24.  para: spaceBefore=0.  collapsed gap = max(24, 0) = 24
     const layout = layoutDocument(fullDoc(hr(), fullP("Hello")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),

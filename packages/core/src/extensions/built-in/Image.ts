@@ -81,7 +81,8 @@ function createImageStrategy(): BlockStrategy {
 
       ctx.restore();
 
-      return renderCtx.lineIndexOffset + 1;
+      // layoutLeafBlock registers 2 lines (top = before, bottom = after).
+      return renderCtx.lineIndexOffset + 2;
     },
   };
 }

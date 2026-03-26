@@ -156,31 +156,50 @@ export function layoutLeafBlock(
     IMAGE_SPACE,
   );
 
-  const cursorDocPos = nodePos + 1; // inside the 2-token leaf block
+  // Leaf blocks expose two cursor positions: before (nodePos) and after
+  // (nodePos + nodeSize). Split the block into two equal vertical zones so
+  // clicking the top half → before and clicking the bottom half → after.
+  // Each zone is a separate line + full-width glyph (2 line indices total).
+  const beforePos  = nodePos;
+  const afterPos   = nodePos + node.nodeSize;
+  const halfHeight = Math.max(1, Math.floor(height / 2));
 
   if (map) {
-    const li = lineIndexOffset;
-    if (!map.hasLine(page, li)) {
+    const liTop    = lineIndexOffset;
+    const liBottom = lineIndexOffset + 1;
+
+    // Top half — cursor before the block
+    if (!map.hasLine(page, liTop)) {
       map.registerLine({
-        page,
-        lineIndex: li,
-        y,
-        height,
-        x,
-        contentWidth: availableWidth,
-        startDocPos: cursorDocPos,
-        endDocPos: cursorDocPos + 1,
+        page, lineIndex: liTop,
+        y, height: halfHeight,
+        x, contentWidth: availableWidth,
+        startDocPos: beforePos, endDocPos: beforePos,
       });
     }
-    if (!map.hasGlyph(cursorDocPos)) {
+    if (!map.hasGlyph(beforePos)) {
       map.registerGlyph({
-        docPos: cursorDocPos,
-        x,
-        y,
-        width: availableWidth,
-        height,
-        page,
-        lineIndex: li,
+        docPos: beforePos, x, y,
+        width: availableWidth, height: halfHeight,
+        page, lineIndex: liTop,
+      });
+    }
+
+    // Bottom half — cursor after the block
+    const yBottom = y + halfHeight;
+    if (!map.hasLine(page, liBottom)) {
+      map.registerLine({
+        page, lineIndex: liBottom,
+        y: yBottom, height: height - halfHeight,
+        x, contentWidth: availableWidth,
+        startDocPos: afterPos, endDocPos: afterPos,
+      });
+    }
+    if (!map.hasGlyph(afterPos)) {
+      map.registerGlyph({
+        docPos: afterPos, x, y: yBottom,
+        width: availableWidth, height: height - halfHeight,
+        page, lineIndex: liBottom,
       });
     }
   }
@@ -496,6 +515,30 @@ export function populateCharMap(
   lineIndexOffset: number,
   measurer: TextMeasurer,
 ): void {
+  // Leaf block (HR, image, etc.) — no lines, just before/after cursor zones.
+  if (block.lines.length === 0) {
+    const beforePos  = block.nodePos;
+    const afterPos   = block.nodePos + block.node.nodeSize;
+    const halfHeight = Math.max(1, Math.floor(block.height / 2));
+    const liTop      = lineIndexOffset;
+    const liBottom   = lineIndexOffset + 1;
+
+    if (!map.hasLine(page, liTop)) {
+      map.registerLine({ page, lineIndex: liTop, y: block.y, height: halfHeight, x: block.x, contentWidth: block.availableWidth, startDocPos: beforePos, endDocPos: beforePos });
+    }
+    if (!map.hasGlyph(beforePos)) {
+      map.registerGlyph({ docPos: beforePos, x: block.x, y: block.y, width: block.availableWidth, height: halfHeight, page, lineIndex: liTop });
+    }
+
+    if (!map.hasLine(page, liBottom)) {
+      map.registerLine({ page, lineIndex: liBottom, y: block.y + halfHeight, height: block.height - halfHeight, x: block.x, contentWidth: block.availableWidth, startDocPos: afterPos, endDocPos: afterPos });
+    }
+    if (!map.hasGlyph(afterPos)) {
+      map.registerGlyph({ docPos: afterPos, x: block.x, y: block.y + halfHeight, width: block.availableWidth, height: block.height - halfHeight, page, lineIndex: liBottom });
+    }
+    return;
+  }
+
   let lineY = block.y;
 
   for (let li = 0; li < block.lines.length; li++) {

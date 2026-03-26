@@ -325,6 +325,32 @@ describe("layoutBlock — leaf blocks (HR and Image)", () => {
     expect(map.hasLine(1, 0)).toBe(true);
   });
 
+  it("HR block — click on top half resolves to position BEFORE the block", () => {
+    // nodePos=10, nodeSize=1 (leaf) → beforePos=10, afterPos=11
+    // height=12 → halfHeight=6; top zone y=50..56, bottom zone y=56..62
+    const map = new CharacterMap();
+    layoutBlock(hr(), {
+      nodePos: 10, x: 72, y: 50, availableWidth: 400, page: 1,
+      measurer: createMeasurer(), fontConfig: hrFontConfig, map, lineIndexOffset: 0,
+    });
+    // Click in the top half (y = 52, inside 50..56)
+    const pos = map.posAtCoords(72 + 200, 52, 1);
+    expect(pos).toBe(10);
+  });
+
+  it("HR block — click on bottom half resolves to position AFTER the block", () => {
+    // nodePos=10, nodeSize=1 (leaf) → afterPos=11
+    // height=12 → halfHeight=6; bottom zone y=56..62
+    const map = new CharacterMap();
+    layoutBlock(hr(), {
+      nodePos: 10, x: 72, y: 50, availableWidth: 400, page: 1,
+      measurer: createMeasurer(), fontConfig: hrFontConfig, map, lineIndexOffset: 0,
+    });
+    // Click in the bottom half (y = 59, inside 56..62)
+    const pos = map.posAtCoords(72 + 200, 59, 1);
+    expect(pos).toBe(11);
+  });
+
   it("Image block — height comes from node height attr (200)", () => {
     const block = layoutBlock(image(200), {
       nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
