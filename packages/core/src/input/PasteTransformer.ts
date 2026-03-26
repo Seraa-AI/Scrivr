@@ -308,6 +308,16 @@ export function cleanPastedHtml(root: HTMLElement): void {
     el.replaceWith(...Array.from(el.childNodes));
   });
 
+  // Strip empty paragraphs immediately adjacent to <hr> elements.
+  // Google Docs wraps every <hr> with <p><span></span></p> spacers — after
+  // pasting these become editable empty paragraphs cluttering the document.
+  root.querySelectorAll("hr").forEach((hr) => {
+    const prev = hr.previousElementSibling;
+    const next = hr.nextElementSibling;
+    if (prev?.tagName === "P" && (prev.textContent ?? "").trim() === "") prev.remove();
+    if (next?.tagName === "P" && (next.textContent ?? "").trim() === "") next.remove();
+  });
+
   // Strip CSS properties that are always default/noise — they create spurious
   // marks (color, font_size, etc.) that pollute the parsed document.
   root.querySelectorAll("[style]").forEach((el) => {

@@ -34,6 +34,29 @@ describe("cleanPastedHtml", () => {
     expect(root.querySelector("p")?.textContent).toBe("Hello");
   });
 
+  it("strips empty <p> elements immediately adjacent to <hr>", () => {
+    const root = document.createElement("div");
+    root.innerHTML = [
+      `<p>Content before</p>`,
+      `<p><span></span></p>`,   // Google Docs spacer
+      `<hr>`,
+      `<p><span></span></p>`,   // Google Docs spacer
+      `<h3>Section heading</h3>`,
+    ].join("");
+    cleanPastedHtml(root);
+    // Empty paras adjacent to hr removed; real content preserved
+    const tags = Array.from(root.children).map((el) => el.tagName.toLowerCase());
+    expect(tags).toEqual(["p", "hr", "h3"]);
+  });
+
+  it("does not strip non-empty <p> elements adjacent to <hr>", () => {
+    const root = document.createElement("div");
+    root.innerHTML = `<p>Above</p><hr><p>Below</p>`;
+    cleanPastedHtml(root);
+    const tags = Array.from(root.children).map((el) => el.tagName.toLowerCase());
+    expect(tags).toEqual(["p", "hr", "p"]);
+  });
+
   it("strips <style>, <meta>, and <link> elements", () => {
     const root = document.createElement("div");
     root.innerHTML = `<style>.c0{font-size:11pt}</style><meta charset="utf-8"><p>Text</p>`;
