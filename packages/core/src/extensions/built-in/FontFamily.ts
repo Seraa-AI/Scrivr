@@ -43,7 +43,16 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
         parseDOM: [
           {
             style: "font-family",
-            getAttrs: (value) => ({ family: (value as string).replace(/['"]/g, "").trim() }),
+            getAttrs: (value) => {
+              // Take only the primary (first) family name — strips the
+              // fallback stack (e.g. "Arial,sans-serif" → "Arial") so the
+              // value matches toolbar presets and blockAttrs comparisons.
+              const primary = (value as string)
+                .replace(/['"]/g, "")
+                .split(",")[0]
+                ?.trim() ?? "";
+              return primary ? { family: primary } : false;
+            },
           },
         ],
         toDOM: (mark) => [

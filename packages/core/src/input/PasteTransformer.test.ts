@@ -233,8 +233,9 @@ describe("Google Docs HTML paste (integration)", () => {
     // Google Docs puts font-family on <span>, not <p> — block fontFamily stays null;
     // the family is carried as an inline font_family mark on the text node instead.
     expect(para.attrs["fontFamily"]).toBeNull();
+    // font_family mark normalises to the primary family name (fallbacks stripped)
     const familyMark = para.firstChild?.marks.find((m) => m.type.name === "font_family");
-    expect(familyMark?.attrs["family"]).toContain("Arial");
+    expect(familyMark?.attrs["family"]).toBe("Arial");
     expect(para.textContent).toBe("Hello world");
   });
 
