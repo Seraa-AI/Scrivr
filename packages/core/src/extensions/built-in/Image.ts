@@ -81,8 +81,8 @@ function createImageStrategy(): BlockStrategy {
 
       ctx.restore();
 
-      // layoutLeafBlock registers 2 lines (top = before, bottom = after).
-      return renderCtx.lineIndexOffset + 2;
+      // Charmap registration is handled by populateCharMap — nothing to do here.
+      return renderCtx.lineIndexOffset + 1;
     },
   };
 }

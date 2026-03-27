@@ -1,4 +1,5 @@
 import type { Node } from "prosemirror-model";
+import { TextSelection } from "prosemirror-state";
 import { CharacterMap } from "./CharacterMap";
 import { layoutDocument } from "./PageLayout";
 import type { PageConfig, DocumentLayout, LayoutPage, MeasureCacheEntry, LayoutResumption } from "./PageLayout";
@@ -174,11 +175,42 @@ export class LayoutCoordinator {
     const page = this._pageMap.get(pageNumber);
     if (!page) return; // don't mark as populated — layout may grow later
     this._populatedPages.add(pageNumber);
+    const doc = this.opts.getDoc();
     let lineOffset = 0;
     for (const block of page.blocks) {
+      if (block.lines.length === 0) {
+        // Leaf block (HR, image, …). nodePos and nodePos+nodeSize are document-level
+        // gap positions — TextSelection.between snaps them to the nearest text node,
+        // always landing in the paragraph BEFORE the block. Resolve to real text
+        // cursor positions first so left-click → end of preceding para and
+        // right-click → start of following para.
+        const $before = doc.resolve(block.nodePos);
+        const beforeSel = TextSelection.findFrom($before, -1);
+        const beforePos = beforeSel?.head ?? block.nodePos;
+
+        const $after = doc.resolve(Math.min(block.nodePos + block.node.nodeSize, doc.content.size));
+        const afterSel = TextSelection.findFrom($after, 1);
+        const afterPos = afterSel?.head ?? (block.nodePos + block.node.nodeSize);
+
+        const halfWidth = block.availableWidth / 2;
+        const li = lineOffset;
+        if (!this.charMap.hasLine(page.pageNumber, li)) {
+          this.charMap.registerLine({ page: page.pageNumber, lineIndex: li, y: block.y, height: block.height, x: block.x, contentWidth: block.availableWidth, startDocPos: beforePos, endDocPos: afterPos });
+        }
+        // Left-half glyph only (no hasGlyph guard so it coexists with para's sentinel).
+        // coordsAtPos finds the paragraph's glyph first (registered earlier) → cursor
+        // draws on the paragraph line, not on the leaf block.
+        //
+        // No right-half glyph: posAtCoords falls through to line.endDocPos = afterPos.
+        // The following paragraph registers its own glyph at afterPos unblocked, so
+        // coordsAtPos draws the cursor at the correct position in that paragraph.
+        this.charMap.registerGlyph({ docPos: beforePos, x: block.x, y: block.y, width: halfWidth, height: block.height, page: page.pageNumber, lineIndex: li });
+        lineOffset += 1;
+        continue;
+      }
+
       populateCharMap(block, this.charMap, page.pageNumber, lineOffset, this.opts.measurer);
-      // Leaf blocks (lines=[]) register 2 line entries (before + after zones).
-      lineOffset += block.lines.length === 0 ? 2 : block.lines.length;
+      lineOffset += block.lines.length;
     }
   }
 

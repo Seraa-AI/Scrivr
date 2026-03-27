@@ -24,9 +24,8 @@ const HorizontalRuleStrategy: BlockStrategy = {
     ctx.stroke();
     ctx.restore();
 
-    // Charmap registration is handled by layoutLeafBlock — nothing to do here.
-    // layoutLeafBlock registers 2 lines (top = before, bottom = after).
-    return lineIndexOffset + 2;
+    // Charmap registration is handled by populateCharMap — nothing to do here.
+    return lineIndexOffset + 1;
   },
 };
 

@@ -325,29 +325,28 @@ describe("layoutBlock — leaf blocks (HR and Image)", () => {
     expect(map.hasLine(1, 0)).toBe(true);
   });
 
-  it("HR block — click on top half resolves to position BEFORE the block", () => {
+  it("HR block — click on left half resolves to position BEFORE the block", () => {
     // nodePos=10, nodeSize=1 (leaf) → beforePos=10, afterPos=11
-    // height=12 → halfHeight=6; top zone y=50..56, bottom zone y=56..62
+    // availableWidth=400 → halfWidth=200; left glyph x=72..272, right x=272..472
     const map = new CharacterMap();
     layoutBlock(hr(), {
       nodePos: 10, x: 72, y: 50, availableWidth: 400, page: 1,
       measurer: createMeasurer(), fontConfig: hrFontConfig, map, lineIndexOffset: 0,
     });
-    // Click in the top half (y = 52, inside 50..56)
-    const pos = map.posAtCoords(72 + 200, 52, 1);
+    // Click left quarter (x=72+50=122, midpoint of left glyph=72+100=172 → 122<=172 → before)
+    const pos = map.posAtCoords(72 + 50, 55, 1);
     expect(pos).toBe(10);
   });
 
-  it("HR block — click on bottom half resolves to position AFTER the block", () => {
+  it("HR block — click on right half resolves to position AFTER the block", () => {
     // nodePos=10, nodeSize=1 (leaf) → afterPos=11
-    // height=12 → halfHeight=6; bottom zone y=56..62
     const map = new CharacterMap();
     layoutBlock(hr(), {
       nodePos: 10, x: 72, y: 50, availableWidth: 400, page: 1,
       measurer: createMeasurer(), fontConfig: hrFontConfig, map, lineIndexOffset: 0,
     });
-    // Click in the bottom half (y = 59, inside 56..62)
-    const pos = map.posAtCoords(72 + 200, 59, 1);
+    // Click right side (x=72+350=422, past midpoint of right glyph=72+300=372 → endDocPos=11)
+    const pos = map.posAtCoords(72 + 350, 55, 1);
     expect(pos).toBe(11);
   });
 
