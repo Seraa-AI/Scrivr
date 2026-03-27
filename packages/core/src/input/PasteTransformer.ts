@@ -38,6 +38,7 @@ export class PasteTransformer {
     // Disable rules that generate tokens our schema can't handle (blockquote, link, image).
     // Their content still renders as plain text — no data loss, just no special formatting.
     this.md = new MarkdownIt({ html: false });
+    //TODO: add these to the schema
     this.md.disable(["blockquote", "image", "link"]);
   }
 
