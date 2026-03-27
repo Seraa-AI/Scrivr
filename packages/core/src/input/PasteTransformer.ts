@@ -62,6 +62,8 @@ export class PasteTransformer {
           // Fall through to plain text
         }
       }
+
+      //User tansaction to allow undo/redo
       return insertText(state, plain);
     }
 
