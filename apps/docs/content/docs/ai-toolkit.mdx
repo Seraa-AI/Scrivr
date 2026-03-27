@@ -1,3 +1,7 @@
+---
+title: AI Toolkit
+---
+
 # AI Toolkit — Implementation Plan
 
 > Inscribe's native AI integration: suggestion mode for users + AI-generated suggestions.
@@ -432,7 +436,7 @@ Keyboard shortcut: Cmd+Shift+S
 
 **Files:**
 - `packages/core/src/extensions/built-in/AiToolkit.ts` — aggregator extension
-- `packages/core/src/extensions/aiToolkitRegistry.ts` — WeakMap<IEditor, AiToolkitAPI>
+- `packages/core/src/extensions/aiToolkitRegistry.ts` — `WeakMap<IEditor, AiToolkitAPI>`
 
 `AiToolkit.ts` bundles all sub-extensions (UniqueId, GhostText, AiCaret, TrackChanges, SuggestionMode) following the StarterKit aggregator pattern.
 
@@ -596,7 +600,7 @@ packages/core/src/extensions/built-in/
     applyChanges.ts
 
 packages/core/src/extensions/
-  aiToolkitRegistry.ts                          (WeakMap<IEditor, AiToolkitAPI>)
+  aiToolkitRegistry.ts                          (`WeakMap<IEditor, AiToolkitAPI>`)
 
 packages/react/src/
   useTrackChanges.ts

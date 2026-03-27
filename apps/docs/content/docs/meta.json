@@ -1,0 +1,12 @@
+{
+  "pages": [
+    "index",
+    "architecture",
+    "extensibility",
+    "pageless-mode",
+    "ai-toolkit",
+    "track-changes",
+    "testing",
+    "phase-2"
+  ]
+}
