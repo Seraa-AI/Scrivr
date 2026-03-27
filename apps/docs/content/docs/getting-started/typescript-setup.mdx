@@ -1,0 +1,30 @@
+---
+title: TypeScript Setup
+description: Configure tsconfig, type imports, and inference tips.
+---
+
+## Basic Configuration
+
+Inscribe targets `ES2020` and ships ESM-only packages. Ensure your `tsconfig.json` is
+compatible:
+
+```json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "jsx": "react-jsx"
+  }
+}
+```
+
+<Callout type="warn">
+  `moduleResolution: "Bundler"` (or `"Node16"` / `"NodeNext"`) is required. The older `"Node"` resolution mode does not support the package `exports` field used by all Inscribe packages.
+</Callout>
+
+## Type Definitions
+
+Because Inscribe is written in strict TypeScript, you do not need to install separate `@types/*` 
+packages — type declarations are bundled directly with each package.

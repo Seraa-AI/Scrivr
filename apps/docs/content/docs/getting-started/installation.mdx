@@ -39,40 +39,49 @@ For a standard React application install the core engine and the React bindings:
 
 ### Optional Packages
 
-| Package | When to install |
+| Package | Purpose & Features |
 | --- | --- |
-| `@inscribe/plugins` | Real-time collaboration (`Collaboration`, `CollaborationCursor`) |
-| `@inscribe/export` | Exporting documents to Markdown, PDF, etc. |
+| `@inscribe/plugins` | **Real-time collaboration** (Yjs/Hocuspocus), **AI Toolkit**, and **Track Changes**. |
+| `@inscribe/export` | Exporting documents to paginated **PDF** (via `pdf-lib`), **DOCX** (via OpenXML), and **Markdown**. |
 
 ---
 
-## TypeScript Configuration
+## Setting Up Optional Features
 
-Inscribe targets `ES2020` and ships ESM-only packages. Ensure your `tsconfig.json` is
-compatible:
+If you opt into the features provided by `@inscribe/plugins`, you will need to configure the corresponding external dependencies and environment variables in your application.
 
-```json title="tsconfig.json"
-{
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "strict": true,
-    "jsx": "react-jsx"
-  }
-}
-```
+### AI Toolkit (Vercel AI SDK)
 
-<Callout type="warn">
-  `moduleResolution: "Bundler"` (or `"Node16"` / `"NodeNext"`) is required. The older `"Node"` resolution mode does not support the package `exports` field used by all Inscribe packages.
-</Callout>
+To use the AI writing assistant (powered by Anthropic Claude by default), you will need to install the Vercel AI SDK and set up a server-side endpoint:
+
+<Tabs items={["pnpm", "npm", "yarn"]}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add ai @ai-sdk/react @ai-sdk/anthropic
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install ai @ai-sdk/react @ai-sdk/anthropic
+    ```
+  </Tab>
+</Tabs>
+
+**Environment Variables:**
+*   `ANTHROPIC_API_KEY`: Required by your backend API route to fulfill AI streaming requests.
+
+### Real-Time Collaboration (Hocuspocus/Yjs)
+
+Inscribe's collaborative engine relies on **Yjs** for CRDT data structures and synchronizes over WebSockets via **Hocuspocus**. You will need a running Hocuspocus backend server to persist and sync editor states. 
+
+**Environment Variables:**
+*   `VITE_WS_URL`: The frontend client needs the address of the collaboration server (e.g., `ws://localhost:1234`).
 
 ---
 
 ## Bundler Support
 
-Inscribe has been tested with **Vite** (recommended), **Webpack 5**, and **esbuild**. No special
-plugins or aliases are required — the packages ship pre-bundled ESM.
+Inscribe has been tested with **Vite** (recommended), **Webpack 5**, and **esbuild**. No special plugins or aliases are required — the packages ship pre-bundled ESM.
 
 ---
 

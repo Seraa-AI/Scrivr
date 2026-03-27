@@ -57,13 +57,13 @@ const editor = useCanvasEditor({
   onCreate: ({ editor }) => console.log('Editor ready', editor),
   onUpdate: ({ editor }) => console.log('Document changed'),
   onDestroy:  () => console.log('Editor destroyed'),
-});
+}, [/* Optional dependency array to re-initialize the editor */]);
 ```
 
 ### 2. `<Canvas />`
 
 `<Canvas />` is a thin React lifecycle wrapper around the core `ViewManager`. It mounts the
-rendering engine into a container `<div>` and handles cleanup automatically.
+rendering engine into a container `<div>`, manages the hidden `<textarea>` input bridge (for keyboard and IME events), and handles virtual scrolling `IntersectionObserver` cleanup automatically.
 
 ```tsx
 <Canvas
@@ -77,18 +77,36 @@ rendering engine into a container `<div>` and handles cleanup automatically.
 
 ---
 
-## Listening to Content Changes
+## Adding Real-Time Collaboration
 
-Use the `onUpdate` callback to react to document changes — for example, to sync content to your backend:
+Inscribe is built from the ground up for multiplayer. Turning your standalone editor into a collaborative one requires just a few extra lines using `@inscribe/plugins` and [Hocuspocus](https://hocuspocus.dev/):
 
-```tsx
-const editor = useCanvasEditor({
-  extensions: [StarterKit],
-  onUpdate: ({ editor }) => {
-    const markdown = editor.getMarkdown();
-    saveToServer(markdown);
-  },
+```tsx title="MultiplayerEditor.tsx"
+import { useCanvasEditor, Canvas, StarterKit } from '@inscribe/react';
+import { Collaboration, CollaborationCursor } from '@inscribe/plugins';
+import { HocuspocusProvider } from '@hocuspocus/provider';
+
+// 1. Set up the WebSocket provider connecting to your backend
+const provider = new HocuspocusProvider({
+  url: import.meta.env.VITE_WS_URL || 'ws://localhost:1234',
+  name: 'document-room-xyz',
 });
+
+export function MultiplayerEditor() {
+  const editor = useCanvasEditor({
+    extensions: [
+      StarterKit,
+      // 2. Add the collaboration extensions passing the Yjs document
+      Collaboration.configure({ document: provider.document }),
+      CollaborationCursor.configure({ 
+        provider, 
+        user: { name: 'Alice', color: '#f7b731' } 
+      }),
+    ],
+  });
+
+  return <Canvas editor={editor} style={{ height: '100vh' }} />;
+}
 ```
 
 ---

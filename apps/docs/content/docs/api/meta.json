@@ -1,0 +1,4 @@
+{
+  "title": "API Reference",
+  "pages": ["editor", "view-manager", "events", "types", "nodes"]
+}
