@@ -9,6 +9,7 @@ import {
   defaultPageConfig,
   LinkPopover,
   SlashMenu,
+  ImageMenu,
 } from "@inscribe/react";
 import type { EditorStateContext } from "@inscribe/react";
 import { PdfExport } from "@inscribe/export";
@@ -169,6 +170,7 @@ export function App() {
       <FloatingMenuBar editor={editor} />
       <SlashMenu editor={editor} />
       <LinkPopover editor={editor} />
+      <ImageMenu editor={editor} />
       <TrackChangesPopover editor={editor} />
     </div>
   );

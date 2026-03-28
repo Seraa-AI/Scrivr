@@ -3,6 +3,8 @@ import type { DocumentLayout, LayoutPage, PageConfig } from "../layout/PageLayou
 import { setupCanvas } from "./canvas";
 import { renderPage } from "./PageRenderer";
 import { clearOverlay, renderCursor, renderSelection } from "./OverlayRenderer";
+import { NodeSelection } from "prosemirror-state";
+import { getHandles, hitHandle, computeNewSize, renderHandles } from "./ResizeController";
 
 interface PageEntry {
   wrapper: HTMLDivElement;
@@ -43,6 +45,14 @@ export class ViewManager {
   private gap: number;
   private showMarginGuides: boolean;
   private unsubscribe: (() => void) | null = null;
+  private resizeDrag: {
+    handle: string;
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+    docPos: number;
+  } | null = null;
 
   constructor(
     private editor: Editor,
@@ -291,7 +301,10 @@ export class ViewManager {
 
     const selection = this.editor.getSelectionSnapshot();
 
-    if (!selection.empty) {
+    const pmSelection = this.editor.getState().selection;
+    const isNodeSel = pmSelection instanceof NodeSelection;
+
+    if (!selection.empty && !isNodeSel) {
       const lines = this.editor.charMap
         .linesInRange(selection.from, selection.to)
         .filter((l) => l.page === page.pageNumber);
@@ -301,13 +314,21 @@ export class ViewManager {
       renderSelection(ctx, lines, glyphs, selection.from, selection.to);
     }
 
-    if (this.editor.isFocused && this.editor.cursorManager.isVisible &&
+    if (!isNodeSel && this.editor.isFocused && this.editor.cursorManager.isVisible &&
         page.pageNumber === this.editor.cursorPage) {
       // Scope the search to this page so the preceding-glyph fallback never
       // returns coords from a different page's canvas.
       const coords = this.editor.charMap.coordsAtPos(selection.head, page.pageNumber);
       if (coords) {
         renderCursor(ctx, coords);
+      }
+    }
+
+    // ── Image selection handles ───────────────────────────────────────────────
+    if (isNodeSel && pmSelection.node.type.name === "image") {
+      const objRect = this.editor.charMap.getObjectRect(pmSelection.from);
+      if (objRect && objRect.page === page.pageNumber) {
+        renderHandles(ctx, objRect.x, objRect.y, objRect.width, objRect.height);
       }
     }
 
@@ -322,14 +343,47 @@ export class ViewManager {
     const pageEl = (e.target as HTMLElement).closest("[data-page]") as HTMLElement | null;
     if (!pageEl) return;
 
-    this.isDragging = true;
     const pageNumber = Number(pageEl.getAttribute("data-page"));
-    const rect = pageEl.getBoundingClientRect();
-    const pos = this.editor.charMap.posAtCoords(
-      e.clientX - rect.left,
-      e.clientY - rect.top,
-      pageNumber,
-    );
+    const pageRect = pageEl.getBoundingClientRect();
+    const canvasX = e.clientX - pageRect.left;
+    const canvasY = e.clientY - pageRect.top;
+
+    // ── Resize handle hit-test (takes priority over everything else) ──────────
+    const hit = this.hitHandle(canvasX, canvasY, pageNumber);
+    if (hit) {
+      const sel = this.editor.getState().selection as NodeSelection;
+      this.resizeDrag = {
+        handle: hit.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        startW: sel.node.attrs["width"] as number,
+        startH: sel.node.attrs["height"] as number,
+        docPos: sel.from,
+      };
+      // Lock cursor on all wrappers so it stays consistent as the mouse moves
+      // fast outside the current page element during drag.
+      for (const entry of this.pages.values()) {
+        entry.wrapper.style.cursor = hit.cursor;
+      }
+      return;
+    }
+
+    this.isDragging = true;
+    const pos = this.editor.charMap.posAtCoords(canvasX, canvasY, pageNumber);
+
+    if (!e.shiftKey) {
+      // Check if the click landed on an inline image node → NodeSelection.
+      const doc = this.editor.getState().doc;
+      const $pos = doc.resolve(pos);
+      if ($pos.nodeAfter?.type.name === "image") {
+        this.editor.selectNode(pos);
+        return;
+      }
+      if ($pos.nodeBefore?.type.name === "image") {
+        this.editor.selectNode(pos - $pos.nodeBefore.nodeSize);
+        return;
+      }
+    }
 
     if (e.shiftKey) {
       this.editor.setSelection(this.editor.getState().selection.anchor, pos);
@@ -339,23 +393,67 @@ export class ViewManager {
   };
 
   private handleMouseMove = (e: MouseEvent): void => {
-    if (!this.isDragging) return;
-    const pageEl = document
+    // ── Resize drag ───────────────────────────────────────────────────────────
+    if (this.resizeDrag) {
+      const { handle, startX, startY, startW, startH, docPos } = this.resizeDrag;
+      const { width, height } = computeNewSize(
+        handle,
+        startW, startH,
+        e.clientX - startX,
+        e.clientY - startY,
+      );
+      this.editor.setNodeAttrs(docPos, { width, height });
+      return;
+    }
+
+    // ── Hover cursor over handles ─────────────────────────────────────────────
+    // Set cursor directly on the page wrapper (which has cursor:"text" inline)
+    // so our value wins. Other page wrappers are reset to "text".
+    const hoveredPageEl = document
       .elementFromPoint(e.clientX, e.clientY)
       ?.closest("[data-page]") as HTMLElement | null;
-    if (!pageEl) return;
 
-    const pageNumber = Number(pageEl.getAttribute("data-page"));
-    const rect = pageEl.getBoundingClientRect();
+    for (const entry of this.pages.values()) {
+      if (entry.wrapper === hoveredPageEl) {
+        const pageNumber = Number(hoveredPageEl.getAttribute("data-page"));
+        const pageRect = hoveredPageEl.getBoundingClientRect();
+        const hit = this.hitHandle(e.clientX - pageRect.left, e.clientY - pageRect.top, pageNumber);
+        entry.wrapper.style.cursor = hit ? hit.cursor : "text";
+      } else {
+        entry.wrapper.style.cursor = "text";
+      }
+    }
+
+    // ── Normal text-drag selection ────────────────────────────────────────────
+    if (!this.isDragging || !hoveredPageEl) return;
+
+    const pageNumber = Number(hoveredPageEl.getAttribute("data-page"));
+    const pageRect = hoveredPageEl.getBoundingClientRect();
     const pos = this.editor.charMap.posAtCoords(
-      e.clientX - rect.left,
-      e.clientY - rect.top,
+      e.clientX - pageRect.left,
+      e.clientY - pageRect.top,
       pageNumber,
     );
     this.editor.setSelection(this.editor.getState().selection.anchor, pos);
   };
 
   private handleMouseUp = (): void => {
+    if (this.resizeDrag) {
+      this.resizeDrag = null;
+      for (const entry of this.pages.values()) {
+        entry.wrapper.style.cursor = "text";
+      }
+    }
     this.isDragging = false;
   };
+
+  /** Returns the handle under canvas-space (x, y) on the given page, or null. */
+  private hitHandle(canvasX: number, canvasY: number, page: number) {
+    const sel = this.editor.getState().selection;
+    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return null;
+    const r = this.editor.charMap.getObjectRect(sel.from);
+    if (!r || r.page !== page) return null;
+    return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
+  }
 }
+

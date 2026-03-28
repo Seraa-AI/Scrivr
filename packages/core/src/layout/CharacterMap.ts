@@ -61,14 +61,32 @@ export interface CoordsResult {
   page: number;
 }
 
+/**
+ * Actual render rect of an inline object (image, widget) on the canvas.
+ * Unlike GlyphEntry (which is cursor-sized), this stores the full visual bounds
+ * so the overlay can draw resize handles and the popover can position correctly.
+ */
+export interface ObjectRectEntry {
+  docPos: number;
+  /** Left edge of the object in canvas coordinates */
+  x: number;
+  /** Top of the object in canvas coordinates (not the text baseline) */
+  y: number;
+  width: number;
+  height: number;
+  page: number;
+}
+
 export class CharacterMap {
   private glyphs: GlyphEntry[] = [];
   private lines: LineEntry[] = [];
+  private objectRects = new Map<number, ObjectRectEntry>();
 
   // Called by the layout engine after each layout pass
   clear(): void {
     this.glyphs = [];
     this.lines = [];
+    this.objectRects.clear();
   }
 
   registerGlyph(entry: GlyphEntry): void {
@@ -77,6 +95,16 @@ export class CharacterMap {
 
   registerLine(entry: LineEntry): void {
     this.lines.push(entry);
+  }
+
+  /** Register the full visual bounding rect of an inline object (image, widget). */
+  registerObjectRect(entry: ObjectRectEntry): void {
+    this.objectRects.set(entry.docPos, entry);
+  }
+
+  /** Returns the full visual rect of the inline object at docPos, or undefined. */
+  getObjectRect(docPos: number): ObjectRectEntry | undefined {
+    return this.objectRects.get(docPos);
   }
 
   /**

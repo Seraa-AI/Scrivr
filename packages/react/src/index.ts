@@ -4,6 +4,7 @@ export { useCanvasEditor } from "./useCanvasEditor";
 export { BubbleMenu } from "./BubbleMenu";
 export { FloatingMenu } from "./FloatingMenu";
 export { LinkPopover } from "./LinkPopover";
+export { ImageMenu } from "./ImageMenu";
 export { SlashMenu } from "./SlashMenu";
 export type { SlashMenuItem } from "./SlashMenu";
 export type { UseCanvasEditorOptions } from "./useCanvasEditor";

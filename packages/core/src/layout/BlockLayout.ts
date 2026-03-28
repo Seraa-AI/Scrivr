@@ -630,6 +630,8 @@ export function populateCharMap(
     for (const span of line.spans) {
       if (span.kind === "object") {
         const objX = block.x + lineOffsetX + span.x;
+        // Store full visual rect for overlay handles / popover positioning.
+        map.registerObjectRect({ docPos: span.docPos, x: objX, y: computeObjectRenderY(lineY, line, span), width: span.width, height: span.height, page });
         // y = textY so cursor draws at the text baseline, not image top.
         map.registerGlyph({
           docPos: span.docPos,

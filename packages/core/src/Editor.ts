@@ -1,4 +1,4 @@
-import { EditorState, Transaction, TextSelection } from "prosemirror-state";
+import { EditorState, Transaction, TextSelection, NodeSelection } from "prosemirror-state";
 import type {
   FontModifier,
   MarkDecorator,
@@ -367,6 +367,37 @@ export class Editor {
    * If both positions are on different lines, the rect uses the `from` line's
    * y/height and extends to the right edge of the available content width.
    */
+  getNodeViewportRect(docPos: number): DOMRect | null {
+    this.lc.ensureLayout();
+    const rect = this.lc.charMap.getObjectRect(docPos);
+    if (!rect) return null;
+    const pageEl = this.ib.lookupPage(rect.page);
+    if (!pageEl) return null;
+    const pageRect = pageEl.getBoundingClientRect();
+    return new DOMRect(pageRect.left + rect.x, pageRect.top + rect.y, rect.width, rect.height);
+  }
+
+  /**
+   * Select the inline node at docPos using a NodeSelection.
+   * Falls back to moveCursorTo if the node is not selectable.
+   */
+  selectNode(docPos: number): void {
+    try {
+      const sel = NodeSelection.create(this.state.doc, docPos);
+      this.dispatch(this.state.tr.setSelection(sel));
+      this.focus();
+    } catch {
+      this.moveCursorTo(docPos);
+    }
+  }
+
+  /** Merge attrs into the node at docPos. No-op if no node exists there. */
+  setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void {
+    const node = this.state.doc.nodeAt(docPos);
+    if (!node) return;
+    this.dispatch(this.state.tr.setNodeMarkup(docPos, undefined, { ...node.attrs, ...attrs }));
+  }
+
   getViewportRect(from: number, to: number): DOMRect | null {
     this.lc.ensureLayout();
 

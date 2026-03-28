@@ -66,6 +66,24 @@ export interface IEditor {
    * page element lookup has been registered (i.e. editor not mounted).
    */
   getViewportRect(from: number, to: number): DOMRect | null;
+  /**
+   * Returns the full visual viewport rect of the inline object at docPos
+   * (image, widget). Unlike getViewportRect, this uses the actual object
+   * render bounds — not the cursor-sized glyph — so the rect height matches
+   * the real image height and rect.bottom is the correct anchor for a popover.
+   * Returns null if the object has not been rendered yet.
+   */
+  getNodeViewportRect(docPos: number): DOMRect | null;
+  /**
+   * Select the inline node at docPos using a ProseMirror NodeSelection.
+   * Falls back to moveCursorTo if the position is not selectable.
+   */
+  selectNode(docPos: number): void;
+  /**
+   * Update the attrs of the node at docPos, merging with its current attrs.
+   * No-op if there is no node at that position.
+   */
+  setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void;
   /** Apply a transaction from an external source (e.g. Y.js remote sync). */
   _applyTransaction(tr: Transaction): void;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
