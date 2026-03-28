@@ -19,7 +19,7 @@ import type { Command, Plugin, Transaction, EditorState } from "prosemirror-stat
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
-import type { BlockStrategy } from "../layout/BlockRegistry";
+import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
 
@@ -380,6 +380,18 @@ export interface ExtensionConfig<Options = object> {
   addLayoutHandlers?(this: Phase1Context<Options>): Record<string, BlockStrategy>;
 
   /**
+   * Map of node type name → InlineStrategy.
+   * Each entry is registered in InlineRegistry so TextBlockStrategy can dispatch
+   * rendering of inline object spans (images, widgets) to the correct strategy.
+   *
+   * @example
+   * addInlineHandlers() {
+   *   return { image: createInlineImageStrategy() };
+   * }
+   */
+  addInlineHandlers?(this: Phase1Context<Options>): Record<string, InlineStrategy>;
+
+  /**
    * Block styles contributed by this extension.
    * Merged into the FontConfig used by layoutDocument.
    * Keys are node type names or compound keys like "heading_1".
@@ -487,6 +499,8 @@ export interface ResolvedExtension {
   commands: Record<string, (...args: unknown[]) => Command>;
   /** Map of node type name → BlockStrategy, contributed by this extension. */
   layoutHandlers: Record<string, BlockStrategy>;
+  /** Map of node type name → InlineStrategy, contributed by this extension. */
+  inlineHandlers: Record<string, InlineStrategy>;
   /** Block styles contributed by this extension (merged into FontConfig). */
   blockStyles: Record<string, BlockStyle>;
   markDecorators: Map<string, MarkDecorator>;

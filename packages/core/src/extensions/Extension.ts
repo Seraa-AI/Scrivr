@@ -80,6 +80,7 @@ export class Extension<Options extends object = object> {
       commands: schema ? (config.addCommands?.call(p2) ?? {}) : {},
       // Phase 3/4: options available, no schema needed
       layoutHandlers: config.addLayoutHandlers?.call(p1) ?? {},
+      inlineHandlers: config.addInlineHandlers?.call(p1) ?? {},
       blockStyles: config.addBlockStyles?.call(p1) ?? {},
       markDecorators: new Map(Object.entries(config.addMarkDecorators?.call(p1) ?? {})),
       fontModifiers: config.addFontModifiers?.call(p1) ?? new Map(),

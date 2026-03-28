@@ -274,6 +274,7 @@ export class ViewManager {
       markDecorators: this.editor.markDecorators,
       showMarginGuides: this.showMarginGuides,
       ...(this.editor.blockRegistry ? { blockRegistry: this.editor.blockRegistry } : {}),
+      ...(this.editor.inlineRegistry ? { inlineRegistry: this.editor.inlineRegistry } : {}),
     });
   }
 

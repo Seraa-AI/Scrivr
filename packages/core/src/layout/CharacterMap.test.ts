@@ -6,10 +6,10 @@ import { CharacterMap } from "./CharacterMap";
 // Page 1, line 1: "World" at docPos 6-10, y=80, each char 10px wide
 function buildTwoLinePage(map: CharacterMap) {
   for (let i = 0; i < 5; i++) {
-    map.registerGlyph({ docPos: 1 + i, x: i * 10, y: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
+    map.registerGlyph({ docPos: 1 + i, x: i * 10, y: 60, lineY: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
   }
   for (let i = 0; i < 5; i++) {
-    map.registerGlyph({ docPos: 6 + i, x: i * 10, y: 80, width: 10, height: 20, page: 1, lineIndex: 1 });
+    map.registerGlyph({ docPos: 6 + i, x: i * 10, y: 80, lineY: 80, width: 10, height: 20, page: 1, lineIndex: 1 });
   }
   map.registerLine({ page: 1, lineIndex: 0, y: 60, height: 20, x: 0, contentWidth: 400, startDocPos: 1, endDocPos: 6 });
   map.registerLine({ page: 1, lineIndex: 1, y: 80, height: 20, x: 0, contentWidth: 400, startDocPos: 6, endDocPos: 11 });
@@ -56,6 +56,7 @@ function buildSingleLinePage(map: CharacterMap) {
       docPos,
       x,
       y: 60,
+      lineY: 60,
       width,
       height: 20,
       page: 1,
@@ -141,10 +142,10 @@ describe("CharacterMap", () => {
       // so the cursor is simply not drawn on page 1's overlay (correct behaviour).
       const crossMap = new CharacterMap();
       // Page 1 has glyphs at docPos 1–4
-      crossMap.registerGlyph({ docPos: 1, x: 0, y: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
-      crossMap.registerGlyph({ docPos: 4, x: 30, y: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
+      crossMap.registerGlyph({ docPos: 1, x: 0, y: 60, lineY: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
+      crossMap.registerGlyph({ docPos: 4, x: 30, y: 60, lineY: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
       // Page 2 has a glyph at docPos 101 but NOT at 100 (cursor is at the boundary)
-      crossMap.registerGlyph({ docPos: 101, x: 72, y: 72, width: 10, height: 20, page: 2, lineIndex: 0 });
+      crossMap.registerGlyph({ docPos: 101, x: 72, y: 72, lineY: 72, width: 10, height: 20, page: 2, lineIndex: 0 });
 
       // Unscoped: falls back to page 1's glyph at docPos 4
       const unscoped = crossMap.coordsAtPos(100);
@@ -251,10 +252,10 @@ describe("CharacterMap — posAbove / posBelow (vertical navigation)", () => {
     it("posBelow crosses from last line of page 1 to first line of page 2", () => {
       const crossMap = new CharacterMap();
       // Page 1 has only one line (lineIndex 0)
-      crossMap.registerGlyph({ docPos: 1, x: 0, y: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
+      crossMap.registerGlyph({ docPos: 1, x: 0, y: 60, lineY: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
       crossMap.registerLine({ page: 1, lineIndex: 0, y: 60, height: 20, x: 0, contentWidth: 400, startDocPos: 1, endDocPos: 2 });
       // Page 2 has its own line (lineIndex 0 — page-global within page 2)
-      crossMap.registerGlyph({ docPos: 5, x: 0, y: 60, width: 10, height: 20, page: 2, lineIndex: 0 });
+      crossMap.registerGlyph({ docPos: 5, x: 0, y: 60, lineY: 60, width: 10, height: 20, page: 2, lineIndex: 0 });
       crossMap.registerLine({ page: 2, lineIndex: 0, y: 60, height: 20, x: 0, contentWidth: 400, startDocPos: 5, endDocPos: 6 });
 
       const pos = crossMap.posBelow(1, 0);
@@ -263,9 +264,9 @@ describe("CharacterMap — posAbove / posBelow (vertical navigation)", () => {
 
     it("posAbove crosses from first line of page 2 to last line of page 1", () => {
       const crossMap = new CharacterMap();
-      crossMap.registerGlyph({ docPos: 1, x: 0, y: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
+      crossMap.registerGlyph({ docPos: 1, x: 0, y: 60, lineY: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
       crossMap.registerLine({ page: 1, lineIndex: 0, x: 0, contentWidth: 400, y: 60, height: 20, startDocPos: 1, endDocPos: 2 });
-      crossMap.registerGlyph({ docPos: 5, x: 0, y: 60, width: 10, height: 20, page: 2, lineIndex: 0 });
+      crossMap.registerGlyph({ docPos: 5, x: 0, y: 60, lineY: 60, width: 10, height: 20, page: 2, lineIndex: 0 });
       crossMap.registerLine({ page: 2, lineIndex: 0, x: 0, contentWidth: 400, y: 60, height: 20, startDocPos: 5, endDocPos: 6 });
 
       const pos = crossMap.posAbove(5, 0);

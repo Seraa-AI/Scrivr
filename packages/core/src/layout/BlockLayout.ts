@@ -1,7 +1,7 @@
 import { Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
 import { TextMeasurer } from "./TextMeasurer";
-import { LineBreaker, LayoutLine, InputSpan } from "./LineBreaker";
+import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import {
   FontConfig,
@@ -176,10 +176,10 @@ export function layoutLeafBlock(
       });
     }
     if (!map.hasGlyph(beforePos)) {
-      map.registerGlyph({ docPos: beforePos, x, y, width: halfWidth, height, page, lineIndex: li });
+      map.registerGlyph({ docPos: beforePos, x, y, lineY: y, width: halfWidth, height, page, lineIndex: li });
     }
     if (!map.hasGlyph(afterPos)) {
-      map.registerGlyph({ docPos: afterPos, x: x + halfWidth, y, width: halfWidth, height, page, lineIndex: li });
+      map.registerGlyph({ docPos: afterPos, x: x + halfWidth, y, lineY: y, width: halfWidth, height, page, lineIndex: li });
     }
   }
 
@@ -274,7 +274,7 @@ export function layoutBlock(
   // so LineBreaker returns one line and CharacterMap registers a cursor position.
   const inputSpans: InputSpan[] = spans.length
     ? spans
-    : [{ text: "\u200B", font: baseFont, docPos: nodePos + 1 }];
+    : [{ kind: "text", text: "\u200B", font: baseFont, docPos: nodePos + 1 }];
 
   // ── 3. Break into lines ───────────────────────────────────────────────────
   const breaker = new LineBreaker(measurer);
@@ -294,15 +294,22 @@ export function layoutBlock(
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li]!;
       const lineIndex = lineIndexOffset + li;
+      const isLastLine = li === lines.length - 1;
 
-      // Alignment offset — critical: without this, click positions are wrong
-      // for centered/right-aligned text
       const lineOffsetX = computeAlignmentOffset(
         resolvedAlign,
         availableWidth,
         line.width,
       );
 
+      // textY: top of the cursor rectangle for text glyphs.
+      // When a baseline image inflates line.ascent, text sits at the bottom of
+      // the line. Align text cursor to the actual text position, not the full line.
+      const textY = line.textAscent > 0
+        ? lineY + line.ascent - line.textAscent
+        : lineY + Math.max(0, line.lineHeight - line.cursorHeight) / 2;
+
+      const lastLineSpan = line.spans[line.spans.length - 1];
       map.registerLine({
         page,
         lineIndex,
@@ -311,23 +318,46 @@ export function layoutBlock(
         x,
         contentWidth: availableWidth,
         startDocPos: line.spans[0]?.docPos ?? nodePos + 1,
-        endDocPos:
-          (line.spans[line.spans.length - 1]?.docPos ?? nodePos + 1) +
-          (line.spans[line.spans.length - 1]?.text.length ?? 0),
+        endDocPos: lastLineSpan ? spanEndDocPos(lastLineSpan) : nodePos + 1,
       });
 
-      let lastGlyph = { x: 0, width: 0, docPos: -1, isZws: false };
+      let lastGlyph = { x: 0, width: 0, docPos: -1, isZws: false, isObject: false };
 
       for (const span of line.spans) {
-        const run = measurer.measureRun(span.text, span.font);
+        if (span.kind === "object") {
+          const objX = x + lineOffsetX + span.x;
+          // y = textY so cursor draws at the text baseline, not image top.
+          map.registerGlyph({
+            docPos: span.docPos,
+            x: objX,
+            y: textY,
+            lineY,
+            width: span.width,
+            height: line.cursorHeight,
+            page,
+            lineIndex,
+          });
+          map.registerGlyph({
+            docPos: span.docPos + 1,
+            x: objX + span.width,
+            y: textY,
+            lineY,
+            width: 0,
+            height: line.cursorHeight,
+            page,
+            lineIndex,
+          });
+          lastGlyph = { x: objX + span.width, width: 0, docPos: span.docPos, isZws: false, isObject: true };
+          continue;
+        }
 
+        const run = measurer.measureRun(span.text, span.font);
         for (let ci = 0; ci < span.text.length; ci++) {
           const charX =
-            x + // page left margin
-            lineOffsetX + // alignment offset
-            span.x + // span's x within the line
-            run.charPositions[ci]!; // char's x within the span (kerning-aware)
-
+            x +
+            lineOffsetX +
+            span.x +
+            run.charPositions[ci]!;
           const charWidth =
             ci < span.text.length - 1
               ? run.charPositions[ci + 1]! - run.charPositions[ci]!
@@ -336,9 +366,10 @@ export function layoutBlock(
           map.registerGlyph({
             docPos: span.docPos + ci,
             x: charX,
-            y: lineY,
+            y: textY,
+            lineY,
             width: charWidth,
-            height: line.lineHeight,
+            height: line.cursorHeight,
             page,
             lineIndex,
           });
@@ -348,22 +379,22 @@ export function layoutBlock(
             width: charWidth,
             docPos: span.docPos + ci,
             isZws: span.text[ci] === "\u200B",
+            isObject: false,
           };
         }
       }
 
-      // Sentinel on last line only (same reasoning as populateCharMap above)
-      if (
-        li === lines.length - 1 &&
-        lastGlyph.docPos >= 0 &&
-        !lastGlyph.isZws
-      ) {
+      // Register end-of-line sentinel at the position just past the last real
+      // character — but only on the LAST line, and only when the last span was
+      // text (object spans already register a right-half glyph at docPos+1).
+      if (isLastLine && lastGlyph.docPos >= 0 && !lastGlyph.isZws && !lastGlyph.isObject) {
         map.registerGlyph({
           docPos: lastGlyph.docPos + 1,
           x: lastGlyph.x + lastGlyph.width,
-          y: lineY,
+          y: textY,
+          lineY,
           width: 0,
-          height: line.lineHeight,
+          height: line.cursorHeight,
           page,
           lineIndex,
         });
@@ -410,18 +441,48 @@ function extractSpans(
   const spans: InputSpan[] = [];
 
   node.forEach((child, offset) => {
-    if (!child.isText || !child.text) return;
+    const childDocPos = nodePos + 1 + offset;
 
-    const font = resolveFont(baseFont, child.marks, fontModifiers);
-    spans.push({
-      text: child.text,
-      font,
-      docPos: nodePos + 1 + offset,
-      marks: child.marks.map((m) => ({
-        name: m.type.name,
-        attrs: m.attrs as Record<string, unknown>,
-      })),
-    });
+    if (child.isText && child.text) {
+      const font = resolveFont(baseFont, child.marks, fontModifiers);
+      spans.push({
+        kind: "text",
+        text: child.text,
+        font,
+        docPos: childDocPos,
+        marks: child.marks.map((m) => ({
+          name: m.type.name,
+          attrs: m.attrs as Record<string, unknown>,
+        })),
+      });
+      return;
+    }
+
+    // Inline non-text leaf node (image, widget, …).
+    // Guard: only nodes with explicit numeric width/height attrs are inline
+    // objects. Structural inline leaves like hard_break have no size attrs and
+    // must NOT be treated as inline objects — doing so would give them a 200px
+    // height and create huge blank line boxes.
+    if (child.isLeaf && !child.isText) {
+      const w = child.attrs["width"] as number | null | undefined;
+      const h = child.attrs["height"] as number | null | undefined;
+      if (typeof w === "number" || typeof h === "number") {
+        // Option B: node attr takes precedence; fall back to "baseline".
+        const rawAlign = child.attrs["verticalAlign"];
+        const verticalAlign: InlineObjectVerticalAlign =
+          rawAlign === "baseline" || rawAlign === "middle" || rawAlign === "top"
+            ? rawAlign
+            : "baseline";
+        spans.push({
+          kind: "object",
+          node: child,
+          docPos: childDocPos,
+          width: typeof w === "number" ? w : 200,
+          height: typeof h === "number" ? h : 200,
+          verticalAlign,
+        });
+      }
+    }
   });
 
   return spans;
@@ -467,9 +528,9 @@ export function computeJustifySpaceBonus(
 
   let spaceCount = 0;
   for (let si = 0; si < spans.length; si++) {
-    // Trailing spaces on the last span don't get expanded
-    const text =
-      si === spans.length - 1 ? spans[si]!.text.trimEnd() : spans[si]!.text;
+    const span = spans[si]!;
+    if (span.kind !== "text") continue; // object spans have no spaces
+    const text = si === spans.length - 1 ? span.text.trimEnd() : span.text;
     for (const ch of text) {
       if (ch === " ") spaceCount++;
     }
@@ -513,11 +574,11 @@ export function populateCharMap(
     }
     // Left half → cursor before the block
     if (!map.hasGlyph(beforePos)) {
-      map.registerGlyph({ docPos: beforePos, x: block.x, y: block.y, width: halfWidth, height: block.height, page, lineIndex: li });
+      map.registerGlyph({ docPos: beforePos, x: block.x, y: block.y, lineY: block.y, width: halfWidth, height: block.height, page, lineIndex: li });
     }
     // Right half → cursor after the block
     if (!map.hasGlyph(afterPos)) {
-      map.registerGlyph({ docPos: afterPos, x: block.x + halfWidth, y: block.y, width: halfWidth, height: block.height, page, lineIndex: li });
+      map.registerGlyph({ docPos: afterPos, x: block.x + halfWidth, y: block.y, lineY: block.y, width: halfWidth, height: block.height, page, lineIndex: li });
     }
     return;
   }
@@ -542,6 +603,13 @@ export function populateCharMap(
       isLastLine,
     );
 
+    // textY: top of cursor rectangles for text glyphs.
+    // Aligns to the actual text position when a baseline image inflates line.ascent.
+    const textY = line.textAscent > 0
+      ? lineY + line.ascent - line.textAscent
+      : lineY + Math.max(0, line.lineHeight - line.cursorHeight) / 2;
+
+    const lastPopSpan = line.spans[line.spans.length - 1];
     map.registerLine({
       page,
       lineIndex: globalLineIndex,
@@ -550,18 +618,43 @@ export function populateCharMap(
       x: block.x,
       contentWidth: block.availableWidth,
       startDocPos: line.spans[0]?.docPos ?? block.nodePos + 1,
-      endDocPos:
-        (line.spans[line.spans.length - 1]?.docPos ?? block.nodePos + 1) +
-        (line.spans[line.spans.length - 1]?.text.length ?? 0),
+      endDocPos: lastPopSpan ? spanEndDocPos(lastPopSpan) : block.nodePos + 1,
     });
 
     // Track the last non-ZWS glyph so we can register a zero-width sentinel
     // at endDocPos after the loop. Without this, coordsAtPos(endDocPos) falls
     // back to the preceding-glyph search which can return a glyph from the
     // wrong page and cause scrollCursorIntoView to scroll to the wrong place.
-    let lastGlyph = { x: 0, width: 0, docPos: -1, isZws: false };
+    let lastGlyph = { x: 0, width: 0, docPos: -1, isZws: false, isObject: false };
     let spacesBeforeSpan = 0;
     for (const span of line.spans) {
+      if (span.kind === "object") {
+        const objX = block.x + lineOffsetX + span.x;
+        // y = textY so cursor draws at the text baseline, not image top.
+        map.registerGlyph({
+          docPos: span.docPos,
+          x: objX,
+          y: textY,
+          lineY,
+          width: span.width,
+          height: line.cursorHeight,
+          page,
+          lineIndex: globalLineIndex,
+        });
+        map.registerGlyph({
+          docPos: span.docPos + 1,
+          x: objX + span.width,
+          y: textY,
+          lineY,
+          width: 0,
+          height: line.cursorHeight,
+          page,
+          lineIndex: globalLineIndex,
+        });
+        lastGlyph = { x: objX + span.width, width: 0, docPos: span.docPos, isZws: false, isObject: true };
+        continue;
+      }
+
       const run = measurer.measureRun(span.text, span.font);
       let spacesWithinSpan = 0;
 
@@ -580,9 +673,10 @@ export function populateCharMap(
         map.registerGlyph({
           docPos: span.docPos + ci,
           x: charX,
-          y: lineY,
+          y: textY,
+          lineY,
           width: charWidth,
-          height: line.lineHeight,
+          height: line.cursorHeight,
           page,
           lineIndex: globalLineIndex,
         });
@@ -592,6 +686,7 @@ export function populateCharMap(
           width: charWidth,
           docPos: span.docPos + ci,
           isZws: span.text[ci] === "\u200B",
+          isObject: false,
         };
 
         if (span.text[ci] === " ") spacesWithinSpan++;
@@ -601,7 +696,9 @@ export function populateCharMap(
     }
 
     // Register end-of-line caret sentinel at the position just past the last
-    // real character — but only on the LAST line of the block.
+    // real character — but only on the LAST line of the block, and only when
+    // the last span was text (object spans already register a right-half glyph
+    // at docPos+1, so no sentinel is needed).
     //
     // Why only last line? For wrapped paragraphs, the endDocPos of an
     // intermediate line equals the docPos of the first character on the next
@@ -618,13 +715,14 @@ export function populateCharMap(
     //
     // Skip ZWS lines (empty paragraphs): their only valid cursor position is
     // the ZWS docPos itself, which is already registered as a glyph above.
-    if (lastGlyph.docPos >= 0 && !lastGlyph.isZws && isLastLine) {
+    if (isLastLine && lastGlyph.docPos >= 0 && !lastGlyph.isZws && !lastGlyph.isObject) {
       map.registerGlyph({
         docPos: lastGlyph.docPos + 1,
         x: lastGlyph.x + lastGlyph.width,
-        y: lineY,
+        y: textY,
+        lineY,
         width: 0,
-        height: line.lineHeight,
+        height: line.cursorHeight,
         page,
         lineIndex: globalLineIndex,
       });

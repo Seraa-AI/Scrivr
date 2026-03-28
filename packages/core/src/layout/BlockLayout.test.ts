@@ -1,12 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { layoutBlock, populateCharMap, resolveLeafBlockDimensions } from "./BlockLayout";
+import { TextBlockStrategy } from "./TextBlockStrategy";
 import { CharacterMap } from "./CharacterMap";
+import type { InlineStrategy } from "./BlockRegistry";
+import { InlineRegistry } from "./BlockRegistry";
 import { defaultFontConfig } from "./FontConfig";
 import type { FontConfig } from "./FontConfig";
 import { schema } from "../model/schema";
 import {
   createMeasurer,
   buildStarterKitContext,
+  MOCK_LINE_HEIGHT,
   paragraph,
   boldParagraph,
   underlineParagraph,
@@ -132,8 +136,9 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
       nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
     });
     const span = block.lines[0]?.spans[0];
-    expect(span?.marks).toBeDefined();
-    expect(span?.marks?.some((m) => m.name === "underline")).toBe(true);
+    const textSpan = span?.kind === "text" ? span : undefined;
+    expect(textSpan?.marks).toBeDefined();
+    expect(textSpan?.marks?.some((m) => m.name === "underline")).toBe(true);
   });
 
   it("strikethrough mark appears on layout spans", () => {
@@ -141,7 +146,8 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
       nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
     });
     const span = block.lines[0]?.spans[0];
-    expect(span?.marks?.some((m) => m.name === "strikethrough")).toBe(true);
+    const textSpan = span?.kind === "text" ? span : undefined;
+    expect(textSpan?.marks?.some((m) => m.name === "strikethrough")).toBe(true);
   });
 
   it("plain text has empty marks array", () => {
@@ -149,7 +155,8 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
       nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
     });
     const span = block.lines[0]?.spans[0];
-    expect(span?.marks).toHaveLength(0);
+    const textSpan = span?.kind === "text" ? span : undefined;
+    expect(textSpan?.marks).toHaveLength(0);
   });
 
   it("mixed paragraph: plain span has no underline, underlined span does", () => {
@@ -159,10 +166,12 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
     // Two children → two spans on the line
     const spans = block.lines[0]?.spans ?? [];
     expect(spans.length).toBeGreaterThanOrEqual(2);
-    const plainSpan = spans.find((s) => s.text === "Hello ");
-    const underlinedSpan = spans.find((s) => s.text === "World");
-    expect(plainSpan?.marks?.some((m) => m.name === "underline")).toBe(false);
-    expect(underlinedSpan?.marks?.some((m) => m.name === "underline")).toBe(true);
+    const plainSpan = spans.find((s) => s.kind === "text" && s.text === "Hello ");
+    const underlinedSpan = spans.find((s) => s.kind === "text" && s.text === "World");
+    const plainTextSpan = plainSpan?.kind === "text" ? plainSpan : undefined;
+    const underlinedTextSpan = underlinedSpan?.kind === "text" ? underlinedSpan : undefined;
+    expect(plainTextSpan?.marks?.some((m) => m.name === "underline")).toBe(false);
+    expect(underlinedTextSpan?.marks?.some((m) => m.name === "underline")).toBe(true);
   });
 
   it("marks survive word-wrap: multi-word underlined text passes marks to all spans", () => {
@@ -173,7 +182,9 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
     expect(block.lines.length).toBeGreaterThan(1);
     for (const line of block.lines) {
       for (const span of line.spans) {
-        expect(span.marks?.some((m) => m.name === "underline")).toBe(true);
+        if (span.kind === "text") {
+          expect(span.marks?.some((m) => m.name === "underline")).toBe(true);
+        }
       }
     }
   });
@@ -572,24 +583,29 @@ describe("layoutBlock — node fontFamily attr", () => {
     const block = layoutBlock(paragraphWithFamily("Hello", "Arial"), {
       nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
     });
+    const span = block.lines[0]?.spans[0];
+    const font = span?.kind === "text" ? span.font : undefined;
     // The span font should contain "Arial", not "Georgia"
-    expect(block.lines[0]?.spans[0]?.font).toContain("Arial");
-    expect(block.lines[0]?.spans[0]?.font).not.toContain("Georgia");
+    expect(font).toContain("Arial");
+    expect(font).not.toContain("Georgia");
   });
 
   it("preserves the block style size when substituting the family", () => {
     const block = layoutBlock(paragraphWithFamily("Hello", "Arial"), {
       nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
     });
+    const span = block.lines[0]?.spans[0];
+    const font = span?.kind === "text" ? span.font : undefined;
     // Paragraph base size is 14px — must be preserved after family substitution
-    expect(block.lines[0]?.spans[0]?.font).toContain("14px");
+    expect(font).toContain("14px");
   });
 
   it("preserves heading size and weight when substituting the family", () => {
     const block = layoutBlock(headingWithFamily(1, "Title", "Inter"), {
       nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
     });
-    const font = block.lines[0]?.spans[0]?.font ?? "";
+    const span = block.lines[0]?.spans[0];
+    const font = span?.kind === "text" ? span.font : "";
     expect(font).toContain("Inter");
     expect(font).toContain("28px");
     expect(font).toContain("bold");
@@ -600,7 +616,9 @@ describe("layoutBlock — node fontFamily attr", () => {
     const block = layoutBlock(paragraph("Hello"), {
       nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
     });
-    expect(block.lines[0]?.spans[0]?.font).toContain("Georgia");
+    const span = block.lines[0]?.spans[0];
+    const font = span?.kind === "text" ? span.font : undefined;
+    expect(font).toContain("Georgia");
   });
 
   it("node fontFamily overrides the fontConfig family", () => {
@@ -612,7 +630,230 @@ describe("layoutBlock — node fontFamily attr", () => {
       measurer: createMeasurer(),
       fontConfig: customConfig,
     });
-    expect(block.lines[0]?.spans[0]?.font).toContain("Courier New");
-    expect(block.lines[0]?.spans[0]?.font).not.toContain("Verdana");
+    const span = block.lines[0]?.spans[0];
+    const font = span?.kind === "text" ? span.font : undefined;
+    expect(font).toContain("Courier New");
+    expect(font).not.toContain("Verdana");
+  });
+});
+
+// ── Inline node handling — regression suite ───────────────────────────────────
+//
+// These tests lock in the correct behaviour introduced when images moved from
+// full-width block nodes to inline objects inside paragraph line boxes.
+//
+// THE REGRESSION that prompted this suite:
+//   extractSpans() started treating ALL inline leaf nodes (including hard_break)
+//   as inline objects. hard_break has no width/height attrs, so it defaulted to
+//   200 × 200 px — every Shift-Enter line break created a massive blank space.
+//
+// Rule: only inline leaf nodes with at least one numeric width/height attr are
+// emitted as object spans. Structural leaves (hard_break) are silently skipped.
+
+describe("extractSpans — inline node handling (regression)", () => {
+  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+
+  // ── hard_break must never become an object span ──────────────────────────
+
+  it("hard_break inside a paragraph does NOT produce an object span", () => {
+    const hb = skSchema.nodes["hard_break"]?.create();
+    if (!hb) return;
+    const para = skSchema.node("paragraph", null, [
+      skSchema.text("Hello"), hb, skSchema.text("World"),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    const allSpans = block.lines.flatMap(l => l.spans);
+    expect(allSpans.every(s => s.kind === "text")).toBe(true);
+  });
+
+  it("hard_break does NOT inflate line height to 200px — stays at text line height", () => {
+    // THE EXACT REGRESSION: before the guard, lineHeight became 200px here.
+    const hb = skSchema.nodes["hard_break"]?.create();
+    if (!hb) return;
+    const para = skSchema.node("paragraph", null, [
+      skSchema.text("A"), hb, skSchema.text("B"),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    for (const line of block.lines) {
+      expect(line.lineHeight).toBeLessThan(100);
+      expect(line.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    }
+  });
+
+  it("paragraph containing only a hard_break falls back to ZWS — normal line height", () => {
+    const hb = skSchema.nodes["hard_break"]?.create();
+    if (!hb) return;
+    const para = skSchema.node("paragraph", null, [hb]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    expect(block.lines).toHaveLength(1);
+    expect(block.lines[0]?.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    const spans = block.lines[0]?.spans ?? [];
+    expect(spans.every(s => s.kind === "text")).toBe(true);
+  });
+
+  // ── inline image IS an object span ───────────────────────────────────────
+
+  it("inline image with width+height attrs produces exactly one object span", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 100, height: 80 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [
+      skSchema.text("Before"), img, skSchema.text("After"),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 600,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    const allSpans = block.lines.flatMap(l => l.spans);
+    const objectSpans = allSpans.filter(s => s.kind === "object");
+    expect(objectSpans).toHaveLength(1);
+  });
+
+  it("line containing an inline image is as tall as the image when it exceeds text height", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 200, height: 150 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [img]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    expect(block.lines[0]?.lineHeight).toBe(150);
+    expect(block.height).toBe(150);
+  });
+
+  it("line height is max(text, image) — small image alongside text keeps text height", () => {
+    // Image (8px) is shorter than text (~18px) — line height must not shrink.
+    const img = skSchema.nodes["image"]?.create({ src: "i.png", width: 8, height: 8 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    expect(block.lines[0]?.lineHeight).toBeGreaterThanOrEqual(MOCK_LINE_HEIGHT);
+  });
+
+  it("inline image registers a glyph in the CharacterMap at its docPos", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 50, height: 50 });
+    if (!img) return;
+    // doc structure: doc(para(text"Hi", img)) — image is at docPos 4
+    // nodePos=0 → para opens at 0, text "Hi" at 1,2, img at 3
+    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const map = new CharacterMap();
+    layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig, map,
+    });
+    // "Hi" → docPos 1,2; image → docPos 3; sentinel → docPos 4
+    expect(map.hasGlyph(3)).toBe(true); // the image glyph
+    expect(map.hasGlyph(4)).toBe(true); // sentinel past the image
+  });
+});
+
+// ── TextBlockStrategy — inline object rendering ───────────────────────────────
+//
+// Verifies that TextBlockStrategy correctly dispatches object spans to the
+// InlineRegistry. This is the rendering path that was silently broken when
+// StarterKit collected layoutHandlers (now empty on Image) instead of
+// inlineHandlers — images appeared as blank cursors.
+
+describe("TextBlockStrategy — inline image rendering", () => {
+  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+
+  function makeMockCtx(): CanvasRenderingContext2D {
+    return {
+      save: vi.fn(), restore: vi.fn(),
+      fillText: vi.fn(), strokeRect: vi.fn(), fillRect: vi.fn(),
+      measureText: vi.fn(() => ({ width: 8 })),
+      beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(),
+      stroke: vi.fn(), fill: vi.fn(), arc: vi.fn(), closePath: vi.fn(),
+      font: "", fillStyle: "", strokeStyle: "", lineWidth: 1,
+      textAlign: "left", textBaseline: "alphabetic",
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+  }
+
+  it("calls InlineStrategy.render() for each inline image span", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 80, height: 60 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+
+    const renderFn = vi.fn();
+    const inlineStrategy: InlineStrategy = { render: renderFn };
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("image", inlineStrategy);
+
+    const ctx = makeMockCtx();
+    TextBlockStrategy.render(block, {
+      ctx,
+      pageNumber: 1,
+      lineIndexOffset: 0,
+      dpr: 1,
+      measurer: createMeasurer(),
+      inlineRegistry,
+    }, new CharacterMap());
+
+    expect(renderFn).toHaveBeenCalledOnce();
+    // Verify it was called with the correct node
+    const [, , , w, h, node] = renderFn.mock.calls[0] as [unknown, unknown, unknown, number, number, unknown];
+    expect(w).toBe(80);
+    expect(h).toBe(60);
+  });
+
+  it("does NOT call InlineStrategy.render() when inlineRegistry is absent", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 80, height: 60 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [img]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+
+    const ctx = makeMockCtx();
+    // No inlineRegistry — should not throw, just silently skip drawing
+    expect(() => {
+      TextBlockStrategy.render(block, {
+        ctx, pageNumber: 1, lineIndexOffset: 0, dpr: 1, measurer: createMeasurer(),
+      }, new CharacterMap());
+    }).not.toThrow();
+  });
+
+  it("still renders surrounding text when paragraph contains a mix of text and image", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 50, height: 50 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [
+      skSchema.text("Hello"), img, skSchema.text("World"),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 600,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+
+    const renderFn = vi.fn();
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("image", { render: renderFn });
+
+    const ctx = makeMockCtx();
+    TextBlockStrategy.render(block, {
+      ctx, pageNumber: 1, lineIndexOffset: 0, dpr: 1,
+      measurer: createMeasurer(), inlineRegistry,
+    }, new CharacterMap());
+
+    // Text was drawn (fillText called for "Hello" and "World" chars)
+    expect(ctx.fillText).toHaveBeenCalled();
+    // Image strategy was also called
+    expect(renderFn).toHaveBeenCalledOnce();
   });
 });

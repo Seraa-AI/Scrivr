@@ -15,11 +15,18 @@ export interface GlyphEntry {
   docPos: number;
   /** Left edge of this glyph in canvas coordinates */
   x: number;
-  /** Top of the line this glyph sits on */
+  /** Top of the glyph's render rectangle (may be offset from lineY for vertically-centered glyphs) */
   y: number;
+  /**
+   * Top of the owning line's rectangle — always equals the LineEntry.y for this glyph's line.
+   * Used by posAtCoords to group glyphs by line independently of their render y,
+   * which can differ when inline images inflate the line height and glyphs are
+   * vertically offset within it.
+   */
+  lineY: number;
   /** Measured width of this glyph */
   width: number;
-  /** Line height (ascent + descent) */
+  /** Cursor/hit-test height — text-sized for text glyphs and object glyphs */
   height: number;
   /** 1-based page number */
   page: number;
@@ -89,11 +96,13 @@ export class CharacterMap {
     const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
     if (!line) return 0;
 
-    // Filter by y coordinate rather than lineIndex so that table cells —
-    // which share the same y but have different lineIndex values — all
-    // participate in the x hit-test. Sort left-to-right for safety.
+    // Filter by lineY rather than glyph.y so that:
+    // (a) table cells — which share the same lineY but have different lineIndex
+    //     values — all participate in the x hit-test, and
+    // (b) inline objects that inflate lineHeight — whose glyphs are vertically
+    //     offset from the line top — are still found alongside text glyphs.
     const lineGlyphs = this.glyphs
-      .filter((g) => g.page === page && g.y === line.y)
+      .filter((g) => g.page === page && g.lineY === line.y)
       .sort((a, b) => a.x - b.x);
 
     if (!lineGlyphs.length) return line.startDocPos;

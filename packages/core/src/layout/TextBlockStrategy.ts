@@ -1,6 +1,7 @@
 import type { CharacterMap } from "./CharacterMap";
 import type { LayoutBlock } from "./BlockLayout";
 import { computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
+import { computeObjectRenderY } from "./LineBreaker";
 import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
 
 /**
@@ -10,12 +11,13 @@ import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
  * (paragraph, heading, list item, etc.). Draws each span with mark decorators
  * and registers glyph positions into the CharacterMap for cursor hit-testing.
  *
- * Paragraph and Heading extensions register an instance of this strategy.
- * Future block types (image, code block, table) register their own strategies.
+ * Text spans are drawn directly. Object spans (inline images, widgets) are
+ * dispatched to the InlineRegistry — the Image extension registers an
+ * InlineStrategy there.
  */
 export const TextBlockStrategy: BlockStrategy = {
   render(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
-    const { ctx, pageNumber, lineIndexOffset, measurer, markDecorators } = renderCtx;
+    const { ctx, pageNumber, lineIndexOffset, measurer, markDecorators, inlineRegistry } = renderCtx;
     const { lines, x, availableWidth, align } = block;
 
     for (let li = 0; li < lines.length; li++) {
@@ -32,12 +34,57 @@ export const TextBlockStrategy: BlockStrategy = {
       const lineY = block.y + getTotalLineHeight(lines, li);
       const baseline = lineY + line.ascent;
 
+      // textY: top of cursor rectangles for text glyphs on this line.
+      // When a baseline image inflates line.ascent, text renders near the bottom
+      // of the tall line. Align the cursor to the actual text position.
+      const textY = line.textAscent > 0
+        ? lineY + line.ascent - line.textAscent
+        : lineY + Math.max(0, line.lineHeight - line.cursorHeight) / 2;
+
       let spacesBeforeSpan = 0;
       for (const span of line.spans) {
+        // ── Inline object span (image, widget, …) ─────────────────────────────
+        if (span.kind === "object") {
+          const spanX = x + lineOffsetX + span.x;
+          const objY = computeObjectRenderY(lineY, line, span);
+          const strategy = inlineRegistry?.get(span.node.type.name);
+          if (strategy) {
+            strategy.render(ctx, spanX, objY, span.width, span.height, span.node);
+          }
+          // y = textY so cursor draws at the text baseline, not the image top.
+          // Full-width glyph: midpoint at image center → 50/50 click split.
+          if (!map.hasGlyph(span.docPos)) {
+            map.registerGlyph({
+              docPos: span.docPos,
+              x: spanX,
+              y: textY,
+              lineY,
+              width: span.width,
+              height: line.cursorHeight,
+              page: pageNumber,
+              lineIndex: globalLineIndex,
+            });
+          }
+          // Zero-width sentinel at right edge → coordsAtPos draws cursor at
+          // the right edge of the image, not its center.
+          if (!map.hasGlyph(span.docPos + 1)) {
+            map.registerGlyph({
+              docPos: span.docPos + 1,
+              x: spanX + span.width,
+              y: textY,
+              lineY,
+              width: 0,
+              height: line.cursorHeight,
+              page: pageNumber,
+              lineIndex: globalLineIndex,
+            });
+          }
+          continue;
+        }
+
+        // ── Text span ─────────────────────────────────────────────────────────
         const run = measurer.measureRun(span.text, span.font);
 
-        // For justify: draw each character individually at its adjusted x.
-        // For other alignments spaceBonus is 0, so charX collapses to spanX + charPos.
         const drawSpan = (fillColor: string) => {
           if (spaceBonus === 0) {
             const spanX = x + lineOffsetX + span.x;
@@ -66,7 +113,6 @@ export const TextBlockStrategy: BlockStrategy = {
           markAttrs: {} as Record<string, unknown>,
         };
 
-        // decoratePre — backgrounds, highlights
         if (markDecorators && span.marks) {
           for (const markInfo of span.marks) {
             const dec = markDecorators.get(markInfo.name);
@@ -76,7 +122,6 @@ export const TextBlockStrategy: BlockStrategy = {
 
         ctx.font = span.font;
 
-        // decorateFill — allow marks to override text color (e.g. Color extension)
         let fillColor = "#1e293b";
         if (markDecorators && span.marks) {
           for (const markInfo of span.marks) {
@@ -89,7 +134,6 @@ export const TextBlockStrategy: BlockStrategy = {
         }
         drawSpan(fillColor);
 
-        // decoratePost — underlines, strikethroughs
         if (markDecorators && span.marks) {
           for (const markInfo of span.marks) {
             const dec = markDecorators.get(markInfo.name);
@@ -97,7 +141,6 @@ export const TextBlockStrategy: BlockStrategy = {
           }
         }
 
-        // Populate CharacterMap (guarded — only on first render of this page)
         if (!map.hasGlyph(span.docPos)) {
           let spacesWithinSpan = 0;
           for (let ci = 0; ci < span.text.length; ci++) {
@@ -112,9 +155,10 @@ export const TextBlockStrategy: BlockStrategy = {
             map.registerGlyph({
               docPos: span.docPos + ci,
               x: charX,
-              y: lineY,
+              y: textY,
+              lineY,
               width: charWidth,
-              height: line.lineHeight,
+              height: line.cursorHeight,
               page: pageNumber,
               lineIndex: globalLineIndex,
             });
@@ -126,8 +170,8 @@ export const TextBlockStrategy: BlockStrategy = {
         spacesBeforeSpan += countSpaces(span.text);
       }
 
-      // Register line entry with the page-global index
       if (!map.hasLine(pageNumber, globalLineIndex)) {
+        const lastSpan = line.spans[line.spans.length - 1];
         map.registerLine({
           page: pageNumber,
           lineIndex: globalLineIndex,
@@ -136,9 +180,9 @@ export const TextBlockStrategy: BlockStrategy = {
           x,
           contentWidth: availableWidth,
           startDocPos: line.spans[0]?.docPos ?? 0,
-          endDocPos:
-            (line.spans[line.spans.length - 1]?.docPos ?? 0) +
-            (line.spans[line.spans.length - 1]?.text.length ?? 0),
+          endDocPos: lastSpan
+            ? (lastSpan.kind === "text" ? lastSpan.docPos + lastSpan.text.length : lastSpan.docPos + 1)
+            : 0,
         });
       }
     }
@@ -152,4 +196,3 @@ export const TextBlockStrategy: BlockStrategy = {
 function getTotalLineHeight(lines: LayoutBlock["lines"], upToIndex: number): number {
   return lines.slice(0, upToIndex).reduce((sum, l) => sum + l.lineHeight, 0);
 }
-

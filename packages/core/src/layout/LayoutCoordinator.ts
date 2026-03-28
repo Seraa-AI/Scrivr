@@ -204,7 +204,7 @@ export class LayoutCoordinator {
         // No right-half glyph: posAtCoords falls through to line.endDocPos = afterPos.
         // The following paragraph registers its own glyph at afterPos unblocked, so
         // coordsAtPos draws the cursor at the correct position in that paragraph.
-        this.charMap.registerGlyph({ docPos: beforePos, x: block.x, y: block.y, width: halfWidth, height: block.height, page: page.pageNumber, lineIndex: li });
+        this.charMap.registerGlyph({ docPos: beforePos, x: block.x, y: block.y, lineY: block.y, width: halfWidth, height: block.height, page: page.pageNumber, lineIndex: li });
         lineOffset += 1;
         continue;
       }

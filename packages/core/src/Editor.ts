@@ -4,7 +4,7 @@ import type { Schema } from "prosemirror-model";
 import { MarkdownSerializer } from "prosemirror-markdown";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
-import { BlockRegistry } from "./layout/BlockRegistry";
+import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import { CursorManager } from "./renderer/CursorManager";
 import { TextMeasurer } from "./layout/TextMeasurer";
@@ -185,6 +185,12 @@ export class Editor {
   readonly blockRegistry: BlockRegistry;
 
   /**
+   * Inline object registry built from all extensions.
+   * Pass to renderPage — maps node type names to InlineStrategy instances.
+   */
+  readonly inlineRegistry: InlineRegistry;
+
+  /**
    * Bound command map — each entry calls the extension command with the
    * current state + this editor's dispatch. Built once; closures over `this`
    * so they always read the latest state at call time.
@@ -211,6 +217,7 @@ export class Editor {
     this.markDecorators = this.manager.buildMarkDecorators();
     this.toolbarItems = this.manager.buildToolbarItems();
     this.blockRegistry = this.manager.buildBlockRegistry();
+    this.inlineRegistry = this.manager.buildInlineRegistry();
     this.cursorManager = new CursorManager(() => {
       onCursorTick?.(this.cursorManager.isVisible);
       this.notifyListeners();

@@ -706,7 +706,8 @@ describe("layoutDocument — pageConfig.fontFamily", () => {
       fontConfig,
       measurer: createMeasurer(),
     });
-    const span = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    const rawSpan = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    const span = rawSpan?.kind === "text" ? rawSpan : undefined;
     expect(span?.font).toContain("Arial");
     expect(span?.font).not.toContain("Georgia");
   });
@@ -718,7 +719,8 @@ describe("layoutDocument — pageConfig.fontFamily", () => {
       fontConfig,
       measurer: createMeasurer(),
     });
-    const span = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    const rawSpan = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    const span = rawSpan?.kind === "text" ? rawSpan : undefined;
     expect(span?.font).toContain("Verdana");
     expect(span?.font).toContain("bold");
     expect(span?.font).toContain("28px");
@@ -731,7 +733,8 @@ describe("layoutDocument — pageConfig.fontFamily", () => {
       fontConfig,
       measurer: createMeasurer(),
     });
-    const span = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    const rawSpan = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    const span = rawSpan?.kind === "text" ? rawSpan : undefined;
     expect(span?.font).toContain("Georgia");
   });
 });

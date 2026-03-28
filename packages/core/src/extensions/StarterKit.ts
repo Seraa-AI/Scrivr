@@ -27,7 +27,7 @@ import type { Command } from "prosemirror-state";
 import type { NodeSpec, MarkSpec } from "prosemirror-model";
 import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules, IEditor } from "./types";
 import type { BlockStyle } from "../layout/FontConfig";
-import type { BlockStrategy } from "../layout/BlockRegistry";
+import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { PageConfig } from "../layout/PageLayout";
 
 interface StarterKitOptions {
@@ -355,9 +355,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.horizontalRule !== false) {
       Object.assign(handlers, HorizontalRule.resolve().layoutHandlers);
     }
-    if (opts.image !== false) {
-      Object.assign(handlers, Image.resolve().layoutHandlers);
-    }
+    // Image is now an inline node — it registers an InlineStrategy, not a BlockStrategy.
     return handlers;
   },
 
@@ -380,10 +378,17 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.horizontalRule !== false) {
       Object.assign(styles, HorizontalRule.resolve().blockStyles);
     }
-    if (opts.image !== false) {
-      Object.assign(styles, Image.resolve().blockStyles);
-    }
+    // Image is now an inline node — no block styles needed.
     return styles;
+  },
+
+  addInlineHandlers() {
+    const handlers: Record<string, InlineStrategy> = {};
+    const opts = this.options;
+    if (opts.image !== false) {
+      Object.assign(handlers, Image.resolve().inlineHandlers);
+    }
+    return handlers;
   },
 
   addToolbarItems() {
