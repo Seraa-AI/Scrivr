@@ -470,7 +470,12 @@ function extractSpans(
         // Option B: node attr takes precedence; fall back to "baseline".
         const rawAlign = child.attrs["verticalAlign"];
         const verticalAlign: InlineObjectVerticalAlign =
-          rawAlign === "baseline" || rawAlign === "middle" || rawAlign === "top"
+          rawAlign === "baseline" ||
+          rawAlign === "middle" ||
+          rawAlign === "top" ||
+          rawAlign === "bottom" ||
+          rawAlign === "text-top" ||
+          rawAlign === "text-bottom"
             ? rawAlign
             : "baseline";
         spans.push({

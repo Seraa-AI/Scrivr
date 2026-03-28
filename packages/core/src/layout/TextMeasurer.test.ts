@@ -84,12 +84,14 @@ describe("TextMeasurer.getFontMetrics", () => {
     expect(metrics.lineHeight).toBeCloseTo((MOCK_FONT_ASCENT + MOCK_FONT_DESCENT) * 1.2);
   });
 
-  it("caches — measureText is not called twice for the same font", () => {
+  it("caches — measureText calls don't increase on repeated calls for the same font", () => {
     const m = new TextMeasurer();
     m.getFontMetrics("14px serif");
-    m.getFontMetrics("14px serif");
     const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
-    expect(ctx.measureText).toHaveBeenCalledTimes(1);
+    const callsAfterFirst = ctx.measureText.mock.calls.length;
+    m.getFontMetrics("14px serif");
+    // Second call must not add any more measureText calls (result is cached).
+    expect(ctx.measureText).toHaveBeenCalledTimes(callsAfterFirst);
   });
 
   it("font metrics are stable — same result regardless of what text is measured after", () => {

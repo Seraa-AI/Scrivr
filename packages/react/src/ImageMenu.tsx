@@ -19,12 +19,15 @@ interface ImageMenuProps {
   editor: Editor | null;
 }
 
-type VerticalAlign = "baseline" | "middle" | "top";
+type VerticalAlign = "baseline" | "middle" | "top" | "bottom" | "text-top" | "text-bottom";
 
 const ALIGN_OPTIONS: { value: VerticalAlign; label: string; title: string }[] = [
-  { value: "baseline", label: "Baseline", title: "Align image bottom to text baseline" },
-  { value: "middle",   label: "Middle",   title: "Center image in line height" },
-  { value: "top",      label: "Top",      title: "Align image top to line top" },
+  { value: "baseline",    label: "Baseline",   title: "Align image bottom to text baseline" },
+  { value: "middle",      label: "Middle",     title: "Center image on font x-height (matches Word / Docs)" },
+  { value: "top",         label: "Top",        title: "Align image top to line top" },
+  { value: "bottom",      label: "Bottom",     title: "Align image bottom to line bottom" },
+  { value: "text-top",    label: "Text Top",   title: "Align image top to parent font ascent" },
+  { value: "text-bottom", label: "Text Bot",   title: "Align image bottom to parent font descent" },
 ];
 
 export function ImageMenu({ editor }: ImageMenuProps) {

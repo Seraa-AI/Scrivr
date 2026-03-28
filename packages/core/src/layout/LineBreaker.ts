@@ -12,12 +12,22 @@ import { normalizeFont } from "./StyleResolver";
 /**
  * How an inline object aligns vertically within its line box.
  *
- *   "baseline" — bottom of the object sits on the text baseline (Google Docs default).
- *                The line ascent expands to fit the object above the baseline.
- *   "middle"   — object is centered in the line height.
- *   "top"      — top of the object sits at the line top.
+ *   "baseline"    — bottom of the object sits on the text baseline (Google Docs default).
+ *                  The line ascent expands to fit the object above the baseline.
+ *   "middle"      — center of the object aligns with the parent font's x-height midpoint
+ *                   (matches CSS vertical-align: middle and Word/Docs behaviour).
+ *   "top"         — top of the object sits at the line top.
+ *   "bottom"      — bottom of the object sits at the line bottom.
+ *   "text-top"    — top of the object aligns with the top of the parent font's ascent.
+ *   "text-bottom" — bottom of the object aligns with the bottom of the parent font's descent.
  */
-export type InlineObjectVerticalAlign = "baseline" | "middle" | "top";
+export type InlineObjectVerticalAlign =
+  | "baseline"
+  | "middle"
+  | "top"
+  | "bottom"
+  | "text-top"
+  | "text-bottom";
 
 export type InputSpan =
   | {
@@ -96,6 +106,13 @@ export interface LayoutLine {
    * For object-only lines (no text) falls back to DEFAULT_CURSOR_HEIGHT (16px).
    */
   cursorHeight: number;
+  /**
+   * X-height of the dominant font on this line — height of a lowercase "x".
+   * Used by vertical-align: middle to align element centers to the x-height
+   * midpoint rather than the full line height midpoint (matches CSS spec).
+   * Zero on object-only lines.
+   */
+  xHeight: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -114,23 +131,43 @@ export function spanEndDocPos(span: LayoutSpan | InputSpan): number {
  * The result is an absolute y — pass lineY (top of the line strip) and the
  * LayoutLine produced by buildLine so the correct alignment mode is applied.
  *
- *   "baseline" — bottom of object on text baseline  (lineY + ascent - height)
- *   "top"      — top of object at line top          (lineY)
- *   "middle"   — object centered in line height     (lineY + (lineHeight - height) / 2)
+ *   "baseline"    — bottom of object on text baseline      (lineY + ascent - height)
+ *   "top"         — top of object at line top              (lineY)
+ *   "bottom"      — bottom of object at line bottom        (lineY + lineHeight - height)
+ *   "middle"      — center of object at x-height midpoint  baseline - xHeight/2 - height/2
+ *                   (matches CSS spec and Word/Docs; falls back to line-center if no text)
+ *   "text-top"    — top of object at parent font ascent top (lineY + ascent - textAscent)
+ *   "text-bottom" — bottom of object at parent font descent (lineY + ascent + descent - height)
  */
 export function computeObjectRenderY(
   lineY: number,
   line: LayoutLine,
   span: Extract<LayoutSpan, { kind: "object" }>,
 ): number {
+  const baseline = lineY + line.ascent;
   switch (span.verticalAlign) {
     case "baseline":
-      return lineY + line.ascent - span.height;
+      return baseline - span.height;
     case "top":
       return lineY;
+    case "bottom":
+      return lineY + line.lineHeight - span.height;
     case "middle":
-    default:
+      if (line.xHeight > 0) {
+        // CSS spec: center of element aligns with midpoint of parent x-height.
+        // midpoint = baseline - xHeight/2  →  top = midpoint - height/2
+        return baseline - line.xHeight / 2 - span.height / 2;
+      }
+      // Object-only line (no text) — fall back to centering in line height.
       return lineY + Math.max(0, line.lineHeight - span.height) / 2;
+    case "text-top":
+      // Top of object at the top of the parent font's ascender.
+      return baseline - line.textAscent;
+    case "text-bottom":
+      // Bottom of object at the bottom of the parent font's descender.
+      return baseline + line.descent - span.height;
+    default:
+      return baseline - span.height;
   }
 }
 
@@ -428,6 +465,7 @@ function buildLine(spans: LayoutSpan[], measurer: TextMeasurer): LayoutLine {
   let textAscent = 0;
   let textDescent = 0;
   let textLineHeight = 0;
+  let xHeight = 0;
   let width = 0;
   const seenFonts = new Set<string>();
 
@@ -441,30 +479,51 @@ function buildLine(spans: LayoutSpan[], measurer: TextMeasurer): LayoutLine {
     if (m.ascent > textAscent) textAscent = m.ascent;
     if (m.descent > textDescent) textDescent = m.descent;
     if (m.lineHeight > textLineHeight) textLineHeight = m.lineHeight;
+    if (m.xHeight > xHeight) xHeight = m.xHeight;
   }
 
   // Pass 2: expand line metrics to accommodate object spans.
   //
-  //   "baseline" — image bottom on text baseline → expand ascent so the image
-  //                fits above the baseline. lineHeight = ascent + descent.
-  //   "top"      — image stacked from the line top → expand lineHeight directly.
-  //   "middle"   — image centered in line height → expand lineHeight directly.
+  //   "baseline"    — image bottom on text baseline → expand ascent.
+  //   "top"/"bottom"/"middle" — expand lineHeight but don't move the baseline.
+  //   "text-top"    — top of object at parent font top (ascent - textAscent).
+  //                   Expand descent if object extends below text bottom.
+  //   "text-bottom" — bottom of object at parent font bottom (ascent + descent).
+  //                   Expand ascent if object extends above text top.
   let ascent = textAscent;
   let descent = textDescent;
   let lineHeight = textLineHeight;
 
   for (const span of spans) {
     if (span.kind !== "object") continue;
-    if (span.verticalAlign === "baseline") {
-      if (span.height > ascent) ascent = span.height;
-    } else {
-      // "top" and "middle" expand the total line height but don't move the baseline.
-      if (span.height > lineHeight) lineHeight = span.height;
+    switch (span.verticalAlign) {
+      case "baseline":
+        if (span.height > ascent) ascent = span.height;
+        break;
+      case "top":
+      case "bottom":
+      case "middle":
+        if (span.height > lineHeight) lineHeight = span.height;
+        break;
+      case "text-top": {
+        // Object top = ascent - textAscent. Object bottom = ascent - textAscent + height.
+        // Needs lineHeight >= (ascent - textAscent) + height.
+        const needed = ascent - textAscent + span.height;
+        if (needed > lineHeight) lineHeight = needed;
+        break;
+      }
+      case "text-bottom": {
+        // Object bottom = ascent + descent. Object top = ascent + descent - height.
+        // If height > textAscent + descent, object pokes above text top → expand ascent.
+        const overflow = span.height - (textAscent + descent);
+        if (overflow > 0) ascent = Math.max(ascent, ascent + overflow);
+        break;
+      }
     }
   }
 
-  // Baseline images may have inflated ascent beyond textLineHeight.
-  // Ensure lineHeight covers ascent + descent.
+  // Baseline/text-bottom objects may have inflated ascent beyond textLineHeight.
+  // Ensure lineHeight always covers ascent + descent.
   lineHeight = Math.max(lineHeight, ascent + descent);
 
   // Object-only line: no text ascent — use lineHeight as ascent so baseline
@@ -476,5 +535,5 @@ function buildLine(spans: LayoutSpan[], measurer: TextMeasurer): LayoutLine {
   // for object-only lines (no text spans present).
   const cursorHeight = textLineHeight > 0 ? textLineHeight : DEFAULT_CURSOR_HEIGHT;
 
-  return { spans, width, ascent, descent, lineHeight, textAscent, cursorHeight };
+  return { spans, width, ascent, descent, lineHeight, textAscent, cursorHeight, xHeight };
 }

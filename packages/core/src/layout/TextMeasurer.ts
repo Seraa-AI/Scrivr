@@ -24,6 +24,13 @@ export interface FontMetrics {
   descent: number;
   /** ascent + descent — height to allocate per line */
   lineHeight: number;
+  /**
+   * Height of a lowercase "x" in this font — the CSS x-height.
+   * Used for vertical-align: middle (centers the element on the x-height
+   * midpoint, not the full line height midpoint).
+   * Measured via actualBoundingBoxAscent of "x" (visual cap, not font max).
+   */
+  xHeight: number;
 }
 
 export interface RunMetrics {
@@ -156,10 +163,16 @@ export class TextMeasurer {
         ? m.fontBoundingBoxDescent
         : m.actualBoundingBoxDescent;
 
+    // x-height: visual height of lowercase "x". Use actualBoundingBoxAscent
+    // (not fontBoundingBox) — we want the rendered cap height, not the font max.
+    const xMetrics = this.ctx.measureText("x");
+    const xHeight = xMetrics.actualBoundingBoxAscent;
+
     const metrics: FontMetrics = {
       ascent,
       descent,
       lineHeight: (ascent + descent) * this.lineHeightMultiplier,
+      xHeight,
     };
 
     this.metricCache.set(font, metrics);
