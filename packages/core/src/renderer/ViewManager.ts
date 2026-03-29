@@ -53,6 +53,13 @@ export class ViewManager {
     startH: number;
     docPos: number;
   } | null = null;
+  private floatDrag: {
+    docPos: number;
+    startX: number;
+    startY: number;
+    startOffsetX: number;
+    startOffsetY: number;
+  } | null = null;
 
   constructor(
     private editor: Editor,
@@ -285,6 +292,7 @@ export class ViewManager {
       showMarginGuides: this.showMarginGuides,
       ...(this.editor.blockRegistry ? { blockRegistry: this.editor.blockRegistry } : {}),
       ...(this.editor.inlineRegistry ? { inlineRegistry: this.editor.inlineRegistry } : {}),
+      ...(layout.floats ? { floats: layout.floats } : {}),
     });
   }
 
@@ -368,6 +376,26 @@ export class ViewManager {
       return;
     }
 
+    // ── Float body drag hit-test ──────────────────────────────────────────────
+    const floatHit = this.hitFloat(canvasX, canvasY, pageNumber);
+    if (floatHit) {
+      // Select the float node so createImageMenu can show its toolbar.
+      this.editor.selectNode(floatHit.docPos);
+      const attrs = floatHit.node.attrs as { floatOffset?: { x: number; y: number } };
+      const currentOffset = attrs.floatOffset ?? { x: 0, y: 0 };
+      this.floatDrag = {
+        docPos: floatHit.docPos,
+        startX: e.clientX,
+        startY: e.clientY,
+        startOffsetX: currentOffset.x,
+        startOffsetY: currentOffset.y,
+      };
+      for (const entry of this.pages.values()) {
+        entry.wrapper.style.cursor = "move";
+      }
+      return;
+    }
+
     this.isDragging = true;
     const pos = this.editor.charMap.posAtCoords(canvasX, canvasY, pageNumber);
 
@@ -406,7 +434,16 @@ export class ViewManager {
       return;
     }
 
-    // ── Hover cursor over handles ─────────────────────────────────────────────
+    // ── Float body drag ───────────────────────────────────────────────────────
+    if (this.floatDrag) {
+      const { docPos, startX, startY, startOffsetX, startOffsetY } = this.floatDrag;
+      const newX = startOffsetX + (e.clientX - startX);
+      const newY = startOffsetY + (e.clientY - startY);
+      this.editor.setNodeAttrs(docPos, { floatOffset: { x: newX, y: newY } });
+      return;
+    }
+
+    // ── Hover cursor over handles / floats ────────────────────────────────────
     // Set cursor directly on the page wrapper (which has cursor:"text" inline)
     // so our value wins. Other page wrappers are reset to "text".
     const hoveredPageEl = document
@@ -417,8 +454,16 @@ export class ViewManager {
       if (entry.wrapper === hoveredPageEl) {
         const pageNumber = Number(hoveredPageEl.getAttribute("data-page"));
         const pageRect = hoveredPageEl.getBoundingClientRect();
-        const hit = this.hitHandle(e.clientX - pageRect.left, e.clientY - pageRect.top, pageNumber);
-        entry.wrapper.style.cursor = hit ? hit.cursor : "text";
+        const localX = e.clientX - pageRect.left;
+        const localY = e.clientY - pageRect.top;
+        const hit = this.hitHandle(localX, localY, pageNumber);
+        if (hit) {
+          entry.wrapper.style.cursor = hit.cursor;
+        } else if (this.hitFloat(localX, localY, pageNumber)) {
+          entry.wrapper.style.cursor = "move";
+        } else {
+          entry.wrapper.style.cursor = "text";
+        }
       } else {
         entry.wrapper.style.cursor = "text";
       }
@@ -444,6 +489,12 @@ export class ViewManager {
         entry.wrapper.style.cursor = "text";
       }
     }
+    if (this.floatDrag) {
+      this.floatDrag = null;
+      for (const entry of this.pages.values()) {
+        entry.wrapper.style.cursor = "text";
+      }
+    }
     this.isDragging = false;
   };
 
@@ -454,6 +505,27 @@ export class ViewManager {
     const r = this.editor.charMap.getObjectRect(sel.from);
     if (!r || r.page !== page) return null;
     return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
+  }
+
+  /**
+   * Returns the float layout entry under canvas-space (x, y) on the given page, or null.
+   * Used for hover cursor and float body drag.
+   */
+  private hitFloat(canvasX: number, canvasY: number, page: number) {
+    const floats = this.editor.layout.floats;
+    if (!floats) return null;
+    for (const float of floats) {
+      if (float.page !== page) continue;
+      if (
+        canvasX >= float.x &&
+        canvasX <= float.x + float.width &&
+        canvasY >= float.y &&
+        canvasY <= float.y + float.height
+      ) {
+        return float;
+      }
+    }
+    return null;
   }
 }
 

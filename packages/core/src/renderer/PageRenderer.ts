@@ -1,4 +1,4 @@
-import { LayoutPage, PageConfig } from "../layout/PageLayout";
+import { LayoutPage, PageConfig, FloatLayout } from "../layout/PageLayout";
 import { LayoutBlock, computeAlignmentOffset } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
 import { TextMeasurer } from "../layout/TextMeasurer";
@@ -28,6 +28,8 @@ export interface RenderPageOptions {
   blockRegistry?: BlockRegistry;
   /** Inline object registry — dispatches inline spans to their render strategies */
   inlineRegistry?: InlineRegistry;
+  /** Float images on this page — rendered after (or before for 'behind') regular blocks */
+  floats?: FloatLayout[];
 }
 
 /**
@@ -56,6 +58,7 @@ export function renderPage(options: RenderPageOptions): void {
     markDecorators,
     blockRegistry,
     inlineRegistry,
+    floats,
   } = options;
 
   const { pageWidth, pageHeight, margins } = pageConfig;
@@ -85,6 +88,16 @@ export function renderPage(options: RenderPageOptions): void {
   // ── Check stale again before drawing (layout may have changed) ───────────
   if (renderVersion !== currentVersion()) return;
 
+  // Floats on this page, partitioned by render order.
+  const pageFloats = floats?.filter((f) => f.page === page.pageNumber) ?? [];
+  const behindFloats = pageFloats.filter((f) => f.mode === "behind");
+  const frontFloats  = pageFloats.filter((f) => f.mode !== "behind");
+
+  // ── Draw 'behind' floats BEFORE blocks ────────────────────────────────────
+  for (const float of behindFloats) {
+    drawFloat(ctx, float, map, inlineRegistry);
+  }
+
   // ── Draw blocks ───────────────────────────────────────────────────────────
   // lineIndexOffset accumulates across blocks so every line on the page has
   // a unique index in the CharacterMap. Without this, each block resets to 0
@@ -110,6 +123,56 @@ export function renderPage(options: RenderPageOptions): void {
       lineIndexOffset = drawBlock(ctx, block, measurer, map, page.pageNumber, lineIndexOffset, markDecorators);
     }
   }
+
+  // ── Draw front/square floats AFTER blocks ─────────────────────────────────
+  for (const float of frontFloats) {
+    drawFloat(ctx, float, map, inlineRegistry);
+  }
+}
+
+/**
+ * Draws a single float image at its absolute position and registers its
+ * ObjectRect in the CharacterMap so handles and popovers work.
+ */
+function drawFloat(
+  ctx: CanvasRenderingContext2D,
+  float: FloatLayout,
+  map: CharacterMap,
+  inlineRegistry?: InlineRegistry,
+): void {
+  const { x, y, width, height, node, docPos, page } = float;
+
+  // Always register with actual float dimensions. populateCharMap registers a
+  // 0×0 placeholder for the zero-width anchor span; we overwrite it here so
+  // getNodeViewportRect / createImageMenu sees the real visual rect.
+  map.registerObjectRect({ docPos, x, y, width, height, page });
+  // Only register the anchor glyph if populateCharMap hasn't already done it.
+  if (!map.hasGlyph(docPos)) {
+    map.registerGlyph({
+      docPos,
+      x,
+      y,
+      lineY: y,
+      width: 0,
+      height: 0,
+      page,
+      lineIndex: 0,
+    });
+  }
+
+  // Use inline strategy if available.
+  const strategy = inlineRegistry?.get(node.type.name);
+  if (strategy) {
+    strategy.render(ctx, x, y, width, height, node);
+    return;
+  }
+
+  // Fallback: draw a placeholder rect.
+  ctx.save();
+  ctx.strokeStyle = "#e2e8f0";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, width, height);
+  ctx.restore();
 }
 
 // ── Private ───────────────────────────────────────────────────────────────────
@@ -136,8 +199,10 @@ function drawBlock(
     const line = block.lines[li]!;
     const globalLineIndex = lineIndexOffset + li;
 
-    // Alignment offset — must match what BlockLayout computed
-    const lineOffsetX = computeAlignmentOffset(block.align, contentWidth, line.width);
+    // Alignment offset — must match what BlockLayout computed.
+    // For float-constrained lines, constraintX shifts the line right (square-left floats).
+    const lineConstraintX = line.constraintX ?? 0;
+    const lineOffsetX = lineConstraintX + computeAlignmentOffset(block.align, line.effectiveWidth ?? contentWidth, line.width);
     const lineY = block.y + getTotalLineHeight(block.lines, li);
     const baseline = lineY + line.ascent;
     // textY: where the cursor draws — aligned to the text, not the full line.
@@ -277,8 +342,7 @@ function drawBlock(
     if (isLastLine && lastSpan?.kind === "text" && lastSpan.text !== "\u200B") {
       const endDocPos = lastSpan.docPos + lastSpan.text.length;
       if (!map.hasGlyph(endDocPos)) {
-        const lastLineOffsetX = computeAlignmentOffset(block.align, contentWidth, line.width);
-        const sentinelX = block.x + lastLineOffsetX + lastSpan.x +
+        const sentinelX = block.x + lineOffsetX + lastSpan.x +
           measurer.measureRun(lastSpan.text, lastSpan.font).totalWidth;
         const textY = line.textAscent > 0
           ? lineY + line.ascent - line.textAscent

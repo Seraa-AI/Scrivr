@@ -738,3 +738,134 @@ describe("layoutDocument — pageConfig.fontFamily", () => {
     expect(span?.font).toContain("Georgia");
   });
 });
+
+// ── Float layout (wrapping mode) ───────────────────────────────────────────────
+
+describe("layoutDocument — float image wrapping", () => {
+  // Long text to force several wrapped lines (each ≈ 55 chars at 8px/char, 442px constrained width)
+  const longText = "word ".repeat(60).trim(); // 60 words × 5 chars = ~300 chars, ~6+ lines
+
+  it("square-left: produces floats array with the float image", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    expect(layout.floats).toBeDefined();
+    expect(layout.floats!.length).toBe(1);
+    expect(layout.floats![0]!.mode).toBe("square-left");
+  });
+
+  it("square-left: constrained lines have constraintX set (text pushed right of image)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const block = layout.pages[0]!.blocks[0]!;
+    // First line should be constrained (float starts at block.y = margins.top)
+    const firstLine = block.lines[0]!;
+    // constraintX = nodeWidth + FLOAT_MARGIN = 200 + 8 = 208
+    expect(firstLine.constraintX).toBe(208);
+    // effectiveWidth = contentWidth - nodeWidth - FLOAT_MARGIN = 650 - 200 - 8 = 442
+    expect(firstLine.effectiveWidth).toBe(442);
+  });
+
+  it("square-right: constrained lines have effectiveWidth set (text wraps in left zone)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-right" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const block = layout.pages[0]!.blocks[0]!;
+    const firstLine = block.lines[0]!;
+    // For square-right, text stays at left (constraintX = 0 / undefined)
+    expect(firstLine.constraintX).toBeUndefined();
+    // effectiveWidth = contentWidth - nodeWidth - FLOAT_MARGIN = 650 - 200 - 8 = 442
+    expect(firstLine.effectiveWidth).toBe(442);
+  });
+
+  it("square-left: float x position is at left margin", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.floats![0]!;
+    expect(float.x).toBe(defaultPageConfig.margins.left); // 72
+    expect(float.y).toBe(defaultPageConfig.margins.top);  // 72
+  });
+
+  it("square-right: float x position is at right margin", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-right" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.floats![0]!;
+    // floatX = contentRight - nodeWidth = (794 - 72) - 200 = 522
+    expect(float.x).toBe(defaultPageConfig.pageWidth - defaultPageConfig.margins.right - 200);
+    expect(float.y).toBe(defaultPageConfig.margins.top);
+  });
+
+  it("lines below the float zone revert to full width", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Float height = 200. lineHeight ≈ 18. Lines within float zone: floor(200/18) = 11 lines.
+    // Use enough text to get lines well past the float zone.
+    const extraLongText = "word ".repeat(200).trim();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
+    const para = schema.node("paragraph", null, [img, schema.text(extraLongText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const block = layout.pages[0]!.blocks[0]!;
+    // Find a line beyond the float zone (past 200px from block.y)
+    let foundUnconstrained = false;
+    let cumulativeH = 0;
+    for (const line of block.lines) {
+      cumulativeH += line.lineHeight;
+      if (cumulativeH > 200 && line.constraintX === undefined && line.effectiveWidth === undefined) {
+        foundUnconstrained = true;
+        break;
+      }
+    }
+    expect(foundUnconstrained).toBe(true);
+  });
+
+  it("Pass 3 reflowed block never overflows the page bottom", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 360,
+      pageHeight: 400,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // A one-line anchor ensures the float paragraph is NOT isFirstOnPage,
+    // allowing Pass 1 to split it when it overflows.
+    const anchor = schema.node("paragraph", null, [schema.text("lead")]);
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 150, wrappingMode: "square-left" });
+    const manyWords = "word ".repeat(100).trim();
+    const floatPara = schema.node("paragraph", null, [img, schema.text(manyWords)]);
+    // Paragraphs after the float get yDelta-shifted. Without the fix they
+    // overflow into the bottom margin; with the fix they move to the next page.
+    const after1 = schema.node("paragraph", null, [schema.text("after one")]);
+    const after2 = schema.node("paragraph", null, [schema.text("after two")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [anchor, floatPara, after1, after2]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const pageBottom = smallPage.pageHeight - smallPage.margins.bottom; // 380
+    for (const page of layout.pages) {
+      for (const block of page.blocks) {
+        if (block.lines.length > 0) {
+          expect(block.y + block.height).toBeLessThanOrEqual(pageBottom + 0.001);
+        }
+      }
+    }
+  });
+});

@@ -20,6 +20,7 @@ interface ImageMenuProps {
 }
 
 type VerticalAlign = "baseline" | "middle" | "top" | "bottom" | "text-top" | "text-bottom";
+type WrappingMode = "inline" | "square-left" | "square-right" | "top-bottom" | "behind" | "front";
 
 const ALIGN_OPTIONS: { value: VerticalAlign; label: string; title: string }[] = [
   { value: "baseline",    label: "Baseline",   title: "Align image bottom to text baseline" },
@@ -30,12 +31,22 @@ const ALIGN_OPTIONS: { value: VerticalAlign; label: string; title: string }[] = 
   { value: "text-bottom", label: "Text Bot",   title: "Align image bottom to parent font descent" },
 ];
 
+const WRAP_OPTIONS: { value: WrappingMode; label: string; title: string }[] = [
+  { value: "inline",       label: "In line",  title: "Image sits inline with text" },
+  { value: "square-left",  label: "← Wrap",   title: "Text wraps to the right of the image" },
+  { value: "square-right", label: "Wrap →",   title: "Text wraps to the left of the image" },
+  { value: "top-bottom",   label: "↕ Break",  title: "Image breaks the text flow (top/bottom)" },
+  { value: "behind",       label: "Behind",   title: "Image floats behind text" },
+  { value: "front",        label: "Front",    title: "Image floats in front of text" },
+];
+
 export function ImageMenu({ editor }: ImageMenuProps) {
-  const [rect, setRect]   = useState<DOMRect | null>(null);
-  const [info, setInfo]   = useState<ImageMenuInfo | null>(null);
-  const [pos,  setPos]    = useState<{ x: number; y: number } | null>(null);
-  const [width,  setWidth]  = useState("");
-  const [height, setHeight] = useState("");
+  const [rect, setRect]         = useState<DOMRect | null>(null);
+  const [info, setInfo]         = useState<ImageMenuInfo | null>(null);
+  const [pos,  setPos]          = useState<{ x: number; y: number } | null>(null);
+  const [width,  setWidth]      = useState("");
+  const [height, setHeight]     = useState("");
+  const [wrappingMode, setWrappingMode] = useState<WrappingMode>("inline");
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -46,10 +57,12 @@ export function ImageMenu({ editor }: ImageMenuProps) {
         setInfo(i);
         setWidth(String(Math.round(i.node.attrs["width"] as number)));
         setHeight(String(Math.round(i.node.attrs["height"] as number)));
+        setWrappingMode((i.node.attrs["wrappingMode"] as WrappingMode) ?? "inline");
       },
       onMove: (r, i) => {
         setRect(r);
         setInfo(i);
+        setWrappingMode((i.node.attrs["wrappingMode"] as WrappingMode) ?? "inline");
       },
       onHide: () => { setRect(null); setInfo(null); setPos(null); },
     });
@@ -71,6 +84,7 @@ export function ImageMenu({ editor }: ImageMenuProps) {
   if (!rect || !info) return null;
 
   const currentAlign = (info.node.attrs["verticalAlign"] as VerticalAlign) ?? "baseline";
+  const isFloat = wrappingMode !== "inline";
 
   function applyAttr(attrs: Record<string, unknown>) {
     if (!editor || !info) return;
@@ -85,6 +99,11 @@ export function ImageMenu({ editor }: ImageMenuProps) {
 
   function handleAlignChange(align: VerticalAlign) {
     applyAttr({ verticalAlign: align });
+  }
+
+  function handleWrapChange(mode: WrappingMode) {
+    setWrappingMode(mode);
+    applyAttr({ wrappingMode: mode });
   }
 
   return createPortal(
@@ -103,25 +122,26 @@ export function ImageMenu({ editor }: ImageMenuProps) {
         boxShadow:    "0 4px 20px rgba(0,0,0,0.13)",
         padding:      "8px 10px",
         display:      "flex",
-        alignItems:   "center",
-        gap:          8,
+        flexDirection: "column",
+        alignItems:   "stretch",
+        gap:          6,
         fontSize:     13,
         whiteSpace:   "nowrap",
         userSelect:   "none",
       }}
     >
-      {/* Vertical alignment */}
+      {/* Layout / wrapping mode */}
       <div style={styles.group}>
-        <span style={styles.label}>Align</span>
+        <span style={styles.label}>Layout</span>
         <div style={styles.segmented}>
-          {ALIGN_OPTIONS.map(({ value, label, title }) => (
+          {WRAP_OPTIONS.map(({ value, label, title }) => (
             <button
               key={value}
               title={title}
-              onMouseDown={(e) => { e.preventDefault(); handleAlignChange(value); }}
+              onMouseDown={(e) => { e.preventDefault(); handleWrapChange(value); }}
               style={{
                 ...styles.segBtn,
-                ...(currentAlign === value ? styles.segBtnActive : {}),
+                ...(wrappingMode === value ? styles.segBtnActive : {}),
               }}
             >
               {label}
@@ -129,6 +149,31 @@ export function ImageMenu({ editor }: ImageMenuProps) {
           ))}
         </div>
       </div>
+
+      {/* Vertical alignment — only shown when image is inline */}
+      {!isFloat && (
+        <>
+          <div style={styles.divider} />
+          <div style={styles.group}>
+            <span style={styles.label}>Align</span>
+            <div style={styles.segmented}>
+              {ALIGN_OPTIONS.map(({ value, label, title }) => (
+                <button
+                  key={value}
+                  title={title}
+                  onMouseDown={(e) => { e.preventDefault(); handleAlignChange(value); }}
+                  style={{
+                    ...styles.segBtn,
+                    ...(currentAlign === value ? styles.segBtnActive : {}),
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
 
       <div style={styles.divider} />
 
@@ -190,8 +235,8 @@ const styles = {
     color: "#fff",
   },
   divider: {
-    width: 1,
-    height: 22,
+    width: "100%",
+    height: 1,
     background: "#e2e8f0",
   },
   dimInput: {

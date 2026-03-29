@@ -1,13 +1,15 @@
 export { CharacterMap } from "./CharacterMap";
+export { ExclusionManager } from "./ExclusionManager";
+export type { ExclusionRect, LineConstraint } from "./ExclusionManager";
 export type { GlyphEntry, LineEntry, CoordsResult } from "./CharacterMap";
 export { TextMeasurer } from "./TextMeasurer";
 export type { FontMetrics, RunMetrics } from "./TextMeasurer";
 export { LineBreaker } from "./LineBreaker";
-export type { InputSpan, LayoutSpan, LayoutLine } from "./LineBreaker";
+export type { InputSpan, LayoutSpan, LayoutLine, ConstraintProvider } from "./LineBreaker";
 export { layoutBlock, resolveLeafBlockDimensions } from "./BlockLayout";
 export type { LayoutBlock, BlockLayoutOptions } from "./BlockLayout";
 export { layoutDocument, defaultPageConfig, collapseMargins } from "./PageLayout";
-export type { PageConfig, LayoutPage, DocumentLayout, PageLayoutOptions } from "./PageLayout";
+export type { PageConfig, LayoutPage, DocumentLayout, PageLayoutOptions, FloatLayout } from "./PageLayout";
 export { defaultFontConfig, getBlockStyle } from "./FontConfig";
 export type { FontConfig, BlockStyle } from "./FontConfig";
 export { resolveFont } from "./StyleResolver";

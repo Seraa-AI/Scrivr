@@ -143,6 +143,10 @@ export const Image = Extension.create({
           nodeId: { default: null },
           /** Vertical alignment within the line box — matches InlineObjectVerticalAlign */
           verticalAlign: { default: "baseline" },
+          /** Text wrapping mode: 'inline' | 'square-left' | 'square-right' | 'top-bottom' | 'behind' | 'front' */
+          wrappingMode: { default: "inline" },
+          /** Float offset relative to the anchor paragraph origin { x, y } in px */
+          floatOffset: { default: { x: 0, y: 0 } },
         },
         parseDOM: [
           {

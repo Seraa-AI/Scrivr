@@ -113,6 +113,20 @@ export interface LayoutLine {
    * Zero on object-only lines.
    */
   xHeight: number;
+  /**
+   * The actual available width used when breaking this line.
+   * For lines constrained by a float, this is narrower than block.availableWidth.
+   * Used by justify to spread text only to the constrained width, not the full column.
+   * Undefined when no constraint applies (use block.availableWidth as fallback).
+   */
+  effectiveWidth?: number;
+  /**
+   * Left-offset delta (from the block's content left edge) for float-constrained lines.
+   * Non-zero for square-left floats where text must start to the right of the float.
+   * Add this to block.x when computing absolute span positions.
+   * Undefined (= 0) when no constraint applies.
+   */
+  constraintX?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -172,6 +186,16 @@ export function computeObjectRenderY(
 }
 
 /**
+ * A ConstraintProvider narrows the available line area based on floated images.
+ *
+ * @param absoluteLineY — absolute Y of the line top in page coordinates
+ * @returns { x, width } where x is a left-offset delta from the block's
+ *          content left and width is the available text width, or null if
+ *          no constraint applies at this Y.
+ */
+export type ConstraintProvider = (absoluteLineY: number) => { x: number; width: number } | null;
+
+/**
  * LineBreaker — greedy word-wrap algorithm.
  *
  * Converts a paragraph's InputSpans into LayoutLines that fit within maxWidth.
@@ -194,22 +218,36 @@ export class LineBreaker {
    * @param maxWidth — available width in CSS pixels (page width minus margins)
    * @param map     — optional CharacterMap to populate with glyph positions
    * @param pageContext — page + lineIndex offset for CharacterMap registration
+   * @param options — optional { constraintProvider, startY } for float text-wrapping
    */
   breakIntoLines(
     spans: InputSpan[],
     maxWidth: number,
     map?: CharacterMap,
-    pageContext?: { page: number; lineIndexOffset: number; lineY: number }
+    pageContext?: { page: number; lineIndexOffset: number; lineY: number },
+    options?: {
+      constraintProvider?: ConstraintProvider;
+      startY?: number;
+    }
   ): LayoutLine[] {
     if (!spans.length) return [];
+
+    const constraintProvider = options?.constraintProvider;
+    const startY = options?.startY ?? 0;
 
     const lines: LayoutLine[] = [];
     let currentLine: LayoutSpan[] = [];
     let currentWidth = 0;
+    let cumulativeLineY = 0;
+    // Track the effective width and x-offset constraint active when this line started.
+    // Needed by justify (effectiveWidth) and square-left rendering (constraintX).
+    let currentLineEffectiveWidth: number | undefined = undefined;
+    let currentLineConstraintX: number | undefined = undefined;
 
     // Tokenise all spans. Text spans → word tokens (space-split).
     // Object spans → single atomic tokens (cannot be split).
     const rawWords = tokenise(spans);
+    // Pre-tokenise with the default maxWidth for wide-word splitting.
     const words: Token[] = [];
     for (const word of rawWords) {
       if (word.kind === "object") {
@@ -225,18 +263,39 @@ export class LineBreaker {
     }
 
     for (const word of words) {
+      // Determine the effective width for the current line, applying any
+      // float constraint from the ConstraintProvider.
+      const absoluteLineY = startY + cumulativeLineY;
+      const constraint = constraintProvider ? constraintProvider(absoluteLineY) : null;
+      const effectiveMaxWidth = constraint ? constraint.width : maxWidth;
+
+      // Record constraint on the first word of a new line.
+      if (currentLine.length === 0) {
+        currentLineEffectiveWidth = constraint ? constraint.width : undefined;
+        currentLineConstraintX = (constraint && constraint.x > 0) ? constraint.x : undefined;
+      }
+
       const wordWidth =
         word.kind === "object"
           ? word.width
           : this.measurer.measureWidth(word.text, word.font);
 
-      const fitsOnCurrentLine = currentWidth + wordWidth <= maxWidth;
+      const fitsOnCurrentLine = currentWidth + wordWidth <= effectiveMaxWidth;
       const lineIsEmpty = currentLine.length === 0;
 
       if (!fitsOnCurrentLine && !lineIsEmpty) {
-        lines.push(buildLine(currentLine, this.measurer));
+        const finishedLine = buildLine(currentLine, this.measurer);
+        if (currentLineEffectiveWidth !== undefined) finishedLine.effectiveWidth = currentLineEffectiveWidth;
+        if (currentLineConstraintX !== undefined) finishedLine.constraintX = currentLineConstraintX;
+        lines.push(finishedLine);
+        cumulativeLineY += finishedLine.lineHeight;
         currentLine = [];
         currentWidth = 0;
+        // Sample constraint for the new line that's about to start.
+        const newAbsoluteLineY = startY + cumulativeLineY;
+        const newConstraint = constraintProvider ? constraintProvider(newAbsoluteLineY) : null;
+        currentLineEffectiveWidth = newConstraint ? newConstraint.width : undefined;
+        currentLineConstraintX = (newConstraint && newConstraint.x > 0) ? newConstraint.x : undefined;
       }
 
       if (word.kind === "object") {
@@ -265,7 +324,10 @@ export class LineBreaker {
     }
 
     if (currentLine.length) {
-      lines.push(buildLine(currentLine, this.measurer));
+      const lastLine = buildLine(currentLine, this.measurer);
+      if (currentLineEffectiveWidth !== undefined) lastLine.effectiveWidth = currentLineEffectiveWidth;
+      if (currentLineConstraintX !== undefined) lastLine.constraintX = currentLineConstraintX;
+      lines.push(lastLine);
     }
 
     if (map && pageContext) {

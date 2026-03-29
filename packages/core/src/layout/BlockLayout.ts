@@ -1,7 +1,7 @@
 import { Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
 import { TextMeasurer } from "./TextMeasurer";
-import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign } from "./LineBreaker";
+import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type ConstraintProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import {
   FontConfig,
@@ -122,6 +122,12 @@ export interface BlockLayoutOptions {
   lineIndexOffset?: number;
   /** Mark name → font modifier. When provided, resolveFont uses it instead of the built-in switch. */
   fontModifiers?: Map<string, FontModifier>;
+  /**
+   * Optional float constraint provider — narrows line width around floating images.
+   * When provided, each line queries this function at its absolute Y position
+   * to get a { x, width } override. Absent = default maxWidth behaviour.
+   */
+  constraintProvider?: ConstraintProvider;
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────────
@@ -238,6 +244,7 @@ export function layoutBlock(
     map,
     lineIndexOffset = 0,
     fontModifiers,
+    constraintProvider,
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
@@ -282,7 +289,13 @@ export function layoutBlock(
   // We pass the CharacterMap only after we know the alignment offset.
   // If alignment is left (no offset), we can pass it directly.
   // For center/right we populate the map manually below after offsetting.
-  const lines = breaker.breakIntoLines(inputSpans, availableWidth);
+  const lines = breaker.breakIntoLines(
+    inputSpans,
+    availableWidth,
+    undefined,
+    undefined,
+    constraintProvider ? { constraintProvider, startY: y } : undefined,
+  );
 
   // ── 4. Compute height ─────────────────────────────────────────────────────
   const height = lines.reduce((sum, l) => sum + l.lineHeight, 0);
@@ -296,9 +309,11 @@ export function layoutBlock(
       const lineIndex = lineIndexOffset + li;
       const isLastLine = li === lines.length - 1;
 
-      const lineOffsetX = computeAlignmentOffset(
+      // For float-constrained lines, constraintX shifts the line right (square-left).
+      const lineConstraintX = line.constraintX ?? 0;
+      const lineOffsetX = lineConstraintX + computeAlignmentOffset(
         resolvedAlign,
-        availableWidth,
+        line.effectiveWidth ?? availableWidth,
         line.width,
       );
 
@@ -467,6 +482,25 @@ function extractSpans(
       const w = child.attrs["width"] as number | null | undefined;
       const h = child.attrs["height"] as number | null | undefined;
       if (typeof w === "number" || typeof h === "number") {
+        // Float anchor: when wrappingMode is not 'inline' (and not undefined/null),
+        // emit a zero-width/zero-height object span. This keeps the doc position
+        // in the line box but contributes no line width or height — the actual
+        // image is rendered independently by PageLayout's float pass.
+        const wrappingMode = child.attrs["wrappingMode"] as string | undefined;
+        const isFloat = wrappingMode !== undefined && wrappingMode !== "inline";
+
+        if (isFloat) {
+          spans.push({
+            kind: "object",
+            node: child,
+            docPos: childDocPos,
+            width: 0,   // zero width: does not affect line breaking
+            height: 0,  // zero height: does not affect line height
+            verticalAlign: "baseline",
+          });
+          return;
+        }
+
         // Option B: node attr takes precedence; fall back to "baseline".
         const rawAlign = child.attrs["verticalAlign"];
         const verticalAlign: InlineObjectVerticalAlign =
@@ -595,15 +629,16 @@ export function populateCharMap(
     const globalLineIndex = lineIndexOffset + li;
     const isLastLine = li === block.lines.length - 1;
 
-    const lineOffsetX = computeAlignmentOffset(
+    const lineConstraintX = line.constraintX ?? 0;
+    const lineOffsetX = lineConstraintX + computeAlignmentOffset(
       block.align,
-      block.availableWidth,
+      line.effectiveWidth ?? block.availableWidth,
       line.width,
     );
     const spaceBonus = computeJustifySpaceBonus(
       block.align,
       line.spans,
-      block.availableWidth,
+      line.effectiveWidth ?? block.availableWidth,
       line.width,
       isLastLine,
     );

@@ -9,7 +9,8 @@ import {
   applyPageFont,
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock } from "./BlockLayout";
-import type { LayoutLine } from "./LineBreaker";
+import type { LayoutLine, ConstraintProvider } from "./LineBreaker";
+import { ExclusionManager } from "./ExclusionManager";
 
 export interface PageConfig {
   pageWidth: number;
@@ -27,6 +28,28 @@ export interface PageConfig {
 export interface LayoutPage {
   pageNumber: number;
   blocks: LayoutBlock[];
+}
+
+/**
+ * A float image that has been lifted out of the normal flow.
+ * Produced by the Pass 2 float analysis step in layoutDocument.
+ * Consumed by PageRenderer to draw the image at its absolute position.
+ */
+export interface FloatLayout {
+  /** ProseMirror doc position of the float anchor span */
+  docPos: number;
+  /** Page this float appears on (1-based) */
+  page: number;
+  /** Left edge in page coordinates */
+  x: number;
+  /** Top edge in page coordinates */
+  y: number;
+  width: number;
+  height: number;
+  /** wrappingMode value — 'square-left' | 'square-right' | 'top-bottom' | 'behind' | 'front' */
+  mode: string;
+  /** The ProseMirror image node */
+  node: Node;
 }
 
 export interface DocumentLayout {
@@ -49,6 +72,12 @@ export interface DocumentLayout {
    * to continue exactly where this run stopped — avoids O(N²) re-iteration.
    */
   resumption?: LayoutResumption;
+  /**
+   * Float images lifted out of the normal text flow.
+   * Each entry has absolute page coordinates so PageRenderer can draw it.
+   * Absent (or empty) when the document has no floating images.
+   */
+  floats?: FloatLayout[];
 }
 
 /**
@@ -215,6 +244,7 @@ export function layoutDocument(
   // may still be correct even though downstream blocks have changed.
   let seenCacheMiss = false;
   let processedBlocks = 0;
+  let earlyTerminated = false;
 
   for (let itemIdx = startIndex; itemIdx < items.length; itemIdx++) {
     const item = items[itemIdx]!;
@@ -242,7 +272,12 @@ export function layoutDocument(
         prevSpaceAfter,
         version: chunkVersion,
       };
-      return { pages: [...pages, currentPage], pageConfig, version: chunkVersion, isPartial: true, resumption };
+      const partialPass1: DocumentLayout = { pages: [...pages, currentPage], pageConfig, version: chunkVersion, isPartial: true, resumption };
+      // Run the float pass on already-processed pages so floats visible in the
+      // initial chunk render immediately — avoids the "floats appear on follow-up
+      // render" page-jump. Floats beyond the cutoff will appear when idle layout
+      // completes and produces the full layout, which is the normal update path.
+      return runFloatPass(partialPass1, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
     }
 
     const { node, nodePos, listMarker, indentLeft, styleKey } = item;
@@ -485,16 +520,295 @@ export function layoutDocument(
             });
           }
 
-          return { pages, pageConfig, version: chunkVersion };
+          earlyTerminated = true;
+          break;
         }
       }
     }
   }
 
-  // Flush last page (always — even if empty, so there's at least one page)
-  pages.push(currentPage);
+  // Flush last page. When Phase 1b early-terminated, the current page was
+  // already pushed inside the loop (along with all subsequent copied pages).
+  if (!earlyTerminated) {
+    pages.push(currentPage);
+  }
 
-  return { pages, pageConfig, version: chunkVersion };
+  const pass1Result: DocumentLayout = { pages, pageConfig, version: chunkVersion };
+  return runFloatPass(pass1Result, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
+}
+
+/**
+ * Pass 2 + Pass 3 of layout: compute float positions, populate the
+ * ExclusionManager, and re-flow any blocks that overlap an exclusion zone.
+ *
+ * Called both for complete layouts and for partial (streaming) layouts so that
+ * floats visible in the initial chunk appear immediately rather than jumping
+ * into view when the idle-layout follow-up completes.
+ */
+function runFloatPass(
+  pass1Result: DocumentLayout,
+  margins: PageConfig["margins"],
+  pageWidth: number,
+  contentWidth: number,
+  measurer: TextMeasurer,
+  fontConfig: FontConfig,
+  fontModifiers: Map<string, FontModifier> | undefined,
+): DocumentLayout {
+  const { pages } = pass1Result;
+
+  // Only run when the document actually contains floating images.
+  // When no floats exist, skip entirely — zero overhead for the common case.
+  const floatAnchors = collectFloatAnchors(pages);
+  if (floatAnchors.length === 0) {
+    return pass1Result;
+  }
+
+  // Pass 2: compute float positions and populate the ExclusionManager.
+  const exclusionMgr = new ExclusionManager();
+  const floats: FloatLayout[] = [];
+  const FLOAT_MARGIN = 8; // px gap around each float
+
+  for (const anchor of floatAnchors) {
+    const node = anchor.node;
+    const attrs = node.attrs as {
+      width?: number;
+      height?: number;
+      wrappingMode?: string;
+      floatOffset?: { x: number; y: number };
+    };
+
+    const nodeWidth  = typeof attrs.width  === "number" ? attrs.width  : 200;
+    const nodeHeight = typeof attrs.height === "number" ? attrs.height : 200;
+    const mode       = attrs.wrappingMode ?? "inline";
+    const offsetX    = attrs.floatOffset?.x ?? 0;
+    const offsetY    = attrs.floatOffset?.y ?? 0;
+
+    const floatY = anchor.anchorBlockY + offsetY;
+    const contentX = margins.left;
+    const contentRight = pageWidth - margins.right;
+
+    let floatX: number;
+    if (mode === "square-right") {
+      // offsetX shifts from the default right-side position. Adding it means
+      // dragging right increases offsetX and moves the image right (natural).
+      floatX = contentRight - nodeWidth + offsetX;
+    } else {
+      // square-left, top-bottom, behind, front — default to left side
+      floatX = contentX + offsetX;
+    }
+
+    floats.push({
+      docPos: anchor.docPos,
+      page: anchor.anchorPage,
+      x: floatX,
+      y: floatY,
+      width: nodeWidth,
+      height: nodeHeight,
+      mode,
+      node,
+    });
+
+    // 'behind' and 'front' float over text with no exclusion — text flows
+    // through them. Only wrapping modes create exclusion zones.
+    if (mode === "behind" || mode === "front") continue;
+
+    // Determine which side text is excluded from.
+    const side: "left" | "right" | "full" =
+      mode === "square-left" ? "left" :
+      mode === "square-right" ? "right" :
+      "full"; // top-bottom
+
+    exclusionMgr.addRect({
+      page: anchor.anchorPage,
+      x: floatX - FLOAT_MARGIN,
+      right: floatX + nodeWidth + FLOAT_MARGIN,
+      y: floatY,
+      bottom: floatY + nodeHeight,
+      side,
+      docPos: anchor.docPos,
+    });
+  }
+
+  // Pass 3: re-layout blocks whose Y range overlaps an exclusion zone, then
+  // cascade any height change to every subsequent block on the same page.
+  const pageBottom = pass1Result.pageConfig.pageHeight - pass1Result.pageConfig.margins.bottom;
+
+  for (const page of pages) {
+    if (!exclusionMgr.hasExclusionsOnPage(page.pageNumber)) continue;
+
+    const pageNum = page.pageNumber;
+    // Accumulated height delta from all re-layouts so far on this page.
+    // Applied to subsequent blocks so they don't overlap the taller reflowed blocks.
+    let yDelta = 0;
+    // Non-overlapping blocks pushed past the page bottom by yDelta accumulation.
+    // Collected here and prepended to the next page after the inner loop.
+    const overflowToNext: LayoutBlock[] = [];
+
+    for (let bi = 0; bi < page.blocks.length; bi++) {
+      let block = page.blocks[bi]!;
+
+      // Shift this block's Y by the accumulated delta from previous re-layouts.
+      if (yDelta !== 0) {
+        block = { ...block, y: block.y + yDelta };
+        page.blocks[bi] = block;
+      }
+
+      // Skip leaf blocks (no lines to reflow or clamp).
+      if (block.lines.length === 0) continue;
+
+      const hasOverlap = exclusionMgr.getConstraint(
+        pageNum,
+        block.y,
+        block.height || 1,
+        margins.left,
+        contentWidth,
+      ) !== null;
+
+      if (hasOverlap) {
+        // Build a ConstraintProvider bound to this block's absolute position.
+        const blockContentX = block.x;
+        const blockAvailWidth = block.availableWidth;
+
+        const constraintProvider: ConstraintProvider = (absoluteLineY: number) => {
+          return exclusionMgr.getConstraint(
+            pageNum,
+            absoluteLineY,
+            1,
+            blockContentX,
+            blockAvailWidth,
+          );
+        };
+
+        // Re-measure the block with the constraint provider.
+        // layoutBlock always lays out the FULL paragraph node. When this block
+        // was split across pages in Pass 1, the reflowed result contains all
+        // lines — far more than can fit on this page — causing content to
+        // overflow into the bottom margin. Clamp lines to the page boundary.
+        const reflowed = layoutBlock(block.node, {
+          nodePos: block.nodePos,
+          x: block.x,
+          y: block.y,
+          availableWidth: block.availableWidth,
+          page: pageNum,
+          measurer,
+          fontConfig,
+          ...(fontModifiers ? { fontModifiers } : {}),
+          constraintProvider,
+        });
+
+        const finalBlock = clampBlockToPage(reflowed, pageBottom);
+
+        // Accumulate the height difference so subsequent blocks shift accordingly.
+        yDelta += finalBlock.height - block.height;
+        page.blocks[bi] = finalBlock;
+      } else if (block.y + block.height > pageBottom) {
+        // Non-overlapping block pushed past the page bottom by yDelta.
+        // Stripping its lines would lose content — move it to the next page instead.
+        overflowToNext.push(block);
+        page.blocks.splice(bi, 1);
+        bi--;
+      }
+    }
+
+    // Prepend overflow blocks to the next page, repositioned at the top of its
+    // content area. Existing next-page blocks shift down to make room.
+    if (overflowToNext.length > 0) {
+      const nextPageNum = pageNum + 1;
+      let nextPage = pages.find((p) => p.pageNumber === nextPageNum);
+      if (!nextPage) {
+        nextPage = { pageNumber: nextPageNum, blocks: [] };
+        const insertAt = pages.findIndex((p) => p.pageNumber > nextPageNum);
+        if (insertAt === -1) pages.push(nextPage);
+        else pages.splice(insertAt, 0, nextPage);
+      }
+
+      // Stack overflow blocks at the top of the next page's content area.
+      let nextY = margins.top;
+      const reposBlocks: LayoutBlock[] = overflowToNext.map((b) => {
+        const rb = { ...b, y: nextY };
+        nextY += b.height;
+        return rb;
+      });
+      const totalHeight = nextY - margins.top;
+
+      // Push existing next-page blocks down to accommodate the inserted blocks.
+      for (let j = 0; j < nextPage.blocks.length; j++) {
+        nextPage.blocks[j] = { ...nextPage.blocks[j]!, y: nextPage.blocks[j]!.y + totalHeight };
+      }
+      nextPage.blocks.unshift(...reposBlocks);
+    }
+  }
+
+  return { ...pass1Result, floats };
+}
+
+/**
+ * Truncates a block's lines so that `block.y + block.height <= pageBottom`.
+ * Returns the same block reference when no clamping is needed.
+ * Forces at least one line when the block starts below the page bottom so the
+ * block is never completely empty (prevents cursor / hit-test holes).
+ */
+function clampBlockToPage(block: LayoutBlock, pageBottom: number): LayoutBlock {
+  const available = pageBottom - block.y;
+  if (block.height <= available) return block;
+
+  let h = 0;
+  let lineCount = 0;
+  for (const line of block.lines) {
+    if (h + line.lineHeight > available) break;
+    h += line.lineHeight;
+    lineCount++;
+  }
+  // Force at least one line only when the block starts above the page bottom
+  // and there is at least a sliver of space. Blocks that start at or below
+  // pageBottom (available ≤ 0) become empty (they're fully off-page).
+  if (lineCount === 0 && available > 0 && block.lines.length > 0) {
+    lineCount = 1;
+    h = block.lines[0]!.lineHeight;
+  }
+  return {
+    ...block,
+    lines: block.lines.slice(0, lineCount),
+    height: h,
+    continuesOnNextPage: true as const,
+  };
+}
+
+/** Float anchor: a zero-width object span referencing a floating image node. */
+interface FloatAnchor {
+  docPos: number;
+  node: Node;
+  anchorBlockY: number;
+  anchorPage: number;
+}
+
+/**
+ * Walks all laid-out blocks and collects float anchors — zero-width object
+ * spans whose node has wrappingMode !== 'inline' and !== undefined.
+ */
+function collectFloatAnchors(pages: LayoutPage[]): FloatAnchor[] {
+  const anchors: FloatAnchor[] = [];
+
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      for (const line of block.lines) {
+        for (const span of line.spans) {
+          if (span.kind !== "object") continue;
+          if (span.width !== 0) continue; // only zero-width float anchors
+          const wrappingMode = span.node.attrs["wrappingMode"] as string | undefined;
+          if (!wrappingMode || wrappingMode === "inline") continue;
+          anchors.push({
+            docPos: span.docPos,
+            node: span.node,
+            anchorBlockY: block.y,
+            anchorPage: page.pageNumber,
+          });
+        }
+      }
+    }
+  }
+
+  return anchors;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
