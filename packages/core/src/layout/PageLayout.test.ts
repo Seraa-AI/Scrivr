@@ -837,6 +837,144 @@ describe("layoutDocument — float image wrapping", () => {
     expect(foundUnconstrained).toBe(true);
   });
 
+  it("overflow cascade: blocks pushed past page N+1 bottom are moved to page N+2", () => {
+    // Regression for the Pass 3b cascade bug:
+    // Pass 3 moves overflow blocks from page 1 to page 2 and pushes page 2's
+    // existing blocks DOWN. If those pushed blocks now exceed page 2's bottom,
+    // they must be cascaded to page 3 — they were NOT, because Pass 3 skips
+    // pages without exclusion zones.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 360,
+      pageHeight: 200,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // Float paragraph fills most of page 1 and causes a large yDelta,
+    // pushing "after" paragraphs off page 1 into page 2. The "filler"
+    // paragraphs on page 2 are then pushed past page 2's bottom by the
+    // prepended overflow blocks — they must land on page 3.
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 100, wrappingMode: "square-left" });
+    const manyWords = "word ".repeat(60).trim();
+    const floatPara = schema.node("paragraph", null, [img, schema.text(manyWords)]);
+    const filler1 = schema.node("paragraph", null, [schema.text("filler one")]);
+    const filler2 = schema.node("paragraph", null, [schema.text("filler two")]);
+    const filler3 = schema.node("paragraph", null, [schema.text("filler three")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [floatPara, filler1, filler2, filler3]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const pageBottom = smallPage.pageHeight - smallPage.margins.bottom; // 180
+    for (const page of layout.pages) {
+      for (const block of page.blocks) {
+        if (block.lines.length > 0) {
+          expect(block.y + block.height).toBeLessThanOrEqual(pageBottom + 0.001);
+        }
+      }
+    }
+  });
+
+  it("Phase 1b drag: re-layout after float move does not double-shift block positions", () => {
+    // Regression for the Phase 1b float-drag bug:
+    // Phase 1b copies blocks from previousLayout which has Pass-3 yDelta baked
+    // into block.y values. When the float moves and runFloatPass runs again,
+    // Pass 3 stacks its new yDelta on top — doubling displacement and pushing
+    // the last paragraphs off the page. The fix: Phase 1b copies from
+    // _pass1Pages (clean pre-float positions) instead of the float-adjusted pages.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 360,
+      pageHeight: 400,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const measurer = createMeasurer();
+    const img = schema.nodes["image"]!.create({ src: "", width: 150, height: 120, wrappingMode: "square-left" });
+    const manyWords = "word ".repeat(40).trim();
+    const floatPara = schema.node("paragraph", null, [img, schema.text(manyWords)]);
+    const after1 = schema.node("paragraph", null, [schema.text("trailing one")]);
+    const after2 = schema.node("paragraph", null, [schema.text("trailing two")]);
+    const doc = schema.node("doc", null, [floatPara, after1, after2]);
+    const opts = { pageConfig: smallPage, fontConfig, measurer };
+
+    // First layout (float at default offsetY=0).
+    const layout1 = layoutDocument(doc, opts);
+
+    // Simulate drag: move float down by 60px. Only the image node changes.
+    const img2 = schema.nodes["image"]!.create({ src: "", width: 150, height: 120, wrappingMode: "square-left", floatOffset: { x: 0, y: 60 } });
+    const floatPara2 = schema.node("paragraph", null, [img2, schema.text(manyWords)]);
+    const doc2 = schema.node("doc", null, [floatPara2, after1, after2]);
+
+    // Second layout reuses measureCache and previousLayout — exactly what the
+    // editor does on each drag mousemove event.
+    const measureCache = new WeakMap();
+    const layout2 = layoutDocument(doc2, { ...opts, previousLayout: layout1, measureCache });
+
+    // All text blocks must be within the page bottom on every page.
+    const pageBottom = smallPage.pageHeight - smallPage.margins.bottom; // 380
+    for (const page of layout2.pages) {
+      for (const block of page.blocks) {
+        if (block.lines.length > 0) {
+          expect(block.y + block.height).toBeLessThanOrEqual(pageBottom + 0.001);
+        }
+      }
+    }
+    // The trailing paragraphs must appear somewhere in the layout (not lost).
+    const allBlocks = layout2.pages.flatMap((p) => p.blocks);
+    const trailingCount = allBlocks.filter(
+      (b) => b.node === after1 || b.node === after2,
+    ).length;
+    expect(trailingCount).toBe(2);
+  });
+
+  it("float stacking: two same-side floats do not overlap each other", () => {
+    // Fix 1: downward scan. A second square-left float anchored near the first
+    // must be pushed below it, not placed at the same Y.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const measurer = createMeasurer();
+    const img1 = schema.nodes["image"]!.create({ src: "", width: 150, height: 100, wrappingMode: "square-left" });
+    const img2 = schema.nodes["image"]!.create({ src: "", width: 150, height: 100, wrappingMode: "square-left" });
+    // Both anchors are in adjacent paragraphs — without the fix they'd both
+    // land at approximately the same Y and visually overlap.
+    const para1 = schema.node("paragraph", null, [img1, schema.text("first float text here")]);
+    const para2 = schema.node("paragraph", null, [img2, schema.text("second float text here")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: defaultPageConfig, fontConfig, measurer },
+    );
+    const floats = layout.floats!;
+    expect(floats.length).toBe(2);
+    const [f1, f2] = floats as [typeof floats[0], typeof floats[0]];
+    // The second float must start at or below the bottom of the first.
+    expect(f2!.y).toBeGreaterThanOrEqual(f1!.y + f1!.height - 0.001);
+  });
+
+  it("float Y reconciliation: float y tracks anchor block after Pass 3 yDelta shift", () => {
+    // Fix 2 (Pass 4): if blocks before the anchor grow due to wrapping around a
+    // different float, yDelta shifts the anchor block. The FloatLayout.y must
+    // follow the anchor's final position, not stay at its Pass 1 position.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const measurer = createMeasurer();
+    // Float A (square-right) on para1 causes para1 to grow (wrapped lines).
+    // Float B (square-left) on para2 — its anchor shifts down by yDelta.
+    // After Pass 4, float B's y must equal para2's final block.y + offsetY.
+    const imgA = schema.nodes["image"]!.create({ src: "", width: 200, height: 80, wrappingMode: "square-right" });
+    const imgB = schema.nodes["image"]!.create({ src: "", width: 200, height: 80, wrappingMode: "square-left" });
+    const manyWords = "word ".repeat(30).trim();
+    const para1 = schema.node("paragraph", null, [imgA, schema.text(manyWords)]);
+    const para2 = schema.node("paragraph", null, [imgB, schema.text("anchor text")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: defaultPageConfig, fontConfig, measurer },
+    );
+    const floats = layout.floats!;
+    expect(floats.length).toBe(2);
+    const floatB = floats.find((f) => f.node === imgB)!;
+    // Find para2's final block y.
+    const allBlocks = layout.pages.flatMap((p) => p.blocks);
+    const anchorBlock = allBlocks.find((b) => b.node === para2)!;
+    expect(floatB.y).toBeCloseTo(anchorBlock.y, 1);
+  });
+
   it("Pass 3 reflowed block never overflows the page bottom", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const smallPage = {

@@ -50,6 +50,14 @@ export interface FloatLayout {
   mode: string;
   /** The ProseMirror image node */
   node: Node;
+  /**
+   * Pass 1 y-coordinate of the anchor block — stored so Pass 4 can apply the
+   * correct yDelta correction without overwriting Fix 1's stacking offset.
+   * Pass 4 computes: newY = f.y + (finalAnchorY - anchorBlockY), which shifts
+   * the float by exactly how much the anchor block moved in Pass 3, preserving
+   * any extra downward offset that float stacking added.
+   */
+  anchorBlockY: number;
 }
 
 export interface DocumentLayout {
@@ -78,6 +86,18 @@ export interface DocumentLayout {
    * Absent (or empty) when the document has no floating images.
    */
   floats?: FloatLayout[];
+  /**
+   * Snapshot of the Pass 1 page/block positions BEFORE runFloatPass mutated
+   * them. Set only when the layout contains floats.
+   *
+   * Phase 1b early termination copies blocks from previousLayout. If it
+   * copied from the float-processed pages, those blocks would carry stale
+   * Pass-3 yDelta values. When the new run's Pass 3 then adds its own yDelta
+   * on top, positions double-shift and blocks overflow the page, disappearing
+   * from the visible area. Phase 1b must copy from these clean Pass 1
+   * positions so runFloatPass starts from a correct baseline every time.
+   */
+  _pass1Pages?: LayoutPage[];
 }
 
 /**
@@ -489,7 +509,11 @@ export function layoutDocument(
       // delta: how much all subsequent blocks' nodePos has shifted this run.
       // Uniform for everything after the edit point.
       const delta = prevNodePos !== undefined ? nodePos - prevNodePos : 0;
-      const prevPages = previousLayout.pages;
+      // Use _pass1Pages when available — those are the clean pre-float positions.
+      // previousLayout.pages contains float-adjusted y values (post Pass 3 yDelta);
+      // copying those would cause the new Pass 3 to stack yDelta on top of already-
+      // shifted blocks, doubling displacement and losing paragraphs off the page.
+      const prevPages = previousLayout._pass1Pages ?? previousLayout.pages;
       const curPageIdx = currentPage.pageNumber - 1;
 
       if (curPageIdx < prevPages.length) {
@@ -563,6 +587,14 @@ function runFloatPass(
     return pass1Result;
   }
 
+  // Snapshot Pass 1 page/block positions before any mutation.
+  // Phase 1b copies blocks from previousLayout; it must copy from these clean
+  // positions rather than the float-adjusted ones. See DocumentLayout._pass1Pages.
+  const pass1Pages: LayoutPage[] = pages.map((p) => ({
+    pageNumber: p.pageNumber,
+    blocks: [...p.blocks],
+  }));
+
   // Pass 2: compute float positions and populate the ExclusionManager.
   const exclusionMgr = new ExclusionManager();
   const floats: FloatLayout[] = [];
@@ -583,7 +615,6 @@ function runFloatPass(
     const offsetX    = attrs.floatOffset?.x ?? 0;
     const offsetY    = attrs.floatOffset?.y ?? 0;
 
-    const floatY = anchor.anchorBlockY + offsetY;
     const contentX = margins.left;
     const contentRight = pageWidth - margins.right;
 
@@ -597,15 +628,43 @@ function runFloatPass(
       floatX = contentX + offsetX;
     }
 
+    // Fix 1: downward scan — push this float below any already-placed float on
+    // the same page that it would physically overlap. This implements the CSS
+    // VizAssert "find smallest Y where float fits" rule: a float cannot occupy
+    // horizontal space already taken by a previously placed float at that Y.
+    // 'behind'/'front' floats are exempt — they render above/below text and
+    // never create exclusion zones, so stacking rules don't apply.
+    let candidateY = anchor.anchorBlockY + offsetY;
+    if (mode !== "behind" && mode !== "front") {
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const placed of floats) {
+          if (placed.page !== anchor.anchorPage) continue;
+          if (placed.mode === "behind" || placed.mode === "front") continue;
+          const hOverlap =
+            floatX < placed.x + placed.width && floatX + nodeWidth > placed.x;
+          const vOverlap =
+            candidateY < placed.y + placed.height &&
+            candidateY + nodeHeight > placed.y;
+          if (hOverlap && vOverlap) {
+            candidateY = placed.y + placed.height;
+            changed = true;
+          }
+        }
+      }
+    }
+
     floats.push({
       docPos: anchor.docPos,
       page: anchor.anchorPage,
       x: floatX,
-      y: floatY,
+      y: candidateY,
       width: nodeWidth,
       height: nodeHeight,
       mode,
       node,
+      anchorBlockY: anchor.anchorBlockY,
     });
 
     // 'behind' and 'front' float over text with no exclusion — text flows
@@ -622,8 +681,8 @@ function runFloatPass(
       page: anchor.anchorPage,
       x: floatX - FLOAT_MARGIN,
       right: floatX + nodeWidth + FLOAT_MARGIN,
-      y: floatY,
-      bottom: floatY + nodeHeight,
+      y: candidateY,
+      bottom: candidateY + nodeHeight,
       side,
       docPos: anchor.docPos,
     });
@@ -739,7 +798,106 @@ function runFloatPass(
     }
   }
 
-  return { ...pass1Result, floats };
+  // Pass 3b: Overflow cascade — propagate block overflow to pages that were
+  // skipped by Pass 3 because they have no float exclusions.
+  //
+  // Pass 3 runs only on pages that have exclusion zones. When it moves blocks
+  // from page N to page N+1 (overflowToNext), it pushes page N+1's existing
+  // blocks DOWN. If those pushed blocks now exceed page N+1's bottom, they stay
+  // there — Pass 3 never visits page N+1 because it has no exclusions.
+  //
+  // This pass iterates every page in forward order and moves any text block
+  // whose bottom exceeds pageBottom to the next page, cascading as far as
+  // needed. It is safe to re-run on pages already handled by Pass 3 because
+  // those pages have no remaining overflowing blocks after Pass 3.
+  for (let pi = 0; pi < pages.length; pi++) {
+    const page = pages[pi]!;
+    const overflowBlocks: LayoutBlock[] = [];
+
+    for (let bi = 0; bi < page.blocks.length; bi++) {
+      const block = page.blocks[bi]!;
+      // Leaf blocks (images, HRs) keep their position even when they overflow —
+      // same policy as Pass 3. Text blocks are moved to preserve content.
+      if (block.lines.length === 0) continue;
+      if (block.y + block.height > pageBottom) {
+        overflowBlocks.push(block);
+        page.blocks.splice(bi, 1);
+        bi--;
+      }
+    }
+
+    if (overflowBlocks.length === 0) continue;
+
+    const nextPageNum = page.pageNumber + 1;
+    let nextPage = pages.find((p) => p.pageNumber === nextPageNum);
+    if (!nextPage) {
+      nextPage = { pageNumber: nextPageNum, blocks: [] };
+      const insertAt = pages.findIndex((p) => p.pageNumber > nextPageNum);
+      if (insertAt === -1) pages.push(nextPage);
+      else pages.splice(insertAt, 0, nextPage);
+    }
+
+    let nextY = margins.top;
+    const reposBlocks: LayoutBlock[] = overflowBlocks.map((b) => {
+      const rb = { ...b, y: nextY };
+      nextY += b.height;
+      return rb;
+    });
+    const totalHeight = nextY - margins.top;
+
+    for (let j = 0; j < nextPage.blocks.length; j++) {
+      nextPage.blocks[j] = { ...nextPage.blocks[j]!, y: nextPage.blocks[j]!.y + totalHeight };
+    }
+    nextPage.blocks.unshift(...reposBlocks);
+    // Do NOT increment pi — we need to re-examine this same page index in case
+    // the newly inserted nextPage is at pages[pi+1] and itself overflows.
+  }
+
+  // Pass 4: Reconcile float Y values after Pass 3 may have shifted anchor blocks.
+  //
+  // Pass 3 applies a `yDelta` to every block that follows a reflowed block,
+  // updating block.y in-place. But the FloatLayout entries were computed in
+  // Pass 2 from the original Pass 1 block positions. If a block *before* a
+  // float's anchor paragraph was reflowed (grew taller due to text wrapping),
+  // the anchor block shifts by yDelta while the float remains at the old Y —
+  // causing the float to visually drift above its anchor.
+  //
+  // Fix: walk the final block list, find each float anchor span, record the
+  // block's new Y, then remap every FloatLayout to that corrected position.
+  // This corrects the rendered position; the exclusion zones (used by Pass 3,
+  // now complete) are not retroactively changed.
+  if (floats.length > 0) {
+    const finalAnchorY = new Map<number, { y: number; page: number }>();
+    for (const page of pages) {
+      for (const block of page.blocks) {
+        for (const line of block.lines) {
+          for (const span of line.spans) {
+            if (span.kind !== "object" || span.width !== 0) continue;
+            const wm = span.node.attrs["wrappingMode"] as string | undefined;
+            if (!wm || wm === "inline") continue;
+            finalAnchorY.set(span.docPos, { y: block.y, page: page.pageNumber });
+          }
+        }
+      }
+    }
+
+    for (let fi = 0; fi < floats.length; fi++) {
+      const f = floats[fi]!;
+      const final = finalAnchorY.get(f.docPos);
+      if (!final) continue;
+      // Shift by exactly how much the anchor block moved in Pass 3 (yDelta).
+      // Using (final.y - f.anchorBlockY) rather than (final.y + offsetY) is
+      // critical: the latter would reset f.y to the un-stacked position,
+      // undoing any downward displacement that Fix 1's stacking applied.
+      const yDelta = final.y - f.anchorBlockY;
+      const newY = f.y + yDelta;
+      if (newY !== f.y || final.page !== f.page) {
+        floats[fi] = { ...f, y: newY, page: final.page };
+      }
+    }
+  }
+
+  return { ...pass1Result, floats, _pass1Pages: pass1Pages };
 }
 
 /**
