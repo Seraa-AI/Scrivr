@@ -698,6 +698,241 @@ describe("layoutDocument — line splitting", () => {
   });
 });
 
+// ── Line splitting when the text block is first on its page ──────────────────
+//
+// Regression tests for the bug where the !isFirstOnPage guard prevented text
+// blocks from splitting when they were the first block on a page. The fix:
+//   overflows = blockBottom > pageBottom && (!isFirstOnPage || entry.lines.length > 0)
+//
+// Same splitPage geometry as the suite above (3 lines per page).
+describe("layoutDocument — line splitting (first on page)", () => {
+  const LH = MOCK_LINE_HEIGHT; // 18px
+
+  const splitPage = {
+    pageWidth:  120,
+    pageHeight: Math.round(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
+    margins: { top: 10, right: 10, bottom: 10, left: 10 },
+  };
+
+  const sixLineText  = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff";
+  const nineLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff ggggggggg hhhhhhhhh iiiiiiiii";
+
+  it("splits a paragraph that is the first and only block on page 1 across two pages", () => {
+    // No preceding block — isFirstOnPage is true. The paragraph (6 lines × 18px = 108px)
+    // overflows contentHeight (54px) and must split: 3 lines on page 1, 3 on page 2.
+    const layout = layoutDocument(doc(p(sixLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(2);
+
+    const part1 = layout.pages[0]!.blocks[0]!;
+    expect(part1.lines).toHaveLength(3);
+    expect(part1.continuesOnNextPage).toBe(true);
+    expect(part1.isContinuation).toBeUndefined();
+
+    const part2 = layout.pages[1]!.blocks[0]!;
+    expect(part2.lines).toHaveLength(3);
+    expect(part2.isContinuation).toBe(true);
+    expect(part2.continuesOnNextPage).toBeUndefined();
+  });
+
+  it("all lines are conserved when a first-on-page paragraph spans two pages", () => {
+    const layout = layoutDocument(doc(p(sixLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const totalLines = layout.pages
+      .flatMap(pg => pg.blocks)
+      .reduce((n, b) => n + b.lines.length, 0);
+    expect(totalLines).toBe(6);
+  });
+
+  it("splits a first-on-page paragraph across three pages when it has 9 lines", () => {
+    const layout = layoutDocument(doc(p(nineLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(3);
+
+    const p1 = layout.pages[0]!.blocks[0]!;
+    expect(p1.lines).toHaveLength(3);
+    expect(p1.continuesOnNextPage).toBe(true);
+    expect(p1.isContinuation).toBeUndefined();
+
+    const p2 = layout.pages[1]!.blocks[0]!;
+    expect(p2.lines).toHaveLength(3);
+    expect(p2.isContinuation).toBe(true);
+    expect(p2.continuesOnNextPage).toBe(true);
+
+    const p3 = layout.pages[2]!.blocks[0]!;
+    expect(p3.lines).toHaveLength(3);
+    expect(p3.isContinuation).toBe(true);
+    expect(p3.continuesOnNextPage).toBeUndefined();
+
+    // Total lines conserved
+    expect(p1.lines.length + p2.lines.length + p3.lines.length).toBe(9);
+  });
+
+  it("splits a paragraph that is first on a page following a hard page break", () => {
+    // After the page break, currentPage.blocks is empty so isFirstOnPage is true.
+    // The six-line paragraph must still split across pages 2 and 3.
+    const layout = layoutDocument(doc(p("intro"), pageBreak(), p(sixLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(3);
+
+    const part1 = layout.pages[1]!.blocks[0]!;
+    expect(part1.lines).toHaveLength(3);
+    expect(part1.continuesOnNextPage).toBe(true);
+
+    const part2 = layout.pages[2]!.blocks[0]!;
+    expect(part2.lines).toHaveLength(3);
+    expect(part2.isContinuation).toBe(true);
+    expect(part2.continuesOnNextPage).toBeUndefined();
+  });
+
+  it("continuation parts have spaceBefore = 0 when the block style has non-zero spaceBefore", () => {
+    // heading_1 has spaceBefore = 24 in defaultFontConfig.
+    // Continuation parts must suppress spaceBefore regardless.
+    const layout = layoutDocument(doc(heading(1, nineLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages.length).toBeGreaterThanOrEqual(2);
+
+    for (let i = 1; i < layout.pages.length; i++) {
+      const part = layout.pages[i]!.blocks[0]!;
+      expect(part.isContinuation).toBe(true);
+      expect(part.spaceBefore).toBe(0);
+    }
+  });
+});
+
+// ── Gap suppression at page boundary (linesFit=0 dead zone) ──────────────────
+//
+// When the inter-block gap (prevSpaceAfter + spaceBefore) pushes targetY into
+// the "dead zone" where not even one line fits, but lines WOULD fit starting
+// from y (gap-free), the gap is suppressed and the block starts at y instead
+// of jumping entirely to the next page.
+//
+// This is the second missing-link bug: "paragraphs moved to next page when
+// they can fit the current page."
+//
+// Same splitPage geometry (3 lines per page, lineHeight=18, pageBottom=64).
+// Key boundary: targetY must be > pageBottom - lineHeight = 64 - 18 = 46
+// for linesFit=0. But y must be <= pageBottom - lineHeight = 46 for the
+// gap-suppression fix to kick in.
+describe("layoutDocument — gap suppression at page boundary", () => {
+  const LH = MOCK_LINE_HEIGHT; // 18px
+
+  const splitPage = {
+    pageWidth:  120,
+    pageHeight: Math.round(10 + 3 * LH + 10), // 74px
+    margins: { top: 10, right: 10, bottom: 10, left: 10 },
+  };
+
+  // 2-line intro: y = margins.top + 2×LH = 10 + 36 = 46 = pageBottom - LH
+  // gap = prevSpaceAfter(10) → targetY = 56 → pageAvailable = 8 < 18 → dead zone
+  // BUT pageBottom - y = 18 >= LH → gap-suppression applies → 1 line on page 1
+  const twoLineIntro = "aaaaaaaaa bbbbbbbbb";
+  const fourLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd";
+
+  it("splits a paragraph whose gap pushed targetY into the dead zone", () => {
+    // twoLineIntro → y=46. gap=10 → targetY=56. pageAvailable=8 < LH.
+    // pageBottom - y = 18 = LH → fix kicks in: block starts at y=46, 1 line on p1.
+    const layout = layoutDocument(doc(p(twoLineIntro), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(2);
+
+    // Page 1: intro (2 lines) + first line of second para
+    expect(layout.pages[0]!.blocks).toHaveLength(2);
+    const gapPart = layout.pages[0]!.blocks[1]!;
+    expect(gapPart.lines).toHaveLength(1);
+    expect(gapPart.continuesOnNextPage).toBe(true);
+    expect(gapPart.isContinuation).toBeUndefined();
+
+    // Page 2: remaining 3 lines
+    const cont = layout.pages[1]!.blocks[0]!;
+    expect(cont.lines).toHaveLength(3);
+    expect(cont.isContinuation).toBe(true);
+  });
+
+  it("block starts at y (gap suppressed), not at targetY", () => {
+    // Block must visually start directly after the previous block — no gap wasted.
+    const layout = layoutDocument(doc(p(twoLineIntro), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    const introY = splitPage.margins.top; // 10
+    const introHeight = 2 * LH; // 36
+    const expectedY = introY + introHeight; // 46 = y (not targetY = 56)
+    expect(layout.pages[0]!.blocks[1]!.y).toBe(expectedY);
+  });
+
+  it("all lines are conserved when gap suppression applies", () => {
+    const layout = layoutDocument(doc(p(twoLineIntro), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const totalLines = layout.pages
+      .flatMap(pg => pg.blocks)
+      .reduce((n, b) => n + b.lines.length, 0);
+    expect(totalLines).toBe(2 + 4); // intro + four-line para
+  });
+
+  it("gap suppression applies when spaceBefore (not prevSpaceAfter) causes the dead zone", () => {
+    // One-line intro → y = 28. heading_1 spaceBefore = 24.
+    // gap = max(10, 24) = 24 → targetY = 52 → pageAvailable = 12 < LH.
+    // pageBottom - y = 36 >= LH → fix: heading starts at y=28, 2 lines on p1.
+    const oneLineIntro = "aaaaaaaaa";
+    const layout = layoutDocument(doc(p(oneLineIntro), heading(1, fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(2);
+    expect(layout.pages[0]!.blocks).toHaveLength(2);
+
+    const headingPart1 = layout.pages[0]!.blocks[1]!;
+    expect(headingPart1.lines.length).toBeGreaterThanOrEqual(1);
+    expect(headingPart1.continuesOnNextPage).toBe(true);
+
+    const headingPart2 = layout.pages[1]!.blocks[0]!;
+    expect(headingPart2.isContinuation).toBe(true);
+  });
+
+  it("block still jumps to next page when no room even at y (regression guard)", () => {
+    // Three-line intro fills page 1 exactly: y = 10 + 54 = 64 = pageBottom.
+    // pageBottom - y = 0 < LH → gap-suppression does NOT apply → block jumps.
+    // fourLineText (4 lines) then splits normally across pages 2 and 3 (3 + 1).
+    const threeLineIntro = "aaaaaaaaa bbbbbbbbb ccccccccc";
+    const layout = layoutDocument(doc(p(threeLineIntro), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    // Page 1: intro only. Page 2+3: four-line para split 3/1 (page fits 3 lines).
+    expect(layout.pages).toHaveLength(3);
+    expect(layout.pages[0]!.blocks).toHaveLength(1);
+
+    // The first part on page 2 has isContinuation=undefined (it jumped, not split)
+    expect(layout.pages[1]!.blocks[0]!.isContinuation).toBeUndefined();
+    expect(layout.pages[1]!.blocks[0]!.lines).toHaveLength(3);
+    expect(layout.pages[2]!.blocks[0]!.isContinuation).toBe(true);
+    expect(layout.pages[2]!.blocks[0]!.lines).toHaveLength(1);
+  });
+});
+
 describe("layoutDocument — pageConfig.fontFamily", () => {
   it("span fonts in a paragraph use the page fontFamily", () => {
     const { fontConfig } = buildStarterKitContext();
@@ -1041,6 +1276,62 @@ describe("layoutDocument — float image wrapping", () => {
     expect(resolved!.page).toBe(2);
     // anchorPage reflects where the paragraph lives — useful for Pass 4 yDelta.
     expect(resolved!.anchorPage).toBe(1);
+  });
+
+  it("float yDelta: long paragraph is split at page boundary rather than moved wholesale", () => {
+    // Regression for the core bug: when float reflow (Pass 3) applies yDelta to
+    // a subsequent block, pushing it past pageBottom, the block was previously
+    // moved to the next page as a whole unit (leaving blank space on page 1).
+    // With the fix, lines that fit on page 1 stay; the rest continue on page 2.
+    //
+    // Setup: smallPage width=500, height=300, margins=20 → pageBottom=280, contentWidth=460
+    // Float: width=400 (square-left) → constrained text width ≈ 52px (460-400-8*2)
+    // floatPara (anchor): img + 4 words → Pass 1: 1 line (18px); Pass 3: 4 lines (72px)
+    //   → yDelta = 54px
+    // afterPara: ~150 words → Pass 1: 13 lines on page 1 (y=38, h=234) + 1 line on page 2
+    //   After yDelta: y=92, h=234, bottom=326 > 280 → overflow
+    //   splitBlockAtBoundary: 10 lines fit (y=92..272), 3 lines overflow to page 2
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 500,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const img = schema.nodes["image"]!.create({ src: "", width: 400, height: 50, wrappingMode: "square-left" });
+    const floatPara = schema.node("paragraph", null, [img, schema.text("word word word word")]);
+    const longText = "word ".repeat(150).trim();
+    const afterPara = schema.node("paragraph", null, [schema.text(longText)]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [floatPara, afterPara]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const pageBottom = smallPage.pageHeight - smallPage.margins.bottom; // 280
+
+    // afterPara must appear on page 1 (not wholly moved to page 2)
+    const page1Blocks = layout.pages[0]?.blocks ?? [];
+    const afterParaOnPage1 = page1Blocks.find((b) => b.node === afterPara);
+    expect(afterParaOnPage1).toBeDefined();
+
+    // The page 1 part must be a split part (continues on next page)
+    expect(afterParaOnPage1?.continuesOnNextPage).toBe(true);
+
+    // afterPara must also appear on page 2 (the overflow)
+    const page2Blocks = layout.pages[1]?.blocks ?? [];
+    const afterParaOnPage2 = page2Blocks.find((b) => b.node === afterPara);
+    expect(afterParaOnPage2).toBeDefined();
+
+    // The page 2 part must be a continuation
+    expect(afterParaOnPage2?.isContinuation).toBe(true);
+
+    // No text block should overflow the page bottom
+    for (const page of layout.pages) {
+      for (const block of page.blocks) {
+        if (block.lines.length > 0) {
+          expect(block.y + block.height).toBeLessThanOrEqual(pageBottom + 0.001);
+        }
+      }
+    }
   });
 
   it("Pass 3 reflowed block never overflows the page bottom", () => {

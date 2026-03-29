@@ -378,10 +378,30 @@ export function layoutDocument(
     // ── Page overflow check ───────────────────────────────────────────────────
     const blockBottom = targetY + entry.height;
     const pageBottom = margins.top + contentHeight;
-    const overflows = blockBottom > pageBottom && !isFirstOnPage;
+    // Text blocks (lines.length > 0) can always be split across pages, even when
+    // first on a page — their split path has its own infinite-loop guard (forces
+    // at least 1 line when partStartY === margins.top). Leaf blocks (lines.length
+    // === 0) still need the !isFirstOnPage guard to avoid creating an endless
+    // stream of empty pages for a leaf that is taller than contentHeight.
+    const overflows = blockBottom > pageBottom && (!isFirstOnPage || entry.lines.length > 0);
+
+    // ── Layout debug log ──────────────────────────────────────────────────────
+    if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+      console.log(
+        `[layout] block="${node.type.name}" nodePos=${nodePos}` +
+        ` page=${currentPage.pageNumber} isFirstOnPage=${isFirstOnPage}` +
+        ` gap=${gap.toFixed(1)} y=${y.toFixed(1)} targetY=${targetY.toFixed(1)}` +
+        ` height=${entry.height.toFixed(1)} blockBottom=${blockBottom.toFixed(1)}` +
+        ` pageBottom=${pageBottom.toFixed(1)} overflows=${overflows}` +
+        ` lines=${entry.lines.length}`
+      );
+    }
 
     if (!overflows) {
       // ── Normal placement ───────────────────────────────────────────────────
+      if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+        console.log(`  → NORMAL PLACEMENT (page ${currentPage.pageNumber})`);
+      }
       currentPage.blocks.push(block);
       y = targetY + entry.height;
       prevSpaceAfter = blockStyle.spaceAfter;
@@ -391,10 +411,16 @@ export function layoutDocument(
       // height, place it anyway (overflow) rather than looping forever.
       const tooTallForAnyPage = entry.height > contentHeight;
       if (tooTallForAnyPage) {
+        if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+          console.log(`  → LEAF too-tall: forced onto current page ${currentPage.pageNumber}`);
+        }
         currentPage.blocks.push(block);
         y = targetY + entry.height;
         prevSpaceAfter = blockStyle.spaceAfter;
       } else {
+        if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+          console.log(`  → LEAF moved to page ${pages.length + 2}`);
+        }
         pages.push(currentPage);
         currentPage = newPage(pages.length + 1);
         y = margins.top;
@@ -416,9 +442,17 @@ export function layoutDocument(
       // ── Text block: split lines across page boundaries ─────────────────────
       // Iterate through remainingLines, placing as many as fit on each page.
       // Handles blocks that span 2, 3, or more pages in a single pass.
+      if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+        console.log(`  → SPLIT PATH entered (${entry.lines.length} lines total)`);
+      }
       let remainingLines = entry.lines;
       let hasPlacedAnyPart = false;
       let currentPartStartY = targetY;
+      // Tracks whether gap-suppression has already been applied for this block.
+      // If linesFit=0 fires a second time after gap-suppress, force 1 line
+      // (sub-pixel shortfall: pageBottom - y is just barely less than lineHeight,
+      // e.g. 19.0 vs 19.2, causing the whole block to jump to the next page).
+      let gapSuppressApplied = false;
 
       while (remainingLines.length > 0) {
         const partStartY = currentPartStartY;
@@ -432,18 +466,47 @@ export function layoutDocument(
           heightFit += line.lineHeight;
         }
 
+        if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+          console.log(
+            `    split iter: page=${currentPage.pageNumber} partStartY=${partStartY.toFixed(1)}` +
+            ` pageAvailable=${pageAvailable.toFixed(1)} linesFit=${linesFit}` +
+            ` remaining=${remainingLines.length} hasPlacedAnyPart=${hasPlacedAnyPart}` +
+            ` firstLineH=${remainingLines[0]!.lineHeight.toFixed(1)}`
+          );
+        }
+
         if (linesFit === 0) {
-          if (hasPlacedAnyPart || partStartY === margins.top) {
-            // At the top of a page and still can't fit — force one line so we
-            // never loop forever (handles single lines taller than the page).
+          if (hasPlacedAnyPart || partStartY === margins.top || gapSuppressApplied) {
+            // Force one line: either we're at the top of a page (infinite-loop
+            // guard for lines taller than the full page), or gap-suppression has
+            // already been applied and a sub-pixel shortfall still prevents a fit
+            // (e.g. pageBottom - y = 19.0 vs lineHeight = 19.2 — 0.2 px gap).
+            if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+              console.log(`    → linesFit=0 FORCE 1 line (top-of-page / sub-pixel guard)`);
+            }
             linesFit = 1;
             heightFit = remainingLines[0]!.lineHeight;
+          } else if (pageBottom - y >= remainingLines[0]!.lineHeight - 0.5) {
+            // The inter-block gap pushed targetY into the dead zone. Suppress
+            // the gap and retry from y. The 0.5 px tolerance handles floating-
+            // point accumulation where the available space is fractionally less
+            // than lineHeight (e.g. 19.0 vs 19.2).
+            if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+              console.log(`    → linesFit=0 GAP SUPPRESS: retry at y=${y.toFixed(1)} (was targetY=${targetY.toFixed(1)})`);
+            }
+            currentPartStartY = y;
+            gapSuppressApplied = true;
+            continue;
           } else {
-            // Nothing placed yet and targetY left no room — advance first.
+            // Nothing placed yet and no room even at y — advance to next page.
+            if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+              console.log(`    → linesFit=0 ADVANCE to page ${pages.length + 2}`);
+            }
             pages.push(currentPage);
             currentPage = newPage(pages.length + 1);
             prevSpaceAfter = 0;
             currentPartStartY = margins.top;
+            gapSuppressApplied = false;
             continue;
           }
         }
@@ -477,6 +540,12 @@ export function layoutDocument(
           partBlock.blockType = "list_item";
         }
 
+        if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+          console.log(
+            `    → PLACED ${linesFit} lines on page ${currentPage.pageNumber}` +
+            ` at y=${partStartY.toFixed(1)} isCont=${isCont} isLastPart=${isLastPart}`
+          );
+        }
         currentPage.blocks.push(partBlock);
         hasPlacedAnyPart = true;
 
@@ -783,10 +852,15 @@ function runFloatPass(
         page.blocks[bi] = finalBlock;
       } else if (block.y + block.height > pageBottom) {
         // Non-overlapping block pushed past the page bottom by yDelta.
-        // Stripping its lines would lose content — move it to the next page instead.
-        overflowToNext.push(block);
-        page.blocks.splice(bi, 1);
-        bi--;
+        // Split it so lines that fit stay on this page; the rest move to the next.
+        const { kept, overflow } = splitBlockAtBoundary(block, pageBottom);
+        if (kept) {
+          page.blocks[bi] = kept;
+        } else {
+          page.blocks.splice(bi, 1);
+          bi--;
+        }
+        overflowToNext.push(overflow);
       }
     }
 
@@ -838,12 +912,17 @@ function runFloatPass(
     for (let bi = 0; bi < page.blocks.length; bi++) {
       const block = page.blocks[bi]!;
       // Leaf blocks (images, HRs) keep their position even when they overflow —
-      // same policy as Pass 3. Text blocks are moved to preserve content.
+      // same policy as Pass 3. Text blocks are split at the page boundary.
       if (block.lines.length === 0) continue;
       if (block.y + block.height > pageBottom) {
-        overflowBlocks.push(block);
-        page.blocks.splice(bi, 1);
-        bi--;
+        const { kept, overflow } = splitBlockAtBoundary(block, pageBottom);
+        if (kept) {
+          page.blocks[bi] = kept;
+        } else {
+          page.blocks.splice(bi, 1);
+          bi--;
+        }
+        overflowBlocks.push(overflow);
       }
     }
 
@@ -956,6 +1035,61 @@ function clampBlockToPage(block: LayoutBlock, pageBottom: number): LayoutBlock {
     height: h,
     continuesOnNextPage: true as const,
   };
+}
+
+/**
+ * Split a text block at the page boundary, returning both the part that fits
+ * on the current page and the overflow part for the next page.
+ *
+ * Used by Pass 3 and Pass 3b when a yDelta shift pushes a block past pageBottom.
+ * Unlike clampBlockToPage (which discards overflow lines), this preserves ALL
+ * content by returning the overflow as a continuation block.
+ *
+ * Returns `kept: null` when no lines fit at all (block.y >= pageBottom or
+ * first line doesn't fit) — in that case the entire block is the overflow.
+ */
+function splitBlockAtBoundary(
+  block: LayoutBlock,
+  pageBottom: number,
+): { kept: LayoutBlock | null; overflow: LayoutBlock } {
+  const available = pageBottom - block.y;
+  let linesFit = 0;
+  let heightFit = 0;
+  for (const line of block.lines) {
+    if (heightFit + line.lineHeight > available) break;
+    linesFit++;
+    heightFit += line.lineHeight;
+  }
+
+  if (linesFit === 0) {
+    // No lines fit on the current page — move entire block to next page unchanged.
+    // This is not a continuation (no content was placed on the current page), so
+    // preserve the original block's flags (same as the old whole-block-move behavior).
+    return { kept: null, overflow: block };
+  }
+
+  const kept: LayoutBlock = {
+    ...block,
+    height: heightFit,
+    lines: block.lines.slice(0, linesFit),
+    spaceAfter: 0,
+    continuesOnNextPage: true as const,
+  };
+
+  // Helper: spread block without list marker props (continuation parts don't show markers).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { listMarker: _lm, listMarkerX: _lmx, ...blockWithoutMarker } = block;
+
+  const overflow: LayoutBlock = {
+    ...blockWithoutMarker,
+    // y will be repositioned by the caller when it stacks overflow blocks
+    height: block.height - heightFit,
+    lines: block.lines.slice(linesFit),
+    spaceBefore: 0,
+    isContinuation: true as const,
+  };
+
+  return { kept, overflow };
 }
 
 /** Float anchor: a zero-width object span referencing a floating image node. */

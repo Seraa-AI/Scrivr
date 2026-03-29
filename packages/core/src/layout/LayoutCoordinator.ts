@@ -7,6 +7,7 @@ import type { FontConfig } from "./FontConfig";
 import type { TextMeasurer } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
 import { populateCharMap } from "./BlockLayout";
+import { spanEndDocPos } from "./LineBreaker";
 
 export interface LayoutCoordinatorOptions {
   pageConfig: PageConfig;
@@ -275,10 +276,38 @@ export class LayoutCoordinator {
     for (const page of this._layout.pages) {
       this._pageMap.set(page.pageNumber, page);
       for (const block of page.blocks) {
-        this._blockIndex.push([block.nodePos, block.nodePos + block.node.nodeSize, page.pageNumber]);
+        if (block.lines.length === 0) {
+          // Leaf block (image, HR): use the full node range.
+          this._blockIndex.push([block.nodePos, block.nodePos + block.node.nodeSize, page.pageNumber]);
+        } else {
+          // Text block: use the actual char range of the rendered lines so that
+          // split-paragraph continuation blocks (same nodePos, different lines)
+          // get non-overlapping ranges. Without this, the binary search in
+          // _cursorPageFromLayout always returns page 1 for any position in the
+          // paragraph, regardless of which visual part the cursor is in.
+          const firstLine = block.lines[0]!;
+          const lastLine  = block.lines[block.lines.length - 1]!;
+          const firstSpan = firstLine.spans[0];
+          const lastSpan  = lastLine.spans[lastLine.spans.length - 1];
+          const charStart = firstSpan ? firstSpan.docPos : block.nodePos + 1;
+          // charStart-only blocks (no last span) fall back to the node range.
+          let charEnd = lastSpan
+            ? spanEndDocPos(lastSpan)
+            : block.nodePos + block.node.nodeSize;
+          // For the LAST visual part of a block (continuesOnNextPage is falsy),
+          // extend charEnd to include the paragraph-end cursor position so that
+          // clicking after the last character lands on the correct page.
+          // For blocks that continue on the next page, charEnd stays at
+          // spanEndDocPos — keeping the range non-overlapping with the next part.
+          if (!block.continuesOnNextPage) {
+            charEnd = Math.max(charEnd, block.nodePos + block.node.nodeSize);
+          }
+          this._blockIndex.push([charStart, charEnd, page.pageNumber]);
+        }
       }
     }
-    // Blocks are already in document order, but sort defensively.
+    // Sort by charStart. For non-split paragraphs the ranges are already ordered;
+    // for split paragraphs each part now has a distinct, non-overlapping range.
     this._blockIndex.sort((a, b) => a[0] - b[0]);
   }
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Editor } from "./Editor";
+import { StarterKit } from "./extensions/StarterKit";
 import type { EditorState } from "prosemirror-state";
 
 /**
@@ -937,6 +938,57 @@ describe("Editor — cursorPage", () => {
     const wrongPage = editor.charMap.coordsAtPos(sel.head, 99);
     expect(wrongPage).toBeNull();
     cleanup();
+  });
+
+  it("cursorPage returns page 2 when cursor is in the continuation block of a split paragraph", () => {
+    // Regression: _blockIndex used nodePos ranges which overlap for split-paragraph
+    // blocks (kept part on page 1 and continuation on page 2 share the same nodePos
+    // and nodeSize). Binary search always returned page 1, so cursorPage was stuck
+    // at 1 even when the cursor was visually on page 2. This caused the cursor to
+    // never be drawn on page 2 even after the user clicked there.
+    //
+    // Setup: MOCK_LINE_HEIGHT=18, pageHeight=200, margins=20 → pageBottom=180,
+    // contentHeight=160. Lines per page = floor(160/18) = 8.
+    // "hello" = 5 chars × 8px = 40px. With contentWidth=200-20-20=160px,
+    // words per line = floor(160/40) but "hello hello " = 2 × (40+8) = 96px,
+    // "hello hello hello " = 3 × 48 = 144px < 160px → 3 words per line,
+    // "hello hello hello hello " = 4 × 48 = 192px > 160px → 3 words per line.
+    // 20 words → ceil(20/3)=7 lines → page 1 has 8 lines = all, no split?
+    // Use 30 words → ceil(30/3)=10 lines → page 1: 8, page 2: 2 ✓
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = new Editor({
+      extensions: [StarterKit.configure({ pagination: { pageWidth: 200, pageHeight: 200, margins: { top: 20, bottom: 20, left: 20, right: 20 } } })],
+    });
+    editor.mount(container);
+
+    // Insert 30 space-separated words → ~10 lines → 8 on page 1, 2 on page 2
+    const ta = container.querySelector("textarea")!;
+    ta.value = "hello ".repeat(30).trim(); // "hello hello ... hello" (30 words)
+    ta.dispatchEvent(new Event("input"));
+
+    // ensureLayout() runs in a rAF in production; call it synchronously in tests.
+    editor.ensureLayout();
+
+    // Populate page 2 so charMap has glyph entries for it
+    editor.ensurePagePopulated(2);
+
+    // Move cursor to the very end of the paragraph (last char on page 2).
+    // para is the first child of doc at nodePos=0. Content size = 30*5 + 29 = 179 chars.
+    // End cursor position within doc = para.nodePos + 1 + para.content.size = 1 + 179 = 180.
+    const doc = editor.getState().doc;
+    const para = doc.child(0)!;
+    const endCursorPos = 1 + para.content.size; // position after last char of para
+    editor.moveCursorTo(endCursorPos);
+
+    // ensureLayout again so _cursorPage reflects the new cursor position
+    editor.ensureLayout();
+
+    // cursorPage must be 2, not 1
+    expect(editor.cursorPage).toBe(2);
+
+    editor.destroy();
+    container.remove();
   });
 });
 
