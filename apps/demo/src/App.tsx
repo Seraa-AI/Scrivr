@@ -39,7 +39,7 @@ function makeIdentity() {
   const room = getParam("room") ?? "default";
   const userName = getParam("user") ?? `User ${Math.floor(Math.random() * 100)}`;
   const userColor = getParam("color") ?? COLORS[Math.floor(Math.random() * COLORS.length)]!;
-  const wsUrl = (import.meta as unknown as { env: Record<string, string> }).env.VITE_WS_URL ?? "ws://localhost:1234";
+  const wsUrl = (import.meta as unknown as { env: Record<string, string> }).env.VITE_WS_URL ?? "ws://localhost:1235";
   return { room, userName, userColor, wsUrl };
 }
 

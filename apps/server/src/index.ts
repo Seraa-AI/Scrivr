@@ -29,7 +29,7 @@ function docPath(name: string): string {
 // ── Server ────────────────────────────────────────────────────────────────────
 
 const server = Server.configure({
-  port: 1234,
+  port: 1235,
 
   async onLoadDocument({ document, documentName }) {
     const file = docPath(documentName);
