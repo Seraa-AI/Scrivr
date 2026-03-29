@@ -58,6 +58,13 @@ export interface FloatLayout {
    * any extra downward offset that float stacking added.
    */
   anchorBlockY: number;
+  /**
+   * Page number of the anchor span (where the image node lives in the doc).
+   * May differ from `page` when float stacking pushes the float past the page
+   * bottom and it overflows onto the next page. Pass 4 uses this to avoid
+   * resetting the float's page back to the anchor's page.
+   */
+  anchorPage: number;
 }
 
 export interface DocumentLayout {
@@ -634,30 +641,43 @@ function runFloatPass(
     // horizontal space already taken by a previously placed float at that Y.
     // 'behind'/'front' floats are exempt — they render above/below text and
     // never create exclusion zones, so stacking rules don't apply.
-    let candidateY = anchor.anchorBlockY + offsetY;
-    if (mode !== "behind" && mode !== "front") {
+    const floatPageBottom = pass1Result.pageConfig.pageHeight - margins.bottom;
+
+    // Helper: run the downward-scan stacking loop for a given page + candidateY.
+    const resolveStacking = (onPage: number, startY: number): number => {
+      let cy = startY;
+      if (mode === "behind" || mode === "front") return cy;
       let changed = true;
       while (changed) {
         changed = false;
         for (const placed of floats) {
-          if (placed.page !== anchor.anchorPage) continue;
+          if (placed.page !== onPage) continue;
           if (placed.mode === "behind" || placed.mode === "front") continue;
-          const hOverlap =
-            floatX < placed.x + placed.width && floatX + nodeWidth > placed.x;
-          const vOverlap =
-            candidateY < placed.y + placed.height &&
-            candidateY + nodeHeight > placed.y;
+          const hOverlap = floatX < placed.x + placed.width && floatX + nodeWidth > placed.x;
+          const vOverlap = cy < placed.y + placed.height && cy + nodeHeight > placed.y;
           if (hOverlap && vOverlap) {
-            candidateY = placed.y + placed.height;
+            cy = placed.y + placed.height;
             changed = true;
           }
         }
       }
+      return cy;
+    };
+
+    let candidateY = resolveStacking(anchor.anchorPage, anchor.anchorBlockY + offsetY);
+
+    // If stacking pushed the float past the page bottom, overflow it to the
+    // next page and re-run stacking there so it doesn't overlap any floats
+    // already placed on that page.
+    let floatPage = anchor.anchorPage;
+    if (mode !== "behind" && mode !== "front" && candidateY + nodeHeight > floatPageBottom) {
+      floatPage = anchor.anchorPage + 1;
+      candidateY = resolveStacking(floatPage, margins.top);
     }
 
     floats.push({
       docPos: anchor.docPos,
-      page: anchor.anchorPage,
+      page: floatPage,
       x: floatX,
       y: candidateY,
       width: nodeWidth,
@@ -665,6 +685,7 @@ function runFloatPass(
       mode,
       node,
       anchorBlockY: anchor.anchorBlockY,
+      anchorPage: anchor.anchorPage,
     });
 
     // 'behind' and 'front' float over text with no exclusion — text flows
@@ -678,7 +699,7 @@ function runFloatPass(
       "full"; // top-bottom
 
     exclusionMgr.addRect({
-      page: anchor.anchorPage,
+      page: floatPage,
       x: floatX - FLOAT_MARGIN,
       right: floatX + nodeWidth + FLOAT_MARGIN,
       y: candidateY,
@@ -891,8 +912,13 @@ function runFloatPass(
       // undoing any downward displacement that Fix 1's stacking applied.
       const yDelta = final.y - f.anchorBlockY;
       const newY = f.y + yDelta;
-      if (newY !== f.y || final.page !== f.page) {
-        floats[fi] = { ...f, y: newY, page: final.page };
+      // Only update the float's page to match the anchor when the float was NOT
+      // overflow-placed onto a different page by Pass 2. If anchorPage !== page,
+      // the float deliberately lives on page N+1 to avoid exceeding page N's
+      // bottom — resetting it to final.page would move it back and hide it.
+      const newPage = f.anchorPage === f.page ? final.page : f.page;
+      if (newY !== f.y || newPage !== f.page) {
+        floats[fi] = { ...f, y: newY, page: newPage };
       }
     }
   }

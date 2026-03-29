@@ -51,6 +51,12 @@ export interface InputBridgeOptions {
   getViewportRect: (from: number, to: number) => DOMRect | null;
   /** CharacterMap — used by scrollCursorIntoView for cursor coordinates. */
   getCharMap: () => CharacterMap;
+  /**
+   * Returns the visual page/y/height for a float at docPos, or null when
+   * the position is not a float. Used by scrollCursorIntoView to scroll to
+   * the float's actual rendered page rather than the anchor span's page.
+   */
+  getFloatPosition?: (docPos: number) => { page: number; y: number; height: number } | null;
   /** Keymap built from all extensions — consulted on every keydown. */
   keymap: Record<string, Command>;
   /** Input handlers from all extensions — consulted before the keymap.
@@ -169,8 +175,18 @@ export class InputBridge {
    */
   scrollCursorIntoView(): void {
     if (!this._container || !this.pageElementLookup) return;
-    const { head } = this.opts.getState().selection;
-    const coords = this.opts.getCharMap().coordsAtPos(head);
+    const sel = this.opts.getState().selection;
+    const { head } = sel;
+
+    // Float nodes: their anchor glyph is registered on the anchor paragraph's
+    // page (always page 1 when overflowed to page 2+). Use the float's actual
+    // rendered position instead so we scroll to the correct page.
+    // NodeSelection: anchor = from (position before the node), head = to = from + nodeSize.
+    // layout.floats stores docPos = from, so we look up sel.from, not head.
+    const floatPos = this.opts.getFloatPosition?.(sel.from);
+    const coords = floatPos
+      ? { page: floatPos.page, y: floatPos.y, height: floatPos.height }
+      : this.opts.getCharMap().coordsAtPos(head);
     if (!coords) return;
 
     const pageEl = this.pageElementLookup(coords.page);

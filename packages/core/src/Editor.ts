@@ -274,6 +274,11 @@ export class Editor {
       getSchema: () => this.manager.schema,
       getViewportRect: (from, to) => this.getViewportRect(from, to),
       getCharMap: () => this.lc.charMap,
+      getFloatPosition: (docPos: number) => {
+        const f = this.layout.floats?.find((fl) => fl.docPos === docPos);
+        if (!f) return null;
+        return { page: f.page, y: f.y, height: f.height };
+      },
       keymap: this.manager.buildKeymap(),
       inputHandlers: this.manager.buildInputHandlers(),
       navigator: this,

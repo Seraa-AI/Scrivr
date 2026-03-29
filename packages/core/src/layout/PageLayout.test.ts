@@ -975,6 +975,74 @@ describe("layoutDocument — float image wrapping", () => {
     expect(floatB.y).toBeCloseTo(anchorBlock.y, 1);
   });
 
+  it("float stacking past page bottom: overflowed float moves to next page", () => {
+    // Regression: two square-left floats with height > half the page.
+    // After Fix 1 stacks float2 below float1, candidateY + height > pageBottom.
+    // The float must land on page 2 (page: 2) with y within page 2's bounds,
+    // NOT stay on page 1 with y > pageBottom (which made it invisible).
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 300,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // pageBottom = 300 - 20 = 280. Two floats each 160px tall stacked = 20 + 160 + 160 = 340 > 280.
+    const img1 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    const img2 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    const para1 = schema.node("paragraph", null, [img1, schema.text("first paragraph text")]);
+    const para2 = schema.node("paragraph", null, [img2, schema.text("second paragraph text")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const floats = layout.floats!;
+    expect(floats.length).toBe(2);
+    const pageBottom = smallPage.pageHeight - smallPage.margins.bottom;
+
+    // Every float must fit within its assigned page (y + height ≤ pageBottom).
+    for (const f of floats) {
+      expect(f.y + f.height).toBeLessThanOrEqual(pageBottom + 0.001);
+    }
+
+    // The second float should have overflowed to page 2.
+    const f2 = floats[1]!;
+    expect(f2.page).toBe(2);
+    expect(f2.anchorPage).toBe(1); // anchor paragraph is still on page 1
+    expect(f2.y).toBeGreaterThanOrEqual(smallPage.margins.top - 0.001);
+  });
+
+  it("float page overflow: getFloatPosition uses float.page not anchor glyph page", () => {
+    // Regression for the scroll-to-page-1 bug:
+    // When a float overflows to page 2, its docPos is still in a paragraph on page 1.
+    // layout.floats[].page must be 2 so callers can scroll to the correct page.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 300,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const img1 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    const img2 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    const para1 = schema.node("paragraph", null, [img1, schema.text("first para")]);
+    const para2 = schema.node("paragraph", null, [img2, schema.text("second para")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const floats = layout.floats!;
+    const f2 = floats.find((f) => f.node === img2)!;
+
+    // Simulate getFloatPosition(sel.from) — sel.from = f2.docPos for a NodeSelection.
+    const resolved = floats.find((fl) => fl.docPos === f2.docPos);
+    expect(resolved).toBeDefined();
+    // The resolved page must be the float's visual page (2), not the anchor's page (1).
+    expect(resolved!.page).toBe(2);
+    // anchorPage reflects where the paragraph lives — useful for Pass 4 yDelta.
+    expect(resolved!.anchorPage).toBe(1);
+  });
+
   it("Pass 3 reflowed block never overflows the page bottom", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const smallPage = {
@@ -1007,3 +1075,4 @@ describe("layoutDocument — float image wrapping", () => {
     }
   });
 });
+
