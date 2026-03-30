@@ -48,6 +48,9 @@ function createInlineImageStrategy(): InlineStrategy {
       height: number,
       node: import("prosemirror-model").Node,
     ): void {
+      // Zero-size anchor spans for floating images — nothing to draw.
+      if (width <= 0 || height <= 0) return;
+
       const src = node.attrs["src"] as string | undefined;
       const alt = node.attrs["alt"] as string | undefined ?? "";
 
