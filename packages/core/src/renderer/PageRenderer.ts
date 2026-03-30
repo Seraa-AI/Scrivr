@@ -1,10 +1,10 @@
-import { LayoutPage, PageConfig } from "../layout/PageLayout";
-import { LayoutBlock } from "../layout/BlockLayout";
+import { LayoutPage, PageConfig, FloatLayout } from "../layout/PageLayout";
+import { LayoutBlock, computeAlignmentOffset } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
 import { TextMeasurer } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
 import type { MarkDecorator } from "../extensions/types";
-import type { BlockRegistry } from "../layout/BlockRegistry";
+import type { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 
 export interface RenderPageOptions {
   ctx: CanvasRenderingContext2D;
@@ -26,6 +26,10 @@ export interface RenderPageOptions {
   markDecorators?: Map<string, MarkDecorator>;
   /** Block registry from extensions — dispatches each block to its strategy */
   blockRegistry?: BlockRegistry;
+  /** Inline object registry — dispatches inline spans to their render strategies */
+  inlineRegistry?: InlineRegistry;
+  /** Float images on this page — rendered after (or before for 'behind') regular blocks */
+  floats?: FloatLayout[];
 }
 
 /**
@@ -53,6 +57,8 @@ export function renderPage(options: RenderPageOptions): void {
     showMarginGuides = false,
     markDecorators,
     blockRegistry,
+    inlineRegistry,
+    floats,
   } = options;
 
   const { pageWidth, pageHeight, margins } = pageConfig;
@@ -82,6 +88,16 @@ export function renderPage(options: RenderPageOptions): void {
   // ── Check stale again before drawing (layout may have changed) ───────────
   if (renderVersion !== currentVersion()) return;
 
+  // Floats on this page, partitioned by render order.
+  const pageFloats = floats?.filter((f) => f.page === page.pageNumber) ?? [];
+  const behindFloats = pageFloats.filter((f) => f.mode === "behind");
+  const frontFloats  = pageFloats.filter((f) => f.mode !== "behind");
+
+  // ── Draw 'behind' floats BEFORE blocks ────────────────────────────────────
+  for (const float of behindFloats) {
+    drawFloat(ctx, float, map, inlineRegistry);
+  }
+
   // ── Draw blocks ───────────────────────────────────────────────────────────
   // lineIndexOffset accumulates across blocks so every line on the page has
   // a unique index in the CharacterMap. Without this, each block resets to 0
@@ -99,6 +115,7 @@ export function renderPage(options: RenderPageOptions): void {
           dpr,
           measurer,
           ...(markDecorators ? { markDecorators } : {}),
+          ...(inlineRegistry ? { inlineRegistry } : {}),
         },
         map,
       );
@@ -106,6 +123,56 @@ export function renderPage(options: RenderPageOptions): void {
       lineIndexOffset = drawBlock(ctx, block, measurer, map, page.pageNumber, lineIndexOffset, markDecorators);
     }
   }
+
+  // ── Draw front/square floats AFTER blocks ─────────────────────────────────
+  for (const float of frontFloats) {
+    drawFloat(ctx, float, map, inlineRegistry);
+  }
+}
+
+/**
+ * Draws a single float image at its absolute position and registers its
+ * ObjectRect in the CharacterMap so handles and popovers work.
+ */
+function drawFloat(
+  ctx: CanvasRenderingContext2D,
+  float: FloatLayout,
+  map: CharacterMap,
+  inlineRegistry?: InlineRegistry,
+): void {
+  const { x, y, width, height, node, docPos, page } = float;
+
+  // Always register with actual float dimensions. populateCharMap registers a
+  // 0×0 placeholder for the zero-width anchor span; we overwrite it here so
+  // getNodeViewportRect / createImageMenu sees the real visual rect.
+  map.registerObjectRect({ docPos, x, y, width, height, page });
+  // Only register the anchor glyph if populateCharMap hasn't already done it.
+  if (!map.hasGlyph(docPos)) {
+    map.registerGlyph({
+      docPos,
+      x,
+      y,
+      lineY: y,
+      width: 0,
+      height: 0,
+      page,
+      lineIndex: 0,
+    });
+  }
+
+  // Use inline strategy if available.
+  const strategy = inlineRegistry?.get(node.type.name);
+  if (strategy) {
+    strategy.render(ctx, x, y, width, height, node);
+    return;
+  }
+
+  // Fallback: draw a placeholder rect.
+  ctx.save();
+  ctx.strokeStyle = "#e2e8f0";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, width, height);
+  ctx.restore();
 }
 
 // ── Private ───────────────────────────────────────────────────────────────────
@@ -132,12 +199,53 @@ function drawBlock(
     const line = block.lines[li]!;
     const globalLineIndex = lineIndexOffset + li;
 
-    // Alignment offset — must match what BlockLayout computed
-    const lineOffsetX = computeAlignmentOffset(block.align, contentWidth, line.width);
+    // Alignment offset — must match what BlockLayout computed.
+    // For float-constrained lines, constraintX shifts the line right (square-left floats).
+    const lineConstraintX = line.constraintX ?? 0;
+    const lineOffsetX = lineConstraintX + computeAlignmentOffset(block.align, line.effectiveWidth ?? contentWidth, line.width);
     const lineY = block.y + getTotalLineHeight(block.lines, li);
     const baseline = lineY + line.ascent;
+    // textY: where the cursor draws — aligned to the text, not the full line.
+    const textY = line.textAscent > 0
+      ? lineY + line.ascent - line.textAscent
+      : lineY + Math.max(0, line.lineHeight - line.cursorHeight) / 2;
 
     for (const span of line.spans) {
+      if (span.kind === "object") {
+        // Fallback: object spans in drawBlock — no inline strategy available here.
+        // Register two glyphs with cursorHeight so caret and hit-testing work.
+        const objX = block.x + lineOffsetX + span.x;
+        // Full-width glyph: midpoint at image center → 50/50 click split.
+        // y = textY so cursor draws at the text baseline, not the image top.
+        if (!map.hasGlyph(span.docPos)) {
+          map.registerGlyph({
+            docPos: span.docPos,
+            x: objX,
+            y: textY,
+            lineY,
+            width: span.width,
+            height: line.cursorHeight,
+            page: pageNumber,
+            lineIndex: globalLineIndex,
+          });
+        }
+        // Zero-width sentinel at right edge → coordsAtPos draws cursor at
+        // the right edge of the image, not its center.
+        if (!map.hasGlyph(span.docPos + 1)) {
+          map.registerGlyph({
+            docPos: span.docPos + 1,
+            x: objX + span.width,
+            y: textY,
+            lineY,
+            width: 0,
+            height: line.cursorHeight,
+            page: pageNumber,
+            lineIndex: globalLineIndex,
+          });
+        }
+        continue;
+      }
+
       const spanX = block.x + lineOffsetX + span.x;
       const run = measurer.measureRun(span.text, span.font);
       const spanRect = {
@@ -183,6 +291,9 @@ function drawBlock(
 
       // ── Populate CharacterMap (just-in-time, on first render of this page) ─
       if (!map.hasGlyph(span.docPos)) {
+        const textY = line.textAscent > 0
+          ? lineY + line.ascent - line.textAscent
+          : lineY + Math.max(0, line.lineHeight - line.cursorHeight) / 2;
         for (let ci = 0; ci < span.text.length; ci++) {
           const charX = spanX + run.charPositions[ci]!;
           const charWidth =
@@ -193,9 +304,10 @@ function drawBlock(
           map.registerGlyph({
             docPos: span.docPos + ci,
             x: charX,
-            y: lineY,
+            y: textY,
+            lineY,
             width: charWidth,
-            height: line.lineHeight,
+            height: line.cursorHeight,
             page: pageNumber,
             lineIndex: globalLineIndex,
           });
@@ -212,11 +324,40 @@ function drawBlock(
         height: line.lineHeight,
         x: block.x,
         contentWidth: block.availableWidth,
-        startDocPos: line.spans[0]?.docPos ?? 0,
-        endDocPos:
-          (line.spans[line.spans.length - 1]?.docPos ?? 0) +
-          (line.spans[line.spans.length - 1]?.text.length ?? 0),
+        startDocPos: line.spans[0]?.docPos ?? block.nodePos + 1,
+        endDocPos: (() => {
+          const s = line.spans[line.spans.length - 1];
+          if (!s) return block.nodePos + 1;
+          return s.kind === "text" ? s.docPos + s.text.length : s.docPos + 1;
+        })(),
       });
+    }
+
+    // Register end-of-line caret sentinel on the last line only, and only
+    // when the last span is text (object spans already register a right-half
+    // glyph at docPos+1). Guard with hasGlyph so we don't duplicate when
+    // populateCharMap ran first.
+    const isLastLine = li === block.lines.length - 1;
+    const lastSpan = line.spans[line.spans.length - 1];
+    if (isLastLine && lastSpan?.kind === "text" && lastSpan.text !== "\u200B") {
+      const endDocPos = lastSpan.docPos + lastSpan.text.length;
+      if (!map.hasGlyph(endDocPos)) {
+        const sentinelX = block.x + lineOffsetX + lastSpan.x +
+          measurer.measureRun(lastSpan.text, lastSpan.font).totalWidth;
+        const textY = line.textAscent > 0
+          ? lineY + line.ascent - line.textAscent
+          : lineY + Math.max(0, line.lineHeight - line.cursorHeight) / 2;
+        map.registerGlyph({
+          docPos: endDocPos,
+          x: sentinelX,
+          y: textY,
+          lineY,
+          width: 0,
+          height: line.cursorHeight,
+          page: pageNumber,
+          lineIndex: globalLineIndex,
+        });
+      }
     }
   }
 
@@ -230,14 +371,3 @@ function getTotalLineHeight(
   return lines.slice(0, upToIndex).reduce((sum, l) => sum + l.lineHeight, 0);
 }
 
-function computeAlignmentOffset(
-  align: LayoutBlock["align"],
-  availableWidth: number,
-  lineWidth: number
-): number {
-  switch (align) {
-    case "center": return Math.max(0, (availableWidth - lineWidth) / 2);
-    case "right":  return Math.max(0, availableWidth - lineWidth);
-    default:       return 0;
-  }
-}

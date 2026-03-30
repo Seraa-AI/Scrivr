@@ -65,6 +65,7 @@ export class YBinding {
    */
   private synced = false;
 
+
   /**
    * Y.js-aware undo manager. Tracks only LOCAL_ORIGIN transactions so
    * remote peers' changes are never included in the local undo stack.

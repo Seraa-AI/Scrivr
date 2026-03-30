@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveFont } from "./StyleResolver";
+import { resolveFont, substituteFamily, normalizeFont } from "./StyleResolver";
 import { schema } from "../model/schema";
 
 // Helper — create a ProseMirror mark by name
@@ -74,5 +74,56 @@ describe("resolveFont — font_family mark", () => {
     expect(
       resolveFont("14px Georgia", [mark("font_family", { family: "Times New Roman" })])
     ).toBe("14px Times New Roman");
+  });
+});
+
+describe("substituteFamily", () => {
+  it("replaces the family, preserves size", () => {
+    expect(substituteFamily("14px Georgia", "Arial")).toBe("14px Arial");
+  });
+
+  it("replaces the family, preserves bold weight", () => {
+    expect(substituteFamily("bold 28px Georgia, serif", "Inter")).toBe("bold 28px Inter");
+  });
+
+  it("replaces the family, preserves italic style", () => {
+    expect(substituteFamily("italic 14px Georgia", "Verdana")).toBe("italic 14px Verdana");
+  });
+
+  it("replaces the family, preserves bold+italic", () => {
+    expect(substituteFamily("italic bold 14px Georgia", "Courier New")).toBe("italic bold 14px Courier New");
+  });
+
+  it("handles multi-word family in input", () => {
+    expect(substituteFamily("14px Times New Roman", "Arial")).toBe("14px Arial");
+  });
+
+  it("handles multi-word family in replacement", () => {
+    expect(substituteFamily("14px Georgia", "Times New Roman")).toBe("14px Times New Roman");
+  });
+});
+
+describe("normalizeFont", () => {
+  it("strips bold, keeps size and family", () => {
+    expect(normalizeFont("bold 14px Georgia")).toBe("14px Georgia");
+  });
+
+  it("strips italic, keeps size and family", () => {
+    expect(normalizeFont("italic 14px Georgia")).toBe("14px Georgia");
+  });
+
+  it("strips bold+italic", () => {
+    expect(normalizeFont("italic bold 28px Georgia, serif")).toBe("28px Georgia, serif");
+  });
+
+  it("leaves normal-weight font unchanged", () => {
+    expect(normalizeFont("14px Georgia")).toBe("14px Georgia");
+  });
+
+  it("preserves font size change (font_size mark scenario)", () => {
+    // "bold 32px Georgia" and "32px Georgia" both normalize to "32px Georgia"
+    // — they share the same line height, which is what we want
+    expect(normalizeFont("bold 32px Georgia")).toBe("32px Georgia");
+    expect(normalizeFont("32px Georgia")).toBe("32px Georgia");
   });
 });

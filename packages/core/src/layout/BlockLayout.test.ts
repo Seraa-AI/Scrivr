@@ -1,12 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
-import { layoutBlock, resolveLeafBlockDimensions } from "./BlockLayout";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { layoutBlock, populateCharMap, resolveLeafBlockDimensions } from "./BlockLayout";
+import { TextBlockStrategy } from "./TextBlockStrategy";
 import { CharacterMap } from "./CharacterMap";
+import type { InlineStrategy } from "./BlockRegistry";
+import { InlineRegistry } from "./BlockRegistry";
 import { defaultFontConfig } from "./FontConfig";
 import type { FontConfig } from "./FontConfig";
 import { schema } from "../model/schema";
 import {
   createMeasurer,
   buildStarterKitContext,
+  MOCK_LINE_HEIGHT,
   paragraph,
   boldParagraph,
   underlineParagraph,
@@ -14,6 +18,19 @@ import {
   mixedParagraph,
   heading,
 } from "../test-utils";
+
+// StarterKit schema has the fontFamily attr on paragraph and heading nodes.
+const { schema: skSchema } = buildStarterKitContext();
+
+// Helper: paragraph node with a fontFamily attr set
+function paragraphWithFamily(text: string, fontFamily: string) {
+  return skSchema.node("paragraph", { fontFamily }, text ? [skSchema.text(text)] : []);
+}
+
+// Helper: heading node with a fontFamily attr set
+function headingWithFamily(level: number, text: string, fontFamily: string) {
+  return skSchema.node("heading", { level, fontFamily }, [skSchema.text(text)]);
+}
 
 // lineHeight = (12+3) * 1.2 = 18
 
@@ -119,8 +136,9 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
       nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
     });
     const span = block.lines[0]?.spans[0];
-    expect(span?.marks).toBeDefined();
-    expect(span?.marks?.some((m) => m.name === "underline")).toBe(true);
+    const textSpan = span?.kind === "text" ? span : undefined;
+    expect(textSpan?.marks).toBeDefined();
+    expect(textSpan?.marks?.some((m) => m.name === "underline")).toBe(true);
   });
 
   it("strikethrough mark appears on layout spans", () => {
@@ -128,7 +146,8 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
       nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
     });
     const span = block.lines[0]?.spans[0];
-    expect(span?.marks?.some((m) => m.name === "strikethrough")).toBe(true);
+    const textSpan = span?.kind === "text" ? span : undefined;
+    expect(textSpan?.marks?.some((m) => m.name === "strikethrough")).toBe(true);
   });
 
   it("plain text has empty marks array", () => {
@@ -136,7 +155,8 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
       nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
     });
     const span = block.lines[0]?.spans[0];
-    expect(span?.marks).toHaveLength(0);
+    const textSpan = span?.kind === "text" ? span : undefined;
+    expect(textSpan?.marks).toHaveLength(0);
   });
 
   it("mixed paragraph: plain span has no underline, underlined span does", () => {
@@ -146,10 +166,12 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
     // Two children → two spans on the line
     const spans = block.lines[0]?.spans ?? [];
     expect(spans.length).toBeGreaterThanOrEqual(2);
-    const plainSpan = spans.find((s) => s.text === "Hello ");
-    const underlinedSpan = spans.find((s) => s.text === "World");
-    expect(plainSpan?.marks?.some((m) => m.name === "underline")).toBe(false);
-    expect(underlinedSpan?.marks?.some((m) => m.name === "underline")).toBe(true);
+    const plainSpan = spans.find((s) => s.kind === "text" && s.text === "Hello ");
+    const underlinedSpan = spans.find((s) => s.kind === "text" && s.text === "World");
+    const plainTextSpan = plainSpan?.kind === "text" ? plainSpan : undefined;
+    const underlinedTextSpan = underlinedSpan?.kind === "text" ? underlinedSpan : undefined;
+    expect(plainTextSpan?.marks?.some((m) => m.name === "underline")).toBe(false);
+    expect(underlinedTextSpan?.marks?.some((m) => m.name === "underline")).toBe(true);
   });
 
   it("marks survive word-wrap: multi-word underlined text passes marks to all spans", () => {
@@ -160,7 +182,9 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
     expect(block.lines.length).toBeGreaterThan(1);
     for (const line of block.lines) {
       for (const span of line.spans) {
-        expect(span.marks?.some((m) => m.name === "underline")).toBe(true);
+        if (span.kind === "text") {
+          expect(span.marks?.some((m) => m.name === "underline")).toBe(true);
+        }
       }
     }
   });
@@ -312,6 +336,31 @@ describe("layoutBlock — leaf blocks (HR and Image)", () => {
     expect(map.hasLine(1, 0)).toBe(true);
   });
 
+  it("HR block — click on left half resolves to position BEFORE the block", () => {
+    // nodePos=10, nodeSize=1 (leaf) → beforePos=10, afterPos=11
+    // availableWidth=400 → halfWidth=200; left glyph x=72..272, right x=272..472
+    const map = new CharacterMap();
+    layoutBlock(hr(), {
+      nodePos: 10, x: 72, y: 50, availableWidth: 400, page: 1,
+      measurer: createMeasurer(), fontConfig: hrFontConfig, map, lineIndexOffset: 0,
+    });
+    // Click left quarter (x=72+50=122, midpoint of left glyph=72+100=172 → 122<=172 → before)
+    const pos = map.posAtCoords(72 + 50, 55, 1);
+    expect(pos).toBe(10);
+  });
+
+  it("HR block — click on right half resolves to position AFTER the block", () => {
+    // nodePos=10, nodeSize=1 (leaf) → afterPos=11
+    const map = new CharacterMap();
+    layoutBlock(hr(), {
+      nodePos: 10, x: 72, y: 50, availableWidth: 400, page: 1,
+      measurer: createMeasurer(), fontConfig: hrFontConfig, map, lineIndexOffset: 0,
+    });
+    // Click right side (x=72+350=422, past midpoint of right glyph=72+300=372 → endDocPos=11)
+    const pos = map.posAtCoords(72 + 350, 55, 1);
+    expect(pos).toBe(11);
+  });
+
   it("Image block — height comes from node height attr (200)", () => {
     const block = layoutBlock(image(200), {
       nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
@@ -388,5 +437,423 @@ describe("resolveLeafBlockDimensions", () => {
     const { spaceBefore, spaceAfter } = resolveLeafBlockDimensions(node, undefined, IMAGE_DEFAULT, IMAGE_SPACE);
     expect(spaceBefore).toBe(IMAGE_SPACE);
     expect(spaceAfter).toBe(IMAGE_SPACE);
+  });
+});
+
+// ── End-of-line caret sentinel ─────────────────────────────────────────────────
+//
+// Without the sentinel, coordsAtPos(endDocPos) falls back to a
+// reversed-registration-order search that can return a glyph from the wrong
+// page when multiple pages are registered in non-docPos order (cursor page is
+// always registered first). The sentinel provides an exact-match glyph so the
+// fallback is never reached.
+
+describe("layoutBlock — end-of-line caret sentinel (via layoutBlock map)", () => {
+  it("registers sentinel glyph at docPos just past the last character", () => {
+    const map = new CharacterMap();
+    // "Hi" at nodePos=0 → chars at docPos 1,2 → sentinel at 3
+    layoutBlock(paragraph("Hi"), {
+      nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1,
+      measurer: createMeasurer(), map, lineIndexOffset: 0,
+    });
+    expect(map.hasGlyph(3)).toBe(true);
+  });
+
+  it("sentinel x equals right edge of last character", () => {
+    const map = new CharacterMap();
+    layoutBlock(paragraph("Hi"), {
+      nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1,
+      measurer: createMeasurer(), map, lineIndexOffset: 0,
+    });
+    // 'i' is at docPos 2, sentinel at docPos 3
+    const iCoords   = map.coordsAtPos(2);
+    const sentCoords = map.coordsAtPos(3);
+    // sentinel.x = iCoords.x + iCoords.width (8px per char in mock)
+    expect(sentCoords?.x).toBeCloseTo(iCoords!.x + 8);
+  });
+
+  it("sentinel width is 0 (it has no visual extent)", () => {
+    const map = new CharacterMap();
+    layoutBlock(paragraph("Hi"), {
+      nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1,
+      measurer: createMeasurer(), map, lineIndexOffset: 0,
+    });
+    // Access internal glyphs to verify width=0
+    const glyphs = map.glyphsInRange(3, 4);
+    expect(glyphs[0]?.width).toBe(0);
+  });
+
+  it("does NOT register a sentinel for an empty paragraph (ZWS)", () => {
+    const map = new CharacterMap();
+    layoutBlock(paragraph(""), {
+      nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1,
+      measurer: createMeasurer(), map, lineIndexOffset: 0,
+    });
+    // ZWS at docPos 1 is registered; docPos 2 (past closing token) must NOT be
+    expect(map.hasGlyph(1)).toBe(true);
+    expect(map.hasGlyph(2)).toBe(false);
+  });
+
+  it("sentinel is only on the last line — intermediate lines are not corrupted", () => {
+    const map = new CharacterMap();
+    // "Hello world" wraps to 2 lines at width=80 (11 chars × 8px = 88 > 80)
+    layoutBlock(paragraph("Hello world"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 80, page: 1,
+      measurer: createMeasurer(), map, lineIndexOffset: 0,
+    });
+    // The first glyph of line 2 ('w' at docPos 7 if "Hello " is line 1)
+    // must be reachable via exact match — no sentinel at that position.
+    // Total glyphs = 11 chars + 1 sentinel (last line only), not 13.
+    const allGlyphs = map.glyphsInRange(0, 20);
+    expect(allGlyphs).toHaveLength(12); // 11 chars + 1 sentinel on last line
+  });
+});
+
+describe("populateCharMap — end-of-line caret sentinel", () => {
+  it("registers sentinel glyph at docPos past the last character", () => {
+    const block = layoutBlock(paragraph("Hi"), {
+      nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    const map = new CharacterMap();
+    populateCharMap(block, map, 1, 0, createMeasurer());
+    // "Hi" → chars at docPos 1,2 → sentinel at 3
+    expect(map.hasGlyph(3)).toBe(true);
+  });
+
+  it("sentinel glyph is on the correct page", () => {
+    const block = layoutBlock(paragraph("Hi"), {
+      nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    const map = new CharacterMap();
+    populateCharMap(block, map, 3, 0, createMeasurer()); // page 3
+    expect(map.coordsAtPos(3)?.page).toBe(3);
+  });
+
+  it("coordsAtPos(endDocPos) returns the sentinel page even when another page's glyphs were registered first", () => {
+    // Simulate the scroll-to-top bug scenario:
+    // page 3 (cursor page) is registered first; page 1 is registered second.
+    // Without sentinel, coordsAtPos(endDocPos_on_page1) would reverse-search
+    // and find a page-3 glyph (higher docPos, registered earlier → appears
+    // later in the reversed array), returning the wrong page.
+    // With sentinel, the exact-match path returns page 1 correctly.
+    const blockP3 = layoutBlock(paragraph("Page three text"), {
+      nodePos: 20, x: 72, y: 200, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    const blockP1 = layoutBlock(paragraph("Hi"), {
+      nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    const map = new CharacterMap();
+
+    // Register page-3 block first (higher docPos) — mimics ensurePagePopulated(cursorPage)
+    populateCharMap(blockP3, map, 3, 0, createMeasurer());
+    // Then register page-1 block (lower docPos) — mimics ensurePagePopulated(cursorPage-2)
+    populateCharMap(blockP1, map, 1, 0, createMeasurer());
+
+    // docPos 3 = sentinel after "Hi" on page 1
+    const coords = map.coordsAtPos(3);
+    expect(coords?.page).toBe(1);
+  });
+
+  it("does NOT register sentinel for empty paragraph (ZWS only line)", () => {
+    const block = layoutBlock(paragraph(""), {
+      nodePos: 0, x: 72, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    const map = new CharacterMap();
+    populateCharMap(block, map, 1, 0, createMeasurer());
+    expect(map.hasGlyph(1)).toBe(true);  // ZWS cursor position
+    expect(map.hasGlyph(2)).toBe(false); // nothing past closing token
+  });
+
+  it("sentinel is only on the last line of a wrapped paragraph", () => {
+    const block = layoutBlock(paragraph("Hello world"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 80, page: 1, measurer: createMeasurer(),
+    });
+    expect(block.lines).toHaveLength(2);
+    const map = new CharacterMap();
+    populateCharMap(block, map, 1, 0, createMeasurer());
+    // 11 chars + 1 sentinel (last line only) = 12 total glyphs
+    expect(map.glyphsInRange(0, 20)).toHaveLength(12);
+  });
+});
+
+// ── node.attrs.fontFamily override ────────────────────────────────────────────
+
+describe("layoutBlock — node fontFamily attr", () => {
+  it("span font uses the node fontFamily instead of the block style family", () => {
+    const block = layoutBlock(paragraphWithFamily("Hello", "Arial"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    const span = block.lines[0]?.spans[0];
+    const font = span?.kind === "text" ? span.font : undefined;
+    // The span font should contain "Arial", not "Georgia"
+    expect(font).toContain("Arial");
+    expect(font).not.toContain("Georgia");
+  });
+
+  it("preserves the block style size when substituting the family", () => {
+    const block = layoutBlock(paragraphWithFamily("Hello", "Arial"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    const span = block.lines[0]?.spans[0];
+    const font = span?.kind === "text" ? span.font : undefined;
+    // Paragraph base size is 14px — must be preserved after family substitution
+    expect(font).toContain("14px");
+  });
+
+  it("preserves heading size and weight when substituting the family", () => {
+    const block = layoutBlock(headingWithFamily(1, "Title", "Inter"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    const span = block.lines[0]?.spans[0];
+    const font = span?.kind === "text" ? span.font : "";
+    expect(font).toContain("Inter");
+    expect(font).toContain("28px");
+    expect(font).toContain("bold");
+  });
+
+  it("null fontFamily attr falls back to the block style family", () => {
+    // No fontFamily attr — should use default Georgia from block style
+    const block = layoutBlock(paragraph("Hello"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+    });
+    const span = block.lines[0]?.spans[0];
+    const font = span?.kind === "text" ? span.font : undefined;
+    expect(font).toContain("Georgia");
+  });
+
+  it("node fontFamily overrides the fontConfig family", () => {
+    const customConfig: FontConfig = {
+      paragraph: { font: "14px Verdana", spaceBefore: 0, spaceAfter: 10, align: "left" },
+    };
+    const block = layoutBlock(paragraphWithFamily("Hello", "Courier New"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1,
+      measurer: createMeasurer(),
+      fontConfig: customConfig,
+    });
+    const span = block.lines[0]?.spans[0];
+    const font = span?.kind === "text" ? span.font : undefined;
+    expect(font).toContain("Courier New");
+    expect(font).not.toContain("Verdana");
+  });
+});
+
+// ── Inline node handling — regression suite ───────────────────────────────────
+//
+// These tests lock in the correct behaviour introduced when images moved from
+// full-width block nodes to inline objects inside paragraph line boxes.
+//
+// THE REGRESSION that prompted this suite:
+//   extractSpans() started treating ALL inline leaf nodes (including hard_break)
+//   as inline objects. hard_break has no width/height attrs, so it defaulted to
+//   200 × 200 px — every Shift-Enter line break created a massive blank space.
+//
+// Rule: only inline leaf nodes with at least one numeric width/height attr are
+// emitted as object spans. Structural leaves (hard_break) are silently skipped.
+
+describe("extractSpans — inline node handling (regression)", () => {
+  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+
+  // ── hard_break must never become an object span ──────────────────────────
+
+  it("hard_break inside a paragraph does NOT produce an object span", () => {
+    const hb = skSchema.nodes["hard_break"]?.create();
+    if (!hb) return;
+    const para = skSchema.node("paragraph", null, [
+      skSchema.text("Hello"), hb, skSchema.text("World"),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    const allSpans = block.lines.flatMap(l => l.spans);
+    expect(allSpans.every(s => s.kind === "text")).toBe(true);
+  });
+
+  it("hard_break does NOT inflate line height to 200px — stays at text line height", () => {
+    // THE EXACT REGRESSION: before the guard, lineHeight became 200px here.
+    const hb = skSchema.nodes["hard_break"]?.create();
+    if (!hb) return;
+    const para = skSchema.node("paragraph", null, [
+      skSchema.text("A"), hb, skSchema.text("B"),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    for (const line of block.lines) {
+      expect(line.lineHeight).toBeLessThan(100);
+      expect(line.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    }
+  });
+
+  it("paragraph containing only a hard_break falls back to ZWS — normal line height", () => {
+    const hb = skSchema.nodes["hard_break"]?.create();
+    if (!hb) return;
+    const para = skSchema.node("paragraph", null, [hb]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    expect(block.lines).toHaveLength(1);
+    expect(block.lines[0]?.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    const spans = block.lines[0]?.spans ?? [];
+    expect(spans.every(s => s.kind === "text")).toBe(true);
+  });
+
+  // ── inline image IS an object span ───────────────────────────────────────
+
+  it("inline image with width+height attrs produces exactly one object span", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 100, height: 80 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [
+      skSchema.text("Before"), img, skSchema.text("After"),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 600,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    const allSpans = block.lines.flatMap(l => l.spans);
+    const objectSpans = allSpans.filter(s => s.kind === "object");
+    expect(objectSpans).toHaveLength(1);
+  });
+
+  it("line containing an inline image is as tall as the image when it exceeds text height", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 200, height: 150 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [img]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    expect(block.lines[0]?.lineHeight).toBe(150);
+    expect(block.height).toBe(150);
+  });
+
+  it("line height is max(text, image) — small image alongside text keeps text height", () => {
+    // Image (8px) is shorter than text (~18px) — line height must not shrink.
+    const img = skSchema.nodes["image"]?.create({ src: "i.png", width: 8, height: 8 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    expect(block.lines[0]?.lineHeight).toBeGreaterThanOrEqual(MOCK_LINE_HEIGHT);
+  });
+
+  it("inline image registers a glyph in the CharacterMap at its docPos", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 50, height: 50 });
+    if (!img) return;
+    // doc structure: doc(para(text"Hi", img)) — image is at docPos 4
+    // nodePos=0 → para opens at 0, text "Hi" at 1,2, img at 3
+    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const map = new CharacterMap();
+    layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig, map,
+    });
+    // "Hi" → docPos 1,2; image → docPos 3; sentinel → docPos 4
+    expect(map.hasGlyph(3)).toBe(true); // the image glyph
+    expect(map.hasGlyph(4)).toBe(true); // sentinel past the image
+  });
+});
+
+// ── TextBlockStrategy — inline object rendering ───────────────────────────────
+//
+// Verifies that TextBlockStrategy correctly dispatches object spans to the
+// InlineRegistry. This is the rendering path that was silently broken when
+// StarterKit collected layoutHandlers (now empty on Image) instead of
+// inlineHandlers — images appeared as blank cursors.
+
+describe("TextBlockStrategy — inline image rendering", () => {
+  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+
+  function makeMockCtx(): CanvasRenderingContext2D {
+    return {
+      save: vi.fn(), restore: vi.fn(),
+      fillText: vi.fn(), strokeRect: vi.fn(), fillRect: vi.fn(),
+      measureText: vi.fn(() => ({ width: 8 })),
+      beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(),
+      stroke: vi.fn(), fill: vi.fn(), arc: vi.fn(), closePath: vi.fn(),
+      font: "", fillStyle: "", strokeStyle: "", lineWidth: 1,
+      textAlign: "left", textBaseline: "alphabetic",
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+  }
+
+  it("calls InlineStrategy.render() for each inline image span", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 80, height: 60 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+
+    const renderFn = vi.fn();
+    const inlineStrategy: InlineStrategy = { render: renderFn };
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("image", inlineStrategy);
+
+    const ctx = makeMockCtx();
+    TextBlockStrategy.render(block, {
+      ctx,
+      pageNumber: 1,
+      lineIndexOffset: 0,
+      dpr: 1,
+      measurer: createMeasurer(),
+      inlineRegistry,
+    }, new CharacterMap());
+
+    expect(renderFn).toHaveBeenCalledOnce();
+    // Verify it was called with the correct node
+    const [, , , w, h, node] = renderFn.mock.calls[0] as [unknown, unknown, unknown, number, number, unknown];
+    expect(w).toBe(80);
+    expect(h).toBe(60);
+  });
+
+  it("does NOT call InlineStrategy.render() when inlineRegistry is absent", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 80, height: 60 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [img]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+
+    const ctx = makeMockCtx();
+    // No inlineRegistry — should not throw, just silently skip drawing
+    expect(() => {
+      TextBlockStrategy.render(block, {
+        ctx, pageNumber: 1, lineIndexOffset: 0, dpr: 1, measurer: createMeasurer(),
+      }, new CharacterMap());
+    }).not.toThrow();
+  });
+
+  it("still renders surrounding text when paragraph contains a mix of text and image", () => {
+    const img = skSchema.nodes["image"]?.create({ src: "a.png", width: 50, height: 50 });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [
+      skSchema.text("Hello"), img, skSchema.text("World"),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 600,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+
+    const renderFn = vi.fn();
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("image", { render: renderFn });
+
+    const ctx = makeMockCtx();
+    TextBlockStrategy.render(block, {
+      ctx, pageNumber: 1, lineIndexOffset: 0, dpr: 1,
+      measurer: createMeasurer(), inlineRegistry,
+    }, new CharacterMap());
+
+    // Text was drawn (fillText called for "Hello" and "World" chars)
+    expect(ctx.fillText).toHaveBeenCalled();
+    // Image strategy was also called
+    expect(renderFn).toHaveBeenCalledOnce();
   });
 });

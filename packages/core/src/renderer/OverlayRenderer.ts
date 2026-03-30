@@ -160,25 +160,29 @@ export function renderTrackedDelete(
     }
   }
 
-  // Strikethrough — group by line to draw one line per row
-  const byLine = new Map<number, { minX: number; maxX: number; midY: number }>();
-  for (const g of glyphs) {
-    const existing = byLine.get(g.lineIndex);
-    if (existing) {
-      existing.minX = Math.min(existing.minX, g.x);
-      existing.maxX = Math.max(existing.maxX, g.x + g.width);
+  // Strikethrough — one segment per contiguous docPos run on each line.
+  // Sorting by docPos then checking adjacency ensures that non-deleted text
+  // inserted between two delete spans (e.g. "~~foo~~ bar ~~baz~~") does not
+  // produce a single strikethrough that crosses "bar".
+  const sorted = [...glyphs].sort((a, b) =>
+    a.lineIndex !== b.lineIndex ? a.lineIndex - b.lineIndex : a.docPos - b.docPos,
+  );
+
+  const runs: Array<{ minX: number; maxX: number; midY: number; prevDocPos: number }> = [];
+  for (const g of sorted) {
+    const last = runs[runs.length - 1];
+    const midY = g.y + g.height / 2;
+    if (last && last.prevDocPos + 1 === g.docPos && last.midY === midY) {
+      last.maxX = Math.max(last.maxX, g.x + g.width);
+      last.prevDocPos = g.docPos;
     } else {
-      byLine.set(g.lineIndex, {
-        minX: g.x,
-        maxX: g.x + g.width,
-        midY: g.y + g.height / 2,
-      });
+      runs.push({ minX: g.x, maxX: g.x + g.width, midY, prevDocPos: g.docPos });
     }
   }
 
   ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
   ctx.lineWidth   = 1.5;
-  for (const { minX, maxX, midY } of byLine.values()) {
+  for (const { minX, maxX, midY } of runs) {
     ctx.beginPath();
     ctx.moveTo(minX, midY);
     ctx.lineTo(maxX, midY);

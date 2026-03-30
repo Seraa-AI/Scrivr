@@ -72,51 +72,100 @@ describe("deleteSelection", () => {
 
 // ── deleteBackward ────────────────────────────────────────────────────────────
 
+function applyBackward(state: EditorState): EditorState | null {
+  let dispatched: ReturnType<typeof state.apply> | null = null;
+  const handled = deleteBackward(state, (tr) => { dispatched = state.apply(tr); });
+  return handled ? dispatched : null;
+}
+
 describe("deleteBackward", () => {
-  it("returns null when at the start of the document", () => {
+  it("returns false at the start of the document (no-op)", () => {
     const state = makeState();
-    expect(deleteBackward(state)).toBeNull();
+    expect(deleteBackward(state)).toBe(false);
   });
 
-  it("deletes one character behind the cursor", () => {
+  it("deletes one character to the left (mid-text)", () => {
     const state = makeState("abc");
-    // cursor is after "abc" — position 4 (doc > paragraph > text)
-    const tr = deleteBackward(state);
-    expect(tr).not.toBeNull();
-    const next = state.apply(tr!);
-    expect(next.doc.textContent).toBe("ab");
+    const next = applyBackward(state);
+    expect(next?.doc.textContent).toBe("ab");
   });
 
   it("deletes the selection when non-empty", () => {
     const sel = stateWithSelection("hello", 2, 4);
-    const tr = deleteBackward(sel);
-    expect(tr).not.toBeNull();
-    const next = sel.apply(tr!);
-    expect(next.doc.textContent).toBe("hlo");
+    const next = applyBackward(sel);
+    expect(next?.doc.textContent).toBe("hlo");
+  });
+
+  it("joins two paragraphs when cursor is at the start of the second one", () => {
+    // Build: <p>Hello</p><p>World</p>, cursor at start of "World"
+    const s1 = makeState("Hello");
+    const s2 = s1.apply(splitBlock(s1)!);
+    const s3 = s2.apply(insertText(s2, "World")!);
+
+    // cursor is after "World" — move it to the start of the second paragraph
+    const { TextSelection } = require("prosemirror-state");
+    // <p>Hello</p> occupies positions 0-6 (nodeSize=7); second <p> opens at 7, inside at 8
+    const s4 = s3.apply(s3.tr.setSelection(TextSelection.near(s3.doc.resolve(8))));
+
+    const next = applyBackward(s4);
+    expect(next?.doc.textContent).toBe("HelloWorld");
+    expect(next?.doc.childCount).toBe(1); // merged into one paragraph
+  });
+
+  it("joins an empty paragraph into the preceding one", () => {
+    // <p>Hello</p><p></p>, cursor at start of empty paragraph
+    const s1 = makeState("Hello");
+    const s2 = s1.apply(splitBlock(s1)!);
+    // cursor is already inside the new empty paragraph
+    const next = applyBackward(s2);
+    expect(next?.doc.childCount).toBe(1);
+    expect(next?.doc.textContent).toBe("Hello");
   });
 });
 
 // ── deleteForward ─────────────────────────────────────────────────────────────
 
+function applyForward(state: EditorState): EditorState | null {
+  let dispatched: ReturnType<typeof state.apply> | null = null;
+  const handled = deleteForward(state, (tr) => { dispatched = state.apply(tr); });
+  return handled ? dispatched : null;
+}
+
 describe("deleteForward", () => {
+  it("returns false at the end of the document (no-op)", () => {
+    const state = makeState("abc");
+    expect(deleteForward(state)).toBe(false);
+  });
+
   it("deletes one character ahead of the cursor", () => {
     const state = makeState("abc");
     // Move cursor to after the paragraph open token (position 1)
     const { TextSelection } = require("prosemirror-state");
     const $pos = state.doc.resolve(1);
     const withCursor = state.apply(state.tr.setSelection(TextSelection.near($pos)));
-    const tr = deleteForward(withCursor);
-    expect(tr).not.toBeNull();
-    const next = withCursor.apply(tr!);
-    expect(next.doc.textContent).toBe("bc");
+    const next = applyForward(withCursor);
+    expect(next?.doc.textContent).toBe("bc");
   });
 
   it("deletes the selection when non-empty", () => {
     const sel = stateWithSelection("hello", 2, 4);
-    const tr = deleteForward(sel);
-    expect(tr).not.toBeNull();
-    const next = sel.apply(tr!);
-    expect(next.doc.textContent).toBe("hlo");
+    const next = applyForward(sel);
+    expect(next?.doc.textContent).toBe("hlo");
+  });
+
+  it("joins two paragraphs when cursor is at the end of the first one", () => {
+    // Build: <p>Hello</p><p>World</p>, cursor at end of "Hello"
+    const s1 = makeState("Hello");
+    const s2 = s1.apply(splitBlock(s1)!);
+    const s3 = s2.apply(insertText(s2, "World")!);
+
+    // Move cursor to the end of the first paragraph: position 6
+    const { TextSelection } = require("prosemirror-state");
+    const s4 = s3.apply(s3.tr.setSelection(TextSelection.near(s3.doc.resolve(6))));
+
+    const next = applyForward(s4);
+    expect(next?.doc.textContent).toBe("HelloWorld");
+    expect(next?.doc.childCount).toBe(1);
   });
 });
 

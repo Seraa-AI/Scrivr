@@ -15,11 +15,18 @@ export interface GlyphEntry {
   docPos: number;
   /** Left edge of this glyph in canvas coordinates */
   x: number;
-  /** Top of the line this glyph sits on */
+  /** Top of the glyph's render rectangle (may be offset from lineY for vertically-centered glyphs) */
   y: number;
+  /**
+   * Top of the owning line's rectangle — always equals the LineEntry.y for this glyph's line.
+   * Used by posAtCoords to group glyphs by line independently of their render y,
+   * which can differ when inline images inflate the line height and glyphs are
+   * vertically offset within it.
+   */
+  lineY: number;
   /** Measured width of this glyph */
   width: number;
-  /** Line height (ascent + descent) */
+  /** Cursor/hit-test height — text-sized for text glyphs and object glyphs */
   height: number;
   /** 1-based page number */
   page: number;
@@ -54,14 +61,32 @@ export interface CoordsResult {
   page: number;
 }
 
+/**
+ * Actual render rect of an inline object (image, widget) on the canvas.
+ * Unlike GlyphEntry (which is cursor-sized), this stores the full visual bounds
+ * so the overlay can draw resize handles and the popover can position correctly.
+ */
+export interface ObjectRectEntry {
+  docPos: number;
+  /** Left edge of the object in canvas coordinates */
+  x: number;
+  /** Top of the object in canvas coordinates (not the text baseline) */
+  y: number;
+  width: number;
+  height: number;
+  page: number;
+}
+
 export class CharacterMap {
   private glyphs: GlyphEntry[] = [];
   private lines: LineEntry[] = [];
+  private objectRects = new Map<number, ObjectRectEntry>();
 
   // Called by the layout engine after each layout pass
   clear(): void {
     this.glyphs = [];
     this.lines = [];
+    this.objectRects.clear();
   }
 
   registerGlyph(entry: GlyphEntry): void {
@@ -70,6 +95,16 @@ export class CharacterMap {
 
   registerLine(entry: LineEntry): void {
     this.lines.push(entry);
+  }
+
+  /** Register the full visual bounding rect of an inline object (image, widget). */
+  registerObjectRect(entry: ObjectRectEntry): void {
+    this.objectRects.set(entry.docPos, entry);
+  }
+
+  /** Returns the full visual rect of the inline object at docPos, or undefined. */
+  getObjectRect(docPos: number): ObjectRectEntry | undefined {
+    return this.objectRects.get(docPos);
   }
 
   /**
@@ -89,14 +124,16 @@ export class CharacterMap {
     const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
     if (!line) return 0;
 
-    // Filter by y coordinate rather than lineIndex so that table cells —
-    // which share the same y but have different lineIndex values — all
-    // participate in the x hit-test. Sort left-to-right for safety.
+    // Filter by lineY rather than glyph.y so that:
+    // (a) table cells — which share the same lineY but have different lineIndex
+    //     values — all participate in the x hit-test, and
+    // (b) inline objects that inflate lineHeight — whose glyphs are vertically
+    //     offset from the line top — are still found alongside text glyphs.
     const lineGlyphs = this.glyphs
-      .filter((g) => g.page === page && g.y === line.y)
+      .filter((g) => g.page === page && g.lineY === line.y)
       .sort((a, b) => a.x - b.x);
 
-    if (lineGlyphs.length === 0) return line.startDocPos;
+    if (!lineGlyphs.length) return line.startDocPos;
 
     for (const glyph of lineGlyphs) {
       const midpoint = glyph.x + glyph.width / 2;
@@ -123,19 +160,27 @@ export class CharacterMap {
    *
    * If the position falls between two glyphs, returns the right edge of
    * the preceding glyph (i.e. the left edge of the gap).
+   *
+   * @param scopeToPage — when provided, both the exact and preceding-glyph
+   *   searches are restricted to glyphs on that page. Use this when rendering
+   *   the cursor overlay so the fallback can never land on a glyph from a
+   *   different page's canvas (which would cause the cursor to disappear or
+   *   jump). Callers that need cross-page data (posAbove, posBelow) omit this.
    */
-  coordsAtPos(docPos: number): CoordsResult | null {
+  coordsAtPos(docPos: number, scopeToPage?: number): CoordsResult | null {
+    const pool =
+      scopeToPage !== undefined
+        ? this.glyphs.filter((g) => g.page === scopeToPage)
+        : this.glyphs;
+
     // Exact match — start of a glyph
-    const exact = this.glyphs.find((g) => g.docPos === docPos);
+    const exact = pool.find((g) => g.docPos === docPos);
     if (exact) {
       return { x: exact.x, y: exact.y, height: exact.height, page: exact.page };
     }
 
     // Position is after the last glyph on a line — draw cursor at its right edge
-    const preceding = [...this.glyphs]
-      .reverse()
-      .find((g) => g.docPos < docPos);
-
+    const preceding = [...pool].reverse().find((g) => g.docPos < docPos);
     if (preceding) {
       return {
         x: preceding.x + preceding.width,
@@ -169,20 +214,26 @@ export class CharacterMap {
     // Find the highest line on this page that is strictly above currentLine.y
     const above = this.lines
       .filter((l) => l.page === currentLine.page && l.y < currentLine.y)
-      .reduce<LineEntry | undefined>(
-        (best, l) => (best === undefined || l.y > best.y ? l : best),
-        undefined,
-      );
+      .reduce<
+        LineEntry | undefined
+      >((best, l) => (best === undefined || l.y > best.y ? l : best), undefined);
 
-    if (above) {
+    if (above)
       return this.posAtCoords(x, above.y + above.height / 2, above.page);
-    }
 
     // First visual row on this page — jump to the last line of the previous page
-    const prevPageLines = this.lines.filter((l) => l.page === currentLine.page - 1);
-    if (prevPageLines.length === 0) return null;
-    const lastOnPrev = prevPageLines.reduce((max, l) => (l.y > max.y ? l : max));
-    return this.posAtCoords(x, lastOnPrev.y + lastOnPrev.height / 2, lastOnPrev.page);
+    const prevPageLines = this.lines.filter(
+      (l) => l.page === currentLine.page - 1,
+    );
+    if (!prevPageLines.length) return null;
+    const lastOnPrev = prevPageLines.reduce((max, l) =>
+      l.y > max.y ? l : max,
+    );
+    return this.posAtCoords(
+      x,
+      lastOnPrev.y + lastOnPrev.height / 2,
+      lastOnPrev.page,
+    );
   }
 
   /**
@@ -205,20 +256,26 @@ export class CharacterMap {
     const currentBottom = currentLine.y + currentLine.height;
     const below = this.lines
       .filter((l) => l.page === currentLine.page && l.y >= currentBottom)
-      .reduce<LineEntry | undefined>(
-        (best, l) => (best === undefined || l.y < best.y ? l : best),
-        undefined,
-      );
+      .reduce<
+        LineEntry | undefined
+      >((best, l) => (best === undefined || l.y < best.y ? l : best), undefined);
 
-    if (below) {
+    if (below)
       return this.posAtCoords(x, below.y + below.height / 2, below.page);
-    }
 
     // Last visual row on this page — jump to the first line of the next page
-    const nextPageLines = this.lines.filter((l) => l.page === currentLine.page + 1);
-    if (nextPageLines.length === 0) return null;
-    const firstOnNext = nextPageLines.reduce((min, l) => (l.y < min.y ? l : min));
-    return this.posAtCoords(x, firstOnNext.y + firstOnNext.height / 2, firstOnNext.page);
+    const nextPageLines = this.lines.filter(
+      (l) => l.page === currentLine.page + 1,
+    );
+    if (!nextPageLines.length) return null;
+    const firstOnNext = nextPageLines.reduce((min, l) =>
+      l.y < min.y ? l : min,
+    );
+    return this.posAtCoords(
+      x,
+      firstOnNext.y + firstOnNext.height / 2,
+      firstOnNext.page,
+    );
   }
 
   /**
@@ -259,7 +316,7 @@ export class CharacterMap {
   // Internal — find which line a y coordinate lands on
   private lineAtCoords(y: number, page: number): LineEntry | undefined {
     return this.lines.find(
-      (l) => l.page === page && y >= l.y && y < l.y + l.height
+      (l) => l.page === page && y >= l.y && y < l.y + l.height,
     );
   }
 
@@ -267,15 +324,15 @@ export class CharacterMap {
   // Click above first line → first line. Click below last line → last line.
   private nearestLine(y: number, page: number): LineEntry | undefined {
     const pageLines = this.lines.filter((l) => l.page === page);
-    if (pageLines.length === 0) return undefined;
+    if (!pageLines.length) return undefined;
     return pageLines.reduce((closest, line) => {
       const closestDist = Math.min(
         Math.abs(y - closest.y),
-        Math.abs(y - (closest.y + closest.height))
+        Math.abs(y - (closest.y + closest.height)),
       );
       const lineDist = Math.min(
         Math.abs(y - line.y),
-        Math.abs(y - (line.y + line.height))
+        Math.abs(y - (line.y + line.height)),
       );
       return lineDist < closestDist ? line : closest;
     });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TextSelection } from "prosemirror-state";
+import { TextSelection, EditorState } from "prosemirror-state";
 import { createEditorState, createEditorStateFromJSON } from "./state";
 import { insertText, deleteBackward, toggleBold, applyUndo } from "./commands";
 
@@ -42,13 +42,14 @@ describe("commands", () => {
   it("deleteBackward removes the character before the cursor", () => {
     const state = createEditorState();
     const s1 = state.apply(insertText(state, "Hello")!);
-    const s2 = s1.apply(deleteBackward(s1)!);
-    expect(s2.doc.textContent).toBe("Hell");
+    let result: EditorState | undefined;
+    deleteBackward(s1, (tr) => { result = s1.apply(tr); });
+    expect(result?.doc.textContent).toBe("Hell");
   });
 
-  it("deleteBackward returns null at the start of the document", () => {
+  it("deleteBackward returns false at the start of the document", () => {
     const state = createEditorState();
-    expect(deleteBackward(state)).toBeNull();
+    expect(deleteBackward(state)).toBe(false);
   });
 
   it("toggleBold returns null when there is no selection", () => {

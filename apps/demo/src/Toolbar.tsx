@@ -49,6 +49,7 @@ export function Toolbar({ items, activeMarks, activeMarkAttrs, blockType, blockA
             <FamilySelect
               items={groupMap.get(group)!}
               activeMarkAttrs={activeMarkAttrs}
+              blockAttrs={blockAttrs}
               onCommand={onCommand}
             />
           ) : (
@@ -82,19 +83,26 @@ function SizeSelect({ items, activeMarkAttrs, onCommand }: {
 }) {
   const activeSize = activeMarkAttrs["font_size"]?.["size"];
   const value = typeof activeSize === "number" ? String(activeSize) : "";
+  // Pasted content may have non-preset sizes (e.g. 15px from 11pt Google Docs).
+  // Inject a custom option so the select reflects the actual current size.
+  const presetValues = new Set(items.map((i) => String(i.args?.[0])));
+  const hasCustomSize = value !== "" && !presetValues.has(value);
 
   return (
     <select
       style={styles.select}
       value={value}
       onChange={(e) => {
-        const item = items.find((i) => String((i.args?.[0])) === e.target.value);
+        const item = items.find((i) => String(i.args?.[0]) === e.target.value);
         if (item) onCommand(item.command, item.args);
       }}
       onMouseDown={(e) => e.stopPropagation()}
       title="Font size"
     >
       <option value="" disabled>Size</option>
+      {hasCustomSize && (
+        <option value={value}>{value}</option>
+      )}
       {items.map((item) => (
         <option key={String(item.args?.[0])} value={String(item.args?.[0])}>
           {item.label}
@@ -106,13 +114,20 @@ function SizeSelect({ items, activeMarkAttrs, onCommand }: {
 
 // ── Family dropdown ───────────────────────────────────────────────────────────
 
-function FamilySelect({ items, activeMarkAttrs, onCommand }: {
+function FamilySelect({ items, activeMarkAttrs, blockAttrs, onCommand }: {
   items: ToolbarItemSpec[];
   activeMarkAttrs: Record<string, Record<string, unknown>>;
+  blockAttrs: Record<string, unknown>;
   onCommand: (cmd: string, args?: unknown[]) => void;
 }) {
-  const activeFamily = activeMarkAttrs["font_family"]?.["family"];
-  const value = typeof activeFamily === "string" ? activeFamily : "";
+  // Inline font_family mark wins (character-level override).
+  // Fall back to block-level fontFamily attr (set by setBlockFontFamily).
+  const inlineFamily = activeMarkAttrs["font_family"]?.["family"];
+  const blockFamily  = blockAttrs["fontFamily"];
+  const activeFamily = typeof inlineFamily === "string" ? inlineFamily
+                     : typeof blockFamily  === "string" ? blockFamily
+                     : null;
+  const value = activeFamily ?? "";
 
   return (
     <select

@@ -1,5 +1,5 @@
 import { EditorState, Transaction } from "prosemirror-state";
-import { toggleMark } from "prosemirror-commands";
+import { toggleMark, joinBackward, joinForward } from "prosemirror-commands";
 import { MarkType } from "prosemirror-model";
 import { undo, redo } from "prosemirror-history";
 import { schema } from "./schema";
@@ -27,18 +27,76 @@ export function deleteSelection(state: EditorState): Transaction | null {
   return state.tr.deleteSelection();
 }
 
-export function deleteBackward(state: EditorState): Transaction | null {
+/**
+ * Backspace behaviour — matches Google Docs:
+ *
+ *  - Non-empty selection  → delete it
+ *  - Cursor at doc start  → no-op
+ *  - Cursor at block start → join with the preceding block (paragraph merge,
+ *                            list-item lift, heading collapse, etc.)
+ *  - Cursor mid-text       → delete one character to the left
+ *
+ * Uses ProseMirror's `joinBackward` for block-boundary cases so all the
+ * edge cases (different node types, nested lists, etc.) are handled correctly.
+ *
+ * Signature matches the ProseMirror Command type so it can be used directly
+ * as a keymap value without a wrapper.
+ */
+export function deleteBackward(
+  state: EditorState,
+  dispatch?: (tr: Transaction) => void,
+): boolean {
   const { empty, from } = state.selection;
-  if (!empty) return state.tr.deleteSelection();
-  if (from <= 1) return null; // already at start of doc
-  return state.tr.delete(from - 1, from);
+
+  if (!empty) {
+    if (dispatch) dispatch(state.tr.deleteSelection());
+    return true;
+  }
+
+  if (from <= 1) return false;
+
+  // At the very start of a textblock — join with the previous block
+  if (state.selection.$from.parentOffset === 0) {
+    return joinBackward(state, dispatch);
+  }
+
+  // Mid-text — delete one character to the left
+  if (dispatch) dispatch(state.tr.delete(from - 1, from));
+  return true;
 }
 
-export function deleteForward(state: EditorState): Transaction | null {
-  const { empty, from } = state.selection;
-  if (!empty) return state.tr.deleteSelection();
-  if (from >= state.doc.content.size) return null;
-  return state.tr.delete(from, from + 1);
+/**
+ * Delete key behaviour — mirrors Google Docs:
+ *
+ *  - Non-empty selection  → delete it
+ *  - Cursor at doc end    → no-op
+ *  - Cursor at block end  → join with the next block (paragraph merge, etc.)
+ *  - Cursor mid-text      → delete one character to the right
+ *
+ * Signature matches the ProseMirror Command type so it can be used directly
+ * as a keymap value without a wrapper.
+ */
+export function deleteForward(
+  state: EditorState,
+  dispatch?: (tr: Transaction) => void,
+): boolean {
+  const { empty, from, $from } = state.selection;
+
+  if (!empty) {
+    if (dispatch) dispatch(state.tr.deleteSelection());
+    return true;
+  }
+
+  if (from >= state.doc.content.size) return false;
+
+  // At the very end of a textblock — join with the next block
+  if ($from.parentOffset === $from.parent.content.size) {
+    return joinForward(state, dispatch);
+  }
+
+  // Mid-text — delete one character to the right
+  if (dispatch) dispatch(state.tr.delete(from, from + 1));
+  return true;
 }
 
 export function splitBlock(state: EditorState): Transaction | null {

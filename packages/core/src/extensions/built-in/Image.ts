@@ -1,8 +1,6 @@
 import { Extension } from "../Extension";
 import type { Command } from "prosemirror-state";
-import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
-import type { CharacterMap } from "../../layout/CharacterMap";
-import type { LayoutBlock } from "../../layout/BlockLayout";
+import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { IEditor } from "../types";
 
 // ── Image cache ───────────────────────────────────────────────────────────────
@@ -16,7 +14,6 @@ function getCachedImage(src: string): HTMLImageElement | null {
   if (entry instanceof HTMLImageElement) return entry;
   if (entry === "loading" || entry === "error") return null;
 
-  // Start loading
   imageCache.set(src, "loading");
   const img = new globalThis.Image();
   img.onload = () => {
@@ -29,59 +26,54 @@ function getCachedImage(src: string): HTMLImageElement | null {
   return null;
 }
 
-// ── Per-instance state (editor redraw hook) ───────────────────────────────────
+// ── Per-instance state ────────────────────────────────────────────────────────
 
 interface InstanceState { cleanup: () => void }
 const instanceState = new WeakMap<object, InstanceState>();
 
-// ── ImageStrategy ─────────────────────────────────────────────────────────────
+// ── Inline image strategy ─────────────────────────────────────────────────────
 
 const PLACEHOLDER_BG     = "#f1f5f9";
 const PLACEHOLDER_BORDER = "#e2e8f0";
 const PLACEHOLDER_TEXT   = "#94a3b8";
 
-function createImageStrategy(): BlockStrategy {
+function createInlineImageStrategy(): InlineStrategy {
   return {
-    render(block: LayoutBlock, renderCtx: BlockRenderContext, _map: CharacterMap): number {
-      const { ctx } = renderCtx;
-      const { x, y, availableWidth, height, node } = block;
-
-      const src     = node.attrs["src"]   as string | undefined;
-      const alt     = node.attrs["alt"]   as string | undefined ?? "";
-      const attrW   = node.attrs["width"] as number | undefined;
-      const drawW   = (attrW && attrW > 0) ? Math.min(attrW, availableWidth) : availableWidth;
-      const drawH   = height;
-      const drawX   = x + (availableWidth - drawW) / 2; // center if narrower than page
+    verticalAlign: "baseline" as const,
+    render(
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      node: import("prosemirror-model").Node,
+    ): void {
+      const src = node.attrs["src"] as string | undefined;
+      const alt = node.attrs["alt"] as string | undefined ?? "";
 
       ctx.save();
 
       if (src) {
         const img = getCachedImage(src);
         if (img) {
-          // Draw image, maintaining aspect ratio via object-fit: contain
-          const scale  = Math.min(drawW / img.naturalWidth, drawH / img.naturalHeight);
-          const sw     = img.naturalWidth  * scale;
-          const sh     = img.naturalHeight * scale;
-          const sx     = drawX + (drawW - sw) / 2;
-          const sy     = y    + (drawH - sh) / 2;
+          const scale = Math.min(width / img.naturalWidth, height / img.naturalHeight);
+          const sw = img.naturalWidth  * scale;
+          const sh = img.naturalHeight * scale;
+          const sx = x + (width  - sw) / 2;
+          const sy = y + (height - sh) / 2;
           ctx.drawImage(img, sx, sy, sw, sh);
         } else {
-          // Loading / error placeholder
-          drawPlaceholder(ctx, drawX, y, drawW, drawH, alt || "Loading…");
+          drawPlaceholder(ctx, x, y, width, height, alt || "Loading…");
         }
       } else {
-        // No src — empty placeholder
-        drawPlaceholder(ctx, drawX, y, drawW, drawH, "Image");
+        drawPlaceholder(ctx, x, y, width, height, "Image");
       }
 
-      // Thin border around the image area
       ctx.strokeStyle = PLACEHOLDER_BORDER;
       ctx.lineWidth   = 1;
-      ctx.strokeRect(drawX, y, drawW, drawH);
+      ctx.strokeRect(x, y, width, height);
 
       ctx.restore();
-
-      return renderCtx.lineIndexOffset + 1;
     },
   };
 }
@@ -94,7 +86,6 @@ function drawPlaceholder(
   ctx.fillStyle = PLACEHOLDER_BG;
   ctx.fillRect(x, y, w, h);
 
-  // Mountain icon (simple triangle)
   const cx = x + w / 2;
   const cy = y + h / 2 - 10;
   const r  = Math.min(20, h / 6);
@@ -109,7 +100,6 @@ function drawPlaceholder(
   ctx.closePath();
   ctx.fill();
 
-  // Label
   ctx.font = "12px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -122,16 +112,14 @@ function insertImage(): Command {
   return (state, dispatch) => {
     const imageType = state.schema.nodes["image"];
     if (!imageType) return false;
-
     if (!dispatch) return true;
 
     const src = window.prompt("Image URL:", "https://");
     if (!src) return false;
 
-    const { $head } = state.selection;
-    const after = $head.after(1);
-    const node  = imageType.create({ src, alt: "" }); // width and height use schema defaults (null → full width, 200px tall)
-    const tr    = state.tr.insert(after, node).scrollIntoView();
+    // Insert inline at the current cursor position (inside the paragraph)
+    const node = imageType.create({ src, alt: "" });
+    const tr   = state.tr.replaceSelectionWith(node).scrollIntoView();
     dispatch(tr);
     return true;
   };
@@ -145,13 +133,20 @@ export const Image = Extension.create({
   addNodes() {
     return {
       image: {
-        group: "block",
+        inline: true,
+        group: "inline",
         attrs: {
           src:    { default: "" },
           alt:    { default: "" },
-          width:  { default: null },
+          width:  { default: 200 },
           height: { default: 200 },
           nodeId: { default: null },
+          /** Vertical alignment within the line box — matches InlineObjectVerticalAlign */
+          verticalAlign: { default: "baseline" },
+          /** Text wrapping mode: 'inline' | 'square-left' | 'square-right' | 'top-bottom' | 'behind' | 'front' */
+          wrappingMode: { default: "inline" },
+          /** Float offset relative to the anchor paragraph origin { x, y } in px */
+          floatOffset: { default: { x: 0, y: 0 } },
         },
         parseDOM: [
           {
@@ -161,7 +156,7 @@ export const Image = Extension.create({
               return {
                 src:    el.getAttribute("src") ?? "",
                 alt:    el.getAttribute("alt") ?? "",
-                width:  el.getAttribute("width")  ? parseInt(el.getAttribute("width")!)  : null,
+                width:  el.getAttribute("width")  ? parseInt(el.getAttribute("width")!)  : 200,
                 height: el.getAttribute("height") ? parseInt(el.getAttribute("height")!) : 200,
               };
             },
@@ -169,12 +164,9 @@ export const Image = Extension.create({
         ],
         toDOM(node) {
           const { src, alt, width, height } = node.attrs as {
-            src: string; alt: string; width: number | null; height: number | null;
+            src: string; alt: string; width: number; height: number;
           };
-          const attrs: Record<string, string> = { src, alt };
-          if (width)  attrs["width"]  = String(width);
-          if (height) attrs["height"] = String(height);
-          return ["img", attrs];
+          return ["img", { src, alt, width: String(width), height: String(height) }];
         },
       },
     };
@@ -184,19 +176,8 @@ export const Image = Extension.create({
     return { insertImage: () => insertImage() };
   },
 
-  addBlockStyles() {
-    return {
-      image: {
-        font: "16px sans-serif",
-        spaceBefore: 8,
-        spaceAfter:  8,
-        align: "left" as const,
-      },
-    };
-  },
-
-  addLayoutHandlers() {
-    return { image: createImageStrategy() };
+  addInlineHandlers() {
+    return { image: createInlineImageStrategy() };
   },
 
   onEditorReady(editor: IEditor) {

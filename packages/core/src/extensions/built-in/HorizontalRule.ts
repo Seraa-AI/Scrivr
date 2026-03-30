@@ -24,7 +24,7 @@ const HorizontalRuleStrategy: BlockStrategy = {
     ctx.stroke();
     ctx.restore();
 
-    // Charmap registration is handled by layoutLeafBlock — nothing to do here.
+    // Charmap registration is handled by populateCharMap — nothing to do here.
     return lineIndexOffset + 1;
   },
 };
@@ -72,8 +72,8 @@ export const HorizontalRule = Extension.create({
     return {
       horizontalRule: {
         font: "8px Georgia, serif",  // keep block height tight; only the rule line is drawn
-        spaceBefore: 8,
-        spaceAfter: 8,
+        spaceBefore: 24,
+        spaceAfter: 24,
         align: "left" as const,
       },
     };

@@ -1,51 +1,26 @@
-import { EditorState, Transaction, TextSelection } from "prosemirror-state";
-import type { Command } from "prosemirror-state";
-import type { InputHandler, FontModifier, MarkDecorator, ToolbarItemSpec, OverlayRenderHandler, IEditor } from "./extensions/types";
+import { EditorState, Transaction, TextSelection, NodeSelection } from "prosemirror-state";
+import type {
+  FontModifier,
+  MarkDecorator,
+  ToolbarItemSpec,
+  OverlayRenderHandler,
+  IEditor,
+} from "./extensions/types";
 import type { Schema } from "prosemirror-model";
 import { MarkdownSerializer } from "prosemirror-markdown";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
-import { BlockRegistry } from "./layout/BlockRegistry";
+import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import { CursorManager } from "./renderer/CursorManager";
-import { CharacterMap } from "./layout/CharacterMap";
 import { TextMeasurer } from "./layout/TextMeasurer";
-import { layoutDocument, defaultPageConfig } from "./layout/PageLayout";
+import { defaultPageConfig } from "./layout/PageLayout";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
-import { populateCharMap } from "./layout/BlockLayout";
-import { insertText } from "./model/commands";
+import type { FontConfig } from "./layout/FontConfig";
+import { LayoutCoordinator } from "./layout/LayoutCoordinator";
+import type { CharacterMap } from "./layout/CharacterMap";
+import { InputBridge } from "./input/InputBridge";
 import { PasteTransformer } from "./input/PasteTransformer";
-
-/**
- * Convert a DOM KeyboardEvent into a ProseMirror key string.
- *
- * Format: [Mod-][Alt-][Shift-]key
- *   - "Mod" = Cmd on Mac, Ctrl on Windows/Linux
- *   - Single-character keys are lowercased (Shift is already in the prefix)
- *   - Special keys keep their DOM name: "Enter", "Backspace", "Delete", "Tab"
- *
- * Examples: Cmd+B → "Mod-b", Cmd+Shift+Z → "Mod-Shift-z", Enter → "Enter"
- */
-function keyEventToString(e: KeyboardEvent): string {
-  let key = e.key;
-  let prefix = "";
-  if (e.metaKey || e.ctrlKey) prefix += "Mod-";
-  if (e.altKey)  prefix += "Alt-";
-  if (e.shiftKey) prefix += "Shift-";
-
-  // On macOS, Option (Alt) transforms e.key into special characters
-  // (e.g. Option+1 → "¡", Option+b → "∫"). When that happens, fall back to
-  // e.code so that Mod-Alt-1 and similar bindings resolve correctly.
-  if (e.altKey && key.length === 1 && !/^[a-zA-Z0-9]$/.test(key)) {
-    if (e.code.startsWith("Digit")) key = e.code.slice(5);      // "Digit1" → "1"
-    else if (e.code.startsWith("Key")) key = e.code.slice(3);   // "KeyB"   → "B"
-  }
-
-  // Single-character keys: lowercase so "Mod-b" matches whether or not Shift
-  // is also held (e.g. Cmd+Shift+Z gives e.key="Z" — we want "Mod-Shift-z").
-  if (key.length === 1) key = key.toLowerCase();
-  return prefix + key;
-}
 
 export type EditorChangeHandler = (state: EditorState) => void;
 
@@ -112,6 +87,20 @@ export interface EditorOptions {
    * or clear the cursor.
    */
   onCursorTick?: (isVisible: boolean) => void;
+  /**
+   * When false, all rAF render flushes are suppressed until setReady(true)
+   * is called. Use this for collaborative documents where a Y.js / HocusPocus
+   * provider will fire hundreds of typeObserver events during initial sync —
+   * suppressing flushes means zero layout work during sync, then a single
+   * full layout + paint once the provider fires its `synced` event.
+   *
+   * Example:
+   *   const editor = new Editor({ startReady: false, ... });
+   *   provider.on('synced', () => editor.setReady(true));
+   *
+   * Defaults to true (standard, non-collaborative use).
+   */
+  startReady?: boolean;
 }
 
 /**
@@ -138,50 +127,44 @@ export interface EditorOptions {
 export class Editor {
   private readonly manager: ExtensionManager;
   private state: EditorState;
-  private textarea: HTMLTextAreaElement | null = null;
-  private container: HTMLElement | null = null;
   private readonly onChange: EditorChangeHandler | undefined;
   private readonly onFocusChange: ((focused: boolean) => void) | undefined;
 
   /** Subscriber set — notified on every state change, focus change, and cursor tick. */
   private readonly listeners = new Set<() => void>();
-  private _isFocused = false;
 
-  // ── Engine-owned layout infrastructure ───────────────────────────────────
-
-  /** Page dimensions and margins — drives layoutDocument. */
+  /** Page dimensions and margins — passed to LayoutCoordinator and read by renderers. */
   readonly pageConfig: PageConfig;
 
-  /** The text measurer used by the layout engine. Created once; caches are reused. */
+  /** The text measurer — created once; its internal caches are reused across layouts. */
   readonly measurer: TextMeasurer;
 
-  /**
-   * The CharacterMap — glyph positions for hit-testing and cursor rendering.
-   * Owned by the editor, populated during ensureLayout() for all pages.
-   */
-  readonly charMap: CharacterMap;
+  // ── Layout coordinator ────────────────────────────────────────────────────
+
+  /** Owns all layout state: DocumentLayout, CharacterMap, dirty/partial flags,
+   *  measure cache, and idle-callback scheduling. */
+  private readonly lc: LayoutCoordinator;
 
   /**
-   * The current document layout — pages, blocks, dimensions.
-   * Re-computed by ensureLayout() after every state change.
+   * requestAnimationFrame handle for the pending render flush.
+   * Multiple dispatch() calls within the same frame share a single flush,
+   * collapsing e.g. hundreds of Y.js sync operations into one layout + one paint.
    */
-  private _layout: DocumentLayout;
+  private _rafId: number | null = null;
 
-  /**
-   * True when the state has changed but layout has not yet been recomputed.
-   * ensureLayout() clears this flag.
-   */
-  private dirty = false;
+  // ── Input bridge ──────────────────────────────────────────────────────────
 
-  /**
-   * Adapter-provided function that resolves a 1-based page number to the
-   * corresponding DOM element. Used by syncInputBridge / scrollCursorIntoView.
-   * Set via setPageElementLookup() — null until the rendering adapter provides it.
-   */
-  private pageElementLookup: ((page: number) => HTMLElement | null) | null = null;
+  /** Owns the hidden textarea, all DOM event listeners, and clipboard handling. */
+  private readonly ib: InputBridge;
 
   /** Owns the cursor blink timer. Public so adapters can read isVisible. */
   readonly cursorManager: CursorManager;
+
+  /**
+   * Merged block styles from all extensions — the fontConfig passed to every
+   * layoutDocument call. Built once at construction from ExtensionManager.
+   */
+  readonly fontConfig: FontConfig;
 
   /**
    * Font modifier map built from all extensions.
@@ -208,17 +191,17 @@ export class Editor {
   readonly blockRegistry: BlockRegistry;
 
   /**
+   * Inline object registry built from all extensions.
+   * Pass to renderPage — maps node type names to InlineStrategy instances.
+   */
+  readonly inlineRegistry: InlineRegistry;
+
+  /**
    * Bound command map — each entry calls the extension command with the
    * current state + this editor's dispatch. Built once; closures over `this`
    * so they always read the latest state at call time.
    */
   readonly commands: Record<string, (...args: unknown[]) => void>;
-
-  /** Merged keymap from all extensions — consulted on every keydown. */
-  private readonly keymap: Record<string, Command>;
-  private pasteTransformer!: PasteTransformer;
-  /** Merged input handlers from all extensions — consulted before the keymap. */
-  private readonly inputHandlers: Record<string, InputHandler>;
 
   /**
    * Overlay render handlers registered by extensions (e.g. CollaborationCursor).
@@ -229,17 +212,26 @@ export class Editor {
   /** Cleanup functions returned by onEditorReady() callbacks — called on destroy(). */
   private editorReadyCleanup: Array<() => void> = [];
 
-  constructor({ extensions = [StarterKit], pageConfig, onChange, onFocusChange, onCursorTick }: EditorOptions) {
+  constructor({
+    extensions = [StarterKit],
+    pageConfig,
+    onChange,
+    onFocusChange,
+    onCursorTick,
+    startReady = true,
+  }: EditorOptions) {
     this.manager = new ExtensionManager(extensions);
     this.onChange = onChange;
     this.onFocusChange = onFocusChange;
-    this.pageConfig = this.manager.buildPageConfig() ?? pageConfig ?? defaultPageConfig;
+    this.pageConfig =
+      this.manager.buildPageConfig() ?? pageConfig ?? defaultPageConfig;
+    this.fontConfig = this.manager.buildBlockStyles();
     this.measurer = new TextMeasurer({ lineHeightMultiplier: 1.2 });
-    this.charMap = new CharacterMap();
     this.fontModifiers = this.manager.buildFontModifiers();
     this.markDecorators = this.manager.buildMarkDecorators();
     this.toolbarItems = this.manager.buildToolbarItems();
     this.blockRegistry = this.manager.buildBlockRegistry();
+    this.inlineRegistry = this.manager.buildInlineRegistry();
     this.cursorManager = new CursorManager(() => {
       onCursorTick?.(this.cursorManager.isVisible);
       this.notifyListeners();
@@ -252,23 +244,56 @@ export class Editor {
       ...(initialDoc ? { doc: initialDoc } : {}),
     });
 
-    // Initial layout — run synchronously so editor.layout is available immediately
-    this._layout = layoutDocument(this.state.doc, {
+    this.lc = new LayoutCoordinator({
       pageConfig: this.pageConfig,
+      fontConfig: this.fontConfig,
       measurer: this.measurer,
       fontModifiers: this.fontModifiers,
-      previousVersion: 0,
+      getDoc: () => this.state.doc,
+      getHead: () => this.state.selection.head,
+      onUpdate: () => this.notifyListeners(),
     });
-    this.populateCharMapFromLayout();
 
-    this.keymap = this.manager.buildKeymap();
-    this.inputHandlers = this.manager.buildInputHandlers();
+    // If startReady:false, cancel the idle layout and suppress all flushes
+    // until setReady(true) is called (e.g. from provider.on('synced', ...)).
+    if (!startReady) {
+      this.lc.setReady(false);
+    }
+
     this.commands = this.buildCommands();
-    this.pasteTransformer = new PasteTransformer(
+
+    const pasteTransformer = new PasteTransformer(
       this.manager.schema,
       this.manager.buildMarkdownRules(),
       this.manager.buildMarkdownParserTokens(),
     );
+
+    this.ib = new InputBridge({
+      getState: () => this.state,
+      dispatch: (tr) => this.dispatch(tr),
+      getSchema: () => this.manager.schema,
+      getViewportRect: (from, to) => this.getViewportRect(from, to),
+      getCharMap: () => this.lc.charMap,
+      getFloatPosition: (docPos: number) => {
+        const f = this.layout.floats?.find((fl) => fl.docPos === docPos);
+        if (!f) return null;
+        return { page: f.page, y: f.y, height: f.height };
+      },
+      keymap: this.manager.buildKeymap(),
+      inputHandlers: this.manager.buildInputHandlers(),
+      navigator: this,
+      pasteTransformer,
+      onFocus: () => {
+        this.cursorManager.start();
+        this.notifyListeners();
+        this.onFocusChange?.(true);
+      },
+      onBlur: () => {
+        this.cursorManager.stop();
+        this.notifyListeners();
+        this.onFocusChange?.(false);
+      },
+    });
 
     // Invoke onEditorReady() for all extensions that define it.
     // Runs after everything is initialised so extensions can safely subscribe,
@@ -280,6 +305,29 @@ export class Editor {
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
+
+  /**
+   * Signal that the editor is (or is no longer) ready to render.
+   *
+   * Pass `false` before a collaborative provider connects to suppress all rAF
+   * render flushes during the initial Y.js document sync — prevents O(N²)
+   * layout work while typeObserver fires hundreds of times.
+   *
+   * Pass `true` once the provider fires its `synced` event. The editor will
+   * do a single full layout + paint of the complete document.
+   *
+   * Example (HocusPocus):
+   *   const editor = new Editor({ startReady: false, ... });
+   *   provider.on('synced', () => editor.setReady(true));
+   */
+  setReady(ready: boolean): void {
+    if (!ready && this._rafId !== null) {
+      // Cancel any pending flush before going unready to prevent a stale render.
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
+    this.lc.setReady(ready);
+  }
 
   /**
    * The merged ProseMirror Schema built from all extensions.
@@ -295,12 +343,21 @@ export class Editor {
   }
 
   /**
+   * The CharacterMap — glyph positions for hit-testing and cursor rendering.
+   * Owned by the LayoutCoordinator; exposed here so ViewManager and adapters
+   * can access it without knowing about the coordinator.
+   */
+  get charMap(): CharacterMap {
+    return this.lc.charMap;
+  }
+
+  /**
    * The current document layout. Calls ensureLayout() so the result
    * always reflects the latest EditorState.
    */
   get layout(): DocumentLayout {
-    this.ensureLayout();
-    return this._layout;
+    this.lc.ensureLayout();
+    return this.lc.current;
   }
 
   /**
@@ -315,27 +372,60 @@ export class Editor {
    * If both positions are on different lines, the rect uses the `from` line's
    * y/height and extends to the right edge of the available content width.
    */
-  getViewportRect(from: number, to: number): DOMRect | null {
-    if (!this.pageElementLookup) return null;
-    this.ensureLayout();
+  getNodeViewportRect(docPos: number): DOMRect | null {
+    this.lc.ensureLayout();
+    const rect = this.lc.charMap.getObjectRect(docPos);
+    if (!rect) return null;
+    const pageEl = this.ib.lookupPage(rect.page);
+    if (!pageEl) return null;
+    const pageRect = pageEl.getBoundingClientRect();
+    return new DOMRect(pageRect.left + rect.x, pageRect.top + rect.y, rect.width, rect.height);
+  }
 
-    const fromCoords = this.charMap.coordsAtPos(from);
+  /**
+   * Select the inline node at docPos using a NodeSelection.
+   * Falls back to moveCursorTo if the node is not selectable.
+   */
+  selectNode(docPos: number): void {
+    try {
+      const sel = NodeSelection.create(this.state.doc, docPos);
+      this.dispatch(this.state.tr.setSelection(sel));
+      this.focus();
+    } catch {
+      this.moveCursorTo(docPos);
+    }
+  }
+
+  /** Merge attrs into the node at docPos. No-op if no node exists there. */
+  setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void {
+    const node = this.state.doc.nodeAt(docPos);
+    if (!node) return;
+    this.dispatch(this.state.tr.setNodeMarkup(docPos, undefined, { ...node.attrs, ...attrs }));
+  }
+
+  getViewportRect(from: number, to: number): DOMRect | null {
+    this.lc.ensureLayout();
+
+    const fromCoords = this.lc.charMap.coordsAtPos(from);
     if (!fromCoords) return null;
 
-    const pageEl = this.pageElementLookup(fromCoords.page);
+    const pageEl = this.ib.lookupPage(fromCoords.page);
     if (!pageEl) return null;
 
     const pageRect = pageEl.getBoundingClientRect();
-    const toCoords = this.charMap.coordsAtPos(to);
+    const toCoords = this.lc.charMap.coordsAtPos(to);
 
-    const left   = pageRect.left + fromCoords.x;
-    const top    = pageRect.top  + fromCoords.y;
+    const left = pageRect.left + fromCoords.x;
+    const top = pageRect.top + fromCoords.y;
     const height = fromCoords.height;
 
     // Width: span to toCoords if on same line, otherwise use a minimal 1px width
-    const sameLine = toCoords && toCoords.page === fromCoords.page &&
+    const sameLine =
+      toCoords &&
+      toCoords.page === fromCoords.page &&
       Math.abs(toCoords.y - fromCoords.y) < 2;
-    const width = sameLine && toCoords ? (toCoords.x - fromCoords.x) : 1;
+    const width =
+      sameLine && toCoords ? Math.abs(toCoords.x - fromCoords.x) : 1;
 
     return new DOMRect(left, top, Math.max(1, width), height);
   }
@@ -348,26 +438,53 @@ export class Editor {
    * Framework adapters should not need to call this directly.
    */
   ensureLayout(): void {
-    if (!this.dirty) return;
-    this.dirty = false;
-    this.charMap.clear();
-    this._layout = layoutDocument(this.state.doc, {
-      pageConfig: this.pageConfig,
-      measurer: this.measurer,
-      fontModifiers: this.fontModifiers,
-      previousVersion: this._layout.version,
-    });
-    this.populateCharMapFromLayout();
+    this.lc.ensureLayout();
   }
 
-  private populateCharMapFromLayout(): void {
-    for (const page of this._layout.pages) {
-      let lineOffset = 0;
-      for (const block of page.blocks) {
-        populateCharMap(block, this.charMap, page.pageNumber, lineOffset, this.measurer);
-        lineOffset += block.lines.length;
-      }
-    }
+  /**
+   * Three-phase loading state for collaborative documents.
+   *
+   *  'syncing'   — editor created, waiting for the Y.js / HocusPocus server to
+   *                deliver the document (setReady(false) is in effect). No
+   *                content is visible yet — show a full-screen loading UI.
+   *
+   *  'rendering' — onSynced fired and the first pages are already painted; idle
+   *                callbacks are completing the rest of the layout in the
+   *                background. Content is visible and interactive — you can hide
+   *                the loading UI and show a subtle progress indicator if you want.
+   *
+   *  'ready'     — all pages are laid out. For non-collaborative editors this is
+   *                the initial state (no sync step needed).
+   *
+   * The value changes are surfaced through the normal notifyListeners() cycle,
+   * so useEditorState() picks them up without any extra wiring:
+   *
+   *   const loadingState = useEditorState({
+   *     editor,
+   *     selector: (ctx) => ctx.editor.loadingState,
+   *     equalityFn: Object.is,
+   *   });
+   */
+  get loadingState(): "syncing" | "rendering" | "ready" {
+    return this.lc.loadingState;
+  }
+
+  /**
+   * The page number the cursor currently resides on.
+   * Computed once per layout cycle in ensureLayout() — free to read on every
+   * overlay paint without re-walking the layout.
+   */
+  get cursorPage(): number {
+    return this.lc.cursorPage;
+  }
+
+  /**
+   * Ensures the CharacterMap is populated for the given page.
+   * Called eagerly for cursor page ± 1 after every layout pass.
+   * Also called by ViewManager before painting — idempotent.
+   */
+  ensurePagePopulated(pageNumber: number): void {
+    this.lc.ensurePagePopulated(pageNumber);
   }
 
   /**
@@ -378,7 +495,7 @@ export class Editor {
    * Ensures layout is current before computing.
    */
   getSelectionSnapshot(): SelectionSnapshot {
-    this.ensureLayout();
+    this.lc.ensureLayout();
     const { selection } = this.state;
     const blockInfo = this.getBlockInfo();
     return {
@@ -399,11 +516,7 @@ export class Editor {
    * Creates the hidden textarea and attaches event listeners.
    */
   mount(container: HTMLElement): void {
-    this.container = container;
-    this.textarea = this.createHiddenTextarea();
-    this.container.appendChild(this.textarea);
-    this.attachListeners();
-    this.textarea.focus();
+    this.ib.mount(container);
   }
 
   /**
@@ -412,16 +525,15 @@ export class Editor {
    * After unmount the editor can be re-mounted with mount().
    */
   unmount(): void {
-    if (this.textarea) {
-      this.detachListeners();
-      this.textarea.remove();
-      this.textarea = null;
-    }
-    this.container = null;
-    this.pageElementLookup = null;
+    this.ib.unmount();
   }
 
   destroy(): void {
+    if (this._rafId !== null) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
+    this.lc.destroy();
     for (const cleanup of this.editorReadyCleanup) cleanup();
     this.editorReadyCleanup = [];
     this.overlayRenderHandlers.clear();
@@ -430,7 +542,7 @@ export class Editor {
   }
 
   focus(): void {
-    this.textarea?.focus();
+    this.ib.focus();
   }
 
   /**
@@ -458,7 +570,7 @@ export class Editor {
     pageConfig: PageConfig,
   ): void {
     for (const handler of this.overlayRenderHandlers) {
-      handler(ctx, pageNumber, pageConfig, this.charMap);
+      handler(ctx, pageNumber, pageConfig, this.lc.charMap);
     }
   }
 
@@ -487,71 +599,26 @@ export class Editor {
    * (e.g. Canvas) after mount so the editor can position the textarea
    * and scroll the cursor into view.
    */
-  setPageElementLookup(fn: ((page: number) => HTMLElement | null) | null): void {
-    this.pageElementLookup = fn;
+  setPageElementLookup(
+    fn: ((page: number) => HTMLElement | null) | null,
+  ): void {
+    this.ib.setPageElementLookup(fn);
   }
 
   /**
    * Positions the hidden textarea at the cursor's visual location.
-   *
-   * Without this, the textarea sits at top:0 and the browser scrolls the
-   * scroll container back to the top whenever the user types — because
-   * the browser wants to keep the focused element visible.
-   *
-   * Also critical for mobile IME: the suggestion bar and magnifier appear
-   * near the textarea, so placing it at the cursor makes them usable.
+   * Delegates to InputBridge.syncPosition().
    */
   syncInputBridge(): void {
-    if (!this.textarea || !this.container || !this.pageElementLookup) return;
-
-    const { head } = this.state.selection;
-    const coords = this.charMap.coordsAtPos(head);
-    if (!coords) return;
-
-    const pageEl = this.pageElementLookup(coords.page);
-    if (!pageEl) return;
-
-    const containerRect = this.container.getBoundingClientRect();
-    const pageRect = pageEl.getBoundingClientRect();
-
-    Object.assign(this.textarea.style, {
-      top: `${(pageRect.top - containerRect.top) + coords.y}px`,
-      left: `${(pageRect.left - containerRect.left) + coords.x}px`,
-      height: `${coords.height}px`,
-    });
+    this.ib.syncPosition();
   }
 
   /**
    * Scrolls the nearest scrollable ancestor so the cursor is visible.
-   *
-   * Called after every state change (from dispatch) and after React renders
-   * (from the adapter) as a safety net for new-page scenarios.
+   * Called after every state change and after React renders new pages.
    */
   scrollCursorIntoView(): void {
-    if (!this.container || !this.pageElementLookup) return;
-
-    const { head } = this.state.selection;
-    const coords = this.charMap.coordsAtPos(head);
-    if (!coords) return;
-
-    const pageEl = this.pageElementLookup(coords.page);
-    if (!pageEl) return;
-
-    const scrollParent = findScrollParent(this.container);
-    if (!scrollParent) return;
-
-    const pageRect = pageEl.getBoundingClientRect();
-    const scrollRect = scrollParent.getBoundingClientRect();
-
-    const cursorTop = pageRect.top + coords.y;
-    const cursorBottom = cursorTop + coords.height;
-    const buffer = 40;
-
-    if (cursorBottom > scrollRect.bottom - buffer) {
-      scrollParent.scrollTop += cursorBottom - scrollRect.bottom + buffer;
-    } else if (cursorTop < scrollRect.top + buffer) {
-      scrollParent.scrollTop -= scrollRect.top - cursorTop + buffer;
-    }
+    this.ib.scrollCursorIntoView();
   }
 
   /**
@@ -573,9 +640,7 @@ export class Editor {
     const h = Math.max(0, Math.min(head, size));
     const $a = this.state.doc.resolve(a);
     const $h = this.state.doc.resolve(h);
-    this.dispatch(
-      this.state.tr.setSelection(TextSelection.between($a, $h))
-    );
+    this.dispatch(this.state.tr.setSelection(TextSelection.between($a, $h)));
     this.focus();
   }
 
@@ -584,7 +649,8 @@ export class Editor {
     const head = this.state.selection.head;
     if (head <= 0) return;
     const $pos = this.state.doc.resolve(Math.max(0, head - 1));
-    this.applyMovement(TextSelection.near($pos, -1).head, extend);
+    const sel = TextSelection.findFrom($pos, -1);
+    if (sel) this.applyMovement(sel.head, extend);
   }
 
   /** Move right one position. Pass extend=true to grow the selection (Shift+→). */
@@ -593,16 +659,17 @@ export class Editor {
     const size = this.state.doc.content.size;
     if (head >= size) return;
     const $pos = this.state.doc.resolve(Math.min(size, head + 1));
-    this.applyMovement(TextSelection.near($pos, 1).head, extend);
+    const sel = TextSelection.findFrom($pos, 1);
+    if (sel) this.applyMovement(sel.head, extend);
   }
 
   /** Move up one line preserving x. Pass extend=true for Shift+↑. */
   moveUp(extend = false): void {
-    this.ensureLayout();
+    this.lc.ensureLayout();
     const head = this.state.selection.head;
-    const coords = this.charMap.coordsAtPos(head);
+    const coords = this.lc.charMap.coordsAtPos(head);
     if (!coords) return;
-    const pos = this.charMap.posAbove(head, coords.x);
+    const pos = this.lc.charMap.posAbove(head, coords.x);
     if (pos !== null) this.applyMovement(pos, extend);
   }
 
@@ -705,7 +772,7 @@ export class Editor {
 
   /** Whether the editor's textarea currently has focus. */
   get isFocused(): boolean {
-    return this._isFocused;
+    return this.ib.isFocused;
   }
 
   /**
@@ -753,11 +820,11 @@ export class Editor {
 
   /** Move down one line preserving x. Pass extend=true for Shift+↓. */
   moveDown(extend = false): void {
-    this.ensureLayout();
+    this.lc.ensureLayout();
     const head = this.state.selection.head;
-    const coords = this.charMap.coordsAtPos(head);
+    const coords = this.lc.charMap.coordsAtPos(head);
     if (!coords) return;
-    const pos = this.charMap.posBelow(head, coords.x);
+    const pos = this.lc.charMap.posBelow(head, coords.x);
     if (pos !== null) this.applyMovement(pos, extend);
   }
 
@@ -777,9 +844,7 @@ export class Editor {
     // and position 0 without throwing, unlike TextSelection.create.
     const $a = this.state.doc.resolve(Math.max(0, Math.min(a, size)));
     const $h = this.state.doc.resolve(h);
-    this.dispatch(
-      this.state.tr.setSelection(TextSelection.between($a, $h))
-    );
+    this.dispatch(this.state.tr.setSelection(TextSelection.between($a, $h)));
   }
 
   private notifyListeners(): void {
@@ -789,15 +854,35 @@ export class Editor {
   private dispatch(tr: Transaction | null): void {
     if (!tr) return;
     this.state = this.state.apply(tr);
-    this.dirty = true;
-    this.ensureLayout();
-    this.cursorManager.reset();
-    // ViewManager.update() runs inside notifyListeners (via subscribe),
-    // creating any new page DOM elements before we position the textarea.
-    this.notifyListeners();
-    this.syncInputBridge();
-    this.scrollCursorIntoView();
+    this.lc.invalidate();
+    // resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
+    // The rAF flush below handles the repaint — calling reset() here was the root cause
+    // of O(N²) repaints during Y.js initial sync (one full canvas paint per dispatch).
+    this.cursorManager.resetSilent();
     this.onChange?.(this.state);
+    // Schedule a single rAF flush rather than rendering immediately.
+    // Multiple dispatches within the same frame (e.g. Y.js initial sync
+    // firing hundreds of typeObserver events) share one layout + one paint,
+    // reducing O(N²) sync cost to O(N).
+    this.scheduleFlush();
+  }
+
+  /**
+   * Schedules a layout + render flush for the next animation frame.
+   * Idempotent — calling it multiple times before the frame fires is free.
+   */
+  private scheduleFlush(): void {
+    if (!this.lc.isReady) return; // suppress during collaborative sync
+    if (this._rafId !== null) return;
+    this._rafId = requestAnimationFrame(() => {
+      this._rafId = null;
+      this.lc.ensureLayout();
+      // ViewManager.update() runs inside notifyListeners (via subscribe),
+      // creating any new page DOM elements before we position the textarea.
+      this.notifyListeners();
+      this.syncInputBridge();
+      this.scrollCursorIntoView();
+    });
   }
 
   /**
@@ -818,146 +903,4 @@ export class Editor {
 
     return bound;
   }
-
-  private createHiddenTextarea(): HTMLTextAreaElement {
-    const ta = document.createElement("textarea");
-
-    Object.assign(ta.style, {
-      position: "absolute",
-      opacity: "0",
-      width: "1px",
-      height: "1px",
-      padding: "0",
-      border: "none",
-      margin: "0",
-      overflow: "hidden",
-      resize: "none",
-      outline: "none",
-      pointerEvents: "none",
-      top: "0",
-      left: "0",
-    });
-
-    ta.setAttribute("autocomplete", "off");
-    ta.setAttribute("autocorrect", "off");
-    ta.setAttribute("autocapitalize", "off");
-    ta.setAttribute("spellcheck", "false");
-    // aria-hidden on a focused element is invalid — the textarea IS the
-    // keyboard/IME input bridge, so screen readers should be able to reach it.
-    ta.setAttribute("role", "textbox");
-    ta.setAttribute("aria-multiline", "true");
-    ta.setAttribute("aria-label", "Document editor");
-    ta.setAttribute("tabindex", "0");
-
-    return ta;
-  }
-
-  private attachListeners(): void {
-    const ta = this.textarea!;
-    ta.addEventListener("keydown", this.handleKeydown);
-    ta.addEventListener("input", this.handleInput);
-    ta.addEventListener("compositionend", this.handleCompositionEnd);
-    ta.addEventListener("paste", this.handlePaste);
-    ta.addEventListener("focus", this.handleFocus);
-    ta.addEventListener("blur", this.handleBlur);
-  }
-
-  private detachListeners(): void {
-    const ta = this.textarea!;
-    ta.removeEventListener("keydown", this.handleKeydown);
-    ta.removeEventListener("input", this.handleInput);
-    ta.removeEventListener("compositionend", this.handleCompositionEnd);
-    ta.removeEventListener("paste", this.handlePaste);
-    ta.removeEventListener("focus", this.handleFocus);
-    ta.removeEventListener("blur", this.handleBlur);
-  }
-
-  private handleFocus = (): void => {
-    this._isFocused = true;
-    this.cursorManager.start();
-    this.notifyListeners();
-    this.onFocusChange?.(true);
-  };
-
-  private handleBlur = (): void => {
-    this._isFocused = false;
-    this.cursorManager.stop();
-    this.notifyListeners();
-    this.onFocusChange?.(false);
-  };
-
-  private handleKeydown = (e: KeyboardEvent): void => {
-    // Input handlers first — editor-level actions (navigation, etc.)
-    // declared by extensions via addInputHandlers().
-    if (this.tryInputHandler(e)) {
-      e.preventDefault();
-      return;
-    }
-    // Tab must always be captured so the browser never shifts focus away.
-    if (e.key === "Tab") e.preventDefault();
-    // Then document-level commands declared by extensions via addKeymap().
-    if (this.tryKeymapCommand(e)) {
-      e.preventDefault();
-      this.clearTextarea();
-    }
-  };
-
-  private handleInput = (e: Event): void => {
-    if ((e as InputEvent).isComposing) return;
-    const text = this.textarea!.value;
-    if (!text) return;
-    this.dispatch(insertText(this.state, text));
-    this.clearTextarea();
-  };
-
-  private handleCompositionEnd = (e: CompositionEvent): void => {
-    const text = e.data;
-    if (!text) return;
-    this.dispatch(insertText(this.state, text));
-    this.clearTextarea();
-  };
-
-  /**
-   * Look up the key event in the extension input handlers and run it if found.
-   * Returns true when a handler was executed.
-   */
-  private tryInputHandler(e: KeyboardEvent): boolean {
-    const handler = this.inputHandlers[e.key];
-    if (!handler) return false;
-    return handler(this, e);
-  }
-
-  /**
-   * Look up the key event in the extension keymap and run the command if found.
-   * Returns true when a command was executed (so the caller can preventDefault).
-   */
-  private tryKeymapCommand(e: KeyboardEvent): boolean {
-    const key = keyEventToString(e);
-    const cmd = this.keymap[key];
-    if (!cmd) return false;
-    return cmd(this.state, (tr) => this.dispatch(tr));
-  }
-
-  private handlePaste = (e: ClipboardEvent): void => {
-    e.preventDefault();
-    if (!e.clipboardData) return;
-    const tr = this.pasteTransformer.transform(e.clipboardData, this.state);
-    if (tr) this.dispatch(tr);
-  };
-
-  private clearTextarea(): void {
-    if (this.textarea) this.textarea.value = "";
-  }
-}
-
-// ── Module-level helpers ──────────────────────────────────────────────────────
-
-function findScrollParent(el: HTMLElement): HTMLElement | null {
-  let current = el.parentElement;
-  while (current) {
-    const { overflowY } = getComputedStyle(current);
-    if (overflowY === "auto" || overflowY === "scroll") return current;
-    current = current.parentElement;
-  }
-  return null;
 }

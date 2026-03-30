@@ -141,6 +141,18 @@ export class ServerEditor implements IEditor {
     return null;
   }
 
+  /** Not available server-side — always returns null. */
+  getNodeViewportRect(_docPos: number): DOMRect | null {
+    return null;
+  }
+
+  /** Not available server-side — no-op. */
+  selectNode(_docPos: number): void {}
+
+  /** Not available server-side — no-op. */
+  setNodeAttrs(_docPos: number, _attrs: Record<string, unknown>): void {}
+
+
   /**
    * Apply a transaction from an external source.
    * Alias of applyTransaction — satisfies IEditor._applyTransaction.
@@ -151,4 +163,12 @@ export class ServerEditor implements IEditor {
 
   /** No-op: ServerEditor has no renderer to redraw. */
   redraw(): void {}
+
+  /** No-op: ServerEditor has no renderer to redraw. */
+  setReady(ready: boolean): void {}
+
+  /** No-op: ServerEditor has no renderer to redraw. */
+  get loadingState(): "syncing" | "rendering" | "ready" {
+    return "ready";
+  }
 }

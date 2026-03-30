@@ -75,7 +75,8 @@ function drawBlock(
   const firstLine = block.lines[0];
   if (block.listMarker && block.listMarkerX !== undefined && firstLine !== undefined) {
     const markerFont = fonts["normal"]!;
-    const fontSize   = extractFontSizePx(firstLine.spans[0]?.font ?? "12px sans-serif");
+    const firstSpan  = firstLine.spans[0];
+    const fontSize   = extractFontSizePx((firstSpan?.kind === "text" ? firstSpan.font : undefined) ?? "12px sans-serif");
     const markerX    = block.listMarkerX * PT_PER_PX;
     const markerY    = flipY(block.y + firstLine.ascent, pageHeightPt);
     page.drawText(block.listMarker, {
@@ -111,6 +112,9 @@ function drawLine(
   const pdfY = flipY(baselineY, pageHeightPt);
 
   for (const span of line.spans) {
+    // Inline object spans (images, widgets) are not renderable by the PDF exporter.
+    if (span.kind === "object") continue;
+
     // Strip zero-width and non-WinAnsi characters — Standard PDF fonts use
     // WinAnsi encoding (roughly Latin-1 + Windows-1252 extras up to U+02DC).
     // U+200B (zero-width space) is the most common offender: the layout engine
