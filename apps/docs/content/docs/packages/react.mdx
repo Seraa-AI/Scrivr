@@ -1,6 +1,6 @@
 ---
 title: "@inscribe/react"
-description: React bindings for Inscribe — useCanvasEditor hook, Canvas component, and useEditorState selector hook.
+description: React bindings for Inscribe — useInscribeEditor hook, Inscribe component, and useEditorState selector hook.
 ---
 
 `@inscribe/react` is a thin React adapter over `@inscribe/core`. It provides a hook to create and manage
@@ -31,15 +31,15 @@ building toolbars and menus without excessive re-renders.
 
 ---
 
-## useCanvasEditor
+## useInscribeEditor
 
-`useCanvasEditor` creates an `Editor` instance on mount and destroys it on unmount. It returns `null`
-during the first render (before the effect runs) — `<Canvas />` handles this gracefully.
+`useInscribeEditor` creates an `Editor` instance on mount and destroys it on unmount. It returns `null`
+during the first render (before the effect runs) — `<Inscribe />` handles this gracefully.
 
 ```tsx
-import { useCanvasEditor, StarterKit } from '@inscribe/react';
+import { useInscribeEditor, StarterKit } from '@inscribe/react';
 
-const editor = useCanvasEditor({
+const editor = useInscribeEditor({
   extensions: [StarterKit],
 });
 ```
@@ -50,29 +50,31 @@ const editor = useCanvasEditor({
 |--------|------|-------------|
 | `extensions` | `Extension[]` | **Required.** Extensions to load. |
 | `pageConfig` | `PageConfig` | Page dimensions and margins. Defaults to A4 / 1-inch margins. |
-| `content` | `string \| object` | Initial document content (HTML string or ProseMirror JSON). |
 | `onCreate` | `({ editor }) => void` | Called once the editor is fully initialized. |
-| `onUpdate` | `({ editor }) => void` | Called on every document change. |
+| `onUpdate` | `({ editor }) => void` | Called on every document or selection change. |
+| `onSelectionUpdate` | `({ editor }) => void` | Alias for `onUpdate` — fires on every state change. |
+| `onFocus` | `({ editor }) => void` | Called when the editor textarea gains focus. |
+| `onBlur` | `({ editor }) => void` | Called when the editor textarea loses focus. |
 | `onDestroy` | `() => void` | Called when the editor is destroyed. |
 
 The optional second argument is a **dependency array** — if any value in it changes, the editor is torn down
 and re-initialized:
 
 ```tsx
-const editor = useCanvasEditor({ extensions: [StarterKit] }, [roomId]);
+const editor = useInscribeEditor({ extensions: [StarterKit] }, [roomId]);
 ```
 
 ---
 
-## Canvas
+## Inscribe
 
-`<Canvas />` mounts the `ViewManager` into a container `<div>`. It manages the hidden `<textarea>`
+`<Inscribe />` mounts the `ViewManager` into a container `<div>`. It manages the hidden `<textarea>`
 input bridge for keyboard and IME events, and cleans up all observers on unmount.
 
 ```tsx
-import { Canvas } from '@inscribe/react';
+import { Inscribe } from '@inscribe/react';
 
-<Canvas
+<Inscribe
   editor={editor}
   style={{ height: '100vh', background: '#f5f5f5' }}
 />
@@ -82,7 +84,7 @@ import { Canvas } from '@inscribe/react';
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `editor` | `Editor \| null` | — | **Required.** Editor instance from `useCanvasEditor`. |
+| `editor` | `Editor \| null` | — | **Required.** Editor instance from `useInscribeEditor`. |
 | `gap` | `number` | `24` | Gap in px between pages. |
 | `overscan` | `number` | `500` | Virtual scroll overscan in px. |
 | `className` | `string` | — | CSS class on the outer container. |
@@ -139,18 +141,32 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
 
 ---
 
+## Menu Components
+
+`@inscribe/react` exports five ready-made floating menu components:
+
+| Component | Description |
+|-----------|-------------|
+| `BubbleMenu` | Appears above a text selection. Use for inline formatting (bold, italic, link). |
+| `FloatingMenu` | Appears at the start of an empty paragraph. Use for block-type switchers. |
+| `LinkPopover` | Popover for inserting and editing links. |
+| `ImageMenu` | Context menu for selected images — alignment, float mode, resize. |
+| `SlashMenu` | `/`-triggered command palette for inserting blocks. |
+
+---
+
 ## Full Example
 
 ```tsx title="MyEditor.tsx"
-import { useCanvasEditor, Canvas, useEditorState, StarterKit } from '@inscribe/react';
+import { useInscribeEditor, Inscribe, useEditorState, StarterKit } from '@inscribe/react';
 
 export function MyEditor() {
-  const editor = useCanvasEditor({
+  const editor = useInscribeEditor({
     extensions: [StarterKit],
     pageConfig: {
-      width: 794,
-      height: 1123,
-      margin: { top: 96, right: 96, bottom: 96, left: 96 },
+      pageWidth: 794,
+      pageHeight: 1123,
+      margins: { top: 96, right: 96, bottom: 96, left: 96 },
     },
   });
 
@@ -164,7 +180,7 @@ export function MyEditor() {
       <button onClick={() => editor?.commands.toggleBold()}>
         {isBold ? 'Bold ✓' : 'Bold'}
       </button>
-      <Canvas editor={editor} style={{ flex: 1 }} />
+      <Inscribe editor={editor} style={{ flex: 1 }} />
     </div>
   );
 }

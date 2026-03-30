@@ -49,7 +49,7 @@ editor.mount(document.getElementById('editor')!);
 editor.destroy();
 ```
 
-See the full [Editor API reference](/ api/editor).
+See the full [Editor API reference](/api/editor).
 
 ---
 
@@ -63,10 +63,19 @@ See the full [Editor API reference](/ api/editor).
 | `Heading` (levels 1–6) | Block node |
 | `BulletList`, `OrderedList`, `ListItem` | Block nodes |
 | `HardBreak` | Inline node |
-| `Bold`, `Italic`, `Underline`, `Strike` | Marks |
+| `Bold`, `Italic`, `Underline`, `Strikethrough` | Marks |
+| `Highlight` | Mark |
+| `Color` | Mark |
+| `FontSize` | Mark |
+| `FontFamily` | Mark |
 | `Link` | Mark |
-| `Code` (inline), `CodeBlock` | Mark / Block node |
+| `CodeBlock` | Block node |
+| `Image` | Inline node |
+| `HorizontalRule` | Block node |
+| `Alignment` | Extension |
 | `History` (undo/redo) | Extension |
+| `Pagination` | Extension |
+| `Typography` | Extension |
 | `TrailingNode` | Extension |
 
 ```ts
@@ -103,7 +112,7 @@ const editor = new Editor({
 });
 ```
 
-See [Built-in Nodes](/ guides/nodes/built-in-nodes) and [Custom Extensions](/ guides/nodes/custom-extensions)
+See [Built-in Nodes](/guides/nodes/built-in-nodes) and [Custom Extensions](/guides/nodes/custom-extensions)
 for a complete reference.
 
 ---
@@ -116,21 +125,21 @@ Control page dimensions and margins via `pageConfig`. All values are in **pixels
 const editor = new Editor({
   extensions: [StarterKit],
   pageConfig: {
-    width: 794,    // A4 width  (~210 mm)
-    height: 1123,  // A4 height (~297 mm)
-    margin: { top: 96, right: 96, bottom: 96, left: 96 }, // 1-inch margins
+    pageWidth: 794,    // A4 width  (~210 mm)
+    pageHeight: 1123,  // A4 height (~297 mm)
+    margins: { top: 96, right: 96, bottom: 96, left: 96 }, // 1-inch margins
   },
 });
 ```
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `width` | `794` | Page width in px |
-| `height` | `1123` | Page height in px |
-| `margin.top` | `96` | Top margin in px |
-| `margin.right` | `96` | Right margin in px |
-| `margin.bottom` | `96` | Bottom margin in px |
-| `margin.left` | `96` | Left margin in px |
+| `pageWidth` | `794` | Page width in px |
+| `pageHeight` | `1123` | Page height in px |
+| `margins.top` | `96` | Top margin in px |
+| `margins.right` | `96` | Right margin in px |
+| `margins.bottom` | `96` | Bottom margin in px |
+| `margins.left` | `96` | Left margin in px |
 
 ---
 
@@ -141,22 +150,15 @@ const editor = new Editor({
 ```ts
 editor.commands.toggleBold();
 editor.commands.setHeading({ level: 2 });
-editor.commands.insertContent('<p>Hello world</p>');
 editor.commands.undo();
 editor.commands.redo();
-```
-
-Commands are composable with `chain()`:
-
-```ts
-editor.chain().focus().toggleBold().run();
 ```
 
 ---
 
 ## ViewManager
 
-`ViewManager` is the canvas renderer. In React you will never construct it directly — `<Canvas />` handles
+`ViewManager` is the canvas renderer. In React you will never construct it directly — `<Inscribe />` handles
 that. In headless contexts (tests, SSR pre-rendering) you can instantiate it directly:
 
 ```ts
@@ -166,7 +168,7 @@ const vm = new ViewManager(editor, containerElement);
 vm.destroy();
 ```
 
-See the full [ViewManager reference](/ api/view-manager).
+See the full [ViewManager reference](/api/view-manager).
 
 ---
 

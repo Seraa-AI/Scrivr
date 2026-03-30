@@ -8,7 +8,7 @@ It manages the lifecycle of per-page `<div>` containers and `<canvas>` elements,
 virtual scrolling, and orchestrates canvas painting.
 
 <Callout type="info">
-  **You do not need to use `ViewManager` directly.** The `<Canvas />` React component handles
+  **You do not need to use `ViewManager` directly.** The `<Inscribe />` React component handles
   `ViewManager` construction and teardown automatically. This page is for library contributors
   and developers building custom rendering adapters.
 </Callout>
@@ -45,7 +45,7 @@ On construction, `ViewManager`:
 
 | Resource | Description |
 |---|---|
-| Per-page `<div>` wrappers | One per page in `DocumentLayout`, sized to `pageConfig.width × height` |
+| Per-page `<div>` wrappers | One per page in `DocumentLayout`, sized to `pageConfig.pageWidth × pageConfig.pageHeight` |
 | Content `<canvas>` | Draws text, images, and block backgrounds (one per page) |
 | Overlay `<canvas>` | Draws cursor, selection highlights, and extension overlays (one per page) |
 | `IntersectionObserver` | Watches page visibility; only paints pages in (or near) the viewport |
@@ -75,14 +75,14 @@ Full cleanup:
 - Disconnects the `IntersectionObserver`
 - Removes all page DOM elements from the container
 
-Always call `destroy()` before discarding a `ViewManager` instance. The `<Canvas />` component
+Always call `destroy()` before discarding a `ViewManager` instance. The `<Inscribe />` component
 calls this in its `useEffect` cleanup.
 
 ---
 
-## `<Canvas />` as a Thin Wrapper
+## `<Inscribe />` as a Thin Wrapper
 
-The full implementation of `<Canvas />` is:
+The full implementation of `<Inscribe />` is:
 
 ```tsx
 useEffect(() => {

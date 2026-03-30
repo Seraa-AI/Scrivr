@@ -2,3 +2,155 @@
 title: AI Assistant Toolkit
 description: Implement ghost text suggestions mapped directly over the canvas cursor.
 ---
+
+`AiToolkit` adds a streaming ghost-text writing assistant to Inscribe. Suggestions are rendered
+as a canvas overlay — the document is never mutated until the user explicitly accepts.
+
+---
+
+## How It Works
+
+`AiToolkit` is an aggregator extension that bundles:
+
+- **`UniqueId`** — assigns stable IDs to each block (used to map LLM output back to document positions)
+- **`GhostText`** — renders streaming suggestion text as a canvas overlay at the cursor
+- **`AiCaret`** — animates the cursor during a streaming response
+
+The core flow is:
+
+1. Add `AiToolkit` to extensions
+2. Get a handle with `getAiToolkit(editor)`
+3. Read context: `ai.getContext()` or `ai.getMarkdownRange(from, to)`
+4. Stream LLM output — push each chunk to the ghost text overlay via `ai.pushChunk(text)`
+5. User presses Tab/Enter to accept → `editor.commands.acceptSuggestion()`
+
+---
+
+## Setup
+
+```tsx title="AiEditor.tsx"
+import { useInscribeEditor, Inscribe, StarterKit, useEditorState } from '@inscribe/react';
+import { AiToolkit, getAiToolkit } from '@inscribe/plugins';
+
+export function AiEditor() {
+  const editor = useInscribeEditor({
+    extensions: [
+      StarterKit,
+      AiToolkit,
+    ],
+  });
+
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <AiToolbar editor={editor} />
+      <Inscribe editor={editor} style={{ flex: 1 }} />
+    </div>
+  );
+}
+```
+
+---
+
+## Reading Document Context
+
+```ts
+import { getAiToolkit } from '@inscribe/plugins';
+
+const ai = getAiToolkit(editor);
+
+// Full context object — includes cursor position, surrounding text, block info
+const context = ai.getContext();
+
+// Markdown of a specific range (e.g. selected text for a rewrite prompt)
+const snap = editor.getSelectionSnapshot();
+const selectedMd = ai.getMarkdownRange(snap.from, snap.to);
+
+// Document as semantic chunks — useful for RAG / context-window management
+const chunks = ai.getTextChunks();
+```
+
+---
+
+## Streaming a Suggestion
+
+```ts
+async function streamSuggestion(editor: Editor) {
+  const ai = getAiToolkit(editor);
+  const context = ai.getContext();
+
+  const response = await fetch('/api/ai/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ context }),
+  });
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunk = decoder.decode(value);
+    // Push each chunk to the ghost text overlay
+    ai.pushChunk(chunk);
+  }
+}
+```
+
+---
+
+## Accepting and Rejecting
+
+```tsx
+function AiToolbar({ editor }: { editor: Editor | null }) {
+  const hasSuggestion = useEditorState({
+    editor,
+    selector: ({ editor }) => {
+      const ai = editor ? getAiToolkit(editor) : null;
+      return ai?.hasSuggestion() ?? false;
+    },
+  });
+
+  if (!hasSuggestion) return null;
+
+  return (
+    <div style={{ padding: '8px', background: '#f0f0f0' }}>
+      <button onClick={() => editor?.commands.acceptSuggestion()}>
+        Accept (Tab)
+      </button>
+      <button onClick={() => editor?.commands.rejectSuggestion()}>
+        Reject (Esc)
+      </button>
+    </div>
+  );
+}
+```
+
+The editor also accepts the ghost text suggestion when the user presses `Tab` and rejects it
+with `Escape` — no toolbar required.
+
+---
+
+## Backend API Route (Next.js example)
+
+```ts title="app/api/ai/complete/route.ts"
+import { streamText } from 'ai';
+import { anthropic } from '@ai-sdk/anthropic';
+
+export async function POST(req: Request) {
+  const { context } = await req.json();
+
+  const result = streamText({
+    model: anthropic('claude-sonnet-4-6'),
+    system: 'You are a writing assistant. Continue the document naturally.',
+    prompt: `Continue after: "${context.surroundingText}"`,
+  });
+
+  return result.toTextStreamResponse();
+}
+```
+
+<Callout type="info">
+  `ANTHROPIC_API_KEY` must be set in your backend environment.
+</Callout>

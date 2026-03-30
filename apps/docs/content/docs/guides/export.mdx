@@ -2,3 +2,123 @@
 title: Document Export
 description: Exporting the canvas to standalone PDFs or downloading Markdown.
 ---
+
+`@inscribe/export` provides browser-side serializers for converting Inscribe documents to
+portable formats. Install it separately:
+
+```bash
+pnpm add @inscribe/export
+```
+
+---
+
+## PDF Export
+
+`exportToPdf` generates a paginated PDF from the current editor state. It uses
+[pdf-lib](https://pdf-lib.js.org/) and renders standard PDF fonts (Helvetica, Times, Courier) —
+no custom font embedding.
+
+### Triggering a download from a toolbar button
+
+```tsx
+import { exportToPdf } from '@inscribe/export';
+
+async function handleDownloadPdf(editor: Editor) {
+  // 1. Generate PDF bytes
+  const pdfBytes = await exportToPdf(editor);
+
+  // 2. Create a blob and trigger a download
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'document.pdf';
+  document.body.appendChild(a);
+  a.click();
+
+  // 3. Clean up
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+```
+
+### React toolbar button example
+
+```tsx
+export function ExportToolbar({ editor }: { editor: Editor | null }) {
+  const [exporting, setExporting] = useState(false);
+
+  async function handlePdf() {
+    if (!editor) return;
+    setExporting(true);
+    try {
+      const bytes = await exportToPdf(editor);
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'document.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <button onClick={handlePdf} disabled={exporting}>
+      {exporting ? 'Generating…' : 'Download PDF'}
+    </button>
+  );
+}
+```
+
+<Callout type="info">
+  `exportToPdf` returns a `Promise<Uint8Array>`. The async work happens in the browser — no server
+  round-trip is required.
+</Callout>
+
+---
+
+## Markdown Export
+
+`exportToMarkdown` is synchronous and serializes the full document to a CommonMark string.
+
+```tsx
+import { exportToMarkdown } from '@inscribe/export';
+
+function handleDownloadMarkdown(editor: Editor) {
+  const markdown = exportToMarkdown(editor);
+
+  const blob = new Blob([markdown], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'document.md';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+```
+
+You can also use it to copy the document as Markdown to the clipboard:
+
+```ts
+const markdown = exportToMarkdown(editor);
+await navigator.clipboard.writeText(markdown);
+```
+
+---
+
+## DOCX Export
+
+<Callout type="warn">
+  DOCX export is coming soon. The `exportToDocx` function is exported but currently returns an empty
+  document. Full Word-compatible export is on the roadmap.
+</Callout>
+
+---
+
+## Package Reference
+
+See the full [@inscribe/export package reference](/packages/export) for the complete API.

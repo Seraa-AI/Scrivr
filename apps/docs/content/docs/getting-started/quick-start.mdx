@@ -6,23 +6,23 @@ description: Build a minimal working Inscribe editor in a React application.
 This guide walks you through mounting a fully functional canvas editor in a React component.
 You will use the two primitives from `@inscribe/react`:
 
-- **`useCanvasEditor`** — creates and manages an `Editor` instance.
-- **`<Canvas />`** — mounts the rendering engine on a DOM container.
+- **`useInscribeEditor`** — creates and manages an `Editor` instance.
+- **`<Inscribe />`** — mounts the rendering engine on a DOM container.
 
 ---
 
 ## Minimal Example
 
 ```tsx title="MyEditor.tsx"
-import { useCanvasEditor, Canvas, StarterKit } from '@inscribe/react';
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
 
 export function MyEditor() {
-  const editor = useCanvasEditor({
+  const editor = useInscribeEditor({
     extensions: [StarterKit],
   });
 
   return (
-    <Canvas
+    <Inscribe
       editor={editor}
       style={{ height: '100vh', background: '#f5f5f5' }}
     />
@@ -36,37 +36,36 @@ That's it. Drop `<MyEditor />` anywhere in your React tree and you have a pagina
 
 ## How It Works
 
-### 1. `useCanvasEditor`
+### 1. `useInscribeEditor`
 
-`useCanvasEditor` is a React hook that creates an `Editor` instance on mount and destroys it on unmount. The `editor` value is `null` on the very first render (before the effect runs) — `<Canvas />` handles this gracefully by rendering nothing until the editor is ready.
+`useInscribeEditor` is a React hook that creates an `Editor` instance on mount and destroys it on unmount. The `editor` value is `null` on the very first render (before the effect runs) — `<Inscribe />` handles this gracefully by rendering nothing until the editor is ready.
 
 ```ts
-const editor = useCanvasEditor({
+const editor = useInscribeEditor({
   // Extensions to load. StarterKit includes paragraphs, headings,
   // lists, bold, italic, links, history, and more.
   extensions: [StarterKit],
 
   // Optional: page dimensions and margins. Defaults to A4 / 1-inch margins.
   pageConfig: {
-    width: 794,   // px at 96 dpi — A4
-    height: 1123,
-    margin: { top: 96, right: 96, bottom: 96, left: 96 },
+    pageWidth: 794,   // px at 96 dpi — A4
+    pageHeight: 1123,
+    margins: { top: 96, right: 96, bottom: 96, left: 96 },
   },
 
   // Lifecycle callbacks
-  onCreate: ({ editor }) => console.log('Editor ready', editor),
   onUpdate: ({ editor }) => console.log('Document changed'),
-  onDestroy:  () => console.log('Editor destroyed'),
+  onDestroy: () => console.log('Editor destroyed'),
 }, [/* Optional dependency array to re-initialize the editor */]);
 ```
 
-### 2. `<Canvas />`
+### 2. `<Inscribe />`
 
-`<Canvas />` is a thin React lifecycle wrapper around the core `ViewManager`. It mounts the
+`<Inscribe />` is a thin React lifecycle wrapper around the core `ViewManager`. It mounts the
 rendering engine into a container `<div>`, manages the hidden `<textarea>` input bridge (for keyboard and IME events), and handles virtual scrolling `IntersectionObserver` cleanup automatically.
 
 ```tsx
-<Canvas
+<Inscribe
   editor={editor}
   gap={24}          // gap in px between pages. Default: 24
   overscan={500}    // virtual scroll overscan in px. Default: 500
@@ -79,33 +78,28 @@ rendering engine into a container `<div>`, manages the hidden `<textarea>` input
 
 ## Adding Real-Time Collaboration
 
-Inscribe is built from the ground up for multiplayer. Turning your standalone editor into a collaborative one requires just a few extra lines using `@inscribe/plugins` and [Hocuspocus](https://hocuspocus.dev/):
+Inscribe is built from the ground up for multiplayer. Turning your standalone editor into a collaborative one requires just a few extra lines using `@inscribe/plugins`:
 
 ```tsx title="MultiplayerEditor.tsx"
-import { useCanvasEditor, Canvas, StarterKit } from '@inscribe/react';
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
 import { Collaboration, CollaborationCursor } from '@inscribe/plugins';
-import { HocuspocusProvider } from '@hocuspocus/provider';
-
-// 1. Set up the WebSocket provider connecting to your backend
-const provider = new HocuspocusProvider({
-  url: import.meta.env.VITE_WS_URL || 'ws://localhost:1234',
-  name: 'document-room-xyz',
-});
 
 export function MultiplayerEditor() {
-  const editor = useCanvasEditor({
+  const editor = useInscribeEditor({
     extensions: [
       StarterKit,
-      // 2. Add the collaboration extensions passing the Yjs document
-      Collaboration.configure({ document: provider.document }),
-      CollaborationCursor.configure({ 
-        provider, 
-        user: { name: 'Alice', color: '#f7b731' } 
+      Collaboration.configure({
+        url: import.meta.env.VITE_WS_URL || 'ws://localhost:1234',
+        name: 'document-room-xyz',
+      }),
+      CollaborationCursor.configure({
+        user: { name: 'Alice', color: '#f7b731' },
       }),
     ],
+    startReady: false, // wait for server sync before rendering
   });
 
-  return <Canvas editor={editor} style={{ height: '100vh' }} />;
+  return <Inscribe editor={editor} style={{ height: '100vh' }} />;
 }
 ```
 
@@ -117,10 +111,10 @@ Use the `useEditorState` hook to subscribe to specific slices of editor state wi
 the whole component tree on every keypress:
 
 ```tsx
-import { useCanvasEditor, Canvas, useEditorState, StarterKit } from '@inscribe/react';
+import { useInscribeEditor, Inscribe, useEditorState, StarterKit } from '@inscribe/react';
 
 export function EditorWithToolbar() {
-  const editor = useCanvasEditor({ extensions: [StarterKit] });
+  const editor = useInscribeEditor({ extensions: [StarterKit] });
 
   // Only re-renders when isBold changes
   const isBold = useEditorState({
@@ -136,7 +130,7 @@ export function EditorWithToolbar() {
       >
         Bold
       </button>
-      <Canvas editor={editor} style={{ height: '80vh' }} />
+      <Inscribe editor={editor} style={{ height: '80vh' }} />
     </>
   );
 }

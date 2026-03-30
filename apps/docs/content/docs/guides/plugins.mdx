@@ -2,3 +2,204 @@
 title: Creating Plugins
 description: Extending the Editor by writing your first Extension.
 ---
+
+Every Inscribe feature — built-in or custom — is an `Extension`. Extensions declare schema
+contributions, keymaps, commands, layout handlers, and lifecycle hooks through a single
+`Extension.create()` call.
+
+---
+
+## `Extension.create()`
+
+```ts
+import { Extension } from '@inscribe/core';
+
+const MyExtension = Extension.create<MyOptions>({
+  name: 'myExtension',
+
+  defaultOptions: {
+    myOption: 'default',
+  },
+
+  // ...config hooks
+});
+```
+
+The generic type parameter `<MyOptions>` makes your options typesafe. `defaultOptions` provides
+fallback values — callers can override with `.configure({ myOption: 'custom' })`.
+
+---
+
+## Configuration hooks
+
+### `addKeymap`
+
+Returns a map of keyboard shortcuts to ProseMirror commands.
+
+```ts
+addKeymap() {
+  return {
+    'Mod-Shift-k': (state, dispatch) => {
+      if (dispatch) {
+        dispatch(state.tr.insertText('→'));
+      }
+      return true;
+    },
+  };
+},
+```
+
+---
+
+### `addCommands`
+
+Contributes commands to `editor.commands`. Each command factory receives the current
+state and returns a ProseMirror command function.
+
+```ts
+addCommands() {
+  return {
+    insertArrow: () => (state, dispatch) => {
+      if (dispatch) {
+        dispatch(state.tr.insertText('→'));
+      }
+      return true;
+    },
+  };
+},
+```
+
+After registration: `editor.commands.insertArrow()`.
+
+---
+
+### `addProseMirrorPlugins`
+
+Contributes low-level ProseMirror plugins for event handling or decorations.
+
+```ts
+addProseMirrorPlugins() {
+  return [
+    new Plugin({
+      props: {
+        handleKeyDown(view, event) {
+          if (event.key === 'Tab') {
+            // custom tab handling
+            return true; // mark as handled
+          }
+          return false;
+        },
+      },
+    }),
+  ];
+},
+```
+
+---
+
+### `onCreate`
+
+Called once after the editor instance is fully constructed. Use to register subscriptions or
+set up external state that depends on the editor.
+
+```ts
+onCreate(editor) {
+  const unsubscribe = editor.subscribe(() => {
+    // react to state changes
+  });
+
+  // return cleanup function
+  return unsubscribe;
+},
+```
+
+---
+
+### `onTransaction`
+
+Called after every ProseMirror transaction is applied. Receives the old and new state.
+
+```ts
+onTransaction({ editor, transaction }) {
+  if (transaction.docChanged) {
+    console.log('document changed');
+  }
+},
+```
+
+---
+
+## Minimal custom extension example
+
+This extension adds a `Mod-Shift-h` shortcut that inserts `"Hello!"` at the cursor:
+
+```ts
+import { Extension } from '@inscribe/core';
+
+const HelloExtension = Extension.create({
+  name: 'hello',
+
+  addKeymap() {
+    return {
+      'Mod-Shift-h': (state, dispatch) => {
+        if (dispatch) {
+          dispatch(state.tr.insertText('Hello!'));
+        }
+        return true;
+      },
+    };
+  },
+
+  addCommands() {
+    return {
+      sayHello: () => (state, dispatch) => {
+        if (dispatch) {
+          dispatch(state.tr.insertText('Hello!'));
+        }
+        return true;
+      },
+    };
+  },
+});
+
+// Use it
+const editor = new Editor({
+  extensions: [StarterKit, HelloExtension],
+});
+
+editor.commands.sayHello();
+```
+
+---
+
+## Composing sub-extensions
+
+Use `addExtensions` to bundle multiple extensions into one:
+
+```ts
+const MyFeature = Extension.create({
+  name: 'myFeature',
+
+  addExtensions() {
+    return [
+      SubExtensionA,
+      SubExtensionB.configure({ option: true }),
+    ];
+  },
+});
+```
+
+This is how `StarterKit` works — it's an extension that aggregates all the built-in extensions.
+
+---
+
+## Further reading
+
+<Cards>
+  <Card title="Custom Extensions" href="/guides/nodes/custom-extensions">
+    Full guide to custom nodes, marks, and layout strategies.
+  </Card>
+  <Card title="Extension type reference" href="/api/types">
+    TypeScript interfaces for ExtensionConfig, ExtensionContext, and related types.
+  </Card>
+</Cards>

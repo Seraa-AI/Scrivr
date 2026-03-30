@@ -5,7 +5,7 @@ description: Complete reference for the Editor class — methods, properties, an
 
 The `Editor` class is the central orchestrator of every Inscribe instance. It owns the document state,
 layout engine, and extension system. Consumers interact with it directly (headless) or via the
-`useCanvasEditor` React hook.
+`useInscribeEditor` React hook.
 
 ```ts
 import { Editor, StarterKit } from '@inscribe/core';
@@ -26,7 +26,7 @@ editor.mount(containerElement);
 new Editor(options: EditorOptions)
 ```
 
-Accepts an [`EditorOptions`](/ api/types#editoroptions) object. Builds the ProseMirror schema from
+Accepts an [`EditorOptions`](/api/types#editoroptions) object. Builds the ProseMirror schema from
 extensions, runs the initial layout, and starts the cursor blink timer.
 
 ---
@@ -45,7 +45,7 @@ directly — it reflects exactly which node and mark types are loaded.
 readonly pageConfig: PageConfig
 ```
 The active page dimensions. Set once at construction from `EditorOptions.pageConfig` or the first
-extension that provides one. See [`PageConfig`](/ api/types#pageconfig).
+extension that provides one. See [`PageConfig`](/api/types#pageconfig).
 
 ### `charMap`
 ```ts
@@ -66,6 +66,24 @@ the cursor in a custom overlay.
 get isFocused(): boolean
 ```
 Whether the editor's hidden textarea currently has focus.
+
+### `loadingState`
+```ts
+get loadingState(): 'syncing' | 'rendering' | 'ready'
+```
+Current loading phase of the editor:
+
+| Value | Meaning |
+|-------|---------|
+| `'syncing'` | Waiting for collaborative sync (only when `startReady: false`). |
+| `'rendering'` | Layout engine is running for the first time. |
+| `'ready'` | Document is fully laid out and visible. |
+
+### `cursorPage`
+```ts
+get cursorPage(): number
+```
+The 1-based page number of the current cursor position.
 
 ### `commands`
 ```ts
@@ -88,14 +106,14 @@ editor.commands.undo();
 mount(container: HTMLElement): void
 ```
 Creates the hidden `<textarea>` input bridge and attaches keyboard/paste event listeners to the
-given container. Called automatically by `<Canvas />`.
+given container. Called automatically by `<Inscribe />`.
 
 ### `unmount()`
 ```ts
 unmount(): void
 ```
 Removes the textarea and detaches event listeners. The editor state is preserved — the editor can be
-re-mounted. Called automatically by `<Canvas />` on unmount.
+re-mounted. Called automatically by `<Inscribe />` on unmount.
 
 ### `destroy()`
 ```ts
@@ -109,6 +127,13 @@ After `destroy()` the editor instance should not be used.
 focus(): void
 ```
 Programmatically focuses the hidden textarea.
+
+### `setReady(ready)`
+```ts
+setReady(ready: boolean): void
+```
+Unblocks layout flushing when using collaboration with `startReady: false`. Call `setReady(true)`
+after the server syncs the initial document to start rendering.
 
 ---
 
@@ -144,7 +169,7 @@ editor.isActive('bulletList');                 // inside a list?
 getSelectionSnapshot(): SelectionSnapshot
 ```
 Returns a lightweight snapshot of the selection — all the data a toolbar or floating menu needs
-without requiring ProseMirror imports. See [`SelectionSnapshot`](/ api/types#selectionsnapshot).
+without requiring ProseMirror imports. See [`SelectionSnapshot`](/api/types#selectionsnapshot).
 
 ### `getActiveMarks()`
 ```ts
@@ -165,6 +190,12 @@ attrs.color?.color; // '#dc2626'
 attrs.font_size?.size; // 18
 ```
 
+### `getBlockInfo()`
+```ts
+getBlockInfo(): { blockType: string; blockAttrs: Record<string, unknown> }
+```
+Returns the type name and attributes of the block node containing the cursor.
+
 ### `getMarkdown()`
 ```ts
 getMarkdown(): string
@@ -181,6 +212,20 @@ get layout(): DocumentLayout
 ```
 Returns the current `DocumentLayout`. Calls `ensureLayout()` internally so the result always reflects
 the latest state.
+
+### `ensureLayout()`
+```ts
+ensureLayout(): void
+```
+Forces the layout engine to run synchronously if the current layout is stale. Normally called
+implicitly by `editor.layout`.
+
+### `ensurePagePopulated(pageNumber)`
+```ts
+ensurePagePopulated(pageNumber: number): void
+```
+Ensures the given page (1-based) has been laid out. Used by the input bridge when the user clicks
+on a page that hasn't been rendered yet.
 
 ### `getViewportRect(from, to)`
 ```ts
@@ -199,6 +244,12 @@ if (rect) {
   menuEl.style.left = `${rect.left}px`;
 }
 ```
+
+### `scrollCursorIntoView()`
+```ts
+scrollCursorIntoView(): void
+```
+Scrolls the viewport so the current cursor position is visible.
 
 ---
 
@@ -274,4 +325,4 @@ const unregister = editor.addOverlayRenderHandler(
 setPageElementLookup(fn: ((page: number) => HTMLElement | null) | null): void
 ```
 Registers the function used by the editor to resolve a 1-based page number to its DOM element.
-Called automatically by `<Canvas />`. Only needed when building a custom rendering adapter.
+Called automatically by `<Inscribe />`. Only needed when building a custom rendering adapter.

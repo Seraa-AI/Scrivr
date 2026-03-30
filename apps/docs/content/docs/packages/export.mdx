@@ -1,6 +1,6 @@
 ---
 title: "@inscribe/export"
-description: Export utilities — serialize Inscribe documents to paginated PDF (pdf-lib), DOCX (OpenXML), or Markdown.
+description: Export utilities — serialize Inscribe documents to paginated PDF (pdf-lib) or Markdown.
 ---
 
 `@inscribe/export` provides serializers that convert an Inscribe `EditorState` into portable document
@@ -30,8 +30,9 @@ formats. All serializers run entirely in the browser — no server round-trip re
 
 ## PDF Export
 
-Generates a multi-page PDF that matches the paginated canvas layout pixel-for-pixel.
-Powered by [pdf-lib](https://pdf-lib.js.org/).
+Generates a multi-page PDF that matches the paginated canvas layout.
+Powered by [pdf-lib](https://pdf-lib.js.org/). Uses standard PDF fonts (Helvetica, Times, Courier) —
+no custom font embedding.
 
 ```ts
 import { exportToPdf } from '@inscribe/export';
@@ -47,51 +48,16 @@ a.download = 'document.pdf';
 a.click();
 ```
 
-### Options
-
-```ts
-const pdfBytes = await exportToPdf(editor, {
-  // Metadata embedded in the PDF
-  title: 'My Document',
-  author: 'Alice',
-  subject: 'Draft v1',
-
-  // Override page size (defaults to editor's PageConfig)
-  pageSize: { width: 595, height: 842 }, // A4 in PDF points
-});
-```
+`exportToPdf` takes the editor instance and returns a `Promise<Uint8Array>` of the raw PDF bytes.
 
 ---
 
 ## DOCX Export
 
-Serializes the document to a `.docx` file (Office Open XML format) compatible with
-Microsoft Word, Google Docs, and LibreOffice.
-
-```ts
-import { exportToDocx } from '@inscribe/export';
-
-const docxBlob = await exportToDocx(editor);
-
-const url = URL.createObjectURL(docxBlob);
-const a = document.createElement('a');
-a.href = url;
-a.download = 'document.docx';
-a.click();
-```
-
-### Supported Elements
-
-| Element | DOCX equivalent |
-|---------|----------------|
-| Paragraph | `<w:p>` with run formatting |
-| Heading 1–6 | Built-in Word heading styles |
-| Bold / Italic / Underline | `<w:b>`, `<w:i>`, `<w:u>` |
-| Bullet list | `<w:numPr>` with list style |
-| Ordered list | `<w:numPr>` with decimal style |
-| Link | `<w:hyperlink>` |
-| Hard break | `<w:br>` |
-| Code block | Monospace paragraph style |
+<Callout type="warn">
+  DOCX export is coming soon. The `exportToDocx` function is exported but currently returns an empty
+  document. Full Word-compatible export is on the roadmap.
+</Callout>
 
 ---
 
@@ -110,14 +76,7 @@ console.log(markdown);
 // A paragraph with **bold** and _italic_ text.
 ```
 
-### Options
-
-```ts
-const markdown = exportToMarkdown(editor, {
-  // Use GitHub Flavored Markdown extensions (tables, strikethrough)
-  gfm: true,
-});
-```
+`exportToMarkdown` is synchronous and returns a `string`.
 
 ---
 

@@ -1,12 +1,12 @@
 ---
 title: Event Callbacks
-description: Full signature reference for all Editor and useCanvasEditor event callbacks.
+description: Full signature reference for all Editor and useInscribeEditor event callbacks.
 ---
 
 Inscribe exposes event callbacks at two levels:
 
 - **`EditorOptions`** — used when instantiating `Editor` directly (headless)
-- **`UseCanvasEditorOptions`** — React hook wrapper with additional lifecycle callbacks
+- **`UseInscribeEditorOptions`** — React hook wrapper with additional lifecycle callbacks
 
 ---
 
@@ -34,7 +34,7 @@ const editor = new Editor({
 ```
 
 <Callout type="info">
-  When using `<Canvas />` and `useCanvasEditor`, you do not need `onChange` — use `onUpdate` instead.
+  When using `<Inscribe />` and `useInscribeEditor`, you do not need `onChange` — use `onUpdate` instead.
   The React adapter subscribes to the editor internally via `editor.subscribe()`.
 </Callout>
 
@@ -77,15 +77,15 @@ const editor = new Editor({
 ```
 
 <Callout type="info">
-  When using `<Canvas />`, the `ViewManager` handles cursor repainting automatically.
+  When using `<Inscribe />`, the `ViewManager` handles cursor repainting automatically.
   You only need `onCursorTick` when building a completely custom rendering adapter.
 </Callout>
 
 ---
 
-## UseCanvasEditorOptions Callbacks (React)
+## UseInscribeEditorOptions Callbacks (React)
 
-These are passed to `useCanvasEditor(options, deps?)`. They are a superset of `EditorOptions`
+These are passed to `useInscribeEditor(options, deps?)`. They are a superset of `EditorOptions`
 callbacks, using a `{ editor }` props object for consistency with the Tiptap API.
 
 ### `onCreate`
@@ -96,7 +96,7 @@ Called once after the editor instance has been created. Use for one-time setup t
 to the editor instance (e.g. loading initial content):
 
 ```ts
-const editor = useCanvasEditor({
+const editor = useInscribeEditor({
   extensions: [StarterKit],
   onCreate: ({ editor }) => {
     editor.commands.setContent(savedDoc);
@@ -113,7 +113,7 @@ onUpdate?: (props: { editor: Editor }) => void
 Called on every document or selection change (equivalent to `onChange` in `EditorOptions`).
 
 ```ts
-const editor = useCanvasEditor({
+const editor = useInscribeEditor({
   extensions: [StarterKit],
   onUpdate: ({ editor }) => {
     const md = editor.getMarkdown();
@@ -172,5 +172,5 @@ const unsubscribe = editor.subscribe(() => {
 unsubscribe();
 ```
 
-`editor.subscribe()` is the underlying primitive that both `useCanvasEditor` and `<Canvas />`
+`editor.subscribe()` is the underlying primitive that both `useInscribeEditor` and `<Inscribe />`
 use internally.

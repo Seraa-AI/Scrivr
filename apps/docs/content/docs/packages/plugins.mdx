@@ -1,6 +1,6 @@
 ---
 title: "@inscribe/plugins"
-description: Optional extensions — real-time collaboration via Yjs/Hocuspocus, AI Toolkit, and Track Changes.
+description: Optional extensions — real-time collaboration, AI Toolkit, and Track Changes.
 ---
 
 `@inscribe/plugins` ships optional extensions that build on top of `@inscribe/core`. Install it only
@@ -30,108 +30,128 @@ when you need one of the advanced features it provides.
 
 ## Real-Time Collaboration
 
-Inscribe's collaboration layer uses **Yjs** for CRDT data structures and syncs over WebSockets via
-**Hocuspocus**. Two extensions are needed:
+Inscribe's collaboration layer uses **Yjs** for CRDT data structures and syncs over WebSockets.
+Two extensions are needed:
 
-- `Collaboration` — binds the ProseMirror document to a shared Yjs `Y.Doc`
+- `Collaboration` — connects the editor to a shared document via WebSocket
 - `CollaborationCursor` — renders remote user cursors on the canvas overlay
+
+The library manages the WebSocket connection internally — no separate provider setup is needed
+on the client.
 
 ### Setup
 
-First, install the peer dependencies:
-
-<Tabs items={["pnpm", "npm"]}>
-  <Tab value="pnpm">
-    ```bash
-    pnpm add @hocuspocus/provider yjs
-    ```
-  </Tab>
-  <Tab value="npm">
-    ```bash
-    npm install @hocuspocus/provider yjs
-    ```
-  </Tab>
-</Tabs>
-
-Then configure your editor:
-
 ```tsx title="CollaborativeEditor.tsx"
-import { useCanvasEditor, Canvas, StarterKit } from '@inscribe/react';
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
 import { Collaboration, CollaborationCursor } from '@inscribe/plugins';
-import { HocuspocusProvider } from '@hocuspocus/provider';
-
-const provider = new HocuspocusProvider({
-  url: import.meta.env.VITE_WS_URL,
-  name: 'my-document',
-});
 
 export function CollaborativeEditor() {
-  const editor = useCanvasEditor({
+  const editor = useInscribeEditor({
     extensions: [
       StarterKit,
-      Collaboration.configure({ document: provider.document }),
+      Collaboration.configure({
+        url: import.meta.env.VITE_WS_URL, // e.g. 'ws://localhost:1234'
+        name: 'my-document',              // document identifier
+      }),
       CollaborationCursor.configure({
-        provider,
         user: { name: 'Alice', color: '#f7b731' },
       }),
     ],
+    startReady: false, // wait for sync before rendering
   });
 
-  return <Canvas editor={editor} style={{ height: '100vh' }} />;
+  return <Inscribe editor={editor} style={{ height: '100vh' }} />;
 }
 ```
 
 **Environment variable required:** `VITE_WS_URL` — the WebSocket URL of your Hocuspocus server
 (e.g. `ws://localhost:1234`).
 
-See the [Collaboration example](/ examples/collaboration) for a full backend + frontend setup.
+### `Collaboration.configure` options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `url` | `string` | WebSocket server URL. |
+| `name` | `string` | Document identifier — maps to a room/document on the server. |
+
+### `CollaborationCursor.configure` options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `user` | `{ name: string; color: string }` | Display name and cursor colour for the local user. |
+
+### `startReady: false`
+
+When using collaboration, pass `startReady: false` to `useInscribeEditor` (or `new Editor`). This
+suppresses layout flushes until the server syncs the initial document. Call `editor.setReady(true)`
+inside the provider's `onSync` callback — or rely on `Collaboration` to do it automatically.
+
+See the [Collaboration example](/examples/collaboration) for a full backend + frontend setup.
 
 ---
 
 ## AI Toolkit
 
-The AI Toolkit adds a streaming ghost-text writing assistant powered by any LLM via the
-**Vercel AI SDK**. It renders suggestions as a canvas overlay — the document is never mutated until
-the user explicitly accepts a suggestion.
+`AiToolkit` is an aggregator extension that enables ghost-text AI suggestions directly on the
+canvas overlay. Suggestions are rendered as a canvas overlay — the document is never mutated until
+the user explicitly accepts.
+
+`AiToolkit` bundles three sub-extensions: `UniqueId` (stable block IDs), `GhostText` (overlay
+renderer), and `AiCaret` (cursor overlay during streaming).
 
 ### Setup
 
-Install the AI SDK peer dependencies:
-
-<Tabs items={["pnpm", "npm"]}>
-  <Tab value="pnpm">
-    ```bash
-    pnpm add ai @ai-sdk/react @ai-sdk/anthropic
-    ```
-  </Tab>
-  <Tab value="npm">
-    ```bash
-    npm install ai @ai-sdk/react @ai-sdk/anthropic
-    ```
-  </Tab>
-</Tabs>
-
-**Environment variable required:** `ANTHROPIC_API_KEY` — set on your backend API route.
-
 ```tsx title="AiEditor.tsx"
-import { useCanvasEditor, Canvas, StarterKit } from '@inscribe/react';
-import { AiToolkit } from '@inscribe/plugins';
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+import { AiToolkit, getAiToolkit } from '@inscribe/plugins';
 
 export function AiEditor() {
-  const editor = useCanvasEditor({
+  const editor = useInscribeEditor({
     extensions: [
       StarterKit,
-      AiToolkit.configure({
-        endpoint: '/api/ai/complete', // your streaming API route
-      }),
+      AiToolkit,
     ],
+    onCreate: ({ editor }) => {
+      const ai = getAiToolkit(editor);
+      // ai is now available for reading context and pushing suggestions
+    },
   });
 
-  return <Canvas editor={editor} style={{ height: '100vh' }} />;
+  return <Inscribe editor={editor} style={{ height: '100vh' }} />;
 }
 ```
 
-See the [AI Assistant example](/ examples/ai-assistant) for the full API route implementation.
+### `getAiToolkit(editor): AiToolkitAPI`
+
+After the editor is created, call `getAiToolkit(editor)` to get the toolkit handle:
+
+```ts
+import { getAiToolkit } from '@inscribe/plugins';
+
+const ai = getAiToolkit(editor);
+
+// Read document context around the cursor
+const context = ai.getContext();
+
+// Get markdown for a range (e.g. for an inline rewrite prompt)
+const md = ai.getMarkdownRange(from, to);
+
+// Get document as text chunks (useful for chunked LLM context)
+const chunks = ai.getTextChunks();
+
+// Accept the current ghost text suggestion into the document
+editor.commands.acceptSuggestion();
+```
+
+### `AiToolkitAPI` methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getContext()` | `AiContext` | Full document context including cursor position and surrounding text. |
+| `getMarkdownRange(from, to)` | `string` | Markdown serialization of the given doc position range. |
+| `getTextChunks()` | `string[]` | Document split into semantic chunks for LLM context windows. |
+
+See the [AI Assistant example](/examples/ai-assistant) for the full streaming integration pattern.
 
 ---
 
@@ -140,24 +160,42 @@ See the [AI Assistant example](/ examples/ai-assistant) for the full API route i
 The Track Changes extension records every insertion and deletion as annotated ranges in the document,
 enabling multi-author review workflows.
 
+### Setup
+
 ```tsx
 import { TrackChanges } from '@inscribe/plugins';
 
-const editor = useCanvasEditor({
+const editor = useInscribeEditor({
   extensions: [
     StarterKit,
     TrackChanges.configure({
-      enabled: true,
-      author: { id: 'user-1', name: 'Alice' },
+      initialStatus: 'tracking',   // 'tracking' | 'viewing'
+      userID: 'user-1',
+      canAcceptReject: true,
     }),
   ],
 });
+```
 
-// Accept all pending changes
-editor.commands.acceptAllChanges();
+### `TrackChanges.configure` options
 
-// Reject a specific change
-editor.commands.rejectChange(changeId);
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `initialStatus` | `'tracking' \| 'viewing'` | `'tracking'` | Whether tracking is on at startup. |
+| `userID` | `string` | — | Author ID stamped on each change. |
+| `canAcceptReject` | `boolean` | `true` | Whether the local user can accept/reject changes. |
+| `skipTrsWithMetas` | `string[]` | `[]` | Transaction meta keys that bypass change recording. |
+
+### Commands
+
+```ts
+// Set the status of specific changes (accept or reject by ID)
+editor.commands.setChangeStatuses('accepted', [changeId1, changeId2]);
+editor.commands.setChangeStatuses('rejected', [changeId1]);
+
+// Toggle tracking on/off (or pass an explicit status)
+editor.commands.setTrackingStatus('tracking');
+editor.commands.setTrackingStatus('viewing');
 ```
 
 <Callout type="info">
