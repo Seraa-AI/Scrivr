@@ -1,4 +1,55 @@
 ---
-title: list
-description: Configuration shape for the list extension.
+title: List
+description: Bullet and ordered lists — toggleBulletList, toggleOrderedList, indent, and dedent.
 ---
+
+Provides bullet lists, ordered lists, and list items. All three node types
+(`bulletList`, `orderedList`, `listItem`) are registered by a single `List` extension.
+
+```ts
+import { List } from '@inscribe/core';
+```
+
+No configurable options.
+
+---
+
+## Nodes
+
+| Node | Content | Description |
+|------|---------|-------------|
+| `bulletList` | `listItem+` | Unordered list container. |
+| `orderedList` | `listItem+` | Ordered list container. Has an `order` attribute (default `1`) for the starting number. |
+| `listItem` | `paragraph block*` | A single list item. The first child must be a paragraph; subsequent children can be any block (for nested content). |
+
+---
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `toggleBulletList()` | Wraps selection in a bullet list, lifts it out, or converts from ordered — mirrors Google Docs behaviour. |
+| `toggleOrderedList()` | Same toggle logic for ordered lists. |
+| `liftListItem()` | Dedents the current list item (or exits the list if at top level). |
+| `sinkListItem()` | Indents the current list item one level deeper. |
+
+---
+
+## Keyboard
+
+| Key | Action |
+|-----|--------|
+| `Mod-Shift-8` | Toggle bullet list |
+| `Mod-Shift-9` | Toggle ordered list |
+| `Enter` | Split list item. Exits the list when the item is empty. |
+| `Tab` | Indent list item deeper. |
+| `Shift-Tab` | Dedent list item. |
+
+---
+
+## Input rules
+
+| Pattern | Result |
+|---------|--------|
+| `- ` or `* ` at start of block | Wraps in a bullet list. |
+| `1. ` at start of block | Wraps in an ordered list starting at that number. |

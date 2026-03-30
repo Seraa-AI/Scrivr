@@ -1,0 +1,162 @@
+---
+title: Layout Strategies
+description: How the canvas renderer knows how to draw each block node — the BlockStrategy and InlineStrategy interfaces.
+---
+
+Inscribe's canvas renderer does not know how to draw any specific block type by default.
+Instead, each extension that adds a block node must also register a **strategy** — an object
+that tells the renderer exactly how to paint that block and where each character sits on screen.
+
+This page explains why strategies exist, what they do, and how the built-in ones work.
+
+---
+
+## The problem strategies solve
+
+In a DOM-based editor, the browser handles rendering. Each node type maps to an HTML element and
+the browser paints it. On a canvas there is no equivalent — every pixel must be drawn explicitly
+by code.
+
+Different block types need fundamentally different drawing logic:
+
+- A paragraph draws text line by line, handling word wrap and alignment.
+- A code block draws the same text lines but first fills a grey background behind them.
+- A table draws a grid, measures column widths, and lays out cells independently.
+
+Strategies are the mechanism that lets each extension own its own drawing logic without the
+renderer needing to know anything about the specific nodes that exist.
+
+---
+
+## `BlockStrategy`
+
+A `BlockStrategy` is a plain object with a single `render` method:
+
+```ts
+interface BlockStrategy {
+  render(
+    block: LayoutBlock,
+    renderCtx: BlockRenderContext,
+    map: CharacterMap,
+  ): number;
+}
+```
+
+The renderer calls `render()` once per visible block, per frame. The strategy must do two things:
+
+1. **Draw** — paint the block's visual content onto `renderCtx.ctx` (the page canvas context).
+2. **Register** — record the `(x, y, page)` coordinates of every character into `map` (the
+   `CharacterMap`), so the editor can translate a mouse click to a doc position and a doc
+   position to cursor coordinates.
+
+The return value is the updated `lineIndexOffset` — the cumulative line count after this block.
+The renderer passes it to the next block so each block knows its global line number.
+
+<Callout type="warn">
+  A strategy that draws correctly but skips `CharacterMap` registration will break click-to-cursor
+  and cursor placement for that block. Always delegate to `TextBlockStrategy` for the registration
+  step unless you are implementing a fully custom block type like a table.
+</Callout>
+
+---
+
+## `TextBlockStrategy`
+
+`TextBlockStrategy` is the built-in strategy for any block whose content is made of inline text
+— paragraphs, headings, list items, code blocks. It:
+
+- Iterates over every line and span produced by the layout engine.
+- Applies font strings resolved from block styles and active marks (bold, italic, size, family).
+- Calls each active mark's `MarkDecorator` (`decoratePre`, `decorateFill`, `decoratePost`) to
+  draw backgrounds, colours, and underlines.
+- Dispatches inline object spans (images) to the `InlineRegistry`.
+- Registers every glyph's `(x, y, height, page)` into the `CharacterMap`.
+
+**Any block that contains inline text should use `TextBlockStrategy`** — either directly or as a
+delegate after custom pre-rendering.
+
+---
+
+## Wrapping `TextBlockStrategy`
+
+The most common pattern for a custom block is to draw additional decoration, then delegate.
+This is exactly how `CodeBlockStrategy` is implemented:
+
+```ts
+import { TextBlockStrategy } from '@inscribe/core';
+import type { BlockStrategy } from '@inscribe/core';
+
+const CalloutStrategy: BlockStrategy = {
+  render(block, renderCtx, map) {
+    // 1. Custom drawing — background fill
+    const { ctx } = renderCtx;
+    ctx.save();
+    ctx.fillStyle = '#eff6ff';
+    ctx.fillRect(block.x - 8, block.y - 8, block.availableWidth + 16, block.height + 16);
+    ctx.restore();
+
+    // 2. Delegate — handles text, marks, inline objects, and CharacterMap registration
+    return TextBlockStrategy.render(block, renderCtx, map);
+  },
+};
+```
+
+The strategy is connected to a node type name via `addLayoutHandlers()` in the extension:
+
+```ts
+addLayoutHandlers() {
+  return { callout: CalloutStrategy };
+},
+```
+
+The renderer looks up `'callout'` in the `BlockRegistry` and calls `CalloutStrategy.render()`
+for every `callout` block it encounters.
+
+---
+
+## `InlineStrategy`
+
+For inline objects — nodes that live inside a line box alongside text (images, widgets) —
+the contract is `InlineStrategy`:
+
+```ts
+interface InlineStrategy {
+  verticalAlign: 'baseline' | 'middle' | 'top';
+  render(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    node: Node,
+  ): void;
+}
+```
+
+`TextBlockStrategy` calls the inline strategy when it encounters an object span in a line.
+Inline strategies are registered via `addInlineHandlers()`:
+
+```ts
+addInlineHandlers() {
+  return { image: createInlineImageStrategy() };
+},
+```
+
+---
+
+## Summary
+
+| Concept | What it is | Registered via |
+|---------|-----------|----------------|
+| `BlockStrategy` | Draws a block and registers its characters into the `CharacterMap` | `addLayoutHandlers()` |
+| `TextBlockStrategy` | Built-in strategy for all text-based blocks | — (use directly) |
+| `InlineStrategy` | Draws an inline object (image, widget) inside a line box | `addInlineHandlers()` |
+
+<Cards>
+  <Card title="Custom Extensions" href="/guides/nodes/custom-extensions">
+    How to register a custom block node with its own strategy.
+  </Card>
+  <Card title="Render Pipeline" href="/concepts/render-pipeline">
+    How a keypress becomes pixels — the four-stage pipeline.
+  </Card>
+</Cards>

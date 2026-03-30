@@ -1,4 +1,50 @@
 ---
-title: code-block
-description: Configuration shape for the code-block extension.
+title: CodeBlock
+description: Fenced code block with monospace rendering and a light background.
 ---
+
+A preformatted code block. Text inside is rendered in a monospace font on a light background
+with a faint border. Marks are not permitted inside a code block — all text is unstyled.
+
+```ts
+import { CodeBlock } from '@inscribe/core';
+```
+
+No configurable options.
+
+---
+
+## Attributes
+
+`CodeBlock` has no user-facing attributes. It does carry `nodeId` (set automatically by
+`UniqueId` when `AiToolkit` is active) and `dataTracked` (used by `TrackChanges`).
+
+---
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `toggleCodeBlock()` | Converts the current block to a code block, or back to a paragraph if already in one. |
+
+**Keyboard:** `Mod-Alt-c`
+
+---
+
+## Behaviour
+
+- `Tab` inside a code block inserts two spaces instead of indenting a list item.
+- Marks are disabled — `Bold`, `Italic`, and other inline marks have no effect inside a code block.
+- Whitespace is preserved exactly as typed.
+
+---
+
+## Default style
+
+`13px 'Courier New', Courier, monospace` — 14px space before and after the block.
+
+---
+
+## Input rules
+
+Typing ` ``` ` at the start of a block converts it to a code block.

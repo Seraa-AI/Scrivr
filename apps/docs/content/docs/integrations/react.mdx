@@ -1,4 +1,134 @@
 ---
-title: React Hooks
-description: Complete reference for the @inscribe/react adapter hook system.
+title: React Integration
+description: Patterns for Next.js, server components, SSR, and context providers.
 ---
+
+`@inscribe/react` is a client-only library — it creates a canvas, listens to DOM events, and
+manages browser APIs. This page covers the patterns you need when using Inscribe inside
+a React framework like Next.js.
+
+---
+
+## Client Components
+
+The editor must live in a **client component**. Add `'use client'` to any file that imports from
+`@inscribe/react`:
+
+```tsx title="components/MyEditor.tsx"
+'use client';
+
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+
+export function MyEditor() {
+  const editor = useInscribeEditor({ extensions: [StarterKit] });
+  return <Inscribe editor={editor} style={{ height: '100vh' }} />;
+}
+```
+
+Server components can then import and render `<MyEditor />` normally — they just can't use the
+`editor` instance themselves.
+
+---
+
+## Next.js — Disabling SSR
+
+If you need the editor component to be lazily loaded (e.g. to keep it out of the initial bundle),
+use `next/dynamic` with `ssr: false`:
+
+```tsx title="app/page.tsx"
+import dynamic from 'next/dynamic';
+
+const MyEditor = dynamic(() => import('@/components/MyEditor'), { ssr: false });
+
+export default function Page() {
+  return <MyEditor />;
+}
+```
+
+`'use client'` on the component itself is still required — `ssr: false` only controls whether
+Next.js attempts to server-render the component during the build.
+
+---
+
+## Sharing the Editor Instance
+
+For small apps, pass `editor` as a prop. For larger trees, create a context to avoid threading
+it through every component.
+
+```tsx title="context/EditorContext.tsx"
+'use client';
+
+import { createContext, useContext } from 'react';
+import type { Editor } from '@inscribe/core';
+
+const EditorContext = createContext<Editor | null>(null);
+
+export const EditorProvider = EditorContext.Provider;
+
+export function useEditor(): Editor | null {
+  return useContext(EditorContext);
+}
+```
+
+```tsx title="components/EditorApp.tsx"
+'use client';
+
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+import { EditorProvider } from '@/context/EditorContext';
+import { Toolbar } from './Toolbar';
+
+export function EditorApp() {
+  const editor = useInscribeEditor({ extensions: [StarterKit] });
+
+  return (
+    <EditorProvider value={editor}>
+      <Toolbar />
+      <Inscribe editor={editor} style={{ height: '100vh' }} />
+    </EditorProvider>
+  );
+}
+```
+
+```tsx title="components/Toolbar.tsx"
+'use client';
+
+import { useEditor } from '@/context/EditorContext';
+
+export function Toolbar() {
+  const editor = useEditor();
+  return (
+    <button onClick={() => editor?.commands.toggleBold()}>Bold</button>
+  );
+}
+```
+
+<Callout type="info">
+  A built-in `InscribeContext` and `useInscribe` hook are coming to `@inscribe/react` — see the
+  [React package page](/packages/react#inscribecontext-and-useinscribe). Once available, the
+  manual context above can be replaced with those.
+</Callout>
+
+---
+
+## Server-Side Document Processing
+
+If you need to process documents on the server — applying AI suggestions, validating content,
+or exporting to Markdown — use `ServerEditor` from `@inscribe/core`.
+It shares the same schema and extension system as the browser `Editor` but has no DOM dependency.
+
+```ts title="app/api/export/route.ts"
+import { ServerEditor, StarterKit } from '@inscribe/core';
+
+export async function POST(req: Request) {
+  const { doc } = await req.json();
+
+  const editor = new ServerEditor({
+    extensions: [StarterKit],
+    content: doc,
+  });
+
+  return Response.json({ markdown: editor.getMarkdown() });
+}
+```
+
+See the [ServerEditor API reference](/api/server-editor) for the full interface.

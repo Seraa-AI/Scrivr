@@ -4,7 +4,7 @@ description: Full backend and frontend setup for multiplayer editing with Inscri
 ---
 
 This example shows how to set up a real-time collaborative editor using `@inscribe/plugins`
-and an `@inscribe/server` Hocuspocus backend.
+and a Hocuspocus-compatible WebSocket backend.
 
 ---
 
@@ -15,28 +15,28 @@ the WebSocket connection — you don't need to manage a provider on the client.
 
 - `Collaboration.configure({ url, name })` — connects to your server and binds the document
 - `CollaborationCursor.configure({ user })` — renders remote user cursors on the overlay canvas
-- `startReady: false` — delays layout rendering until the server has synced the initial document
 
 ---
 
 ## Backend Setup
 
-Install the server package:
+Inscribe's collaboration protocol is compatible with any [Hocuspocus](https://hocuspocus.dev/) server.
+You can self-host Hocuspocus directly:
 
 ```bash
-pnpm add @inscribe/server
+pnpm add @hocuspocus/server
 ```
 
 ```ts title="server.ts"
-import { createServer } from '@inscribe/server';
+import { Server } from '@hocuspocus/server';
 
-const server = createServer({
+const server = Server.configure({
   port: 1234,
-  // Optional: persist documents to disk or a database
-  onLoadDocument: async ({ documentName }) => {
+  // Optional: persist documents to a database
+  async onLoadDocument({ documentName }) {
     return await db.load(documentName);
   },
-  onStoreDocument: async ({ documentName, document }) => {
+  async onStoreDocument({ documentName, document }) {
     await db.save(documentName, document);
   },
 });
@@ -50,7 +50,7 @@ console.log('Collaboration server running on ws://localhost:1234');
 ## Frontend Setup
 
 ```tsx title="CollaborativeEditor.tsx"
-import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+import { useInscribeEditor, Inscribe, useInscribeState, StarterKit } from '@inscribe/react';
 import { Collaboration, CollaborationCursor } from '@inscribe/plugins';
 
 interface Props {
@@ -62,20 +62,18 @@ export function CollaborativeEditor({ documentId, user }: Props) {
   const editor = useInscribeEditor(
     {
       extensions: [
-        StarterKit,
+        StarterKit.configure({ history: false }), // Y.UndoManager replaces PM history
         Collaboration.configure({
           url: import.meta.env.VITE_WS_URL, // e.g. 'ws://localhost:1234'
           name: documentId,
         }),
         CollaborationCursor.configure({ user }),
       ],
-      // Suppress layout until the server syncs the initial document
-      startReady: false,
     },
     [documentId], // re-initialize when document changes
   );
 
-  const loadingState = useEditorState({
+  const loadingState = useInscribeState({
     editor,
     selector: ({ editor }) => editor?.loadingState,
   });
@@ -89,6 +87,23 @@ export function CollaborativeEditor({ documentId, user }: Props) {
 ```
 
 **Environment variable required:** `VITE_WS_URL` — the WebSocket URL of your Hocuspocus server.
+
+<Callout type="info">
+  **Authentication — coming soon.** An `onAuthenticate` callback will be added to
+  `Collaboration.configure()` so you can attach tokens or headers to the WebSocket handshake
+  before the connection is established:
+
+  ```ts
+  // Future API — not yet available
+  Collaboration.configure({
+    url: import.meta.env.VITE_WS_URL,
+    name: documentId,
+    onAuthenticate: () => ({
+      token: getAuthToken(),
+    }),
+  })
+  ```
+</Callout>
 
 ---
 

@@ -1,4 +1,200 @@
 ---
 title: Custom Extensions
-description: Write custom schema extensions and register their canvas render strategies.
+description: Write custom schema extensions — add new node types, marks, layout strategies, and canvas decorators.
 ---
+
+The `guides/plugins` page covers behaviour extensions (keymaps, commands, lifecycle hooks).
+This page covers extensions that add **new content types** to the schema — custom block nodes,
+custom marks, and the canvas rendering strategies that go with them.
+
+---
+
+## Layout strategies
+
+Every block node must register a **`BlockStrategy`** — the object the canvas renderer calls to
+draw that block and record where each character sits on screen.
+
+<Callout type="info">
+  Read [Layout Strategies](/concepts/layout-strategies) for a full explanation of what strategies
+  are, what `TextBlockStrategy` does, and when to write your own.
+</Callout>
+
+The short version: use `TextBlockStrategy` for any block that contains inline text. It handles
+text rendering, mark decorators, inline images, and `CharacterMap` registration. Only write a
+custom strategy for blocks with non-text content (tables, diagrams).
+
+---
+
+## Adding a custom block node
+
+A block extension contributes a ProseMirror node spec, a layout strategy, and optionally
+block styles (font and spacing).
+
+```ts
+import { Extension, TextBlockStrategy } from '@inscribe/core';
+
+const Callout = Extension.create({
+  name: 'callout',
+
+  addNodes() {
+    return {
+      callout: {
+        group: 'block',
+        content: 'inline*',
+        attrs: { type: { default: 'info' } }, // 'info' | 'warn' | 'error'
+        parseDOM: [{ tag: 'div[data-callout]', getAttrs: (dom) => ({
+          type: (dom as HTMLElement).getAttribute('data-type') ?? 'info',
+        }) }],
+        toDOM: (node) => ['div', { 'data-callout': '', 'data-type': node.attrs['type'] }, 0],
+      },
+    };
+  },
+
+  addLayoutHandlers() {
+    // TextBlockStrategy handles all text rendering and CharacterMap registration
+    return { callout: TextBlockStrategy };
+  },
+
+  addBlockStyles() {
+    return {
+      callout: {
+        font: '14px Georgia, serif',
+        spaceBefore: 12,
+        spaceAfter: 12,
+        align: 'left' as const,
+      },
+    };
+  },
+
+  addCommands() {
+    return {
+      setCallout: (attrs: { type: string }) => (state, dispatch) => {
+        const callout = state.schema.nodes['callout'];
+        if (!callout) return false;
+        if (dispatch) {
+          dispatch(state.tr.setBlockType(
+            state.selection.from,
+            state.selection.to,
+            callout,
+            attrs,
+          ));
+        }
+        return true;
+      },
+    };
+  },
+});
+```
+
+---
+
+## Adding a custom mark
+
+Custom marks contribute a ProseMirror mark spec and optionally a `MarkDecorator` for canvas
+rendering (e.g. drawing a background colour or underline).
+
+```ts
+import { Extension } from '@inscribe/core';
+import type { MarkDecorator } from '@inscribe/core';
+
+const Spoiler = Extension.create({
+  name: 'spoiler',
+
+  addMarks() {
+    return {
+      spoiler: {
+        parseDOM: [{ tag: 'span[data-spoiler]' }],
+        toDOM: () => ['span', { 'data-spoiler': '' }, 0],
+      },
+    };
+  },
+
+  addMarkDecorators() {
+    const decorator: MarkDecorator = {
+      // Draw a solid black rectangle behind the text (hides it until revealed)
+      decoratePre(ctx, rect) {
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(rect.x, rect.y - rect.ascent, rect.width, rect.ascent + rect.descent);
+      },
+    };
+    return { spoiler: decorator };
+  },
+
+  addCommands() {
+    return {
+      toggleSpoiler: () => (state, dispatch) => {
+        const mark = state.schema.marks['spoiler'];
+        if (!mark) return false;
+        const { toggleMark } = require('prosemirror-commands');
+        return toggleMark(mark)(state, dispatch);
+      },
+    };
+  },
+});
+```
+
+---
+
+## `MarkDecorator` interface
+
+The decorator runs during canvas rendering, once per text span that carries the mark:
+
+```ts
+interface MarkDecorator {
+  // Called before the text is drawn — use for backgrounds and highlights
+  decoratePre?(ctx: CanvasRenderingContext2D, rect: SpanRect): void;
+
+  // Return a CSS colour string to override the text fill colour
+  decorateFill?(rect: SpanRect): string | undefined;
+
+  // Called after the text is drawn — use for underlines and strikethroughs
+  decoratePost?(ctx: CanvasRenderingContext2D, rect: SpanRect): void;
+}
+```
+
+`SpanRect` gives you the bounding box of the span in page-local coordinates:
+
+```ts
+interface SpanRect {
+  x: number;
+  y: number;        // baseline y
+  width: number;
+  ascent: number;   // pixels above baseline
+  descent: number;  // pixels below baseline
+  markAttrs: Record<string, unknown>; // attrs from the mark
+}
+```
+
+---
+
+## Font modifiers
+
+If your mark changes how text is measured (size, weight, family), register a `FontModifier`
+via `addFontModifiers()`. The modifier receives a parsed font object and mutates it:
+
+```ts
+addFontModifiers() {
+  return new Map([
+    ['spoiler', (parsed) => {
+      // spoiler text renders at half opacity — no size change needed
+      // but if you needed to change size: parsed.size = 12;
+    }],
+  ]);
+},
+```
+
+Use `addFontModifiers` for marks that affect text metrics (bold, italic, size, family).
+Use `addMarkDecorators` for visual-only effects that don't change measurement.
+
+---
+
+## Further reading
+
+<Cards>
+  <Card title="Creating Plugins" href="/guides/plugins">
+    Keymaps, commands, and the `onEditorReady` lifecycle hook.
+  </Card>
+  <Card title="Built-in Nodes" href="/guides/nodes/built-in-nodes">
+    Reference for all extensions bundled in StarterKit.
+  </Card>
+</Cards>

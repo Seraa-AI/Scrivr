@@ -5,6 +5,7 @@
     "render-pipeline",
     "document-model",
     "coordinate-system",
-    "event-system"
+    "event-system",
+    "layout-strategies"
   ]
 }

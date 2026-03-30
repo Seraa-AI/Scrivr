@@ -3,9 +3,9 @@ title: Editor API
 description: Complete reference for the Editor class — methods, properties, and lifecycle.
 ---
 
-The `Editor` class is the central orchestrator of every Inscribe instance. It owns the document state,
-layout engine, and extension system. Consumers interact with it directly (headless) or via the
-`useInscribeEditor` React hook.
+The `Editor` class is the central orchestrator of every Inscribe instance. It owns the document
+state, layout engine, and extension system. Consumers interact with it directly (headless) or
+via the `useInscribeEditor` React hook.
 
 ```ts
 import { Editor, StarterKit } from '@inscribe/core';
@@ -26,8 +26,8 @@ editor.mount(containerElement);
 new Editor(options: EditorOptions)
 ```
 
-Accepts an [`EditorOptions`](/api/types#editoroptions) object. Builds the ProseMirror schema from
-extensions, runs the initial layout, and starts the cursor blink timer.
+Accepts an [`EditorOptions`](/api/types#editoroptions) object. Builds the ProseMirror schema
+from extensions, runs the initial layout, and starts the cursor blink timer.
 
 ---
 
@@ -37,29 +37,48 @@ extensions, runs the initial layout, and starts the cursor blink timer.
 ```ts
 get schema(): Schema
 ```
-The merged ProseMirror schema built from all active extensions. Use this instead of importing a schema
-directly — it reflects exactly which node and mark types are loaded.
+The merged ProseMirror schema built from all active extensions. Use this instead of importing a
+schema directly — it reflects exactly which node and mark types are loaded.
 
 ### `pageConfig`
 ```ts
 readonly pageConfig: PageConfig
 ```
-The active page dimensions. Set once at construction from `EditorOptions.pageConfig` or the first
-extension that provides one. See [`PageConfig`](/api/types#pageconfig).
+The active page dimensions. Set once at construction from `EditorOptions.pageConfig`.
+See [`PageConfig`](/api/types#pageconfig).
 
 ### `charMap`
 ```ts
-readonly charMap: CharacterMap
+get charMap(): CharacterMap
 ```
-The spatial index mapping doc positions to `(x, y, page)` canvas coordinates. Updated after every
-state change.
+The spatial index mapping doc positions to `(x, y, page)` canvas coordinates. Owned by the
+layout engine and updated after every layout pass.
 
 ### `cursorManager`
 ```ts
 readonly cursorManager: CursorManager
 ```
 Manages the cursor blink timer. Read `cursorManager.isVisible` to know whether to draw or clear
-the cursor in a custom overlay.
+the cursor in a custom overlay renderer.
+
+### `toolbarItems`
+```ts
+readonly toolbarItems: ToolbarItemSpec[]
+```
+Toolbar item specs contributed by all extensions, in registration order. Data-only — no
+framework dependency. Use this to build a data-driven toolbar without hard-coding button lists.
+
+### `commands`
+```ts
+readonly commands: Record<string, (...args: unknown[]) => void>
+```
+All bound extension commands. Closures that always read the latest state at call time.
+
+```ts
+editor.commands.toggleBold();
+editor.commands.setHeading2();
+editor.commands.undo();
+```
 
 ### `isFocused`
 ```ts
@@ -71,7 +90,7 @@ Whether the editor's hidden textarea currently has focus.
 ```ts
 get loadingState(): 'syncing' | 'rendering' | 'ready'
 ```
-Current loading phase of the editor:
+Current loading phase:
 
 | Value | Meaning |
 |-------|---------|
@@ -85,108 +104,97 @@ get cursorPage(): number
 ```
 The 1-based page number of the current cursor position.
 
-### `commands`
-```ts
-readonly commands: Record<string, (...args: unknown[]) => void>
-```
-All bound extension commands. Commands are closures that always read the latest state at call time.
-
-```ts
-editor.commands.toggleBold();
-editor.commands.setHeading({ level: 2 });
-editor.commands.undo();
-```
-
 ---
 
-## Lifecycle Methods
+## Lifecycle
 
 ### `mount(container)`
 ```ts
 mount(container: HTMLElement): void
 ```
-Creates the hidden `<textarea>` input bridge and attaches keyboard/paste event listeners to the
-given container. Called automatically by `<Inscribe />`.
+Attaches the keyboard, IME, and paste event listeners to the given container. Called
+automatically by `<Inscribe />`.
 
 ### `unmount()`
 ```ts
 unmount(): void
 ```
-Removes the textarea and detaches event listeners. The editor state is preserved — the editor can be
-re-mounted. Called automatically by `<Inscribe />` on unmount.
+Detaches event listeners. The editor state is preserved — the editor can be re-mounted.
+Called automatically by `<Inscribe />` on unmount.
 
 ### `destroy()`
 ```ts
 destroy(): void
 ```
-Full teardown: runs extension cleanup callbacks, stops the cursor blink timer, and calls `unmount()`.
-After `destroy()` the editor instance should not be used.
+Full teardown: runs extension cleanup, stops the cursor blink timer, and calls `unmount()`.
+After `destroy()` the instance must not be used.
 
 ### `focus()`
 ```ts
 focus(): void
 ```
-Programmatically focuses the hidden textarea.
+Programmatically focuses the editor.
 
 ### `setReady(ready)`
 ```ts
 setReady(ready: boolean): void
 ```
-Unblocks layout flushing when using collaboration with `startReady: false`. Call `setReady(true)`
-after the server syncs the initial document to start rendering.
+Unblocks layout flushing after a collaborative sync. Managed automatically by the
+`Collaboration` extension — you do not need to call this manually.
 
 ---
 
-## State Methods
+## State
 
 ### `getState()`
 ```ts
 getState(): EditorState
 ```
-Returns the current ProseMirror `EditorState`. States are immutable — reference equality detects
-changes.
+Returns the current ProseMirror `EditorState`. States are immutable — reference equality
+detects changes.
 
 ### `getSnapshot()`
 ```ts
 getSnapshot(): EditorState
 ```
-Alias of `getState()`. Used as the `getSnapshot` argument for React's `useSyncExternalStore`.
+Returns the current state. Used as the `getSnapshot` argument for React's
+`useSyncExternalStore`.
 
 ### `isActive(name, attrs?)`
 ```ts
 isActive(name: string, attrs?: Record<string, unknown>): boolean
 ```
-Returns `true` if the named mark or block node type is active at the current cursor or selection.
+Returns `true` if the named mark or block type is active at the current cursor or selection.
 
 ```ts
-editor.isActive('bold');                       // mark active?
-editor.isActive('heading', { level: 1 });     // h1 active?
-editor.isActive('bulletList');                 // inside a list?
+editor.isActive('bold');
+editor.isActive('heading', { level: 1 });
 ```
 
 ### `getSelectionSnapshot()`
 ```ts
 getSelectionSnapshot(): SelectionSnapshot
 ```
-Returns a lightweight snapshot of the selection — all the data a toolbar or floating menu needs
-without requiring ProseMirror imports. See [`SelectionSnapshot`](/api/types#selectionsnapshot).
+Returns a lightweight snapshot with everything a toolbar or floating menu needs — active marks,
+block type, cursor position — without requiring ProseMirror imports.
+See [`SelectionSnapshot`](/api/types#selectionsnapshot).
 
 ### `getActiveMarks()`
 ```ts
 getActiveMarks(): string[]
 ```
-Names of marks active at the cursor. For a range selection, only marks present on **every** character
-in the range are returned (matches toggle semantics).
+Names of marks active at the cursor. For a range selection, only marks present on **every**
+character in the range are returned.
 
 ### `getActiveMarkAttrs()`
 ```ts
 getActiveMarkAttrs(): Record<string, Record<string, unknown>>
 ```
-Attributes of each active mark. Keys are mark names; values are the mark's attrs.
+Attributes of each active mark, keyed by mark name.
 
 ```ts
 const attrs = editor.getActiveMarkAttrs();
-attrs.color?.color; // '#dc2626'
+attrs.color?.color;    // '#dc2626'
 attrs.font_size?.size; // 18
 ```
 
@@ -194,7 +202,7 @@ attrs.font_size?.size; // 18
 ```ts
 getBlockInfo(): { blockType: string; blockAttrs: Record<string, unknown> }
 ```
-Returns the type name and attributes of the block node containing the cursor.
+Type name and attributes of the block node containing the cursor.
 
 ### `getMarkdown()`
 ```ts
@@ -202,48 +210,63 @@ getMarkdown(): string
 ```
 Serializes the full document to Markdown using extension-contributed serializer rules.
 
+### `getMarkdownSerializer()`
+```ts
+getMarkdownSerializer(): MarkdownSerializer
+```
+Returns a configured `MarkdownSerializer` built from all extension rules. Used internally by
+`getMarkdown()` and `exportToMarkdown()` from `@inscribe/export`.
+
 ---
 
-## Layout Methods
+## Layout
 
 ### `layout`
 ```ts
 get layout(): DocumentLayout
 ```
-Returns the current `DocumentLayout`. Calls `ensureLayout()` internally so the result always reflects
+The current `DocumentLayout`. Calls `ensureLayout()` internally so the result always reflects
 the latest state.
 
 ### `ensureLayout()`
 ```ts
 ensureLayout(): void
 ```
-Forces the layout engine to run synchronously if the current layout is stale. Normally called
-implicitly by `editor.layout`.
+Forces the layout engine to run synchronously if the current layout is stale. Normally
+triggered implicitly by `editor.layout` and movement methods.
 
 ### `ensurePagePopulated(pageNumber)`
 ```ts
 ensurePagePopulated(pageNumber: number): void
 ```
-Ensures the given page (1-based) has been laid out. Used by the input bridge when the user clicks
-on a page that hasn't been rendered yet.
+Ensures the given page (1-based) has been laid out and its character positions are indexed.
+
+---
+
+## Viewport & Position
 
 ### `getViewportRect(from, to)`
 ```ts
 getViewportRect(from: number, to: number): DOMRect | null
 ```
-Converts a doc position range to a screen-space `DOMRect` (viewport-relative). Returns `null` if
-the positions are not in the `CharacterMap` or if no rendering adapter is mounted.
-
-Use this to position floating menus:
+Converts a doc position range to a viewport-relative `DOMRect`. Returns `null` if the
+positions are not in the character map or no rendering adapter is mounted.
 
 ```ts
-const snap = editor.getSelectionSnapshot();
 const rect = editor.getViewportRect(snap.from, snap.to);
 if (rect) {
   menuEl.style.top  = `${rect.bottom + 8}px`;
   menuEl.style.left = `${rect.left}px`;
 }
 ```
+
+### `getNodeViewportRect(docPos)`
+```ts
+getNodeViewportRect(docPos: number): DOMRect | null
+```
+Converts a single node's doc position to a viewport-relative `DOMRect` covering the full
+visual bounds of that node. Used by `createImageMenu` to position the image toolbar below
+the selected image.
 
 ### `scrollCursorIntoView()`
 ```ts
@@ -253,7 +276,7 @@ Scrolls the viewport so the current cursor position is visible.
 
 ---
 
-## Cursor & Selection Methods
+## Cursor & Selection
 
 ### `moveCursorTo(pos)`
 ```ts
@@ -265,8 +288,21 @@ Collapses the cursor to a given doc position.
 ```ts
 setSelection(anchor: number, head: number): void
 ```
-Sets an explicit selection range. `anchor` is the fixed end; `head` is the moving end (where the
-cursor is drawn). Both values are clamped to valid doc bounds.
+Sets an explicit selection range. Both values are clamped to valid doc bounds.
+
+### `selectNode(docPos)`
+```ts
+selectNode(docPos: number): void
+```
+Creates a `NodeSelection` at the given doc position. Falls back to `moveCursorTo` if the node
+is not selectable. Use this to programmatically select images and other inline objects.
+
+### `setNodeAttrs(docPos, attrs)`
+```ts
+setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void
+```
+Merges attributes into the node at `docPos`. Use this to update image dimensions, alignment,
+or any other node-level attribute without writing a custom command.
 
 ### `moveLeft / moveRight / moveUp / moveDown`
 ```ts
@@ -275,7 +311,7 @@ moveRight(extend?: boolean): void
 moveUp(extend?: boolean): void
 moveDown(extend?: boolean): void
 ```
-Arrow-key cursor movement. Pass `extend: true` to grow the selection (Shift+arrow behaviour).
+Arrow-key cursor movement. Pass `extend: true` to grow the selection (Shift+arrow).
 
 ---
 
@@ -285,21 +321,19 @@ Arrow-key cursor movement. Pass `extend: true` to grow the selection (Shift+arro
 ```ts
 subscribe(listener: () => void): () => void
 ```
-Registers a listener that is called on every editor notification: state changes, focus changes,
-and cursor blink ticks. Returns an unsubscribe function.
+Registers a listener called on every editor notification: state changes, focus changes, and
+cursor blink ticks. Returns an unsubscribe function.
 
 ```ts
 const unsubscribe = editor.subscribe(() => forceUpdate());
-// later:
-unsubscribe();
 ```
 
 ### `redraw()`
 ```ts
 redraw(): void
 ```
-Triggers a UI repaint without a document or selection change. Use when external state
-(e.g. collaborative awareness data) changes and the overlay needs refreshing.
+Triggers a repaint without a document or selection change. Use when external state (e.g.
+collaborative awareness data) changes and the overlay needs refreshing.
 
 ---
 
@@ -309,13 +343,13 @@ Triggers a UI repaint without a document or selection change. Use when external 
 ```ts
 addOverlayRenderHandler(handler: OverlayRenderHandler): () => void
 ```
-Registers a canvas draw function on the overlay layer. Called by `ViewManager` after the built-in
-cursor and selection are painted. Returns an unregister function.
+Registers a canvas draw function on the overlay layer. Called after the built-in cursor and
+selection are painted. Returns an unregister function.
 
 ```ts
 const unregister = editor.addOverlayRenderHandler(
   (ctx, pageNumber, pageConfig, charMap) => {
-    // draw remote cursors for this page...
+    // draw custom overlay for this page
   }
 );
 ```
@@ -324,5 +358,18 @@ const unregister = editor.addOverlayRenderHandler(
 ```ts
 setPageElementLookup(fn: ((page: number) => HTMLElement | null) | null): void
 ```
-Registers the function used by the editor to resolve a 1-based page number to its DOM element.
-Called automatically by `<Inscribe />`. Only needed when building a custom rendering adapter.
+Registers the function used to resolve a 1-based page number to its DOM element. Called
+automatically by `<Inscribe />`. Only needed when building a custom rendering adapter.
+
+### `_applyTransaction(tr)`
+```ts
+_applyTransaction(tr: Transaction): void
+```
+Applies a ProseMirror transaction directly, bypassing input positioning. Used by extensions
+and the AI toolkit to dispatch transactions that originate outside normal user input (e.g.
+Yjs remote sync, ghost text updates).
+
+<Callout type="warn">
+  Prefixed with `_` to signal it is infrastructure-facing. Prefer `editor.commands.*` for
+  document mutations from application code.
+</Callout>

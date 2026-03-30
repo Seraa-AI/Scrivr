@@ -97,33 +97,27 @@ addProseMirrorPlugins() {
 
 ---
 
-### `onCreate`
+### `onEditorReady`
 
-Called once after the editor instance is fully constructed. Use to register subscriptions or
-set up external state that depends on the editor.
+Called once after the editor instance is fully constructed. Use to register subscriptions,
+overlay render handlers, or connect external services that need the live editor.
+
+Return a cleanup function — it is called automatically when `editor.destroy()` runs.
 
 ```ts
-onCreate(editor) {
+onEditorReady(editor) {
   const unsubscribe = editor.subscribe(() => {
     // react to state changes
   });
 
-  // return cleanup function
-  return unsubscribe;
-},
-```
+  const unregister = editor.addOverlayRenderHandler((ctx, pageNumber, pageConfig, charMap) => {
+    // draw custom canvas overlay
+  });
 
----
-
-### `onTransaction`
-
-Called after every ProseMirror transaction is applied. Receives the old and new state.
-
-```ts
-onTransaction({ editor, transaction }) {
-  if (transaction.docChanged) {
-    console.log('document changed');
-  }
+  return () => {
+    unsubscribe();
+    unregister();
+  };
 },
 ```
 
@@ -174,22 +168,23 @@ editor.commands.sayHello();
 
 ## Composing sub-extensions
 
-Use `addExtensions` to bundle multiple extensions into one:
+To bundle multiple extensions into one, implement the schema/behaviour hooks for each member
+directly, or call `.resolve()` on each sub-extension and merge the results. This is the pattern
+`StarterKit` uses internally — it aggregates all built-in extensions by resolving and merging
+their `nodes`, `marks`, `keymap`, `commands`, etc. into a single `Extension.create()` config.
+
+For most use cases, simply pass multiple extensions to the `extensions` array in `EditorOptions`
+rather than building an aggregator extension:
 
 ```ts
-const MyFeature = Extension.create({
-  name: 'myFeature',
-
-  addExtensions() {
-    return [
-      SubExtensionA,
-      SubExtensionB.configure({ option: true }),
-    ];
-  },
+const editor = new Editor({
+  extensions: [
+    StarterKit,
+    MyExtensionA,
+    MyExtensionB.configure({ option: true }),
+  ],
 });
 ```
-
-This is how `StarterKit` works — it's an extension that aggregates all the built-in extensions.
 
 ---
 

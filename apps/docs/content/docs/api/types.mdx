@@ -25,7 +25,7 @@ interface EditorOptions {
 | Property | Type | Required | Description |
 |---|---|---|---|
 | `extensions` | `Extension[]` | No | Active extensions. Defaults to `[StarterKit]`. |
-| `pageConfig` | `PageConfig` | No | Page dimensions. Defaults to A4 / 1-inch margins. |
+| `pageConfig` | `PageConfig` | No | Page dimensions. Defaults to A4, ¾-inch margins. |
 | `onChange` | `(state: EditorState) => void` | No | State change callback. |
 | `onFocusChange` | `(focused: boolean) => void` | No | Focus in/out callback. |
 | `onCursorTick` | `(isVisible: boolean) => void` | No | Cursor blink tick callback. |
@@ -76,13 +76,13 @@ interface PageConfig {
 }
 ```
 
-**Default (A4, 1-inch margins):**
+**Default (A4, ¾-inch margins):**
 
 ```ts
 const defaultPageConfig: PageConfig = {
   pageWidth: 794,
   pageHeight: 1123,
-  margins: { top: 96, right: 96, bottom: 96, left: 96 },
+  margins: { top: 72, right: 72, bottom: 72, left: 72 },
 };
 ```
 

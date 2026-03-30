@@ -1,36 +1,36 @@
 ---
 title: AI Assistant Toolkit
-description: Implement ghost text suggestions mapped directly over the canvas cursor.
+description: Stream ghost text suggestions over the canvas with AiToolkit.
 ---
 
 `AiToolkit` adds a streaming ghost-text writing assistant to Inscribe. Suggestions are rendered
-as a canvas overlay — the document is never mutated until the user explicitly accepts.
+as a canvas overlay — the document is not modified during streaming. When the stream ends the
+content is inserted as a tracked change so the user can review it before accepting.
 
 ---
 
 ## How It Works
 
-`AiToolkit` is an aggregator extension that bundles:
+`AiToolkit` bundles three sub-extensions:
 
-- **`UniqueId`** — assigns stable IDs to each block (used to map LLM output back to document positions)
-- **`GhostText`** — renders streaming suggestion text as a canvas overlay at the cursor
-- **`AiCaret`** — animates the cursor during a streaming response
+- **`UniqueId`** — assigns a stable `nodeId` to every block. Used to anchor ghost text to the right position.
+- **`GhostText`** — renders streaming text as a canvas overlay below the anchor block.
+- **`AiCaret`** — animates a pulsing cursor during streaming.
 
-The core flow is:
+The core flow:
 
-1. Add `AiToolkit` to extensions
-2. Get a handle with `getAiToolkit(editor)`
-3. Read context: `ai.getContext()` or `ai.getMarkdownRange(from, to)`
-4. Stream LLM output — push each chunk to the ghost text overlay via `ai.pushChunk(text)`
-5. User presses Tab/Enter to accept → `editor.commands.acceptSuggestion()`
+1. Add `AiToolkit` to extensions.
+2. Get a handle: `const ai = getAiToolkit(editor)`
+3. Read context: `ai.getContext()` or `ai.getBlocks()`
+4. Call `await ai.generateSuggestion(nodeId, stream)` — handles streaming, overlay, and insertion.
 
 ---
 
 ## Setup
 
 ```tsx title="AiEditor.tsx"
-import { useInscribeEditor, Inscribe, StarterKit, useEditorState } from '@inscribe/react';
-import { AiToolkit, getAiToolkit } from '@inscribe/plugins';
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+import { AiToolkit } from '@inscribe/plugins';
 
 export function AiEditor() {
   const editor = useInscribeEditor({
@@ -40,12 +40,7 @@ export function AiEditor() {
     ],
   });
 
-  return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <AiToolbar editor={editor} />
-      <Inscribe editor={editor} style={{ flex: 1 }} />
-    </div>
-  );
+  return <Inscribe editor={editor} style={{ height: '100vh' }} />;
 }
 ```
 
@@ -58,93 +53,85 @@ import { getAiToolkit } from '@inscribe/plugins';
 
 const ai = getAiToolkit(editor);
 
-// Full context object — includes cursor position, surrounding text, block info
-const context = ai.getContext();
+// Text context around the cursor — use this to build your LLM prompt
+const context = ai.getContext({ beforeChars: 1000, afterChars: 200 });
+// { before: string, after: string, selection: string, cursorPos: number, totalLength: number }
 
-// Markdown of a specific range (e.g. selected text for a rewrite prompt)
-const snap = editor.getSelectionSnapshot();
-const selectedMd = ai.getMarkdownRange(snap.from, snap.to);
+// All blocks with stable nodeIds — use nodeId to anchor ghost text
+const blocks = ai.getBlocks();
+// [{ nodeId: 'abc123', text: 'First paragraph...' }, ...]
 
-// Document as semantic chunks — useful for RAG / context-window management
-const chunks = ai.getTextChunks();
+// Markdown of a selection range
+const { from, to } = editor.getState().selection;
+const selectedMd = ai.getMarkdownRange(from, to);
+
+// Document split into chunks for LLM context windows
+const chunks = ai.getTextChunks(4000);
 ```
 
 ---
 
 ## Streaming a Suggestion
 
-```ts
-async function streamSuggestion(editor: Editor) {
-  const ai = getAiToolkit(editor);
-  const context = ai.getContext();
+`generateSuggestion` takes a `nodeId` and an `AsyncIterable<string>`. It streams cosmetically
+as ghost text, then inserts the result after the anchor block as a tracked change.
 
+```ts
+import { getAiToolkit } from '@inscribe/plugins';
+
+async function runSuggestion(editor: Editor) {
+  const ai = getAiToolkit(editor);
+
+  // Build context for the LLM
+  const context = ai.getContext({ beforeChars: 1000 });
+
+  // Get the nodeId of the block to insert after
+  const blocks = ai.getBlocks();
+  const anchorBlock = blocks[blocks.length - 1]; // last block
+  if (!anchorBlock) return;
+
+  // Fetch a streaming response from your backend
   const response = await fetch('/api/ai/complete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ context }),
+    body: JSON.stringify({ before: context.before }),
   });
 
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    const chunk = decoder.decode(value);
-    // Push each chunk to the ghost text overlay
-    ai.pushChunk(chunk);
+  // Convert ReadableStream to AsyncIterable<string>
+  async function* toTextStream(stream: ReadableStream<Uint8Array>): AsyncIterable<string> {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        yield decoder.decode(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
   }
+
+  // Stream ghost text cosmetically, then insert as a tracked change
+  await ai.generateSuggestion(anchorBlock.nodeId, toTextStream(response.body!));
 }
 ```
 
 ---
 
-## Accepting and Rejecting
-
-```tsx
-function AiToolbar({ editor }: { editor: Editor | null }) {
-  const hasSuggestion = useEditorState({
-    editor,
-    selector: ({ editor }) => {
-      const ai = editor ? getAiToolkit(editor) : null;
-      return ai?.hasSuggestion() ?? false;
-    },
-  });
-
-  if (!hasSuggestion) return null;
-
-  return (
-    <div style={{ padding: '8px', background: '#f0f0f0' }}>
-      <button onClick={() => editor?.commands.acceptSuggestion()}>
-        Accept (Tab)
-      </button>
-      <button onClick={() => editor?.commands.rejectSuggestion()}>
-        Reject (Esc)
-      </button>
-    </div>
-  );
-}
-```
-
-The editor also accepts the ghost text suggestion when the user presses `Tab` and rejects it
-with `Escape` — no toolbar required.
-
----
-
-## Backend API Route (Next.js example)
+## Backend API Route
 
 ```ts title="app/api/ai/complete/route.ts"
 import { streamText } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 
 export async function POST(req: Request) {
-  const { context } = await req.json();
+  const { before } = await req.json();
 
   const result = streamText({
     model: anthropic('claude-sonnet-4-6'),
     system: 'You are a writing assistant. Continue the document naturally.',
-    prompt: `Continue after: "${context.surroundingText}"`,
+    prompt: `Continue after:\n\n${before}`,
   });
 
   return result.toTextStreamResponse();
@@ -154,3 +141,29 @@ export async function POST(req: Request) {
 <Callout type="info">
   `ANTHROPIC_API_KEY` must be set in your backend environment.
 </Callout>
+
+---
+
+## Low-Level Streaming
+
+If you need more control — for example to clear ghost text early or handle errors — use
+`streamGhostText` directly instead of `generateSuggestion`:
+
+```ts
+const ai = getAiToolkit(editor);
+
+try {
+  // Streams cosmetically only — document is NOT modified
+  const generated = await ai.streamGhostText(anchorBlock.nodeId, stream);
+
+  // Clear the overlays
+  ai.clearGhostText();
+  ai.clearAiCaret();
+
+  // Now decide what to do with `generated`...
+} catch (err) {
+  ai.clearGhostText();
+  ai.clearAiCaret();
+  throw err;
+}
+```

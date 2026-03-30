@@ -1,124 +1,78 @@
 ---
 title: Editor Options
-description: Full reference for the Editor configuration object.
+description: Configuration reference for the headless Editor class and PageConfig.
 ---
 
-`EditorOptions` is the configuration object passed to `new Editor(options)` (headless) or
-`useInscribeEditor(options)` (React). All fields are optional.
+This page covers the headless `new Editor(options)` API. If you are using a framework binding,
+the hook options live in the package page for your framework.
+
+<Cards>
+  <Card title="@inscribe/react" href="/packages/react">
+    `useInscribeEditor`, `useInscribeState`, and React-specific callbacks.
+  </Card>
+</Cards>
 
 ---
 
-## `EditorOptions`
+## `new Editor(options)`
 
 ```ts
-interface EditorOptions {
-  extensions?: Extension[];
-  pageConfig?: PageConfig;
-  onChange?: (state: EditorState) => void;
-  onFocusChange?: (focused: boolean) => void;
-  onCursorTick?: (isVisible: boolean) => void;
-  startReady?: boolean;
-}
+import { Editor, StarterKit } from '@inscribe/core';
+
+const editor = new Editor({
+  extensions: [StarterKit],
+  onChange: (state) => console.log('changed', state),
+});
+
+editor.mount(document.getElementById('editor')!);
 ```
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `extensions` | `Extension[]` | `[StarterKit]` | Extensions to load. Each extension contributes nodes, marks, commands, and layout handlers to the editor. |
-| `pageConfig` | `PageConfig` | A4, 1-inch margins | Page dimensions and margins. See [PageConfig](#pageconfig) below. |
-| `onChange` | `(state: EditorState) => void` | — | Fired synchronously on every document edit or selection change. The `state` argument is the new immutable state. |
-| `onFocusChange` | `(focused: boolean) => void` | — | Fired when the hidden textarea gains (`true`) or loses (`false`) focus. |
-| `onCursorTick` | `(isVisible: boolean) => void` | — | Fired on every cursor blink tick (~530ms). Alternates between `true` and `false` to drive the blink animation. Only needed when building a custom rendering adapter. |
-| `startReady` | `boolean` | `true` | Set to `false` when using collaboration to suppress layout flushes until the server syncs the initial document. Call `editor.setReady(true)` when the connection is established. |
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `extensions` | `Extension[]` | `[StarterKit]` | Extensions to load. |
+| `pageConfig` | `PageConfig` | A4, ¾-inch margins | Page dimensions and margins. |
+| `onChange` | `(state: EditorState) => void` | — | Fired on every document or selection change. |
+| `onFocusChange` | `(focused: boolean) => void` | — | Fired when the editor textarea gains or loses focus. |
+| `onCursorTick` | `(isVisible: boolean) => void` | — | Fired on every cursor blink tick. Only needed when building a custom rendering adapter. |
+| `startReady` | `boolean` | `true` | Advanced. Suppresses layout flushes until the editor is marked ready internally. Managed automatically by the `Collaboration` extension — you do not need to set this manually. |
 
 ---
 
 ## `PageConfig`
 
-Controls the physical dimensions and margins of every page.
+Controls the physical dimensions and margins of every page. All values are in **pixels at 96 dpi**.
 
 ```ts
 interface PageConfig {
   pageWidth: number;
   pageHeight: number;
-  margins: {
-    top: number;
-    right: number;
-    bottom: number;
-    left: number;
-  };
+  margins: { top: number; right: number; bottom: number; left: number };
   fontFamily?: string;
 }
 ```
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `pageWidth` | `794` | Page width in px (96 dpi). 794 px = A4 width (~210 mm). |
-| `pageHeight` | `1123` | Page height in px (96 dpi). 1123 px = A4 height (~297 mm). |
-| `margins.top` | `96` | Top margin in px. 96 px = 1 inch at 96 dpi. |
-| `margins.right` | `96` | Right margin in px. |
-| `margins.bottom` | `96` | Bottom margin in px. |
-| `margins.left` | `96` | Left margin in px. |
-| `fontFamily` | — | Document-level default font. Overrides block-level font styles. |
+| `pageWidth` | `794` | Page width in px. 794 ≈ A4 width (210 mm). |
+| `pageHeight` | `1123` | Page height in px. 1123 ≈ A4 height (297 mm). |
+| `margins.top` | `72` | Top margin in px. 72 px = ¾ inch. |
+| `margins.right` | `72` | Right margin in px. |
+| `margins.bottom` | `72` | Bottom margin in px. |
+| `margins.left` | `72` | Left margin in px. |
+| `fontFamily` | — | Document-level default font family. |
 
 **Common page sizes:**
 
 | Format | `pageWidth` | `pageHeight` |
 |--------|-------------|--------------|
-| A4 (portrait) | `794` | `1123` |
-| US Letter (portrait) | `816` | `1056` |
-| A4 (landscape) | `1123` | `794` |
+| A4 portrait | `794` | `1123` |
+| US Letter portrait | `816` | `1056` |
+| A4 landscape | `1123` | `794` |
 
----
+**Common margin presets:**
 
-## `UseInscribeEditorOptions`
-
-`useInscribeEditor` accepts a superset of `EditorOptions` with additional React lifecycle callbacks.
-
-```ts
-interface UseInscribeEditorOptions extends EditorOptions {
-  onUpdate?: (props: { editor: Editor }) => void;
-  onSelectionUpdate?: (props: { editor: Editor }) => void;
-  onFocus?: (props: { editor: Editor }) => void;
-  onBlur?: (props: { editor: Editor }) => void;
-  onCreate?: (props: { editor: Editor }) => void;
-  onDestroy?: () => void;
-}
-```
-
-| Property | Description |
-|----------|-------------|
-| `onUpdate` | Fired on every document or selection change. Equivalent to `onChange` in `EditorOptions`. |
-| `onSelectionUpdate` | Alias for `onUpdate`. Provided for API compatibility. |
-| `onFocus` | Fired when the editor textarea gains focus. |
-| `onBlur` | Fired when the editor textarea loses focus. |
-| `onCreate` | Fired once after the editor instance is created. Use for one-time setup that requires access to the editor instance. |
-| `onDestroy` | Fired just before the editor is destroyed on unmount. Use for external cleanup. |
-
-The `onChange` / `onFocusChange` / `onCursorTick` fields from `EditorOptions` are also accepted but the
-React-style `{ editor }` callbacks are preferred in React applications.
-
-See [Event Callbacks](/api/events) for full callback documentation.
-
----
-
-## Example
-
-```ts
-const editor = new Editor({
-  extensions: [StarterKit],
-
-  pageConfig: {
-    pageWidth: 816,   // US Letter
-    pageHeight: 1056,
-    margins: { top: 96, right: 96, bottom: 96, left: 96 },
-  },
-
-  onChange: (state) => {
-    localStorage.setItem('doc', JSON.stringify(state.doc.toJSON()));
-  },
-
-  onFocusChange: (focused) => {
-    document.body.classList.toggle('editor-focused', focused);
-  },
-});
-```
+| Preset | px |
+|--------|----|
+| ¾ inch (default) | `72` |
+| 1 inch | `96` |
+| ½ inch (narrow) | `48` |

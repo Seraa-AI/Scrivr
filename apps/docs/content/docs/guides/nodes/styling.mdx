@@ -1,4 +1,137 @@
 ---
 title: Styling Content
-description: Advanced block-level styling, typography modifiers, and colors.
+description: Mark-based inline styling, block-level alignment, and overriding default block styles.
 ---
+
+Inscribe has two layers of styling: **inline marks** applied to text ranges, and **block styles**
+that define the base font, size, and spacing for each block type.
+
+---
+
+## Inline marks
+
+Inline marks are applied to a selection via commands. All mark commands are included in
+`StarterKit`.
+
+### Text formatting
+
+```ts
+editor.commands.toggleBold();
+editor.commands.toggleItalic();
+editor.commands.toggleUnderline();
+editor.commands.toggleStrikethrough();
+```
+
+### Font size
+
+```ts
+editor.commands.setFontSize(18);   // apply 18px to selection
+editor.commands.unsetFontSize();   // remove font size mark
+```
+
+### Font family
+
+```ts
+editor.commands.setFontFamily('Georgia, serif');
+editor.commands.unsetFontFamily();
+```
+
+### Color
+
+```ts
+editor.commands.setColor('#dc2626');  // red
+editor.commands.unsetColor();
+```
+
+### Highlight
+
+```ts
+editor.commands.toggleHighlight({ color: '#fef08a' }); // yellow
+editor.commands.unsetHighlight();
+```
+
+### Alignment
+
+Alignment is a block-level attribute, not a mark — it applies to the entire paragraph or
+heading, not just the selected text.
+
+```ts
+editor.commands.setAlignLeft();
+editor.commands.setAlignCenter();
+editor.commands.setAlignRight();
+editor.commands.setAlignJustify();
+```
+
+When multiple blocks are selected, alignment is applied to all of them.
+
+---
+
+## Document-level font
+
+Set a default font for the entire document via `pageConfig.fontFamily`. This overrides the
+font family in every block style while preserving sizes and weights:
+
+```ts
+const editor = new Editor({
+  extensions: [StarterKit],
+  pageConfig: {
+    pageWidth: 794,
+    pageHeight: 1123,
+    margins: { top: 72, right: 72, bottom: 72, left: 72 },
+    fontFamily: 'Inter, sans-serif', // override default Georgia
+  },
+});
+```
+
+Inline `font_family` marks still win over the document-level font.
+
+---
+
+## Block styles
+
+Block styles define the base `font`, `spaceBefore`, `spaceAfter`, and `align` for each node
+type. They are the canvas equivalent of CSS `font` and `margin` on block elements.
+
+The defaults (from `StarterKit`):
+
+| Block | Font | Space before | Space after |
+|-------|------|-------------|-------------|
+| `paragraph` | 14px Georgia | 0 | 10px |
+| `heading_1` | bold 28px Georgia | 24px | 12px |
+| `heading_2` | bold 22px Georgia | 20px | 10px |
+| `heading_3` | bold 18px Georgia | 16px | 8px |
+| `codeBlock` | 13px Courier New | 14px | 14px |
+| `list_item` | 14px Georgia | 0 | 4px |
+
+---
+
+## Overriding block styles in a custom extension
+
+Contribute replacement block styles from an extension's `addBlockStyles()`:
+
+```ts
+import { Extension } from '@inscribe/core';
+
+const CustomTypography = Extension.create({
+  name: 'customTypography',
+
+  addBlockStyles() {
+    return {
+      paragraph: {
+        font: '16px Inter, sans-serif',
+        spaceBefore: 0,
+        spaceAfter: 12,
+        align: 'left',
+      },
+      heading_1: {
+        font: 'bold 32px Inter, sans-serif',
+        spaceBefore: 32,
+        spaceAfter: 16,
+        align: 'left',
+      },
+    };
+  },
+});
+```
+
+Block styles from later extensions in the array override earlier ones for the same key.

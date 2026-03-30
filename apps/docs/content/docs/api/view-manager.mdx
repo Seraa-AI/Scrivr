@@ -30,8 +30,9 @@ const vm = new ViewManager(editor, container, {
 |---|---|---|
 | `editor` | `Editor` | The editor instance to render |
 | `container` | `HTMLElement` | DOM element to render pages into |
-| `options.gap` | `number` | Gap in px between page elements |
-| `options.overscan` | `number` | Extra px around viewport to keep painted |
+| `options.gap` | `number` | Gap in px between page elements. Default: `24` |
+| `options.overscan` | `number` | Extra px around viewport to keep painted. Default: `500` |
+| `options.showMarginGuides` | `boolean` | Draw faint margin guide lines on each page. Default: `false` |
 
 On construction, `ViewManager`:
 1. Subscribes to the editor via `editor.subscribe()`

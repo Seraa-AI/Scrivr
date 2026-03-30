@@ -127,7 +127,7 @@ const editor = new Editor({
   pageConfig: {
     pageWidth: 794,    // A4 width  (~210 mm)
     pageHeight: 1123,  // A4 height (~297 mm)
-    margins: { top: 96, right: 96, bottom: 96, left: 96 }, // 1-inch margins
+    margins: { top: 72, right: 72, bottom: 72, left: 72 }, // ¾-inch margins
   },
 });
 ```
@@ -136,10 +136,10 @@ const editor = new Editor({
 |----------|---------|-------------|
 | `pageWidth` | `794` | Page width in px |
 | `pageHeight` | `1123` | Page height in px |
-| `margins.top` | `96` | Top margin in px |
-| `margins.right` | `96` | Right margin in px |
-| `margins.bottom` | `96` | Bottom margin in px |
-| `margins.left` | `96` | Left margin in px |
+| `margins.top` | `72` | Top margin in px |
+| `margins.right` | `72` | Right margin in px |
+| `margins.bottom` | `72` | Bottom margin in px |
+| `margins.left` | `72` | Left margin in px |
 
 ---
 
@@ -149,7 +149,7 @@ const editor = new Editor({
 
 ```ts
 editor.commands.toggleBold();
-editor.commands.setHeading({ level: 2 });
+editor.commands.setHeading2();
 editor.commands.undo();
 editor.commands.redo();
 ```

@@ -1,4 +1,65 @@
 ---
-title: image
-description: Configuration shape for the image extension.
+title: Image
+description: Inline image node with float layout modes — inline, square wrap, behind, and front.
 ---
+
+An inline image node. Images live inside paragraph content as inline nodes and support
+six text-wrapping modes for float layout.
+
+```ts
+import { Image } from '@inscribe/core';
+```
+
+No configurable options.
+
+---
+
+## Attributes
+
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `src` | `string` | `''` | Image URL. Loaded asynchronously and cached — the editor redraws once loaded. |
+| `alt` | `string` | `''` | Alt text. Shown as a placeholder label while the image loads. |
+| `width` | `number` | `200` | Rendered width in px. |
+| `height` | `number` | `200` | Rendered height in px. |
+| `wrappingMode` | `string` | `'inline'` | Text wrapping mode — see table below. |
+| `floatOffset` | `{ x: number; y: number }` | `{ x: 0, y: 0 }` | Float position offset in px relative to the anchor paragraph. Only used by float modes. |
+| `verticalAlign` | `string` | `'baseline'` | Vertical alignment within the line box when in `inline` mode. |
+
+---
+
+## Wrapping modes
+
+| Value | Behaviour |
+|-------|-----------|
+| `'inline'` | Image sits in the text flow on its own line, like a character. |
+| `'square-left'` | Image floats left; text wraps on the right. |
+| `'square-right'` | Image floats right; text wraps on the left. |
+| `'top-bottom'` | Image spans the full content width; text breaks above and below. |
+| `'behind'` | Image is placed behind the text (no text wrap). |
+| `'front'` | Image is placed in front of the text (no text wrap). |
+
+---
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `insertImage()` | Opens a `prompt()` for an image URL and inserts the image at the cursor. Replace with your own UI by dispatching a transaction directly. |
+
+---
+
+## Updating image attributes
+
+Use `editor.setNodeAttrs(docPos, attrs)` to update any image attribute after insertion:
+
+```ts
+// Resize
+editor.setNodeAttrs(docPos, { width: 400, height: 300 });
+
+// Change wrapping mode
+editor.setNodeAttrs(docPos, { wrappingMode: 'square-left' });
+```
+
+The `ImageMenu` component in `@inscribe/react` uses this API to provide a context menu
+for alignment, float mode, and resize handles.

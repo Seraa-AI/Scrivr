@@ -7,7 +7,6 @@ description: Install Inscribe into your project and configure TypeScript.
 
 - **Node.js** ≥ 18 (LTS recommended)
 - A package manager — `pnpm`, `npm`, or `yarn`
-- A **React** application (React 18 or 19)
 
 <Callout type="info">
   Inscribe is written in strict TypeScript. You don't need to install separate `@types/*` packages — type declarations are bundled with each package.
@@ -17,7 +16,7 @@ description: Install Inscribe into your project and configure TypeScript.
 
 ## Install the Packages
 
-For a standard React application install the core engine and the React bindings:
+### React
 
 <Tabs items={["pnpm", "npm", "yarn"]}>
   <Tab value="pnpm">
@@ -37,45 +36,114 @@ For a standard React application install the core engine and the React bindings:
   </Tab>
 </Tabs>
 
+### Headless (no framework)
+
+`@inscribe/core` has no framework dependency and can be used in any JavaScript environment — Node.js, vanilla JS, or as a base for a custom framework adapter.
+
+<Tabs items={["pnpm", "npm", "yarn"]}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @inscribe/core
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @inscribe/core
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @inscribe/core
+    ```
+  </Tab>
+</Tabs>
+
 ### Optional Packages
 
-| Package | Purpose & Features |
+| Package | Purpose |
 | --- | --- |
-| `@inscribe/plugins` | **Real-time collaboration** (Yjs/Hocuspocus), **AI Toolkit**, and **Track Changes**. |
-| `@inscribe/export` | Exporting documents to paginated **PDF** (via `pdf-lib`) and **Markdown**. DOCX export is coming soon. |
+| `@inscribe/plugins` | **Real-time collaboration**, **AI Toolkit**, and **Track Changes**. |
+| `@inscribe/export` | Export to paginated **PDF** and **Markdown**. DOCX coming soon. |
 
 ---
 
 ## Setting Up Optional Features
 
-If you opt into the features provided by `@inscribe/plugins`, you will need to configure the corresponding external dependencies and environment variables in your application.
+### Real-Time Collaboration
 
-### AI Toolkit (Vercel AI SDK)
-
-To use the AI writing assistant (powered by Anthropic Claude by default), you will need to install the Vercel AI SDK and set up a server-side endpoint:
+The collaboration layer syncs over WebSockets using **Yjs** CRDTs. You will need to run your own WebSocket backend — any [Hocuspocus](https://hocuspocus.dev/)-compatible server works. Install `@inscribe/plugins` on the frontend:
 
 <Tabs items={["pnpm", "npm", "yarn"]}>
   <Tab value="pnpm">
     ```bash
-    pnpm add ai @ai-sdk/react @ai-sdk/anthropic
+    pnpm add @inscribe/plugins
     ```
   </Tab>
   <Tab value="npm">
     ```bash
-    npm install ai @ai-sdk/react @ai-sdk/anthropic
+    npm install @inscribe/plugins
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @inscribe/plugins
     ```
   </Tab>
 </Tabs>
 
-**Environment Variables:**
-*   `ANTHROPIC_API_KEY`: Required by your backend API route to fulfill AI streaming requests.
+Set the WebSocket server URL so the frontend can connect. With Vite:
 
-### Real-Time Collaboration (Hocuspocus/Yjs)
+```bash
+VITE_WS_URL=ws://localhost:1234
+```
 
-Inscribe's collaborative engine relies on **Yjs** for CRDT data structures and synchronizes over WebSockets via **Hocuspocus**. You will need a running Hocuspocus backend server to persist and sync editor states. 
+The variable name depends on your bundler — Vite requires the `VITE_` prefix, Next.js uses `NEXT_PUBLIC_`, etc.
 
-**Environment Variables:**
-*   `VITE_WS_URL`: The frontend client needs the address of the collaboration server (e.g., `ws://localhost:1234`).
+See the [Collaboration example](/examples/collaboration) for the full setup.
+
+---
+
+### AI Toolkit
+
+`AiToolkit` is bring-your-own-LLM — it provides the editor-side context and ghost text overlay, but the actual LLM call is made from your own backend endpoint. Install `@inscribe/plugins` on the frontend and whatever AI SDK you prefer on the backend:
+
+<Tabs items={["pnpm", "npm", "yarn"]}>
+  <Tab value="pnpm">
+    ```bash
+    # Frontend
+    pnpm add @inscribe/plugins
+
+    # Backend (example using Vercel AI SDK + Anthropic)
+    pnpm add ai @ai-sdk/anthropic
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    # Frontend
+    npm install @inscribe/plugins
+
+    # Backend (example using Vercel AI SDK + Anthropic)
+    npm install ai @ai-sdk/anthropic
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    # Frontend
+    yarn add @inscribe/plugins
+
+    # Backend (example using Vercel AI SDK + Anthropic)
+    yarn add ai @ai-sdk/anthropic
+    ```
+  </Tab>
+</Tabs>
+
+**Environment variable** (backend only, if using Anthropic):
+
+```bash
+ANTHROPIC_API_KEY=your-key-here
+```
+
+See the [AI Assistant example](/examples/ai-assistant) for the full integration pattern.
 
 ---
 
@@ -90,5 +158,8 @@ Inscribe has been tested with **Vite** (recommended), **Webpack 5**, and **esbui
 <Cards>
   <Card title="Quick Start" href="/getting-started/quick-start">
     Build your first editor in under 30 lines of React.
+  </Card>
+  <Card title="Editor Options" href="/getting-started/editor-options">
+    Full reference for all configuration options.
   </Card>
 </Cards>

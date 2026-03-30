@@ -7,6 +7,7 @@ export { LinkPopover } from "./LinkPopover";
 export { ImageMenu } from "./ImageMenu";
 export { SlashMenu } from "./SlashMenu";
 export type { SlashMenuItem } from "./SlashMenu";
+export { TrackChangesPopover } from "./TrackChangesPopover";
 export type { UseCanvasEditorOptions } from "./useCanvasEditor";
 
 export { Canvas } from "./Canvas";

@@ -18,7 +18,7 @@ import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
 import { FloatingMenuBar } from "./FloatingMenuBar";
 import { ModeSwitcher } from "./ModeSwitcher";
-import { TrackChangesPopover } from "./TrackChangesPopover";
+import { TrackChangesPopover } from "@inscribe/react";
 import { ChatPanel } from "./ChatPanel";
 
 // ── Room + user identity from URL params ──────────────────────────────────────

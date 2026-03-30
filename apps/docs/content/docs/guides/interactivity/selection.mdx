@@ -1,4 +1,150 @@
 ---
 title: Selection Ranges
-description: Manipulating ranges, getting active marks, and programmatic movement.
+description: Reading selection state, moving the cursor programmatically, and handling mark queries.
 ---
+
+Inscribe exposes the current selection through `SelectionSnapshot` — a plain object you can
+read without importing ProseMirror. For programmatic cursor movement and selection changes,
+use the methods on the `Editor` instance directly.
+
+---
+
+## Reading selection state
+
+### `editor.getSelectionSnapshot()`
+
+The primary way to read selection state in toolbar and menu code:
+
+```ts
+const snap = editor.getSelectionSnapshot();
+
+snap.from           // start of selection (or cursor pos)
+snap.to             // end of selection
+snap.empty          // true = cursor only, no text selected
+snap.anchor         // fixed end (doesn't move on Shift+arrow)
+snap.head           // moving end — where the caret is drawn
+
+snap.activeMarks                    // ['bold', 'italic']
+snap.activeMarkAttrs.color?.color   // '#dc2626'
+snap.activeMarkAttrs.font_size?.size // 18
+
+snap.blockType      // 'paragraph' | 'heading' | 'bulletList' | ...
+snap.blockAttrs     // { level: 2, align: 'left' }
+```
+
+For ranges, `activeMarks` only includes marks present on **every** character in the selection.
+
+---
+
+### `editor.isActive(name, attrs?)`
+
+Quick boolean check — useful for toggling toolbar button active states:
+
+```ts
+editor.isActive('bold');
+editor.isActive('heading', { level: 1 });
+editor.isActive('link');
+```
+
+---
+
+### `editor.getActiveMarks()`
+
+Returns mark names active at the cursor. Equivalent to `snap.activeMarks`.
+
+---
+
+### `editor.getActiveMarkAttrs()`
+
+Returns attributes of each active mark, keyed by mark name:
+
+```ts
+const attrs = editor.getActiveMarkAttrs();
+attrs.color?.color;       // '#dc2626'
+attrs.font_size?.size;    // 18
+attrs.font_family?.family; // 'Georgia'
+```
+
+---
+
+### `editor.getBlockInfo()`
+
+Type name and attributes of the block containing the cursor:
+
+```ts
+const { blockType, blockAttrs } = editor.getBlockInfo();
+// blockType: 'heading', blockAttrs: { level: 2, align: 'center' }
+```
+
+---
+
+## Moving the cursor programmatically
+
+### `editor.moveCursorTo(pos)`
+
+Collapses the cursor to a doc position:
+
+```ts
+editor.moveCursorTo(1); // move to start of document
+```
+
+---
+
+### `editor.setSelection(anchor, head)`
+
+Sets an explicit selection range. Both values are clamped to valid doc bounds:
+
+```ts
+editor.setSelection(10, 25); // select from pos 10 to 25
+editor.setSelection(25, 10); // same range, cursor at left end
+```
+
+---
+
+### `editor.selectNode(docPos)`
+
+Creates a `NodeSelection` at a doc position — use this to programmatically select
+images or other inline objects:
+
+```ts
+editor.selectNode(imageDocPos);
+```
+
+Falls back to `moveCursorTo` if the node at that position is not selectable.
+
+---
+
+### Arrow movement
+
+```ts
+editor.moveLeft();          // ← one character
+editor.moveRight();         // → one character
+editor.moveUp();            // ↑ one visual line
+editor.moveDown();          // ↓ one visual line
+
+// Pass extend: true to grow the selection (Shift+arrow equivalent)
+editor.moveRight(true);
+```
+
+---
+
+## Subscribing to selection changes
+
+Use `editor.subscribe()` to react to every state change, or `useInscribeState` in React
+to subscribe to a specific slice without unnecessary re-renders:
+
+```tsx
+// React — only re-renders when bold state changes
+const isBold = useInscribeState({
+  editor,
+  selector: ({ editor }) => editor?.isActive('bold') ?? false,
+});
+```
+
+```ts
+// Vanilla — fires on every state change, focus change, and cursor tick
+const unsubscribe = editor.subscribe(() => {
+  const snap = editor.getSelectionSnapshot();
+  updateToolbar(snap);
+});
+```

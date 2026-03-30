@@ -31,8 +31,12 @@ formats. All serializers run entirely in the browser — no server round-trip re
 ## PDF Export
 
 Generates a multi-page PDF that matches the paginated canvas layout.
-Powered by [pdf-lib](https://pdf-lib.js.org/). Uses standard PDF fonts (Helvetica, Times, Courier) —
-no custom font embedding.
+Powered by [pdf-lib](https://pdf-lib.js.org/).
+
+<Callout type="info">
+  Currently uses standard PDF fonts (Helvetica, Times, Courier). Custom font embedding is coming
+  soon — documents using custom font families will fall back to the standard fonts in the meantime.
+</Callout>
 
 ```ts
 import { exportToPdf } from '@inscribe/export';
@@ -77,6 +81,23 @@ console.log(markdown);
 ```
 
 `exportToMarkdown` is synchronous and returns a `string`.
+
+<Callout type="warn">
+  **Markdown has no equivalent for some Inscribe formatting.** The following are silently dropped
+  during serialization — the text content is preserved but the formatting is lost:
+
+  | Lost | Reason |
+  |------|--------|
+  | Text alignment (left, center, right, justify) | Not part of CommonMark |
+  | Font family | Not part of CommonMark |
+  | Font size | Not part of CommonMark |
+  | Text color | Not part of CommonMark |
+  | Highlight | Not part of CommonMark |
+  | Track Changes marks | Pending insertions/deletions are exported as plain text |
+
+  If you need to round-trip a document without losing formatting, use the JSON format
+  (`editor.getJSON()` / `editor.setJSON()`) or wait for DOCX export.
+</Callout>
 
 ---
 

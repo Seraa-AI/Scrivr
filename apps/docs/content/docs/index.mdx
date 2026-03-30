@@ -3,6 +3,11 @@ title: Introduction
 description: Inscribe is a canvas-based, paginated document editor built on ProseMirror and Yjs.
 ---
 
+<Callout type="warn">
+  Inscribe is currently in **beta**. APIs may change between releases. We recommend pinning to an
+  exact version and reviewing the changelog before upgrading.
+</Callout>
+
 ## What is Inscribe?
 
 **Inscribe** is an open-source, canvas-rendered document editor framework. Unlike traditional
@@ -14,29 +19,33 @@ It is built upon four distinct architectural layers:
 
 | Layer | Technology | Purpose |
 | --- | --- | --- |
-| **Model** | [ProseMirror](https://prosemirror.net/) | Handles the stateless document tree, schema validation, and rich-text history. |
+| **Model** | [ProseMirror](https://prosemirror.net/) | Immutable document tree, schema validation, and rich-text history. |
 | **Layout** | Custom Engine | Computes pagination, line-breaking, and text measurement independent of the DOM. |
-| **Renderer** | HTML5 Canvas | Paints the document accurately ensuring pixel-perfect visual fidelity. |
+| **Renderer** | HTML5 Canvas | Paints the document directly onto `<canvas>` for pixel-perfect visual fidelity. |
 | **Input** | Hidden `<textarea>` | Bridges browser keyboard and IME events safely to ProseMirror transactions. |
 
 ---
 
 ## Package Overview
 
-The monorepo ships four main packages. As a consumer, you will almost always use the first two.
-
 <Cards>
   <Card title="@inscribe/core" href="/packages/core">
-    The headless engine — `Editor` orchestrator, ProseMirror schema, custom `Layout` engine, canvas `ViewManager`, and all built-in extensions.
+    The headless engine — `Editor` orchestrator, ProseMirror schema, custom layout engine, canvas `ViewManager`, and all built-in extensions.
   </Card>
   <Card title="@inscribe/react" href="/packages/react">
     React bindings — `useInscribeEditor` hook, `<Inscribe />` component, and contextual menus.
   </Card>
   <Card title="@inscribe/plugins" href="/packages/plugins">
-    Optional extensions — features like AI Toolkit (Anthropic/Vercel AI SDK), Track Changes, and real-time CRDT Collaboration via Yjs/Hocuspocus.
+    Optional extensions — AI Toolkit, Track Changes, and real-time collaboration via Yjs.
   </Card>
   <Card title="@inscribe/export" href="/packages/export">
-    Export utilities — serialize the document into paginated PDFs (via `pdf-lib`), DOCX (via OpenXML), or standard Markdown.
+    Export utilities — paginated PDF (via `pdf-lib`) and Markdown. DOCX coming soon.
+  </Card>
+  <Card title="@inscribe/vue">
+    <span class="inline-block mb-2 rounded-md bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-900/40 dark:text-orange-400">Coming Soon</span> Vue 3 bindings — `useInscribeEditor` composable and `<Inscribe />` component.
+  </Card>
+  <Card title="@inscribe/svelte">
+    <span class="inline-block mb-2 rounded-md bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-900/40 dark:text-orange-400">Coming Soon</span> Svelte bindings — `createInscribeEditor` store and `<Inscribe />` component.
   </Card>
 </Cards>
 
@@ -46,19 +55,17 @@ The monorepo ships four main packages. As a consumer, you will almost always use
 
 **Canvas rendering, not DOM.** Every glyph, cursor, selection highlight, and overlay (ghost text, tracked changes) is drawn directly on an `HTMLCanvasElement`. The editor owns its own coordinate system — the browser's layout engine is only used for the outer scroll container.
 
-**Deterministic Layout Engine.** Inscribe implements its own page and block layout algorithms. It handles word wrapping, font measurement, and pagination natively. This means documents are visually identical across all browsers and devices.
+**Deterministic layout engine.** Inscribe implements its own page and block layout algorithms. It handles word wrapping, font measurement, and pagination natively. Documents are visually identical across all browsers and devices.
 
-**Pages as first-class citizens.** The document is broken into fixed-size pages (A4 by default). The `ViewManager` implements virtual scrolling, only painting pages that are currently in the viewport. You control page dimensions and margins through a simple `PageConfig` object.
+**Pages as first-class citizens.** The document is broken into fixed-size pages (A4 by default). The `ViewManager` implements virtual scrolling, only painting pages in the viewport. You control page dimensions and margins through a simple `PageConfig` object.
 
-**Extension-first architecture.** Almost every feature — headings, lists, links, collaboration — is an `Extension`. You compose the features you need via `StarterKit` or by listing extensions explicitly. This keeps bundle sizes lean.
+**Extension-first architecture.** Almost every feature — headings, lists, links, collaboration — is an `Extension`. You compose only what you need via `StarterKit` or by listing extensions explicitly. This keeps bundle sizes lean.
 
-**One document model + multiple renderers.** The ProseMirror `EditorState` is the single source of truth. The canvas renderer reads from it; Yjs syncs it across peers; the export layer serializes it. Nothing holds a shadow copy.
+**One document model, multiple consumers.** The ProseMirror `EditorState` is the single source of truth. The canvas renderer reads from it; Yjs syncs it across peers; the export layer serializes it. Nothing holds a shadow copy.
 
 ---
 
 ## Getting Started
-
-New here? Start with the installation guide:
 
 <Cards>
   <Card title="Installation" href="/getting-started/installation">

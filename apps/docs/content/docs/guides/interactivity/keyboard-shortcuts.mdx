@@ -1,4 +1,110 @@
 ---
 title: Keyboard Shortcuts
-description: The built-in modifier commands and overriding default hotkeys.
+description: All built-in keyboard shortcuts and how to add or override them.
 ---
+
+All shortcuts use `Mod` as a platform-agnostic modifier — `Cmd` on macOS, `Ctrl` on Windows and Linux.
+
+---
+
+## Built-in shortcuts
+
+### Text formatting
+
+| Shortcut | Command | Extension |
+|----------|---------|-----------|
+| `Mod-b` | `toggleBold()` | `Bold` |
+| `Mod-i` | `toggleItalic()` | `Italic` |
+| `Mod-u` | `toggleUnderline()` | `Underline` |
+| `Mod-Shift-s` | `toggleStrikethrough()` | `Strikethrough` |
+| `Mod-Shift-h` | `toggleHighlight()` | `Highlight` |
+
+### Block type
+
+| Shortcut | Command | Extension |
+|----------|---------|-----------|
+| `Mod-Alt-1` … `Mod-Alt-6` | `setHeading1()` … `setHeading6()` | `Heading` |
+| `Mod-Alt-0` | `setParagraph()` | `Heading` |
+| `Mod-Alt-c` | `toggleCodeBlock()` | `CodeBlock` |
+
+### Alignment
+
+| Shortcut | Command |
+|----------|---------|
+| `Mod-Shift-l` | `setAlignLeft()` |
+| `Mod-Shift-e` | `setAlignCenter()` |
+| `Mod-Shift-r` | `setAlignRight()` |
+| `Mod-Shift-j` | `setAlignJustify()` |
+
+### Lists
+
+| Shortcut | Action |
+|----------|--------|
+| `Mod-Shift-8` | Toggle bullet list |
+| `Mod-Shift-9` | Toggle ordered list |
+| `Tab` | Indent list item |
+| `Shift-Tab` | Dedent list item |
+
+### History
+
+| Shortcut | Command |
+|----------|---------|
+| `Mod-z` | `undo()` |
+| `Mod-Shift-z` | `redo()` |
+| `Mod-y` | `redo()` (Windows alias) |
+
+### Editing
+
+| Shortcut | Action |
+|----------|--------|
+| `Mod-a` | Select all |
+| `Shift-Enter` | Insert hard break (line break without splitting the block) |
+| `Tab` (inside code block) | Insert two spaces |
+
+---
+
+## Adding a custom shortcut
+
+Register shortcuts in `addKeymap()`. The key string format follows ProseMirror's
+[`prosemirror-keymap`](https://prosemirror.net/docs/ref/#keymap) conventions.
+
+```ts
+import { Extension } from '@inscribe/core';
+
+const MyShortcuts = Extension.create({
+  name: 'myShortcuts',
+
+  addKeymap() {
+    return {
+      'Mod-Shift-x': (state, dispatch) => {
+        if (dispatch) dispatch(state.tr.insertText('✕'));
+        return true;
+      },
+    };
+  },
+});
+```
+
+---
+
+## Overriding a built-in shortcut
+
+Register the same key in your extension's `addKeymap()`. Extensions are resolved in the order
+they appear in the `extensions` array — later extensions override earlier ones for the same key.
+
+```ts
+// Place MyExtension after StarterKit to override Mod-b
+const editor = new Editor({
+  extensions: [StarterKit, MyExtension],
+});
+```
+
+To disable a shortcut entirely, return `false` from the command:
+
+```ts
+addKeymap() {
+  return {
+    'Mod-b': () => false, // disable bold shortcut
+  };
+},
+```

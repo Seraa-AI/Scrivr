@@ -1,4 +1,38 @@
 ---
-title: paragraph
-description: Configuration shape for the paragraph extension.
+title: Paragraph
+description: The default block node — plain text with alignment and font family support.
 ---
+
+The default block type. Every document must include `Paragraph`.
+
+```ts
+import { Paragraph } from '@inscribe/core';
+```
+
+No configurable options.
+
+---
+
+## Attributes
+
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `align` | `'left' \| 'center' \| 'right' \| 'justify'` | `'left'` | Text alignment. |
+| `fontFamily` | `string \| null` | `null` | Block-level font family override. `null` inherits from `pageConfig`. |
+
+---
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `setParagraph()` | Converts the current block to a paragraph. |
+
+**Keyboard:** `Mod-Alt-0`
+
+---
+
+## Behaviour
+
+- `Enter` splits the block and carries `align` and `fontFamily` onto the new paragraph.
+- When splitting a heading, the new block becomes a paragraph (not another heading) but inherits `fontFamily`.
