@@ -1,4 +1,277 @@
 ---
 title: Editor API
-description: Main Editor class methods and properties reference.
+description: Complete reference for the Editor class — methods, properties, and lifecycle.
 ---
+
+The `Editor` class is the central orchestrator of every Inscribe instance. It owns the document state,
+layout engine, and extension system. Consumers interact with it directly (headless) or via the
+`useCanvasEditor` React hook.
+
+```ts
+import { Editor, StarterKit } from '@inscribe/core';
+
+const editor = new Editor({
+  extensions: [StarterKit],
+  onChange: (state) => console.log('changed', state),
+});
+
+editor.mount(containerElement);
+```
+
+---
+
+## Constructor
+
+```ts
+new Editor(options: EditorOptions)
+```
+
+Accepts an [`EditorOptions`](/docs/api/types#editoroptions) object. Builds the ProseMirror schema from
+extensions, runs the initial layout, and starts the cursor blink timer.
+
+---
+
+## Properties
+
+### `schema`
+```ts
+get schema(): Schema
+```
+The merged ProseMirror schema built from all active extensions. Use this instead of importing a schema
+directly — it reflects exactly which node and mark types are loaded.
+
+### `pageConfig`
+```ts
+readonly pageConfig: PageConfig
+```
+The active page dimensions. Set once at construction from `EditorOptions.pageConfig` or the first
+extension that provides one. See [`PageConfig`](/docs/api/types#pageconfig).
+
+### `charMap`
+```ts
+readonly charMap: CharacterMap
+```
+The spatial index mapping doc positions to `(x, y, page)` canvas coordinates. Updated after every
+state change.
+
+### `cursorManager`
+```ts
+readonly cursorManager: CursorManager
+```
+Manages the cursor blink timer. Read `cursorManager.isVisible` to know whether to draw or clear
+the cursor in a custom overlay.
+
+### `isFocused`
+```ts
+get isFocused(): boolean
+```
+Whether the editor's hidden textarea currently has focus.
+
+### `commands`
+```ts
+readonly commands: Record<string, (...args: unknown[]) => void>
+```
+All bound extension commands. Commands are closures that always read the latest state at call time.
+
+```ts
+editor.commands.toggleBold();
+editor.commands.setHeading({ level: 2 });
+editor.commands.undo();
+```
+
+---
+
+## Lifecycle Methods
+
+### `mount(container)`
+```ts
+mount(container: HTMLElement): void
+```
+Creates the hidden `<textarea>` input bridge and attaches keyboard/paste event listeners to the
+given container. Called automatically by `<Canvas />`.
+
+### `unmount()`
+```ts
+unmount(): void
+```
+Removes the textarea and detaches event listeners. The editor state is preserved — the editor can be
+re-mounted. Called automatically by `<Canvas />` on unmount.
+
+### `destroy()`
+```ts
+destroy(): void
+```
+Full teardown: runs extension cleanup callbacks, stops the cursor blink timer, and calls `unmount()`.
+After `destroy()` the editor instance should not be used.
+
+### `focus()`
+```ts
+focus(): void
+```
+Programmatically focuses the hidden textarea.
+
+---
+
+## State Methods
+
+### `getState()`
+```ts
+getState(): EditorState
+```
+Returns the current ProseMirror `EditorState`. States are immutable — reference equality detects
+changes.
+
+### `getSnapshot()`
+```ts
+getSnapshot(): EditorState
+```
+Alias of `getState()`. Used as the `getSnapshot` argument for React's `useSyncExternalStore`.
+
+### `isActive(name, attrs?)`
+```ts
+isActive(name: string, attrs?: Record<string, unknown>): boolean
+```
+Returns `true` if the named mark or block node type is active at the current cursor or selection.
+
+```ts
+editor.isActive('bold');                       // mark active?
+editor.isActive('heading', { level: 1 });     // h1 active?
+editor.isActive('bulletList');                 // inside a list?
+```
+
+### `getSelectionSnapshot()`
+```ts
+getSelectionSnapshot(): SelectionSnapshot
+```
+Returns a lightweight snapshot of the selection — all the data a toolbar or floating menu needs
+without requiring ProseMirror imports. See [`SelectionSnapshot`](/docs/api/types#selectionsnapshot).
+
+### `getActiveMarks()`
+```ts
+getActiveMarks(): string[]
+```
+Names of marks active at the cursor. For a range selection, only marks present on **every** character
+in the range are returned (matches toggle semantics).
+
+### `getActiveMarkAttrs()`
+```ts
+getActiveMarkAttrs(): Record<string, Record<string, unknown>>
+```
+Attributes of each active mark. Keys are mark names; values are the mark's attrs.
+
+```ts
+const attrs = editor.getActiveMarkAttrs();
+attrs.color?.color; // '#dc2626'
+attrs.font_size?.size; // 18
+```
+
+### `getMarkdown()`
+```ts
+getMarkdown(): string
+```
+Serializes the full document to Markdown using extension-contributed serializer rules.
+
+---
+
+## Layout Methods
+
+### `layout`
+```ts
+get layout(): DocumentLayout
+```
+Returns the current `DocumentLayout`. Calls `ensureLayout()` internally so the result always reflects
+the latest state.
+
+### `getViewportRect(from, to)`
+```ts
+getViewportRect(from: number, to: number): DOMRect | null
+```
+Converts a doc position range to a screen-space `DOMRect` (viewport-relative). Returns `null` if
+the positions are not in the `CharacterMap` or if no rendering adapter is mounted.
+
+Use this to position floating menus:
+
+```ts
+const snap = editor.getSelectionSnapshot();
+const rect = editor.getViewportRect(snap.from, snap.to);
+if (rect) {
+  menuEl.style.top  = `${rect.bottom + 8}px`;
+  menuEl.style.left = `${rect.left}px`;
+}
+```
+
+---
+
+## Cursor & Selection Methods
+
+### `moveCursorTo(pos)`
+```ts
+moveCursorTo(pos: number): void
+```
+Collapses the cursor to a given doc position.
+
+### `setSelection(anchor, head)`
+```ts
+setSelection(anchor: number, head: number): void
+```
+Sets an explicit selection range. `anchor` is the fixed end; `head` is the moving end (where the
+cursor is drawn). Both values are clamped to valid doc bounds.
+
+### `moveLeft / moveRight / moveUp / moveDown`
+```ts
+moveLeft(extend?: boolean): void
+moveRight(extend?: boolean): void
+moveUp(extend?: boolean): void
+moveDown(extend?: boolean): void
+```
+Arrow-key cursor movement. Pass `extend: true` to grow the selection (Shift+arrow behaviour).
+
+---
+
+## Subscription
+
+### `subscribe(listener)`
+```ts
+subscribe(listener: () => void): () => void
+```
+Registers a listener that is called on every editor notification: state changes, focus changes,
+and cursor blink ticks. Returns an unsubscribe function.
+
+```ts
+const unsubscribe = editor.subscribe(() => forceUpdate());
+// later:
+unsubscribe();
+```
+
+### `redraw()`
+```ts
+redraw(): void
+```
+Triggers a UI repaint without a document or selection change. Use when external state
+(e.g. collaborative awareness data) changes and the overlay needs refreshing.
+
+---
+
+## Extension Points
+
+### `addOverlayRenderHandler(handler)`
+```ts
+addOverlayRenderHandler(handler: OverlayRenderHandler): () => void
+```
+Registers a canvas draw function on the overlay layer. Called by `ViewManager` after the built-in
+cursor and selection are painted. Returns an unregister function.
+
+```ts
+const unregister = editor.addOverlayRenderHandler(
+  (ctx, pageNumber, pageConfig, charMap) => {
+    // draw remote cursors for this page...
+  }
+);
+```
+
+### `setPageElementLookup(fn)`
+```ts
+setPageElementLookup(fn: ((page: number) => HTMLElement | null) | null): void
+```
+Registers the function used by the editor to resolve a 1-based page number to its DOM element.
+Called automatically by `<Canvas />`. Only needed when building a custom rendering adapter.

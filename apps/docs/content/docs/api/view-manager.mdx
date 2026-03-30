@@ -1,4 +1,102 @@
 ---
 title: ViewManager API
-description: The DOM-Canvas coordination layer instance.
+description: The DOM and canvas coordination layer for Inscribe's rendering engine.
 ---
+
+`ViewManager` is the component that bridges `Editor` (state + layout) with the browser DOM.
+It manages the lifecycle of per-page `<div>` containers and `<canvas>` elements, implements
+virtual scrolling, and orchestrates canvas painting.
+
+<Callout type="info">
+  **You do not need to use `ViewManager` directly.** The `<Canvas />` React component handles
+  `ViewManager` construction and teardown automatically. This page is for library contributors
+  and developers building custom rendering adapters.
+</Callout>
+
+---
+
+## Construction
+
+```ts
+import { ViewManager } from '@inscribe/core';
+
+const vm = new ViewManager(editor, container, {
+  gap: 24,       // px between pages. Default: 24
+  overscan: 500, // virtual scroll overscan px. Default: 500
+});
+```
+
+| Argument | Type | Description |
+|---|---|---|
+| `editor` | `Editor` | The editor instance to render |
+| `container` | `HTMLElement` | DOM element to render pages into |
+| `options.gap` | `number` | Gap in px between page elements |
+| `options.overscan` | `number` | Extra px around viewport to keep painted |
+
+On construction, `ViewManager`:
+1. Subscribes to the editor via `editor.subscribe()`
+2. Calls `editor.setPageElementLookup()` with a resolver that returns each page's DOM element
+3. Creates the initial set of page DOM elements from `editor.layout`
+4. Begins watching page visibility with an `IntersectionObserver`
+
+---
+
+## What It Owns
+
+| Resource | Description |
+|---|---|
+| Per-page `<div>` wrappers | One per page in `DocumentLayout`, sized to `pageConfig.width × height` |
+| Content `<canvas>` | Draws text, images, and block backgrounds (one per page) |
+| Overlay `<canvas>` | Draws cursor, selection highlights, and extension overlays (one per page) |
+| `IntersectionObserver` | Watches page visibility; only paints pages in (or near) the viewport |
+| `editor.subscribe` cleanup fn | Unregisters on `destroy()` |
+
+---
+
+## Virtual Scrolling
+
+`ViewManager` implements virtual scrolling by painting only pages that are intersecting with the
+viewport's overscan zone. Pages outside this zone are kept in the DOM (to preserve scroll position)
+but their canvas content is cleared to free GPU memory.
+
+The overscan value (default `500px`) controls how far beyond the visible area pages are kept
+actively painted. Increasing this reduces the chance of seeing blank pages during fast scrolling.
+
+---
+
+## `destroy()`
+
+```ts
+vm.destroy(): void
+```
+
+Full cleanup:
+- Unsubscribes from the editor
+- Disconnects the `IntersectionObserver`
+- Removes all page DOM elements from the container
+
+Always call `destroy()` before discarding a `ViewManager` instance. The `<Canvas />` component
+calls this in its `useEffect` cleanup.
+
+---
+
+## `<Canvas />` as a Thin Wrapper
+
+The full implementation of `<Canvas />` is:
+
+```tsx
+useEffect(() => {
+  if (!editor || !containerRef.current) return;
+
+  editor.mount(containerRef.current);
+  const vm = new ViewManager(editor, containerRef.current, { gap, overscan });
+
+  return () => {
+    vm.destroy();
+    editor.unmount();
+  };
+}, [editor, gap, overscan]);
+```
+
+If you need custom behaviour (e.g. rendering into a Shadow DOM, or driving the canvas from
+a non-React framework), copy this pattern and manage the `ViewManager` lifecycle yourself.
