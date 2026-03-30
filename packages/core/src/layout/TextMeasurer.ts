@@ -24,6 +24,13 @@ export interface FontMetrics {
   descent: number;
   /** ascent + descent — height to allocate per line */
   lineHeight: number;
+  /**
+   * Height of a lowercase "x" in this font — the CSS x-height.
+   * Used for vertical-align: middle (centers the element on the x-height
+   * midpoint, not the full line height midpoint).
+   * Measured via actualBoundingBoxAscent of "x" (visual cap, not font max).
+   */
+  xHeight: number;
 }
 
 export interface RunMetrics {
@@ -39,6 +46,50 @@ export interface RunMetrics {
   charPositions: number[];
 }
 
+/**
+ * Minimal LRU cache backed by a Map.
+ * JavaScript Maps maintain insertion order — deleting and re-inserting on
+ * access keeps the most-recently-used entry at the end and the least-recently-
+ * used at the front.  Eviction is O(1): `map.keys().next()` gives the oldest.
+ */
+class LRUCache<V> {
+  private map = new Map<string, V>();
+  constructor(private readonly maxSize: number) {}
+
+  get(key: string): V | undefined {
+    const val = this.map.get(key);
+    if (val === undefined) return undefined;
+    // Move to end (most recently used)
+    this.map.delete(key);
+    this.map.set(key, val);
+    return val;
+  }
+
+  set(key: string, val: V): void {
+    if (this.map.has(key)) this.map.delete(key);
+    this.map.set(key, val);
+    if (this.map.size > this.maxSize) {
+      // Evict least-recently-used (first entry)
+      this.map.delete(this.map.keys().next().value!);
+    }
+  }
+
+  /** Remove all entries whose key satisfies the predicate. O(n). */
+  deleteIf(predicate: (key: string) => boolean): void {
+    for (const key of [...this.map.keys()]) {
+      if (predicate(key)) this.map.delete(key);
+    }
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+
+  clear(): void {
+    this.map.clear();
+  }
+}
+
 export class TextMeasurer {
   private ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -47,6 +98,14 @@ export class TextMeasurer {
 
   /** font → FontMetrics */
   private metricCache = new Map<string, FontMetrics>();
+
+  /**
+   * LRU cache for measureRun results.
+   * Key: `${font}\x00${text}` — null separator avoids collisions.
+   * 2 000 entries covers the vocabulary of a large document with room to spare.
+   * measureRun() is O(n) raw ctx.measureText calls; a cache hit is O(1).
+   */
+  private runCache = new LRUCache<RunMetrics>(2000);
 
   /** How much to multiply (ascent + descent) for final line height */
   private lineHeightMultiplier: number;
@@ -104,10 +163,16 @@ export class TextMeasurer {
         ? m.fontBoundingBoxDescent
         : m.actualBoundingBoxDescent;
 
+    // x-height: visual height of lowercase "x". Use actualBoundingBoxAscent
+    // (not fontBoundingBox) — we want the rendered cap height, not the font max.
+    const xMetrics = this.ctx.measureText("x");
+    const xHeight = xMetrics.actualBoundingBoxAscent;
+
     const metrics: FontMetrics = {
       ascent,
       descent,
       lineHeight: (ascent + descent) * this.lineHeightMultiplier,
+      xHeight,
     };
 
     this.metricCache.set(font, metrics);
@@ -128,6 +193,10 @@ export class TextMeasurer {
       return { totalWidth: 0, charPositions: [] };
     }
 
+    const key = `${font}\x00${text}`;
+    const cached = this.runCache.get(key);
+    if (cached) return cached;
+
     this.ctx.font = font;
     const charPositions: number[] = new Array(text.length).fill(0) as number[];
 
@@ -138,8 +207,9 @@ export class TextMeasurer {
     }
 
     const totalWidth = this.ctx.measureText(text).width;
-
-    return { totalWidth, charPositions };
+    const result: RunMetrics = { totalWidth, charPositions };
+    this.runCache.set(key, result);
+    return result;
   }
 
   /**
@@ -156,9 +226,14 @@ export class TextMeasurer {
     if (font) {
       this.widthCache.delete(font);
       this.metricCache.delete(font);
+      // Evict only run-cache entries for this font — key format is `${font}\x00${text}`.
+      // Clearing all entries would discard valid kerning data for other fonts.
+      const prefix = `${font}\x00`;
+      this.runCache.deleteIf((key) => key.startsWith(prefix));
     } else {
       this.widthCache.clear();
       this.metricCache.clear();
+      this.runCache.clear();
     }
   }
 

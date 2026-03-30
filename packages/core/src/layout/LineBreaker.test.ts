@@ -25,7 +25,7 @@ describe("LineBreaker — basic wrapping", () => {
   it("puts everything on one line when it fits", () => {
     const lb = new LineBreaker(makeMeasurer());
     const lines = lb.breakIntoLines(
-      [{ text: "Hello world", font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text: "Hello world", font: "14px serif", docPos: 1 }],
       200
     );
     expect(lines).toHaveLength(1);
@@ -36,7 +36,7 @@ describe("LineBreaker — basic wrapping", () => {
     const lb = new LineBreaker(makeMeasurer());
     // maxWidth=80: "Hello " (48px) fits, "world" (40px) pushes to 88px → wrap
     const lines = lb.breakIntoLines(
-      [{ text: "Hello world", font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text: "Hello world", font: "14px serif", docPos: 1 }],
       80
     );
     expect(lines).toHaveLength(2);
@@ -45,7 +45,7 @@ describe("LineBreaker — basic wrapping", () => {
   it("no line exceeds maxWidth", () => {
     const lb = new LineBreaker(makeMeasurer());
     const lines = lb.breakIntoLines(
-      [{ text: "The quick brown fox jumps over the lazy dog", font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text: "The quick brown fox jumps over the lazy dog", font: "14px serif", docPos: 1 }],
       100
     );
     for (const line of lines) {
@@ -57,11 +57,11 @@ describe("LineBreaker — basic wrapping", () => {
     const text = "The quick brown fox jumps over the lazy dog";
     const lb = new LineBreaker(makeMeasurer());
     const lines = lb.breakIntoLines(
-      [{ text, font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text, font: "14px serif", docPos: 1 }],
       100
     );
     const reconstructed = lines
-      .flatMap((l) => l.spans.map((s) => s.text))
+      .flatMap((l) => l.spans.filter((s) => s.kind === "text").map((s) => s.kind === "text" ? s.text : ""))
       .join("")
       .trim();
     expect(reconstructed).toBe(text);
@@ -79,8 +79,8 @@ describe("LineBreaker — multi-span (mixed fonts)", () => {
     // "Hello " (48px) + "world" (40px) = 88px — fits in 120px
     const lines = lb.breakIntoLines(
       [
-        { text: "Hello ", font: "14px serif", docPos: 1 },
-        { text: "world", font: "bold 14px serif", docPos: 7 },
+        { kind: "text" as const, text: "Hello ", font: "14px serif", docPos: 1 },
+        { kind: "text" as const, text: "world", font: "bold 14px serif", docPos: 7 },
       ],
       120
     );
@@ -93,8 +93,8 @@ describe("LineBreaker — multi-span (mixed fonts)", () => {
     // maxWidth=60: "Hello " (48px) fits, "world" (40px) → 88px > 60 → wrap
     const lines = lb.breakIntoLines(
       [
-        { text: "Hello ", font: "14px serif", docPos: 1 },
-        { text: "world", font: "bold 14px serif", docPos: 7 },
+        { kind: "text" as const, text: "Hello ", font: "14px serif", docPos: 1 },
+        { kind: "text" as const, text: "world", font: "bold 14px serif", docPos: 7 },
       ],
       60
     );
@@ -106,7 +106,7 @@ describe("LineBreaker — vertical metrics", () => {
   it("line height is taken from font metrics × multiplier", () => {
     const lb = new LineBreaker(makeMeasurer());
     const lines = lb.breakIntoLines(
-      [{ text: "Hello", font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text: "Hello", font: "14px serif", docPos: 1 }],
       200
     );
     // (12 + 3) * 1.2 = 18
@@ -119,8 +119,8 @@ describe("LineBreaker — vertical metrics", () => {
     const lb = new LineBreaker(makeMeasurer());
     const lines = lb.breakIntoLines(
       [
-        { text: "normal ", font: "14px serif", docPos: 1 },
-        { text: "big", font: "24px serif", docPos: 8 },
+        { kind: "text" as const, text: "normal ", font: "14px serif", docPos: 1 },
+        { kind: "text" as const, text: "big", font: "24px serif", docPos: 8 },
       ],
       200
     );
@@ -134,7 +134,7 @@ describe("LineBreaker — overflow / wide words (regression)", () => {
     // "ABCDEFGHIJ" = 10 chars × 8px = 80px, but maxWidth is 40px (5 chars)
     // Expected: each line is ≤ 40px wide
     const lines = lb.breakIntoLines(
-      [{ text: "ABCDEFGHIJ", font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text: "ABCDEFGHIJ", font: "14px serif", docPos: 1 }],
       40
     );
     expect(lines.length).toBeGreaterThanOrEqual(2);
@@ -147,11 +147,11 @@ describe("LineBreaker — overflow / wide words (regression)", () => {
     const lb = new LineBreaker(makeMeasurer());
     const text = "ABCDEFGHIJ";
     const lines = lb.breakIntoLines(
-      [{ text, font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text, font: "14px serif", docPos: 1 }],
       40
     );
     const reconstructed = lines
-      .flatMap((l) => l.spans.map((s) => s.text))
+      .flatMap((l) => l.spans.filter((s) => s.kind === "text").map((s) => s.kind === "text" ? s.text : ""))
       .join("");
     expect(reconstructed).toBe(text);
   });
@@ -161,7 +161,7 @@ describe("LineBreaker — overflow / wide words (regression)", () => {
     // Simulates a long URL or identifier with no spaces
     const text = "a".repeat(50); // 50 chars × 8px = 400px, maxWidth = 100px
     const lines = lb.breakIntoLines(
-      [{ text, font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text, font: "14px serif", docPos: 1 }],
       100
     );
     for (const line of lines) {
@@ -176,7 +176,7 @@ describe("LineBreaker — CharacterMap population", () => {
     const map = new CharacterMap();
 
     lb.breakIntoLines(
-      [{ text: "Hi", font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text: "Hi", font: "14px serif", docPos: 1 }],
       200,
       map,
       { page: 1, lineIndexOffset: 0, lineY: 60 }
@@ -192,7 +192,7 @@ describe("LineBreaker — CharacterMap population", () => {
 
     // maxWidth=60: wraps into 2 lines
     lb.breakIntoLines(
-      [{ text: "Hello world", font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text: "Hello world", font: "14px serif", docPos: 1 }],
       60,
       map,
       { page: 1, lineIndexOffset: 0, lineY: 60 }
@@ -209,7 +209,7 @@ describe("LineBreaker — CharacterMap population", () => {
     const map = new CharacterMap();
 
     lb.breakIntoLines(
-      [{ text: "Hi", font: "14px serif", docPos: 1 }],
+      [{ kind: "text" as const, text: "Hi", font: "14px serif", docPos: 1 }],
       200,
       map,
       { page: 1, lineIndexOffset: 0, lineY: 60 }

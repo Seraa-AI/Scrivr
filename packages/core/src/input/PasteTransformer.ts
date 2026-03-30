@@ -38,6 +38,7 @@ export class PasteTransformer {
     // Disable rules that generate tokens our schema can't handle (blockquote, link, image).
     // Their content still renders as plain text — no data loss, just no special formatting.
     this.md = new MarkdownIt({ html: false });
+    //TODO: add these to the schema
     this.md.disable(["blockquote", "image", "link"]);
   }
 
@@ -61,6 +62,8 @@ export class PasteTransformer {
           // Fall through to plain text
         }
       }
+
+      //User tansaction to allow undo/redo
       return insertText(state, plain);
     }
 
@@ -72,10 +75,34 @@ export class PasteTransformer {
   private fromHtml(html: string, state: EditorState): Transaction {
     const div = document.createElement("div");
     div.innerHTML = html;
-    const slice = PMDOMParser.fromSchema(this.schema).parseSlice(div, {
+    cleanPastedHtml(div);
+
+    // Use parse() (not parseSlice) so we get a complete document, then build
+    // a Slice with openStart:0. parseSlice sets openStart:1 for block-level
+    // content which causes replaceSelection to merge the first block into the
+    // cursor paragraph — discarding that block's attrs (e.g. align:"center").
+    const doc = PMDOMParser.fromSchema(this.schema).parse(div, {
       preserveWhitespace: false,
     });
-    return state.tr.replaceSelection(slice);
+
+    // Collect only block-level nodes. parse() may produce inline nodes (e.g.
+    // hard_break) at the document level from Google Docs' trailing <br> tags.
+    const blockNodes: Node[] = [];
+    doc.content.forEach((n) => { if (n.isBlock) blockNodes.push(n); });
+    const fragment = Fragment.from(blockNodes.length ? blockNodes : doc.content);
+
+    // When pasting into an empty paragraph, replace the whole paragraph so we
+    // don't leave a stray empty paragraph before the inserted blocks.
+    const { $from } = state.selection;
+    if ($from.depth >= 1 && $from.parent.content.size === 0) {
+      const blockFrom = $from.before($from.depth);
+      const blockTo   = $from.after($from.depth);
+      return state.tr.replaceWith(blockFrom, blockTo, fragment);
+    }
+
+    // Non-empty position: insert complete blocks (openStart:0) so every
+    // pasted block retains its own attrs rather than merging with the cursor's.
+    return state.tr.replaceSelection(new Slice(fragment, 0, 0));
   }
 
   // ── Markdown ──────────────────────────────────────────────────────────────
@@ -261,4 +288,66 @@ export class PasteTransformer {
 
     return nodes.length > 0 ? nodes : [this.schema.text("\u200B")];
   }
+}
+
+// ── HTML cleanup ──────────────────────────────────────────────────────────────
+
+/**
+ * Normalise pasted HTML before handing it to the ProseMirror DOMParser.
+ *
+ * Handles:
+ *  - Google Docs: unwraps the outer `<b id="docs-internal-guid-…">` shell
+ *    (font-weight:normal wrapper that carries no semantic weight)
+ *  - Non-breaking spaces (\u00A0) → regular spaces so word-joining works
+ */
+export function cleanPastedHtml(root: HTMLElement): void {
+  // Strip non-content elements — Google Docs includes a <style> block with
+  // generated CSS classes (.c0 { font-size:11pt; … }) that don't map to our schema.
+  root.querySelectorAll("style, meta, link").forEach((el) => el.remove());
+
+  // Unwrap Google Docs' outer bold wrapper — <b id="docs-internal-guid-…"
+  // style="font-weight:normal"> has no semantic meaning; it's just a container.
+  root.querySelectorAll('b[id^="docs-internal-guid"]').forEach((el) => {
+    el.replaceWith(...Array.from(el.childNodes));
+  });
+
+  // Strip empty paragraphs immediately adjacent to <hr> elements.
+  // Google Docs wraps every <hr> with <p><span></span></p> spacers — after
+  // pasting these become editable empty paragraphs cluttering the document.
+  root.querySelectorAll("hr").forEach((hr) => {
+    const prev = hr.previousElementSibling;
+    const next = hr.nextElementSibling;
+    if (prev?.tagName === "P" && (prev.textContent ?? "").trim() === "") prev.remove();
+    if (next?.tagName === "P" && (next.textContent ?? "").trim() === "") next.remove();
+  });
+
+  // Strip CSS properties that are always default/noise — they create spurious
+  // marks (color, font_size, etc.) that pollute the parsed document.
+  root.querySelectorAll("[style]").forEach((el) => {
+    const s = (el as HTMLElement).style;
+    s.removeProperty("background-color");
+    s.removeProperty("font-variant");
+    s.removeProperty("white-space");          // pre/pre-wrap from Google Docs
+    if (s.textDecoration === "none")  s.removeProperty("text-decoration");
+    if (s.verticalAlign  === "baseline") s.removeProperty("vertical-align");
+    if (s.color === "rgb(0, 0, 0)" || s.color === "#000000") s.removeProperty("color");
+    // margin/padding/line-height have no schema equivalent
+    // TODO: add these to the schema
+    s.removeProperty("line-height");
+    s.removeProperty("margin-top");
+    s.removeProperty("margin-bottom");
+    s.removeProperty("margin-left");
+    s.removeProperty("margin-right");
+  });
+
+  // Replace non-breaking spaces with regular spaces in all text nodes.
+  // Google Docs uses \u00A0 between words which causes word-joining to break.
+  const walkTextNodes = (node: ChildNode): void => {
+    if (node.nodeType === 3 /* TEXT_NODE */) {
+      node.textContent = (node.textContent ?? "").replace(/\u00a0/g, " ");
+    } else {
+      node.childNodes.forEach(walkTextNodes);
+    }
+  };
+  walkTextNodes(root);
 }

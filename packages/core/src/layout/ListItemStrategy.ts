@@ -18,7 +18,8 @@ export const ListItemStrategy: BlockStrategy = {
       const firstLine = block.lines[0];
       if (firstLine) {
         const baseline = block.y + firstLine.ascent;
-        ctx.font = firstLine.spans[0]?.font ?? "14px Georgia, serif";
+        const firstSpan = firstLine.spans[0];
+        ctx.font = (firstSpan?.kind === "text" ? firstSpan.font : undefined) ?? "14px Georgia, serif";
         ctx.fillStyle = "#1e293b";
         ctx.textAlign = "right";
         ctx.fillText(block.listMarker, block.listMarkerX, baseline);

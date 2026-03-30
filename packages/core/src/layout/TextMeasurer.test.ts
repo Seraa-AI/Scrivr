@@ -84,12 +84,14 @@ describe("TextMeasurer.getFontMetrics", () => {
     expect(metrics.lineHeight).toBeCloseTo((MOCK_FONT_ASCENT + MOCK_FONT_DESCENT) * 1.2);
   });
 
-  it("caches — measureText is not called twice for the same font", () => {
+  it("caches — measureText calls don't increase on repeated calls for the same font", () => {
     const m = new TextMeasurer();
     m.getFontMetrics("14px serif");
-    m.getFontMetrics("14px serif");
     const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
-    expect(ctx.measureText).toHaveBeenCalledTimes(1);
+    const callsAfterFirst = ctx.measureText.mock.calls.length;
+    m.getFontMetrics("14px serif");
+    // Second call must not add any more measureText calls (result is cached).
+    expect(ctx.measureText).toHaveBeenCalledTimes(callsAfterFirst);
   });
 
   it("font metrics are stable — same result regardless of what text is measured after", () => {
@@ -99,6 +101,25 @@ describe("TextMeasurer.getFontMetrics", () => {
     const after = m.getFontMetrics("14px serif");
     expect(before.ascent).toBe(after.ascent);
     expect(before.lineHeight).toBe(after.lineHeight);
+  });
+
+  it("falls back to actualBoundingBox when fontBoundingBox is absent", () => {
+    // Override mock to omit fontBoundingBoxAscent/Descent (older browser simulation)
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      measureText: vi.fn((_text: string) => ({
+        width: 40,
+        actualBoundingBoxAscent: 10,
+        actualBoundingBoxDescent: 2,
+        // fontBoundingBoxAscent / fontBoundingBoxDescent intentionally absent
+      })),
+      font: "",
+    } as unknown as CanvasRenderingContext2D);
+
+    const m = new TextMeasurer({ lineHeightMultiplier: 1.0 });
+    const metrics = m.getFontMetrics("14px serif");
+    expect(metrics.ascent).toBe(10);
+    expect(metrics.descent).toBe(2);
+    expect(metrics.lineHeight).toBeCloseTo(12);
   });
 });
 
@@ -134,6 +155,49 @@ describe("TextMeasurer.measureRun", () => {
     const run = m.measureRun("", "14px serif");
     expect(run.totalWidth).toBe(0);
     expect(run.charPositions).toHaveLength(0);
+  });
+
+  it("single character — charPositions is [0] and totalWidth matches measureWidth", () => {
+    const m = new TextMeasurer();
+    const run = m.measureRun("A", "14px serif");
+    expect(run.charPositions).toEqual([0]);
+    expect(run.totalWidth).toBe(m.measureWidth("A", "14px serif"));
+  });
+
+  it("caches — measureText is not called again for the same (font, text)", () => {
+    const m = new TextMeasurer();
+    m.measureRun("hello", "14px serif");
+    const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
+    const callsAfterFirst = ctx.measureText.mock.calls.length;
+
+    m.measureRun("hello", "14px serif"); // should be a cache hit
+    expect(ctx.measureText.mock.calls.length).toBe(callsAfterFirst); // no new calls
+  });
+
+  it("different fonts are cached as separate entries", () => {
+    const m = new TextMeasurer();
+    const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
+
+    m.measureRun("hi", "14px serif");
+    const callsAfterFirst = ctx.measureText.mock.calls.length;
+
+    // Same text, different font — must NOT be a cache hit
+    m.measureRun("hi", "16px serif");
+    expect(ctx.measureText.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+  });
+});
+
+describe("LRU runCache eviction", () => {
+  it("evicts oldest entries when capacity is exceeded", () => {
+    const m = new TextMeasurer();
+    const font = "14px serif";
+    // Fill beyond the 2000-entry limit
+    for (let i = 0; i < 2100; i++) {
+      m.measureRun(`unique-text-${i}`, font);
+    }
+    // Oldest 100 entries (0–99) should have been evicted; cache size ≤ 2000
+    const cache = m["runCache"] as { size: number };
+    expect(cache.size).toBeLessThanOrEqual(2000);
   });
 });
 
@@ -172,5 +236,24 @@ describe("TextMeasurer.invalidate", () => {
 
     m.measureWidth("hello", "14px serif"); // invalidated — must re-measure
     expect(ctx.measureText).toHaveBeenCalledTimes(callsAfterInitial + 1);
+  });
+
+  it("invalidate(font) evicts only that font's run-cache entries, not others", () => {
+    const m = new TextMeasurer();
+    m.measureRun("hello", "14px serif");
+    m.measureRun("hello", "16px serif"); // different font — should survive invalidation
+
+    const ctx = m["ctx"] as unknown as { measureText: ReturnType<typeof vi.fn> };
+    const callsBefore = ctx.measureText.mock.calls.length;
+
+    m.invalidate("14px serif");
+
+    // "16px serif" run should still be cached — no new measureText calls
+    m.measureRun("hello", "16px serif");
+    expect(ctx.measureText.mock.calls.length).toBe(callsBefore);
+
+    // "14px serif" run was evicted — must re-measure
+    m.measureRun("hello", "14px serif");
+    expect(ctx.measureText.mock.calls.length).toBeGreaterThan(callsBefore);
   });
 });

@@ -203,4 +203,34 @@ describe("ExtensionManager", () => {
       expect(typeof highlightDec!.decoratePre).toBe("function");
     });
   });
+
+  describe("buildInlineRegistry", () => {
+    it("returns an InlineRegistry with image strategy registered via StarterKit", () => {
+      // THE REGRESSION: StarterKit was collecting layoutHandlers (now empty on Image)
+      // instead of inlineHandlers — image strategy was never registered, so images
+      // rendered as blank cursors. This test locks that wiring in.
+      const manager = new ExtensionManager([StarterKit]);
+      const registry = manager.buildInlineRegistry();
+      expect(registry.has("image")).toBe(true);
+    });
+
+    it("image strategy has a callable render function", () => {
+      const manager = new ExtensionManager([StarterKit]);
+      const registry = manager.buildInlineRegistry();
+      const strategy = registry.get("image");
+      expect(typeof strategy?.render).toBe("function");
+    });
+
+    it("returns empty registry when no extensions declare inline handlers", () => {
+      const manager = new ExtensionManager([Document, Paragraph, Bold]);
+      const registry = manager.buildInlineRegistry();
+      expect(registry.has("image")).toBe(false);
+    });
+
+    it("StarterKit.configure({ image: false }) excludes the image strategy", () => {
+      const manager = new ExtensionManager([StarterKit.configure({ image: false })]);
+      const registry = manager.buildInlineRegistry();
+      expect(registry.has("image")).toBe(false);
+    });
+  });
 });

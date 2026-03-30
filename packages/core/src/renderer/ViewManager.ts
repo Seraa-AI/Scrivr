@@ -3,6 +3,8 @@ import type { DocumentLayout, LayoutPage, PageConfig } from "../layout/PageLayou
 import { setupCanvas } from "./canvas";
 import { renderPage } from "./PageRenderer";
 import { clearOverlay, renderCursor, renderSelection } from "./OverlayRenderer";
+import { NodeSelection } from "prosemirror-state";
+import { getHandles, hitHandle, computeNewSize, renderHandles } from "./ResizeController";
 
 interface PageEntry {
   wrapper: HTMLDivElement;
@@ -43,6 +45,21 @@ export class ViewManager {
   private gap: number;
   private showMarginGuides: boolean;
   private unsubscribe: (() => void) | null = null;
+  private resizeDrag: {
+    handle: string;
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+    docPos: number;
+  } | null = null;
+  private floatDrag: {
+    docPos: number;
+    startX: number;
+    startY: number;
+    startOffsetX: number;
+    startOffsetY: number;
+  } | null = null;
 
   constructor(
     private editor: Editor,
@@ -101,6 +118,8 @@ export class ViewManager {
    *
    * Also called by the IntersectionObserver when page visibility changes.
    */
+  private _firstPaintDone = false;
+
   update(): void {
     const layout = this.editor.layout;
 
@@ -115,8 +134,20 @@ export class ViewManager {
       if (isVisible) {
         this.ensureCanvasesAttached(entry, layout.pageConfig);
         if (entry.lastPaintedVersion !== layout.version) {
+          if (!this._firstPaintDone) {
+            performance.mark("inscribe:first-paint-start");
+          }
           this.paintContent(entry, page, layout);
           entry.lastPaintedVersion = layout.version;
+          if (!this._firstPaintDone) {
+            performance.mark("inscribe:first-paint-end");
+            performance.measure(
+              "inscribe:first-paint (canvas draw, page 1)",
+              "inscribe:first-paint-start",
+              "inscribe:first-paint-end",
+            );
+            this._firstPaintDone = true;
+          }
         }
         this.paintOverlay(entry, page);
       } else {
@@ -230,6 +261,11 @@ export class ViewManager {
   // ── Painting ───────────────────────────────────────────────────────────────
 
   private paintContent(entry: PageEntry, page: LayoutPage, layout: DocumentLayout): void {
+    // Ensure this page's CharacterMap entries exist before rendering.
+    // The cursor page is already populated by ensureLayout(); this covers
+    // all other visible pages on their first paint.
+    this.editor.ensurePagePopulated(page.pageNumber);
+
     const { pageConfig } = layout;
 
     const { dpr } = setupCanvas(entry.contentCanvas, {
@@ -255,11 +291,17 @@ export class ViewManager {
       markDecorators: this.editor.markDecorators,
       showMarginGuides: this.showMarginGuides,
       ...(this.editor.blockRegistry ? { blockRegistry: this.editor.blockRegistry } : {}),
+      ...(this.editor.inlineRegistry ? { inlineRegistry: this.editor.inlineRegistry } : {}),
+      ...(layout.floats ? { floats: layout.floats } : {}),
     });
   }
 
   private paintOverlay(entry: PageEntry, page: LayoutPage): void {
     if (!entry.canvasesAttached) return;
+
+    // paintOverlay runs every cursor blink — ensure page is populated even if
+    // paintContent was skipped (version unchanged) or not yet called.
+    this.editor.ensurePagePopulated(page.pageNumber);
 
     const { pageConfig } = this.editor.layout;
     const ctx = entry.overlayCanvas.getContext("2d")!;
@@ -267,7 +309,10 @@ export class ViewManager {
 
     const selection = this.editor.getSelectionSnapshot();
 
-    if (!selection.empty) {
+    const pmSelection = this.editor.getState().selection;
+    const isNodeSel = pmSelection instanceof NodeSelection;
+
+    if (!selection.empty && !isNodeSel) {
       const lines = this.editor.charMap
         .linesInRange(selection.from, selection.to)
         .filter((l) => l.page === page.pageNumber);
@@ -277,10 +322,21 @@ export class ViewManager {
       renderSelection(ctx, lines, glyphs, selection.from, selection.to);
     }
 
-    if (this.editor.isFocused && this.editor.cursorManager.isVisible) {
-      const coords = this.editor.charMap.coordsAtPos(selection.head);
-      if (coords && coords.page === page.pageNumber) {
+    if (!isNodeSel && this.editor.isFocused && this.editor.cursorManager.isVisible &&
+        page.pageNumber === this.editor.cursorPage) {
+      // Scope the search to this page so the preceding-glyph fallback never
+      // returns coords from a different page's canvas.
+      const coords = this.editor.charMap.coordsAtPos(selection.head, page.pageNumber);
+      if (coords) {
         renderCursor(ctx, coords);
+      }
+    }
+
+    // ── Image selection handles ───────────────────────────────────────────────
+    if (isNodeSel && pmSelection.node.type.name === "image") {
+      const objRect = this.editor.charMap.getObjectRect(pmSelection.from);
+      if (objRect && objRect.page === page.pageNumber) {
+        renderHandles(ctx, objRect.x, objRect.y, objRect.width, objRect.height);
       }
     }
 
@@ -295,14 +351,67 @@ export class ViewManager {
     const pageEl = (e.target as HTMLElement).closest("[data-page]") as HTMLElement | null;
     if (!pageEl) return;
 
-    this.isDragging = true;
     const pageNumber = Number(pageEl.getAttribute("data-page"));
-    const rect = pageEl.getBoundingClientRect();
-    const pos = this.editor.charMap.posAtCoords(
-      e.clientX - rect.left,
-      e.clientY - rect.top,
-      pageNumber,
-    );
+    const pageRect = pageEl.getBoundingClientRect();
+    const canvasX = e.clientX - pageRect.left;
+    const canvasY = e.clientY - pageRect.top;
+
+    // ── Resize handle hit-test (takes priority over everything else) ──────────
+    const hit = this.hitHandle(canvasX, canvasY, pageNumber);
+    if (hit) {
+      const sel = this.editor.getState().selection as NodeSelection;
+      this.resizeDrag = {
+        handle: hit.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        startW: sel.node.attrs["width"] as number,
+        startH: sel.node.attrs["height"] as number,
+        docPos: sel.from,
+      };
+      // Lock cursor on all wrappers so it stays consistent as the mouse moves
+      // fast outside the current page element during drag.
+      for (const entry of this.pages.values()) {
+        entry.wrapper.style.cursor = hit.cursor;
+      }
+      return;
+    }
+
+    // ── Float body drag hit-test ──────────────────────────────────────────────
+    const floatHit = this.hitFloat(canvasX, canvasY, pageNumber);
+    if (floatHit) {
+      // Select the float node so createImageMenu can show its toolbar.
+      this.editor.selectNode(floatHit.docPos);
+      const attrs = floatHit.node.attrs as { floatOffset?: { x: number; y: number } };
+      const currentOffset = attrs.floatOffset ?? { x: 0, y: 0 };
+      this.floatDrag = {
+        docPos: floatHit.docPos,
+        startX: e.clientX,
+        startY: e.clientY,
+        startOffsetX: currentOffset.x,
+        startOffsetY: currentOffset.y,
+      };
+      for (const entry of this.pages.values()) {
+        entry.wrapper.style.cursor = "move";
+      }
+      return;
+    }
+
+    this.isDragging = true;
+    const pos = this.editor.charMap.posAtCoords(canvasX, canvasY, pageNumber);
+
+    if (!e.shiftKey) {
+      // Check if the click landed on an inline image node → NodeSelection.
+      const doc = this.editor.getState().doc;
+      const $pos = doc.resolve(pos);
+      if ($pos.nodeAfter?.type.name === "image") {
+        this.editor.selectNode(pos);
+        return;
+      }
+      if ($pos.nodeBefore?.type.name === "image") {
+        this.editor.selectNode(pos - $pos.nodeBefore.nodeSize);
+        return;
+      }
+    }
 
     if (e.shiftKey) {
       this.editor.setSelection(this.editor.getState().selection.anchor, pos);
@@ -312,23 +421,114 @@ export class ViewManager {
   };
 
   private handleMouseMove = (e: MouseEvent): void => {
-    if (!this.isDragging) return;
-    const pageEl = document
+    // ── Resize drag ───────────────────────────────────────────────────────────
+    if (this.resizeDrag) {
+      const { handle, startX, startY, startW, startH, docPos } = this.resizeDrag;
+      const { pageWidth, margins } = this.editor.layout.pageConfig;
+      const maxWidth = pageWidth - margins.left - margins.right;
+      const { width, height } = computeNewSize(
+        handle,
+        startW, startH,
+        e.clientX - startX,
+        e.clientY - startY,
+        maxWidth,
+      );
+      this.editor.setNodeAttrs(docPos, { width, height });
+      return;
+    }
+
+    // ── Float body drag ───────────────────────────────────────────────────────
+    if (this.floatDrag) {
+      const { docPos, startX, startY, startOffsetX, startOffsetY } = this.floatDrag;
+      const newX = startOffsetX + (e.clientX - startX);
+      const newY = startOffsetY + (e.clientY - startY);
+      this.editor.setNodeAttrs(docPos, { floatOffset: { x: newX, y: newY } });
+      return;
+    }
+
+    // ── Hover cursor over handles / floats ────────────────────────────────────
+    // Set cursor directly on the page wrapper (which has cursor:"text" inline)
+    // so our value wins. Other page wrappers are reset to "text".
+    const hoveredPageEl = document
       .elementFromPoint(e.clientX, e.clientY)
       ?.closest("[data-page]") as HTMLElement | null;
-    if (!pageEl) return;
 
-    const pageNumber = Number(pageEl.getAttribute("data-page"));
-    const rect = pageEl.getBoundingClientRect();
+    for (const entry of this.pages.values()) {
+      if (entry.wrapper === hoveredPageEl) {
+        const pageNumber = Number(hoveredPageEl.getAttribute("data-page"));
+        const pageRect = hoveredPageEl.getBoundingClientRect();
+        const localX = e.clientX - pageRect.left;
+        const localY = e.clientY - pageRect.top;
+        const hit = this.hitHandle(localX, localY, pageNumber);
+        if (hit) {
+          entry.wrapper.style.cursor = hit.cursor;
+        } else if (this.hitFloat(localX, localY, pageNumber)) {
+          entry.wrapper.style.cursor = "move";
+        } else {
+          entry.wrapper.style.cursor = "text";
+        }
+      } else {
+        entry.wrapper.style.cursor = "text";
+      }
+    }
+
+    // ── Normal text-drag selection ────────────────────────────────────────────
+    if (!this.isDragging || !hoveredPageEl) return;
+
+    const pageNumber = Number(hoveredPageEl.getAttribute("data-page"));
+    const pageRect = hoveredPageEl.getBoundingClientRect();
     const pos = this.editor.charMap.posAtCoords(
-      e.clientX - rect.left,
-      e.clientY - rect.top,
+      e.clientX - pageRect.left,
+      e.clientY - pageRect.top,
       pageNumber,
     );
     this.editor.setSelection(this.editor.getState().selection.anchor, pos);
   };
 
   private handleMouseUp = (): void => {
+    if (this.resizeDrag) {
+      this.resizeDrag = null;
+      for (const entry of this.pages.values()) {
+        entry.wrapper.style.cursor = "text";
+      }
+    }
+    if (this.floatDrag) {
+      this.floatDrag = null;
+      for (const entry of this.pages.values()) {
+        entry.wrapper.style.cursor = "text";
+      }
+    }
     this.isDragging = false;
   };
+
+  /** Returns the handle under canvas-space (x, y) on the given page, or null. */
+  private hitHandle(canvasX: number, canvasY: number, page: number) {
+    const sel = this.editor.getState().selection;
+    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return null;
+    const r = this.editor.charMap.getObjectRect(sel.from);
+    if (!r || r.page !== page) return null;
+    return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
+  }
+
+  /**
+   * Returns the float layout entry under canvas-space (x, y) on the given page, or null.
+   * Used for hover cursor and float body drag.
+   */
+  private hitFloat(canvasX: number, canvasY: number, page: number) {
+    const floats = this.editor.layout.floats;
+    if (!floats) return null;
+    for (const float of floats) {
+      if (float.page !== page) continue;
+      if (
+        canvasX >= float.x &&
+        canvasX <= float.x + float.width &&
+        canvasY >= float.y &&
+        canvasY <= float.y + float.height
+      ) {
+        return float;
+      }
+    }
+    return null;
+  }
 }
+

@@ -19,7 +19,7 @@ import type { Command, Plugin, Transaction, EditorState } from "prosemirror-stat
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
-import type { BlockStrategy } from "../layout/BlockRegistry";
+import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
 
@@ -66,10 +66,50 @@ export interface IEditor {
    * page element lookup has been registered (i.e. editor not mounted).
    */
   getViewportRect(from: number, to: number): DOMRect | null;
+  /**
+   * Returns the full visual viewport rect of the inline object at docPos
+   * (image, widget). Unlike getViewportRect, this uses the actual object
+   * render bounds — not the cursor-sized glyph — so the rect height matches
+   * the real image height and rect.bottom is the correct anchor for a popover.
+   * Returns null if the object has not been rendered yet.
+   */
+  getNodeViewportRect(docPos: number): DOMRect | null;
+  /**
+   * Select the inline node at docPos using a ProseMirror NodeSelection.
+   * Falls back to moveCursorTo if the position is not selectable.
+   */
+  selectNode(docPos: number): void;
+  /**
+   * Update the attrs of the node at docPos, merging with its current attrs.
+   * No-op if there is no node at that position.
+   */
+  setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void;
   /** Apply a transaction from an external source (e.g. Y.js remote sync). */
   _applyTransaction(tr: Transaction): void;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
   redraw(): void;
+  /**
+   * Signal that the editor is (or is no longer) ready to render.
+   * Call setReady(false) before a collaborative provider connects to suppress
+   * layout/paint during Y.js sync. Call setReady(true) from onSynced to do
+   * one fast chunked layout of the complete document.
+   */
+  setReady(ready: boolean): void;
+  /**
+   * Three-phase loading state. Changes are surfaced via subscribe() so
+   * useEditorState() picks them up automatically:
+   *
+   *   const loadingState = useEditorState({
+   *     editor,
+   *     selector: (ctx) => ctx.editor.loadingState,
+   *     equalityFn: Object.is,
+   *   });
+   *
+   *  'syncing'   — waiting for collaborative sync (no content yet)
+   *  'rendering' — first pages visible, idle layout running in background
+   *  'ready'     — fully loaded
+   */
+  get loadingState(): "syncing" | "rendering" | "ready";
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
 }
@@ -358,6 +398,18 @@ export interface ExtensionConfig<Options = object> {
   addLayoutHandlers?(this: Phase1Context<Options>): Record<string, BlockStrategy>;
 
   /**
+   * Map of node type name → InlineStrategy.
+   * Each entry is registered in InlineRegistry so TextBlockStrategy can dispatch
+   * rendering of inline object spans (images, widgets) to the correct strategy.
+   *
+   * @example
+   * addInlineHandlers() {
+   *   return { image: createInlineImageStrategy() };
+   * }
+   */
+  addInlineHandlers?(this: Phase1Context<Options>): Record<string, InlineStrategy>;
+
+  /**
    * Block styles contributed by this extension.
    * Merged into the FontConfig used by layoutDocument.
    * Keys are node type names or compound keys like "heading_1".
@@ -465,6 +517,8 @@ export interface ResolvedExtension {
   commands: Record<string, (...args: unknown[]) => Command>;
   /** Map of node type name → BlockStrategy, contributed by this extension. */
   layoutHandlers: Record<string, BlockStrategy>;
+  /** Map of node type name → InlineStrategy, contributed by this extension. */
+  inlineHandlers: Record<string, InlineStrategy>;
   /** Block styles contributed by this extension (merged into FontConfig). */
   blockStyles: Record<string, BlockStyle>;
   markDecorators: Map<string, MarkDecorator>;

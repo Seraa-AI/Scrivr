@@ -9,6 +9,7 @@ import {
   defaultPageConfig,
   LinkPopover,
   SlashMenu,
+  ImageMenu,
 } from "@inscribe/react";
 import type { EditorStateContext } from "@inscribe/react";
 import { PdfExport } from "@inscribe/export";
@@ -38,7 +39,7 @@ function makeIdentity() {
   const room = getParam("room") ?? "default";
   const userName = getParam("user") ?? `User ${Math.floor(Math.random() * 100)}`;
   const userColor = getParam("color") ?? COLORS[Math.floor(Math.random() * COLORS.length)]!;
-  const wsUrl = (import.meta as unknown as { env: Record<string, string> }).env.VITE_WS_URL ?? "ws://localhost:1234";
+  const wsUrl = (import.meta as unknown as { env: Record<string, string> }).env.VITE_WS_URL ?? "ws://localhost:1235";
   return { room, userName, userColor, wsUrl };
 }
 
@@ -66,6 +67,22 @@ const EMPTY_TOOLBAR: ToolbarSlice = {
   blockAttrs: {},
 };
 
+function Spinner() {
+  return (
+    <svg width={20} height={20} viewBox="0 0 20 20" style={styles.spinner}>
+      <circle cx={10} cy={10} r={8} fill="none" stroke="#cbd5e1" strokeWidth={2.5} />
+      <circle
+        cx={10} cy={10} r={8}
+        fill="none"
+        stroke="#3b82f6"
+        strokeWidth={2.5}
+        strokeDasharray="16 34"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function App() {
   // Lazy init — runs once on the client, never on the server
   const [{ room, userName, userColor, extensions }] = useState(() => {
@@ -88,11 +105,31 @@ export function App() {
   // deepEqual is the default — handles string[], nested objects correctly.
   const toolbar = useEditorState({ editor, selector: selectToolbar }) ?? EMPTY_TOOLBAR;
 
+  // Loading state — driven by Collaboration.ts setReady(false/true) + idle chunks.
+  // Object.is is sufficient — 'syncing' | 'rendering' | 'ready' are string primitives.
+  const loadingState = useEditorState({
+    editor,
+    selector: (ctx) => ctx.editor.loadingState,
+    equalityFn: Object.is,
+  }) ?? "syncing";
+
+  const pageInfo = useEditorState({
+    editor,
+    selector: (ctx) => ({
+      current: ctx.editor.cursorPage,
+      total: ctx.editor.layout.pages.length,
+    }),
+    equalityFn: (a, b) => a.current === b.current && a.total === b.total,
+  }) ?? { current: 1, total: 1 };
+
   return (
     <div style={styles.shell}>
       <header style={styles.header}>
         <span style={styles.title}>inscribe</span>
         <span style={styles.badge}>dev</span>
+        <span style={styles.pageInfo}>
+          Page {pageInfo.current} of {pageInfo.total}
+        </span>
         <span style={styles.room}>
           <span style={{ ...styles.dot, background: userColor }} />
           {userName} · {room}
@@ -118,12 +155,22 @@ export function App() {
           <Canvas editor={editor} style={styles.canvas} />
         </main>
         <ChatPanel editor={editor} />
+
+        {loadingState === "syncing" && (
+          <div style={styles.loadingOverlay}>
+            <div style={styles.loadingCard}>
+              <Spinner />
+              <span style={styles.loadingText}>Connecting…</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <BubbleMenuBar editor={editor} />
       <FloatingMenuBar editor={editor} />
       <SlashMenu editor={editor} />
       <LinkPopover editor={editor} />
+      <ImageMenu editor={editor} />
       <TrackChangesPopover editor={editor} />
     </div>
   );
@@ -146,6 +193,11 @@ const styles = {
     flexShrink: 0,
   },
   title: { fontFamily: "monospace", fontSize: 15, fontWeight: 600 },
+  pageInfo: {
+    fontSize: 12,
+    color: "#94a3b8",
+    fontFamily: "monospace",
+  },
   room: {
     marginLeft: "auto",
     fontSize: 12,
@@ -187,6 +239,7 @@ const styles = {
     flex: 1,
     display: "flex",
     overflow: "hidden",
+    position: "relative" as const,
   },
   main: {
     flex: 1,
@@ -197,5 +250,37 @@ const styles = {
   },
   canvas: {
     position: "relative" as const,
+  },
+  loadingOverlay: {
+    position: "absolute" as const,
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(241, 245, 249, 0.85)",
+    backdropFilter: "blur(2px)",
+    zIndex: 10,
+    pointerEvents: "none" as const,
+  },
+  loadingCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "#fff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 8,
+    padding: "10px 18px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+    pointerEvents: "none" as const,
+  },
+  loadingText: {
+    fontSize: 13,
+    color: "#475569",
+    fontFamily: "monospace",
+  },
+  spinner: {
+    animation: "spin 0.9s linear infinite",
+    display: "block" as const,
+    flexShrink: 0,
   },
 } as const;

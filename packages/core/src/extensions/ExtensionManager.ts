@@ -7,7 +7,7 @@ import type { Node as ProseMirrorNode } from "prosemirror-model";
 import type { Extension } from "./Extension";
 import type { MarkDecorator, ResolvedExtension, FontModifier, ToolbarItemSpec, InputHandler, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules, MarkdownNodeSerializer, MarkdownMarkSerializer } from "./types";
 import type { IEditor } from "./types";
-import { BlockRegistry } from "../layout/BlockRegistry";
+import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
 import { defaultPageConfig } from "../layout/PageLayout";
 import type { PageConfig } from "../layout/PageLayout";
@@ -176,6 +176,20 @@ export class ExtensionManager {
     const registry = new BlockRegistry();
     for (const ext of this.resolved) {
       for (const [nodeTypeName, strategy] of Object.entries(ext.layoutHandlers)) {
+        registry.register(nodeTypeName, strategy);
+      }
+    }
+    return registry;
+  }
+
+  /**
+   * Builds an InlineRegistry from all extensions that implement addInlineHandlers().
+   * TextBlockStrategy uses this to dispatch rendering of inline object spans.
+   */
+  buildInlineRegistry(): InlineRegistry {
+    const registry = new InlineRegistry();
+    for (const ext of this.resolved) {
+      for (const [nodeTypeName, strategy] of Object.entries(ext.inlineHandlers)) {
         registry.register(nodeTypeName, strategy);
       }
     }

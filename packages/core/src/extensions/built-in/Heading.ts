@@ -24,6 +24,7 @@ export const Heading = Extension.create<HeadingOptions>({
         attrs: {
           level:       { default: 1 },
           align:       { default: "left" },
+          fontFamily:  { default: null },
           nodeId:      { default: null },
           dataTracked: { default: [] },
         },
@@ -32,13 +33,26 @@ export const Heading = Extension.create<HeadingOptions>({
           tag: `h${level}`,
           getAttrs(dom) {
             const el = dom as HTMLElement;
-            return { level, nodeId: el.getAttribute("data-node-id") ?? null };
+            const rawFamily = el.style.fontFamily;
+            const fontFamily = rawFamily
+              ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() || null
+              : null;
+            return {
+              level,
+              align:      el.style.textAlign || "left",
+              fontFamily: fontFamily,
+              nodeId:     el.getAttribute("data-node-id") ?? null,
+            };
           },
         })),
         toDOM: (node) => {
+          const styles: string[] = [];
+          if (node.attrs.align && node.attrs.align !== "left") styles.push(`text-align:${node.attrs.align as string}`);
+          if (node.attrs.fontFamily) styles.push(`font-family:${node.attrs.fontFamily as string}`);
           const attrs: Record<string, string> = {};
+          if (styles.length) attrs["style"] = styles.join(";");
           if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
-          return [`h${node.attrs.level}`, attrs, 0];
+          return [`h${node.attrs.level as number}`, attrs, 0];
         },
       },
     };

@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { layoutDocument, defaultPageConfig, collapseMargins } from "./PageLayout";
-import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak } from "../test-utils";
+import type { MeasureCacheEntry } from "./PageLayout";
+import { applyPageFont } from "./FontConfig";
+import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, MOCK_LINE_HEIGHT } from "../test-utils";
 
 // lineHeight = 18, contentHeight = 1123 - 72 - 72 = 979
 
@@ -166,9 +168,9 @@ describe("layoutDocument — horizontal rule", () => {
   }
 
   // HR block style: font "8px Georgia, serif" → height = Math.round(8 × 1.5) = 12
-  // spaceBefore = 8, spaceAfter = 8
+  // spaceBefore = 24, spaceAfter = 24
   const HR_HEIGHT = 12;
-  const HR_SPACE  = 8;
+  const HR_SPACE  = 24;
 
   it("HR block has correct height (derived from 8px font)", () => {
     const layout = layoutDocument(fullDoc(hr()), {
@@ -191,26 +193,26 @@ describe("layoutDocument — horizontal rule", () => {
   });
 
   it("paragraph before HR: HR y accounts for para height and collapsed margin", () => {
-    // para: spaceAfter=10.  HR: spaceBefore=8.  collapsed gap = max(10, 8) = 10
+    // para: spaceAfter=10.  HR: spaceBefore=24.  collapsed gap = max(10, 24) = 24
     const layout = layoutDocument(fullDoc(fullP("Hello"), hr()), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       fontConfig: fullFontConfig,
     });
     const [para, hrBlock] = layout.pages[0]!.blocks;
-    const expectedGap = Math.max(10, HR_SPACE); // 10
+    const expectedGap = Math.max(10, HR_SPACE); // 16
     expect(hrBlock!.y).toBe(para!.y + para!.height + expectedGap);
   });
 
   it("HR before paragraph: para y accounts for HR height and collapsed margin", () => {
-    // HR spaceAfter=8.  para: spaceBefore=0.  collapsed gap = max(8, 0) = 8
+    // HR: spaceAfter=24.  para: spaceBefore=0.  collapsed gap = max(24, 0) = 24
     const layout = layoutDocument(fullDoc(hr(), fullP("Hello")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       fontConfig: fullFontConfig,
     });
     const [hrBlock, para] = layout.pages[0]!.blocks;
-    const expectedGap = Math.max(HR_SPACE, 0); // 8
+    const expectedGap = Math.max(HR_SPACE, 0); // 16
     expect(para!.y).toBe(hrBlock!.y + HR_HEIGHT + expectedGap);
   });
 
@@ -276,6 +278,230 @@ describe("layoutDocument — list item spacing", () => {
   });
 });
 
+// ── measureCache ─────────────────────────────────────────────────────────────
+
+describe("layoutDocument — measureCache", () => {
+  it("produces identical layout output when a cache is provided", () => {
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const baseDoc = doc(p("Hello"), p("World"));
+    const opts = { pageConfig: defaultPageConfig, measurer: createMeasurer() };
+
+    const withoutCache = layoutDocument(baseDoc, opts);
+    const withCache    = layoutDocument(baseDoc, { ...opts, measureCache: cache });
+
+    expect(withCache.pages).toHaveLength(withoutCache.pages.length);
+    for (let pi = 0; pi < withoutCache.pages.length; pi++) {
+      const blocksA = withoutCache.pages[pi]!.blocks;
+      const blocksB = withCache.pages[pi]!.blocks;
+      expect(blocksB).toHaveLength(blocksA.length);
+      for (let bi = 0; bi < blocksA.length; bi++) {
+        expect(blocksB[bi]!.height).toBe(blocksA[bi]!.height);
+        expect(blocksB[bi]!.y).toBe(blocksA[bi]!.y);
+        expect(blocksB[bi]!.x).toBe(blocksA[bi]!.x);
+      }
+    }
+  });
+
+  it("populates the cache after the first layout run", () => {
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const para = p("Cached paragraph");
+    const testDoc = doc(para);
+    layoutDocument(testDoc, { pageConfig: defaultPageConfig, measurer: createMeasurer(), measureCache: cache });
+    // The inner paragraph node is the cache key
+    const innerNode = testDoc.firstChild!;
+    expect(cache.has(innerNode)).toBe(true);
+    const entry = cache.get(innerNode)!;
+    expect(entry.height).toBeGreaterThan(0);
+    expect(entry.availableWidth).toBe(defaultPageConfig.pageWidth - defaultPageConfig.margins.left - defaultPageConfig.margins.right);
+  });
+
+  it("uses cached height — manually stale entry is reflected in layout y positions", () => {
+    // This test verifies the cache is actually consulted (not just populated).
+    // We manually inject a fake cache entry with a doubled height and confirm
+    // the second block's y-position shifts accordingly.
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const firstPara = p("First paragraph");
+    const secondPara = p("Second paragraph");
+    const testDoc = doc(firstPara, secondPara);
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    // First run — establishes true layout
+    const trueLayout = layoutDocument(testDoc, opts);
+    const trueFirstHeight = trueLayout.pages[0]!.blocks[0]!.height;
+    const trueSecondY     = trueLayout.pages[0]!.blocks[1]!.y;
+
+    // Corrupt the first paragraph's cache entry — double the height
+    const firstNode = testDoc.firstChild!;
+    const realEntry = cache.get(firstNode)!;
+    cache.set(firstNode, { ...realEntry, height: realEntry.height * 2 });
+
+    // Second run with same doc — the first block should use the inflated height
+    const cachedLayout = layoutDocument(testDoc, opts);
+    const cachedFirstHeight = cachedLayout.pages[0]!.blocks[0]!.height;
+    const cachedSecondY     = cachedLayout.pages[0]!.blocks[1]!.y;
+
+    // Cache hit: first block height is now doubled
+    expect(cachedFirstHeight).toBe(trueFirstHeight * 2);
+    // Second block was pushed down by the extra height
+    expect(cachedSecondY).toBeGreaterThan(trueSecondY);
+  });
+
+  it("adjusts span docPos when a block shifts due to content inserted before it", () => {
+    // Simulates ProseMirror structural sharing: the second paragraph Node keeps
+    // the same JS object reference even after text is inserted into the first
+    // paragraph (shifting the second paragraph's absolute nodePos). Without the
+    // fix, cached span.docPos values would be stale (off by the insertion delta).
+    const para2 = p("Second");
+    const doc1 = doc(p("A"),       para2); // para2.nodePos = 3  (p("A").nodeSize = 3)
+    const doc2 = doc(p("AAAAAAA"), para2); // para2.nodePos = 9  (p("AAAAAAA").nodeSize = 9)
+
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    // First layout — populates the cache for para2 with nodePos=3
+    const layout1 = layoutDocument(doc1, opts);
+    const block2_1 = layout1.pages[0]!.blocks[1]!;
+    expect(block2_1.lines[0]!.spans[0]!.docPos).toBe(block2_1.nodePos + 1);
+
+    // Second layout — para2 is the same Node object (structural sharing) but its
+    // nodePos has shifted by 6 (from 3 to 9). The cache must return adjusted docPos.
+    const layout2 = layoutDocument(doc2, opts);
+    const block2_2 = layout2.pages[0]!.blocks[1]!;
+    expect(block2_2.nodePos).toBeGreaterThan(block2_1.nodePos);
+    expect(block2_2.lines[0]!.spans[0]!.docPos).toBe(block2_2.nodePos + 1);
+  });
+
+  it("re-measures when availableWidth changes (margin change)", () => {
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const testDoc = doc(p("Text"));
+    const measurer = createMeasurer();
+    const narrow = { pageWidth: 400, pageHeight: 800, margins: { top: 20, right: 20, bottom: 20, left: 20 } };
+    const wide   = { pageWidth: 700, pageHeight: 800, margins: { top: 20, right: 20, bottom: 20, left: 20 } };
+
+    const layoutNarrow = layoutDocument(testDoc, { pageConfig: narrow, measurer, measureCache: cache });
+    const layoutWide   = layoutDocument(testDoc, { pageConfig: wide,   measurer, measureCache: cache });
+
+    // Both runs should succeed and the cached entry should reflect the wide config
+    expect(layoutNarrow.pages[0]!.blocks[0]!.availableWidth).toBe(360); // 400 - 20 - 20
+    expect(layoutWide.pages[0]!.blocks[0]!.availableWidth).toBe(660);   // 700 - 20 - 20
+  });
+});
+
+// ── Phase 1b: early termination ───────────────────────────────────────────────
+
+describe("layoutDocument — Phase 1b early termination", () => {
+  it("returns the correct layout when early termination fires on second layout run", () => {
+    // Three paragraphs. Edit the first one — the second and third are structurally
+    // shared and should be copied from previousLayout without re-looping.
+    const para2 = p("Second");
+    const para3 = p("Third");
+    const doc1 = doc(p("A"),       para2, para3);
+    const doc2 = doc(p("AAAAAAA"), para2, para3);
+
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    // First layout — warm up the cache AND record placedTargetY/placedPage.
+    const layout1 = layoutDocument(doc1, opts);
+
+    // Second layout — para2 and para3 are same Node objects; second layout
+    // should copy from layout1 via early termination.
+    const layout2 = layoutDocument(doc2, { ...opts, previousLayout: layout1 });
+
+    // Both layouts should have the same number of pages and blocks.
+    expect(layout2.pages.length).toBe(layout1.pages.length);
+    const blocks2 = layout2.pages[0]!.blocks;
+    const blocks1 = layout1.pages[0]!.blocks;
+    expect(blocks2).toHaveLength(blocks1.length);
+
+    // Block positions should be identical (editing first para doesn't shift others vertically).
+    expect(blocks2[1]!.y).toBe(blocks1[1]!.y);
+    expect(blocks2[2]!.y).toBe(blocks1[2]!.y);
+  });
+
+  it("corrects span docPos for blocks copied via early termination when delta !== 0", () => {
+    // Insert text before para2 so its nodePos shifts, then verify span.docPos
+    // in the copied blocks reflects the new absolute positions.
+    const para2 = p("Second");
+    const para3 = p("Third");
+    const doc1 = doc(p("A"),       para2, para3);
+    const doc2 = doc(p("AAAAAAA"), para2, para3);
+
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    const layout1 = layoutDocument(doc1, opts);
+    const layout2 = layoutDocument(doc2, { ...opts, previousLayout: layout1 });
+
+    const block2_1 = layout1.pages[0]!.blocks[1]!;
+    const block2_2 = layout2.pages[0]!.blocks[1]!;
+    const block3_2 = layout2.pages[0]!.blocks[2]!;
+
+    // nodePos shifted for both para2 and para3
+    expect(block2_2.nodePos).toBeGreaterThan(block2_1.nodePos);
+
+    // span.docPos must be anchored to the new absolute positions
+    expect(block2_2.lines[0]!.spans[0]!.docPos).toBe(block2_2.nodePos + 1);
+    expect(block3_2.lines[0]!.spans[0]!.docPos).toBe(block3_2.nodePos + 1);
+  });
+});
+
+// ── Streaming layout (maxBlocks) ──────────────────────────────────────────────
+
+describe("layoutDocument — maxBlocks / streaming", () => {
+  it("returns isPartial:true when maxBlocks is smaller than the block count", () => {
+    const testDoc = doc(p("A"), p("B"), p("C"), p("D"), p("E"));
+    const layout = layoutDocument(testDoc, {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+      maxBlocks: 2,
+    });
+    expect(layout.isPartial).toBe(true);
+    // Only the first 2 blocks were laid out
+    const blockCount = layout.pages.reduce((n, pg) => n + pg.blocks.length, 0);
+    expect(blockCount).toBe(2);
+  });
+
+  it("returns isPartial:false (undefined) when maxBlocks >= block count", () => {
+    const testDoc = doc(p("A"), p("B"));
+    const layout = layoutDocument(testDoc, {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+      maxBlocks: 100,
+    });
+    expect(layout.isPartial).toBeUndefined();
+  });
+
+  it("partial + full layout produce identical block positions", () => {
+    const blocks = Array.from({ length: 10 }, (_, i) => p(`Paragraph ${i + 1}`));
+    const testDoc = doc(...blocks);
+    const measurer = createMeasurer();
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    // Partial layout: first 5 blocks
+    const partial = layoutDocument(testDoc, { ...opts, maxBlocks: 5 });
+    expect(partial.isPartial).toBe(true);
+
+    // Full layout with warm cache (simulates idle callback completion)
+    const full = layoutDocument(testDoc, opts);
+    expect(full.isPartial).toBeUndefined();
+
+    // All blocks in the full layout should have the same y/height as a fresh
+    // layout without any cache (positions don't depend on measurement order)
+    const freshFull = layoutDocument(testDoc, { pageConfig: defaultPageConfig, measurer: createMeasurer() });
+    expect(full.pages[0]!.blocks).toHaveLength(freshFull.pages[0]!.blocks.length);
+    for (let i = 0; i < freshFull.pages[0]!.blocks.length; i++) {
+      expect(full.pages[0]!.blocks[i]!.y).toBe(freshFull.pages[0]!.blocks[i]!.y);
+      expect(full.pages[0]!.blocks[i]!.height).toBe(freshFull.pages[0]!.blocks[i]!.height);
+    }
+  });
+});
+
 // ── collapseMargins helper ────────────────────────────────────────────────────
 
 describe("collapseMargins", () => {
@@ -292,3 +518,852 @@ describe("collapseMargins", () => {
     expect(collapseMargins(0, 0)).toBe(0);
   });
 });
+
+// ── applyPageFont ─────────────────────────────────────────────────────────────
+
+describe("applyPageFont", () => {
+  it("replaces the family in every block style", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const result = applyPageFont(fontConfig, "Inter");
+    expect(result["paragraph"]?.font).toContain("Inter");
+    expect(result["heading_1"]?.font).toContain("Inter");
+    expect(result["heading_2"]?.font).toContain("Inter");
+  });
+
+  it("preserves paragraph size after family substitution", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const result = applyPageFont(fontConfig, "Arial");
+    expect(result["paragraph"]?.font).toContain("14px");
+    expect(result["paragraph"]?.font).not.toContain("Georgia");
+  });
+
+  it("preserves heading size and weight after family substitution", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const result = applyPageFont(fontConfig, "Verdana");
+    expect(result["heading_1"]?.font).toContain("28px");
+    expect(result["heading_1"]?.font).toContain("bold");
+    expect(result["heading_1"]?.font).toContain("Verdana");
+  });
+
+  it("preserves spaceBefore, spaceAfter, and align", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const original = fontConfig["heading_1"]!;
+    const result = applyPageFont(fontConfig, "Arial");
+    expect(result["heading_1"]?.spaceBefore).toBe(original.spaceBefore);
+    expect(result["heading_1"]?.spaceAfter).toBe(original.spaceAfter);
+    expect(result["heading_1"]?.align).toBe(original.align);
+  });
+});
+
+// ── pageConfig.fontFamily end-to-end ─────────────────────────────────────────
+
+// ── Line-level page splitting ─────────────────────────────────────────────────
+//
+// Page geometry used throughout this section:
+//   pageWidth  = 120   → contentWidth  = 100px (120 − 2×10 margins)
+//   pageHeight = 74    → contentHeight = 54px  (74 − 2×10 margins) = 3 × MOCK_LINE_HEIGHT
+//   pageBottom = margins.top + contentHeight   = 10 + 54 = 64px
+//
+// Text wrapping: at contentWidth=100px and MOCK_CHAR_WIDTH=8px, a 9-char word
+// (72px) fits alone but never alongside another (144px > 100px). So
+// "aaaaaaaaa bbbbbbbbb ..." reliably produces one line per word.
+//
+// Block layout with a 1-line "intro" paragraph before the tall block:
+//   intro y=10, height=18, spaceAfter=10
+//   tall block: gap=10, targetY=38, spaceAvailable=64-38=26px → 1 line fits (18px)
+//   → part 1 (1 line) on page 1; remaining lines carried to subsequent pages
+//
+describe("layoutDocument — line splitting", () => {
+  const LH = MOCK_LINE_HEIGHT; // 18px
+
+  const splitPage = {
+    pageWidth:  120,
+    pageHeight: Math.round(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
+    margins: { top: 10, right: 10, bottom: 10, left: 10 },
+  };
+
+  const fourLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd"; // 4 × 9-char words → 4 lines
+  const sixLineText  = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff"; // 6 lines
+
+  it("splits a tall paragraph across two pages at the correct line boundary", () => {
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(2);
+
+    // Page 1: intro + first split part (1 line)
+    expect(layout.pages[0]!.blocks).toHaveLength(2);
+    const part1 = layout.pages[0]!.blocks[1]!;
+    expect(part1.lines).toHaveLength(1);
+    expect(part1.continuesOnNextPage).toBe(true);
+    expect(part1.isContinuation).toBeUndefined();
+
+    // Page 2: continuation (remaining 3 lines)
+    expect(layout.pages[1]!.blocks).toHaveLength(1);
+    const part2 = layout.pages[1]!.blocks[0]!;
+    expect(part2.lines).toHaveLength(3);
+    expect(part2.isContinuation).toBe(true);
+    expect(part2.continuesOnNextPage).toBeUndefined();
+  });
+
+  it("lines are conserved — total across all parts equals the full line count", () => {
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const part1 = layout.pages[0]!.blocks[1]!;
+    const part2 = layout.pages[1]!.blocks[0]!;
+    expect(part1.lines.length + part2.lines.length).toBe(4);
+  });
+
+  it("both parts reference the same ProseMirror node and nodePos", () => {
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const part1 = layout.pages[0]!.blocks[1]!;
+    const part2 = layout.pages[1]!.blocks[0]!;
+    expect(part1.node).toBe(part2.node);   // same JS object reference
+    expect(part1.nodePos).toBe(part2.nodePos);
+  });
+
+  it("continuation part starts at margins.top with spaceBefore = 0", () => {
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const cont = layout.pages[1]!.blocks[0]!;
+    expect(cont.y).toBe(splitPage.margins.top);
+    expect(cont.spaceBefore).toBe(0);
+  });
+
+  it("non-last split parts have spaceAfter = 0; last part has the block's natural spaceAfter", () => {
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const part1 = layout.pages[0]!.blocks[1]!;
+    const part2 = layout.pages[1]!.blocks[0]!;
+    expect(part1.spaceAfter).toBe(0);
+    expect(part2.spaceAfter).toBeGreaterThan(0); // paragraph's natural spaceAfter
+  });
+
+  it("splits a block across three pages when it has enough lines", () => {
+    // sixLineText → 6 lines; splitPage fits 3 lines per page content area.
+    // Page 1: intro + 1 line (26px available after gap)
+    // Page 2: 3 lines (54px available, 3 × 18 = 54 ≤ 54)
+    // Page 3: 2 remaining lines
+    const layout = layoutDocument(doc(p("intro"), p(sixLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(3);
+
+    const p1part = layout.pages[0]!.blocks[1]!;
+    const p2part = layout.pages[1]!.blocks[0]!;
+    const p3part = layout.pages[2]!.blocks[0]!;
+
+    // Line counts
+    expect(p1part.lines).toHaveLength(1);
+    expect(p2part.lines).toHaveLength(3);
+    expect(p3part.lines).toHaveLength(2);
+
+    // Flag consistency
+    expect(p1part.continuesOnNextPage).toBe(true);
+    expect(p2part.isContinuation).toBe(true);
+    expect(p2part.continuesOnNextPage).toBe(true);  // middle part
+    expect(p3part.isContinuation).toBe(true);
+    expect(p3part.continuesOnNextPage).toBeUndefined(); // last part
+
+    // Total lines conserved
+    expect(p1part.lines.length + p2part.lines.length + p3part.lines.length).toBe(6);
+  });
+
+  it("block after the split is placed after the last continuation part", () => {
+    // The continuation on page 2 fills the entire content area (3 lines × 18 = 54px).
+    // The "after" paragraph can't fit on page 2 and overflows to page 3.
+    // Key property: it starts at margins.top — not at an incorrect overlapping y.
+    const layout = layoutDocument(doc(p("intro"), p(fourLineText), p("after")), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    // "after" ends up on page 3 (page 2 is exactly full from the continuation)
+    expect(layout.pages.length).toBeGreaterThanOrEqual(3);
+    const afterBlock = layout.pages[2]!.blocks[0]!;
+    expect(afterBlock.y).toBe(splitPage.margins.top);
+  });
+});
+
+// ── Line splitting when the text block is first on its page ──────────────────
+//
+// Regression tests for the bug where the !isFirstOnPage guard prevented text
+// blocks from splitting when they were the first block on a page. The fix:
+//   overflows = blockBottom > pageBottom && (!isFirstOnPage || entry.lines.length > 0)
+//
+// Same splitPage geometry as the suite above (3 lines per page).
+describe("layoutDocument — line splitting (first on page)", () => {
+  const LH = MOCK_LINE_HEIGHT; // 18px
+
+  const splitPage = {
+    pageWidth:  120,
+    pageHeight: Math.round(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
+    margins: { top: 10, right: 10, bottom: 10, left: 10 },
+  };
+
+  const sixLineText  = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff";
+  const nineLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff ggggggggg hhhhhhhhh iiiiiiiii";
+
+  it("splits a paragraph that is the first and only block on page 1 across two pages", () => {
+    // No preceding block — isFirstOnPage is true. The paragraph (6 lines × 18px = 108px)
+    // overflows contentHeight (54px) and must split: 3 lines on page 1, 3 on page 2.
+    const layout = layoutDocument(doc(p(sixLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(2);
+
+    const part1 = layout.pages[0]!.blocks[0]!;
+    expect(part1.lines).toHaveLength(3);
+    expect(part1.continuesOnNextPage).toBe(true);
+    expect(part1.isContinuation).toBeUndefined();
+
+    const part2 = layout.pages[1]!.blocks[0]!;
+    expect(part2.lines).toHaveLength(3);
+    expect(part2.isContinuation).toBe(true);
+    expect(part2.continuesOnNextPage).toBeUndefined();
+  });
+
+  it("all lines are conserved when a first-on-page paragraph spans two pages", () => {
+    const layout = layoutDocument(doc(p(sixLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const totalLines = layout.pages
+      .flatMap(pg => pg.blocks)
+      .reduce((n, b) => n + b.lines.length, 0);
+    expect(totalLines).toBe(6);
+  });
+
+  it("splits a first-on-page paragraph across three pages when it has 9 lines", () => {
+    const layout = layoutDocument(doc(p(nineLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(3);
+
+    const p1 = layout.pages[0]!.blocks[0]!;
+    expect(p1.lines).toHaveLength(3);
+    expect(p1.continuesOnNextPage).toBe(true);
+    expect(p1.isContinuation).toBeUndefined();
+
+    const p2 = layout.pages[1]!.blocks[0]!;
+    expect(p2.lines).toHaveLength(3);
+    expect(p2.isContinuation).toBe(true);
+    expect(p2.continuesOnNextPage).toBe(true);
+
+    const p3 = layout.pages[2]!.blocks[0]!;
+    expect(p3.lines).toHaveLength(3);
+    expect(p3.isContinuation).toBe(true);
+    expect(p3.continuesOnNextPage).toBeUndefined();
+
+    // Total lines conserved
+    expect(p1.lines.length + p2.lines.length + p3.lines.length).toBe(9);
+  });
+
+  it("splits a paragraph that is first on a page following a hard page break", () => {
+    // After the page break, currentPage.blocks is empty so isFirstOnPage is true.
+    // The six-line paragraph must still split across pages 2 and 3.
+    const layout = layoutDocument(doc(p("intro"), pageBreak(), p(sixLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(3);
+
+    const part1 = layout.pages[1]!.blocks[0]!;
+    expect(part1.lines).toHaveLength(3);
+    expect(part1.continuesOnNextPage).toBe(true);
+
+    const part2 = layout.pages[2]!.blocks[0]!;
+    expect(part2.lines).toHaveLength(3);
+    expect(part2.isContinuation).toBe(true);
+    expect(part2.continuesOnNextPage).toBeUndefined();
+  });
+
+  it("continuation parts have spaceBefore = 0 when the block style has non-zero spaceBefore", () => {
+    // heading_1 has spaceBefore = 24 in defaultFontConfig.
+    // Continuation parts must suppress spaceBefore regardless.
+    const layout = layoutDocument(doc(heading(1, nineLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages.length).toBeGreaterThanOrEqual(2);
+
+    for (let i = 1; i < layout.pages.length; i++) {
+      const part = layout.pages[i]!.blocks[0]!;
+      expect(part.isContinuation).toBe(true);
+      expect(part.spaceBefore).toBe(0);
+    }
+  });
+});
+
+// ── Gap suppression at page boundary (linesFit=0 dead zone) ──────────────────
+//
+// When the inter-block gap (prevSpaceAfter + spaceBefore) pushes targetY into
+// the "dead zone" where not even one line fits, but lines WOULD fit starting
+// from y (gap-free), the gap is suppressed and the block starts at y instead
+// of jumping entirely to the next page.
+//
+// This is the second missing-link bug: "paragraphs moved to next page when
+// they can fit the current page."
+//
+// Same splitPage geometry (3 lines per page, lineHeight=18, pageBottom=64).
+// Key boundary: targetY must be > pageBottom - lineHeight = 64 - 18 = 46
+// for linesFit=0. But y must be <= pageBottom - lineHeight = 46 for the
+// gap-suppression fix to kick in.
+describe("layoutDocument — gap suppression at page boundary", () => {
+  const LH = MOCK_LINE_HEIGHT; // 18px
+
+  const splitPage = {
+    pageWidth:  120,
+    pageHeight: Math.round(10 + 3 * LH + 10), // 74px
+    margins: { top: 10, right: 10, bottom: 10, left: 10 },
+  };
+
+  // 2-line intro: y = margins.top + 2×LH = 10 + 36 = 46 = pageBottom - LH
+  // gap = prevSpaceAfter(10) → targetY = 56 → pageAvailable = 8 < 18 → dead zone
+  // BUT pageBottom - y = 18 >= LH → gap-suppression applies → 1 line on page 1
+  const twoLineIntro = "aaaaaaaaa bbbbbbbbb";
+  const fourLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd";
+
+  it("splits a paragraph whose gap pushed targetY into the dead zone", () => {
+    // twoLineIntro → y=46. gap=10 → targetY=56. pageAvailable=8 < LH.
+    // pageBottom - y = 18 = LH → fix kicks in: block starts at y=46, 1 line on p1.
+    const layout = layoutDocument(doc(p(twoLineIntro), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(2);
+
+    // Page 1: intro (2 lines) + first line of second para
+    expect(layout.pages[0]!.blocks).toHaveLength(2);
+    const gapPart = layout.pages[0]!.blocks[1]!;
+    expect(gapPart.lines).toHaveLength(1);
+    expect(gapPart.continuesOnNextPage).toBe(true);
+    expect(gapPart.isContinuation).toBeUndefined();
+
+    // Page 2: remaining 3 lines
+    const cont = layout.pages[1]!.blocks[0]!;
+    expect(cont.lines).toHaveLength(3);
+    expect(cont.isContinuation).toBe(true);
+  });
+
+  it("block starts at y (gap suppressed), not at targetY", () => {
+    // Block must visually start directly after the previous block — no gap wasted.
+    const layout = layoutDocument(doc(p(twoLineIntro), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    const introY = splitPage.margins.top; // 10
+    const introHeight = 2 * LH; // 36
+    const expectedY = introY + introHeight; // 46 = y (not targetY = 56)
+    expect(layout.pages[0]!.blocks[1]!.y).toBe(expectedY);
+  });
+
+  it("all lines are conserved when gap suppression applies", () => {
+    const layout = layoutDocument(doc(p(twoLineIntro), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const totalLines = layout.pages
+      .flatMap(pg => pg.blocks)
+      .reduce((n, b) => n + b.lines.length, 0);
+    expect(totalLines).toBe(2 + 4); // intro + four-line para
+  });
+
+  it("gap suppression applies when spaceBefore (not prevSpaceAfter) causes the dead zone", () => {
+    // One-line intro → y = 28. heading_1 spaceBefore = 24.
+    // gap = max(10, 24) = 24 → targetY = 52 → pageAvailable = 12 < LH.
+    // pageBottom - y = 36 >= LH → fix: heading starts at y=28, 2 lines on p1.
+    const oneLineIntro = "aaaaaaaaa";
+    const layout = layoutDocument(doc(p(oneLineIntro), heading(1, fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(2);
+    expect(layout.pages[0]!.blocks).toHaveLength(2);
+
+    const headingPart1 = layout.pages[0]!.blocks[1]!;
+    expect(headingPart1.lines.length).toBeGreaterThanOrEqual(1);
+    expect(headingPart1.continuesOnNextPage).toBe(true);
+
+    const headingPart2 = layout.pages[1]!.blocks[0]!;
+    expect(headingPart2.isContinuation).toBe(true);
+  });
+
+  it("block still jumps to next page when no room even at y (regression guard)", () => {
+    // Three-line intro fills page 1 exactly: y = 10 + 54 = 64 = pageBottom.
+    // pageBottom - y = 0 < LH → gap-suppression does NOT apply → block jumps.
+    // fourLineText (4 lines) then splits normally across pages 2 and 3 (3 + 1).
+    const threeLineIntro = "aaaaaaaaa bbbbbbbbb ccccccccc";
+    const layout = layoutDocument(doc(p(threeLineIntro), p(fourLineText)), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+
+    // Page 1: intro only. Page 2+3: four-line para split 3/1 (page fits 3 lines).
+    expect(layout.pages).toHaveLength(3);
+    expect(layout.pages[0]!.blocks).toHaveLength(1);
+
+    // The first part on page 2 has isContinuation=undefined (it jumped, not split)
+    expect(layout.pages[1]!.blocks[0]!.isContinuation).toBeUndefined();
+    expect(layout.pages[1]!.blocks[0]!.lines).toHaveLength(3);
+    expect(layout.pages[2]!.blocks[0]!.isContinuation).toBe(true);
+    expect(layout.pages[2]!.blocks[0]!.lines).toHaveLength(1);
+  });
+});
+
+describe("layoutDocument — pageConfig.fontFamily", () => {
+  it("span fonts in a paragraph use the page fontFamily", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const layout = layoutDocument(doc(p("Hello")), {
+      pageConfig: { ...defaultPageConfig, fontFamily: "Arial" },
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+    const rawSpan = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    const span = rawSpan?.kind === "text" ? rawSpan : undefined;
+    expect(span?.font).toContain("Arial");
+    expect(span?.font).not.toContain("Georgia");
+  });
+
+  it("span fonts in a heading use the page fontFamily", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const layout = layoutDocument(doc(heading(1, "Title")), {
+      pageConfig: { ...defaultPageConfig, fontFamily: "Verdana" },
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+    const rawSpan = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    const span = rawSpan?.kind === "text" ? rawSpan : undefined;
+    expect(span?.font).toContain("Verdana");
+    expect(span?.font).toContain("bold");
+    expect(span?.font).toContain("28px");
+  });
+
+  it("absent fontFamily leaves block style fonts unchanged", () => {
+    const { fontConfig } = buildStarterKitContext();
+    const layout = layoutDocument(doc(p("Hello")), {
+      pageConfig: defaultPageConfig, // no fontFamily
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+    const rawSpan = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    const span = rawSpan?.kind === "text" ? rawSpan : undefined;
+    expect(span?.font).toContain("Georgia");
+  });
+});
+
+// ── Float layout (wrapping mode) ───────────────────────────────────────────────
+
+describe("layoutDocument — float image wrapping", () => {
+  // Long text to force several wrapped lines (each ≈ 55 chars at 8px/char, 442px constrained width)
+  const longText = "word ".repeat(60).trim(); // 60 words × 5 chars = ~300 chars, ~6+ lines
+
+  it("square-left: produces floats array with the float image", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    expect(layout.floats).toBeDefined();
+    expect(layout.floats!.length).toBe(1);
+    expect(layout.floats![0]!.mode).toBe("square-left");
+  });
+
+  it("square-left: constrained lines have constraintX set (text pushed right of image)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const block = layout.pages[0]!.blocks[0]!;
+    // First line should be constrained (float starts at block.y = margins.top)
+    const firstLine = block.lines[0]!;
+    // constraintX = nodeWidth + FLOAT_MARGIN = 200 + 8 = 208
+    expect(firstLine.constraintX).toBe(208);
+    // effectiveWidth = contentWidth - nodeWidth - FLOAT_MARGIN = 650 - 200 - 8 = 442
+    expect(firstLine.effectiveWidth).toBe(442);
+  });
+
+  it("square-right: constrained lines have effectiveWidth set (text wraps in left zone)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-right" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const block = layout.pages[0]!.blocks[0]!;
+    const firstLine = block.lines[0]!;
+    // For square-right, text stays at left (constraintX = 0 / undefined)
+    expect(firstLine.constraintX).toBeUndefined();
+    // effectiveWidth = contentWidth - nodeWidth - FLOAT_MARGIN = 650 - 200 - 8 = 442
+    expect(firstLine.effectiveWidth).toBe(442);
+  });
+
+  it("square-left: float x position is at left margin", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.floats![0]!;
+    expect(float.x).toBe(defaultPageConfig.margins.left); // 72
+    expect(float.y).toBe(defaultPageConfig.margins.top);  // 72
+  });
+
+  it("square-right: float x position is at right margin", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-right" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.floats![0]!;
+    // floatX = contentRight - nodeWidth = (794 - 72) - 200 = 522
+    expect(float.x).toBe(defaultPageConfig.pageWidth - defaultPageConfig.margins.right - 200);
+    expect(float.y).toBe(defaultPageConfig.margins.top);
+  });
+
+  it("lines below the float zone revert to full width", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Float height = 200. lineHeight ≈ 18. Lines within float zone: floor(200/18) = 11 lines.
+    // Use enough text to get lines well past the float zone.
+    const extraLongText = "word ".repeat(200).trim();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
+    const para = schema.node("paragraph", null, [img, schema.text(extraLongText)]);
+    const layout = layoutDocument(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const block = layout.pages[0]!.blocks[0]!;
+    // Find a line beyond the float zone (past 200px from block.y)
+    let foundUnconstrained = false;
+    let cumulativeH = 0;
+    for (const line of block.lines) {
+      cumulativeH += line.lineHeight;
+      if (cumulativeH > 200 && line.constraintX === undefined && line.effectiveWidth === undefined) {
+        foundUnconstrained = true;
+        break;
+      }
+    }
+    expect(foundUnconstrained).toBe(true);
+  });
+
+  it("overflow cascade: blocks pushed past page N+1 bottom are moved to page N+2", () => {
+    // Regression for the Pass 3b cascade bug:
+    // Pass 3 moves overflow blocks from page 1 to page 2 and pushes page 2's
+    // existing blocks DOWN. If those pushed blocks now exceed page 2's bottom,
+    // they must be cascaded to page 3 — they were NOT, because Pass 3 skips
+    // pages without exclusion zones.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 360,
+      pageHeight: 200,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // Float paragraph fills most of page 1 and causes a large yDelta,
+    // pushing "after" paragraphs off page 1 into page 2. The "filler"
+    // paragraphs on page 2 are then pushed past page 2's bottom by the
+    // prepended overflow blocks — they must land on page 3.
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 100, wrappingMode: "square-left" });
+    const manyWords = "word ".repeat(60).trim();
+    const floatPara = schema.node("paragraph", null, [img, schema.text(manyWords)]);
+    const filler1 = schema.node("paragraph", null, [schema.text("filler one")]);
+    const filler2 = schema.node("paragraph", null, [schema.text("filler two")]);
+    const filler3 = schema.node("paragraph", null, [schema.text("filler three")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [floatPara, filler1, filler2, filler3]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const pageBottom = smallPage.pageHeight - smallPage.margins.bottom; // 180
+    for (const page of layout.pages) {
+      for (const block of page.blocks) {
+        if (block.lines.length > 0) {
+          expect(block.y + block.height).toBeLessThanOrEqual(pageBottom + 0.001);
+        }
+      }
+    }
+  });
+
+  it("Phase 1b drag: re-layout after float move does not double-shift block positions", () => {
+    // Regression for the Phase 1b float-drag bug:
+    // Phase 1b copies blocks from previousLayout which has Pass-3 yDelta baked
+    // into block.y values. When the float moves and runFloatPass runs again,
+    // Pass 3 stacks its new yDelta on top — doubling displacement and pushing
+    // the last paragraphs off the page. The fix: Phase 1b copies from
+    // _pass1Pages (clean pre-float positions) instead of the float-adjusted pages.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 360,
+      pageHeight: 400,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const measurer = createMeasurer();
+    const img = schema.nodes["image"]!.create({ src: "", width: 150, height: 120, wrappingMode: "square-left" });
+    const manyWords = "word ".repeat(40).trim();
+    const floatPara = schema.node("paragraph", null, [img, schema.text(manyWords)]);
+    const after1 = schema.node("paragraph", null, [schema.text("trailing one")]);
+    const after2 = schema.node("paragraph", null, [schema.text("trailing two")]);
+    const doc = schema.node("doc", null, [floatPara, after1, after2]);
+    const opts = { pageConfig: smallPage, fontConfig, measurer };
+
+    // First layout (float at default offsetY=0).
+    const layout1 = layoutDocument(doc, opts);
+
+    // Simulate drag: move float down by 60px. Only the image node changes.
+    const img2 = schema.nodes["image"]!.create({ src: "", width: 150, height: 120, wrappingMode: "square-left", floatOffset: { x: 0, y: 60 } });
+    const floatPara2 = schema.node("paragraph", null, [img2, schema.text(manyWords)]);
+    const doc2 = schema.node("doc", null, [floatPara2, after1, after2]);
+
+    // Second layout reuses measureCache and previousLayout — exactly what the
+    // editor does on each drag mousemove event.
+    const measureCache = new WeakMap();
+    const layout2 = layoutDocument(doc2, { ...opts, previousLayout: layout1, measureCache });
+
+    // All text blocks must be within the page bottom on every page.
+    const pageBottom = smallPage.pageHeight - smallPage.margins.bottom; // 380
+    for (const page of layout2.pages) {
+      for (const block of page.blocks) {
+        if (block.lines.length > 0) {
+          expect(block.y + block.height).toBeLessThanOrEqual(pageBottom + 0.001);
+        }
+      }
+    }
+    // The trailing paragraphs must appear somewhere in the layout (not lost).
+    const allBlocks = layout2.pages.flatMap((p) => p.blocks);
+    const trailingCount = allBlocks.filter(
+      (b) => b.node === after1 || b.node === after2,
+    ).length;
+    expect(trailingCount).toBe(2);
+  });
+
+  it("float stacking: two same-side floats do not overlap each other", () => {
+    // Fix 1: downward scan. A second square-left float anchored near the first
+    // must be pushed below it, not placed at the same Y.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const measurer = createMeasurer();
+    const img1 = schema.nodes["image"]!.create({ src: "", width: 150, height: 100, wrappingMode: "square-left" });
+    const img2 = schema.nodes["image"]!.create({ src: "", width: 150, height: 100, wrappingMode: "square-left" });
+    // Both anchors are in adjacent paragraphs — without the fix they'd both
+    // land at approximately the same Y and visually overlap.
+    const para1 = schema.node("paragraph", null, [img1, schema.text("first float text here")]);
+    const para2 = schema.node("paragraph", null, [img2, schema.text("second float text here")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: defaultPageConfig, fontConfig, measurer },
+    );
+    const floats = layout.floats!;
+    expect(floats.length).toBe(2);
+    const [f1, f2] = floats as [typeof floats[0], typeof floats[0]];
+    // The second float must start at or below the bottom of the first.
+    expect(f2!.y).toBeGreaterThanOrEqual(f1!.y + f1!.height - 0.001);
+  });
+
+  it("float Y reconciliation: float y tracks anchor block after Pass 3 yDelta shift", () => {
+    // Fix 2 (Pass 4): if blocks before the anchor grow due to wrapping around a
+    // different float, yDelta shifts the anchor block. The FloatLayout.y must
+    // follow the anchor's final position, not stay at its Pass 1 position.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const measurer = createMeasurer();
+    // Float A (square-right) on para1 causes para1 to grow (wrapped lines).
+    // Float B (square-left) on para2 — its anchor shifts down by yDelta.
+    // After Pass 4, float B's y must equal para2's final block.y + offsetY.
+    const imgA = schema.nodes["image"]!.create({ src: "", width: 200, height: 80, wrappingMode: "square-right" });
+    const imgB = schema.nodes["image"]!.create({ src: "", width: 200, height: 80, wrappingMode: "square-left" });
+    const manyWords = "word ".repeat(30).trim();
+    const para1 = schema.node("paragraph", null, [imgA, schema.text(manyWords)]);
+    const para2 = schema.node("paragraph", null, [imgB, schema.text("anchor text")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: defaultPageConfig, fontConfig, measurer },
+    );
+    const floats = layout.floats!;
+    expect(floats.length).toBe(2);
+    const floatB = floats.find((f) => f.node === imgB)!;
+    // Find para2's final block y.
+    const allBlocks = layout.pages.flatMap((p) => p.blocks);
+    const anchorBlock = allBlocks.find((b) => b.node === para2)!;
+    expect(floatB.y).toBeCloseTo(anchorBlock.y, 1);
+  });
+
+  it("float stacking past page bottom: overflowed float moves to next page", () => {
+    // Regression: two square-left floats with height > half the page.
+    // After Fix 1 stacks float2 below float1, candidateY + height > pageBottom.
+    // The float must land on page 2 (page: 2) with y within page 2's bounds,
+    // NOT stay on page 1 with y > pageBottom (which made it invisible).
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 300,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // pageBottom = 300 - 20 = 280. Two floats each 160px tall stacked = 20 + 160 + 160 = 340 > 280.
+    const img1 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    const img2 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    const para1 = schema.node("paragraph", null, [img1, schema.text("first paragraph text")]);
+    const para2 = schema.node("paragraph", null, [img2, schema.text("second paragraph text")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const floats = layout.floats!;
+    expect(floats.length).toBe(2);
+    const pageBottom = smallPage.pageHeight - smallPage.margins.bottom;
+
+    // Every float must fit within its assigned page (y + height ≤ pageBottom).
+    for (const f of floats) {
+      expect(f.y + f.height).toBeLessThanOrEqual(pageBottom + 0.001);
+    }
+
+    // The second float should have overflowed to page 2.
+    const f2 = floats[1]!;
+    expect(f2.page).toBe(2);
+    expect(f2.anchorPage).toBe(1); // anchor paragraph is still on page 1
+    expect(f2.y).toBeGreaterThanOrEqual(smallPage.margins.top - 0.001);
+  });
+
+  it("float page overflow: getFloatPosition uses float.page not anchor glyph page", () => {
+    // Regression for the scroll-to-page-1 bug:
+    // When a float overflows to page 2, its docPos is still in a paragraph on page 1.
+    // layout.floats[].page must be 2 so callers can scroll to the correct page.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 300,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const img1 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    const img2 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    const para1 = schema.node("paragraph", null, [img1, schema.text("first para")]);
+    const para2 = schema.node("paragraph", null, [img2, schema.text("second para")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const floats = layout.floats!;
+    const f2 = floats.find((f) => f.node === img2)!;
+
+    // Simulate getFloatPosition(sel.from) — sel.from = f2.docPos for a NodeSelection.
+    const resolved = floats.find((fl) => fl.docPos === f2.docPos);
+    expect(resolved).toBeDefined();
+    // The resolved page must be the float's visual page (2), not the anchor's page (1).
+    expect(resolved!.page).toBe(2);
+    // anchorPage reflects where the paragraph lives — useful for Pass 4 yDelta.
+    expect(resolved!.anchorPage).toBe(1);
+  });
+
+  it("float yDelta: long paragraph is split at page boundary rather than moved wholesale", () => {
+    // Regression for the core bug: when float reflow (Pass 3) applies yDelta to
+    // a subsequent block, pushing it past pageBottom, the block was previously
+    // moved to the next page as a whole unit (leaving blank space on page 1).
+    // With the fix, lines that fit on page 1 stay; the rest continue on page 2.
+    //
+    // Setup: smallPage width=500, height=300, margins=20 → pageBottom=280, contentWidth=460
+    // Float: width=400 (square-left) → constrained text width ≈ 52px (460-400-8*2)
+    // floatPara (anchor): img + 4 words → Pass 1: 1 line (18px); Pass 3: 4 lines (72px)
+    //   → yDelta = 54px
+    // afterPara: ~150 words → Pass 1: 13 lines on page 1 (y=38, h=234) + 1 line on page 2
+    //   After yDelta: y=92, h=234, bottom=326 > 280 → overflow
+    //   splitBlockAtBoundary: 10 lines fit (y=92..272), 3 lines overflow to page 2
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 500,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const img = schema.nodes["image"]!.create({ src: "", width: 400, height: 50, wrappingMode: "square-left" });
+    const floatPara = schema.node("paragraph", null, [img, schema.text("word word word word")]);
+    const longText = "word ".repeat(150).trim();
+    const afterPara = schema.node("paragraph", null, [schema.text(longText)]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [floatPara, afterPara]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const pageBottom = smallPage.pageHeight - smallPage.margins.bottom; // 280
+
+    // afterPara must appear on page 1 (not wholly moved to page 2)
+    const page1Blocks = layout.pages[0]?.blocks ?? [];
+    const afterParaOnPage1 = page1Blocks.find((b) => b.node === afterPara);
+    expect(afterParaOnPage1).toBeDefined();
+
+    // The page 1 part must be a split part (continues on next page)
+    expect(afterParaOnPage1?.continuesOnNextPage).toBe(true);
+
+    // afterPara must also appear on page 2 (the overflow)
+    const page2Blocks = layout.pages[1]?.blocks ?? [];
+    const afterParaOnPage2 = page2Blocks.find((b) => b.node === afterPara);
+    expect(afterParaOnPage2).toBeDefined();
+
+    // The page 2 part must be a continuation
+    expect(afterParaOnPage2?.isContinuation).toBe(true);
+
+    // No text block should overflow the page bottom
+    for (const page of layout.pages) {
+      for (const block of page.blocks) {
+        if (block.lines.length > 0) {
+          expect(block.y + block.height).toBeLessThanOrEqual(pageBottom + 0.001);
+        }
+      }
+    }
+  });
+
+  it("Pass 3 reflowed block never overflows the page bottom", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 360,
+      pageHeight: 400,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // A one-line anchor ensures the float paragraph is NOT isFirstOnPage,
+    // allowing Pass 1 to split it when it overflows.
+    const anchor = schema.node("paragraph", null, [schema.text("lead")]);
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 150, wrappingMode: "square-left" });
+    const manyWords = "word ".repeat(100).trim();
+    const floatPara = schema.node("paragraph", null, [img, schema.text(manyWords)]);
+    // Paragraphs after the float get yDelta-shifted. Without the fix they
+    // overflow into the bottom margin; with the fix they move to the next page.
+    const after1 = schema.node("paragraph", null, [schema.text("after one")]);
+    const after2 = schema.node("paragraph", null, [schema.text("after two")]);
+    const layout = layoutDocument(
+      schema.node("doc", null, [anchor, floatPara, after1, after2]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const pageBottom = smallPage.pageHeight - smallPage.margins.bottom; // 380
+    for (const page of layout.pages) {
+      for (const block of page.blocks) {
+        if (block.lines.length > 0) {
+          expect(block.y + block.height).toBeLessThanOrEqual(pageBottom + 0.001);
+        }
+      }
+    }
+  });
+});
+

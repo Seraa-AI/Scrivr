@@ -20,13 +20,14 @@ import { HorizontalRule } from "./built-in/HorizontalRule";
 import { Image } from "./built-in/Image";
 import { Typography } from "./built-in/Typography";
 import { Pagination } from "./built-in/Pagination";
+import { TrailingNode } from "./built-in/TrailingNode";
 import { chainCommands } from "prosemirror-commands";
 import type { InputRule } from "prosemirror-inputrules";
 import type { Command } from "prosemirror-state";
 import type { NodeSpec, MarkSpec } from "prosemirror-model";
 import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules, IEditor } from "./types";
 import type { BlockStyle } from "../layout/FontConfig";
-import type { BlockStrategy } from "../layout/BlockRegistry";
+import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { PageConfig } from "../layout/PageLayout";
 
 interface StarterKitOptions {
@@ -52,6 +53,7 @@ interface StarterKitOptions {
   horizontalRule?: false;
   image?: false;
   typography?: false;
+  trailingNode?: false;
 }
 
 /**
@@ -139,12 +141,20 @@ export const StarterKit = Extension.create<StarterKitOptions>({
 
   addProseMirrorPlugins() {
     const opts = this.options;
-    if (opts.history === false) return [];
+    const plugins = [];
 
-    const ext = typeof opts.history === "object"
-      ? History.configure(opts.history)
-      : History;
-    return ext.resolve(this.schema).plugins;
+    if (opts.history !== false) {
+      const ext = typeof opts.history === "object"
+        ? History.configure(opts.history)
+        : History;
+      plugins.push(...ext.resolve(this.schema).plugins);
+    }
+
+    if (opts.trailingNode !== false) {
+      plugins.push(...TrailingNode.resolve(this.schema).plugins);
+    }
+
+    return plugins;
   },
 
   addKeymap() {
@@ -345,9 +355,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.horizontalRule !== false) {
       Object.assign(handlers, HorizontalRule.resolve().layoutHandlers);
     }
-    if (opts.image !== false) {
-      Object.assign(handlers, Image.resolve().layoutHandlers);
-    }
+    // Image is now an inline node — it registers an InlineStrategy, not a BlockStrategy.
     return handlers;
   },
 
@@ -370,10 +378,17 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.horizontalRule !== false) {
       Object.assign(styles, HorizontalRule.resolve().blockStyles);
     }
-    if (opts.image !== false) {
-      Object.assign(styles, Image.resolve().blockStyles);
-    }
+    // Image is now an inline node — no block styles needed.
     return styles;
+  },
+
+  addInlineHandlers() {
+    const handlers: Record<string, InlineStrategy> = {};
+    const opts = this.options;
+    if (opts.image !== false) {
+      Object.assign(handlers, Image.resolve().inlineHandlers);
+    }
+    return handlers;
   },
 
   addToolbarItems() {

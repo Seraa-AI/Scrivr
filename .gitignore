@@ -7,3 +7,4 @@ data/
 apps/server/data/
 .turbo/
 .pnpm-store/
+.env

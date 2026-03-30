@@ -50,10 +50,10 @@ describe("HorizontalRule — addBlockStyles", () => {
     expect(size).toBeLessThanOrEqual(16);
   });
 
-  it("spaceBefore and spaceAfter are small (tight spacing)", () => {
+  it("spaceBefore and spaceAfter are ≥ 16 (comfortable spacing around the rule)", () => {
     const style = resolved.blockStyles["horizontalRule"]!;
-    expect(style.spaceBefore).toBeLessThanOrEqual(16);
-    expect(style.spaceAfter).toBeLessThanOrEqual(16);
+    expect(style.spaceBefore).toBeGreaterThanOrEqual(16);
+    expect(style.spaceAfter).toBeGreaterThanOrEqual(16);
   });
 });
 

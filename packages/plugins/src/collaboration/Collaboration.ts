@@ -99,6 +99,12 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     const type = ydoc.getXmlFragment("prosemirror");
     const { url = "ws://localhost:1234", name = "default" } = this.options;
 
+    // Suppress all layout/paint flushes while Y.js syncs the document.
+    // Hundreds of typeObserver events will fire during initial sync — without
+    // this, each one triggers a full layout+paint, causing O(N²) total work.
+    // setReady(true) in onSynced does one fast chunked layout of the final doc.
+    editor.setReady(false);
+
     const binding = new YBinding(editor, ydoc, type);
     inst.binding = binding;
     binding.bind();
@@ -107,7 +113,10 @@ export const Collaboration = Extension.create<CollaborationOptions>({
       url,
       name,
       document: ydoc,
-      onSynced: () => binding.markSynced(),
+      onSynced: () => {
+        binding.markSynced();
+        editor.setReady(true);
+      },
     });
 
     // Store provider so CollaborationCursor can read awareness
