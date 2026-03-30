@@ -1,4 +1,115 @@
 ---
 title: The Document Model
-description: Understanding the ProseMirror Node tree and how lines are resolved into blocks.
+description: How Inscribe represents documents using ProseMirror's node tree — and how that maps to the canvas renderer.
 ---
+
+Inscribe uses [ProseMirror](https://prosemirror.net/) as its document model. ProseMirror provides an
+immutable, schema-validated node tree that acts as the single source of truth for the entire editor.
+The canvas renderer reads from it, Yjs syncs it across peers, and the export layer serializes it.
+Nothing holds a shadow copy.
+
+---
+
+## The Node Tree
+
+A ProseMirror document is a tree of **nodes**. Every node has a type, optional attributes, and
+optional content. The root is always a `doc` node.
+
+```
+doc
+├── heading  { level: 1 }
+│   └── text "Hello, World"
+├── paragraph
+│   ├── text "This is "
+│   ├── text "bold"  [mark: bold]
+│   └── text " text."
+└── bulletList
+    └── listItem
+        └── paragraph
+            └── text "An item"
+```
+
+**Block nodes** (like `paragraph`, `heading`, `bulletList`) define the document's vertical structure.
+**Inline nodes** (like `text`, `image`) live inside blocks.
+**Marks** (like `bold`, `italic`, `link`) are annotations applied to ranges of inline content.
+
+---
+
+## The Schema is Extension-Defined
+
+Inscribe has **no hardcoded node types**. The ProseMirror schema is assembled from the extensions you
+provide at construction time:
+
+```ts
+const editor = new Editor({
+  extensions: [StarterKit],
+});
+// editor.schema contains: paragraph, heading, text, bold, italic, link, ...
+```
+
+Every extension contributes one or more node or mark type definitions. `StarterKit` bundles the most
+common ones. The merged schema is available as `editor.schema`.
+
+---
+
+## Immutable State
+
+`EditorState` is **immutable**. Every edit produces a brand-new state object via a `Transaction`.
+Reference equality (`prevState !== nextState`) is enough to know the document changed — which is why
+`editor.getSnapshot()` works directly with React's `useSyncExternalStore`.
+
+```ts
+editor.subscribe(() => {
+  const state = editor.getSnapshot(); // always the latest EditorState
+});
+```
+
+---
+
+## Doc Positions
+
+ProseMirror identifies every point in a document with an integer **position**. Position `0` is before
+the first character; positions increment through each token in the tree (opening tags, characters, closing
+tags).
+
+```
+doc:              0
+  heading:        1
+    text "Hello"  1 2 3 4 5
+  /heading:       6
+  paragraph:      7
+    text "World"  8 9 10 11 12
+  /paragraph:     13
+```
+
+Doc positions are what `SelectionSnapshot` exposes (`.anchor`, `.head`, `.from`, `.to`). The
+`CharacterMap` translates these integer positions into pixel `(x, y)` canvas coordinates.
+
+---
+
+## Reading the Document
+
+| Method | Returns | Use case |
+|---|---|---|
+| `editor.getState()` | `EditorState` | Access the full ProseMirror state |
+| `editor.getState().doc.toJSON()` | `object` | Serialize to a plain JSON tree |
+| `editor.getMarkdown()` | `string` | Serialize to Markdown |
+| `editor.getSelectionSnapshot()` | `SelectionSnapshot` | Toolbar / menu state |
+| `editor.isActive('bold')` | `boolean` | Check mark/block at cursor |
+
+---
+
+## One Model, Multiple Consumers
+
+```
+                 ┌──────────────┐
+                 │  EditorState │  ← single source of truth
+                 └──────┬───────┘
+          ┌─────────────┼──────────────┐
+          ▼             ▼              ▼
+    Canvas Renderer   Yjs / Hocuspocus  @inscribe/export
+    (layout + paint)  (real-time sync)  (PDF / DOCX / MD)
+```
+
+The canvas renderer, collaboration layer, and export utilities all read from the same `EditorState`.
+No synchronisation between them is needed because they share the same model.

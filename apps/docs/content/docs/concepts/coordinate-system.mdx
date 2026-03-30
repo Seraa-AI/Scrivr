@@ -1,4 +1,120 @@
 ---
 title: Coordinate System
-description: World coordinates versus screen coordinates and the mapping layer.
+description: World-space versus screen-space coordinates, and how Inscribe maps between them.
 ---
+
+Because Inscribe bypasses the browser's layout engine, it manages its own coordinate system.
+Understanding the two coordinate spaces — **world-space** and **screen-space** — is essential when
+building custom menus, overlays, or hit-testing logic.
+
+---
+
+## Two Coordinate Spaces
+
+### World-Space (page-relative)
+
+World-space coordinates are **relative to the top-left corner of a page canvas**. They are computed by
+the layout engine during `layoutDocument()` and stored in the `CharacterMap`.
+
+- **Unit:** pixels at 96 DPI (same unit as `pageConfig.width` / `pageConfig.height`)
+- **Origin:** top-left of the page element (not the scroll container)
+- **Who computes them:** `layoutDocument()` → `populateCharMap()`
+
+### Screen-Space (viewport-relative)
+
+Screen-space coordinates are **relative to the browser viewport**. They are the coordinates you need
+to position a floating menu (`BubbleMenu`, `FloatingMenu`) using `position: fixed`.
+
+- **Unit:** CSS pixels
+- **Origin:** top-left of the browser viewport (same as `Element.getBoundingClientRect()`)
+- **Who computes them:** `editor.getViewportRect(from, to)`
+
+---
+
+## The CharacterMap
+
+The `CharacterMap` is the spatial index that makes both directions of lookup fast:
+
+```ts
+// World-space coords for a doc position (used by the renderer)
+const coords = editor.charMap.coordsAtPos(docPosition);
+// Returns: { x, y, height, page } | null
+
+// Doc position from world-space coords (used by mouse click handling)
+const pos = editor.charMap.posAtCoords(x, y, pageNumber);
+// Returns: number | null
+```
+
+`coordsAtPos` is used internally by `syncInputBridge()`, `scrollCursorIntoView()`, and the overlay
+renderer to place the cursor. `posAtCoords` is called by `ViewManager` to resolve a mouse click to a
+doc position.
+
+---
+
+## Converting to Screen-Space
+
+To position a DOM element (like a tooltip or bubble menu) relative to the cursor or selection, use
+`editor.getViewportRect(from, to)`:
+
+```ts
+const snapshot = editor.getSelectionSnapshot();
+const rect = editor.getViewportRect(snapshot.from, snapshot.to);
+
+if (rect) {
+  // rect is a standard DOMRect — use it with position: fixed
+  floatingEl.style.top  = `${rect.bottom + 8}px`;
+  floatingEl.style.left = `${rect.left}px`;
+}
+```
+
+`getViewportRect` internally calls `coordsAtPos` for world-space, then adds the page element's
+`getBoundingClientRect()` offset to convert to screen-space.
+
+---
+
+## Page Numbering
+
+Pages are **1-based**. The document begins on page `1`. `CharacterMap` entries record which page a
+character belongs to:
+
+```ts
+const entry = editor.charMap.coordsAtPos(pos);
+entry?.page; // 1, 2, 3, ...
+```
+
+The `ViewManager` maintains a DOM element per page. `editor.setPageElementLookup()` registers a
+resolver so the editor can call `pageElementLookup(pageNumber)` to get the page's DOM element and
+read its `getBoundingClientRect()`.
+
+---
+
+## Coordinate Flow at a Glance
+
+```
+Mouse click (clientX, clientY)
+    │
+    ▼
+ViewManager subtracts page element offset
+    │
+    ▼
+CharacterMap.posAtCoords(x, y, page)   ← world-space
+    │
+    ▼
+Doc position (integer)
+    │
+    ▼
+editor.moveCursorTo(pos)  or  editor.setSelection(anchor, head)
+```
+
+```
+Selection change  (anchor, head integers)
+    │
+    ▼
+CharacterMap.coordsAtPos(head)         ← world-space
+    │
+    ▼
++ pageElement.getBoundingClientRect()  ← screen-space offset
+    │
+    ▼
+DOMRect  →  position BubbleMenu / FloatingMenu
+```

@@ -1,4 +1,106 @@
 ---
 title: Event System
-description: How the input DOM bridge syncs with the canvas renderer correctly.
+description: How browser events are bridged to ProseMirror commands through the hidden textarea.
 ---
+
+Inscribe does not use `contenteditable`. All user input is routed through a **hidden `<textarea>`**
+that acts as a thin, invisible bridge between the browser's native input handling and the ProseMirror
+command system.
+
+---
+
+## The Hidden Textarea
+
+When `editor.mount(container)` is called, a `<textarea>` element is created and appended to the editor
+container with `opacity: 0` and `position: absolute`. It is always focused while the editor is active,
+capturing all keyboard events without any visible UI.
+
+The textarea is repositioned to the cursor's visual location after every state change via
+`syncInputBridge()`. This is critical for two reasons:
+
+1. **Scroll anchoring** — browsers scroll the viewport to keep the focused element visible. If the
+   textarea stayed at `top: 0`, typing at the bottom of a long document would constantly scroll back to
+   the top.
+2. **Mobile IME / magnifier** — the OS keyboard suggestion bar and text magnifier appear near the
+   focused element. Keeping the textarea at the cursor ensures these UX helpers are usable.
+
+---
+
+## Keyboard Event Handling
+
+Every `keydown` event on the textarea is converted to a ProseMirror key string by `keyEventToString`:
+
+| Raw event | Key string | Meaning |
+|---|---|---|
+| `Cmd+B` (macOS) | `"Mod-b"` | Platform-agnostic modifier |
+| `Ctrl+Shift+Z` (Windows) | `"Mod-Shift-z"` | Redo |
+| `Enter` | `"Enter"` | New line / paragraph |
+| `Backspace` | `"Backspace"` | Delete backwards |
+| `Tab` | `"Tab"` | Indent (if extension handles it) |
+
+The key string is looked up in the merged **keymap** built from all active extensions. If a matching
+ProseMirror `Command` is found, it is executed and the event is `preventDefault`-ed. If no extension
+handles the key, the event is discarded silently for special keys, or falls through to the `input`
+handler for printable characters.
+
+---
+
+## Text Input Handling
+
+Printable characters are consumed via the `input` event (not `keydown`). This correctly handles:
+
+- **Regular typing** — `insertText` is called with `event.data`
+- **Autocorrect / spellcheck substitution** — the browser fires a single `input` event with the
+  corrected word; Inscribe replaces the affected range accordingly
+
+Extensions can register **input handlers** to intercept specific text patterns before the default
+insert runs. The slash menu (`/`) is implemented this way — typing `/` triggers an input handler that
+opens the command palette.
+
+---
+
+## IME Composition
+
+For CJK input methods (Chinese, Japanese, Korean), the browser fires a sequence of events:
+
+```
+compositionstart  →  compositionupdate (...)  →  compositionend  →  input
+```
+
+Inscribe guards the `keydown` and `input` handlers with a `composing` flag so that intermediate
+composition states do not corrupt the document. Only the final `compositionend + input` sequence
+commits the composed text as a single ProseMirror transaction.
+
+---
+
+## Focus and Blur
+
+`editor.focus()` programmatically focuses the textarea. Focus/blur events on the textarea fire
+`editor.onFocusChange(focused: boolean)`, which:
+
+- Updates `editor.isFocused`
+- Starts or stops the cursor blink timer (`CursorManager`)
+- Notifies all subscribers so the overlay canvas repaints correctly
+
+---
+
+## Paste Handling
+
+Paste events are intercepted on the textarea. `PasteTransformer` converts the clipboard payload:
+
+- **HTML** — parsed through a sanitized ProseMirror `DOMParser` (schema-constrained, so only allowed
+  node types survive)
+- **Plain text** — treated as preformatted text and inserted directly
+- **Markdown** — detected and parsed into ProseMirror nodes via a bundled Markdown parser
+
+---
+
+## Event Flow Summary
+
+```
+keydown  ──►  keyEventToString()  ──►  keymap lookup  ──►  Command / ignored
+input    ──►  composing check     ──►  insertText() / InputHandler
+paste    ──►  PasteTransformer    ──►  transaction
+focus    ──►  CursorManager.start() + onFocusChange(true)
+blur     ──►  CursorManager.stop()  + onFocusChange(false)
+```

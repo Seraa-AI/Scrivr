@@ -1,4 +1,115 @@
 ---
 title: Render Pipeline
-description: Layout computation, dirty flags, and the paginated canvas painting loop.
+description: How Inscribe moves from a user keypress to pixels on the canvas.
 ---
+
+Inscribe's rendering model is fundamentally different from a DOM-based editor. There is no
+`contenteditable` region, no DOM diffing, and no CSS layout. Instead, every glyph, cursor, 
+and selection highlight is drawn directly onto an HTML5 `<canvas>` element by a custom layout 
+and rendering engine.
+
+This page walks you through the four-stage pipeline that runs on every user interaction.
+
+---
+
+## The Four Stages
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  1. INPUT       User types → hidden <textarea> fires     │
+│                 an input / keydown event                  │
+├─────────────────────────────────────────────────────────┤
+│  2. TRANSACTION  Event → ProseMirror Command → dispatch   │
+│                  Produces a new immutable EditorState     │
+├─────────────────────────────────────────────────────────┤
+│  3. LAYOUT      layoutDocument() traverses the doc tree   │
+│                 Breaks text into lines; assigns each      │
+│                 character an (x, y, page) coordinate      │
+├─────────────────────────────────────────────────────────┤
+│  4. PAINT       ViewManager repaints affected canvases    │
+│                 PageRenderer draws text runs              │
+│                 OverlayRenderer draws cursor + selection  │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Stage 1 — Input Bridge
+
+Inscribe does not use `contenteditable`. Instead, `Editor.mount()` creates a **hidden `<textarea>`**
+and positions it at the cursor's pixel location. All keyboard events are captured from this element.
+
+The textarea serves three purposes:
+
+1. **Keyboard events** — `keydown` fires for special keys (arrows, backspace, shortcuts). The raw event is
+   converted to a ProseMirror key string (e.g. `"Mod-b"`, `"Enter"`) and dispatched to the keymap.
+2. **Text composition** — `input` events handle regular character input and are guarded by
+   `compositionstart` / `compositionend` for CJK IME support.
+3. **Scroll anchoring** — `syncInputBridge()` repositions the textarea to the cursor's world coordinates
+   after every state change. This prevents the browser from scrolling the viewport back to `top: 0` when the
+   focused element is out of view.
+
+---
+
+## Stage 2 — ProseMirror Transaction
+
+When an event maps to an editor action, a ProseMirror **Transaction** is created and dispatched via
+`editor.dispatch(tr)`. The transaction is applied to the current (immutable) `EditorState`, producing
+a new immutable `EditorState`.
+
+All state changes — typing, undo, remote collaboration updates — go through this single path.
+
+---
+
+## Stage 3 — Layout Engine
+
+After dispatch, `Editor` sets a `dirty` flag and calls `ensureLayout()`:
+
+```ts
+// Inside Editor.dispatch():
+this.state = this.state.apply(tr);
+this.dirty = true;
+this.ensureLayout(); // re-runs only when dirty
+```
+
+`ensureLayout()` calls `layoutDocument()` which traverses the ProseMirror doc tree and:
+
+1. Measures every text run using `TextMeasurer` (which wraps `CanvasRenderingContext2D.measureText`)
+2. Breaks lines at the content width defined by `pageConfig`
+3. Paginates blocks across fixed-height pages
+4. Returns a `DocumentLayout` — an array of pages, each with positioned blocks and lines
+
+After layout, `populateCharMap()` populates the `CharacterMap` — a spatial index that records the 
+`(x, y, height, page)` coordinate for every character position in the document.
+
+<Callout type="warn">
+  **Current limitation:** `layoutDocument()` re-processes the **entire document** on every state change.
+  For documents under ~50 pages this is imperceptible. Incremental layout (only re-processing affected pages)
+  is on the roadmap.
+</Callout>
+
+---
+
+## Stage 4 — Canvas Paint
+
+The `ViewManager` subscribes to the `Editor` via `editor.subscribe()`. When the editor notifies its
+listeners, `ViewManager.update()` runs:
+
+1. **Page DOM sync** — creates or removes `<div>` wrappers for each page in `DocumentLayout`
+2. **Virtual scroll** — an `IntersectionObserver` watches each page wrapper; only pages inside (or near) the
+   viewport are actively painted
+3. **Content canvas** — `PageRenderer.renderPage()` draws text runs, block backgrounds, and images
+4. **Overlay canvas** — `OverlayRenderer` draws the cursor (a blinking `1px` line from `CursorManager`)
+   and selection highlights. Extension-registered overlay handlers (e.g. collaboration cursors) are also
+   called here via `editor.runOverlayHandlers()`
+
+---
+
+## Summary
+
+| Stage | Key class / function | Output |
+|---|---|---|
+| Input | `Editor` + hidden `<textarea>` | DOM event → ProseMirror key string |
+| Transaction | `EditorState.apply(tr)` | New immutable `EditorState` |
+| Layout | `layoutDocument()` + `populateCharMap()` | `DocumentLayout` + `CharacterMap` |
+| Paint | `ViewManager` → `PageRenderer` + `OverlayRenderer` | Pixels on `<canvas>` |
