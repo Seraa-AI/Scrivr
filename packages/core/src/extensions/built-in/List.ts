@@ -1,5 +1,6 @@
 import { wrapInList, splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
-import { chainCommands, liftEmptyBlock, splitBlockKeepMarks } from "prosemirror-commands";
+import { chainCommands, liftEmptyBlock } from "prosemirror-commands";
+import { splitBlockInheritAttrs } from "./Paragraph";
 import { wrappingInputRule } from "prosemirror-inputrules";
 import type { NodeType } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
@@ -109,7 +110,7 @@ export const List = Extension.create({
       // Chain: liftEmptyBlock exits a list when the item is empty;
       // splitListItem handles Enter inside a non-empty list item;
       // splitBlockKeepMarks is the fallback for Enter outside lists.
-      Enter: chainCommands(liftEmptyBlock, splitListItem(listItem!), splitBlockKeepMarks),
+      Enter: chainCommands(liftEmptyBlock, splitListItem(listItem!), splitBlockInheritAttrs),
       Tab: sinkListItem(listItem!),
       "Shift-Tab": liftListItem(listItem!),
       // Mod-Shift-8: toggle bullet list (⌘⇧8 = • on most keyboards)
