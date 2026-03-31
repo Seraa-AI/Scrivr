@@ -1,4 +1,280 @@
 ---
-title: Notion-like Editor
-description: Implement hover menus and slash commands in a basic text document.
+title: Document Editor
+description: Implement bubble menus and slash commands in a full document editor.
 ---
+
+This example wires together the four menu controllers into a complete document editor with a
+formatting toolbar, a slash command palette, and an image toolbar. It uses only `@inscribe/react`
+and `@inscribe/core` — no additional dependencies.
+
+---
+
+## What it includes
+
+- **Bubble menu** — appears on text selection for inline formatting (bold, italic, underline)
+- **Floating menu** — appears beside empty paragraphs as a `/` command trigger
+- **Slash menu** — full block-insert palette triggered by typing `/`
+- **Image menu** — appears when an image is selected for resize/alignment
+
+---
+
+## Setup
+
+```bash
+pnpm add @inscribe/core @inscribe/react
+```
+
+---
+
+## Full example
+
+```tsx title="DocumentEditor.tsx"
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+import {
+  createBubbleMenu,
+  createFloatingMenu,
+  createSlashMenu,
+  createImageMenu,
+  type Editor,
+} from '@inscribe/core';
+
+// ─── Slash command list ───────────────────────────────────────────────────────
+
+const SLASH_ITEMS = [
+  { label: 'Heading 1',    command: 'setHeading1' },
+  { label: 'Heading 2',    command: 'setHeading2' },
+  { label: 'Heading 3',    command: 'setHeading3' },
+  { label: 'Bullet list',  command: 'toggleBulletList' },
+  { label: 'Ordered list', command: 'toggleOrderedList' },
+  { label: 'Code block',   command: 'setCodeBlock' },
+  { label: 'Divider',      command: 'insertHorizontalRule' },
+];
+
+// ─── Menus ────────────────────────────────────────────────────────────────────
+
+function BubbleMenu({ editor }: { editor: Editor }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    return createBubbleMenu(editor, {
+      onShow: (rect) => {
+        el.style.cssText = `display:flex; position:fixed; left:${rect.left}px; top:${rect.top - 44}px;`;
+      },
+      onMove: (rect) => {
+        el.style.left = `${rect.left}px`;
+        el.style.top  = `${rect.top - 44}px`;
+      },
+      onHide: () => {
+        el.style.display = 'none';
+      },
+    });
+  }, [editor]);
+
+  return (
+    <div ref={ref} style={{ display: 'none', gap: 4, background: '#1e1e1e', borderRadius: 6, padding: '4px 6px' }}>
+      {(['toggleBold', 'toggleItalic', 'toggleUnderline'] as const).map((cmd, i) => (
+        <button key={i} onMouseDown={(e) => { e.preventDefault(); editor.commands[cmd](); }}
+          style={{ color: '#fff', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }}>
+          {['B', 'I', 'U'][i]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FloatingAdd({ editor }: { editor: Editor }) {
+  const ref = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    return createFloatingMenu(editor, {
+      onShow: (rect) => {
+        el.style.cssText = `display:block; position:fixed; left:${rect.left - 36}px; top:${rect.top}px;`;
+      },
+      onMove: (rect) => {
+        el.style.left = `${rect.left - 36}px`;
+        el.style.top  = `${rect.top}px`;
+      },
+      onHide: () => {
+        el.style.display = 'none';
+      },
+    });
+  }, [editor]);
+
+  return (
+    <button ref={ref} style={{ display: 'none', position: 'fixed', width: 24, height: 24, borderRadius: '50%',
+      background: '#e5e7eb', border: 'none', cursor: 'pointer', fontSize: 18, lineHeight: '24px' }}
+      onMouseDown={(e) => { e.preventDefault(); editor.focus(); }}>
+      +
+    </button>
+  );
+}
+
+function SlashMenu({ editor }: { editor: Editor }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [items, setItems] = useState(SLASH_ITEMS);
+  const slashFromRef = useRef<number>(0);
+  const dismissRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const { cleanup, dismissMenu } = createSlashMenu(editor, {
+      onShow: (rect, query, slashFrom) => {
+        slashFromRef.current = slashFrom;
+        setItems(SLASH_ITEMS.filter((i) => i.label.toLowerCase().includes(query.toLowerCase())));
+        el.style.cssText = `display:block; position:fixed; left:${rect.left}px; top:${rect.bottom + 8}px;`;
+      },
+      onUpdate: (_rect, query) => {
+        setItems(SLASH_ITEMS.filter((i) => i.label.toLowerCase().includes(query.toLowerCase())));
+      },
+      onHide: () => {
+        el.style.display = 'none';
+      },
+    });
+
+    dismissRef.current = dismissMenu;
+    return cleanup;
+  }, [editor]);
+
+  function selectItem(cmd: string) {
+    const state = editor.getState();
+    editor._applyTransaction(state.tr.delete(slashFromRef.current, state.selection.from));
+    (editor.commands as Record<string, () => void>)[cmd]?.();
+    dismissRef.current?.();
+  }
+
+  return (
+    <div ref={ref} style={{ display: 'none', position: 'fixed', background: '#fff', border: '1px solid #e5e7eb',
+      borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,.1)', minWidth: 200, overflow: 'hidden' }}>
+      {items.map((item) => (
+        <button key={item.command} onMouseDown={(e) => { e.preventDefault(); selectItem(item.command); }}
+          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
+            background: 'none', border: 'none', cursor: 'pointer', fontSize: 14 }}>
+          {item.label}
+        </button>
+      ))}
+      {items.length === 0 && (
+        <p style={{ padding: '8px 12px', color: '#6b7280', fontSize: 14, margin: 0 }}>No results</p>
+      )}
+    </div>
+  );
+}
+
+function ImageToolbar({ editor }: { editor: Editor }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const docPosRef = useRef<number>(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    return createImageMenu(editor, {
+      onShow: (rect, info) => {
+        docPosRef.current = info.docPos;
+        el.style.cssText = `display:flex; position:fixed; left:${rect.left}px; top:${rect.bottom + 8}px;`;
+      },
+      onMove: (rect) => {
+        el.style.left = `${rect.left}px`;
+        el.style.top  = `${rect.bottom + 8}px`;
+      },
+      onHide: () => {
+        el.style.display = 'none';
+      },
+    });
+  }, [editor]);
+
+  function setWrap(wrap: string) {
+    editor.setNodeAttrs(docPosRef.current, { wrap });
+  }
+
+  return (
+    <div ref={ref} style={{ display: 'none', gap: 4, background: '#1e1e1e', borderRadius: 6, padding: '4px 8px' }}>
+      {(['none', 'left', 'right'] as const).map((w) => (
+        <button key={w} onMouseDown={(e) => { e.preventDefault(); setWrap(w); }}
+          style={{ color: '#fff', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, padding: '2px 6px' }}>
+          {w === 'none' ? 'Inline' : w === 'left' ? 'Float left' : 'Float right'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Editor ───────────────────────────────────────────────────────────────────
+
+export function DocumentEditor() {
+  const editor = useInscribeEditor({
+    extensions: [StarterKit],
+  });
+
+  return (
+    <div style={{ position: 'relative', height: '100vh' }}>
+      {editor && (
+        <>
+          <BubbleMenu editor={editor} />
+          <FloatingAdd editor={editor} />
+          <SlashMenu editor={editor} />
+          <ImageToolbar editor={editor} />
+        </>
+      )}
+      <Inscribe editor={editor} style={{ height: '100%' }} />
+    </div>
+  );
+}
+```
+
+---
+
+## How it works
+
+### Bubble menu
+
+`createBubbleMenu` fires `onShow` with a viewport `DOMRect` whenever the selection becomes
+non-empty. The menu is positioned `44px` above the selection using `rect.top`. `onHide` is
+called when the selection collapses.
+
+### Floating `+` button
+
+`createFloatingMenu` fires when the cursor lands on an empty paragraph with nothing selected.
+The button is offset `36px` to the left of the cursor rect. Clicking it focuses the editor and
+the user can start typing `/` to open the slash menu.
+
+### Slash command palette
+
+`createSlashMenu` fires whenever the user types `/` in a text block. The `query` parameter
+updates as they continue typing so you can filter the list live. When a user picks an item:
+
+1. Delete the `/query` text from `slashFrom` to the current cursor position.
+2. Run the chosen command.
+3. Call `dismissMenu()` to hide the palette.
+
+### Image toolbar
+
+`createImageMenu` fires when the user clicks an image node. `info.docPos` is the doc position
+of the image — pass it to `editor.setNodeAttrs()` to update `wrap`, `width`, or any other
+image attribute without writing a custom command.
+
+---
+
+## Further reading
+
+<Cards>
+  <Card title="Menus reference" href="/getting-started/menus">
+    All options and callbacks for each menu controller.
+  </Card>
+  <Card title="Keyboard shortcuts" href="/guides/interactivity/keyboard-shortcuts">
+    Built-in shortcuts and how to add your own.
+  </Card>
+  <Card title="Creating plugins" href="/guides/plugins">
+    Bundle custom keymaps and commands into an Extension.
+  </Card>
+</Cards>

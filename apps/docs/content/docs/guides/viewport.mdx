@@ -2,3 +2,153 @@
 title: Viewport & Layout
 description: Controlling virtual scroll margins, gaps, and page dimensions.
 ---
+
+Inscribe renders pages onto `<canvas>` elements inside a scrollable container. Only the pages
+near the visible area are painted at any time — off-screen pages are represented by empty
+spacer elements. This section covers how to configure page dimensions, observe layout state,
+and control scroll programmatically.
+
+---
+
+## Page dimensions
+
+Page size, margins, and spacing are set once via `PageConfig` in `EditorOptions`.
+
+```ts
+import { Editor, StarterKit } from '@inscribe/core';
+
+const editor = new Editor({
+  extensions: [StarterKit],
+  pageConfig: {
+    pageWidth: 816,        // px — US Letter at 96 dpi
+    pageHeight: 1056,      // px
+    marginTop: 96,         // px — 1 inch
+    marginBottom: 96,
+    marginLeft: 96,
+    marginRight: 96,
+    pageGap: 24,           // vertical space between pages in the scroll container
+    pagePaddingY: 48,      // space above the first page and below the last
+  },
+});
+```
+
+`pageConfig` is read-only after construction. See [`PageConfig`](/api/types#pageconfig) for all
+fields and defaults.
+
+---
+
+## Observing the current page
+
+`editor.cursorPage` returns the 1-based page number of the current cursor position:
+
+```ts
+const page = editor.cursorPage; // e.g. 3
+```
+
+Subscribe to updates to drive a page-number indicator:
+
+```tsx
+function PageIndicator({ editor }: { editor: Editor }) {
+  const page = useInscribeState({
+    editor,
+    selector: ({ editor }) => editor?.cursorPage ?? 1,
+  });
+
+  return <span>Page {page}</span>;
+}
+```
+
+---
+
+## Scrolling to the cursor
+
+`scrollCursorIntoView()` scrolls the viewport so the current cursor position is visible.
+Call it after programmatically moving the cursor to make sure the target position is on screen.
+
+```ts
+editor.moveCursorTo(targetPos);
+editor.scrollCursorIntoView();
+```
+
+---
+
+## Converting positions to screen coordinates
+
+`getViewportRect(from, to)` maps a doc-position range to a viewport-relative `DOMRect`.
+This is the primary way to position floating UI elements — menus, tooltips, link popovers —
+relative to the text.
+
+```ts
+const snap = editor.getSelectionSnapshot();
+const rect = editor.getViewportRect(snap.from, snap.to);
+
+if (rect) {
+  tooltipEl.style.top  = `${rect.bottom + 8}px`;
+  tooltipEl.style.left = `${rect.left}px`;
+}
+```
+
+Returns `null` when the positions are not in the character map (e.g. on an unrendered page)
+or when no rendering adapter is mounted.
+
+For a selected image node, use `getNodeViewportRect(docPos)` instead — it returns a rect
+covering the full visual bounds of the node:
+
+```ts
+const rect = editor.getNodeViewportRect(imageDocPos);
+if (rect) {
+  imageToolbar.style.top  = `${rect.bottom + 8}px`;
+  imageToolbar.style.left = `${rect.left}px`;
+}
+```
+
+---
+
+## Triggering and observing layout
+
+The layout engine runs automatically after every transaction. You rarely need to trigger it
+manually, but two methods are available when you do:
+
+### `ensureLayout()`
+
+Forces a synchronous layout pass if the current layout is stale. Normally triggered
+implicitly whenever you access `editor.layout`.
+
+```ts
+editor.ensureLayout();
+const layout = editor.layout; // guaranteed up-to-date
+```
+
+### `ensurePagePopulated(pageNumber)`
+
+Lays out and indexes a specific page, useful when you need accurate coordinates for a page
+that hasn't scrolled into view yet.
+
+```ts
+editor.ensurePagePopulated(5);
+const rect = editor.getViewportRect(posOnPage5, posOnPage5 + 1);
+```
+
+---
+
+## Forcing a repaint
+
+`redraw()` triggers a repaint without a document or selection change. Use it when external
+state changes affect the overlay — for example when collaborative cursor data updates.
+
+```ts
+editor.redraw();
+```
+
+---
+
+## Further reading
+
+<Cards>
+  <Card title="PageConfig reference" href="/api/types#pageconfig">
+    All fields and their defaults.
+  </Card>
+  <Card title="Editor API — Viewport & Position" href="/api/editor#viewport--position">
+    Full reference for getViewportRect, scrollCursorIntoView, and related methods.
+  </Card>
+</Cards>

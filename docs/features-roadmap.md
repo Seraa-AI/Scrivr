@@ -1,12 +1,18 @@
 # Inscribe Features Roadmap
 
-Brainstorm of all features expected in a production-grade word processor. Grouped by area. Status column tracks what's done vs. planned.
+Production-grade word processor feature plan for Inscribe. Organised into three layers to prevent the common trap of spending weeks on performance while users still can't change line spacing.
 
 ---
 
-## Paste Quality
+## Layer 1 — Editing Quality
 
-### Google Docs Paste Fix
+*Day-to-day improvements users notice immediately. Ship these first — they determine whether the editor feels "real".*
+
+---
+
+### Paste Quality
+
+#### Google Docs Paste Fix
 
 **Status:** Planned
 
@@ -41,7 +47,7 @@ GDocs emits deeply nested `<span>` tags with inline styles. Raw PM DOMParser pro
 
 **Also handle:** Word/LibreOffice paste (similar issue — `mso-*` styles, `<o:p>` tags, Word-specific namespace junk). Same `cleanPastedHtml` hook, additional stripping rules.
 
-### Large Paste Optimization
+#### Large Paste Optimization
 
 **Status:** Not implemented
 
@@ -144,9 +150,48 @@ editor.subscribe(() => {
 
 ---
 
-## Paragraph Formatting
+### Text Formatting
 
-### Line Height
+#### Clear Formatting
+
+**Status:** Not implemented
+
+- Remove all marks from selection
+- Command: `clearFormatting()` → `state.tr.removeMark(from, to)` for every mark type in schema
+- Keyboard: Ctrl+\\ (standard in Google Docs / Word)
+
+*Ship this early — the paste → clear formatting → reformat workflow is the first thing users try after pasting from GDocs.*
+
+#### Format Painter
+
+**Status:** Not implemented
+
+- Copy the marks at the cursor position
+- Next selection gets those marks applied
+- Two modes: single-use (click once) and persistent (double-click — keep painting until Escape)
+- Store copied marks in editor state or a component-level ref
+
+#### Font Size (fine-grained)
+**Status:** Done (FontSize extension exists)
+
+#### Text Color / Highlight
+**Status:** Done
+
+#### Superscript / Subscript
+
+**Status:** Not implemented
+
+- New marks: `superscript`, `subscript`
+- `resolveFont` applies size reduction (0.65×) and vertical offset
+- Commands: `toggleSuperscript`, `toggleSubscript`
+- Keyboard: Ctrl+Shift+= / Ctrl+=
+
+---
+
+### Paragraph Formatting
+
+#### Line Height
+
 **Status:** Not implemented
 
 Line height is currently baked into font metrics (ascent + descent + leading). Users expect a "line spacing" control (1.0, 1.15, 1.5, 2.0, or exact px).
@@ -157,7 +202,8 @@ Line height is currently baked into font metrics (ascent + descent + leading). U
 - UI: dropdown with presets (Single / 1.15 / 1.5 / Double / Custom)
 - Command: `setLineHeight(value: number)`
 
-### Space Before / Space After
+#### Space Before / Space After
+
 **Status:** Not implemented (hard-coded in `BlockStyle`)
 
 `spaceBefore` and `spaceAfter` are currently static values contributed by extensions via `addBlockStyles()`. Users need per-paragraph control.
@@ -167,7 +213,8 @@ Line height is currently baked into font metrics (ascent + descent + leading). U
 - UI: "Paragraph spacing" section in a format panel
 - Command: `setSpacing({ before?: number, after?: number })`
 
-### First-Line Indent / Hanging Indent
+#### First-Line Indent / Hanging Indent
+
 **Status:** Not implemented
 
 - Add `indent` (left indent, in px or pt) and `firstLineIndent` attributes to paragraph
@@ -175,7 +222,8 @@ Line height is currently baked into font metrics (ascent + descent + leading). U
 - Hanging indent = positive `indent` + negative `firstLineIndent`
 - Already implied by list item rendering — generalize to all blocks
 
-### Indentation (Block Level)
+#### Indentation (Block Level)
+
 **Status:** Partially done (list items use MARKER_RIGHT_GAP)
 
 - `Indent` / `Outdent` commands for paragraphs (increase/decrease left margin by a tab stop, e.g. 36px)
@@ -183,59 +231,7 @@ Line height is currently baked into font metrics (ascent + descent + leading). U
 
 ---
 
-## Ruler
-
-**Status:** Not implemented
-
-The horizontal ruler is a DOM overlay (not canvas) above the page — it shows:
-- Page margin boundaries (grayed-out non-content zones)
-- Left indent marker (triangle pointing down)
-- First-line indent marker (triangle pointing up, stacked on left indent)
-- Right indent marker
-- Tab stops (click to add, drag to move)
-
-**Plan:**
-- Render as a `<div>` positioned above the canvas, same width as the page
-- Listen for drag events on indent markers → dispatch `setIndent`/`setFirstLineIndent` transactions
-- Tab stop markers → `addTabStop` / `removeTabStop` commands (tab stops also need layout engine support)
-- Synchronize with cursor position — ruler shows indent values of the paragraph the cursor is in
-
----
-
-## Text Formatting
-
-### Clear Formatting
-**Status:** Not implemented
-
-- Remove all marks from selection
-- Command: `clearFormatting()` → `state.tr.removeMark(from, to)` for every mark type in schema
-- Keyboard: Ctrl+\\ (standard in Google Docs / Word)
-
-### Format Painter
-**Status:** Not implemented
-
-- Copy the marks at the cursor position
-- Next selection gets those marks applied
-- Two modes: single-use (click once) and persistent (double-click — keep painting until Escape)
-- Store copied marks in editor state or a component-level ref
-
-### Font Size (fine-grained)
-**Status:** Done (FontSize extension exists)
-
-### Text Color / Highlight
-**Status:** Done
-
-### Superscript / Subscript
-**Status:** Not implemented
-
-- New marks: `superscript`, `subscript`
-- `resolveFont` applies size reduction (0.65×) and vertical offset
-- Commands: `toggleSuperscript`, `toggleSubscript`
-- Keyboard: Ctrl+Shift+= / Ctrl+=
-
----
-
-## Find & Replace
+### Find & Replace
 
 **Status:** Not implemented
 
@@ -249,73 +245,11 @@ Must-have for any word processor.
 
 ---
 
-## Page Setup
-
-### Page Margins
-**Status:** Hard-coded in `PageLayout` (`margins` object)
-
-- Add margin settings (top, bottom, left, right) to document-level attrs or a `PageSettings` extension
-- `PageLayout` reads from doc attrs instead of constants
-- UI: Page Setup dialog or drag-able margin lines on the ruler
-
-### Page Size / Orientation
-**Status:** Hard-coded (A4 / Letter)
-
-- Add `pageSize: "A4" | "Letter" | "Legal" | "Custom"` and `orientation: "portrait" | "landscape"` to doc attrs
-- `PageLayout` derives `pageWidth`/`pageHeight` from these
-- Affects canvas size too — `ViewManager` must resize canvases
-
-### Page Numbering
-**Status:** Partially done (page count displayed in demo UI)
-
-- `{PAGE}` / `{PAGES}` fields in headers/footers (see below)
-- "Start at" setting, Roman numerals option
-
----
-
-## Headers and Footers
+### Zoom
 
 **Status:** Not implemented
 
-Repeating content drawn at the top/bottom of every page.
-
-- Add a `header` and `footer` PM node (document-level, not part of the flow content)
-- `PageLayout` reserves `headerHeight` / `footerHeight` from page margins
-- `PageRenderer` draws header/footer on every page using a separate layout pass
-- Headers/footers can contain: text, page number fields `{PAGE}`, `{PAGES}`, images, alignment
-- "Different first page" and "different odd/even" options
-
----
-
-## Comments / Annotations
-
-**Status:** Not implemented
-
-Inline comments visible in a sidebar.
-
-- `comment` mark with `id`, `authorId`, `createdAt` attrs (similar to `trackChange` mark)
-- Comment thread stored outside the doc (in Y.js awareness or a separate data structure)
-- Sidebar panel: shows threads sorted by doc position
-- Canvas overlay: draws a bracket or highlight for the commented range
-
----
-
-## Table of Contents
-
-**Status:** Not implemented
-
-Auto-generated from heading nodes.
-
-- `toc` node — a leaf block that re-renders based on the current heading structure
-- `updateToc()` command — scans `doc.descendants()` for heading nodes, builds entries with dotted leaders and page numbers
-- Page numbers come from `CharacterMap.posAtPage()` — heading nodePos → page
-- Manual update (button) first; auto-update on each render is too expensive
-
----
-
-## Zoom
-
-**Status:** Not implemented
+Affects perceived quality for long contracts and dense documents immediately — even if everything else works, the editor feels unfinished without it.
 
 - `zoom` factor (0.5–2.0) stored in editor state (not doc)
 - Affects canvas CSS `transform: scale(zoom)` or canvas pixel dimensions
@@ -324,7 +258,7 @@ Auto-generated from heading nodes.
 
 ---
 
-## Word Count
+### Word Count
 
 **Status:** Not implemented
 
@@ -334,45 +268,25 @@ Auto-generated from heading nodes.
 
 ---
 
-## Spell Check
+### Spell Check
 
 **Status:** Not implemented (browser native doesn't work on canvas)
 
-- Canvas editors lose browser spell-check because text is not in a `contenteditable`
-- Options:
-  1. **Browser API:** `Intl.Segmenter` + dictionary lookup (heavy, offline)
-  2. **Server-side:** Send words to a spell-check endpoint, receive error ranges
-  3. **`typo.js` or similar WASM dict:** runs client-side, no server needed
-- Render: red squiggly underline via `decoratePost` in a `SpellCheck` mark decorator
+Canvas editors lose browser spell-check because text is not in a `contenteditable`. Options:
+
+1. **Browser API:** `Intl.Segmenter` + dictionary lookup (heavy, offline)
+2. **Server-side:** Send words to a spell-check endpoint, receive error ranges
+3. **`typo.js` or similar WASM dict:** runs client-side, no server needed
+
+Render: red squiggly underline via `decoratePost` in a `SpellCheck` mark decorator.
 
 ---
 
-## Export
-
-### PDF
-**Status:** Shell exists (`@inscribe/export`)
-
-- Wire `PageRenderer` output into a PDF library (jsPDF or pdf-lib)
-- Each page → canvas → `toDataURL('image/png')` → embed in PDF
-- Preserve text layer for searchability (needs pdf-lib text API)
-
-### DOCX
-**Status:** Stub
-
-- Use `docx` npm package (pure JS, no server)
-- Walk PM doc → emit DOCX XML nodes
-- Handles: paragraphs, headings, bold/italic/underline, lists, images, tables (once implemented)
-
-### Markdown
-**Status:** Done (MarkdownSerializer exists)
-
----
-
-## Context Menu
+### Context Menu
 
 **Status:** Not implemented
 
-Right-click on the canvas should show a context-sensitive menu. This is a fundamental expectation — users instinctively right-click when they don't know where a command lives.
+Right-click on the canvas should show a context-sensitive menu.
 
 **What it needs to show (context-sensitive):**
 
@@ -410,7 +324,7 @@ Right-click on the canvas should show a context-sensitive menu. This is a fundam
 
 ---
 
-## Editing Quality
+### Editing Quality
 
 | Feature | Status | Notes |
 |---|---|---|
@@ -428,11 +342,453 @@ Right-click on the canvas should show a context-sensitive menu. This is a fundam
 
 ---
 
+## Layer 2 — Document Professional Features
+
+*What makes Inscribe usable for legal and professional documents. These make the difference between a demo editor and a production tool.*
+
 ---
 
-## Rendering Architecture
+### Ruler
 
-### Rotating Canvas Pool (Virtual Scrolling V2)
+**Status:** Not implemented
+
+The horizontal ruler is a DOM overlay (not canvas) above the page — it shows:
+- Page margin boundaries (grayed-out non-content zones)
+- Left indent marker (triangle pointing down)
+- First-line indent marker (triangle pointing up, stacked on left indent)
+- Right indent marker
+- Tab stops (click to add, drag to move)
+
+**Plan:**
+- Render as a `<div>` positioned above the canvas, same width as the page
+- Listen for drag events on indent markers → dispatch `setIndent`/`setFirstLineIndent` transactions
+- Tab stop markers → `addTabStop` / `removeTabStop` commands (tab stops also need layout engine support)
+- Synchronize with cursor position — ruler shows indent values of the paragraph the cursor is in
+
+---
+
+### Page Setup
+
+#### Page Margins
+
+**Status:** Hard-coded in `PageLayout` (`margins` object)
+
+- Add margin settings (top, bottom, left, right) to document-level attrs or a `PageSettings` extension
+- `PageLayout` reads from doc attrs instead of constants
+- UI: Page Setup dialog or drag-able margin lines on the ruler
+
+#### Page Size / Orientation
+
+**Status:** Hard-coded (A4 / Letter)
+
+- Add `pageSize: "A4" | "Letter" | "Legal" | "Custom"` and `orientation: "portrait" | "landscape"` to doc attrs
+- `PageLayout` derives `pageWidth`/`pageHeight` from these
+- Affects canvas size too — `ViewManager` must resize canvases
+
+#### Page Numbering
+
+**Status:** Partially done (page count displayed in demo UI)
+
+- `{PAGE}` / `{PAGES}` fields in headers/footers (see below)
+- "Start at" setting, Roman numerals option
+
+---
+
+### Headers and Footers
+
+**Status:** Not implemented
+
+Repeating content drawn at the top/bottom of every page.
+
+- Add a `header` and `footer` PM node (document-level, not part of the flow content)
+- `PageLayout` reserves `headerHeight` / `footerHeight` from page margins
+- `PageRenderer` draws header/footer on every page using a separate layout pass
+- Headers/footers can contain: text, page number fields `{PAGE}`, `{PAGES}`, images, alignment
+- "Different first page" and "different odd/even" options
+
+---
+
+### Automatic Clause / Section Numbering
+
+**Status:** Not implemented
+
+**Why this matters for legal:** Legal documents use deeply nested numbering conventions that are impossible to manage manually — clauses are renumbered when sections are inserted, deleted, or reordered. Word processors handle this automatically; Inscribe must too.
+
+**Numbering formats required:**
+
+| Style | Example |
+|---|---|
+| Decimal | 1. / 1.1 / 1.1.1 |
+| Legal outline | 1. / A. / i. / (a) |
+| Alphabetic | A. / B. / C. |
+| Roman | I. / II. / III. |
+| Custom | ARTICLE 1 / Section 1.1 |
+
+**Model:**
+
+Clause numbering is a document-level feature, not a per-paragraph attribute. The numbering is computed from the heading structure on each render — it is not stored in node attributes.
+
+```typescript
+// Document-level plugin state
+interface NumberingConfig {
+  style: 'decimal' | 'legal' | 'alpha' | 'roman';
+  levels: number;         // how many nesting levels to number (1–6)
+  separator: string;      // '.' for decimal, ')' for (a) style
+  prefix?: string;        // 'ARTICLE' for ARTICLE 1 style
+  autoRestart: boolean;   // restart counters when a higher level is seen
+}
+```
+
+**Implementation plan:**
+
+1. **`NumberingPlugin`** — a ProseMirror plugin that walks the doc on each state change, counts headings by level, and stores the computed labels in plugin state:
+   ```typescript
+   // Walk doc.descendants() — heading nodes at level N increment counter[N-1]
+   // and reset all counters for N+1 through max
+   // Output: Map<nodePos, label> e.g. { 5 → "1.2.3" }
+   ```
+
+2. **Canvas rendering** — `HeadingStrategy` reads the numbering plugin state and prepends the label to the rendered text. This avoids storing numbers in the doc (so they don't appear in JSON exports raw) while keeping the canvas display in sync.
+
+3. **PDF export** — the computed label is included in the pdf-lib text draw call alongside the heading text.
+
+4. **Commands:**
+   ```typescript
+   editor.commands.setNumberingStyle(config: NumberingConfig): boolean
+   editor.commands.clearNumbering(): boolean
+   editor.commands.setNumberingStart(level: number, start: number): boolean // manual override
+   ```
+
+5. **UI:** A "Numbering" panel in the format toolbar. Level-by-level configuration is advanced — ship single-style doc-level numbering first, per-level config later.
+
+---
+
+### Track Changes
+
+**Status:** Substantially complete — engine, rendering, and AI pipeline are production-ready
+
+Track Changes is one of the most critical features for legal document workflows. Legal professionals collaborate by redlining — insertions and deletions must be visible and attributable.
+
+**What's done:**
+
+The `TrackChanges` extension in `@inscribe/plugins` is far more complete than a typical "in progress" plugin:
+
+- **Schema** — `tracked_insert` and `tracked_delete` marks with `excludes: ""` so multiple authors can stack their marks on the same text segment without collision
+- **8 tracked operations** — `insert`, `delete`, `set_node_attributes`, `wrap_with_node`, `node_split`, `reference`, `move`, `structure`
+- **All PM step types handled** — `ReplaceStep`, `AttrStep`, `AddMarkStep`, `RemoveMarkStep`, and node-mark variants (only `ReplaceAroundStep` for lift/wrap deferred)
+- **Multi-author support** — mark stacking via `excludes: ""` means author A's delete and author B's insert can coexist on the same text; each carries its own `authorID`
+- **Conflict detection** — `findChanges()` computes `isConflict: true` at read-time for two pending changes from different authors that overlap with opposing operations; this is not mutated on the marks, computed fresh each render
+- **Accept / Reject** — two-pass `applyChanges()` handles text, node attributes, and move operations; `setChangeStatuses(status, ids)` command accepts an array of IDs
+- **Canvas rendering** — `onEditorReady` registers an overlay handler that draws inserts in a 6-shade green family (rotated by author ID hash), deletes in a 6-shade red family, and conflicts in amber (rendered on top); deduplicates when two authors share the same pixel
+- **Conflict popover** — headless `createChangePopover(editor, callbacks)` controller fires `onShow(rect, info)`, `onMove`, and `onHide`. `info.conflictChanges` carries all overlapping parties so the React layer can render per-author accept/reject buttons
+- **AI suggestion pipeline** — `insertAsSuggestion(text, from, to, authorID)` and `applyDiffAsSuggestion({ nodeId, proposedText, authorID })` insert AI edits as tracked changes using a legal-aware LCS tokenizer with character-level refinement and `groupId` pairing so delete + insert pairs can be accepted/rejected atomically
+- **`ChangeSet` API** — `changeSet.changes`, `.pending`, `.groupChanges`, `.changeTree`, `.get(id)`, `.hasDuplicateIds`, `.hasInconsistentData`
+
+Configuration:
+```typescript
+TrackChanges.configure({
+  initialStatus: 'tracking' | 'accepting' | 'off',
+  userID: string,
+  canAcceptReject: boolean,
+  skipTrsWithMetas: (PluginKey | string)[],
+})
+```
+
+Commands: `setTrackingStatus(status?)`, `setChangeStatuses(status, ids)`, `setTrackChangesUserID(userID)`, `refreshChanges()`, `insertAsSuggestion(text, from, to, authorID)`
+
+**What's still needed:**
+
+1. **Review panel UI (React)** — `ChangeSet` provides all the data; the sidebar component itself (list of changes sorted by doc position, author avatars, timestamps, accept/reject buttons, "accept all" shortcut) needs to be built in the React layer. The headless popover controller is already wired — this is a UI-only task.
+
+2. **Batch accept / reject commands** — `setChangeStatuses` supports an array of IDs but there is no `acceptAllChanges()` / `rejectAllChanges()` convenience command yet. Trivial to add.
+
+3. **Move operation canvas rendering** — move changes are tracked and linked via `moveNodeId` but the canvas overlay does not yet render them distinctly from inserts/deletes.
+
+4. **`ReplaceAroundStep` tracking** — lift and wrap operations (e.g. promoting a paragraph into a list) are deferred; they will need a dedicated handler.
+
+5. **Table cell tracking** — will need integration once tables are implemented.
+
+6. **`filterTransaction` composability with Block-Level Access Control** — when both plugins are active, locked blocks must block edits regardless of whether tracking is on. The two `filterTransaction` hooks must be ordered correctly (locking runs first).
+
+---
+
+### Defined Terms / Term Highlighting
+
+**Status:** Not implemented
+
+**Why this matters for legal:** Legal documents define terms once (e.g. `"Effective Date" means...`) and reference them throughout. Today, a drafter has no way to know if a defined term is used inconsistently, undefined, or defined but never referenced. This is a source of legal error and costly negotiation.
+
+**Phase 1 — Term detection and highlighting:**
+
+- User marks a span as a "defined term" via a command or context menu item
+- `DefinedTerm` mark stored with `{ term: string, id: string }` attrs
+- Canvas: defined terms rendered with a subtle dotted underline (different from regular underline)
+- All uses of the same term string (case-insensitive) highlighted automatically via a ProseMirror `DecorationSet`
+
+```typescript
+// Example usage:
+editor.commands.defineterm('Effective Date');
+// → all occurrences of "Effective Date" in the doc get a DefinedTermRef decoration
+```
+
+**Phase 2 — Term consistency validation:**
+
+- A `getDefinedTerms()` method returns all terms with definition count and reference count
+- If a term is defined but never referenced → warn
+- If a term is referenced but not defined → warn
+- If a term is defined more than once → error
+- Surface warnings in a sidebar panel
+
+**Phase 3 — Navigation:**
+
+- Click a term reference → jump to its definition
+- "Find all uses" from the definition → shows all references in a list
+- "Rename term" → updates definition and all references in one transaction
+
+**Schema:**
+
+```typescript
+// Mark for the authoritative definition site
+definedTermDef: { attrs: { term: string, id: string } }
+
+// Decoration (not a mark) for reference sites — so references don't enter the doc model
+// They are recomputed from plugin state on every render
+```
+
+---
+
+### Block-Level Access Control (Read-Only Ranges)
+
+**Status:** Not implemented
+
+**The problem:** Legal documents are not uniformly editable. A contract template has boilerplate clauses that must stay locked (firm's standard terms, liability caps, governing law) alongside editable fields (party names, dates, deal-specific terms). Today, Inscribe treats the entire document as a single editable surface — there is no way to mark a paragraph or range as read-only while keeping the rest editable.
+
+**Model:**
+
+Locked ranges are stored as node attributes so they persist in the JSON doc and sync across Yjs sessions.
+
+```typescript
+// Add to all block nodes:
+attrs: {
+  locked: { default: false },
+  lockedBy: { default: null }, // optional: userId who locked it
+}
+```
+
+**Implementation plan:**
+
+1. **ProseMirror plugin — transaction filter:**
+   ```typescript
+   filterTransaction(tr, state) {
+     if (tr.getMeta('bypass-lock')) return true; // escape hatch for programmatic edits
+     for (const step of tr.steps) {
+       const { from, to } = step;
+       state.doc.nodesBetween(from, to, (node) => {
+         if (node.attrs['locked']) return false; // block the transaction
+       });
+     }
+     return true;
+   }
+   ```
+
+2. **Visual indicator** — locked blocks draw a subtle background tint (`rgba(0,0,0,0.03)`) and a 2px grey left border stripe so users can see which regions are locked at a glance.
+
+3. **Cursor feedback** — the caret appears in locked blocks (read selection is allowed) but renders grey instead of black. Keyboard input is silently swallowed.
+
+4. **Commands:**
+   ```typescript
+   editor.commands.lockBlock(pos: number): boolean
+   editor.commands.unlockBlock(pos: number): boolean
+   editor.commands.lockSelection(): boolean
+   editor.commands.unlockAll(): boolean
+   ```
+
+5. **Template authoring vs. filling — two modes:**
+   ```typescript
+   editor.commands.setEditMode('author')  // all blocks editable, can toggle locked attr
+   editor.commands.setEditMode('fill')    // locked blocks enforced, free blocks editable
+   ```
+   In `fill` mode, the lock/unlock commands are disabled and the toolbar hides irrelevant controls.
+
+6. **Track Changes integration:** Locked blocks also suppress track-changes transactions — no tracked insertions or deletions are permitted inside a locked range.
+
+**Inline locked fields (Phase 2):**
+
+Beyond block-level locking, legal templates often have inline placeholders: `[PARTY NAME]`, `[DATE]`. These need a dedicated `lockedField` inline node — a read-only text span that the user can only replace by accepting a structured value (from a form or data merge).
+
+**Sequencing:** Implement after Track Changes stabilises, as both use `filterTransaction` and must compose cleanly.
+
+---
+
+### Comments / Annotations
+
+**Status:** Not implemented
+
+Inline comments visible in a sidebar.
+
+- `comment` mark with `id`, `authorId`, `createdAt` attrs (similar to `trackChange` mark)
+- Comment thread stored outside the doc (in Y.js awareness or a separate data structure)
+- Sidebar panel: shows threads sorted by doc position
+- Canvas overlay: draws a bracket or highlight for the commented range
+
+---
+
+### Table of Contents
+
+**Status:** Not implemented
+
+Auto-generated from heading nodes.
+
+- `toc` node — a leaf block that re-renders based on the current heading structure
+- `updateToc()` command — scans `doc.descendants()` for heading nodes, builds entries with dotted leaders and page numbers
+- Page numbers come from `CharacterMap.posAtPage()` — heading nodePos → page
+- Manual update (button) first; auto-update on each render is too expensive
+- When Clause Numbering is active, TOC entries include the computed numbering label
+
+---
+
+### Export
+
+#### PDF — Searchable Text Layer
+
+**Status:** Shell exists (`@inscribe/export`)
+
+Do not use the canvas raster path (`toDataURL → embed as image`) — that produces PDFs where text is baked into pixels: not selectable, not searchable, not court-submittable. Use pdf-lib's text API instead.
+
+Walk `DocumentLayout` (which already knows exactly where every glyph sits) and emit PDF text operations directly:
+
+```typescript
+import { PDFDocument } from 'pdf-lib';
+
+const pdfDoc = await PDFDocument.create();
+for (const page of layout.pages) {
+  const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
+  for (const block of page.blocks) {
+    for (const line of block.lines) {
+      for (const span of line.spans) {
+        if (span.kind !== 'text') continue;
+        pdfPage.drawText(span.text, {
+          x: pxToPt(span.x),
+          y: pdfPage.getHeight() - pxToPt(span.y), // flip y-axis
+          font: fontMap.get(span.resolvedFont)!,
+          size: pxToPt(span.fontSize),
+          color: rgb(span.color),
+        });
+      }
+    }
+  }
+}
+```
+
+Marks via pdf-lib drawing primitives:
+- Underline / Strikethrough → `pdfPage.drawLine(...)`
+- Highlight → `pdfPage.drawRectangle(...)` before the text span
+- Color → `color` option on `drawText`
+
+#### PDF Custom Font Embedding
+
+**Status:** Not implemented (canvas rasterizes glyphs — embedded fonts need separate pipeline)
+
+When the document uses a custom font (firm letterhead typeface, specific contract serif), the PDF must embed that font's outlines so text reflows identically when printed or opened on a machine without the font installed.
+
+```typescript
+import fontkit from '@pdf-lib/fontkit';
+
+const pdfDoc = await PDFDocument.create();
+pdfDoc.registerFontkit(fontkit);
+
+// Per unique font family:
+const fontBytes = await fontResolver('MyFont', 'normal', 'normal');
+if (fontBytes) {
+  const embeddedFont = await pdfDoc.embedFont(fontBytes);
+  fontMap.set('MyFont normal normal', embeddedFont);
+}
+```
+
+**API:**
+
+Phase 1 (standard fonts, fully searchable):
+```typescript
+exportToPdf(editor: Editor): Promise<Uint8Array>
+```
+
+Phase 2 (custom font embedding):
+```typescript
+exportToPdf(editor: Editor, options?: {
+  fontResolver?: (
+    family: string,
+    weight: 'normal' | 'bold',
+    style: 'normal' | 'italic',
+  ) => Promise<ArrayBuffer | null>;
+}): Promise<Uint8Array>
+```
+
+The `fontResolver` is called once per unique `(family, weight, style)` combination and the result is cached for the export. When it returns `null`, fall back to the nearest standard font (Helvetica / Times / Courier).
+
+**Implementation order:**
+1. Switch PDF path from canvas raster to pdf-lib text API — produces searchable PDFs with standard fonts
+2. Add `fontResolver` option — unlocks custom/branded typefaces
+3. Handle marks (underline, highlight, color) via pdf-lib drawing primitives
+4. Handle inline images via `pdfDoc.embedPng` / `pdfDoc.embedJpg`
+
+#### DOCX
+
+**Status:** Stub
+
+- Use `docx` npm package (pure JS, no server)
+- Walk PM doc → emit DOCX XML nodes
+- Handles: paragraphs, headings, bold/italic/underline, lists, images, tables (once implemented)
+
+#### Markdown
+
+**Status:** Done (MarkdownSerializer exists)
+
+---
+
+## Layer 3 — Engine & Performance
+
+*Invisible to users but critical for large documents. Don't spend time here while Layer 1 and 2 features are outstanding.*
+
+---
+
+### Rendering Architecture
+
+#### Frame-Synchronised Paint Pipeline (rAF scheduling)
+
+**Status:** Not implemented — but `CursorManager.resetSilent()` already anticipates it
+
+**What the current system already does well:**
+- `lastPaintedVersion !== layout.version` guard — content canvas only repaints when layout changes, not on every cursor blink
+- Overlay-only path on blink — cheap: `clearOverlay` + draw cursor, no text re-render
+- `CursorManager.resetSilent()` exists specifically for use inside a scheduled flush
+
+**The one remaining problem:** `update()` fires synchronously on every scroll event, every `setInterval` tick, every `editor.subscribe()` call. If 5 scroll events fire in a single 16ms frame, the content and overlay are repainted 5 times.
+
+**The fix — a one-line scheduler:**
+
+```typescript
+private frameRequested = false;
+
+private scheduleFrame = (): void => {
+  if (this.frameRequested) return;
+  this.frameRequested = true;
+  requestAnimationFrame(() => {
+    this.frameRequested = false;
+    this.update(); // existing update() runs here, unchanged
+  });
+};
+```
+
+Then replace every `this.update()` call-site with `this.scheduleFrame()`. `update()` itself doesn't change at all.
+
+**What you'll notice after this change:**
+- Scroll on a 100-page doc: 1 paint per frame instead of up to 10
+- Fast typing: coalesces rapid dispatch calls into one repaint
+- Safari: significant improvement (Safari's `setInterval` fires more aggressively than Chrome's)
+
+**Implementation size:** ~15 lines of new code, 4 call-site changes. Low risk, high payoff. Implement before the rotating canvas pool since the pool assumes frame-synchronised painting for flicker-free rotation.
+
+#### Rotating Canvas Pool (Virtual Scrolling V2)
 
 **Status:** Optional — current approach is already virtualized
 
@@ -455,111 +811,39 @@ For a 120-page document, the current approach has **120 wrapper divs + ~8–12 l
 
 **When it matters:** Documents with 500+ pages where the 500 wrapper divs measurably affect layout performance. Below that, the current approach is indistinguishable from a pool.
 
-**Real bottleneck today** is not DOM size — it was the layout engine (fixed with the rAF batching + chunked layout work). Measure before switching.
-
-**If we do implement it, the key changes are:**
-
-1. Replace `flex` layout with a `spacer` div that sets total scroll height:
-   ```typescript
-   spacer.style.height = `${pages.length * (pageHeight + gap)}px`;
-   ```
-
-2. Pool creation at init — fixed N wrappers, all `position: absolute`:
-   ```typescript
-   for (let i = 0; i < MAX_CANVASES; i++) {
-     const entry = createPoolEntry();
-     pool.push(entry);
-     pagesContainer.appendChild(entry.wrapper);
-   }
-   ```
-
-3. Visible page calculation on scroll (sync, no observer):
-   ```typescript
-   const start = Math.max(1, Math.floor((scrollTop - overscan) / stride) + 1);
-   const end   = Math.min(totalPages, Math.ceil((scrollTop + viewportH + overscan) / stride));
-   ```
-
-4. On each scroll/update, return off-screen entries to pool, assign pool entries to new visible pages:
-   ```typescript
-   for (const [pageNum, entry] of activePages) {
-     if (!visibleSet.has(pageNum)) { pool.push(entry); activePages.delete(pageNum); }
-   }
-   for (const pageNum of visibleSet) {
-     if (!activePages.has(pageNum)) {
-       const entry = pool.pop()!;
-       assignEntryToPage(entry, pageNum);   // repositions the wrapper via translateY
-       activePages.set(pageNum, entry);
-     }
-   }
-   ```
-
-5. `getPageElement(page)` looks up `activePages.get(page)?.wrapper ?? null` instead of the per-page map.
-
-**Watch out for:** the `data-page` attribute on wrappers must be updated when reassigned — mouse events use it for page number resolution. And `editor.setPageElementLookup` must point to `activePages` instead of the old per-page map.
-
 **Recommendation:** Implement only if profiling shows DOM layout is the bottleneck for target document sizes. Defer until after Tables, Find & Replace, and line-height controls.
-
-### Frame-Synchronised Paint Pipeline (rAF scheduling)
-
-**Status:** Not implemented — but `CursorManager.resetSilent()` already anticipates it
-
-**What the current system already does well:**
-- `lastPaintedVersion !== layout.version` guard — content canvas only repaints when layout changes, not on every cursor blink
-- Overlay-only path on blink — cheap: `clearOverlay` + draw cursor, no text re-render
-- `CursorManager.resetSilent()` exists specifically for use inside a scheduled flush
-
-**The one remaining problem:** `update()` fires synchronously on every scroll event, every `setInterval` tick, every `editor.subscribe()` call. If 5 scroll events fire in a single 16ms frame, the content and overlay are repainted 5 times — the browser only shows the last one.
-
-**The fix — a one-line scheduler:**
-
-```typescript
-private frameRequested = false;
-
-private scheduleFrame = (): void => {
-  if (this.frameRequested) return;
-  this.frameRequested = true;
-  requestAnimationFrame(() => {
-    this.frameRequested = false;
-    this.update();        // existing update() runs here, unchanged
-  });
-};
-```
-
-Then replace every `this.update()` call-site with `this.scheduleFrame()`:
-- `editor.subscribe(() => this.scheduleFrame())`
-- `container.addEventListener("scroll", this.scheduleFrame)`
-- `observer` callback → `this.scheduleFrame()`
-
-`update()` itself doesn't change at all — the scheduler is purely additive.
-
-**Why this doesn't introduce ghost cursor:** The browser can't paint until the current JS turn completes. `dispatch()` → `scheduleFrame()` → `rAF` → `update()` → browser paints is equivalent to `dispatch()` → `update()` → browser paints from the user's perspective, because in both cases the canvas pixels are ready before the browser's next paint. The rAF just guarantees we don't repaint 5× per frame.
-
-**One subtlety with cursor blink:** `CursorManager.onTick()` calls `scheduleFrame()` (not `update()` directly). Since blink fires at 530ms intervals there's never more than one pending blink per frame — the `frameRequested` guard handles the coalescing transparently.
-
-**What you'll notice after this change:**
-- Scroll on a 100-page doc: 1 paint per frame instead of up to 10
-- Fast typing: coalesces rapid dispatch calls into one repaint
-- Canvas rotation (rotating pool): new page always shows fresh content, never stale pixels from previous page assignment
-- Safari: significant improvement (Safari's `setInterval` fires more aggressively than Chrome's)
-
-**Implementation size:** ~15 lines of new code, 4 call-site changes. Low risk, high payoff. Implement before the rotating canvas pool since the pool assumes frame-synchronised painting for flicker-free rotation.
 
 ---
 
 ## Sequencing Recommendation
 
-Priority order based on user impact:
+Priority order for Lexa (legal document editing focus):
 
-1. **GDocs paste fix** — high friction for any user coming from GDocs
-2. **Line height + space before/after** — core formatting, expected by every user
-3. **Find & Replace** — fundamental editing feature
-4. **Clear Formatting** — quick win, one command
-5. **Ruler + indent controls** — visual formatting, expected in any serious editor
-6. **Zoom** — usability for dense documents
-7. **Headers / Footers** — needed for professional documents
+**Layer 1 — Ship these first:**
+
+1. **GDocs paste fix** — high friction for any user coming from GDocs or Word
+2. **Clear formatting** — users immediately try paste → clear → reformat
+3. **Line height + space before/after** — paragraph spacing is how users judge editor quality
+4. **Find & Replace** — fundamental; lawyers search contracts constantly
+5. **Zoom** — psychological completeness for dense documents
+6. **Ruler + indent controls** — visual formatting expected in any serious editor
+7. **Headers / Footers + Page Numbering** — the moment page numbers work, the editor becomes "real"
 8. **Word Count** — small but expected
-9. **PDF export** (wire existing shell)
-10. **DOCX export**
-11. **Table of Contents**
-12. **Comments / Annotations**
-13. **Spell Check**
+
+**Layer 2 — Professional features (run in parallel where possible):**
+
+9. **PDF export — searchable text layer** (Phase 1: pdf-lib text API, standard fonts)
+10. **PDF custom font embedding** (Phase 2: `fontResolver` for firm typefaces)
+11. **Automatic Clause / Section Numbering** — the biggest missing legal-grade feature
+12. **Track Changes** — complete multi-author support and review panel; lawyers won't switch from Word without this
+13. **Block-Level Access Control** — after Track Changes stabilises; unlocks template workflows
+14. **Defined Terms / Term Highlighting** — differentiating feature; almost no editors do this
+15. **DOCX export** — required for interop with opposing counsel
+16. **Comments / Annotations**
+17. **Table of Contents**
+18. **Spell Check**
+
+**Layer 3 — Engine (only when profiling shows it's needed):**
+
+19. **rAF paint pipeline** — 15 lines, implement early for Safari; doesn't block anything
+20. **Rotating canvas pool** — only if 500+ page documents show DOM bottleneck
