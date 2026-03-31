@@ -13,17 +13,17 @@ Every editor instance relies on a layout schema to understand where to break lin
 
 ```ts title="PageConfig.d.ts"
 export interface PageConfig {
-  /** The total width of the canvas page (pixels) */
-  width: number;
-  /** The total height of the canvas page (pixels) */
-  height: number;
-  
-  /** Padding from the top of the canvas to the start of text (pixels) */
-  marginTop: number;
-  /** Padding from the bottom of the canvas before pagination triggers (pixels) */
-  marginBottom: number;
-  marginLeft: number;
-  marginRight: number;
+	/** The total width of the canvas page (pixels) */
+	width: number;
+	/** The total height of the canvas page (pixels) */
+	height: number;
+
+	/** Padding from the top of the canvas to the start of text (pixels) */
+	marginTop: number;
+	/** Padding from the bottom of the canvas before pagination triggers (pixels) */
+	marginBottom: number;
+	marginLeft: number;
+	marginRight: number;
 }
 ```
 
@@ -38,32 +38,34 @@ All values are in **world-space pixels** (`1px = 1 CSS pixel = 1/96th of an inch
 If you want to configure your editor to enforce an exact standard size, you compute the dimensions off 96 DPI:
 
 ### A4 Size
+
 - **Dimensions:** 8.27 × 11.69 inches
 - **Pixels (96 DPI):** 794 × 1123
 
 ```tsx
 const A4_CONFIG = {
-  width: 794,
-  height: 1123,
-  marginTop: 96,    // 1 inch physical margin
-  marginBottom: 96,
-  marginLeft: 96,
-  marginRight: 96,
+	width: 794,
+	height: 1123,
+	marginTop: 96, // 1 inch physical margin
+	marginBottom: 96,
+	marginLeft: 96,
+	marginRight: 96,
 };
 ```
 
 ### US Letter Size
+
 - **Dimensions:** 8.5 × 11.0 inches
 - **Pixels (96 DPI):** 816 × 1056
 
 ```tsx
 const LETTER_CONFIG = {
-  width: 816,
-  height: 1056,
-  marginTop: 96,
-  marginBottom: 96,
-  marginLeft: 96,
-  marginRight: 96,
+	width: 816,
+	height: 1056,
+	marginTop: 96,
+	marginBottom: 96,
+	marginLeft: 96,
+	marginRight: 96,
 };
 ```
 
@@ -74,15 +76,17 @@ const LETTER_CONFIG = {
 Pass the configuration object to the React adapter hook:
 
 ```tsx
-import { useCanvasEditor } from "@inscribe/react";
+import { useInscribeEditor } from "@inscribe/react";
 
 function App() {
-  const editor = useCanvasEditor({
-    extensions: [/* ... */],
-    pageConfig: LETTER_CONFIG, // Hardcode US Letter
-  });
+	const editor = useInscribeEditor({
+		extensions: [
+			/* ... */
+		],
+		pageConfig: LETTER_CONFIG, // Hardcode US Letter
+	});
 
-  return <Canvas editor={editor} />;
+	return <Inscribe editor={editor} />;
 }
 ```
 
@@ -94,17 +98,20 @@ If your application allows users to swap document profiles dynamically (e.g., cl
 
 ```ts
 function switchPageSize(editor) {
-  // Update the generic editor configuration
-  editor.setPageConfig(LETTER_CONFIG);
-  
-  // Explicitly dirty the engine tracking
-  editor.dirty = true;
-  
-  // Re-run PageLayout.ts and regenerate absolute character positions
-  editor.ensureLayout();
+	// Update the generic editor configuration
+	editor.setPageConfig(LETTER_CONFIG);
+
+	// Explicitly dirty the engine tracking
+	editor.dirty = true;
+
+	// Re-run PageLayout.ts and regenerate absolute character positions
+	editor.ensureLayout();
 }
 ```
 
 <Callout type="warn">
-  Modifying `pageConfig` dynamically triggers an immediate, full-document layout calculation via `ensureLayout()`. For documents spanning over 50+ pages, this may cause a perceptible framerate drop as every single block and character is re-measured against the new margins.
+	Modifying `pageConfig` dynamically triggers an immediate, full-document
+	layout calculation via `ensureLayout()`. For documents spanning over 50+
+	pages, this may cause a perceptible framerate drop as every single block and
+	character is re-measured against the new margins.
 </Callout>

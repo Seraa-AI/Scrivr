@@ -11,93 +11,120 @@ This example shows a production-ready document editor with a floating toolbar an
 ## The Component
 
 ```tsx title="DocumentEditor.tsx"
-import { useCanvasEditor, Canvas, BubbleMenu, SlashMenu, StarterKit } from '@inscribe/react';
-import { useEditorState } from '@inscribe/react';
-import { useCallback } from 'react';
+import {
+	useInscribeEditor,
+	Inscribe,
+	BubbleMenu,
+	SlashMenu,
+	StarterKit,
+} from "@inscribe/react";
+import { useInscribeState } from "@inscribe/react";
+import { useCallback } from "react";
 
-const STORAGE_KEY = 'inscribe-document';
+const STORAGE_KEY = "inscribe-document";
 
 function loadSavedDoc() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+	try {
+		const raw = localStorage.getItem(STORAGE_KEY);
+		return raw ? JSON.parse(raw) : null;
+	} catch {
+		return null;
+	}
 }
 
 export function DocumentEditor() {
-  const editor = useCanvasEditor({
-    extensions: [StarterKit],
+	const editor = useInscribeEditor({
+		extensions: [StarterKit],
 
-    onCreate: ({ editor }) => {
-      const saved = loadSavedDoc();
-      if (saved) editor.commands.setContent(saved);
-    },
+		onCreate: ({ editor }) => {
+			const saved = loadSavedDoc();
+			if (saved) editor.commands.setContent(saved);
+		},
 
-    onUpdate: ({ editor }) => {
-      const json = editor.getState().doc.toJSON();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(json));
-    },
-  });
+		onUpdate: ({ editor }) => {
+			const json = editor.getState().doc.toJSON();
+			localStorage.setItem(STORAGE_KEY, JSON.stringify(json));
+		},
+	});
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <Toolbar editor={editor} />
-      <div style={{ flex: 1, overflow: 'auto', background: '#f0f0f0' }}>
-        <Canvas editor={editor} style={{ minHeight: '100%' }} />
-        <BubbleMenu editor={editor}>
-          <FormatButtons editor={editor} />
-        </BubbleMenu>
-        <SlashMenu editor={editor} />
-      </div>
-    </div>
-  );
+	return (
+		<div
+			style={{
+				display: "flex",
+				flexDirection: "column",
+				height: "100vh",
+			}}>
+			<Toolbar editor={editor} />
+			<div style={{ flex: 1, overflow: "auto", background: "#f0f0f0" }}>
+				<Inscribe editor={editor} style={{ minHeight: "100%" }} />
+				<BubbleMenu editor={editor}>
+					<FormatButtons editor={editor} />
+				</BubbleMenu>
+				<SlashMenu editor={editor} />
+			</div>
+		</div>
+	);
 }
 
 // ── Toolbar ──────────────────────────────────────────────────────────────────
 
-function Toolbar({ editor }: { editor: ReturnType<typeof useCanvasEditor> }) {
-  const isBold = useEditorState({
-    editor,
-    selector: ({ editor }) => editor?.isActive('bold') ?? false,
-  });
-  const isItalic = useEditorState({
-    editor,
-    selector: ({ editor }) => editor?.isActive('italic') ?? false,
-  });
+function Toolbar({ editor }: { editor: ReturnType<typeof useInscribeEditor> }) {
+	const isBold = useInscribeState({
+		editor,
+		selector: ({ editor }) => editor?.isActive("bold") ?? false,
+	});
+	const isItalic = useInscribeState({
+		editor,
+		selector: ({ editor }) => editor?.isActive("italic") ?? false,
+	});
 
-  return (
-    <div style={{ padding: '8px 16px', borderBottom: '1px solid #ddd', display: 'flex', gap: 8 }}>
-      <button
-        onClick={() => editor?.commands.toggleBold()}
-        style={{ fontWeight: isBold ? 'bold' : 'normal' }}
-      >
-        B
-      </button>
-      <button
-        onClick={() => editor?.commands.toggleItalic()}
-        style={{ fontStyle: isItalic ? 'italic' : 'normal' }}
-      >
-        I
-      </button>
-      <button onClick={() => editor?.commands.setHeading({ level: 1 })}>H1</button>
-      <button onClick={() => editor?.commands.setHeading({ level: 2 })}>H2</button>
-      <button onClick={() => editor?.commands.toggleBulletList()}>• List</button>
-      <button onClick={() => editor?.commands.undo()}>↩ Undo</button>
-      <button onClick={() => editor?.commands.redo()}>↪ Redo</button>
-    </div>
-  );
+	return (
+		<div
+			style={{
+				padding: "8px 16px",
+				borderBottom: "1px solid #ddd",
+				display: "flex",
+				gap: 8,
+			}}>
+			<button
+				onClick={() => editor?.commands.toggleBold()}
+				style={{ fontWeight: isBold ? "bold" : "normal" }}>
+				B
+			</button>
+			<button
+				onClick={() => editor?.commands.toggleItalic()}
+				style={{ fontStyle: isItalic ? "italic" : "normal" }}>
+				I
+			</button>
+			<button onClick={() => editor?.commands.setHeading({ level: 1 })}>
+				H1
+			</button>
+			<button onClick={() => editor?.commands.setHeading({ level: 2 })}>
+				H2
+			</button>
+			<button onClick={() => editor?.commands.toggleBulletList()}>
+				• List
+			</button>
+			<button onClick={() => editor?.commands.undo()}>↩ Undo</button>
+			<button onClick={() => editor?.commands.redo()}>↪ Redo</button>
+		</div>
+	);
 }
 
-function FormatButtons({ editor }: { editor: ReturnType<typeof useCanvasEditor> }) {
-  return (
-    <>
-      <button onClick={() => editor?.commands.toggleBold()}>B</button>
-      <button onClick={() => editor?.commands.toggleItalic()}>I</button>
-      <button onClick={() => editor?.commands.toggleUnderline()}>U</button>
-    </>
-  );
+function FormatButtons({
+	editor,
+}: {
+	editor: ReturnType<typeof useInscribeEditor>;
+}) {
+	return (
+		<>
+			<button onClick={() => editor?.commands.toggleBold()}>B</button>
+			<button onClick={() => editor?.commands.toggleItalic()}>I</button>
+			<button onClick={() => editor?.commands.toggleUnderline()}>
+				U
+			</button>
+		</>
+	);
 }
 ```
 
@@ -107,6 +134,6 @@ function FormatButtons({ editor }: { editor: ReturnType<typeof useCanvasEditor> 
 
 - **`onCreate`** loads saved content from `localStorage` once after initialization.
 - **`onUpdate`** persists on every change. In production, debounce this or send to a backend API.
-- **`useEditorState`** makes the toolbar reactive without re-rendering the entire component on
+- **`useInscribeState`** makes the toolbar reactive without re-rendering the entire component on
   every keypress.
 - **`BubbleMenu`** and **`SlashMenu`** are dropped in as standalone components — no wiring needed.

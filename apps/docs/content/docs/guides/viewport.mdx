@@ -4,7 +4,7 @@ description: Configuring page dimensions, the virtual scroll window, and program
 ---
 
 Inscribe renders the document as a sequence of fixed-size pages inside a scrollable container.
-The `<Canvas />` component manages this layout automatically through `ViewManager`.
+The `<Inscribe />` component manages this layout automatically through `ViewManager`.
 
 ---
 
@@ -12,7 +12,7 @@ The `<Canvas />` component manages this layout automatically through `ViewManage
 
 Each page in the `DocumentLayout` corresponds to a DOM `<div>` element sized to
 `pageConfig.width × pageConfig.height`. These `<div>` elements are stacked vertically inside
-the `<Canvas />` container, separated by the `gap` value.
+the `<Inscribe />` container, separated by the `gap` value.
 
 The canvas for each page sits at `position: absolute` inside its wrapper. Inscribe uses an
 `IntersectionObserver` to track which pages are visible and only paints those (plus overscan).
@@ -38,13 +38,13 @@ The canvas for each page sits at `position: absolute` inside its wrapper. Inscri
 Page dimensions are set via `pageConfig`. A5 landscape example:
 
 ```ts
-const editor = useCanvasEditor({
-  extensions: [StarterKit],
-  pageConfig: {
-    width: 794,     // A5 landscape px at 96 DPI
-    height: 559,
-    margin: { top: 72, right: 72, bottom: 72, left: 72 },
-  },
+const editor = useInscribeEditor({
+	extensions: [StarterKit],
+	pageConfig: {
+		width: 794, // A5 landscape px at 96 DPI
+		height: 559,
+		margin: { top: 72, right: 72, bottom: 72, left: 72 },
+	},
 });
 ```
 
@@ -54,10 +54,10 @@ See [Customizing Page Appearance](/docs/guides/nodes/styling) for a full DPI ref
 
 ## Gap Between Pages
 
-Control the visual gap between pages with the `gap` prop on `<Canvas />`:
+Control the visual gap between pages with the `gap` prop on `<Inscribe />`:
 
 ```tsx
-<Canvas editor={editor} gap={40} />  {/* 40px between pages */}
+<Inscribe editor={editor} gap={40} />  {/* 40px between pages */}
 ```
 
 Default is `24px`. This gap is purely visual — it does not affect layout or pagination.
@@ -70,7 +70,7 @@ Default is `24px`. This gap is purely visual — it does not affect layout or pa
 Increase `overscan` if users report flickering or blank pages during fast scrolling:
 
 ```tsx
-<Canvas editor={editor} overscan={1000} />
+<Inscribe editor={editor} overscan={1000} />
 ```
 
 Default is `500px`. Higher values keep more pages painted (smoother fast-scroll, more GPU usage).
@@ -91,7 +91,10 @@ editor.moveCursorTo(targetPosition);
 To manually scroll the container to a pixel offset:
 
 ```ts
-const container = document.querySelector('.my-editor') as HTMLElement;
+const container = document.querySelector(".my-editor") as HTMLElement;
 const scrollParent = container.closest('[style*="overflow"]') ?? container;
-scrollParent.scrollTo({ top: pageNumber * (pageHeight + gap), behavior: 'smooth' });
+scrollParent.scrollTo({
+	top: pageNumber * (pageHeight + gap),
+	behavior: "smooth",
+});
 ```

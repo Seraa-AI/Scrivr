@@ -21,7 +21,9 @@ When you use the `<canvas>` API's `measureText()` method, the browser measures t
 Because Inscribe's custom layout engine (`PageLayout.ts`) permanently absolute-positions every character and line break based on these initial measurements, your text layout will be completely corrupted once the custom font finally loads.
 
 <Callout type="warn">
-  Never initialize the editor or call `useCanvasEditor` until you can guarantee your application's fonts are fully loaded and ready in the browser.
+	Never initialize the editor or call `useInscribeEditor` until you can
+	guarantee your application's fonts are fully loaded and ready in the
+	browser.
 </Callout>
 
 ---
@@ -34,30 +36,30 @@ The most robust way to sidestep this issue in a web environment is to wrap your 
 
 ```tsx title="EditorWrapper.tsx"
 import { useState, useEffect } from "react";
-import { useCanvasEditor } from "@inscribe/react";
+import { useInscribeEditor } from "@inscribe/react";
 import { Editor } from "./Editor";
 
 export function EditorWrapper() {
-  const [fontsLoaded, setFontsLoaded] = useState(false);
+	const [fontsLoaded, setFontsLoaded] = useState(false);
 
-  useEffect(() => {
-    // Wait for all custom fonts declared in CSS/HTML to finish loading
-    document.fonts.ready.then(() => {
-      setFontsLoaded(true);
-    });
-  }, []);
+	useEffect(() => {
+		// Wait for all custom fonts declared in CSS/HTML to finish loading
+		document.fonts.ready.then(() => {
+			setFontsLoaded(true);
+		});
+	}, []);
 
-  // Display a fallback UI while fonts are downloading
-  if (!fontsLoaded) {
-    return (
-      <div className="flex items-center justify-center p-10">
-        <p className="text-gray-500 font-mono">Loading typography...</p>
-      </div>
-    );
-  }
+	// Display a fallback UI while fonts are downloading
+	if (!fontsLoaded) {
+		return (
+			<div className="flex items-center justify-center p-10">
+				<p className="text-gray-500 font-mono">Loading typography...</p>
+			</div>
+		);
+	}
 
-  // Safe to mount — TextMeasurer will have 100% accurate metrics
-  return <Editor />;
+	// Safe to mount — TextMeasurer will have 100% accurate metrics
+	return <Editor />;
 }
 ```
 
@@ -69,20 +71,22 @@ If you are building an advanced editor that allows users to change document font
 
 ```ts
 async function changeDocumentFont(editor, fontFamily, fontUrl) {
-  // 1. Fetch and register the new font
-  const font = new FontFace(fontFamily, `url(${fontUrl})`);
-  await font.load();
-  document.fonts.add(font);
+	// 1. Fetch and register the new font
+	const font = new FontFace(fontFamily, `url(${fontUrl})`);
+	await font.load();
+	document.fonts.add(font);
 
-  // 2. Update your EditorState or PageConfig with the new font family name
-  // ... (your state management here)
+	// 2. Update your EditorState or PageConfig with the new font family name
+	// ... (your state management here)
 
-  // 3. Mark the editor as dirty and force a full re-measure
-  editor.dirty = true;
-  editor.ensureLayout();
+	// 3. Mark the editor as dirty and force a full re-measure
+	editor.dirty = true;
+	editor.ensureLayout();
 }
 ```
 
 <Callout type="info">
-  When using `editor.ensureLayout()`, Inscribe re-runs `layoutDocument()` and `populateCharMap()`. This guarantees that the spatial index is updated with the new `measureText()` dimensions corresponding to your newly loaded font.
+	When using `editor.ensureLayout()`, Inscribe re-runs `layoutDocument()` and
+	`populateCharMap()`. This guarantees that the spatial index is updated with
+	the new `measureText()` dimensions corresponding to your newly loaded font.
 </Callout>
