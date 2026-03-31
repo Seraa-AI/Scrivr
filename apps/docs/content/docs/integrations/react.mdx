@@ -1,4 +1,175 @@
 ---
-title: React Hooks
-description: Complete reference for the @inscribe/react adapter hook system.
+title: React Integration
+description: Full reference for @inscribe/react — hooks, components, and contextual menus.
 ---
+
+`@inscribe/react` provides all React-specific bindings for Inscribe. It is the recommended way to
+use Inscribe in any React application.
+
+---
+
+## Installation
+
+<Tabs items={["pnpm", "npm", "yarn"]}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @inscribe/core @inscribe/react
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @inscribe/core @inscribe/react
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @inscribe/core @inscribe/react
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## `useCanvasEditor`
+
+Creates and manages an `Editor` instance tied to the React component lifecycle.
+
+```ts
+import { useCanvasEditor, StarterKit } from '@inscribe/react';
+
+const editor = useCanvasEditor(options, deps?);
+```
+
+Returns `Editor | null` — `null` on first render and during SSR. `<Canvas />` handles `null`
+gracefully by rendering nothing until the editor is ready.
+
+**Options:** See [`UseCanvasEditorOptions`](/docs/api/types#usecanvasoptions) for the full type.
+
+**Dependency array:** The optional second argument `deps` behaves like `useEffect` — when any
+dependency changes, the old editor is destroyed and a new one is created.
+
+```ts
+const editor = useCanvasEditor(
+  { extensions: [StarterKit] },
+  [documentId] // re-initialize when the document changes
+);
+```
+
+---
+
+## `<Canvas />`
+
+Mounts the rendering engine into a container `<div>`. Handles `ViewManager` construction,
+virtual scrolling, and cleanup automatically.
+
+```tsx
+import { Canvas } from '@inscribe/react';
+
+<Canvas
+  editor={editor}   // Editor | null from useCanvasEditor
+  gap={24}          // px between pages (default: 24)
+  overscan={500}    // virtual scroll overscan in px (default: 500)
+  className="my-editor"
+  style={{ height: '100vh' }}
+/>
+```
+
+**Props:** See [`CanvasProps`](/docs/api/types#canvasprops).
+
+---
+
+## `useEditorState`
+
+Subscribes to a specific slice of editor state. The component re-renders **only** when the
+selected value changes — prevents unnecessary re-renders on every keypress.
+
+```tsx
+import { useEditorState } from '@inscribe/react';
+
+const isBold = useEditorState({
+  editor,
+  selector: ({ editor }) => editor?.isActive('bold') ?? false,
+});
+
+const blockType = useEditorState({
+  editor,
+  selector: ({ editor }) => editor?.getSelectionSnapshot().blockType ?? 'paragraph',
+});
+```
+
+---
+
+## `BubbleMenu`
+
+Renders a floating menu that appears above the current text selection. Automatically positions
+itself using `editor.getViewportRect()`.
+
+```tsx
+import { BubbleMenu } from '@inscribe/react';
+
+<BubbleMenu editor={editor}>
+  <button onClick={() => editor?.commands.toggleBold()}>B</button>
+  <button onClick={() => editor?.commands.toggleItalic()}>I</button>
+</BubbleMenu>
+```
+
+The menu is hidden when the selection is collapsed (cursor only) and shown whenever there is a
+non-empty selection. Customize its show/hide logic via the `shouldShow` prop:
+
+```tsx
+<BubbleMenu
+  editor={editor}
+  shouldShow={({ editor }) => editor.isActive('paragraph')}
+>
+  {/* shown only when inside a paragraph */}
+</BubbleMenu>
+```
+
+---
+
+## `FloatingMenu`
+
+Similar to `BubbleMenu` but designed to appear at an empty block (slash menu trigger):
+
+```tsx
+import { FloatingMenu } from '@inscribe/react';
+
+<FloatingMenu editor={editor}>
+  <button onClick={() => editor?.commands.setHeading({ level: 1 })}>H1</button>
+  <button onClick={() => editor?.commands.toggleBulletList()}>List</button>
+</FloatingMenu>
+```
+
+---
+
+## `SlashMenu`
+
+A pre-built command palette activated by typing `/` in an empty block. Includes all `StarterKit`
+block types with labels, icons, and keyboard navigation.
+
+```tsx
+import { SlashMenu } from '@inscribe/react';
+
+<SlashMenu editor={editor} />
+```
+
+---
+
+## Other Frameworks
+
+Vue and Svelte adapters are planned. In the meantime, `@inscribe/core` is framework-agnostic —
+you can use the headless `Editor` class directly with any framework by managing `ViewManager`
+yourself:
+
+```ts
+// Framework-agnostic usage
+import { Editor, ViewManager, StarterKit } from '@inscribe/core';
+
+const editor = new Editor({ extensions: [StarterKit] });
+editor.mount(containerElement);
+const vm = new ViewManager(editor, containerElement);
+
+// on destroy:
+vm.destroy();
+editor.destroy();
+```

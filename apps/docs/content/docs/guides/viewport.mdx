@@ -1,4 +1,97 @@
 ---
-title: Viewport & Layout
-description: Controlling virtual scroll margins, gaps, and page dimensions.
+title: Viewport & Pagination
+description: Configuring page dimensions, the virtual scroll window, and programmatic scrolling.
 ---
+
+Inscribe renders the document as a sequence of fixed-size pages inside a scrollable container.
+The `<Canvas />` component manages this layout automatically through `ViewManager`.
+
+---
+
+## How Pages Are Displayed
+
+Each page in the `DocumentLayout` corresponds to a DOM `<div>` element sized to
+`pageConfig.width × pageConfig.height`. These `<div>` elements are stacked vertically inside
+the `<Canvas />` container, separated by the `gap` value.
+
+The canvas for each page sits at `position: absolute` inside its wrapper. Inscribe uses an
+`IntersectionObserver` to track which pages are visible and only paints those (plus overscan).
+
+```
+┌───── scroll container ──────┐
+│  ┌── page-wrapper (div) ──┐ │
+│  │  <canvas> content      │ │  ← PageRenderer
+│  │  <canvas> overlay      │ │  ← OverlayRenderer
+│  └────────────────────────┘ │
+│     ← gap (24px default) →  │
+│  ┌── page-wrapper (div) ──┐ │
+│  │  <canvas> content      │ │
+│  │  <canvas> overlay      │ │
+│  └────────────────────────┘ │
+└─────────────────────────────┘
+```
+
+---
+
+## Controlling Page Size
+
+Page dimensions are set via `pageConfig`. A5 landscape example:
+
+```ts
+const editor = useCanvasEditor({
+  extensions: [StarterKit],
+  pageConfig: {
+    width: 794,     // A5 landscape px at 96 DPI
+    height: 559,
+    margin: { top: 72, right: 72, bottom: 72, left: 72 },
+  },
+});
+```
+
+See [Customizing Page Appearance](/docs/guides/nodes/styling) for a full DPI reference table.
+
+---
+
+## Gap Between Pages
+
+Control the visual gap between pages with the `gap` prop on `<Canvas />`:
+
+```tsx
+<Canvas editor={editor} gap={40} />  {/* 40px between pages */}
+```
+
+Default is `24px`. This gap is purely visual — it does not affect layout or pagination.
+
+---
+
+## Virtual Scrolling & Overscan
+
+`ViewManager` only paints pages that intersect with the scroll viewport ± `overscan` pixels.
+Increase `overscan` if users report flickering or blank pages during fast scrolling:
+
+```tsx
+<Canvas editor={editor} overscan={1000} />
+```
+
+Default is `500px`. Higher values keep more pages painted (smoother fast-scroll, more GPU usage).
+
+---
+
+## Programmatic Scroll
+
+Inscribe automatically scrolls the cursor into view after every state change via
+`editor.scrollCursorIntoView()`. For custom scrolling (e.g. "go to page 3"), scroll the container:
+
+```ts
+// Scroll to a specific doc position
+editor.moveCursorTo(targetPosition);
+// editor.scrollCursorIntoView() is called automatically after moveCursorTo
+```
+
+To manually scroll the container to a pixel offset:
+
+```ts
+const container = document.querySelector('.my-editor') as HTMLElement;
+const scrollParent = container.closest('[style*="overflow"]') ?? container;
+scrollParent.scrollTo({ top: pageNumber * (pageHeight + gap), behavior: 'smooth' });
+```

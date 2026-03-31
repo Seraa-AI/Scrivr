@@ -1,4 +1,68 @@
 ---
-title: paragraph
-description: Configuration shape for the paragraph extension.
+title: Paragraph
+description: The default block node — plain text with optional alignment.
 ---
+
+The `paragraph` node is the default block type in Inscribe. Every document begins with an empty
+paragraph and new paragraphs are created on `Enter`.
+
+---
+
+## Schema
+
+| Property | Value |
+|---|---|
+| Node type | `paragraph` (block) |
+| Content | `inline*` — zero or more inline nodes (text, image) |
+| Attribute | `align` — `"left"` \| `"center"` \| `"right"` \| `"justify"` |
+| Markdown | `\n\n` (double newline) |
+
+---
+
+## Commands
+
+### `insertParagraph()`
+Splits the current block at the cursor, inserting a new empty paragraph below.
+Bound to `Enter` by default.
+
+```ts
+editor.commands.insertParagraph();
+```
+
+### `setAlignment(align)`
+Sets the text alignment of the paragraph containing the cursor.
+
+```ts
+editor.commands.setAlignment('center');
+editor.commands.setAlignment('justify');
+```
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `Enter` | Insert new paragraph |
+| `Mod-Shift-l` | Align left |
+| `Mod-Shift-e` | Align center |
+| `Mod-Shift-r` | Align right |
+| `Mod-Shift-j` | Justify |
+
+---
+
+## Detecting Active State
+
+```ts
+editor.isActive('paragraph');               // always true inside a paragraph
+editor.getSelectionSnapshot().blockType;    // 'paragraph'
+editor.getSelectionSnapshot().blockAttrs;   // { align: 'left' }
+```
+
+---
+
+## StarterKit Configuration
+
+```ts
+StarterKit.configure({ paragraph: false }) // remove paragraphs (not recommended)
+```

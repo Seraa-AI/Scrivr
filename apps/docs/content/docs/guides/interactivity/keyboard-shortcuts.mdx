@@ -1,4 +1,123 @@
 ---
 title: Keyboard Shortcuts
-description: The built-in modifier commands and overriding default hotkeys.
+description: Default key bindings and how to add or override shortcuts with custom extensions.
 ---
+
+Inscribe processes keyboard events through a merged keymap built from all active extensions.
+Shortcuts use the `Mod-` prefix for cross-platform compatibility — `Mod` maps to `Cmd` on macOS
+and `Ctrl` on Windows and Linux.
+
+---
+
+## Default Shortcuts (StarterKit)
+
+### Text Formatting
+
+| Shortcut | Action |
+|---|---|
+| `Mod-b` | Toggle **bold** |
+| `Mod-i` | Toggle *italic* |
+| `Mod-u` | Toggle underline |
+| `Mod-Shift-s` | Toggle ~~strikethrough~~ |
+| `Mod-Shift-h` | Toggle highlight |
+
+### Headings
+
+| Shortcut | Action |
+|---|---|
+| `Mod-Alt-1` | Toggle H1 |
+| `Mod-Alt-2` | Toggle H2 |
+| `Mod-Alt-3` | Toggle H3 |
+| `Mod-Alt-4` | Toggle H4 |
+| `Mod-Alt-5` | Toggle H5 |
+| `Mod-Alt-6` | Toggle H6 |
+
+### Alignment
+
+| Shortcut | Action |
+|---|---|
+| `Mod-Shift-l` | Align left |
+| `Mod-Shift-e` | Align center |
+| `Mod-Shift-r` | Align right |
+| `Mod-Shift-j` | Justify |
+
+### Lists
+
+| Shortcut | Action |
+|---|---|
+| `Tab` | Indent list item |
+| `Shift-Tab` | Outdent list item |
+| `Enter` | New list item / exit empty list |
+
+### Code Block
+
+| Shortcut | Action |
+|---|---|
+| `Mod-Alt-c` | Toggle code block |
+| `Tab` | Insert 2 spaces (inside code block) |
+
+### History
+
+| Shortcut | Action |
+|---|---|
+| `Mod-z` | Undo |
+| `Mod-Shift-z` | Redo |
+| `Mod-y` | Redo (Windows alias) |
+
+### Editing
+
+| Shortcut | Action |
+|---|---|
+| `Backspace` | Delete backwards |
+| `Delete` | Delete forwards |
+| `Enter` | Insert paragraph |
+
+---
+
+## Adding Custom Shortcuts
+
+Register keyboard shortcuts in the `addKeymap()` hook of a custom extension:
+
+```ts
+import { Extension } from '@inscribe/core';
+import { toggleMark } from 'prosemirror-commands';
+
+const MyExtension = Extension.create({
+  name: 'myExtension',
+
+  addKeymap() {
+    return {
+      'Mod-Shift-k': toggleMark(this.schema.marks.myMark!),
+      'Alt-Enter': (state, dispatch) => {
+        // custom command
+        return false; // return false to fall through to next handler
+      },
+    };
+  },
+});
+```
+
+---
+
+## Overriding Existing Shortcuts
+
+To override a default shortcut, create an extension whose `addKeymap()` returns the same key with
+a different handler. Extensions are processed in registration order; later registrations win:
+
+```ts
+const NoEnterSplit = Extension.create({
+  name: 'noEnterSplit',
+  addKeymap() {
+    return {
+      'Enter': () => true, // capture Enter and do nothing — prevents new paragraph
+    };
+  },
+});
+
+new Editor({ extensions: [StarterKit, NoEnterSplit] });
+```
+
+<Callout type="warn">
+  Overriding `Backspace` or `Delete` carelessly will prevent content deletion. Always call the
+  original command as a fallback using `chainCommands` from `prosemirror-commands`.
+</Callout>

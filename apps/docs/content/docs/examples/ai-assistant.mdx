@@ -1,4 +1,132 @@
 ---
-title: AI Assistant Toolkit
-description: Implement ghost text suggestions mapped directly over the canvas cursor.
+title: AI Assistant
+description: Integrate streaming AI writing assistance using Anthropic Claude and the Vercel AI SDK.
 ---
+
+This example adds an AI writing assistant panel to the editor. When the user highlights text,
+they can ask the AI to rewrite, expand, or summarize it.
+
+---
+
+## Required Packages
+
+```bash
+pnpm add @inscribe/plugins ai @ai-sdk/anthropic @ai-sdk/react
+```
+
+Set `ANTHROPIC_API_KEY` in your server environment.
+
+---
+
+## Server Route
+
+First, create a streaming API route. This example uses TanStack Start (the framework used by the
+Inscribe demo app), but the pattern works with Next.js, Remix, or any Node.js server.
+
+```ts title="src/routes/api/ai.ts"
+import { createAPIFileRoute } from '@tanstack/start/api';
+import { anthropic } from '@ai-sdk/anthropic';
+import { streamText } from 'ai';
+
+export const APIRoute = createAPIFileRoute('/api/ai')({
+  POST: async ({ request }) => {
+    const { prompt } = await request.json() as { prompt: string };
+
+    const result = await streamText({
+      model: anthropic('claude-3-5-sonnet-20241022'),
+      system: 'You are a helpful writing assistant. Respond concisely and clearly.',
+      prompt,
+    });
+
+    return result.toDataStreamResponse();
+  },
+});
+```
+
+---
+
+## The Editor with AI Panel
+
+```tsx title="AIEditor.tsx"
+import { useState } from 'react';
+import { useCanvasEditor, Canvas, StarterKit } from '@inscribe/react';
+import { useChat } from '@ai-sdk/react';
+
+export function AIEditor() {
+  const editor = useCanvasEditor({ extensions: [StarterKit] });
+  const [aiOpen, setAiOpen] = useState(false);
+
+  return (
+    <div style={{ display: 'flex', height: '100vh' }}>
+      <div style={{ flex: 1, overflow: 'auto', background: '#f0f0f0' }}>
+        <Canvas editor={editor} />
+      </div>
+
+      <button
+        onClick={() => setAiOpen((v) => !v)}
+        style={{ position: 'fixed', bottom: 24, right: 24 }}
+      >
+        ✨ AI
+      </button>
+
+      {aiOpen && <AIPanel editor={editor} />}
+    </div>
+  );
+}
+
+// ── AI Panel ──────────────────────────────────────────────────────────────────
+
+function AIPanel({ editor }: { editor: ReturnType<typeof useCanvasEditor> }) {
+  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+    api: '/api/ai',
+    // Inject selected text as context when submitting
+    body: {
+      context: (() => {
+        if (!editor) return '';
+        const snap = editor.getSelectionSnapshot();
+        if (snap.empty) return '';
+        return editor.getState().doc.textBetween(snap.from, snap.to);
+      })(),
+    },
+  });
+
+  return (
+    <div style={{
+      width: 320,
+      borderLeft: '1px solid #ddd',
+      display: 'flex',
+      flexDirection: 'column',
+      background: '#fff',
+    }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        {messages.map((m) => (
+          <div key={m.id} style={{ marginBottom: 12 }}>
+            <strong>{m.role === 'user' ? 'You' : 'AI'}:</strong>
+            <p style={{ margin: '4px 0' }}>{m.content}</p>
+          </div>
+        ))}
+        {isLoading && <p style={{ color: '#888' }}>Thinking…</p>}
+      </div>
+
+      <form onSubmit={handleSubmit} style={{ padding: 12, borderTop: '1px solid #eee' }}>
+        <input
+          value={input}
+          onChange={handleInputChange}
+          placeholder="Ask the AI…"
+          style={{ width: '100%', padding: 8, boxSizing: 'border-box' }}
+        />
+      </form>
+    </div>
+  );
+}
+```
+
+---
+
+## Key Points
+
+- **Selected text as context:** `editor.getSelectionSnapshot()` + `doc.textBetween(from, to)` sends
+  only the highlighted text to the AI, not the full document.
+- **Streaming:** The Vercel AI SDK's `useChat` handles streaming tokens and renders them progressively.
+- **Server-side key:** `ANTHROPIC_API_KEY` is never sent to the browser — the API route handles
+  the Anthropic call server-side.

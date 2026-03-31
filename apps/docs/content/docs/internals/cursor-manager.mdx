@@ -1,0 +1,59 @@
+---
+title: Cursor Manager
+description: Class reference for CursorManager.
+---
+
+The `CursorManager` controls the exact visual blink interval algorithm without relying on UI-layer components (like React `useEffect`).
+
+---
+
+## Constructor
+
+```ts
+new CursorManager(onTick: () => void)
+```
+Accepts a single `onTick` callback, which immediately instructs the overlay renderer proxy to redraw the page canvas when the visibility shifts.
+
+---
+
+## Properties
+
+### `BLINK_INTERVAL_MS`
+```ts
+static readonly BLINK_INTERVAL_MS = 530;
+```
+The physical loop timer in milliseconds (530ms accurately simulates native Windows/Chrome styling).
+
+### `isVisible`
+```ts
+get isVisible(): boolean
+```
+Flag indicating whether the paint cycle should render a solid block or clear the pixels natively.
+
+---
+
+## Methods
+
+### `start()`
+```ts
+start(): void
+```
+Begins the `setInterval` synchronization phase. Overrides any pre-existing timers safely.
+
+### `stop()`
+```ts
+stop(): void
+```
+Clears the active timer. Triggered organically when the Editor is blurred/deselected.
+
+### `reset()`
+```ts
+reset(): void
+```
+Fires on every keystroke. Forces `isVisible = true` and perfectly restarts the 530ms clock. This guarantees that typing rapidly never encounters an "invisible cursor" frame cycle, perfectly mimicking native browser input behavior.
+
+### `resetSilent()`
+```ts
+resetSilent(): void
+```
+Identical to `reset()`, but suppresses the `onTick` UI repaint. Used specifically when the Engine anticipates an immediate Layout Flush natively (preventing double-render flash crashes).

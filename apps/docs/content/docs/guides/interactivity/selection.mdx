@@ -1,4 +1,106 @@
 ---
-title: Selection Ranges
-description: Manipulating ranges, getting active marks, and programmatic movement.
+title: Selection
+description: Reading selection state, programmatically setting selections, and subscribing to changes.
 ---
+
+Inscribe manages selection state through ProseMirror's `TextSelection`. This guide covers how to
+read, set, and react to selection changes from your application code.
+
+---
+
+## Reading Selection State
+
+The simplest way to read selection is `editor.getSelectionSnapshot()` — a zero-dependency snapshot
+that returns everything a toolbar or bubble menu needs:
+
+```ts
+const snap = editor.getSelectionSnapshot();
+
+snap.empty;          // true = cursor only, no text selected
+snap.from;           // start of selection (integers, ProseMirror positions)
+snap.to;             // end of selection
+snap.anchor;         // fixed end
+snap.head;           // moving end
+snap.activeMarks;    // ['bold', 'italic'] — marks active across full selection
+snap.blockType;      // 'paragraph' | 'heading' | 'bulletList' ...
+snap.blockAttrs;     // { level: 1 } for heading, { align: 'center' } for paragraph
+```
+
+---
+
+## Checking Active Marks and Blocks
+
+Use `editor.isActive()` to drive toolbar state without reading the snapshot manually:
+
+```ts
+editor.isActive('bold');                       // bold mark active?
+editor.isActive('italic');                     // italic mark?
+editor.isActive('heading', { level: 1 });     // cursor is inside an H1?
+editor.isActive('bulletList');                 // inside a bullet list?
+```
+
+---
+
+## Subscribing to Selection Changes
+
+Use `editor.subscribe()` to be notified of every state change, then read the snapshot inside:
+
+```ts
+const unsubscribe = editor.subscribe(() => {
+  const snap = editor.getSelectionSnapshot();
+  setBoldActive(snap.activeMarks.includes('bold'));
+  setBlockType(snap.blockType);
+});
+
+// cleanup when component unmounts:
+return unsubscribe;
+```
+
+In React, use `useEditorState` for efficient subscriptions that only re-render when the selected
+value changes:
+
+```tsx
+import { useEditorState } from '@inscribe/react';
+
+const isBold = useEditorState({
+  editor,
+  selector: ({ editor }) => editor?.isActive('bold') ?? false,
+});
+```
+
+---
+
+## Setting Selection Programmatically
+
+```ts
+// Collapse cursor to a specific doc position
+editor.moveCursorTo(42);
+
+// Create a range selection (anchor = fixed, head = moving end)
+editor.setSelection(10, 30);
+
+// Extend the selection (Shift+arrow behavior — moves head, keeps anchor)
+editor.moveRight(true);
+editor.moveDown(true);
+```
+
+---
+
+## Pixel Position of Selection
+
+To place a floating menu at the current selection, convert to screen-space using
+`editor.getViewportRect()`:
+
+```ts
+const snap = editor.getSelectionSnapshot();
+const rect = editor.getViewportRect(snap.from, snap.to);
+
+if (rect) {
+  // rect.top, rect.bottom, rect.left, rect.right are viewport-relative
+  menu.style.top  = `${rect.bottom + 8}px`;
+  menu.style.left = `${rect.left}px`;
+}
+```
+
+See [Coordinate System](/docs/concepts/coordinate-system) for a deeper explanation of world-space
+vs screen-space.

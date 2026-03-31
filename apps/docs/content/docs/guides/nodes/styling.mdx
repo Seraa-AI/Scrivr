@@ -1,4 +1,100 @@
 ---
-title: Styling Content
-description: Advanced block-level styling, typography modifiers, and colors.
+title: Customizing Page Appearance
+description: Control page dimensions, margins, DPI, and canvas font configuration.
 ---
+
+Inscribe's canvas renderer needs explicit page geometry to run its layout engine — there is no CSS
+to override. All appearance customization flows through `pageConfig` and extension-registered font
+modifiers.
+
+---
+
+## Page Dimensions
+
+Pass a `pageConfig` object to `new Editor()` or `useCanvasEditor()`:
+
+```ts
+const editor = useCanvasEditor({
+  extensions: [StarterKit],
+  pageConfig: {
+    width: 794,    // A4 portrait at 96 DPI
+    height: 1123,
+    margin: {
+      top: 96,     // 1 inch = 96 px
+      right: 96,
+      bottom: 96,
+      left: 96,
+    },
+  },
+});
+```
+
+---
+
+## DPI Reference
+
+Inscribe works in **CSS pixel units at 96 DPI** — the same reference density as browsers.
+
+| Paper size | Portrait (px) | Landscape (px) |
+|---|---|---|
+| A4 | 794 × 1123 | 1123 × 794 |
+| US Letter | 816 × 1056 | 1056 × 816 |
+| A3 | 1123 × 1587 | 1587 × 1123 |
+
+<Callout type="info">
+  These dimensions assume a standard 96 DPI screen. On high-DPI (Retina) displays, Inscribe
+  automatically scales the canvas `devicePixelRatio` for sharp rendering — you do not need to
+  account for this in `pageConfig`.
+</Callout>
+
+---
+
+## Margins
+
+Margins define the **content area** — the region where the layout engine places text and blocks.
+They are in pixels and do not affect canvas or page-element sizing; the physical page is always
+`width × height`.
+
+```ts
+margin: {
+  top: 96,    // 1 inch
+  right: 72,  // 0.75 inch
+  bottom: 96,
+  left: 72,
+}
+```
+
+---
+
+## Page Gap and Overscan
+
+The visual gap between pages and the virtual scrolling overscan zone are configured on `<Canvas />`:
+
+```tsx
+<Canvas
+  editor={editor}
+  gap={32}         // px gap between pages (default: 24)
+  overscan={800}   // px beyond viewport to keep painted (default: 500)
+/>
+```
+
+Increase `overscan` if users report briefly seeing blank pages during fast keyboard navigation
+or touch scrolling.
+
+---
+
+## Font Configuration
+
+The layout engine measures text using the HTML5 Canvas `measureText` API. The font used for
+measurement is derived from the `FontFamily` and `FontSize` marks (both included in `StarterKit`).
+
+To set a custom *default* body font, provide a `FontFamily` configuration:
+
+```ts
+StarterKit.configure({
+  fontFamily: { families: ['Inter', 'Georgia', 'Courier New'] },
+})
+```
+
+The first family in the list becomes the default. The layout engine pre-populates the canvas context
+with this font before measuring each run.

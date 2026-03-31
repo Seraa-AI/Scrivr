@@ -1,0 +1,11 @@
+{
+  "title": "Engine Internals",
+  "pages": [
+    "extension-manager",
+    "layout-coordinator",
+    "cursor-manager",
+    "paste-transformer",
+    "input-bridge",
+    "text-measurer"
+  ]
+}

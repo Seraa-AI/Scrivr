@@ -1,4 +1,15 @@
 {
   "title": "Guides",
-  "pages": ["nodes", "interactivity", "viewport", "serialization", "export", "plugins"]
+  "pages": [
+    "nodes",
+    "typography",
+    "custom-extensions",
+    "page-configuration",
+    "floating-menus",
+    "interactivity",
+    "viewport",
+    "serialization",
+    "export",
+    "plugins"
+  ]
 }

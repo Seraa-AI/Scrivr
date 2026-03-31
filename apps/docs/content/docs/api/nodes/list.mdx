@@ -1,4 +1,94 @@
 ---
-title: list
-description: Configuration shape for the list extension.
+title: List
+description: Bullet lists, ordered lists, and list item nesting.
 ---
+
+The `list` extension adds both unordered (`bulletList`) and ordered (`orderedList`) lists with full
+nesting support via `Tab` / `Shift-Tab`.
+
+---
+
+## Schema
+
+### `bulletList`
+| Property | Value |
+|---|---|
+| Node type | `bulletList` (block) |
+| Content | `listItem+` |
+| Markdown | `- ` prefix |
+
+### `orderedList`
+| Property | Value |
+|---|---|
+| Node type | `orderedList` (block) |
+| Attribute | `order` — starting number (default `1`) |
+| Content | `listItem+` |
+| Markdown | `1. ` prefix |
+
+### `listItem`
+| Property | Value |
+|---|---|
+| Node type | `listItem` (block) |
+| Content | `paragraph (bulletList | orderedList)?` |
+
+---
+
+## Commands
+
+### `toggleBulletList()`
+Toggles a bullet list on the current block. If already inside a list, converts back to a paragraph.
+
+```ts
+editor.commands.toggleBulletList();
+```
+
+### `toggleOrderedList()`
+Toggles a numbered list on the current block.
+
+```ts
+editor.commands.toggleOrderedList();
+```
+
+### `splitListItem()`
+Splits the current list item into two (bound to `Enter` inside a list item).
+
+### `liftListItem()` / `sinkListItem()`
+Decreases / increases the nesting level of the current list item (bound to `Shift-Tab` / `Tab`).
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `Enter` | Split list item / exit empty list |
+| `Tab` | Sink (indent) list item |
+| `Shift-Tab` | Lift (outdent) list item |
+
+---
+
+## Input Rules (Markdown)
+
+| Input | Result |
+|---|---|
+| `- ` at start of block | Bullet list |
+| `* ` at start of block | Bullet list |
+| `1. ` at start of block | Ordered list |
+
+---
+
+## Detecting Active State
+
+```ts
+editor.isActive('bulletList');   // cursor is inside a bullet list
+editor.isActive('orderedList');  // cursor is inside an ordered list
+editor.isActive('listItem');     // cursor is inside a list item
+```
+
+---
+
+## StarterKit Configuration
+
+```ts
+StarterKit.configure({ list: false }) // remove list support
+```

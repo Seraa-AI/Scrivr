@@ -1,4 +1,99 @@
 ---
-title: Real-time Collaboration
-description: Live cursor rendering with Hocuspocus alongside Yjs bindings.
+title: Collaboration
+description: A real-time multiplayer editor with shared cursors using Yjs and Hocuspocus.
 ---
+
+This example builds a multiplayer editor where multiple users can edit the same document
+simultaneously and see each other's cursors in real time.
+
+---
+
+## Prerequisites
+
+You need a running Hocuspocus WebSocket server. See `apps/server` in the Inscribe monorepo for a
+minimal setup, or consult the [Hocuspocus documentation](https://hocuspocus.dev/).
+
+```bash
+# Run the bundled collaboration server:
+pnpm --filter @inscribe/server dev
+# WebSocket server starts at ws://localhost:1234
+```
+
+---
+
+## Required Packages
+
+```bash
+pnpm add @inscribe/plugins @hocuspocus/provider
+```
+
+---
+
+## The Component
+
+```tsx title="CollaborativeEditor.tsx"
+import { useMemo } from 'react';
+import { useCanvasEditor, Canvas, StarterKit } from '@inscribe/react';
+import { Collaboration, CollaborationCursor } from '@inscribe/plugins';
+import { HocuspocusProvider } from '@hocuspocus/provider';
+
+interface CollaborativeEditorProps {
+  documentId: string;
+  user: { name: string; color: string };
+}
+
+export function CollaborativeEditor({ documentId, user }: CollaborativeEditorProps) {
+  // Create the provider once per documentId. useMemo ensures it is not
+  // re-created on every render.
+  const provider = useMemo(() => {
+    return new HocuspocusProvider({
+      url: import.meta.env.VITE_WS_URL ?? 'ws://localhost:1234',
+      name: documentId,
+    });
+  }, [documentId]);
+
+  const editor = useCanvasEditor(
+    {
+      extensions: [
+        // ⚠️ History must be disabled — Yjs provides collaborative undo
+        StarterKit.configure({ history: false }),
+        Collaboration.configure({ document: provider.document }),
+        CollaborationCursor.configure({ provider, user }),
+      ],
+    },
+    [provider] // re-initialize the editor when provider changes
+  );
+
+  return (
+    <div style={{ height: '100vh', overflow: 'auto', background: '#f5f5f5' }}>
+      <Canvas editor={editor} />
+    </div>
+  );
+}
+```
+
+---
+
+## Usage
+
+```tsx
+<CollaborativeEditor
+  documentId="project-proposal-2024"
+  user={{ name: 'Alice', color: '#f7b731' }}
+/>
+```
+
+All users with the same `documentId` share the same document. The `color` is used to paint
+remote cursor indicators on the overlay canvas.
+
+---
+
+## Key Points
+
+- **Disable `history`** in `StarterKit`. Yjs provides collaborative undo — mixing both causes
+  conflicts.
+- **Wrap the provider in `useMemo`** (or create it outside React) to avoid reconnecting on every
+  render.
+- **Pass `provider` to the dependency array** so the editor re-initializes if the room changes.
+- Remote cursors are painted on the **overlay canvas** by the `CollaborationCursor` extension
+  via `editor.addOverlayRenderHandler()` — no DOM elements involved.

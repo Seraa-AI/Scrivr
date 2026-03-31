@@ -1,4 +1,121 @@
 ---
 title: Serialization
-description: Loading existing documents and serializing state safely to a remote datastore.
+description: Reading and writing document content — JSON, Markdown, and programmatic content loading.
 ---
+
+Inscribe stores the document as an immutable ProseMirror `EditorState`. This guide covers how to
+serialize it for storage, and how to load content back into the editor.
+
+---
+
+## Reading Content
+
+### JSON
+
+The most reliable serialization format — lossless round-trip with full schema fidelity:
+
+```ts
+const state = editor.getState();
+const json = state.doc.toJSON();
+// Save to your backend / localStorage:
+localStorage.setItem('doc', JSON.stringify(json));
+```
+
+JSON output mirrors the ProseMirror node structure:
+
+```json
+{
+  "type": "doc",
+  "content": [
+    {
+      "type": "heading",
+      "attrs": { "level": 1, "align": "left" },
+      "content": [{ "type": "text", "text": "Hello" }]
+    },
+    {
+      "type": "paragraph",
+      "content": [{ "type": "text", "text": "World" }]
+    }
+  ]
+}
+```
+
+### Markdown
+
+```ts
+const markdown = editor.getMarkdown();
+// "# Hello\n\nWorld"
+```
+
+`getMarkdown()` uses extension-contributed serializer rules. Marks and nodes without rules
+(e.g. `image`) are serialized as their closest Markdown equivalent or omitted.
+
+---
+
+## Loading Content
+
+### From JSON
+
+Use the `setContent` command to replace the current document with a JSON node object:
+
+```ts
+const saved = JSON.parse(localStorage.getItem('doc') ?? 'null');
+
+if (saved) {
+  editor.commands.setContent(saved);
+}
+```
+
+A good pattern is to load content in the `onCreate` callback:
+
+```ts
+const editor = useCanvasEditor({
+  extensions: [StarterKit],
+  onCreate: ({ editor }) => {
+    const saved = localStorage.getItem('doc');
+    if (saved) {
+      editor.commands.setContent(JSON.parse(saved));
+    }
+  },
+});
+```
+
+### Auto-Save on Change
+
+```ts
+const editor = useCanvasEditor({
+  extensions: [StarterKit],
+  onUpdate: ({ editor }) => {
+    const json = editor.getState().doc.toJSON();
+    debouncedSave(json); // debounce to avoid excessive writes
+  },
+});
+```
+
+---
+
+## Markdown Import
+
+Inscribe can parse Markdown into the document model via `PasteTransformer`. To programmatically
+load Markdown content, paste it as clipboard data or use the `setContent` command with a
+pre-parsed node:
+
+```ts
+// Simple approach: use the built-in Markdown paste handler
+// (paste from clipboard triggers automatic Markdown detection)
+
+// Advanced: parse manually using the bundled Markdown parser
+import { markdownToDoc } from '@inscribe/core';
+
+const doc = markdownToDoc(markdownString, editor.schema);
+editor.commands.setContent(doc.toJSON());
+```
+
+---
+
+## Clearing the Document
+
+```ts
+// Insert an empty paragraph (minimal valid document)
+editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph' }] });
+```

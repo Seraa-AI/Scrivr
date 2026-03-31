@@ -1,4 +1,98 @@
 ---
-title: Built-in Nodes
-description: Configurations for starter nodes like Paragraph, Heading, CodeBlock, etc.
+title: Built-in Nodes & Extensions
+description: All extensions bundled in StarterKit — nodes, marks, and utilities.
 ---
+
+`StarterKit` is the batteries-included default for Inscribe. It bundles everything needed for a fully
+functional rich-text document editor.
+
+---
+
+## How to Use StarterKit
+
+```ts
+import { StarterKit } from '@inscribe/core'; // or '@inscribe/react'
+
+const editor = new Editor({ extensions: [StarterKit] });
+```
+
+To selectively disable or configure individual extensions:
+
+```ts
+StarterKit.configure({
+  heading: { levels: [1, 2, 3] }, // limit to H1–H3
+  history: false,                  // disable undo/redo
+  image: false,                    // remove image support
+})
+```
+
+---
+
+## Block Nodes
+
+| Extension | Node type | Description | Input rule |
+|---|---|---|---|
+| `Paragraph` | `paragraph` | Default text block | — |
+| `Heading` | `heading` | H1–H6 with `level` attr | `# `, `## ` … |
+| `List` | `bulletList`, `orderedList`, `listItem` | Nested lists | `- `, `1. ` |
+| `CodeBlock` | `codeBlock` | Monospace fenced block | ` ``` ` |
+| `HorizontalRule` | `horizontal_rule` | Divider line | `---` |
+| `Image` | `image` | Inline image with `src`, `alt`, `width`, `height` | — |
+
+---
+
+## Inline Marks
+
+| Extension | Mark name | Description | Shortcut |
+|---|---|---|---|
+| `Bold` | `bold` | Bold text | `Mod-b` |
+| `Italic` | `italic` | Italic text | `Mod-i` |
+| `Underline` | `underline` | Underlined text | `Mod-u` |
+| `Strikethrough` | `strikethrough` | Strikethrough text | `Mod-Shift-s` |
+| `Highlight` | `highlight` | Background highlight | `Mod-Shift-h` |
+| `Color` | `color` | Text foreground color | — |
+| `FontSize` | `font_size` | Font size (px) | — |
+| `FontFamily` | `font_family` | Font family | — |
+| `Link` | `link` | Hyperlink with `href` | — |
+
+---
+
+## Utilities (Not Node Types)
+
+| Extension | Description |
+|---|---|
+| `Alignment` | Text alignment via `align` attr on block nodes (`left`, `center`, `right`, `justify`) |
+| `History` | Undo/redo via ProseMirror `history` plugin |
+| `Typography` | Smart quote, em-dash, and ellipsis input rules |
+| `BaseEditing` | Backspace, Delete, arrow keys, and slash-command input handler |
+| `Pagination` | Provides the default `PageConfig` (A4 / 1-inch margins) |
+
+---
+
+## History (Undo / Redo)
+
+Undo and redo are provided by the `History` extension (included in `StarterKit`). No extra
+configuration is needed — `Mod-Z` and `Mod-Shift-Z` work out of the box.
+
+```ts
+// Programmatic undo/redo
+editor.commands.undo();
+editor.commands.redo();
+```
+
+To configure history depth:
+
+```ts
+StarterKit.configure({
+  history: {
+    depth: 150,         // max undo steps (default: 100)
+    newGroupDelay: 500, // ms before a new undo group is created
+  }
+})
+```
+
+To disable history (e.g. when using Yjs for collaborative undo):
+
+```ts
+StarterKit.configure({ history: false })
+```

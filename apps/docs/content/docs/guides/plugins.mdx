@@ -1,4 +1,111 @@
 ---
-title: Creating Plugins
-description: Extending the Editor by writing your first Extension.
+title: Plugins
+description: Optional advanced features from @inscribe/plugins — Collaboration, Track Changes, and AI Toolkit.
 ---
+
+`@inscribe/plugins` ships three optional, opt-in feature sets that build on top of `@inscribe/core`.
+None of them are included in `StarterKit` — add only what your application needs.
+
+---
+
+## Installation
+
+<Tabs items={["pnpm", "npm", "yarn"]}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @inscribe/plugins
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @inscribe/plugins
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @inscribe/plugins
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Real-Time Collaboration
+
+Inscribe's collaborative engine uses [Yjs](https://yjs.dev/) (CRDT) synchronized over WebSocket
+via [Hocuspocus](https://hocuspocus.dev/).
+
+```ts
+import { Collaboration, CollaborationCursor } from '@inscribe/plugins';
+import { HocuspocusProvider } from '@hocuspocus/provider';
+
+const provider = new HocuspocusProvider({
+  url: import.meta.env.VITE_WS_URL,
+  name: 'my-document-id',
+});
+
+const editor = useCanvasEditor({
+  extensions: [
+    StarterKit.configure({ history: false }), // ⚠️ disable local history when collaborating
+    Collaboration.configure({ document: provider.document }),
+    CollaborationCursor.configure({
+      provider,
+      user: { name: 'Alice', color: '#f7b731' },
+    }),
+  ],
+});
+```
+
+See the [Collaboration example](/docs/examples/collaboration) for a full working setup.
+
+<Callout type="warn">
+  Always disable the `history` extension from `StarterKit` when using `Collaboration`. Yjs provides
+  its own collaborative undo that is aware of concurrent edits from other users.
+</Callout>
+
+---
+
+## Track Changes
+
+The Track Changes extension records every insertion and deletion as a pending change visible to
+all collaborators. Users can accept or reject individual changes.
+
+```ts
+import { TrackChanges } from '@inscribe/plugins';
+
+const editor = useCanvasEditor({
+  extensions: [StarterKit, TrackChanges],
+});
+
+// Toggle tracking
+editor.commands.toggleTrackChanges();
+
+// Accept / reject all
+editor.commands.acceptAllChanges();
+editor.commands.rejectAllChanges();
+```
+
+---
+
+## AI Toolkit
+
+The AI Toolkit integrates Anthropic Claude (via the Vercel AI SDK) for in-editor writing assistance.
+It requires a server-side API route.
+
+```ts
+import { AIToolkit } from '@inscribe/plugins';
+
+const editor = useCanvasEditor({
+  extensions: [
+    StarterKit,
+    AIToolkit.configure({ apiEndpoint: '/api/ai' }),
+  ],
+});
+
+// Trigger completion at cursor
+editor.commands.triggerAICompletion();
+```
+
+**Required environment variable:** `ANTHROPIC_API_KEY` on your server.
+
+See the [AI Assistant example](/docs/examples/ai-assistant) for the full server route setup.

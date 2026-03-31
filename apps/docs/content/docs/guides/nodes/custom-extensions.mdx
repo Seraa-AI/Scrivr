@@ -1,4 +1,145 @@
 ---
 title: Custom Extensions
-description: Write custom schema extensions and register their canvas render strategies.
+description: Build your own Extension to add new node types, marks, commands, and keyboard shortcuts.
 ---
+
+Inscribe's extension system lets you add any feature to the editor without modifying core packages.
+An extension can contribute: schema nodes or marks, commands, keyboard shortcuts, input rules,
+toolbar items, and canvas font/rendering overrides.
+
+---
+
+## Extension Anatomy
+
+Every extension is created with `Extension.create<Options>({ ... })`:
+
+```ts
+import { Extension } from '@inscribe/core';
+import type { MarkSpec } from 'prosemirror-model';
+import type { Command } from 'prosemirror-state';
+import { toggleMark } from 'prosemirror-commands';
+
+export const Highlight = Extension.create({
+  name: 'highlight',
+
+  // 1. Contribute a mark to the ProseMirror schema
+  addMarks(): Record<string, MarkSpec> {
+    return {
+      highlight: {
+        attrs: { color: { default: '#fef08a' } },
+        parseDOM: [{ tag: 'mark' }],
+        toDOM: () => ['mark', 0],
+      },
+    };
+  },
+
+  // 2. Register commands bound to this.schema
+  addCommands() {
+    return {
+      toggleHighlight: () => toggleMark(this.schema.marks.highlight!),
+    };
+  },
+
+  // 3. Bind keyboard shortcuts
+  addKeymap() {
+    return {
+      'Mod-Shift-h': toggleMark(this.schema.marks.highlight!),
+    };
+  },
+});
+```
+
+Use it like any other extension:
+
+```ts
+const editor = new Editor({
+  extensions: [StarterKit, Highlight],
+});
+
+editor.commands.toggleHighlight();
+```
+
+---
+
+## Available Extension Hooks
+
+| Hook | Return type | Purpose |
+|---|---|---|
+| `addNodes()` | `Record<string, NodeSpec>` | Add ProseMirror block or inline nodes |
+| `addMarks()` | `Record<string, MarkSpec>` | Add ProseMirror inline marks |
+| `addCommands()` | `Record<string, Command>` | Register editor commands |
+| `addKeymap()` | `Record<string, Command>` | Bind keyboard shortcuts |
+| `addInputRules()` | `InputRule[]` | Markdown-style input triggers |
+| `addProseMirrorPlugins()` | `Plugin[]` | Raw ProseMirror plugins |
+| `addToolbarItems()` | `ToolbarItemSpec[]` | Toolbar button/menu descriptors |
+| `addFontModifiers()` | `Map<string, FontModifier>` | Override canvas font for a mark |
+| `addMarkDecorators()` | `Record<string, MarkDecorator>` | Custom canvas draw hook for a mark |
+| `onEditorReady(editor)` | `() => void` (cleanup) | Run once after editor is fully initialized |
+
+---
+
+## Configurable Extensions
+
+Use `Extension.create<Options>` and access `this.options` in hooks:
+
+```ts
+interface HighlightOptions {
+  defaultColor: string;
+}
+
+export const Highlight = Extension.create<HighlightOptions>({
+  name: 'highlight',
+
+  addMarks() {
+    return {
+      highlight: {
+        attrs: { color: { default: this.options.defaultColor } },
+        // ...
+      },
+    };
+  },
+});
+
+// Usage:
+Highlight.configure({ defaultColor: '#fde68a' })
+```
+
+---
+
+## Accessing the Schema in Hooks
+
+Several hooks need the merged schema (e.g. to call `toggleMark`). The schema is available as
+`this.schema` inside any hook:
+
+```ts
+addCommands() {
+  const markType = this.schema.marks.highlight;
+  return {
+    toggleHighlight: () => toggleMark(markType!),
+  };
+},
+```
+
+<Callout type="warn">
+  `this.schema` is only available in hooks that are called after schema construction (`addCommands`,
+  `addKeymap`, `addProseMirrorPlugins`, `addInputRules`, `onEditorReady`). It is **not** available
+  in `addNodes` or `addMarks` — those hooks *define* the schema.
+</Callout>
+
+---
+
+## Rendering Custom Marks on Canvas
+
+To override how a mark is drawn on canvas (e.g. to draw a highlight background behind text), register
+a `MarkDecorator`. The decorator receives the canvas context and the character's bounding box:
+
+```ts
+addMarkDecorators() {
+  return new Map([
+    ['highlight', (ctx, x, y, width, height, attrs) => {
+      ctx.fillStyle = (attrs.color as string) ?? '#fef08a';
+      ctx.fillRect(x, y, width, height);
+    }],
+  ]);
+},
+```

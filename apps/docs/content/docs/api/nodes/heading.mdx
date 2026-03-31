@@ -1,4 +1,85 @@
 ---
-title: heading
-description: Configuration shape for the heading extension.
+title: Heading
+description: Section headings H1–H6 with level attributes.
 ---
+
+The `heading` node represents document headings. It supports levels 1–6 and can be activated via
+keyboard shortcuts, the slash menu, or Markdown input rules (`# `, `## `, etc.).
+
+---
+
+## Schema
+
+| Property | Value |
+|---|---|
+| Node type | `heading` (block) |
+| Content | `inline*` |
+| Attributes | `level` — `1` \| `2` \| `3` \| `4` \| `5` \| `6`<br />`align` — `"left"` \| `"center"` \| `"right"` \| `"justify"` |
+| Markdown | `#` prefix matching heading level |
+
+---
+
+## Commands
+
+### `setHeading({ level })`
+Converts the current block to a heading of the specified level.
+
+```ts
+editor.commands.setHeading({ level: 1 }); // H1
+editor.commands.setHeading({ level: 2 }); // H2
+```
+
+### `toggleHeading({ level })`
+Toggles the block between the specified heading level and a plain paragraph.
+
+```ts
+editor.commands.toggleHeading({ level: 1 });
+```
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `Mod-Alt-1` | Toggle H1 |
+| `Mod-Alt-2` | Toggle H2 |
+| `Mod-Alt-3` | Toggle H3 |
+| `Mod-Alt-4` | Toggle H4 |
+| `Mod-Alt-5` | Toggle H5 |
+| `Mod-Alt-6` | Toggle H6 |
+
+---
+
+## Input Rules (Markdown)
+
+Type at the beginning of an empty block to auto-convert:
+
+| Input | Result |
+|---|---|
+| `# ` + space | H1 |
+| `## ` + space | H2 |
+| `### ` + space | H3 |
+| `#### ` + space | H4 |
+
+---
+
+## Detecting Active State
+
+```ts
+editor.isActive('heading');                        // inside any heading
+editor.isActive('heading', { level: 1 });          // specifically H1
+editor.getSelectionSnapshot().blockAttrs.level;    // 1 | 2 | 3 ...
+```
+
+---
+
+## StarterKit Configuration
+
+```ts
+// Restrict to H1–H3 only
+StarterKit.configure({ heading: { levels: [1, 2, 3] } })
+
+// Remove headings entirely
+StarterKit.configure({ heading: false })
+```

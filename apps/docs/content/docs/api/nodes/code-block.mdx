@@ -1,4 +1,74 @@
 ---
-title: code-block
-description: Configuration shape for the code-block extension.
+title: Code Block
+description: Fenced code blocks with monospace rendering and optional language label.
 ---
+
+The `codeBlock` node renders a fenced block with monospaced font, a background fill, and optional
+syntax-language labelling. Inside a code block, `Tab` inserts spaces and `Enter` always inserts a
+newline (no slash-menu or Markdown triggers fire).
+
+---
+
+## Schema
+
+| Property | Value |
+|---|---|
+| Node type | `codeBlock` (block) |
+| Content | `text*` (plain text only — no marks) |
+| Attribute | `language` — optional string (e.g. `"typescript"`) |
+| Markdown | ` ``` ` fenced block |
+
+---
+
+## Commands
+
+### `setCodeBlock({ language? })`
+Converts the current block to a code block, optionally setting a language label.
+
+```ts
+editor.commands.setCodeBlock();
+editor.commands.setCodeBlock({ language: 'typescript' });
+```
+
+### `toggleCodeBlock()`
+Toggles the current block between a code block and a paragraph.
+
+```ts
+editor.commands.toggleCodeBlock();
+```
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `Mod-Alt-c` | Toggle code block |
+| `Tab` | Insert 2 spaces (inside code block) |
+| `Enter` | Insert newline (inside code block) |
+
+---
+
+## Input Rules (Markdown)
+
+| Input | Result |
+|---|---|
+| ` ``` ` + Enter at start of line | Fenced code block |
+| ` ```ts ` + Enter | Code block with `language: 'ts'` |
+
+---
+
+## Detecting Active State
+
+```ts
+editor.isActive('codeBlock');                        // cursor is in a code block
+editor.getSelectionSnapshot().blockAttrs.language;   // 'typescript' | undefined
+```
+
+---
+
+## StarterKit Configuration
+
+```ts
+StarterKit.configure({ codeBlock: false }) // remove code block support
+```

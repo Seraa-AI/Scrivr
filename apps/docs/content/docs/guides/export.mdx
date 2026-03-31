@@ -1,4 +1,95 @@
 ---
-title: Document Export
-description: Exporting the canvas to standalone PDFs or downloading Markdown.
+title: Export
+description: Export Inscribe documents to PDF, DOCX, and Markdown using @inscribe/export.
 ---
+
+The `@inscribe/export` package provides utilities for converting the document model into
+portable formats: paginated PDF, Word DOCX, and plain Markdown.
+
+---
+
+## Installation
+
+<Tabs items={["pnpm", "npm", "yarn"]}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @inscribe/export
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @inscribe/export
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @inscribe/export
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## PDF Export
+
+`exportToPDF` renders the `DocumentLayout` to a `pdf-lib` PDF document. The output matches the
+canvas rendering exactly — same fonts, same page dimensions, same pagination.
+
+```ts
+import { exportToPDF } from '@inscribe/export';
+
+const pdfBytes = await exportToPDF(editor);
+
+// Download in the browser:
+const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+const url  = URL.createObjectURL(blob);
+const a    = document.createElement('a');
+a.href     = url;
+a.download = 'document.pdf';
+a.click();
+URL.revokeObjectURL(url);
+```
+
+<Callout type="info">
+  PDF export requires the layout engine to have already run. Call `editor.ensureLayout()` before
+  `exportToPDF` if you are exporting immediately after programmatic content changes.
+</Callout>
+
+---
+
+## Markdown Export
+
+The simplest export — already available directly on the editor instance:
+
+```ts
+// Via editor (no extra package needed):
+const markdown = editor.getMarkdown();
+
+// Via @inscribe/export (same result, adds a download helper):
+import { exportToMarkdown } from '@inscribe/export';
+
+const { content, download } = exportToMarkdown(editor);
+download('document.md'); // triggers browser download
+```
+
+---
+
+## DOCX Export
+
+```ts
+import { exportToDOCX } from '@inscribe/export';
+
+const blob = await exportToDOCX(editor);
+
+const url = URL.createObjectURL(blob);
+const a   = document.createElement('a');
+a.href    = url;
+a.download = 'document.docx';
+a.click();
+URL.revokeObjectURL(url);
+```
+
+<Callout type="warn">
+  DOCX export renders block structure and inline text formatting. Complex canvas-only features
+  (custom mark decorators, image blocks) may not export with full fidelity.
+</Callout>
