@@ -1,0 +1,91 @@
+---
+title: Layout Coordinator
+description: Class reference for LayoutCoordinator.
+---
+
+The `LayoutCoordinator` abstracts pagination mathematics away from the raw `Editor` state, implementing background idle-chunking (streaming layout data asynchronously to preserve 60fps).
+
+---
+
+## Constructor
+
+```ts
+new LayoutCoordinator(opts: LayoutCoordinatorOptions)
+```
+
+### `LayoutCoordinatorOptions`
+- **`pageConfig`** *(PageConfig)*: Active page boundaries and margins.
+- **`fontConfig`** *(FontConfig)*: Typographical rulesets.
+- **`measurer`** *(TextMeasurer)*: The engine canvas measurer.
+- **`fontModifiers`** *(Map)*: Extension-specific modifiers.
+- **`getDoc`** *`() => Node`*: Eager callback resolving the latest `EditorState.doc`.
+- **`getHead`** *`() => number`*: Eager callback resolving the absolute cursor doc-position.
+- **`onUpdate`** *`() => void`*: Callback fired after idle layout finishes, triggering a React UI repaint.
+
+---
+
+## Properties
+
+### `charMap`
+```ts
+readonly charMap: CharacterMap
+```
+The spatial index mapping document coordinates against world-space layout rectangles.
+
+### `current`
+```ts
+get current(): DocumentLayout
+```
+Returns the active structure containing the array of LayoutPages, lines, and bounding boxes.
+
+### `cursorPage`
+```ts
+get cursorPage(): number
+```
+The 1-based page number tracking exactly which physical printed page the cursor currently resides on.
+
+### `isReady`
+```ts
+get isReady(): boolean
+```
+`false` if layout processing is actively paused/suppressed by `startReady` rules via collaborative websockets.
+
+### `loadingState`
+```ts
+get loadingState(): "syncing" | "rendering" | "ready"
+```
+The three-phase status: Waiting on network (syncing), churning idle blocks in the background (rendering), or 100% computed (ready).
+
+---
+
+## Methods
+
+### `invalidate()`
+```ts
+invalidate(): void
+```
+Marks the layout as stale. Called immediately on every keystroke, forcing `ensureLayout` to recalculate the block differentials.
+
+### `ensureLayout()`
+```ts
+ensureLayout(): void
+```
+Synchronously forces the Layout tree to recompute if `invalidate()` was triggered. Runs prior to any visual drawing step.
+
+### `ensurePagePopulated()`
+```ts
+ensurePagePopulated(pageNumber: number): void
+```
+Lazily and eagerly populates the `CharacterMap` hit-test zones specifically for a single page, avoiding O(N) spatial mapping constraints for off-screen pages.
+
+### `setReady()`
+```ts
+setReady(ready: boolean): void
+```
+Used by remote synchronization APIs to temporarily pause `requestIdleCallback` loop calculations until the first bulk Y.js payload cleanly resolves.
+
+### `destroy()`
+```ts
+destroy(): void
+```
+Immediately terminates any actively running idle computations.

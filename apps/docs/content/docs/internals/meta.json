@@ -1,0 +1,12 @@
+{
+	"title": "Engine Internals",
+	"icon": "Cpu",
+	"pages": [
+		"extension-manager",
+		"layout-coordinator",
+		"cursor-manager",
+		"paste-transformer",
+		"input-bridge",
+		"text-measurer"
+	]
+}

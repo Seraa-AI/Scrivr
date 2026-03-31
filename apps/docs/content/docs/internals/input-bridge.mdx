@@ -1,0 +1,103 @@
+---
+title: Input Bridge
+description: Class reference for InputBridge.
+---
+
+The `InputBridge` creates an invisible proxy `<textarea>` that accurately hijacks all keystrokes, clipboard actions, and Input Method Editor (IME) flows to translate native actions to the Headless Editor math, bypassing `contenteditable`.
+
+---
+
+## Constructor
+
+```ts
+new InputBridge(opts: InputBridgeOptions)
+```
+
+### `InputBridgeOptions`
+- **`getState / dispatch / getSchema / getCharMap / getViewportRect / getFloatPosition`**: Read-only lazy state pullers wrapping the complex Editor engine natively.
+- **`keymap`**: The resolved keybindings dictating hotkey actions.
+- **`inputHandlers`**: Interceptor functions specific to DOM keystrokes.
+- **`navigator`**: The proxy Editor reference interface.
+- **`pasteTransformer`**: The `PasteTransformer` instance handling `clipboardData` operations.
+- **`onFocus / onBlur`**: Bubble tracking for UX boundaries.
+
+---
+
+## Properties
+
+### `isFocused`
+```ts
+get isFocused(): boolean
+```
+Returns true when the invisible `<textarea>` natively holds the browser's DOM execution focus.
+
+### `container`
+```ts
+get container(): HTMLElement | null
+```
+The parent physical node containing the hidden proxy.
+
+---
+
+## Methods
+
+### Mounting & Lifecycle
+
+#### `mount(container: HTMLElement)`
+```ts
+mount(container: HTMLElement): void
+```
+Generates the invisible `textarea`, styles it specifically to `1x1` pixels invisibly, and attaches the 8 critical DOM event listeners (`input`, `compositionend`, `cut`, `copy`, `paste`, `keydown`).
+
+#### `unmount()`
+```ts
+unmount(): void
+```
+Removes the `textarea` and detaches all listeners globally.
+
+#### `focus()`
+```ts
+focus(): void
+```
+Programmatically instructs the browser to native-focus the `<textarea>` to intercept inputs organically.
+
+### Scrolling & Positioning
+
+#### `syncPosition()`
+```ts
+syncPosition(): void
+```
+Physically offsets the `textarea.style.top/left/height` directly to hover beneath the mathematical cursor coordinates. Doing this ensures Mobile Keyboard Magnifiers open near the actual text, preventing the OS from jumping erratically natively.
+
+#### `scrollCursorIntoView()`
+```ts
+scrollCursorIntoView(): void
+```
+Uses the `CharacterMap` output coordinates to execute internal `scrollTop` bounding box adjustments on the nearest parent overflow scroller, locking the cursor in the visible frame gracefully.
+
+#### `setPageElementLookup()`
+```ts
+setPageElementLookup(fn: ((page: number) => HTMLElement | null) | null): void
+```
+Accepts an adapter resolver that translates a 1-based internal layout page into the physical Browser DOM `<div data-page="1">` Wrapper, required for Scroll-Into-View math accurately.
+#### `lookupPage()`
+```ts
+lookupPage(page: number): HTMLElement | null
+```
+Retrieves the DOM node representing the specified page.
+
+---
+
+## Utility Functions
+
+### `keyEventToString()`
+```ts
+export function keyEventToString(e: KeyboardEvent): string
+```
+Translates raw DOM Event variants into predictable ProseMirror mapping targets like `"Mod-Shift-z"`.
+
+### `findScrollParent()`
+```ts
+export function findScrollParent(el: HTMLElement | null): HTMLElement | null
+```
+Recursively traverses up the DOM to locate the primary overflow host natively.

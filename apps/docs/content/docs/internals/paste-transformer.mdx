@@ -1,0 +1,49 @@
+---
+title: Paste Transformer
+description: Class reference for PasteTransformer.
+---
+
+The `PasteTransformer` converts complex HTML and Markdown payloads originating from standard OS `ClipboardEvent` buffers into strictly valid ProseMirror `Transaction` boundaries.
+
+---
+
+## Constructor
+
+```ts
+new PasteTransformer(
+  schema: Schema,
+  extraMarkdownRules: MarkdownBlockRule[] = [],
+  markdownParserTokens: Record<string, MarkdownParserTokenSpec> = {}
+)
+```
+- **`schema`**: The compiled Prosemirror schema used to construct valid block nodes.
+- **`extraMarkdownRules`**: Regex pattern rules injected by Custom Extensions to scrape plain text strings into rich layouts (e.g. matching `---` to a Horizontal Rule).
+- **`markdownParserTokens`**: CommonMark schema translations.
+
+---
+
+## Methods
+
+### `transform()`
+```ts
+transform(clipboardData: DataTransfer, state: EditorState): Transaction | null
+```
+The central invocation function. Parses the `DataTransfer` using a prioritized fallback list:
+1. `text/html` utilizing a sterilized DOM Parser.
+2. `text/plain` utilizing `prosemirror-markdown` CommonMark.
+3. `text/plain` utilizing legacy line-by-line fallback regex processing.
+4. Normal `insertText()` string concatenation as an absolute last resort.
+
+---
+
+## Utility Functions
+
+### `cleanPastedHtml()`
+```ts
+export function cleanPastedHtml(root: HTMLElement): void
+```
+An aggressive DOM sterilizer triggered prior to processing payload nodes. 
+- Discards `style, meta, link` garbage blocks.
+- Unwraps Google Docs' proprietary `<b id="docs-internal-guid...">` containers.
+- Burns redundant empty `<p>` elements surrounding `<hr>` layouts.
+- Trims non-schema CSS properties out of nested span `[style]` objects.

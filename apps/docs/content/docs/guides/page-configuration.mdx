@@ -1,0 +1,117 @@
+---
+title: Pagination & Layout Configuration
+description: Controlling page size, dimensions, margins, and layout behavior.
+---
+
+Unlike scrolling webpage editors, Inscribe breaks documents down into distinct, visually paginated canvases. This is achieved by explicitly defining the dimensions and margins for the layout engine via the `PageConfig` object.
+
+---
+
+## The `PageConfig` Interface
+
+Every editor instance relies on a layout schema to understand where to break lines and split text runs across completely separate page frames.
+
+```ts title="PageConfig.d.ts"
+export interface PageConfig {
+	/** The total width of the canvas page (pixels) */
+	width: number;
+	/** The total height of the canvas page (pixels) */
+	height: number;
+
+	/** Padding from the top of the canvas to the start of text (pixels) */
+	marginTop: number;
+	/** Padding from the bottom of the canvas before pagination triggers (pixels) */
+	marginBottom: number;
+	marginLeft: number;
+	marginRight: number;
+}
+```
+
+By default, Inscribe uses `defaultPageConfig` which roughly matches an A4 page.
+
+All values are in **world-space pixels** (`1px = 1 CSS pixel = 1/96th of an inch`).
+
+---
+
+## Creating Standard Page Profiles
+
+If you want to configure your editor to enforce an exact standard size, you compute the dimensions off 96 DPI:
+
+### A4 Size
+
+- **Dimensions:** 8.27 × 11.69 inches
+- **Pixels (96 DPI):** 794 × 1123
+
+```tsx
+const A4_CONFIG = {
+	width: 794,
+	height: 1123,
+	marginTop: 96, // 1 inch physical margin
+	marginBottom: 96,
+	marginLeft: 96,
+	marginRight: 96,
+};
+```
+
+### US Letter Size
+
+- **Dimensions:** 8.5 × 11.0 inches
+- **Pixels (96 DPI):** 816 × 1056
+
+```tsx
+const LETTER_CONFIG = {
+	width: 816,
+	height: 1056,
+	marginTop: 96,
+	marginBottom: 96,
+	marginLeft: 96,
+	marginRight: 96,
+};
+```
+
+---
+
+## Initializing The Editor
+
+Pass the configuration object to the React adapter hook:
+
+```tsx
+import { useInscribeEditor } from "@inscribe/react";
+
+function App() {
+	const editor = useInscribeEditor({
+		extensions: [
+			/* ... */
+		],
+		pageConfig: LETTER_CONFIG, // Hardcode US Letter
+	});
+
+	return <Inscribe editor={editor} />;
+}
+```
+
+---
+
+## Dynamic Runtime Updates
+
+If your application allows users to swap document profiles dynamically (e.g., clicking a button to switch from A4 to US Letter), the editor must throw away the entire spatial `CharacterMap` and recalculate absolute layouts from scratch.
+
+```ts
+function switchPageSize(editor) {
+	// Update the generic editor configuration
+	editor.setPageConfig(LETTER_CONFIG);
+
+	// Explicitly dirty the engine tracking
+	editor.dirty = true;
+
+	// Re-run PageLayout.ts and regenerate absolute character positions
+	editor.ensureLayout();
+}
+```
+
+<Callout type="warn">
+	Modifying `pageConfig` dynamically triggers an immediate, full-document
+	layout calculation via `ensureLayout()`. For documents spanning over 50+
+	pages, this may cause a perceptible framerate drop as every single block and
+	character is re-measured against the new margins.
+</Callout>

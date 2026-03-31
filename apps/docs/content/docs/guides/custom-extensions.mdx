@@ -1,0 +1,119 @@
+---
+title: Custom Extensions
+description: Building an extension for a Canvas-based editor without DOM rendering.
+---
+
+Building a custom extension for Inscribe is fundamentally different from building one for a DOM-based toolkit like TipTap or Slate. Because Inscribe bypasses the DOM entirely, you cannot simply return a React component or an HTML string string. 
+
+You must define the strict mathematical layout and explicitly tell the engine how to paint your elements on the Canvas context.
+
+---
+
+## 3 Core Components of a Custom Extension
+
+When building a new Node or Mark (e.g., an Image block, a Custom Highlight, a Kanban Board), you must complete three steps:
+
+1. **The Schema (Model Layer)**
+   Register the Node or Mark within the ProseMirror schema. This tells the document tree what attributes, structure, and HTML parse/serialize rules are allowed.
+2. **The Measurer (Layout Layer)**
+   Write a dimension resolver that hooks into `BlockLayout.ts`. The layout engine needs to calculate exactly how wide and how tall your element is (in world-space pixels) so it can position siblings and paginate correctly.
+3. **The Painter (Rendering Layer)**
+   Register a draw handler with `PageRenderer.ts` that issues native HTML5 Canvas drawing commands (`ctx.fillRect`, `ctx.drawImage`) corresponding to the bounding box calculated in Step 2.
+
+---
+
+## A Simple Custom Highlight (Mark)
+
+Let's build a simple inline highlighter that draws a background color over text.
+
+### Step 1: Schema Definition
+
+```typescript title="HighlightMark.ts"
+import { Mark, mergeAttributes } from "@tiptap/core";
+// Under the hood, we extend TipTap's architecture for schema management
+
+export const HighlightMark = Mark.create({
+  name: "highlight",
+
+  addAttributes() {
+    return {
+      color: {
+        default: "#ffff00", 
+      },
+    };
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ["mark", mergeAttributes(HTMLAttributes), 0];
+  },
+});
+```
+
+### Step 2: The Layout Measurer
+
+For inline marks, the width and height are handled inherently by `TextMeasurer` based on the text string. 
+
+However, for block-level nodes (like an `<Image>`), you must define the dimensions explicitly. In a fully custom block:
+
+```typescript title="ImageNode.ts"
+// Example pseudo-code for a Block node
+export const ImageNode = Node.create({
+  name: "image",
+  // ... schema
+
+  addNodeView() {
+    // You must provide bounds logic.
+    return {
+      measure(node) {
+        // Return physical world-space pixels
+        return {
+          width: node.attrs.width || 400,
+          height: node.attrs.height || 300,
+        };
+      }
+    }
+  }
+});
+```
+
+### Step 3: The Canvas Painter
+
+The hardest part: drawing the highlight.
+
+When the `PageRenderer` traverses the `DocumentLayout`, it triggers rendering hooks based on Mark/Node names.
+
+```ts title="Renderer.ts"
+// In your application or extension registry:
+import type { PageRenderer } from "@inscribe/core";
+
+export function registerHighlightPainter(editor) {
+  editor.registerPainter("mark:highlight", (ctx: CanvasRenderingContext2D, args) => {
+    // args contains the world-space bounding box calculated by BlockLayout
+    const { x, y, width, height, node } = args;
+
+    // The current color specified in the ProseMirror attributes
+    const color = node.attrs.color;
+
+    ctx.save();
+    
+    // Draw the background rectangle
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y - height, width, height);
+    
+    // Wait... what about the text?
+    // Inscribe will draw the text run automatically AFTER marks are painted.
+    
+    ctx.restore();
+  });
+}
+```
+
+<Callout type="warn">
+  Remember that Canvas drawing order matters! Backgrounds (like Highlights) must be drawn *before* the text run is explicitly drawn by the `PageRenderer`, otherwise the highlight will paint over the text and obscure it.
+</Callout>
+
+---
+
+## The Complexity Of Canvas
+
+Writing extensions in Inscribe is more mathematically demanding than other editors. If you want to render a complex React component (e.g., an interactive Kanban board table) inside the document flow, Inscribe allows you to use `OverlayRenderer` to project absolute-positioned widgets over the Canvas. See the Coordinate System documentation for `getViewportRect`!

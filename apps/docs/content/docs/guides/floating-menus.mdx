@@ -1,0 +1,106 @@
+---
+title: Floating UIs & Menus
+description: Utilizing coordinate spaces to build popup menus (BubbleMenu/SlashMenu) with @floating-ui/react.
+---
+
+Because Inscribe renders document content purely within a Canvas (meaning there are no physical wrapper DOM nodes for your paragraphs, headers, and marks), you cannot simply attach relative HTML tooltips directly to text.
+
+However, using the world-space to screen-space translation methods covered in the **Coordinate System** guide, you can bind external React-based DOM elements seamlessly over the `<Inscribe />` component.
+
+The easiest and most robust way to build these menus is to pair `@inscribe/react` with the excellent [`@floating-ui/react`](https://floating-ui.com/) library.
+
+---
+
+## The Recipe: Bounding Client Rects
+
+The `@floating-ui/react` library positions elements relative to an anchor reference element. To bypass the need for an actual HTML node, `useFloating` allows you to provide a **Virtial Element**.
+
+All we have to do is supply a custom object holding a `getBoundingClientRect` method! We can generate that dynamically using `editor.getViewportRect()`.
+
+### Building A Contextual Bubble Menu
+
+Here is a full, copy-pasteable implementation of a rich text Bubble Menu that floats above the user's active selection.
+
+```tsx title="CustomBubbleMenu.tsx"
+import { useFloating, shift, offset } from "@floating-ui/react";
+import { useInscribeState } from "@inscribe/react";
+
+export function CustomBubbleMenu({ editor }) {
+	// 1. Initialize Floating UI
+	const { refs, floatingStyles } = useFloating({
+		placement: "top", // Put it above the text
+		middleware: [
+			offset(10), // Push it 10px up from the text line
+			shift({ padding: 8 }), // Prevent the menu from bleeding off screen
+		],
+	});
+
+	// 2. Track ProseMirror selection changes using Inscribe's state selector
+	const selection = useInscribeState({
+		editor,
+		selector: ctx => ctx.editor.getSelectionSnapshot(),
+	});
+
+	// 3. Convert absolute selection positions into standard CSS screen pixels
+	const rect = editor.getViewportRect(selection.from, selection.to);
+
+	// 4. If nothing is selected, or we can't calculate bounds, hide the menu
+	if (!rect || selection.empty) return null;
+
+	// 5. Connect Floating UI to the virtual Inscribe canvas boundary box
+	refs.setPositionReference({
+		getBoundingClientRect: () => rect,
+	});
+
+	// 6. Render your HTML menu on top of the canvas
+	return (
+		<div
+			ref={refs.setFloating}
+			style={floatingStyles}
+			className="z-50 bg-slate-800 p-2 rounded shadow flex gap-2">
+			<button
+				className="text-white hover:bg-slate-700 px-3 py-1 rounded"
+				onClick={() => editor.commands.toggleBold()}>
+				Bold
+			</button>
+
+			<button
+				className="text-white hover:bg-slate-700 px-3 py-1 rounded"
+				onClick={() => editor.commands.toggleItalic()}>
+				Italic
+			</button>
+		</div>
+	);
+}
+```
+
+---
+
+## Mounting in your App
+
+To ensure the Z-indices play nicely, absolute menu components should be rendered at the very top level of your React shell, preferably as a direct sibling to your canvas wrapper.
+
+```tsx title="App.tsx"
+import { useInscribeEditor, Inscribe } from "@inscribe/react";
+import { CustomBubbleMenu } from "./CustomBubbleMenu";
+
+export function App() {
+	const editor = useInscribeEditor({
+		/* ... */
+	});
+
+	return (
+		<div className="relative h-screen w-full flex flex-col">
+			<main className="flex-1 overflow-auto">
+				{/* The Editor Canvas Component */}
+				<Inscribe editor={editor} />
+			</main>
+
+			{/* The Floating Out-of-band UI components */}
+			<CustomBubbleMenu editor={editor} />
+		</div>
+	);
+}
+```
+
+By following this pattern, you can build entirely native feeling tooltips, slash-command drop-downs, and pop-up sidebars that respond instantaneously to Canvas cursor movements while still utilizing 100% of the React ecosystem and styling tools.

@@ -1,0 +1,140 @@
+---
+title: Extension Manager
+description: Class reference for ExtensionManager.
+---
+
+The `ExtensionManager` acts as the compiler for your editor, merging all extensions into a single cohesive rule set in two phases (Schema building, then full resolution).
+
+---
+
+## Constructor
+
+```ts
+new ExtensionManager(extensions: Extension[])
+```
+Accepts the array of extensions provided to the Editor. Resolves them sequentially, meaning later extensions override earlier conflicts.
+
+---
+
+## Properties
+
+### `schema`
+```ts
+readonly schema: Schema
+```
+The final merged ProseMirror schema built from all extensions' `addNodes()` and `addMarks()`.
+
+---
+
+## Methods
+
+### State & Setup
+
+#### `createState(doc?: ProseMirrorNode)`
+```ts
+createState(doc?: ProseMirrorNode): EditorState
+```
+Creates a new EditorState utilizing the built schema and plugins. Optionally seeds it with an initial document.
+
+#### `buildInitialDoc()`
+```ts
+buildInitialDoc(): ProseMirrorNode | undefined
+```
+Extracts the first non-null initial document contributed by any extension (e.g., pulling a Y.js synced doc).
+
+#### `buildPageConfig()`
+```ts
+buildPageConfig(): PageConfig | undefined
+```
+Retrieves the PageConfig from either a standalone "pagination" extension or the StarterKit options.
+
+---
+
+## Plugin & Keymap Builders
+
+#### `buildPlugins()`
+```ts
+buildPlugins(): Plugin[]
+```
+Returns a flat array of all ProseMirror `Plugin` instances, automatically appending the merged keymap and input rules.
+
+#### `buildKeymap()`
+```ts
+buildKeymap(): Record<string, Command>
+```
+Returns the merged keymap used to dispatch KeyboardEvents natively without a ProseMirror EditorView.
+
+#### `buildInputRules()`
+```ts
+buildInputRules(): InputRule[]
+```
+Returns all input rules (like markdown shortcuts) collected across extensions.
+
+#### `buildInputHandlers()`
+```ts
+buildInputHandlers(): Record<string, InputHandler>
+```
+Returns raw native KeyboardEvent interceptors.
+
+#### `buildCommands()`
+```ts
+buildCommands(): Record<string, (...args: unknown[]) => Command>
+```
+Creates the bound dictionary of commands exposed on `editor.commands`.
+
+---
+
+## Layout & Rendering Builders
+
+#### `buildBlockRegistry() / buildInlineRegistry()`
+```ts
+buildBlockRegistry(): BlockRegistry
+buildInlineRegistry(): InlineRegistry
+```
+Extracts `layoutHandlers` and `inlineHandlers` from extensions into O(1) registries for the rendering engine.
+
+#### `buildBlockStyles() / buildFontModifiers()`
+```ts
+buildBlockStyles(): FontConfig
+buildFontModifiers(): Map<string, FontModifier>
+```
+Aggregates CSS fonts, line heights, and styling rules declared on blocks and marks.
+
+#### `buildMarkDecorators()`
+```ts
+buildMarkDecorators(): Map<string, MarkDecorator>
+```
+Collects custom Canvas rendering loops (decorations) applied under/over inline marks.
+
+#### `buildToolbarItems()`
+```ts
+buildToolbarItems(): ToolbarItemSpec[]
+```
+Returns the flat array of UI specifications utilized to build React floating menus.
+
+---
+
+## Markdown & Paste Builders
+
+#### `buildMarkdownRules() / buildMarkdownParserTokens()`
+```ts
+buildMarkdownRules(): MarkdownBlockRule[]
+buildMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec>
+```
+Passes all custom syntax mapping down to the `PasteTransformer` for accurate CommonMark ingestion.
+
+#### `buildMarkdownSerializerRules()`
+```ts
+buildMarkdownSerializerRules(): Required<MarkdownSerializerRules>
+```
+Mapping rules to export ProseMirror nodes back into Markdown string literals.
+
+---
+
+## Lifecycle Builders
+
+#### `buildEditorReadyCallbacks()`
+```ts
+buildEditorReadyCallbacks(): Array<(editor: IEditor) => (() => void) | void>
+```
+Extracts cleanup mechanisms and `onEditorReady` bootstrap scripts that trigger immediately after Editor initialization.

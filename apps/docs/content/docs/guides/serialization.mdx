@@ -1,23 +1,68 @@
 ---
 title: Serialization
-description: Loading existing documents and serializing state safely to a remote datastore.
+description: Reading and writing document content — JSON, Markdown, and programmatic content loading.
 ---
 
-Inscribe stores documents as a ProseMirror JSON tree. You can load an existing document at
-construction time, read the current document at any point, and round-trip through your own
-storage layer without any extra dependencies.
+Inscribe stores the document as an immutable ProseMirror `EditorState`. This guide covers how to
+serialize it for storage and how to load content back into the editor.
 
 ---
 
-## Loading a document
+## Reading Content
+
+### JSON
+
+The most reliable format — lossless round-trip with full schema fidelity:
+
+```ts
+const state = editor.getState();
+const json = state.doc.toJSON();
+// Save to your backend / localStorage:
+localStorage.setItem('doc', JSON.stringify(json));
+```
+
+JSON output mirrors the ProseMirror node structure:
+
+```json
+{
+  "type": "doc",
+  "content": [
+    {
+      "type": "heading",
+      "attrs": { "level": 1, "align": "left" },
+      "content": [{ "type": "text", "text": "Hello" }]
+    },
+    {
+      "type": "paragraph",
+      "content": [{ "type": "text", "text": "World" }]
+    }
+  ]
+}
+```
+
+### Markdown
+
+```ts
+const markdown = editor.getMarkdown();
+// "# Hello\n\nWorld"
+```
+
+`getMarkdown()` uses extension-contributed serializer rules. Marks and nodes without rules
+(e.g. `image`) are serialized as their closest Markdown equivalent or omitted.
+
+---
+
+## Loading Content
+
+### At construction time
 
 Pass the document JSON as `doc` in `EditorOptions`. The editor initialises its state from
-it instead of starting with an empty document.
+it instead of starting with an empty document:
 
 ```ts
 import { Editor, StarterKit } from '@inscribe/core';
 
-const saved = await db.getDocument(id); // your storage layer
+const saved = await db.getDocument(id);
 
 const editor = new Editor({
   extensions: [StarterKit],
@@ -25,82 +70,85 @@ const editor = new Editor({
 });
 ```
 
-The same option is available through `useInscribeEditor` in React:
+### After mount with `setContent`
 
-```tsx
+Use the `setContent` command to replace the document at any time:
+
+```ts
+const saved = JSON.parse(localStorage.getItem('doc') ?? 'null');
+if (saved) {
+  editor.commands.setContent(saved);
+}
+```
+
+A good pattern is to load content in the `onCreate` callback:
+
+```ts
 const editor = useInscribeEditor({
   extensions: [StarterKit],
-  doc: saved.content,
-});
-```
-
-<Callout type="info">
-  `doc` is read once at construction. To replace the document after mount, dispatch a
-  ProseMirror `replaceWith` transaction via `editor._applyTransaction`.
-</Callout>
-
----
-
-## Reading the current document
-
-### As JSON
-
-```ts
-const state = editor.getState();
-const json = state.doc.toJSON(); // safe to serialise and store
-```
-
-### As Markdown
-
-`editor.getMarkdown()` serialises the full document to a CommonMark string using
-extension-contributed serializer rules.
-
-```ts
-const markdown = editor.getMarkdown();
-await navigator.clipboard.writeText(markdown);
-```
-
----
-
-## Saving on every change
-
-Use `onChange` to persist the document whenever it changes:
-
-```ts
-const editor = new Editor({
-  extensions: [StarterKit],
-  doc: saved.content,
-  onChange: (state) => {
-    const json = state.doc.toJSON();
-    debouncedSave(id, json); // debounce to avoid hammering your backend
+  onCreate: ({ editor }) => {
+    const saved = localStorage.getItem('doc');
+    if (saved) {
+      editor.commands.setContent(JSON.parse(saved));
+    }
   },
 });
 ```
 
-### React example
+---
 
-```tsx
-import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+## Auto-Save on Change
 
-export function DocumentEditor({ id, initialDoc }: Props) {
-  const editor = useInscribeEditor({
-    extensions: [StarterKit],
-    doc: initialDoc,
-    onChange: (state) => {
-      debouncedSave(id, state.doc.toJSON());
-    },
-  });
+Use `onUpdate` (React) or `onChange` (headless) to persist on every edit. Always debounce to
+avoid excessive writes:
 
-  return <Inscribe editor={editor} style={{ height: '100vh' }} />;
-}
+```ts
+// React
+const editor = useInscribeEditor({
+  extensions: [StarterKit],
+  onUpdate: ({ editor }) => {
+    const json = editor.getState().doc.toJSON();
+    debouncedSave(json);
+  },
+});
+
+// Headless
+const editor = new Editor({
+  extensions: [StarterKit],
+  onChange: (state) => {
+    debouncedSave(state.doc.toJSON());
+  },
+});
 ```
 
 ---
 
-## Server-side serialization
+## Markdown Import
+
+To programmatically load Markdown, use the bundled parser:
+
+```ts
+import { markdownToDoc } from '@inscribe/core';
+
+const doc = markdownToDoc(markdownString, editor.schema);
+editor.commands.setContent(doc.toJSON());
+```
+
+---
+
+## Clearing the Document
+
+```ts
+// Minimal valid document — a single empty paragraph
+editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph' }] });
+```
+
+---
+
+## Server-side Serialization
 
 Use `ServerEditor` from `@inscribe/server` to parse and transform documents in Node.js
-without mounting a canvas.
+without mounting a canvas:
 
 ```ts
 import { ServerEditor } from '@inscribe/server';
@@ -111,18 +159,16 @@ const server = new ServerEditor({
   doc: saved.content,
 });
 
-// Read the document as Markdown
+// Read
 const markdown = server.getMarkdown();
+const json = server.getState().doc.toJSON();
 
 // Apply a transaction programmatically
 const state = server.getState();
-server._applyTransaction(
-  state.tr.insertText('Prepended text.\n\n', 0)
-);
+server._applyTransaction(state.tr.insertText('Prepended text.\n\n', 0));
 
-// Save the result
-const updated = server.getState().doc.toJSON();
-await db.saveDocument(id, updated);
+// Save
+await db.saveDocument(id, server.getState().doc.toJSON());
 ```
 
 <Callout type="info">

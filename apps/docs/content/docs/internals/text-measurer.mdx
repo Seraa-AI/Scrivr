@@ -1,0 +1,65 @@
+---
+title: Text Measurer
+description: Class reference for TextMeasurer.
+---
+
+Because Inscribe renders off-DOM, it maps text dimensions manually via hardware-accelerated Canvas interactions wrapped in strict `LRUCache` architectures to guarantee 60fps throughput.
+
+---
+
+## Constructor
+
+```ts
+new TextMeasurer({ lineHeightMultiplier?: number })
+```
+Accepts a multiplier variant (default `1.2`) defining global vertical spacing limits mathematically calculated over maximum glyph heights natively.
+
+---
+
+## Type Interfaces
+
+### `FontMetrics`
+```ts
+export interface FontMetrics {
+  ascent: number;
+  descent: number;
+  lineHeight: number;
+  xHeight: number;
+}
+```
+
+### `RunMetrics`
+```ts
+export interface RunMetrics {
+  totalWidth: number;
+  charPositions: number[];
+}
+```
+
+---
+
+## API Methods
+
+### `measureWidth()`
+```ts
+measureWidth(text: string, font: string): number
+```
+Runs a hyper-cached simple measurement resolving the raw pixel width of an identical string and font matrix. (Uses `Map<font, Map<text, width>>`).
+
+### `getFontMetrics()`
+```ts
+getFontMetrics(font: string): FontMetrics
+```
+Retrieves `fontBoundingBoxAscent/Descent` ensuring a heavily stabilized string box. Rather than lines constantly bumping natively based on `j`, `y`, or `p` tails, the layout remains rigidly uniform across the entire document organically. Falls back to measuring "Hg" internally on unsupporting Chromium implementations.
+
+### `measureRun()`
+```ts
+measureRun(text: string, font: string): RunMetrics
+```
+Kerning check. Measures the string entirely via cumulative concatenation tracking accurately how the browser naturally merges specific characters tightly (`AV`). Because it calculates recursively, this resolves inside a bounded `LRUCache<RunMetrics>` limited safely to 2000 total keys aggressively.
+
+### `invalidate()`
+```ts
+invalidate(font?: string): void
+```
+Triggered manually following successful `document.fonts.ready` promises, throwing out prior cached font limits to force accurate Word-Wrap breakpoints to restart calculation cleanly.
