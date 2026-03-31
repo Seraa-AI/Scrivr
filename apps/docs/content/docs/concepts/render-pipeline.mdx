@@ -82,10 +82,10 @@ this.ensureLayout(); // re-runs only when dirty
 After layout, `populateCharMap()` populates the `CharacterMap` — a spatial index that records the 
 `(x, y, height, page)` coordinate for every character position in the document.
 
-<Callout type="warn">
-  **Current limitation:** `layoutDocument()` re-processes the **entire document** on every state change.
-  For documents under ~50 pages this is imperceptible. Incremental layout (only re-processing affected pages)
-  is on the roadmap.
+<Callout type="info">
+  The layout engine uses a **block-level cache** — only blocks whose content or position has changed
+  are re-measured and re-paginated. Unaffected blocks are reused from the previous layout pass,
+  keeping layout fast even for large documents.
 </Callout>
 
 ---

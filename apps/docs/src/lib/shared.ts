@@ -1,11 +1,10 @@
-export const appName = 'Tanstack Start';
-export const docsRoute = '/docs';
+export const appName = 'Inscribe';
+export const docsRoute = '/';
 export const docsImageRoute = '/og/docs';
-export const docsContentRoute = '/llms.mdx/docs';
+export const docsContentRoute = '/llms.mdx';
 
-// fill this with your actual GitHub info, for example:
 export const gitConfig = {
-  user: 'fuma-nama',
-  repo: 'fumadocs',
+  user: 'Seraa-AI',
+  repo: 'Inscribe',
   branch: 'main',
 };

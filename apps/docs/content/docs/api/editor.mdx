@@ -1,9 +1,11 @@
 ---
 title: Editor API
-description: Complete reference for the Editor class — constructor, properties, methods, and lifecycle.
+description: Complete reference for the Editor class — methods, properties, and lifecycle.
 ---
 
-The `Editor` class is the central orchestrator of every Inscribe instance. It owns the document state, layout engine, and extension system. Consumers interact with it directly (headless) or via the `useCanvasEditor` React hook.
+The `Editor` class is the central orchestrator of every Inscribe instance. It owns the document
+state, layout engine, and extension system. Consumers interact with it directly (headless) or
+via the `useInscribeEditor` React hook.
 
 ```ts
 import { Editor, StarterKit } from '@inscribe/core';
@@ -18,201 +20,356 @@ editor.mount(containerElement);
 
 ---
 
-## Constructor & Options
+## Constructor
 
 ```ts
 new Editor(options: EditorOptions)
 ```
 
-Accepts an `EditorOptions` configuration object:
-
-- **`extensions`** `(Extension[])`: Extensions that define the schema, keymap, and commands. Defaults to `[StarterKit]`.
-- **`pageConfig`** `(PageConfig)`: Page dimensions and margins. Defaults to A4 with 1-inch margins.
-- **`onChange`** `(EditorChangeHandler)`: Called on every state change. Optional when using React adapter (as it auto-subscribes).
-- **`onFocusChange`** `((focused: boolean) => void)`: Called when the editor gains or loses focus. Use to show/hide overlays.
-- **`onCursorTick`** `((isVisible: boolean) => void)`: Called every cursor blink tick (530ms) and immediately after cursor movement so the adapter can redraw the overlay.
-- **`startReady`** `(boolean)`: Default `true`. When false, all render flushes are suppressed until `setReady(true)` is called. Essential for collaborative documents to prevent thousands of layout recalculations during initial Hocuspocus sync.
+Accepts an [`EditorOptions`](/api/types#editoroptions) object. Builds the ProseMirror schema
+from extensions, runs the initial layout, and starts the cursor blink timer.
 
 ---
 
-## Public Properties & Registries
+## Properties
 
 ### `schema`
 ```ts
 get schema(): Schema
 ```
-The merged ProseMirror schema built from all active extensions. Use this instead of importing a schema directly.
+The merged ProseMirror schema built from all active extensions. Use this instead of importing a
+schema directly — it reflects exactly which node and mark types are loaded.
 
 ### `pageConfig`
 ```ts
 readonly pageConfig: PageConfig
 ```
-The active page dimensions passed to the layout coordinator and read by renderers.
+The active page dimensions. Set once at construction from `EditorOptions.pageConfig`.
+See [`PageConfig`](/api/types#pageconfig).
 
 ### `charMap`
 ```ts
-readonly charMap: CharacterMap
+get charMap(): CharacterMap
 ```
-The spatial index mapping doc positions to `(x, y, page, height)` absolute coordinates. Used for rendering and hit-testing calculation.
-
-### `measurer`
-```ts
-readonly measurer: TextMeasurer
-```
-The HTML5 `<canvas>` text measurer instance. Its internal width caches are reused across layout passes.
-
-### `fontConfig` / `fontModifiers` / `markDecorators`
-```ts
-readonly fontConfig: FontConfig;
-readonly fontModifiers: Map<string, FontModifier>;
-readonly markDecorators: Map<string, MarkDecorator>;
-```
-Computed typography rules and mark render algorithms merged from all extensions at construction.
-
-### `blockRegistry` / `inlineRegistry` / `toolbarItems`
-```ts
-readonly blockRegistry: BlockRegistry;
-readonly inlineRegistry: InlineRegistry;
-readonly toolbarItems: ToolbarItemSpec[];
-```
-Maps of block/inline rendering strategies (`measure` and `draw` loops) and the data-only toolbar specifications contributed by loaded plugins.
+The spatial index mapping doc positions to `(x, y, page)` canvas coordinates. Owned by the
+layout engine and updated after every layout pass.
 
 ### `cursorManager`
 ```ts
 readonly cursorManager: CursorManager
 ```
-Manages the cursor blink timer. Read `cursorManager.isVisible` to know whether to draw the cursor onto your overlay canvas.
+Manages the cursor blink timer. Read `cursorManager.isVisible` to know whether to draw or clear
+the cursor in a custom overlay renderer.
 
-### `isFocused`
+### `toolbarItems`
 ```ts
-get isFocused(): boolean
+readonly toolbarItems: ToolbarItemSpec[]
 ```
-Whether the editor's hidden native input bridge `<textarea>` currently holds focus.
+Toolbar item specs contributed by all extensions, in registration order. Data-only — no
+framework dependency. Use this to build a data-driven toolbar without hard-coding button lists.
 
 ### `commands`
 ```ts
 readonly commands: Record<string, (...args: unknown[]) => void>
 ```
-All bound extension commands (`editor.commands.toggleBold()`, `editor.commands.undo()`, etc). Closures over the Editor so they instantly read the latest state.
+All bound extension commands. Closures that always read the latest state at call time.
+
+```ts
+editor.commands.toggleBold();
+editor.commands.setHeading2();
+editor.commands.undo();
+```
+
+### `isFocused`
+```ts
+get isFocused(): boolean
+```
+Whether the editor's hidden textarea currently has focus.
 
 ### `loadingState`
 ```ts
-get loadingState(): "syncing" | "rendering" | "ready"
+get loadingState(): 'syncing' | 'rendering' | 'ready'
 ```
-Three-phase state for active collaborative instances ensuring smooth UI progress blocks:
-- `'syncing'`: Waiting for network document; no layout occurs.
-- `'rendering'`: Network document received. First pages drawn; background idle callbacks actively laying out the rest.
-- `'ready'`: All pages completely laid out. Non-collaborative editors start in this state immediately.
+Current loading phase:
+
+| Value | Meaning |
+|-------|---------|
+| `'syncing'` | Waiting for collaborative sync (only when `startReady: false`). |
+| `'rendering'` | Layout engine is running for the first time. |
+| `'ready'` | Document is fully laid out and visible. |
 
 ### `cursorPage`
 ```ts
 get cursorPage(): number
 ```
-The 1-based page number where the cursor currently resides.
+The 1-based page number of the current cursor position.
 
 ---
 
-## Lifecycle & Control Methods
+## Lifecycle
 
-### `setReady(ready: boolean)`
-Resumes or halts the internal frame-loop rendering cycle (`requestAnimationFrame`). Used automatically by collaborative layers to halt rendering while receiving the initial bulky Y.js update.
-
-### `mount(container: HTMLElement)`
-Creates the hidden `<textarea>` input bridge and attaches keyboard/paste event listeners to the given container.
+### `mount(container)`
+```ts
+mount(container: HTMLElement): void
+```
+Attaches the keyboard, IME, and paste event listeners to the given container. Called
+automatically by `<Inscribe />`.
 
 ### `unmount()`
-Tears down the mounted view's event listeners without destroying the internal Model state. Safe to call multiple times or remount.
+```ts
+unmount(): void
+```
+Detaches event listeners. The editor state is preserved — the editor can be re-mounted.
+Called automatically by `<Inscribe />` on unmount.
 
 ### `destroy()`
-Full engine teardown. Runs extension `onEditorReady` cleanup callbacks, unmounts the bridge, and destroys the layout trackers. 
+```ts
+destroy(): void
+```
+Full teardown: runs extension cleanup, stops the cursor blink timer, and calls `unmount()`.
+After `destroy()` the instance must not be used.
 
 ### `focus()`
-Programmatically focuses the hidden textarea bridge wrapper.
+```ts
+focus(): void
+```
+Programmatically focuses the editor.
+
+### `setReady(ready)`
+```ts
+setReady(ready: boolean): void
+```
+Unblocks layout flushing after a collaborative sync. Managed automatically by the
+`Collaboration` extension — you do not need to call this manually.
 
 ---
 
-## State Access Methods
+## State
 
-### `getState() / getSnapshot()`
-Returns the current immutable ProseMirror `EditorState`. 
+### `getState()`
+```ts
+getState(): EditorState
+```
+Returns the current ProseMirror `EditorState`. States are immutable — reference equality
+detects changes.
 
-### `isActive(name: string, attrs?: Record<string, unknown>)`
-Returns `true` if the named mark or block node type is active at the current cursor or selection range. Standard way to trigger "Active" CSS variants in toolbars.
+### `getSnapshot()`
+```ts
+getSnapshot(): EditorState
+```
+Returns the current state. Used as the `getSnapshot` argument for React's
+`useSyncExternalStore`.
+
+### `isActive(name, attrs?)`
+```ts
+isActive(name: string, attrs?: Record<string, unknown>): boolean
+```
+Returns `true` if the named mark or block type is active at the current cursor or selection.
+
+```ts
+editor.isActive('bold');
+editor.isActive('heading', { level: 1 });
+```
 
 ### `getSelectionSnapshot()`
 ```ts
 getSelectionSnapshot(): SelectionSnapshot
 ```
-Returns a lightweight snapshot of the selection (anchor, head, from, to, activeMarks, activeMarkAttrs, blockType, blockAttrs). Provides all data required for Toolbar logic without Prosemirror imports.
+Returns a lightweight snapshot with everything a toolbar or floating menu needs — active marks,
+block type, cursor position — without requiring ProseMirror imports.
+See [`SelectionSnapshot`](/api/types#selectionsnapshot).
 
-### `getActiveMarks() / getActiveMarkAttrs()`
-Returns strings (`["bold", "highlight"]`) or objects representing the precise marks and their attributes present exactly under the cursor gap.
+### `getActiveMarks()`
+```ts
+getActiveMarks(): string[]
+```
+Names of marks active at the cursor. For a range selection, only marks present on **every**
+character in the range are returned.
 
-### `getBlockInfo()`
-Returns the parent block type (`paragraph`, `heading`) and its attributes. Traverses up out of structural wrappers (like bullet lists).
-
-### `getMarkdown() / getMarkdownSerializer()`
-Serializes the full document out to raw Markdown utilizing the extension-contributed serialization rules.
-
----
-
-## Layout & View Methods
-
-### `layout`
-Forces an `ensureLayout()` recalculation and returns the full `DocumentLayout` block schema tree.
-
-### `ensureLayout()`
-Forces the internal tracking algorithm (`LayoutCoordinator`) to reflect the current Editor State.
-
-### `getViewportRect(from: number, to: number)`
-Converts a doc position range to an absolute screen-space `DOMRect` relative to the browser window. Extensively used for `@floating-ui/react` popovers.
-
-### `getNodeViewportRect(docPos: number)`
-Similar to getViewportRect, but resolves the bounding box of a Node/Block specifically, utilizing `__lookupPage` layout tracking.
-
-### `ensurePagePopulated(pageNumber: number)`
-Checks if the generic spatial CharacterMap has been fully calculated up to a target physical page; runs the calculator up if needed.
-
-### `syncInputBridge()`
-Repositions the physical hidden `<textarea>` directly under the actual visual Canvas cursor coordinate to trick native scrolling anchoring.
-
-### `scrollCursorIntoView()`
-Scrolls the active layout window/wrapper so the cursor is visually apparent.
-
----
-
-## Cursor & Selection Command Methods
+### `getActiveMarkAttrs()`
+```ts
+getActiveMarkAttrs(): Record<string, Record<string, unknown>>
+```
+Attributes of each active mark, keyed by mark name.
 
 ```ts
-moveCursorTo(docPos: number): void
-setSelection(anchor: number, head: number): void
-selectNode(docPos: number): void
-setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void
+const attrs = editor.getActiveMarkAttrs();
+attrs.color?.color;    // '#dc2626'
+attrs.font_size?.size; // 18
+```
 
-// Arrow Key simulation
+### `getBlockInfo()`
+```ts
+getBlockInfo(): { blockType: string; blockAttrs: Record<string, unknown> }
+```
+Type name and attributes of the block node containing the cursor.
+
+### `getMarkdown()`
+```ts
+getMarkdown(): string
+```
+Serializes the full document to Markdown using extension-contributed serializer rules.
+
+### `getMarkdownSerializer()`
+```ts
+getMarkdownSerializer(): MarkdownSerializer
+```
+Returns a configured `MarkdownSerializer` built from all extension rules. Used internally by
+`getMarkdown()` and `exportToMarkdown()` from `@inscribe/export`.
+
+---
+
+## Layout
+
+### `layout`
+```ts
+get layout(): DocumentLayout
+```
+The current `DocumentLayout`. Calls `ensureLayout()` internally so the result always reflects
+the latest state.
+
+### `ensureLayout()`
+```ts
+ensureLayout(): void
+```
+Forces the layout engine to run synchronously if the current layout is stale. Normally
+triggered implicitly by `editor.layout` and movement methods.
+
+### `ensurePagePopulated(pageNumber)`
+```ts
+ensurePagePopulated(pageNumber: number): void
+```
+Ensures the given page (1-based) has been laid out and its character positions are indexed.
+
+---
+
+## Viewport & Position
+
+### `getViewportRect(from, to)`
+```ts
+getViewportRect(from: number, to: number): DOMRect | null
+```
+Converts a doc position range to a viewport-relative `DOMRect`. Returns `null` if the
+positions are not in the character map or no rendering adapter is mounted.
+
+```ts
+const rect = editor.getViewportRect(snap.from, snap.to);
+if (rect) {
+  menuEl.style.top  = `${rect.bottom + 8}px`;
+  menuEl.style.left = `${rect.left}px`;
+}
+```
+
+### `getNodeViewportRect(docPos)`
+```ts
+getNodeViewportRect(docPos: number): DOMRect | null
+```
+Converts a single node's doc position to a viewport-relative `DOMRect` covering the full
+visual bounds of that node. Used by `createImageMenu` to position the image toolbar below
+the selected image.
+
+### `scrollCursorIntoView()`
+```ts
+scrollCursorIntoView(): void
+```
+Scrolls the viewport so the current cursor position is visible.
+
+---
+
+## Cursor & Selection
+
+### `moveCursorTo(pos)`
+```ts
+moveCursorTo(pos: number): void
+```
+Collapses the cursor to a given doc position.
+
+### `setSelection(anchor, head)`
+```ts
+setSelection(anchor: number, head: number): void
+```
+Sets an explicit selection range. Both values are clamped to valid doc bounds.
+
+### `selectNode(docPos)`
+```ts
+selectNode(docPos: number): void
+```
+Creates a `NodeSelection` at the given doc position. Falls back to `moveCursorTo` if the node
+is not selectable. Use this to programmatically select images and other inline objects.
+
+### `setNodeAttrs(docPos, attrs)`
+```ts
+setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void
+```
+Merges attributes into the node at `docPos`. Use this to update image dimensions, alignment,
+or any other node-level attribute without writing a custom command.
+
+### `moveLeft / moveRight / moveUp / moveDown`
+```ts
 moveLeft(extend?: boolean): void
 moveRight(extend?: boolean): void
 moveUp(extend?: boolean): void
 moveDown(extend?: boolean): void
 ```
+Arrow-key cursor movement. Pass `extend: true` to grow the selection (Shift+arrow).
 
 ---
 
-## Subscription & Callbacks
+## Subscription
 
-### `subscribe(listener: () => void)`
-Registers a listener called on *every* editor notification (state changes, focus changes, cursor blink). Returns an unsubscribe execution function. 
-
-### `redraw()`
-Triggers an immediate forced UI repaint notification without a State change occurring (used extensively by the awareness remote cursor plugins).
-
-### `addOverlayRenderHandler(handler: OverlayRenderHandler)`
-Registers a Canvas draw block loop on the `OverlayRenderer` tier. Returns an unregister function.
+### `subscribe(listener)`
 ```ts
-const unregister = editor.addOverlayRenderHandler((ctx, pageNum, config, charMap) => {
-   // ctx.fillRect(...) 
-});
+subscribe(listener: () => void): () => void
+```
+Registers a listener called on every editor notification: state changes, focus changes, and
+cursor blink ticks. Returns an unsubscribe function.
+
+```ts
+const unsubscribe = editor.subscribe(() => forceUpdate());
 ```
 
-### `setPageElementLookup(fn: (page: number) => HTMLElement | null)`
-Registers the native DOM resolution function used to map the abstract layout 1-based page number to the physical browser wrapper `div` element. Used internally by layout boundary calculations.
+### `redraw()`
+```ts
+redraw(): void
+```
+Triggers a repaint without a document or selection change. Use when external state (e.g.
+collaborative awareness data) changes and the overlay needs refreshing.
+
+---
+
+## Extension Points
+
+### `addOverlayRenderHandler(handler)`
+```ts
+addOverlayRenderHandler(handler: OverlayRenderHandler): () => void
+```
+Registers a canvas draw function on the overlay layer. Called after the built-in cursor and
+selection are painted. Returns an unregister function.
+
+```ts
+const unregister = editor.addOverlayRenderHandler(
+  (ctx, pageNumber, pageConfig, charMap) => {
+    // draw custom overlay for this page
+  }
+);
+```
+
+### `setPageElementLookup(fn)`
+```ts
+setPageElementLookup(fn: ((page: number) => HTMLElement | null) | null): void
+```
+Registers the function used to resolve a 1-based page number to its DOM element. Called
+automatically by `<Inscribe />`. Only needed when building a custom rendering adapter.
+
+### `_applyTransaction(tr)`
+```ts
+_applyTransaction(tr: Transaction): void
+```
+Applies a ProseMirror transaction directly, bypassing input positioning. Used by extensions
+and the AI toolkit to dispatch transactions that originate outside normal user input (e.g.
+Yjs remote sync, ghost text updates).
+
+<Callout type="warn">
+  Prefixed with `_` to signal it is infrastructure-facing. Prefer `editor.commands.*` for
+  document mutations from application code.
+</Callout>

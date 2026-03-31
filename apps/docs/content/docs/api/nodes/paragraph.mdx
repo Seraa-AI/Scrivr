@@ -1,68 +1,38 @@
 ---
 title: Paragraph
-description: The default block node — plain text with optional alignment.
+description: The default block node — plain text with alignment and font family support.
 ---
 
-The `paragraph` node is the default block type in Inscribe. Every document begins with an empty
-paragraph and new paragraphs are created on `Enter`.
+The default block type. Every document must include `Paragraph`.
+
+```ts
+import { Paragraph } from '@inscribe/core';
+```
+
+No configurable options.
 
 ---
 
-## Schema
+## Attributes
 
-| Property | Value |
-|---|---|
-| Node type | `paragraph` (block) |
-| Content | `inline*` — zero or more inline nodes (text, image) |
-| Attribute | `align` — `"left"` \| `"center"` \| `"right"` \| `"justify"` |
-| Markdown | `\n\n` (double newline) |
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `align` | `'left' \| 'center' \| 'right' \| 'justify'` | `'left'` | Text alignment. |
+| `fontFamily` | `string \| null` | `null` | Block-level font family override. `null` inherits from `pageConfig`. |
 
 ---
 
 ## Commands
 
-### `insertParagraph()`
-Splits the current block at the cursor, inserting a new empty paragraph below.
-Bound to `Enter` by default.
+| Command | Description |
+|---------|-------------|
+| `setParagraph()` | Converts the current block to a paragraph. |
 
-```ts
-editor.commands.insertParagraph();
-```
-
-### `setAlignment(align)`
-Sets the text alignment of the paragraph containing the cursor.
-
-```ts
-editor.commands.setAlignment('center');
-editor.commands.setAlignment('justify');
-```
+**Keyboard:** `Mod-Alt-0`
 
 ---
 
-## Keyboard Shortcuts
+## Behaviour
 
-| Key | Action |
-|---|---|
-| `Enter` | Insert new paragraph |
-| `Mod-Shift-l` | Align left |
-| `Mod-Shift-e` | Align center |
-| `Mod-Shift-r` | Align right |
-| `Mod-Shift-j` | Justify |
-
----
-
-## Detecting Active State
-
-```ts
-editor.isActive('paragraph');               // always true inside a paragraph
-editor.getSelectionSnapshot().blockType;    // 'paragraph'
-editor.getSelectionSnapshot().blockAttrs;   // { align: 'left' }
-```
-
----
-
-## StarterKit Configuration
-
-```ts
-StarterKit.configure({ paragraph: false }) // remove paragraphs (not recommended)
-```
+- `Enter` splits the block and carries `align` and `fontFamily` onto the new paragraph.
+- When splitting a heading, the new block becomes a paragraph (not another heading) but inherits `fontFamily`.

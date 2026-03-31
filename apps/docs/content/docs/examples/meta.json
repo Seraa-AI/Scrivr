@@ -1,4 +1,9 @@
 {
   "title": "Examples",
-  "pages": ["document-editor", "collaboration", "ai-assistant"]
+  "icon": "Clapperboard",
+  "pages": [
+    "document-editor",
+    "collaboration",
+    "ai-assistant"
+  ]
 }

@@ -1,102 +1,78 @@
 ---
 title: Editor Options
-description: Full reference for the Editor configuration object.
+description: Configuration reference for the headless Editor class and PageConfig.
 ---
 
-When initializing Inscribe — whether through the headless `Editor` class directly or via the `useCanvasEditor` React hook — you must provide a configuration object. 
+This page covers the headless `new Editor(options)` API. If you are using a framework binding,
+the hook options live in the package page for your framework.
 
-This object defines which extensions are active, the physical dimensions of the paginated document, and hooks into the editor lifecycle.
-
----
-
-## Configuration Properties
-
-### `extensions`
-- **Type:** `Extension[]`
-- **Required:** Yes
-
-An array of Inscribe Extensions. Because Inscribe uses an extension-first architecture (similar to ProseMirror), the editor is entirely modular and has no built-in schema. For a standard rich-text experience, you should at least provide the `StarterKit`.
-
-```ts
-import { StarterKit } from '@inscribe/react';
-import { Collaboration } from '@inscribe/plugins';
-
-const extensions = [
-  StarterKit,
-  Collaboration.configure({ /* ... */ })
-];
-```
-
-### `pageConfig`
-- **Type:** `PageConfig`
-- **Required:** No
-- **Default:** A4 dimensions (794x1123) with 1-inch margins (96px).
-
-Because Inscribe uses a custom, deterministic layout engine to draw onto a `<canvas>` (bypassing the browser's DOM layout), it needs strict physical boundaries to perform calculating line-breaks, word-wrapping, and pagination.
-
-```ts
-const pageConfig = {
-  // Dimensions in pixels (typically 96 DPI for standard web typography)
-  width: 794,
-  height: 1123,
-  
-  // Margins restrict where the internal layout engine can place text blocks
-  margin: {
-    top: 96,
-    right: 96,
-    bottom: 96,
-    left: 96
-  }
-};
-```
-
-### Lifecycle Callbacks
-
-The editor fires events at key lifecycle moments.
-
-#### `onCreate`
-- **Type:** `({ editor: Editor }) => void`
-
-Fired immediately after the editor has initialized its state, built the ProseMirror schema from the active extensions, and configured the layout engine, but before the initial paint to the canvas.
-
-#### `onUpdate`
-- **Type:** `({ editor: Editor }) => void`
-
-Fired synchronously every time the document model changes (e.g., a ProseMirror transaction is committed). This is the ideal place to serialize the document for saving.
-
-#### `onSelectionUpdate`
-- **Type:** `({ editor: Editor }) => void`
-
-Fired when the cursor position or active selection range changes. This provides parity with TipTap's event system.
-
-#### `onFocus`
-- **Type:** `({ editor: Editor }) => void`
-
-Fired when the editor's native hidden `<textarea>` gains browser focus and is ready to accept keystrokes.
-
-#### `onBlur`
-- **Type:** `({ editor: Editor }) => void`
-
-Fired when the editor's native hidden `<textarea>` loses browser focus.
-
-#### `onDestroy`
-- **Type:** `() => void`
-
-Fired when the editor instance is destroying itself. Useful for cleaning up external side effects or custom event listeners.
+<Cards>
+  <Card title="@inscribe/react" href="/packages/react">
+    `useInscribeEditor`, `useInscribeState`, and React-specific callbacks.
+  </Card>
+</Cards>
 
 ---
 
-## React Specifics: `useCanvasEditor`
-
-If you are using the React bindings, `useCanvasEditor` accepts a second argument: the **dependency array**.
+## `new Editor(options)`
 
 ```ts
-const editor = useCanvasEditor(
-  options, 
-  [/* dependencies */]
-);
+import { Editor, StarterKit } from '@inscribe/core';
+
+const editor = new Editor({
+  extensions: [StarterKit],
+  onChange: (state) => console.log('changed', state),
+});
+
+editor.mount(document.getElementById('editor')!);
 ```
 
-By default, the editor remains a singleton for the entire lifecycle of the component. If you need to completely re-initialize the editor with a brand new state or completely different extensions, pass variables to this dependency array (behaving exactly like `useEffect` or `useMemo`). 
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `extensions` | `Extension[]` | `[StarterKit]` | Extensions to load. |
+| `pageConfig` | `PageConfig` | A4, ¾-inch margins | Page dimensions and margins. |
+| `onChange` | `(state: EditorState) => void` | — | Fired on every document or selection change. |
+| `onFocusChange` | `(focused: boolean) => void` | — | Fired when the editor textarea gains or loses focus. |
+| `onCursorTick` | `(isVisible: boolean) => void` | — | Fired on every cursor blink tick. Only needed when building a custom rendering adapter. |
+| `startReady` | `boolean` | `true` | Advanced. Suppresses layout flushes until the editor is marked ready internally. Managed automatically by the `Collaboration` extension — you do not need to set this manually. |
 
-When a dependency changes, `onDestroy` is called on the old instance, and a new pristine `Editor` engine is created.
+---
+
+## `PageConfig`
+
+Controls the physical dimensions and margins of every page. All values are in **pixels at 96 dpi**.
+
+```ts
+interface PageConfig {
+  pageWidth: number;
+  pageHeight: number;
+  margins: { top: number; right: number; bottom: number; left: number };
+  fontFamily?: string;
+}
+```
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `pageWidth` | `794` | Page width in px. 794 ≈ A4 width (210 mm). |
+| `pageHeight` | `1123` | Page height in px. 1123 ≈ A4 height (297 mm). |
+| `margins.top` | `72` | Top margin in px. 72 px = ¾ inch. |
+| `margins.right` | `72` | Right margin in px. |
+| `margins.bottom` | `72` | Bottom margin in px. |
+| `margins.left` | `72` | Left margin in px. |
+| `fontFamily` | — | Document-level default font family. |
+
+**Common page sizes:**
+
+| Format | `pageWidth` | `pageHeight` |
+|--------|-------------|--------------|
+| A4 portrait | `794` | `1123` |
+| US Letter portrait | `816` | `1056` |
+| A4 landscape | `1123` | `794` |
+
+**Common margin presets:**
+
+| Preset | px |
+|--------|----|
+| ¾ inch (default) | `72` |
+| 1 inch | `96` |
+| ½ inch (narrow) | `48` |

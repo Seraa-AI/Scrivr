@@ -1,0 +1,304 @@
+---
+title: "@inscribe/plugins"
+description: Optional extensions — real-time collaboration, AI Toolkit, and Track Changes.
+---
+
+`@inscribe/plugins` ships optional extensions that build on top of `@inscribe/core`. Install it only
+when you need one of the advanced features it provides.
+
+## Installation
+
+<Tabs items={["pnpm", "npm", "yarn"]}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @inscribe/plugins
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @inscribe/plugins
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @inscribe/plugins
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Real-Time Collaboration
+
+Inscribe's collaboration layer uses **Yjs** for CRDT data structures and syncs over WebSockets.
+Two extensions are needed:
+
+- `Collaboration` — connects the editor to a shared document via WebSocket
+- `CollaborationCursor` — renders remote user cursors on the canvas overlay
+
+The library manages the WebSocket connection internally — no separate provider setup is needed
+on the client.
+
+### Setup
+
+<Callout type="warn">
+  When using `Collaboration`, disable the built-in `History` extension from `StarterKit` —
+  `Collaboration` registers its own undo/redo through Yjs `UndoManager`.
+</Callout>
+
+```tsx title="CollaborativeEditor.tsx"
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+import { Collaboration, CollaborationCursor } from '@inscribe/plugins';
+
+export function CollaborativeEditor() {
+  const editor = useInscribeEditor({
+    extensions: [
+      StarterKit.configure({ history: false }), // Y.UndoManager replaces PM history
+      Collaboration.configure({
+        url: import.meta.env.VITE_WS_URL, // e.g. 'ws://localhost:1234'
+        name: 'my-document',              // document identifier
+      }),
+      CollaborationCursor.configure({
+        user: { name: 'Alice', color: '#f7b731' },
+      }),
+    ],
+  });
+
+  return <Inscribe editor={editor} style={{ height: '100vh' }} />;
+}
+```
+
+**Environment variable required:** `VITE_WS_URL` — the WebSocket URL of your Hocuspocus server
+(e.g. `ws://localhost:1234`).
+
+### Commands
+
+`Collaboration` overrides the default `undo` and `redo` commands to use Yjs `UndoManager`,
+ensuring undo history is scoped per user in a shared document.
+
+```ts
+editor.commands.undo();
+editor.commands.redo();
+```
+
+Keyboard shortcuts `Mod-Z` and `Mod-Y` / `Mod-Shift-Z` are also wired up automatically.
+
+### `Collaboration.configure` options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `url` | `string` | WebSocket server URL. |
+| `name` | `string` | Document identifier — maps to a room/document on the server. |
+| `onAuthenticate` | `() => Record<string, unknown>` | **Coming soon.** Return a payload (e.g. `{ token }`) to attach to the WebSocket handshake for server-side auth. |
+
+### `CollaborationCursor.configure` options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `user` | `{ name: string; color: string }` | Display name and cursor colour for the local user. |
+
+See the [Collaboration example](/examples/collaboration) for a full backend + frontend setup.
+
+---
+
+## AI Toolkit
+
+`AiToolkit` is an aggregator extension that enables ghost-text AI suggestions directly on the
+canvas overlay. Suggestions are rendered as a canvas overlay — the document is never mutated until
+the user explicitly accepts.
+
+`AiToolkit` bundles three sub-extensions: `UniqueId` (stable block IDs), `GhostText` (overlay
+renderer), and `AiCaret` (cursor overlay during streaming).
+
+### Setup
+
+```tsx title="AiEditor.tsx"
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+import { AiToolkit, getAiToolkit } from '@inscribe/plugins';
+
+export function AiEditor() {
+  const editor = useInscribeEditor({
+    extensions: [
+      StarterKit,
+      AiToolkit,
+    ],
+    onCreate: ({ editor }) => {
+      const ai = getAiToolkit(editor);
+      // ai is now available for reading context and pushing suggestions
+    },
+  });
+
+  return <Inscribe editor={editor} style={{ height: '100vh' }} />;
+}
+```
+
+### `getAiToolkit(editor): AiToolkitAPI`
+
+After the editor is created, call `getAiToolkit(editor)` to get the toolkit handle:
+
+```ts
+import { getAiToolkit } from '@inscribe/plugins';
+
+const ai = getAiToolkit(editor);
+```
+
+### Read API
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getContext(options?)` | `{ before, after, selection, cursorPos, totalLength }` | Text context around the cursor. Options: `beforeChars` (default 2000), `afterChars` (default 500), `includeSelection` (default true). |
+| `getTextRange(from, to)` | `string` | Plain text for a doc position range. Block boundaries joined with `\n`. |
+| `getMarkdownRange(from, to)` | `string` | Markdown for a doc position range. |
+| `getTextChunks(chunkSize)` | `string[]` | Full document as Markdown split into chunks of `chunkSize` characters. Useful for LLM context windows. |
+| `getBlocks(from?, to?)` | `Array<{ nodeId, text }>` | All top-level blocks with their stable `nodeId` and accepted text. Pass `from`/`to` to restrict to a range. |
+| `getSchemaDescription()` | `{ nodes, marks }` | Human-readable schema description. Include in AI system prompts so the model knows what content is valid. |
+
+### Streaming API
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `generateSuggestion(nodeId, stream, options?)` | `Promise<void>` | **Primary method.** Streams ghost text cosmetically, then inserts the result after the anchor block as a tracked change. `options.authorId` defaults to `"ai:assistant"`. |
+| `streamGhostText(nodeId, stream)` | `Promise<string>` | Streams cosmetically only — document is not modified. Returns the full accumulated text when the stream ends. |
+| `clearGhostText()` | `void` | Clears the ghost text overlay immediately. |
+| `clearAiCaret()` | `void` | Clears the AI caret overlay immediately. |
+
+See the [AI Assistant example](/examples/ai-assistant) for the full streaming integration pattern.
+
+---
+
+## Track Changes
+
+The Track Changes extension records every insertion and deletion as annotated marks in the
+document, enabling multi-author review workflows identical to Word or Google Docs.
+
+### Setup
+
+```tsx
+import { TrackChanges } from '@inscribe/plugins';
+
+const editor = useInscribeEditor({
+  extensions: [
+    StarterKit,
+    TrackChanges.configure({
+      userID: 'user-1',
+      initialStatus: 'enabled',
+      canAcceptReject: true,
+    }),
+  ],
+});
+```
+
+### `TrackChanges.configure` options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `userID` | `string` | `'anonymous:Anonymous'` | Author ID stamped on each change. |
+| `initialStatus` | `'enabled' \| 'disabled' \| 'view-snapshots'` | `'disabled'` | Tracking state at startup. |
+| `canAcceptReject` | `boolean` | `false` | Whether the local user can accept/reject changes. |
+| `skipTrsWithMetas` | `string[]` | `[]` | Transaction meta keys that bypass change recording. |
+
+### Mode switcher
+
+Like Word and Google Docs, the recommended UX is a three-mode switcher — not just a binary
+toggle — that maps directly to the three `TrackChangesStatus` values:
+
+| Mode | Status | Behaviour |
+|------|--------|-----------|
+| **Editing** | `'disabled'` | All edits apply directly. No tracking. |
+| **Suggesting** | `'enabled'` | Every edit is recorded as a pending change. |
+| **Viewing** | `'view-snapshots'` | Document is read-only. Useful for reviewers. |
+
+Wire up any dropdown or segmented control to `setTrackingStatus`:
+
+```tsx
+import { TrackChangesStatus } from '@inscribe/plugins';
+
+type EditorMode = 'editing' | 'suggesting' | 'viewing';
+
+const MODE_STATUS: Record<EditorMode, TrackChangesStatus> = {
+  editing:    TrackChangesStatus.disabled,
+  suggesting: TrackChangesStatus.enabled,
+  viewing:    TrackChangesStatus.viewSnapshots,
+};
+
+function ModeSwitcher({ editor }: { editor: Editor | null }) {
+  const [mode, setMode] = useState<EditorMode>('editing');
+
+  const handleSelect = (next: EditorMode) => {
+    setMode(next);
+    editor?.commands.setTrackingStatus(MODE_STATUS[next]);
+  };
+
+  return (
+    <select value={mode} onChange={e => handleSelect(e.target.value as EditorMode)}>
+      <option value="editing">Editing</option>
+      <option value="suggesting">Suggesting</option>
+      <option value="viewing">Viewing</option>
+    </select>
+  );
+}
+```
+
+The demo app ships a fully styled `ModeSwitcher` dropdown you can copy as a starting point.
+
+### Commands
+
+```ts
+// Accept or reject changes by ID
+editor.commands.setChangeStatuses('accepted', [changeId1, changeId2]);
+editor.commands.setChangeStatuses('rejected', [changeId1]);
+
+// Update the current author ID (e.g. after a user switch)
+editor.commands.setTrackChangesUserID('user-2');
+
+// Insert text as a pending suggestion, regardless of tracking status.
+// Use this for AI-generated edits — always shown as suggestions, never direct edits.
+editor.commands.insertAsSuggestion(text, from, to, authorId);
+
+// Force-rebuild the change set (rarely needed)
+editor.commands.refreshChanges();
+```
+
+### Accept/reject popover
+
+`@inscribe/plugins` exports a headless `createChangePopover` controller that fires whenever
+the cursor lands inside a pending change — use it to build an inline accept/reject popover,
+just like the comment cards in Word or Google Docs.
+
+```ts
+import { createChangePopover } from '@inscribe/plugins';
+
+const cleanup = createChangePopover(editor, {
+  onShow: (rect, info) => {
+    // info: { id, operation, authorID, status, from, to, text, isConflict, conflictChanges }
+    popover.style.cssText = `display:block; left:${rect.left}px; top:${rect.bottom + 8}px`;
+  },
+  onMove: (rect, info) => {
+    popover.style.left = `${rect.left}px`;
+    popover.style.top  = `${rect.bottom + 8}px`;
+  },
+  onHide: () => { popover.style.display = 'none'; },
+});
+
+// Wire up accept/reject buttons
+acceptBtn.onclick = () => editor.commands.setChangeStatuses('accepted', [info.id]);
+rejectBtn.onclick = () => editor.commands.setChangeStatuses('rejected', [info.id]);
+```
+
+When `info.isConflict` is `true`, `info.conflictChanges` contains all overlapping changes from
+different authors — render per-author accept/reject controls for each.
+
+For React, `@inscribe/react` exports a `TrackChangesPopover` component built on
+`createChangePopover` that handles positioning, single-change and conflict layouts, and author
+attribution out of the box. Drop it alongside `<Inscribe />`:
+
+```tsx
+import { TrackChangesPopover } from '@inscribe/react';
+
+<TrackChangesPopover editor={editor} />
+```
+
+<Callout type="info">
+  Track Changes stores annotations as ProseMirror marks and is fully compatible with the
+  Collaboration extension — each author's changes are tracked and attributed independently.
+</Callout>

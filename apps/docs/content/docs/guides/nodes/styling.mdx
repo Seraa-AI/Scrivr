@@ -1,100 +1,137 @@
 ---
-title: Customizing Page Appearance
-description: Control page dimensions, margins, DPI, and canvas font configuration.
+title: Styling Content
+description: Mark-based inline styling, block-level alignment, and overriding default block styles.
 ---
 
-Inscribe's canvas renderer needs explicit page geometry to run its layout engine — there is no CSS
-to override. All appearance customization flows through `pageConfig` and extension-registered font
-modifiers.
+Inscribe has two layers of styling: **inline marks** applied to text ranges, and **block styles**
+that define the base font, size, and spacing for each block type.
 
 ---
 
-## Page Dimensions
+## Inline marks
 
-Pass a `pageConfig` object to `new Editor()` or `useCanvasEditor()`:
+Inline marks are applied to a selection via commands. All mark commands are included in
+`StarterKit`.
+
+### Text formatting
 
 ```ts
-const editor = useCanvasEditor({
+editor.commands.toggleBold();
+editor.commands.toggleItalic();
+editor.commands.toggleUnderline();
+editor.commands.toggleStrikethrough();
+```
+
+### Font size
+
+```ts
+editor.commands.setFontSize(18);   // apply 18px to selection
+editor.commands.unsetFontSize();   // remove font size mark
+```
+
+### Font family
+
+```ts
+editor.commands.setFontFamily('Georgia, serif');
+editor.commands.unsetFontFamily();
+```
+
+### Color
+
+```ts
+editor.commands.setColor('#dc2626');  // red
+editor.commands.unsetColor();
+```
+
+### Highlight
+
+```ts
+editor.commands.toggleHighlight({ color: '#fef08a' }); // yellow
+editor.commands.unsetHighlight();
+```
+
+### Alignment
+
+Alignment is a block-level attribute, not a mark — it applies to the entire paragraph or
+heading, not just the selected text.
+
+```ts
+editor.commands.setAlignLeft();
+editor.commands.setAlignCenter();
+editor.commands.setAlignRight();
+editor.commands.setAlignJustify();
+```
+
+When multiple blocks are selected, alignment is applied to all of them.
+
+---
+
+## Document-level font
+
+Set a default font for the entire document via `pageConfig.fontFamily`. This overrides the
+font family in every block style while preserving sizes and weights:
+
+```ts
+const editor = new Editor({
   extensions: [StarterKit],
   pageConfig: {
-    width: 794,    // A4 portrait at 96 DPI
-    height: 1123,
-    margin: {
-      top: 96,     // 1 inch = 96 px
-      right: 96,
-      bottom: 96,
-      left: 96,
-    },
+    pageWidth: 794,
+    pageHeight: 1123,
+    margins: { top: 72, right: 72, bottom: 72, left: 72 },
+    fontFamily: 'Inter, sans-serif', // override default Georgia
   },
 });
 ```
 
----
-
-## DPI Reference
-
-Inscribe works in **CSS pixel units at 96 DPI** — the same reference density as browsers.
-
-| Paper size | Portrait (px) | Landscape (px) |
-|---|---|---|
-| A4 | 794 × 1123 | 1123 × 794 |
-| US Letter | 816 × 1056 | 1056 × 816 |
-| A3 | 1123 × 1587 | 1587 × 1123 |
-
-<Callout type="info">
-  These dimensions assume a standard 96 DPI screen. On high-DPI (Retina) displays, Inscribe
-  automatically scales the canvas `devicePixelRatio` for sharp rendering — you do not need to
-  account for this in `pageConfig`.
-</Callout>
+Inline `font_family` marks still win over the document-level font.
 
 ---
 
-## Margins
+## Block styles
 
-Margins define the **content area** — the region where the layout engine places text and blocks.
-They are in pixels and do not affect canvas or page-element sizing; the physical page is always
-`width × height`.
+Block styles define the base `font`, `spaceBefore`, `spaceAfter`, and `align` for each node
+type. They are the canvas equivalent of CSS `font` and `margin` on block elements.
+
+The defaults (from `StarterKit`):
+
+| Block | Font | Space before | Space after |
+|-------|------|-------------|-------------|
+| `paragraph` | 14px Georgia | 0 | 10px |
+| `heading_1` | bold 28px Georgia | 24px | 12px |
+| `heading_2` | bold 22px Georgia | 20px | 10px |
+| `heading_3` | bold 18px Georgia | 16px | 8px |
+| `codeBlock` | 13px Courier New | 14px | 14px |
+| `list_item` | 14px Georgia | 0 | 4px |
+
+---
+
+## Overriding block styles in a custom extension
+
+Contribute replacement block styles from an extension's `addBlockStyles()`:
 
 ```ts
-margin: {
-  top: 96,    // 1 inch
-  right: 72,  // 0.75 inch
-  bottom: 96,
-  left: 72,
-}
+import { Extension } from '@inscribe/core';
+
+const CustomTypography = Extension.create({
+  name: 'customTypography',
+
+  addBlockStyles() {
+    return {
+      paragraph: {
+        font: '16px Inter, sans-serif',
+        spaceBefore: 0,
+        spaceAfter: 12,
+        align: 'left',
+      },
+      heading_1: {
+        font: 'bold 32px Inter, sans-serif',
+        spaceBefore: 32,
+        spaceAfter: 16,
+        align: 'left',
+      },
+    };
+  },
+});
 ```
 
----
-
-## Page Gap and Overscan
-
-The visual gap between pages and the virtual scrolling overscan zone are configured on `<Canvas />`:
-
-```tsx
-<Canvas
-  editor={editor}
-  gap={32}         // px gap between pages (default: 24)
-  overscan={800}   // px beyond viewport to keep painted (default: 500)
-/>
-```
-
-Increase `overscan` if users report briefly seeing blank pages during fast keyboard navigation
-or touch scrolling.
-
----
-
-## Font Configuration
-
-The layout engine measures text using the HTML5 Canvas `measureText` API. The font used for
-measurement is derived from the `FontFamily` and `FontSize` marks (both included in `StarterKit`).
-
-To set a custom *default* body font, provide a `FontFamily` configuration:
-
-```ts
-StarterKit.configure({
-  fontFamily: { families: ['Inter', 'Georgia', 'Courier New'] },
-})
-```
-
-The first family in the list becomes the default. The layout engine pre-populates the canvas context
-with this font before measuring each run.
+Block styles from later extensions in the array override earlier ones for the same key.

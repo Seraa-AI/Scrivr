@@ -1,175 +1,134 @@
 ---
 title: React Integration
-description: Full reference for @inscribe/react — hooks, components, and contextual menus.
+description: Patterns for Next.js, server components, SSR, and context providers.
 ---
 
-`@inscribe/react` provides all React-specific bindings for Inscribe. It is the recommended way to
-use Inscribe in any React application.
-
----
-
-## Installation
-
-<Tabs items={["pnpm", "npm", "yarn"]}>
-  <Tab value="pnpm">
-    ```bash
-    pnpm add @inscribe/core @inscribe/react
-    ```
-  </Tab>
-  <Tab value="npm">
-    ```bash
-    npm install @inscribe/core @inscribe/react
-    ```
-  </Tab>
-  <Tab value="yarn">
-    ```bash
-    yarn add @inscribe/core @inscribe/react
-    ```
-  </Tab>
-</Tabs>
+`@inscribe/react` is a client-only library — it creates a canvas, listens to DOM events, and
+manages browser APIs. This page covers the patterns you need when using Inscribe inside
+a React framework like Next.js.
 
 ---
 
-## `useCanvasEditor`
+## Client Components
 
-Creates and manages an `Editor` instance tied to the React component lifecycle.
+The editor must live in a **client component**. Add `'use client'` to any file that imports from
+`@inscribe/react`:
 
-```ts
-import { useCanvasEditor, StarterKit } from '@inscribe/react';
+```tsx title="components/MyEditor.tsx"
+'use client';
 
-const editor = useCanvasEditor(options, deps?);
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+
+export function MyEditor() {
+  const editor = useInscribeEditor({ extensions: [StarterKit] });
+  return <Inscribe editor={editor} style={{ height: '100vh' }} />;
+}
 ```
 
-Returns `Editor | null` — `null` on first render and during SSR. `<Canvas />` handles `null`
-gracefully by rendering nothing until the editor is ready.
-
-**Options:** See [`UseCanvasEditorOptions`](/docs/api/types#usecanvasoptions) for the full type.
-
-**Dependency array:** The optional second argument `deps` behaves like `useEffect` — when any
-dependency changes, the old editor is destroyed and a new one is created.
-
-```ts
-const editor = useCanvasEditor(
-  { extensions: [StarterKit] },
-  [documentId] // re-initialize when the document changes
-);
-```
+Server components can then import and render `<MyEditor />` normally — they just can't use the
+`editor` instance themselves.
 
 ---
 
-## `<Canvas />`
+## Next.js — Disabling SSR
 
-Mounts the rendering engine into a container `<div>`. Handles `ViewManager` construction,
-virtual scrolling, and cleanup automatically.
+If you need the editor component to be lazily loaded (e.g. to keep it out of the initial bundle),
+use `next/dynamic` with `ssr: false`:
 
-```tsx
-import { Canvas } from '@inscribe/react';
+```tsx title="app/page.tsx"
+import dynamic from 'next/dynamic';
 
-<Canvas
-  editor={editor}   // Editor | null from useCanvasEditor
-  gap={24}          // px between pages (default: 24)
-  overscan={500}    // virtual scroll overscan in px (default: 500)
-  className="my-editor"
-  style={{ height: '100vh' }}
-/>
+const MyEditor = dynamic(() => import('@/components/MyEditor'), { ssr: false });
+
+export default function Page() {
+  return <MyEditor />;
+}
 ```
 
-**Props:** See [`CanvasProps`](/docs/api/types#canvasprops).
+`'use client'` on the component itself is still required — `ssr: false` only controls whether
+Next.js attempts to server-render the component during the build.
 
 ---
 
-## `useEditorState`
+## Sharing the Editor Instance
 
-Subscribes to a specific slice of editor state. The component re-renders **only** when the
-selected value changes — prevents unnecessary re-renders on every keypress.
+For small apps, pass `editor` as a prop. For larger trees, create a context to avoid threading
+it through every component.
 
-```tsx
-import { useEditorState } from '@inscribe/react';
+```tsx title="context/EditorContext.tsx"
+'use client';
 
-const isBold = useEditorState({
-  editor,
-  selector: ({ editor }) => editor?.isActive('bold') ?? false,
-});
+import { createContext, useContext } from 'react';
+import type { Editor } from '@inscribe/core';
 
-const blockType = useEditorState({
-  editor,
-  selector: ({ editor }) => editor?.getSelectionSnapshot().blockType ?? 'paragraph',
-});
+const EditorContext = createContext<Editor | null>(null);
+
+export const EditorProvider = EditorContext.Provider;
+
+export function useEditor(): Editor | null {
+  return useContext(EditorContext);
+}
 ```
+
+```tsx title="components/EditorApp.tsx"
+'use client';
+
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+import { EditorProvider } from '@/context/EditorContext';
+import { Toolbar } from './Toolbar';
+
+export function EditorApp() {
+  const editor = useInscribeEditor({ extensions: [StarterKit] });
+
+  return (
+    <EditorProvider value={editor}>
+      <Toolbar />
+      <Inscribe editor={editor} style={{ height: '100vh' }} />
+    </EditorProvider>
+  );
+}
+```
+
+```tsx title="components/Toolbar.tsx"
+'use client';
+
+import { useEditor } from '@/context/EditorContext';
+
+export function Toolbar() {
+  const editor = useEditor();
+  return (
+    <button onClick={() => editor?.commands.toggleBold()}>Bold</button>
+  );
+}
+```
+
+<Callout type="info">
+  A built-in `InscribeContext` and `useInscribe` hook are coming to `@inscribe/react` — see the
+  [React package page](/packages/react#inscribecontext-and-useinscribe). Once available, the
+  manual context above can be replaced with those.
+</Callout>
 
 ---
 
-## `BubbleMenu`
+## Server-Side Document Processing
 
-Renders a floating menu that appears above the current text selection. Automatically positions
-itself using `editor.getViewportRect()`.
+If you need to process documents on the server — applying AI suggestions, validating content,
+or exporting to Markdown — use `ServerEditor` from `@inscribe/core`.
+It shares the same schema and extension system as the browser `Editor` but has no DOM dependency.
 
-```tsx
-import { BubbleMenu } from '@inscribe/react';
+```ts title="app/api/export/route.ts"
+import { ServerEditor, StarterKit } from '@inscribe/core';
 
-<BubbleMenu editor={editor}>
-  <button onClick={() => editor?.commands.toggleBold()}>B</button>
-  <button onClick={() => editor?.commands.toggleItalic()}>I</button>
-</BubbleMenu>
+export async function POST(req: Request) {
+  const { doc } = await req.json();
+
+  const editor = new ServerEditor({
+    extensions: [StarterKit],
+    content: doc,
+  });
+
+  return Response.json({ markdown: editor.getMarkdown() });
+}
 ```
 
-The menu is hidden when the selection is collapsed (cursor only) and shown whenever there is a
-non-empty selection. Customize its show/hide logic via the `shouldShow` prop:
-
-```tsx
-<BubbleMenu
-  editor={editor}
-  shouldShow={({ editor }) => editor.isActive('paragraph')}
->
-  {/* shown only when inside a paragraph */}
-</BubbleMenu>
-```
-
----
-
-## `FloatingMenu`
-
-Similar to `BubbleMenu` but designed to appear at an empty block (slash menu trigger):
-
-```tsx
-import { FloatingMenu } from '@inscribe/react';
-
-<FloatingMenu editor={editor}>
-  <button onClick={() => editor?.commands.setHeading({ level: 1 })}>H1</button>
-  <button onClick={() => editor?.commands.toggleBulletList()}>List</button>
-</FloatingMenu>
-```
-
----
-
-## `SlashMenu`
-
-A pre-built command palette activated by typing `/` in an empty block. Includes all `StarterKit`
-block types with labels, icons, and keyboard navigation.
-
-```tsx
-import { SlashMenu } from '@inscribe/react';
-
-<SlashMenu editor={editor} />
-```
-
----
-
-## Other Frameworks
-
-Vue and Svelte adapters are planned. In the meantime, `@inscribe/core` is framework-agnostic —
-you can use the headless `Editor` class directly with any framework by managing `ViewManager`
-yourself:
-
-```ts
-// Framework-agnostic usage
-import { Editor, ViewManager, StarterKit } from '@inscribe/core';
-
-const editor = new Editor({ extensions: [StarterKit] });
-editor.mount(containerElement);
-const vm = new ViewManager(editor, containerElement);
-
-// on destroy:
-vm.destroy();
-editor.destroy();
-```
+See the [ServerEditor API reference](/api/server-editor) for the full interface.

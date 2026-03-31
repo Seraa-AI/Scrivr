@@ -16,7 +16,7 @@ building custom menus, overlays, or hit-testing logic.
 World-space coordinates are **relative to the top-left corner of a page canvas**. They are computed by
 the layout engine during `layoutDocument()` and stored in the `CharacterMap`.
 
-- **Unit:** pixels at 96 DPI (same unit as `pageConfig.width` / `pageConfig.height`)
+- **Unit:** pixels at 96 DPI (same unit as `pageConfig.pageWidth` / `pageConfig.pageHeight`)
 - **Origin:** top-left of the page element (not the scroll container)
 - **Who computes them:** `layoutDocument()` → `populateCharMap()`
 

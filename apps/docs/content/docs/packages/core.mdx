@@ -1,0 +1,190 @@
+---
+title: "@inscribe/core"
+description: The headless engine — Editor orchestrator, ProseMirror schema, layout engine, canvas ViewManager, and all built-in extensions.
+---
+
+`@inscribe/core` is the foundation of every Inscribe editor. It contains the headless `Editor` class,
+the custom layout engine, the canvas `ViewManager`, and all built-in document extensions.
+It has no React dependency and can be used in any JavaScript environment.
+
+## Installation
+
+<Tabs items={["pnpm", "npm", "yarn"]}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @inscribe/core
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @inscribe/core
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @inscribe/core
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Editor
+
+The `Editor` class is the central orchestrator. It owns the ProseMirror `EditorState`, drives the layout engine,
+and exposes a `commands` API for document mutations.
+
+```ts
+import { Editor, StarterKit } from '@inscribe/core';
+
+const editor = new Editor({
+  extensions: [StarterKit],
+  onChange: (state) => console.log('state changed', state),
+});
+
+// Attach to a DOM container
+editor.mount(document.getElementById('editor')!);
+
+// Tear down on unmount
+editor.destroy();
+```
+
+See the full [Editor API reference](/api/editor).
+
+---
+
+## StarterKit
+
+`StarterKit` is a convenience extension that bundles every commonly needed node and mark:
+
+| Included | Type |
+|----------|------|
+| `Paragraph` | Block node |
+| `Heading` (levels 1–6) | Block node |
+| `BulletList`, `OrderedList`, `ListItem` | Block nodes |
+| `HardBreak` | Inline node |
+| `Bold`, `Italic`, `Underline`, `Strikethrough` | Marks |
+| `Highlight` | Mark |
+| `Color` | Mark |
+| `FontSize` | Mark |
+| `FontFamily` | Mark |
+| `Link` | Mark |
+| `CodeBlock` | Block node |
+| `Image` | Inline node |
+| `HorizontalRule` | Block node |
+| `Alignment` | Extension |
+| `History` (undo/redo) | Extension |
+| `Pagination` | Extension |
+| `Typography` | Extension |
+| `TrailingNode` | Extension |
+
+```ts
+import { Editor, StarterKit } from '@inscribe/core';
+
+const editor = new Editor({ extensions: [StarterKit] });
+```
+
+You can also use `StarterKit` with options to disable individual pieces:
+
+```ts
+StarterKit.configure({
+  heading: { levels: [1, 2, 3] },
+  codeBlock: false,
+})
+```
+
+---
+
+## Extensions
+
+Every feature in Inscribe is an `Extension`. You can compose only what you need:
+
+```ts
+import { Editor, Paragraph, Heading, Bold, History } from '@inscribe/core';
+
+const editor = new Editor({
+  extensions: [
+    Paragraph,
+    Heading.configure({ levels: [1, 2] }),
+    Bold,
+    History,
+  ],
+});
+```
+
+See [Built-in Nodes](/guides/nodes/built-in-nodes) and [Custom Extensions](/guides/nodes/custom-extensions)
+for a complete reference.
+
+---
+
+## PageConfig
+
+Control page dimensions and margins via `pageConfig`. All values are in **pixels at 96 dpi**.
+
+```ts
+const editor = new Editor({
+  extensions: [StarterKit],
+  pageConfig: {
+    pageWidth: 794,    // A4 width  (~210 mm)
+    pageHeight: 1123,  // A4 height (~297 mm)
+    margins: { top: 72, right: 72, bottom: 72, left: 72 }, // ¾-inch margins
+  },
+});
+```
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `pageWidth` | `794` | Page width in px |
+| `pageHeight` | `1123` | Page height in px |
+| `margins.top` | `72` | Top margin in px |
+| `margins.right` | `72` | Right margin in px |
+| `margins.bottom` | `72` | Bottom margin in px |
+| `margins.left` | `72` | Left margin in px |
+
+---
+
+## Commands
+
+`editor.commands` is the primary way to mutate the document:
+
+```ts
+editor.commands.toggleBold();
+editor.commands.setHeading2();
+editor.commands.undo();
+editor.commands.redo();
+```
+
+---
+
+## ViewManager
+
+`ViewManager` is the canvas renderer. In React you will never construct it directly — `<Inscribe />` handles
+that. In headless contexts (tests, SSR pre-rendering) you can instantiate it directly:
+
+```ts
+import { ViewManager } from '@inscribe/core';
+
+const vm = new ViewManager(editor, containerElement);
+vm.destroy();
+```
+
+See the full [ViewManager reference](/api/view-manager).
+
+---
+
+## API Reference
+
+<Cards>
+  <Card title="Editor" href="/api/editor">
+    Constructor options, lifecycle methods, commands, and events.
+  </Card>
+  <Card title="ViewManager" href="/api/view-manager">
+    Canvas renderer — mount, destroy, and overlay hooks.
+  </Card>
+  <Card title="Events" href="/api/events">
+    All editor events and their payloads.
+  </Card>
+  <Card title="Types" href="/api/types">
+    TypeScript type definitions — EditorOptions, PageConfig, and more.
+  </Card>
+</Cards>

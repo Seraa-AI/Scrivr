@@ -1,98 +1,307 @@
 ---
-title: Built-in Nodes & Extensions
-description: All extensions bundled in StarterKit — nodes, marks, and utilities.
+title: Built-in Nodes
+description: Complete reference for all extensions bundled with @inscribe/core.
 ---
 
-`StarterKit` is the batteries-included default for Inscribe. It bundles everything needed for a fully
-functional rich-text document editor.
-
----
-
-## How to Use StarterKit
-
-```ts
-import { StarterKit } from '@inscribe/core'; // or '@inscribe/react'
-
-const editor = new Editor({ extensions: [StarterKit] });
-```
-
-To selectively disable or configure individual extensions:
-
-```ts
-StarterKit.configure({
-  heading: { levels: [1, 2, 3] }, // limit to H1–H3
-  history: false,                  // disable undo/redo
-  image: false,                    // remove image support
-})
-```
+All extensions are exported from `@inscribe/core` and aggregated by `StarterKit`. You can use
+`StarterKit` for convenience, or compose individual extensions to include only what you need.
 
 ---
 
 ## Block Nodes
 
-| Extension | Node type | Description | Input rule |
-|---|---|---|---|
-| `Paragraph` | `paragraph` | Default text block | — |
-| `Heading` | `heading` | H1–H6 with `level` attr | `# `, `## ` … |
-| `List` | `bulletList`, `orderedList`, `listItem` | Nested lists | `- `, `1. ` |
-| `CodeBlock` | `codeBlock` | Monospace fenced block | ` ``` ` |
-| `HorizontalRule` | `horizontal_rule` | Divider line | `---` |
-| `Image` | `image` | Inline image with `src`, `alt`, `width`, `height` | — |
+### `Paragraph`
 
----
-
-## Inline Marks
-
-| Extension | Mark name | Description | Shortcut |
-|---|---|---|---|
-| `Bold` | `bold` | Bold text | `Mod-b` |
-| `Italic` | `italic` | Italic text | `Mod-i` |
-| `Underline` | `underline` | Underlined text | `Mod-u` |
-| `Strikethrough` | `strikethrough` | Strikethrough text | `Mod-Shift-s` |
-| `Highlight` | `highlight` | Background highlight | `Mod-Shift-h` |
-| `Color` | `color` | Text foreground color | — |
-| `FontSize` | `font_size` | Font size (px) | — |
-| `FontFamily` | `font_family` | Font family | — |
-| `Link` | `link` | Hyperlink with `href` | — |
-
----
-
-## Utilities (Not Node Types)
-
-| Extension | Description |
-|---|---|
-| `Alignment` | Text alignment via `align` attr on block nodes (`left`, `center`, `right`, `justify`) |
-| `History` | Undo/redo via ProseMirror `history` plugin |
-| `Typography` | Smart quote, em-dash, and ellipsis input rules |
-| `BaseEditing` | Backspace, Delete, arrow keys, and slash-command input handler |
-| `Pagination` | Provides the default `PageConfig` (A4 / 1-inch margins) |
-
----
-
-## History (Undo / Redo)
-
-Undo and redo are provided by the `History` extension (included in `StarterKit`). No extra
-configuration is needed — `Mod-Z` and `Mod-Shift-Z` work out of the box.
+The default block type. Every document must include `Paragraph`.
 
 ```ts
-// Programmatic undo/redo
-editor.commands.undo();
-editor.commands.redo();
+import { Paragraph } from '@inscribe/core';
 ```
 
-To configure history depth:
+No configurable options.
+
+---
+
+### `Heading`
+
+Block node for headings at levels 1–6.
 
 ```ts
-StarterKit.configure({
-  history: {
-    depth: 150,         // max undo steps (default: 100)
-    newGroupDelay: 500, // ms before a new undo group is created
-  }
+import { Heading } from '@inscribe/core';
+
+Heading.configure({
+  levels: [1, 2, 3], // restrict to H1–H3 only
 })
 ```
 
-To disable history (e.g. when using Yjs for collaborative undo):
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `levels` | `number[]` | `[1,2,3,4,5,6]` | Permitted heading levels. |
+
+**Commands:** `setHeading1()` … `setHeading6()` (only levels in `options.levels` are registered), `setParagraph()`
+
+---
+
+### `List`
+
+Provides both bullet and ordered lists, including `listItem`.
 
 ```ts
-StarterKit.configure({ history: false })
+import { List } from '@inscribe/core';
+```
+
+No configurable options.
+
+**Commands:** `toggleBulletList()`, `toggleOrderedList()`, `liftListItem()`, `sinkListItem()`
+
+---
+
+### `CodeBlock`
+
+Fenced code block with monospace rendering.
+
+```ts
+import { CodeBlock } from '@inscribe/core';
+```
+
+No configurable options.
+
+**Commands:** `toggleCodeBlock()`
+
+---
+
+### `HorizontalRule`
+
+A thematic break — renders as a horizontal line.
+
+```ts
+import { HorizontalRule } from '@inscribe/core';
+```
+
+No configurable options.
+
+**Commands:** `setHorizontalRule()`
+
+---
+
+## Inline Nodes
+
+### `Image`
+
+Inline image node with support for float layout modes.
+
+```ts
+import { Image } from '@inscribe/core';
+```
+
+**Attributes:** `src`, `alt`, `title`, `width`, `height`, `floatMode` (`'inline'` | `'square-left'` | `'square-right'` | `'top-bottom'` | `'behind'` | `'front'`)
+
+**Commands:** `insertImage({ src, alt?, width?, height? })`
+
+---
+
+## Marks
+
+### `Bold`
+
+```ts
+import { Bold } from '@inscribe/core';
+```
+
+**Commands:** `toggleBold()`
+**Keyboard:** `Mod-b`
+
+---
+
+### `Italic`
+
+```ts
+import { Italic } from '@inscribe/core';
+```
+
+**Commands:** `toggleItalic()`
+**Keyboard:** `Mod-i`
+
+---
+
+### `Underline`
+
+```ts
+import { Underline } from '@inscribe/core';
+```
+
+**Commands:** `toggleUnderline()`
+**Keyboard:** `Mod-u`
+
+---
+
+### `Strikethrough`
+
+```ts
+import { Strikethrough } from '@inscribe/core';
+```
+
+**Commands:** `toggleStrikethrough()`
+
+---
+
+### `Highlight`
+
+Background highlight. Supports multiple colours.
+
+```ts
+import { Highlight } from '@inscribe/core';
+
+Highlight.configure({
+  colors: ['#fef08a', '#bbf7d0', '#bfdbfe'], // allowed colours
+})
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `colors` | `string[]` | Yellow, green, blue | Permitted highlight colours. |
+
+**Commands:** `toggleHighlight({ color })`, `unsetHighlight()`
+
+---
+
+### `Color`
+
+Text foreground colour.
+
+```ts
+import { Color } from '@inscribe/core';
+
+Color.configure({
+  colors: ['#dc2626', '#2563eb', '#16a34a'],
+})
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `colors` | `string[]` | Common palette | Permitted text colours. |
+
+**Commands:** `setColor(color)`, `unsetColor()`
+
+---
+
+### `FontSize`
+
+Text size in pixels.
+
+```ts
+import { FontSize } from '@inscribe/core';
+
+FontSize.configure({
+  sizes: [10, 12, 14, 16, 18, 24, 32],
+})
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `sizes` | `number[]` | Common scale | Permitted font sizes in px. |
+
+**Commands:** `setFontSize(size)`, `unsetFontSize()`
+
+---
+
+### `FontFamily`
+
+Text font family.
+
+```ts
+import { FontFamily } from '@inscribe/core';
+
+FontFamily.configure({
+  families: ['Arial', 'Georgia', 'Courier New'],
+})
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `families` | `string[]` | Common system fonts | Permitted font families. |
+
+**Commands:** `setFontFamily(family)`, `unsetFontFamily()`
+
+---
+
+### `Link`
+
+Hyperlink mark.
+
+```ts
+import { Link } from '@inscribe/core';
+```
+
+**Attributes:** `href`, `title`
+
+**Commands:** `setLink({ href, title? })`, `unsetLink()`
+
+---
+
+## Behaviour Extensions
+
+### `Alignment`
+
+Paragraph text alignment (left, center, right, justify).
+
+```ts
+import { Alignment } from '@inscribe/core';
+```
+
+**Commands:** `setAlignment('left' | 'center' | 'right' | 'justify')`
+
+---
+
+### `History`
+
+Undo/redo stack powered by ProseMirror's history module.
+
+```ts
+import { History } from '@inscribe/core';
+
+History.configure({
+  depth: 100,   // max undo steps
+  delay: 500,   // ms — events within this window are merged into one step
+})
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `depth` | `number` | `100` | Maximum number of undo steps. |
+| `delay` | `number` | `500` | Events within this many ms are merged into one history entry. |
+
+**Commands:** `undo()`, `redo()`
+**Keyboard:** `Mod-z` (undo), `Mod-Shift-z` / `Mod-y` (redo)
+
+---
+
+### `Pagination`
+
+Enables multi-page layout. Required for the canvas layout engine to split content across pages.
+Included in `StarterKit` automatically.
+
+```ts
+import { Pagination } from '@inscribe/core';
+```
+
+---
+
+### `Typography`
+
+Smart typography rules — converts `"straight quotes"` to `"curly quotes"`, `--` to em-dashes, etc.
+
+```ts
+import { Typography } from '@inscribe/core';
+```
+
+---
+
+### `TrailingNode`
+
+Ensures the document always ends with an empty paragraph, preventing cursor trapping at the last
+block node.
+
+```ts
+import { TrailingNode } from '@inscribe/core';
 ```

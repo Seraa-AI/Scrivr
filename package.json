@@ -6,6 +6,7 @@
   "description": "Inscribe — canvas-based document editor",
   "scripts": {
     "dev": "turbo dev --filter=@inscribe/demo",
+    "dev:docs": "turbo dev --filter=@inscribe/docs",
     "server": "turbo dev --filter=@inscribe/server",
     "build": "turbo build --filter='./packages/**'",
     "typecheck": "turbo typecheck",

@@ -1,4 +1,7 @@
 {
   "title": "Integrations",
-  "pages": ["react"]
+  "icon": "Plug",
+  "pages": [
+    "react"
+  ]
 }

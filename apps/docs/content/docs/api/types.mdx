@@ -18,25 +18,27 @@ interface EditorOptions {
   onChange?: (state: EditorState) => void;
   onFocusChange?: (focused: boolean) => void;
   onCursorTick?: (isVisible: boolean) => void;
+  startReady?: boolean;
 }
 ```
 
 | Property | Type | Required | Description |
 |---|---|---|---|
 | `extensions` | `Extension[]` | No | Active extensions. Defaults to `[StarterKit]`. |
-| `pageConfig` | `PageConfig` | No | Page dimensions. Defaults to A4 / 1-inch margins. |
+| `pageConfig` | `PageConfig` | No | Page dimensions. Defaults to A4, ¾-inch margins. |
 | `onChange` | `(state: EditorState) => void` | No | State change callback. |
 | `onFocusChange` | `(focused: boolean) => void` | No | Focus in/out callback. |
 | `onCursorTick` | `(isVisible: boolean) => void` | No | Cursor blink tick callback. |
+| `startReady` | `boolean` | No | Set to `false` when using collaboration — suppresses layout flushes until `setReady(true)` is called. Defaults to `true`. |
 
 ---
 
-## `UseCanvasEditorOptions`
+## `UseInscribeEditorOptions`
 
 React hook options — a superset of `EditorOptions` with React lifecycle callbacks.
 
 ```ts
-interface UseCanvasEditorOptions {
+interface UseInscribeEditorOptions {
   extensions?: Extension[];
   pageConfig?: PageConfig;
   onUpdate?: (props: { editor: Editor }) => void;
@@ -48,7 +50,7 @@ interface UseCanvasEditorOptions {
 }
 ```
 
-See [Event Callbacks](/docs/api/events) for full documentation of each callback.
+See [Event Callbacks](/api/events) for full documentation of each callback.
 
 ---
 
@@ -59,32 +61,34 @@ Defines the physical dimensions and margins of a single page.
 ```ts
 interface PageConfig {
   /** Page width in pixels. At 96 DPI, 794px = A4 width. */
-  width: number;
+  pageWidth: number;
   /** Page height in pixels. At 96 DPI, 1123px = A4 height. */
-  height: number;
+  pageHeight: number;
   /** Content margins in pixels. */
-  margin: {
+  margins: {
     top: number;
     right: number;
     bottom: number;
     left: number;
   };
+  /** Document-level default font family. Overrides block styles. */
+  fontFamily?: string;
 }
 ```
 
-**Default (A4, 1-inch margins):**
+**Default (A4, ¾-inch margins):**
 
 ```ts
 const defaultPageConfig: PageConfig = {
-  width: 794,
-  height: 1123,
-  margin: { top: 96, right: 96, bottom: 96, left: 96 },
+  pageWidth: 794,
+  pageHeight: 1123,
+  margins: { top: 72, right: 72, bottom: 72, left: 72 },
 };
 ```
 
 <Callout type="info">
   Inscribe uses 96 DPI as its reference density. 1 inch = 96 px, matching CSS `px` units at standard
-  screen resolution. Letter size would be `{ width: 816, height: 1056 }`.
+  screen resolution. Letter size would be `{ pageWidth: 816, pageHeight: 1056 }`.
 </Callout>
 
 ---
@@ -133,11 +137,11 @@ snap.activeMarkAttrs.color?.color;    // '#dc2626'
 
 ## `CanvasProps`
 
-Props accepted by the `<Canvas />` React component.
+Props accepted by the `<Inscribe />` React component.
 
 ```ts
 interface CanvasProps {
-  /** Editor from useCanvasEditor(). Renders nothing when null. */
+  /** Editor from useInscribeEditor(). Renders nothing when null. */
   editor: Editor | null;
   /** Gap in pixels between pages. Default: 24. */
   gap?: number;
@@ -163,17 +167,17 @@ The type of the `onChange` callback in `EditorOptions`.
 ## `Extension`
 
 The base type for all Inscribe extensions. Created via `Extension.create<Options>({ ... })`.
-See [Custom Extensions](/docs/guides/nodes/custom-extensions) for full documentation.
+See [Custom Extensions](/guides/nodes/custom-extensions) for full documentation.
 
 ---
 
 ## `DocumentLayout`
 
-The output of `layoutDocument()`. Contains an array of positioned pages.
+The output of the layout engine. Contains an array of positioned pages.
 
 ```ts
 interface DocumentLayout {
-  pages: PageLayout[];
+  pages: LayoutPage[];
   version: number;
 }
 ```

@@ -1,85 +1,62 @@
 ---
 title: Heading
-description: Section headings H1–H6 with level attributes.
+description: Block node for headings at levels 1–6 with configurable level set.
 ---
 
-The `heading` node represents document headings. It supports levels 1–6 and can be activated via
-keyboard shortcuts, the slash menu, or Markdown input rules (`# `, `## `, etc.).
+Block node for section headings at levels 1–6.
+
+```ts
+import { Heading } from '@inscribe/core';
+
+Heading.configure({
+  levels: [1, 2, 3], // restrict to H1–H3 only
+})
+```
 
 ---
 
-## Schema
+## Options
 
-| Property | Value |
-|---|---|
-| Node type | `heading` (block) |
-| Content | `inline*` |
-| Attributes | `level` — `1` \| `2` \| `3` \| `4` \| `5` \| `6`<br />`align` — `"left"` \| `"center"` \| `"right"` \| `"justify"` |
-| Markdown | `#` prefix matching heading level |
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `levels` | `number[]` | `[1,2,3,4,5,6]` | Permitted heading levels. Levels outside this list are excluded from the schema. |
+
+---
+
+## Attributes
+
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `level` | `number` | `1` | Heading level (1–6). |
+| `align` | `'left' \| 'center' \| 'right' \| 'justify'` | `'left'` | Text alignment. |
+| `fontFamily` | `string \| null` | `null` | Block-level font family override. |
 
 ---
 
 ## Commands
 
-### `setHeading({ level })`
-Converts the current block to a heading of the specified level.
+| Command | Description |
+|---------|-------------|
+| `setHeading1()` … `setHeading6()` | Converts the current block to the given heading level. Only commands for configured levels are registered. |
+| `setParagraph()` | Converts the current heading back to a paragraph. |
 
-```ts
-editor.commands.setHeading({ level: 1 }); // H1
-editor.commands.setHeading({ level: 2 }); // H2
-```
-
-### `toggleHeading({ level })`
-Toggles the block between the specified heading level and a plain paragraph.
-
-```ts
-editor.commands.toggleHeading({ level: 1 });
-```
+**Keyboard:** `Mod-Alt-1` … `Mod-Alt-6` (heading), `Mod-Alt-0` (paragraph)
 
 ---
 
-## Keyboard Shortcuts
+## Default styles
 
-| Key | Action |
-|---|---|
-| `Mod-Alt-1` | Toggle H1 |
-| `Mod-Alt-2` | Toggle H2 |
-| `Mod-Alt-3` | Toggle H3 |
-| `Mod-Alt-4` | Toggle H4 |
-| `Mod-Alt-5` | Toggle H5 |
-| `Mod-Alt-6` | Toggle H6 |
-
----
-
-## Input Rules (Markdown)
-
-Type at the beginning of an empty block to auto-convert:
-
-| Input | Result |
-|---|---|
-| `# ` + space | H1 |
-| `## ` + space | H2 |
-| `### ` + space | H3 |
-| `#### ` + space | H4 |
+| Level | Font | Space before | Space after |
+|-------|------|-------------|-------------|
+| H1 | bold 28px Georgia | 24px | 12px |
+| H2 | bold 22px Georgia | 20px | 10px |
+| H3 | bold 18px Georgia | 16px | 8px |
+| H4 | bold 16px Georgia | 14px | 6px |
+| H5 | bold 14px Georgia | 12px | 4px |
+| H6 | bold 12px Georgia | 10px | 2px |
 
 ---
 
-## Detecting Active State
+## Input rules
 
-```ts
-editor.isActive('heading');                        // inside any heading
-editor.isActive('heading', { level: 1 });          // specifically H1
-editor.getSelectionSnapshot().blockAttrs.level;    // 1 | 2 | 3 ...
-```
-
----
-
-## StarterKit Configuration
-
-```ts
-// Restrict to H1–H3 only
-StarterKit.configure({ heading: { levels: [1, 2, 3] } })
-
-// Remove headings entirely
-StarterKit.configure({ heading: false })
-```
+Typing `# ` … `###### ` at the start of a block converts it to the matching heading level.

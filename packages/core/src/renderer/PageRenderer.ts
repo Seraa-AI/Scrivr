@@ -128,6 +128,23 @@ export function renderPage(options: RenderPageOptions): void {
   for (const float of frontFloats) {
     drawFloat(ctx, float, map, inlineRegistry);
   }
+
+  // ── Re-stamp float objectRects with real dimensions ────────────────────────
+  // TextBlockStrategy.render registers 0×0 objectRects for float anchor spans
+  // (the zero-width in-flow placeholders). For 'behind' floats drawn before
+  // blocks, this overwrites the real dimensions set by drawFloat above.
+  // Re-register after all rendering so renderHandles and getNodeViewportRect
+  // always see the correct visual bounds regardless of draw order.
+  for (const float of pageFloats) {
+    map.registerObjectRect({
+      docPos: float.docPos,
+      x: float.x,
+      y: float.y,
+      width: float.width,
+      height: float.height,
+      page: float.page,
+    });
+  }
 }
 
 /**

@@ -1,0 +1,261 @@
+---
+title: "@inscribe/react"
+description: React bindings for Inscribe — useInscribeEditor hook, Inscribe component, and useInscribeState selector hook.
+---
+
+`@inscribe/react` is a thin React adapter over `@inscribe/core`. It provides a hook to create and manage
+an `Editor` instance within the React lifecycle, a mount component, and a state-subscription hook for
+building toolbars and menus without excessive re-renders.
+
+## Installation
+
+<Tabs items={["pnpm", "npm", "yarn"]}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @inscribe/core @inscribe/react
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @inscribe/core @inscribe/react
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @inscribe/core @inscribe/react
+    ```
+  </Tab>
+</Tabs>
+
+**Peer dependencies:** React 18 or 19.
+
+---
+
+## useInscribeEditor
+
+`useInscribeEditor` creates an `Editor` instance on mount and destroys it on unmount. It returns `null`
+during the first render (before the effect runs) — `<Inscribe />` handles this gracefully.
+
+```tsx
+import { useInscribeEditor, StarterKit } from '@inscribe/react';
+
+const editor = useInscribeEditor({
+  extensions: [StarterKit],
+});
+```
+
+### Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `extensions` | `Extension[]` | **Required.** Extensions to load. |
+| `pageConfig` | `PageConfig` | Page dimensions and margins. Defaults to A4, ¾-inch margins. |
+| `onCreate` | `({ editor }) => void` | Called once the editor is fully initialized. |
+| `onUpdate` | `({ editor }) => void` | Called on every document or selection change. |
+| `onSelectionUpdate` | `({ editor }) => void` | Alias for `onUpdate` — fires on every state change. |
+| `onFocus` | `({ editor }) => void` | Called when the editor textarea gains focus. |
+| `onBlur` | `({ editor }) => void` | Called when the editor textarea loses focus. |
+| `onDestroy` | `() => void` | Called when the editor is destroyed. |
+
+The optional second argument is a **dependency array** — if any value in it changes, the editor is torn down
+and re-initialized:
+
+```tsx
+const editor = useInscribeEditor({ extensions: [StarterKit] }, [roomId]);
+```
+
+---
+
+## Inscribe
+
+`<Inscribe />` mounts the `ViewManager` into a container `<div>`. It manages the hidden `<textarea>`
+input bridge for keyboard and IME events, and cleans up all observers on unmount.
+
+```tsx
+import { Inscribe } from '@inscribe/react';
+
+<Inscribe
+  editor={editor}
+  style={{ height: '100vh', background: '#f5f5f5' }}
+/>
+```
+
+### Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `editor` | `Editor \| null` | — | **Required.** Editor instance from `useInscribeEditor`. |
+| `gap` | `number` | `24` | Gap in px between pages. |
+| `overscan` | `number` | `500` | Virtual scroll overscan in px. |
+| `className` | `string` | — | CSS class on the outer container. |
+| `style` | `CSSProperties` | — | Inline styles on the outer container. |
+
+---
+
+## useInscribeState
+
+`useInscribeState` subscribes to a specific slice of editor state. The component only re-renders when
+the selected value changes — not on every keypress.
+
+```tsx
+import { useInscribeState } from '@inscribe/react';
+
+const isBold = useInscribeState({
+  editor,
+  selector: ({ editor }) => editor?.isActive('bold') ?? false,
+});
+```
+
+Use this to build toolbars that stay in sync with cursor position:
+
+```tsx
+export function Toolbar({ editor }: { editor: Editor | null }) {
+  const isBold = useInscribeState({
+    editor,
+    selector: ({ editor }) => editor?.isActive('bold') ?? false,
+  });
+
+  const isItalic = useInscribeState({
+    editor,
+    selector: ({ editor }) => editor?.isActive('italic') ?? false,
+  });
+
+  return (
+    <div>
+      <button
+        onClick={() => editor?.commands.toggleBold()}
+        data-active={isBold}
+      >
+        B
+      </button>
+      <button
+        onClick={() => editor?.commands.toggleItalic()}
+        data-active={isItalic}
+      >
+        I
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+## InscribeContext and useInscribe
+
+<Callout type="info">
+  Coming soon. `InscribeContext` and `useInscribe` are not yet available.
+</Callout>
+
+In larger applications passing the `editor` instance down as a prop to every toolbar, menu, and
+sidebar component gets tedious. `InscribeContext` will let you provide the editor once at the
+top of your tree, and `useInscribe` will let any child component consume it without props.
+
+```tsx title="Future API (not yet available)"
+import { InscribeContext, useInscribe } from '@inscribe/react';
+
+// Provide at the top of your tree
+export function EditorApp() {
+  const editor = useInscribeEditor({ extensions: [StarterKit] });
+
+  return (
+    <InscribeContext.Provider value={editor}>
+      <Toolbar />
+      <Inscribe editor={editor} style={{ height: '100vh' }} />
+    </InscribeContext.Provider>
+  );
+}
+
+// Consume anywhere in the tree — no prop drilling
+function Toolbar() {
+  const editor = useInscribe();
+  return (
+    <button onClick={() => editor?.commands.toggleBold()}>Bold</button>
+  );
+}
+```
+
+---
+
+## Menu Components
+
+`@inscribe/react` exports five ready-made floating menu components:
+
+| Component | Description |
+|-----------|-------------|
+| `BubbleMenu` | Appears above a text selection. Use for inline formatting (bold, italic, link). |
+| `FloatingMenu` | Appears at the start of an empty paragraph. Use for block-type switchers. |
+| `LinkPopover` | Popover for inserting and editing links. |
+| `ImageMenu` | Context menu for selected images — alignment, float mode, resize. |
+| `SlashMenu` | `/`-triggered command palette for inserting blocks. |
+| `TrackChangesPopover` | Inline accept/reject popover — appears when the cursor is inside a pending tracked change. Handles single changes and multi-author conflicts. |
+
+---
+
+## Full Example
+
+```tsx title="MyEditor.tsx"
+import {
+  useInscribeEditor,
+  Inscribe,
+  useInscribeState,
+  BubbleMenu,
+  StarterKit,
+} from '@inscribe/react';
+
+export function MyEditor() {
+  const editor = useInscribeEditor({
+    extensions: [StarterKit],
+    pageConfig: {
+      pageWidth: 794,
+      pageHeight: 1123,
+      margins: { top: 72, right: 72, bottom: 72, left: 72 },
+    },
+  });
+
+  const isBold = useInscribeState({
+    editor,
+    selector: ({ editor }) => editor?.isActive('bold') ?? false,
+  });
+
+  const isItalic = useInscribeState({
+    editor,
+    selector: ({ editor }) => editor?.isActive('italic') ?? false,
+  });
+
+  return (
+    <div style={{ height: '100vh', position: 'relative' }}>
+      {/* BubbleMenu appears above any text selection */}
+      <BubbleMenu editor={editor} className="bubble-menu">
+        <button
+          onClick={() => editor?.commands.toggleBold()}
+          data-active={isBold}
+        >
+          B
+        </button>
+        <button
+          onClick={() => editor?.commands.toggleItalic()}
+          data-active={isItalic}
+        >
+          I
+        </button>
+      </BubbleMenu>
+
+      <Inscribe editor={editor} style={{ height: '100%' }} />
+    </div>
+  );
+}
+```
+
+---
+
+## React Integration Guide
+
+<Cards>
+  <Card title="React Integration" href="/integrations/react">
+    Patterns for context providers, SSR, and server components.
+  </Card>
+  <Card title="Quick Start" href="/getting-started/quick-start">
+    Minimal working editor in under 30 lines.
+  </Card>
+</Cards>

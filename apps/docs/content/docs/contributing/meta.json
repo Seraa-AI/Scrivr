@@ -1,4 +1,9 @@
 {
   "title": "Contributing",
-  "pages": ["overview", "local-setup", "changelog"]
+  "icon": "GitPullRequest",
+  "pages": [
+    "overview",
+    "local-setup",
+    "changelog"
+  ]
 }

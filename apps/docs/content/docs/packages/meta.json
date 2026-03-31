@@ -1,0 +1,10 @@
+{
+  "title": "Packages",
+  "icon": "Package",
+  "pages": [
+    "core",
+    "react",
+    "plugins",
+    "export"
+  ]
+}

@@ -1,0 +1,190 @@
+---
+title: Menus
+description: Headless menu controllers from @inscribe/core — position and show your own UI.
+---
+
+`@inscribe/core` ships four framework-agnostic menu controllers. Each one subscribes to editor
+state, computes visibility, and fires `onShow` / `onHide` / `onMove` callbacks with a viewport
+`DOMRect`. You are responsible for rendering — bring any UI library you like.
+
+Framework bindings (React, Vue, Svelte) wrap these controllers into ready-made components.
+See your framework's package page for those.
+
+---
+
+## createBubbleMenu
+
+Shows when the editor has a non-empty text selection. Use it for inline formatting toolbars
+(bold, italic, link).
+
+```ts
+import { createBubbleMenu } from '@inscribe/core';
+
+const el = document.getElementById('bubble-menu')!;
+
+const cleanup = createBubbleMenu(editor, {
+  onShow: (rect) => {
+    el.style.cssText = `display:block; left:${rect.left}px; top:${rect.top - 40}px`;
+  },
+  onMove: (rect) => {
+    el.style.left = `${rect.left}px`;
+    el.style.top  = `${rect.top - 40}px`;
+  },
+  onHide: () => {
+    el.style.display = 'none';
+  },
+});
+
+// Tear down when done
+cleanup();
+```
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `onShow` | `(rect: DOMRect) => void` | — | Called when the menu should become visible. |
+| `onMove` | `(rect: DOMRect) => void` | — | Called when the menu is already visible but the selection moved. |
+| `onHide` | `() => void` | — | Called when the menu should hide. |
+| `shouldShow` | `(state: EditorState) => boolean` | non-empty text selection | Override the default visibility logic. |
+| `debounce` | `number` | `80` | Delay in ms before reacting to selection changes. Prevents flickering during drag-select. |
+
+---
+
+## createFloatingMenu
+
+Shows when the cursor is in an empty text block with nothing selected. Use it for block-insertion
+UI — a `+` button or a `/` command trigger beside empty paragraphs.
+
+```ts
+import { createFloatingMenu } from '@inscribe/core';
+
+const el = document.getElementById('floating-menu')!;
+
+const cleanup = createFloatingMenu(editor, {
+  onShow: (rect) => {
+    el.style.cssText = `display:block; left:${rect.left - 32}px; top:${rect.top}px`;
+  },
+  onMove: (rect) => {
+    el.style.left = `${rect.left - 32}px`;
+    el.style.top  = `${rect.top}px`;
+  },
+  onHide: () => {
+    el.style.display = 'none';
+  },
+});
+```
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `onShow` | `(rect: DOMRect) => void` | — | Called when the menu should become visible. |
+| `onMove` | `(rect: DOMRect) => void` | — | Called when the cursor moves while the menu is visible. |
+| `onHide` | `() => void` | — | Called when the menu should hide. |
+| `shouldShow` | `(state: EditorState) => boolean` | cursor in empty root text block | Override the default visibility logic. |
+
+---
+
+## createSlashMenu
+
+Shows when the user types `/` anywhere in a text block. Passes a live `query` string (everything
+after the `/`) so you can filter your command list as they type.
+
+```ts
+import { createSlashMenu } from '@inscribe/core';
+
+const { cleanup, dismissMenu } = createSlashMenu(editor, {
+  onShow: (rect, query, slashFrom) => {
+    menu.style.cssText = `display:block; left:${rect.left}px; top:${rect.bottom + 8}px`;
+    filterItems(query);
+  },
+  onUpdate: (rect, query, slashFrom) => {
+    filterItems(query);
+  },
+  onHide: () => {
+    menu.style.display = 'none';
+  },
+});
+
+// When the user selects a command:
+function selectItem(slashFrom: number) {
+  const state = editor.getState();
+  // 1. Delete the "/query" text
+  editor._applyTransaction(state.tr.delete(slashFrom, state.selection.from));
+  // 2. Run the command
+  editor.commands.setHeading1();
+  // 3. Close the menu
+  dismissMenu();
+}
+
+// Tear down
+cleanup();
+```
+
+### Callbacks
+
+| Callback | Signature | Description |
+|----------|-----------|-------------|
+| `onShow` | `(rect, query, slashFrom) => void` | Menu just appeared. `slashFrom` is the doc position of the `/` character. |
+| `onUpdate` | `(rect, query, slashFrom) => void` | Query text changed — re-filter your list. |
+| `onHide` | `() => void` | Menu should hide. |
+
+### Controller
+
+`createSlashMenu` returns a controller object (not a bare cleanup function):
+
+| Property | Description |
+|----------|-------------|
+| `cleanup()` | Stop listening and hide the menu. |
+| `dismissMenu()` | Force-hide immediately — call this after the user selects an item. |
+
+---
+
+## createImageMenu
+
+Shows when the user selects an image node. The `DOMRect` covers the full visual bounds of the
+image, so `rect.bottom` is a reliable anchor for a popover below it.
+
+```ts
+import { createImageMenu } from '@inscribe/core';
+
+const cleanup = createImageMenu(editor, {
+  onShow: (rect, info) => {
+    toolbar.style.cssText = `display:flex; left:${rect.left}px; top:${rect.bottom + 8}px`;
+    widthInput.value = String(info.node.attrs.width);
+  },
+  onMove: (rect, info) => {
+    toolbar.style.left = `${rect.left}px`;
+    toolbar.style.top  = `${rect.bottom + 8}px`;
+  },
+  onHide: () => {
+    toolbar.style.display = 'none';
+  },
+});
+```
+
+### Callbacks
+
+| Callback | Signature | Description |
+|----------|-----------|-------------|
+| `onShow` | `(rect: DOMRect, info: ImageMenuInfo) => void` | An image was just selected. |
+| `onMove` | `(rect: DOMRect, info: ImageMenuInfo) => void` | Image moved (layout reflow or scroll) — reposition. |
+| `onHide` | `() => void` | Selection left the image. |
+
+### `ImageMenuInfo`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `node` | `Node` | The selected ProseMirror image node. Access attributes via `info.node.attrs`. |
+| `docPos` | `number` | Doc position of the image — use with transactions or `editor.selectNode()`. |
+
+---
+
+## Framework bindings
+
+<Cards>
+  <Card title="React menus" href="/packages/react">
+    `BubbleMenu`, `FloatingMenu`, `SlashMenu`, `LinkPopover`, `ImageMenu` as React components.
+  </Card>
+</Cards>

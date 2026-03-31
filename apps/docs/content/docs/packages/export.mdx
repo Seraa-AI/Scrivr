@@ -1,0 +1,113 @@
+---
+title: "@inscribe/export"
+description: Export utilities — serialize Inscribe documents to paginated PDF (pdf-lib) or Markdown.
+---
+
+`@inscribe/export` provides serializers that convert an Inscribe `EditorState` into portable document
+formats. All serializers run entirely in the browser — no server round-trip required.
+
+## Installation
+
+<Tabs items={["pnpm", "npm", "yarn"]}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @inscribe/export
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @inscribe/export
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @inscribe/export
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## PDF Export
+
+Generates a multi-page PDF that matches the paginated canvas layout.
+Powered by [pdf-lib](https://pdf-lib.js.org/).
+
+<Callout type="info">
+  Currently uses standard PDF fonts (Helvetica, Times, Courier). Custom font embedding is coming
+  soon — documents using custom font families will fall back to the standard fonts in the meantime.
+</Callout>
+
+```ts
+import { exportToPdf } from '@inscribe/export';
+
+const pdfBytes = await exportToPdf(editor);
+
+// Download in the browser
+const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+const url = URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = 'document.pdf';
+a.click();
+```
+
+`exportToPdf` takes the editor instance and returns a `Promise<Uint8Array>` of the raw PDF bytes.
+
+---
+
+## DOCX Export
+
+<Callout type="warn">
+  DOCX export is coming soon. The `exportToDocx` function is exported but currently returns an empty
+  document. Full Word-compatible export is on the roadmap.
+</Callout>
+
+---
+
+## Markdown Export
+
+Converts the document to a CommonMark Markdown string. Useful for storing documents in
+version-controlled text files or feeding content into AI pipelines.
+
+```ts
+import { exportToMarkdown } from '@inscribe/export';
+
+const markdown = exportToMarkdown(editor);
+console.log(markdown);
+// # Heading
+//
+// A paragraph with **bold** and _italic_ text.
+```
+
+`exportToMarkdown` is synchronous and returns a `string`.
+
+<Callout type="warn">
+  **Markdown has no equivalent for some Inscribe formatting.** The following are silently dropped
+  during serialization — the text content is preserved but the formatting is lost:
+
+  | Lost | Reason |
+  |------|--------|
+  | Text alignment (left, center, right, justify) | Not part of CommonMark |
+  | Font family | Not part of CommonMark |
+  | Font size | Not part of CommonMark |
+  | Text color | Not part of CommonMark |
+  | Highlight | Not part of CommonMark |
+  | Track Changes marks | Pending insertions/deletions are exported as plain text |
+
+  If you need to round-trip a document without losing formatting, use the JSON format
+  (`editor.getJSON()` / `editor.setJSON()`) or wait for DOCX export.
+</Callout>
+
+---
+
+## Export Guide
+
+<Cards>
+  <Card title="Export Guide" href="/guides/export">
+    Trigger exports from toolbar buttons and handle async PDF generation.
+  </Card>
+  <Card title="Serialization" href="/guides/serialization">
+    Reading and writing ProseMirror JSON and HTML document formats.
+  </Card>
+</Cards>

@@ -17,7 +17,7 @@ import { useFumadocsLoader } from 'fumadocs-core/source/client';
 import { Suspense } from 'react';
 import { useMDXComponents } from '@/components/mdx';
 
-export const Route = createFileRoute('/docs/$')({
+export const Route = createFileRoute('/$')({
   component: Page,
   loader: async ({ params }) => {
     const slugs = params._splat?.split('/') ?? [];

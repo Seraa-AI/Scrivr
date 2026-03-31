@@ -1,0 +1,123 @@
+---
+title: ServerEditor API
+description: Headless document engine for Node.js — apply transactions and export documents without a browser.
+---
+
+`ServerEditor` is a Node.js-compatible document engine that shares the same schema and extension
+system as the browser `Editor` but has no DOM, canvas, or input dependencies. Use it for
+server-side document operations: applying AI suggestions as tracked changes, exporting to
+Markdown or JSON, batch validation, and Hocuspocus server hooks.
+
+```ts
+import { ServerEditor, StarterKit } from '@inscribe/core';
+import { TrackChanges } from '@inscribe/plugins';
+
+const editor = new ServerEditor({
+  extensions: [StarterKit, TrackChanges.configure({ userID: 'server', canAcceptReject: true })],
+  content: docFromDb,
+});
+
+const tr = editor.getState().tr.insertText('Hello world', 1);
+tr.setMeta('aiSuggestAs', 'AI Assistant');
+editor.applyTransaction(tr);
+
+const updated = editor.toJSON();
+```
+
+---
+
+## Constructor
+
+```ts
+new ServerEditor(options?: ServerEditorOptions)
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `extensions` | `Extension[]` | Extensions to load. Defaults to `[StarterKit]`. Omit rendering-only extensions — they are ignored gracefully. |
+| `content` | `Record<string, unknown>` | Initial document as ProseMirror JSON. Starts with an empty document if omitted. |
+
+---
+
+## Methods
+
+### `getState()`
+```ts
+getState(): EditorState
+```
+Returns the current ProseMirror `EditorState`.
+
+---
+
+### `applyTransaction(tr)`
+```ts
+applyTransaction(tr: Transaction): void
+```
+Applies a ProseMirror transaction. All plugin hooks (including `TrackChanges`) run their
+`appendTransaction` logic as normal.
+
+---
+
+### `setContent(json)`
+```ts
+setContent(json: Record<string, unknown>): void
+```
+Replaces the document with a new one from ProseMirror JSON. All plugin state is re-initialised.
+
+---
+
+### `toJSON()`
+```ts
+toJSON(): Record<string, unknown>
+```
+Serializes the document to ProseMirror JSON. Round-trips cleanly with `content` /  `setContent`.
+
+---
+
+### `getText()`
+```ts
+getText(): string
+```
+Returns the plain text content of the document. Block boundaries are joined with newlines.
+
+---
+
+### `getMarkdown()`
+```ts
+getMarkdown(): string
+```
+Serializes the document to Markdown using extension-contributed serializer rules.
+
+---
+
+## What is not available server-side
+
+| Member | Behaviour |
+|--------|-----------|
+| `layout` | Throws — no layout engine runs on the server |
+| `getViewportRect()` | Returns `null` |
+| `getNodeViewportRect()` | Returns `null` |
+| `selectNode()` | No-op |
+| `setNodeAttrs()` | No-op |
+| `subscribe()` | No-op — returns an empty unsubscribe function |
+| `addOverlayRenderHandler()` | No-op |
+| `loadingState` | Always `'ready'` |
+
+---
+
+## Next.js API route example
+
+```ts title="app/api/export/route.ts"
+import { ServerEditor, StarterKit } from '@inscribe/core';
+
+export async function POST(req: Request) {
+  const { doc } = await req.json();
+
+  const editor = new ServerEditor({
+    extensions: [StarterKit],
+    content: doc,
+  });
+
+  return Response.json({ markdown: editor.getMarkdown() });
+}
+```
