@@ -7,8 +7,6 @@ import { getAiToolkit, applyDiffAsSuggestion, applyMultiBlockDiff } from "@inscr
 import type { ToolOutputData } from "../routes/api/ai";
 
 // ── Typed data layer ─────────────────────────────────────────────────────────
-// AppDataTypes maps each data-part name to its payload shape.
-// The server emits 'data-tool_result' chunks via onStepFinish.
 type AppDataTypes = { tool_result: ToolOutputData };
 type AppUIMessage = UIMessage<unknown, AppDataTypes>;
 
@@ -34,8 +32,6 @@ function getDocContext(editor: Editor | null): {
   const { from, to } = state.selection;
   const hasSelection = from !== to;
 
-  // Selection → send only the selected blocks so the agent works in scope.
-  // No selection → send all blocks (full document context).
   const blocks = hasSelection ? ai.getBlocks(from, to) : ai.getBlocks();
   return blocks.length > 0 ? { blocks } : {};
 }
@@ -48,7 +44,6 @@ export function ChatPanel({ editor }: ChatPanelProps) {
   const editorRef = useRef(editor);
   editorRef.current = editor;
 
-  // Selection preview shown above the input when the user has text selected.
   const [selectionPreview, setSelectionPreview] = useState<string | null>(null);
 
   useEffect(() => {
@@ -67,7 +62,6 @@ export function ChatPanel({ editor }: ChatPanelProps) {
     return editor.subscribe(update);
   }, [editor]);
 
-  // Stable transport — injects current document context on every request.
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -82,12 +76,8 @@ export function ChatPanel({ editor }: ChatPanelProps) {
   );
 
   const [inputValue, setInputValue] = useState("");
-
-  // Capture the selection at Send time so insert/replace tools know where to go.
   const pendingSelection = useRef<{ from: number; to: number } | null>(null);
 
-  // Called by useChat's onData as each tool-result data part streams in.
-  // Fires exactly once per tool completion — no deduplication needed.
   function applyToolResult(dataPart: DataUIPart<AppDataTypes>) {
     if (dataPart.type !== "data-tool_result") return;
     const ed = editorRef.current;
@@ -141,11 +131,13 @@ export function ChatPanel({ editor }: ChatPanelProps) {
 
   function submit() {
     const text = inputValue.trim();
+    console.log(text, isLoading)
     if (!text || isLoading) return;
     if (editorRef.current) {
       const s = editorRef.current.getState().selection;
       pendingSelection.current = { from: s.from, to: s.to };
     }
+    console.log("Subbimting")
     sendMessage({ text });
     setInputValue("");
   }
@@ -158,17 +150,21 @@ export function ChatPanel({ editor }: ChatPanelProps) {
   }
 
   return (
-    <aside style={styles.panel}>
-      <div style={styles.header}>
-        <span style={styles.headerTitle}>AI Assistant</span>
-        <span style={styles.headerBadge}>Claude</span>
+    <aside className="w-[300px] shrink-0 flex flex-col bg-white border-l border-[#e8eaed] overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center h-11 px-3.5 bg-white border-b border-[#e8eaed] shrink-0 gap-2">
+        <span className="text-[13px] font-semibold text-gray-900 tracking-tight">AI Assistant</span>
+        <span className="ml-auto text-[11px] font-medium bg-indigo-50 text-indigo-500 border border-indigo-200 rounded-full px-2 py-px tracking-wide">
+          Claude
+        </span>
       </div>
 
-      <div style={styles.messages}>
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-3 pt-3.5 pb-1.5 flex flex-col gap-2.5">
         {messages.length === 0 && (
-          <div style={styles.empty}>
+          <p className="text-[12px] text-gray-400 text-center mt-8 leading-relaxed px-2">
             Ask anything — Claude has your document context and can edit text directly.
-          </div>
+          </p>
         )}
 
         {messages.map((msg) => (
@@ -176,33 +172,38 @@ export function ChatPanel({ editor }: ChatPanelProps) {
         ))}
 
         {isLoading && (
-          <div style={styles.aiBubble}>
-            <span style={styles.thinking}>Thinking…</span>
+          <div className="self-start bg-gray-50 border border-[#e8eaed] rounded-[12px_12px_12px_3px] px-3 py-2 max-w-[92%] text-[13px] leading-relaxed">
+            <span className="text-[12px] text-gray-400 italic">Thinking…</span>
           </div>
         )}
 
         <div ref={bottomRef} />
       </div>
 
-      <div style={styles.inputArea}>
+      {/* Input area */}
+      <div className="px-3 py-2.5 border-t border-[#e8eaed] flex flex-col gap-1.5 shrink-0 bg-white">
         {selectionPreview && (
-          <div style={styles.selectionPill}>
-            <span style={styles.selectionPillLabel}>Selection</span>
-            <span style={styles.selectionPillText}>{selectionPreview}</span>
+          <div className="flex items-start gap-1.5 bg-indigo-50 border border-indigo-200 rounded-md px-2 py-1.5 text-[11px] leading-snug">
+            <span className="font-bold text-indigo-500 uppercase tracking-wider shrink-0 text-[10px] pt-px">
+              Selection
+            </span>
+            <span className="text-indigo-700 italic overflow-hidden text-ellipsis whitespace-nowrap">
+              {selectionPreview}
+            </span>
           </div>
         )}
         <textarea
           ref={inputRef}
-          style={styles.textarea}
+          className="w-full resize-none border border-[#e8eaed] rounded-lg px-2.5 py-2 text-[13px] font-[inherit] outline-none leading-relaxed box-border bg-gray-50 text-gray-900 placeholder:text-gray-400 disabled:opacity-50"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Ask Claude… (Enter to send, Shift+Enter for newline)"
+          placeholder="Ask Claude… (Enter to send)"
           rows={3}
           disabled={isLoading}
         />
         <button
-          style={{ ...styles.sendBtn, opacity: isLoading || !inputValue.trim() ? 0.5 : 1 }}
+          className="self-end bg-indigo-500 hover:bg-indigo-600 text-white border-none rounded-lg px-4 py-1.5 text-[13px] font-semibold cursor-pointer tracking-tight transition-colors disabled:opacity-40"
           onClick={submit}
           disabled={isLoading || !inputValue.trim()}
         >
@@ -218,10 +219,10 @@ export function ChatPanel({ editor }: ChatPanelProps) {
 function MessageRow({ msg }: { msg: UIMessage }) {
   if (msg.role === "user") {
     return (
-      <div style={styles.userBubble}>
+      <div className="self-end bg-indigo-500 text-white rounded-[12px_12px_3px_12px] px-3 py-2 max-w-[85%] text-[13px] leading-relaxed ml-auto">
         {msg.parts.map((part, i) =>
           part.type === "text" ? (
-            <div key={i} style={styles.bubbleText}>{part.text}</div>
+            <div key={i} className="whitespace-pre-wrap wrap-break-word">{part.text}</div>
           ) : null,
         )}
       </div>
@@ -229,17 +230,15 @@ function MessageRow({ msg }: { msg: UIMessage }) {
   }
 
   return (
-    <div style={styles.aiBubble}>
+    <div className="self-start bg-gray-50 border border-[#e8eaed] rounded-[12px_12px_12px_3px] px-3 py-2 max-w-[92%] text-[13px] leading-relaxed flex flex-col gap-2">
       {msg.parts.map((part, i) => {
         if (part.type === "text") {
-          return <div key={i} style={styles.bubbleText}>{part.text}</div>;
+          return <div key={i} className="whitespace-pre-wrap wrap-break-word text-gray-800">{part.text}</div>;
         }
 
         if (part.type === "tool-edit_paragraph") {
           const p = part as { type: string; output?: { proposedText?: string } };
-          return (
-            <SuggestionCard key={i} label="Edit paragraph" text={p.output?.proposedText ?? ""} />
-          );
+          return <SuggestionCard key={i} label="Edit paragraph" text={p.output?.proposedText ?? ""} />;
         }
 
         if (part.type === "tool-edit_section") {
@@ -278,212 +277,23 @@ function MessageRow({ msg }: { msg: UIMessage }) {
 function SuggestionCard({ label, text }: { label: string; text: string }) {
   if (!text) {
     return (
-      <div style={styles.toolPending}>
-        <span style={styles.toolLabel}>{label}</span>
-        <span style={styles.thinking}>Generating…</span>
+      <div className="flex items-center gap-2 py-0.5">
+        <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wider">{label}</span>
+        <span className="text-[12px] text-gray-400 italic">Generating…</span>
       </div>
     );
   }
   return (
-    <div style={styles.toolCard}>
-      <div style={styles.toolCardHeader}>
-        <span style={styles.toolLabel}>{label}</span>
-        <span style={styles.suggestionBadge}>Added to document</span>
+    <div className="bg-white border border-emerald-200 rounded-lg px-2.5 py-2 flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wider">{label}</span>
+        <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-700 rounded-full px-2 py-px tracking-wide">
+          Added to document
+        </span>
       </div>
-      <pre style={styles.toolText}>{text}</pre>
+      <pre className="m-0 text-[12px] leading-relaxed text-gray-700 whitespace-pre-wrap wrap-break-word bg-gray-50 rounded px-2 py-1.5 max-h-[120px] overflow-y-auto font-[inherit]">
+        {text}
+      </pre>
     </div>
   );
 }
-
-// ── Styles ──────────────────────────────────────────────────────────────────
-
-const styles = {
-  panel: {
-    width: 320,
-    flexShrink: 0,
-    display: "flex",
-    flexDirection: "column" as const,
-    background: "#fff",
-    borderLeft: "1px solid #e2e8f0",
-    overflow: "hidden",
-  },
-  header: {
-    padding: "10px 14px",
-    background: "#0f172a",
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    flexShrink: 0,
-  },
-  headerTitle: {
-    color: "#e2e8f0",
-    fontSize: 13,
-    fontWeight: 600,
-    fontFamily: "monospace",
-  },
-  headerBadge: {
-    fontSize: 10,
-    background: "#7c3aed",
-    color: "#ede9fe",
-    padding: "2px 7px",
-    borderRadius: 4,
-    fontFamily: "monospace",
-    marginLeft: "auto",
-  },
-  messages: {
-    flex: 1,
-    overflowY: "auto" as const,
-    padding: "12px 12px 4px",
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: 10,
-  },
-  empty: {
-    color: "#94a3b8",
-    fontSize: 12,
-    textAlign: "center" as const,
-    marginTop: 24,
-    lineHeight: 1.6,
-  },
-  userBubble: {
-    alignSelf: "flex-end" as const,
-    background: "#1e40af",
-    color: "#fff",
-    borderRadius: "12px 12px 2px 12px",
-    padding: "8px 12px",
-    maxWidth: "85%",
-    fontSize: 13,
-    lineHeight: 1.5,
-    marginLeft: "auto",
-  },
-  aiBubble: {
-    alignSelf: "flex-start" as const,
-    background: "#f8fafc",
-    border: "1px solid #e2e8f0",
-    borderRadius: "12px 12px 12px 2px",
-    padding: "8px 12px",
-    maxWidth: "92%",
-    fontSize: 13,
-    lineHeight: 1.5,
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: 8,
-  },
-  bubbleText: {
-    whiteSpace: "pre-wrap" as const,
-    wordBreak: "break-word" as const,
-  },
-  thinking: {
-    color: "#94a3b8",
-    fontSize: 12,
-    fontStyle: "italic" as const,
-  },
-  toolCard: {
-    background: "#fff",
-    border: "1px solid #bbf7d0",
-    borderRadius: 8,
-    padding: "8px 10px",
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: 6,
-  },
-  toolCardHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between" as const,
-  },
-  suggestionBadge: {
-    fontSize: 10,
-    background: "#dcfce7",
-    color: "#15803d",
-    padding: "2px 6px",
-    borderRadius: 4,
-    fontWeight: 600,
-    fontFamily: "monospace",
-  },
-  toolPending: {
-    display: "flex",
-    gap: 8,
-    alignItems: "center",
-    padding: "4px 0",
-  },
-  toolLabel: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#7c3aed",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.05em",
-  },
-  toolText: {
-    margin: 0,
-    fontSize: 12,
-    lineHeight: 1.5,
-    color: "#1e293b",
-    whiteSpace: "pre-wrap" as const,
-    wordBreak: "break-word" as const,
-    background: "#f1f5f9",
-    borderRadius: 4,
-    padding: "6px 8px",
-    maxHeight: 120,
-    overflowY: "auto" as const,
-  },
-  inputArea: {
-    padding: "10px 12px",
-    borderTop: "1px solid #e2e8f0",
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: 8,
-    flexShrink: 0,
-  },
-  selectionPill: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: 6,
-    background: "#eff6ff",
-    border: "1px solid #bfdbfe",
-    borderRadius: 6,
-    padding: "5px 8px",
-    fontSize: 11,
-    lineHeight: 1.4,
-  },
-  selectionPillLabel: {
-    fontWeight: 700,
-    color: "#1d4ed8",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.05em",
-    flexShrink: 0,
-    fontSize: 10,
-    paddingTop: 1,
-  },
-  selectionPillText: {
-    color: "#1e40af",
-    fontStyle: "italic" as const,
-    overflow: "hidden" as const,
-    textOverflow: "ellipsis" as const,
-    whiteSpace: "nowrap" as const,
-  },
-  textarea: {
-    width: "100%",
-    resize: "none" as const,
-    border: "1px solid #e2e8f0",
-    borderRadius: 6,
-    padding: "8px 10px",
-    fontSize: 13,
-    fontFamily: "inherit",
-    outline: "none",
-    lineHeight: 1.5,
-    boxSizing: "border-box" as const,
-    background: "#f8fafc",
-  },
-  sendBtn: {
-    background: "#1e40af",
-    color: "#fff",
-    border: "none",
-    borderRadius: 6,
-    padding: "7px 16px",
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: "pointer",
-    alignSelf: "flex-end" as const,
-  },
-} as const;

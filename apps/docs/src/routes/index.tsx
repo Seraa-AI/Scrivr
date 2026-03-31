@@ -11,7 +11,7 @@ function HomePage() {
       <header className="flex items-center gap-6 px-8 py-4 border-b border-fd-border">
         <span className="font-mono text-sm font-semibold tracking-tight">Inscribe</span>
         <nav className="flex items-center gap-5 ml-auto text-sm text-fd-muted-foreground">
-          <Link to="/docs/$" params={{ _splat: 'getting-started' }} className="hover:text-fd-foreground transition-colors">
+          <Link to="/docs/$" className="hover:text-fd-foreground transition-colors">
             Docs
           </Link>
           <Link to="/playground" className="hover:text-fd-foreground transition-colors">

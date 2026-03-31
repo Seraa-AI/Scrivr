@@ -21,15 +21,8 @@ import { ModeSwitcher } from "./ModeSwitcher";
 import { TrackChangesPopover } from "@inscribe/react";
 import { ChatPanel } from "./ChatPanel";
 
-// ── Room + user identity from URL params ──────────────────────────────────────
-// Open the same URL in two tabs to collaborate.
-//   ?room=my-doc           — share document named "my-doc"
-//   ?room=my-doc&user=Bob  — custom display name
-//   ?color=%23ef4444       — custom cursor colour (URL-encoded hex)
-
 const COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"];
 
-// Guard against SSR (TanStack Start runs this on the server where window is absent)
 function getParam(key: string): string | null {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get(key);
@@ -67,30 +60,13 @@ const EMPTY_TOOLBAR: ToolbarSlice = {
   blockAttrs: {},
 };
 
-function Spinner() {
-  return (
-    <svg width={20} height={20} viewBox="0 0 20 20" style={styles.spinner}>
-      <circle cx={10} cy={10} r={8} fill="none" stroke="#cbd5e1" strokeWidth={2.5} />
-      <circle
-        cx={10} cy={10} r={8}
-        fill="none"
-        stroke="#3b82f6"
-        strokeWidth={2.5}
-        strokeDasharray="16 34"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 export function App() {
-  // Lazy init — runs once on the client, never on the server
   const [{ room, userName, userColor, extensions }] = useState(() => {
     const identity = makeIdentity();
     return {
       ...identity,
       extensions: [
-        StarterKit.configure({ history: false }), // Y.js undo replaces PM history
+        StarterKit.configure({ history: false }),
         Collaboration.configure({ url: identity.wsUrl, name: identity.room }),
         CollaborationCursor.configure({ user: { name: identity.userName, color: identity.userColor } }),
         PdfExport.configure({ filename: identity.room }),
@@ -101,7 +77,6 @@ export function App() {
   });
 
   const editor = useCanvasEditor({ extensions, pageConfig: defaultPageConfig });
-
   const toolbar = useEditorState({ editor, selector: selectToolbar }) ?? EMPTY_TOOLBAR;
 
   const loadingState = useEditorState({
@@ -120,21 +95,40 @@ export function App() {
   }) ?? { current: 1, total: 1 };
 
   return (
-    <div style={styles.shell}>
-      <header style={styles.header}>
-        <a href="/" style={styles.homeLink}>← Home</a>
-        <span style={styles.title}>inscribe</span>
-        <span style={styles.badge}>playground</span>
-        <span style={styles.pageInfo}>
-          Page {pageInfo.current} of {pageInfo.total}
-        </span>
-        <span style={styles.room}>
-          <span style={{ ...styles.dot, background: userColor }} />
-          {userName} · {room}
-        </span>
+    <div className="flex flex-col h-screen bg-[#f7f8fa] font-sans">
+
+      {/* ── Header ── */}
+      <header className="flex items-center justify-between h-11 px-4 bg-white border-b border-[#e8eaed] shrink-0 gap-3">
+        <div className="flex items-center gap-2 flex-1">
+          <a href="/" className="flex items-center gap-1 text-[13px] text-gray-500 no-underline px-1.5 py-0.5 rounded-md hover:bg-gray-100 hover:text-gray-700 transition-colors">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="block">
+              <path d="M9 2L4 7l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Docs
+          </a>
+          <div className="w-px h-4 bg-gray-200" />
+          <span className="text-[14px] font-semibold text-gray-900 tracking-tight">inscribe</span>
+          <span className="text-[11px] font-medium text-indigo-500 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-px tracking-wide">
+            playground
+          </span>
+        </div>
+
+        <div className="flex items-center justify-center flex-1">
+          <span className="text-[12px] text-gray-400 tabular-nums tracking-wide">
+            {pageInfo.current} / {pageInfo.total}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-1 justify-end">
+          <span className="w-[7px] h-[7px] rounded-full shrink-0" style={{ background: userColor }} />
+          <span className="text-[12px] font-medium text-gray-700">{userName}</span>
+          <span className="text-[12px] text-gray-300">·</span>
+          <span className="text-[12px] text-gray-400">{room}</span>
+        </div>
       </header>
 
-      <div style={styles.toolbarRow}>
+      {/* ── Toolbar ── */}
+      <div className="flex items-stretch shrink-0 bg-white border-b border-[#e8eaed]">
         <Toolbar
           items={editor?.toolbarItems ?? []}
           activeMarks={toolbar.activeMarks}
@@ -143,22 +137,29 @@ export function App() {
           blockAttrs={toolbar.blockAttrs}
           onCommand={(cmd, args) => editor?.commands[cmd]?.(...(args ?? []))}
         />
-        <div style={styles.modeSwitcherWrap}>
+        <div className="flex items-center px-3 border-l border-[#e8eaed] shrink-0">
           <ModeSwitcher editor={editor} />
         </div>
       </div>
 
-      <div style={styles.body}>
-        <main style={styles.main}>
-          <Canvas editor={editor} style={styles.canvas} />
+      {/* ── Body ── */}
+      <div className="flex flex-1 overflow-hidden relative">
+        <main
+          className="flex flex-1 overflow-auto justify-center items-start p-4"
+        >
+          <Canvas
+            editor={editor}
+            style={{ position: "relative",  }}
+            pageStyle={{ boxShadow: "none", border: "1px solid #e8eaed" }}
+          />
         </main>
         <ChatPanel editor={editor} />
 
         {loadingState === "syncing" && (
-          <div style={styles.loadingOverlay}>
-            <div style={styles.loadingCard}>
-              <Spinner />
-              <span style={styles.loadingText}>Connecting…</span>
+          <div className="absolute inset-0 flex items-center justify-center bg-[rgba(247,248,250,0.85)] backdrop-blur-sm z-10">
+            <div className="flex items-center gap-2.5 bg-white border border-[#e8eaed] rounded-xl px-5 py-3 shadow-lg">
+              <LoadingSpinner />
+              <span className="text-[13px] font-medium text-gray-700">Connecting…</span>
             </div>
           </div>
         )}
@@ -174,117 +175,11 @@ export function App() {
   );
 }
 
-const styles = {
-  shell: {
-    display: "flex",
-    flexDirection: "column" as const,
-    height: "100vh",
-    background: "#f1f5f9",
-  },
-  header: {
-    background: "#0f172a",
-    color: "#e2e8f0",
-    padding: "10px 24px",
-    display: "flex",
-    alignItems: "center",
-    gap: 16,
-    flexShrink: 0,
-  },
-  homeLink: {
-    fontSize: 12,
-    color: "#94a3b8",
-    fontFamily: "monospace",
-    textDecoration: "none",
-  },
-  title: { fontFamily: "monospace", fontSize: 15, fontWeight: 600 },
-  pageInfo: {
-    fontSize: 12,
-    color: "#94a3b8",
-    fontFamily: "monospace",
-  },
-  room: {
-    marginLeft: "auto",
-    fontSize: 12,
-    color: "#94a3b8",
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    fontFamily: "monospace",
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-    display: "inline-block",
-  },
-  badge: {
-    fontSize: 11,
-    background: "#1e40af",
-    color: "#bfdbfe",
-    padding: "2px 8px",
-    borderRadius: 4,
-    fontFamily: "monospace",
-  },
-  toolbarRow: {
-    display: "flex",
-    alignItems: "stretch",
-    flexShrink: 0,
-  },
-  modeSwitcherWrap: {
-    marginLeft: "auto",
-    padding: "0 8px",
-    display: "flex",
-    alignItems: "center",
-    background: "#fff",
-    borderBottom: "1px solid #e2e8f0",
-    flexShrink: 0,
-  },
-  body: {
-    flex: 1,
-    display: "flex",
-    overflow: "hidden",
-    position: "relative" as const,
-  },
-  main: {
-    flex: 1,
-    overflow: "auto",
-    padding: 40,
-    display: "flex",
-    justifyContent: "center",
-  },
-  canvas: {
-    position: "relative" as const,
-  },
-  loadingOverlay: {
-    position: "absolute" as const,
-    inset: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "rgba(241, 245, 249, 0.85)",
-    backdropFilter: "blur(2px)",
-    zIndex: 10,
-    pointerEvents: "none" as const,
-  },
-  loadingCard: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    background: "#fff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 8,
-    padding: "10px 18px",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-    pointerEvents: "none" as const,
-  },
-  loadingText: {
-    fontSize: 13,
-    color: "#475569",
-    fontFamily: "monospace",
-  },
-  spinner: {
-    animation: "spin 0.9s linear infinite",
-    display: "block" as const,
-    flexShrink: 0,
-  },
-} as const;
+function LoadingSpinner() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" className="block animate-spin">
+      <circle cx="9" cy="9" r="7" fill="none" stroke="#e2e8f0" strokeWidth="2" />
+      <path d="M9 2a7 7 0 0 1 7 7" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}

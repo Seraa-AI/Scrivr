@@ -34,20 +34,25 @@ export function FloatingMenuBar({ editor }: FloatingMenuBarProps) {
 
   return (
     <FloatingMenu editor={editor}>
-      <div style={styles.wrap}>
+      <div className="relative flex items-center">
         <button
           title="Insert block"
           onMouseDown={(e) => {
             e.preventDefault();
             setOpen((v) => !v);
           }}
-          style={{ ...styles.plusBtn, ...(open ? styles.plusBtnOpen : {}) }}
+          className={[
+            "w-[22px] h-[22px] rounded-full border text-[15px] leading-none flex items-center justify-center cursor-pointer transition-all duration-100 shadow-sm p-0",
+            open
+              ? "bg-indigo-500 border-indigo-500 text-white rotate-45"
+              : "bg-white border-gray-300 text-gray-400 hover:border-indigo-400 hover:text-indigo-500",
+          ].join(" ")}
         >
           +
         </button>
 
         {open && (
-          <div style={styles.dropdown}>
+          <div className="absolute left-7 top-1/2 -translate-y-1/2 bg-white border border-[#e8eaed] rounded-[9px] p-1 min-w-[164px] shadow-[0_4px_20px_rgba(0,0,0,0.1),0_1px_4px_rgba(0,0,0,0.06)] z-100">
             {BLOCK_ITEMS.map((item) => (
               <button
                 key={item.command}
@@ -56,16 +61,12 @@ export function FloatingMenuBar({ editor }: FloatingMenuBarProps) {
                   e.preventDefault();
                   runCommand(item);
                 }}
-                style={styles.dropItem}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "#f1f5f9";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                }}
+                className="flex items-center gap-2 w-full bg-transparent border-none rounded-md px-2 py-1.5 cursor-pointer text-left hover:bg-gray-100 transition-colors"
               >
-                <span style={styles.dropIcon}>{item.label}</span>
-                <span style={styles.dropLabel}>{item.title}</span>
+                <span className="w-[22px] text-[12px] text-gray-400 font-mono text-center shrink-0">
+                  {item.label}
+                </span>
+                <span className="text-[13px] font-medium text-gray-700">{item.title}</span>
               </button>
             ))}
           </div>
@@ -74,70 +75,3 @@ export function FloatingMenuBar({ editor }: FloatingMenuBarProps) {
     </FloatingMenu>
   );
 }
-
-const styles = {
-  wrap: {
-    position: "relative" as const,
-    display: "flex",
-    alignItems: "center",
-  },
-  plusBtn: {
-    width: 24,
-    height: 24,
-    borderRadius: "50%",
-    border: "1.5px solid #94a3b8",
-    background: "#fff",
-    color: "#64748b",
-    cursor: "pointer",
-    fontSize: 16,
-    lineHeight: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    transition: "all 0.1s",
-    padding: 0,
-  },
-  plusBtnOpen: {
-    background: "#3b82f6",
-    borderColor: "#3b82f6",
-    color: "#fff",
-    transform: "rotate(45deg)",
-  },
-  dropdown: {
-    position: "absolute" as const,
-    left: 30,
-    top: "50%",
-    transform: "translateY(-50%)",
-    background: "#fff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 8,
-    padding: "4px",
-    minWidth: 160,
-    boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-    zIndex: 100,
-  },
-  dropItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    width: "100%",
-    background: "transparent",
-    border: "none",
-    borderRadius: 5,
-    padding: "6px 8px",
-    cursor: "pointer",
-    textAlign: "left" as const,
-  },
-  dropIcon: {
-    width: 24,
-    fontSize: 12,
-    color: "#64748b",
-    fontFamily: "monospace",
-    textAlign: "center" as const,
-    flexShrink: 0,
-  },
-  dropLabel: {
-    fontSize: 13,
-    color: "#1e293b",
-  },
-} as const;

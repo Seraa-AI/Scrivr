@@ -1,4 +1,26 @@
 import type { ToolbarItemSpec } from "@inscribe/core";
+import {
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+  Heading1,
+  Heading2,
+  Heading3,
+  Pilcrow,
+  List,
+  ListOrdered,
+  Code,
+  Minus,
+  Image as ImageIcon,
+  Link as LinkIcon,
+  Link2Off,
+  type LucideIcon,
+} from "lucide-react";
 
 interface ToolbarProps {
   items: ToolbarItemSpec[];
@@ -9,36 +31,66 @@ interface ToolbarProps {
   onCommand: (cmd: string, args?: unknown[]) => void;
 }
 
+// Map from command name → Lucide icon
+const ICON_MAP: Record<string, LucideIcon> = {
+  toggleBold: Bold,
+  toggleItalic: Italic,
+  toggleUnderline: Underline,
+  toggleStrikethrough: Strikethrough,
+  setAlignLeft: AlignLeft,
+  setAlignCenter: AlignCenter,
+  setAlignRight: AlignRight,
+  setAlignJustify: AlignJustify,
+  setHeading1: Heading1,
+  setHeading2: Heading2,
+  setHeading3: Heading3,
+  setParagraph: Pilcrow,
+  toggleBulletList: List,
+  toggleOrderedList: ListOrdered,
+  toggleCodeBlock: Code,
+  insertHorizontalRule: Minus,
+  insertImage: ImageIcon,
+  setLink: LinkIcon,
+  unsetLink: Link2Off,
+};
+
 /**
- * Toolbar — data-driven toolbar rendered from extension ToolbarItemSpecs.
+ * Toolbar — data-driven from extension ToolbarItemSpecs.
  *
- * Groups are derived from item.group — a divider is inserted whenever the
- * group name changes. Two special groups are rendered as <select> dropdowns
- * instead of individual buttons:
+ * Two special groups render as <select> dropdowns:
  *   "size"   — font size picker
  *   "family" — font family picker
  *
- * Uses onMouseDown + e.preventDefault() so clicks don't blur the hidden
- * textarea and break keyboard input.
+ * The "color" group renders colored circle swatches.
+ * All other items render their Lucide icon (or text label as fallback).
  */
-export function Toolbar({ items, activeMarks, activeMarkAttrs, blockType, blockAttrs, onCommand }: ToolbarProps) {
-  // Split items into ordered groups, preserving first-seen order
+export function Toolbar({
+  items,
+  activeMarks,
+  activeMarkAttrs,
+  blockType,
+  blockAttrs,
+  onCommand,
+}: ToolbarProps) {
   const groupOrder: string[] = [];
   const groupMap = new Map<string, ToolbarItemSpec[]>();
   for (const item of items) {
     const g = item.group ?? "misc";
-    if (!groupMap.has(g)) { groupMap.set(g, []); groupOrder.push(g); }
+    if (!groupMap.has(g)) {
+      groupMap.set(g, []);
+      groupOrder.push(g);
+    }
     groupMap.get(g)!.push(item);
   }
 
   return (
-    <div style={styles.bar}>
+    <div className="flex items-center flex-wrap gap-0.5 px-2.5 py-1 bg-white min-h-[40px] flex-1">
       {groupOrder.map((group, gi) => (
-        <div key={group} style={styles.group}>
-          {/* Divider before every group except the first */}
-          {gi > 0 && <div style={styles.divider} />}
+        <div key={group} className="flex items-center gap-0.5">
+          {gi > 0 && (
+            <div className="w-px h-[18px] bg-gray-200 mx-1.5 shrink-0" />
+          )}
 
-          {/* Font size → compact select */}
           {group === "size" ? (
             <SizeSelect
               items={groupMap.get(group)!}
@@ -54,17 +106,19 @@ export function Toolbar({ items, activeMarks, activeMarkAttrs, blockType, blockA
             />
           ) : (
             groupMap.get(group)!.map((item) => {
-              const active = item.isActive(activeMarks, blockType, blockAttrs, activeMarkAttrs);
+              const active = item.isActive(
+                activeMarks,
+                blockType,
+                blockAttrs,
+                activeMarkAttrs,
+              );
               return (
-                <button
+                <ToolbarButton
                   key={`${item.command}:${JSON.stringify(item.args)}`}
-                  style={{ ...styles.btn, ...(active ? styles.btnActive : {}) }}
-                  onMouseDown={(e) => { e.preventDefault(); onCommand(item.command, item.args); }}
-                  title={item.title}
-                  aria-pressed={active}
-                >
-                  <span style={{ ...styles.label, ...item.labelStyle }}>{item.label}</span>
-                </button>
+                  item={item}
+                  active={active}
+                  onCommand={onCommand}
+                />
               );
             })
           )}
@@ -74,23 +128,83 @@ export function Toolbar({ items, activeMarks, activeMarkAttrs, blockType, blockA
   );
 }
 
-// ── Size dropdown ─────────────────────────────────────────────────────────────
+// ── Toolbar button ─────────────────────────────────────────────────────────────
 
-function SizeSelect({ items, activeMarkAttrs, onCommand }: {
+function ToolbarButton({
+  item,
+  active,
+  onCommand,
+}: {
+  item: ToolbarItemSpec;
+  active: boolean;
+  onCommand: (cmd: string, args?: unknown[]) => void;
+}) {
+  return (
+    <button
+      className={[
+        "inline-flex items-center justify-center min-w-[28px] h-[28px] px-1.5 rounded-md border text-sm cursor-pointer select-none transition-colors duration-100",
+        active
+          ? "bg-indigo-50 border-indigo-200 text-indigo-600"
+          : "bg-transparent border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-800",
+      ].join(" ")}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onCommand(item.command, item.args);
+      }}
+      title={item.title}
+      aria-pressed={active}
+    >
+      <ButtonLabel item={item} />
+    </button>
+  );
+}
+
+function ButtonLabel({ item }: { item: ToolbarItemSpec }) {
+  // Color swatch: render a small colored circle
+  if (item.group === "color") {
+    const color = (item.labelStyle?.color as string) ?? "#000";
+    return (
+      <span
+        className="w-3.5 h-3.5 rounded-full block border border-black/10"
+        style={{ background: color }}
+      />
+    );
+  }
+
+  // Lucide icon if we have a mapping
+  const Icon = ICON_MAP[item.command];
+  if (Icon) return <Icon size={14} strokeWidth={2} />;
+
+  // Fallback to text label
+  return (
+    <span
+      className="leading-none pointer-events-none text-xs font-medium"
+      style={item.labelStyle}
+    >
+      {item.label}
+    </span>
+  );
+}
+
+// ── Size dropdown ──────────────────────────────────────────────────────────────
+
+function SizeSelect({
+  items,
+  activeMarkAttrs,
+  onCommand,
+}: {
   items: ToolbarItemSpec[];
   activeMarkAttrs: Record<string, Record<string, unknown>>;
   onCommand: (cmd: string, args?: unknown[]) => void;
 }) {
   const activeSize = activeMarkAttrs["font_size"]?.["size"];
   const value = typeof activeSize === "number" ? String(activeSize) : "";
-  // Pasted content may have non-preset sizes (e.g. 15px from 11pt Google Docs).
-  // Inject a custom option so the select reflects the actual current size.
   const presetValues = new Set(items.map((i) => String(i.args?.[0])));
   const hasCustomSize = value !== "" && !presetValues.has(value);
 
   return (
     <select
-      style={styles.select}
+      className="h-[28px] w-[60px] px-1.5 border border-gray-200 rounded-md bg-white text-xs text-gray-700 cursor-pointer outline-none appearance-none"
       value={value}
       onChange={(e) => {
         const item = items.find((i) => String(i.args?.[0]) === e.target.value);
@@ -99,10 +213,10 @@ function SizeSelect({ items, activeMarkAttrs, onCommand }: {
       onMouseDown={(e) => e.stopPropagation()}
       title="Font size"
     >
-      <option value="" disabled>Size</option>
-      {hasCustomSize && (
-        <option value={value}>{value}</option>
-      )}
+      <option value="" disabled>
+        Size
+      </option>
+      {hasCustomSize && <option value={value}>{value}</option>}
       {items.map((item) => (
         <option key={String(item.args?.[0])} value={String(item.args?.[0])}>
           {item.label}
@@ -112,26 +226,33 @@ function SizeSelect({ items, activeMarkAttrs, onCommand }: {
   );
 }
 
-// ── Family dropdown ───────────────────────────────────────────────────────────
+// ── Family dropdown ────────────────────────────────────────────────────────────
 
-function FamilySelect({ items, activeMarkAttrs, blockAttrs, onCommand }: {
+function FamilySelect({
+  items,
+  activeMarkAttrs,
+  blockAttrs,
+  onCommand,
+}: {
   items: ToolbarItemSpec[];
   activeMarkAttrs: Record<string, Record<string, unknown>>;
   blockAttrs: Record<string, unknown>;
   onCommand: (cmd: string, args?: unknown[]) => void;
 }) {
-  // Inline font_family mark wins (character-level override).
-  // Fall back to block-level fontFamily attr (set by setBlockFontFamily).
   const inlineFamily = activeMarkAttrs["font_family"]?.["family"];
-  const blockFamily  = blockAttrs["fontFamily"];
-  const activeFamily = typeof inlineFamily === "string" ? inlineFamily
-                     : typeof blockFamily  === "string" ? blockFamily
-                     : null;
+  const blockFamily = blockAttrs["fontFamily"];
+  const activeFamily =
+    typeof inlineFamily === "string"
+      ? inlineFamily
+      : typeof blockFamily === "string"
+        ? blockFamily
+        : null;
   const value = activeFamily ?? "";
 
   return (
     <select
-      style={{ ...styles.select, width: 130, fontFamily: value || "inherit" }}
+      className="h-[28px] w-[130px] px-1.5 border border-gray-200 rounded-md bg-white text-xs text-gray-700 cursor-pointer outline-none appearance-none"
+      style={{ fontFamily: value || "inherit" }}
       value={value}
       onChange={(e) => {
         const item = items.find((i) => i.args?.[0] === e.target.value);
@@ -140,7 +261,9 @@ function FamilySelect({ items, activeMarkAttrs, blockAttrs, onCommand }: {
       onMouseDown={(e) => e.stopPropagation()}
       title="Font family"
     >
-      <option value="" disabled>Font</option>
+      <option value="" disabled>
+        Font
+      </option>
       {items.map((item) => {
         const family = item.args?.[0] as string;
         return (
@@ -152,67 +275,3 @@ function FamilySelect({ items, activeMarkAttrs, blockAttrs, onCommand }: {
     </select>
   );
 }
-
-// ── Styles ────────────────────────────────────────────────────────────────────
-
-const styles = {
-  bar: {
-    display: "flex",
-    alignItems: "center",
-    flexWrap: "wrap" as const,
-    gap: 2,
-    padding: "4px 8px",
-    background: "#fff",
-    borderBottom: "1px solid #e2e8f0",
-    flexShrink: 0,
-    minHeight: 38,
-  },
-  group: {
-    display: "flex",
-    alignItems: "center",
-    gap: 2,
-  },
-  divider: {
-    width: 1,
-    height: 20,
-    background: "#e2e8f0",
-    margin: "0 4px",
-    flexShrink: 0,
-  },
-  btn: {
-    minWidth: 28,
-    height: 28,
-    padding: "0 5px",
-    border: "1px solid transparent",
-    borderRadius: 4,
-    background: "transparent",
-    cursor: "pointer",
-    fontSize: 13,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "#374151",
-    userSelect: "none" as const,
-  },
-  btnActive: {
-    background: "#dbeafe",
-    border: "1px solid #93c5fd",
-    color: "#1d4ed8",
-  },
-  label: {
-    lineHeight: 1,
-    pointerEvents: "none" as const,
-  },
-  select: {
-    height: 28,
-    width: 64,
-    padding: "0 4px",
-    border: "1px solid #e2e8f0",
-    borderRadius: 4,
-    background: "#f8fafc",
-    fontSize: 13,
-    color: "#374151",
-    cursor: "pointer",
-    outline: "none",
-  },
-} as const;

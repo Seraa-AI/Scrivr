@@ -19,6 +19,8 @@ export interface ViewManagerOptions {
   gap?: number;
   overscan?: number;
   showMarginGuides?: boolean;
+  /** Override styles applied to each page wrapper div. Merged on top of defaults. */
+  pageStyle?: Partial<CSSStyleDeclaration>;
 }
 
 /**
@@ -44,6 +46,7 @@ export class ViewManager {
   private isDragging = false;
   private gap: number;
   private showMarginGuides: boolean;
+  private pageStyle: Partial<CSSStyleDeclaration>;
   private unsubscribe: (() => void) | null = null;
   private resizeDrag: {
     handle: string;
@@ -68,6 +71,7 @@ export class ViewManager {
   ) {
     this.gap = options.gap ?? 24;
     this.showMarginGuides = options.showMarginGuides ?? false;
+    this.pageStyle = options.pageStyle ?? {};
 
     this.pagesContainer = document.createElement("div");
     Object.assign(this.pagesContainer.style, {
@@ -201,6 +205,7 @@ export class ViewManager {
   private createPageEntry(pageNumber: number, pageConfig: PageConfig): PageEntry {
     const wrapper = document.createElement("div");
     Object.assign(wrapper.style, {
+      boxSizing: "content-box",
       width: `${pageConfig.pageWidth}px`,
       height: `${pageConfig.pageHeight}px`,
       marginBottom: `${this.gap}px`,
@@ -210,6 +215,7 @@ export class ViewManager {
       flexShrink: "0",
       cursor: "text",
       userSelect: "none",
+      ...this.pageStyle,
     });
     wrapper.setAttribute("data-page", String(pageNumber));
 

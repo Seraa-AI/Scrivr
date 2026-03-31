@@ -5,9 +5,9 @@ import { TrackChangesStatus } from "@inscribe/plugins";
 export type EditorMode = "editing" | "suggesting" | "viewing";
 
 const MODES: { value: EditorMode; label: string; icon: string }[] = [
-  { value: "editing",    label: "Editing",    icon: "✏️" },
-  { value: "suggesting", label: "Suggesting", icon: "✨" },
-  { value: "viewing",    label: "Viewing",    icon: "👁" },
+  { value: "editing",    label: "Editing",    icon: "✎" },
+  { value: "suggesting", label: "Suggesting", icon: "◈" },
+  { value: "viewing",    label: "Viewing",    icon: "◉" },
 ];
 
 const MODE_STATUS: Record<EditorMode, TrackChangesStatus> = {
@@ -33,28 +33,35 @@ export function ModeSwitcher({ editor }: ModeSwitcherProps) {
   };
 
   return (
-    <div style={styles.wrapper}>
+    <div className="relative inline-block">
       <button
-        style={styles.trigger}
+        className="flex items-center gap-1.5 h-[28px] px-2.5 border border-[#e8eaed] rounded-md bg-white text-[12px] text-gray-700 font-medium cursor-pointer select-none tracking-tight"
         onMouseDown={e => { e.preventDefault(); setOpen(o => !o); }}
       >
-        <span>{current.icon}</span>
-        <span style={styles.label}>{current.label}</span>
-        <span style={styles.chevron}>▾</span>
+        <span className="text-[11px] text-indigo-500 leading-none">{current.icon}</span>
+        <span className="min-w-[62px] text-left">{current.label}</span>
+        <span className="text-[10px] opacity-40 ml-0.5">▾</span>
       </button>
 
       {open && (
         <>
-          {/* backdrop to close on outside click */}
-          <div style={styles.backdrop} onClick={() => setOpen(false)} />
-          <div style={styles.menu}>
+          <div className="fixed inset-0 z-99" onClick={() => setOpen(false)} />
+          <div className="absolute top-[calc(100%+5px)] right-0 z-100 bg-white border border-[#e8eaed] rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.08),0_1px_4px_rgba(0,0,0,0.04)] min-w-[148px] overflow-hidden p-1">
             {MODES.map(m => (
               <button
                 key={m.value}
-                style={{ ...styles.item, ...(m.value === mode ? styles.itemActive : {}) }}
+                className={[
+                  "w-full flex items-center gap-2 px-2.5 py-[7px] border-none rounded-md text-[13px] font-medium cursor-pointer text-left tracking-tight transition-colors",
+                  m.value === mode
+                    ? "bg-indigo-50 text-indigo-700"
+                    : "bg-transparent text-gray-700 hover:bg-gray-100",
+                ].join(" ")}
                 onMouseDown={e => { e.preventDefault(); handleSelect(m.value); }}
               >
-                <span>{m.icon}</span>
+                <span className={[
+                  "text-[11px] leading-none w-[14px] text-center",
+                  m.value === mode ? "text-indigo-500" : "text-gray-400",
+                ].join(" ")}>{m.icon}</span>
                 <span>{m.label}</span>
               </button>
             ))}
@@ -64,68 +71,3 @@ export function ModeSwitcher({ editor }: ModeSwitcherProps) {
     </div>
   );
 }
-
-const styles = {
-  wrapper: {
-    position: "relative" as const,
-    display: "inline-block",
-  },
-  trigger: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    height: 28,
-    padding: "0 10px",
-    border: "1px solid #cbd5e1",
-    borderRadius: 4,
-    background: "#f8fafc",
-    fontSize: 13,
-    color: "#374151",
-    cursor: "pointer",
-    fontWeight: 500,
-    userSelect: "none" as const,
-  },
-  label: {
-    minWidth: 68,
-    textAlign: "left" as const,
-  },
-  chevron: {
-    fontSize: 11,
-    opacity: 0.6,
-  },
-  backdrop: {
-    position: "fixed" as const,
-    inset: 0,
-    zIndex: 99,
-  },
-  menu: {
-    position: "absolute" as const,
-    top: "calc(100% + 4px)",
-    left: 0,
-    zIndex: 100,
-    background: "#fff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 6,
-    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-    minWidth: 140,
-    overflow: "hidden",
-  },
-  item: {
-    width: "100%",
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    padding: "7px 12px",
-    border: "none",
-    background: "transparent",
-    fontSize: 13,
-    color: "#374151",
-    cursor: "pointer",
-    textAlign: "left" as const,
-    fontWeight: 500,
-  },
-  itemActive: {
-    background: "#dbeafe",
-    color: "#1d4ed8",
-  },
-} as const;

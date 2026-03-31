@@ -11,6 +11,12 @@ export interface CanvasProps {
   gap?: number;
   /** Virtual scroll overscan in pixels. Default: 500. */
   overscan?: number;
+  /**
+   * Override styles applied to each page wrapper div.
+   * Merged on top of defaults — use `boxShadow: "none"` to remove the shadow,
+   * or `background` to change the page background color.
+   */
+  pageStyle?: Partial<CSSStyleDeclaration>;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -30,6 +36,7 @@ export function Canvas({
   editor,
   gap = DEFAULT_GAP,
   overscan = 500,
+  pageStyle = {},
   className,
   style,
 }: CanvasProps) {
@@ -39,7 +46,7 @@ export function Canvas({
     if (!editor || !containerRef.current) return;
 
     editor.mount(containerRef.current);
-    const vm = new ViewManager(editor, containerRef.current, { gap, overscan });
+    const vm = new ViewManager(editor, containerRef.current, { gap, overscan, pageStyle });
 
     return () => {
       vm.destroy();

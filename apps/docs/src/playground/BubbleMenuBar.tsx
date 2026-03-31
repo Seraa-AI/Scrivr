@@ -13,10 +13,20 @@ type Btn = {
 };
 
 const BUTTONS: Btn[] = [
-  { label: "B",  title: "Bold",          command: "toggleBold",          mark: "bold" },
-  { label: "I",  title: "Italic",         command: "toggleItalic",        mark: "italic" },
-  { label: "U",  title: "Underline",      command: "toggleUnderline",     mark: "underline" },
-  { label: "S",  title: "Strikethrough",  command: "toggleStrikethrough", mark: "strikethrough" },
+  { label: "B", title: "Bold", command: "toggleBold", mark: "bold" },
+  { label: "I", title: "Italic", command: "toggleItalic", mark: "italic" },
+  {
+    label: "U",
+    title: "Underline",
+    command: "toggleUnderline",
+    mark: "underline",
+  },
+  {
+    label: "S",
+    title: "Strikethrough",
+    command: "toggleStrikethrough",
+    mark: "strikethrough",
+  },
 ];
 
 export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
@@ -25,7 +35,7 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
 
   return (
     <BubbleMenu editor={editor} className="bubble-menu-bar">
-      <div style={styles.bar}>
+      <div className="flex items-center gap-0.5 bg-[#18181b] border border-white/8 rounded-[9px] px-1.5 py-1 shadow-[0_8px_24px_rgba(0,0,0,0.3),0_2px_8px_rgba(0,0,0,0.2)]">
         {BUTTONS.map(({ label, title, command, mark }) => (
           <button
             key={command}
@@ -34,18 +44,20 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
               e.preventDefault();
               editor?.commands[command]?.();
             }}
-            style={{
-              ...styles.btn,
-              ...(activeMarks.includes(mark) ? styles.btnActive : {}),
-              ...(label === "B" ? styles.bold : {}),
-              ...(label === "I" ? styles.italic : {}),
-            }}
+            className={[
+              "px-2 py-1 rounded-md border-none text-[13px] leading-none cursor-pointer transition-colors duration-100",
+              activeMarks.includes(mark)
+                ? "bg-indigo-500 text-white"
+                : "bg-transparent text-zinc-400 hover:bg-white/10 hover:text-white",
+              label === "B" ? "font-bold" : "",
+              label === "I" ? "italic" : "",
+            ].join(" ")}
           >
             {label}
           </button>
         ))}
 
-        <div style={styles.divider} />
+        <div className="w-px h-4 bg-white/10 mx-1" />
 
         <button
           title={hasLink ? "Edit link" : "Insert link"}
@@ -53,7 +65,12 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
             e.preventDefault();
             editor?.commands.setLink?.();
           }}
-          style={{ ...styles.btn, ...(hasLink ? styles.btnActive : {}) }}
+          className={[
+            "px-2 py-1 rounded-md border-none text-[13px] leading-none cursor-pointer transition-colors duration-100",
+            hasLink
+              ? "bg-indigo-500 text-white"
+              : "bg-transparent text-zinc-400 hover:bg-white/10 hover:text-white",
+          ].join(" ")}
         >
           🔗
         </button>
@@ -65,7 +82,7 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
               e.preventDefault();
               editor?.commands.unsetLink?.();
             }}
-            style={styles.btn}
+            className="px-2 py-1 rounded-md border-none text-[13px] leading-none cursor-pointer bg-transparent text-zinc-400 hover:bg-white/10 hover:text-white transition-colors duration-100"
           >
             ⛓‍💥
           </button>
@@ -74,43 +91,3 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
     </BubbleMenu>
   );
 }
-
-const styles = {
-  bar: {
-    display: "flex",
-    alignItems: "center",
-    gap: 2,
-    background: "#1e293b",
-    border: "1px solid #334155",
-    borderRadius: 8,
-    padding: "4px 6px",
-    boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
-  },
-  btn: {
-    background: "transparent",
-    border: "none",
-    color: "#cbd5e1",
-    cursor: "pointer",
-    padding: "4px 8px",
-    borderRadius: 5,
-    fontSize: 13,
-    lineHeight: 1,
-    transition: "background 0.1s",
-  },
-  btnActive: {
-    background: "#3b82f6",
-    color: "#fff",
-  },
-  bold: {
-    fontWeight: 700,
-  },
-  italic: {
-    fontStyle: "italic" as const,
-  },
-  divider: {
-    width: 1,
-    height: 18,
-    background: "#334155",
-    margin: "0 4px",
-  },
-} as const;
