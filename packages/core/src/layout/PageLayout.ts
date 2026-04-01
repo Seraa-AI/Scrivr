@@ -67,6 +67,46 @@ export interface FloatLayout {
   anchorPage: number;
 }
 
+/**
+ * One page-part of one source block — the atom the tile renderer paints.
+ *
+ * Unsplit blocks produce a single fragment (fragmentCount = 1).
+ * Blocks split across pages produce N fragments (one per page they span).
+ *
+ * Sorted by page ascending, then y ascending within each page. This ordering
+ * enables O(log N) binary search in pageless mode and O(1) page lookup in
+ * paged mode via DocumentLayout.fragmentsByPage.
+ */
+export interface LayoutFragment {
+  /** 0-based index of this part within its source block. 0 for unsplit. */
+  fragmentIndex: number;
+  /** Total parts this source block was split into. 1 for unsplit. */
+  fragmentCount: number;
+  /** nodePos of the original unsplit source block. */
+  sourceNodePos: number;
+  /** Page number (1-based). */
+  page: number;
+  /** Left edge in page-local coordinates. */
+  x: number;
+  /** Top edge in page-local coordinates. */
+  y: number;
+  /** Width of the block content area. */
+  width: number;
+  /** Height of this fragment (lines only, no spaceBefore/spaceAfter). */
+  height: number;
+  /**
+   * Index of the first line in block.lines that this fragment renders.
+   * Always 0 in the current implementation — reserved for the future
+   * shared-FlowBlock.lines optimization where all fragments of a split
+   * block point into a single LayoutLine[] without copying.
+   */
+  lineStart: number;
+  /** Number of lines this fragment renders (block.lines.length). */
+  lineCount: number;
+  /** The LayoutBlock this fragment was produced from — used by drawBlock(). */
+  block: LayoutBlock;
+}
+
 export interface DocumentLayout {
   pages: LayoutPage[];
   pageConfig: PageConfig;
@@ -105,6 +145,18 @@ export interface DocumentLayout {
    * positions so runFloatPass starts from a correct baseline every time.
    */
   _pass1Pages?: LayoutPage[];
+  /**
+   * Flat fragment index — one entry per page-part of each block, sorted by
+   * page then y. Used by the tile renderer for O(log N) binary search in
+   * pageless mode. Absent on partial (streaming) layouts.
+   */
+  fragments?: LayoutFragment[];
+  /**
+   * Fragments grouped by page (0-indexed: fragmentsByPage[pageNumber - 1]).
+   * Used by the tile renderer for O(1) lookup in paged mode.
+   * Absent on partial (streaming) layouts.
+   */
+  fragmentsByPage?: LayoutFragment[][];
 }
 
 /**
@@ -353,35 +405,15 @@ export function runPipeline(
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
 
-  // Stamp fragmentCount on split-block parts produced in THIS run only.
-  // When Phase 1b early-terminated, blocks were copied from previousLayout
-  // which already has correct fragmentCount values — skip the scan entirely.
-  // When no splits occurred (common case), the Map stays empty and the second
-  // pass is skipped.
-  if (!pr.earlyTerminated) {
-    const fragmentCounts = new Map<number, number>();
-    for (const page of allPages) {
-      for (const block of page.blocks) {
-        if (block.sourceNodePos !== undefined) {
-          fragmentCounts.set(block.sourceNodePos, (fragmentCounts.get(block.sourceNodePos) ?? 0) + 1);
-        }
-      }
-    }
-    if (fragmentCounts.size > 0) {
-      for (const page of allPages) {
-        for (const block of page.blocks) {
-          if (block.sourceNodePos !== undefined) {
-            const count = fragmentCounts.get(block.sourceNodePos);
-            if (count !== undefined) block.fragmentCount = count;
-          }
-        }
-      }
-    }
-  }
-
   // ── Stage 3: float layout ─────────────────────────────────────────────────
   const pass1Result: DocumentLayout = { pages: allPages, pageConfig, version: chunkVersion };
-  return applyFloatLayout(pass1Result, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
+  const floated = applyFloatLayout(pass1Result, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
+
+  // ── Stage 4: fragment index ───────────────────────────────────────────────
+  // buildFragments computes fragmentCount/fragmentIndex from the final page
+  // list, superseding the manual stamping loop that previously lived here.
+  const { fragments, fragmentsByPage } = buildFragments(floated.pages);
+  return { ...floated, fragments, fragmentsByPage };
 }
 
 /**
@@ -1220,6 +1252,71 @@ export function applyFloatLayout(
  * Forces at least one line when the block starts below the page bottom so the
  * block is never completely empty (prevents cursor / hit-test holes).
  */
+/**
+ * Stage 4 of the layout pipeline: build the LayoutFragment index.
+ *
+ * Iterates pages in order and emits one LayoutFragment per LayoutBlock.
+ * Split blocks (fragmentCount > 1) produce multiple fragments — one per
+ * page-slice — with incrementing fragmentIndex values.
+ *
+ * The returned array is sorted by page ascending, then by y ascending within
+ * each page (natural iteration order over pages[].blocks[]).
+ *
+ * Also builds fragmentsByPage: a parallel array indexed by (pageNumber - 1)
+ * for O(1) lookup in paged-mode tile rendering.
+ */
+export function buildFragments(pages: LayoutPage[]): {
+  fragments: LayoutFragment[];
+  fragmentsByPage: LayoutFragment[][];
+} {
+  // Pass 1: count how many page-parts each source block contributes.
+  // This lets us emit the correct fragmentCount on every fragment without
+  // requiring it to be pre-stamped on LayoutBlock.
+  const partCounts = new Map<number, number>();
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      const src = block.sourceNodePos ?? block.nodePos;
+      partCounts.set(src, (partCounts.get(src) ?? 0) + 1);
+    }
+  }
+
+  // Pass 2: emit fragments in page / y order.
+  const fragments: LayoutFragment[] = [];
+  const fragmentsByPage: LayoutFragment[][] = [];
+  const nextIndex = new Map<number, number>(); // tracks fragmentIndex per sourceNodePos
+
+  for (const page of pages) {
+    const pageFrags: LayoutFragment[] = [];
+
+    for (const block of page.blocks) {
+      const sourceNodePos = block.sourceNodePos ?? block.nodePos;
+      const fragmentCount = partCounts.get(sourceNodePos) ?? 1;
+      const fragmentIndex = nextIndex.get(sourceNodePos) ?? 0;
+      nextIndex.set(sourceNodePos, fragmentIndex + 1);
+
+      const frag: LayoutFragment = {
+        fragmentIndex,
+        fragmentCount,
+        sourceNodePos,
+        page: page.pageNumber,
+        x: block.x,
+        y: block.y,
+        width: block.availableWidth,
+        height: block.height,
+        lineStart: 0,
+        lineCount: block.lines.length,
+        block,
+      };
+      fragments.push(frag);
+      pageFrags.push(frag);
+    }
+
+    fragmentsByPage[page.pageNumber - 1] = pageFrags;
+  }
+
+  return { fragments, fragmentsByPage };
+}
+
 function clampBlockToPage(block: LayoutBlock, pageBottom: number): LayoutBlock {
   const available = pageBottom - block.y;
   if (block.height <= available) return block;

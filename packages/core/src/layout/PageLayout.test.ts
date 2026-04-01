@@ -7,7 +7,7 @@ import {
   defaultPageConfig,
   collapseMargins,
 } from "./PageLayout";
-import type { MeasureCacheEntry } from "./PageLayout";
+import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, MOCK_LINE_HEIGHT } from "../test-utils";
 
@@ -1376,12 +1376,9 @@ describe("runPipeline — float image wrapping", () => {
 
 // ── Fragment identity fields ───────────────────────────────────────────────────
 //
-// Phase 2 of the layout fragment architecture stamps fragmentIndex, fragmentCount,
-// and sourceNodePos on every part of a split block so consumers can identify
-// "which part am I?" without reading boolean flag combinations.
-//
-// Same splitPage geometry as the line-splitting suites above.
-describe("runPipeline — fragment identity", () => {
+// ── buildFragments — Stage 4 ─────────────────────────────────────────────────
+
+describe("buildFragments — Stage 4", () => {
   const LH = MOCK_LINE_HEIGHT; // 18px
 
   const splitPage = {
@@ -1390,13 +1387,39 @@ describe("runPipeline — fragment identity", () => {
     margins: { top: 10, right: 10, bottom: 10, left: 10 },
   };
 
-  // Each 9-char word wraps to its own line (72px < contentWidth=100px;
-  // two words = 152px > 100px). spaceAfter for paragraph pushes targetY by
-  // one line height, leaving room for exactly 1 line on page 1 after "intro".
   const fourLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd"; // 4 words → 4 lines
   const sixLineText  = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff"; // 6 lines
 
-  it("unsplit block has no fragment identity fields", () => {
+  it("layout.fragments is present and non-empty", () => {
+    const layout = runPipeline(doc(p("Hello"), p("World")), {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+    });
+    expect(layout.fragments).toBeDefined();
+    expect(layout.fragments!.length).toBeGreaterThan(0);
+  });
+
+  it("layout.fragmentsByPage is present and indexed by page", () => {
+    const layout = runPipeline(doc(p("Hello")), {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+    });
+    expect(layout.fragmentsByPage).toBeDefined();
+    expect(layout.fragmentsByPage![0]).toBeDefined();
+  });
+
+  it("unsplit block produces one fragment with fragmentCount=1 and fragmentIndex=0", () => {
+    const layout = runPipeline(doc(p("intro")), {
+      pageConfig: splitPage,
+      measurer: createMeasurer(),
+    });
+    const frag = layout.fragments![0]!;
+    expect(frag.fragmentIndex).toBe(0);
+    expect(frag.fragmentCount).toBe(1);
+    expect(frag.sourceNodePos).toBe(layout.pages[0]!.blocks[0]!.nodePos);
+  });
+
+  it("unsplit block: LayoutBlock has no fragmentIndex/fragmentCount/sourceNodePos", () => {
     const layout = runPipeline(doc(p("intro")), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
@@ -1407,119 +1430,82 @@ describe("runPipeline — fragment identity", () => {
     expect(block.sourceNodePos).toBeUndefined();
   });
 
-  it("two-part split: fragmentIndex is 0 on first part, 1 on second", () => {
+  it("two-part split: fragments have fragmentIndex 0 and 1, fragmentCount 2", () => {
     const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
-    const part1 = layout.pages[0]!.blocks[1]!;
-    const part2 = layout.pages[1]!.blocks[0]!;
-
-    expect(part1.fragmentIndex).toBe(0);
-    expect(part2.fragmentIndex).toBe(1);
+    // "intro" is fragment 0; split block produces fragments 1 (page 1) and 2 (page 2)
+    const splitFrags = layout.fragments!.filter(f => f.fragmentCount === 2);
+    expect(splitFrags).toHaveLength(2);
+    expect(splitFrags[0]!.fragmentIndex).toBe(0);
+    expect(splitFrags[1]!.fragmentIndex).toBe(1);
+    expect(splitFrags[0]!.sourceNodePos).toBe(splitFrags[1]!.sourceNodePos);
   });
 
-  it("two-part split: fragmentCount is 2 on both parts", () => {
-    const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
-      pageConfig: splitPage,
-      measurer: createMeasurer(),
-    });
-    const part1 = layout.pages[0]!.blocks[1]!;
-    const part2 = layout.pages[1]!.blocks[0]!;
-
-    expect(part1.fragmentCount).toBe(2);
-    expect(part2.fragmentCount).toBe(2);
-  });
-
-  it("two-part split: sourceNodePos equals nodePos on both parts", () => {
-    const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
-      pageConfig: splitPage,
-      measurer: createMeasurer(),
-    });
-    const part1 = layout.pages[0]!.blocks[1]!;
-    const part2 = layout.pages[1]!.blocks[0]!;
-
-    expect(part1.sourceNodePos).toBe(part1.nodePos);
-    expect(part2.sourceNodePos).toBe(part1.nodePos);
-  });
-
-  it("three-part split: fragmentIndex is 0, 1, 2 on successive parts", () => {
-    // sixLineText: 1 line on page 1, 3 on page 2, 2 on page 3
+  it("three-part split: fragmentCount is 3 on all three fragments", () => {
     const layout = runPipeline(doc(p("intro"), p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
-    const p1part = layout.pages[0]!.blocks[1]!;
-    const p2part = layout.pages[1]!.blocks[0]!;
-    const p3part = layout.pages[2]!.blocks[0]!;
-
-    expect(p1part.fragmentIndex).toBe(0);
-    expect(p2part.fragmentIndex).toBe(1);
-    expect(p3part.fragmentIndex).toBe(2);
+    const splitFrags = layout.fragments!.filter(f => f.fragmentCount === 3);
+    expect(splitFrags).toHaveLength(3);
+    expect(splitFrags[0]!.fragmentIndex).toBe(0);
+    expect(splitFrags[1]!.fragmentIndex).toBe(1);
+    expect(splitFrags[2]!.fragmentIndex).toBe(2);
+    expect(splitFrags[0]!.sourceNodePos).toBe(splitFrags[2]!.sourceNodePos);
   });
 
-  it("three-part split: fragmentCount is 3 on all parts", () => {
+  it("isFirst / isLast are correct for a three-part split", () => {
     const layout = runPipeline(doc(p("intro"), p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
-    const p1part = layout.pages[0]!.blocks[1]!;
-    const p2part = layout.pages[1]!.blocks[0]!;
-    const p3part = layout.pages[2]!.blocks[0]!;
+    const [f0, f1, f2] = layout.fragments!.filter(f => f.fragmentCount === 3);
+    const isFirst = (f: LayoutFragment) => f.fragmentIndex === 0;
+    const isLast  = (f: LayoutFragment) => f.fragmentIndex === f.fragmentCount - 1;
 
-    expect(p1part.fragmentCount).toBe(3);
-    expect(p2part.fragmentCount).toBe(3);
-    expect(p3part.fragmentCount).toBe(3);
+    expect(isFirst(f0!)).toBe(true);
+    expect(isLast(f0!)).toBe(false);
+    expect(isFirst(f1!)).toBe(false);
+    expect(isLast(f1!)).toBe(false);
+    expect(isFirst(f2!)).toBe(false);
+    expect(isLast(f2!)).toBe(true);
   });
 
-  it("three-part split: all parts share the same sourceNodePos", () => {
-    const layout = runPipeline(doc(p("intro"), p(sixLineText)), {
-      pageConfig: splitPage,
+  it("fragmentsByPage groups fragments correctly by page number", () => {
+    const layout = runPipeline(doc(p("Page 1"), pageBreak(), p("Page 2")), {
+      pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
-    const p1part = layout.pages[0]!.blocks[1]!;
-    const p2part = layout.pages[1]!.blocks[0]!;
-    const p3part = layout.pages[2]!.blocks[0]!;
-
-    expect(p2part.sourceNodePos).toBe(p1part.sourceNodePos);
-    expect(p3part.sourceNodePos).toBe(p1part.sourceNodePos);
+    expect(layout.fragmentsByPage![0]).toHaveLength(1);
+    expect(layout.fragmentsByPage![1]).toHaveLength(1);
+    expect(layout.fragmentsByPage![0]![0]!.page).toBe(1);
+    expect(layout.fragmentsByPage![1]![0]!.page).toBe(2);
   });
 
-  it("isFirst / isLast derived from fragmentIndex + fragmentCount are correct", () => {
-    const layout = runPipeline(doc(p("intro"), p(sixLineText)), {
-      pageConfig: splitPage,
+  it("each fragment carries a block reference with correct geometry", () => {
+    const layout = runPipeline(doc(p("Hello")), {
+      pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
-    const p1part = layout.pages[0]!.blocks[1]!;
-    const p2part = layout.pages[1]!.blocks[0]!;
-    const p3part = layout.pages[2]!.blocks[0]!;
-
-    const isFirst  = (b: typeof p1part) => b.fragmentIndex === 0;
-    const isLast   = (b: typeof p1part) => b.fragmentIndex === (b.fragmentCount ?? 1) - 1;
-
-    expect(isFirst(p1part)).toBe(true);
-    expect(isLast(p1part)).toBe(false);
-
-    expect(isFirst(p2part)).toBe(false);
-    expect(isLast(p2part)).toBe(false);
-
-    expect(isFirst(p3part)).toBe(false);
-    expect(isLast(p3part)).toBe(true);
+    const frag = layout.fragments![0]!;
+    expect(frag.block).toBe(layout.pages[0]!.blocks[0]!);
+    expect(frag.x).toBe(frag.block.x);
+    expect(frag.y).toBe(frag.block.y);
+    expect(frag.width).toBe(frag.block.availableWidth);
+    expect(frag.height).toBe(frag.block.height);
+    expect(frag.lineCount).toBe(frag.block.lines.length);
+    expect(frag.lineStart).toBe(0);
   });
 
-  it("surrounding unsplit blocks are unaffected by a split block on the same page", () => {
-    const layout = runPipeline(doc(p("before"), p(fourLineText), p("after")), {
-      pageConfig: splitPage,
+  it("total fragment count equals total block count across all pages", () => {
+    const layout = runPipeline(doc(p("A"), p("B"), p("C")), {
+      pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
-    const beforeBlock = layout.pages[0]!.blocks[0]!;
-    // "after" ends up on page 3 (page 2 is full with 3 continuation lines)
-    const afterBlock  = layout.pages[layout.pages.length - 1]!.blocks.at(-1)!;
-
-    expect(beforeBlock.fragmentIndex).toBeUndefined();
-    expect(beforeBlock.fragmentCount).toBeUndefined();
-    expect(afterBlock.fragmentIndex).toBeUndefined();
-    expect(afterBlock.fragmentCount).toBeUndefined();
+    const totalBlocks = layout.pages.reduce((s, pg) => s + pg.blocks.length, 0);
+    expect(layout.fragments!.length).toBe(totalBlocks);
   });
 });
 
