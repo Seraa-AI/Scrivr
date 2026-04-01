@@ -8,7 +8,7 @@ export { LineBreaker } from "./LineBreaker";
 export type { InputSpan, LayoutSpan, LayoutLine, ConstraintProvider } from "./LineBreaker";
 export { layoutBlock, resolveLeafBlockDimensions } from "./BlockLayout";
 export type { LayoutBlock, BlockLayoutOptions } from "./BlockLayout";
-export { layoutDocument, defaultPageConfig, collapseMargins } from "./PageLayout";
+export { runPipeline, defaultPageConfig, collapseMargins } from "./PageLayout";
 export type { PageConfig, LayoutPage, DocumentLayout, PageLayoutOptions, FloatLayout } from "./PageLayout";
 export { defaultFontConfig, getBlockStyle } from "./FontConfig";
 export type { FontConfig, BlockStyle } from "./FontConfig";

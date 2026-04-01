@@ -232,7 +232,7 @@ export interface PageLayoutOptions {
    * Block measurement cache keyed by Node reference.
    * When provided, unchanged blocks (same ProseMirror Node object) skip the
    * layoutBlock call entirely — O(1) cache hit instead of O(chars) re-measure.
-   * The Editor owns this WeakMap and passes it on every layoutDocument call.
+   * The Editor owns this WeakMap and passes it on every runPipeline call.
    */
   measureCache?: WeakMap<Node, MeasureCacheEntry>;
   /**
@@ -270,18 +270,18 @@ export const defaultPageConfig: PageConfig = {
 };
 
 /**
- * layoutDocument — the top-level layout pass.
+ * runPipeline — top-level layout orchestrator.
  *
- * Walks every block node in the ProseMirror doc, stacks them vertically,
- * detects page boundaries, and returns a fully positioned DocumentLayout.
+ * Drives all three pipeline stages in order:
+ *   Stage 1  buildBlockFlow   — position-independent measurement
+ *   Stage 2  paginateFlow     — assign blocks to pages
+ *   Stage 3  applyFloatLayout — float positions + exclusion reflow
  *
- * Does NOT touch the CharacterMap — that is the PageRenderer's responsibility.
- * This keeps layout pure: same inputs always produce the same output.
- *
- * Y coordinates in LayoutBlock are PAGE-LOCAL (0 = page top edge).
- * Each page's canvas starts at (0,0), so renderers use these directly.
+ * Returns a fully positioned DocumentLayout. Does NOT touch the CharacterMap.
+ * This function is the single source of truth for orchestration; both
+ * LayoutCoordinator and tests call it instead of duplicating the logic.
  */
-export function layoutDocument(
+export function runPipeline(
   doc: Node,
   options: PageLayoutOptions,
 ): DocumentLayout {

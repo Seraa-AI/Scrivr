@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderPage } from "./PageRenderer";
 import { CharacterMap } from "../layout/CharacterMap";
-import { layoutDocument, defaultPageConfig } from "../layout/PageLayout";
+import { runPipeline, defaultPageConfig } from "../layout/PageLayout";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import { TextBlockStrategy } from "../layout/TextBlockStrategy";
 import {
@@ -74,7 +74,7 @@ function renderWithStrategy(
   ]);
   const doc = schema.node("doc", null, [para]);
 
-  const layout = layoutDocument(doc, {
+  const layout = runPipeline(doc, {
     pageConfig: defaultPageConfig,
     fontConfig,
     measurer: createMeasurer(),
@@ -198,7 +198,7 @@ describe("renderPage — image strategy zero-size guard", () => {
     const doc = schema.node("doc", null, [
       schema.node("paragraph", null, [img, schema.text("text")]),
     ]);
-    const layout = layoutDocument(doc, {
+    const layout = runPipeline(doc, {
       pageConfig: defaultPageConfig,
       fontConfig: buildStarterKitContext().fontConfig,
       measurer: createMeasurer(),

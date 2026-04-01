@@ -1,15 +1,14 @@
 import type { Node } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
 import { CharacterMap } from "./CharacterMap";
-import {
-  buildBlockFlow,
-  paginateFlow,
-  applyFloatLayout,
-  collectLayoutItems,
-  FlowConfig,
+import { runPipeline } from "./PageLayout";
+import type {
+  PageConfig,
+  DocumentLayout,
+  LayoutPage,
+  MeasureCacheEntry,
+  LayoutResumption,
 } from "./PageLayout";
-import type { PageConfig, DocumentLayout, LayoutPage, MeasureCacheEntry, LayoutResumption } from "./PageLayout";
-import { applyPageFont, defaultFontConfig } from "./FontConfig";
 import type { FontConfig } from "./FontConfig";
 import type { TextMeasurer } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
@@ -17,9 +16,9 @@ import { populateCharMap } from "./BlockLayout";
 import { spanEndDocPos } from "./LineBreaker";
 
 interface FragmentIndexEntry {
-  start: number;  // first docPos on this line (charStart)
-  end:   number;  // last docPos on this line, exclusive (charEnd)
-  page:  number;
+  start: number; // first docPos on this line (charStart)
+  end: number; // last docPos on this line, exclusive (charEnd)
+  page: number;
 }
 
 export interface LayoutCoordinatorOptions {
@@ -93,7 +92,10 @@ export class LayoutCoordinator {
     this.opts = opts;
 
     performance.mark("inscribe:layout-initial-start");
-    this._layout = this._runLayout({ previousVersion: 0, maxBlocks: LayoutCoordinator.INITIAL_BLOCKS });
+    this._layout = this._runLayout({
+      previousVersion: 0,
+      maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
+    });
     performance.mark("inscribe:layout-initial-end");
     performance.measure(
       `inscribe:layout-initial (${opts.getDoc().childCount} blocks, first ${LayoutCoordinator.INITIAL_BLOCKS} sync)`,
@@ -115,9 +117,15 @@ export class LayoutCoordinator {
 
   // ── Public getters ──────────────────────────────────────────────────────────
 
-  get current(): DocumentLayout { return this._layout; }
-  get cursorPage(): number { return this._cursorPage; }
-  get isReady(): boolean { return this._ready; }
+  get current(): DocumentLayout {
+    return this._layout;
+  }
+  get cursorPage(): number {
+    return this._cursorPage;
+  }
+  get isReady(): boolean {
+    return this._ready;
+  }
 
   get loadingState(): "syncing" | "rendering" | "ready" {
     if (!this._ready) return "syncing";
@@ -152,7 +160,10 @@ export class LayoutCoordinator {
     this.charMap.clear();
     this._populatedPages.clear();
     const prev = this._layout;
-    this._layout = this._runLayout({ previousVersion: prev.version, previousLayout: prev });
+    this._layout = this._runLayout({
+      previousVersion: prev.version,
+      previousLayout: prev,
+    });
     this._indexLayout();
     this._cursorPage = this._cursorPageFromLayout();
     this.ensurePagePopulated(this._cursorPage);
@@ -186,14 +197,25 @@ export class LayoutCoordinator {
         const beforeSel = TextSelection.findFrom($before, -1);
         const beforePos = beforeSel?.head ?? block.nodePos;
 
-        const $after = doc.resolve(Math.min(block.nodePos + block.node.nodeSize, doc.content.size));
+        const $after = doc.resolve(
+          Math.min(block.nodePos + block.node.nodeSize, doc.content.size),
+        );
         const afterSel = TextSelection.findFrom($after, 1);
-        const afterPos = afterSel?.head ?? (block.nodePos + block.node.nodeSize);
+        const afterPos = afterSel?.head ?? block.nodePos + block.node.nodeSize;
 
         const halfWidth = block.availableWidth / 2;
         const li = lineOffset;
         if (!this.charMap.hasLine(page.pageNumber, li)) {
-          this.charMap.registerLine({ page: page.pageNumber, lineIndex: li, y: block.y, height: block.height, x: block.x, contentWidth: block.availableWidth, startDocPos: beforePos, endDocPos: afterPos });
+          this.charMap.registerLine({
+            page: page.pageNumber,
+            lineIndex: li,
+            y: block.y,
+            height: block.height,
+            x: block.x,
+            contentWidth: block.availableWidth,
+            startDocPos: beforePos,
+            endDocPos: afterPos,
+          });
         }
         // Left-half glyph only (no hasGlyph guard so it coexists with para's sentinel).
         // coordsAtPos finds the paragraph's glyph first (registered earlier) → cursor
@@ -202,12 +224,27 @@ export class LayoutCoordinator {
         // No right-half glyph: posAtCoords falls through to line.endDocPos = afterPos.
         // The following paragraph registers its own glyph at afterPos unblocked, so
         // coordsAtPos draws the cursor at the correct position in that paragraph.
-        this.charMap.registerGlyph({ docPos: beforePos, x: block.x, y: block.y, lineY: block.y, width: halfWidth, height: block.height, page: page.pageNumber, lineIndex: li });
+        this.charMap.registerGlyph({
+          docPos: beforePos,
+          x: block.x,
+          y: block.y,
+          lineY: block.y,
+          width: halfWidth,
+          height: block.height,
+          page: page.pageNumber,
+          lineIndex: li,
+        });
         lineOffset += 1;
         continue;
       }
 
-      populateCharMap(block, this.charMap, page.pageNumber, lineOffset, this.opts.measurer);
+      populateCharMap(
+        block,
+        this.charMap,
+        page.pageNumber,
+        lineOffset,
+        this.opts.measurer,
+      );
       lineOffset += block.lines.length;
     }
   }
@@ -229,7 +266,10 @@ export class LayoutCoordinator {
       this._dirty = false;
       this.charMap.clear();
       this._populatedPages.clear();
-      this._layout = this._runLayout({ previousVersion: this._layout.version, maxBlocks: LayoutCoordinator.INITIAL_BLOCKS });
+      this._layout = this._runLayout({
+        previousVersion: this._layout.version,
+        maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
+      });
       this._layoutIsPartial = this._layout.isPartial ?? false;
       this._layoutResumption = this._layout.resumption ?? null;
       this._indexLayout();
@@ -271,8 +311,8 @@ export class LayoutCoordinator {
           // Leaf block (image, HR): single entry covering the full node range.
           this._fragmentIndex.push({
             start: block.nodePos,
-            end:   block.nodePos + block.node.nodeSize,
-            page:  page.pageNumber,
+            end: block.nodePos + block.node.nodeSize,
+            page: page.pageNumber,
           });
           continue;
         }
@@ -284,14 +324,14 @@ export class LayoutCoordinator {
         const isLastVisualPart = !block.continuesOnNextPage;
 
         for (let li = 0; li < block.lines.length; li++) {
-          const line      = block.lines[li]!;
+          const line = block.lines[li]!;
           const firstSpan = line.spans[0];
-          const lastSpan  = line.spans[line.spans.length - 1];
+          const lastSpan = line.spans[line.spans.length - 1];
 
           if (!firstSpan || !lastSpan) continue; // safety: skip phantom lines
 
           const lineStart = firstSpan.docPos;
-          let   lineEnd   = spanEndDocPos(lastSpan);
+          let lineEnd = spanEndDocPos(lastSpan);
 
           // Sentinel: the very last line of the last visual part extends to
           // nodePos + nodeSize so the paragraph-end cursor position is covered.
@@ -300,7 +340,11 @@ export class LayoutCoordinator {
             lineEnd = Math.max(lineEnd, block.nodePos + block.node.nodeSize);
           }
 
-          this._fragmentIndex.push({ start: lineStart, end: lineEnd, page: page.pageNumber });
+          this._fragmentIndex.push({
+            start: lineStart,
+            end: lineEnd,
+            page: page.pageNumber,
+          });
         }
       }
     }
@@ -338,7 +382,10 @@ export class LayoutCoordinator {
   private _findPageLinear(docPos: number): number {
     for (const page of this._layout.pages) {
       for (const block of page.blocks) {
-        if (docPos >= block.nodePos && docPos < block.nodePos + block.node.nodeSize) {
+        if (
+          docPos >= block.nodePos &&
+          docPos < block.nodePos + block.node.nodeSize
+        ) {
           return page.pageNumber;
         }
       }
@@ -347,12 +394,9 @@ export class LayoutCoordinator {
   }
 
   /**
-   * Pipeline driver — calls buildBlockFlow → paginateFlow → applyFloatLayout
-   * directly, handling streaming resumption and fragmentCount stamping.
-   *
-   * All four layout call-sites (constructor, ensureLayout, setReady,
-   * _completeIdleLayout) funnel through here so the orchestration logic
-   * lives in exactly one place.
+   * Thin delegation to runPipeline() — maps coordinator state to pipeline options.
+   * All orchestration logic lives in runPipeline (PageLayout.ts); the coordinator
+   * owns only the call-site wiring and state management.
    */
   private _runLayout(opts: {
     previousVersion?: number;
@@ -360,92 +404,19 @@ export class LayoutCoordinator {
     previousLayout?: DocumentLayout;
     resumption?: LayoutResumption | null;
   }): DocumentLayout {
-    const { pageConfig, measurer, fontModifiers } = this.opts;
-
-    const baseConfig = this.opts.fontConfig ?? defaultFontConfig;
-    const fontConfig = pageConfig.fontFamily
-      ? applyPageFont(baseConfig, pageConfig.fontFamily)
-      : baseConfig;
-
-    const { pageWidth, pageHeight, margins } = pageConfig;
-    const contentWidth  = pageWidth  - margins.left - margins.right;
-    const contentHeight = pageHeight - margins.top  - margins.bottom;
-
-    // ── Resumption: restore cursor from a previous partial chunk ─────────────
-    const r = opts.resumption ?? null;
-    const items       = r ? r.items       : collectLayoutItems(this.opts.getDoc(), fontConfig);
-    const startIndex  = r ? r.nextItemIndex : 0;
-    const pages: LayoutPage[] = r ? r.completedPages : [];
-    let   currentPage: LayoutPage = r ? r.currentPage : { pageNumber: 1, blocks: [] };
-    let   y             = r ? r.currentY      : margins.top;
-    let   prevSpaceAfter = r ? r.prevSpaceAfter : 0;
-    const chunkVersion  = r ? r.version : ((opts.previousVersion ?? 0) + 1);
-
-    // ── Stage 1: measure ─────────────────────────────────────────────────────
-    const flowConfig: FlowConfig = { margins, contentWidth };
-    const flowResult = buildBlockFlow(
-      items, startIndex, flowConfig, fontConfig,
-      measurer, fontModifiers, this._measureCache, opts.maxBlocks,
-    );
-
-    // ── Stage 2: paginate ─────────────────────────────────────────────────────
-    const pr = paginateFlow(
-      flowResult.flows, margins, contentHeight,
-      opts.previousLayout, this._measureCache,
-      pages, currentPage, y, prevSpaceAfter,
-    );
-
-    // ── Streaming layout cutoff ───────────────────────────────────────────────
-    if (flowResult.reachedCutoff && !pr.earlyTerminated) {
-      const resumption: LayoutResumption = {
-        items,
-        nextItemIndex:   flowResult.cutoffIndex,
-        completedPages:  pr.pages,
-        currentPage:     { ...pr.currentPage, blocks: [...pr.currentPage.blocks] },
-        currentY:        pr.y,
-        prevSpaceAfter:  pr.prevSpaceAfter,
-        version:         chunkVersion,
-        prevPageCount:   pr.pages.length,
-      };
-      const partialPass1: DocumentLayout = {
-        pages: [...pr.pages, pr.currentPage],
-        pageConfig,
-        version:   chunkVersion,
-        isPartial: true,
-        resumption,
-      };
-      // ── Stage 3: float layout (partial chunk) ────────────────────────────
-      return applyFloatLayout(partialPass1, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
-    }
-
-    const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
-
-    // Stamp fragmentCount on split-block parts produced in this run only.
-    // Early-terminated layouts copied from previousLayout already have correct values.
-    if (!pr.earlyTerminated) {
-      const fragmentCounts = new Map<number, number>();
-      for (const page of allPages) {
-        for (const block of page.blocks) {
-          if (block.sourceNodePos !== undefined) {
-            fragmentCounts.set(block.sourceNodePos, (fragmentCounts.get(block.sourceNodePos) ?? 0) + 1);
-          }
-        }
-      }
-      if (fragmentCounts.size > 0) {
-        for (const page of allPages) {
-          for (const block of page.blocks) {
-            if (block.sourceNodePos !== undefined) {
-              const count = fragmentCounts.get(block.sourceNodePos);
-              if (count !== undefined) block.fragmentCount = count;
-            }
-          }
-        }
-      }
-    }
-
-    // ── Stage 3: float layout ─────────────────────────────────────────────────
-    const pass1Result: DocumentLayout = { pages: allPages, pageConfig, version: chunkVersion };
-    return applyFloatLayout(pass1Result, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
+    return runPipeline(this.opts.getDoc(), {
+      pageConfig: this.opts.pageConfig,
+      fontConfig: this.opts.fontConfig,
+      measurer: this.opts.measurer,
+      fontModifiers: this.opts.fontModifiers,
+      measureCache: this._measureCache,
+      ...(opts.previousVersion !== undefined
+        ? { previousVersion: opts.previousVersion }
+        : {}),
+      ...(opts.maxBlocks !== undefined ? { maxBlocks: opts.maxBlocks } : {}),
+      ...(opts.previousLayout ? { previousLayout: opts.previousLayout } : {}),
+      ...(opts.resumption ? { resumption: opts.resumption } : {}),
+    });
   }
 
   private _scheduleIdleLayout(): void {
@@ -488,7 +459,10 @@ export class LayoutCoordinator {
     performance.mark("inscribe:layout-chunk-start");
     // Pass resumption so layout continues from the next unprocessed block
     // rather than restarting from block 0 — O(N) total vs O(N²).
-    this._layout = this._runLayout({ resumption: this._layoutResumption, maxBlocks: chunkSize });
+    this._layout = this._runLayout({
+      resumption: this._layoutResumption,
+      maxBlocks: chunkSize,
+    });
     performance.mark("inscribe:layout-chunk-end");
     performance.measure(
       `inscribe:layout-chunk (next ${chunkSize} blocks, total ${this._partialLayoutBlocks} of ${this.opts.getDoc().childCount})`,

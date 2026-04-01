@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { layoutDocument, defaultPageConfig, collapseMargins } from "./PageLayout";
+import {
+  runPipeline,
+  buildBlockFlow,
+  paginateFlow,
+  collectLayoutItems,
+  defaultPageConfig,
+  collapseMargins,
+} from "./PageLayout";
 import type { MeasureCacheEntry } from "./PageLayout";
-import { applyPageFont } from "./FontConfig";
+import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, MOCK_LINE_HEIGHT } from "../test-utils";
 
 // lineHeight = 18, contentHeight = 1123 - 72 - 72 = 979
@@ -13,9 +20,9 @@ function h1(text: string) {
 
 // ── Basic structure ───────────────────────────────────────────────────────────
 
-describe("layoutDocument — basic", () => {
+describe("runPipeline — basic", () => {
   it("returns at least one page for an empty doc", () => {
-    const layout = layoutDocument(doc(p()), {
+    const layout = runPipeline(doc(p()), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
@@ -23,7 +30,7 @@ describe("layoutDocument — basic", () => {
   });
 
   it("places a short document on one page", () => {
-    const layout = layoutDocument(doc(p("Hello world")), {
+    const layout = runPipeline(doc(p("Hello world")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
@@ -32,7 +39,7 @@ describe("layoutDocument — basic", () => {
   });
 
   it("increments the version from the previous version", () => {
-    const layout = layoutDocument(doc(p()), {
+    const layout = runPipeline(doc(p()), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       previousVersion: 5,
@@ -41,7 +48,7 @@ describe("layoutDocument — basic", () => {
   });
 
   it("block y coordinates are page-local (start from margins.top)", () => {
-    const layout = layoutDocument(doc(p("Hello")), {
+    const layout = runPipeline(doc(p("Hello")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
@@ -51,7 +58,7 @@ describe("layoutDocument — basic", () => {
   });
 
   it("exposes pageConfig on the layout result", () => {
-    const layout = layoutDocument(doc(p()), {
+    const layout = runPipeline(doc(p()), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
@@ -61,9 +68,9 @@ describe("layoutDocument — basic", () => {
 
 // ── Multiple blocks ───────────────────────────────────────────────────────────
 
-describe("layoutDocument — multiple blocks", () => {
+describe("runPipeline — multiple blocks", () => {
   it("stacks two paragraphs vertically", () => {
-    const layout = layoutDocument(doc(p("First"), p("Second")), {
+    const layout = runPipeline(doc(p("First"), p("Second")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
@@ -75,7 +82,7 @@ describe("layoutDocument — multiple blocks", () => {
 
   it("applies margin collapsing between heading and paragraph", () => {
     // h1: spaceAfter=12. paragraph: spaceBefore=0. collapsed gap = max(12,0) = 12
-    const layout = layoutDocument(doc(h1("Title"), p("Body")), {
+    const layout = runPipeline(doc(h1("Title"), p("Body")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
@@ -87,9 +94,9 @@ describe("layoutDocument — multiple blocks", () => {
 
 // ── Hard page break ───────────────────────────────────────────────────────────
 
-describe("layoutDocument — page_break node", () => {
+describe("runPipeline — page_break node", () => {
   it("forces content onto a new page", () => {
-    const layout = layoutDocument(doc(p("Page 1"), pageBreak(), p("Page 2")), {
+    const layout = runPipeline(doc(p("Page 1"), pageBreak(), p("Page 2")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
@@ -99,7 +106,7 @@ describe("layoutDocument — page_break node", () => {
   });
 
   it("resets y to margins.top on the new page", () => {
-    const layout = layoutDocument(doc(p("A"), pageBreak(), p("B")), {
+    const layout = runPipeline(doc(p("A"), pageBreak(), p("B")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
     });
@@ -110,7 +117,7 @@ describe("layoutDocument — page_break node", () => {
 
 // ── Soft page break (overflow) ────────────────────────────────────────────────
 
-describe("layoutDocument — overflow", () => {
+describe("runPipeline — overflow", () => {
   it("overflows blocks to a new page when they exceed page height", () => {
     // Use a tiny page: 200px tall, margins 10px = 180px content height
     const tinyPage = {
@@ -122,7 +129,7 @@ describe("layoutDocument — overflow", () => {
     // Each paragraph = 1 line = 18px. 180px / 18px = 10 paragraphs per page.
     // Create 12 paragraphs — should overflow to 2 pages.
     const blocks = Array.from({ length: 12 }, (_, i) => p(`Paragraph ${i + 1}`));
-    const layout = layoutDocument(doc(...blocks), {
+    const layout = runPipeline(doc(...blocks), {
       pageConfig: tinyPage,
       measurer: createMeasurer(),
     });
@@ -137,7 +144,7 @@ describe("layoutDocument — overflow", () => {
       margins: { top: 10, right: 10, bottom: 10, left: 10 },
     };
     const blocks = Array.from({ length: 15 }, () => p("Text"));
-    const layout = layoutDocument(doc(...blocks), {
+    const layout = runPipeline(doc(...blocks), {
       pageConfig: tinyPage,
       measurer: createMeasurer(),
     });
@@ -150,7 +157,7 @@ describe("layoutDocument — overflow", () => {
 
 // ── Horizontal rule ───────────────────────────────────────────────────────────
 
-describe("layoutDocument — horizontal rule", () => {
+describe("runPipeline — horizontal rule", () => {
   const { schema: fullSchema, fontConfig: fullFontConfig } = buildStarterKitContext();
 
   function hr() {
@@ -173,7 +180,7 @@ describe("layoutDocument — horizontal rule", () => {
   const HR_SPACE  = 24;
 
   it("HR block has correct height (derived from 8px font)", () => {
-    const layout = layoutDocument(fullDoc(hr()), {
+    const layout = runPipeline(fullDoc(hr()), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       fontConfig: fullFontConfig,
@@ -183,7 +190,7 @@ describe("layoutDocument — horizontal rule", () => {
   });
 
   it("HR is positioned at margins.top when it is the first block", () => {
-    const layout = layoutDocument(fullDoc(hr()), {
+    const layout = runPipeline(fullDoc(hr()), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       fontConfig: fullFontConfig,
@@ -194,7 +201,7 @@ describe("layoutDocument — horizontal rule", () => {
 
   it("paragraph before HR: HR y accounts for para height and collapsed margin", () => {
     // para: spaceAfter=10.  HR: spaceBefore=24.  collapsed gap = max(10, 24) = 24
-    const layout = layoutDocument(fullDoc(fullP("Hello"), hr()), {
+    const layout = runPipeline(fullDoc(fullP("Hello"), hr()), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       fontConfig: fullFontConfig,
@@ -206,7 +213,7 @@ describe("layoutDocument — horizontal rule", () => {
 
   it("HR before paragraph: para y accounts for HR height and collapsed margin", () => {
     // HR: spaceAfter=24.  para: spaceBefore=0.  collapsed gap = max(24, 0) = 24
-    const layout = layoutDocument(fullDoc(hr(), fullP("Hello")), {
+    const layout = runPipeline(fullDoc(hr(), fullP("Hello")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       fontConfig: fullFontConfig,
@@ -217,7 +224,7 @@ describe("layoutDocument — horizontal rule", () => {
   });
 
   it("HR block lines is empty (leaf node — no inline content)", () => {
-    const layout = layoutDocument(fullDoc(hr()), {
+    const layout = runPipeline(fullDoc(hr()), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       fontConfig: fullFontConfig,
@@ -229,7 +236,7 @@ describe("layoutDocument — horizontal rule", () => {
 
 // ── List item spacing ─────────────────────────────────────────────────────────
 
-describe("layoutDocument — list item spacing", () => {
+describe("runPipeline — list item spacing", () => {
   const { schema: fullSchema, fontConfig: fullFontConfig } = buildStarterKitContext();
 
   function bulletList(...items: string[]) {
@@ -254,7 +261,7 @@ describe("layoutDocument — list item spacing", () => {
   // list_item block style: spaceAfter=4 (vs paragraph spaceAfter=10)
   // spaceBefore=0 for both, so collapsed gap between two list items = max(4,0) = 4
   it("gap between two list items uses list_item spaceAfter (4), not paragraph spaceAfter (10)", () => {
-    const layout = layoutDocument(fullDoc(bulletList("First item", "Second item")), {
+    const layout = runPipeline(fullDoc(bulletList("First item", "Second item")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       fontConfig: fullFontConfig,
@@ -267,7 +274,7 @@ describe("layoutDocument — list item spacing", () => {
 
   it("gap after last list item before a paragraph uses list_item spaceAfter (4)", () => {
     // list_item spaceAfter=4, paragraph spaceBefore=0 → collapsed = 4
-    const layout = layoutDocument(fullDoc(bulletList("Only item"), fullP("After")), {
+    const layout = runPipeline(fullDoc(bulletList("Only item"), fullP("After")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       fontConfig: fullFontConfig,
@@ -280,14 +287,14 @@ describe("layoutDocument — list item spacing", () => {
 
 // ── measureCache ─────────────────────────────────────────────────────────────
 
-describe("layoutDocument — measureCache", () => {
+describe("runPipeline — measureCache", () => {
   it("produces identical layout output when a cache is provided", () => {
     const cache = new WeakMap<object, MeasureCacheEntry>();
     const baseDoc = doc(p("Hello"), p("World"));
     const opts = { pageConfig: defaultPageConfig, measurer: createMeasurer() };
 
-    const withoutCache = layoutDocument(baseDoc, opts);
-    const withCache    = layoutDocument(baseDoc, { ...opts, measureCache: cache });
+    const withoutCache = runPipeline(baseDoc, opts);
+    const withCache    = runPipeline(baseDoc, { ...opts, measureCache: cache });
 
     expect(withCache.pages).toHaveLength(withoutCache.pages.length);
     for (let pi = 0; pi < withoutCache.pages.length; pi++) {
@@ -306,7 +313,7 @@ describe("layoutDocument — measureCache", () => {
     const cache = new WeakMap<object, MeasureCacheEntry>();
     const para = p("Cached paragraph");
     const testDoc = doc(para);
-    layoutDocument(testDoc, { pageConfig: defaultPageConfig, measurer: createMeasurer(), measureCache: cache });
+    runPipeline(testDoc, { pageConfig: defaultPageConfig, measurer: createMeasurer(), measureCache: cache });
     // The inner paragraph node is the cache key
     const innerNode = testDoc.firstChild!;
     expect(cache.has(innerNode)).toBe(true);
@@ -327,7 +334,7 @@ describe("layoutDocument — measureCache", () => {
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
     // First run — establishes true layout
-    const trueLayout = layoutDocument(testDoc, opts);
+    const trueLayout = runPipeline(testDoc, opts);
     const trueFirstHeight = trueLayout.pages[0]!.blocks[0]!.height;
     const trueSecondY     = trueLayout.pages[0]!.blocks[1]!.y;
 
@@ -337,7 +344,7 @@ describe("layoutDocument — measureCache", () => {
     cache.set(firstNode, { ...realEntry, height: realEntry.height * 2 });
 
     // Second run with same doc — the first block should use the inflated height
-    const cachedLayout = layoutDocument(testDoc, opts);
+    const cachedLayout = runPipeline(testDoc, opts);
     const cachedFirstHeight = cachedLayout.pages[0]!.blocks[0]!.height;
     const cachedSecondY     = cachedLayout.pages[0]!.blocks[1]!.y;
 
@@ -361,13 +368,13 @@ describe("layoutDocument — measureCache", () => {
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
     // First layout — populates the cache for para2 with nodePos=3
-    const layout1 = layoutDocument(doc1, opts);
+    const layout1 = runPipeline(doc1, opts);
     const block2_1 = layout1.pages[0]!.blocks[1]!;
     expect(block2_1.lines[0]!.spans[0]!.docPos).toBe(block2_1.nodePos + 1);
 
     // Second layout — para2 is the same Node object (structural sharing) but its
     // nodePos has shifted by 6 (from 3 to 9). The cache must return adjusted docPos.
-    const layout2 = layoutDocument(doc2, opts);
+    const layout2 = runPipeline(doc2, opts);
     const block2_2 = layout2.pages[0]!.blocks[1]!;
     expect(block2_2.nodePos).toBeGreaterThan(block2_1.nodePos);
     expect(block2_2.lines[0]!.spans[0]!.docPos).toBe(block2_2.nodePos + 1);
@@ -380,8 +387,8 @@ describe("layoutDocument — measureCache", () => {
     const narrow = { pageWidth: 400, pageHeight: 800, margins: { top: 20, right: 20, bottom: 20, left: 20 } };
     const wide   = { pageWidth: 700, pageHeight: 800, margins: { top: 20, right: 20, bottom: 20, left: 20 } };
 
-    const layoutNarrow = layoutDocument(testDoc, { pageConfig: narrow, measurer, measureCache: cache });
-    const layoutWide   = layoutDocument(testDoc, { pageConfig: wide,   measurer, measureCache: cache });
+    const layoutNarrow = runPipeline(testDoc, { pageConfig: narrow, measurer, measureCache: cache });
+    const layoutWide   = runPipeline(testDoc, { pageConfig: wide,   measurer, measureCache: cache });
 
     // Both runs should succeed and the cached entry should reflect the wide config
     expect(layoutNarrow.pages[0]!.blocks[0]!.availableWidth).toBe(360); // 400 - 20 - 20
@@ -391,7 +398,7 @@ describe("layoutDocument — measureCache", () => {
 
 // ── Phase 1b: early termination ───────────────────────────────────────────────
 
-describe("layoutDocument — Phase 1b early termination", () => {
+describe("runPipeline — Phase 1b early termination", () => {
   it("returns the correct layout when early termination fires on second layout run", () => {
     // Three paragraphs. Edit the first one — the second and third are structurally
     // shared and should be copied from previousLayout without re-looping.
@@ -405,11 +412,11 @@ describe("layoutDocument — Phase 1b early termination", () => {
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
     // First layout — warm up the cache AND record placedTargetY/placedPage.
-    const layout1 = layoutDocument(doc1, opts);
+    const layout1 = runPipeline(doc1, opts);
 
     // Second layout — para2 and para3 are same Node objects; second layout
     // should copy from layout1 via early termination.
-    const layout2 = layoutDocument(doc2, { ...opts, previousLayout: layout1 });
+    const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1 });
 
     // Both layouts should have the same number of pages and blocks.
     expect(layout2.pages.length).toBe(layout1.pages.length);
@@ -434,8 +441,8 @@ describe("layoutDocument — Phase 1b early termination", () => {
     const measurer = createMeasurer();
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
-    const layout1 = layoutDocument(doc1, opts);
-    const layout2 = layoutDocument(doc2, { ...opts, previousLayout: layout1 });
+    const layout1 = runPipeline(doc1, opts);
+    const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1 });
 
     const block2_1 = layout1.pages[0]!.blocks[1]!;
     const block2_2 = layout2.pages[0]!.blocks[1]!;
@@ -452,10 +459,10 @@ describe("layoutDocument — Phase 1b early termination", () => {
 
 // ── Streaming layout (maxBlocks) ──────────────────────────────────────────────
 
-describe("layoutDocument — maxBlocks / streaming", () => {
+describe("runPipeline — maxBlocks / streaming", () => {
   it("returns isPartial:true when maxBlocks is smaller than the block count", () => {
     const testDoc = doc(p("A"), p("B"), p("C"), p("D"), p("E"));
-    const layout = layoutDocument(testDoc, {
+    const layout = runPipeline(testDoc, {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       maxBlocks: 2,
@@ -468,7 +475,7 @@ describe("layoutDocument — maxBlocks / streaming", () => {
 
   it("returns isPartial:false (undefined) when maxBlocks >= block count", () => {
     const testDoc = doc(p("A"), p("B"));
-    const layout = layoutDocument(testDoc, {
+    const layout = runPipeline(testDoc, {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
       maxBlocks: 100,
@@ -484,16 +491,16 @@ describe("layoutDocument — maxBlocks / streaming", () => {
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
     // Partial layout: first 5 blocks
-    const partial = layoutDocument(testDoc, { ...opts, maxBlocks: 5 });
+    const partial = runPipeline(testDoc, { ...opts, maxBlocks: 5 });
     expect(partial.isPartial).toBe(true);
 
     // Full layout with warm cache (simulates idle callback completion)
-    const full = layoutDocument(testDoc, opts);
+    const full = runPipeline(testDoc, opts);
     expect(full.isPartial).toBeUndefined();
 
     // All blocks in the full layout should have the same y/height as a fresh
     // layout without any cache (positions don't depend on measurement order)
-    const freshFull = layoutDocument(testDoc, { pageConfig: defaultPageConfig, measurer: createMeasurer() });
+    const freshFull = runPipeline(testDoc, { pageConfig: defaultPageConfig, measurer: createMeasurer() });
     expect(full.pages[0]!.blocks).toHaveLength(freshFull.pages[0]!.blocks.length);
     for (let i = 0; i < freshFull.pages[0]!.blocks.length; i++) {
       expect(full.pages[0]!.blocks[i]!.y).toBe(freshFull.pages[0]!.blocks[i]!.y);
@@ -573,7 +580,7 @@ describe("applyPageFont", () => {
 //   tall block: gap=10, targetY=38, spaceAvailable=64-38=26px → 1 line fits (18px)
 //   → part 1 (1 line) on page 1; remaining lines carried to subsequent pages
 //
-describe("layoutDocument — line splitting", () => {
+describe("runPipeline — line splitting", () => {
   const LH = MOCK_LINE_HEIGHT; // 18px
 
   const splitPage = {
@@ -586,7 +593,7 @@ describe("layoutDocument — line splitting", () => {
   const sixLineText  = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff"; // 6 lines
 
   it("splits a tall paragraph across two pages at the correct line boundary", () => {
-    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -609,7 +616,7 @@ describe("layoutDocument — line splitting", () => {
   });
 
   it("lines are conserved — total across all parts equals the full line count", () => {
-    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -619,7 +626,7 @@ describe("layoutDocument — line splitting", () => {
   });
 
   it("both parts reference the same ProseMirror node and nodePos", () => {
-    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -630,7 +637,7 @@ describe("layoutDocument — line splitting", () => {
   });
 
   it("continuation part starts at margins.top with spaceBefore = 0", () => {
-    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -640,7 +647,7 @@ describe("layoutDocument — line splitting", () => {
   });
 
   it("non-last split parts have spaceAfter = 0; last part has the block's natural spaceAfter", () => {
-    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -655,7 +662,7 @@ describe("layoutDocument — line splitting", () => {
     // Page 1: intro + 1 line (26px available after gap)
     // Page 2: 3 lines (54px available, 3 × 18 = 54 ≤ 54)
     // Page 3: 2 remaining lines
-    const layout = layoutDocument(doc(p("intro"), p(sixLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -686,7 +693,7 @@ describe("layoutDocument — line splitting", () => {
     // The continuation on page 2 fills the entire content area (3 lines × 18 = 54px).
     // The "after" paragraph can't fit on page 2 and overflows to page 3.
     // Key property: it starts at margins.top — not at an incorrect overlapping y.
-    const layout = layoutDocument(doc(p("intro"), p(fourLineText), p("after")), {
+    const layout = runPipeline(doc(p("intro"), p(fourLineText), p("after")), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -705,7 +712,7 @@ describe("layoutDocument — line splitting", () => {
 //   overflows = blockBottom > pageBottom && (!isFirstOnPage || entry.lines.length > 0)
 //
 // Same splitPage geometry as the suite above (3 lines per page).
-describe("layoutDocument — line splitting (first on page)", () => {
+describe("runPipeline — line splitting (first on page)", () => {
   const LH = MOCK_LINE_HEIGHT; // 18px
 
   const splitPage = {
@@ -720,7 +727,7 @@ describe("layoutDocument — line splitting (first on page)", () => {
   it("splits a paragraph that is the first and only block on page 1 across two pages", () => {
     // No preceding block — isFirstOnPage is true. The paragraph (6 lines × 18px = 108px)
     // overflows contentHeight (54px) and must split: 3 lines on page 1, 3 on page 2.
-    const layout = layoutDocument(doc(p(sixLineText)), {
+    const layout = runPipeline(doc(p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -739,7 +746,7 @@ describe("layoutDocument — line splitting (first on page)", () => {
   });
 
   it("all lines are conserved when a first-on-page paragraph spans two pages", () => {
-    const layout = layoutDocument(doc(p(sixLineText)), {
+    const layout = runPipeline(doc(p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -750,7 +757,7 @@ describe("layoutDocument — line splitting (first on page)", () => {
   });
 
   it("splits a first-on-page paragraph across three pages when it has 9 lines", () => {
-    const layout = layoutDocument(doc(p(nineLineText)), {
+    const layout = runPipeline(doc(p(nineLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -779,7 +786,7 @@ describe("layoutDocument — line splitting (first on page)", () => {
   it("splits a paragraph that is first on a page following a hard page break", () => {
     // After the page break, currentPage.blocks is empty so isFirstOnPage is true.
     // The six-line paragraph must still split across pages 2 and 3.
-    const layout = layoutDocument(doc(p("intro"), pageBreak(), p(sixLineText)), {
+    const layout = runPipeline(doc(p("intro"), pageBreak(), p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -799,7 +806,7 @@ describe("layoutDocument — line splitting (first on page)", () => {
   it("continuation parts have spaceBefore = 0 when the block style has non-zero spaceBefore", () => {
     // heading_1 has spaceBefore = 24 in defaultFontConfig.
     // Continuation parts must suppress spaceBefore regardless.
-    const layout = layoutDocument(doc(heading(1, nineLineText)), {
+    const layout = runPipeline(doc(heading(1, nineLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -828,7 +835,7 @@ describe("layoutDocument — line splitting (first on page)", () => {
 // Key boundary: targetY must be > pageBottom - lineHeight = 64 - 18 = 46
 // for linesFit=0. But y must be <= pageBottom - lineHeight = 46 for the
 // gap-suppression fix to kick in.
-describe("layoutDocument — gap suppression at page boundary", () => {
+describe("runPipeline — gap suppression at page boundary", () => {
   const LH = MOCK_LINE_HEIGHT; // 18px
 
   const splitPage = {
@@ -846,7 +853,7 @@ describe("layoutDocument — gap suppression at page boundary", () => {
   it("splits a paragraph whose gap pushed targetY into the dead zone", () => {
     // twoLineIntro → y=46. gap=10 → targetY=56. pageAvailable=8 < LH.
     // pageBottom - y = 18 = LH → fix kicks in: block starts at y=46, 1 line on p1.
-    const layout = layoutDocument(doc(p(twoLineIntro), p(fourLineText)), {
+    const layout = runPipeline(doc(p(twoLineIntro), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -868,7 +875,7 @@ describe("layoutDocument — gap suppression at page boundary", () => {
 
   it("block starts at y (gap suppressed), not at targetY", () => {
     // Block must visually start directly after the previous block — no gap wasted.
-    const layout = layoutDocument(doc(p(twoLineIntro), p(fourLineText)), {
+    const layout = runPipeline(doc(p(twoLineIntro), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -880,7 +887,7 @@ describe("layoutDocument — gap suppression at page boundary", () => {
   });
 
   it("all lines are conserved when gap suppression applies", () => {
-    const layout = layoutDocument(doc(p(twoLineIntro), p(fourLineText)), {
+    const layout = runPipeline(doc(p(twoLineIntro), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -895,7 +902,7 @@ describe("layoutDocument — gap suppression at page boundary", () => {
     // gap = max(10, 24) = 24 → targetY = 52 → pageAvailable = 12 < LH.
     // pageBottom - y = 36 >= LH → fix: heading starts at y=28, 2 lines on p1.
     const oneLineIntro = "aaaaaaaaa";
-    const layout = layoutDocument(doc(p(oneLineIntro), heading(1, fourLineText)), {
+    const layout = runPipeline(doc(p(oneLineIntro), heading(1, fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -916,7 +923,7 @@ describe("layoutDocument — gap suppression at page boundary", () => {
     // pageBottom - y = 0 < LH → gap-suppression does NOT apply → block jumps.
     // fourLineText (4 lines) then splits normally across pages 2 and 3 (3 + 1).
     const threeLineIntro = "aaaaaaaaa bbbbbbbbb ccccccccc";
-    const layout = layoutDocument(doc(p(threeLineIntro), p(fourLineText)), {
+    const layout = runPipeline(doc(p(threeLineIntro), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -933,10 +940,10 @@ describe("layoutDocument — gap suppression at page boundary", () => {
   });
 });
 
-describe("layoutDocument — pageConfig.fontFamily", () => {
+describe("runPipeline — pageConfig.fontFamily", () => {
   it("span fonts in a paragraph use the page fontFamily", () => {
     const { fontConfig } = buildStarterKitContext();
-    const layout = layoutDocument(doc(p("Hello")), {
+    const layout = runPipeline(doc(p("Hello")), {
       pageConfig: { ...defaultPageConfig, fontFamily: "Arial" },
       fontConfig,
       measurer: createMeasurer(),
@@ -949,7 +956,7 @@ describe("layoutDocument — pageConfig.fontFamily", () => {
 
   it("span fonts in a heading use the page fontFamily", () => {
     const { fontConfig } = buildStarterKitContext();
-    const layout = layoutDocument(doc(heading(1, "Title")), {
+    const layout = runPipeline(doc(heading(1, "Title")), {
       pageConfig: { ...defaultPageConfig, fontFamily: "Verdana" },
       fontConfig,
       measurer: createMeasurer(),
@@ -963,7 +970,7 @@ describe("layoutDocument — pageConfig.fontFamily", () => {
 
   it("absent fontFamily leaves block style fonts unchanged", () => {
     const { fontConfig } = buildStarterKitContext();
-    const layout = layoutDocument(doc(p("Hello")), {
+    const layout = runPipeline(doc(p("Hello")), {
       pageConfig: defaultPageConfig, // no fontFamily
       fontConfig,
       measurer: createMeasurer(),
@@ -976,7 +983,7 @@ describe("layoutDocument — pageConfig.fontFamily", () => {
 
 // ── Float layout (wrapping mode) ───────────────────────────────────────────────
 
-describe("layoutDocument — float image wrapping", () => {
+describe("runPipeline — float image wrapping", () => {
   // Long text to force several wrapped lines (each ≈ 55 chars at 8px/char, 442px constrained width)
   const longText = "word ".repeat(60).trim(); // 60 words × 5 chars = ~300 chars, ~6+ lines
 
@@ -984,7 +991,7 @@ describe("layoutDocument — float image wrapping", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
-    const layout = layoutDocument(schema.node("doc", null, [para]), {
+    const layout = runPipeline(schema.node("doc", null, [para]), {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
     expect(layout.floats).toBeDefined();
@@ -996,7 +1003,7 @@ describe("layoutDocument — float image wrapping", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
-    const layout = layoutDocument(schema.node("doc", null, [para]), {
+    const layout = runPipeline(schema.node("doc", null, [para]), {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
     const block = layout.pages[0]!.blocks[0]!;
@@ -1012,7 +1019,7 @@ describe("layoutDocument — float image wrapping", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-right" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
-    const layout = layoutDocument(schema.node("doc", null, [para]), {
+    const layout = runPipeline(schema.node("doc", null, [para]), {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
     const block = layout.pages[0]!.blocks[0]!;
@@ -1027,7 +1034,7 @@ describe("layoutDocument — float image wrapping", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
-    const layout = layoutDocument(schema.node("doc", null, [para]), {
+    const layout = runPipeline(schema.node("doc", null, [para]), {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
     const float = layout.floats![0]!;
@@ -1039,7 +1046,7 @@ describe("layoutDocument — float image wrapping", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-right" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
-    const layout = layoutDocument(schema.node("doc", null, [para]), {
+    const layout = runPipeline(schema.node("doc", null, [para]), {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
     const float = layout.floats![0]!;
@@ -1055,7 +1062,7 @@ describe("layoutDocument — float image wrapping", () => {
     const extraLongText = "word ".repeat(200).trim();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
     const para = schema.node("paragraph", null, [img, schema.text(extraLongText)]);
-    const layout = layoutDocument(schema.node("doc", null, [para]), {
+    const layout = runPipeline(schema.node("doc", null, [para]), {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
     const block = layout.pages[0]!.blocks[0]!;
@@ -1094,7 +1101,7 @@ describe("layoutDocument — float image wrapping", () => {
     const filler1 = schema.node("paragraph", null, [schema.text("filler one")]);
     const filler2 = schema.node("paragraph", null, [schema.text("filler two")]);
     const filler3 = schema.node("paragraph", null, [schema.text("filler three")]);
-    const layout = layoutDocument(
+    const layout = runPipeline(
       schema.node("doc", null, [floatPara, filler1, filler2, filler3]),
       { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
     );
@@ -1132,7 +1139,7 @@ describe("layoutDocument — float image wrapping", () => {
     const opts = { pageConfig: smallPage, fontConfig, measurer };
 
     // First layout (float at default offsetY=0).
-    const layout1 = layoutDocument(doc, opts);
+    const layout1 = runPipeline(doc, opts);
 
     // Simulate drag: move float down by 60px. Only the image node changes.
     const img2 = schema.nodes["image"]!.create({ src: "", width: 150, height: 120, wrappingMode: "square-left", floatOffset: { x: 0, y: 60 } });
@@ -1142,7 +1149,7 @@ describe("layoutDocument — float image wrapping", () => {
     // Second layout reuses measureCache and previousLayout — exactly what the
     // editor does on each drag mousemove event.
     const measureCache = new WeakMap();
-    const layout2 = layoutDocument(doc2, { ...opts, previousLayout: layout1, measureCache });
+    const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1, measureCache });
 
     // All text blocks must be within the page bottom on every page.
     const pageBottom = smallPage.pageHeight - smallPage.margins.bottom; // 380
@@ -1172,7 +1179,7 @@ describe("layoutDocument — float image wrapping", () => {
     // land at approximately the same Y and visually overlap.
     const para1 = schema.node("paragraph", null, [img1, schema.text("first float text here")]);
     const para2 = schema.node("paragraph", null, [img2, schema.text("second float text here")]);
-    const layout = layoutDocument(
+    const layout = runPipeline(
       schema.node("doc", null, [para1, para2]),
       { pageConfig: defaultPageConfig, fontConfig, measurer },
     );
@@ -1197,7 +1204,7 @@ describe("layoutDocument — float image wrapping", () => {
     const manyWords = "word ".repeat(30).trim();
     const para1 = schema.node("paragraph", null, [imgA, schema.text(manyWords)]);
     const para2 = schema.node("paragraph", null, [imgB, schema.text("anchor text")]);
-    const layout = layoutDocument(
+    const layout = runPipeline(
       schema.node("doc", null, [para1, para2]),
       { pageConfig: defaultPageConfig, fontConfig, measurer },
     );
@@ -1226,7 +1233,7 @@ describe("layoutDocument — float image wrapping", () => {
     const img2 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
     const para1 = schema.node("paragraph", null, [img1, schema.text("first paragraph text")]);
     const para2 = schema.node("paragraph", null, [img2, schema.text("second paragraph text")]);
-    const layout = layoutDocument(
+    const layout = runPipeline(
       schema.node("doc", null, [para1, para2]),
       { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
     );
@@ -1261,7 +1268,7 @@ describe("layoutDocument — float image wrapping", () => {
     const img2 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
     const para1 = schema.node("paragraph", null, [img1, schema.text("first para")]);
     const para2 = schema.node("paragraph", null, [img2, schema.text("second para")]);
-    const layout = layoutDocument(
+    const layout = runPipeline(
       schema.node("doc", null, [para1, para2]),
       { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
     );
@@ -1301,7 +1308,7 @@ describe("layoutDocument — float image wrapping", () => {
     const floatPara = schema.node("paragraph", null, [img, schema.text("word word word word")]);
     const longText = "word ".repeat(150).trim();
     const afterPara = schema.node("paragraph", null, [schema.text(longText)]);
-    const layout = layoutDocument(
+    const layout = runPipeline(
       schema.node("doc", null, [floatPara, afterPara]),
       { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
     );
@@ -1351,7 +1358,7 @@ describe("layoutDocument — float image wrapping", () => {
     // overflow into the bottom margin; with the fix they move to the next page.
     const after1 = schema.node("paragraph", null, [schema.text("after one")]);
     const after2 = schema.node("paragraph", null, [schema.text("after two")]);
-    const layout = layoutDocument(
+    const layout = runPipeline(
       schema.node("doc", null, [anchor, floatPara, after1, after2]),
       { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
     );
@@ -1374,7 +1381,7 @@ describe("layoutDocument — float image wrapping", () => {
 // "which part am I?" without reading boolean flag combinations.
 //
 // Same splitPage geometry as the line-splitting suites above.
-describe("layoutDocument — fragment identity", () => {
+describe("runPipeline — fragment identity", () => {
   const LH = MOCK_LINE_HEIGHT; // 18px
 
   const splitPage = {
@@ -1390,7 +1397,7 @@ describe("layoutDocument — fragment identity", () => {
   const sixLineText  = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff"; // 6 lines
 
   it("unsplit block has no fragment identity fields", () => {
-    const layout = layoutDocument(doc(p("intro")), {
+    const layout = runPipeline(doc(p("intro")), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -1401,7 +1408,7 @@ describe("layoutDocument — fragment identity", () => {
   });
 
   it("two-part split: fragmentIndex is 0 on first part, 1 on second", () => {
-    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -1413,7 +1420,7 @@ describe("layoutDocument — fragment identity", () => {
   });
 
   it("two-part split: fragmentCount is 2 on both parts", () => {
-    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -1425,7 +1432,7 @@ describe("layoutDocument — fragment identity", () => {
   });
 
   it("two-part split: sourceNodePos equals nodePos on both parts", () => {
-    const layout = layoutDocument(doc(p("intro"), p(fourLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -1438,7 +1445,7 @@ describe("layoutDocument — fragment identity", () => {
 
   it("three-part split: fragmentIndex is 0, 1, 2 on successive parts", () => {
     // sixLineText: 1 line on page 1, 3 on page 2, 2 on page 3
-    const layout = layoutDocument(doc(p("intro"), p(sixLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -1452,7 +1459,7 @@ describe("layoutDocument — fragment identity", () => {
   });
 
   it("three-part split: fragmentCount is 3 on all parts", () => {
-    const layout = layoutDocument(doc(p("intro"), p(sixLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -1466,7 +1473,7 @@ describe("layoutDocument — fragment identity", () => {
   });
 
   it("three-part split: all parts share the same sourceNodePos", () => {
-    const layout = layoutDocument(doc(p("intro"), p(sixLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -1479,7 +1486,7 @@ describe("layoutDocument — fragment identity", () => {
   });
 
   it("isFirst / isLast derived from fragmentIndex + fragmentCount are correct", () => {
-    const layout = layoutDocument(doc(p("intro"), p(sixLineText)), {
+    const layout = runPipeline(doc(p("intro"), p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -1501,7 +1508,7 @@ describe("layoutDocument — fragment identity", () => {
   });
 
   it("surrounding unsplit blocks are unaffected by a split block on the same page", () => {
-    const layout = layoutDocument(doc(p("before"), p(fourLineText), p("after")), {
+    const layout = runPipeline(doc(p("before"), p(fourLineText), p("after")), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
@@ -1513,6 +1520,110 @@ describe("layoutDocument — fragment identity", () => {
     expect(beforeBlock.fragmentCount).toBeUndefined();
     expect(afterBlock.fragmentIndex).toBeUndefined();
     expect(afterBlock.fragmentCount).toBeUndefined();
+  });
+});
+
+// ── Pipeline stage unit tests ─────────────────────────────────────────────────
+
+describe("buildBlockFlow — Stage 1", () => {
+  it("returns one FlowBlock per top-level node", () => {
+    const testDoc = doc(p("Hello"), p("World"));
+    const measurer = createMeasurer();
+    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
+    const { flows, reachedCutoff } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
+    expect(flows).toHaveLength(2);
+    expect(reachedCutoff).toBe(false);
+  });
+
+  it("every FlowBlock has height > 0 for non-empty paragraphs", () => {
+    const testDoc = doc(p("Line one"), p("Line two"));
+    const measurer = createMeasurer();
+    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
+    const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
+    for (const flow of flows) {
+      expect(flow.height).toBeGreaterThan(0);
+    }
+  });
+
+  it("respects maxBlocks and returns reachedCutoff: true", () => {
+    const testDoc = doc(p("A"), p("B"), p("C"), p("D"), p("E"));
+    const measurer = createMeasurer();
+    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
+    const { flows, reachedCutoff, cutoffIndex } = buildBlockFlow(
+      items, 0, cfg, defaultFontConfig, measurer, undefined, undefined, 3,
+    );
+    expect(flows).toHaveLength(3);
+    expect(reachedCutoff).toBe(true);
+    expect(cutoffIndex).toBe(3);
+  });
+
+  it("startIndex skips already-processed items", () => {
+    const testDoc = doc(p("A"), p("B"), p("C"));
+    const measurer = createMeasurer();
+    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
+    const { flows } = buildBlockFlow(items, 2, cfg, defaultFontConfig, measurer, undefined, undefined);
+    expect(flows).toHaveLength(1);
+  });
+
+  it("page_break item produces a zero-height isPageBreak FlowBlock", () => {
+    const testDoc = doc(p("Before"), pageBreak(), p("After"));
+    const measurer = createMeasurer();
+    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
+    const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
+    expect(flows).toHaveLength(3);
+    expect(flows[1]!.isPageBreak).toBe(true);
+    expect(flows[1]!.height).toBe(0);
+  });
+});
+
+describe("paginateFlow — Stage 2", () => {
+  it("single short paragraph fits on page 1", () => {
+    const testDoc = doc(p("Hello"));
+    const measurer = createMeasurer();
+    const { margins, pageHeight } = defaultPageConfig;
+    const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
+    const contentHeight = pageHeight - margins.top - margins.bottom;
+    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const cfg = { margins, contentWidth };
+    const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
+    const initPage = { pageNumber: 1, blocks: [] };
+    const pr = paginateFlow(flows, margins, contentHeight, undefined, undefined, [], initPage, margins.top, 0);
+    const allPages = [...pr.pages, pr.currentPage];
+    expect(allPages).toHaveLength(1);
+    expect(allPages[0]!.blocks).toHaveLength(1);
+  });
+
+  it("page_break FlowBlock forces a new page", () => {
+    const testDoc = doc(p("Page 1"), pageBreak(), p("Page 2"));
+    const measurer = createMeasurer();
+    const { margins, pageHeight } = defaultPageConfig;
+    const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
+    const contentHeight = pageHeight - margins.top - margins.bottom;
+    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const cfg = { margins, contentWidth };
+    const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
+    const initPage = { pageNumber: 1, blocks: [] };
+    const pr = paginateFlow(flows, margins, contentHeight, undefined, undefined, [], initPage, margins.top, 0);
+    const allPages = [...pr.pages, pr.currentPage];
+    expect(allPages).toHaveLength(2);
+    expect(allPages[0]!.blocks[0]!.nodePos).toBeLessThan(allPages[1]!.blocks[0]!.nodePos);
+  });
+
+  it("earlyTerminated is false when no previousLayout is passed", () => {
+    const testDoc = doc(p("Only"));
+    const measurer = createMeasurer();
+    const { margins, pageHeight } = defaultPageConfig;
+    const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
+    const contentHeight = pageHeight - margins.top - margins.bottom;
+    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
+    const pr = paginateFlow(flows, margins, contentHeight, undefined, undefined, [], { pageNumber: 1, blocks: [] }, margins.top, 0);
+    expect(pr.earlyTerminated).toBe(false);
   });
 });
 
