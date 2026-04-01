@@ -1,17 +1,17 @@
 {
-  "name": "@harfi/react",
+  "name": "@scrivr/react",
   "version": "0.1.0",
-  "description": "React bindings for the Harfi canvas document editor",
+  "description": "React bindings for the Scrivr canvas document editor",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Seraa-AI/Harfi.git",
+    "url": "https://github.com/Seraa-AI/Scrivr.git",
     "directory": "packages/react"
   },
-  "homepage": "https://github.com/Seraa-AI/Harfi#readme",
+  "homepage": "https://github.com/Seraa-AI/Scrivr#readme",
   "bugs": {
-    "url": "https://github.com/Seraa-AI/Harfi/issues"
+    "url": "https://github.com/Seraa-AI/Scrivr/issues"
   },
   "keywords": [
     "canvas",
@@ -20,7 +20,7 @@
     "prosemirror",
     "document",
     "rich-text",
-    "harfi"
+    "scrivr"
   ],
   "type": "module",
   "main": "./dist/index.js",
@@ -49,17 +49,17 @@
     "@floating-ui/dom": "^1.7.6"
   },
   "peerDependencies": {
-    "@harfi/core": "workspace:*",
-    "@harfi/plugins": "workspace:*",
+    "@scrivr/core": "workspace:*",
+    "@scrivr/plugins": "workspace:*",
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
   },
   "peerDependenciesMeta": {
-    "@harfi/plugins": { "optional": true }
+    "@scrivr/plugins": { "optional": true }
   },
   "devDependencies": {
-    "@harfi/core": "workspace:*",
-    "@harfi/plugins": "workspace:*",
+    "@scrivr/core": "workspace:*",
+    "@scrivr/plugins": "workspace:*",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
     "tsup": "^8.0.0",

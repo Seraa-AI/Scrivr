@@ -1,5 +1,5 @@
 /**
- * Vitest setup for @harfi/core — runs before each test file.
+ * Vitest setup for @scrivr/core — runs before each test file.
  * Overrides HTMLCanvasElement.measureText with deterministic values so
  * TextMeasurer returns predictable pixel sizes in every layout test.
  */

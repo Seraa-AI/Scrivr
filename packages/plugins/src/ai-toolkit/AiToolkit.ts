@@ -1,5 +1,5 @@
-import { Extension } from "@harfi/core";
-import type { IEditor } from "@harfi/core";
+import { Extension } from "@scrivr/core";
+import type { IEditor } from "@scrivr/core";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
@@ -15,7 +15,7 @@ import type { Command } from "prosemirror-state";
  * AiToolkitAPI — the single entry point for all AI interactions with an editor.
  *
  * Obtain via:
- *   import { getAiToolkit } from "@harfi/core";
+ *   import { getAiToolkit } from "@scrivr/core";
  *   const ai = getAiToolkit(editor);
  *
  * Never instantiate directly — created by AiToolkit.onEditorReady().
@@ -353,8 +353,8 @@ interface AiToolkitOptions {
  * Add this to your extensions array to enable AI capabilities:
  *
  * @example
- * import { StarterKit, AiToolkit } from "@harfi/core";
- * import { getAiToolkit } from "@harfi/core";
+ * import { StarterKit, AiToolkit } from "@scrivr/core";
+ * import { getAiToolkit } from "@scrivr/core";
  *
  * const editor = new Editor({ extensions: [StarterKit, AiToolkit] });
  * const ai = getAiToolkit(editor);

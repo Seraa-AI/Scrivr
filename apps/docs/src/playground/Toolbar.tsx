@@ -1,4 +1,4 @@
-import type { ToolbarItemSpec } from "@harfi/core";
+import type { ToolbarItemSpec } from "@scrivr/core";
 import {
   Bold,
   Italic,

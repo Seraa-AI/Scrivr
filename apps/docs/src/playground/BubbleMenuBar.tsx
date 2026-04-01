@@ -1,5 +1,5 @@
-import { BubbleMenu } from "@harfi/react";
-import type { Editor } from "@harfi/react";
+import { BubbleMenu } from "@scrivr/react";
+import type { Editor } from "@scrivr/react";
 
 interface BubbleMenuBarProps {
   editor: Editor | null;

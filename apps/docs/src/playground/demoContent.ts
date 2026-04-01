@@ -1,8 +1,8 @@
-import { Extension } from "@harfi/core";
+import { Extension } from "@scrivr/core";
 
 /**
  * Initial document loaded in the playground.
- * Showcases the full range of Harfi formatting capabilities.
+ * Showcases the full range of Scrivr formatting capabilities.
  * Extend this as new features land.
  */
 const DEMO_DOC = {
@@ -11,7 +11,7 @@ const DEMO_DOC = {
     {
       type: "heading",
       attrs: { level: 1, align: "left" },
-      content: [{ type: "text", text: "Welcome to Harfi" }],
+      content: [{ type: "text", text: "Welcome to Scrivr" }],
     },
     {
       type: "paragraph",
@@ -19,7 +19,7 @@ const DEMO_DOC = {
       content: [
         {
           type: "text",
-          text: "A canvas-rendered document editor built for high-fidelity, multi-page documents. Unlike DOM-based editors, Harfi paints each page directly onto an HTML ",
+          text: "A canvas-rendered document editor built for high-fidelity, multi-page documents. Unlike DOM-based editors, Scrivr paints each page directly onto an HTML ",
         },
         { type: "text", marks: [{ type: "bold" }], text: "canvas element" },
         {
@@ -39,7 +39,7 @@ const DEMO_DOC = {
       type: "paragraph",
       attrs: { align: "left" },
       content: [
-        { type: "text", text: "Harfi supports rich inline formatting — " },
+        { type: "text", text: "Scrivr supports rich inline formatting — " },
         { type: "text", marks: [{ type: "bold" }], text: "bold" },
         { type: "text", text: ", " },
         { type: "text", marks: [{ type: "italic" }], text: "italic" },
@@ -126,7 +126,7 @@ const DEMO_DOC = {
             {
               type: "link",
               attrs: {
-                href: "https://github.com/Seraa-AI/Harfi",
+                href: "https://github.com/Seraa-AI/Scrivr",
                 title: null,
               },
             },
@@ -261,7 +261,7 @@ const DEMO_DOC = {
               type: "paragraph",
               attrs: { align: "left" },
               content: [
-                { type: "text", text: "Harfi paginates automatically" },
+                { type: "text", text: "Scrivr paginates automatically" },
               ],
             },
           ],
@@ -296,7 +296,7 @@ const DEMO_DOC = {
       content: [
         {
           type: "text",
-          text: "Harfi uses a custom layout pipeline that computes line breaks, page boundaries, and float positions — independent of the browser's CSS engine. The output is ",
+          text: "Scrivr uses a custom layout pipeline that computes line breaks, page boundaries, and float positions — independent of the browser's CSS engine. The output is ",
         },
         {
           type: "text",

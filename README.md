@@ -1,8 +1,8 @@
-# Harfi
+# Scrivr
 
 > **Beta** — APIs may change between releases. Pin to an exact version and review the changelog before upgrading.
 
-Harfi is an open-source, canvas-rendered document editor framework. Unlike traditional DOM-based rich-text editors, Harfi renders its content directly onto `<canvas>` elements — giving you pixel-perfect, paginated layouts without fighting the browser's layout engine.
+Scrivr is an open-source, canvas-rendered document editor framework. Unlike traditional DOM-based rich-text editors, Scrivr renders its content directly onto `<canvas>` elements — giving you pixel-perfect, paginated layouts without fighting the browser's layout engine.
 
 ## Architecture
 
@@ -17,26 +17,26 @@ Harfi is an open-source, canvas-rendered document editor framework. Unlike tradi
 
 | Package | Description |
 |---------|-------------|
-| [`@harfi/core`](./packages/core) | Headless engine — `Editor`, layout engine, canvas `ViewManager`, and all built-in extensions |
-| [`@harfi/react`](./packages/react) | React bindings — `useCanvasEditor`, `<Harfi />`, and menu components |
-| [`@harfi/plugins`](./packages/plugins) | Optional extensions — real-time collaboration (Yjs), AI Toolkit, and Track Changes |
-| [`@harfi/export`](./packages/export) | Export utilities — paginated PDF (`exportToPdf`) and Markdown (`exportToMarkdown`) |
+| [`@scrivr/core`](./packages/core) | Headless engine — `Editor`, layout engine, canvas `ViewManager`, and all built-in extensions |
+| [`@scrivr/react`](./packages/react) | React bindings — `useCanvasEditor`, `<Scrivr />`, and menu components |
+| [`@scrivr/plugins`](./packages/plugins) | Optional extensions — real-time collaboration (Yjs), AI Toolkit, and Track Changes |
+| [`@scrivr/export`](./packages/export) | Export utilities — paginated PDF (`exportToPdf`) and Markdown (`exportToMarkdown`) |
 
 ## Quick Start
 
 ```bash
-pnpm add @harfi/core @harfi/react
+pnpm add @scrivr/core @scrivr/react
 ```
 
 ```tsx
-import { useCanvasEditor, Harfi, StarterKit } from '@harfi/react';
+import { useCanvasEditor, Scrivr, StarterKit } from '@scrivr/react';
 
 export function MyEditor() {
   const editor = useCanvasEditor({
     extensions: [StarterKit],
   });
 
-  return <Harfi editor={editor} style={{ height: '100vh' }} />;
+  return <Scrivr editor={editor} style={{ height: '100vh' }} />;
 }
 ```
 
@@ -48,10 +48,10 @@ apps/
   docs/     # Fumadocs documentation site
   server/   # Hocuspocus collaboration server
 packages/
-  core/     # @harfi/core
-  react/    # @harfi/react
-  plugins/  # @harfi/plugins
-  export/   # @harfi/export
+  core/     # @scrivr/core
+  react/    # @scrivr/react
+  plugins/  # @scrivr/plugins
+  export/   # @scrivr/export
 ```
 
 ## Development

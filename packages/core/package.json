@@ -1,17 +1,17 @@
 {
-  "name": "@harfi/core",
+  "name": "@scrivr/core",
   "version": "0.1.0",
   "description": "High-performance canvas-based document editor engine",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Seraa-AI/Harfi.git",
+    "url": "https://github.com/Seraa-AI/Scrivr.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/Seraa-AI/Harfi#readme",
+  "homepage": "https://github.com/Seraa-AI/Scrivr#readme",
   "bugs": {
-    "url": "https://github.com/Seraa-AI/Harfi/issues"
+    "url": "https://github.com/Seraa-AI/Scrivr/issues"
   },
   "keywords": [
     "canvas",
@@ -19,7 +19,7 @@
     "prosemirror",
     "document",
     "rich-text",
-    "harfi"
+    "scrivr"
   ],
   "type": "module",
   "main": "./dist/index.js",

@@ -1,5 +1,5 @@
-import { Extension, renderTrackedInsert, renderTrackedDelete, renderTrackedConflict } from "@harfi/core";
-import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler } from "@harfi/core";
+import { Extension, renderTrackedInsert, renderTrackedDelete, renderTrackedConflict } from "@scrivr/core";
+import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler } from "@scrivr/core";
 import type { EditorState, Transaction } from "prosemirror-state";
 
 import { setAction, skipTracking, TrackChangesAction } from "./actions";
@@ -36,7 +36,7 @@ function deleteColor(authorID: string): string {
 }
 
 /**
- * TrackChanges — opt-in track-changes plugin for @harfi/plugins.
+ * TrackChanges — opt-in track-changes plugin for @scrivr/plugins.
  *
  * Adds `tracked_insert` and `tracked_delete` marks to the schema (opt-in),
  * intercepts all transactions via appendTransaction, and exposes commands

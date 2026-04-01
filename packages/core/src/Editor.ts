@@ -683,7 +683,7 @@ export class Editor {
    */
   /**
    * Returns a MarkdownSerializer configured with all extension-contributed rules.
-   * Use this with exportToMarkdown() from @harfi/export.
+   * Use this with exportToMarkdown() from @scrivr/export.
    */
   getMarkdownSerializer(): MarkdownSerializer {
     const { nodes, marks } = this.manager.buildMarkdownSerializerRules();

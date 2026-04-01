@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useState, useLayoutEffect, useRef, useCallback, useDebugValue } from "react";
-import type { Editor } from "@harfi/core";
+import type { Editor } from "@scrivr/core";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

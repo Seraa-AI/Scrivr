@@ -139,16 +139,16 @@ export class ViewManager {
         this.ensureCanvasesAttached(entry, layout.pageConfig);
         if (entry.lastPaintedVersion !== layout.version) {
           if (!this._firstPaintDone) {
-            performance.mark("harfi:first-paint-start");
+            performance.mark("scrivr:first-paint-start");
           }
           this.paintContent(entry, page, layout);
           entry.lastPaintedVersion = layout.version;
           if (!this._firstPaintDone) {
-            performance.mark("harfi:first-paint-end");
+            performance.mark("scrivr:first-paint-end");
             performance.measure(
-              "harfi:first-paint (canvas draw, page 1)",
-              "harfi:first-paint-start",
-              "harfi:first-paint-end",
+              "scrivr:first-paint (canvas draw, page 1)",
+              "scrivr:first-paint-start",
+              "scrivr:first-paint-end",
             );
             this._firstPaintDone = true;
           }

@@ -1,7 +1,7 @@
 import { Plugin, PluginKey } from "prosemirror-state";
 import type { EditorState, Transaction } from "prosemirror-state";
-import { Extension, renderAiCaret } from "@harfi/core";
-import type { IEditor, OverlayRenderHandler } from "@harfi/core";
+import { Extension, renderAiCaret } from "@scrivr/core";
+import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
 
 // ── Plugin state ──────────────────────────────────────────────────────────────
 

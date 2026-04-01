@@ -16,8 +16,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
-import { createSlashMenu } from "@harfi/core";
-import type { Editor } from "@harfi/core";
+import { createSlashMenu } from "@scrivr/core";
+import type { Editor } from "@scrivr/core";
 
 export interface SlashMenuItem {
   /** Short icon label shown in the menu (e.g. "H1", "•"). */

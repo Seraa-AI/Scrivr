@@ -7,20 +7,20 @@ import {
   LinkPopover,
   SlashMenu,
   ImageMenu,
-} from "@harfi/react";
-import type { EditorStateContext } from "@harfi/react";
-import { PdfExport } from "@harfi/export";
+} from "@scrivr/react";
+import type { EditorStateContext } from "@scrivr/react";
+import { PdfExport } from "@scrivr/export";
 import {
   Collaboration,
   CollaborationCursor,
   TrackChanges,
   AiToolkit,
-} from "@harfi/plugins";
+} from "@scrivr/plugins";
 import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
 import { FloatingMenuBar } from "./FloatingMenuBar";
 import { ModeSwitcher } from "./ModeSwitcher";
-import { TrackChangesPopover } from "@harfi/react";
+import { TrackChangesPopover } from "@scrivr/react";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent } from "./demoContent";
 
@@ -78,7 +78,7 @@ const EXTENSIONS =
       ]
     : [
         StarterKit,
-        PdfExport.configure({ filename: "harfi-demo" }),
+        PdfExport.configure({ filename: "scrivr-demo" }),
         TrackChanges.configure({ userID: "demo-user", canAcceptReject: true }),
         AiToolkit,
         DemoContent,

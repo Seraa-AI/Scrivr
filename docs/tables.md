@@ -2,7 +2,7 @@
 
 ## Overview
 
-Tables are the most complex block type in Harfi. They require:
+Tables are the most complex block type in Scrivr. They require:
 1. A new ProseMirror schema (4 node types)
 2. Model-layer editing commands (merge/split cells, add/delete rows/columns)
 3. A custom layout engine that understands cell spans and row heights
@@ -18,7 +18,7 @@ This document describes what to adopt from `prosemirror-tables`, what to rewrite
 
 ### ✅ Schema — `tableNodes()`
 
-The 4 node types map directly to Harfi's schema. Define them manually (or call `tableNodes()`) with these specs:
+The 4 node types map directly to Scrivr's schema. Define them manually (or call `tableNodes()`) with these specs:
 
 ```
 table        group: "block", content: "table_row+"

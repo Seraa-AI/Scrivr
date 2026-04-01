@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { Editor, StarterKit } from "@harfi/core";
-import type { Extension, PageConfig } from "@harfi/core";
+import { Editor, StarterKit } from "@scrivr/core";
+import type { Extension, PageConfig } from "@scrivr/core";
 
 export interface UseCanvasEditorOptions {
   /** Extensions to load. Defaults to [StarterKit]. */

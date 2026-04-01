@@ -1,23 +1,23 @@
 {
-  "name": "harfi",
+  "name": "scrivr",
   "private": true,
   "version": "0.0.1",
   "packageManager": "pnpm@10.32.1",
-  "description": "Harfi — high-performance canvas-based document editor",
+  "description": "Scrivr — high-performance canvas-based document editor",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Seraa-AI/Harfi.git"
+    "url": "https://github.com/Seraa-AI/Scrivr.git"
   },
-  "homepage": "https://github.com/Seraa-AI/Harfi#readme",
+  "homepage": "https://github.com/Seraa-AI/Scrivr#readme",
   "bugs": {
-    "url": "https://github.com/Seraa-AI/Harfi/issues"
+    "url": "https://github.com/Seraa-AI/Scrivr/issues"
   },
   "scripts": {
-    "dev": "turbo dev --filter=@harfi/demo",
-    "dev:docs": "turbo dev --filter=@harfi/docs",
-    "server": "turbo dev --filter=@harfi/server",
+    "dev": "turbo dev --filter=@scrivr/demo",
+    "dev:docs": "turbo dev --filter=@scrivr/docs",
+    "server": "turbo dev --filter=@scrivr/server",
     "build": "turbo build --filter='./packages/**'",
     "typecheck": "turbo typecheck",
     "test": "turbo test",

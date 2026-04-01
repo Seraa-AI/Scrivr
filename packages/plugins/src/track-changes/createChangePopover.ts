@@ -1,4 +1,4 @@
-import type { IEditor } from "@harfi/core";
+import type { IEditor } from "@scrivr/core";
 
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { CHANGE_OPERATION, CHANGE_STATUS } from "./types";

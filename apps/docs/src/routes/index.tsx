@@ -9,7 +9,7 @@ function HomePage() {
     <div className="flex flex-col min-h-screen bg-fd-background text-fd-foreground">
       {/* Nav */}
       <header className="flex items-center gap-6 px-8 py-4 border-b border-fd-border">
-        <span className="font-mono text-sm font-semibold tracking-tight">Harfi</span>
+        <span className="font-mono text-sm font-semibold tracking-tight">Scrivr</span>
         <nav className="flex items-center gap-5 ml-auto text-sm text-fd-muted-foreground">
           <Link to="/docs/$" className="hover:text-fd-foreground transition-colors">
             Docs
@@ -18,7 +18,7 @@ function HomePage() {
             Playground
           </Link>
           <a
-            href="https://github.com/Seraa-AI/Harfi"
+            href="https://github.com/Seraa-AI/Scrivr"
             target="_blank"
             rel="noreferrer"
             className="hover:text-fd-foreground transition-colors"
@@ -38,7 +38,7 @@ function HomePage() {
             A canvas-based<br />document editor
           </h1>
           <p className="text-lg text-fd-muted-foreground leading-relaxed max-w-lg">
-            Harfi renders documents onto HTML canvas — pixel-perfect pagination,
+            Scrivr renders documents onto HTML canvas — pixel-perfect pagination,
             real-time collaboration, and an AI writing assistant. Built for React.
           </p>
         </div>
@@ -46,7 +46,7 @@ function HomePage() {
         {/* Install snippet */}
         <div className="flex items-center gap-2 bg-fd-card border border-fd-border rounded-lg px-5 py-3 font-mono text-sm">
           <span className="text-fd-muted-foreground select-none">$</span>
-          <span>pnpm add @harfi/core @harfi/react</span>
+          <span>pnpm add @scrivr/core @scrivr/react</span>
         </div>
 
         {/* CTAs */}
@@ -79,7 +79,7 @@ function HomePage() {
       </main>
 
       <footer className="text-center text-xs text-fd-muted-foreground py-6 border-t border-fd-border">
-        Built with Harfi · MIT License
+        Built with Scrivr · MIT License
       </footer>
     </div>
   );

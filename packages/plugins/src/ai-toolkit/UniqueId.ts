@@ -1,6 +1,6 @@
 import { Plugin } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
-import { Extension } from "@harfi/core";
+import { Extension } from "@scrivr/core";
 
 // ── ID generator ──────────────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-# Contributing to Harfi
+# Contributing to Scrivr
 
 Thank you for your interest in contributing. This document covers how to report bugs, propose changes, and get your code merged.
 

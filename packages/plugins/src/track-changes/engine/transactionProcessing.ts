@@ -57,7 +57,7 @@ export function iterationIsValid(
   const isMassReplace = oldTr.getMeta("massSearchReplace");
   if (iterations > 20 && uiEvent != "cut" && !isMassReplace) {
     console.error(
-      "@harfi/plugins track-changes: Possible infinite loop in iterating tr.steps, tracking skipped!\n" +
+      "@scrivr/plugins track-changes: Possible infinite loop in iterating tr.steps, tracking skipped!\n" +
         "This is probably an error with the library, please report back to maintainers with a reproduction if possible",
       newTr,
     );
@@ -67,7 +67,7 @@ export function iterationIsValid(
     step.constructor.name === "ReplaceStep"
   ) {
     console.error(
-      "@harfi/plugins track-changes: Multiple prosemirror-transform packages imported, alias/dedupe them " +
+      "@scrivr/plugins track-changes: Multiple prosemirror-transform packages imported, alias/dedupe them " +
         "or instanceof checks fail as well as creating new steps",
     );
     return false;

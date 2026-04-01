@@ -1,4 +1,4 @@
-// React adapter for @harfi/core
+// React adapter for @scrivr/core
 
 export { useInscribeEditor } from "./useInscribeEditor";
 export { BubbleMenu } from "./BubbleMenu";
@@ -17,7 +17,7 @@ export { useInscribeState as useEditorState, shallowEqual, deepEqual } from "./u
 export type { UseEditorStateOptions, EditorStateContext } from "./useInscribeState";
 
 // Re-export core types consumers need when building with this adapter
-export type { Editor, SelectionSnapshot } from "@harfi/core";
-export { StarterKit, Pagination, defaultPageConfig, ViewManager, FontFamily, Link } from "@harfi/core";
-export type { PageConfig, DocumentLayout, Extension, ViewManagerOptions } from "@harfi/core";
-export { Collaboration, CollaborationCursor } from "@harfi/plugins";
+export type { Editor, SelectionSnapshot } from "@scrivr/core";
+export { StarterKit, Pagination, defaultPageConfig, ViewManager, FontFamily, Link } from "@scrivr/core";
+export type { PageConfig, DocumentLayout, Extension, ViewManagerOptions } from "@scrivr/core";
+export { Collaboration, CollaborationCursor } from "@scrivr/plugins";

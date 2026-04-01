@@ -1,17 +1,17 @@
 {
-  "name": "@harfi/plugins",
+  "name": "@scrivr/plugins",
   "version": "0.1.0",
-  "description": "ProseMirror plugins and collaboration extensions for Harfi",
+  "description": "ProseMirror plugins and collaboration extensions for Scrivr",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Seraa-AI/Harfi.git",
+    "url": "https://github.com/Seraa-AI/Scrivr.git",
     "directory": "packages/plugins"
   },
-  "homepage": "https://github.com/Seraa-AI/Harfi#readme",
+  "homepage": "https://github.com/Seraa-AI/Scrivr#readme",
   "bugs": {
-    "url": "https://github.com/Seraa-AI/Harfi/issues"
+    "url": "https://github.com/Seraa-AI/Scrivr/issues"
   },
   "keywords": [
     "canvas",
@@ -20,7 +20,7 @@
     "plugins",
     "collaboration",
     "yjs",
-    "harfi"
+    "scrivr"
   ],
   "type": "module",
   "main": "./dist/index.js",
@@ -47,7 +47,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@harfi/core": "workspace:*"
+    "@scrivr/core": "workspace:*"
   },
   "peerDependencies": {
     "@hocuspocus/provider": ">=3.0.0",

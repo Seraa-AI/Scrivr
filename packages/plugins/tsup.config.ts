@@ -7,7 +7,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   external: [
-    "@harfi/core",
+    "@scrivr/core",
     "@hocuspocus/provider",
     "prosemirror-model",
     "prosemirror-state",

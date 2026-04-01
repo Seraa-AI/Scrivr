@@ -1,11 +1,11 @@
 /**
  * PdfExport — extension that adds an "Export PDF" toolbar button and
- * `exportPdf` command to any Harfi editor instance.
+ * `exportPdf` command to any Scrivr editor instance.
  *
- * Lives in @harfi/export (not core) because it depends on pdf-lib.
+ * Lives in @scrivr/export (not core) because it depends on pdf-lib.
  *
  * Usage:
- *   import { PdfExport } from "@harfi/export";
+ *   import { PdfExport } from "@scrivr/export";
  *
  *   new Editor({
  *     extensions: [
@@ -14,8 +14,8 @@
  *     ],
  *   });
  */
-import { Extension } from "@harfi/core";
-import type { IEditor } from "@harfi/core";
+import { Extension } from "@scrivr/core";
+import type { IEditor } from "@scrivr/core";
 import { exportToPdf } from "./index";
 
 interface PdfExportOptions {

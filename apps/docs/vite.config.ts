@@ -28,10 +28,10 @@ export default defineConfig({
     tsconfigPaths: true,
     alias: {
       tslib: 'tslib/tslib.es6.js',
-      '@harfi/core': resolve(__dirname, '../../packages/core/src/index.ts'),
-      '@harfi/plugins': resolve(__dirname, '../../packages/plugins/src/index.ts'),
-      '@harfi/export': resolve(__dirname, '../../packages/export/src/index.ts'),
-      '@harfi/react': resolve(__dirname, '../../packages/react/src/index.ts'),
+      '@scrivr/core': resolve(__dirname, '../../packages/core/src/index.ts'),
+      '@scrivr/plugins': resolve(__dirname, '../../packages/plugins/src/index.ts'),
+      '@scrivr/export': resolve(__dirname, '../../packages/export/src/index.ts'),
+      '@scrivr/react': resolve(__dirname, '../../packages/react/src/index.ts'),
     },
   },
 });

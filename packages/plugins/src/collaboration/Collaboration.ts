@@ -16,8 +16,8 @@
  */
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { Extension } from "@harfi/core";
-import type { IEditor } from "@harfi/core";
+import { Extension } from "@scrivr/core";
+import type { IEditor } from "@scrivr/core";
 import { YBinding } from "./YBinding";
 import { collaborationRegistry } from "./collaborationState";
 

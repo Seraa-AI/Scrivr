@@ -1,4 +1,4 @@
-import type { IEditor } from "@harfi/core";
+import type { IEditor } from "@scrivr/core";
 import type { AiToolkitAPI } from "./AiToolkit";
 
 /**

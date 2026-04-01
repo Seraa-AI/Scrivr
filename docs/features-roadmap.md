@@ -1,6 +1,6 @@
-# Harfi Features Roadmap
+# Scrivr Features Roadmap
 
-Production-grade word processor feature plan for Harfi. Organised into three layers to prevent the common trap of spending weeks on performance while users still can't change line spacing.
+Production-grade word processor feature plan for Scrivr. Organised into three layers to prevent the common trap of spending weeks on performance while users still can't change line spacing.
 
 ---
 
@@ -344,7 +344,7 @@ Right-click on the canvas should show a context-sensitive menu.
 
 ## Layer 2 — Document Professional Features
 
-*What makes Harfi usable for legal and professional documents. These make the difference between a demo editor and a production tool.*
+*What makes Scrivr usable for legal and professional documents. These make the difference between a demo editor and a production tool.*
 
 ---
 
@@ -412,7 +412,7 @@ Repeating content drawn at the top/bottom of every page.
 
 **Status:** Not implemented
 
-**Why this matters for legal:** Legal documents use deeply nested numbering conventions that are impossible to manage manually — clauses are renumbered when sections are inserted, deleted, or reordered. Word processors handle this automatically; Harfi must too.
+**Why this matters for legal:** Legal documents use deeply nested numbering conventions that are impossible to manage manually — clauses are renumbered when sections are inserted, deleted, or reordered. Word processors handle this automatically; Scrivr must too.
 
 **Numbering formats required:**
 
@@ -471,7 +471,7 @@ Track Changes is one of the most critical features for legal document workflows.
 
 **What's done:**
 
-The `TrackChanges` extension in `@harfi/plugins` is far more complete than a typical "in progress" plugin:
+The `TrackChanges` extension in `@scrivr/plugins` is far more complete than a typical "in progress" plugin:
 
 - **Schema** — `tracked_insert` and `tracked_delete` marks with `excludes: ""` so multiple authors can stack their marks on the same text segment without collision
 - **8 tracked operations** — `insert`, `delete`, `set_node_attributes`, `wrap_with_node`, `node_split`, `reference`, `move`, `structure`
@@ -561,7 +561,7 @@ definedTermDef: { attrs: { term: string, id: string } }
 
 **Status:** Not implemented
 
-**The problem:** Legal documents are not uniformly editable. A contract template has boilerplate clauses that must stay locked (firm's standard terms, liability caps, governing law) alongside editable fields (party names, dates, deal-specific terms). Today, Harfi treats the entire document as a single editable surface — there is no way to mark a paragraph or range as read-only while keeping the rest editable.
+**The problem:** Legal documents are not uniformly editable. A contract template has boilerplate clauses that must stay locked (firm's standard terms, liability caps, governing law) alongside editable fields (party names, dates, deal-specific terms). Today, Scrivr treats the entire document as a single editable surface — there is no way to mark a paragraph or range as read-only while keeping the rest editable.
 
 **Model:**
 
@@ -651,7 +651,7 @@ Auto-generated from heading nodes.
 
 #### PDF — Searchable Text Layer
 
-**Status:** Shell exists (`@harfi/export`)
+**Status:** Shell exists (`@scrivr/export`)
 
 Do not use the canvas raster path (`toDataURL → embed as image`) — that produces PDFs where text is baked into pixels: not selectable, not searchable, not court-submittable. Use pdf-lib's text API instead.
 

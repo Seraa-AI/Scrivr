@@ -1,5 +1,5 @@
 /**
- * Shared test utilities for @harfi/core tests.
+ * Shared test utilities for @scrivr/core tests.
  *
  * Centralises:
  *   - Canvas mock setup (consistent char width / ascent / descent across all layout tests)

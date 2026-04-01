@@ -91,16 +91,16 @@ export class LayoutCoordinator {
   constructor(opts: LayoutCoordinatorOptions) {
     this.opts = opts;
 
-    performance.mark("harfi:layout-initial-start");
+    performance.mark("scrivr:layout-initial-start");
     this._layout = this._runLayout({
       previousVersion: 0,
       maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
     });
-    performance.mark("harfi:layout-initial-end");
+    performance.mark("scrivr:layout-initial-end");
     performance.measure(
-      `harfi:layout-initial (${opts.getDoc().childCount} blocks, first ${LayoutCoordinator.INITIAL_BLOCKS} sync)`,
-      "harfi:layout-initial-start",
-      "harfi:layout-initial-end",
+      `scrivr:layout-initial (${opts.getDoc().childCount} blocks, first ${LayoutCoordinator.INITIAL_BLOCKS} sync)`,
+      "scrivr:layout-initial-start",
+      "scrivr:layout-initial-end",
     );
 
     this._layoutIsPartial = this._layout.isPartial ?? false;
@@ -456,18 +456,18 @@ export class LayoutCoordinator {
 
     this.charMap.clear();
     this._populatedPages.clear();
-    performance.mark("harfi:layout-chunk-start");
+    performance.mark("scrivr:layout-chunk-start");
     // Pass resumption so layout continues from the next unprocessed block
     // rather than restarting from block 0 — O(N) total vs O(N²).
     this._layout = this._runLayout({
       resumption: this._layoutResumption,
       maxBlocks: chunkSize,
     });
-    performance.mark("harfi:layout-chunk-end");
+    performance.mark("scrivr:layout-chunk-end");
     performance.measure(
-      `harfi:layout-chunk (next ${chunkSize} blocks, total ${this._partialLayoutBlocks} of ${this.opts.getDoc().childCount})`,
-      "harfi:layout-chunk-start",
-      "harfi:layout-chunk-end",
+      `scrivr:layout-chunk (next ${chunkSize} blocks, total ${this._partialLayoutBlocks} of ${this.opts.getDoc().childCount})`,
+      "scrivr:layout-chunk-start",
+      "scrivr:layout-chunk-end",
     );
     this._layoutIsPartial = this._layout.isPartial ?? false;
     this._layoutResumption = this._layout.resumption ?? null;

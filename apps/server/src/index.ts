@@ -65,5 +65,5 @@ const server = Server.configure({
 });
 
 server.listen();
-console.log("Harfi collaboration server listening on ws://localhost:1234");
+console.log("Scrivr collaboration server listening on ws://localhost:1234");
 console.log(`Documents persisted to: ${DATA_DIR}`);

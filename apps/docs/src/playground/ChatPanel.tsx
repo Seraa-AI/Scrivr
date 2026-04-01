@@ -2,8 +2,8 @@ import { useRef, useEffect, useMemo, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage, DataUIPart } from "ai";
-import type { Editor } from "@harfi/core";
-import { getAiToolkit, applyDiffAsSuggestion, applyMultiBlockDiff } from "@harfi/plugins";
+import type { Editor } from "@scrivr/core";
+import { getAiToolkit, applyDiffAsSuggestion, applyMultiBlockDiff } from "@scrivr/plugins";
 import type { ToolOutputData } from "../routes/api/ai";
 
 // ── Typed data layer ─────────────────────────────────────────────────────────

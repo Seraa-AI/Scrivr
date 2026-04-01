@@ -16,7 +16,7 @@ export { PdfExport } from "./PdfExport";
  * everything else → Helvetica.
  */
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from "pdf-lib";
-import type { IEditor, DocumentLayout, LayoutBlock, LayoutLine } from "@harfi/core";
+import type { IEditor, DocumentLayout, LayoutBlock, LayoutLine } from "@scrivr/core";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

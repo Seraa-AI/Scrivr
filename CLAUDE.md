@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**Harfi** — a canvas-based document editor framework. Packages: `@harfi/core`, `@harfi/react`, `@harfi/plugins`, `@harfi/export`. Apps: `demo`, `docs`, `server`.
+**Scrivr** — a canvas-based document editor framework. Packages: `@scrivr/core`, `@scrivr/react`, `@scrivr/plugins`, `@scrivr/export`. Apps: `demo`, `docs`, `server`.
 
 ## Commands
 

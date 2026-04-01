@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
-  external: ["react", "react-dom", "@harfi/core", "@harfi/plugins"],
+  external: ["react", "react-dom", "@scrivr/core", "@scrivr/plugins"],
 });

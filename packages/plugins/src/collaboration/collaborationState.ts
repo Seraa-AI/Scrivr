@@ -7,7 +7,7 @@
  */
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import type * as Y from "yjs";
-import type { IEditor } from "@harfi/core";
+import type { IEditor } from "@scrivr/core";
 
 export interface CollabState {
   ydoc: Y.Doc;

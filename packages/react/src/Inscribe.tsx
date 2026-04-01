@@ -1,6 +1,6 @@
 import { useRef, useEffect } from "react";
-import type { Editor } from "@harfi/core";
-import { ViewManager } from "@harfi/core";
+import type { Editor } from "@scrivr/core";
+import { ViewManager } from "@scrivr/core";
 
 const DEFAULT_GAP = 24;
 
@@ -25,7 +25,7 @@ export interface InscribeProps {
  * Inscribe — mounts the Inscribe rendering engine onto a container div.
  *
  * All page DOM management, canvas painting, mouse handling, and virtual
- * scrolling are owned by the ViewManager in @harfi/core. This component
+ * scrolling are owned by the ViewManager in @scrivr/core. This component
  * is a thin React lifecycle wrapper: mount on effect, unmount on cleanup.
  *
  * @example

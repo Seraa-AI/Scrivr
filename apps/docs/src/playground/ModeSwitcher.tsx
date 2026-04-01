@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { Editor } from "@harfi/core";
-import { TrackChangesStatus } from "@harfi/plugins";
+import type { Editor } from "@scrivr/core";
+import { TrackChangesStatus } from "@scrivr/plugins";
 
 export type EditorMode = "editing" | "suggesting" | "viewing";
 
