@@ -183,10 +183,13 @@ export class TextMeasurer {
    * Measures a full text run and returns the x position of every character.
    *
    * Uses cumulative measurement to capture kerning:
-   *   charPositions[i] = measureWidth(text.slice(0, i), font)
+   *   charPositions[i] = width of text[0..i-1]
    *
-   * This is more expensive than measureWidth() — use it only when populating
-   * the CharacterMap (i.e. during layout, not during line-break decisions).
+   * Builds the prefix string incrementally (current += text[i]) instead of
+   * text.slice(0, i) to avoid allocating N temporary strings per span.
+   *
+   * This is more expensive than measureWidth() — call it only when populating
+   * the CharacterMap (render pass), not during line-break decisions.
    */
   measureRun(text: string, font: string): RunMetrics {
     if (text.length === 0) {
@@ -200,10 +203,12 @@ export class TextMeasurer {
     this.ctx.font = font;
     const charPositions: number[] = new Array(text.length).fill(0) as number[];
 
-    // charPositions[0] is always 0 — first character starts at the run origin
+    // charPositions[0] is always 0 — first character starts at the run origin.
+    // Incrementally build the prefix string to avoid N temporary slice allocations.
+    let prefix = text[0]!;
     for (let i = 1; i < text.length; i++) {
-      // Measure the string up to this character — captures kerning with prior chars
-      charPositions[i] = this.ctx.measureText(text.slice(0, i)).width;
+      charPositions[i] = this.ctx.measureText(prefix).width;
+      prefix += text[i];
     }
 
     const totalWidth = this.ctx.measureText(text).width;
