@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useEffect } from 'react';
-import { App } from '@/playground/App';
+import { Playground } from '@/playground/Playground';
 
 export const Route = createFileRoute('/playground')({
   component: PlaygroundPage,
@@ -12,5 +12,5 @@ function PlaygroundPage() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
-  return <App />;
+  return <Playground />;
 }

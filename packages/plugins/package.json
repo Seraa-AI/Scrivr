@@ -1,7 +1,27 @@
 {
   "name": "@inscribe/plugins",
   "version": "0.0.1",
-  "private": true,
+  "description": "ProseMirror plugins and collaboration extensions for Inscribe",
+  "license": "Apache-2.0",
+  "author": "Seraa AI <hello@seraa.ai>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Seraa-AI/Inscribe.git",
+    "directory": "packages/plugins"
+  },
+  "homepage": "https://github.com/Seraa-AI/Inscribe#readme",
+  "bugs": {
+    "url": "https://github.com/Seraa-AI/Inscribe/issues"
+  },
+  "keywords": [
+    "canvas",
+    "editor",
+    "prosemirror",
+    "plugins",
+    "collaboration",
+    "yjs",
+    "inscribe"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,6 +30,13 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "dev": "tsup --watch",

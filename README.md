@@ -18,9 +18,9 @@ Inscribe is an open-source, canvas-rendered document editor framework. Unlike tr
 | Package | Description |
 |---------|-------------|
 | [`@inscribe/core`](./packages/core) | Headless engine — `Editor`, layout engine, canvas `ViewManager`, and all built-in extensions |
-| [`@inscribe/react`](./packages/react) | React bindings — `useInscribeEditor`, `<Inscribe />`, and menu components |
+| [`@inscribe/react`](./packages/react) | React bindings — `useCanvasEditor`, `<Inscribe />`, and menu components |
 | [`@inscribe/plugins`](./packages/plugins) | Optional extensions — real-time collaboration (Yjs), AI Toolkit, and Track Changes |
-| [`@inscribe/export`](./packages/export) | Export utilities — paginated PDF and Markdown |
+| [`@inscribe/export`](./packages/export) | Export utilities — paginated PDF (`exportToPdf`) and Markdown (`exportToMarkdown`) |
 
 ## Quick Start
 
@@ -29,10 +29,10 @@ pnpm add @inscribe/core @inscribe/react
 ```
 
 ```tsx
-import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+import { useCanvasEditor, Inscribe, StarterKit } from '@inscribe/react';
 
 export function MyEditor() {
-  const editor = useInscribeEditor({
+  const editor = useCanvasEditor({
     extensions: [StarterKit],
   });
 
@@ -92,4 +92,4 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the contribution guide, branch na
 
 ## License
 
-MIT
+Apache-2.0 — see [`LICENSE`](./LICENSE) for details.

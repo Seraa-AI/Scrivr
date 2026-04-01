@@ -1,7 +1,27 @@
 {
   "name": "@inscribe/react",
   "version": "0.0.1",
-  "private": true,
+  "description": "React bindings for the Inscribe canvas document editor",
+  "license": "Apache-2.0",
+  "author": "Seraa AI <hello@seraa.ai>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Seraa-AI/Inscribe.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/Seraa-AI/Inscribe#readme",
+  "bugs": {
+    "url": "https://github.com/Seraa-AI/Inscribe/issues"
+  },
+  "keywords": [
+    "canvas",
+    "editor",
+    "react",
+    "prosemirror",
+    "document",
+    "rich-text",
+    "inscribe"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,6 +31,13 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
@@ -18,15 +45,20 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@floating-ui/dom": "^1.7.6",
-    "@inscribe/core": "workspace:*",
-    "@inscribe/plugins": "workspace:*"
+    "@floating-ui/dom": "^1.7.6"
   },
   "peerDependencies": {
+    "@inscribe/core": "workspace:*",
+    "@inscribe/plugins": "workspace:*",
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
   },
+  "peerDependenciesMeta": {
+    "@inscribe/plugins": { "optional": true }
+  },
   "devDependencies": {
+    "@inscribe/core": "workspace:*",
+    "@inscribe/plugins": "workspace:*",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
     "tsup": "^8.0.0",

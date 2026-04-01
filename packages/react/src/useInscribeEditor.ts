@@ -37,7 +37,7 @@ export interface UseCanvasEditorOptions {
  * const editor = useCanvasEditor({ extensions: [StarterKit] })
  * return <Canvas editor={editor} />
  */
-export function useCanvasEditor(
+export function useInscribeEditor(
   options: UseCanvasEditorOptions,
   deps: unknown[] = []
 ): Editor | null {

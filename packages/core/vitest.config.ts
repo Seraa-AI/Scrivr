@@ -6,6 +6,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "src/**/*.spec.ts"],
     setupFiles: ["./vitest.setup.ts"],
     globals: true,
+    reporters: process.env.CI ? ["github-actions", "verbose"] : ["default"],
     coverage: {
       provider: "v8",
       include: ["src/**"],

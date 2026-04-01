@@ -22,6 +22,7 @@ pnpm add @inscribe/core @inscribe/react
 ```tsx title="DocumentEditor.tsx"
 'use client';
 
+import { useState } from 'react';
 import {
   useInscribeEditor,
   useInscribeState,
@@ -30,30 +31,30 @@ import {
   SlashMenu,
   StarterKit,
 } from '@inscribe/react';
+import { Extension } from '@inscribe/core';
 
-const STORAGE_KEY = 'inscribe-document';
-
-function loadSavedDoc() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+interface DocumentEditorProps {
+  /** ProseMirror JSON to open. Pass null for an empty document. */
+  initialDoc: Record<string, unknown> | null;
+  onUpdate?: (json: Record<string, unknown>) => void;
 }
 
-export function DocumentEditor() {
+export function DocumentEditor({ initialDoc, onUpdate }: DocumentEditorProps) {
+  // useState initializer captures initialDoc once at mount time.
+  const [extensions] = useState(() => [
+    StarterKit,
+    Extension.create({
+      name: 'initialContent',
+      addInitialDoc() {
+        return initialDoc ? this.schema.nodeFromJSON(initialDoc) : null;
+      },
+    }),
+  ]);
+
   const editor = useInscribeEditor({
-    extensions: [StarterKit],
-
-    onCreate: ({ editor }) => {
-      const saved = loadSavedDoc();
-      if (saved) editor.commands.setContent(saved);
-    },
-
+    extensions,
     onUpdate: ({ editor }) => {
-      const json = editor.getState().doc.toJSON();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(json));
+      onUpdate?.(editor.getState().doc.toJSON());
     },
   });
 
@@ -117,8 +118,10 @@ function FormatButtons({ editor }: { editor: ReturnType<typeof useInscribeEditor
 
 ## Key points
 
-- **`onCreate`** loads saved content from `localStorage` once after initialization.
-- **`onUpdate`** persists on every change. In production, debounce this or send to a backend API instead.
+- **Props-based** — `DocumentEditor` accepts `initialDoc` as a prop. The parent component decides how to fetch (API, localStorage, React Query, etc.) and passes the result down.
+- **`useState` initializer** captures `initialDoc` once at mount time so it is available to `addInitialDoc()` on construction — even if the parent re-renders before the effect fires.
+- **`addInitialDoc()`** is the extension hook that seeds the editor with an initial ProseMirror document. Returning `null` starts with an empty document instead.
+- **`onUpdate`** surfaces changes back to the parent. Debounce or batch this in production before writing to your backend.
 - **`useInscribeState`** makes the toolbar reactive — it re-renders only the toolbar, not the canvas, on each state change.
 - **`BubbleMenu`** and **`SlashMenu`** are standalone React components from `@inscribe/react` — no manual wiring needed.
 

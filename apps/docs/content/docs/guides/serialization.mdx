@@ -54,46 +54,69 @@ const markdown = editor.getMarkdown();
 
 ## Loading Content
 
-### At construction time
+Initial content is provided via `addInitialDoc()` in an extension. The hook runs synchronously at
+editor construction and returns a ProseMirror `Node` (or `null` to start empty).
 
-Pass the document JSON as `doc` in `EditorOptions`. The editor initialises its state from
-it instead of starting with an empty document:
+The recommended pattern is to accept the document as a **prop** — your component stays clean and
+your application layer decides how to fetch it (REST, GraphQL, localStorage, etc.).
 
-```ts
-import { Editor, StarterKit } from '@inscribe/core';
+```tsx
+import { useState } from 'react';
+import { useInscribeEditor, Inscribe, StarterKit } from '@inscribe/react';
+import { Extension } from '@inscribe/core';
 
-const saved = await db.getDocument(id);
+interface EditorProps {
+  /** ProseMirror JSON document to open. Pass null to start empty. */
+  initialDoc: Record<string, unknown> | null;
+  onUpdate?: (json: Record<string, unknown>) => void;
+}
 
-const editor = new Editor({
-  extensions: [StarterKit],
-  doc: saved.content, // ProseMirror JSON
-});
-```
+export function MyEditor({ initialDoc, onUpdate }: EditorProps) {
+  // useState initializer runs once — captures initialDoc at mount time.
+  const [extensions] = useState(() => [
+    StarterKit,
+    Extension.create({
+      name: 'initialContent',
+      addInitialDoc() {
+        return initialDoc ? this.schema.nodeFromJSON(initialDoc) : null;
+      },
+    }),
+  ]);
 
-### After mount with `setContent`
+  const editor = useInscribeEditor({
+    extensions,
+    onUpdate: ({ editor }) => {
+      onUpdate?.(editor.getState().doc.toJSON());
+    },
+  });
 
-Use the `setContent` command to replace the document at any time:
-
-```ts
-const saved = JSON.parse(localStorage.getItem('doc') ?? 'null');
-if (saved) {
-  editor.commands.setContent(saved);
+  return <Inscribe editor={editor} style={{ height: '100vh' }} />;
 }
 ```
 
-A good pattern is to load content in the `onCreate` callback:
+Your application layer handles the fetch and passes the result down:
 
-```ts
-const editor = useInscribeEditor({
-  extensions: [StarterKit],
-  onCreate: ({ editor }) => {
-    const saved = localStorage.getItem('doc');
-    if (saved) {
-      editor.commands.setContent(JSON.parse(saved));
-    }
-  },
-});
+```tsx
+// Next.js server component
+const doc = await db.documents.findOne(id);
+return <MyEditor initialDoc={doc.content} onUpdate={(json) => save(id, json)} />;
+
+// React Query
+const { data } = useQuery({ queryKey: ['doc', id], queryFn: () => fetchDoc(id) });
+if (!data) return <Skeleton />;
+return <MyEditor initialDoc={data.content} />;
+
+// localStorage
+const saved = JSON.parse(localStorage.getItem('doc') ?? 'null');
+return <MyEditor initialDoc={saved} onUpdate={(json) => localStorage.setItem('doc', JSON.stringify(json))} />;
 ```
+
+<Callout type="info">
+  The `useState` initializer closes over `initialDoc` **once** at mount time, so the editor
+  constructs with the correct document even if the parent re-renders before the editor mounts.
+  Changing `initialDoc` after mount has no effect — create a new editor instance (via the `deps`
+  array) if you need to replace the document entirely.
+</Callout>
 
 ---
 
@@ -123,41 +146,39 @@ const editor = new Editor({
 
 ---
 
-## Markdown Import
-
-To programmatically load Markdown, use the bundled parser:
-
-```ts
-import { markdownToDoc } from '@inscribe/core';
-
-const doc = markdownToDoc(markdownString, editor.schema);
-editor.commands.setContent(doc.toJSON());
-```
-
----
-
 ## Clearing the Document
 
+Replace the content with a minimal valid document — a single empty paragraph:
+
 ```ts
-// Minimal valid document — a single empty paragraph
-editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph' }] });
+import { Extension } from '@inscribe/core';
+
+const EmptyDoc = Extension.create({
+  name: 'emptyDoc',
+  addInitialDoc() {
+    return this.schema.nodeFromJSON({
+      type: 'doc',
+      content: [{ type: 'paragraph' }],
+    });
+  },
+});
 ```
+
+Or create a fresh editor instance with no initial content extension — the editor defaults to
+an empty paragraph automatically.
 
 ---
 
 ## Server-side Serialization
 
-Use `ServerEditor` from `@inscribe/server` to parse and transform documents in Node.js
+Use `ServerEditor` from `@inscribe/core` to parse and transform documents in Node.js
 without mounting a canvas:
 
 ```ts
-import { ServerEditor } from '@inscribe/server';
-import { StarterKit } from '@inscribe/core';
+import { ServerEditor, StarterKit } from '@inscribe/core';
 
-const server = new ServerEditor({
-  extensions: [StarterKit],
-  doc: saved.content,
-});
+const server = new ServerEditor({ extensions: [StarterKit] });
+server.setContent(saved.content); // load from ProseMirror JSON
 
 // Read
 const markdown = server.getMarkdown();
@@ -165,15 +186,15 @@ const json = server.getState().doc.toJSON();
 
 // Apply a transaction programmatically
 const state = server.getState();
-server._applyTransaction(state.tr.insertText('Prepended text.\n\n', 0));
+server.applyTransaction(state.tr.insertText('Prepended text.\n\n', 0));
 
 // Save
 await db.saveDocument(id, server.getState().doc.toJSON());
 ```
 
 <Callout type="info">
-  `ServerEditor` accepts the same `EditorOptions` as the browser `Editor` but never renders
-  a canvas. It is safe to use in Next.js Route Handlers, Hono endpoints, or any Node.js
+  `ServerEditor` accepts the same `extensions` and `pageConfig` as the browser `Editor` but never
+  renders a canvas. It is safe to use in Next.js Route Handlers, Hono endpoints, or any Node.js
   environment.
 </Callout>
 

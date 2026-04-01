@@ -1,7 +1,26 @@
 {
   "name": "@inscribe/export",
   "version": "0.0.1",
-  "private": true,
+  "description": "PDF and Markdown export for Inscribe documents",
+  "license": "Apache-2.0",
+  "author": "Seraa AI <hello@seraa.ai>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Seraa-AI/Inscribe.git",
+    "directory": "packages/export"
+  },
+  "homepage": "https://github.com/Seraa-AI/Inscribe#readme",
+  "bugs": {
+    "url": "https://github.com/Seraa-AI/Inscribe/issues"
+  },
+  "keywords": [
+    "canvas",
+    "editor",
+    "pdf",
+    "export",
+    "markdown",
+    "inscribe"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,6 +29,13 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "dev": "tsup --watch",

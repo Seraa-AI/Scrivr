@@ -4,7 +4,7 @@ import { ViewManager } from "@inscribe/core";
 
 const DEFAULT_GAP = 24;
 
-export interface CanvasProps {
+export interface InscribeProps {
   /** Editor instance from useCanvasEditor. Renders nothing when null. */
   editor: Editor | null;
   /** Gap in pixels between pages. Default: 24. */
@@ -22,7 +22,7 @@ export interface CanvasProps {
 }
 
 /**
- * Canvas — mounts the Inscribe rendering engine onto a container div.
+ * Inscribe — mounts the Inscribe rendering engine onto a container div.
  *
  * All page DOM management, canvas painting, mouse handling, and virtual
  * scrolling are owned by the ViewManager in @inscribe/core. This component
@@ -30,16 +30,16 @@ export interface CanvasProps {
  *
  * @example
  * const editor = useCanvasEditor({ extensions: [StarterKit] })
- * return <Canvas editor={editor} style={{ padding: 40 }} />
+ * return <Inscribe editor={editor} style={{ padding: 40 }} />
  */
-export function Canvas({
+export function Inscribe({
   editor,
   gap = DEFAULT_GAP,
   overscan = 500,
   pageStyle = {},
   className,
   style,
-}: CanvasProps) {
+}: InscribeProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
