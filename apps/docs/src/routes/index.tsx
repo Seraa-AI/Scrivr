@@ -39,14 +39,15 @@ function HomePage() {
           </h1>
           <p className="text-lg text-fd-muted-foreground leading-relaxed max-w-lg">
             Scrivr renders documents onto HTML canvas — pixel-perfect pagination,
-            real-time collaboration, and an AI writing assistant. Built for React.
+            real-time collaboration, and an AI writing assistant. Headless core,
+            bring your own framework.
           </p>
         </div>
 
         {/* Install snippet */}
         <div className="flex items-center gap-2 bg-fd-card border border-fd-border rounded-lg px-5 py-3 font-mono text-sm">
           <span className="text-fd-muted-foreground select-none">$</span>
-          <span>pnpm add @scrivr/core @scrivr/react</span>
+          <span>pnpm add @scrivr/core</span>
         </div>
 
         {/* CTAs */}
@@ -66,8 +67,33 @@ function HomePage() {
           </Link>
         </div>
 
+        {/* Framework adapters */}
+        <div className="flex flex-col items-center gap-3 mt-4 w-full max-w-2xl">
+          <span className="text-xs text-fd-muted-foreground uppercase tracking-widest font-mono">Framework adapters</span>
+          <div className="flex flex-wrap justify-center gap-3 w-full">
+            {ADAPTERS.map((a) => (
+              <div
+                key={a.name}
+                className={`flex items-center gap-2.5 border rounded-lg px-4 py-2.5 text-sm font-medium ${
+                  a.available
+                    ? 'bg-fd-card border-fd-border text-fd-foreground'
+                    : 'bg-fd-card/50 border-fd-border/50 text-fd-muted-foreground'
+                }`}
+              >
+                <span>{a.icon}</span>
+                <span>{a.name}</span>
+                {!a.available && (
+                  <span className="text-xs font-mono bg-fd-accent/30 text-fd-muted-foreground rounded px-1.5 py-0.5">
+                    soon
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Feature grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-8 max-w-2xl w-full text-left">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4 max-w-2xl w-full text-left">
           {FEATURES.map((f) => (
             <div key={f.title} className="bg-fd-card border border-fd-border rounded-xl p-5 flex flex-col gap-2">
               <span className="text-xl">{f.icon}</span>
@@ -79,17 +105,24 @@ function HomePage() {
       </main>
 
       <footer className="text-center text-xs text-fd-muted-foreground py-6 border-t border-fd-border">
-        Built with Scrivr · MIT License
+        Built with Scrivr · Apache-2.0 License
       </footer>
     </div>
   );
 }
 
+const ADAPTERS = [
+  { name: 'React', icon: '⚛️', available: true },
+  { name: 'Vue', icon: '💚', available: false },
+  { name: 'Svelte', icon: '🧡', available: false },
+  { name: 'Vanilla JS', icon: '🟨', available: false },
+];
+
 const FEATURES = [
   {
     icon: '📄',
-    title: 'Canvas rendering',
-    description: 'Pages render to HTML canvas — precise layout, custom fonts, and pixel-perfect pagination.',
+    title: 'Headless core',
+    description: 'Framework-agnostic engine. Drop in the React adapter or wire up any UI layer yourself.',
   },
   {
     icon: '🤝',
