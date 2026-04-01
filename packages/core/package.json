@@ -1,6 +1,6 @@
 {
   "name": "@inscribe/core",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "High-performance canvas-based document editor engine",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",

@@ -1,6 +1,6 @@
 {
   "name": "@inscribe/export",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "PDF and Markdown export for Inscribe documents",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",

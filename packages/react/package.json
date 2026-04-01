@@ -1,6 +1,6 @@
 {
   "name": "@inscribe/react",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "React bindings for the Inscribe canvas document editor",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
