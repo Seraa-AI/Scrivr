@@ -1,8 +1,15 @@
 import type { Node } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
 import { CharacterMap } from "./CharacterMap";
-import { layoutDocument } from "./PageLayout";
+import {
+  buildBlockFlow,
+  paginateFlow,
+  applyFloatLayout,
+  collectLayoutItems,
+  FlowConfig,
+} from "./PageLayout";
 import type { PageConfig, DocumentLayout, LayoutPage, MeasureCacheEntry, LayoutResumption } from "./PageLayout";
+import { applyPageFont, defaultFontConfig } from "./FontConfig";
 import type { FontConfig } from "./FontConfig";
 import type { TextMeasurer } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
@@ -86,15 +93,7 @@ export class LayoutCoordinator {
     this.opts = opts;
 
     performance.mark("inscribe:layout-initial-start");
-    this._layout = layoutDocument(opts.getDoc(), {
-      pageConfig: opts.pageConfig,
-      fontConfig: opts.fontConfig,
-      measurer: opts.measurer,
-      fontModifiers: opts.fontModifiers,
-      previousVersion: 0,
-      measureCache: this._measureCache,
-      maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
-    });
+    this._layout = this._runLayout({ previousVersion: 0, maxBlocks: LayoutCoordinator.INITIAL_BLOCKS });
     performance.mark("inscribe:layout-initial-end");
     performance.measure(
       `inscribe:layout-initial (${opts.getDoc().childCount} blocks, first ${LayoutCoordinator.INITIAL_BLOCKS} sync)`,
@@ -153,15 +152,7 @@ export class LayoutCoordinator {
     this.charMap.clear();
     this._populatedPages.clear();
     const prev = this._layout;
-    this._layout = layoutDocument(this.opts.getDoc(), {
-      pageConfig: this.opts.pageConfig,
-      fontConfig: this.opts.fontConfig,
-      measurer: this.opts.measurer,
-      fontModifiers: this.opts.fontModifiers,
-      previousVersion: prev.version,
-      measureCache: this._measureCache,
-      previousLayout: prev,
-    });
+    this._layout = this._runLayout({ previousVersion: prev.version, previousLayout: prev });
     this._indexLayout();
     this._cursorPage = this._cursorPageFromLayout();
     this.ensurePagePopulated(this._cursorPage);
@@ -238,15 +229,7 @@ export class LayoutCoordinator {
       this._dirty = false;
       this.charMap.clear();
       this._populatedPages.clear();
-      this._layout = layoutDocument(this.opts.getDoc(), {
-        pageConfig: this.opts.pageConfig,
-        fontConfig: this.opts.fontConfig,
-        measurer: this.opts.measurer,
-        fontModifiers: this.opts.fontModifiers,
-        previousVersion: this._layout.version,
-        measureCache: this._measureCache,
-        maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
-      });
+      this._layout = this._runLayout({ previousVersion: this._layout.version, maxBlocks: LayoutCoordinator.INITIAL_BLOCKS });
       this._layoutIsPartial = this._layout.isPartial ?? false;
       this._layoutResumption = this._layout.resumption ?? null;
       this._indexLayout();
@@ -363,6 +346,108 @@ export class LayoutCoordinator {
     return this._layout.pages.at(-1)?.pageNumber ?? 1;
   }
 
+  /**
+   * Pipeline driver — calls buildBlockFlow → paginateFlow → applyFloatLayout
+   * directly, handling streaming resumption and fragmentCount stamping.
+   *
+   * All four layout call-sites (constructor, ensureLayout, setReady,
+   * _completeIdleLayout) funnel through here so the orchestration logic
+   * lives in exactly one place.
+   */
+  private _runLayout(opts: {
+    previousVersion?: number;
+    maxBlocks?: number;
+    previousLayout?: DocumentLayout;
+    resumption?: LayoutResumption | null;
+  }): DocumentLayout {
+    const { pageConfig, measurer, fontModifiers } = this.opts;
+
+    const baseConfig = this.opts.fontConfig ?? defaultFontConfig;
+    const fontConfig = pageConfig.fontFamily
+      ? applyPageFont(baseConfig, pageConfig.fontFamily)
+      : baseConfig;
+
+    const { pageWidth, pageHeight, margins } = pageConfig;
+    const contentWidth  = pageWidth  - margins.left - margins.right;
+    const contentHeight = pageHeight - margins.top  - margins.bottom;
+
+    // ── Resumption: restore cursor from a previous partial chunk ─────────────
+    const r = opts.resumption ?? null;
+    const items       = r ? r.items       : collectLayoutItems(this.opts.getDoc(), fontConfig);
+    const startIndex  = r ? r.nextItemIndex : 0;
+    const pages: LayoutPage[] = r ? r.completedPages : [];
+    let   currentPage: LayoutPage = r ? r.currentPage : { pageNumber: 1, blocks: [] };
+    let   y             = r ? r.currentY      : margins.top;
+    let   prevSpaceAfter = r ? r.prevSpaceAfter : 0;
+    const chunkVersion  = r ? r.version : ((opts.previousVersion ?? 0) + 1);
+
+    // ── Stage 1: measure ─────────────────────────────────────────────────────
+    const flowConfig: FlowConfig = { margins, contentWidth };
+    const flowResult = buildBlockFlow(
+      items, startIndex, flowConfig, fontConfig,
+      measurer, fontModifiers, this._measureCache, opts.maxBlocks,
+    );
+
+    // ── Stage 2: paginate ─────────────────────────────────────────────────────
+    const pr = paginateFlow(
+      flowResult.flows, margins, contentHeight,
+      opts.previousLayout, this._measureCache,
+      pages, currentPage, y, prevSpaceAfter,
+    );
+
+    // ── Streaming layout cutoff ───────────────────────────────────────────────
+    if (flowResult.reachedCutoff && !pr.earlyTerminated) {
+      const resumption: LayoutResumption = {
+        items,
+        nextItemIndex:   flowResult.cutoffIndex,
+        completedPages:  pr.pages,
+        currentPage:     { ...pr.currentPage, blocks: [...pr.currentPage.blocks] },
+        currentY:        pr.y,
+        prevSpaceAfter:  pr.prevSpaceAfter,
+        version:         chunkVersion,
+        prevPageCount:   pr.pages.length,
+      };
+      const partialPass1: DocumentLayout = {
+        pages: [...pr.pages, pr.currentPage],
+        pageConfig,
+        version:   chunkVersion,
+        isPartial: true,
+        resumption,
+      };
+      // ── Stage 3: float layout (partial chunk) ────────────────────────────
+      return applyFloatLayout(partialPass1, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
+    }
+
+    const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
+
+    // Stamp fragmentCount on split-block parts produced in this run only.
+    // Early-terminated layouts copied from previousLayout already have correct values.
+    if (!pr.earlyTerminated) {
+      const fragmentCounts = new Map<number, number>();
+      for (const page of allPages) {
+        for (const block of page.blocks) {
+          if (block.sourceNodePos !== undefined) {
+            fragmentCounts.set(block.sourceNodePos, (fragmentCounts.get(block.sourceNodePos) ?? 0) + 1);
+          }
+        }
+      }
+      if (fragmentCounts.size > 0) {
+        for (const page of allPages) {
+          for (const block of page.blocks) {
+            if (block.sourceNodePos !== undefined) {
+              const count = fragmentCounts.get(block.sourceNodePos);
+              if (count !== undefined) block.fragmentCount = count;
+            }
+          }
+        }
+      }
+    }
+
+    // ── Stage 3: float layout ─────────────────────────────────────────────────
+    const pass1Result: DocumentLayout = { pages: allPages, pageConfig, version: chunkVersion };
+    return applyFloatLayout(pass1Result, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
+  }
+
   private _scheduleIdleLayout(): void {
     const run = (deadline?: IdleDeadline) => this._completeIdleLayout(deadline);
     if (typeof requestIdleCallback !== "undefined") {
@@ -401,17 +486,9 @@ export class LayoutCoordinator {
     this.charMap.clear();
     this._populatedPages.clear();
     performance.mark("inscribe:layout-chunk-start");
-    this._layout = layoutDocument(this.opts.getDoc(), {
-      pageConfig: this.opts.pageConfig,
-      fontConfig: this.opts.fontConfig,
-      measurer: this.opts.measurer,
-      fontModifiers: this.opts.fontModifiers,
-      measureCache: this._measureCache,
-      // Pass resumption so layout continues from the next unprocessed block
-      // rather than restarting from block 0 — O(N) total vs O(N²).
-      ...(this._layoutResumption ? { resumption: this._layoutResumption } : {}),
-      maxBlocks: chunkSize,
-    });
+    // Pass resumption so layout continues from the next unprocessed block
+    // rather than restarting from block 0 — O(N) total vs O(N²).
+    this._layout = this._runLayout({ resumption: this._layoutResumption, maxBlocks: chunkSize });
     performance.mark("inscribe:layout-chunk-end");
     performance.measure(
       `inscribe:layout-chunk (next ${chunkSize} blocks, total ${this._partialLayoutBlocks} of ${this.opts.getDoc().childCount})`,

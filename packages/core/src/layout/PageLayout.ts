@@ -735,7 +735,9 @@ function computeInputHash(nodePos: number, node: Node, availableWidth: number): 
 function blockHasFloatAnchor(lines: LayoutLine[]): boolean {
   for (const line of lines) {
     for (const span of line.spans) {
-      if (span.kind === "floatAnchor") return true;
+      if (span.kind !== "object" || span.width !== 0) continue;
+      const wm = span.node.attrs["wrappingMode"] as string | undefined;
+      if (wm && wm !== "inline") return true;
     }
   }
   return false;
@@ -1426,7 +1428,7 @@ const MARKER_RIGHT_GAP = 6; // px — gap between the marker's right edge and th
  * List container nodes (bulletList, orderedList) are expanded into one item
  * per list item so each renders as an independent LayoutBlock.
  */
-function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutItem[] {
+export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutItem[] {
   const items: LayoutItem[] = [];
 
   doc.forEach((node, offset) => {
