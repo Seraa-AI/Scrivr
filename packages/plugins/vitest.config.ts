@@ -5,5 +5,6 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.spec.ts"],
     globals: true,
+    reporters: process.env.CI ? ["github-actions", "verbose"] : ["default"],
   },
 });
