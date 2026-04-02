@@ -193,7 +193,7 @@ export function computeObjectRenderY(
  *          content left and width is the available text width, or null if
  *          no constraint applies at this Y.
  */
-export type ConstraintProvider = (absoluteLineY: number) => { x: number; width: number } | null;
+export type ConstraintProvider = (absoluteLineY: number) => { x: number; width: number; skipToY?: number } | null;
 
 /**
  * LineBreaker — greedy word-wrap algorithm.
@@ -265,8 +265,43 @@ export class LineBreaker {
     for (const word of words) {
       // Determine the effective width for the current line, applying any
       // float constraint from the ConstraintProvider.
-      const absoluteLineY = startY + cumulativeLineY;
-      const constraint = constraintProvider ? constraintProvider(absoluteLineY) : null;
+      let absoluteLineY = startY + cumulativeLineY;
+      let constraint = constraintProvider ? constraintProvider(absoluteLineY) : null;
+
+      // Handle top-bottom ('full') float: flush any partial line then emit a
+      // spacer line whose lineHeight equals the remaining gap to skipToY. The
+      // spacer has no spans so the renderer draws nothing, but BlockLayout's
+      // height = lines.reduce(sum + lineHeight) correctly reserves the space,
+      // and the renderer's lineY advances past the image before drawing the
+      // next real line.
+      if (constraint?.skipToY !== undefined && constraint.skipToY > absoluteLineY) {
+        if (currentLine.length > 0) {
+          const fl = buildLine(currentLine, this.measurer);
+          if (currentLineEffectiveWidth !== undefined) fl.effectiveWidth = currentLineEffectiveWidth;
+          if (currentLineConstraintX !== undefined) fl.constraintX = currentLineConstraintX;
+          lines.push(fl);
+          cumulativeLineY += fl.lineHeight;
+          currentLine = [];
+          currentWidth = 0;
+        }
+        const gapHeight = constraint.skipToY - startY - cumulativeLineY;
+        if (gapHeight > 0) {
+          lines.push({
+            spans: [],
+            width: 0,
+            ascent: 0,
+            descent: 0,
+            lineHeight: gapHeight,
+            textAscent: 0,
+            cursorHeight: 0,
+            xHeight: 0,
+          });
+          cumulativeLineY += gapHeight;
+        }
+        absoluteLineY = startY + cumulativeLineY;
+        constraint = constraintProvider ? constraintProvider(absoluteLineY) : null;
+      }
+
       const effectiveMaxWidth = constraint ? constraint.width : maxWidth;
 
       // Record constraint on the first word of a new line.

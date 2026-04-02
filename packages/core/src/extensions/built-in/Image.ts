@@ -59,12 +59,11 @@ function createInlineImageStrategy(): InlineStrategy {
       if (src) {
         const img = getCachedImage(src);
         if (img) {
-          const scale = Math.min(width / img.naturalWidth, height / img.naturalHeight);
-          const sw = img.naturalWidth  * scale;
-          const sh = img.naturalHeight * scale;
-          const sx = x + (width  - sw) / 2;
-          const sy = y + (height - sh) / 2;
-          ctx.drawImage(img, sx, sy, sw, sh);
+          // Draw the image stretched to fill the exact box dimensions.
+          // For inline images the box matches attrs.width × attrs.height.
+          // For floats the box comes from FloatLayout (e.g. full content
+          // width for break mode), so the image fills the full area.
+          ctx.drawImage(img, x, y, width, height);
         } else {
           drawPlaceholder(ctx, x, y, width, height, alt || "Loading…");
         }

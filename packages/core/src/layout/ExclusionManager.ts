@@ -28,6 +28,12 @@ export interface LineConstraint {
   x: number;
   /** Available width (0 means no space — top-bottom / full case) */
   width: number;
+  /**
+   * When set, the line breaker should flush the current partial line and jump
+   * cumulativeLineY to this absolute Y before sampling the next constraint.
+   * Used for 'full' (top-bottom) floats so text skips cleanly past the image.
+   */
+  skipToY?: number;
 }
 
 export class ExclusionManager {
@@ -63,8 +69,8 @@ export class ExclusionManager {
       } else if (r.side === "right") {
         rightEdge = Math.min(rightEdge, r.x);
       } else {
-        // 'full' — top-bottom: no space available
-        return { x: 0, width: 0 };
+        // 'full' — top-bottom: signal the line breaker to skip past this zone
+        return { x: 0, width: 0, skipToY: r.bottom };
       }
     }
 

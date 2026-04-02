@@ -798,7 +798,7 @@ export class TileManager {
       const floatHit =
         !resizeHit && this.hitFloatAt(hit.docX, hit.docY, hit.page);
       const cursor = resizeHit ? resizeHit.cursor : floatHit ? "move" : "text";
-      this.tilesContainer.style.cursor = cursor;
+      this.setCursorAll(cursor);
     }
 
     // Text selection drag
@@ -821,6 +821,11 @@ export class TileManager {
 
   private setCursorAll(cursor: string): void {
     this.tilesContainer.style.cursor = cursor;
+    // Tile wrappers have an explicit cursor style that overrides the container.
+    // Update all pool entries so the override is consistent.
+    for (const entry of this.pool) {
+      entry.wrapper.style.cursor = cursor;
+    }
   }
 
   // ── Scroll ────────────────────────────────────────────────────────────────
