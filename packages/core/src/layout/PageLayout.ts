@@ -23,6 +23,12 @@ export interface PageConfig {
    * Absent = use whatever family is declared in each block style.
    */
   fontFamily?: string;
+  /**
+   * When true, pagination is disabled. All blocks land on a single virtual page
+   * and `y` grows unbounded. The tile renderer uses `DocumentLayout.totalContentHeight`
+   * to size the scroll container. `pageHeight` is unused in this mode.
+   */
+  pageless?: boolean;
 }
 
 export interface LayoutPage {
@@ -115,6 +121,13 @@ export interface DocumentLayout {
    * to abort stale renders when the document changes mid-scroll.
    */
   version: number;
+  /**
+   * Total scroll height of the document in CSS pixels.
+   * Paged mode:   pages.length * pageHeight  (computed by runPipeline).
+   * Pageless mode: final block bottom + bottom margin (computed by runPipeline).
+   * Used by TileManager to size the scroll container.
+   */
+  totalContentHeight: number;
   /**
    * True when the layout was stopped early via `maxBlocks`. The pages
    * present are correct; blocks beyond the cutoff have not been measured.
@@ -321,6 +334,13 @@ export const defaultPageConfig: PageConfig = {
   margins: { top: 72, right: 72, bottom: 72, left: 72 },
 };
 
+export const defaultPagelessConfig: PageConfig = {
+  pageWidth: 885,
+  pageHeight: 0,
+  margins: { top: 40, right: 73, bottom: 40, left: 73 },
+  pageless: true,
+};
+
 /**
  * runPipeline — top-level layout orchestrator.
  *
@@ -347,7 +367,8 @@ export function runPipeline(
 
   const { pageWidth, pageHeight, margins } = pageConfig;
   const contentWidth = pageWidth - margins.left - margins.right;
-  const contentHeight = pageHeight - margins.top - margins.bottom;
+  // In pageless mode pageHeight is 0 — contentHeight is unused (overflow is disabled).
+  const contentHeight = pageConfig.pageless ? Infinity : pageHeight - margins.top - margins.bottom;
   const maxBlocks = options.maxBlocks;
 
   // ── Resumption support: O(N) incremental chunked layout ───────────────────
@@ -378,6 +399,7 @@ export function runPipeline(
     flowResult.flows, margins, contentHeight,
     previousLayout, measureCache,
     pages, currentPage, y, prevSpaceAfter,
+    pageConfig.pageless,
   );
 
   // ── Streaming layout cutoff ───────────────────────────────────────────────
@@ -392,12 +414,16 @@ export function runPipeline(
       version: chunkVersion,
       prevPageCount: pr.pages.length,
     };
+    const partialPages = [...pr.pages, pr.currentPage];
     const partialPass1: DocumentLayout = {
-      pages: [...pr.pages, pr.currentPage],
+      pages: partialPages,
       pageConfig,
       version: chunkVersion,
       isPartial: true,
       resumption,
+      totalContentHeight: pageConfig.pageless
+        ? pr.y + margins.bottom
+        : partialPages.length * pageHeight,
     };
     // ── Stage 3: float layout (partial chunk) ────────────────────────────────
     return applyFloatLayout(partialPass1, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
@@ -406,14 +432,20 @@ export function runPipeline(
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
 
   // ── Stage 3: float layout ─────────────────────────────────────────────────
-  const pass1Result: DocumentLayout = { pages: allPages, pageConfig, version: chunkVersion };
+  const pass1Result: DocumentLayout = { pages: allPages, pageConfig, version: chunkVersion, totalContentHeight: 0 };
   const floated = applyFloatLayout(pass1Result, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
 
   // ── Stage 4: fragment index ───────────────────────────────────────────────
   // buildFragments computes fragmentCount/fragmentIndex from the final page
   // list, superseding the manual stamping loop that previously lived here.
   const { fragments, fragmentsByPage } = buildFragments(floated.pages);
-  return { ...floated, fragments, fragmentsByPage };
+
+  // ── Compute totalContentHeight ────────────────────────────────────────────
+  const totalContentHeight = pageConfig.pageless
+    ? pr.y + margins.bottom
+    : allPages.length * pageHeight;
+
+  return { ...floated, fragments, fragmentsByPage, totalContentHeight };
 }
 
 /**
@@ -443,6 +475,7 @@ export function paginateFlow(
   initPage: LayoutPage,
   initY: number,
   initPrevSpaceAfter: number,
+  pageless?: boolean,
 ): {
   /** All completed pages. When earlyTerminated, currentPage is already included. */
   pages: LayoutPage[];
@@ -465,8 +498,8 @@ export function paginateFlow(
   let earlyTerminated = false;
 
   for (const flow of flows) {
-    // ── Hard page break ──────────────────────────────────────────────────────
-    if (flow.isPageBreak) {
+    // ── Hard page break (skipped in pageless mode) ───────────────────────────
+    if (flow.isPageBreak && !pageless) {
       pages.push(currentPage);
       currentPage = newPage(pages.length + 1);
       y = margins.top;
@@ -512,12 +545,12 @@ export function paginateFlow(
       block.blockType = "list_item";
     }
 
-    // ── Page overflow check ───────────────────────────────────────────────────
+    // ── Page overflow check (disabled in pageless mode) ───────────────────────
     const blockBottom = targetY + flow.height;
     const pageBottom = margins.top + contentHeight;
     // Text blocks can always be split; leaf blocks need the !isFirstOnPage guard
     // to avoid infinite empty-page loops when the block exceeds contentHeight.
-    const overflows = blockBottom > pageBottom && (!isFirstOnPage || flow.lines.length > 0);
+    const overflows = !pageless && blockBottom > pageBottom && (!isFirstOnPage || flow.lines.length > 0);
 
     // ── Layout debug log ──────────────────────────────────────────────────────
     if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {

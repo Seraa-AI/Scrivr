@@ -68,9 +68,12 @@ export function ImageMenu({ editor }: ImageMenuProps) {
     });
   }, [editor]);
 
-  // Reposition the popover whenever rect or menu size changes
+  // Reposition the popover whenever rect or menu size changes.
+  // The `cancelled` flag prevents stale computePosition promises (from a
+  // previous rect) from overwriting the position after a newer rect arrives.
   useEffect(() => {
     if (!rect || !menuRef.current) return;
+    let cancelled = false;
     const virtualEl = {
       getBoundingClientRect: () => rect,
       getClientRects: () => [rect] as unknown as DOMRectList,
@@ -78,7 +81,10 @@ export function ImageMenu({ editor }: ImageMenuProps) {
     computePosition(virtualEl, menuRef.current, {
       placement: "bottom-start",
       middleware: [offset(8), flip(), shift({ padding: 8 })],
-    }).then(({ x, y }) => setPos({ x, y }));
+    }).then(({ x, y }) => {
+      if (!cancelled) setPos({ x, y });
+    });
+    return () => { cancelled = true; };
   }, [rect]);
 
   if (!rect || !info) return null;

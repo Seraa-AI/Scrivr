@@ -5,6 +5,7 @@ import {
   paginateFlow,
   collectLayoutItems,
   defaultPageConfig,
+  defaultPagelessConfig,
   collapseMargins,
 } from "./PageLayout";
 import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
@@ -1610,6 +1611,82 @@ describe("paginateFlow — Stage 2", () => {
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
     const pr = paginateFlow(flows, margins, contentHeight, undefined, undefined, [], { pageNumber: 1, blocks: [] }, margins.top, 0);
     expect(pr.earlyTerminated).toBe(false);
+  });
+});
+
+// ── Pageless mode ─────────────────────────────────────────────────────────────
+
+describe("runPipeline — pageless mode", () => {
+  it("places all blocks on a single page regardless of document length", () => {
+    // Build a doc with enough blocks to overflow a standard page
+    const blocks = Array.from({ length: 60 }, (_, i) => p(`Paragraph ${i + 1}`));
+    const layout = runPipeline(doc(...blocks), {
+      pageConfig: defaultPagelessConfig,
+      measurer: createMeasurer(),
+    });
+    expect(layout.pages).toHaveLength(1);
+    expect(layout.pages[0]!.blocks).toHaveLength(60);
+  });
+
+  it("y grows monotonically — blocks are never moved to a new page", () => {
+    const blocks = Array.from({ length: 20 }, (_, i) => p(`Line ${i + 1}`));
+    const layout = runPipeline(doc(...blocks), {
+      pageConfig: defaultPagelessConfig,
+      measurer: createMeasurer(),
+    });
+    const ys = layout.pages[0]!.blocks.map((b) => b.y);
+    for (let i = 1; i < ys.length; i++) {
+      expect(ys[i]!).toBeGreaterThan(ys[i - 1]!);
+    }
+  });
+
+  it("ignores page_break nodes — no new pages created", () => {
+    const layout = runPipeline(doc(p("Before"), pageBreak(), p("After")), {
+      pageConfig: defaultPagelessConfig,
+      measurer: createMeasurer(),
+    });
+    expect(layout.pages).toHaveLength(1);
+  });
+
+  it("totalContentHeight is greater than zero and grows with content", () => {
+    const small = runPipeline(doc(p("A")), {
+      pageConfig: defaultPagelessConfig,
+      measurer: createMeasurer(),
+    });
+    const large = runPipeline(doc(...Array.from({ length: 40 }, (_, i) => p(`Para ${i}`))), {
+      pageConfig: defaultPagelessConfig,
+      measurer: createMeasurer(),
+    });
+    expect(small.totalContentHeight).toBeGreaterThan(0);
+    expect(large.totalContentHeight).toBeGreaterThan(small.totalContentHeight);
+  });
+
+  it("totalContentHeight equals y of last block + height + bottom margin", () => {
+    const layout = runPipeline(doc(p("Hello"), p("World")), {
+      pageConfig: defaultPagelessConfig,
+      measurer: createMeasurer(),
+    });
+    const blocks = layout.pages[0]!.blocks;
+    const last = blocks[blocks.length - 1]!;
+    const expectedMin = last.y + last.height;
+    expect(layout.totalContentHeight).toBeGreaterThan(expectedMin);
+    expect(layout.totalContentHeight).toBeLessThanOrEqual(expectedMin + defaultPagelessConfig.margins.bottom + 1);
+  });
+
+  it("paged mode totalContentHeight = pageCount * pageHeight", () => {
+    // Build a 2-page document
+    const blocks = Array.from({ length: 60 }, (_, i) => p(`Para ${i}`));
+    const layout = runPipeline(doc(...blocks), {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+    });
+    const expected = layout.pages.length * defaultPageConfig.pageHeight;
+    expect(layout.totalContentHeight).toBe(expected);
+  });
+
+  it("defaultPagelessConfig has pageless: true", () => {
+    expect(defaultPagelessConfig.pageless).toBe(true);
+    expect(defaultPagelessConfig.pageHeight).toBe(0);
   });
 });
 

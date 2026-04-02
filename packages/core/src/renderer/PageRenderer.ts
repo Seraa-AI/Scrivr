@@ -201,7 +201,7 @@ function drawFloat(
  * @returns updated offset (lineIndexOffset + block.lines.length) for the
  *          next block to continue from.
  */
-function drawBlock(
+export function drawBlock(
   ctx: CanvasRenderingContext2D,
   block: LayoutBlock,
   measurer: TextMeasurer,
