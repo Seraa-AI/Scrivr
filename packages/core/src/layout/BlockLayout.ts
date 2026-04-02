@@ -643,6 +643,10 @@ export function populateCharMap(
     const line = block.lines[li]!;
     const globalLineIndex = lineIndexOffset + li;
     const isLastLine = li === block.lines.length - 1;
+    // Match TextBlockStrategy.render: the justify last-line exception (no
+    // stretching) only applies when this is the final line of the whole block,
+    // not just the last line of a fragment that continues on the next page.
+    const isLastLineOfBlock = isLastLine && !block.continuesOnNextPage;
 
     const lineConstraintX = line.constraintX ?? 0;
     const lineOffsetX = lineConstraintX + computeAlignmentOffset(
@@ -655,7 +659,7 @@ export function populateCharMap(
       line.spans,
       line.effectiveWidth ?? block.availableWidth,
       line.width,
-      isLastLine,
+      isLastLineOfBlock,
     );
 
     // textY: top of cursor rectangles for text glyphs.

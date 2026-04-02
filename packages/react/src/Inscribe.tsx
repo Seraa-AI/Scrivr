@@ -1,20 +1,21 @@
 import { useRef, useEffect } from "react";
 import type { Editor } from "@scrivr/core";
-import { ViewManager } from "@scrivr/core";
+import { TileManager } from "@scrivr/core";
 
 const DEFAULT_GAP = 24;
 
 export interface InscribeProps {
   /** Editor instance from useCanvasEditor. Renders nothing when null. */
   editor: Editor | null;
-  /** Gap in pixels between pages. Default: 24. */
+  /** Gap in pixels between pages in paged mode. Default: 24. */
   gap?: number;
-  /** Virtual scroll overscan in pixels. Default: 500. */
+  /** Extra tiles to keep above/below the viewport. Default: 1. */
   overscan?: number;
+  /** Draw margin guide lines (dev aid). Default: false. */
+  showMarginGuides?: boolean;
   /**
-   * Override styles applied to each page wrapper div.
-   * Merged on top of defaults — use `boxShadow: "none"` to remove the shadow,
-   * or `background` to change the page background color.
+   * Style overrides for each page wrapper in paged mode.
+   * e.g. `pageStyle={{ boxShadow: "none", border: "1px solid #e8eaed" }}`
    */
   pageStyle?: Partial<CSSStyleDeclaration>;
   className?: string;
@@ -22,11 +23,10 @@ export interface InscribeProps {
 }
 
 /**
- * Inscribe — mounts the Inscribe rendering engine onto a container div.
+ * Inscribe — mounts the Scrivr rendering engine onto a container div.
  *
- * All page DOM management, canvas painting, mouse handling, and virtual
- * scrolling are owned by the ViewManager in @scrivr/core. This component
- * is a thin React lifecycle wrapper: mount on effect, unmount on cleanup.
+ * Uses TileManager for both paged and pageless modes. The engine checks
+ * `editor.isPageless` to determine the rendering strategy automatically.
  *
  * @example
  * const editor = useCanvasEditor({ extensions: [StarterKit] })
@@ -35,7 +35,8 @@ export interface InscribeProps {
 export function Inscribe({
   editor,
   gap = DEFAULT_GAP,
-  overscan = 500,
+  overscan = 1,
+  showMarginGuides = false,
   pageStyle = {},
   className,
   style,
@@ -46,13 +47,17 @@ export function Inscribe({
     if (!editor || !containerRef.current) return;
 
     editor.mount(containerRef.current);
-    const vm = new ViewManager(editor, containerRef.current, { gap, overscan, pageStyle });
+    const tm = new TileManager(editor, containerRef.current, { gap, overscan, showMarginGuides, pageStyle });
 
     return () => {
-      vm.destroy();
+      tm.destroy();
       editor.unmount();
     };
-  }, [editor, gap, overscan]);
+  // pageStyle intentionally excluded — it's applied at TileManager construction
+  // time only. Adding it would recreate the entire engine on every parent render
+  // (inline object props always have a new reference), causing scroll-to-top.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, gap, overscan, showMarginGuides]);
 
   return (
     <div

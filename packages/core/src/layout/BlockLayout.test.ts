@@ -4,7 +4,7 @@ import { TextBlockStrategy } from "./TextBlockStrategy";
 import { CharacterMap } from "./CharacterMap";
 import type { InlineStrategy } from "./BlockRegistry";
 import { InlineRegistry } from "./BlockRegistry";
-import { defaultFontConfig } from "./FontConfig";
+import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import type { FontConfig } from "./FontConfig";
 import { schema } from "../model/schema";
 import {
@@ -611,14 +611,17 @@ describe("layoutBlock — node fontFamily attr", () => {
     expect(font).toContain("bold");
   });
 
-  it("null fontFamily attr falls back to the block style family", () => {
-    // No fontFamily attr — should use default Georgia from block style
+  it("null fontFamily attr uses whatever family is in the fontConfig", () => {
+    // layoutBlock is called by the pipeline after applyPageFont has injected
+    // the document family. Test that passing a config with a family works.
+    const fontConfig = applyPageFont(defaultFontConfig, "Arial, sans-serif");
     const block = layoutBlock(paragraph("Hello"), {
       nodePos: 0, x: 0, y: 0, availableWidth: 400, page: 1, measurer: createMeasurer(),
+      fontConfig,
     });
     const span = block.lines[0]?.spans[0];
     const font = span?.kind === "text" ? span.font : undefined;
-    expect(font).toContain("Georgia");
+    expect(font).toContain("Arial");
   });
 
   it("node fontFamily overrides the fontConfig family", () => {

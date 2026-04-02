@@ -89,7 +89,7 @@ export class InputBridge {
 
   private textarea: HTMLTextAreaElement | null = null;
   private _container: HTMLElement | null = null;
-  private pageElementLookup: ((page: number) => HTMLElement | null) | null = null;
+  private pageScreenRectLookup: ((page: number) => { screenLeft: number; screenTop: number } | null) | null = null;
   private _isFocused = false;
 
   constructor(opts: InputBridgeOptions) {
@@ -104,9 +104,9 @@ export class InputBridge {
   /** The container element passed to mount(). Null when unmounted. */
   get container(): HTMLElement | null { return this._container; }
 
-  /** Resolve a 1-based page number to its DOM element via the registered lookup. */
-  lookupPage(page: number): HTMLElement | null {
-    return this.pageElementLookup?.(page) ?? null;
+  /** Resolve a 1-based page number to its screen-space top-left corner. */
+  lookupPageScreenRect(page: number): { screenLeft: number; screenTop: number } | null {
+    return this.pageScreenRectLookup?.(page) ?? null;
   }
 
   /**
@@ -134,7 +134,7 @@ export class InputBridge {
       this.textarea = null;
     }
     this._container = null;
-    this.pageElementLookup = null;
+    this.pageScreenRectLookup = null;
   }
 
   /** Programmatically focus the textarea (re-captures keyboard input). */
@@ -143,11 +143,13 @@ export class InputBridge {
   }
 
   /**
-   * Register the adapter's page-element resolver.
-   * Needed by syncPosition() and scrollCursorIntoView(). Pass null to clear.
+   * Register the adapter's page screen-rect resolver.
+   * Returns the screen-space {screenLeft, screenTop} of page N's top-left corner.
+   * Used by scrollCursorIntoView(), getViewportRect(), and getNodeViewportRect().
+   * Pass null to clear.
    */
-  setPageElementLookup(fn: ((page: number) => HTMLElement | null) | null): void {
-    this.pageElementLookup = fn;
+  setPageScreenRectLookup(fn: ((page: number) => { screenLeft: number; screenTop: number } | null) | null): void {
+    this.pageScreenRectLookup = fn;
   }
 
   /**
@@ -174,7 +176,7 @@ export class InputBridge {
    * Called after every state change and after React renders new pages.
    */
   scrollCursorIntoView(): void {
-    if (!this._container || !this.pageElementLookup) return;
+    if (!this._container || !this.pageScreenRectLookup) return;
     const sel = this.opts.getState().selection;
     const { head } = sel;
 
@@ -189,15 +191,14 @@ export class InputBridge {
       : this.opts.getCharMap().coordsAtPos(head);
     if (!coords) return;
 
-    const pageEl = this.pageElementLookup(coords.page);
-    if (!pageEl) return;
-
     const scrollParent = findScrollParent(this._container);
     if (!scrollParent) return;
 
+    // Convert screen-space page top to absolute Y within the scroll container.
+    const pageScreenRect = this.pageScreenRectLookup(coords.page);
+    if (!pageScreenRect) return;
     const containerRect = scrollParent.getBoundingClientRect();
-    const pageTop =
-      pageEl.getBoundingClientRect().top - containerRect.top + scrollParent.scrollTop;
+    const pageTop = pageScreenRect.screenTop - containerRect.top + scrollParent.scrollTop;
 
     const cursorAbsTop    = pageTop + coords.y;
     const cursorAbsBottom = cursorAbsTop + coords.height;

@@ -100,7 +100,7 @@ export const Paragraph = Extension.create({
 
   addBlockStyles() {
     return {
-      paragraph: { font: "14px Georgia, serif", spaceBefore: 0, spaceAfter: 10, align: "left" as const },
+      paragraph: { font: "14px", spaceBefore: 0, spaceAfter: 10, align: "left" as const },
     };
   },
 

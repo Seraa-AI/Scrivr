@@ -9,12 +9,12 @@ interface FontFamilyOptions {
 }
 
 const DEFAULT_FAMILIES = [
+  "Arial",
   "Georgia",
   "Times New Roman",
-  "Arial",
   "Verdana",
-  "Courier New",
   "Trebuchet MS",
+  "Courier New",
 ];
 
 /**

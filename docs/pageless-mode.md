@@ -1,5 +1,19 @@
 # Tile-Based Rendering + Pageless Mode — Implementation Plan
 
+## Status
+
+| Phase | Steps | Status |
+|---|---|---|
+| Phase 1 — Layout engine | Steps 1–4 | ✅ Done (branch `pageless-tile-manager`) |
+| Phase 2 — TileManager | Step 5 | 🔲 Pending |
+| Phase 3 — Extract drawBlock | Steps 6–7 | 🔲 Pending |
+| Phase 4 — Wire up | Steps 8–10 | 🔲 Pending |
+| Phase 5 — Input bridge | Steps 11–12 | 🔲 Pending |
+| Phase 6 — CharacterMap | (none) | ✅ No changes needed |
+| Phase 7 — Demo + tests | Steps 13–14 | 🔲 Pending |
+
+---
+
 ## Overview
 
 Replace `ViewManager` (one canvas per page) with a unified **`TileManager`**
@@ -33,12 +47,14 @@ The `TileManager` is the **view layer** counterpart to the layout pipeline descr
 
 ### How the stages map to tile painting
 
-| Pipeline Stage | Tile Manager Role |
-|---|---|
-| Stage 2 — Inline Layout | Produces `LayoutLine[]` consumed by `drawBlock()` |
-| Stage 3 — Block Flow | `FlowBlock.y` is the exact `visualY` in pageless mode — no translation needed |
-| Stage 5 — Pagination | Tells the tile manager where page boundaries fall and where to draw page chrome |
-| Stage 6 — Fragment Builder | Provides `LayoutFragment[]` sorted by `y` — the fast lookup index for tile painting |
+The current pipeline has four stages:
+
+| Stage | Function | TileManager Role |
+|---|---|---|
+| Stage 1 — `buildBlockFlow` | Position-independent measurement | Produces `LayoutLine[]` consumed by `drawBlock()` |
+| Stage 2 — `paginateFlow` | Block-to-page assignment | `FlowBlock.y` is the exact `visualY` in pageless mode — no translation needed |
+| Stage 3 — `applyFloatLayout` | Float positions + exclusion reflow | Tells the tile manager where floats live per page |
+| Stage 4 — `buildFragments` | Produces `LayoutFragment[]` + `fragmentsByPage[][]` | Provides sorted fragment index for fast tile lookup |
 
 ### Fragment-based tile lookup
 
@@ -71,15 +87,15 @@ function fragmentsInTile(
 }
 ```
 
-Both approaches use the same `LayoutFragment[]` from Stage 6. The `DocumentLayout` should expose both for convenience:
+Both approaches use the same `LayoutFragment[]` from Stage 4. `DocumentLayout` exposes both:
 ```ts
-fragments:      LayoutFragment[]        // flat, sorted by y — for pageless
-fragmentsByPage: LayoutFragment[][]     // grouped by pageNumber — for paged
+fragments:       LayoutFragment[]        // flat, sorted by y — for pageless
+fragmentsByPage: LayoutFragment[][]      // grouped by pageNumber — for paged
 ```
 
 ### Dirty tile detection via fragment versions
 
-`lastPaintedVersion` in each `TileEntry` is compared against `layout.version`. With the pipeline's `inputHash` diffing in Stage 3 (see pipeline doc), a keystroke in one paragraph only updates the fragments for that block and shifts the Y of subsequent fragments. The tile manager then repaints **only tiles whose visual Y range intersects the changed fragments' Y range** — not all tiles with a stale version:
+`lastPaintedVersion` in each `TileEntry` is compared against `layout.version`. A keystroke in one paragraph only updates the fragments for that block and shifts the Y of subsequent fragments. The tile manager then repaints **only tiles whose visual Y range intersects the changed fragments' Y range**:
 
 ```ts
 // After layout update, compute the dirty visual Y range from changed fragments
@@ -113,7 +129,7 @@ IntersectionObserver per page
 
 ```
 PAGED MODE                              PAGELESS MODE
-tileHeight = pageHeight (~1120px)       tileHeight = 307px
+tileHeight = pageHeight (~1123px)       tileHeight = 307px
 
 ┌────────────────────────┐              ┌────────────────────────┐
 │ tilesContainer         │              │ tilesContainer         │
@@ -141,7 +157,7 @@ fragmentsByPage[tileIndex] lookup.      fragmentsInRange() binary search.
 | Concern | Paged | Pageless |
 |---|---|---|
 | `layoutDocument` output | Multiple `LayoutPage` objects | Single `LayoutPage` |
-| Tile height | `pageHeight` (~1120px on A4) | 307px |
+| Tile height | `pageHeight` (~1123px on A4) | 307px |
 | Container height | `pageCount × pageHeight` | `totalContentHeight` |
 | Tile index meaning | `tileIndex === pageIndex` | `tileIndex === floor(scrollY / 307)` |
 | Y → document-Y mapping | None — `tileIndex` IS the page | `FlowBlock.y` is exact `visualY` |
@@ -151,57 +167,60 @@ fragmentsByPage[tileIndex] lookup.      fragmentsInRange() binary search.
 | Fragment lookup | `fragmentsByPage[tileIndex]` — O(1) | `fragmentsInRange(tileTop, tileBottom)` — O(log N) |
 | Hit-testing | `tileIndex → page`, Y is page-local directly | Direct (all page 1) |
 | Tile recycling | Pool of visible pages (typically 3–5) | Pool of 8 small tiles |
-| Canvas size on 2× DPR | 1120 × 2 = 2240px — well within browser limits | 307 × 2 = 614px |
+| Canvas size on 2× DPR | 1123 × 2 = 2246px — well within browser limits | 307 × 2 = 614px |
 
 ---
 
-## Phase 1: Layout Engine
+## Phase 1: Layout Engine ✅ DONE
 
-### Step 1 — Extend `PageConfig` with `pageless`
-
-**File**: `packages/core/src/layout/PageLayout.ts`
-
-- Add `pageless?: boolean` to the `PageConfig` interface.
-- Export a `defaultPagelessConfig`:
-  ```ts
-  export const defaultPagelessConfig: PageConfig = {
-    pageWidth: 885,
-    pageHeight: 0,   // unused in pageless mode
-    margins: { top: 40, right: 73, bottom: 40, left: 73 },
-    pageless: true,
-  };
-  ```
-- **Why**: Single flag that the rest of the system checks. Keeping it on
-  `PageConfig` avoids new interfaces.
-
-### Step 2 — Add `totalContentHeight` to `DocumentLayout`
+### Step 1 — Extend `PageConfig` with `pageless` ✅
 
 **File**: `packages/core/src/layout/PageLayout.ts`
 
-- Add `totalContentHeight: number` to the `DocumentLayout` interface.
-- Paged mode: `pages.length * pageConfig.pageHeight`.
-- Pageless mode: final `y` position after the last block + bottom margin.
-- **Why**: The tile manager needs this for container sizing in both modes.
+Added `pageless?: boolean` to the `PageConfig` interface and exported `defaultPagelessConfig`:
+```ts
+export const defaultPagelessConfig: PageConfig = {
+  pageWidth: 885,
+  pageHeight: 0,   // unused in pageless mode
+  margins: { top: 40, right: 73, bottom: 40, left: 73 },
+  pageless: true,
+};
+```
+`pageHeight: 0` is safe — `runPipeline` sets `contentHeight = Infinity` when `pageless: true` so the value is never used in geometry.
 
-### Step 3 — Skip page breaks when `pageless` is true
+### Step 2 — Add `totalContentHeight` to `DocumentLayout` ✅
 
-**File**: `packages/core/src/layout/PageLayout.ts` — `layoutDocument()`
+**File**: `packages/core/src/layout/PageLayout.ts`
 
-- When `pageConfig.pageless`:
-  - Skip the overflow check (`blockBottom > pageBottom`).
-  - All blocks land on a single `LayoutPage` with `pageNumber: 1`.
-  - `y` grows unbounded.
-  - After the loop: `totalContentHeight = y + margins.bottom`.
-- When `!pageConfig.pageless`: existing behavior unchanged.
-- **Why**: Minimal diff. CharacterMap and BlockLayout work automatically.
+Added as a **required** field on `DocumentLayout`:
+```ts
+totalContentHeight: number;
+```
+- Paged mode: `pages.length * pageHeight` (computed at end of `runPipeline`)
+- Pageless mode: `finalY + margins.bottom` (computed from `paginateFlow`'s returned `y`)
 
-### Step 4 — Update `Editor` to expose the flag
+### Step 3 — Skip page breaks when `pageless` is true ✅
+
+**File**: `packages/core/src/layout/PageLayout.ts` — `paginateFlow()`
+
+Added optional `pageless?: boolean` parameter to `paginateFlow`:
+- Hard page break nodes (`flow.isPageBreak`) are skipped when `pageless`
+- Overflow check (`blockBottom > pageBottom`) is short-circuited to `false` when `pageless`
+- `y` grows unbounded on a single `LayoutPage`
+
+`runPipeline` passes `pageConfig.pageless` as the last argument to `paginateFlow`.
+
+### Step 4 — `Editor.isPageless` getter ✅
 
 **File**: `packages/core/src/Editor.ts`
 
-- Add `get isPageless(): boolean` (reads `this.pageConfig.pageless`).
-- No layout logic changes — `Editor` already passes `pageConfig` to
-  `layoutDocument`.
+```ts
+get isPageless(): boolean {
+  return this.pageConfig.pageless === true;
+}
+```
+
+Also exported `defaultPagelessConfig` from `packages/core/src/layout/index.ts`.
 
 ---
 
@@ -251,8 +270,6 @@ get tileHeight(): number {
   if (!this.editor.isPageless) return this.editor.pageConfig.pageHeight;
   if (this.options.smallTileHeight) return this.options.smallTileHeight;
   // Viewport-aware: scale with screen size, clamped to a safe range.
-  // Small screens: fewer tiles → less redraw jump.
-  // Large screens: bigger tiles → fewer tiles in pool, fewer repaints.
   const vh = this.scrollParent.clientHeight;
   return Math.max(240, Math.min(Math.round(vh * 0.35), 480));
 }
@@ -284,8 +301,10 @@ outerContainer (editor.mount target)
 ```
 
 The `tilesContainer` height drives the native scrollbar:
-- Paged: `Σ(pageHeight) + (pageCount - 1) × gap`
+- Paged: `layout.totalContentHeight` (= `pageCount * pageHeight`)
 - Pageless: `layout.totalContentHeight`
+
+Both modes use `layout.totalContentHeight` — no branching needed.
 
 #### 5c. Y-coordinate mapping
 
@@ -300,12 +319,11 @@ docYToVisualY(page: number, docY: number): number
 ```
 
 **Pageless mode**: identity mapping. `visualY === docY`, page is always 1.
-Stage 3's `FlowBlock.y` is the exact `visualY` — no translation needed.
+Stage 2's block `y` values are the exact `visualY` — no translation needed.
 
-**Paged mode**: dramatically simpler than unified-tile paged mode.
-Because `tileHeight = pageHeight`, tile boundaries align exactly with page
-boundaries. There are no partial pages, no tiles spanning a gap. The gap is
-a CSS `margin-bottom` on each tile wrapper — it does not exist in canvas space.
+**Paged mode**: because `tileHeight = pageHeight`, tile boundaries align exactly
+with page boundaries. The gap is a CSS `margin-bottom` on each tile wrapper —
+it does not exist in canvas space.
 
 ```ts
 // Paged: tileIndex IS pageIndex
@@ -319,9 +337,6 @@ docYToVisualY(page: number, docY: number) {
   return (page - 1) * this.tileHeight + docY;
 }
 ```
-
-The gap is rendered by CSS (`gap` px margin below each `.tile-wrapper`), not
-inside the canvas. This removes the tile-spans-gap problem entirely.
 
 These two functions are the **only** branching point between paged and pageless
 rendering in the tile manager.
@@ -348,17 +363,11 @@ rendering in the tile manager.
      - Always paintOverlay() (cursor blink changes every tick).
 ```
 
-The "dirty fragment range" is derived from Stage 3's `inputHash` diffing — only
-fragments whose source block changed (by hash) are dirty, so only the tiles
-overlapping those fragments' visual Y range need repainting.
-
 #### 5e. `paintContent(tile, layout)` — paged mode
-
-Because `tileIndex === pageIndex`, this is simple full-page rendering:
 
 ```
 1. page = tile.tileIndex + 1
-2. fragments = layout.fragmentsByPage[tile.tileIndex]  // O(1) lookup, no search
+2. fragments = layout.fragmentsByPage[tile.tileIndex]  // O(1) lookup
 3. Set up canvas (pageHeight × pageWidth at device DPR).
 4. Clear canvas.
 5. Draw page background (white rect, full canvas).
@@ -369,28 +378,24 @@ Because `tileIndex === pageIndex`, this is simple full-page rendering:
 ```
 
 No page offset translation. No gap drawing. No partial-page clipping.
-The gap between pages is a CSS `margin-bottom` on the tile wrapper — not
-a canvas concern at all.
 
 #### 5f. `paintContent(tile, layout)` — pageless mode
-
-Small-tile virtualization — no page chrome, no gaps:
 
 ```
 1. tileTop    = tile.tileIndex * TILE_HEIGHT  (307px)
 2. tileBottom = tileTop + TILE_HEIGHT
-3. fragments  = fragmentsInTile(layout.fragments, tileTop, tileBottom)  // binary search
+3. fragments  = fragmentsInTile(layout.fragments, tileTop, tileBottom)
 4. Set up canvas, clear.
 5. ctx.save(); ctx.translate(0, -tileTop);
 6. For each fragment: drawBlock(fragment.block, ctx, fragment.lineStart, fragment.lineCount)
 7. ctx.restore();
 ```
 
-Both modes call the same `drawBlock()` — extracted from `PageRenderer`.
+Both modes call the same `drawBlock()` — exported from `PageRenderer` in Phase 3.
 
 #### 5g. `paintOverlay(tile)`
 
-Same for both modes, but **gated** — do not repaint on every animation frame:
+Gated to avoid redundant repaints on every animation frame:
 
 ```ts
 function paintOverlay(tile: TileEntry): void {
@@ -399,27 +404,24 @@ function paintOverlay(tile: TileEntry): void {
   const blinkDirty  = needsCursor && tile.lastBlinkState !== currentBlinkOn;
   const moveDirty   = tile.lastCursorTile !== cursorTile || tile.lastSelectionVersion !== selectionVersion;
 
-  if (!blinkDirty && !moveDirty) return;  // nothing changed — skip entirely
+  if (!blinkDirty && !moveDirty) return;
 
   tile.lastBlinkState       = currentBlinkOn;
   tile.lastCursorTile       = cursorTile;
   tile.lastSelectionVersion = selectionVersion;
 
-  // Clear and redraw
   overlayCtx.clearRect(0, 0, canvas.width, canvas.height);
   overlayCtx.save();
   overlayCtx.translate(0, -tileVisualTop);
-  // filter glyphs to tile visual range, then:
-  renderSelection(overlayCtx, selectionGlyphs);
+  renderSelection(overlayCtx, selectionLines, selectionGlyphs, from, to);
   if (needsCursor && currentBlinkOn) renderCursor(overlayCtx, cursorCoords);
   overlayCtx.restore();
 }
 ```
 
-**Why this matters:** without the guard, every blink tick (typically 530ms interval
-implemented via `requestAnimationFrame` counting) repaints all visible overlay
-canvases — O(poolSize) clears + redraws per blink. On a large monitor with 6
-visible tiles that is 6× unnecessary work every half-second. With the guard:
+`renderCursor` and `renderSelection` from `OverlayRenderer` accept absolute
+coordinates and are called after `ctx.translate` so the tile origin is
+already applied.
 
 | Event | Tiles repainted |
 |---|---|
@@ -430,51 +432,28 @@ visible tiles that is 6× unnecessary work every half-second. With the guard:
 
 #### 5h. Mouse events and hit-testing
 
-The `hitTest(clientX, clientY)` function is the critical bridge between visual
-coordinates (where the user clicked) and document positions (what `charMap` needs).
-It must correctly handle paged gaps, tile offsets, and DPR scaling.
-
 ```ts
 function hitTest(clientX: number, clientY: number): { page: number; docX: number; docY: number } | null {
-  // 1. Find the tile the click landed in
   const containerRect = tilesContainer.getBoundingClientRect();
   const visualX = (clientX - containerRect.left) / dpr;
   const visualY = (clientY - containerRect.top)  / dpr + scrollParent.scrollTop;
 
-  // 2. Check if visualY falls in a page gap (paged mode only)
-  //    If so, snap to the nearest page edge.
+  // Check if visualY falls in a page gap (paged mode only)
   if (!isPageless) {
     const slotHeight = pageHeight + gap;
     const posInSlot  = visualY % slotHeight;
     if (posInSlot >= pageHeight) {
-      // Click is inside a gap — map to end of the preceding page
       return { page: Math.floor(visualY / slotHeight) + 1, docX: visualX, docY: pageHeight };
     }
   }
 
-  // 3. Translate visual → doc coordinates
   const { page, docY } = visualYToDocY(visualY);
-
-  // 4. Adjust X for page margins (center-aligned page in paged mode)
   const pageLeft = isPageless ? 0 : (containerWidth - pageWidth) / 2;
   const docX = visualX - pageLeft;
 
   return { page, docX, docY };
 }
 ```
-
-Caller in `mousedown`:
-```ts
-const hit = hitTest(e.clientX, e.clientY);
-if (hit) {
-  const pos = charMap.posAtCoords(hit.docX, hit.docY, hit.page);
-  editor.setSelection(pos);
-}
-```
-
-- `mousemove` / `mouseup`: same `hitTest()` pattern.
-- Shift+click: `charMap.posAtCoords()` + `setSelection(anchor, pos)`.
-- Click+drag: `mousedown` sets anchor; `mousemove` extends selection.
 
 #### 5i. Scroll handling
 
@@ -487,10 +466,12 @@ if (hit) {
 
 - Subscribe via `editor.subscribe()` → `update()`.
 - Register `editor.setPageElementLookup()`:
-  - Pageless: always returns `tilesContainer` for page 1.
-  - Paged: returns a virtual rect computed from `docYToVisualY(page, 0)`.
-- **Why**: `syncInputBridge` and `scrollCursorIntoView` need a way to resolve
-  page → DOM position.
+  - Pageless: always returns a virtual element at `docYToVisualY(1, 0)` for page 1.
+  - Paged: returns a virtual element at `docYToVisualY(page, 0)` for each page.
+  - **Why**: `InputBridge.scrollCursorIntoView` and `syncPosition` call
+    `lookupPage(page)` to get a DOM element whose `getBoundingClientRect().top`
+    gives the page's visual top. The TileManager should register a sentinel
+    element (or a zero-size positioned div) at the correct `top` for each page.
 
 #### 5k. `destroy()`
 
@@ -508,47 +489,71 @@ if (hit) {
 
 **File**: `packages/core/src/renderer/PageRenderer.ts`
 
-- The existing `drawBlock()` function is currently module-private.
-- Export it so `TileManager` can call it directly.
-- Update the signature to accept `lineStart` / `lineCount` so it renders only
-  the fragment slice: `drawBlock(block, ctx, lineStart, lineCount)`.
-- Keep `renderPage()` as-is for backward compatibility during migration.
-  It can be deprecated later once `TileManager` fully replaces `ViewManager`.
-- **Why**: Avoid duplicating text rendering, mark decoration, and CharacterMap
-  population logic.
+`drawBlock` is currently a module-private function with this signature:
+```ts
+function drawBlock(
+  ctx: CanvasRenderingContext2D,
+  block: LayoutBlock,
+  measurer: TextMeasurer,
+  map: CharacterMap,
+  pageNumber: number,
+  lineIndexOffset: number,
+  markDecorators?: Map<string, MarkDecorator>
+): number
+```
+
+Changes needed:
+- Add `export` keyword.
+- Add `lineStart` and `lineCount` parameters so `TileManager` can render only
+  the fragment slice when a block spans multiple tiles.
+- Keep `renderPage()` calling `drawBlock` as before for backward compatibility.
+
+Updated signature:
+```ts
+export function drawBlock(
+  ctx: CanvasRenderingContext2D,
+  block: LayoutBlock,
+  measurer: TextMeasurer,
+  map: CharacterMap,
+  pageNumber: number,
+  lineIndexOffset: number,
+  markDecorators?: Map<string, MarkDecorator>,
+  lineStart?: number,    // default 0
+  lineCount?: number,    // default block.lines.length
+): number
+```
+
+Export from `packages/core/src/renderer/index.ts`.
 
 ### Step 7 — OverlayRenderer stays unchanged
 
 **File**: `packages/core/src/renderer/OverlayRenderer.ts`
 
-- `renderCursor()` and `renderSelection()` accept absolute coords.
-- The caller (`TileManager`) applies `ctx.translate()` before calling them.
-- No changes needed.
+`renderCursor()` and `renderSelection()` accept absolute coords.
+The caller (`TileManager`) applies `ctx.translate()` before calling them.
+No changes needed.
 
 ---
 
-## Phase 4: Wire up in Editor + React Adapter
+## Phase 4: Wire up in Inscribe + React Adapter
 
 ### Step 8 — Deprecate `ViewManager`, use `TileManager` everywhere
 
 **File**: `packages/core/src/renderer/ViewManager.ts`
 
-- Mark `ViewManager` as `@deprecated` — keep it functional for now.
+- Add `@deprecated` JSDoc — keep it functional for the transition period.
 - All new rendering goes through `TileManager`.
-- **Migration path**: `ViewManager` can be removed in a future version once
-  `TileManager` is proven stable.
 
-### Step 9 — Update `Canvas` component
+### Step 9 — Update `Inscribe` component
 
-**File**: `packages/react/src/Canvas.tsx`
+**File**: `packages/react/src/Inscribe.tsx`
 
 ```ts
 useEffect(() => {
   if (!editor || !containerRef.current) return;
-  editor.mount(containerRef.current);
 
+  editor.mount(containerRef.current);
   const manager = new TileManager(editor, containerRef.current, {
-    tileHeight,
     gap,
     overscan,
     showMarginGuides,
@@ -558,13 +563,14 @@ useEffect(() => {
     manager.destroy();
     editor.unmount();
   };
-}, [editor, gap, overscan, tileHeight, showMarginGuides]);
+}, [editor, gap, overscan, showMarginGuides]);
 ```
 
 - Always uses `TileManager` — no branching needed.
-- The `TileManager` internally checks `editor.isPageless` for the Y-mapping
+- The `TileManager` internally checks `editor.isPageless` for Y-mapping
   and page chrome decisions.
-- Add optional `tileHeight?: number` prop to `CanvasProps` (default 307).
+- Remove the `ViewManager` import.
+- `gap` and `overscan` remain as props (they apply in both modes).
 
 ### Step 10 — Export new types
 
@@ -577,24 +583,50 @@ useEffect(() => {
 
 ## Phase 5: `syncInputBridge` + Scroll-to-Cursor
 
-### Step 11 — Adapt `syncInputBridge()`
+### Step 11 — `syncPosition()` works without changes
 
-**File**: `packages/core/src/Editor.ts`
+**File**: `packages/core/src/input/InputBridge.ts`
 
-- Current logic: finds page element, positions textarea relative to page rect.
-- With TileManager: `pageElementLookup` returns the `tilesContainer`.
-  Position the textarea at `docYToVisualY(coords.page, coords.y)` relative
-  to the container.
-- The TileManager sets the lookup function, so `Editor` doesn't need to
-  know which mode it's in — the lookup abstracts it.
+`syncPosition()` calls `editor.getViewportRect(head, head)` which uses
+`lookupPage` internally. As long as `TileManager` registers a page element
+lookup that returns an element whose `getBoundingClientRect().top` is the
+correct visual top for that page, `syncPosition` works automatically.
 
-### Step 12 — Adapt `scrollCursorIntoView()`
+### Step 12 — `scrollCursorIntoView()` works without changes
 
-**File**: `packages/core/src/Editor.ts`
+**File**: `packages/core/src/input/InputBridge.ts`
 
-- Same approach: use `pageElementLookup` to get visual coordinates.
-- Scroll the parent so the cursor's visual Y is in the viewport.
-- Works for both modes via the same abstraction.
+`scrollCursorIntoView()` calls `lookupPage(coords.page)` and reads
+`getBoundingClientRect().top` of the returned element. The TileManager
+must register sentinel elements (zero-size absolute-positioned divs) at the
+correct visual top for each page in paged mode, and at `y=0` for page 1 in
+pageless mode.
+
+```ts
+// TileManager registers this lookup during construction:
+editor.setPageElementLookup((page) => {
+  const sentinel = sentinelMap.get(page);
+  if (sentinel) return sentinel;
+
+  // Create a sentinel div at the page's visual top
+  const div = document.createElement("div");
+  Object.assign(div.style, {
+    position: "absolute",
+    top: `${docYToVisualY(page, 0)}px`,
+    left: "0",
+    width: "0",
+    height: "0",
+    pointerEvents: "none",
+  });
+  tilesContainer.appendChild(div);
+  sentinelMap.set(page, div);
+  return div;
+});
+```
+
+In pageless mode all content is page 1, `docYToVisualY(1, 0) = 0`, so the
+sentinel sits at the top of the container — the correct `getBoundingClientRect`
+reference for all `scrollCursorIntoView` coordinate math.
 
 ---
 
@@ -604,23 +636,12 @@ The `CharacterMap` works without modification in both modes.
 
 **Pageless mode = one virtual page (page 1)**
 
-Treating the entire pageless document as a single page is not a simplification —
-it is the correct model. All glyphs have `page: 1`. `CharacterMap.posAtCoords(x, y, 1)`
-works without changes. `posAbove()` / `posBelow()` work across the whole document.
-
-This also makes the future transition to the pipeline trivially correct: in
-pageless mode, Stage 3's `FlowBlock.y` is the exact `visualY`, and Stage 5
-(Pagination) is a no-op that produces a single `LayoutPage`. The CharacterMap
-never needs to know which mode is active.
+All glyphs have `page: 1`. `CharacterMap.posAtCoords(x, y, 1)` works without
+changes. `posAbove()` / `posBelow()` work across the whole document.
 
 **Paged mode** — same as today. Glyphs have `page: 1, 2, ...` and page-local Y.
 The tile manager converts visual coordinates to page-local before calling
 `posAtCoords`, exactly as the current `ViewManager` does.
-
-The one known performance issue — `CharacterMap` linear scans are O(N glyphs) —
-is addressed by the `LayoutFragment[]` binary search in the tile painter (see
-Section "Relation to the Layout Pipeline"). The charMap linear scan concern is
-separate and can be addressed with a glyph B-tree index if needed in the future.
 
 ---
 
@@ -636,52 +657,38 @@ separate and can be addressed with a glyph B-tree index if needed in the future.
 
 ### Step 14 — Unit tests
 
-- `PageLayout.test.ts`:
-  - `pageless: true` → all blocks on one page.
-  - `totalContentHeight` correct in both modes.
-  - No page breaks in pageless even with large docs.
-- `TileManager` tests:
-  - Tile recycling: pool size never exceeded.
-  - `visualYToDocY` / `docYToVisualY` roundtrip correctly in both modes.
-  - Paged mode: gap regions map to no content.
-  - Mouse hit-testing resolves correct doc positions (paged, pageless, gap edge cases).
-  - Scroll → tiles reassigned and repainted.
-  - Fragment binary search: correct results at tile boundaries.
-  - Dirty tile detection: only tiles intersecting changed fragment Y range repaint.
+**Layout tests** (already done in Phase 1, `src/layout/PageLayout.test.ts`):
+- ✅ `pageless: true` → all blocks on one page.
+- ✅ `totalContentHeight` correct in both modes.
+- ✅ No page breaks in pageless even with large docs.
+- ✅ `defaultPagelessConfig` shape.
+
+**TileManager tests** (pending):
+- Tile recycling: pool size never exceeded.
+- `visualYToDocY` / `docYToVisualY` roundtrip correctly in both modes.
+- Paged mode: gap regions map to no content.
+- Mouse hit-testing resolves correct doc positions (paged, pageless, gap edge cases).
+- Scroll → tiles reassigned and repainted.
+- Fragment binary search: correct results at tile boundaries.
+- Dirty tile detection: only tiles intersecting changed fragment Y range repaint.
 
 ---
 
 ## File Change Summary
 
-| File | Change |
-|---|---|
-| `packages/core/src/layout/PageLayout.ts` | Add `pageless` to `PageConfig`, `totalContentHeight` to `DocumentLayout`, pageless branch in `layoutDocument` |
-| `packages/core/src/Editor.ts` | Add `isPageless` getter. Adapt `syncInputBridge` + `scrollCursorIntoView` |
-| `packages/core/src/renderer/TileManager.ts` | **New file** — unified tile-based renderer for both modes |
-| `packages/core/src/renderer/PageRenderer.ts` | Export `drawBlock` with `lineStart`/`lineCount` params |
-| `packages/core/src/renderer/ViewManager.ts` | Mark `@deprecated` |
-| `packages/core/src/renderer/index.ts` | Export `TileManager`, `TileManagerOptions` |
-| `packages/core/src/index.ts` | Export `defaultPagelessConfig`, `TileManager` |
-| `packages/react/src/Canvas.tsx` | Use `TileManager` always (replaces `ViewManager`), add `tileHeight` prop |
-| `packages/react/src/index.ts` | Re-export new types |
-| `apps/demo/src/App.tsx` | Add pageless/paged toggle |
-| Test files | New test cases |
-
----
-
-## Implementation Order
-
-```
-Phase 1 (Steps 1-4)  → Layout engine changes                ~1 day
-Phase 2 (Step 5)     → TileManager (biggest piece)           ~3-4 days
-Phase 3 (Steps 6-7)  → Extract drawBlock, verify overlay     ~2 hours
-Phase 4 (Steps 8-10) → Wire up, exports, deprecate VM        ~2 hours
-Phase 5 (Steps 11-12)→ Input bridge + scroll-to-cursor       ~3 hours
-Phase 6              → (none — CharacterMap unchanged)
-Phase 7 (Steps 13-14)→ Demo toggle + tests                   ~1 day
-```
-
-**Total estimate**: ~5-6 days of focused work.
+| File | Change | Status |
+|---|---|---|
+| `packages/core/src/layout/PageLayout.ts` | `pageless` on `PageConfig`, `totalContentHeight` on `DocumentLayout`, `defaultPagelessConfig`, pageless branch in `paginateFlow` | ✅ Done |
+| `packages/core/src/layout/index.ts` | Export `defaultPagelessConfig` | ✅ Done |
+| `packages/core/src/Editor.ts` | `isPageless` getter | ✅ Done |
+| `packages/core/src/renderer/TileManager.ts` | **New file** — unified tile-based renderer | 🔲 Pending |
+| `packages/core/src/renderer/PageRenderer.ts` | Export `drawBlock` with `lineStart`/`lineCount` params | 🔲 Pending |
+| `packages/core/src/renderer/ViewManager.ts` | Mark `@deprecated` | 🔲 Pending |
+| `packages/core/src/renderer/index.ts` | Export `TileManager`, `TileManagerOptions` | 🔲 Pending |
+| `packages/core/src/index.ts` | Export `defaultPagelessConfig`, `TileManager` | 🔲 Pending |
+| `packages/react/src/Inscribe.tsx` | Use `TileManager` (replaces `ViewManager`) | 🔲 Pending |
+| `packages/react/src/index.ts` | Re-export new types | 🔲 Pending |
+| `apps/demo/src/App.tsx` | Pageless/paged toggle | 🔲 Pending |
 
 ---
 
@@ -689,36 +696,34 @@ Phase 7 (Steps 13-14)→ Demo toggle + tests                   ~1 day
 
 | Risk | Mitigation |
 |---|---|
-| Canvas max size (browsers cap at ~16384px) | Pageless tiles are 307px — never hits the limit. Paged tiles are pageHeight (~1120px, 2240px at 2× DPR) — well within limits for all standard page sizes |
+| Canvas max size (browsers cap at ~16384px) | Pageless tiles are 307px — never hits the limit. Paged tiles are pageHeight (~1123px, 2246px at 2× DPR) — well within limits for all standard page sizes |
 | Text spanning tile boundaries looks clipped | Pageless: `ctx.translate(-tileTop)` + natural canvas clipping. Paged: no boundary crossing possible — tile = full page |
 | Page gap regions in tiles (paged mode) | Eliminated — gap is CSS margin, never inside a canvas |
 | Scroll performance on very long docs | Fixed tile pool + RAF throttle. Paged pool is even smaller (3–5 tiles vs 8) |
-| Hit-testing in gap region | `hitTest()` detects CSS gap area (click Y falls outside any tile's canvas rect) and snaps to nearest page edge |
-| `CharacterMap` linear scans slow for huge docs | Paged: `fragmentsByPage[]` O(1) lookup entirely avoids the scan. Pageless: O(log N) binary search. |
+| Hit-testing in gap region | `hitTest()` detects CSS gap area and snaps to nearest page edge |
 | Cursor blink causes full repaint | Only overlay canvases repaint on blink (content is dirty-range gated) |
-| `ViewManager` removal is breaking | Deprecate first, remove in next major version. TileManager has same public API shape |
-| Dirty tile detection (paged) | A keystroke on page 5 only marks `fragmentsByPage[4]` dirty → only tile 4 repaints |
+| `ViewManager` removal is breaking | Deprecate first, remove in next major version |
+| `scrollCursorIntoView` sentinel accuracy | Sentinel div `top` must be updated when `totalContentHeight` changes (e.g. after typing) |
 
 ---
 
 ## Migration Path: ViewManager → TileManager
 
 1. **Phase A** (this plan): Ship `TileManager` alongside `ViewManager`.
-   `Canvas.tsx` uses `TileManager`. `ViewManager` marked `@deprecated`.
+   `Inscribe.tsx` uses `TileManager`. `ViewManager` marked `@deprecated`.
 2. **Phase B** (follow-up): Remove `ViewManager` once `TileManager` is
-   battle-tested. Clean up any code that referenced `ViewManager` directly.
-3. **Phase C** (optional): Remove page-specific logic from React adapter
-   files (`PageView.tsx`, `useVirtualPages.ts`) that are no longer needed.
+   battle-tested.
+3. **Phase C** (optional): Remove any remaining page-specific helpers that
+   are no longer needed once both modes go through `TileManager`.
 
 ---
 
 ## Open Questions
 
-1. **Tile height**: 307px (Google's default) vs. a different value? Making it
-   configurable via `TileManagerOptions` covers all cases.
-2. **Page chrome in paged mode**: Should the tile manager draw full page
-   shadows (currently CSS `box-shadow` on the wrapper div) via canvas, or
-   use a background div behind tiles? Canvas-drawn shadows are more
+1. **Tile height**: 307px (Google's default) vs. viewport-adaptive (`vh * 0.35`)?
+   Making it configurable via `TileManagerOptions.smallTileHeight` covers all cases.
+2. **Page chrome in paged mode**: Canvas-drawn shadows vs. CSS `box-shadow` on
+   wrapper div? CSS is simpler to implement first; canvas shadows are more
    consistent but slightly more rendering work.
 3. **Page-break nodes in pageless mode**: Render as a visual divider (HR)
    or ignore entirely?
@@ -726,8 +731,3 @@ Phase 7 (Steps 13-14)→ Demo toggle + tests                   ~1 day
    the print stylesheet?
 5. **Horizontal resize**: Should pageless mode auto-resize `pageWidth` to
    match the container width (fluid layout)?
-6. **Fragment availability at TileManager time**: The `LayoutFragment[]` array
-   from Stage 6 of the pipeline is not yet produced by the current
-   `layoutDocument()`. Until the pipeline refactor lands, the tile manager
-   falls back to an O(N) block scan for painting. The `fragmentsInTile()`
-   binary search becomes the fast path once Stage 6 ships.

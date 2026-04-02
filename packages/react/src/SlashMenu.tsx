@@ -150,14 +150,14 @@ export function SlashMenu({
       getBoundingClientRect: () => rect,
       getClientRects: () => [rect] as unknown as DOMRectList,
     };
+    let cancelled = false;
     computePosition(virtualEl, menuRef.current, {
       placement: "bottom-start",
       middleware: [offset(6), flip(), shift({ padding: 8 })],
     })
-      .then(({ x, y }) => setPos({ x, y }))
-      .catch((err) =>
-        console.error("[SlashMenu] computePosition failed:", err),
-      );
+      .then(({ x, y }) => { if (!cancelled) setPos({ x, y }); })
+      .catch((err) => console.error("[SlashMenu] computePosition failed:", err));
+    return () => { cancelled = true; };
   }, [rect, filtered.length]);
 
   // Keyboard navigation — capture phase intercepts before ProseMirror

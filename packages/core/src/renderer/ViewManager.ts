@@ -37,6 +37,7 @@ export interface ViewManagerOptions {
  * cursor and the one-frame lag that React lifecycle hooks introduce.
  *
  * Framework-agnostic — works with any adapter that provides a container div.
+ * @deprecated Use TileManager instead. ViewManager will be removed in a future release.
  */
 export class ViewManager {
   private pages = new Map<number, PageEntry>();
@@ -107,7 +108,12 @@ export class ViewManager {
     document.addEventListener("mousemove", this.handleMouseMove);
     document.addEventListener("mouseup", this.handleMouseUp);
 
-    editor.setPageElementLookup((page) => this.pages.get(page)?.wrapper ?? null);
+    editor.setPageTopLookup((page) => {
+      const wrapper = this.pages.get(page)?.wrapper;
+      if (!wrapper) return null;
+      const rect = wrapper.getBoundingClientRect();
+      return { screenLeft: rect.left, screenTop: rect.top };
+    });
 
     this.unsubscribe = editor.subscribe(() => this.update());
     this.update();
@@ -173,7 +179,7 @@ export class ViewManager {
     document.removeEventListener("mouseup", this.handleMouseUp);
     this.pages.clear();
     this.pagesContainer.remove();
-    this.editor.setPageElementLookup(null);
+    this.editor.setPageTopLookup(null);
   }
 
   // ── Page DOM sync ──────────────────────────────────────────────────────────

@@ -133,6 +133,12 @@ export class Editor {
   /** Subscriber set — notified on every state change, focus change, and cursor tick. */
   private readonly listeners = new Set<() => void>();
 
+  /**
+   * Incremented by redraw() to signal asset-only repaints (e.g. image load).
+   * TileManager compares against this to bypass the layout-version paint guard.
+   */
+  renderGeneration = 0;
+
   /** Page dimensions and margins — passed to LayoutCoordinator and read by renderers. */
   readonly pageConfig: PageConfig;
 
@@ -223,8 +229,12 @@ export class Editor {
     this.manager = new ExtensionManager(extensions);
     this.onChange = onChange;
     this.onFocusChange = onFocusChange;
-    this.pageConfig =
-      this.manager.buildPageConfig() ?? pageConfig ?? defaultPageConfig;
+    const builtConfig = this.manager.buildPageConfig();
+    // User-supplied pageConfig overrides extension-built config so that
+    // top-level options like fontFamily are always respected.
+    this.pageConfig = builtConfig && pageConfig
+      ? { ...builtConfig, ...pageConfig }
+      : builtConfig ?? pageConfig ?? defaultPageConfig;
     this.fontConfig = this.manager.buildBlockStyles();
     this.measurer = new TextMeasurer({ lineHeightMultiplier: 1.2 });
     this.fontModifiers = this.manager.buildFontModifiers();
@@ -360,12 +370,17 @@ export class Editor {
     return this.lc.current;
   }
 
+  /** True when the editor is in pageless (infinite-scroll) mode. */
+  get isPageless(): boolean {
+    return this.pageConfig.pageless === true;
+  }
+
   /**
    * Convert a doc position range to a viewport DOMRect.
    *
    * Uses the CharacterMap for pixel-accurate canvas coordinates, then offsets
    * by the page element's viewport position (registered by the rendering adapter
-   * via setPageElementLookup). Returns null if either position is not in the
+   * via setPageTopLookup). Returns null if either position is not in the
    * CharacterMap or if no adapter has registered a page element lookup.
    *
    * The returned rect spans from the `from` position to the `to` position.
@@ -376,10 +391,13 @@ export class Editor {
     this.lc.ensureLayout();
     const rect = this.lc.charMap.getObjectRect(docPos);
     if (!rect) return null;
-    const pageEl = this.ib.lookupPage(rect.page);
-    if (!pageEl) return null;
-    const pageRect = pageEl.getBoundingClientRect();
-    return new DOMRect(pageRect.left + rect.x, pageRect.top + rect.y, rect.width, rect.height);
+    const pageScreenRect = this.ib.lookupPageScreenRect(rect.page);
+    if (!pageScreenRect) return null;
+    return new DOMRect(
+      pageScreenRect.screenLeft + rect.x,
+      pageScreenRect.screenTop  + rect.y,
+      rect.width, rect.height,
+    );
   }
 
   /**
@@ -409,14 +427,13 @@ export class Editor {
     const fromCoords = this.lc.charMap.coordsAtPos(from);
     if (!fromCoords) return null;
 
-    const pageEl = this.ib.lookupPage(fromCoords.page);
-    if (!pageEl) return null;
+    const pageScreenRect = this.ib.lookupPageScreenRect(fromCoords.page);
+    if (!pageScreenRect) return null;
 
-    const pageRect = pageEl.getBoundingClientRect();
     const toCoords = this.lc.charMap.coordsAtPos(to);
 
-    const left = pageRect.left + fromCoords.x;
-    const top = pageRect.top + fromCoords.y;
+    const left = pageScreenRect.screenLeft + fromCoords.x;
+    const top  = pageScreenRect.screenTop  + fromCoords.y;
     const height = fromCoords.height;
 
     // Width: span to toCoords if on same line, otherwise use a minimal 1px width
@@ -590,19 +607,19 @@ export class Editor {
    * needs to be repainted with fresh remote cursor positions.
    */
   redraw(): void {
+    this.renderGeneration++;
     this.notifyListeners();
   }
 
   /**
-   * Register a function that resolves a 1-based page number to the
-   * DOM element representing that page. Called by the rendering adapter
-   * (e.g. Canvas) after mount so the editor can position the textarea
-   * and scroll the cursor into view.
+   * Register a function that returns the screen-space top-left corner of
+   * page N. Used by scrollCursorIntoView, getViewportRect, and
+   * getNodeViewportRect — no DOM element per page needed.
    */
-  setPageElementLookup(
-    fn: ((page: number) => HTMLElement | null) | null,
+  setPageTopLookup(
+    fn: ((page: number) => { screenLeft: number; screenTop: number } | null) | null,
   ): void {
-    this.ib.setPageElementLookup(fn);
+    this.ib.setPageScreenRectLookup(fn);
   }
 
   /**
@@ -877,11 +894,12 @@ export class Editor {
     this._rafId = requestAnimationFrame(() => {
       this._rafId = null;
       this.lc.ensureLayout();
-      // ViewManager.update() runs inside notifyListeners (via subscribe),
-      // creating any new page DOM elements before we position the textarea.
-      this.notifyListeners();
-      this.syncInputBridge();
+      // Scroll first so the viewport is settled, then notify subscribers.
+      // This ensures getNodeViewportRect / getViewportRect return post-scroll
+      // screen coordinates, preventing a one-frame popover position jump.
       this.scrollCursorIntoView();
+      this.syncInputBridge();
+      this.notifyListeners();
     });
   }
 

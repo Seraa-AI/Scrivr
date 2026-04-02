@@ -4,6 +4,7 @@ import {
   useEditorState,
   StarterKit,
   defaultPageConfig,
+  DEFAULT_FONT_FAMILY,
   LinkPopover,
   SlashMenu,
   ImageMenu,

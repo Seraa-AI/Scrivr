@@ -1,4 +1,5 @@
 import type { ToolbarItemSpec } from "@scrivr/core";
+import { DEFAULT_FONT_FAMILY } from "@scrivr/react";
 import {
   Bold,
   Italic,
@@ -29,6 +30,10 @@ interface ToolbarProps {
   blockType: string;
   blockAttrs: Record<string, unknown>;
   onCommand: (cmd: string, args?: unknown[]) => void;
+  /** Document-level default font family — shown when no explicit family is set on the selection. */
+  defaultFontFamily?: string;
+  /** Document-level default font size in px — shown when no font_size mark is active. */
+  defaultFontSize?: number;
 }
 
 // Map from command name → Lucide icon
@@ -71,6 +76,8 @@ export function Toolbar({
   blockType,
   blockAttrs,
   onCommand,
+  defaultFontFamily = DEFAULT_FONT_FAMILY,
+  defaultFontSize = 14,
 }: ToolbarProps) {
   const groupOrder: string[] = [];
   const groupMap = new Map<string, ToolbarItemSpec[]>();
@@ -95,6 +102,7 @@ export function Toolbar({
             <SizeSelect
               items={groupMap.get(group)!}
               activeMarkAttrs={activeMarkAttrs}
+              defaultFontSize={defaultFontSize}
               onCommand={onCommand}
             />
           ) : group === "family" ? (
@@ -102,6 +110,7 @@ export function Toolbar({
               items={groupMap.get(group)!}
               activeMarkAttrs={activeMarkAttrs}
               blockAttrs={blockAttrs}
+              defaultFontFamily={defaultFontFamily}
               onCommand={onCommand}
             />
           ) : (
@@ -191,16 +200,20 @@ function ButtonLabel({ item }: { item: ToolbarItemSpec }) {
 function SizeSelect({
   items,
   activeMarkAttrs,
+  defaultFontSize,
   onCommand,
 }: {
   items: ToolbarItemSpec[];
   activeMarkAttrs: Record<string, Record<string, unknown>>;
+  defaultFontSize: number;
   onCommand: (cmd: string, args?: unknown[]) => void;
 }) {
-  const activeSize = activeMarkAttrs["font_size"]?.["size"];
-  const value = typeof activeSize === "number" ? String(activeSize) : "";
+  const markSize = activeMarkAttrs["font_size"]?.["size"];
+  // Fall back to document default size when no explicit mark is set.
+  const activeSize = typeof markSize === "number" ? markSize : defaultFontSize;
+  const value = String(activeSize);
   const presetValues = new Set(items.map((i) => String(i.args?.[0])));
-  const hasCustomSize = value !== "" && !presetValues.has(value);
+  const hasCustomSize = !presetValues.has(value);
 
   return (
     <select
@@ -213,9 +226,6 @@ function SizeSelect({
       onMouseDown={(e) => e.stopPropagation()}
       title="Font size"
     >
-      <option value="" disabled>
-        Size
-      </option>
       {hasCustomSize && <option value={value}>{value}</option>}
       {items.map((item) => (
         <option key={String(item.args?.[0])} value={String(item.args?.[0])}>
@@ -232,27 +242,28 @@ function FamilySelect({
   items,
   activeMarkAttrs,
   blockAttrs,
+  defaultFontFamily,
   onCommand,
 }: {
   items: ToolbarItemSpec[];
   activeMarkAttrs: Record<string, Record<string, unknown>>;
   blockAttrs: Record<string, unknown>;
+  defaultFontFamily: string;
   onCommand: (cmd: string, args?: unknown[]) => void;
 }) {
   const inlineFamily = activeMarkAttrs["font_family"]?.["family"];
   const blockFamily = blockAttrs["fontFamily"];
+  // Priority: inline mark → block attr → document default
   const activeFamily =
-    typeof inlineFamily === "string"
-      ? inlineFamily
-      : typeof blockFamily === "string"
-        ? blockFamily
-        : null;
-  const value = activeFamily ?? "";
+    typeof inlineFamily === "string" ? inlineFamily :
+    typeof blockFamily  === "string" ? blockFamily :
+    defaultFontFamily.split(",")[0]!.trim(); // strip fallback stack
+  const value = activeFamily;
 
   return (
     <select
       className="h-[28px] w-[130px] px-1.5 border border-gray-200 rounded-md bg-white text-xs text-gray-700 cursor-pointer outline-none appearance-none"
-      style={{ fontFamily: value || "inherit" }}
+      style={{ fontFamily: value }}
       value={value}
       onChange={(e) => {
         const item = items.find((i) => i.args?.[0] === e.target.value);
@@ -261,9 +272,10 @@ function FamilySelect({
       onMouseDown={(e) => e.stopPropagation()}
       title="Font family"
     >
-      <option value="" disabled>
-        Font
-      </option>
+      {/* Show custom family (e.g. from pasted content) if not in presets */}
+      {!items.some((i) => i.args?.[0] === value) && (
+        <option value={value} style={{ fontFamily: value }}>{value}</option>
+      )}
       {items.map((item) => {
         const family = item.args?.[0] as string;
         return (

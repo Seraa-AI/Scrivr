@@ -137,7 +137,7 @@ export const List = Extension.create({
   addBlockStyles() {
     return {
       list_item: {
-        font: "14px Georgia, serif",
+        font: "14px",
         spaceBefore: 0,
         spaceAfter: 4,
         align: "left" as const,

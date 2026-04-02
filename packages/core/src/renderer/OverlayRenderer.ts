@@ -1,4 +1,8 @@
-import type { CoordsResult, GlyphEntry, LineEntry } from "../layout/CharacterMap";
+import type {
+  CoordsResult,
+  GlyphEntry,
+  LineEntry,
+} from "../layout/CharacterMap";
 
 // ── AI / Track-changes overlay helpers ───────────────────────────────────────
 
@@ -22,15 +26,15 @@ export function renderGhostText(
 ): void {
   if (!text) return;
 
-  const fontSize   = options?.fontSize   ?? 14;
-  const color      = options?.color      ?? "rgba(100, 116, 139, 0.65)"; // slate-500, muted
-  const fontFamily = options?.fontFamily ?? "Georgia, serif";
+  const fontSize = options?.fontSize ?? 14;
+  const color = options?.color ?? "rgba(100, 116, 139, 0.65)"; // slate-500, muted
+  const fontFamily = options?.fontFamily ?? "Arial, sans-serif";
 
   ctx.save();
-  ctx.font          = `italic ${fontSize}px ${fontFamily}`;
-  ctx.fillStyle     = color;
-  ctx.textBaseline  = "top";
-  ctx.textAlign     = "left";
+  ctx.font = `italic ${fontSize}px ${fontFamily}`;
+  ctx.fillStyle = color;
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
   // Clip to available width so ghost text never bleeds into the margin
   ctx.fillText(text, x, y + (lineHeight - fontSize) / 2, maxWidth);
   ctx.restore();
@@ -45,8 +49,8 @@ export function renderAiCaret(
   coords: CoordsResult,
   options?: { color?: string; label?: string; visible?: boolean },
 ): void {
-  const color   = options?.color   ?? "#a5b4fc"; // indigo-300
-  const label   = options?.label   ?? "AI";
+  const color = options?.color ?? "#a5b4fc"; // indigo-300
+  const label = options?.label ?? "AI";
   const visible = options?.visible ?? true;
 
   const x = Math.round(coords.x) + 0.5;
@@ -56,8 +60,8 @@ export function renderAiCaret(
   if (visible) {
     // Caret line (slightly thicker than user cursor to distinguish)
     ctx.strokeStyle = color;
-    ctx.lineWidth   = 2;
-    ctx.lineCap     = "round";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(x, coords.y + 1);
     ctx.lineTo(x, coords.y + coords.height - 1);
@@ -66,8 +70,8 @@ export function renderAiCaret(
 
   // Label bubble (always visible while AI caret is active)
   ctx.font = "bold 10px system-ui, -apple-system, sans-serif";
-  const textW  = ctx.measureText(label).width;
-  const pad    = 4;
+  const textW = ctx.measureText(label).width;
+  const pad = 4;
   const labelW = textW + pad * 2;
   const labelH = 15;
   const labelX = coords.x;
@@ -82,7 +86,7 @@ export function renderAiCaret(
   }
   ctx.fill();
 
-  ctx.fillStyle    = "#1e1b4b"; // indigo-950 for contrast
+  ctx.fillStyle = "#1e1b4b"; // indigo-950 for contrast
   ctx.textBaseline = "middle";
   ctx.fillText(label, labelX + pad, labelY + labelH / 2);
 
@@ -103,9 +107,7 @@ export function renderTrackedInsert(
 
   ctx.save();
   // Underline + subtle fill — faint enough not to obscure text
-  ctx.fillStyle = color.startsWith("#")
-    ? hexToRgba(color, 0.12)
-    : color;
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.12) : color;
 
   // Pass 1 — glyph highlights
   for (const g of glyphs) {
@@ -122,7 +124,7 @@ export function renderTrackedInsert(
 
   // Underline
   ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.8) : color;
-  ctx.lineWidth   = 1.5;
+  ctx.lineWidth = 1.5;
   for (const g of glyphs) {
     ctx.beginPath();
     ctx.moveTo(g.x, g.y + g.height - 1);
@@ -165,10 +167,17 @@ export function renderTrackedDelete(
   // inserted between two delete spans (e.g. "~~foo~~ bar ~~baz~~") does not
   // produce a single strikethrough that crosses "bar".
   const sorted = [...glyphs].sort((a, b) =>
-    a.lineIndex !== b.lineIndex ? a.lineIndex - b.lineIndex : a.docPos - b.docPos,
+    a.lineIndex !== b.lineIndex
+      ? a.lineIndex - b.lineIndex
+      : a.docPos - b.docPos,
   );
 
-  const runs: Array<{ minX: number; maxX: number; midY: number; prevDocPos: number }> = [];
+  const runs: Array<{
+    minX: number;
+    maxX: number;
+    midY: number;
+    prevDocPos: number;
+  }> = [];
   for (const g of sorted) {
     const last = runs[runs.length - 1];
     const midY = g.y + g.height / 2;
@@ -181,7 +190,7 @@ export function renderTrackedDelete(
   }
 
   ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
-  ctx.lineWidth   = 1.5;
+  ctx.lineWidth = 1.5;
   for (const { minX, maxX, midY } of runs) {
     ctx.beginPath();
     ctx.moveTo(minX, midY);
@@ -260,7 +269,7 @@ export function clearOverlay(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  dpr: number
+  dpr: number,
 ): void {
   ctx.resetTransform();
   ctx.clearRect(0, 0, width * dpr, height * dpr);
@@ -276,7 +285,7 @@ export function clearOverlay(
  */
 export function renderCursor(
   ctx: CanvasRenderingContext2D,
-  coords: CoordsResult
+  coords: CoordsResult,
 ): void {
   // +0.5 sub-pixel offset → 1px stroke lands on a physical pixel boundary
   const x = Math.round(coords.x) + 0.5;

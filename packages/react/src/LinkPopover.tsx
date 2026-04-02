@@ -42,10 +42,12 @@ export function LinkPopover({ editor }: LinkPopoverProps) {
       getBoundingClientRect: () => rect,
       getClientRects:        () => [rect] as unknown as DOMRectList,
     };
+    let cancelled = false;
     computePosition(virtualEl, menuRef.current, {
       placement: "bottom-start",
       middleware: [offset(6), flip(), shift({ padding: 8 })],
-    }).then(({ x, y }) => setPos({ x, y }));
+    }).then(({ x, y }) => { if (!cancelled) setPos({ x, y }); });
+    return () => { cancelled = true; };
   }, [rect, editing]);
 
   if (!rect || !info) return null;

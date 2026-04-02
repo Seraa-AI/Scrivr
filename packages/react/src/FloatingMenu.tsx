@@ -47,10 +47,12 @@ export function FloatingMenu({ editor, children, shouldShow, className }: Floati
       getClientRects:        () => [rect] as unknown as DOMRectList,
     };
 
+    let cancelled = false;
     computePosition(virtualEl, menuRef.current, {
       placement: "left",
       middleware: [offset(8), flip(), shift({ padding: 8 })],
-    }).then(({ x, y }) => setPos({ x, y }));
+    }).then(({ x, y }) => { if (!cancelled) setPos({ x, y }); });
+    return () => { cancelled = true; };
   }, [rect]);
 
   if (!rect) return null;

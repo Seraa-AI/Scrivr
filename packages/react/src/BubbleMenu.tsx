@@ -41,9 +41,11 @@ export function BubbleMenu({ editor, children, shouldShow, className }: BubbleMe
     return createBubbleMenu(editor, opts);
   }, [editor, shouldShow]);
 
-  // Re-position via floating-ui whenever rect changes
+  // Re-position via floating-ui whenever rect changes.
+  // cancelled flag prevents stale promises from overwriting a newer position.
   useEffect(() => {
     if (!rect || !menuRef.current) return;
+    let cancelled = false;
 
     const virtualEl = {
       getBoundingClientRect: () => rect,
@@ -53,7 +55,11 @@ export function BubbleMenu({ editor, children, shouldShow, className }: BubbleMe
     computePosition(virtualEl, menuRef.current, {
       placement: "top",
       middleware: [offset(8), flip(), shift({ padding: 8 })],
-    }).then(({ x, y }) => setPos({ x, y }));
+    }).then(({ x, y }) => {
+      if (!cancelled) setPos({ x, y });
+    });
+
+    return () => { cancelled = true; };
   }, [rect]);
 
   if (!rect) return null;

@@ -1,6 +1,6 @@
 export { setupCanvas, clearCanvas } from "./canvas";
 export type { CanvasSetupOptions, CanvasSetupResult } from "./canvas";
-export { renderPage } from "./PageRenderer";
+export { renderPage, drawBlock } from "./PageRenderer";
 export type { RenderPageOptions } from "./PageRenderer";
 export {
   clearOverlay,
@@ -13,5 +13,8 @@ export {
   renderTrackedConflict,
 } from "./OverlayRenderer";
 export { CursorManager } from "./CursorManager";
+export { TileManager } from "./TileManager";
+export type { TileManagerOptions } from "./TileManager";
+/** @deprecated Use TileManager instead. */
 export { ViewManager } from "./ViewManager";
 export type { ViewManagerOptions } from "./ViewManager";
