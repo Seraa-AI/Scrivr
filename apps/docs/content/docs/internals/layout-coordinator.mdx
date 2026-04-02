@@ -76,7 +76,18 @@ Synchronously forces the Layout tree to recompute if `invalidate()` was triggere
 ```ts
 ensurePagePopulated(pageNumber: number): void
 ```
-Lazily and eagerly populates the `CharacterMap` hit-test zones specifically for a single page, avoiding O(N) spatial mapping constraints for off-screen pages.
+Lazily and eagerly populates the `CharacterMap` hit-test zones specifically for a single page,
+avoiding O(N) spatial mapping constraints for off-screen pages.
+
+After registering inline glyphs for every block on the page, it also stamps the real
+`(x, y, width, height)` objectRects for any **floating images** whose anchor paragraph is on that
+page. This is important because float objectRects are only written to the charMap by
+`drawFloat` during the TileManager paint (RAF-B), but `notifyListeners` fires one frame earlier
+(RAF-A) — `getNodeViewportRect` would otherwise read the zero-width inline anchor entry and
+position the `ImageMenu` popover at the wrong location.
+
+Called automatically for `cursorPage ± 1` after every `ensureLayout()` pass, and on demand by
+`TileManager` before painting each visible tile.
 
 ### `setReady()`
 ```ts

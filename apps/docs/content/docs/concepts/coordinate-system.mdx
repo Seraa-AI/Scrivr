@@ -18,7 +18,7 @@ the layout engine during `layoutDocument()` and stored in the `CharacterMap`.
 
 - **Unit:** pixels at 96 DPI (same unit as `pageConfig.pageWidth` / `pageConfig.pageHeight`)
 - **Origin:** top-left of the page element (not the scroll container)
-- **Who computes them:** `layoutDocument()` → `populateCharMap()`
+- **Who computes them:** `layoutDocument()` → `ensurePagePopulated()` → `populateCharMap()`
 
 ### Screen-Space (viewport-relative)
 
@@ -72,6 +72,24 @@ if (rect) {
 
 ---
 
+## Glyph Registration Accuracy
+
+Every character in the document has exactly one `GlyphEntry` in the `CharacterMap`. A few details
+are worth knowing if you write custom hit-testing or layout strategies:
+
+- **Justify space bonus** — for a paragraph that spans multiple pages, the last rendered line on
+  page N is *not* the last line of the whole block. `populateCharMap` uses
+  `isLastLineOfBlock = isLastLine && !block.continuesOnNextPage` to decide whether to suppress
+  space stretching, matching what `TextBlockStrategy.render` draws. Without this, justified text's
+  character x-positions would diverge between the charMap and the canvas, causing click misses for
+  the final characters on the page.
+
+- **Float objectRects** — floating images register a zero-width anchor entry in the inline text flow.
+  `ensurePagePopulated` overwrites this with the real `(x, y, width, height)` from `FloatLayout`
+  so that `getNodeViewportRect` works correctly even before the TileManager paint has run.
+
+---
+
 ## Page Numbering
 
 Pages are **1-based**. The document begins on page `1`. `CharacterMap` entries record which page a
@@ -82,9 +100,10 @@ const entry = editor.charMap.coordsAtPos(pos);
 entry?.page; // 1, 2, 3, ...
 ```
 
-The `ViewManager` maintains a DOM element per page. `editor.setPageElementLookup()` registers a
-resolver so the editor can call `pageElementLookup(pageNumber)` to get the page's DOM element and
-read its `getBoundingClientRect()`.
+The `TileManager` registers a `pageTopLookup` callback with the editor via
+`editor.setPageTopLookup()`. This callback computes the live screen-space origin of any page by
+reading `tilesContainer.getBoundingClientRect()` and adding the page's visual Y offset — no
+sentinel DOM nodes required.
 
 ---
 
@@ -94,10 +113,10 @@ read its `getBoundingClientRect()`.
 Mouse click (clientX, clientY)
     │
     ▼
-ViewManager subtracts page element offset
+TileManager.hitTest()  →  { page, docX, docY }
     │
     ▼
-CharacterMap.posAtCoords(x, y, page)   ← world-space
+CharacterMap.posAtCoords(docX, docY, page)   ← world-space
     │
     ▼
 Doc position (integer)
@@ -110,10 +129,10 @@ editor.moveCursorTo(pos)  or  editor.setSelection(anchor, head)
 Selection change  (anchor, head integers)
     │
     ▼
-CharacterMap.coordsAtPos(head)         ← world-space
+CharacterMap.coordsAtPos(head)              ← world-space
     │
     ▼
-+ pageElement.getBoundingClientRect()  ← screen-space offset
++ editor.setPageTopLookup(page)             ← screen-space offset (TileManager)
     │
     ▼
 DOMRect  →  position BubbleMenu / FloatingMenu

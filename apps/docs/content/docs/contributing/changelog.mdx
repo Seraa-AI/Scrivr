@@ -11,6 +11,58 @@ Visit the releases page to see version history, breaking changes, and migration 
 
 ---
 
+## Recent Fixes
+
+### Floating image popover position jump
+
+**Symptom:** Clicking a floating (wrapped) image caused the `ImageMenu` popover to flash at the
+wrong position before snapping to the correct one.
+
+**Root cause:** `ensurePagePopulated` stamped only the zero-width inline anchor entry for floated
+images — the real `(x, y, width, height)` from `FloatLayout` was only written during
+`TileManager`'s paint pass (RAF-B), but `notifyListeners` fires one frame earlier (RAF-A). The
+`ImageMenu` therefore read a 0×0 objectRect, placed itself at the anchor's text position, and only
+corrected ~530 ms later when the cursor blink timer fired the next notification.
+
+**Fix:** `LayoutCoordinator.ensurePagePopulated` now stamps the real float dimensions from
+`layout.floats` immediately after processing inline block spans. `getNodeViewportRect` sees the
+correct bounds at notification time.
+
+---
+
+### Cursor lands on next page near end of last line
+
+**Symptom:** Clicking on the last two or three characters of the last visible line of a page placed
+the cursor on the next page instead.
+
+**Root cause:** `populateCharMap` used `isLastLine` (last line of the *fragment*) as the
+`isLastLineOfBlock` flag when computing `spaceBonus` for justified text. For a split block whose
+last fragment line continues on the next page, `isLastLine = true` produces `spaceBonus = 0`, while
+`TextBlockStrategy.render` correctly sets `spaceBonus > 0` (using `isLastLine &&
+!block.continuesOnNextPage`). The rendered characters were shifted right of their charMap entries;
+clicks near the right edge fell past all registered glyphs and resolved to `line.endDocPos` on the
+next page.
+
+**Fix:** `populateCharMap` now derives `isLastLineOfBlock = isLastLine &&
+!block.continuesOnNextPage`, matching `TextBlockStrategy.render` exactly.
+
+---
+
+### Floating UI popovers jump-then-snap
+
+**Symptom:** `BubbleMenu`, `ImageMenu`, `FloatingMenu`, `LinkPopover`, `SlashMenu`, and
+`TrackChangesPopover` occasionally painted at the wrong position for one frame when the anchor rect
+changed rapidly.
+
+**Root cause:** `@floating-ui/dom`'s `computePosition` is async. When the rect changed again before
+the previous `Promise` resolved, the stale result overwrote the position that had already been
+calculated for the new rect.
+
+**Fix:** A `cancelled` flag is set in the `useEffect` cleanup function. The `.then()` handler checks
+`if (!cancelled)` before calling `setPos`, so stale promises are silently discarded.
+
+---
+
 ## Versioning
 
 Scrivr follows [Semantic Versioning](https://semver.org/):

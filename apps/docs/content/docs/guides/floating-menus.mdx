@@ -104,3 +104,38 @@ export function App() {
 ```
 
 By following this pattern, you can build entirely native feeling tooltips, slash-command drop-downs, and pop-up sidebars that respond instantaneously to Canvas cursor movements while still utilizing 100% of the React ecosystem and styling tools.
+
+---
+
+## Avoiding position flicker
+
+`@floating-ui/dom`'s `computePosition` is **asynchronous** — it returns a `Promise`. If the anchor
+rect changes again before the previous promise resolves (e.g. the user clicks a different element),
+the stale result can overwrite the newly-computed position, causing a one-frame jump.
+
+Guard against this with a `cancelled` flag in your `useEffect` cleanup:
+
+```tsx
+useEffect(() => {
+  if (!rect || !menuRef.current) return;
+
+  const virtualEl = {
+    getBoundingClientRect: () => rect,
+    getClientRects: () => [rect] as unknown as DOMRectList,
+  };
+
+  let cancelled = false;
+
+  computePosition(virtualEl, menuRef.current, {
+    placement: "bottom-start",
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+  }).then(({ x, y }) => {
+    if (!cancelled) setPos({ x, y }); // discard stale result
+  });
+
+  return () => { cancelled = true; }; // cleanup cancels in-flight promise
+}, [rect]);
+```
+
+The built-in `BubbleMenu`, `ImageMenu`, `FloatingMenu`, `LinkPopover`, `SlashMenu`, and
+`TrackChangesPopover` components all use this pattern.

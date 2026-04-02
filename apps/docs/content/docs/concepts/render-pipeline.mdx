@@ -90,18 +90,66 @@ After layout, `populateCharMap()` populates the `CharacterMap` — a spatial ind
 
 ---
 
-## Stage 4 — Canvas Paint
+## Stage 3 — Layout & CharacterMap
 
-The `ViewManager` subscribes to the `Editor` via `editor.subscribe()`. When the editor notifies its
-listeners, `ViewManager.update()` runs:
+After dispatch, `Editor.dispatch()` calls `lc.invalidate()` and schedules a single RAF flush via
+`scheduleFlush()`. Multiple dispatches within the same frame coalesce — only one layout + one paint
+occur per frame.
 
-1. **Page DOM sync** — creates or removes `<div>` wrappers for each page in `DocumentLayout`
-2. **Virtual scroll** — an `IntersectionObserver` watches each page wrapper; only pages inside (or near) the
-   viewport are actively painted
-3. **Content canvas** — `PageRenderer.renderPage()` draws text runs, block backgrounds, and images
-4. **Overlay canvas** — `OverlayRenderer` draws the cursor (a blinking `1px` line from `CursorManager`)
-   and selection highlights. Extension-registered overlay handlers (e.g. collaboration cursors) are also
-   called here via `editor.runOverlayHandlers()`
+When the RAF fires:
+
+1. `lc.ensureLayout()` re-runs the layout pipeline and clears the `CharacterMap`.
+2. `lc.ensurePagePopulated(cursorPage ± 1)` immediately re-populates glyph entries and float
+   objectRects for the cursor page and its neighbours.
+3. `scrollCursorIntoView()` settles scroll position.
+4. `notifyListeners()` fires — floating menus and other subscribers receive up-to-date
+   `getViewportRect` / `getNodeViewportRect` results.
+
+---
+
+## Stage 4 — Canvas Paint (TileManager)
+
+`TileManager` subscribes to `editor.subscribe()`. When `notifyListeners` fires it schedules its own
+RAF (`scheduleUpdate`), which runs **one frame after** the layout flush:
+
+1. **Tile pool management** — a fixed pool of `<canvas>` elements is recycled; each visible page
+   slot is assigned a tile.
+2. **Content canvas** — `PageRenderer.renderPage()` draws text runs, block backgrounds, floating
+   images, and mark decorations. It also re-stamps glyph entries and float objectRects into the
+   `CharacterMap` as a side-effect of rendering.
+3. **Overlay canvas** — `OverlayRenderer` draws the cursor (a blinking line from `CursorManager`)
+   and selection highlights. Extension-registered overlay handlers (e.g. collaboration cursors) run
+   here via `editor.runOverlayHandlers()`.
+4. **Skip guard** — a tile skips repaint when both `lastPaintedVersion === layout.version` and
+   `lastRenderGeneration === editor.renderGeneration`. Calling `editor.redraw()` (e.g. after an
+   image loads) increments `renderGeneration` and forces a repaint without a layout change.
+
+---
+
+## RAF Timing
+
+Understanding the two-frame sequence matters when building floating menus:
+
+```
+Frame N  dispatch()
+           │
+           ├─ lc.invalidate()
+           └─ scheduleFlush() → RAF-A
+
+Frame N+1 (RAF-A)  Editor flush
+           │
+           ├─ ensureLayout()          ← layout runs, charMap cleared + re-populated
+           ├─ scrollCursorIntoView()
+           └─ notifyListeners()       ← BubbleMenu / ImageMenu read getViewportRect HERE
+
+Frame N+2 (RAF-B)  TileManager paint
+           │
+           └─ renderPage()            ← pixels drawn, charMap also re-stamped
+```
+
+Floating menus receive their rect at RAF-A (before pixels are drawn). Because `ensurePagePopulated`
+re-stamps float objectRects synchronously inside the layout flush, `getNodeViewportRect` returns
+correct coordinates even before the paint.
 
 ---
 
@@ -111,5 +159,5 @@ listeners, `ViewManager.update()` runs:
 |---|---|---|
 | Input | `Editor` + hidden `<textarea>` | DOM event → ProseMirror key string |
 | Transaction | `EditorState.apply(tr)` | New immutable `EditorState` |
-| Layout | `layoutDocument()` + `populateCharMap()` | `DocumentLayout` + `CharacterMap` |
-| Paint | `ViewManager` → `PageRenderer` + `OverlayRenderer` | Pixels on `<canvas>` |
+| Layout flush (RAF-A) | `ensureLayout()` + `ensurePagePopulated()` | `DocumentLayout` + `CharacterMap` |
+| Paint (RAF-B) | `TileManager` → `PageRenderer` + `OverlayRenderer` | Pixels on `<canvas>` |
