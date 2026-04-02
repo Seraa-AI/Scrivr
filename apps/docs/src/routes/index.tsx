@@ -105,7 +105,7 @@ function HomePage() {
       </main>
 
       <footer className="text-center text-xs text-fd-muted-foreground py-6 border-t border-fd-border">
-        Built with Scrivr · Apache-2.0 License
+        Built by Seraa AI · Apache-2.0 License
       </footer>
     </div>
   );
