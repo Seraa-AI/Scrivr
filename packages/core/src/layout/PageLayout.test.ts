@@ -1375,6 +1375,116 @@ describe("runPipeline — float image wrapping", () => {
   });
 });
 
+// ── Float image — top-bottom (break) mode ────────────────────────────────────
+//
+// defaultPageConfig: pageWidth=794, margins=72 all sides
+//   contentX = 72, contentRight = 722, contentWidth = 650
+//   FLOAT_MARGIN = 8, MOCK_LINE_HEIGHT = 18
+//
+// For a 200×200 image in break mode:
+//   floatX = 72 + (650 - 200) / 2 = 72 + 225 = 297  (centered)
+//   exclusion: x=72, right=722 (full content width), y=72-8=64, bottom=72+200+8=280
+//   skipToY = 280 (first line at y=72 is inside [64,280] → gap to 280)
+
+describe("runPipeline — top-bottom (break) float", () => {
+  const longText = "word ".repeat(80).trim();
+
+  it("float starts at content left and spans full content width", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "top-bottom" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.floats![0]!;
+    const contentX     = defaultPageConfig.margins.left;                                // 72
+    const contentWidth = defaultPageConfig.pageWidth - defaultPageConfig.margins.left - defaultPageConfig.margins.right; // 650
+    expect(float.x).toBeCloseTo(contentX, 1);
+    expect(float.width).toBeCloseTo(contentWidth, 1);
+  });
+
+  it("no text line overlaps the image zone (text fully above or below)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "top-bottom" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+
+    const float = layout.floats![0]!;
+    const floatTop    = float.y;
+    const floatBottom = float.y + float.height;
+
+    // Accumulate line Y positions from the anchor block.
+    const block = layout.pages[0]!.blocks[0]!;
+    let lineY = block.y;
+    for (const line of block.lines) {
+      if (line.spans.length > 0) {
+        // A real (non-spacer) line must not overlap [floatTop, floatBottom].
+        const lineBottom = lineY + line.lineHeight;
+        const overlaps = lineY < floatBottom && lineBottom > floatTop;
+        expect(overlaps).toBe(false);
+      }
+      lineY += line.lineHeight;
+    }
+  });
+
+  it("all words appear in the laid-out lines (no text dropped)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "top-bottom" });
+    const text = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    const para = schema.node("paragraph", null, [img, schema.text(text)]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const block = layout.pages[0]!.blocks[0]!;
+    const rendered = block.lines
+      .flatMap((l) => l.spans.filter((s) => s.kind === "text").map((s) => (s as { kind: "text"; text: string }).text))
+      .join(" ")
+      .trim();
+    // Every word from the source text must be present.
+    for (const word of text.split(" ")) {
+      expect(rendered).toContain(word);
+    }
+  });
+
+  it("block height includes the image gap (height > just the text lines)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "top-bottom" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    // Without the gap the block height would be just text lines.
+    // With the gap it must be at least imageHeight (200px) taller.
+    const block = layout.pages[0]!.blocks[0]!;
+    const FLOAT_MARGIN = 8;
+    expect(block.height).toBeGreaterThanOrEqual(200 + FLOAT_MARGIN);
+  });
+
+  it("exclusion spans full content width (no text constrained to a narrow column)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Use a very wide image to ensure a narrow-column bug would be obvious.
+    const img = schema.nodes["image"]!.create({ src: "", width: 400, height: 100, wrappingMode: "top-bottom" });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const block = layout.pages[0]!.blocks[0]!;
+    const contentWidth = defaultPageConfig.pageWidth - defaultPageConfig.margins.left - defaultPageConfig.margins.right; // 650
+    // All real lines must use the full content width (no constraintX narrowing).
+    for (const line of block.lines) {
+      if (line.spans.length > 0) {
+        expect(line.constraintX ?? 0).toBe(0);
+        // effectiveWidth should be undefined (full width) or equal to contentWidth.
+        if (line.effectiveWidth !== undefined) {
+          expect(line.effectiveWidth).toBeCloseTo(contentWidth, 1);
+        }
+      }
+    }
+  });
+});
+
 // ── Fragment identity fields ───────────────────────────────────────────────────
 //
 // ── buildFragments — Stage 4 ─────────────────────────────────────────────────

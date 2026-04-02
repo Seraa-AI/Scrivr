@@ -963,16 +963,20 @@ export function applyFloatLayout(
     const contentWidth = contentRight - contentX;
 
     // Clamp nodeWidth so it never exceeds the available content width.
-    // This guards against attrs set before the resize constraint was in place.
-    const clampedNodeWidth = Math.min(nodeWidth, contentWidth);
+    // For break (top-bottom) mode the image stretches to fill the full content
+    // width — the stored attrs.width is ignored for layout purposes.
+    const clampedNodeWidth = mode === "top-bottom" ? contentWidth : Math.min(nodeWidth, contentWidth);
 
     let floatX: number;
     if (mode === "square-right") {
       // offsetX shifts from the default right-side position. Adding it means
       // dragging right increases offsetX and moves the image right (natural).
       floatX = contentRight - clampedNodeWidth + offsetX;
+    } else if (mode === "top-bottom") {
+      // Break mode: image starts at the content left edge (full-width).
+      floatX = contentX;
     } else {
-      // square-left, top-bottom, behind, front — default to left side
+      // square-left, behind, front — default to left side
       floatX = contentX + offsetX;
     }
     // Clamp so the float never escapes the page content area regardless of how
@@ -1042,12 +1046,18 @@ export function applyFloatLayout(
       mode === "square-right" ? "right" :
       "full"; // top-bottom
 
+    // For top-bottom (break) mode the exclusion must span the full content width
+    // so no text can flow beside the image. For left/right wrap only the image
+    // footprint (+ margin) is excluded.
+    const exclLeft  = side === "full" ? contentX     : floatX - FLOAT_MARGIN;
+    const exclRight = side === "full" ? contentRight : floatX + clampedNodeWidth + FLOAT_MARGIN;
+
     exclusionMgr.addRect({
       page: floatPage,
-      x: floatX - FLOAT_MARGIN,
-      right: floatX + nodeWidth + FLOAT_MARGIN,
-      y: candidateY,
-      bottom: candidateY + nodeHeight,
+      x: exclLeft,
+      right: exclRight,
+      y: candidateY - FLOAT_MARGIN,
+      bottom: candidateY + nodeHeight + FLOAT_MARGIN,
       side,
       docPos: anchor.docPos,
     });

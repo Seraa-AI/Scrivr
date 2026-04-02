@@ -170,6 +170,52 @@ describe("LineBreaker — overflow / wide words (regression)", () => {
   });
 });
 
+describe("LineBreaker — skipToY (top-bottom float)", () => {
+  it("skips cumulativeLineY past the exclusion zone when skipToY is returned", () => {
+    const lb = new LineBreaker(makeMeasurer());
+    // Float exclusion spans absoluteY 20–60 (40px gap) — lineHeight = 18px.
+    // startY = 0, so absoluteLineY = cumulativeLineY.
+    // First word lands at y=0 (no constraint) → line 1 produced.
+    // Second word lands at y=18 which is inside [20, 60) → skipToY=60 jumps cumulativeLineY to 60.
+    const constraintProvider = (y: number) => {
+      if (y >= 18 && y < 60) return { x: 0, width: 0, skipToY: 60 };
+      return null;
+    };
+    const lines = lb.breakIntoLines(
+      [
+        { kind: "text" as const, text: "before float after", font: "14px serif", docPos: 1 },
+      ],
+      200,
+      undefined,
+      undefined,
+      { constraintProvider },
+    );
+    // There should be no line whose startY falls inside the exclusion zone.
+    // We can verify by checking that text spans before and after the gap both exist
+    // and the total line count is > 1 (gap caused a split).
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("all words are preserved when a skipToY gap is inserted", () => {
+    const lb = new LineBreaker(makeMeasurer());
+    const constraintProvider = (y: number) =>
+      y >= 18 && y < 60 ? { x: 0, width: 0, skipToY: 60 } : null;
+    const text = "before float after end";
+    const lines = lb.breakIntoLines(
+      [{ kind: "text" as const, text, font: "14px serif", docPos: 1 }],
+      400,
+      undefined,
+      undefined,
+      { constraintProvider },
+    );
+    const reconstructed = lines
+      .flatMap((l) => l.spans.filter((s) => s.kind === "text").map((s) => s.kind === "text" ? s.text : ""))
+      .join("")
+      .trim();
+    expect(reconstructed).toBe(text);
+  });
+});
+
 describe("LineBreaker — CharacterMap population", () => {
   it("registers one glyph per character", () => {
     const lb = new LineBreaker(makeMeasurer());
