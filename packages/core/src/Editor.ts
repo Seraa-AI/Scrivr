@@ -133,6 +133,12 @@ export class Editor {
   /** Subscriber set — notified on every state change, focus change, and cursor tick. */
   private readonly listeners = new Set<() => void>();
 
+  /**
+   * Incremented by redraw() to signal asset-only repaints (e.g. image load).
+   * TileManager compares against this to bypass the layout-version paint guard.
+   */
+  renderGeneration = 0;
+
   /** Page dimensions and margins — passed to LayoutCoordinator and read by renderers. */
   readonly pageConfig: PageConfig;
 
@@ -601,6 +607,7 @@ export class Editor {
    * needs to be repainted with fresh remote cursor positions.
    */
   redraw(): void {
+    this.renderGeneration++;
     this.notifyListeners();
   }
 

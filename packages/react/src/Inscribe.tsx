@@ -53,6 +53,10 @@ export function Inscribe({
       tm.destroy();
       editor.unmount();
     };
+  // pageStyle intentionally excluded — it's applied at TileManager construction
+  // time only. Adding it would recreate the entire engine on every parent render
+  // (inline object props always have a new reference), causing scroll-to-top.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, gap, overscan, showMarginGuides]);
 
   return (

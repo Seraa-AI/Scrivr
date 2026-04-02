@@ -5,7 +5,12 @@ import { renderPage } from "./PageRenderer";
 import { drawBlock } from "./PageRenderer";
 import { clearOverlay, renderCursor, renderSelection } from "./OverlayRenderer";
 import { NodeSelection } from "prosemirror-state";
-import { getHandles, hitHandle, computeNewSize, renderHandles } from "./ResizeController";
+import {
+  getHandles,
+  hitHandle,
+  computeNewSize,
+  renderHandles,
+} from "./ResizeController";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +44,8 @@ interface TileEntry {
   /** pageless: slice index; paged: pageIndex (0-based). */
   tileIndex: number;
   lastPaintedVersion: number;
+  /** Mirrors editor.renderGeneration — forces repaint on asset loads (e.g. images). */
+  lastRenderGeneration: number;
   assigned: boolean;
   // ── Overlay blink guard ───────────────────────────────────────────────────
   lastBlinkState: boolean;
@@ -67,7 +74,8 @@ export function fragmentsInTile(
   tileTop: number,
   tileBottom: number,
 ): LayoutFragment[] {
-  let lo = 0, hi = fragments.length;
+  let lo = 0,
+    hi = fragments.length;
   while (lo < hi) {
     const mid = (lo + hi) >>> 1;
     if (fragments[mid]!.y + fragments[mid]!.height <= tileTop) lo = mid + 1;
@@ -112,14 +120,18 @@ export class TileManager {
   private resizeObserver: ResizeObserver | null = null;
   private resizeDrag: {
     handle: string;
-    startX: number; startY: number;
-    startW: number; startH: number;
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
     docPos: number;
   } | null = null;
   private floatDrag: {
     docPos: number;
-    startX: number; startY: number;
-    startOffsetX: number; startOffsetY: number;
+    startX: number;
+    startY: number;
+    startOffsetX: number;
+    startOffsetY: number;
   } | null = null;
   private _firstPaintDone = false;
 
@@ -128,11 +140,11 @@ export class TileManager {
     private readonly container: HTMLElement,
     options: TileManagerOptions = {},
   ) {
-    this.gap            = options.gap            ?? 24;
-    this.overscan       = options.overscan       ?? 1;
+    this.gap = options.gap ?? 24;
+    this.overscan = options.overscan ?? 1;
     this.showMarginGuides = options.showMarginGuides ?? false;
     this.smallTileHeight = options.smallTileHeight ?? DEFAULT_SMALL_TILE_HEIGHT;
-    this.pageStyle      = options.pageStyle      ?? {};
+    this.pageStyle = options.pageStyle ?? {};
 
     // ── tiles container ──────────────────────────────────────────────────────
     this.tilesContainer = document.createElement("div");
@@ -157,10 +169,10 @@ export class TileManager {
     // Used by scrollCursorIntoView, getViewportRect, getNodeViewportRect.
     editor.setPageTopLookup((page) => {
       const tileRect = this.tilesContainer.getBoundingClientRect();
-      const visualY  = this.docYToVisualY(page, 0);
+      const visualY = this.docYToVisualY(page, 0);
       return {
         screenLeft: tileRect.left,
-        screenTop:  tileRect.top + visualY,
+        screenTop: tileRect.top + visualY,
       };
     });
 
@@ -182,7 +194,9 @@ export class TileManager {
    * In pageless mode there is no gap.
    */
   private get slotHeight(): number {
-    return this.editor.isPageless ? this.tileHeight : this.tileHeight + this.gap;
+    return this.editor.isPageless
+      ? this.tileHeight
+      : this.tileHeight + this.gap;
   }
 
   private containerHeight(layout: DocumentLayout): number {
@@ -235,25 +249,33 @@ export class TileManager {
     if (!this.scrollParent) {
       this.scrollParent = findScrollParent(this.container);
       if (this.scrollParent) {
-        this.scrollParent.addEventListener("scroll", this.handleScroll, { passive: true });
+        this.scrollParent.addEventListener("scroll", this.handleScroll, {
+          passive: true,
+        });
         this.resizeObserver = new ResizeObserver(() => this.scheduleUpdate());
         this.resizeObserver.observe(this.scrollParent);
       }
     }
 
-    const scrollEl    = this.scrollParent;
-    const scrollTop   = scrollEl ? scrollEl.scrollTop : 0;
-    const viewportH   = scrollEl ? scrollEl.clientHeight : window.innerHeight;
+    const scrollEl = this.scrollParent;
+    const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+    const viewportH = scrollEl ? scrollEl.clientHeight : window.innerHeight;
 
     // ── Container sizing ──────────────────────────────────────────────────
     const ch = this.containerHeight(layout);
     this.tilesContainer.style.height = `${ch}px`;
-    this.tilesContainer.style.width  = `${layout.pageConfig.pageWidth}px`;
+    this.tilesContainer.style.width = `${layout.pageConfig.pageWidth}px`;
 
     // ── Compute visible tile range ────────────────────────────────────────
     const total = this.totalTiles(layout);
-    const firstVisible = Math.max(0,         Math.floor(scrollTop / sh) - this.overscan);
-    const lastVisible  = Math.min(total - 1, Math.ceil((scrollTop + viewportH) / sh) + this.overscan);
+    const firstVisible = Math.max(
+      0,
+      Math.floor(scrollTop / sh) - this.overscan,
+    );
+    const lastVisible = Math.min(
+      total - 1,
+      Math.ceil((scrollTop + viewportH) / sh) + this.overscan,
+    );
 
     // ── Grow pool to cover the visible range ──────────────────────────────
     const needed = lastVisible - firstVisible + 1;
@@ -261,7 +283,10 @@ export class TileManager {
 
     // ── Release out-of-range tiles (hide, don't remove) ──────────────────
     for (const tile of this.pool) {
-      if (tile.assigned && (tile.tileIndex < firstVisible || tile.tileIndex > lastVisible)) {
+      if (
+        tile.assigned &&
+        (tile.tileIndex < firstVisible || tile.tileIndex > lastVisible)
+      ) {
         this.activeTiles.delete(tile.tileIndex);
         tile.assigned = false;
         tile.wrapper.style.display = "none";
@@ -274,21 +299,24 @@ export class TileManager {
       let tile = this.activeTiles.get(idx);
 
       if (!tile) {
-        tile = this.pool.find(t => !t.assigned);
+        tile = this.pool.find((t) => !t.assigned);
         if (!tile) {
-          console.warn(`[TileManager] Pool exhausted at idx=${idx} (pool size=${this.pool.length})`);
+          console.warn(
+            `[TileManager] Pool exhausted at idx=${idx} (pool size=${this.pool.length})`,
+          );
           continue;
         }
 
-        tile.assigned               = true;
-        tile.tileIndex              = idx;
-        tile.lastPaintedVersion     = -1;
-        tile.lastBlinkState         = false;
-        tile.lastCursorTile         = -1;
-        tile.lastSelectionKey       = "";
-        tile.wrapper.style.top      = `${idx * sh}px`;
-        tile.wrapper.style.height   = `${this.tileHeight}px`;
-        tile.wrapper.style.display  = "block";
+        tile.assigned = true;
+        tile.tileIndex = idx;
+        tile.lastPaintedVersion = -1;
+        tile.lastRenderGeneration = -1;
+        tile.lastBlinkState = false;
+        tile.lastCursorTile = -1;
+        tile.lastSelectionKey = "";
+        tile.wrapper.style.top = `${idx * sh}px`;
+        tile.wrapper.style.height = `${this.tileHeight}px`;
+        tile.wrapper.style.display = "block";
         this.activeTiles.set(idx, tile);
       }
 
@@ -297,13 +325,21 @@ export class TileManager {
       this.paintContent(tile, layout, version);
       this.paintOverlay(tile, layout, version);
     }
-
   }
 
   // ── Content painting ───────────────────────────────────────────────────────
 
-  private paintContent(tile: TileEntry, layout: DocumentLayout, version: number): void {
-    if (tile.lastPaintedVersion === version) return;
+  private paintContent(
+    tile: TileEntry,
+    layout: DocumentLayout,
+    version: number,
+  ): void {
+    const renderGen = this.editor.renderGeneration;
+    if (
+      tile.lastPaintedVersion === version &&
+      tile.lastRenderGeneration === renderGen
+    )
+      return;
 
     const pageNumber = tile.tileIndex + 1; // 1-based
     this.editor.ensurePagePopulated(pageNumber);
@@ -319,6 +355,7 @@ export class TileManager {
     }
 
     tile.lastPaintedVersion = version;
+    tile.lastRenderGeneration = renderGen;
 
     if (!this._firstPaintDone) {
       performance.mark("scrivr:first-paint-end");
@@ -331,7 +368,11 @@ export class TileManager {
     }
   }
 
-  private paintContentPaged(tile: TileEntry, layout: DocumentLayout, _pageNumber: number): void {
+  private paintContentPaged(
+    tile: TileEntry,
+    layout: DocumentLayout,
+    _pageNumber: number,
+  ): void {
     const { pageConfig } = layout;
     const page = layout.pages[tile.tileIndex];
     if (!page) return;
@@ -343,33 +384,37 @@ export class TileManager {
     tile.dpr = dpr;
 
     // Size overlay canvas to match
-    tile.overlayCanvas.width  = Math.round(pageConfig.pageWidth  * dpr);
+    tile.overlayCanvas.width = Math.round(pageConfig.pageWidth * dpr);
     tile.overlayCanvas.height = Math.round(pageConfig.pageHeight * dpr);
-    tile.overlayCanvas.style.width  = `${pageConfig.pageWidth}px`;
+    tile.overlayCanvas.style.width = `${pageConfig.pageWidth}px`;
     tile.overlayCanvas.style.height = `${pageConfig.pageHeight}px`;
 
     renderPage({
       ctx: tile.contentCanvas.getContext("2d", { alpha: false })!,
       page,
       pageConfig,
-      renderVersion:   layout.version,
-      currentVersion:  () => this.editor.layout.version,
+      renderVersion: layout.version,
+      currentVersion: () => this.editor.layout.version,
       dpr,
-      measurer:        this.editor.measurer,
-      map:             this.editor.charMap,
-      markDecorators:  this.editor.markDecorators,
+      measurer: this.editor.measurer,
+      map: this.editor.charMap,
+      markDecorators: this.editor.markDecorators,
       showMarginGuides: this.showMarginGuides,
-      ...(this.editor.blockRegistry  ? { blockRegistry:  this.editor.blockRegistry  } : {}),
-      ...(this.editor.inlineRegistry ? { inlineRegistry: this.editor.inlineRegistry } : {}),
+      ...(this.editor.blockRegistry
+        ? { blockRegistry: this.editor.blockRegistry }
+        : {}),
+      ...(this.editor.inlineRegistry
+        ? { inlineRegistry: this.editor.inlineRegistry }
+        : {}),
       ...(layout.floats ? { floats: layout.floats } : {}),
     });
   }
 
   private paintContentPageless(tile: TileEntry, layout: DocumentLayout): void {
     const { pageConfig } = layout;
-    const tileTop    = tile.tileIndex * this.tileHeight;
+    const tileTop = tile.tileIndex * this.tileHeight;
     const tileBottom = tileTop + this.tileHeight;
-    const fragments  = layout.fragments
+    const fragments = layout.fragments
       ? fragmentsInTile(layout.fragments, tileTop, tileBottom)
       : [];
 
@@ -379,13 +424,13 @@ export class TileManager {
     // Size canvases
     const w = pageConfig.pageWidth;
     const h = this.tileHeight;
-    tile.contentCanvas.width  = Math.round(w * dpr);
+    tile.contentCanvas.width = Math.round(w * dpr);
     tile.contentCanvas.height = Math.round(h * dpr);
-    tile.contentCanvas.style.width  = `${w}px`;
+    tile.contentCanvas.style.width = `${w}px`;
     tile.contentCanvas.style.height = `${h}px`;
-    tile.overlayCanvas.width  = Math.round(w * dpr);
+    tile.overlayCanvas.width = Math.round(w * dpr);
     tile.overlayCanvas.height = Math.round(h * dpr);
-    tile.overlayCanvas.style.width  = `${w}px`;
+    tile.overlayCanvas.style.width = `${w}px`;
     tile.overlayCanvas.style.height = `${h}px`;
 
     const ctx = tile.contentCanvas.getContext("2d", { alpha: false })!;
@@ -410,8 +455,12 @@ export class TileManager {
             lineIndexOffset,
             dpr,
             measurer: this.editor.measurer,
-            ...(this.editor.markDecorators  ? { markDecorators:  this.editor.markDecorators  } : {}),
-            ...(this.editor.inlineRegistry  ? { inlineRegistry:  this.editor.inlineRegistry  } : {}),
+            ...(this.editor.markDecorators
+              ? { markDecorators: this.editor.markDecorators }
+              : {}),
+            ...(this.editor.inlineRegistry
+              ? { inlineRegistry: this.editor.inlineRegistry }
+              : {}),
           },
           this.editor.charMap,
         );
@@ -433,31 +482,40 @@ export class TileManager {
 
   // ── Overlay painting ───────────────────────────────────────────────────────
 
-  private paintOverlay(tile: TileEntry, layout: DocumentLayout, _version: number): void {
+  private paintOverlay(
+    tile: TileEntry,
+    layout: DocumentLayout,
+    _version: number,
+  ): void {
     const { pageConfig } = layout;
-    const tileTop      = tile.tileIndex * this.tileHeight;
-    const cursorPage   = this.editor.cursorPage;
-    const isPageless   = this.editor.isPageless;
-    const cursorTile   = isPageless
-      ? Math.floor(this.docYToVisualY(cursorPage, this.cursorDocY()) / this.tileHeight)
+    const tileTop = tile.tileIndex * this.tileHeight;
+    const cursorPage = this.editor.cursorPage;
+    const isPageless = this.editor.isPageless;
+    const cursorTile = isPageless
+      ? Math.floor(
+          this.docYToVisualY(cursorPage, this.cursorDocY()) / this.tileHeight,
+        )
       : cursorPage - 1;
 
-    const sel    = this.editor.getSelectionSnapshot();
+    const sel = this.editor.getSelectionSnapshot();
     const selKey = `${sel.head}:${sel.from}:${sel.to}`;
-    const blinkOn = this.editor.isFocused && this.editor.cursorManager.isVisible;
+    const blinkOn =
+      this.editor.isFocused && this.editor.cursorManager.isVisible;
 
     // ── Blink gate ────────────────────────────────────────────────────────
-    const blinkDirty = tile.tileIndex === cursorTile && tile.lastBlinkState !== blinkOn;
-    const moveDirty  = tile.lastCursorTile !== cursorTile || tile.lastSelectionKey !== selKey;
+    const blinkDirty =
+      tile.tileIndex === cursorTile && tile.lastBlinkState !== blinkOn;
+    const moveDirty =
+      tile.lastCursorTile !== cursorTile || tile.lastSelectionKey !== selKey;
     if (!blinkDirty && !moveDirty) return;
 
-    tile.lastBlinkState    = blinkOn;
-    tile.lastCursorTile    = cursorTile;
-    tile.lastSelectionKey  = selKey;
+    tile.lastBlinkState = blinkOn;
+    tile.lastCursorTile = cursorTile;
+    tile.lastSelectionKey = selKey;
 
     const dpr = tile.dpr || (window.devicePixelRatio ?? 1);
-    const w   = pageConfig.pageWidth;
-    const h   = this.tileHeight;
+    const w = pageConfig.pageWidth;
+    const h = this.tileHeight;
 
     const overlayCtx = tile.overlayCanvas.getContext("2d")!;
     clearOverlay(overlayCtx, w, h, dpr);
@@ -467,7 +525,7 @@ export class TileManager {
       overlayCtx.translate(0, -tileTop);
     }
 
-    const pmSel   = this.editor.getState().selection;
+    const pmSel = this.editor.getState().selection;
     const isNodeSel = pmSel instanceof NodeSelection;
     const pageNum = isPageless ? 1 : tile.tileIndex + 1;
 
@@ -475,10 +533,10 @@ export class TileManager {
     if (!sel.empty && !isNodeSel) {
       const lines = this.editor.charMap
         .linesInRange(sel.from, sel.to)
-        .filter(l => l.page === pageNum);
+        .filter((l) => l.page === pageNum);
       const glyphs = this.editor.charMap
         .glyphsInRange(sel.from, sel.to)
-        .filter(g => g.page === pageNum);
+        .filter((g) => g.page === pageNum);
       renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to);
     }
 
@@ -492,7 +550,13 @@ export class TileManager {
     if (isNodeSel && pmSel.node.type.name === "image") {
       const objRect = this.editor.charMap.getObjectRect(pmSel.from);
       if (objRect && objRect.page === pageNum) {
-        renderHandles(overlayCtx, objRect.x, objRect.y, objRect.width, objRect.height);
+        renderHandles(
+          overlayCtx,
+          objRect.x,
+          objRect.y,
+          objRect.width,
+          objRect.height,
+        );
       }
     }
 
@@ -528,33 +592,36 @@ export class TileManager {
     const wrapper = document.createElement("div");
     Object.assign(wrapper.style, {
       boxSizing: "content-box",
-      position:   "absolute",
-      left:       "0",
-      display:    "none",   // hidden until assigned by update()
-      cursor:     "text",
+      position: "absolute",
+      left: "0",
+      width: "100%", // tilesContainer carries pageWidth; 100% fills it
+      display: "none", // hidden until assigned by update()
+      cursor: "text",
       userSelect: "none",
       // Paged mode defaults — overridden by pageStyle option
-      ...(!this.editor.isPageless ? {
-        boxShadow:  "0 4px 32px rgba(0,0,0,0.12)",
-        background: "#fff",
-      } : {}),
+      ...(!this.editor.isPageless
+        ? {
+            boxShadow: "0 4px 32px rgba(0,0,0,0.12)",
+            background: "#fff",
+          }
+        : {}),
       ...(!this.editor.isPageless ? this.pageStyle : {}),
     });
 
     const contentCanvas = document.createElement("canvas");
     Object.assign(contentCanvas.style, {
-      display:  "block",
+      display: "block",
       position: "absolute",
-      top:      "0",
-      left:     "0",
+      top: "0",
+      left: "0",
     });
 
     const overlayCanvas = document.createElement("canvas");
     Object.assign(overlayCanvas.style, {
-      display:       "block",
-      position:      "absolute",
-      top:           "0",
-      left:          "0",
+      display: "block",
+      position: "absolute",
+      top: "0",
+      left: "0",
       pointerEvents: "none",
     });
 
@@ -565,19 +632,23 @@ export class TileManager {
       wrapper,
       contentCanvas,
       overlayCanvas,
-      dpr:                   1,
-      tileIndex:             -1,
-      lastPaintedVersion:    -1,
-      assigned:              false,
-      lastBlinkState:        false,
-      lastCursorTile:        -1,
-      lastSelectionKey:      "",
+      dpr: 1,
+      tileIndex: -1,
+      lastPaintedVersion: -1,
+      lastRenderGeneration: -1,
+      assigned: false,
+      lastBlinkState: false,
+      lastCursorTile: -1,
+      lastSelectionKey: "",
     };
   }
 
   // ── Hit testing ────────────────────────────────────────────────────────────
 
-  private hitTest(clientX: number, clientY: number): { page: number; docX: number; docY: number } | null {
+  private hitTest(
+    clientX: number,
+    clientY: number,
+  ): { page: number; docX: number; docY: number } | null {
     const containerRect = this.tilesContainer.getBoundingClientRect();
     // getBoundingClientRect() already incorporates scroll — do NOT add scrollTop.
     const visualX = clientX - containerRect.left;
@@ -600,7 +671,8 @@ export class TileManager {
 
   private hitHandleAt(canvasX: number, canvasY: number, page: number) {
     const sel = this.editor.getState().selection;
-    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return null;
+    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image")
+      return null;
     const r = this.editor.charMap.getObjectRect(sel.from);
     if (!r || r.page !== page) return null;
     return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
@@ -611,8 +683,12 @@ export class TileManager {
     if (!floats) return null;
     for (const float of floats) {
       if (float.page !== page) continue;
-      if (canvasX >= float.x && canvasX <= float.x + float.width &&
-          canvasY >= float.y && canvasY <= float.y + float.height) {
+      if (
+        canvasX >= float.x &&
+        canvasX <= float.x + float.width &&
+        canvasY >= float.y &&
+        canvasY <= float.y + float.height
+      ) {
         return float;
       }
     }
@@ -634,7 +710,8 @@ export class TileManager {
       const sel = this.editor.getState().selection as NodeSelection;
       this.resizeDrag = {
         handle: resizeHit.id,
-        startX: e.clientX, startY: e.clientY,
+        startX: e.clientX,
+        startY: e.clientY,
         startW: sel.node.attrs["width"] as number,
         startH: sel.node.attrs["height"] as number,
         docPos: sel.from,
@@ -647,12 +724,16 @@ export class TileManager {
     const floatHit = this.hitFloatAt(docX, docY, page);
     if (floatHit) {
       this.editor.selectNode(floatHit.docPos);
-      const attrs = floatHit.node.attrs as { floatOffset?: { x: number; y: number } };
+      const attrs = floatHit.node.attrs as {
+        floatOffset?: { x: number; y: number };
+      };
       const off = attrs.floatOffset ?? { x: 0, y: 0 };
       this.floatDrag = {
         docPos: floatHit.docPos,
-        startX: e.clientX, startY: e.clientY,
-        startOffsetX: off.x, startOffsetY: off.y,
+        startX: e.clientX,
+        startY: e.clientY,
+        startOffsetX: off.x,
+        startOffsetY: off.y,
       };
       this.setCursorAll("move");
       return;
@@ -662,8 +743,8 @@ export class TileManager {
     const pos = this.editor.charMap.posAtCoords(docX, docY, page);
 
     if (!e.shiftKey) {
-      const doc   = this.editor.getState().doc;
-      const $pos  = doc.resolve(pos);
+      const doc = this.editor.getState().doc;
+      const $pos = doc.resolve(pos);
       if ($pos.nodeAfter?.type.name === "image") {
         this.editor.selectNode(pos);
         return;
@@ -681,12 +762,17 @@ export class TileManager {
   private handleMouseMove = (e: MouseEvent): void => {
     // Resize drag
     if (this.resizeDrag) {
-      const { handle, startX, startY, startW, startH, docPos } = this.resizeDrag;
+      const { handle, startX, startY, startW, startH, docPos } =
+        this.resizeDrag;
       const { pageWidth, margins } = this.editor.layout.pageConfig;
       const maxWidth = pageWidth - margins.left - margins.right;
       const { width, height } = computeNewSize(
-        handle, startW, startH,
-        e.clientX - startX, e.clientY - startY, maxWidth,
+        handle,
+        startW,
+        startH,
+        e.clientX - startX,
+        e.clientY - startY,
+        maxWidth,
       );
       this.editor.setNodeAttrs(docPos, { width, height });
       return;
@@ -694,9 +780,13 @@ export class TileManager {
 
     // Float drag
     if (this.floatDrag) {
-      const { docPos, startX, startY, startOffsetX, startOffsetY } = this.floatDrag;
+      const { docPos, startX, startY, startOffsetX, startOffsetY } =
+        this.floatDrag;
       this.editor.setNodeAttrs(docPos, {
-        floatOffset: { x: startOffsetX + (e.clientX - startX), y: startOffsetY + (e.clientY - startY) },
+        floatOffset: {
+          x: startOffsetX + (e.clientX - startX),
+          y: startOffsetY + (e.clientY - startY),
+        },
       });
       return;
     }
@@ -705,8 +795,9 @@ export class TileManager {
     const hit = this.hitTest(e.clientX, e.clientY);
     if (hit) {
       const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
-      const floatHit  = !resizeHit && this.hitFloatAt(hit.docX, hit.docY, hit.page);
-      const cursor    = resizeHit ? resizeHit.cursor : floatHit ? "move" : "text";
+      const floatHit =
+        !resizeHit && this.hitFloatAt(hit.docX, hit.docY, hit.page);
+      const cursor = resizeHit ? resizeHit.cursor : floatHit ? "move" : "text";
       this.tilesContainer.style.cursor = cursor;
     }
 
@@ -717,8 +808,14 @@ export class TileManager {
   };
 
   private handleMouseUp = (): void => {
-    if (this.resizeDrag) { this.resizeDrag = null; this.setCursorAll("text"); }
-    if (this.floatDrag)  { this.floatDrag  = null; this.setCursorAll("text"); }
+    if (this.resizeDrag) {
+      this.resizeDrag = null;
+      this.setCursorAll("text");
+    }
+    if (this.floatDrag) {
+      this.floatDrag = null;
+      this.setCursorAll("text");
+    }
     this.isDragging = false;
   };
 
