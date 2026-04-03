@@ -93,25 +93,37 @@ function SingleChangePopover({
   editor: Editor | null;
   onClose: () => void;
 }) {
-  const label  = OPERATION_LABEL[info.operation] ?? info.operation;
+  const isReplacement = !!(info.replacedText && info.insertedText);
+  const label  = isReplacement ? "Replacement" : (OPERATION_LABEL[info.operation] ?? info.operation);
   const author = shortName(info.authorID);
   const isDelete = info.operation === CHANGE_OPERATION.delete;
+
+  const ids = info.groupIds.length > 0 ? info.groupIds : [info.id];
 
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{
           ...badge,
-          background: isDelete ? "#fee2e2" : "#dcfce7",
-          color:      isDelete ? "#b91c1c" : "#15803d",
+          background: isReplacement ? "#ede9fe" : isDelete ? "#fee2e2" : "#dcfce7",
+          color:      isReplacement ? "#6d28d9"  : isDelete ? "#b91c1c" : "#15803d",
         }}>
-          {isDelete ? "−" : "+"} {label}
+          {isReplacement ? "↔" : isDelete ? "−" : "+"} {label}
         </span>
         <span style={{ color: "#64748b", fontSize: 12, flex: 1 }}>{author}</span>
-        <button onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [info.id]); onClose(); }} style={btnStyle("#15803d", "#fff")}>✓ Accept</button>
-        <button onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [info.id]); onClose(); }} style={btnStyle("#b91c1c", "#fff")}>✗ Reject</button>
+        <button onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, ids); onClose(); }} style={btnStyle("#15803d", "#fff")}>✓ Accept</button>
+        <button onClick={() => { editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, ids); onClose(); }} style={btnStyle("#b91c1c", "#fff")}>✗ Reject</button>
       </div>
-      {info.text ? (
+      {isReplacement ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={textPreview("#fee2e2", "#b91c1c")}>
+            Removing: <em>"{info.replacedText}"</em>
+          </div>
+          <div style={textPreview("#f0fdf4", "#15803d")}>
+            Adding: <em>"{info.insertedText}"</em>
+          </div>
+        </div>
+      ) : info.text ? (
         <div style={textPreview(isDelete ? "#fee2e2" : "#f0fdf4", isDelete ? "#b91c1c" : "#15803d")}>
           {isDelete ? "Removing: " : "Adding: "}
           <em>"{info.text}"</em>

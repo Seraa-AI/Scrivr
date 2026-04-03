@@ -228,8 +228,12 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
       const deleteGlyphs = new Map<number, { glyph: GlyphEntry; color: string }>();
       const insertLines = new Map<number, { line: LineEntry; color: string }>();
       const deleteLines = new Map<number, { line: LineEntry; color: string }>();
-      const conflictGlyphs: GlyphEntry[] = [];
-      const conflictLines: LineEntry[] = [];
+      // Conflict glyphs/lines are also deduplicated by position — without this,
+      // N overlapping conflict changes push the same glyphs N times, causing
+      // renderTrackedConflict to layer N semi-transparent amber fills at the
+      // same pixels and produce a solid opaque orange block.
+      const conflictGlyphsMap = new Map<number, GlyphEntry>();
+      const conflictLinesMap = new Map<number, LineEntry>();
 
       for (const change of changeSet.changes) {
         const { operation, authorID } = change.dataTracked;
@@ -260,8 +264,12 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         }
 
         if (isConflict) {
-          conflictGlyphs.push(...glyphs);
-          conflictLines.push(...lines);
+          for (const g of glyphs) {
+            if (!conflictGlyphsMap.has(g.docPos)) conflictGlyphsMap.set(g.docPos, g);
+          }
+          for (const l of lines) {
+            if (!conflictLinesMap.has(l.lineIndex)) conflictLinesMap.set(l.lineIndex, l);
+          }
         }
       }
 
@@ -299,6 +307,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
       }
 
       // Conflict overlay — rendered on top of insert/delete colours
+      const conflictGlyphs = [...conflictGlyphsMap.values()];
+      const conflictLines = [...conflictLinesMap.values()];
       if (conflictGlyphs.length > 0 || conflictLines.length > 0) {
         renderTrackedConflict(ctx, conflictGlyphs, conflictLines);
       }

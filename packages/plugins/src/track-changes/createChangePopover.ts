@@ -20,6 +20,22 @@ export interface ChangePopoverInfo {
   isConflict: boolean;
   /** All pending changes that overlap this conflict range. Empty for normal changes. */
   conflictChanges: ChangePopoverInfo[];
+  /**
+   * All change IDs that belong to the same logical group (shared groupId).
+   * Equal to [id] for ungrouped changes.
+   * Pass this to setChangeStatuses to accept/reject the whole replacement atomically.
+   */
+  groupIds: string[];
+  /**
+   * For replacement groups: the full original text being removed.
+   * Undefined for pure insertions or standalone deletions.
+   */
+  replacedText?: string;
+  /**
+   * For replacement groups: the full new text being inserted.
+   * Undefined for pure deletions or standalone insertions.
+   */
+  insertedText?: string;
 }
 
 export interface ChangePopoverCallbacks {
@@ -109,6 +125,40 @@ export function createChangePopover(
       try { return state.doc.textBetween(from, to, " "); } catch { return ""; }
     };
 
+    // Build group information for the primary change.
+    // When char-level expansion produces many 1-char marks sharing a groupId,
+    // we aggregate them here so the popover shows the full replacement text
+    // and accept/reject applies to the whole group atomically.
+    const primaryGroupId = (primary.dataTracked as { groupId?: string }).groupId;
+    let groupIds: string[] = [primary.id];
+    let replacedText: string | undefined;
+    let insertedText: string | undefined;
+
+    if (primaryGroupId) {
+      const groupChanges = pending.filter(
+        c => (c.dataTracked as { groupId?: string }).groupId === primaryGroupId,
+      );
+      groupIds = groupChanges.map(c => c.id);
+
+      const deletes = groupChanges
+        .filter(c => c.dataTracked.operation === CHANGE_OPERATION.delete)
+        .sort((a, b) => a.from - b.from);
+      const inserts = groupChanges
+        .filter(c => c.dataTracked.operation === CHANGE_OPERATION.insert)
+        .sort((a, b) => a.from - b.from);
+
+      if (deletes.length > 0) {
+        const dFrom = deletes[0]!.from;
+        const dTo   = deletes[deletes.length - 1]!.to;
+        replacedText = readText(dFrom, dTo);
+      }
+      if (inserts.length > 0) {
+        const iFrom = inserts[0]!.from;
+        const iTo   = inserts[inserts.length - 1]!.to;
+        insertedText = readText(iFrom, iTo);
+      }
+    }
+
     const toInfo = (c: typeof primary): ChangePopoverInfo => ({
       id:              c.id,
       operation:       c.dataTracked.operation as CHANGE_OPERATION,
@@ -119,14 +169,20 @@ export function createChangePopover(
       text:            readText(c.from, c.to),
       isConflict:      !!(c.dataTracked as { isConflict?: boolean }).isConflict,
       conflictChanges: [],
+      groupIds,
+      ...(replacedText !== undefined ? { replacedText } : {}),
+      ...(insertedText !== undefined ? { insertedText } : {}),
     });
 
     const primaryInfo = toInfo(primary);
     primaryInfo.isConflict = isConflict;
     primaryInfo.conflictChanges = isConflict ? conflictGroup.map(toInfo) : [];
 
-    // Stable key: sorted ids of the conflict group (or just primary)
-    const key = (isConflict ? conflictGroup : [primary]).map(c => c.id).sort().join("|");
+    // Stable key: use groupId when available (so moving across chars within the
+    // same replacement group doesn't re-trigger onShow), or sorted ids for conflicts.
+    const key = isConflict
+      ? conflictGroup.map(c => c.id).sort().join("|")
+      : (primaryGroupId ?? primary.id);
 
     if (visible && lastKey === key) {
       onMove(rect, primaryInfo);
