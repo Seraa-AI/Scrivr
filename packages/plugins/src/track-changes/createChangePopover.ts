@@ -51,6 +51,15 @@ export interface ChangePopoverInfo {
    */
   newAttrs?: Record<string, any>;
   /**
+   * For node type changes (e.g. bulletList → orderedList): the old node type name.
+   * Undefined for pure attribute changes where the node type stays the same.
+   */
+  oldNodeTypeName?: string;
+  /**
+   * For node type changes: the new node type name.
+   */
+  newNodeTypeName?: string;
+  /**
    * For move operations: the UUID that links the source deletion to this
    * destination insertion (or vice-versa). Use this to locate the paired change.
    */
@@ -234,6 +243,16 @@ export function createChangePopover(
       fontFamily: "Font",
       fontSize: "Font size",
       indent: "Indent",
+      order: "Start number",
+    };
+
+    const NODE_TYPE_LABELS: Record<string, string> = {
+      bulletList: "Bullet list",
+      orderedList: "Ordered list",
+      paragraph: "Paragraph",
+      heading: "Heading",
+      blockquote: "Blockquote",
+      codeBlock: "Code block",
     };
 
     /** Human-readable value for a known attribute key. */
@@ -275,10 +294,14 @@ export function createChangePopover(
       // ── Attribute change fields ──────────────────────────────────────────────
       let oldAttrs: Record<string, any> | undefined;
       let newAttrs: Record<string, any> | undefined;
+      let oldNodeTypeName: string | undefined;
+      let newNodeTypeName: string | undefined;
       if (op === CHANGE_OPERATION.set_node_attributes) {
         const attrChange = c as NodeAttrChange;
         oldAttrs = attrChange.oldAttrs;
         newAttrs = attrChange.newAttrs;
+        oldNodeTypeName = attrChange.oldNodeTypeName;
+        newNodeTypeName = attrChange.newNodeTypeName;
       }
 
       // ── Move operation fields ────────────────────────────────────────────────
@@ -299,7 +322,13 @@ export function createChangePopover(
       // For mark changes, show the affected text.
       // For all others, read the document text between from/to.
       let text: string;
-      if (changeKind === "node-attr" && oldAttrs && newAttrs) {
+      if (changeKind === "node-attr" && oldNodeTypeName && newNodeTypeName) {
+        // Node type changed (e.g. bulletList → orderedList): show type labels
+        // directly — diffing attrs would produce "order: 1 → default".
+        const fromLabel = NODE_TYPE_LABELS[oldNodeTypeName] ?? oldNodeTypeName;
+        const toLabel   = NODE_TYPE_LABELS[newNodeTypeName] ?? newNodeTypeName;
+        text = `${fromLabel} → ${toLabel}`;
+      } else if (changeKind === "node-attr" && oldAttrs && newAttrs) {
         const parts: string[] = [];
         const keys = new Set([
           ...Object.keys(oldAttrs),
@@ -337,6 +366,8 @@ export function createChangePopover(
         ...(insertedText !== undefined ? { insertedText } : {}),
         ...(oldAttrs !== undefined ? { oldAttrs } : {}),
         ...(newAttrs !== undefined ? { newAttrs } : {}),
+        ...(oldNodeTypeName !== undefined ? { oldNodeTypeName } : {}),
+        ...(newNodeTypeName !== undefined ? { newNodeTypeName } : {}),
         ...(moveNodeId !== undefined ? { moveNodeId } : {}),
         ...(moveRole !== undefined ? { moveRole } : {}),
         ...(markName !== undefined ? { markName } : {}),

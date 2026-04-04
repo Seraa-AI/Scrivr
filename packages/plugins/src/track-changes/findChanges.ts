@@ -128,6 +128,7 @@ export function findChanges(state: EditorState): ChangeSet {
           nodeType: node.type,
         } as PartialChange<TextChange>;
       } else if (dataTracked?.operation === CHANGE_OPERATION.set_node_attributes) {
+        const oldNodeTypeName = (dataTracked as Record<string, unknown>).oldNodeTypeName as string | undefined;
         change = {
           id,
           type: "node-attr-change",
@@ -137,6 +138,7 @@ export function findChanges(state: EditorState): ChangeSet {
           node: node,
           newAttrs: { ...node.attrs },
           oldAttrs: { ...dataTracked?.oldAttrs },
+          ...(oldNodeTypeName ? { oldNodeTypeName, newNodeTypeName: node.type.name } : {}),
         } as NodeAttrChange;
       } else if (dataTracked?.operation === CHANGE_OPERATION.reference) {
         change = {

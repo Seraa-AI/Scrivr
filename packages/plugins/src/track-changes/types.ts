@@ -139,6 +139,10 @@ export type NodeAttrChange = Change & {
   node: Node;
   oldAttrs: Record<string, any>;
   newAttrs: Record<string, any>;
+  /** Set when the node type itself changed (e.g. bulletList → orderedList). */
+  oldNodeTypeName?: string;
+  /** Set when the node type itself changed (e.g. orderedList → bulletList). */
+  newNodeTypeName?: string;
 };
 
 export type WrapChange = Change & {
