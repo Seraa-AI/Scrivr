@@ -25,12 +25,21 @@ const DELETE_COLORS = ["#dc2626", "#b91c1c", "#e11d48", "#be185d", "#c2410c", "#
  */
 const ATTR_CHANGE_COLOR = "#d97706";
 
+/**
+ * Stable first-seen assignment: each new authorID gets the next available
+ * palette slot. Authors 1–6 each get a distinct shade; beyond 6 the slot
+ * wraps. This avoids hash collisions that could give two different authors
+ * the same color within the palette size.
+ */
+const _authorIndexMap = new Map<string, number>();
+let _nextAuthorSlot = 0;
+
 function authorIndex(authorID: string): number {
-  let hash = 0;
-  for (let i = 0; i < authorID.length; i++) {
-    hash = (hash * 31 + authorID.charCodeAt(i)) >>> 0;
+  if (!_authorIndexMap.has(authorID)) {
+    _authorIndexMap.set(authorID, _nextAuthorSlot % INSERT_COLORS.length);
+    _nextAuthorSlot++;
   }
-  return hash % INSERT_COLORS.length;
+  return _authorIndexMap.get(authorID)!;
 }
 
 function insertColor(authorID: string): string {

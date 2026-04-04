@@ -1,9 +1,11 @@
 import { Node } from "prosemirror-model";
 import { Transaction } from "prosemirror-state";
+import { isHistoryTransaction } from "prosemirror-history";
 import { ReplaceStep, Step } from "prosemirror-transform";
 
 import { isIndentationAction, TrackChangesAction } from "../actions";
 import { ChangeSet } from "../ChangeSet";
+import { genId } from "../helpers";
 import {
   isDeletingPendingMovedNode,
   isDirectPendingMoveDeletion,
@@ -15,7 +17,29 @@ import {
   TrTrackingContext,
 } from "../types";
 
-const genId = () => Math.random().toString(36).slice(2, 10);
+/**
+ * Bookkeeping attrs that are excluded when comparing nodes for move detection.
+ * These fields change independently of user content (timestamps, tracking IDs)
+ * and must not cause a false mismatch between the deleted and inserted node.
+ */
+const BOOKKEEPING_ATTRS = new Set(["dataTracked", "nodeId"]);
+
+/**
+ * Deep-equals two ProseMirror nodes by semantic content, stripping bookkeeping
+ * attrs so that a moved node carrying dataTracked still matches its original.
+ */
+function nodeContentEquals(a: Node, b: Node): boolean {
+  if (a.type !== b.type) return false;
+  if (a.isText) return a.text === b.text;
+  const stripBookkeeping = (attrs: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(attrs).filter(([k]) => !BOOKKEEPING_ATTRS.has(k)));
+  if (JSON.stringify(stripBookkeeping(a.attrs)) !== JSON.stringify(stripBookkeeping(b.attrs))) return false;
+  if (a.childCount !== b.childCount) return false;
+  for (let i = 0; i < a.childCount; i++) {
+    if (!nodeContentEquals(a.child(i), b.child(i))) return false;
+  }
+  return true;
+}
 
 export function passThroughMeta(oldTr: Transaction, newTr: Transaction) {
   oldTr.getMeta("inputType") &&
@@ -47,6 +71,15 @@ export const excludeFromTracking = (node: Node) => {
   return node && !node.type.spec.attrs?.dataTracked;
 };
 
+/**
+ * Upper bound on tracked steps per transaction for typical edits.
+ * Cut operations and mass-replace bypass this limit because they legitimately
+ * generate large step counts. If a normal edit exceeds this limit it most
+ * likely indicates a loop or unsupported step type — tracking is skipped and
+ * an error is logged so the issue can be reproduced and reported.
+ */
+const MAX_TRACKED_STEPS_PER_TR = 20;
+
 export function iterationIsValid(
   iterations: number,
   oldTr: Transaction,
@@ -55,7 +88,7 @@ export function iterationIsValid(
 ) {
   const uiEvent = oldTr.getMeta("uiEvent");
   const isMassReplace = oldTr.getMeta("massSearchReplace");
-  if (iterations > 20 && uiEvent != "cut" && !isMassReplace) {
+  if (iterations > MAX_TRACKED_STEPS_PER_TR && uiEvent != "cut" && !isMassReplace) {
     console.error(
       "@scrivr/plugins track-changes: Possible infinite loop in iterating tr.steps, tracking skipped!\n" +
         "This is probably an error with the library, please report back to maintainers with a reproduction if possible",
@@ -128,8 +161,10 @@ export const getMoveOperationsSteps = (
         if (
           peerStepInsertsContent &&
           deletedContent.content.firstChild &&
-          peerStep.slice.content.firstChild.toString() ===
-            deletedContent.content.firstChild.toString()
+          nodeContentEquals(
+            peerStep.slice.content.firstChild,
+            deletedContent.content.firstChild,
+          )
         ) {
           const commonID = genId();
           movingAssoc.set(peerStep, commonID);
@@ -148,8 +183,10 @@ export const getMoveOperationsSteps = (
         if (
           insertedContent.content.firstChild &&
           deletedPeerContent.content.firstChild &&
-          insertedContent.content.firstChild.toString() ===
-            deletedPeerContent.content.firstChild.toString()
+          nodeContentEquals(
+            insertedContent.content.firstChild,
+            deletedPeerContent.content.firstChild,
+          )
         ) {
           const commonID = genId();
           movingAssoc.set(peerStep, commonID);
@@ -199,6 +236,7 @@ export const filterMeaninglessMoveSteps = (
               CHANGE_OPERATION.insert,
             );
             if (isPendingInsert) {
+              cleanSteps.push(null);
               continue;
             }
           }
@@ -212,8 +250,7 @@ export const filterMeaninglessMoveSteps = (
 };
 
 
-// @ts-ignore
-export const trFromHistory = (tr: Transaction) => Object.keys(tr.meta).find((s) => s.startsWith('history$'))
+export const trFromHistory = (tr: Transaction): boolean => isHistoryTransaction(tr);
 export const changeMovedToInsertsOnSourceDeletion = (
   tr: Transaction,
   newTr: Transaction,

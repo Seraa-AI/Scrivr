@@ -65,13 +65,21 @@ export const List = Extension.create({
       bulletList: {
         group: "block",
         content: "listItem+",
+        attrs: {
+          nodeId:      { default: null },
+          dataTracked: { default: [] },
+        },
         parseDOM: [{ tag: "ul" }],
         toDOM: () => ["ul", 0],
       },
       orderedList: {
         group: "block",
         content: "listItem+",
-        attrs: { order: { default: 1 } },
+        attrs: {
+          order:       { default: 1 },
+          nodeId:      { default: null },
+          dataTracked: { default: [] },
+        },
         parseDOM: [
           {
             tag: "ol",

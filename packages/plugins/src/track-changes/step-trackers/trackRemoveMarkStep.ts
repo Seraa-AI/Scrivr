@@ -10,12 +10,11 @@ import {
 import {
   createNewDeleteAttrs,
   createNewInsertAttrs,
+  genId,
   isValidTrackableMark,
   NewEmptyAttrs,
 } from "../helpers";
 import { CHANGE_OPERATION, DataTrackedAttrs } from "../types";
-
-const genId = () => Math.random().toString(36).slice(2, 10);
 
 function markHasOp(mark: Mark, operation: CHANGE_OPERATION) {
   if (mark.attrs.dataTracked && Array.isArray(mark.attrs.dataTracked)) {

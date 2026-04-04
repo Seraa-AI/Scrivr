@@ -2,7 +2,7 @@ import { Attrs, Fragment, Mark, Node as PMNode, Schema } from "prosemirror-model
 
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs } from "./types";
 
-const genId = () => Math.random().toString(36).slice(2, 10);
+export const genId = () => crypto.randomUUID();
 
 // ── Mark trackability ─────────────────────────────────────────────────────────
 

@@ -54,7 +54,7 @@ export class ChangeSet {
       if (
         currentNodeChange &&
         (c.from >= currentNodeChange.to ||
-          c.dataTracked.statusUpdateAt !== currentNodeChange.dataTracked.statusUpdateAt)
+          c.dataTracked.authorID !== currentNodeChange.dataTracked.authorID)
       ) {
         rootNodes.push(currentNodeChange);
         currentNodeChange = undefined;
@@ -170,7 +170,7 @@ export class ChangeSet {
   }
 
   getNotIn(ids: string[]) {
-    return this.#changes.filter(c => ids.includes(c.id));
+    return this.#changes.filter(c => !ids.includes(c.id));
   }
 
   matchAndAddToRootChange(rootNodes: TrackedChange[], change: TrackedChange) {
@@ -179,7 +179,7 @@ export class ChangeSet {
       if (
         root.type === "node-change" &&
         change.from < root.to &&
-        change.dataTracked.statusUpdateAt === root.dataTracked.statusUpdateAt
+        change.dataTracked.authorID === root.dataTracked.authorID
       ) {
         root.children.push(change);
         return { index: i, root };

@@ -8,6 +8,7 @@ import {
   createNewSplitAttrs,
   createNewWrapAttrs,
   equalMarks,
+  genId,
   getBlockInlineTrackedData,
   getTextNodeTrackedMarkData,
   NewEmptyAttrs,
@@ -16,8 +17,6 @@ import {
   NewTrackedAttrs,
 } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, ExposedFragment } from "../types";
-
-const genId = () => Math.random().toString(36).slice(2, 10);
 
 export function setFragmentAsInserted(inserted: Fragment, insertAttrs: NewInsertAttrs, schema: Schema) {
   const updatedInserted = loopContentAndMergeText(inserted, insertAttrs, schema);

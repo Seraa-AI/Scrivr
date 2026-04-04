@@ -7,6 +7,12 @@ import { ChangeSet } from "./ChangeSet";
 
 // ── DataTrackedAttrs ──────────────────────────────────────────────────────────
 
+/**
+ * Minimal shared shape of a single dataTracked entry — the fields that are
+ * present on every operation type. Used in low-level utilities
+ * (updateAttributes, trackRemoveMarkStep) where only id/status/operation
+ * are needed. For the full per-operation union type see TrackedAttrs.
+ */
 export type DataTrackedAttrs = {
   id: string;
   status: string;
