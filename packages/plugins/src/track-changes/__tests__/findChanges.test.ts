@@ -199,3 +199,82 @@ describe("findChanges — ChangeSet deduplication", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+// ── Fix 1: invalid ID guard ────────────────────────────────────────────────────
+
+describe("findChanges — invalid ID guard", () => {
+  it("no change has an empty-string id", () => {
+    const editor = new TestEditor(doc(p("hello")));
+    editor.insertAt(6, "!");
+    editor.insertAt(2, "X");
+
+    const ids = editor.allChanges.map(c => c.id);
+    expect(ids.every(id => id && id.length > 0)).toBe(true);
+  });
+});
+
+// ── Fix 2: text accumulation ──────────────────────────────────────────────────
+
+describe("findChanges — text accumulation across adjacent text nodes", () => {
+  it("single insert change has correct text content", () => {
+    const editor = new TestEditor(doc(p("hello")));
+    editor.insertAt(6, "!");
+
+    const change = editor.pendingChanges[0]!;
+    expect(change.type).toBe("text-change");
+    expect((change as import("../types").TextChange).text).toBe("!");
+  });
+
+  it("multiple adjacent inserts from same author merge into one change with full text", () => {
+    const editor = new TestEditor(doc(p("hello")));
+    // Type "AB" one char at a time — adjacent same-author inserts merge
+    editor.insertAt(6, "A");
+    editor.insertAt(7, "B");
+
+    expect(editor.pendingChanges).toHaveLength(1);
+    const change = editor.pendingChanges[0]! as import("../types").TextChange;
+    expect(change.text).toBe("AB");
+  });
+});
+
+// ── Fix 3: mark change grouping ───────────────────────────────────────────────
+
+describe("findChanges — mark changes are grouped by ID", () => {
+  it("one insert produces exactly one change, not one per character", () => {
+    const editor = new TestEditor(doc(p("hello")));
+    editor.insertAt(6, "world"); // 5 chars inserted under same tracking ID
+
+    // Should be one logical change, not 5 separate mark-change entries
+    expect(editor.pendingChanges).toHaveLength(1);
+  });
+
+  it("change covers the full inserted range", () => {
+    const editor = new TestEditor(doc(p("hello")));
+    editor.insertAt(6, "world");
+
+    const change = editor.pendingChanges[0]!;
+    // "world" is 5 chars inserted after "hello" (pos 6..11)
+    expect(change.to - change.from).toBe(5);
+  });
+
+  it("two non-adjacent inserts from same author remain separate changes", () => {
+    const editor = new TestEditor(doc(p("hello")));
+    editor.insertAt(6, "!");
+    editor.insertAt(2, "X");
+
+    expect(editor.pendingChanges).toHaveLength(2);
+  });
+
+  it("changes from different authors in same paragraph are separate", () => {
+    const editor = new TestEditor(doc(p("hello")), "author1");
+    editor.insertAt(6, "!");
+
+    editor.setUserID("author2");
+    editor.insertAt(2, "X");
+
+    expect(editor.pendingChanges).toHaveLength(2);
+    const authors = editor.pendingChanges.map(c => c.dataTracked.authorID);
+    expect(authors).toContain("author1");
+    expect(authors).toContain("author2");
+  });
+});

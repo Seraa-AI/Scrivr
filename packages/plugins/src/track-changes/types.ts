@@ -147,6 +147,7 @@ export type MarkChange = Change & {
   nodeType: NodeType;
   mark: Mark;
   node: Node;
+  text: string;
 };
 
 export type TrackedChange =
