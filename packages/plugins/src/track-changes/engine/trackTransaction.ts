@@ -24,6 +24,7 @@ import { updateChangeAttrs } from "./updateAttributes";
 import { diffChangeSteps, isStructuralChange } from "../lib/structuralChange";
 import { isDeleteStep, isSetNodeMarkupStep } from "../step-trackers/qualifiers";
 import { trackReplaceAroundStep } from "../step-trackers/trackReplaceAroundStep";
+import { trackSetNodeMarkupStep } from "../step-trackers/trackSetNodeMarkupStep";
 import trackAttrsChangeStep from "../step-trackers/trackAttrsChangeStep";
 import {
   trackAddMarkStep,
@@ -125,38 +126,8 @@ export function trackTransaction(
       }
     } else if (step instanceof ReplaceAroundStep) {
       if (isSetNodeMarkupStep(step)) {
-        // Node type or attrs change (paragraph↔heading, h1→h2, ul↔ol, etc.).
-        // trackReplaceAroundStep can't handle this — it tries to insert the new
-        // node wrapper inside the gap, producing an invalid document. Instead,
-        // invert the step to restore the old node, then record an update-node-attrs
-        // change that processChangeSteps applies via setNodeMarkup.
-        const currentDoc = tr.docs[i]!;
-        const currentNode = currentDoc.nodeAt(step.from);
-        const newNode = step.slice.content.firstChild;
-        if (currentNode && newNode) {
-          const { dataTracked: _a, nodeId: _b, ...oldMeaningful } = currentNode.attrs as Record<string, unknown>;
-          const { dataTracked: _c, nodeId: _d, ...newMeaningful } = newNode.attrs as Record<string, unknown>;
-          const typeChanged = currentNode.type !== newNode.type;
-          if (typeChanged || JSON.stringify(oldMeaningful) !== JSON.stringify(newMeaningful)) {
-            const inverted = step.invert(currentDoc);
-            if (!newTr.maybeStep(inverted).failed) {
-              const { dataTracked: _dt, nodeId, ...currentAttrs } = currentNode.attrs as Record<string, unknown>;
-              const { dataTracked: _dt2, nodeId: _nid, ...sliceAttrs } = newNode.attrs as Record<string, unknown>;
-              // Type change: use only the new type's attrs (avoid leaking attrs that
-              // don't belong to the new type, e.g. `level` from heading into paragraph).
-              const newAttrs = typeChanged
-                ? { ...sliceAttrs, nodeId }
-                : { ...currentAttrs, ...sliceAttrs, nodeId };
-              processChangeSteps([{
-                pos: step.from,
-                type: "update-node-attrs",
-                node: currentNode,
-                newAttrs,
-                ...(typeChanged ? { newNodeType: newNode.type } : {}),
-              }], newTr, emptyAttrs, oldState.schema, deletedNodeMapping);
-            }
-          }
-        }
+        const steps = trackSetNodeMarkupStep(step, newTr, emptyAttrs, tr.docs[i]!);
+        if (steps.length > 0) processChangeSteps(steps, newTr, emptyAttrs, oldState.schema, deletedNodeMapping);
       } else {
         let steps = trackReplaceAroundStep(step, oldState, tr, newTr, emptyAttrs, tr.docs[i]!, trContext);
         steps = diffChangeSteps(steps);
