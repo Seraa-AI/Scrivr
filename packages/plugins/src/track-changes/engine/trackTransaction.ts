@@ -22,7 +22,7 @@ import { createNewPendingAttrs, getNodeTrackedData } from "../helpers";
 import { fixAndSetSelectionAfterTracking } from "./fixAndSetSelectionAfterTracking";
 import { updateChangeAttrs } from "./updateAttributes";
 import { diffChangeSteps, isStructuralChange } from "../lib/structuralChange";
-import { isDeleteStep, isLiftStep, isSetNodeMarkupStep, isWrapStep } from "../step-trackers/qualifiers";
+import { isDeleteStep, isSetNodeMarkupStep } from "../step-trackers/qualifiers";
 import { trackReplaceAroundStep } from "../step-trackers/trackReplaceAroundStep";
 import trackAttrsChangeStep from "../step-trackers/trackAttrsChangeStep";
 import {
@@ -125,63 +125,42 @@ export function trackTransaction(
       }
     } else if (step instanceof ReplaceAroundStep) {
       if (isSetNodeMarkupStep(step)) {
-        // setNodeMarkup step — node type/attrs changed (e.g. heading h1→h2).
-        // Treat it the same as an AttrStep: record an update-node-attrs change.
+        // Node type or attrs change (paragraph↔heading, h1→h2, ul↔ol, etc.).
+        // trackReplaceAroundStep can't handle this — it tries to insert the new
+        // node wrapper inside the gap, producing an invalid document. Instead,
+        // invert the step to restore the old node, then record an update-node-attrs
+        // change that processChangeSteps applies via setNodeMarkup.
         const currentDoc = tr.docs[i]!;
-        const nodePos: number = step.from;
-        const currentNode = currentDoc.nodeAt(nodePos);
+        const currentNode = currentDoc.nodeAt(step.from);
         const newNode = step.slice.content.firstChild;
         if (currentNode && newNode) {
-          // Only track when something user-visible changed.
-          // Strip nodeId and dataTracked (internal bookkeeping) before comparing
-          // so that nodeId-assignment and accept/reject ops don't generate false
-          // attribute-change entries.
-          const { dataTracked: _dtA, nodeId: _nidA, ...currentMeaningful } = currentNode.attrs as Record<string, unknown>;
-          const { dataTracked: _dtB, nodeId: _nidB, ...newMeaningful } = newNode.attrs as Record<string, unknown>;
+          const { dataTracked: _a, nodeId: _b, ...oldMeaningful } = currentNode.attrs as Record<string, unknown>;
+          const { dataTracked: _c, nodeId: _d, ...newMeaningful } = newNode.attrs as Record<string, unknown>;
           const typeChanged = currentNode.type !== newNode.type;
-          const attrsChanged = JSON.stringify(currentMeaningful) !== JSON.stringify(newMeaningful);
-          if (!typeChanged && !attrsChanged) {
-            // Only bookkeeping fields changed (e.g. dataTracked or nodeId stamping).
-            // The original transaction already applied the step — nothing to add.
-          } else {
+          if (typeChanged || JSON.stringify(oldMeaningful) !== JSON.stringify(newMeaningful)) {
             const inverted = step.invert(currentDoc);
-            const stepResult = newTr.maybeStep(inverted);
-            if (!stepResult.failed) {
-              const { dataTracked: _dt, ...currentAttrs } = currentNode.attrs as Record<string, unknown>;
+            if (!newTr.maybeStep(inverted).failed) {
+              const { dataTracked: _dt, nodeId, ...currentAttrs } = currentNode.attrs as Record<string, unknown>;
               const { dataTracked: _dt2, nodeId: _nid, ...sliceAttrs } = newNode.attrs as Record<string, unknown>;
-              // For same-type changes (e.g. h1→h2), merge old attrs so unset attrs
-              // keep their existing values. For type changes (e.g. p→heading or
-              // heading→p), use ONLY the new type's attrs — the old type may have
-              // attrs (like `level`) that don't belong in the new type, which would
-              // cause the attrs-diff guard to incorrectly see "no change".
+              // Type change: use only the new type's attrs (avoid leaking attrs that
+              // don't belong to the new type, e.g. `level` from heading into paragraph).
               const newAttrs = typeChanged
-                ? { ...sliceAttrs, nodeId: currentAttrs.nodeId }
-                : { ...currentAttrs, ...sliceAttrs, nodeId: currentAttrs.nodeId };
-              const changeStep: import("../types").ChangeStep = {
-                pos: nodePos,
+                ? { ...sliceAttrs, nodeId }
+                : { ...currentAttrs, ...sliceAttrs, nodeId };
+              processChangeSteps([{
+                pos: step.from,
                 type: "update-node-attrs",
                 node: currentNode,
                 newAttrs,
                 ...(typeChanged ? { newNodeType: newNode.type } : {}),
-              };
-              processChangeSteps([changeStep], newTr, emptyAttrs, oldState.schema, deletedNodeMapping);
+              }], newTr, emptyAttrs, oldState.schema, deletedNodeMapping);
             }
           }
         }
-      } else if (isWrapStep(step) || isLiftStep(step)) {
-        // Wrap (e.g. blockquote) and lift operations.
-        const changeSteps = trackReplaceAroundStep(
-          step,
-          oldState,
-          tr,
-          newTr,
-          emptyAttrs,
-          tr.docs[i]!,
-          trContext,
-        );
-        if (changeSteps.length > 0) {
-          processChangeSteps(changeSteps, newTr, emptyAttrs, oldState.schema, deletedNodeMapping);
-        }
+      } else {
+        let steps = trackReplaceAroundStep(step, oldState, tr, newTr, emptyAttrs, tr.docs[i]!, trContext);
+        steps = diffChangeSteps(steps);
+        processChangeSteps(steps, newTr, emptyAttrs, oldState.schema, deletedNodeMapping);
       }
     } else if (step instanceof AttrStep) {
       const changeSteps = trackAttrsChangeStep(

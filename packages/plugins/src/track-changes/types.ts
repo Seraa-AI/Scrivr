@@ -70,6 +70,8 @@ type InsertDeleteAttrs = {
 export type UpdateAttrs = Omit<InsertDeleteAttrs, "operation"> & {
   operation: CHANGE_OPERATION.set_node_attributes;
   oldAttrs: Record<string, any>;
+  /** Original node type name, set only when the node type changes (e.g. ul→ol). Used to restore the type on rejection. */
+  oldNodeTypeName?: string;
 };
 
 export type WrapAttrs = Omit<InsertDeleteAttrs, "operation"> & {

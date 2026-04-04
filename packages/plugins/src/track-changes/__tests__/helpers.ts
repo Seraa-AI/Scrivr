@@ -41,6 +41,29 @@ export const schema = new Schema({
         align:       { default: null },
       },
     },
+    bullet_list: {
+      group: "block",
+      content: "list_item+",
+      attrs: {
+        dataTracked: { default: null },
+        nodeId:      { default: null },
+      },
+    },
+    ordered_list: {
+      group: "block",
+      content: "list_item+",
+      attrs: {
+        dataTracked: { default: null },
+        nodeId:      { default: null },
+      },
+    },
+    list_item: {
+      content: "paragraph+",
+      attrs: {
+        dataTracked: { default: null },
+        nodeId:      { default: null },
+      },
+    },
     text: { group: "inline" },
   },
   marks: {
@@ -67,6 +90,18 @@ export function h(level: number, text: string, attrs?: Record<string, unknown>) 
 
 export function doc(...nodes: import("prosemirror-model").Node[]) {
   return schema.nodes.doc.create(null, nodes);
+}
+
+export function li(text: string) {
+  return schema.nodes.list_item.create(null, p(text));
+}
+
+export function ul(...items: ReturnType<typeof li>[]) {
+  return schema.nodes.bullet_list.create(null, items);
+}
+
+export function ol(...items: ReturnType<typeof li>[]) {
+  return schema.nodes.ordered_list.create(null, items);
 }
 
 // ── Editor harness ────────────────────────────────────────────────────────────

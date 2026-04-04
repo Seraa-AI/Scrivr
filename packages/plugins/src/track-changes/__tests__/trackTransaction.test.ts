@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { doc, p, h, TestEditor } from "./helpers";
+import { doc, p, h, ul, ol, li, TestEditor } from "./helpers";
 import { CHANGE_OPERATION, TrackChangesStatus } from "../types";
 import { trackChangesPlugin, trackChangesPluginKey } from "../engine/trackChangesPlugin";
 import { EditorState } from "prosemirror-state";
@@ -84,6 +84,69 @@ describe("trackTransaction — heading → paragraph (reverse)", () => {
     expect(editor.pendingChanges).toHaveLength(1);
     expect(editor.pendingChanges[0]!.type).toBe("node-attr-change");
     expect(editor.state.doc.firstChild!.type.name).toBe("paragraph");
+  });
+});
+
+// ── List type conversion tracking ─────────────────────────────────────────────
+
+describe("trackTransaction — ordered → bullet list (type change)", () => {
+  it("setNodeMarkup(ordered_list → bullet_list) produces one node-attr-change", () => {
+    const editor = new TestEditor(doc(ol(li("item one"), li("item two"))));
+    // pos 0 is the ordered_list node
+    editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.bullet_list, {}));
+
+    expect(editor.pendingChanges).toHaveLength(1);
+    const change = editor.pendingChanges[0]!;
+    expect(change.type).toBe("node-attr-change");
+    expect(change.dataTracked.operation).toBe(CHANGE_OPERATION.set_node_attributes);
+  });
+
+  it("node type changes to bullet_list in the document", () => {
+    const editor = new TestEditor(doc(ol(li("item one"), li("item two"))));
+    editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.bullet_list, {}));
+
+    expect(editor.state.doc.firstChild!.type.name).toBe("bullet_list");
+  });
+
+  it("list content is preserved after type change", () => {
+    const editor = new TestEditor(doc(ol(li("item one"), li("item two"))));
+    editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.bullet_list, {}));
+
+    expect(editor.state.doc.firstChild!.childCount).toBe(2);
+    expect(editor.state.doc.textContent).toBe("item oneitem two");
+  });
+
+  it("accepting the change clears it; list stays as bullet_list", () => {
+    const editor = new TestEditor(doc(ol(li("item one"))));
+    editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.bullet_list, {}));
+
+    const ids = editor.pendingChanges.map(c => c.id);
+    editor.acceptChanges(ids);
+
+    expect(editor.pendingChanges).toHaveLength(0);
+    expect(editor.state.doc.firstChild!.type.name).toBe("bullet_list");
+  });
+
+  it("rejecting the change reverts to ordered_list", () => {
+    const editor = new TestEditor(doc(ol(li("item one"))));
+    editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.bullet_list, {}));
+
+    const ids = editor.pendingChanges.map(c => c.id);
+    editor.rejectChanges(ids);
+
+    expect(editor.pendingChanges).toHaveLength(0);
+    expect(editor.state.doc.firstChild!.type.name).toBe("ordered_list");
+  });
+});
+
+describe("trackTransaction — bullet → ordered list (reverse)", () => {
+  it("setNodeMarkup(bullet_list → ordered_list) produces one node-attr-change", () => {
+    const editor = new TestEditor(doc(ul(li("item one"))));
+    editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.ordered_list, {}));
+
+    expect(editor.pendingChanges).toHaveLength(1);
+    expect(editor.pendingChanges[0]!.type).toBe("node-attr-change");
+    expect(editor.state.doc.firstChild!.type.name).toBe("ordered_list");
   });
 });
 
