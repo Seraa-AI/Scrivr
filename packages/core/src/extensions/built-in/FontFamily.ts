@@ -38,7 +38,7 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
   addMarks() {
     return {
       font_family: {
-        attrs: { family: {} },
+        attrs: { family: {}, dataTracked: { default: [] } },
         excludes: "font_family",
         parseDOM: [
           {

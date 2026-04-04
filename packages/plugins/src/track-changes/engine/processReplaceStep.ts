@@ -218,7 +218,7 @@ export function processChangeSteps(
 
         newTr.setNodeMarkup(
           mapping.map(c.pos),
-          undefined,
+          c.newNodeType ?? c.node.type,
           {
             ...c.newAttrs,
             dataTracked: finalDataTracked.length > 0 ? finalDataTracked : null,

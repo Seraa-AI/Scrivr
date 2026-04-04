@@ -27,7 +27,7 @@ export const FontSize = Extension.create<FontSizeOptions>({
   addMarks() {
     return {
       font_size: {
-        attrs: { size: {} },
+        attrs: { size: {}, dataTracked: { default: [] } },
         excludes: "font_size",
         parseDOM: [
           {

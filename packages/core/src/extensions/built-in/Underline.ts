@@ -8,6 +8,7 @@ export const Underline = Extension.create({
   addMarks() {
     return {
       underline: {
+        attrs: { dataTracked: { default: [] } },
         parseDOM: [
           { tag: "u" },
           { style: "text-decoration=underline" },

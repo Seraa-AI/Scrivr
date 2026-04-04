@@ -251,6 +251,8 @@ export interface UpdateNodeAttrsStep {
   type: "update-node-attrs";
   node: Node;
   newAttrs: Record<string, any>;
+  /** New node type when the block type changes (e.g. paragraph → heading). Undefined means keep existing type. */
+  newNodeType?: NodeType;
 }
 
 export type ChangeStep =

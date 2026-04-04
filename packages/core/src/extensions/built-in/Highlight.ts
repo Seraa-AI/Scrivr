@@ -30,8 +30,8 @@ export const Highlight = Extension.create<HighlightOptions>({
 
   addMarks() {
     const attrs = this.options.multicolor
-      ? { color: { default: this.options.color } }
-      : {};
+      ? { color: { default: this.options.color }, dataTracked: { default: [] } }
+      : { dataTracked: { default: [] } };
 
     return {
       highlight: {

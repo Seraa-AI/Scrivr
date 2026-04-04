@@ -17,6 +17,7 @@ export const Italic = Extension.create<ItalicOptions>({
   addMarks() {
     return {
       italic: {
+        attrs: { dataTracked: { default: [] } },
         parseDOM: [
           { tag: "em" },
           { tag: "i", getAttrs: (node) => (node as HTMLElement).style.fontStyle !== "normal" && null },

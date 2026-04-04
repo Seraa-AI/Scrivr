@@ -1,4 +1,4 @@
-import { Extension, renderTrackedInsert, renderTrackedDelete, renderTrackedConflict } from "@scrivr/core";
+import { Extension, renderTrackedInsert, renderTrackedDelete, renderTrackedConflict, renderTrackedAttrChange } from "@scrivr/core";
 import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler } from "@scrivr/core";
 import type { EditorState, Transaction } from "prosemirror-state";
 
@@ -18,6 +18,12 @@ const INSERT_COLORS = ["#16a34a", "#15803d", "#059669", "#10b981", "#0d9488", "#
  * Delete palette — red/rose family. Semantic: "removing content".
  */
 const DELETE_COLORS = ["#dc2626", "#b91c1c", "#e11d48", "#be185d", "#c2410c", "#9a3412"];
+
+/**
+ * Attribute-change color — amber. Distinct from insert/delete so reviewers
+ * immediately recognise "formatting was changed here".
+ */
+const ATTR_CHANGE_COLOR = "#d97706";
 
 function authorIndex(authorID: string): number {
   let hash = 0;
@@ -234,6 +240,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
       // same pixels and produce a solid opaque orange block.
       const conflictGlyphsMap = new Map<number, GlyphEntry>();
       const conflictLinesMap = new Map<number, LineEntry>();
+      // Attribute changes: keyed by lineIndex to avoid duplicate bars.
+      const attrChangeLines = new Map<number, LineEntry>();
 
       for (const change of changeSet.changes) {
         const { operation, authorID } = change.dataTracked;
@@ -260,6 +268,11 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
           }
           for (const l of lines) {
             if (!deleteLines.has(l.lineIndex)) deleteLines.set(l.lineIndex, { line: l, color });
+          }
+        } else if (operation === CHANGE_OPERATION.set_node_attributes) {
+          // Draw a left-margin bar for every line of the changed block.
+          for (const l of lines) {
+            if (!attrChangeLines.has(l.lineIndex)) attrChangeLines.set(l.lineIndex, l);
           }
         }
 
@@ -311,6 +324,11 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
       const conflictLines = [...conflictLinesMap.values()];
       if (conflictGlyphs.length > 0 || conflictLines.length > 0) {
         renderTrackedConflict(ctx, conflictGlyphs, conflictLines);
+      }
+
+      // Attribute-change bars — rendered last so they're always visible
+      if (attrChangeLines.size > 0) {
+        renderTrackedAttrChange(ctx, [...attrChangeLines.values()], ATTR_CHANGE_COLOR);
       }
     };
 

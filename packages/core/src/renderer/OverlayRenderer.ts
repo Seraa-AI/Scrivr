@@ -202,6 +202,36 @@ export function renderTrackedDelete(
 }
 
 /**
+ * Draws a colored left-margin bar for each line of a block whose node
+ * attributes were changed (e.g. heading level, alignment).
+ *
+ * Mirrors Word / Google Docs "formatting changed" bar in the left gutter.
+ * Uses a distinct amber palette to avoid confusion with insert (green) and
+ * delete (red).
+ */
+export function renderTrackedAttrChange(
+  ctx: CanvasRenderingContext2D,
+  lines: LineEntry[],
+  color: string,
+): void {
+  if (lines.length === 0) return;
+
+  ctx.save();
+
+  const BAR_WIDTH = 3;
+  const BAR_GAP = 4; // pixels left of the line's x origin
+
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
+
+  for (const line of lines) {
+    const barX = Math.max(0, line.x - BAR_GAP - BAR_WIDTH);
+    ctx.fillRect(barX, line.y, BAR_WIDTH, line.height);
+  }
+
+  ctx.restore();
+}
+
+/**
  * Draws an amber conflict indicator over glyphs where two authors' marks
  * overlap on the same segment. Rendered on top of the normal insert/delete
  * colour — the underlying green/red is still visible through the amber wash.

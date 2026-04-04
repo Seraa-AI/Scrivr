@@ -8,6 +8,7 @@ export const Strikethrough = Extension.create({
   addMarks() {
     return {
       strikethrough: {
+        attrs: { dataTracked: { default: [] } },
         parseDOM: [
           { tag: "s" },
           { tag: "del" },

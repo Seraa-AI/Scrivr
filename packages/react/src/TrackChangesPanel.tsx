@@ -207,7 +207,7 @@ function describeAttrChange(change: NodeAttrChange): string {
     }
   }
 
-  return parts.join(" · ") || "Attribute changed";
+  return parts.join(" · ");
 }
 
 /** Describe a MarkChange for display. */

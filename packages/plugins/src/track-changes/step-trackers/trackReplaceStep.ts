@@ -128,11 +128,9 @@ export function trackReplaceStep(
           slice: new Slice(fragment, openStart, openEnd) as ExposedSlice,
         });
       } else {
-        const isDeleteEvent = (window.event as KeyboardEvent)?.code === "Delete";
-        const isDeleteContentForward =
-          // @ts-expect-error window.event.inputType missing in TS DOM defs
-          window.event?.inputType === "deleteContentForward";
-
+        const winEvent = typeof window !== "undefined" ? window.event as (KeyboardEvent & { inputType?: string }) | undefined : undefined;
+        const isDeleteEvent = winEvent?.code === "Delete";
+        const isDeleteContentForward = winEvent?.inputType === "deleteContentForward";
         selectionPos = isDeleteEvent || isDeleteContentForward ? toA : fromA;
       }
     });

@@ -28,7 +28,7 @@ export const Color = Extension.create<ColorOptions>({
   addMarks() {
     return {
       color: {
-        attrs: { color: {} },
+        attrs: { color: {}, dataTracked: { default: [] } },
         excludes: "color",
         parseDOM: [
           {
