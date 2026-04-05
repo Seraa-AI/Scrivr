@@ -48,6 +48,7 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
 
   let visible = false;
   let lastDocPos = -1;
+  let rafId: number | null = null;
 
   function update() {
     const state = editor.getState();
@@ -77,10 +78,14 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
     }
   }
 
-  const unsubscribe = editor.subscribe(update);
+  const unsubscribe = editor.on("update", () => {
+    if (rafId !== null) return;
+    rafId = requestAnimationFrame(() => { rafId = null; update(); });
+  });
 
   return () => {
     unsubscribe();
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     if (visible) { visible = false; lastDocPos = -1; onHide(); }
   };
 }

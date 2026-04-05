@@ -38,6 +38,7 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
   const { onShow, onHide, onMove } = options;
 
   let visible = false;
+  let rafId: number | null = null;
 
   function update() {
     const state    = editor.getState();
@@ -79,10 +80,14 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     }
   }
 
-  const unsubscribe = editor.subscribe(update);
+  const unsubscribe = editor.on("update", () => {
+    if (rafId !== null) return;
+    rafId = requestAnimationFrame(() => { rafId = null; update(); });
+  });
 
   return () => {
     unsubscribe();
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     if (visible) { visible = false; onHide(); }
   };
 }

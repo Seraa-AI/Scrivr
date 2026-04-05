@@ -75,7 +75,7 @@ export function createBubbleMenu(editor: IEditor, options: BubbleMenuOptions): (
     timer = setTimeout(update, delay);
   }
 
-  const unsubscribe = editor.subscribe(scheduleUpdate);
+  const unsubscribe = editor.on("update", scheduleUpdate);
 
   return () => {
     if (timer) clearTimeout(timer);

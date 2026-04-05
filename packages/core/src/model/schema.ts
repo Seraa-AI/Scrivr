@@ -17,13 +17,13 @@ import { Schema } from "prosemirror-model";
 
 export const schema = new Schema({
   nodes: {
-    // ── Top level ────────────────────────────────────────────────────────────
+    /** Top level */
 
     doc: {
       content: "block+",
     },
 
-    // ── Block nodes ──────────────────────────────────────────────────────────
+    /** Block nodes */
 
     paragraph: {
       group: "block",
@@ -71,7 +71,7 @@ export const schema = new Schema({
       toDOM: () => ["li", 0],
     },
 
-    // Code block — monospace, no marks, input rule ``
+    /** Code block — monospace, no marks, input rule `` */
     codeBlock: {
       content: "text*",
       group: "block",
@@ -85,14 +85,14 @@ export const schema = new Schema({
       toDOM: () => ["pre", ["code", 0]],
     },
 
-    // Horizontal rule — leaf block, drawn as a thin line
+    /** Horizontal rule — leaf block, drawn as a thin line */
     horizontalRule: {
       group: "block",
       parseDOM: [{ tag: "hr" }],
       toDOM: () => ["hr"],
     },
 
-    // Table — fixed-width columns, common in legal contracts
+    /** Table — fixed-width columns, common in legal contracts */
     table: {
       group: "block",
       content: "table_row+",
@@ -114,15 +114,15 @@ export const schema = new Schema({
       },
     },
 
-    // Hard page break — forces content onto the next page
+    /** Hard page break — forces content onto the next page */
     page_break: {
       group: "block",
       isLeaf: true,
     },
 
-    // ── Inline nodes ─────────────────────────────────────────────────────────
+    /** Inline nodes */
 
-    // Inline image — sits inside a paragraph line box
+    /** Inline image — sits inside a paragraph line box */
     image: {
       group: "inline",
       inline: true,
@@ -143,7 +143,7 @@ export const schema = new Schema({
       ],
     },
 
-    // Hard line break within a paragraph (Shift+Enter)
+    /** Hard line break within a paragraph (Shift+Enter) */
     hard_break: {
       group: "inline",
       inline: true,
@@ -157,14 +157,14 @@ export const schema = new Schema({
   },
 
   marks: {
-    // ── Core formatting ───────────────────────────────────────────────────────
+    /** Core formatting */
 
     bold: {},
     italic: {},
     underline: {},
     strikethrough: {},
 
-    // ── Typography ────────────────────────────────────────────────────────────
+    /** Typography */
 
     font_size: {
       attrs: {
@@ -187,7 +187,7 @@ export const schema = new Schema({
       excludes: "color",
     },
 
-    // ── Links ─────────────────────────────────────────────────────────────────
+    /** Links */
 
     link: {
       attrs: {
@@ -197,7 +197,7 @@ export const schema = new Schema({
       inclusive: false, // typing at the end of a link doesn't extend it
     },
 
-    // ── Highlight ─────────────────────────────────────────────────────────────
+    /** Highlight */
 
     highlight: {
       attrs: {
@@ -206,7 +206,7 @@ export const schema = new Schema({
       },
     },
 
-    // ── Track changes ─────────────────────────────────────────────────────────
+    /** Track changes */
     // These marks are applied by the track-changes plugin.
     // The DOCX exporter maps them to <w:ins> and <w:del> OOXML nodes.
 

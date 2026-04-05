@@ -16,6 +16,7 @@
 import type { NodeSpec, MarkSpec, Schema, Node, Mark } from "prosemirror-model";
 import type { MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState } from "prosemirror-state";
+import type { EditorEvents } from "../types/augmentation";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
@@ -59,6 +60,8 @@ export type OverlayRenderHandler = (
 export interface IBaseEditor {
   /** Subscribe to all editor notifications (state change, focus, cursor tick). */
   subscribe(listener: () => void): () => void;
+  /** Subscribe to a typed editor event. Returns an unsubscribe function. */
+  on<K extends keyof EditorEvents>(event: K, handler: (payload: EditorEvents[K]) => void): () => void;
   /** Current ProseMirror state. */
   getState(): EditorState;
   /**

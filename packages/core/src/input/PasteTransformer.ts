@@ -1,12 +1,20 @@
-import { DOMParser as PMDOMParser, Fragment, Mark, Slice } from "prosemirror-model";
+import {
+  DOMParser as PMDOMParser,
+  Fragment,
+  Mark,
+  Slice,
+} from "prosemirror-model";
 import type { Schema, Node } from "prosemirror-model";
 import type { EditorState, Transaction } from "prosemirror-state";
 import { MarkdownParser } from "prosemirror-markdown";
 import MarkdownIt from "markdown-it";
-import type { MarkdownBlockRule, MarkdownParserTokenSpec } from "../extensions/types";
+import type {
+  MarkdownBlockRule,
+  MarkdownParserTokenSpec,
+} from "../extensions/types";
 import { insertText } from "../model/commands";
 
-// ── Markdown detection heuristic ──────────────────────────────────────────────
+/** Markdown detection heuristic */
 // Require intentional block-level structure — mid-sentence asterisks are NOT markdown.
 const MARKDOWN_PATTERN = /^(#{1,6} |[*-] |\d+\. |`{3}|---)/m;
 
@@ -33,7 +41,10 @@ export class PasteTransformer {
   constructor(
     private readonly schema: Schema,
     private readonly extraMarkdownRules: MarkdownBlockRule[] = [],
-    private readonly markdownParserTokens: Record<string, MarkdownParserTokenSpec> = {},
+    private readonly markdownParserTokens: Record<
+      string,
+      MarkdownParserTokenSpec
+    > = {},
   ) {
     // Disable rules that generate tokens our schema can't handle (blockquote, link, image).
     // Their content still renders as plain text — no data loss, just no special formatting.
@@ -42,7 +53,10 @@ export class PasteTransformer {
     this.md.disable(["blockquote", "image", "link"]);
   }
 
-  transform(clipboardData: DataTransfer, state: EditorState): Transaction | null {
+  transform(
+    clipboardData: DataTransfer,
+    state: EditorState,
+  ): Transaction | null {
     const html = clipboardData.getData("text/html").trim();
     const plain = clipboardData.getData("text/plain");
 
@@ -70,7 +84,7 @@ export class PasteTransformer {
     return null;
   }
 
-  // ── HTML ─────────────────────────────────────────────────────────────────
+  /** HTML */
 
   private fromHtml(html: string, state: EditorState): Transaction {
     const div = document.createElement("div");
@@ -88,15 +102,19 @@ export class PasteTransformer {
     // Collect only block-level nodes. parse() may produce inline nodes (e.g.
     // hard_break) at the document level from Google Docs' trailing <br> tags.
     const blockNodes: Node[] = [];
-    doc.content.forEach((n) => { if (n.isBlock) blockNodes.push(n); });
-    const fragment = Fragment.from(blockNodes.length ? blockNodes : doc.content);
+    doc.content.forEach((n) => {
+      if (n.isBlock) blockNodes.push(n);
+    });
+    const fragment = Fragment.from(
+      blockNodes.length ? blockNodes : doc.content,
+    );
 
     // When pasting into an empty paragraph, replace the whole paragraph so we
     // don't leave a stray empty paragraph before the inserted blocks.
     const { $from } = state.selection;
     if ($from.depth >= 1 && $from.parent.content.size === 0) {
       const blockFrom = $from.before($from.depth);
-      const blockTo   = $from.after($from.depth);
+      const blockTo = $from.after($from.depth);
       return state.tr.replaceWith(blockFrom, blockTo, fragment);
     }
 
@@ -105,7 +123,7 @@ export class PasteTransformer {
     return state.tr.replaceSelection(new Slice(fragment, 0, 0));
   }
 
-  // ── Markdown ──────────────────────────────────────────────────────────────
+  /** Markdown */
 
   private looksLikeMarkdown(text: string): boolean {
     if (MARKDOWN_PATTERN.test(text)) return true;
@@ -139,7 +157,7 @@ export class PasteTransformer {
     return state.tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0));
   }
 
-  // ── Legacy line-by-line parser ────────────────────────────────────────────
+  /** Legacy line-by-line parser */
 
   /**
    * Line-by-line block parser. Produces paragraph, heading, bulletList,
@@ -170,7 +188,10 @@ export class PasteTransformer {
       const items = list.items.map((itemText) =>
         this.schema.nodes["listItem"]!.create(
           null,
-          this.schema.nodes["paragraph"]!.create(null, this.parseInline(itemText)),
+          this.schema.nodes["paragraph"]!.create(
+            null,
+            this.parseInline(itemText),
+          ),
         ),
       );
       const listType = list.type === "bullet" ? "bulletList" : "orderedList";
@@ -195,7 +216,11 @@ export class PasteTransformer {
       for (const rule of this.extraMarkdownRules) {
         const match = rule.pattern.exec(line);
         if (match) {
-          const node = rule.createNode(match, this.schema, this.parseInline.bind(this));
+          const node = rule.createNode(
+            match,
+            this.schema,
+            this.parseInline.bind(this),
+          );
           if (node) {
             flushPara();
             flushList();
@@ -290,7 +315,7 @@ export class PasteTransformer {
   }
 }
 
-// ── HTML cleanup ──────────────────────────────────────────────────────────────
+/** HTML cleanup */
 
 /**
  * Normalise pasted HTML before handing it to the ProseMirror DOMParser.
@@ -317,8 +342,10 @@ export function cleanPastedHtml(root: HTMLElement): void {
   root.querySelectorAll("hr").forEach((hr) => {
     const prev = hr.previousElementSibling;
     const next = hr.nextElementSibling;
-    if (prev?.tagName === "P" && (prev.textContent ?? "").trim() === "") prev.remove();
-    if (next?.tagName === "P" && (next.textContent ?? "").trim() === "") next.remove();
+    if (prev?.tagName === "P" && (prev.textContent ?? "").trim() === "")
+      prev.remove();
+    if (next?.tagName === "P" && (next.textContent ?? "").trim() === "")
+      next.remove();
   });
 
   // Strip CSS properties that are always default/noise — they create spurious
@@ -327,10 +354,11 @@ export function cleanPastedHtml(root: HTMLElement): void {
     const s = (el as HTMLElement).style;
     s.removeProperty("background-color");
     s.removeProperty("font-variant");
-    s.removeProperty("white-space");          // pre/pre-wrap from Google Docs
-    if (s.textDecoration === "none")  s.removeProperty("text-decoration");
-    if (s.verticalAlign  === "baseline") s.removeProperty("vertical-align");
-    if (s.color === "rgb(0, 0, 0)" || s.color === "#000000") s.removeProperty("color");
+    s.removeProperty("white-space"); // pre/pre-wrap from Google Docs
+    if (s.textDecoration === "none") s.removeProperty("text-decoration");
+    if (s.verticalAlign === "baseline") s.removeProperty("vertical-align");
+    if (s.color === "rgb(0, 0, 0)" || s.color === "#000000")
+      s.removeProperty("color");
     // margin/padding/line-height have no schema equivalent
     // TODO: add these to the schema
     s.removeProperty("line-height");

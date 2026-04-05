@@ -20,14 +20,15 @@ export function keyEventToString(e: KeyboardEvent): string {
   let key = e.key;
   let prefix = "";
   if (e.metaKey || e.ctrlKey) prefix += "Mod-";
-  if (e.altKey)  prefix += "Alt-";
+  if (e.altKey) prefix += "Alt-";
   if (e.shiftKey) prefix += "Shift-";
 
   // On macOS, Option (Alt) transforms e.key into special characters
   // (e.g. Option+1 → "¡", Option+b → "∫"). Fall back to e.code so that
   // Mod-Alt-1 and similar bindings resolve correctly.
   if (e.altKey && key.length === 1 && !/^[a-zA-Z0-9]$/.test(key)) {
-    if (e.code.startsWith("Digit")) key = e.code.slice(5);   // "Digit1" → "1"
+    if (e.code.startsWith("Digit"))
+      key = e.code.slice(5); // "Digit1" → "1"
     else if (e.code.startsWith("Key")) key = e.code.slice(3); // "KeyB"   → "B"
   }
 
@@ -56,7 +57,9 @@ export interface InputBridgeOptions {
    * the position is not a float. Used by scrollCursorIntoView to scroll to
    * the float's actual rendered page rather than the anchor span's page.
    */
-  getFloatPosition?: (docPos: number) => { page: number; y: number; height: number } | null;
+  getFloatPosition?: (
+    docPos: number,
+  ) => { page: number; y: number; height: number } | null;
   /** Keymap built from all extensions — consulted on every keydown. */
   keymap: Record<string, Command>;
   /** Input handlers from all extensions — consulted before the keymap.
@@ -89,23 +92,31 @@ export class InputBridge {
 
   private textarea: HTMLTextAreaElement | null = null;
   private _container: HTMLElement | null = null;
-  private pageScreenRectLookup: ((page: number) => { screenLeft: number; screenTop: number } | null) | null = null;
+  private pageScreenRectLookup:
+    | ((page: number) => { screenLeft: number; screenTop: number } | null)
+    | null = null;
   private _isFocused = false;
 
   constructor(opts: InputBridgeOptions) {
     this.opts = opts;
   }
 
-  // ── Public API ──────────────────────────────────────────────────────────────
+  /** Public API */
 
   /** True when the textarea currently has DOM focus. */
-  get isFocused(): boolean { return this._isFocused; }
+  get isFocused(): boolean {
+    return this._isFocused;
+  }
 
   /** The container element passed to mount(). Null when unmounted. */
-  get container(): HTMLElement | null { return this._container; }
+  get container(): HTMLElement | null {
+    return this._container;
+  }
 
   /** Resolve a 1-based page number to its screen-space top-left corner. */
-  lookupPageScreenRect(page: number): { screenLeft: number; screenTop: number } | null {
+  lookupPageScreenRect(
+    page: number,
+  ): { screenLeft: number; screenTop: number } | null {
     return this.pageScreenRectLookup?.(page) ?? null;
   }
 
@@ -148,7 +159,11 @@ export class InputBridge {
    * Used by scrollCursorIntoView(), getViewportRect(), and getNodeViewportRect().
    * Pass null to clear.
    */
-  setPageScreenRectLookup(fn: ((page: number) => { screenLeft: number; screenTop: number } | null) | null): void {
+  setPageScreenRectLookup(
+    fn:
+      | ((page: number) => { screenLeft: number; screenTop: number } | null)
+      | null,
+  ): void {
     this.pageScreenRectLookup = fn;
   }
 
@@ -165,8 +180,8 @@ export class InputBridge {
     const rect = this.opts.getViewportRect(head, head);
     if (!rect) return;
     Object.assign(this.textarea.style, {
-      top:    `${rect.top}px`,
-      left:   `${rect.left}px`,
+      top: `${rect.top}px`,
+      left: `${rect.left}px`,
       height: `${rect.height}px`,
     });
   }
@@ -198,80 +213,82 @@ export class InputBridge {
     const pageScreenRect = this.pageScreenRectLookup(coords.page);
     if (!pageScreenRect) return;
     const containerRect = scrollParent.getBoundingClientRect();
-    const pageTop = pageScreenRect.screenTop - containerRect.top + scrollParent.scrollTop;
+    const pageTop =
+      pageScreenRect.screenTop - containerRect.top + scrollParent.scrollTop;
 
-    const cursorAbsTop    = pageTop + coords.y;
+    const cursorAbsTop = pageTop + coords.y;
     const cursorAbsBottom = cursorAbsTop + coords.height;
-    const visibleTop      = scrollParent.scrollTop;
-    const visibleBottom   = visibleTop + scrollParent.clientHeight;
+    const visibleTop = scrollParent.scrollTop;
+    const visibleBottom = visibleTop + scrollParent.clientHeight;
     const buffer = 40;
 
     if (cursorAbsBottom > visibleBottom - buffer) {
-      scrollParent.scrollTop = cursorAbsBottom - scrollParent.clientHeight + buffer;
+      scrollParent.scrollTop =
+        cursorAbsBottom - scrollParent.clientHeight + buffer;
     } else if (cursorAbsTop < visibleTop + buffer) {
       scrollParent.scrollTop = cursorAbsTop - buffer;
     }
   }
 
-  // ── Private — textarea creation ─────────────────────────────────────────────
+  /** Private — textarea creation */
 
   private _createTextarea(): HTMLTextAreaElement {
     const ta = document.createElement("textarea");
     Object.assign(ta.style, {
-      position:      "fixed",
-      opacity:       "0",
-      width:         "1px",
-      height:        "1px",
-      padding:       "0",
-      border:        "none",
-      margin:        "0",
-      overflow:      "hidden",
-      resize:        "none",
-      outline:       "none",
+      position: "fixed",
+      opacity: "0",
+      width: "1px",
+      height: "1px",
+      padding: "0",
+      border: "none",
+      margin: "0",
+      overflow: "hidden",
+      resize: "none",
+      outline: "none",
       pointerEvents: "none",
-      top:           "-9999px",
-      left:          "-9999px",
+      top: "-9999px",
+      left: "-9999px",
     });
-    ta.setAttribute("autocomplete",   "off");
-    ta.setAttribute("autocorrect",    "off");
+    ta.setAttribute("autocomplete", "off");
+    ta.setAttribute("autocorrect", "off");
     ta.setAttribute("autocapitalize", "off");
-    ta.setAttribute("spellcheck",     "false");
+    ta.setAttribute("spellcheck", "false");
     // aria-hidden on a focused element is invalid — this textarea IS the
     // keyboard/IME bridge, so screen readers must be able to reach it.
-    ta.setAttribute("role",           "textbox");
+    ta.setAttribute("role", "textbox");
     ta.setAttribute("aria-multiline", "true");
-    ta.setAttribute("aria-label",     "Document editor");
-    ta.setAttribute("tabindex",       "0");
+    ta.setAttribute("aria-label", "Document editor");
+    ta.setAttribute("tabindex", "0");
     return ta;
   }
 
-  // ── Private — event wiring ──────────────────────────────────────────────────
+  /** Private — event wiring */
 
   private _attachListeners(): void {
     const ta = this.textarea!;
-    ta.addEventListener("keydown",        this._handleKeydown);
-    ta.addEventListener("input",          this._handleInput);
+    ta.addEventListener("keydown", this._handleKeydown);
+    ta.addEventListener("input", this._handleInput);
     ta.addEventListener("compositionend", this._handleCompositionEnd);
-    ta.addEventListener("paste",          this._handlePaste);
-    ta.addEventListener("copy",           this._handleCopy);
-    ta.addEventListener("cut",            this._handleCut);
-    ta.addEventListener("focus",          this._handleFocus);
-    ta.addEventListener("blur",           this._handleBlur);
+    ta.addEventListener("paste", this._handlePaste);
+    ta.addEventListener("copy", this._handleCopy);
+    ta.addEventListener("cut", this._handleCut);
+    ta.addEventListener("focus", this._handleFocus);
+    ta.addEventListener("blur", this._handleBlur);
   }
 
   private _detachListeners(): void {
     const ta = this.textarea!;
-    ta.removeEventListener("keydown",        this._handleKeydown);
-    ta.removeEventListener("input",          this._handleInput);
+    ta.removeEventListener("keydown", this._handleKeydown);
+    ta.removeEventListener("input", this._handleInput);
     ta.removeEventListener("compositionend", this._handleCompositionEnd);
-    ta.removeEventListener("paste",          this._handlePaste);
-    ta.removeEventListener("copy",           this._handleCopy);
-    ta.removeEventListener("cut",            this._handleCut);
-    ta.removeEventListener("focus",          this._handleFocus);
-    ta.removeEventListener("blur",           this._handleBlur);
+    ta.removeEventListener("paste", this._handlePaste);
+    ta.removeEventListener("copy", this._handleCopy);
+    ta.removeEventListener("cut", this._handleCut);
+    ta.removeEventListener("focus", this._handleFocus);
+    ta.removeEventListener("blur", this._handleBlur);
   }
 
-  // ── Private — event handlers ────────────────────────────────────────────────
+  /** Private — event handlers */
 
   private _handleFocus = (): void => {
     this._isFocused = true;
@@ -321,7 +338,10 @@ export class InputBridge {
     const { from, to, empty } = state.selection;
     if (empty || !e.clipboardData) return;
     e.preventDefault();
-    e.clipboardData.setData("text/plain", state.doc.textBetween(from, to, "\n"));
+    e.clipboardData.setData(
+      "text/plain",
+      state.doc.textBetween(from, to, "\n"),
+    );
     const html = serializeSelectionToHtml(state, this.opts.getSchema());
     if (html) e.clipboardData.setData("text/html", html);
   };
@@ -331,7 +351,10 @@ export class InputBridge {
     const { from, to, empty } = state.selection;
     if (empty || !e.clipboardData) return;
     e.preventDefault();
-    e.clipboardData.setData("text/plain", state.doc.textBetween(from, to, "\n"));
+    e.clipboardData.setData(
+      "text/plain",
+      state.doc.textBetween(from, to, "\n"),
+    );
     const html = serializeSelectionToHtml(state, this.opts.getSchema());
     if (html) e.clipboardData.setData("text/html", html);
     const tr = deleteSelection(state);
@@ -341,18 +364,22 @@ export class InputBridge {
   private _handlePaste = (e: ClipboardEvent): void => {
     e.preventDefault();
     if (!e.clipboardData) return;
-    const tr = this.opts.pasteTransformer.transform(e.clipboardData, this.opts.getState());
+    const tr = this.opts.pasteTransformer.transform(
+      e.clipboardData,
+      this.opts.getState(),
+    );
     if (tr) this.opts.dispatch(tr);
   };
 
-  // ── Private — helpers ───────────────────────────────────────────────────────
+  /** Private — helpers */
 
   private _tryInputHandler(e: KeyboardEvent): boolean {
     // Try the fully-qualified key first (e.g. "Alt-ArrowLeft" for word-jump),
     // then fall back to the bare key so that handlers which read modifier state
     // directly (like BaseEditing's arrow handlers) still fire.
     const handler =
-      this.opts.inputHandlers[keyEventToString(e)] ?? this.opts.inputHandlers[e.key];
+      this.opts.inputHandlers[keyEventToString(e)] ??
+      this.opts.inputHandlers[e.key];
     if (!handler) return false;
     return handler(this.opts.navigator, e);
   }
@@ -372,7 +399,7 @@ export class InputBridge {
   }
 }
 
-// ── Module-level helpers ──────────────────────────────────────────────────────
+/** Module-level helpers */
 
 export function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   if (!el) return null;
