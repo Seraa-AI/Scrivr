@@ -272,13 +272,23 @@ export function rejectAiSuggestion(
         }
         acceptedOffset += tokenLen;
       } else if (op.type === "insert") {
-        // Rejecting an insert = remove the inserted text.
-        // The inserted content is tracked_insert text — delete it from the doc.
+        // Rejecting an insert = remove the tracked_insert text written by
+        // applyAiSuggestion(tracked). Guard: only delete if a tracked_insert
+        // mark is actually present at this position — if the suggestion was
+        // never applied (fresh rejection), there is no inserted text to remove
+        // and deleting would mangle the original document content.
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         if (range) {
-          const insertLen = op.text.length;
-          tr.delete(range.from + insertedChars, range.from + insertedChars + insertLen);
-          insertedChars -= insertLen;
+          const fromPos = range.from + insertedChars;
+          const insertMarkType = schema.marks.tracked_insert;
+          const nodeAfter = insertMarkType
+            ? state.doc.resolve(fromPos).nodeAfter
+            : null;
+          if (nodeAfter && nodeAfter.marks.some((m) => m.type === insertMarkType)) {
+            const insertLen = Math.min(op.text.length, nodeAfter.nodeSize);
+            tr.delete(fromPos, fromPos + insertLen);
+            insertedChars -= insertLen;
+          }
         }
         // acceptedOffset does NOT advance for inserts
       }

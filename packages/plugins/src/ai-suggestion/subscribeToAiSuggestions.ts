@@ -17,6 +17,7 @@
 import type { IEditor } from "@scrivr/core";
 import { aiSuggestionPluginKey, AI_SUGGESTION_SET_HOVER } from "./AiSuggestionPlugin";
 import { applyAiSuggestion, rejectAiSuggestion } from "./showHideApply";
+import { findNodeById } from "../ai-toolkit/UniqueId";
 import type { AiSuggestionBlock, AiOp, AiSuggestionPluginState } from "./types";
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -171,15 +172,8 @@ export function subscribeToAiSuggestions(
       );
     },
     activate(blockId) {
-      const state = editor.getState();
-      let nodePos: number | null = null;
-      state.doc.descendants((node, pos) => {
-        if (node.attrs["nodeId"] === blockId) { nodePos = pos; return false; }
-        return undefined;
-      });
-      if (nodePos !== null) {
-        editor.moveCursorTo((nodePos as number) + 1);
-      }
+      const found = findNodeById(editor.getState().doc, blockId);
+      if (found) editor.moveCursorTo(found.pos + 1);
     },
   };
 
