@@ -18,6 +18,7 @@ import { subscribeToAiSuggestions } from "@scrivr/plugins";
 import type {
   AiSuggestionCardData,
   AiSuggestionCardActions,
+  AiSuggestionSubscribeOptions,
   AiOp,
 } from "@scrivr/plugins";
 
@@ -39,26 +40,30 @@ const KEEP_TRIM = 40;
  * Returns the current card list and action functions. Automatically
  * re-renders when the editor state changes.
  */
-export function useAiSuggestionCards(editor: Editor | null): {
-  cards: AiSuggestionCardData[];
+export function useAiSuggestionCards(
+  editor:  Editor | null,
+  options?: AiSuggestionSubscribeOptions,
+): {
+  cards:   AiSuggestionCardData[];
   actions: AiSuggestionCardActions | null;
 } {
   const [state, setState] = useState<{
-    cards: AiSuggestionCardData[];
+    cards:   AiSuggestionCardData[];
     actions: AiSuggestionCardActions | null;
   }>({ cards: [], actions: null });
 
   useEffect(() => {
-    if (!editor) {
-      setState({ cards: [], actions: null });
-      return;
-    }
+    if (!editor) { setState({ cards: [], actions: null }); return; }
 
-    const unsub = subscribeToAiSuggestions(editor, (cards, actions) => {
-      setState({ cards, actions });
-    });
+    const unsub = subscribeToAiSuggestions(
+      editor,
+      (cards, actions) => setState({ cards, actions }),
+      options,
+    );
 
     return unsub;
+  // options is intentionally excluded — callers should stabilise it with useMemo/useCallback
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
 
   return state;
@@ -123,11 +128,49 @@ function InlineDiff({ ops }: { ops: AiOp[] }) {
   );
 }
 
+// ── Style overrides ───────────────────────────────────────────────────────────
+
+/**
+ * Per-slot class name overrides. Applied in addition to built-in inline styles,
+ * so Tailwind, CSS modules, or any class-based approach works naturally.
+ */
+export interface AiSuggestionCardClassNames {
+  /** Outer panel container (the sticky column). */
+  panel?: string;
+  /** Individual card wrapper. */
+  card?: string;
+  /** Card header row (badge + label + chevron). */
+  header?: string;
+  /** The "✦ AI" badge. */
+  badge?: string;
+  /** Diff body container (shown when expanded). */
+  diff?: string;
+  /** Button row container (Accept / Reject / Edit first). */
+  actions?: string;
+}
+
+/**
+ * Per-slot inline style overrides. Merged over the built-in styles,
+ * so individual properties can be changed without replacing everything.
+ */
+export interface AiSuggestionCardStyles {
+  panel?: React.CSSProperties;
+  card?: React.CSSProperties;
+  header?: React.CSSProperties;
+  badge?: React.CSSProperties;
+  diff?: React.CSSProperties;
+  actions?: React.CSSProperties;
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface AiSuggestionCardsPanelProps {
   editor: Editor | null;
   mode?: "direct" | "tracked";
+  /** Per-slot class name overrides — works with Tailwind, CSS modules, etc. */
+  classNames?: AiSuggestionCardClassNames;
+  /** Per-slot inline style overrides — merged over the built-in styles. */
+  styles?: AiSuggestionCardStyles;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -135,15 +178,22 @@ export interface AiSuggestionCardsPanelProps {
 export function AiSuggestionCardsPanel({
   editor,
   mode = "direct",
+  classNames: cn = {},
+  styles: sx = {},
 }: AiSuggestionCardsPanelProps) {
-  const { cards, actions } = useAiSuggestionCards(editor);
   // Single open card at a time — null means all collapsed.
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // Auto-open the card when cursor enters a suggestion block.
+  const { cards, actions } = useAiSuggestionCards(editor, {
+    onFocus: (blockId) => setOpenId(blockId),
+  });
 
   if (!editor || cards.length === 0 || !actions) return null;
 
   return (
     <div
+      className={cn.panel}
       style={{
         width: CARD_WIDTH,
         flexShrink: 0,
@@ -153,6 +203,7 @@ export function AiSuggestionCardsPanel({
         flexDirection: "column",
         gap: 8,
         alignSelf: "flex-start",
+        ...sx.panel,
       }}
     >
       {/* Accept All / Reject All */}
@@ -180,38 +231,41 @@ export function AiSuggestionCardsPanel({
       {/* Cards */}
       {cards.map((card) => {
         const isExpanded = openId === card.blockId;
+        const isHighlighted = isExpanded || card.isActive;
 
         return (
           <div
             key={card.blockId}
+            className={cn.card}
             style={{
               background: "#ffffff",
               borderRadius: 8,
-              border:
-                isExpanded || card.isActive
-                  ? `2px solid ${COLOR_BRAND}`
-                  : "1.5px solid #e5e7eb",
-              boxShadow:
-                isExpanded || card.isActive
-                  ? "0 2px 12px rgba(79,70,229,0.10)"
-                  : "0 1px 3px rgba(0,0,0,0.06)",
+              border: isHighlighted
+                ? `2px solid ${COLOR_BRAND}`
+                : "1.5px solid #e5e7eb",
+              boxShadow: isHighlighted
+                ? "0 2px 12px rgba(79,70,229,0.10)"
+                : "0 1px 3px rgba(0,0,0,0.06)",
               fontFamily: "system-ui, -apple-system, sans-serif",
               overflow: "hidden",
               opacity: card.isStale ? 0.65 : 1,
               transition: "border-color 0.15s, box-shadow 0.15s",
               cursor: "default",
+              ...sx.card,
             }}
             onMouseEnter={() => actions.hover(card.blockId)}
             onMouseLeave={() => actions.hover(null)}
           >
             {/* Header */}
             <div
+              className={cn.header}
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 7,
                 padding: "7px 10px",
                 cursor: "pointer",
+                ...sx.header,
               }}
               onClick={() => {
                 if (openId === card.blockId) {
@@ -222,7 +276,12 @@ export function AiSuggestionCardsPanel({
                 }
               }}
             >
-              <span style={aiBadgeStyle}>✦ AI</span>
+              <span
+                className={cn.badge}
+                style={{ ...aiBadgeStyle, ...sx.badge }}
+              >
+                ✦ AI
+              </span>
               <span
                 style={{
                   flex: 1,
@@ -268,51 +327,53 @@ export function AiSuggestionCardsPanel({
                   padding: "8px 10px 10px",
                 }}
               >
-                <InlineDiff ops={card.block.ops} />
+                <div className={cn.diff} style={sx.diff}>
+                  <InlineDiff ops={card.block.ops} />
+                </div>
 
-                {/* Accept / Reject row */}
-                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                {/* Accept / Reject / Edit first */}
+                <div className={cn.actions} style={{ ...sx.actions }}>
+                  <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                    <button
+                      style={{
+                        ...acceptBtnStyle,
+                        opacity: card.isStale ? 0.4 : 1,
+                        cursor: card.isStale ? "not-allowed" : "pointer",
+                      }}
+                      disabled={card.isStale}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        if (!card.isStale) actions.accept(card.blockId, mode);
+                      }}
+                    >
+                      ✓ Accept
+                    </button>
+                    <button
+                      style={rejectBtnStyle}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        actions.reject(card.blockId);
+                      }}
+                    >
+                      ✕ Reject
+                    </button>
+                  </div>
                   <button
                     style={{
-                      ...acceptBtnStyle,
+                      ...acceptAsEditBtnStyle,
                       opacity: card.isStale ? 0.4 : 1,
                       cursor: card.isStale ? "not-allowed" : "pointer",
+                      marginTop: 6,
                     }}
                     disabled={card.isStale}
                     onMouseDown={(e) => {
                       e.preventDefault();
-                      if (!card.isStale) actions.accept(card.blockId, mode);
+                      if (!card.isStale) actions.accept(card.blockId, "direct");
                     }}
                   >
-                    ✓ Accept
-                  </button>
-                  <button
-                    style={rejectBtnStyle}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      actions.reject(card.blockId);
-                    }}
-                  >
-                    ✕ Reject
+                    ✎ Edit first
                   </button>
                 </div>
-
-                {/* Edit first */}
-                <button
-                  style={{
-                    ...acceptAsEditBtnStyle,
-                    opacity: card.isStale ? 0.4 : 1,
-                    cursor: card.isStale ? "not-allowed" : "pointer",
-                    marginTop: 6,
-                  }}
-                  disabled={card.isStale}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    if (!card.isStale) actions.accept(card.blockId, "direct");
-                  }}
-                >
-                  ✎ Edit first
-                </button>
               </div>
             )}
           </div>

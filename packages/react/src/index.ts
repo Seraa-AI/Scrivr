@@ -10,7 +10,11 @@ export { AiSuggestionCardsPanel, useAiSuggestionCards } from "./AiSuggestionCard
 export type { SlashMenuItem } from "./SlashMenu";
 export { TrackChangesPopover } from "./TrackChangesPopover";
 export { AiSuggestionPopover } from "./AiSuggestionPopover";
-export type { AiSuggestionCardsPanelProps } from "./AiSuggestionCards";
+export type {
+  AiSuggestionCardsPanelProps,
+  AiSuggestionCardClassNames,
+  AiSuggestionCardStyles,
+} from "./AiSuggestionCards";
 export { TrackChangesPanel } from "./TrackChangesPanel";
 export type { UseCanvasEditorOptions } from "./useInscribeEditor";
 
