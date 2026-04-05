@@ -40,7 +40,8 @@
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
-    "test": "true",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -51,7 +52,9 @@
     "prosemirror-markdown": "^1.13.4"
   },
   "devDependencies": {
+    "prosemirror-model": "^1.25.4",
     "tsup": "^8.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
   }
 }
