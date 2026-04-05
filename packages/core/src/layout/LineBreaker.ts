@@ -237,24 +237,26 @@ export class LineBreaker {
    *
    * @param spans   — text runs / inline objects from the ProseMirror doc tree
    * @param maxWidth — available width in CSS pixels (page width minus margins)
-   * @param map     — optional CharacterMap to populate with glyph positions
-   * @param pageContext — page + lineIndex offset for CharacterMap registration
-   * @param options — optional { constraintProvider, startY } for float text-wrapping
+   * @param options — required options including defaultFontFamily, defaultFontSize,
+   *                  and optional map, pageContext, constraintProvider, startY
    */
   breakIntoLines(
     spans: InputSpan[],
     maxWidth: number,
-    map?: CharacterMap,
-    pageContext?: { page: number; lineIndexOffset: number; lineY: number },
-    options?: {
+    options: {
+      /** Font family for phantom ZWS lines emitted on hard_break tokens, e.g. "Georgia". */
+      defaultFontFamily: string;
+      /** Font size in CSS pixels for phantom ZWS lines, e.g. 14. */
+      defaultFontSize: number;
+      map?: CharacterMap;
+      pageContext?: { page: number; lineIndexOffset: number; lineY: number };
       constraintProvider?: ConstraintProvider;
       startY?: number;
     },
   ): LayoutLine[] {
     if (!spans.length) return [];
 
-    const constraintProvider = options?.constraintProvider;
-    const startY = options?.startY ?? 0;
+    const { defaultFontFamily, defaultFontSize, map, pageContext, constraintProvider, startY = 0 } = options;
 
     const lines: LayoutLine[] = [];
     let currentLine: LayoutSpan[] = [];
@@ -366,7 +368,9 @@ export class LineBreaker {
           // currentLine is empty: this is either a leading break or a consecutive
           // break immediately following another break. Emit a phantom ZWS line so
           // every break produces exactly one line box — N breaks → N new lines.
-          const font = lastSeenFont ?? "14px sans-serif";
+          // font is always defined here: either a prior text span set lastSeenFont,
+          // or we fall back to the caller-provided default font (always defined).
+          const font = lastSeenFont ?? `${defaultFontSize}px ${defaultFontFamily}`;
           const phantomLine = buildLine(
             [{ kind: "text", text: "\u200B", font, x: 0, width: 0, docPos: word.docPos }],
             this.measurer,
@@ -446,7 +450,7 @@ export class LineBreaker {
       // Use the font of the last text token seen (guaranteed to exist because the
       // ZWS fallback in BlockLayout replaces span-less paragraphs before we get here).
       const trailingBreak = words[words.length - 1]! as BreakToken;
-      const font = lastSeenFont ?? "14px sans-serif";
+      const font = lastSeenFont ?? `${defaultFontSize}px ${defaultFontFamily}`;
       const phantomLine = buildLine(
         [
           {

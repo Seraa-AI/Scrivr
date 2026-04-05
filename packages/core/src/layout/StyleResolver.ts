@@ -29,7 +29,7 @@ export interface ParsedFont {
  *   "italic bold 14px Georgia"
  *   "14px Times New Roman"   ← multi-word family
  */
-function parseFont(font: string): ParsedFont {
+export function parseFont(font: string): ParsedFont {
   const tokens = font.trim().split(/\s+/);
 
   let style = "normal";

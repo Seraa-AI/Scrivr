@@ -9,7 +9,7 @@ import {
   getBlockStyle,
   BlockStyle,
 } from "./FontConfig";
-import { resolveFont, substituteFamily } from "./StyleResolver";
+import { resolveFont, substituteFamily, parseFont } from "./StyleResolver";
 
 /** Extracts px size from a CSS font string like "bold 14px Georgia, serif". Returns null if not found. */
 function parseFontSizePx(font: string): number | null {
@@ -306,12 +306,15 @@ export function layoutBlock(
   // We pass the CharacterMap only after we know the alignment offset.
   // If alignment is left (no offset), we can pass it directly.
   // For center/right we populate the map manually below after offsetting.
+  const parsedBase = parseFont(baseFont);
   const lines = breaker.breakIntoLines(
     inputSpans,
     availableWidth,
-    undefined,
-    undefined,
-    constraintProvider ? { constraintProvider, startY: y } : undefined,
+    {
+      defaultFontFamily: parsedBase.family,
+      defaultFontSize: parseFloat(parsedBase.size),
+      ...(constraintProvider ? { constraintProvider, startY: y } : {}),
+    },
   );
 
   // ── 4. Compute height ─────────────────────────────────────────────────────
