@@ -22,7 +22,7 @@ import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
 import { FloatingMenuBar } from "./FloatingMenuBar";
 import { ModeSwitcher } from "./ModeSwitcher";
-import { TrackChangesPopover, AiSuggestionPopover, TrackChangesPanel } from "@scrivr/react";
+import { TrackChangesPopover, TrackChangesPanel, AiSuggestionCardsPanel } from "@scrivr/react";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent } from "./demoContent";
 
@@ -228,11 +228,14 @@ export function Playground() {
       {/* ── Body ── */}
       <div className="flex flex-1 overflow-hidden relative">
         <main className="flex flex-1 overflow-auto justify-center items-start p-4">
-          <Inscribe
-            editor={editor}
-            style={{ position: "relative" }}
-            pageStyle={{ boxShadow: "none", border: "1px solid #e8eaed" }}
-          />
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 24 }}>
+            <Inscribe
+              editor={editor}
+              style={{ position: "relative" }}
+              pageStyle={{ boxShadow: "none", border: "1px solid #e8eaed" }}
+            />
+            <AiSuggestionCardsPanel editor={editor} mode="tracked" />
+          </div>
         </main>
 
         {/* ── Right sidebar with tabs ── */}
@@ -289,7 +292,6 @@ export function Playground() {
       <LinkPopover editor={editor} />
       <ImageMenu editor={editor} />
       <TrackChangesPopover editor={editor} />
-      <AiSuggestionPopover editor={editor} mode="tracked" />
     </div>
   );
 }

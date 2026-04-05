@@ -1,273 +1,299 @@
 /**
- * showHideApply — public command functions for the AI suggestion system.
+ * showHideApply.ts
  *
- * These are standalone functions (not extension commands) so application code
- * can import and call them directly. They are also exposed through AiToolkitAPI
- * via the ai.suggestions namespace.
+ * Commands for showing, hiding, applying, and rejecting AI suggestions.
+ *
+ * The "apply" path walks each block's ops and commits them to the document
+ * as tracked changes (mode: "tracked") or direct mutations (mode: "direct").
+ *
+ * The "reject" path removes all pending AI insert marks and restores all
+ * AI-deleted text back to plain text in the affected blocks.
  */
 
-import type { EditorState, Transaction } from "prosemirror-state";
-
+import type { IEditor } from "@scrivr/core";
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { applyMultiBlockDiff } from "../track-changes/lib/applyDiffAsSuggestion";
-import { buildAcceptedTextMap, acceptedRangeToDocRange } from "../track-changes/lib/acceptedTextMap";
-import { AI_SUGGESTION_HIDE, AI_SUGGESTION_SHOW, aiSuggestionPluginKey } from "./AiSuggestionPlugin";
-import type {
-  AiSuggestion,
-  AiSuggestionBlock,
-  ApplyAiResult,
-  ApplyAiSuggestionOptions,
-  RejectAiSuggestionOptions,
-  WordLevelOp,
-} from "./types";
-
-// ── Internal helpers ──────────────────────────────────────────────────────────
-
-/**
- * Check whether a block's live accepted text still matches the text captured
- * at suggestion-compute time. Returns true if the block is stale.
- */
-function isBlockStale(state: EditorState, block: AiSuggestionBlock): boolean {
-  const found = findNodeById(state.doc, block.nodeId);
-  if (!found) return true; // node no longer exists → treat as stale
-  const { acceptedText } = buildAcceptedTextMap(found.node, found.pos, state.schema);
-  return acceptedText !== block.acceptedText;
-}
+import type { AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
+import {
+  aiSuggestionPluginKey,
+  AI_SUGGESTION_SET,
+} from "./AiSuggestionPlugin";
+import { buildAcceptedTextMap } from "../track-changes/lib/acceptedTextMap";
+import { skipTracking, TrackChangesAction, setAction } from "../track-changes/actions";
+import {
+  addTrackIdIfDoesntExist,
+  createNewDeleteAttrs,
+  createNewInsertAttrs,
+  createNewPendingAttrs,
+} from "../track-changes/helpers";
+import { applyTrackedDelete } from "../track-changes/lib/splitRangeForNewMark";
+import { acceptedRangeToDocRange } from "../track-changes/lib/acceptedTextMap";
 
 /**
- * Reconstruct the "proposed text" for a block from its WordLevelOp array.
- * The proposed text is the accepted text with deletes removed and inserts applied:
- * keeps + inserts, in order.
+ * Set the active AI suggestion. Dispatches AI_SUGGESTION_SET meta.
+ * Pass null to clear the current suggestion.
  */
-function opsToProposedText(ops: WordLevelOp[]): string {
-  return ops
-    .filter(op => op.type !== "delete")
-    .map(op => op.text)
-    .join("");
-}
-
-/**
- * Filter ops to only those belonging to a specific groupId.
- * For ops NOT in the group, convert them to "keep" so the rest of the text
- * is preserved when only one group is applied.
- */
-function filterOpsByGroup(ops: WordLevelOp[], groupId: string): WordLevelOp[] {
-  return ops.map(op => {
-    if (op.type === "keep") return op;
-    if (op.groupId === groupId) return op;
-    // Op belongs to a different group — treat as keep (preserve the text)
-    if (op.type === "delete") return { type: "keep" as const, text: op.text };
-    // Insert ops not in this group are dropped (they add new text we don't want)
-    return null;
-  }).filter((op): op is WordLevelOp => op !== null);
-}
-
-// ── Public API ────────────────────────────────────────────────────────────────
-
-/**
- * Display an AI suggestion as an overlay on the canvas.
- * The document is NOT modified — the suggestion is stored in plugin state only.
- *
- * @example
- * showAiSuggestion(state, dispatch, suggestion);
- */
-export function showAiSuggestion(
-  state: EditorState,
-  dispatch: (tr: Transaction) => void,
-  suggestion: AiSuggestion,
-): void {
-  dispatch(
+export function showAiSuggestion(editor: IEditor, suggestion: AiSuggestion | null): void {
+  const state = editor.getState();
+  editor._applyTransaction(
     state.tr
-      .setMeta(AI_SUGGESTION_SHOW, suggestion)
+      .setMeta(AI_SUGGESTION_SET, { payload: suggestion })
       .setMeta("addToHistory", false),
   );
 }
 
 /**
- * Hide the current AI suggestion overlay.
- * The document is NOT modified.
- */
-export function hideAiSuggestion(
-  state: EditorState,
-  dispatch: (tr: Transaction) => void,
-): void {
-  dispatch(
-    state.tr
-      .setMeta(AI_SUGGESTION_HIDE, true)
-      .setMeta("addToHistory", false),
-  );
-}
-
-/**
- * Apply the current AI suggestion (or a specific group within it) to the document.
+ * Apply the current AI suggestion to the document.
  *
- * @param options.groupId  If provided, only the ops with this groupId are applied.
- *                         Other groups remain visible in the overlay.
- * @param options.mode     "direct"  — plain replace, no tracking marks.
- *                         "tracked" — applies as tracked_insert/delete marks,
- *                                     entering the human track-changes flow.
+ * mode "direct"  — writes the proposed text directly into the document.
+ * mode "tracked" — records changes as tracked insert/delete marks.
  *
- * @returns { applied, reason } — applied is false with a reason if the
- *          suggestion is missing, stale, or produces no change.
+ * If `blockId` is provided, only that block's ops are applied.
+ * If `groupId` is provided, only ops matching that groupId are applied.
  */
 export function applyAiSuggestion(
-  state: EditorState,
-  dispatch: (tr: Transaction) => void,
-  options: ApplyAiSuggestionOptions,
-): ApplyAiResult {
-  const pluginState = aiSuggestionPluginKey.getState(state);
-  if (!pluginState?.suggestion) {
-    return { applied: false, reason: "not-found" };
+  editor: IEditor,
+  { groupId, blockId, mode }: ApplyAiSuggestionOptions,
+): void {
+  const state = editor.getState();
+  const ps    = aiSuggestionPluginKey.getState(state);
+  if (!ps?.suggestion) return;
+
+  let affectedBlocks = ps.suggestion.blocks;
+  if (blockId) {
+    affectedBlocks = affectedBlocks.filter((b) => b.nodeId === blockId);
   }
 
-  const { suggestion } = pluginState;
-  const { groupId, mode } = options;
+  if (mode === "direct") {
+    _applyDirect(editor, affectedBlocks, groupId);
+  } else {
+    _applyTracked(editor, affectedBlocks, groupId);
+  }
 
-  // Validate staleness for all affected blocks before touching the document.
-  const affectedBlocks = suggestion.blocks.filter(block => {
-    if (!groupId) return true; // applying all — check every block
-    return block.ops.some(op => op.type !== "keep" && op.groupId === groupId);
+  // Remove accepted block(s) from the suggestion; clear when none remain
+  if (!groupId) {
+    const remaining = blockId
+      ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
+      : [];
+    showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
+  }
+}
+
+/** Apply by directly writing the proposed text into the doc (no tracking marks). */
+function _applyDirect(
+  editor: IEditor,
+  blocks: AiSuggestionBlock[],
+  groupId?: string,
+): void {
+  const state  = editor.getState();
+  const schema = state.schema;
+
+  // Process blocks in reverse document order to keep positions stable
+  const resolved = blocks.flatMap((b) => {
+    const found = findNodeById(state.doc, b.nodeId);
+    return found ? [{ block: b, found }] : [];
   });
+  resolved.sort((a, b) => b.found.pos - a.found.pos);
 
-  for (const block of affectedBlocks) {
-    if (isBlockStale(state, block)) {
-      return { applied: false, reason: "stale" };
-    }
-  }
-
-  if (affectedBlocks.length === 0) {
-    return { applied: false, reason: "no-change" };
-  }
-
-  if (mode === "tracked") {
-    // Reconstruct proposedText per block and delegate to applyMultiBlockDiff.
-    // applyMultiBlockDiff re-diffs internally (same tokenizer + pairReplacements),
-    // so the result is identical to what computeAiSuggestion produced.
-    const blocksForDiff = affectedBlocks.map(block => {
-      const filteredOps = groupId ? filterOpsByGroup(block.ops, groupId) : block.ops;
-      return {
-        nodeId:       block.nodeId,
-        proposedText: opsToProposedText(filteredOps),
-      };
-    });
-
-    // Intercept dispatch to inject AI_SUGGESTION_HIDE into the same transaction.
-    // This is critical: if we called hideAiSuggestion(state, dispatch) separately
-    // after applyMultiBlockDiff, the hide transaction would be built from the old
-    // `state`, whose tr.doc is the pre-change doc, reverting the tracked marks.
-    const dispatchWithHide = (tr: Transaction) => {
-      tr.setMeta(AI_SUGGESTION_HIDE, true);
-      dispatch(tr);
-    };
-
-    const result = applyMultiBlockDiff(state, dispatchWithHide, {
-      blocks:   blocksForDiff,
-      authorID: suggestion.authorID,
-    });
-
-    if (!result.applied) return { applied: false, reason: "no-change" };
-    return { applied: true };
-  }
-
-  // mode === "direct": plain ProseMirror replace, no tracking marks.
-  // Process blocks in reverse document order so applying a later block
-  // does not shift positions of earlier blocks in the same transaction.
   const tr = state.tr;
 
-  const sortedBlocks = [...affectedBlocks].sort((a, b) => {
-    const posA = findNodeById(state.doc, a.nodeId)?.pos ?? 0;
-    const posB = findNodeById(state.doc, b.nodeId)?.pos ?? 0;
-    return posB - posA; // descending
-  });
+  for (const { block, found } of resolved) {
+    const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
 
-  let anyApplied = false;
+    let acceptedOffset = 0;
+    let insertedChars  = 0;
 
-  for (const block of sortedBlocks) {
-    const found = findNodeById(tr.doc, block.nodeId);
-    if (!found) continue;
+    for (const op of block.ops) {
+      const tokenLen = op.text.length;
 
-    const { map } = buildAcceptedTextMap(found.node, found.pos, state.schema);
+      if (op.type === "keep") {
+        acceptedOffset += tokenLen;
+        continue;
+      }
 
-    const filteredOps = groupId ? filterOpsByGroup(block.ops, groupId) : block.ops;
-    const proposedText = opsToProposedText(filteredOps);
+      if (groupId && op.groupId !== groupId) {
+        if (op.type === "delete") acceptedOffset += tokenLen;
+        continue;
+      }
 
-    // Replace the full accepted-text range with proposedText.
-    const fullRange = acceptedRangeToDocRange(map, 0, block.acceptedText.length);
-    if (!fullRange) continue;
-
-    const schema = state.schema;
-    const textNode = proposedText
-      ? schema.text(proposedText.replace(/\n/g, " "))
-      : null;
-
-    if (textNode) {
-      tr.replaceWith(fullRange.from, fullRange.to, textNode);
-    } else {
-      tr.delete(fullRange.from, fullRange.to);
+      if (op.type === "delete") {
+        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
+        if (range) {
+          tr.delete(range.from + insertedChars, range.to + insertedChars);
+          insertedChars -= tokenLen;
+        }
+        acceptedOffset += tokenLen;
+      } else if (op.type === "insert") {
+        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
+        if (range) {
+          const textNode = schema.text(op.text);
+          tr.insert(range.from + insertedChars, textNode);
+          insertedChars += op.text.length;
+        }
+        // acceptedOffset does NOT advance for inserts
+      }
     }
-    anyApplied = true;
   }
 
-  if (!anyApplied) return { applied: false, reason: "no-change" };
+  skipTracking(tr);
+  editor._applyTransaction(tr);
+}
 
-  tr.setMeta("addToHistory", true)
-    .setMeta(AI_SUGGESTION_HIDE, true);
-  dispatch(tr);
-  return { applied: true };
+/** Apply by recording changes as tracked insert/delete marks. */
+function _applyTracked(
+  editor: IEditor,
+  blocks: AiSuggestionBlock[],
+  groupId?: string,
+): void {
+  const state    = editor.getState();
+  const schema   = state.schema;
+  const authorID = "ai:assistant";
+  const now      = Date.now();
+
+  const resolved = blocks.flatMap((b) => {
+    const found = findNodeById(state.doc, b.nodeId);
+    return found ? [{ block: b, found }] : [];
+  });
+  resolved.sort((a, b) => b.found.pos - a.found.pos);
+
+  const tr = state.tr;
+
+  for (const { block, found } of resolved) {
+    const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
+
+    let acceptedOffset = 0;
+    let insertedChars  = 0;
+
+    for (const op of block.ops) {
+      const tokenLen = op.text.length;
+
+      if (op.type === "keep") {
+        acceptedOffset += tokenLen;
+        continue;
+      }
+
+      if (groupId && op.groupId !== groupId) {
+        if (op.type === "delete") acceptedOffset += tokenLen;
+        continue;
+      }
+
+      const baseAttrs = createNewPendingAttrs(now, authorID);
+
+      if (op.type === "delete") {
+        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
+        if (range) {
+          const dataTracked = addTrackIdIfDoesntExist(createNewDeleteAttrs(baseAttrs)) as Record<string, unknown>;
+          if (op.groupId) dataTracked["groupId"] = op.groupId;
+          applyTrackedDelete(tr, range.from + insertedChars, range.to + insertedChars, dataTracked, schema);
+        }
+        acceptedOffset += tokenLen;
+      } else if (op.type === "insert") {
+        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
+        if (range) {
+          const insertMarkType = schema.marks.tracked_insert;
+          if (insertMarkType) {
+            const dataTracked = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs)) as Record<string, unknown>;
+            if (op.groupId) dataTracked["groupId"] = op.groupId;
+            const safeText = op.text.replace(/\n/g, " ");
+            tr.insert(range.from + insertedChars, schema.text(safeText, [insertMarkType.create({ dataTracked })]));
+            insertedChars += safeText.length;
+          }
+        }
+        // acceptedOffset does NOT advance for inserts
+      }
+    }
+  }
+
+  skipTracking(tr);
+  setAction(tr, TrackChangesAction.refreshChanges, true);
+  editor._applyTransaction(tr);
 }
 
 /**
- * Reject (discard) the current AI suggestion without modifying the document.
- * If a groupId is provided, only that group is discarded; the remaining groups
- * stay visible. If no groupId is provided, the entire suggestion is hidden.
+ * Reject the current AI suggestion.
  *
- * Note: per-group rejection (partial hide) rebuilds the suggestion with the
- * rejected group's ops converted to keeps, then re-shows it. This means the
- * overlay re-renders without the rejected group.
+ * Removes all tracked_insert marks applied by the suggestion and removes
+ * tracked_delete marks (restoring the original text).
+ *
+ * If `blockId` is provided, only that block's ops are reversed.
+ * If `groupId` is provided, only ops matching that groupId are reversed.
  */
 export function rejectAiSuggestion(
-  state: EditorState,
-  dispatch: (tr: Transaction) => void,
+  editor: IEditor,
   options?: RejectAiSuggestionOptions,
 ): void {
-  const { groupId } = options ?? {};
+  const state = editor.getState();
+  const ps    = aiSuggestionPluginKey.getState(state);
+  if (!ps?.suggestion) return;
 
+  const { blockId, groupId } = options ?? {};
+
+  let affectedBlocks = ps.suggestion.blocks;
+  if (blockId) {
+    affectedBlocks = affectedBlocks.filter((b) => b.nodeId === blockId);
+  }
+
+  const schema   = state.schema;
+  const resolved = affectedBlocks.flatMap((b) => {
+    const found = findNodeById(state.doc, b.nodeId);
+    return found ? [{ block: b, found }] : [];
+  });
+  resolved.sort((a, b) => b.found.pos - a.found.pos);
+
+  const tr = state.tr;
+
+  for (const { block, found } of resolved) {
+    const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
+
+    let acceptedOffset = 0;
+    let insertedChars  = 0;
+
+    for (const op of block.ops) {
+      const tokenLen = op.text.length;
+
+      if (op.type === "keep") {
+        acceptedOffset += tokenLen;
+        continue;
+      }
+
+      if (groupId && op.groupId !== groupId) {
+        if (op.type === "delete") acceptedOffset += tokenLen;
+        continue;
+      }
+
+      if (op.type === "delete") {
+        // Rejecting a delete = restore the text. The tracked_delete mark
+        // needs to be removed so the text reappears as normal.
+        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
+        if (range) {
+          const deleteMarkType = schema.marks.tracked_delete;
+          if (deleteMarkType) {
+            tr.removeMark(range.from + insertedChars, range.to + insertedChars, deleteMarkType);
+          }
+        }
+        acceptedOffset += tokenLen;
+      } else if (op.type === "insert") {
+        // Rejecting an insert = remove the inserted text.
+        // The inserted content is tracked_insert text — delete it from the doc.
+        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
+        if (range) {
+          const insertLen = op.text.length;
+          tr.delete(range.from + insertedChars, range.from + insertedChars + insertLen);
+          insertedChars -= insertLen;
+        }
+        // acceptedOffset does NOT advance for inserts
+      }
+    }
+  }
+
+  skipTracking(tr);
+  setAction(tr, TrackChangesAction.refreshChanges, true);
+  editor._applyTransaction(tr);
+
+  // Remove rejected block(s) from the suggestion; clear when none remain
   if (!groupId) {
-    // Reject everything — just hide.
-    hideAiSuggestion(state, dispatch);
-    return;
+    const remaining = blockId
+      ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
+      : [];
+    showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
   }
-
-  // Per-group rejection: rebuild the suggestion without that group's ops.
-  const pluginState = aiSuggestionPluginKey.getState(state);
-  if (!pluginState?.suggestion) return;
-
-  const { suggestion } = pluginState;
-
-  // Remove the rejected group from each block's ops.
-  const updatedBlocks = suggestion.blocks.map(block => ({
-    ...block,
-    ops: block.ops.map((op): WordLevelOp => {
-      if (op.type === "keep") return op;
-      if (op.groupId !== groupId) return op;
-      // Convert rejected delete/insert to keep — preserve the original text.
-      if (op.type === "delete") return { type: "keep", text: op.text };
-      // Drop rejected inserts (they add new text that's been rejected).
-      return null as unknown as WordLevelOp;
-    }).filter((op): op is WordLevelOp => op !== null),
-  }));
-
-  // If all blocks are now keep-only, just hide.
-  const anyChange = updatedBlocks.some(b =>
-    b.ops.some(op => op.type !== "keep"),
-  );
-
-  if (!anyChange) {
-    hideAiSuggestion(state, dispatch);
-    return;
-  }
-
-  // Re-show the trimmed suggestion.
-  const trimmedSuggestion: AiSuggestion = { ...suggestion, blocks: updatedBlocks };
-  showAiSuggestion(state, dispatch, trimmedSuggestion);
 }

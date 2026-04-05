@@ -1,231 +1,187 @@
 /**
- * renderAiSuggestionOps
+ * renderAiSuggestionOps.ts
  *
- * Canvas rendering helpers for the AI suggestion overlay.
+ * Canvas rendering helpers for AI suggestion overlays:
+ *   - renderDeleteHighlight — bottom-border underline (inactive) or light fill + border (active)
+ *   - renderInsertMarker    — thin colored vertical bar at insertion point
+ *   - buildOpRenderInstructions — maps AiOps to typed render instructions
+ *   - renderInstructions    — executes render instructions on a canvas context
  *
- * Delete ops: reuse renderTrackedDelete (strikethrough + red wash) since the
- * visual language is identical — "this text would be removed".
- *
- * Insert ops: the inserted text does not yet exist in the document, so there
- * are no GlyphEntries in the CharacterMap. Instead we draw "phantom" inline
- * text at the insertion point coordinate using the same font as the surrounding
- * paragraph. renderAiInsert handles this.
+ * Active = the block currently under the cursor or hovered in the sidebar.
+ * Inactive = all other blocks; rendered subtly to reduce visual noise.
  */
 
-import type { GlyphEntry, LineEntry } from "@scrivr/core";
-import { renderTrackedDelete, renderTrackedInsert } from "@scrivr/core";
-
-import type { CharacterMap } from "@scrivr/core";
-import { acceptedRangeToDocRange } from "../track-changes/lib/acceptedTextMap";
-import type { PosMapEntry } from "../track-changes/lib/acceptedTextMap";
-import type { WordLevelOp } from "./types";
+import type { CharacterMap, GlyphEntry } from "@scrivr/core";
+import type { AiOp } from "./types";
 
 // ── Render instruction types ──────────────────────────────────────────────────
 
-export interface DeleteRenderInstruction {
-  type:    "delete";
-  groupId: string;
-  glyphs:  GlyphEntry[];
-  lines:   LineEntry[];
-  color:   string;
-}
-
 export interface InsertRenderInstruction {
-  type:       "insert";
-  groupId:    string;
-  text:       string;
-  x:          number;
-  y:          number;
-  lineHeight: number;
-  color:      string;
+  type:     "insert";
+  x:        number;
+  y:        number;
+  height:   number;
+  color:    string;
+  page:     number;
 }
 
-export type AiOpRenderInstruction = DeleteRenderInstruction | InsertRenderInstruction;
+export interface DeleteRenderInstruction {
+  type:  "delete";
+  from:  number;
+  to:    number;
+  color: string;
+  page:  number;
+}
 
-// ── Phantom insert renderer ───────────────────────────────────────────────────
+export type RenderInstruction = InsertRenderInstruction | DeleteRenderInstruction;
+
+// ── Delete highlight ──────────────────────────────────────────────────────────
 
 /**
- * Draw an insertion-point marker for an AI suggestion insert.
- *
- * Phantom inline text cannot be rendered correctly without re-running the
- * layout engine (the new text has no CharacterMap entries and would overlap
- * existing glyphs). Instead we draw a compact "+" marker at the insertion
- * point — a green vertical bar with a small pill label above it.
- *
- * The actual inserted content is shown in the AiSuggestionPopover when the
- * cursor enters the suggestion range.
+ * Inactive: a single red underline per glyph — low visual weight.
+ * Active:   light pink fill + stronger underline to draw the eye.
  */
-export function renderAiInsert(
+export function renderDeleteHighlight(
   ctx: CanvasRenderingContext2D,
-  inst: InsertRenderInstruction,
+  glyphs: GlyphEntry[],
+  isActive: boolean,
 ): void {
-  const { x, y, lineHeight, color } = inst;
+  if (glyphs.length === 0) return;
 
   ctx.save();
+  ctx.setLineDash([3, 2]);
+  ctx.strokeStyle = isActive
+    ? "rgba(239, 68, 68, 0.65)"  // stronger when active
+    : "rgba(239, 68, 68, 0.25)"; // faint when inactive
+  ctx.lineWidth = isActive ? 1.5 : 1;
 
-  const barH = lineHeight;
-  const barW = 2;
-  const barX = x;
-  const barY = y;
-
-  // Vertical insertion bar
-  ctx.fillStyle = hexToRgba(color, 0.85);
-  ctx.fillRect(barX, barY, barW, barH);
-
-  // Small "+" pill above the bar
-  const labelFont = `bold ${Math.max(8, Math.round(lineHeight * 0.55))}px system-ui, sans-serif`;
-  ctx.font = labelFont;
-  const labelText = "+";
-  const tw  = ctx.measureText(labelText).width;
-  const pad = 3;
-  const lw  = tw + pad * 2;
-  const lh  = Math.round(lineHeight * 0.65);
-  const lx  = barX - lw / 2 + barW / 2;
-  const ly  = barY - lh - 2;
-
-  ctx.fillStyle = color;
-  if (ctx.roundRect) {
+  for (const g of glyphs) {
     ctx.beginPath();
-    ctx.roundRect(lx, ly, lw, lh, 3);
-    ctx.fill();
-  } else {
-    ctx.fillRect(lx, ly, lw, lh);
+    ctx.moveTo(g.x, g.y + g.height - 0.5);
+    ctx.lineTo(g.x + g.width, g.y + g.height - 0.5);
+    ctx.stroke();
   }
 
-  ctx.fillStyle = "#fff";
-  ctx.textBaseline = "middle";
-  ctx.fillText(labelText, lx + pad, ly + lh / 2);
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// ── Insert marker ─────────────────────────────────────────────────────────────
+
+/**
+ * Inactive: very faint 1px bar.
+ * Active:   solid 2px bar — signals "something is being inserted here".
+ */
+export function renderInsertMarker(
+  ctx: CanvasRenderingContext2D,
+  inst: InsertRenderInstruction,
+  isActive: boolean,
+): void {
+  const { x, y, height, color } = inst;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineCap = "round";
+
+  if (isActive) {
+    // Bar with top cap
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, y + 3);
+    ctx.lineTo(x, y + height - 3);
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - 3, y + 3);
+    ctx.lineTo(x + 3, y + 3);
+    ctx.stroke();
+  } else {
+    // Faint 1px bar, no cap
+    ctx.globalAlpha = 0.2;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y + 3);
+    ctx.lineTo(x, y + height - 3);
+    ctx.stroke();
+  }
 
   ctx.restore();
 }
 
-// ── Op → canvas instruction mapper ───────────────────────────────────────────
+// ── Instruction builder ───────────────────────────────────────────────────────
 
-const DELETE_COLOR = "#dc2626"; // red-600
-const INSERT_COLOR = "#16a34a"; // green-600
-
-/**
- * Walk a block's WordLevelOp array and produce canvas rendering instructions
- * for each delete and insert op visible on `pageNumber`.
- *
- * @param ops         Word-level ops from AiSuggestionBlock.
- * @param map         Position map re-derived from the live block (via buildAcceptedTextMap).
- * @param charMap     The editor's CharacterMap for the current render frame.
- * @param pageNumber  The page currently being painted.
- */
 export function buildOpRenderInstructions(
-  ops: WordLevelOp[],
-  map: PosMapEntry[],
+  ops: AiOp[],
+  map: import("../track-changes/lib/acceptedTextMap").PosMapEntry[],
   charMap: CharacterMap,
   pageNumber: number,
-): AiOpRenderInstruction[] {
-  const instructions: AiOpRenderInstruction[] = [];
+): RenderInstruction[] {
+  const INSERT_COLOR = "#6366f1"; // indigo-500
+  const DELETE_COLOR = "#dc2626"; // red-600
+
+  const instructions: RenderInstruction[] = [];
   let acceptedOffset = 0;
 
   for (const op of ops) {
+    const tokenLen = op.text.length;
+
     if (op.type === "keep") {
-      acceptedOffset += op.text.length;
+      acceptedOffset += tokenLen;
       continue;
     }
 
     if (op.type === "delete") {
-      const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
-      if (range) {
-        const glyphs = charMap.glyphsInRange(range.from, range.to).filter(g => g.page === pageNumber);
-        const lines  = charMap.linesInRange(range.from, range.to).filter(l => l.page === pageNumber);
-        if (glyphs.length > 0 || lines.length > 0) {
-          instructions.push({ type: "delete", groupId: op.groupId, glyphs, lines, color: DELETE_COLOR });
-        }
+      const startEntry = map[acceptedOffset];
+      const endEntry   = map[Math.min(acceptedOffset + tokenLen - 1, map.length - 1)];
+      if (startEntry && endEntry) {
+        instructions.push({
+          type:  "delete",
+          from:  startEntry.docPos,
+          to:    endEntry.docPos + 1,
+          color: DELETE_COLOR,
+          page:  pageNumber,
+        });
       }
-      acceptedOffset += op.text.length;
-      // Note: acceptedOffset advances for deletes (they consume accepted chars)
-    } else {
-      // insert — zero-width point in the accepted text
-      const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
-      if (range) {
-        const coords = charMap.coordsAtPos(range.from, pageNumber);
+      acceptedOffset += tokenLen;
+    } else if (op.type === "insert") {
+      const insertAtEntry = map[acceptedOffset];
+      if (insertAtEntry) {
+        const coords = charMap.coordsAtPos(insertAtEntry.docPos);
         if (coords && coords.page === pageNumber) {
-          // Get line height from the LineEntry at the insertion point
-          const lines = charMap.linesInRange(
-            Math.max(0, range.from - 1),
-            range.from + 1,
-          ).filter(l => l.page === pageNumber);
-          const lineHeight = lines[0]?.height ?? 20;
-
           instructions.push({
-            type:       "insert",
-            groupId:    op.groupId,
-            text:       op.text,
-            x:          coords.x,
-            y:          coords.y,
-            lineHeight,
-            color:      INSERT_COLOR,
+            type:   "insert",
+            x:      coords.x,
+            y:      coords.y,
+            height: coords.height,
+            color:  INSERT_COLOR,
+            page:   pageNumber,
           });
         }
       }
-      // insert does NOT advance acceptedOffset — inserts add new chars, don't consume accepted ones
+      // acceptedOffset does NOT advance for inserts
     }
   }
 
   return instructions;
 }
 
-// ── Render dispatcher ─────────────────────────────────────────────────────────
+// ── Instruction renderer ──────────────────────────────────────────────────────
 
 /**
- * Render all instructions for one block onto the canvas overlay.
- * Deduplicates glyphs/lines by position (same pattern as TrackChanges.ts) to
- * prevent double-painting when multiple ops touch the same range.
+ * Execute render instructions. isActive controls highlight intensity.
  */
 export function renderInstructions(
   ctx: CanvasRenderingContext2D,
-  instructions: AiOpRenderInstruction[],
+  instructions: RenderInstruction[],
+  charMap: CharacterMap,
+  isActive: boolean,
 ): void {
-  // Collect and deduplicate deletes by docPos
-  const deleteGlyphs = new Map<number, { glyph: GlyphEntry; color: string }>();
-  const deleteLines  = new Map<number, { line: LineEntry;  color: string }>();
-
   for (const inst of instructions) {
     if (inst.type === "delete") {
-      for (const g of inst.glyphs) {
-        if (!deleteGlyphs.has(g.docPos)) deleteGlyphs.set(g.docPos, { glyph: g, color: inst.color });
-      }
-      for (const l of inst.lines) {
-        if (!deleteLines.has(l.lineIndex)) deleteLines.set(l.lineIndex, { line: l, color: inst.color });
-      }
+      const glyphs = charMap.glyphsInRange(inst.from, inst.to)
+        .filter((g) => g.page === inst.page);
+      renderDeleteHighlight(ctx, glyphs, isActive);
     }
+    // insert markers intentionally not rendered — card panel conveys inserts
   }
-
-  // Render deletes grouped by color
-  if (deleteGlyphs.size > 0 || deleteLines.size > 0) {
-    const byColor = new Map<string, { glyphs: GlyphEntry[]; lines: LineEntry[] }>();
-    for (const { glyph, color } of deleteGlyphs.values()) {
-      if (!byColor.has(color)) byColor.set(color, { glyphs: [], lines: [] });
-      byColor.get(color)!.glyphs.push(glyph);
-    }
-    for (const { line, color } of deleteLines.values()) {
-      if (!byColor.has(color)) byColor.set(color, { glyphs: [], lines: [] });
-      byColor.get(color)!.lines.push(line);
-    }
-    for (const [color, { glyphs, lines }] of byColor) {
-      renderTrackedDelete(ctx, glyphs, lines, color);
-    }
-  }
-
-  // Render inserts (phantom text) — drawn after deletes so they appear on top
-  for (const inst of instructions) {
-    if (inst.type === "insert") {
-      renderAiInsert(ctx, inst);
-    }
-  }
-}
-
-// ── Utility ───────────────────────────────────────────────────────────────────
-
-function hexToRgba(hex: string, alpha: number): string {
-  const h = hex.replace("#", "");
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
 }

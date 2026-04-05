@@ -7,8 +7,8 @@
  * AI-proposed replacement, then packages the result as a serializable
  * AiSuggestion that can be:
  *   - saved to a DB as plain JSON
- *   - passed to ai.suggestions.show() to render as an overlay
- *   - passed to ai.suggestions.apply() to commit to the document
+ *   - passed to showAiSuggestion() to render as an overlay
+ *   - passed to applyAiSuggestion() to commit to the document
  *
  * Notably does NOT call expandCharLevel — AI suggestions stay at word/token
  * granularity. Character-level surgical marks are appropriate for human edits
@@ -22,7 +22,7 @@ import { findNodeById } from "../ai-toolkit/UniqueId";
 import { buildAcceptedTextMap } from "../track-changes/lib/acceptedTextMap";
 import { diffText, pairReplacements } from "../track-changes/lib/diffText";
 import type { PairedDiffOp } from "../track-changes/lib/diffText";
-import type { AiSuggestion, AiSuggestionBlock, WordLevelOp } from "./types";
+import type { AiSuggestion, AiSuggestionBlock, AiOp } from "./types";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -41,15 +41,15 @@ function genId(): string {
 }
 
 /**
- * Convert PairedDiffOp[] (from diffText + pairReplacements) to WordLevelOp[].
+ * Convert PairedDiffOp[] (from diffText + pairReplacements) to AiOp[].
  *
  * pairReplacements assigns a groupId to paired delete+insert ops. Standalone
  * deletes or inserts (no natural pair within the look-ahead window) get a
  * generated groupId so the API surface is uniform — every non-keep op can be
  * individually accepted or rejected via groupId.
  */
-function toWordLevelOps(pairedOps: PairedDiffOp[]): WordLevelOp[] {
-  return pairedOps.map((op, i): WordLevelOp => {
+function toDiffOps(pairedOps: PairedDiffOp[]): AiOp[] {
+  return pairedOps.map((op, i): AiOp => {
     if (op.type === "keep") return { type: "keep", text: op.text };
     // Use the existing groupId from pairReplacements, or generate a unique one
     // for standalone ops that weren't paired (no matching insert/delete nearby).
@@ -76,13 +76,13 @@ function toWordLevelOps(pairedOps: PairedDiffOp[]): WordLevelOp[] {
  *   blocks: [{ nodeId, proposedText: "..." }],
  *   authorID: "AI Assistant",
  * });
- * if (suggestion) await db.save(suggestion);
+ * if (suggestion) showAiSuggestion(editor, suggestion);
  */
 export function computeAiSuggestion(
   state: EditorState,
   options: ComputeAiSuggestionOptions,
 ): AiSuggestion | null {
-  const { blocks: inputBlocks, authorID } = options;
+  const { blocks: inputBlocks } = options;
   const schema = state.schema;
   const resultBlocks: AiSuggestionBlock[] = [];
 
@@ -96,12 +96,12 @@ export function computeAiSuggestion(
       schema,
     );
 
-    // No change for this block — skip entirely (don't include in suggestion).
+    // No change for this block — skip entirely.
     if (acceptedText === proposedText) continue;
 
     const rawOps = diffText(acceptedText, proposedText);
     const paired = pairReplacements(rawOps);
-    const ops = toWordLevelOps(paired);
+    const ops = toDiffOps(paired);
 
     // Only include the block if it has at least one non-keep op.
     const hasChange = ops.some((o) => o.type !== "keep");
@@ -113,9 +113,6 @@ export function computeAiSuggestion(
   if (resultBlocks.length === 0) return null;
 
   return {
-    id: genId(),
-    authorID,
     blocks: resultBlocks,
-    createdAt: Date.now(),
   };
 }

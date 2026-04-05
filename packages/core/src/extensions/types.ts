@@ -112,6 +112,8 @@ export interface IEditor {
   get loadingState(): "syncing" | "rendering" | "ready";
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
+  /** Move the cursor to a document position. */
+  moveCursorTo(docPos: number): void;
 }
 
 /**

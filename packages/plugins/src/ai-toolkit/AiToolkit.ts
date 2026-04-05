@@ -10,9 +10,9 @@ import type { Schema } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { AiSuggestion as AiSuggestionExtension } from "../ai-suggestion/AiSuggestion";
 import { computeAiSuggestion } from "../ai-suggestion/computeAiSuggestion";
-import { showAiSuggestion, hideAiSuggestion, applyAiSuggestion, rejectAiSuggestion } from "../ai-suggestion/showHideApply";
+import { showAiSuggestion, applyAiSuggestion, rejectAiSuggestion } from "../ai-suggestion/showHideApply";
 import { aiSuggestionPluginKey } from "../ai-suggestion/AiSuggestionPlugin";
-import type { AiSuggestion as AiSuggestionData, ApplyAiSuggestionOptions, ApplyAiResult, RejectAiSuggestionOptions } from "../ai-suggestion/types";
+import type { AiSuggestion as AiSuggestionData, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "../ai-suggestion/types";
 import type { ComputeAiSuggestionOptions } from "../ai-suggestion/computeAiSuggestion";
 
 /**
@@ -47,38 +47,31 @@ export class AiSuggestionsAPI {
    * Pass a previously saved AiSuggestion JSON to restore across sessions.
    */
   show(suggestion: AiSuggestionData): void {
-    showAiSuggestion(this.editor.getState(), (tr) => {
-      this.editor._applyTransaction(tr);
-    }, suggestion);
+    showAiSuggestion(this.editor, suggestion);
   }
 
   /** Hide the current suggestion overlay without modifying the document. */
   hide(): void {
-    hideAiSuggestion(this.editor.getState(), (tr) => {
-      this.editor._applyTransaction(tr);
-    });
+    showAiSuggestion(this.editor, null);
   }
 
   /**
-   * Apply the current suggestion (or a specific group) to the document.
+   * Apply the current suggestion (or a specific group/block) to the document.
    *
    * @param options.mode     "direct" — plain replace. "tracked" — adds track-changes marks.
    * @param options.groupId  Apply only this group; others remain in the overlay.
+   * @param options.blockId  Apply only this block; others remain in the overlay.
    */
-  apply(options: ApplyAiSuggestionOptions): ApplyAiResult {
-    return applyAiSuggestion(this.editor.getState(), (tr) => {
-      this.editor._applyTransaction(tr);
-    }, options);
+  apply(options: ApplyAiSuggestionOptions): void {
+    applyAiSuggestion(this.editor, options);
   }
 
   /**
-   * Reject (discard) the current suggestion or a specific group.
+   * Reject (discard) the current suggestion or a specific group/block.
    * No document changes — the overlay is simply hidden or trimmed.
    */
   reject(options?: RejectAiSuggestionOptions): void {
-    rejectAiSuggestion(this.editor.getState(), (tr) => {
-      this.editor._applyTransaction(tr);
-    }, options);
+    rejectAiSuggestion(this.editor, options);
   }
 
   /** Returns the currently displayed suggestion, or null. */

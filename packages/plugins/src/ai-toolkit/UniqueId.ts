@@ -2,13 +2,9 @@ import { Plugin } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import { Extension } from "@scrivr/core";
 
-// ── ID generator ──────────────────────────────────────────────────────────────
-
 function generateNodeId(): string {
-  return `node-${Math.random().toString(36).slice(2, 10)}`;
+  return crypto.randomUUID();
 }
-
-// ── Utility ───────────────────────────────────────────────────────────────────
 
 /**
  * Find a block node in the document by its stable nodeId attribute.
@@ -28,8 +24,6 @@ export function findNodeById(
   return result;
 }
 
-// ── Extension ─────────────────────────────────────────────────────────────────
-
 /**
  * UniqueId — stamps every new block node with a stable `nodeId` attribute.
  *
@@ -43,7 +37,6 @@ export function findNodeById(
  */
 export const UniqueId = Extension.create({
   name: "uniqueId",
-
   addProseMirrorPlugins() {
     return [
       new Plugin({

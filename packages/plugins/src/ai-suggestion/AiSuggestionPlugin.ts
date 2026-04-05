@@ -1,65 +1,79 @@
+/**
+ * AiSuggestionPlugin.ts
+ *
+ * ProseMirror plugin that holds the AiSuggestionPluginState:
+ *   - suggestion:    the active AiSuggestion (null when none)
+ *   - staleBlockIds: nodeIds whose accepted text has changed since suggestion applied
+ *   - hoverBlockId:  nodeId currently hovered in a React edge card
+ *   - activeBlockId: nodeId containing the cursor
+ *
+ * Meta action keys:
+ *   AI_SUGGESTION_SET          — payload: AiSuggestion | null
+ *   AI_SUGGESTION_SET_STALE    — payload: ReadonlySet<string>
+ *   AI_SUGGESTION_SET_HOVER    — payload: string | null
+ *   AI_SUGGESTION_SET_ACTIVE   — payload: string | null
+ */
+
 import { Plugin, PluginKey } from "prosemirror-state";
-import type { AiSuggestion, AiSuggestionPluginState } from "./types";
+import type { Transaction } from "prosemirror-state";
+import type { AiSuggestionPluginState } from "./types";
 
-// ── Plugin key ────────────────────────────────────────────────────────────────
+export const aiSuggestionPluginKey = new PluginKey<AiSuggestionPluginState>("aiSuggestion");
 
-export const aiSuggestionPluginKey = new PluginKey<AiSuggestionPluginState>(
-  "aiSuggestion",
-);
-
-// ── Meta action keys ──────────────────────────────────────────────────────────
-
-/** Set on a transaction to show a suggestion: `tr.setMeta(AI_SUGGESTION_SHOW, suggestion)` */
-export const AI_SUGGESTION_SHOW = "aiSuggestion:show";
-
-/** Set on a transaction to hide the current suggestion: `tr.setMeta(AI_SUGGESTION_HIDE, true)` */
-export const AI_SUGGESTION_HIDE = "aiSuggestion:hide";
-
-// ── Initial state ─────────────────────────────────────────────────────────────
+export const AI_SUGGESTION_SET        = "aiSuggestion:set";
+export const AI_SUGGESTION_SET_STALE  = "aiSuggestion:setStale";
+export const AI_SUGGESTION_SET_HOVER  = "aiSuggestion:setHover";
+export const AI_SUGGESTION_SET_ACTIVE = "aiSuggestion:setActive";
 
 const EMPTY_STATE: AiSuggestionPluginState = {
   suggestion:    null,
   staleBlockIds: new Set(),
+  hoverBlockId:  null,
+  activeBlockId: null,
 };
 
-// ── Plugin ────────────────────────────────────────────────────────────────────
+export const aiSuggestionPlugin = new Plugin<AiSuggestionPluginState>({
+  key: aiSuggestionPluginKey,
 
-/**
- * ProseMirror plugin that holds the active AiSuggestion in its state.
- *
- * The suggestion is pure JSON — no live doc positions are stored here.
- * The overlay handler re-derives doc positions on every render tick by calling
- * buildAcceptedTextMap() on the live block, which is always correct even after
- * the user has edited the document.
- *
- * Staleness (staleBlockIds) is NOT tracked here — it is computed by the overlay
- * handler on each render using the live accepted text. Storing it in plugin state
- * would require mapping it through every transaction, adding unnecessary complexity.
- */
-export function createAiSuggestionPlugin(): Plugin<AiSuggestionPluginState> {
-  return new Plugin<AiSuggestionPluginState>({
-    key: aiSuggestionPluginKey,
+  state: {
+    init: () => ({ ...EMPTY_STATE }),
 
-    state: {
-      init(): AiSuggestionPluginState {
-        return EMPTY_STATE;
-      },
+    apply(tr: Transaction, prev: AiSuggestionPluginState) {
+      // Handle AI_SUGGESTION_SET
+      const newSuggestion = tr.getMeta(AI_SUGGESTION_SET) as
+        | { payload: AiSuggestionPluginState["suggestion"] }
+        | undefined;
+      if (newSuggestion !== undefined) {
+        return {
+          ...prev,
+          suggestion:    newSuggestion.payload,
+          staleBlockIds: new Set<string>(),
+          hoverBlockId:  null,
+          activeBlockId: null,
+        };
+      }
 
-      apply(tr, prev): AiSuggestionPluginState {
-        const showMeta = tr.getMeta(AI_SUGGESTION_SHOW) as AiSuggestion | undefined;
-        if (showMeta) {
-          return { suggestion: showMeta, staleBlockIds: new Set() };
-        }
+      // Handle AI_SUGGESTION_SET_STALE
+      const newStale = tr.getMeta(AI_SUGGESTION_SET_STALE) as
+        | ReadonlySet<string>
+        | undefined;
+      if (newStale !== undefined) {
+        return { ...prev, staleBlockIds: newStale };
+      }
 
-        if (tr.getMeta(AI_SUGGESTION_HIDE)) {
-          return EMPTY_STATE;
-        }
+      // Handle AI_SUGGESTION_SET_HOVER
+      const hoverMeta = tr.getMeta(AI_SUGGESTION_SET_HOVER);
+      if (hoverMeta !== undefined) {
+        return { ...prev, hoverBlockId: (hoverMeta as string | null) };
+      }
 
-        // No suggestion-related meta — carry state forward unchanged.
-        // We intentionally do NOT map positions through tr.mapping because
-        // we don't store positions. The overlay re-derives them each frame.
-        return prev;
-      },
+      // Handle AI_SUGGESTION_SET_ACTIVE
+      const activeMeta = tr.getMeta(AI_SUGGESTION_SET_ACTIVE);
+      if (activeMeta !== undefined) {
+        return { ...prev, activeBlockId: (activeMeta as string | null) };
+      }
+
+      return prev;
     },
-  });
-}
+  },
+});

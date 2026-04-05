@@ -19,33 +19,78 @@ interface ImageMenuProps {
   editor: Editor | null;
 }
 
-type VerticalAlign = "baseline" | "middle" | "top" | "bottom" | "text-top" | "text-bottom";
-type WrappingMode = "inline" | "square-left" | "square-right" | "top-bottom" | "behind" | "front";
+type VerticalAlign =
+  | "baseline"
+  | "middle"
+  | "top"
+  | "bottom"
+  | "text-top"
+  | "text-bottom";
+type WrappingMode =
+  | "inline"
+  | "square-left"
+  | "square-right"
+  | "top-bottom"
+  | "behind"
+  | "front";
 
-const ALIGN_OPTIONS: { value: VerticalAlign; label: string; title: string }[] = [
-  { value: "baseline",    label: "Baseline",   title: "Align image bottom to text baseline" },
-  { value: "middle",      label: "Middle",     title: "Center image on font x-height (matches Word / Docs)" },
-  { value: "top",         label: "Top",        title: "Align image top to line top" },
-  { value: "bottom",      label: "Bottom",     title: "Align image bottom to line bottom" },
-  { value: "text-top",    label: "Text Top",   title: "Align image top to parent font ascent" },
-  { value: "text-bottom", label: "Text Bot",   title: "Align image bottom to parent font descent" },
-];
+const ALIGN_OPTIONS: { value: VerticalAlign; label: string; title: string }[] =
+  [
+    {
+      value: "baseline",
+      label: "Baseline",
+      title: "Align image bottom to text baseline",
+    },
+    {
+      value: "middle",
+      label: "Middle",
+      title: "Center image on font x-height (matches Word / Docs)",
+    },
+    { value: "top", label: "Top", title: "Align image top to line top" },
+    {
+      value: "bottom",
+      label: "Bottom",
+      title: "Align image bottom to line bottom",
+    },
+    {
+      value: "text-top",
+      label: "Text Top",
+      title: "Align image top to parent font ascent",
+    },
+    {
+      value: "text-bottom",
+      label: "Text Bot",
+      title: "Align image bottom to parent font descent",
+    },
+  ];
 
 const WRAP_OPTIONS: { value: WrappingMode; label: string; title: string }[] = [
-  { value: "inline",       label: "In line",  title: "Image sits inline with text" },
-  { value: "square-left",  label: "← Wrap",   title: "Text wraps to the right of the image" },
-  { value: "square-right", label: "Wrap →",   title: "Text wraps to the left of the image" },
-  { value: "top-bottom",   label: "↕ Break",  title: "Image breaks the text flow (top/bottom)" },
-  { value: "behind",       label: "Behind",   title: "Image floats behind text" },
-  { value: "front",        label: "Front",    title: "Image floats in front of text" },
+  { value: "inline", label: "In line", title: "Image sits inline with text" },
+  {
+    value: "square-left",
+    label: "← Wrap",
+    title: "Text wraps to the right of the image",
+  },
+  {
+    value: "square-right",
+    label: "Wrap →",
+    title: "Text wraps to the left of the image",
+  },
+  {
+    value: "top-bottom",
+    label: "↕ Break",
+    title: "Image breaks the text flow (top/bottom)",
+  },
+  { value: "behind", label: "Behind", title: "Image floats behind text" },
+  { value: "front", label: "Front", title: "Image floats in front of text" },
 ];
 
 export function ImageMenu({ editor }: ImageMenuProps) {
-  const [rect, setRect]         = useState<DOMRect | null>(null);
-  const [info, setInfo]         = useState<ImageMenuInfo | null>(null);
-  const [pos,  setPos]          = useState<{ x: number; y: number } | null>(null);
-  const [width,  setWidth]      = useState("");
-  const [height, setHeight]     = useState("");
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const [info, setInfo] = useState<ImageMenuInfo | null>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [width, setWidth] = useState("");
+  const [height, setHeight] = useState("");
   const [wrappingMode, setWrappingMode] = useState<WrappingMode>("inline");
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -57,14 +102,22 @@ export function ImageMenu({ editor }: ImageMenuProps) {
         setInfo(i);
         setWidth(String(Math.round(i.node.attrs["width"] as number)));
         setHeight(String(Math.round(i.node.attrs["height"] as number)));
-        setWrappingMode((i.node.attrs["wrappingMode"] as WrappingMode) ?? "inline");
+        setWrappingMode(
+          (i.node.attrs["wrappingMode"] as WrappingMode) ?? "inline",
+        );
       },
       onMove: (r, i) => {
         setRect(r);
         setInfo(i);
-        setWrappingMode((i.node.attrs["wrappingMode"] as WrappingMode) ?? "inline");
+        setWrappingMode(
+          (i.node.attrs["wrappingMode"] as WrappingMode) ?? "inline",
+        );
       },
-      onHide: () => { setRect(null); setInfo(null); setPos(null); },
+      onHide: () => {
+        setRect(null);
+        setInfo(null);
+        setPos(null);
+      },
     });
   }, [editor]);
 
@@ -84,12 +137,15 @@ export function ImageMenu({ editor }: ImageMenuProps) {
     }).then(({ x, y }) => {
       if (!cancelled) setPos({ x, y });
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [rect]);
 
   if (!rect || !info) return null;
 
-  const currentAlign = (info.node.attrs["verticalAlign"] as VerticalAlign) ?? "baseline";
+  const currentAlign =
+    (info.node.attrs["verticalAlign"] as VerticalAlign) ?? "baseline";
   const isFloat = wrappingMode !== "inline";
 
   function applyAttr(attrs: Record<string, unknown>) {
@@ -117,23 +173,23 @@ export function ImageMenu({ editor }: ImageMenuProps) {
       ref={menuRef}
       onMouseDown={(e) => e.preventDefault()}
       style={{
-        position:     "fixed",
-        left:         pos?.x ?? 0,
-        top:          pos?.y ?? 0,
-        zIndex:       60,
-        visibility:   pos ? "visible" : "hidden",
-        background:   "#fff",
-        border:       "1px solid #e2e8f0",
+        position: "fixed",
+        left: pos?.x ?? 0,
+        top: pos?.y ?? 0,
+        zIndex: 60,
+        visibility: pos ? "visible" : "hidden",
+        background: "#fff",
+        border: "1px solid #e2e8f0",
         borderRadius: 10,
-        boxShadow:    "0 4px 20px rgba(0,0,0,0.13)",
-        padding:      "8px 10px",
-        display:      "flex",
+        boxShadow: "0 4px 20px rgba(0,0,0,0.13)",
+        padding: "8px 10px",
+        display: "flex",
         flexDirection: "column",
-        alignItems:   "stretch",
-        gap:          6,
-        fontSize:     13,
-        whiteSpace:   "nowrap",
-        userSelect:   "none",
+        alignItems: "stretch",
+        gap: 6,
+        fontSize: 13,
+        whiteSpace: "nowrap",
+        userSelect: "none",
       }}
     >
       {/* Layout / wrapping mode */}
@@ -144,7 +200,10 @@ export function ImageMenu({ editor }: ImageMenuProps) {
             <button
               key={value}
               title={title}
-              onMouseDown={(e) => { e.preventDefault(); handleWrapChange(value); }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleWrapChange(value);
+              }}
               style={{
                 ...styles.segBtn,
                 ...(wrappingMode === value ? styles.segBtnActive : {}),
@@ -167,7 +226,10 @@ export function ImageMenu({ editor }: ImageMenuProps) {
                 <button
                   key={value}
                   title={title}
-                  onMouseDown={(e) => { e.preventDefault(); handleAlignChange(value); }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleAlignChange(value);
+                  }}
                   style={{
                     ...styles.segBtn,
                     ...(currentAlign === value ? styles.segBtnActive : {}),
@@ -190,7 +252,9 @@ export function ImageMenu({ editor }: ImageMenuProps) {
           value={width}
           onChange={(e) => setWidth(e.target.value)}
           onBlur={handleWidthBlur}
-          onKeyDown={(e) => { if (e.key === "Enter") handleWidthBlur(); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleWidthBlur();
+          }}
           style={styles.dimInput}
         />
         <span style={{ color: "#94a3b8" }}>×</span>
@@ -199,7 +263,9 @@ export function ImageMenu({ editor }: ImageMenuProps) {
           value={height}
           onChange={(e) => setHeight(e.target.value)}
           onBlur={handleWidthBlur}
-          onKeyDown={(e) => { if (e.key === "Enter") handleWidthBlur(); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleWidthBlur();
+          }}
           style={styles.dimInput}
         />
         <span style={{ color: "#94a3b8", fontSize: 11 }}>px</span>

@@ -1,10 +1,12 @@
 /**
- * createSuggestionPopover — headless controller for the AI suggestion popover.
+ * createSuggestionPopover.ts
+ *
+ * Headless controller for the AI suggestion popover.
  *
  * Subscribes to editor state changes and fires onShow/onMove/onHide whenever
  * the cursor lands inside an AI suggestion op's range.
  *
- * Follows the same subscriber pattern as createChangePopover — the React layer
+ * Follows the same subscriber pattern as createChangePopover. The React layer
  * (AiSuggestionPopover) is a thin wrapper around this.
  */
 
@@ -13,10 +15,11 @@ import type { IEditor } from "@scrivr/core";
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { buildAcceptedTextMap, acceptedRangeToDocRange } from "../track-changes/lib/acceptedTextMap";
 import { aiSuggestionPluginKey } from "./AiSuggestionPlugin";
-import type { AiSuggestion, WordLevelOp } from "./types";
+import type { AiSuggestion, AiOp } from "./types";
 
-// ── Public types ──────────────────────────────────────────────────────────────
-
+/**
+ * Information about a suggestion group.
+ */
 export interface SuggestionGroupInfo {
   /** Shared groupId for all ops in this logical replacement. */
   groupId: string;
@@ -30,20 +33,21 @@ export interface SuggestionGroupInfo {
   isStale: boolean;
 }
 
+/**
+ * Callback functions for the suggestion popover.
+ */
 export interface SuggestionPopoverCallbacks {
   onShow: (rect: DOMRect, info: SuggestionGroupInfo) => void;
   onMove: (rect: DOMRect, info: SuggestionGroupInfo) => void;
   onHide: () => void;
 }
 
-// ── Internal helpers ──────────────────────────────────────────────────────────
-
 /**
  * Walk a block's ops and collect from/to doc positions for each unique groupId.
  * Returns a map of groupId → { from, to } covering all ops in that group.
  */
 function buildGroupRanges(
-  ops: WordLevelOp[],
+  ops: AiOp[],
   map: ReturnType<typeof buildAcceptedTextMap>["map"],
 ): Map<string, { from: number; to: number; replacedText: string; insertedText: string }> {
   const groups = new Map<string, {
@@ -61,13 +65,19 @@ function buildGroupRanges(
       continue;
     }
 
-    if (!groups.has(op.groupId)) {
-      groups.set(op.groupId, {
+    const groupId = op.groupId;
+    if (!groupId) {
+      if (op.type === "delete") acceptedOffset += op.text.length;
+      continue;
+    }
+
+    if (!groups.has(groupId)) {
+      groups.set(groupId, {
         deleteFrom: Infinity, deleteTo: -Infinity,
         deleteText: "", insertText: "", hasInsert: false, insertAnchor: null,
       });
     }
-    const g = groups.get(op.groupId)!;
+    const g = groups.get(groupId)!;
 
     if (op.type === "delete") {
       const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
@@ -78,7 +88,7 @@ function buildGroupRanges(
       g.deleteText += op.text;
       acceptedOffset += op.text.length;
     } else {
-      // insert — anchor at current acceptedOffset (no accepted chars consumed)
+      // insert — anchor at current acceptedOffset
       if (!g.hasInsert) {
         const anchor = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         g.insertAnchor = anchor?.from ?? null;
@@ -111,8 +121,6 @@ function buildGroupRanges(
 
   return result;
 }
-
-// ── Public API ────────────────────────────────────────────────────────────────
 
 /**
  * Create a headless AI suggestion popover controller.
@@ -161,10 +169,6 @@ export function createSuggestionPopover(
       );
       const isStale = liveText !== block.acceptedText;
 
-      // Check if cursor is anywhere inside this block's extent.
-      // This is more discoverable than requiring the cursor to land
-      // precisely on a deleted-text range — clicking anywhere in a
-      // suggestion block surfaces the popover.
       const blockStart = nodeFound.pos;
       const blockEnd   = nodeFound.pos + nodeFound.node.nodeSize;
       if (head < blockStart || head > blockEnd) continue;
@@ -172,15 +176,13 @@ export function createSuggestionPopover(
       const groupRanges = buildGroupRanges(block.ops, map);
       if (groupRanges.size === 0) continue;
 
-      // Prefer the group whose deleted-text range contains the cursor.
-      // Fall back to the group whose range is nearest to the cursor.
       let bestGroupId: string | null = null;
       let bestRange: { from: number; to: number; replacedText: string; insertedText: string } | null = null;
       let bestDist = Infinity;
 
-      for (const [groupId, range] of groupRanges) {
+      for (const [gId, range] of groupRanges) {
         if (head >= range.from && head <= range.to) {
-          bestGroupId = groupId;
+          bestGroupId = gId;
           bestRange = range;
           break;
         }
@@ -189,7 +191,7 @@ export function createSuggestionPopover(
           : head < range.from ? range.from - head : head - range.to;
         if (dist < bestDist) {
           bestDist = dist;
-          bestGroupId = groupId;
+          bestGroupId = gId;
           bestRange = range;
         }
       }
@@ -219,7 +221,6 @@ export function createSuggestionPopover(
       isStale:      found.isStale,
     };
 
-    // Stable key: groupId is deterministic across cursor moves within a group.
     const key = found.groupId;
 
     if (visible && lastKey === key) {
