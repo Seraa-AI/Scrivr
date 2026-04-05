@@ -16,7 +16,7 @@
   },
   "scripts": {
     "dev": "turbo dev --filter=@scrivr/demo",
-    "dev:docs": "turbo dev --filter=@scrivr/docs",
+    "dev:docs": "turbo dev --filter=@scrivr/docs --filter=@scrivr/server",
     "server": "turbo dev --filter=@scrivr/server",
     "build": "turbo build --filter='./packages/**'",
     "typecheck": "turbo typecheck",

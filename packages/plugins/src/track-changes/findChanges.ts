@@ -23,26 +23,66 @@ export function findChanges(state: EditorState): ChangeSet {
   // Map from change ID → active group. Supports multiple marks per text node
   // (e.g. tracked_insert + tracked_delete stacked from different authors).
   const currentMap = new Map<string, { change: IncompleteChange; node: PMNode }>();
+  // Parallel map for inline mark-based changes (tracked_insert / tracked_delete marks).
+  const markMap = new Map<string, { change: IncompleteChange; node: PMNode }>();
 
   state.doc.descendants((node, pos) => {
-    const tracked = getNodeTrackedData(node, state.schema) || [];
+    // ── Mark grouping ─────────────────────────────────────────────────────────
+    // Marks can't cross block boundaries in ProseMirror, so flush all in-flight
+    // mark groups when we encounter a block node.
+    if (node.isBlock && markMap.size > 0) {
+      markMap.forEach(c => changes.push(c.change));
+      markMap.clear();
+    }
 
     const marksWithTrackChanges = getMarkTrackedData(node);
-    marksWithTrackChanges?.forEach((trackAttrs, mark) => {
-      trackAttrs.forEach(c => {
-        const ch = {
-          id: c.id,
-          type: "mark-change",
-          from: pos,
-          to: pos + node.nodeSize,
-          dataTracked: { ...c },
-          nodeType: node.type,
-          node: node,
-          mark: mark,
-        } as MarkChange;
-        changes.push(ch);
+    if (marksWithTrackChanges.size > 0) {
+      // Build the set of tracking IDs active in this node.
+      const activeMarkIds = new Set<string>();
+      marksWithTrackChanges.forEach(trackAttrs =>
+        trackAttrs.forEach(c => { if (c.id) activeMarkIds.add(c.id); }),
+      );
+
+      // Flush stale mark groups (IDs that ended before this node).
+      for (const [id, c] of Array.from(markMap.entries())) {
+        if (!activeMarkIds.has(id)) {
+          changes.push(c.change);
+          markMap.delete(id);
+        }
+      }
+
+      // Extend existing groups or open new ones.
+      marksWithTrackChanges.forEach((trackAttrs, mark) => {
+        trackAttrs.forEach(c => {
+          const id = c.id;
+          if (!id) return;
+          if (markMap.has(id)) {
+            const existing = markMap.get(id)!;
+            existing.change.to = pos + node.nodeSize;
+            existing.node = node;
+            (existing.change as PartialChange<MarkChange>).text += node.text ?? "";
+          } else {
+            markMap.set(id, {
+              change: {
+                id,
+                type: "mark-change",
+                from: pos,
+                to: pos + node.nodeSize,
+                dataTracked: { ...c },
+                nodeType: node.type,
+                node,
+                mark,
+                text: node.text ?? "",
+              } as PartialChange<MarkChange>,
+              node,
+            });
+          }
+        });
       });
-    });
+    }
+
+    // ── Node attribute tracking ───────────────────────────────────────────────
+    const tracked = getNodeTrackedData(node, state.schema) || [];
 
     // Build the set of IDs active in this node so we can flush stale groups.
     const activeIds = new Set(tracked.map(d => d?.id || "").filter(Boolean));
@@ -59,12 +99,20 @@ export function findChanges(state: EditorState): ChangeSet {
 
     for (let i = 0; i < tracked.length; i += 1) {
       const dataTracked = tracked[i];
-      const id = dataTracked?.id || "";
+      // Fix 1: skip entries with no valid ID — avoids merging unrelated changes
+      // under the "" key.
+      const id = dataTracked?.id;
+      if (!id) continue;
 
       if (currentMap.has(id)) {
         // Extend the existing group to cover this node.
-        currentMap.get(id)!.change.to = pos + node.nodeSize;
-        currentMap.get(id)!.node = node;
+        const existing = currentMap.get(id)!;
+        existing.change.to = pos + node.nodeSize;
+        existing.node = node;
+        // Fix 2: accumulate text so multi-node text groups contain full content.
+        if (node.isText && existing.change.type === "text-change") {
+          (existing.change as PartialChange<TextChange>).text += node.text ?? "";
+        }
         continue;
       }
 
@@ -80,6 +128,7 @@ export function findChanges(state: EditorState): ChangeSet {
           nodeType: node.type,
         } as PartialChange<TextChange>;
       } else if (dataTracked?.operation === CHANGE_OPERATION.set_node_attributes) {
+        const oldNodeTypeName = (dataTracked as Record<string, unknown>).oldNodeTypeName as string | undefined;
         change = {
           id,
           type: "node-attr-change",
@@ -89,6 +138,7 @@ export function findChanges(state: EditorState): ChangeSet {
           node: node,
           newAttrs: { ...node.attrs },
           oldAttrs: { ...dataTracked?.oldAttrs },
+          ...(oldNodeTypeName ? { oldNodeTypeName, newNodeTypeName: node.type.name } : {}),
         } as NodeAttrChange;
       } else if (dataTracked?.operation === CHANGE_OPERATION.reference) {
         change = {
@@ -123,6 +173,7 @@ export function findChanges(state: EditorState): ChangeSet {
 
   // Flush any remaining open groups.
   currentMap.forEach(c => changes.push(c.change));
+  markMap.forEach(c => changes.push(c.change));
 
   // ── Conflict detection (computed, no mark mutations) ───────────────────────
   // Two pending changes conflict when they overlap in document range AND belong
@@ -145,8 +196,8 @@ export function findChanges(state: EditorState): ChangeSet {
         (aOp === CHANGE_OPERATION.delete && bOp === CHANGE_OPERATION.insert);
       if (!areOpposing) continue;
       if (a.from < b.to && a.to > b.from) {
-        (a.dataTracked as Record<string, unknown>).isConflict = true;
-        (b.dataTracked as Record<string, unknown>).isConflict = true;
+        a.dataTracked = { ...a.dataTracked, isConflict: true };
+        b.dataTracked = { ...b.dataTracked, isConflict: true };
       }
     }
   }

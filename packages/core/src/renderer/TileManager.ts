@@ -1,4 +1,5 @@
 import type { Editor } from "../Editor";
+import type { EditorState } from "prosemirror-state";
 import type { DocumentLayout, LayoutFragment } from "../layout/PageLayout";
 import { setupCanvas, clearCanvas } from "./canvas";
 import { renderPage } from "./PageRenderer";
@@ -51,6 +52,8 @@ interface TileEntry {
   lastBlinkState: boolean;
   lastCursorTile: number;
   lastSelectionKey: string; // "head:from:to"
+  /** Last seen PM state — detects plugin-state-only transactions (e.g. AI suggestions). */
+  lastPmState: EditorState | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -314,6 +317,7 @@ export class TileManager {
         tile.lastBlinkState = false;
         tile.lastCursorTile = -1;
         tile.lastSelectionKey = "";
+        tile.lastPmState = null;
         tile.wrapper.style.top = `${idx * sh}px`;
         tile.wrapper.style.height = `${this.tileHeight}px`;
         tile.wrapper.style.display = "block";
@@ -503,15 +507,20 @@ export class TileManager {
       this.editor.isFocused && this.editor.cursorManager.isVisible;
 
     // ── Blink gate ────────────────────────────────────────────────────────
+    const pmState = this.editor.getState();
     const blinkDirty =
       tile.tileIndex === cursorTile && tile.lastBlinkState !== blinkOn;
     const moveDirty =
       tile.lastCursorTile !== cursorTile || tile.lastSelectionKey !== selKey;
-    if (!blinkDirty && !moveDirty) return;
+    // Also repaint when PM plugin state changes (e.g. AI suggestion shown/hidden)
+    // without a cursor or selection movement.
+    const pluginStateDirty = tile.lastPmState !== pmState;
+    if (!blinkDirty && !moveDirty && !pluginStateDirty) return;
 
     tile.lastBlinkState = blinkOn;
     tile.lastCursorTile = cursorTile;
     tile.lastSelectionKey = selKey;
+    tile.lastPmState = pmState;
 
     const dpr = tile.dpr || (window.devicePixelRatio ?? 1);
     const w = pageConfig.pageWidth;
@@ -640,6 +649,7 @@ export class TileManager {
       lastBlinkState: false,
       lastCursorTile: -1,
       lastSelectionKey: "",
+      lastPmState: null,
     };
   }
 

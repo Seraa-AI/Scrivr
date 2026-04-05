@@ -51,6 +51,16 @@ export type InputSpan =
       docPos: number;
       /** Vertical alignment within the line — sourced from the node's verticalAlign attr */
       verticalAlign: InlineObjectVerticalAlign;
+    }
+  | {
+      /**
+       * Hard line break (Shift-Enter / hard_break node).
+       * Flushes the current line and starts a new one. Does not contribute
+       * any visible width or height — the break itself is invisible.
+       */
+      kind: "break";
+      /** ProseMirror doc position of the hard_break node */
+      docPos: number;
     };
 
 // ── LayoutSpan ────────────────────────────────────────────────────────────────
@@ -127,6 +137,13 @@ export interface LayoutLine {
    * Undefined (= 0) when no constraint applies.
    */
   constraintX?: number;
+  /**
+   * When this line ends with a hard_break node, the ProseMirror doc position of
+   * that break. Used by CharacterMap registration to expose the break position as
+   * a clickable cursor target — without this, coordsAtPos(breakPos) has no anchor.
+   * Undefined for lines that end due to normal word-wrap.
+   */
+  terminalBreakDocPos?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -136,7 +153,9 @@ export interface LayoutLine {
  * Text spans: docPos + text.length; object spans: docPos + 1 (nodeSize = 1).
  */
 export function spanEndDocPos(span: LayoutSpan | InputSpan): number {
-  return span.kind === "text" ? span.docPos + span.text.length : span.docPos + 1;
+  return span.kind === "text"
+    ? span.docPos + span.text.length
+    : span.docPos + 1;
 }
 
 /**
@@ -193,7 +212,9 @@ export function computeObjectRenderY(
  *          content left and width is the available text width, or null if
  *          no constraint applies at this Y.
  */
-export type ConstraintProvider = (absoluteLineY: number) => { x: number; width: number; skipToY?: number } | null;
+export type ConstraintProvider = (
+  absoluteLineY: number,
+) => { x: number; width: number; skipToY?: number } | null;
 
 /**
  * LineBreaker — greedy word-wrap algorithm.
@@ -216,29 +237,34 @@ export class LineBreaker {
    *
    * @param spans   — text runs / inline objects from the ProseMirror doc tree
    * @param maxWidth — available width in CSS pixels (page width minus margins)
-   * @param map     — optional CharacterMap to populate with glyph positions
-   * @param pageContext — page + lineIndex offset for CharacterMap registration
-   * @param options — optional { constraintProvider, startY } for float text-wrapping
+   * @param options — required options including defaultFontFamily, defaultFontSize,
+   *                  and optional map, pageContext, constraintProvider, startY
    */
   breakIntoLines(
     spans: InputSpan[],
     maxWidth: number,
-    map?: CharacterMap,
-    pageContext?: { page: number; lineIndexOffset: number; lineY: number },
-    options?: {
+    options: {
+      /** Font family for phantom ZWS lines emitted on hard_break tokens, e.g. "Georgia". */
+      defaultFontFamily: string;
+      /** Font size in CSS pixels for phantom ZWS lines, e.g. 14. */
+      defaultFontSize: number;
+      map?: CharacterMap;
+      pageContext?: { page: number; lineIndexOffset: number; lineY: number };
       constraintProvider?: ConstraintProvider;
       startY?: number;
-    }
+    },
   ): LayoutLine[] {
     if (!spans.length) return [];
 
-    const constraintProvider = options?.constraintProvider;
-    const startY = options?.startY ?? 0;
+    const { defaultFontFamily, defaultFontSize, map, pageContext, constraintProvider, startY = 0 } = options;
 
     const lines: LayoutLine[] = [];
     let currentLine: LayoutSpan[] = [];
     let currentWidth = 0;
     let cumulativeLineY = 0;
+    // Tracks the most recently seen text font — used to size the phantom ZWS
+    // line emitted after a trailing hard_break.
+    let lastSeenFont: string | undefined = undefined;
     // Track the effective width and x-offset constraint active when this line started.
     // Needed by justify (effectiveWidth) and square-left rendering (constraintX).
     let currentLineEffectiveWidth: number | undefined = undefined;
@@ -246,11 +272,12 @@ export class LineBreaker {
 
     // Tokenise all spans. Text spans → word tokens (space-split).
     // Object spans → single atomic tokens (cannot be split).
+    // Break spans → break tokens (force a line flush).
     const rawWords = tokenise(spans);
     // Pre-tokenise with the default maxWidth for wide-word splitting.
     const words: Token[] = [];
     for (const word of rawWords) {
-      if (word.kind === "object") {
+      if (word.kind === "object" || word.kind === "break") {
         words.push(word);
       } else {
         const wordWidth = this.measurer.measureWidth(word.text, word.font);
@@ -266,7 +293,9 @@ export class LineBreaker {
       // Determine the effective width for the current line, applying any
       // float constraint from the ConstraintProvider.
       let absoluteLineY = startY + cumulativeLineY;
-      let constraint = constraintProvider ? constraintProvider(absoluteLineY) : null;
+      let constraint = constraintProvider
+        ? constraintProvider(absoluteLineY)
+        : null;
 
       // Handle top-bottom ('full') float: flush any partial line then emit a
       // spacer line whose lineHeight equals the remaining gap to skipToY. The
@@ -274,11 +303,16 @@ export class LineBreaker {
       // height = lines.reduce(sum + lineHeight) correctly reserves the space,
       // and the renderer's lineY advances past the image before drawing the
       // next real line.
-      if (constraint?.skipToY !== undefined && constraint.skipToY > absoluteLineY) {
+      if (
+        constraint?.skipToY !== undefined &&
+        constraint.skipToY > absoluteLineY
+      ) {
         if (currentLine.length > 0) {
           const fl = buildLine(currentLine, this.measurer);
-          if (currentLineEffectiveWidth !== undefined) fl.effectiveWidth = currentLineEffectiveWidth;
-          if (currentLineConstraintX !== undefined) fl.constraintX = currentLineConstraintX;
+          if (currentLineEffectiveWidth !== undefined)
+            fl.effectiveWidth = currentLineEffectiveWidth;
+          if (currentLineConstraintX !== undefined)
+            fl.constraintX = currentLineConstraintX;
           lines.push(fl);
           cumulativeLineY += fl.lineHeight;
           currentLine = [];
@@ -299,7 +333,9 @@ export class LineBreaker {
           cumulativeLineY += gapHeight;
         }
         absoluteLineY = startY + cumulativeLineY;
-        constraint = constraintProvider ? constraintProvider(absoluteLineY) : null;
+        constraint = constraintProvider
+          ? constraintProvider(absoluteLineY)
+          : null;
       }
 
       const effectiveMaxWidth = constraint ? constraint.width : maxWidth;
@@ -307,7 +343,42 @@ export class LineBreaker {
       // Record constraint on the first word of a new line.
       if (currentLine.length === 0) {
         currentLineEffectiveWidth = constraint ? constraint.width : undefined;
-        currentLineConstraintX = (constraint && constraint.x > 0) ? constraint.x : undefined;
+        currentLineConstraintX =
+          constraint && constraint.x > 0 ? constraint.x : undefined;
+      }
+
+      // Hard line break: flush the current line and start a new one.
+      // Handled before wordWidth because BreakToken has no text/font.
+      if (word.kind === "break") {
+        if (currentLine.length > 0) {
+          // Normal case: flush the content line terminated by this break.
+          const finishedLine = buildLine(currentLine, this.measurer);
+          if (currentLineEffectiveWidth !== undefined)
+            finishedLine.effectiveWidth = currentLineEffectiveWidth;
+          if (currentLineConstraintX !== undefined)
+            finishedLine.constraintX = currentLineConstraintX;
+          finishedLine.terminalBreakDocPos = word.docPos;
+          lines.push(finishedLine);
+          cumulativeLineY += finishedLine.lineHeight;
+          currentLine = [];
+          currentWidth = 0;
+          currentLineEffectiveWidth = undefined;
+          currentLineConstraintX = undefined;
+        } else {
+          // currentLine is empty: this is either a leading break or a consecutive
+          // break immediately following another break. Emit a phantom ZWS line so
+          // every break produces exactly one line box — N breaks → N new lines.
+          // font is always defined here: either a prior text span set lastSeenFont,
+          // or we fall back to the caller-provided default font (always defined).
+          const font = lastSeenFont ?? `${defaultFontSize}px ${defaultFontFamily}`;
+          const phantomLine = buildLine(
+            [{ kind: "text", text: "\u200B", font, x: 0, width: 0, docPos: word.docPos }],
+            this.measurer,
+          );
+          lines.push(phantomLine);
+          cumulativeLineY += phantomLine.lineHeight;
+        }
+        continue;
       }
 
       const wordWidth =
@@ -320,17 +391,24 @@ export class LineBreaker {
 
       if (!fitsOnCurrentLine && !lineIsEmpty) {
         const finishedLine = buildLine(currentLine, this.measurer);
-        if (currentLineEffectiveWidth !== undefined) finishedLine.effectiveWidth = currentLineEffectiveWidth;
-        if (currentLineConstraintX !== undefined) finishedLine.constraintX = currentLineConstraintX;
+        if (currentLineEffectiveWidth !== undefined)
+          finishedLine.effectiveWidth = currentLineEffectiveWidth;
+        if (currentLineConstraintX !== undefined)
+          finishedLine.constraintX = currentLineConstraintX;
         lines.push(finishedLine);
         cumulativeLineY += finishedLine.lineHeight;
         currentLine = [];
         currentWidth = 0;
         // Sample constraint for the new line that's about to start.
         const newAbsoluteLineY = startY + cumulativeLineY;
-        const newConstraint = constraintProvider ? constraintProvider(newAbsoluteLineY) : null;
-        currentLineEffectiveWidth = newConstraint ? newConstraint.width : undefined;
-        currentLineConstraintX = (newConstraint && newConstraint.x > 0) ? newConstraint.x : undefined;
+        const newConstraint = constraintProvider
+          ? constraintProvider(newAbsoluteLineY)
+          : null;
+        currentLineEffectiveWidth = newConstraint
+          ? newConstraint.width
+          : undefined;
+        currentLineConstraintX =
+          newConstraint && newConstraint.x > 0 ? newConstraint.x : undefined;
       }
 
       if (word.kind === "object") {
@@ -344,6 +422,7 @@ export class LineBreaker {
           verticalAlign: word.verticalAlign,
         });
       } else {
+        lastSeenFont = word.font;
         currentLine.push({
           kind: "text",
           text: word.text,
@@ -360,9 +439,32 @@ export class LineBreaker {
 
     if (currentLine.length) {
       const lastLine = buildLine(currentLine, this.measurer);
-      if (currentLineEffectiveWidth !== undefined) lastLine.effectiveWidth = currentLineEffectiveWidth;
-      if (currentLineConstraintX !== undefined) lastLine.constraintX = currentLineConstraintX;
+      if (currentLineEffectiveWidth !== undefined)
+        lastLine.effectiveWidth = currentLineEffectiveWidth;
+      if (currentLineConstraintX !== undefined)
+        lastLine.constraintX = currentLineConstraintX;
       lines.push(lastLine);
+    } else if (words.length > 0 && words[words.length - 1]!.kind === "break") {
+      // Trailing break: the paragraph ends with a hard_break and currentLine is empty.
+      // Emit a phantom ZWS line so the cursor after the break is reachable.
+      // Use the font of the last text token seen (guaranteed to exist because the
+      // ZWS fallback in BlockLayout replaces span-less paragraphs before we get here).
+      const trailingBreak = words[words.length - 1]! as BreakToken;
+      const font = lastSeenFont ?? `${defaultFontSize}px ${defaultFontFamily}`;
+      const phantomLine = buildLine(
+        [
+          {
+            kind: "text",
+            text: "\u200B",
+            font,
+            x: 0,
+            width: 0,
+            docPos: trailingBreak.docPos + 1,
+          },
+        ],
+        this.measurer,
+      );
+      lines.push(phantomLine);
     }
 
     if (map && pageContext) {
@@ -374,27 +476,45 @@ export class LineBreaker {
 
   /**
    * Splits a text token that is wider than maxWidth into the largest
-   * character-level chunks that each fit within maxWidth (greedy, left to right).
+   * grapheme-cluster chunks that each fit within maxWidth (greedy, left to right).
+   *
+   * Uses Intl.Segmenter to iterate grapheme clusters so surrogate pairs and
+   * ZWJ sequences (e.g. emoji with skin-tone modifiers) are never split —
+   * the original character-index loop would break UTF-16 surrogate pairs when
+   * the split point landed inside a multi-code-unit character.
    */
   private splitWideWord(word: TextToken, maxWidth: number): TextToken[] {
     const result: TextToken[] = [];
-    let start = 0;
+    const graphemes = [...new Intl.Segmenter().segment(word.text)];
+    let startSeg = 0;
 
-    while (start < word.text.length) {
-      let end = start + 1;
-      while (end < word.text.length) {
-        const w = this.measurer.measureWidth(word.text.slice(start, end + 1), word.font);
-        if (w > maxWidth) break;
-        end++;
+    while (startSeg < graphemes.length) {
+      const chunkStart = graphemes[startSeg]!.index;
+      let endSeg = startSeg; // last included grapheme (inclusive)
+
+      // Greedily extend the chunk one grapheme at a time.
+      while (endSeg + 1 < graphemes.length) {
+        const next = graphemes[endSeg + 1]!;
+        // Measure from chunkStart through the END of the next grapheme.
+        const tentativeEnd = next.index + next.segment.length;
+        if (this.measurer.measureWidth(word.text.slice(chunkStart, tentativeEnd), word.font) > maxWidth) break;
+        endSeg++;
       }
+
+      // chunkEnd = start of the first grapheme NOT included in this chunk.
+      const chunkEnd =
+        endSeg + 1 < graphemes.length
+          ? graphemes[endSeg + 1]!.index
+          : word.text.length;
+
       result.push({
         kind: "text",
-        text: word.text.slice(start, end),
+        text: word.text.slice(chunkStart, chunkEnd),
         font: word.font,
-        docPos: word.docPos + start,
+        docPos: word.docPos + chunkStart,
         ...(word.marks !== undefined ? { marks: word.marks } : {}),
       });
-      start = end;
+      startSeg = endSeg + 1;
     }
 
     return result;
@@ -407,7 +527,7 @@ export class LineBreaker {
   private populateCharacterMap(
     lines: LayoutLine[],
     map: CharacterMap,
-    ctx: { page: number; lineIndexOffset: number; lineY: number }
+    ctx: { page: number; lineIndexOffset: number; lineY: number },
   ): void {
     let y = ctx.lineY;
 
@@ -420,9 +540,10 @@ export class LineBreaker {
       // When a baseline image inflates line.ascent, text sits at the bottom of
       // the line (baseline = y + ascent). We align the cursor to the text, not
       // the full line height.
-      const textY = line.textAscent > 0
-        ? y + line.ascent - line.textAscent
-        : y + Math.max(0, line.lineHeight - line.cursorHeight) / 2;
+      const textY =
+        line.textAscent > 0
+          ? y + line.ascent - line.textAscent
+          : y + Math.max(0, line.lineHeight - line.cursorHeight) / 2;
 
       map.registerLine({
         page: ctx.page,
@@ -432,7 +553,12 @@ export class LineBreaker {
         x: 0,
         contentWidth: 0,
         startDocPos: line.spans[0]?.docPos ?? 0,
-        endDocPos: lastSpan ? spanEndDocPos(lastSpan) : 0,
+        endDocPos:
+          line.terminalBreakDocPos !== undefined
+            ? line.terminalBreakDocPos + 1
+            : lastSpan
+              ? spanEndDocPos(lastSpan)
+              : 0,
       });
 
       for (const span of line.spans) {
@@ -472,14 +598,31 @@ export class LineBreaker {
             x: span.x + run.charPositions[ci]!,
             y: textY,
             lineY: y,
-            width: ci < span.text.length - 1
-              ? run.charPositions[ci + 1]! - run.charPositions[ci]!
-              : run.totalWidth - run.charPositions[ci]!,
+            width:
+              ci < span.text.length - 1
+                ? run.charPositions[ci + 1]! - run.charPositions[ci]!
+                : run.totalWidth - run.charPositions[ci]!,
             height: line.cursorHeight,
             page: ctx.page,
             lineIndex,
           });
         }
+      }
+
+      // Register a zero-width glyph at the hard_break's doc position so
+      // coordsAtPos(breakDocPos) returns a valid cursor location at the end
+      // of this line rather than falling back to the wrong-page heuristic.
+      if (line.terminalBreakDocPos !== undefined) {
+        map.registerGlyph({
+          docPos: line.terminalBreakDocPos,
+          x: line.width,
+          y: textY,
+          lineY: y,
+          width: 0,
+          height: line.cursorHeight,
+          page: ctx.page,
+          lineIndex,
+        });
       }
 
       y += line.lineHeight;
@@ -506,7 +649,12 @@ interface ObjectToken {
   verticalAlign: InlineObjectVerticalAlign;
 }
 
-type Token = TextToken | ObjectToken;
+interface BreakToken {
+  kind: "break";
+  docPos: number;
+}
+
+type Token = TextToken | ObjectToken | BreakToken;
 
 /**
  * Splits InputSpans into word-level tokens.
@@ -522,7 +670,19 @@ function tokenise(spans: InputSpan[]): Token[] {
 
   for (const span of spans) {
     if (span.kind === "object") {
-      tokens.push({ kind: "object", node: span.node, width: span.width, height: span.height, docPos: span.docPos, verticalAlign: span.verticalAlign });
+      tokens.push({
+        kind: "object",
+        node: span.node,
+        width: span.width,
+        height: span.height,
+        docPos: span.docPos,
+        verticalAlign: span.verticalAlign,
+      });
+      continue;
+    }
+
+    if (span.kind === "break") {
+      tokens.push({ kind: "break", docPos: span.docPos });
       continue;
     }
 
@@ -630,7 +790,17 @@ function buildLine(spans: LayoutSpan[], measurer: TextMeasurer): LayoutLine {
   // cursorHeight is text-derived so the caret stays text-sized even when an
   // inline image inflates lineHeight. Falls back to DEFAULT_CURSOR_HEIGHT
   // for object-only lines (no text spans present).
-  const cursorHeight = textLineHeight > 0 ? textLineHeight : DEFAULT_CURSOR_HEIGHT;
+  const cursorHeight =
+    textLineHeight > 0 ? textLineHeight : DEFAULT_CURSOR_HEIGHT;
 
-  return { spans, width, ascent, descent, lineHeight, textAscent, cursorHeight, xHeight };
+  return {
+    spans,
+    width,
+    ascent,
+    descent,
+    lineHeight,
+    textAscent,
+    cursorHeight,
+    xHeight,
+  };
 }

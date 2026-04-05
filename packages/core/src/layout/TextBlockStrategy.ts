@@ -173,6 +173,21 @@ export const TextBlockStrategy: BlockStrategy = {
         spacesBeforeSpan += countSpaces(span.text);
       }
 
+      // Register a zero-width glyph at the hard_break's doc position so
+      // coordsAtPos(breakDocPos) returns the correct cursor location at line-end.
+      if (line.terminalBreakDocPos !== undefined && !map.hasGlyph(line.terminalBreakDocPos)) {
+        map.registerGlyph({
+          docPos: line.terminalBreakDocPos,
+          x: x + lineOffsetX + line.width,
+          y: textY,
+          lineY,
+          width: 0,
+          height: line.cursorHeight,
+          page: pageNumber,
+          lineIndex: globalLineIndex,
+        });
+      }
+
       if (!map.hasLine(pageNumber, globalLineIndex)) {
         const lastSpan = line.spans[line.spans.length - 1];
         map.registerLine({
@@ -183,9 +198,11 @@ export const TextBlockStrategy: BlockStrategy = {
           x,
           contentWidth: availableWidth,
           startDocPos: line.spans[0]?.docPos ?? 0,
-          endDocPos: lastSpan
-            ? (lastSpan.kind === "text" ? lastSpan.docPos + lastSpan.text.length : lastSpan.docPos + 1)
-            : 0,
+          endDocPos: line.terminalBreakDocPos !== undefined
+            ? line.terminalBreakDocPos + 1
+            : (lastSpan
+              ? (lastSpan.kind === "text" ? lastSpan.docPos + lastSpan.text.length : lastSpan.docPos + 1)
+              : 0),
         });
       }
     }

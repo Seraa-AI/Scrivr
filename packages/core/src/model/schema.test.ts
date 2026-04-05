@@ -10,14 +10,15 @@ describe("schema — nodes", () => {
     const required = [
       "paragraph",
       "heading",
-      "bullet_list",
-      "ordered_list",
-      "list_item",
+      "bulletList",
+      "orderedList",
+      "listItem",
+      "codeBlock",
+      "horizontalRule",
       "table",
       "table_row",
       "table_cell",
       "page_break",
-      "form_field",
       "hard_break",
     ];
     for (const name of required) {
@@ -28,11 +29,6 @@ describe("schema — nodes", () => {
   it("heading has a level attribute defaulting to 1", () => {
     const heading = schema.nodes["heading"]!;
     expect(heading.spec.attrs?.["level"]?.default).toBe(1);
-  });
-
-  it("form_field has fieldType attribute defaulting to text", () => {
-    const field = schema.nodes["form_field"]!;
-    expect(field.spec.attrs?.["fieldType"]?.default).toBe("text");
   });
 
   it("table has columnWidths attribute defaulting to empty array", () => {
@@ -52,8 +48,9 @@ describe("schema — marks", () => {
       "font_family",
       "color",
       "link",
-      "track_insert",
-      "track_delete",
+      "highlight",
+      "tracked_insert",
+      "tracked_delete",
     ];
     for (const name of required) {
       expect(schema.marks[name], `missing mark: ${name}`).toBeDefined();
@@ -68,10 +65,9 @@ describe("schema — marks", () => {
     expect(schema.marks["font_size"]!.spec.excludes).toBe("font_size");
   });
 
-  it("track_insert has author and date attributes", () => {
-    const mark = schema.marks["track_insert"]!;
-    expect(mark.spec.attrs?.["author"]).toBeDefined();
-    expect(mark.spec.attrs?.["date"]).toBeDefined();
+  it("tracked_insert has dataTracked attribute", () => {
+    const mark = schema.marks["tracked_insert"]!;
+    expect(mark.spec.attrs?.["dataTracked"]).toBeDefined();
   });
 });
 
@@ -98,16 +94,13 @@ describe("schema — document construction", () => {
     expect(boldText.marks[0]?.type.name).toBe("bold");
   });
 
-  it("can apply track_insert mark with author and date", () => {
+  it("can apply tracked_insert mark", () => {
     const inserted = schema.text("new clause", [
-      schema.marks["track_insert"]!.create({
-        author: "Alice",
-        date: "2026-03-19T00:00:00Z",
-      }),
+      schema.marks["tracked_insert"]!.create({ dataTracked: { id: "abc", operation: "insert" } }),
     ]);
     const mark = inserted.marks[0]!;
-    expect(mark.type.name).toBe("track_insert");
-    expect(mark.attrs["author"]).toBe("Alice");
+    expect(mark.type.name).toBe("tracked_insert");
+    expect(mark.attrs["dataTracked"]).toBeDefined();
   });
 
   it("serialises to JSON and back without data loss", () => {

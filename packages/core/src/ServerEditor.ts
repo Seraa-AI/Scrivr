@@ -119,6 +119,9 @@ export class ServerEditor implements IEditor {
     return serializer.serialize(this.state.doc);
   }
 
+  /** No-op: ServerEditor has no visual cursor. */
+  moveCursorTo(_docPos: number): void { /* no-op */ }
+
   // ── IEditor stubs — no visual surface on the server ────────────────────────
 
   /** No-op: ServerEditor has no subscribers. */

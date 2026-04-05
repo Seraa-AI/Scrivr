@@ -8,20 +8,97 @@ import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { buildAcceptedTextMap } from "../track-changes/lib/acceptedTextMap";
 import type { Schema } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
+import { AiSuggestion as AiSuggestionExtension } from "../ai-suggestion/AiSuggestion";
+import { computeAiSuggestion } from "../ai-suggestion/computeAiSuggestion";
+import { showAiSuggestion, applyAiSuggestion, rejectAiSuggestion } from "../ai-suggestion/showHideApply";
+import { aiSuggestionPluginKey } from "../ai-suggestion/AiSuggestionPlugin";
+import type { AiSuggestion as AiSuggestionData, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "../ai-suggestion/types";
+import type { ComputeAiSuggestionOptions } from "../ai-suggestion/computeAiSuggestion";
 
-// ── AiToolkitAPI ─────────────────────────────────────────────────────────────
+/**
+ * Namespaced API for AI suggestion overlay — accessed via `ai.suggestions`.
+ *
+ * All methods are thin wrappers around the standalone functions in
+ * showHideApply.ts, bound to the editor instance so callers don't need to
+ * manage state/dispatch themselves.
+ */
+export class AiSuggestionsAPI {
+  constructor(private readonly editor: IEditor) {}
+
+  /**
+   * Compute a word-level diff between the current document and proposed text.
+   * Pure — no document mutation.
+   *
+   * @returns Serializable AiSuggestion JSON, or null if no changes detected.
+   *
+   * @example
+   * const s = ai.suggestions.compute({
+   *   blocks: [{ nodeId, proposedText: "..." }],
+   *   authorID: "AI Assistant",
+   * });
+   * if (s) await db.save(s);
+   */
+  compute(options: ComputeAiSuggestionOptions): AiSuggestionData | null {
+    return computeAiSuggestion(this.editor.getState(), options);
+  }
+
+  /**
+   * Display a suggestion as a canvas overlay. The document is NOT modified.
+   * Pass a previously saved AiSuggestion JSON to restore across sessions.
+   */
+  show(suggestion: AiSuggestionData): void {
+    showAiSuggestion(this.editor, suggestion);
+  }
+
+  /** Hide the current suggestion overlay without modifying the document. */
+  hide(): void {
+    showAiSuggestion(this.editor, null);
+  }
+
+  /**
+   * Apply the current suggestion (or a specific group/block) to the document.
+   *
+   * @param options.mode     "direct" — plain replace. "tracked" — adds track-changes marks.
+   * @param options.groupId  Apply only this group; others remain in the overlay.
+   * @param options.blockId  Apply only this block; others remain in the overlay.
+   */
+  apply(options: ApplyAiSuggestionOptions): void {
+    applyAiSuggestion(this.editor, options);
+  }
+
+  /**
+   * Reject (discard) the current suggestion or a specific group/block.
+   * No document changes — the overlay is simply hidden or trimmed.
+   */
+  reject(options?: RejectAiSuggestionOptions): void {
+    rejectAiSuggestion(this.editor, options);
+  }
+
+  /** Returns the currently displayed suggestion, or null. */
+  getCurrent(): AiSuggestionData | null {
+    return aiSuggestionPluginKey.getState(this.editor.getState())?.suggestion ?? null;
+  }
+}
 
 /**
  * AiToolkitAPI — the single entry point for all AI interactions with an editor.
  *
  * Obtain via:
- *   import { getAiToolkit } from "@scrivr/core";
+ *   import { getAiToolkit } from "@scrivr/plugins";
  *   const ai = getAiToolkit(editor);
  *
  * Never instantiate directly — created by AiToolkit.onEditorReady().
  */
 export class AiToolkitAPI {
-  constructor(private readonly editor: IEditor) {}
+  /**
+   * AI suggestion overlay API.
+   * null if the AiSuggestion extension was not included (aiSuggestion: false).
+   */
+  readonly suggestions: AiSuggestionsAPI | null;
+
+  constructor(private readonly editor: IEditor, hasSuggestion: boolean) {
+    this.suggestions = hasSuggestion ? new AiSuggestionsAPI(editor) : null;
+  }
 
   // ── Read API ───────────────────────────────────────────────────────────────
 
@@ -342,6 +419,8 @@ interface AiToolkitOptions {
   ghostText?: false;
   /** Set false to exclude the AiCaret sub-extension. Default: true. */
   aiCaret?: false;
+  /** Set false to exclude the AiSuggestion sub-extension. Default: true. */
+  aiSuggestion?: false;
 }
 
 // ── AiToolkit extension ───────────────────────────────────────────────────────
@@ -379,6 +458,9 @@ export const AiToolkit = Extension.create<AiToolkitOptions>({
     if (this.options.aiCaret !== false) {
       plugins.push(...AiCaret.resolve(this.schema).plugins);
     }
+    if (this.options.aiSuggestion !== false) {
+      plugins.push(...AiSuggestionExtension.resolve(this.schema).plugins);
+    }
     return plugins;
   },
 
@@ -405,9 +487,14 @@ export const AiToolkit = Extension.create<AiToolkitOptions>({
       const cleanup = AiCaret.resolve().editorReadyCallback?.(editor);
       if (cleanup) cleanups.push(cleanup);
     }
+    if (this.options.aiSuggestion !== false) {
+      const cleanup = AiSuggestionExtension.resolve().editorReadyCallback?.(editor);
+      if (cleanup) cleanups.push(cleanup);
+    }
 
     // Create and register the AiToolkitAPI instance
-    const api = new AiToolkitAPI(editor);
+    const hasSuggestion = this.options.aiSuggestion !== false;
+    const api = new AiToolkitAPI(editor, hasSuggestion);
     aiToolkitRegistry.set(editor, api);
 
     return () => {

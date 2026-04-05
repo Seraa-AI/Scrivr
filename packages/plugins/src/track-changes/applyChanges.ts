@@ -8,7 +8,7 @@ import { ChangeSet } from "./ChangeSet";
 import { excludeFromTracked } from "./helpers";
 import { deleteNode, keepPairedChanges } from "./lib/deleteNode";
 import { mergeNode } from "./lib/mergeNode";
-import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs, TrackedChange } from "./types";
+import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs, TrackedChange, UpdateAttrs } from "./types";
 
 function collectMoveNodeIds(containerNode: PMNode, primaryMoveNodeId: string): Set<string> {
   const moveNodeIds = new Set<string>();
@@ -101,8 +101,10 @@ export function applyChanges(
         node.marks,
       );
     } else if (ChangeSet.isNodeAttrChange(change) && change.dataTracked.status === CHANGE_STATUS.rejected) {
+      const oldTypeName = (change.dataTracked as UpdateAttrs).oldNodeTypeName;
+      const oldType = oldTypeName ? node.type.schema.nodes[oldTypeName] : undefined;
       tr.setNodeMarkup(
-        from, undefined,
+        from, oldType,
         { ...change.oldAttrs, dataTracked: excludeFromTracked(node.attrs.dataTracked, change.id) },
         node.marks,
       );

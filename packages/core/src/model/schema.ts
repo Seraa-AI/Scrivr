@@ -37,28 +37,59 @@ export const schema = new Schema({
       group: "block",
       content: "inline*",
       attrs: {
-        level: { default: 1 },      // 1–6
+        level: { default: 1 }, // 1–6
         align: { default: "left" },
       },
       defining: true,
     },
 
-    bullet_list: {
+    bulletList: {
       group: "block",
-      content: "list_item+",
+      content: "listItem+",
+      parseDOM: [{ tag: "ul" }],
+      toDOM: () => ["ul", 0],
     },
 
-    ordered_list: {
+    orderedList: {
       group: "block",
-      content: "list_item+",
+      content: "listItem+",
       attrs: {
-        order: { default: 1 },      // starting number
+        order: { default: 1 }, // starting number
       },
+      parseDOM: [{ tag: "ol" }],
+      toDOM: () => ["ol", 0],
     },
 
-    list_item: {
+    listItem: {
       content: "paragraph block*",
       defining: true,
+      attrs: {
+        nodeId: { default: null },
+        dataTracked: { default: [] },
+      },
+      parseDOM: [{ tag: "li" }],
+      toDOM: () => ["li", 0],
+    },
+
+    // Code block — monospace, no marks, input rule ``
+    codeBlock: {
+      content: "text*",
+      group: "block",
+      code: true,
+      marks: "",
+      attrs: {
+        nodeId: { default: null },
+        dataTracked: { default: [] },
+      },
+      parseDOM: [{ tag: "pre", preserveWhitespace: "full" as const }],
+      toDOM: () => ["pre", ["code", 0]],
+    },
+
+    // Horizontal rule — leaf block, drawn as a thin line
+    horizontalRule: {
+      group: "block",
+      parseDOM: [{ tag: "hr" }],
+      toDOM: () => ["hr"],
     },
 
     // Table — fixed-width columns, common in legal contracts
@@ -89,24 +120,28 @@ export const schema = new Schema({
       isLeaf: true,
     },
 
-    // Form field — embedded interactive element within document flow
-    // Rendered as a canvas overlay (text input, checkbox, date picker)
-    // Inline so it can sit within a paragraph (e.g. signature line)
-    form_field: {
+    // ── Inline nodes ─────────────────────────────────────────────────────────
+
+    // Inline image — sits inside a paragraph line box
+    image: {
       group: "inline",
-      isLeaf: true,
       inline: true,
       attrs: {
-        id: { default: "" },
-        fieldType: { default: "text" }, // text | checkbox | date | signature
-        label: { default: "" },
-        placeholder: { default: "" },
-        required: { default: false },
-        value: { default: null as string | boolean | null },
+        src: { default: "" },
+        alt: { default: "" },
+        width: { default: 200 },
+        height: { default: 200 },
+        nodeId: { default: null },
+        verticalAlign: { default: "baseline" },
+        wrappingMode: { default: "inline" },
+        floatOffset: { default: { x: 0, y: 0 } },
       },
+      parseDOM: [{ tag: "img[src]" }],
+      toDOM: (node) => [
+        "img",
+        { src: node.attrs.src as string, alt: node.attrs.alt as string },
+      ],
     },
-
-    // ── Inline nodes ─────────────────────────────────────────────────────────
 
     // Hard line break within a paragraph (Shift+Enter)
     hard_break: {
@@ -162,22 +197,37 @@ export const schema = new Schema({
       inclusive: false, // typing at the end of a link doesn't extend it
     },
 
+    // ── Highlight ─────────────────────────────────────────────────────────────
+
+    highlight: {
+      attrs: {
+        color: { default: "rgba(255, 220, 0, 0.4)" },
+        dataTracked: { default: [] },
+      },
+    },
+
     // ── Track changes ─────────────────────────────────────────────────────────
     // These marks are applied by the track-changes plugin.
     // The DOCX exporter maps them to <w:ins> and <w:del> OOXML nodes.
 
-    track_insert: {
+    tracked_insert: {
       attrs: {
-        author: {},
-        date: {},    // ISO 8601 string
+        dataTracked: { default: null },
       },
+      inclusive: false,
+      excludes: "",
+      parseDOM: [{ tag: "ins[data-tracked]" }],
+      toDOM: () => ["ins", { "data-tracked": "insert" }, 0],
     },
 
-    track_delete: {
+    tracked_delete: {
       attrs: {
-        author: {},
-        date: {},
+        dataTracked: { default: null },
       },
+      inclusive: false,
+      excludes: "",
+      parseDOM: [{ tag: "del[data-tracked]" }],
+      toDOM: () => ["del", { "data-tracked": "delete" }, 0],
     },
   },
 });

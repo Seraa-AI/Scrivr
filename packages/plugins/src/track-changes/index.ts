@@ -29,6 +29,10 @@ export type {
   TrackedChange,
   TextChange,
   NodeChange,
+  NodeAttrChange,
+  WrapChange,
+  MarkChange,
+  ReferenceChange,
   ChangeStep,
   IncompleteChange,
 } from "./types";

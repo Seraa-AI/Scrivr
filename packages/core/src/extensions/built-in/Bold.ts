@@ -24,6 +24,7 @@ export const Bold = Extension.create<BoldOptions>({
   addMarks() {
     return {
       bold: {
+        attrs: { dataTracked: { default: [] } },
         parseDOM: [
           { tag: "strong" },
           { tag: "b", getAttrs: (node) => (node as HTMLElement).style.fontWeight !== "normal" && null },

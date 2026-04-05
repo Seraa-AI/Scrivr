@@ -7,6 +7,12 @@ import { ChangeSet } from "./ChangeSet";
 
 // ── DataTrackedAttrs ──────────────────────────────────────────────────────────
 
+/**
+ * Minimal shared shape of a single dataTracked entry — the fields that are
+ * present on every operation type. Used in low-level utilities
+ * (updateAttributes, trackRemoveMarkStep) where only id/status/operation
+ * are needed. For the full per-operation union type see TrackedAttrs.
+ */
 export type DataTrackedAttrs = {
   id: string;
   status: string;
@@ -70,6 +76,8 @@ type InsertDeleteAttrs = {
 export type UpdateAttrs = Omit<InsertDeleteAttrs, "operation"> & {
   operation: CHANGE_OPERATION.set_node_attributes;
   oldAttrs: Record<string, any>;
+  /** Original node type name, set only when the node type changes (e.g. ul→ol). Used to restore the type on rejection. */
+  oldNodeTypeName?: string;
 };
 
 export type WrapAttrs = Omit<InsertDeleteAttrs, "operation"> & {
@@ -131,6 +139,10 @@ export type NodeAttrChange = Change & {
   node: Node;
   oldAttrs: Record<string, any>;
   newAttrs: Record<string, any>;
+  /** Set when the node type itself changed (e.g. bulletList → orderedList). */
+  oldNodeTypeName?: string;
+  /** Set when the node type itself changed (e.g. orderedList → bulletList). */
+  newNodeTypeName?: string;
 };
 
 export type WrapChange = Change & {
@@ -147,6 +159,7 @@ export type MarkChange = Change & {
   nodeType: NodeType;
   mark: Mark;
   node: Node;
+  text: string;
 };
 
 export type TrackedChange =
@@ -251,6 +264,8 @@ export interface UpdateNodeAttrsStep {
   type: "update-node-attrs";
   node: Node;
   newAttrs: Record<string, any>;
+  /** New node type when the block type changes (e.g. paragraph → heading). Undefined means keep existing type. */
+  newNodeType?: NodeType;
 }
 
 export type ChangeStep =

@@ -642,23 +642,15 @@ describe("layoutBlock — node fontFamily attr", () => {
 
 // ── Inline node handling — regression suite ───────────────────────────────────
 //
-// These tests lock in the correct behaviour introduced when images moved from
-// full-width block nodes to inline objects inside paragraph line boxes.
-//
-// THE REGRESSION that prompted this suite:
-//   extractSpans() started treating ALL inline leaf nodes (including hard_break)
-//   as inline objects. hard_break has no width/height attrs, so it defaulted to
-//   200 × 200 px — every Shift-Enter line break created a massive blank space.
-//
-// Rule: only inline leaf nodes with at least one numeric width/height attr are
-// emitted as object spans. Structural leaves (hard_break) are silently skipped.
+// These tests lock in the correct behaviour for hard_break (Shift-Enter) and
+// inline images inside paragraphs.
 
-describe("extractSpans — inline node handling (regression)", () => {
+describe("extractSpans — inline node handling", () => {
   const { schema: skSchema, fontConfig } = buildStarterKitContext();
 
-  // ── hard_break must never become an object span ──────────────────────────
+  // ── hard_break: Shift-Enter creates two lines ─────────────────────────────
 
-  it("hard_break inside a paragraph does NOT produce an object span", () => {
+  it("hard_break inside a paragraph splits into two lines", () => {
     const hb = skSchema.nodes["hard_break"]?.create();
     if (!hb) return;
     const para = skSchema.node("paragraph", null, [
@@ -668,12 +660,17 @@ describe("extractSpans — inline node handling (regression)", () => {
       nodePos: 0, x: 0, y: 0, availableWidth: 400,
       page: 1, measurer: createMeasurer(), fontConfig,
     });
-    const allSpans = block.lines.flatMap(l => l.spans);
-    expect(allSpans.every(s => s.kind === "text")).toBe(true);
+    expect(block.lines).toHaveLength(2);
+    // Line 0: "Hello" text only, terminated by break
+    const line0Spans = block.lines[0]!.spans;
+    expect(line0Spans.every(s => s.kind === "text")).toBe(true);
+    expect(block.lines[0]!.terminalBreakDocPos).toBeDefined();
+    // Line 1: "World" text only
+    const line1Spans = block.lines[1]!.spans;
+    expect(line1Spans.every(s => s.kind === "text")).toBe(true);
   });
 
-  it("hard_break does NOT inflate line height to 200px — stays at text line height", () => {
-    // THE EXACT REGRESSION: before the guard, lineHeight became 200px here.
+  it("hard_break does NOT inflate line height — both lines stay at text line height", () => {
     const hb = skSchema.nodes["hard_break"]?.create();
     if (!hb) return;
     const para = skSchema.node("paragraph", null, [
@@ -683,6 +680,7 @@ describe("extractSpans — inline node handling (regression)", () => {
       nodePos: 0, x: 0, y: 0, availableWidth: 400,
       page: 1, measurer: createMeasurer(), fontConfig,
     });
+    expect(block.lines).toHaveLength(2);
     for (const line of block.lines) {
       expect(line.lineHeight).toBeLessThan(100);
       expect(line.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
@@ -690,6 +688,8 @@ describe("extractSpans — inline node handling (regression)", () => {
   });
 
   it("paragraph containing only a hard_break falls back to ZWS — normal line height", () => {
+    // A paragraph with ONLY a hard_break has no renderable content after the
+    // break, so it uses the ZWS fallback (same as an empty paragraph).
     const hb = skSchema.nodes["hard_break"]?.create();
     if (!hb) return;
     const para = skSchema.node("paragraph", null, [hb]);
@@ -701,6 +701,21 @@ describe("extractSpans — inline node handling (regression)", () => {
     expect(block.lines[0]?.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
     const spans = block.lines[0]?.spans ?? [];
     expect(spans.every(s => s.kind === "text")).toBe(true);
+  });
+
+  it("trailing hard_break emits a phantom second line for the cursor after the break", () => {
+    const hb = skSchema.nodes["hard_break"]?.create();
+    if (!hb) return;
+    const para = skSchema.node("paragraph", null, [skSchema.text("Hello"), hb]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 400,
+      page: 1, measurer: createMeasurer(), fontConfig,
+    });
+    expect(block.lines).toHaveLength(2);
+    // Line 0 ends with the break; line 1 is the phantom ZWS cursor line.
+    expect(block.lines[0]!.terminalBreakDocPos).toBeDefined();
+    expect(block.lines[1]!.spans).toHaveLength(1);
+    expect(block.lines[1]!.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
   });
 
   // ── inline image IS an object span ───────────────────────────────────────

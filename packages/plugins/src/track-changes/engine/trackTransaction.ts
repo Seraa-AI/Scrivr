@@ -18,11 +18,13 @@ import {
   iterationIsValid,
   passThroughMeta,
 } from "./transactionProcessing";
-import { createNewPendingAttrs, getNodeTrackedData } from "../helpers";
+import { createNewPendingAttrs, genId, getNodeTrackedData } from "../helpers";
 import { fixAndSetSelectionAfterTracking } from "./fixAndSetSelectionAfterTracking";
 import { updateChangeAttrs } from "./updateAttributes";
-import { diffChangeSteps, isStructuralChange } from "../lib/structuralChange";
-import { isDeleteStep } from "../step-trackers/qualifiers";
+import { diffChangeSteps } from "../lib/structuralChange";
+import { isSetNodeMarkupStep } from "../step-trackers/qualifiers";
+import { trackReplaceAroundStep } from "../step-trackers/trackReplaceAroundStep";
+import { trackSetNodeMarkupStep } from "../step-trackers/trackSetNodeMarkupStep";
 import trackAttrsChangeStep from "../step-trackers/trackAttrsChangeStep";
 import {
   trackAddMarkStep,
@@ -30,10 +32,8 @@ import {
   trackRemoveMarkStep,
   trackRemoveNodeMarkStep,
 } from "../step-trackers/trackRemoveMarkStep";
-import { trackReplaceAroundStep } from "../step-trackers/trackReplaceAroundStep";
 import { trackReplaceStep } from "../step-trackers/trackReplaceStep";
 
-const genId = () => Math.random().toString(36).slice(2, 10);
 
 export function trackTransaction(
   tr: Transaction,
@@ -75,26 +75,21 @@ export function trackTransaction(
         continue;
       }
 
-      let thisStepMapping = tr.mapping.slice(i + 1, i + 1);
-      if (isDeleteStep(step) || isStructuralChange(tr)) {
-        thisStepMapping = deletedNodeMapping;
-      }
-
       const [initialTrackedContent, newSelectionPos] = trackReplaceStep(
         i,
         oldState,
         newTr,
         emptyAttrs,
         tr,
-        thisStepMapping,
+        deletedNodeMapping,
         trContext,
       );
 
       let trackedContent = initialTrackedContent;
       if (trackedContent.length === 1) {
-        const step: any = trackedContent[0];
+        const trackedStep = trackedContent[0] as any;
         if (
-          excludeFromTracking(step?.node || step?.slice?.content?.content[0])
+          excludeFromTracking(trackedStep?.node || trackedStep?.slice?.content?.content[0])
         ) {
           continue;
         }
@@ -124,7 +119,14 @@ export function trackTransaction(
         trContext.selectionPosFromInsertion = userSelectionPos;
       }
     } else if (step instanceof ReplaceAroundStep) {
-      // ReplaceAroundStep tracking is currently disabled (see old code comments)
+      if (isSetNodeMarkupStep(step)) {
+        const steps = trackSetNodeMarkupStep(step, newTr, emptyAttrs, tr.docs[i]!);
+        if (steps.length > 0) processChangeSteps(steps, newTr, emptyAttrs, oldState.schema, deletedNodeMapping);
+      } else {
+        let steps = trackReplaceAroundStep(step, oldState, tr, newTr, emptyAttrs, tr.docs[i]!, trContext);
+        steps = diffChangeSteps(steps);
+        processChangeSteps(steps, newTr, emptyAttrs, oldState.schema, deletedNodeMapping);
+      }
     } else if (step instanceof AttrStep) {
       const changeSteps = trackAttrsChangeStep(
         step,

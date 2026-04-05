@@ -2,9 +2,9 @@ import { Attrs, Fragment, Mark, Node as PMNode, Schema } from "prosemirror-model
 
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs } from "./types";
 
-const genId = () => Math.random().toString(36).slice(2, 10);
-
-// ── Mark trackability ─────────────────────────────────────────────────────────
+export function genId(): string {
+  return crypto.randomUUID();
+}
 
 export function isValidTrackableMark(mark: Mark) {
   const spec = mark.type.spec;
@@ -25,8 +25,6 @@ export function equalMarks(n1: PMNode, n2: PMNode) {
     n1.marks.every(mark => n1.marks.find(m => m.type === mark.type))
   );
 }
-
-// ── NewAttrs factory types ────────────────────────────────────────────────────
 
 export type NewEmptyAttrs = Omit<TrackedAttrs, "id" | "operation">;
 
@@ -61,8 +59,6 @@ export type NewReferenceAttrs = Omit<TrackedAttrs, "id" | "operation"> & {
 };
 
 export type NewTrackedAttrs = NewInsertAttrs | NewDeleteAttrs | NewUpdateAttrs | NewMoveAttrs;
-
-// ── NewAttrs factories ────────────────────────────────────────────────────────
 
 export function createNewInsertAttrs(attrs: NewEmptyAttrs): NewInsertAttrs {
   return { ...attrs, operation: CHANGE_OPERATION.insert };
@@ -125,8 +121,6 @@ export function addTrackIdIfDoesntExist(attrs: Partial<TrackedAttrs>) {
   return attrs;
 }
 
-// ── Tracked data accessors ────────────────────────────────────────────────────
-
 export function getTextNodeTrackedMarkData(node: PMNode | null, schema: Schema) {
   if (!node || !node.isText) return undefined;
 
@@ -183,7 +177,10 @@ export function shouldMergeTrackedAttributes(
   right?: Partial<TrackedAttrs>,
 ) {
   if (!left || !right) {
-    console.warn("passed undefined dataTracked attributes to shouldMergeTrackedAttributes", { left, right });
+    console.warn("passed undefined dataTracked attributes to shouldMergeTrackedAttributes", {
+      left,
+      right,
+    });
     return false;
   }
   return (

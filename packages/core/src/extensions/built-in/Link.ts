@@ -22,7 +22,7 @@ export const Link = Extension.create({
   addMarks() {
     return {
       link: {
-        attrs: { href: {}, title: { default: null } },
+        attrs: { href: {}, title: { default: null }, dataTracked: { default: [] } },
         inclusive: false, // cursor after a link doesn't continue it
         parseDOM: [
           {

@@ -43,8 +43,7 @@ export const isSplitStep = (
   } = slice;
 
   if (
-    // @ts-expect-error window.event is used for key detection in browser env
-    (window.event?.code === "Enter" || window.event?.code === "NumpadEnter") &&
+    (uiEvent === "Enter" || uiEvent === "NumpadEnter") &&
     firstChild?.type.name === "list_item"
   ) {
     return (
@@ -67,6 +66,22 @@ export const isWrapStep = (step: ReplaceAroundStep) =>
   step.to === step.gapTo &&
   step.slice.openStart === 0 &&
   step.slice.openEnd === 0;
+
+/**
+ * Returns true when the ReplaceAroundStep was produced by setNodeMarkup —
+ * i.e. it changes a node's type or attributes while preserving its inner
+ * content verbatim. Examples: heading level change (h1→h2), paragraph
+ * alignment change when expressed as a full node replacement.
+ *
+ * Shape: structure=true, gap spans exactly the inner content (gapFrom = from+1,
+ * gapTo = to-1), and the slice contains the new node wrapper.
+ */
+export const isSetNodeMarkupStep = (step: ReplaceAroundStep): boolean => {
+  const { from, to, gapFrom, gapTo } = step;
+  // `structure` is set by ProseMirror internals but not in the public type.
+  const structure = (step as unknown as { structure?: boolean }).structure;
+  return !!(structure && gapFrom === from + 1 && gapTo === to - 1);
+};
 
 export const isLiftStep = (step: ReplaceAroundStep) => {
   if (

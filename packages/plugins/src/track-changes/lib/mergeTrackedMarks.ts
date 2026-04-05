@@ -1,11 +1,9 @@
 import { Node as PMNode, Schema } from "prosemirror-model";
 import { Transaction } from "prosemirror-state";
 
-import { shouldMergeTrackedAttributes } from "../helpers";
+import { genId, shouldMergeTrackedAttributes } from "../helpers";
 import { ChangeStep, DeleteNodeStep, DeleteTextStep } from "../types";
 import { ExposedFragment, TrackedAttrs } from "../types";
-
-const genId = () => Math.random().toString(36).slice(2, 10);
 
 /**
  * Matches deleted to inserted content and returns the first pos they differ and the updated ChangeStep list.

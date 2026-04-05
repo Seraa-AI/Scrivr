@@ -97,10 +97,14 @@ export function trackReplaceStep(
         } else if (
           isSplitStep(step, oldState.selection, tr.getMeta("uiEvent"))
         ) {
+          // Pass newSliceContent (not fragment) so that text carried into the
+          // new paragraph ("lo" from splitting "hel|lo") is NOT marked as a
+          // new tracked_insert. Only the structural node_split/reference marks
+          // are added; the carried text stays untracked, matching Google Docs.
           fragment = setFragmentAsNodeSplit(
             newTr.doc.resolve(step.from),
             newTr,
-            fragment,
+            newSliceContent,
             attrs,
           );
         } else if (moveID) {
@@ -128,11 +132,9 @@ export function trackReplaceStep(
           slice: new Slice(fragment, openStart, openEnd) as ExposedSlice,
         });
       } else {
-        const isDeleteEvent = (window.event as KeyboardEvent)?.code === "Delete";
-        const isDeleteContentForward =
-          // @ts-expect-error window.event.inputType missing in TS DOM defs
-          window.event?.inputType === "deleteContentForward";
-
+        const uiEventMeta = tr.getMeta("uiEvent") as string | undefined;
+        const isDeleteEvent = uiEventMeta === "Delete";
+        const isDeleteContentForward = uiEventMeta === "deleteContentForward";
         selectionPos = isDeleteEvent || isDeleteContentForward ? toA : fromA;
       }
     });

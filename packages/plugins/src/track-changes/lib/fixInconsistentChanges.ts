@@ -3,9 +3,8 @@ import { Transaction } from "prosemirror-state";
 
 import { ChangeSet } from "../ChangeSet";
 import { updateChangeAttrs } from "../engine/updateAttributes";
+import { genId } from "../helpers";
 import { CHANGE_STATUS } from "../types";
-
-const genId = () => Math.random().toString(36).slice(2, 10);
 
 /**
  * Iterates over a ChangeSet and repairs changes that are missing required attributes or have duplicate IDs.

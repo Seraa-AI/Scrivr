@@ -9,7 +9,7 @@ import {
   getBlockStyle,
   BlockStyle,
 } from "./FontConfig";
-import { resolveFont, substituteFamily } from "./StyleResolver";
+import { resolveFont, substituteFamily, parseFont } from "./StyleResolver";
 
 /** Extracts px size from a CSS font string like "bold 14px Georgia, serif". Returns null if not found. */
 function parseFontSizePx(font: string): number | null {
@@ -292,9 +292,11 @@ export function layoutBlock(
   );
 
   // ── 2. Empty node fallback ────────────────────────────────────────────────
-  // An empty paragraph has no spans. We create a virtual zero-width-space span
-  // so LineBreaker returns one line and CharacterMap registers a cursor position.
-  const inputSpans: InputSpan[] = spans.length
+  // An empty paragraph (or one containing only hard_break nodes) has no
+  // renderable content. We create a virtual zero-width-space span so
+  // LineBreaker returns one line and CharacterMap registers a cursor position.
+  const hasRenderableContent = spans.some(s => s.kind !== "break");
+  const inputSpans: InputSpan[] = hasRenderableContent
     ? spans
     : [{ kind: "text", text: "\u200B", font: baseFont, docPos: nodePos + 1 }];
 
@@ -304,12 +306,15 @@ export function layoutBlock(
   // We pass the CharacterMap only after we know the alignment offset.
   // If alignment is left (no offset), we can pass it directly.
   // For center/right we populate the map manually below after offsetting.
+  const parsedBase = parseFont(baseFont);
   const lines = breaker.breakIntoLines(
     inputSpans,
     availableWidth,
-    undefined,
-    undefined,
-    constraintProvider ? { constraintProvider, startY: y } : undefined,
+    {
+      defaultFontFamily: parsedBase.family,
+      defaultFontSize: parseFloat(parsedBase.size),
+      ...(constraintProvider ? { constraintProvider, startY: y } : {}),
+    },
   );
 
   // ── 4. Compute height ─────────────────────────────────────────────────────
@@ -485,6 +490,12 @@ function extractSpans(
           attrs: m.attrs as Record<string, unknown>,
         })),
       });
+      return;
+    }
+
+    // Hard line break: flush the current line and start a new one.
+    if (child.type.name === "hard_break") {
+      spans.push({ kind: "break", docPos: childDocPos });
       return;
     }
 
@@ -677,7 +688,9 @@ export function populateCharMap(
       x: block.x,
       contentWidth: block.availableWidth,
       startDocPos: line.spans[0]?.docPos ?? block.nodePos + 1,
-      endDocPos: lastPopSpan ? spanEndDocPos(lastPopSpan) : block.nodePos + 1,
+      endDocPos: line.terminalBreakDocPos !== undefined
+        ? line.terminalBreakDocPos + 1
+        : (lastPopSpan ? spanEndDocPos(lastPopSpan) : block.nodePos + 1),
     });
 
     // Track the last non-ZWS glyph so we can register a zero-width sentinel
@@ -754,6 +767,22 @@ export function populateCharMap(
       }
 
       spacesBeforeSpan += countSpaces(span.text);
+    }
+
+    // Register a zero-width glyph at the hard_break's doc position so
+    // coordsAtPos(breakDocPos) returns the correct cursor location at line-end.
+    if (line.terminalBreakDocPos !== undefined) {
+      const breakX = block.x + lineOffsetX + line.width;
+      map.registerGlyph({
+        docPos: line.terminalBreakDocPos,
+        x: breakX,
+        y: textY,
+        lineY,
+        width: 0,
+        height: line.cursorHeight,
+        page,
+        lineIndex: globalLineIndex,
+      });
     }
 
     // Register end-of-line caret sentinel at the position just past the last

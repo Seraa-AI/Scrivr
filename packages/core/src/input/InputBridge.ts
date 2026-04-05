@@ -358,9 +358,13 @@ export class InputBridge {
   }
 
   private _tryKeymapCommand(e: KeyboardEvent): boolean {
-    const cmd = this.opts.keymap[keyEventToString(e)];
+    const keyStr = keyEventToString(e);
+    const cmd = this.opts.keymap[keyStr];
     if (!cmd) return false;
-    return cmd(this.opts.getState(), (tr) => this.opts.dispatch(tr));
+    return cmd(this.opts.getState(), (tr) => {
+      tr.setMeta("uiEvent", keyStr);
+      this.opts.dispatch(tr);
+    });
   }
 
   private _clearTextarea(): void {

@@ -3,7 +3,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage, DataUIPart } from "ai";
 import type { Editor } from "@scrivr/core";
-import { getAiToolkit, applyDiffAsSuggestion, applyMultiBlockDiff } from "@scrivr/plugins";
+import { getAiToolkit } from "@scrivr/plugins";
 import type { ToolOutputData } from "../routes/api/ai";
 
 // ── Typed data layer ─────────────────────────────────────────────────────────
@@ -12,6 +12,7 @@ type AppUIMessage = UIMessage<unknown, AppDataTypes>;
 
 interface ChatPanelProps {
   editor: Editor | null;
+  hideBorder?: boolean;
 }
 
 // ── Document context ────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ function getDocContext(editor: Editor | null): {
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function ChatPanel({ editor }: ChatPanelProps) {
+export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
   const editorRef = useRef(editor);
@@ -88,21 +89,24 @@ export function ChatPanel({ editor }: ChatPanelProps) {
     if (toolType === "edit_paragraph") {
       const { nodeId, proposedText } = output as { nodeId?: string; proposedText?: string };
       if (!nodeId || !proposedText) return;
-      applyDiffAsSuggestion(ed.getState(), (tr) => ed._applyTransaction(tr), {
-        nodeId,
-        proposedText,
+      const ai = getAiToolkit(ed);
+      const suggestion = ai?.suggestions?.compute({
+        blocks: [{ nodeId, proposedText }],
         authorID: "AI Assistant",
       });
+      if (suggestion) ai?.suggestions?.show(suggestion);
       return;
     }
 
     if (toolType === "edit_section") {
       const { edits } = output as { edits?: Array<{ nodeId: string; proposedText: string }> };
       if (!edits?.length) return;
-      applyMultiBlockDiff(ed.getState(), (tr) => ed._applyTransaction(tr), {
+      const ai = getAiToolkit(ed);
+      const suggestion = ai?.suggestions?.compute({
         blocks: edits,
         authorID: "AI Assistant",
       });
+      if (suggestion) ai?.suggestions?.show(suggestion);
       return;
     }
 
@@ -131,13 +135,11 @@ export function ChatPanel({ editor }: ChatPanelProps) {
 
   function submit() {
     const text = inputValue.trim();
-    console.log(text, isLoading)
     if (!text || isLoading) return;
     if (editorRef.current) {
       const s = editorRef.current.getState().selection;
       pendingSelection.current = { from: s.from, to: s.to };
     }
-    console.log("Subbimting")
     sendMessage({ text });
     setInputValue("");
   }
@@ -150,7 +152,7 @@ export function ChatPanel({ editor }: ChatPanelProps) {
   }
 
   return (
-    <aside className="w-[300px] shrink-0 flex flex-col bg-white border-l border-[#e8eaed] overflow-hidden">
+    <aside className={`w-full shrink-0 flex flex-col bg-white overflow-hidden${hideBorder ? "" : " border-l border-[#e8eaed]"}`}>
       {/* Header */}
       <div className="flex items-center h-11 px-3.5 bg-white border-b border-[#e8eaed] shrink-0 gap-2">
         <span className="text-[13px] font-semibold text-gray-900 tracking-tight">AI Assistant</span>
@@ -287,8 +289,8 @@ function SuggestionCard({ label, text }: { label: string; text: string }) {
     <div className="bg-white border border-emerald-200 rounded-lg px-2.5 py-2 flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wider">{label}</span>
-        <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-700 rounded-full px-2 py-px tracking-wide">
-          Added to document
+        <span className="text-[10px] font-semibold bg-violet-100 text-violet-700 rounded-full px-2 py-px tracking-wide">
+          Review in editor
         </span>
       </div>
       <pre className="m-0 text-[12px] leading-relaxed text-gray-700 whitespace-pre-wrap wrap-break-word bg-gray-50 rounded px-2 py-1.5 max-h-[120px] overflow-y-auto font-[inherit]">

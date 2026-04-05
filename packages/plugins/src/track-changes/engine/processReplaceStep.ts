@@ -197,11 +197,15 @@ export function processChangeSteps(
                 ...oldUpdate,
                 updatedAt: emptyAttrs.updatedAt,
               }
-            : addTrackIdIfDoesntExist(
-                createNewUpdateAttrs(emptyAttrs, c.node.attrs),
-              );
+            : {
+                ...addTrackIdIfDoesntExist(createNewUpdateAttrs(emptyAttrs, c.node.attrs)),
+                // Record original node type for type changes (ul↔ol, p↔h, etc.)
+                // so that rejection can pass the right type to setNodeMarkup.
+                ...(c.newNodeType ? { oldNodeTypeName: c.node.type.name } : {}),
+              };
         if (
           (JSON.stringify(oldAttrs) !== JSON.stringify(c.newAttrs) ||
+            c.newNodeType !== undefined ||
             c.node.type === c.node.type.schema.nodes.citation) &&
           !oldDataTracked.find(
             d =>
@@ -218,7 +222,7 @@ export function processChangeSteps(
 
         newTr.setNodeMarkup(
           mapping.map(c.pos),
-          undefined,
+          c.newNodeType ?? c.node.type,
           {
             ...c.newAttrs,
             dataTracked: finalDataTracked.length > 0 ? finalDataTracked : null,

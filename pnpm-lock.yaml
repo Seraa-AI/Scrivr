@@ -226,6 +226,9 @@ importers:
       '@hocuspocus/provider':
         specifier: ^3.4.4
         version: 3.4.4(y-protocols@1.0.7(yjs@13.6.30))(yjs@13.6.30)
+      prosemirror-history:
+        specifier: ^1.5.0
+        version: 1.5.0
       prosemirror-model:
         specifier: ^1.25.4
         version: 1.25.4

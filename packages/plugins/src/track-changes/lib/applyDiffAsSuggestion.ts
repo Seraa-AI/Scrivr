@@ -30,6 +30,7 @@
  *                   > 0.7 → full rewrite, offer "Accept rewrite" button
  */
 
+import type { Schema } from "prosemirror-model";
 import type { EditorState, Transaction } from "prosemirror-state";
 
 import { findNodeById } from "../../ai-toolkit/UniqueId";
@@ -39,6 +40,7 @@ import {
   createNewInsertAttrs,
   createNewPendingAttrs,
 } from "../helpers";
+import { CHANGE_STATUS } from "../types";
 import { acceptedRangeToDocRange, buildAcceptedTextMap } from "./acceptedTextMap";
 import {
   computeEditDensity,
@@ -48,6 +50,73 @@ import {
 } from "./diffText";
 import { applyTrackedDelete } from "./splitRangeForNewMark";
 import { skipTracking, TrackChangesAction, setAction } from "../actions";
+
+// ── Clear previous suggestions ────────────────────────────────────────────────
+
+/**
+ * Removes all pending tracked_insert and tracked_delete marks attributed to
+ * `authorID` from the text nodes within `[nodeFrom+1, nodeTo-1]`.
+ *
+ * For tracked_insert text (text the author previously inserted), the inserted
+ * characters are also deleted so positions snap back before the new diff runs.
+ * For tracked_delete marks the mark is simply removed (the text stays, the new
+ * diff will re-delete it if still needed).
+ *
+ * Deletions are applied in reverse position order so earlier positions remain
+ * stable as we go.
+ */
+function clearAuthorPendingMarks(
+  tr: Transaction,
+  nodeFrom: number,
+  nodeTo: number,
+  authorID: string,
+  schema: Schema,
+): void {
+  const insertType = schema.marks.tracked_insert;
+  const deleteType = schema.marks.tracked_delete;
+  if (!insertType || !deleteType) return;
+
+  // Collect ranges to delete (previous tracked inserts) — must be done in
+  // reverse order to keep positions stable.
+  const insertRanges: Array<{ from: number; to: number }> = [];
+  // Deduplicate by text node start position. With excludes:"" a single text
+  // node can accumulate many tracked_insert marks from repeated AI calls.
+  // Without deduplication, tr.delete() is called once per mark at the same
+  // position, which in a PM transaction cascades into deleting N adjacent chars.
+  const seenInsertFrom = new Set<number>();
+
+  // Walk the block content (nodeFrom+1 skips the opening token).
+  tr.doc.nodesBetween(nodeFrom + 1, nodeTo - 1, (child, pos) => {
+    if (!child.isText) return;
+    const from = pos;
+    const to = pos + child.nodeSize;
+
+    for (const mark of child.marks) {
+      const data = mark.attrs.dataTracked as { authorID?: string; status?: string } | null;
+      if (!data || data.authorID !== authorID || data.status !== CHANGE_STATUS.pending) continue;
+
+      if (mark.type === insertType) {
+        // This text was inserted by the author's previous suggestion — queue
+        // for deletion so it doesn't interfere with the new diff.
+        // Only add once per text node even if it has multiple stacked marks.
+        if (!seenInsertFrom.has(from)) {
+          seenInsertFrom.add(from);
+          insertRanges.push({ from, to });
+        }
+      } else if (mark.type === deleteType) {
+        // The author marked this text as deleted. Remove the mark so the text
+        // is "live" again and the new diff can re-delete it if needed.
+        tr.removeMark(from, to, mark);
+      }
+    }
+  });
+
+  // Delete previously-inserted ranges in reverse order (last → first).
+  insertRanges.sort((a, b) => b.from - a.from);
+  for (const { from, to } of insertRanges) {
+    tr.delete(from, to);
+  }
+}
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -100,7 +169,20 @@ function applyBlockToTr(
   authorID: string,
 ): { applied: boolean; editDensity: number; sourceChars: number } {
   const schema = state.schema;
-  const { acceptedText, map } = buildAcceptedTextMap(found.node, found.pos, schema);
+
+  // Clear any pending marks from the same author on this block before diffing.
+  // Without this, repeated calls stack new marks on top of the old ones,
+  // creating an exponential conflict explosion (each new insert conflicts with
+  // every old delete from a different author, all at the same positions).
+  const nodeFrom = found.pos;
+  const nodeTo   = found.pos + found.node.nodeSize;
+  clearAuthorPendingMarks(tr, nodeFrom, nodeTo, authorID, schema);
+
+  // Re-resolve the node after mutations (positions may have shifted).
+  const updatedFound = findNodeById(tr.doc, found.node.attrs["nodeId"] as string);
+  if (!updatedFound) return { applied: false, editDensity: 0, sourceChars: 0 };
+
+  const { acceptedText, map } = buildAcceptedTextMap(updatedFound.node, updatedFound.pos, schema);
 
   if (acceptedText === proposedText) {
     return { applied: false, editDensity: 0, sourceChars: acceptedText.length };
