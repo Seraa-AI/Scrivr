@@ -29,16 +29,21 @@ const HIT_RADIUS = (HANDLE_SIZE + 5) / 2;
  * Returns the 8 handle descriptors for a rect defined by (x, y, w, h).
  * All coordinates are in canvas (logical CSS pixel) space.
  */
-export function getHandles(x: number, y: number, w: number, h: number): ResizeHandle[] {
+export function getHandles(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): ResizeHandle[] {
   return [
-    { id: "TL", hx: x,       hy: y,       cursor: "nw-resize" },
-    { id: "TC", hx: x + w/2, hy: y,       cursor: "n-resize"  },
-    { id: "TR", hx: x + w,   hy: y,       cursor: "ne-resize" },
-    { id: "MR", hx: x + w,   hy: y + h/2, cursor: "e-resize"  },
-    { id: "BR", hx: x + w,   hy: y + h,   cursor: "se-resize" },
-    { id: "BC", hx: x + w/2, hy: y + h,   cursor: "s-resize"  },
-    { id: "BL", hx: x,       hy: y + h,   cursor: "sw-resize" },
-    { id: "ML", hx: x,       hy: y + h/2, cursor: "w-resize"  },
+    { id: "TL", hx: x, hy: y, cursor: "nw-resize" },
+    { id: "TC", hx: x + w / 2, hy: y, cursor: "n-resize" },
+    { id: "TR", hx: x + w, hy: y, cursor: "ne-resize" },
+    { id: "MR", hx: x + w, hy: y + h / 2, cursor: "e-resize" },
+    { id: "BR", hx: x + w, hy: y + h, cursor: "se-resize" },
+    { id: "BC", hx: x + w / 2, hy: y + h, cursor: "s-resize" },
+    { id: "BL", hx: x, hy: y + h, cursor: "sw-resize" },
+    { id: "ML", hx: x, hy: y + h / 2, cursor: "w-resize" },
   ];
 }
 
@@ -52,7 +57,10 @@ export function hitHandle(
   handles: ResizeHandle[],
 ): ResizeHandle | null {
   for (const h of handles) {
-    if (Math.abs(canvasX - h.hx) <= HIT_RADIUS && Math.abs(canvasY - h.hy) <= HIT_RADIUS) {
+    if (
+      Math.abs(canvasX - h.hx) <= HIT_RADIUS &&
+      Math.abs(canvasY - h.hy) <= HIT_RADIUS
+    ) {
       return h;
     }
   }

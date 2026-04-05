@@ -103,7 +103,7 @@ export function splitBlock(state: EditorState): Transaction | null {
   return state.tr.split(state.selection.from);
 }
 
-// ── Formatting ───────────────────────────────────────────────────────────────
+/** Formatting */
 
 export function toggleBold(state: EditorState): Transaction | null {
   return applyToggleMark(state, schema.marks["bold"]!);
@@ -139,7 +139,7 @@ export function setColor(state: EditorState, color: string): Transaction | null 
   return state.tr.addMark(from, to, schema.marks["color"]!.create({ color }));
 }
 
-// ── History ──────────────────────────────────────────────────────────────────
+/** History */
 
 /**
  * Undo / redo use prosemirror-history's command interface.
@@ -157,7 +157,7 @@ export function applyRedo(state: EditorState): Transaction | null {
   return result;
 }
 
-// ── Internal helpers ─────────────────────────────────────────────────────────
+/** Internal helpers */
 
 function applyToggleMark(state: EditorState, markType: MarkType): Transaction | null {
   const { from, to } = state.selection;

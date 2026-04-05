@@ -15,8 +15,6 @@ import type {
   PageConfig,
 } from "../layout/PageLayout";
 
-// ── Canvas mock ───────────────────────────────────────────────────────────────
-
 /**
  * Returns a full CanvasRenderingContext2D stub. All drawing ops are no-ops;
  * measureText returns deterministic widths (8px/char). Must be called before
@@ -59,8 +57,6 @@ function stubCanvas(): void {
     imageSmoothingQuality: "high" as ImageSmoothingQuality,
   } as unknown as CanvasRenderingContext2D);
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function frag(y: number, height: number): LayoutFragment {
   return { y, height } as LayoutFragment;
@@ -132,8 +128,6 @@ function makeMockEditor(isPageless = false, pageConfig = DEFAULT_PAGE_CONFIG) {
   return { editor, layoutRef };
 }
 
-// ── fragmentsInTile ───────────────────────────────────────────────────────────
-
 describe("fragmentsInTile", () => {
   it("returns empty array for empty fragments list", () => {
     expect(fragmentsInTile([], 0, 307)).toEqual([]);
@@ -196,8 +190,6 @@ describe("fragmentsInTile", () => {
   });
 });
 
-// ── findScrollParent ──────────────────────────────────────────────────────────
-
 describe("findScrollParent", () => {
   it("returns null when no scrollable ancestor exists", () => {
     const el = document.createElement("div");
@@ -244,8 +236,6 @@ describe("findScrollParent", () => {
     outer.remove();
   });
 });
-
-// ── TileManager construction ──────────────────────────────────────────────────
 
 describe("TileManager — construction", () => {
   let container: HTMLDivElement;
@@ -310,8 +300,6 @@ describe("TileManager — construction", () => {
     }).not.toThrow();
   });
 });
-
-// ── TileManager — update / tile positioning ───────────────────────────────────
 
 describe("TileManager — tile positioning (paged)", () => {
   let container: HTMLDivElement;
@@ -430,8 +418,6 @@ describe("TileManager — tile positioning (paged)", () => {
   });
 });
 
-// ── TileManager — dynamic pool sizing ────────────────────────────────────────
-
 describe("TileManager — dynamic pool sizing", () => {
   let container: HTMLDivElement;
   let scrollParent: HTMLDivElement;
@@ -509,8 +495,6 @@ describe("TileManager — dynamic pool sizing", () => {
     tm.destroy();
   });
 });
-
-// ── TileManager — destroy ─────────────────────────────────────────────────────
 
 describe("TileManager — destroy", () => {
   let container: HTMLDivElement;

@@ -16,9 +16,7 @@ import { schema } from "./model/schema";
 import type { Node } from "prosemirror-model";
 import type { Schema } from "prosemirror-model";
 import type { FontConfig } from "./layout/FontConfig";
-
-// ── Canvas mock constants ─────────────────────────────────────────────────────
-
+  
 /** Fixed character width used by the canvas mock — 8px per character. */
 export const MOCK_CHAR_WIDTH = 8;
 /** Fixed font ascent used by the canvas mock. */
@@ -44,14 +42,12 @@ export function mockCanvas(): void {
       width: text.length * MOCK_CHAR_WIDTH,
       actualBoundingBoxAscent: MOCK_ASCENT,
       actualBoundingBoxDescent: MOCK_DESCENT,
-      fontBoundingBoxAscent:    MOCK_ASCENT,
-      fontBoundingBoxDescent:   MOCK_DESCENT,
+      fontBoundingBoxAscent: MOCK_ASCENT,
+      fontBoundingBoxDescent: MOCK_DESCENT,
     })),
     font: "",
   } as unknown as CanvasRenderingContext2D);
 }
-
-// ── TextMeasurer factory ──────────────────────────────────────────────────────
 
 /**
  * Creates a TextMeasurer with the standard lineHeightMultiplier used in tests (1.2).
@@ -60,8 +56,6 @@ export function mockCanvas(): void {
 export function createMeasurer(): TextMeasurer {
   return new TextMeasurer({ lineHeightMultiplier: 1.2 });
 }
-
-// ── Node builders (base schema) ───────────────────────────────────────────────
 
 /** Empty or text paragraph node. */
 export function paragraph(text = ""): Node {
@@ -114,8 +108,6 @@ export function pageBreak(): Node {
   return schema.node("page_break");
 }
 
-// ── StarterKit context (full schema + fontConfig) ─────────────────────────────
-
 export interface FullEditorContext {
   /** ProseMirror schema built from StarterKit — includes all built-in nodes and marks. */
   schema: Schema;
@@ -136,7 +128,7 @@ export interface FullEditorContext {
 export function buildStarterKitContext(): FullEditorContext {
   const manager = new ExtensionManager([StarterKit]);
   return {
-    schema:     manager.schema,
+    schema: manager.schema,
     fontConfig: manager.buildBlockStyles(),
   };
 }

@@ -13,11 +13,11 @@ import {
   renderHandles,
 } from "./ResizeController";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+/** Constants */
 
 const DEFAULT_SMALL_TILE_HEIGHT = 307; // pageless tile height in CSS pixels
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+/** Types */
 
 export interface TileManagerOptions {
   /** Tile height for pageless mode (default 307). */
@@ -48,7 +48,7 @@ interface TileEntry {
   /** Mirrors editor.renderGeneration — forces repaint on asset loads (e.g. images). */
   lastRenderGeneration: number;
   assigned: boolean;
-  // ── Overlay blink guard ───────────────────────────────────────────────────
+  /** Overlay blink guard */
   lastBlinkState: boolean;
   lastCursorTile: number;
   lastSelectionKey: string; // "head:from:to"
@@ -56,7 +56,7 @@ interface TileEntry {
   lastPmState: EditorState | null;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+/** Helpers */
 
 export function findScrollParent(el: HTMLElement): HTMLElement | null {
   let node: HTMLElement | null = el.parentElement;
@@ -91,7 +91,7 @@ export function fragmentsInTile(
   return result;
 }
 
-// ── TileManager ───────────────────────────────────────────────────────────────
+/** TileManager */
 
 /**
  * TileManager — unified tile-based renderer for paged and pageless modes.
@@ -184,7 +184,7 @@ export class TileManager {
     this.scheduleUpdate();
   }
 
-  // ── Geometry helpers ───────────────────────────────────────────────────────
+  /** Geometry helpers */
 
   private get tileHeight(): number {
     return this.editor.isPageless
@@ -232,7 +232,7 @@ export class TileManager {
     return (page - 1) * this.slotHeight + docY;
   }
 
-  // ── Scheduling ─────────────────────────────────────────────────────────────
+  /** Scheduling */
 
   private scheduleUpdate(): void {
     if (this.rafId !== null) return;
@@ -242,13 +242,13 @@ export class TileManager {
     });
   }
 
-  // ── Core update loop ───────────────────────────────────────────────────────
+  /** Core update loop */
 
   update(): void {
     const layout = this.editor.layout;
     const sh = this.slotHeight;
 
-    // ── First update: find + attach scroll parent ─────────────────────────
+    /** First update: find + attach scroll parent */
     if (!this.scrollParent) {
       this.scrollParent = findScrollParent(this.container);
       if (this.scrollParent) {
@@ -264,12 +264,12 @@ export class TileManager {
     const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
     const viewportH = scrollEl ? scrollEl.clientHeight : window.innerHeight;
 
-    // ── Container sizing ──────────────────────────────────────────────────
+    /** ── Container sizing ────────────────────────────────────────────────── */
     const ch = this.containerHeight(layout);
     this.tilesContainer.style.height = `${ch}px`;
     this.tilesContainer.style.width = `${layout.pageConfig.pageWidth}px`;
 
-    // ── Compute visible tile range ────────────────────────────────────────
+    /** Compute visible tile range */
     const total = this.totalTiles(layout);
     const firstVisible = Math.max(
       0,
@@ -280,11 +280,11 @@ export class TileManager {
       Math.ceil((scrollTop + viewportH) / sh) + this.overscan,
     );
 
-    // ── Grow pool to cover the visible range ──────────────────────────────
+    /** Grow pool to cover the visible range */
     const needed = lastVisible - firstVisible + 1;
     this.ensurePoolSize(needed);
 
-    // ── Release out-of-range tiles (hide, don't remove) ──────────────────
+    /** Release out-of-range tiles (hide, don't remove) */
     for (const tile of this.pool) {
       if (
         tile.assigned &&
@@ -296,7 +296,7 @@ export class TileManager {
       }
     }
 
-    // ── Assign pool entries to visible indices ────────────────────────────
+    /** Assign pool entries to visible indices */
     for (let idx = firstVisible; idx <= lastVisible; idx++) {
       // O(1) lookup — already assigned?
       let tile = this.activeTiles.get(idx);
@@ -331,7 +331,7 @@ export class TileManager {
     }
   }
 
-  // ── Content painting ───────────────────────────────────────────────────────
+  /** Content painting */
 
   private paintContent(
     tile: TileEntry,
@@ -653,7 +653,7 @@ export class TileManager {
     };
   }
 
-  // ── Hit testing ────────────────────────────────────────────────────────────
+  /** Hit testing */
 
   private hitTest(
     clientX: number,
@@ -705,7 +705,7 @@ export class TileManager {
     return null;
   }
 
-  // ── Mouse events ───────────────────────────────────────────────────────────
+  /** Mouse events */
 
   private handleMouseDown = (e: MouseEvent): void => {
     e.preventDefault();
@@ -838,13 +838,13 @@ export class TileManager {
     }
   }
 
-  // ── Scroll ────────────────────────────────────────────────────────────────
+  /** Scroll */
 
   private handleScroll = (): void => {
     this.scheduleUpdate();
   };
 
-  // ── Destroy ───────────────────────────────────────────────────────────────
+  /** Destroy */
 
   destroy(): void {
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
