@@ -166,7 +166,7 @@ export function AiSuggestionCardsPanel({
 
       {/* Cards */}
       {cards.map((card) => {
-        const isExpanded = card.isActive || card.isHovered;
+        const isExpanded = card.isActive;
 
         return (
           <div
