@@ -1,6 +1,6 @@
 // React adapter for @scrivr/core
 
-export { useInscribeEditor } from "./useInscribeEditor";
+export { useScrivrEditor } from "./useScrivrEditor";
 export { BubbleMenu } from "./BubbleMenu";
 export { FloatingMenu } from "./FloatingMenu";
 export { LinkPopover } from "./LinkPopover";
@@ -16,13 +16,13 @@ export type {
   AiSuggestionCardStyles,
 } from "./AiSuggestionCards";
 export { TrackChangesPanel } from "./TrackChangesPanel";
-export type { UseCanvasEditorOptions } from "./useInscribeEditor";
+export type { UseCanvasEditorOptions } from "./useScrivrEditor";
 
-export { Inscribe } from "./Inscribe";
-export type { InscribeProps } from "./Inscribe";
+export { Scrivr } from "./Scrivr";
+export type { ScrivrProps } from "./Scrivr";
 
-export { useInscribeState as useEditorState, shallowEqual, deepEqual } from "./useInscribeState";
-export type { UseEditorStateOptions, EditorStateContext } from "./useInscribeState";
+export { useScrivrState as useEditorState, shallowEqual, deepEqual } from "./useScrivrState";
+export type { UseEditorStateOptions, EditorStateContext } from "./useScrivrState";
 
 // Re-export core types consumers need when building with this adapter
 export type { Editor, SelectionSnapshot } from "@scrivr/core";
