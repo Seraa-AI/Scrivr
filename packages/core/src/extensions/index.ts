@@ -23,6 +23,7 @@ export { Alignment } from "./built-in/Alignment";
 export { List } from "./built-in/List";
 export { Pagination } from "./built-in/Pagination";
 export { Image } from "./built-in/Image";
+export { ClearFormatting } from "./built-in/ClearFormatting";
 
 export type {
   ExtensionConfig,

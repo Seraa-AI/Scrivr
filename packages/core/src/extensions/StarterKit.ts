@@ -21,6 +21,7 @@ import { Image } from "./built-in/Image";
 import { Typography } from "./built-in/Typography";
 import { Pagination } from "./built-in/Pagination";
 import { TrailingNode } from "./built-in/TrailingNode";
+import { ClearFormatting } from "./built-in/ClearFormatting";
 import { chainCommands } from "prosemirror-commands";
 import type { InputRule } from "prosemirror-inputrules";
 import type { Command } from "prosemirror-state";
@@ -54,6 +55,7 @@ interface StarterKitOptions {
   image?: false;
   typography?: false;
   trailingNode?: false;
+  clearFormatting?: false;
 }
 
 /**
@@ -217,6 +219,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       const ext = typeof opts.highlight === "object" ? Highlight.configure(opts.highlight) : Highlight;
       Object.assign(km, ext.resolve(this.schema).keymap);
     }
+    if (opts.clearFormatting !== false) {
+      Object.assign(km, ClearFormatting.resolve(this.schema).keymap);
+    }
 
     return km;
   },
@@ -280,6 +285,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.image !== false) {
       Object.assign(cmds, Image.resolve(this.schema).commands);
+    }
+    if (opts.clearFormatting !== false) {
+      Object.assign(cmds, ClearFormatting.resolve(this.schema).commands);
     }
 
     return cmds;
@@ -446,6 +454,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.image !== false) {
       items.push(...Image.resolve().toolbarItems);
+    }
+    if (opts.clearFormatting !== false) {
+      items.push(...ClearFormatting.resolve().toolbarItems);
     }
 
     return items;
