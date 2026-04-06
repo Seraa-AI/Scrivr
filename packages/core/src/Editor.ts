@@ -101,6 +101,12 @@ export interface EditorOptions {
    * Defaults to true (standard, non-collaborative use).
    */
   startReady?: boolean;
+  /**
+   * Start the editor in read-only / view mode.
+   * Can also be toggled at any time via `editor.setReadOnly(value)`.
+   * Defaults to false.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -202,6 +208,7 @@ export class Editor extends BaseEditor implements IEditor {
     onFocusChange,
     onCursorTick,
     startReady = true,
+    readOnly = false,
   }: EditorOptions) {
     // BaseEditor handles: manager, state, commands, storage, event emitter
     super({ extensions });
@@ -280,6 +287,9 @@ export class Editor extends BaseEditor implements IEditor {
       },
     });
 
+    // Apply initial read-only state after infrastructure is ready.
+    if (readOnly) this.setReadOnly(true);
+
     // Fire onEditorReady after ALL infrastructure (including view) is set up.
     this._fireEditorReady();
   }
@@ -301,6 +311,20 @@ export class Editor extends BaseEditor implements IEditor {
    */
   protected override _dispatchForCommands(tr: Transaction): void {
     this._viewDispatch(tr);
+  }
+
+  /**
+   * Override: gate InputBridge mutations and cursor blink in addition to
+   * setting the flag and notifying subscribers.
+   */
+  override setReadOnly(value: boolean): void {
+    super.setReadOnly(value);
+    this.ib.setReadOnly(value);
+    if (value) {
+      this.cursorManager.stop();
+    } else if (this.ib.isFocused) {
+      this.cursorManager.start();
+    }
   }
 
   /** Override to use full view dispatch so setNodeAttrs triggers a repaint. */

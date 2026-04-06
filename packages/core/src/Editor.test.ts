@@ -1150,3 +1150,130 @@ describe("Editor — copy and cut", () => {
     cleanup();
   });
 });
+
+// ── Read-only / view mode ─────────────────────────────────────────────────────
+
+describe("Editor — read-only mode", () => {
+  function dispatchPaste(container: HTMLElement, text: string) {
+    const ta = container.querySelector("textarea")!;
+    const event = new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: new DataTransfer(),
+    });
+    event.clipboardData!.setData("text/plain", text);
+    ta.dispatchEvent(event);
+  }
+
+  it("readOnly is false by default", () => {
+    const { editor, cleanup } = makeEditor();
+    expect(editor.readOnly).toBe(false);
+    cleanup();
+  });
+
+  it("readOnly option starts the editor in read-only mode", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = new Editor({ readOnly: true });
+    editor.mount(container);
+    expect(editor.readOnly).toBe(true);
+    editor.destroy();
+    container.remove();
+  });
+
+  it("setReadOnly(true) sets the flag and notifies subscribers", () => {
+    const { editor, cleanup } = makeEditor();
+    let notified = false;
+    editor.subscribe(() => { notified = true; });
+    editor.setReadOnly(true);
+    expect(editor.readOnly).toBe(true);
+    expect(notified).toBe(true);
+    cleanup();
+  });
+
+  it("setReadOnly(false) clears the flag and notifies subscribers", () => {
+    const { editor, cleanup } = makeEditor();
+    editor.setReadOnly(true);
+    let notified = false;
+    editor.subscribe(() => { notified = true; });
+    editor.setReadOnly(false);
+    expect(editor.readOnly).toBe(false);
+    expect(notified).toBe(true);
+    cleanup();
+  });
+
+  it("setting the same value twice does not notify subscribers a second time", () => {
+    const { editor, cleanup } = makeEditor();
+    editor.setReadOnly(true);
+    let count = 0;
+    editor.subscribe(() => { count++; });
+    editor.setReadOnly(true); // same value — should be a no-op
+    expect(count).toBe(0);
+    cleanup();
+  });
+
+  it("blocks typing when read-only", () => {
+    const { editor, type, cleanup } = makeEditor();
+    // First type some content to establish a baseline
+    type("Hello");
+    const before = editor.getState().doc.textContent;
+    editor.setReadOnly(true);
+    type(" world");
+    expect(editor.getState().doc.textContent).toBe(before);
+    cleanup();
+  });
+
+  it("blocks paste when read-only", () => {
+    const { editor, cleanup } = makeEditor();
+    editor.setReadOnly(true);
+    const container = editor["ib"].container as HTMLElement;
+    dispatchPaste(container, "pasted text");
+    expect(editor.getState().doc.textContent).toBe("");
+    cleanup();
+  });
+
+  it("unblocks typing after setReadOnly(false)", () => {
+    const { editor, type, cleanup } = makeEditor();
+    editor.setReadOnly(true);
+    type("blocked");
+    expect(editor.getState().doc.textContent).toBe("");
+    editor.setReadOnly(false);
+    type("allowed");
+    expect(editor.getState().doc.textContent).toBe("allowed");
+    cleanup();
+  });
+
+  it("allows copy in read-only mode (does not throw)", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("copy me");
+    editor.setReadOnly(true);
+    const container = editor["ib"].container as HTMLElement;
+    const ta = container.querySelector("textarea")!;
+    // Selecting all text so copy has something to work with
+    const event = new ClipboardEvent("copy", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: new DataTransfer(),
+    });
+    expect(() => ta.dispatchEvent(event)).not.toThrow();
+    cleanup();
+  });
+
+  it("blocks cut mutation in read-only mode (content unchanged)", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("do not cut");
+    editor.setSelection(1, 11);
+    const before = editor.getState().doc.textContent;
+    editor.setReadOnly(true);
+    const container = editor["ib"].container as HTMLElement;
+    const ta = container.querySelector("textarea")!;
+    const event = new ClipboardEvent("cut", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: new DataTransfer(),
+    });
+    ta.dispatchEvent(event);
+    expect(editor.getState().doc.textContent).toBe(before);
+    cleanup();
+  });
+});

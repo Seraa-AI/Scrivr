@@ -162,6 +162,8 @@ export class TestAiEditor implements IEditor {
   moveCursorTo(_pos: number): void {
     /* no-op in tests */
   }
+  get readOnly(): boolean { return false; }
+  setReadOnly(_value: boolean): void {}
 
   /** Convenience helpers */
 

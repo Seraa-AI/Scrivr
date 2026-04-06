@@ -64,6 +64,10 @@ export interface IBaseEditor {
   on<K extends keyof EditorEvents>(event: K, handler: (payload: EditorEvents[K]) => void): () => void;
   /** Current ProseMirror state. */
   getState(): EditorState;
+  /** True when the editor is in read-only / view mode. */
+  get readOnly(): boolean;
+  /** Enable or disable read-only / view mode. Notifies subscribers. */
+  setReadOnly(value: boolean): void;
   /**
    * Update the attrs of the node at docPos, merging with its current attrs.
    * No-op if there is no node at that position.

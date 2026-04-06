@@ -30,6 +30,7 @@ export function ModeSwitcher({ editor }: ModeSwitcherProps) {
     setMode(next);
     setOpen(false);
     editor?.commands.setTrackingStatus?.(MODE_STATUS[next]);
+    editor?.setReadOnly(next === "viewing");
   };
 
   return (

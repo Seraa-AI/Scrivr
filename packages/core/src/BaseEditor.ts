@@ -45,6 +45,7 @@ export class BaseEditor implements IBaseEditor {
   protected readonly _manager: ExtensionManager;
   protected _state: EditorState;
 
+  private _readOnly = false;
   private readonly _listeners = new Set<() => void>();
 
   /**
@@ -89,6 +90,23 @@ export class BaseEditor implements IBaseEditor {
 
   getState(): EditorState {
     return this._state;
+  }
+
+  /** True when the editor is in read-only / view mode. */
+  get readOnly(): boolean {
+    return this._readOnly;
+  }
+
+  /**
+   * Enable or disable read-only mode. When true, all document mutations are
+   * blocked and the cursor is hidden. Notifies subscribers so UI can react.
+   *
+   * Subclasses (Editor) override this to also gate InputBridge + CursorManager.
+   */
+  setReadOnly(value: boolean): void {
+    if (this._readOnly === value) return;
+    this._readOnly = value;
+    this._notifyListeners();
   }
 
   /** Merge attrs into the node at docPos. No-op if no node exists there. */
