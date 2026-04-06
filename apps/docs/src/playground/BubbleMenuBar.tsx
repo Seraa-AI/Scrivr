@@ -13,10 +13,30 @@ type Btn = {
 };
 
 const BUTTONS: Btn[] = [
-  { label: "B", title: "Bold",          mark: "bold",          action: (e) => e.commands.toggleBold?.() },
-  { label: "I", title: "Italic",        mark: "italic",        action: (e) => e.commands.toggleItalic?.() },
-  { label: "U", title: "Underline",     mark: "underline",     action: (e) => e.commands.toggleUnderline?.() },
-  { label: "S", title: "Strikethrough", mark: "strikethrough", action: (e) => e.commands.toggleStrikethrough?.() },
+  {
+    label: "B",
+    title: "Bold",
+    mark: "bold",
+    action: (e) => e.commands.toggleBold(),
+  },
+  {
+    label: "I",
+    title: "Italic",
+    mark: "italic",
+    action: (e) => e.commands.toggleItalic(),
+  },
+  {
+    label: "U",
+    title: "Underline",
+    mark: "underline",
+    action: (e) => e.commands.toggleUnderline(),
+  },
+  {
+    label: "S",
+    title: "Strikethrough",
+    mark: "strikethrough",
+    action: (e) => e.commands.toggleStrikethrough(),
+  },
 ];
 
 export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {

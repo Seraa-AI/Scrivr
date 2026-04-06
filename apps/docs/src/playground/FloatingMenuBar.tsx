@@ -18,44 +18,43 @@ function useBlockItems(editor: Editor | null): BlockItem[] {
       {
         label: "¶",
         title: "Paragraph",
-        action: (e) => e.commands.setParagraph?.(),
+        action: (e) => e.commands.setParagraph(),
       },
       {
         label: "H1",
         title: "Heading 1",
-        action: (e) => e.commands.setHeading1?.(),
+        action: (e) => e.commands.setHeading1(),
       },
       {
         label: "H2",
         title: "Heading 2",
-        action: (e) => e.commands.setHeading2?.(),
+        action: (e) => e.commands.setHeading2(),
       },
       {
         label: "H3",
         title: "Heading 3",
-        action: (e) => e.commands.setHeading3?.(),
+        action: (e) => e.commands.setHeading3(),
       },
       {
         label: "•",
         title: "Bullet List",
-        action: (e) => e.commands.toggleBulletList?.(),
+        action: (e) => e.commands.toggleBulletList(),
       },
       {
         label: "1.",
         title: "Ordered List",
-        action: (e) => e.commands.toggleOrderedList?.(),
+        action: (e) => e.commands.toggleOrderedList(),
       },
       {
         label: "<>",
         title: "Code Block",
-        action: (e) => e.commands.toggleCodeBlock?.(),
+        action: (e) => e.commands.toggleCodeBlock(),
       },
       {
         label: "—",
         title: "Divider",
-        action: (e) => e.commands.insertHorizontalRule?.(),
+        action: (e) => e.commands.insertHorizontalRule(),
       },
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     ],
     [!!editor],
   );

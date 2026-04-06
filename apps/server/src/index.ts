@@ -4,10 +4,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ── Storage directory ─────────────────────────────────────────────────────────
-// Resolve relative to this file's location so the path is correct regardless
-// of which directory the server process is started from.
+/** ── Storage directory */
 
+/** Resolve relative to this file's location so the path is correct regardless
+ * of which directory the server process is started from.
+ */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "data");
 
