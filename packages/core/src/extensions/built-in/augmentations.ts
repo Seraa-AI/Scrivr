@@ -113,6 +113,10 @@ declare module "@scrivr/core" {
       /** Insert a horizontal rule at the cursor. */
       insertHorizontalRule: () => ReturnType;
     };
+    clearFormatting: {
+      /** Remove all marks and reset block formatting in the selection. */
+      clearFormatting: () => ReturnType;
+    };
   }
 
   interface NodeAttributes {
