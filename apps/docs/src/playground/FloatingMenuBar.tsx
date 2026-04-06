@@ -13,17 +13,52 @@ type BlockItem = {
 };
 
 function useBlockItems(editor: Editor | null): BlockItem[] {
-  return useMemo(() => [
-    { label: "¶",  title: "Paragraph",    action: (e) => e.commands.setParagraph?.() },
-    { label: "H1", title: "Heading 1",    action: (e) => e.commands.setHeading1?.() },
-    { label: "H2", title: "Heading 2",    action: (e) => e.commands.setHeading2?.() },
-    { label: "H3", title: "Heading 3",    action: (e) => e.commands.setHeading3?.() },
-    { label: "•",  title: "Bullet List",  action: (e) => e.commands.toggleBulletList?.() },
-    { label: "1.", title: "Ordered List", action: (e) => e.commands.toggleOrderedList?.() },
-    { label: "<>", title: "Code Block",   action: (e) => e.commands.toggleCodeBlock?.() },
-    { label: "—",  title: "Divider",      action: (e) => e.commands.insertHorizontalRule?.() },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [!!editor]);
+  return useMemo(
+    () => [
+      {
+        label: "¶",
+        title: "Paragraph",
+        action: (e) => e.commands.setParagraph?.(),
+      },
+      {
+        label: "H1",
+        title: "Heading 1",
+        action: (e) => e.commands.setHeading1?.(),
+      },
+      {
+        label: "H2",
+        title: "Heading 2",
+        action: (e) => e.commands.setHeading2?.(),
+      },
+      {
+        label: "H3",
+        title: "Heading 3",
+        action: (e) => e.commands.setHeading3?.(),
+      },
+      {
+        label: "•",
+        title: "Bullet List",
+        action: (e) => e.commands.toggleBulletList?.(),
+      },
+      {
+        label: "1.",
+        title: "Ordered List",
+        action: (e) => e.commands.toggleOrderedList?.(),
+      },
+      {
+        label: "<>",
+        title: "Code Block",
+        action: (e) => e.commands.toggleCodeBlock?.(),
+      },
+      {
+        label: "—",
+        title: "Divider",
+        action: (e) => e.commands.insertHorizontalRule?.(),
+      },
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    ],
+    [!!editor],
+  );
 }
 
 export function FloatingMenuBar({ editor }: FloatingMenuBarProps) {
@@ -65,7 +100,9 @@ export function FloatingMenuBar({ editor }: FloatingMenuBarProps) {
                 <span className="w-[22px] text-[12px] text-gray-400 font-mono text-center shrink-0">
                   {item.label}
                 </span>
-                <span className="text-[13px] font-medium text-gray-700">{item.title}</span>
+                <span className="text-[13px] font-medium text-gray-700">
+                  {item.title}
+                </span>
               </button>
             ))}
           </div>
