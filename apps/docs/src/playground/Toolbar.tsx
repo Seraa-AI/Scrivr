@@ -1,4 +1,5 @@
 import type { ToolbarItemSpec } from "@scrivr/core";
+import type { Editor } from "@scrivr/react";
 import { DEFAULT_FONT_FAMILY } from "@scrivr/react";
 import {
   Bold,
@@ -24,16 +25,22 @@ import {
 } from "lucide-react";
 
 interface ToolbarProps {
+  editor: Editor | null;
   items: ToolbarItemSpec[];
   activeMarks: string[];
   activeMarkAttrs: Record<string, Record<string, unknown>>;
   blockType: string;
   blockAttrs: Record<string, unknown>;
-  onCommand: (cmd: string, args?: unknown[]) => void;
   /** Document-level default font family — shown when no explicit family is set on the selection. */
   defaultFontFamily?: string;
   /** Document-level default font size in px — shown when no font_size mark is active. */
   defaultFontSize?: number;
+}
+
+/** Single cast point: ToolbarItemSpec uses string commands (core extension API). */
+function runCommand(editor: Editor, cmd: string, args?: unknown[]) {
+  const fn = (editor.commands as Record<string, ((...a: unknown[]) => void) | undefined>)[cmd];
+  fn?.(...(args ?? []));
 }
 
 // Map from command name → Lucide icon
@@ -70,15 +77,18 @@ const ICON_MAP: Record<string, LucideIcon> = {
  * All other items render their Lucide icon (or text label as fallback).
  */
 export function Toolbar({
+  editor,
   items,
   activeMarks,
   activeMarkAttrs,
   blockType,
   blockAttrs,
-  onCommand,
   defaultFontFamily = DEFAULT_FONT_FAMILY,
   defaultFontSize = 14,
 }: ToolbarProps) {
+  const onCommand = (cmd: string, args?: unknown[]) => {
+    if (editor) runCommand(editor, cmd, args);
+  };
   const groupOrder: string[] = [];
   const groupMap = new Map<string, ToolbarItemSpec[]>();
   for (const item of items) {

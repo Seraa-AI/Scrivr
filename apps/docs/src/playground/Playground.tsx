@@ -1,6 +1,6 @@
 import {
-  useInscribeEditor,
-  Inscribe,
+  useScrivrEditor,
+  Scrivr,
   useEditorState,
   StarterKit,
   defaultPageConfig,
@@ -114,7 +114,7 @@ type SidebarTab = "ai" | "changes";
 export function Playground() {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("ai");
 
-  const editor = useInscribeEditor({
+  const editor = useScrivrEditor({
     extensions: EXTENSIONS,
     pageConfig: defaultPageConfig,
   });
@@ -178,7 +178,7 @@ export function Playground() {
           </a>
           <div className="w-px h-4 bg-gray-200" />
           <span className="text-[14px] font-semibold text-gray-900 tracking-tight">
-            inscribe
+            scrivr
           </span>
           <span className="text-[11px] font-medium text-indigo-500 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-px tracking-wide">
             playground
@@ -216,7 +216,7 @@ export function Playground() {
           activeMarkAttrs={toolbar.activeMarkAttrs}
           blockType={toolbar.blockType}
           blockAttrs={toolbar.blockAttrs}
-          onCommand={(cmd, args) => editor?.commands[cmd]?.(...(args ?? []))}
+          editor={editor}
         />
         <div className="flex items-center px-3 border-l border-[#e8eaed] shrink-0">
           <ModeSwitcher editor={editor} />
@@ -227,7 +227,7 @@ export function Playground() {
       <div className="flex flex-1 overflow-hidden relative">
         <main className="flex flex-1 overflow-auto justify-center items-start p-4">
           <div style={{ display: "flex", alignItems: "flex-start", gap: 24 }}>
-            <Inscribe
+            <Scrivr
               editor={editor}
               style={{ position: "relative" }}
               pageStyle={{ boxShadow: "none", border: "1px solid #e8eaed" }}

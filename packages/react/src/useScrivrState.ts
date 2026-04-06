@@ -102,14 +102,14 @@ class EditorStateManager {
  *
  * @example
  * // Re-renders only when bold toggles
- * const isBold = useInscribeState({
+ * const isBold = useScrivrState({
  *   editor,
  *   selector: (ctx) => ctx.editor.isActive('bold'),
  * })
  *
  * @example
  * // Object selector — re-renders only when one of these actually changes
- * const state = useInscribeState({
+ * const state = useScrivrState({
  *   editor,
  *   selector: (ctx) => ({
  *     isBold: ctx.editor.isActive('bold'),
@@ -117,7 +117,7 @@ class EditorStateManager {
  *   }),
  * })
  */
-export function useInscribeState<T>(
+export function useScrivrState<T>(
   options: UseEditorStateOptions<T>
 ): T | null {
   const { editor, selector, equalityFn = deepEqual as (a: T, b: T) => boolean } = options;

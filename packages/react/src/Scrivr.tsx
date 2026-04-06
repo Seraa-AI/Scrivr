@@ -4,7 +4,7 @@ import { TileManager } from "@scrivr/core";
 
 const DEFAULT_GAP = 24;
 
-export interface InscribeProps {
+export interface ScrivrProps {
   /** Editor instance from useCanvasEditor. Renders nothing when null. */
   editor: Editor | null;
   /** Gap in pixels between pages in paged mode. Default: 24. */
@@ -23,16 +23,16 @@ export interface InscribeProps {
 }
 
 /**
- * Inscribe — mounts the Scrivr rendering engine onto a container div.
+ * Scrivr — mounts the Scrivr rendering engine onto a container div.
  *
  * Uses TileManager for both paged and pageless modes. The engine checks
  * `editor.isPageless` to determine the rendering strategy automatically.
  *
  * @example
- * const editor = useCanvasEditor({ extensions: [StarterKit] })
- * return <Inscribe editor={editor} style={{ padding: 40 }} />
+ * const editor = useScrivrEditor({ extensions: [StarterKit] })
+ * return <Scrivr editor={editor} style={{ padding: 40 }} />
  */
-export function Inscribe({
+export function Scrivr({
   editor,
   gap = DEFAULT_GAP,
   overscan = 1,
@@ -40,7 +40,7 @@ export function Inscribe({
   pageStyle = {},
   className,
   style,
-}: InscribeProps) {
+}: ScrivrProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
