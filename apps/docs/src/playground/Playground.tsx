@@ -216,7 +216,7 @@ export function Playground() {
           activeMarkAttrs={toolbar.activeMarkAttrs}
           blockType={toolbar.blockType}
           blockAttrs={toolbar.blockAttrs}
-          onCommand={(cmd, args) => editor?.commands[cmd]?.(...(args ?? []))}
+          editor={editor}
         />
         <div className="flex items-center px-3 border-l border-[#e8eaed] shrink-0">
           <ModeSwitcher editor={editor} />

@@ -8,25 +8,15 @@ interface BubbleMenuBarProps {
 type Btn = {
   label: string;
   title: string;
-  command: string;
   mark: string;
+  action: (editor: Editor) => void;
 };
 
 const BUTTONS: Btn[] = [
-  { label: "B", title: "Bold", command: "toggleBold", mark: "bold" },
-  { label: "I", title: "Italic", command: "toggleItalic", mark: "italic" },
-  {
-    label: "U",
-    title: "Underline",
-    command: "toggleUnderline",
-    mark: "underline",
-  },
-  {
-    label: "S",
-    title: "Strikethrough",
-    command: "toggleStrikethrough",
-    mark: "strikethrough",
-  },
+  { label: "B", title: "Bold",          mark: "bold",          action: (e) => e.commands.toggleBold?.() },
+  { label: "I", title: "Italic",        mark: "italic",        action: (e) => e.commands.toggleItalic?.() },
+  { label: "U", title: "Underline",     mark: "underline",     action: (e) => e.commands.toggleUnderline?.() },
+  { label: "S", title: "Strikethrough", mark: "strikethrough", action: (e) => e.commands.toggleStrikethrough?.() },
 ];
 
 export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
@@ -36,13 +26,13 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
   return (
     <BubbleMenu editor={editor} className="bubble-menu-bar">
       <div className="flex items-center gap-0.5 bg-[#18181b] border border-white/8 rounded-[9px] px-1.5 py-1 shadow-[0_8px_24px_rgba(0,0,0,0.3),0_2px_8px_rgba(0,0,0,0.2)]">
-        {BUTTONS.map(({ label, title, command, mark }) => (
+        {BUTTONS.map(({ label, title, mark, action }) => (
           <button
-            key={command}
+            key={mark}
             title={title}
             onMouseDown={(e) => {
               e.preventDefault();
-              editor?.commands[command]?.();
+              if (editor) action(editor);
             }}
             className={[
               "px-2 py-1 rounded-md border-none text-[13px] leading-none cursor-pointer transition-colors duration-100",
