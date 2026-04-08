@@ -10,7 +10,7 @@ Scrivr is an open-source, canvas-rendered document editor framework. Unlike trad
 |-------|-----------|---------|
 | **Model** | ProseMirror | Immutable document tree, schema validation, rich-text history |
 | **Layout** | Custom engine | Pagination, line-breaking, and text measurement independent of the DOM |
-| **Renderer** | HTML5 Canvas | Paints the document directly onto `<canvas>` for pixel-perfect visual fidelity |
+| **Renderer** | HTML5 Canvas + TileManager | Paints the document directly onto `<canvas>` tiles for pixel-perfect visual fidelity |
 | **Input** | Hidden `<textarea>` | Bridges browser keyboard and IME events to ProseMirror transactions |
 
 ## Packages
@@ -18,8 +18,8 @@ Scrivr is an open-source, canvas-rendered document editor framework. Unlike trad
 | Package | Description |
 |---------|-------------|
 | [`@scrivr/core`](./packages/core) | Headless engine — `Editor`, layout engine, canvas `ViewManager`, and all built-in extensions |
-| [`@scrivr/react`](./packages/react) | React bindings — `useCanvasEditor`, `<Scrivr />`, and menu components |
-| [`@scrivr/plugins`](./packages/plugins) | Optional extensions — real-time collaboration (Yjs), AI Toolkit, and Track Changes |
+| [`@scrivr/react`](./packages/react) | React bindings — `useScrivrEditor`, `<Scrivr />`, and menu components |
+| [`@scrivr/plugins`](./packages/plugins) | Optional extensions — real-time collaboration (Yjs), AI Toolkit, AI Suggestions, and Track Changes |
 | [`@scrivr/export`](./packages/export) | Export utilities — paginated PDF (`exportToPdf`) and Markdown (`exportToMarkdown`) |
 
 ## Quick Start
@@ -29,10 +29,10 @@ pnpm add @scrivr/core @scrivr/react
 ```
 
 ```tsx
-import { useCanvasEditor, Scrivr, StarterKit } from '@scrivr/react';
+import { useScrivrEditor, Scrivr, StarterKit } from '@scrivr/react';
 
 export function MyEditor() {
-  const editor = useCanvasEditor({
+  const editor = useScrivrEditor({
     extensions: [StarterKit],
   });
 
