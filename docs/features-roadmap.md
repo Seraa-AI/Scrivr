@@ -815,6 +815,87 @@ For a 120-page document, the current approach has **120 wrapper divs + ~8–12 l
 
 ---
 
+### Typographic Justification Quality
+
+*Moving justified text from "word-spacing only" to TeX-grade margin precision.*
+
+**Status:** Not implemented — current justification stretches spaces only via `spaceBonus` in `computeJustifySpaceBonus()`
+
+The current greedy line breaker + space-only justification produces uneven "grayness" in justified paragraphs: loose lines with rivers of white space next to tight lines. Professional typesetting engines (TeX, InDesign) solve this with five complementary techniques.
+
+#### 1. Soft Hyphenation
+
+**Priority:** High (biggest single improvement)
+
+Long words that miss the line cutoff force the entire word to the next line, leaving a massive gap. A pattern-based hyphenator (e.g. Hypher or TeX hyphenation patterns) inserts soft-wrap opportunities into long words during tokenization.
+
+**Implementation:**
+- During `LineBreaker.breakIntoLines()` tokenization phase, run words through a hyphenation engine
+- When a word doesn't fit the remaining line width, try hyphenation points before pushing the whole word to the next line
+- Insert a visible hyphen (`-`) at the break point
+- Reduces `spaceBonus` required to fill lines, immediately improving paragraph density
+
+#### 2. Micro-Typography: Font Expansion/Compression
+
+**Priority:** Medium
+
+Instead of only stretching spaces, slightly stretch or compress the characters themselves. Humans cannot perceive horizontal scaling of ±2%.
+
+**Implementation:**
+- In `TextBlockStrategy`, when `spaceBonus` is needed, distribute a portion (up to ±1-2%) as horizontal font scaling via `ctx.setTransform(expansionFactor, 0, 0, 1, charX, baseline)`
+- Results in much more even paragraph "grayness" because word spacing stays closer to the font's natural design
+- Apply expansion before space-stretching — use space adjustment only for the remainder
+
+#### 3. Optical Margin Alignment (Hanging Punctuation)
+
+**Priority:** Medium
+
+Punctuation characters (`.` `,` `-` `"` `'`) have significant internal white space. When they sit flush at the margin, the visual edge looks ragged even though the bounding box is aligned.
+
+**Implementation:**
+- In `TextBlockStrategy`, allow trailing punctuation to overshoot `maxWidth` by 50-100% of the punctuation character's width (~5-8px)
+- Leading quotation marks hang into the left margin by a similar amount
+- Purely a rendering adjustment — no line-breaking changes needed
+- Creates a much harder, cleaner visual edge on justified and left-aligned blocks
+
+#### 4. Flush-Left Threshold (Anti-Blowout)
+
+**Priority:** High (small change, prevents worst-case artifacts)
+
+If a non-last line is less than ~85% full, justifying it produces grotesque spacing. Force these lines to left-align instead.
+
+**Implementation:**
+- In `computeJustifySpaceBonus()`, add: if `extraSpace / availableWidth > 0.15`, return `0`
+- Prevents "white-space blowouts" where two or three words are stretched across the full line width
+- The second-to-last line before a short final line is the most common trigger
+
+#### 5. Multi-Pass Line Breaking (Knuth-Plass)
+
+**Priority:** Low (highest complexity, diminishing returns after hyphenation)
+
+The current greedy breaker fills each line maximally, which can leave subsequent lines in impossible states. A Knuth-Plass-style algorithm minimizes total paragraph "badness" by considering all possible break points simultaneously.
+
+**Implementation:**
+- Replace or augment the greedy loop in `LineBreaker.breakIntoLines()` with a dynamic-programming pass
+- Define "badness" per line as a function of `spaceBonus` magnitude
+- Minimize total badness across all lines in the paragraph
+- Falls back to greedy for very long paragraphs (performance bound)
+
+**Recommended implementation order:**
+1. Flush-left threshold — 5 lines of code, prevents worst artifacts immediately
+2. Soft hyphenation — biggest quality improvement, moderate complexity
+3. Hanging punctuation — rendering-only change, no line-breaking risk
+4. Font expansion — requires careful per-character rendering changes
+5. Knuth-Plass — only after 1-4 are stable; most users won't notice the difference over hyphenation alone
+
+**Key files:**
+- `LineBreaker.ts` — tokenization and line-breaking decisions
+- `BlockLayout.ts` — `computeJustifySpaceBonus()` for flush-left threshold
+- `TextBlockStrategy.ts` — rendering with `spaceBonus`, expansion, and hanging punctuation
+- `TextMeasurer.ts` — width measurement (may need ±expansion variant)
+
+---
+
 ## Sequencing Recommendation
 
 Priority order for Lexa (legal document editing focus):
@@ -846,4 +927,5 @@ Priority order for Lexa (legal document editing focus):
 **Layer 3 — Engine (only when profiling shows it's needed):**
 
 19. **rAF paint pipeline** — 15 lines, implement early for Safari; doesn't block anything
-20. **Rotating canvas pool** — only if 500+ page documents show DOM bottleneck
+20. **Typographic justification** — flush-left threshold and hyphenation first; hanging punctuation, expansion, and Knuth-Plass later
+21. **Rotating canvas pool** — only if 500+ page documents show DOM bottleneck
