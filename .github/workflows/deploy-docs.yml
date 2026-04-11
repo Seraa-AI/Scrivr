@@ -9,11 +9,6 @@ name: Deploy Docs
 #   release.yml     → @scrivr/core, @scrivr/react, @scrivr/plugins, @scrivr/export
 #                     published to npmjs.com via changesets
 #   deploy-docs.yml → scrivr-docs Docker image pushed to registry.digitalocean.com
-#
-# See docs/guides/ai-features.mdx and the commit message for "ci: split docs
-# deployment into its own workflow" for the history of why these are split —
-# previously, docs deployment was gated on changesets publishing a package,
-# which meant docs-only changes never redeployed the site.
 
 on:
   push:
@@ -85,15 +80,3 @@ jobs:
 
       - name: Push Docker image
         run: pnpm --filter @scrivr/docs deploy:production:push
-
-      # NOTE: after the image is pushed, the DigitalOcean app platform may or
-      # may not auto-redeploy depending on how the app is configured. If it
-      # doesn't, add a step here that uses `doctl` (or the DO API) to trigger
-      # a deployment explicitly:
-      #
-      #   - uses: digitalocean/action-doctl@v2
-      #     with:
-      #       token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-      #   - run: doctl apps create-deployment <APP_ID> --force-rebuild
-      #
-      # Verify in the DO dashboard once or twice which path your app uses.

@@ -67,8 +67,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-# Docs app deployment (apps/docs → DigitalOcean container registry) lives in
-# a separate workflow: .github/workflows/deploy-docs.yml. Release.yml is now
-# scoped exclusively to npm package publishing via changesets. See that file
-# for the rationale behind the split.
