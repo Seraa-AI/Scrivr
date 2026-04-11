@@ -7,7 +7,7 @@ Scrivr ships with an **AI Toolkit** plugin that powers the chat panel, inline su
 
 ## Why it's off on the public playground
 
-The public docs deployment (`docs.scrivr.dev` or whatever your deployment is) **does not ship with AI features enabled**. This is deliberate, and we want to explain why rather than hide it:
+The public docs deployment (`scrivr.seraaai.co/playground`) **does not ship with AI features enabled**. This is deliberate, and we want to explain why rather than hide it:
 
 - **We don't want to host an API key on a public site.** Scrivr doesn't operate a proxy server for Claude API calls, so there's no single place we could safely put an Anthropic key for public use.
 - **We don't want to build a rate-limited free tier.** A proxy with quota management, abuse detection, and spend caps is real ongoing infrastructure that a docs-site playground doesn't justify.
@@ -35,7 +35,7 @@ The gate has two inputs, both literal-replaced by Vite at build time so Rollup c
 - **`import.meta.env.DEV`** — `true` when running `pnpm dev:docs`, `false` in `pnpm build`. This is what makes AI features "just work" in local development without any env var setup.
 - **`import.meta.env.VITE_AI_ENABLED`** — an explicit override. Set `VITE_AI_ENABLED=true` at build time to include AI features in a production bundle. Useful for testing the Docker image locally before deploying, or for self-hosting the docs app with AI enabled.
 
-In the public production deployment (`scrivr.dev` or equivalent), neither flag is set, so `AI_ENABLED` resolves to `false` at build time. Vite inlines it as a literal, Rollup folds the branches, and the entire AI code path — the plugin import, the ChatPanel module, the suggestion cards — is stripped from the bundle. The production bundle that ships to public visitors contains **zero AI code**.
+In the public production deployment (`scrivr.seraaai.co`), neither flag is set, so `AI_ENABLED` resolves to `false` at build time. Vite inlines it as a literal, Rollup folds the branches, and the entire AI code path — the plugin import, the ChatPanel module, the suggestion cards — is stripped from the bundle. The production bundle that ships to public visitors contains **zero AI code**.
 
 ### Why build-time flags and not a runtime env lookup?
 
@@ -66,7 +66,7 @@ If you're adding a new env var to the docs app, ask: "should code behind this fl
 
    ```bash
    # apps/docs/.env.local
-   VITE_ANTHROPIC_API_KEY=sk-ant-api03-...your-key-here...
+   ANTHROPIC_API_KEY=sk-ant-api03-...your-key-here...
    ```
 
 2. Start the dev server from the repo root:
