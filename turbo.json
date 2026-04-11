@@ -23,6 +23,17 @@
       "dependsOn": ["^build"]
     },
     "clean": {
+      "cache": false,
+      "persistent": true
+    },
+    "deploy:production:build": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "cache": false
+    },
+    "deploy:production:push": {
+      "dependsOn": ["deploy:production:build"],
+      "outputs": [],
       "cache": false
     }
   }

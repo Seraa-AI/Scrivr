@@ -59,6 +59,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - uses: changesets/action@v1
+        id: changesets
         with:
           publish: pnpm release
           title: "chore: version packages"

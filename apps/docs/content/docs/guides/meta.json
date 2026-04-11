@@ -7,6 +7,7 @@
     "viewport",
     "serialization",
     "export",
-    "plugins"
+    "plugins",
+    "ai-features"
   ]
 }

@@ -1,0 +1,82 @@
+name: Deploy Docs
+
+# Ships the apps/docs Docker image to the DigitalOcean container registry.
+#
+# This workflow is deliberately independent of the Release workflow (which
+# handles npm package publishing via changesets). They are two separate
+# pipelines with different artifacts, consumers, and cadences:
+#
+#   release.yml     → @scrivr/core, @scrivr/react, @scrivr/plugins, @scrivr/export
+#                     published to npmjs.com via changesets
+#   deploy-docs.yml → scrivr-docs Docker image pushed to registry.digitalocean.com
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # The docs app itself
+      - "apps/docs/**"
+      # Workspace packages the docs app bundles via turbo
+      - "packages/core/**"
+      - "packages/react/**"
+      - "packages/plugins/**"
+      - "packages/export/**"
+      # Root build / workspace configs that affect the Docker build context
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - "tsconfig.base.json"
+      # This workflow itself (so fixes trigger a test run)
+      - ".github/workflows/deploy-docs.yml"
+  # Manual trigger from the GitHub Actions UI — useful for:
+  #   - Emergency redeploys without a code change
+  #   - Rolling forward after a failed push
+  #   - Testing the workflow itself on a non-main branch (use the "Run workflow"
+  #     button with a branch selected)
+  workflow_dispatch:
+
+# Prevent overlapping deploys to the same environment. If a second push lands
+# while a deploy is in flight, the second one queues and runs after the first.
+# We don't cancel in-flight deploys because Docker registry pushes are not
+# fully atomic — cancelling mid-upload can leave manifest state inconsistent.
+concurrency:
+  group: deploy-docs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and push docs image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Log in to DigitalOcean Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: registry.digitalocean.com
+          # DO uses the access token as BOTH username and password — this is
+          # per their docs, not a typo.
+          username: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          password: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Docker image
+        run: pnpm --filter @scrivr/docs deploy:production:build
+
+      - name: Push Docker image
+        run: pnpm --filter @scrivr/docs deploy:production:push

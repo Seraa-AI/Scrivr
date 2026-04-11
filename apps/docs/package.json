@@ -3,13 +3,18 @@
   "private": true,
   "type": "module",
   "sideEffects": false,
+  "config": {
+    "DockerContainerRegistry": "registry.digitalocean.com/lansan-mycaretaker"
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
     "start": "node .output/server/index.mjs",
     "preview": "vite preview",
     "types:check": "fumadocs-mdx && tsc --noEmit",
-    "postinstall": "fumadocs-mdx"
+    "postinstall": "fumadocs-mdx",
+    "deploy:production:build": "cd ../../ && docker build -f ./apps/docs/Dockerfile -t $npm_package_config_DockerContainerRegistry/scrivr-docs:production .",
+    "deploy:production:push": "docker push $npm_package_config_DockerContainerRegistry/scrivr-docs:production"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.63",

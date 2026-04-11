@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+**/.turbo
+**/dist
+**/.output
+**/.next
+**/build
+.git
+.gitignore
+*.md
+.env
+.env.*
+!.env.example

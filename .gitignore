@@ -8,3 +8,4 @@ apps/server/data/
 .turbo/
 .pnpm-store/
 .env
+*.code-workspace

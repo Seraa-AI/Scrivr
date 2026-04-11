@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.32.1",
   "description": "Scrivr — high-performance canvas-based document editor",
   "license": "Apache-2.0",
-  "author": "Seraa AI <hello@seraa.ai>",
+  "author": "Seraa AI <support@seraaai.co>",
   "repository": {
     "type": "git",
     "url": "https://github.com/Seraa-AI/Scrivr.git"
@@ -28,7 +28,9 @@
     "changeset": "changeset",
     "changeset:empty": "changeset --empty",
     "version-packages": "changeset version",
-    "release": "pnpm build && pnpm --filter './packages/**' publish --access public --no-git-checks --provenance"
+    "release": "pnpm build && pnpm --filter './packages/**' publish --access public --no-git-checks --provenance",
+    "deploy:production:build": "turbo run deploy:production:build",
+    "deploy:production:push": "turbo run deploy:production:push"
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",

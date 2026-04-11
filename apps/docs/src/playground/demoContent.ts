@@ -191,10 +191,10 @@ const DEMO_DOC = {
       content: [{ type: "text", text: "Lists" }],
     },
     {
-      type: "bullet_list",
+      type: "bulletList",
       content: [
         {
-          type: "list_item",
+          type: "listItem",
           content: [
             {
               type: "paragraph",
@@ -209,7 +209,7 @@ const DEMO_DOC = {
           ],
         },
         {
-          type: "list_item",
+          type: "listItem",
           content: [
             {
               type: "paragraph",
@@ -224,7 +224,7 @@ const DEMO_DOC = {
           ],
         },
         {
-          type: "list_item",
+          type: "listItem",
           content: [
             {
               type: "paragraph",
@@ -241,11 +241,11 @@ const DEMO_DOC = {
       ],
     },
     {
-      type: "ordered_list",
+      type: "orderedList",
       attrs: { order: 1 },
       content: [
         {
-          type: "list_item",
+          type: "listItem",
           content: [
             {
               type: "paragraph",
@@ -255,7 +255,7 @@ const DEMO_DOC = {
           ],
         },
         {
-          type: "list_item",
+          type: "listItem",
           content: [
             {
               type: "paragraph",
@@ -267,7 +267,7 @@ const DEMO_DOC = {
           ],
         },
         {
-          type: "list_item",
+          type: "listItem",
           content: [
             {
               type: "paragraph",
