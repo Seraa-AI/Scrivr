@@ -1134,6 +1134,18 @@ export function applyFloatLayout(
     return pass1Result;
   }
 
+  // Per-page metrics lookup. Normally `pass1Result.metrics` is populated by
+  // runPipeline with one entry per page, and we index into it by `pageNumber - 1`.
+  // Fallback: if `metrics` is absent (e.g. a test or caller that constructs
+  // DocumentLayout directly without running the pipeline), compute fresh from
+  // EMPTY_RESOLVED_CHROME — this matches the pre-refactor hand-computed formula.
+  const metricsForPage = (pageNumber: number): PageMetrics => {
+    const idx = pageNumber - 1;
+    const m = pass1Result.metrics?.[idx];
+    if (m && m.pageNumber === pageNumber) return m;
+    return computePageMetrics(pass1Result.pageConfig, EMPTY_RESOLVED_CHROME, pageNumber);
+  };
+
   // Snapshot Pass 1 page/block positions before any mutation.
   // Phase 1b copies blocks from previousLayout; it must copy from these clean
   // positions rather than the float-adjusted ones. See DocumentLayout._pass1Pages.
@@ -1193,7 +1205,11 @@ export function applyFloatLayout(
     // horizontal space already taken by a previously placed float at that Y.
     // 'behind'/'front' floats are exempt — they render above/below text and
     // never create exclusion zones, so stacking rules don't apply.
-    const floatPageBottom = pass1Result.pageConfig.pageHeight - margins.bottom;
+    //
+    // Per-page: contentBottom reads via metricsForPage so differentFirstPage
+    // headers and future footnote bands produce the correct clamp bound for
+    // this anchor's specific page.
+    const floatPageBottom = metricsForPage(anchor.anchorPage).contentBottom;
 
     // Helper: run the downward-scan stacking loop for a given page + candidateY.
     const resolveStacking = (onPage: number, startY: number): number => {
@@ -1224,7 +1240,10 @@ export function applyFloatLayout(
     let floatPage = anchor.anchorPage;
     if (mode !== "behind" && mode !== "front" && candidateY + nodeHeight > floatPageBottom) {
       floatPage = anchor.anchorPage + 1;
-      candidateY = resolveStacking(floatPage, margins.top);
+      // When overflowing to the next page, reset to THAT page's contentTop
+      // (not the current page's) — this matters once chrome contributors
+      // produce different reservations per page.
+      candidateY = resolveStacking(floatPage, metricsForPage(floatPage).contentTop);
     }
 
     floats.push({
@@ -1269,10 +1288,15 @@ export function applyFloatLayout(
 
   // Pass 3: re-layout blocks whose Y range overlaps an exclusion zone, then
   // cascade any height change to every subsequent block on the same page.
-  const pageBottom = pass1Result.pageConfig.pageHeight - pass1Result.pageConfig.margins.bottom;
-
+  //
+  // `pageBottom` is fetched per-page inside the loop (not hoisted) because
+  // different pages may reserve different footer band heights once chrome
+  // contributors land. In Phase 0 with zero contributors, every page has
+  // the same contentBottom so there's no functional difference.
   for (const page of pages) {
     if (!exclusionMgr.hasExclusionsOnPage(page.pageNumber)) continue;
+
+    const pageBottom = metricsForPage(page.pageNumber).contentBottom;
 
     const pageNum = page.pageNumber;
     // Accumulated height delta from all re-layouts so far on this page.
@@ -1366,13 +1390,16 @@ export function applyFloatLayout(
       }
 
       // Stack overflow blocks at the top of the next page's content area.
-      let nextY = margins.top;
+      // Use the NEXT page's contentTop (not the current page's) so chrome
+      // reservations on the next page are respected.
+      const nextPageContentTop = metricsForPage(nextPage.pageNumber).contentTop;
+      let nextY = nextPageContentTop;
       const reposBlocks: LayoutBlock[] = overflowToNext.map((b) => {
         const rb = { ...b, y: nextY };
         nextY += b.height;
         return rb;
       });
-      const totalHeight = nextY - margins.top;
+      const totalHeight = nextY - nextPageContentTop;
 
       // Push existing next-page blocks down to accommodate the inserted blocks.
       for (let j = 0; j < nextPage.blocks.length; j++) {
@@ -1397,14 +1424,18 @@ export function applyFloatLayout(
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi]!;
     const overflowBlocks: LayoutBlock[] = [];
+    // Per-page pageBottom (was hoisted in the pre-refactor code). With zero
+    // chrome contributors (Phase 0) every page has the same value, so
+    // behavior is unchanged; Phase 1b+ uses this per-page.
+    const pagePageBottom = metricsForPage(page.pageNumber).contentBottom;
 
     for (let bi = 0; bi < page.blocks.length; bi++) {
       const block = page.blocks[bi]!;
       // Leaf blocks (images, HRs) keep their position even when they overflow —
       // same policy as Pass 3. Text blocks are split at the page boundary.
       if (block.lines.length === 0) continue;
-      if (block.y + block.height > pageBottom) {
-        const { kept, overflow } = splitBlockAtBoundary(block, pageBottom);
+      if (block.y + block.height > pagePageBottom) {
+        const { kept, overflow } = splitBlockAtBoundary(block, pagePageBottom);
         if (kept) {
           page.blocks[bi] = kept;
         } else {
@@ -1426,13 +1457,14 @@ export function applyFloatLayout(
       else pages.splice(insertAt, 0, nextPage);
     }
 
-    let nextY = margins.top;
+    const nextPageContentTop = metricsForPage(nextPage.pageNumber).contentTop;
+    let nextY = nextPageContentTop;
     const reposBlocks: LayoutBlock[] = overflowBlocks.map((b) => {
       const rb = { ...b, y: nextY };
       nextY += b.height;
       return rb;
     });
-    const totalHeight = nextY - margins.top;
+    const totalHeight = nextY - nextPageContentTop;
 
     for (let j = 0; j < nextPage.blocks.length; j++) {
       nextPage.blocks[j] = { ...nextPage.blocks[j]!, y: nextPage.blocks[j]!.y + totalHeight };
