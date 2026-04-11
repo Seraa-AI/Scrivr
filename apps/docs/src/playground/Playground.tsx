@@ -29,11 +29,34 @@ import {
 } from "@scrivr/react";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent } from "./demoContent";
+import { env } from "../lib/env";
 
-// Set VITE_COLLAB=true in .env.local to use the local collaboration server
-// instead of the static demo document.
+// Runtime env vars go through the validated env module (see lib/env.ts).
+// These are read from the cached Zod-parsed object at app boot.
+const USE_COLLAB = env.get("VITE_COLLAB") === "true";
 
-const USE_COLLAB = import.meta.env.VITE_COLLAB === "true";
+// AI features (AiToolkit plugin, AI chat panel, suggestion cards) are gated
+// by a BUILD-TIME flag rather than a runtime env module lookup. The distinction
+// matters because it enables dead code elimination in production bundles.
+//
+// Why not route this through env.get("VITE_AI_ENABLED")?
+// Runtime env reads prevent Rollup from statically proving the branches are
+// unreachable, so all AI code would ship in the production bundle even when
+// disabled — ~100KB of unused code on every public docs visit.
+//
+// Why two checks?
+//   - `import.meta.env.DEV` → true in `pnpm dev:docs`, false in `pnpm build`
+//   - `import.meta.env.VITE_AI_ENABLED === "true"` → escape hatch for building
+//     a production-like bundle with AI enabled, for testing the prod Docker
+//     image locally before deploying. Set `VITE_AI_ENABLED=true pnpm build`.
+//
+// Both checks are literal-replaced by Vite at build time, so Rollup can fold
+// them into a single constant and eliminate the dead branches. In the public
+// production bundle, AI_ENABLED = false and the AI code paths are stripped.
+//
+// See docs/guides/ai-features.mdx for the full rationale and setup walkthrough.
+const AI_ENABLED =
+  import.meta.env.DEV || import.meta.env.VITE_AI_ENABLED === "true";
 
 const COLORS = [
   "#ef4444",
@@ -56,9 +79,7 @@ const identity = USE_COLLAB
       userName: getParam("user") ?? `User ${Math.floor(Math.random() * 100)}`,
       userColor:
         getParam("color") ?? COLORS[Math.floor(Math.random() * COLORS.length)]!,
-      wsUrl:
-        (import.meta as unknown as { env: Record<string, string> }).env
-          .VITE_WS_URL ?? "ws://localhost:1235",
+      wsUrl: env.get("VITE_WS_URL"),
     }
   : null;
 
@@ -75,13 +96,14 @@ const EXTENSIONS =
           userID: identity.userName,
           canAcceptReject: true,
         }),
-        AiToolkit,
+        // AiToolkit is only loaded in local dev (see AI_ENABLED above).
+        ...(AI_ENABLED ? [AiToolkit] : []),
       ]
     : [
         StarterKit,
         PdfExport.configure({ filename: "scrivr-demo" }),
         TrackChanges.configure({ userID: "demo-user", canAcceptReject: true }),
-        AiToolkit,
+        ...(AI_ENABLED ? [AiToolkit] : []),
         DemoContent,
       ];
 
@@ -112,7 +134,11 @@ const EMPTY_TOOLBAR: ToolbarSlice = {
 type SidebarTab = "ai" | "changes";
 
 export function Playground() {
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("ai");
+  // Default to "changes" when AI is disabled in production builds so there's
+  // a valid tab selection even though the "ai" tab won't render.
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>(
+    AI_ENABLED ? "ai" : "changes",
+  );
 
   const editor = useScrivrEditor({
     extensions: EXTENSIONS,
@@ -183,6 +209,15 @@ export function Playground() {
           <span className="text-[11px] font-medium text-indigo-500 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-px tracking-wide">
             playground
           </span>
+          {!AI_ENABLED && (
+            <a
+              href="/docs/guides/ai-features"
+              className="text-[11px] font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-full px-2 py-px tracking-wide no-underline hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              title="AI features are available when running the docs app locally"
+            >
+              AI · local dev
+            </a>
+          )}
         </div>
 
         <div className="flex items-center justify-center flex-1">
@@ -232,11 +267,13 @@ export function Playground() {
               style={{ position: "relative" }}
               pageStyle={{ boxShadow: "none", border: "1px solid #e8eaed" }}
             />
-            <AiSuggestionCardsPanel editor={editor} mode="tracked" />
+            {AI_ENABLED && (
+              <AiSuggestionCardsPanel editor={editor} mode="tracked" />
+            )}
           </div>
         </main>
 
-        {/* ── Right sidebar with tabs ── */}
+        {/* ── Right sidebar ── */}
         <div
           style={{
             display: "flex",
@@ -248,51 +285,84 @@ export function Playground() {
             background: "#fff",
           }}
         >
-          {/* Tab bar */}
-          <div
-            style={{
-              display: "flex",
-              borderBottom: "1px solid #e8eaed",
-              flexShrink: 0,
-            }}
-          >
-            {(["ai", "changes"] as SidebarTab[]).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setSidebarTab(tab)}
-                style={{ letterSpacing: "-0.01em" }}
-                className={`flex-1 h-9 border-none bg-transparent cursor-pointer text-xs border-b-2 transition-[color,border-color] duration-150 ${
-                  sidebarTab === tab
-                    ? "font-semibold text-indigo-500 border-indigo-500"
-                    : "font-normal text-gray-500 border-transparent"
-                }`}
+          {AI_ENABLED ? (
+            <>
+              {/* Tab bar — only when AI is available. In prod the AI tab is
+                  dropped entirely and the sidebar shows Track Changes only. */}
+              <div
+                style={{
+                  display: "flex",
+                  borderBottom: "1px solid #e8eaed",
+                  flexShrink: 0,
+                }}
               >
-                {tab === "ai" ? "AI Assistant" : "Track Changes"}
-              </button>
-            ))}
-          </div>
+                {(["ai", "changes"] as SidebarTab[]).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setSidebarTab(tab)}
+                    style={{ letterSpacing: "-0.01em" }}
+                    className={`flex-1 h-9 border-none bg-transparent cursor-pointer text-xs border-b-2 transition-[color,border-color] duration-150 ${
+                      sidebarTab === tab
+                        ? "font-semibold text-indigo-500 border-indigo-500"
+                        : "font-normal text-gray-500 border-transparent"
+                    }`}
+                  >
+                    {tab === "ai" ? "AI Assistant" : "Track Changes"}
+                  </button>
+                ))}
+              </div>
 
-          {/* Panel content — both mounted, only one visible */}
-          <div
-            style={{
-              flex: 1,
-              overflow: "hidden",
-              display: sidebarTab === "ai" ? "flex" : "none",
-              flexDirection: "column",
-            }}
-          >
-            <ChatPanel editor={editor} hideBorder />
-          </div>
-          <div
-            style={{
-              flex: 1,
-              overflow: "hidden",
-              display: sidebarTab === "changes" ? "flex" : "none",
-              flexDirection: "column",
-            }}
-          >
-            <TrackChangesPanel editor={editor} />
-          </div>
+              {/* Panel content — both mounted, only one visible */}
+              <div
+                style={{
+                  flex: 1,
+                  overflow: "hidden",
+                  display: sidebarTab === "ai" ? "flex" : "none",
+                  flexDirection: "column",
+                }}
+              >
+                <ChatPanel editor={editor} hideBorder />
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  overflow: "hidden",
+                  display: sidebarTab === "changes" ? "flex" : "none",
+                  flexDirection: "column",
+                }}
+              >
+                <TrackChangesPanel editor={editor} />
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Prod mode: no tab bar, just Track Changes full-height. */}
+              <div
+                style={{
+                  height: 36,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderBottom: "1px solid #e8eaed",
+                  flexShrink: 0,
+                  letterSpacing: "-0.01em",
+                }}
+                className="text-xs font-semibold text-indigo-500"
+              >
+                Track Changes
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <TrackChangesPanel editor={editor} />
+              </div>
+            </>
+          )}
         </div>
 
         {USE_COLLAB && loadingState === "syncing" && (

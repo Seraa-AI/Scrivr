@@ -1,0 +1,102 @@
+---
+title: AI Features
+description: Enable the AI chat panel and suggestion cards in the Scrivr playground by running the docs app locally.
+---
+
+Scrivr ships with an **AI Toolkit** plugin that powers the chat panel, inline suggestion cards, and ghost-text completions you see in some of the docs screenshots. This guide explains how to enable it.
+
+## Why it's off on the public playground
+
+The public docs deployment (`docs.scrivr.dev` or whatever your deployment is) **does not ship with AI features enabled**. This is deliberate, and we want to explain why rather than hide it:
+
+- **We don't want to host an API key on a public site.** Scrivr doesn't operate a proxy server for Claude API calls, so there's no single place we could safely put an Anthropic key for public use.
+- **We don't want to build a rate-limited free tier.** A proxy with quota management, abuse detection, and spend caps is real ongoing infrastructure that a docs-site playground doesn't justify.
+- **We don't want to ask you for your API key on a public site.** Even with memory-only storage, pasting credentials into a third-party web page is a trust ask we'd rather not make in a "just click and try it" context.
+
+So the simplest, most honest answer is: **the AI features are available when you run the docs app locally with your own Claude API key.** This gives you the full experience with zero trust concerns — the key never leaves your machine, and you're only ever billed by Anthropic for your own usage.
+
+## What you get when you enable AI locally
+
+When `AiToolkit` is loaded, the playground gains three pieces of functionality:
+
+- **Chat Panel** — a right-sidebar conversation UI that can read and edit the document you're working on
+- **AI Suggestion Cards** — inline suggestion cards that appear next to the canvas, showing diffs from AI edits that you can accept/reject
+- **Ghost Text Completions** — inline completions shown as you type, similar to GitHub Copilot
+
+All three live in the `@scrivr/plugins` package as the `AiToolkit` extension, and all three are gated behind a build-time flag in `apps/docs/src/playground/Playground.tsx`:
+
+```ts
+const AI_ENABLED =
+  import.meta.env.DEV || import.meta.env.VITE_AI_ENABLED === "true";
+```
+
+The gate has two inputs, both literal-replaced by Vite at build time so Rollup can tree-shake dead branches:
+
+- **`import.meta.env.DEV`** — `true` when running `pnpm dev:docs`, `false` in `pnpm build`. This is what makes AI features "just work" in local development without any env var setup.
+- **`import.meta.env.VITE_AI_ENABLED`** — an explicit override. Set `VITE_AI_ENABLED=true` at build time to include AI features in a production bundle. Useful for testing the Docker image locally before deploying, or for self-hosting the docs app with AI enabled.
+
+In the public production deployment (`scrivr.dev` or equivalent), neither flag is set, so `AI_ENABLED` resolves to `false` at build time. Vite inlines it as a literal, Rollup folds the branches, and the entire AI code path — the plugin import, the ChatPanel module, the suggestion cards — is stripped from the bundle. The production bundle that ships to public visitors contains **zero AI code**.
+
+### Why build-time flags and not a runtime env lookup?
+
+The docs app also has a validated runtime env module at `apps/docs/src/lib/env.ts` for things like `VITE_COLLAB` and `VITE_WS_URL`. You might reasonably ask: why not route `VITE_AI_ENABLED` through the same module?
+
+Because runtime env reads defeat tree-shaking. If `AI_ENABLED` comes from `env.get("VITE_AI_ENABLED")`, Rollup can't prove the branches behind `if (AI_ENABLED)` will always be unreachable in a given bundle, so it ships the dead code anyway — roughly 100KB of unused AI module weight on every public docs visit. The runtime check would correctly gate rendering, but the code would still be downloaded.
+
+The solution is a two-lane approach:
+
+| Kind | Example | Where it goes |
+|---|---|---|
+| Runtime configurable (validated, may vary at runtime) | `VITE_COLLAB`, `VITE_WS_URL` | `env.get(...)` in `lib/env.ts` |
+| Build-time feature flag (tree-shakable) | `AI_ENABLED` | Direct `import.meta.env.X` check in `Playground.tsx` |
+
+If you're adding a new env var to the docs app, ask: "should code behind this flag be able to ship to users who never set it?" If no, use a build-time flag. If yes, use the env module.
+
+## Enabling AI locally
+
+### Prerequisites
+
+- A Claude API key from [console.anthropic.com](https://console.anthropic.com/settings/keys). A free-tier key works for basic testing; for sustained use you'll want a paid plan.
+- Node 24+ and pnpm 10 installed
+- The Scrivr repo cloned locally
+
+### Setup
+
+1. Create a `.env.local` file in `apps/docs/` (this file is gitignored):
+
+   ```bash
+   # apps/docs/.env.local
+   VITE_ANTHROPIC_API_KEY=sk-ant-api03-...your-key-here...
+   ```
+
+2. Start the dev server from the repo root:
+
+   ```bash
+   pnpm dev:docs
+   ```
+
+3. Open [http://localhost:3000/playground](http://localhost:3000/playground) — the AI Assistant tab should appear in the right sidebar, and the suggestion cards panel should render next to the canvas.
+
+### How it works
+
+The `AiToolkit` plugin reads the key from the Vite environment at startup and initializes an Anthropic SDK client in the browser. Because it's running in your local dev environment with your own key, there's no proxy, no rate limiting, and no third-party involvement — every request goes directly from your browser to `api.anthropic.com`.
+
+See `packages/plugins/src/ai-toolkit/` for the full implementation.
+
+## Embedding AI features in your own app
+
+If you're building an application that embeds Scrivr, you have three paths to offering AI features to your users:
+
+1. **Proxy through your backend** (recommended). Your server holds the API key, your app calls your server, and your server calls Anthropic. You control rate limiting, abuse detection, and spend. Most production apps take this path.
+
+2. **BYOK (Bring Your Own Key)** in your UI. Show a settings panel where users paste their own Anthropic key, store it in memory or `localStorage`, and pass it to the `AiToolkit` plugin. Your app never sees the key; your users pay their own bills.
+
+3. **Service account per user** via a managed Anthropic workspace. Appropriate for enterprise deployments where each user has their own billing relationship.
+
+The `@scrivr/plugins` `AiToolkit` extension accepts a custom Anthropic SDK instance at configure time, so any of these patterns drops in without touching core Scrivr code.
+
+## Related
+
+- **Plugins guide** — [Creating Plugins](/docs/guides/plugins)
+- **Track Changes** — the AI suggestion workflow uses the same fragment-and-accept/reject model as [Track Changes](/docs/guides/plugins)
+- **Source** — `packages/plugins/src/ai-toolkit/` in the repo
