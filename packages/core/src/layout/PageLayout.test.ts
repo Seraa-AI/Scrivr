@@ -9,6 +9,7 @@ import {
   collapseMargins,
 } from "./PageLayout";
 import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
+import { computePageMetrics, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, MOCK_LINE_HEIGHT } from "../test-utils";
 
@@ -1679,17 +1680,34 @@ describe("buildBlockFlow — Stage 1", () => {
 });
 
 describe("paginateFlow — Stage 2", () => {
+  // Shared helper: build the per-page metrics lookup the way runPipeline does.
+  // With EMPTY_RESOLVED_CHROME, every page produces identical metrics matching
+  // the pre-refactor hand-computed formula.
+  const makeMetricsFor = () => {
+    const cache = new Map<number, PageMetrics>();
+    return (pageNumber: number): PageMetrics => {
+      const hit = cache.get(pageNumber);
+      if (hit) return hit;
+      const m = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, pageNumber);
+      cache.set(pageNumber, m);
+      return m;
+    };
+  };
+
   it("single short paragraph fits on page 1", () => {
     const testDoc = doc(p("Hello"));
     const measurer = createMeasurer();
-    const { margins, pageHeight } = defaultPageConfig;
+    const { margins } = defaultPageConfig;
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
-    const contentHeight = pageHeight - margins.top - margins.bottom;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
     const initPage = { pageNumber: 1, blocks: [] };
-    const pr = paginateFlow(flows, margins, contentHeight, undefined, undefined, [], initPage, margins.top, 0);
+    const metricsFor = makeMetricsFor();
+    const pr = paginateFlow(
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
+      undefined, undefined, [], initPage, metricsFor(1).contentTop, 0,
+    );
     const allPages = [...pr.pages, pr.currentPage];
     expect(allPages).toHaveLength(1);
     expect(allPages[0]!.blocks).toHaveLength(1);
@@ -1698,14 +1716,17 @@ describe("paginateFlow — Stage 2", () => {
   it("page_break FlowBlock forces a new page", () => {
     const testDoc = doc(p("Page 1"), pageBreak(), p("Page 2"));
     const measurer = createMeasurer();
-    const { margins, pageHeight } = defaultPageConfig;
+    const { margins } = defaultPageConfig;
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
-    const contentHeight = pageHeight - margins.top - margins.bottom;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
     const initPage = { pageNumber: 1, blocks: [] };
-    const pr = paginateFlow(flows, margins, contentHeight, undefined, undefined, [], initPage, margins.top, 0);
+    const metricsFor = makeMetricsFor();
+    const pr = paginateFlow(
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
+      undefined, undefined, [], initPage, metricsFor(1).contentTop, 0,
+    );
     const allPages = [...pr.pages, pr.currentPage];
     expect(allPages).toHaveLength(2);
     expect(allPages[0]!.blocks[0]!.nodePos).toBeLessThan(allPages[1]!.blocks[0]!.nodePos);
@@ -1714,12 +1735,15 @@ describe("paginateFlow — Stage 2", () => {
   it("earlyTerminated is false when no previousLayout is passed", () => {
     const testDoc = doc(p("Only"));
     const measurer = createMeasurer();
-    const { margins, pageHeight } = defaultPageConfig;
+    const { margins } = defaultPageConfig;
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
-    const contentHeight = pageHeight - margins.top - margins.bottom;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
-    const pr = paginateFlow(flows, margins, contentHeight, undefined, undefined, [], { pageNumber: 1, blocks: [] }, margins.top, 0);
+    const metricsFor = makeMetricsFor();
+    const pr = paginateFlow(
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
+      undefined, undefined, [], { pageNumber: 1, blocks: [] }, metricsFor(1).contentTop, 0,
+    );
     expect(pr.earlyTerminated).toBe(false);
   });
 });
