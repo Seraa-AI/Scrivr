@@ -18,6 +18,7 @@ import {
   type PageMetrics,
   type ResolvedChrome,
 } from "./PageMetrics";
+import { fitLinesInCapacity } from "./splitLines";
 
 export interface PageConfig {
   pageWidth: number;
@@ -717,13 +718,9 @@ export function paginateFlow(
         const splitMetrics = metricsFor(currentPage.pageNumber);
         const pageAvailable = splitMetrics.contentBottom - partStartY;
 
-        let linesFit = 0;
-        let heightFit = 0;
-        for (const line of remainingLines) {
-          if (heightFit + line.lineHeight > pageAvailable) break;
-          linesFit++;
-          heightFit += line.lineHeight;
-        }
+        const fitResult = fitLinesInCapacity(remainingLines, pageAvailable);
+        let linesFit = fitResult.fitted.length;
+        let heightFit = fitResult.fittedHeight;
 
         if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
           console.log(
@@ -824,40 +821,12 @@ export function paginateFlow(
     if (cachedEntry) {
       cachedEntry.placedTargetY = targetY;
       cachedEntry.placedPage = currentPage.pageNumber;
-      // runId identifies THIS run; contentTop snapshots the specific page's
-      // reserved-top value at placement time. Both are read by the next run's
-      // early-termination guard to detect chrome configuration changes that
-      // would invalidate the cached targetY.
       cachedEntry.placedRunId = runId;
       cachedEntry.placedContentTop = metricsFor(currentPage.pageNumber).contentTop;
     }
 
-    // ── Early termination ─────────────────────────────────────────────────────
-    //
-    // Safe to copy the rest of this block's downstream layout from the
-    // previous run only when ALL of the following match between the previous
-    // run and this one:
-    //
-    //   1. targetY is the same
-    //      The block landed at the same vertical position. If the edit only
-    //      shifted content earlier in the doc, targetY downstream matches.
-    //
-    //   2. pageNumber is the same
-    //      The block landed on the same page.
-    //
-    //   3. preCachedRunId === previousLayout.runId
-    //      The cache entry is fresh from the run we'd be copying from, not
-    //      from an even older run with potentially different chrome.
-    //
-    //   4. preCachedContentTop === current page's contentTop
-    //      The page's reserved-top hasn't shifted due to a chrome change
-    //      (e.g. a header plugin activated, a footnote band grew). If it
-    //      had, the cached targetY would be stale by the delta.
-    //
-    // With zero chrome contributors, conditions 3 and 4 are trivially true
-    // whenever the cache entry was written by the immediately previous run
-    // (which is the normal case), so the shortcut hit rate is unchanged
-    // from when only conditions 1 and 2 existed.
+    // Early termination: copy downstream pages from previous run when
+    // targetY, page, runId, and contentTop all match the cached placement.
     if (
       previousLayout &&
       seenCacheMiss &&
@@ -1064,11 +1033,7 @@ export function applyFloatLayout(
     return pass1Result;
   }
 
-  // Per-page metrics lookup. Normally `pass1Result.metrics` is populated by
-  // runPipeline with one entry per page, and we index into it by `pageNumber - 1`.
-  // Fallback: if `metrics` is absent (e.g. a test or caller that constructs
-  // DocumentLayout directly without running the pipeline), compute fresh from
-  // EMPTY_RESOLVED_CHROME — this matches the pre-refactor hand-computed formula.
+  // Per-page metrics lookup. Falls back to computing from EMPTY_RESOLVED_CHROME.
   const metricsForPage = (pageNumber: number): PageMetrics => {
     const idx = pageNumber - 1;
     const m = pass1Result.metrics?.[idx];

@@ -88,7 +88,7 @@ export function computePageMetrics(
 }
 
 /** Zero-contributor default — produces the same metrics as raw margin arithmetic. */
-export const EMPTY_RESOLVED_CHROME: ResolvedChrome = {
-  contributions: {},
+export const EMPTY_RESOLVED_CHROME: ResolvedChrome = Object.freeze({
+  contributions: Object.freeze({} as Record<string, never>),
   metricsVersion: 0,
-};
+});
