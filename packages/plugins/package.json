@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/plugins",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "ProseMirror plugins and collaboration extensions for Scrivr",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
