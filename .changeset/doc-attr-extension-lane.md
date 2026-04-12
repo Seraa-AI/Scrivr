@@ -1,8 +1,8 @@
 ---
-"@scrivr/core": minor
-"@scrivr/react": minor
-"@scrivr/plugins": minor
-"@scrivr/export": minor
+"@scrivr/core": patch
+"@scrivr/react": patch
+"@scrivr/plugins": patch
+"@scrivr/export": patch
 ---
 
 feat(core): addDocAttrs() extension lane for doc-level attributes
