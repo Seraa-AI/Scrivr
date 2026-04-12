@@ -68,9 +68,13 @@ export class Extension<Options extends object = object> {
 
     return {
       name,
-      // Phase 1: called with p1 so addNodes/addMarks can access this.options
+      // Phase 1: called with p1 so addNodes/addMarks/addDocAttrs can access this.options
       nodes: config.addNodes?.call(p1) ?? {},
       marks: config.addMarks?.call(p1) ?? {},
+      // docAttrs is also Phase 1 — contributions are merged into the doc
+      // node's attrs spec during schema construction, before any Phase 2
+      // context exists.
+      docAttrs: config.addDocAttrs?.call(p1) ?? {},
       // Phase 2: only when schema is available
       plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
       ...(schema && config.addInitialDoc

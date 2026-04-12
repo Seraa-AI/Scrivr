@@ -13,7 +13,7 @@
  *   Phase 3 — addLayoutHandler / addMarkDecorators → wired into BlockRegistry + renderer
  */
 
-import type { NodeSpec, MarkSpec, Schema, Node, Mark } from "prosemirror-model";
+import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark } from "prosemirror-model";
 import type { MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState } from "prosemirror-state";
 import type { EditorEvents } from "../types/augmentation";
@@ -369,6 +369,16 @@ export interface ExtensionConfig<Options = object> {
   /** Contribute ProseMirror mark specs. Keys become schema mark type names. */
   addMarks?(this: Phase1Context<Options>): Record<string, MarkSpec>;
 
+  /**
+   * Contribute attributes to the `doc` node at schema-build time.
+   * Duplicate attr names across extensions throw at build time.
+   * Write attrs via `tr.setDocAttribute(name, value)`.
+   *
+   * Example:
+   *   addDocAttrs() { return { headerFooter: { default: null } }; }
+   */
+  addDocAttrs?(this: Phase1Context<Options>): Record<string, AttributeSpec>;
+
   // ── Phase 2: Behaviour ──────────────────────────────────────────────────────
   // Called with `this = ExtensionContext` — the built schema is available.
 
@@ -536,6 +546,10 @@ export interface ResolvedExtension {
   name: string;
   nodes: Record<string, NodeSpec>;
   marks: Record<string, MarkSpec>;
+  /**
+   * Doc-level attribute contributions. See `ExtensionConfig.addDocAttrs`.
+   */
+  docAttrs: Record<string, AttributeSpec>;
   plugins: Plugin[];
   keymap: Record<string, Command>;
   commands: Record<string, (...args: unknown[]) => Command>;

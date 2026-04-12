@@ -22,3 +22,5 @@ export * from "./renderer";
 export * from "./input";
 export * from "./extensions";
 export * from "./menus";
+/** ProseMirror's built-in DocAttrStep — prefer `tr.setDocAttribute(name, value)`. */
+export { DocAttrStep } from "prosemirror-transform";

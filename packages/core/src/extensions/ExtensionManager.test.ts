@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ExtensionManager } from "./ExtensionManager";
+import { Extension } from "./Extension";
 import { StarterKit } from "./StarterKit";
 import { Bold } from "./built-in/Bold";
 import { Italic } from "./built-in/Italic";
@@ -231,6 +232,143 @@ describe("ExtensionManager", () => {
       const manager = new ExtensionManager([StarterKit.configure({ image: false })]);
       const registry = manager.buildInlineRegistry();
       expect(registry.has("image")).toBe(false);
+    });
+  });
+
+  describe("addDocAttrs", () => {
+    // Helpers: minimal extensions that contribute a doc attr for testing.
+    // We use fresh Extension.create calls rather than touching built-in
+    // extensions so collision behavior is deterministic regardless of
+    // which built-ins do or don't contribute doc attrs in the future.
+    const makeDocAttrContributor = (name: string, attrName: string, defaultValue: unknown) =>
+      Extension.create({
+        name,
+        addDocAttrs() {
+          return { [attrName]: { default: defaultValue } };
+        },
+      });
+
+    it("merges contributed doc attrs into the doc node spec", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
+      const manager = new ExtensionManager([StarterKit, HeaderFooter]);
+
+      const docAttrs = manager.schema.nodes["doc"]!.spec.attrs;
+      expect(docAttrs).toBeDefined();
+      expect(docAttrs!["headerFooter"]).toBeDefined();
+      // Default value flows through to instances of the doc node
+      const doc = manager.schema.nodes["doc"]!.createAndFill()!;
+      expect(doc.attrs.headerFooter).toBeNull();
+    });
+
+    it("accumulates contributions from multiple extensions additively", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", "hf-default");
+      const Footnotes = makeDocAttrContributor("footnotes", "footnotes", []);
+      const TrackChanges = makeDocAttrContributor("trackChanges", "trackChanges", { enabled: false });
+      const manager = new ExtensionManager([StarterKit, HeaderFooter, Footnotes, TrackChanges]);
+
+      const doc = manager.schema.nodes["doc"]!.createAndFill()!;
+      expect(doc.attrs.headerFooter).toBe("hf-default");
+      expect(doc.attrs.footnotes).toEqual([]);
+      expect(doc.attrs.trackChanges).toEqual({ enabled: false });
+    });
+
+    it("throws on collision when two extensions contribute the same attr name", () => {
+      const A = makeDocAttrContributor("extensionA", "config", "value-from-A");
+      const B = makeDocAttrContributor("extensionB", "config", "value-from-B");
+
+      expect(() => new ExtensionManager([StarterKit, A, B])).toThrow(
+        /Doc attribute "config" is contributed by both "extensionA" and "extensionB"/,
+      );
+    });
+
+    it("collision error mentions both owner names so the developer knows who to blame", () => {
+      const A = makeDocAttrContributor("headerFooter", "metadata", null);
+      const B = makeDocAttrContributor("pageSettings", "metadata", null);
+
+      try {
+        new ExtensionManager([A, B]);
+        expect.fail("expected ExtensionManager to throw on collision");
+      } catch (e) {
+        const msg = (e as Error).message;
+        expect(msg).toMatch(/"headerFooter"/);
+        expect(msg).toMatch(/"pageSettings"/);
+        // The error should also suggest namespacing as a fix, to guide
+        // the developer away from the "what do I do now" dead end.
+        expect(msg).toMatch(/[Rr]ename/);
+      }
+    });
+
+    it("no collision when extensions contribute different attr names", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
+      const Footnotes = makeDocAttrContributor("footnotes", "footnotes", []);
+      // Should not throw — different attr names, no collision
+      expect(() => new ExtensionManager([StarterKit, HeaderFooter, Footnotes])).not.toThrow();
+    });
+
+    it("an extension with no addDocAttrs contributes nothing", () => {
+      // Control case: existing extensions (Bold, Italic, etc.) don't contribute
+      // doc attrs. The manager should build a schema without any attrs on the
+      // doc node (or only whatever attrs the extensions happen to contribute).
+      const manager = new ExtensionManager([Document, Paragraph, Bold]);
+      const docAttrs = manager.schema.nodes["doc"]!.spec.attrs;
+      // Either undefined or an empty object — both are acceptable "nothing contributed"
+      if (docAttrs !== undefined) {
+        expect(Object.keys(docAttrs)).toHaveLength(0);
+      }
+    });
+
+    it("contributed attrs participate in doc node creation with defaults", () => {
+      const WithDefault = makeDocAttrContributor("theme", "theme", "light");
+      const manager = new ExtensionManager([StarterKit, WithDefault]);
+
+      // Creating a doc with no explicit attrs should fall through to the default
+      const doc = manager.schema.nodes["doc"]!.createAndFill()!;
+      expect(doc.attrs.theme).toBe("light");
+
+      // Explicitly passing attrs should override the default
+      const explicitDoc = manager.schema.nodes["doc"]!.create(
+        { theme: "dark" },
+        // Need content that matches "block+" — an empty paragraph works
+        [manager.schema.nodes["paragraph"]!.create()],
+      );
+      expect(explicitDoc.attrs.theme).toBe("dark");
+    });
+
+    it("collision detection fires even when both extensions come through StarterKit-adjacent chains", () => {
+      // Simulate two separate Extension.create calls producing the same
+      // attr name. This catches the case where two extensions authored
+      // independently by different teams happen to collide, not just
+      // copy-paste mistakes.
+      const A = Extension.create({
+        name: "pluginA",
+        addDocAttrs() { return { config: { default: null } }; },
+      });
+      const B = Extension.create({
+        name: "pluginB",
+        addDocAttrs() { return { config: { default: {} } }; }, // different default — still a collision
+      });
+
+      expect(() => new ExtensionManager([A, B])).toThrow(/collision|[cC]ontributed by both/);
+    });
+
+    it("declared attrs are writable via tr.setDocAttribute", () => {
+      // End-to-end: the extension lane declares the attr, and ProseMirror's
+      // built-in DocAttrStep (routed through Transaction.setDocAttribute)
+      // successfully writes it. This is the pattern extensions should use.
+      const Headered = makeDocAttrContributor("headered", "headerFooter", null);
+      const manager = new ExtensionManager([StarterKit, Headered]);
+      const state = manager.createState();
+
+      const newConfig = { title: "Chapter 1", pageNumber: true };
+      const tr = state.tr.setDocAttribute("headerFooter", newConfig);
+      const nextState = state.apply(tr);
+
+      expect(nextState.doc.attrs.headerFooter).toEqual(newConfig);
+
+      // Undo should restore the previous value (null default).
+      const undoTr = nextState.tr.step(tr.steps[0]!.invert(tr.docs[0]!));
+      const undoneState = nextState.apply(undoTr);
+      expect(undoneState.doc.attrs.headerFooter).toBeNull();
     });
   });
 });

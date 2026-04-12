@@ -3,9 +3,20 @@ import { EditorState } from "prosemirror-state";
 import { keymap } from "prosemirror-keymap";
 import { inputRules } from "prosemirror-inputrules";
 import type { Plugin, Command } from "prosemirror-state";
-import type { Node as ProseMirrorNode } from "prosemirror-model";
+import type { Node as ProseMirrorNode, AttributeSpec } from "prosemirror-model";
 import type { Extension } from "./Extension";
-import type { MarkDecorator, ResolvedExtension, FontModifier, ToolbarItemSpec, InputHandler, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules, MarkdownNodeSerializer, MarkdownMarkSerializer } from "./types";
+import type {
+  MarkDecorator,
+  ResolvedExtension,
+  FontModifier,
+  ToolbarItemSpec,
+  InputHandler,
+  MarkdownBlockRule,
+  MarkdownParserTokenSpec,
+  MarkdownSerializerRules,
+  MarkdownNodeSerializer,
+  MarkdownMarkSerializer,
+} from "./types";
 import type { IBaseEditor } from "./types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
@@ -48,10 +59,40 @@ export class ExtensionManager {
     };
     const marks: Record<string, object> = {};
 
+    // Doc attr contributions — collision detection throws naming both owners.
+    const docAttrs: Record<string, AttributeSpec> = {};
+    const docAttrOwners: Record<string, string> = {};
+
     for (const ext of extensions) {
       const partial = ext.resolve(); // no schema — Phase 1 only
+      // Note: addNodes({ doc: ... }) can overwrite the doc spec and bypass
+      // collision detection. Use addDocAttrs() for doc-level attributes.
       Object.assign(nodes, partial.nodes);
       Object.assign(marks, partial.marks);
+
+      // Merge docAttrs contributions with collision detection.
+      for (const [attrName, spec] of Object.entries(partial.docAttrs)) {
+        if (attrName in docAttrs) {
+          const prevOwner = docAttrOwners[attrName]!;
+          throw new Error(
+            `[ExtensionManager] Doc attribute "${attrName}" is contributed by ` +
+              `both "${prevOwner}" and "${partial.name}". Doc attributes must be ` +
+              `unique across all extensions. Rename one (e.g. ` +
+              `"${partial.name}_${attrName}") or remove the duplicate extension.`,
+          );
+        }
+        docAttrs[attrName] = spec;
+        docAttrOwners[attrName] = partial.name;
+      }
+    }
+
+    // Merge doc attrs into the doc node spec additively.
+    if (Object.keys(docAttrs).length > 0) {
+      const baseDoc = nodes["doc"] as Record<string, unknown>;
+      nodes["doc"] = {
+        ...baseDoc,
+        attrs: { ...(baseDoc.attrs as object | undefined), ...docAttrs },
+      };
     }
 
     return new Schema({ nodes, marks });
@@ -103,7 +144,9 @@ export class ExtensionManager {
 
     const starterKit = this.extensions.find((e) => e.name === "starterKit");
     if (starterKit) {
-      const { pagination: pkOpt } = starterKit.options as { pagination?: false | Partial<PageConfig> };
+      const { pagination: pkOpt } = starterKit.options as {
+        pagination?: false | Partial<PageConfig>;
+      };
       if (pkOpt !== false && pkOpt !== undefined) {
         return { ...defaultPageConfig, ...pkOpt } as PageConfig;
       }
@@ -167,7 +210,9 @@ export class ExtensionManager {
   buildBlockRegistry(): BlockRegistry {
     const registry = new BlockRegistry();
     for (const ext of this.resolved) {
-      for (const [nodeTypeName, strategy] of Object.entries(ext.layoutHandlers)) {
+      for (const [nodeTypeName, strategy] of Object.entries(
+        ext.layoutHandlers,
+      )) {
         registry.register(nodeTypeName, strategy);
       }
     }
@@ -181,7 +226,9 @@ export class ExtensionManager {
   buildInlineRegistry(): InlineRegistry {
     const registry = new InlineRegistry();
     for (const ext of this.resolved) {
-      for (const [nodeTypeName, strategy] of Object.entries(ext.inlineHandlers)) {
+      for (const [nodeTypeName, strategy] of Object.entries(
+        ext.inlineHandlers,
+      )) {
         registry.register(nodeTypeName, strategy);
       }
     }
@@ -280,7 +327,9 @@ export class ExtensionManager {
    * Called by Editor at the end of construction to let extensions do runtime
    * setup (collaboration providers, overlay handlers, etc.).
    */
-  buildEditorReadyCallbacks(): Array<(editor: IBaseEditor) => (() => void) | void> {
+  buildEditorReadyCallbacks(): Array<
+    (editor: IBaseEditor) => (() => void) | void
+  > {
     return this.resolved
       .filter((ext) => ext.editorReadyCallback !== undefined)
       .map((ext) => ext.editorReadyCallback!);
