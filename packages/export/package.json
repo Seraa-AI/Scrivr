@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/export",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "PDF and Markdown export for Scrivr documents",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
