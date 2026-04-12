@@ -371,31 +371,11 @@ export interface ExtensionConfig<Options = object> {
 
   /**
    * Contribute attributes to the `doc` node at schema-build time.
+   * Duplicate attr names across extensions throw at build time.
+   * Write attrs via `tr.setDocAttribute(name, value)`.
    *
-   * Every extension's contributions are merged additively into the doc
-   * node's `attrs` spec by `ExtensionManager.buildSchema`. Two extensions
-   * contributing the same attr name is a collision and throws at schema-
-   * build time with a clear error naming both owners — extensions are
-   * expected to namespace their attr names (e.g. `headerFooter`,
-   * `trackChanges`, `sections`) to avoid collisions in practice.
-   *
-   * Once declared here, the attr is writable via ProseMirror's built-in
-   * `tr.setDocAttribute(name, value)` (or equivalently, by stepping a
-   * `DocAttrStep` directly). Both route through the same jsonID so they
-   * round-trip correctly through collaboration and history snapshots.
-   *
-   * Note: ProseMirror's NodeType.create silently drops attrs that aren't
-   * declared on the schema, so typos in the attr name fail quietly. Declare
-   * every attr you intend to write via `addDocAttrs()` and cross-check
-   * attr-name strings against the declaration in one place.
-   *
-   * Example — contributing a `headerFooter` attr:
-   *   addDocAttrs() {
-   *     return { headerFooter: { default: null } };
-   *   }
-   *
-   * Then anywhere in the extension's commands:
-   *   dispatch(state.tr.setDocAttribute("headerFooter", newConfig));
+   * Example:
+   *   addDocAttrs() { return { headerFooter: { default: null } }; }
    */
   addDocAttrs?(this: Phase1Context<Options>): Record<string, AttributeSpec>;
 
@@ -567,11 +547,7 @@ export interface ResolvedExtension {
   nodes: Record<string, NodeSpec>;
   marks: Record<string, MarkSpec>;
   /**
-   * Doc-level attribute contributions. Merged additively into the doc
-   * node's `attrs` spec by `ExtensionManager.buildSchema`, with collision
-   * detection throwing at schema-build time if two extensions contribute
-   * the same attr name. See `ExtensionConfig.addDocAttrs` for the
-   * full contract.
+   * Doc-level attribute contributions. See `ExtensionConfig.addDocAttrs`.
    */
   docAttrs: Record<string, AttributeSpec>;
   plugins: Plugin[];

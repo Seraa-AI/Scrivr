@@ -3,7 +3,7 @@ import { EditorState } from "prosemirror-state";
 import { keymap } from "prosemirror-keymap";
 import { inputRules } from "prosemirror-inputrules";
 import type { Plugin, Command } from "prosemirror-state";
-import type { Node as ProseMirrorNode } from "prosemirror-model";
+import type { Node as ProseMirrorNode, AttributeSpec } from "prosemirror-model";
 import type { Extension } from "./Extension";
 import type {
   MarkDecorator,
@@ -59,17 +59,14 @@ export class ExtensionManager {
     };
     const marks: Record<string, object> = {};
 
-    // Doc-level attribute contributions are collected into a single map
-    // and merged into the `doc` node spec below. Collisions (two extensions
-    // contributing the same attr name) fail fast with a clear error
-    // naming both owners, because silent last-wins would make attr-ownership
-    // bugs extremely hard to diagnose later — a plugin reads its attr and
-    // finds someone else's value, traced back through multiple layers.
-    const docAttrs: Record<string, object> = {};
+    // Doc attr contributions — collision detection throws naming both owners.
+    const docAttrs: Record<string, AttributeSpec> = {};
     const docAttrOwners: Record<string, string> = {};
 
     for (const ext of extensions) {
       const partial = ext.resolve(); // no schema — Phase 1 only
+      // Note: addNodes({ doc: ... }) can overwrite the doc spec and bypass
+      // collision detection. Use addDocAttrs() for doc-level attributes.
       Object.assign(nodes, partial.nodes);
       Object.assign(marks, partial.marks);
 
@@ -89,10 +86,7 @@ export class ExtensionManager {
       }
     }
 
-    // Merge collected doc attrs into the doc node spec. The base spec was
-    // { content: "block+" }; we add an `attrs` field additively so any
-    // other doc-node contributors (future extensions that want to override
-    // content expressions, for example) can still layer on top.
+    // Merge doc attrs into the doc node spec additively.
     if (Object.keys(docAttrs).length > 0) {
       const baseDoc = nodes["doc"] as Record<string, unknown>;
       nodes["doc"] = {

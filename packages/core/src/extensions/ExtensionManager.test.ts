@@ -364,6 +364,11 @@ describe("ExtensionManager", () => {
       const nextState = state.apply(tr);
 
       expect(nextState.doc.attrs.headerFooter).toEqual(newConfig);
+
+      // Undo should restore the previous value (null default).
+      const undoTr = nextState.tr.step(tr.steps[0]!.invert(tr.docs[0]!));
+      const undoneState = nextState.apply(undoTr);
+      expect(undoneState.doc.attrs.headerFooter).toBeNull();
     });
   });
 });
