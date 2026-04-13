@@ -340,6 +340,54 @@ Right-click on the canvas should show a context-sensitive menu.
 | Tab stops in text | Not implemented | Requires ruler integration |
 | Drag to move selection | Not implemented | Mouse drag on canvas |
 
+### Mobile / Touch Input
+
+**Status:** Not implemented — editor is mouse-only
+
+Canvas-based rendering means the browser's native selection doesn't apply. All touch selection UI must be built from scratch.
+
+#### Phase 1 — Basic touch mapping (~30 lines)
+
+Map touch events to mouse equivalents in TileManager:
+
+- `touchstart` → `mousedown` (tap to place cursor)
+- `touchmove` → `mousemove` (drag to select)
+- `touchend` → `mouseup`
+
+Gets tap-to-cursor and drag-to-select working with zero new UI. Uses existing `charMap.posAtCoords()` → `TextSelection.create()` path.
+
+#### Phase 2 — Selection gestures
+
+- **Long press (500ms)** → select word at touch position (find word boundaries via PM `doc.resolve()`)
+- **Double tap** → select word (track tap timing)
+- **Triple tap** → select paragraph
+
+#### Phase 3 — Selection handles
+
+- Render two draggable handles (anchor + head) on the overlay canvas after selection
+- `touchmove` on a handle → extend selection via `charMap.posAtCoords()`
+- Handles styled as iOS/Android blue lollipops
+- Hide handles on tap outside selection
+
+#### Phase 4 — Context menu
+
+- Floating cut/copy/paste bar above selection (rendered in DOM, not canvas)
+- Show after selection via long press or handle drag
+- Actions route through existing `ClipboardSerializer` / `PasteTransformer`
+
+#### Files to touch
+
+- `TileManager.ts` — add touch listeners alongside mouse listeners
+- `OverlayRenderer.ts` — render selection handles on overlay canvas
+- New `TouchHandler.ts` — long-press timer, gesture detection, handle hit-testing
+- `InputBridge.ts` — already positions hidden textarea at cursor for IME (mobile keyboards work today)
+
+#### Notes
+
+- `pointer` events API (normalizes mouse + touch + pen) is worth considering instead of separate touch listeners — but requires careful testing on iOS Safari which has quirks with `pointerdown` on canvas
+- Image resize handles already exist in `ResizeController.ts` — selection handles can follow the same pattern (overlay canvas + hit-testing)
+- Pinch-to-zoom is out of scope until the zoom feature lands
+
 ---
 
 ## Layer 2 — Document Professional Features
