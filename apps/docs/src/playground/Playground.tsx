@@ -244,15 +244,17 @@ export function Playground() {
       </header>
 
       {/* ── Toolbar ── */}
-      <div className="flex items-stretch shrink-0 bg-white border-b border-[#e8eaed] overflow-x-auto">
-        <Toolbar
-          items={editor?.toolbarItems ?? []}
-          activeMarks={toolbar.activeMarks}
-          activeMarkAttrs={toolbar.activeMarkAttrs}
-          blockType={toolbar.blockType}
-          blockAttrs={toolbar.blockAttrs}
-          editor={editor}
-        />
+      <div className="flex items-stretch shrink-0 bg-white border-b border-[#e8eaed]">
+        <div className="flex-1 overflow-x-auto">
+          <Toolbar
+            items={editor?.toolbarItems ?? []}
+            activeMarks={toolbar.activeMarks}
+            activeMarkAttrs={toolbar.activeMarkAttrs}
+            blockType={toolbar.blockType}
+            blockAttrs={toolbar.blockAttrs}
+            editor={editor}
+          />
+        </div>
         <div className="flex items-center px-3 border-l border-[#e8eaed] shrink-0">
           <ModeSwitcher editor={editor} />
         </div>
