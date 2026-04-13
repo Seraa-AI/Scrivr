@@ -103,7 +103,7 @@ export function Toolbar({
   }
 
   return (
-    <div className="flex items-center flex-wrap gap-0.5 px-2.5 py-1 bg-white min-h-[40px] flex-1">
+    <div className="flex items-center flex-nowrap md:flex-wrap gap-0.5 px-2.5 py-1 bg-white min-h-[40px] flex-1">
       {groupOrder.map((group, gi) => (
         <div key={group} className="flex items-center gap-0.5">
           {gi > 0 && (
