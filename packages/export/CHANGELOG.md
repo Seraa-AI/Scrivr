@@ -1,5 +1,13 @@
 # @scrivr/export
 
+## 1.0.2
+
+### Patch Changes
+
+- 1d7dde7: Add CommonJS output to all packages so CJS consumers can `require()` the library
+- Updated dependencies [1d7dde7]
+  - @scrivr/core@1.0.2
+
 ## 1.0.1
 
 ### Patch Changes
