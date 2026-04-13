@@ -179,11 +179,11 @@ export function Playground() {
   return (
     <div className="flex flex-col h-screen bg-[#f7f8fa] font-sans">
       {/* ── Header ── */}
-      <header className="flex items-center justify-between h-11 px-4 bg-white border-b border-[#e8eaed] shrink-0 gap-3">
-        <div className="flex items-center gap-2 flex-1">
+      <header className="flex items-center justify-between h-11 px-2 md:px-4 bg-white border-b border-[#e8eaed] shrink-0 gap-2 md:gap-3">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           <a
             href="/"
-            className="flex items-center gap-1 text-[13px] text-gray-500 no-underline px-1.5 py-0.5 rounded-md hover:bg-gray-100 hover:text-gray-700 transition-colors"
+            className="flex items-center gap-1 text-[13px] text-gray-500 no-underline px-1.5 py-0.5 rounded-md hover:bg-gray-100 hover:text-gray-700 transition-colors shrink-0"
           >
             <svg
               width="14"
@@ -200,19 +200,19 @@ export function Playground() {
                 strokeLinejoin="round"
               />
             </svg>
-            Docs
+            <span className="hidden sm:inline">Docs</span>
           </a>
-          <div className="w-px h-4 bg-gray-200" />
-          <span className="text-[14px] font-semibold text-gray-900 tracking-tight">
+          <div className="w-px h-4 bg-gray-200 hidden sm:block" />
+          <span className="text-[14px] font-semibold text-gray-900 tracking-tight shrink-0">
             scrivr
           </span>
-          <span className="text-[11px] font-medium text-indigo-500 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-px tracking-wide">
+          <span className="text-[11px] font-medium text-indigo-500 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-px tracking-wide hidden sm:inline">
             playground
           </span>
           {!AI_ENABLED && (
             <a
               href="/docs/guides/ai-features"
-              className="text-[11px] font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-full px-2 py-px tracking-wide no-underline hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              className="text-[11px] font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-full px-2 py-px tracking-wide no-underline hover:bg-gray-100 hover:text-gray-700 transition-colors hidden md:inline"
               title="AI features are available when running the docs app locally"
             >
               AI · local dev
@@ -220,31 +220,31 @@ export function Playground() {
           )}
         </div>
 
-        <div className="flex items-center justify-center flex-1">
+        <div className="flex items-center justify-center shrink-0">
           <span className="text-[12px] text-gray-400 tabular-nums tracking-wide">
             {pageInfo.current} / {pageInfo.total}
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-1 justify-end">
+        <div className="flex items-center gap-1.5 flex-1 justify-end min-w-0 hidden md:flex">
           {USE_COLLAB && identity && (
             <>
               <span
                 className="w-[7px] h-[7px] rounded-full shrink-0"
                 style={{ background: identity.userColor }}
               />
-              <span className="text-[12px] font-medium text-gray-700">
+              <span className="text-[12px] font-medium text-gray-700 truncate">
                 {identity.userName}
               </span>
               <span className="text-[12px] text-gray-300">·</span>
-              <span className="text-[12px] text-gray-400">{identity.room}</span>
+              <span className="text-[12px] text-gray-400 truncate">{identity.room}</span>
             </>
           )}
         </div>
       </header>
 
       {/* ── Toolbar ── */}
-      <div className="flex items-stretch shrink-0 bg-white border-b border-[#e8eaed]">
+      <div className="flex items-stretch shrink-0 bg-white border-b border-[#e8eaed] overflow-x-auto">
         <Toolbar
           items={editor?.toolbarItems ?? []}
           activeMarks={toolbar.activeMarks}
@@ -260,8 +260,8 @@ export function Playground() {
 
       {/* ── Body ── */}
       <div className="flex flex-1 overflow-hidden relative">
-        <main className="flex flex-1 overflow-auto justify-center items-start p-4">
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 24 }}>
+        <main className="flex-1 overflow-auto p-1 md:p-4">
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 24, margin: "0 auto", width: "fit-content" }}>
             <Scrivr
               editor={editor}
               style={{ position: "relative" }}
@@ -273,10 +273,10 @@ export function Playground() {
           </div>
         </main>
 
-        {/* ── Right sidebar ── */}
+        {/* ── Right sidebar — hidden on mobile ── */}
         <div
+          className="hidden md:flex"
           style={{
-            display: "flex",
             flexDirection: "column",
             width: 300,
             flexShrink: 0,
