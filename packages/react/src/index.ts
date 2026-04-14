@@ -26,6 +26,6 @@ export type { UseEditorStateOptions, EditorStateContext } from "./useScrivrState
 
 // Re-export core types consumers need when building with this adapter
 export type { Editor, SelectionSnapshot } from "@scrivr/core";
-export { StarterKit, Pagination, defaultPageConfig, DEFAULT_FONT_FAMILY, ViewManager, FontFamily, Link } from "@scrivr/core";
-export type { PageConfig, DocumentLayout, Extension, ViewManagerOptions } from "@scrivr/core";
+export { StarterKit, Pagination, defaultPageConfig, DEFAULT_FONT_FAMILY, FontFamily, Link } from "@scrivr/core";
+export type { PageConfig, DocumentLayout, Extension } from "@scrivr/core";
 export { Collaboration, CollaborationCursor } from "@scrivr/plugins";

@@ -16,6 +16,3 @@ export {
 export { CursorManager } from "./CursorManager";
 export { TileManager } from "./TileManager";
 export type { TileManagerOptions } from "./TileManager";
-/** @deprecated Use TileManager instead. */
-export { ViewManager } from "./ViewManager";
-export type { ViewManagerOptions } from "./ViewManager";

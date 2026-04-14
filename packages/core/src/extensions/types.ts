@@ -23,6 +23,7 @@ import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
+import type { SelectionController } from "../SelectionController";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
 
@@ -107,7 +108,7 @@ export interface IEditor extends IBaseEditor {
   getNodeViewportRect(docPos: number): DOMRect | null;
   /**
    * Select the inline node at docPos using a ProseMirror NodeSelection.
-   * Falls back to moveCursorTo if the position is not selectable.
+   * Falls back to selection.moveCursorTo if the position is not selectable.
    */
   selectNode(docPos: number): void;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
@@ -134,8 +135,8 @@ export interface IEditor extends IBaseEditor {
    *  'ready'     — fully loaded
    */
   get loadingState(): "syncing" | "rendering" | "ready";
-  /** Move the cursor to a document position. */
-  moveCursorTo(docPos: number): void;
+  /** Selection controller — cursor movement, word/line navigation, selection. */
+  readonly selection: SelectionController;
 }
 
 /**

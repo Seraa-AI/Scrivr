@@ -180,7 +180,7 @@ export function subscribeToAiSuggestions(
     },
     activate(blockId) {
       const found = findNodeById(editor.getState().doc, blockId);
-      if (found) editor.moveCursorTo(found.pos + 1);
+      if (found) editor.selection.moveCursorTo(found.pos + 1);
     },
   };
 

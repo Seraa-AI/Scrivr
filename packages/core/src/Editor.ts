@@ -1,4 +1,5 @@
-import { EditorState, Transaction, TextSelection, NodeSelection } from "prosemirror-state";
+import { EditorState, Transaction, NodeSelection } from "prosemirror-state";
+import { SelectionController } from "./SelectionController";
 import type {
   FontModifier,
   MarkDecorator,
@@ -153,6 +154,9 @@ export class Editor extends BaseEditor implements IEditor {
 
   // ── Input bridge ──────────────────────────────────────────────────────────
 
+  /** Owns all cursor movement, selection, and word/line navigation logic. */
+  readonly selection: SelectionController;
+
   /** Owns the hidden textarea, all DOM event listeners, and clipboard handling. */
   private readonly ib: InputBridge;
 
@@ -197,7 +201,7 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Overlay render handlers registered by extensions (e.g. CollaborationCursor).
-   * Called by ViewManager.paintOverlay() for each visible page.
+   * Called by TileManager.paintOverlay() for each visible page.
    */
   private readonly overlayRenderHandlers = new Set<OverlayRenderHandler>();
 
@@ -252,6 +256,14 @@ export class Editor extends BaseEditor implements IEditor {
       this.lc.setReady(false);
     }
 
+    this.selection = new SelectionController({
+      getState: () => this._state,
+      dispatch: (tr) => this._viewDispatch(tr),
+      ensureLayout: () => this.lc.ensureLayout(),
+      getCharMap: () => this.lc.charMap,
+      focus: () => this.focus(),
+    });
+
     const pasteTransformer = new PasteTransformer(
       this._manager.schema,
       this._manager.buildMarkdownRules(),
@@ -271,7 +283,7 @@ export class Editor extends BaseEditor implements IEditor {
       },
       keymap: this._manager.buildKeymap(),
       inputHandlers: this._manager.buildInputHandlers(),
-      navigator: this,
+      navigator: this.selection,
       pasteTransformer,
       onFocus: () => {
         this.cursorManager.start();
@@ -452,7 +464,7 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Select the inline node at docPos using a NodeSelection.
-   * Falls back to moveCursorTo if the node is not selectable.
+   * Falls back to selection.moveCursorTo if the node is not selectable.
    */
   selectNode(docPos: number): void {
     try {
@@ -460,7 +472,7 @@ export class Editor extends BaseEditor implements IEditor {
       this._viewDispatch(this._state.tr.setSelection(sel));
       this.focus();
     } catch {
-      this.moveCursorTo(docPos);
+      this.selection.moveCursorTo(docPos);
     }
   }
 
@@ -520,7 +532,7 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Register a canvas draw function on the overlay layer.
-   * Called by ViewManager.paintOverlay() after the local cursor and selection.
+   * Called by TileManager.paintOverlay() after the local cursor and selection.
    * Returns an unregister function.
    */
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void {
@@ -530,7 +542,7 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Invoke all registered overlay render handlers for a given page.
-   * Called by ViewManager.paintOverlay() — not intended for external use.
+   * Called by TileManager.paintOverlay() — not intended for external use.
    */
   runOverlayHandlers(
     ctx: CanvasRenderingContext2D,
@@ -577,169 +589,6 @@ export class Editor extends BaseEditor implements IEditor {
     this.ib.scrollCursorIntoView();
   }
 
-  /**
-   * Collapse the cursor to a specific doc position.
-   */
-  moveCursorTo(docPos: number): void {
-    this._applyMovement(docPos, false);
-    this.focus();
-  }
-
-  /**
-   * Set an explicit anchor + head, creating a non-collapsed selection.
-   */
-  setSelection(anchor: number, head: number): void {
-    const size = this._state.doc.content.size;
-    const a = Math.max(0, Math.min(anchor, size));
-    const h = Math.max(0, Math.min(head, size));
-    const $a = this._state.doc.resolve(a);
-    const $h = this._state.doc.resolve(h);
-    this._viewDispatch(this._state.tr.setSelection(TextSelection.between($a, $h)));
-    this.focus();
-  }
-
-  /** Move left one position. Pass extend=true to grow the selection (Shift+←). */
-  moveLeft(extend = false): void {
-    const head = this._state.selection.head;
-    if (head <= 0) return;
-    const $pos = this._state.doc.resolve(Math.max(0, head - 1));
-    const sel = TextSelection.findFrom($pos, -1);
-    if (sel) this._applyMovement(sel.head, extend);
-  }
-
-  /** Move right one position. Pass extend=true to grow the selection (Shift+→). */
-  moveRight(extend = false): void {
-    const head = this._state.selection.head;
-    const size = this._state.doc.content.size;
-    if (head >= size) return;
-    const $pos = this._state.doc.resolve(Math.min(size, head + 1));
-    const sel = TextSelection.findFrom($pos, 1);
-    if (sel) this._applyMovement(sel.head, extend);
-  }
-
-  /** Move up one line preserving x. Pass extend=true for Shift+↑. */
-  moveUp(extend = false): void {
-    this.lc.ensureLayout();
-    const head = this._state.selection.head;
-    const coords = this.lc.charMap.coordsAtPos(head);
-    if (!coords) return;
-    const pos = this.lc.charMap.posAbove(head, coords.x);
-    if (pos !== null) this._applyMovement(pos, extend);
-  }
-
-  /** Move down one line preserving x. Pass extend=true for Shift+↓. */
-  moveDown(extend = false): void {
-    this.lc.ensureLayout();
-    const head = this._state.selection.head;
-    const coords = this.lc.charMap.coordsAtPos(head);
-    if (!coords) return;
-    const pos = this.lc.charMap.posBelow(head, coords.x);
-    if (pos !== null) this._applyMovement(pos, extend);
-  }
-
-  /** Move cursor to the previous word boundary. */
-  moveWordLeft(extend = false): void {
-    const head = this._state.selection.head;
-    const pos = this._findWordBoundary(head, -1);
-    if (pos !== head) this._applyMovement(pos, extend);
-  }
-
-  /** Move cursor to the next word boundary. */
-  moveWordRight(extend = false): void {
-    const head = this._state.selection.head;
-    const pos = this._findWordBoundary(head, 1);
-    if (pos !== head) this._applyMovement(pos, extend);
-  }
-
-  /** Delete from cursor to previous word boundary. */
-  deleteWordBackward(): void {
-    const { head, empty } = this._state.selection;
-    if (!empty) {
-      // If there's a selection, just delete it
-      const tr = this._state.tr.deleteSelection();
-      this._viewDispatch(tr);
-      return;
-    }
-    const wordStart = this._findWordBoundary(head, -1);
-    if (wordStart < head) {
-      this._viewDispatch(this._state.tr.delete(wordStart, head));
-    }
-  }
-
-  /** Delete from cursor to next word boundary. */
-  deleteWordForward(): void {
-    const { head, empty } = this._state.selection;
-    if (!empty) {
-      const tr = this._state.tr.deleteSelection();
-      this._viewDispatch(tr);
-      return;
-    }
-    const wordEnd = this._findWordBoundary(head, 1);
-    if (wordEnd > head) {
-      this._viewDispatch(this._state.tr.delete(head, wordEnd));
-    }
-  }
-
-  /** Move to start of the current visual line. */
-  moveToLineStart(extend = false): void {
-    this.lc.ensureLayout();
-    const head = this._state.selection.head;
-    const pos = this.lc.charMap.lineStartPos(head);
-    if (pos !== null) this._applyMovement(pos, extend);
-  }
-
-  /** Move to end of the current visual line. */
-  moveToLineEnd(extend = false): void {
-    this.lc.ensureLayout();
-    const head = this._state.selection.head;
-    const pos = this.lc.charMap.lineEndPos(head);
-    if (pos !== null) this._applyMovement(pos, extend);
-  }
-
-  /** Move to start of document. */
-  moveToDocStart(extend = false): void {
-    const $pos = this._state.doc.resolve(0);
-    const sel = TextSelection.findFrom($pos, 1);
-    if (sel) this._applyMovement(sel.head, extend);
-  }
-
-  /** Move to end of document. */
-  moveToDocEnd(extend = false): void {
-    const size = this._state.doc.content.size;
-    const $pos = this._state.doc.resolve(size);
-    const sel = TextSelection.findFrom($pos, -1);
-    if (sel) this._applyMovement(sel.head, extend);
-  }
-
-  /**
-   * Select the word at the given doc position.
-   * Returns { from, to } of the word boundaries.
-   */
-  selectWordAt(pos: number): { from: number; to: number } {
-    const from = this._findWordBoundary(pos, -1);
-    const to = this._findWordBoundary(pos, 1);
-    this.setSelection(from, to);
-    return { from, to };
-  }
-
-  /**
-   * Public access to word boundary scanning — used by TileManager/ViewManager
-   * for word-granularity drag selection after double-click.
-   */
-  wordBoundary(pos: number, dir: -1 | 1): number {
-    return this._findWordBoundary(pos, dir);
-  }
-
-  /**
-   * Select the entire block (paragraph/heading) containing the given position.
-   */
-  selectBlockAt(pos: number): void {
-    const $pos = this._state.doc.resolve(pos);
-    const blockStart = $pos.start($pos.depth);
-    const blockEnd = $pos.end($pos.depth);
-    this.setSelection(blockStart, blockEnd);
-  }
-
   /** Whether the editor's textarea currently has focus. */
   get isFocused(): boolean {
     return this.ib.isFocused;
@@ -754,61 +603,6 @@ export class Editor extends BaseEditor implements IEditor {
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
-
-  /**
-   * Find the next word boundary from `pos` in `dir` (-1 = left, 1 = right).
-   * Matches native text editor behaviour: skip whitespace, then skip word chars
-   * (or vice versa depending on what's under the cursor).
-   */
-  private _findWordBoundary(pos: number, dir: -1 | 1): number {
-    const doc = this._state.doc;
-    const size = doc.content.size;
-
-    // Extract text of the block containing `pos`
-    const $pos = doc.resolve(pos);
-    const blockStart = $pos.start($pos.depth);
-    const blockEnd = $pos.end($pos.depth);
-    const blockText = doc.textBetween(blockStart, blockEnd);
-
-    // Offset within the block's text
-    let offset = pos - blockStart;
-
-    const ch = (i: number): string => blockText.charAt(i);
-
-    if (dir === -1) {
-      // Skip whitespace, then skip word chars (or skip punctuation)
-      while (offset > 0 && isWhitespace(ch(offset - 1))) offset--;
-      if (offset > 0 && isWordChar(ch(offset - 1))) {
-        while (offset > 0 && isWordChar(ch(offset - 1))) offset--;
-      } else {
-        while (offset > 0 && !isWordChar(ch(offset - 1)) && !isWhitespace(ch(offset - 1))) offset--;
-      }
-    } else {
-      const len = blockText.length;
-      while (offset < len && isWhitespace(ch(offset))) offset++;
-      if (offset < len && isWordChar(ch(offset))) {
-        while (offset < len && isWordChar(ch(offset))) offset++;
-      } else {
-        while (offset < len && !isWordChar(ch(offset)) && !isWhitespace(ch(offset))) offset++;
-      }
-    }
-
-    return Math.max(0, Math.min(blockStart + offset, size));
-  }
-
-  /**
-   * Core movement primitive.
-   * extend=false → collapsed cursor at newHead
-   * extend=true  → selection from current anchor to newHead (Shift+arrow)
-   */
-  private _applyMovement(newHead: number, extend: boolean): void {
-    const size = this._state.doc.content.size;
-    const h = Math.max(0, Math.min(newHead, size));
-    const a = extend ? this._state.selection.anchor : h;
-    const $a = this._state.doc.resolve(Math.max(0, Math.min(a, size)));
-    const $h = this._state.doc.resolve(h);
-    this._viewDispatch(this._state.tr.setSelection(TextSelection.between($a, $h)));
-  }
 
   /**
    * The view-aware dispatch: applies state + invalidates layout + resets
@@ -843,15 +637,4 @@ export class Editor extends BaseEditor implements IEditor {
       this._notifyListeners();
     });
   }
-}
-
-// ── Module-level helpers ────────────────────────────────────────────────────
-
-/** Word character: letters, digits, underscore (matches \w). */
-function isWordChar(ch: string): boolean {
-  return /\w/.test(ch);
-}
-
-function isWhitespace(ch: string): boolean {
-  return /\s/.test(ch);
 }

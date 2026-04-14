@@ -6,12 +6,8 @@ import { renderPage } from "./PageRenderer";
 import { drawBlock } from "./PageRenderer";
 import { clearOverlay, renderCursor, renderSelection } from "./OverlayRenderer";
 import { NodeSelection } from "prosemirror-state";
-import {
-  getHandles,
-  hitHandle,
-  computeNewSize,
-  renderHandles,
-} from "./ResizeController";
+import { renderHandles } from "./ResizeController";
+import { PointerController } from "./PointerController";
 
 /** Constants */
 
@@ -37,7 +33,7 @@ export interface TileManagerOptions {
   pageStyle?: Partial<CSSStyleDeclaration>;
 }
 
-interface TileEntry {
+export interface TileEntry {
   wrapper: HTMLDivElement;
   contentCanvas: HTMLCanvasElement;
   overlayCanvas: HTMLCanvasElement;
@@ -114,39 +110,15 @@ export class TileManager {
   private readonly activeTiles = new Map<number, TileEntry>();
   private unsubscribe: (() => void) | null = null;
   private rafId: number | null = null;
-  private isDragging = false;
   private readonly gap: number;
   private readonly overscan: number;
   private readonly showMarginGuides: boolean;
   private readonly smallTileHeight: number;
   private readonly pageStyle: Partial<CSSStyleDeclaration>;
   private resizeObserver: ResizeObserver | null = null;
-  private resizeDrag: {
-    handle: string;
-    startX: number;
-    startY: number;
-    startW: number;
-    startH: number;
-    docPos: number;
-    pendingWidth: number;
-    pendingHeight: number;
-  } | null = null;
-  private floatDrag: {
-    docPos: number;
-    startX: number;
-    startY: number;
-    startOffsetX: number;
-    startOffsetY: number;
-  } | null = null;
   private _firstPaintDone = false;
   private _unwatchDpr: (() => void) | null = null;
-  /** Click-count tracking for double/triple-click. */
-  private _clickCount = 0;
-  private _lastClickTime = 0;
-  private _lastClickX = 0;
-  private _lastClickY = 0;
-  /** Word boundaries from double-click — used for word-granularity drag. */
-  private _wordAnchor: { from: number; to: number } | null = null;
+  private readonly pointer: PointerController;
 
   constructor(
     private readonly editor: Editor,
@@ -173,9 +145,17 @@ export class TileManager {
     this.ensurePoolSize(1);
 
     // ── mouse events ─────────────────────────────────────────────────────────
-    this.tilesContainer.addEventListener("mousedown", this.handleMouseDown);
-    document.addEventListener("mousemove", this.handleMouseMove);
-    document.addEventListener("mouseup", this.handleMouseUp);
+    this.pointer = new PointerController({
+      editor,
+      tilesContainer: this.tilesContainer,
+      pool: this.pool,
+      slotHeight: () => this.slotHeight,
+      tileHeight: () => this.tileHeight,
+      isPageless: () => this.editor.isPageless,
+      visualYToDocY: (y) => this.visualYToDocY(y),
+      scheduleUpdate: () => this.scheduleUpdate(),
+    });
+    this.pointer.attach();
 
     // ── page screen rect lookup ───────────────────────────────────────────────
     // Returns screen-space top-left of page N. Pure math — no sentinel DOM nodes.
@@ -584,8 +564,9 @@ export class TileManager {
       const objRect = this.editor.charMap.getObjectRect(pmSel.from);
       if (objRect && objRect.page === pageNum) {
         // During resize drag, show ghost handles at the pending (uncommitted) size.
-        const w = this.resizeDrag?.pendingWidth ?? objRect.width;
-        const h = this.resizeDrag?.pendingHeight ?? objRect.height;
+        const pending = this.pointer.pendingResize;
+        const w = pending?.width ?? objRect.width;
+        const h = pending?.height ?? objRect.height;
         renderHandles(overlayCtx, objRect.x, objRect.y, w, h);
       }
     }
@@ -674,262 +655,6 @@ export class TileManager {
     };
   }
 
-  /** Hit testing */
-
-  private hitTest(
-    clientX: number,
-    clientY: number,
-  ): { page: number; docX: number; docY: number } | null {
-    const containerRect = this.tilesContainer.getBoundingClientRect();
-    // getBoundingClientRect() already incorporates scroll — do NOT add scrollTop.
-    const visualX = clientX - containerRect.left;
-    const visualY = clientY - containerRect.top;
-
-    // In paged mode, check if the click landed in an inter-page gap.
-    if (!this.editor.isPageless) {
-      const sh = this.slotHeight;
-      const posInSlot = visualY % sh;
-      if (posInSlot >= this.tileHeight) {
-        // Click is in the gap — snap to end of the preceding page
-        const tileIndex = Math.floor(visualY / sh);
-        return { page: tileIndex + 1, docX: visualX, docY: this.tileHeight };
-      }
-    }
-
-    const { page, docY } = this.visualYToDocY(visualY);
-    return { page, docX: visualX, docY };
-  }
-
-  private hitHandleAt(canvasX: number, canvasY: number, page: number) {
-    const sel = this.editor.getState().selection;
-    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image")
-      return null;
-    const r = this.editor.charMap.getObjectRect(sel.from);
-    if (!r || r.page !== page) return null;
-    return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
-  }
-
-  private hitFloatAt(canvasX: number, canvasY: number, page: number) {
-    const floats = this.editor.layout.floats;
-    if (!floats) return null;
-    for (const float of floats) {
-      if (float.page !== page) continue;
-      if (
-        canvasX >= float.x &&
-        canvasX <= float.x + float.width &&
-        canvasY >= float.y &&
-        canvasY <= float.y + float.height
-      ) {
-        return float;
-      }
-    }
-    return null;
-  }
-
-  /** Mouse events */
-
-  private handleMouseDown = (e: MouseEvent): void => {
-    e.preventDefault();
-    const hit = this.hitTest(e.clientX, e.clientY);
-    if (!hit) return;
-
-    const { page, docX, docY } = hit;
-
-    // Resize handle — mutation, block in read-only
-    const resizeHit = this.hitHandleAt(docX, docY, page);
-    if (resizeHit) {
-      if (this.editor.readOnly) return;
-      const sel = this.editor.getState().selection as NodeSelection;
-      const startW = sel.node.attrs["width"] as number;
-      const startH = sel.node.attrs["height"] as number;
-      this.resizeDrag = {
-        handle: resizeHit.id,
-        startX: e.clientX,
-        startY: e.clientY,
-        startW,
-        startH,
-        docPos: sel.from,
-        pendingWidth: startW,
-        pendingHeight: startH,
-      };
-      this.setCursorAll(resizeHit.cursor);
-      return;
-    }
-
-    // Float body drag — mutation, block in read-only
-    const floatHit = this.hitFloatAt(docX, docY, page);
-    if (floatHit) {
-      if (this.editor.readOnly) return;
-      this.editor.selectNode(floatHit.docPos);
-      const attrs = floatHit.node.attrs as {
-        floatOffset?: { x: number; y: number };
-      };
-      const off = attrs.floatOffset ?? { x: 0, y: 0 };
-      this.floatDrag = {
-        docPos: floatHit.docPos,
-        startX: e.clientX,
-        startY: e.clientY,
-        startOffsetX: off.x,
-        startOffsetY: off.y,
-      };
-      this.setCursorAll("move");
-      return;
-    }
-
-    if (this.editor.readOnly) {
-      // Collapse any active selection on click without placing the cursor.
-      const state = this.editor.getState();
-      if (!state.selection.empty) {
-        const { head } = state.selection;
-        this.editor.setSelection(head, head);
-      }
-      return;
-    }
-
-    // ── Click-count tracking (double/triple-click) ──────────────────────────
-    const now = Date.now();
-    const CLICK_TIMEOUT = 500; // ms
-    const CLICK_RADIUS = 5;   // px
-    if (
-      now - this._lastClickTime < CLICK_TIMEOUT &&
-      Math.abs(e.clientX - this._lastClickX) < CLICK_RADIUS &&
-      Math.abs(e.clientY - this._lastClickY) < CLICK_RADIUS
-    ) {
-      this._clickCount++;
-    } else {
-      this._clickCount = 1;
-    }
-    this._lastClickTime = now;
-    this._lastClickX = e.clientX;
-    this._lastClickY = e.clientY;
-
-    this.isDragging = true;
-    const pos = this.editor.charMap.posAtCoords(docX, docY, page);
-
-    // Triple-click → select entire block
-    if (this._clickCount >= 3) {
-      this._wordAnchor = null;
-      this.editor.selectBlockAt(pos);
-      return;
-    }
-
-    // Double-click → select word (and enable word-granularity drag)
-    if (this._clickCount === 2) {
-      const bounds = this.editor.selectWordAt(pos);
-      this._wordAnchor = bounds;
-      return;
-    }
-
-    this._wordAnchor = null;
-
-    if (!e.shiftKey) {
-      const doc = this.editor.getState().doc;
-      const $pos = doc.resolve(pos);
-      if ($pos.nodeAfter?.type.name === "image") {
-        this.editor.selectNode(pos);
-        return;
-      }
-      if ($pos.nodeBefore?.type.name === "image") {
-        this.editor.selectNode(pos - $pos.nodeBefore.nodeSize);
-        return;
-      }
-      this.editor.moveCursorTo(pos);
-    } else {
-      this.editor.setSelection(this.editor.getState().selection.anchor, pos);
-    }
-  };
-
-  private handleMouseMove = (e: MouseEvent): void => {
-    // Resize drag — buffer pending size; commit only on mouseup
-    if (this.resizeDrag) {
-      const { handle, startX, startY, startW, startH } = this.resizeDrag;
-      const { pageWidth, margins } = this.editor.layout.pageConfig;
-      const maxWidth = pageWidth - margins.left - margins.right;
-      const { width, height } = computeNewSize(
-        handle,
-        startW,
-        startH,
-        e.clientX - startX,
-        e.clientY - startY,
-        maxWidth,
-      );
-      this.resizeDrag.pendingWidth = width;
-      this.resizeDrag.pendingHeight = height;
-      this.scheduleUpdate();
-      return;
-    }
-
-    // Float drag
-    if (this.floatDrag) {
-      const { docPos, startX, startY, startOffsetX, startOffsetY } =
-        this.floatDrag;
-      this.editor.setNodeAttrs(docPos, {
-        floatOffset: {
-          x: startOffsetX + (e.clientX - startX),
-          y: startOffsetY + (e.clientY - startY),
-        },
-      });
-      return;
-    }
-
-    // Hover cursor
-    const hit = this.hitTest(e.clientX, e.clientY);
-    if (hit) {
-      const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
-      const floatHit =
-        !resizeHit && this.hitFloatAt(hit.docX, hit.docY, hit.page);
-      const cursor = resizeHit ? resizeHit.cursor : floatHit ? "move" : "text";
-      this.setCursorAll(cursor);
-    }
-
-    // Text selection drag
-    if (!this.isDragging || !hit) return;
-    const pos = this.editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
-
-    // Word-granularity drag (after double-click)
-    if (this._wordAnchor) {
-      const { from: wFrom, to: wTo } = this._wordAnchor;
-      if (pos < wFrom) {
-        // Dragging left of the original word — extend to the word boundary at pos
-        const wordStart = this.editor.wordBoundary(pos, -1);
-        this.editor.setSelection(wTo, wordStart);
-      } else if (pos > wTo) {
-        // Dragging right of the original word
-        const wordEnd = this.editor.wordBoundary(pos, 1);
-        this.editor.setSelection(wFrom, wordEnd);
-      } else {
-        // Still within the original word
-        this.editor.setSelection(wFrom, wTo);
-      }
-      return;
-    }
-
-    this.editor.setSelection(this.editor.getState().selection.anchor, pos);
-  };
-
-  private handleMouseUp = (): void => {
-    if (this.resizeDrag) {
-      const { docPos, pendingWidth, pendingHeight } = this.resizeDrag;
-      this.editor.setNodeAttrs(docPos, { width: pendingWidth, height: pendingHeight });
-      this.resizeDrag = null;
-      this.setCursorAll("text");
-    }
-    if (this.floatDrag) {
-      this.floatDrag = null;
-      this.setCursorAll("text");
-    }
-    this.isDragging = false;
-  };
-
-  private setCursorAll(cursor: string): void {
-    this.tilesContainer.style.cursor = cursor;
-    // Tile wrappers have an explicit cursor style that overrides the container.
-    // Update all pool entries so the override is consistent.
-    for (const entry of this.pool) {
-      entry.wrapper.style.cursor = cursor;
-    }
-  }
-
   /** Scroll */
 
   private handleScroll = (): void => {
@@ -944,9 +669,7 @@ export class TileManager {
     this._unwatchDpr?.();
     this.scrollParent?.removeEventListener("scroll", this.handleScroll);
     this.resizeObserver?.disconnect();
-    this.tilesContainer.removeEventListener("mousedown", this.handleMouseDown);
-    document.removeEventListener("mousemove", this.handleMouseMove);
-    document.removeEventListener("mouseup", this.handleMouseUp);
+    this.pointer.detach();
     this.activeTiles.clear();
     this.tilesContainer.remove();
     this.editor.setPageTopLookup(null);

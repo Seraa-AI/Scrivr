@@ -87,7 +87,7 @@ describe("ClearFormatting", () => {
     run(editor, "clearFormatting");
 
     // Move cursor inside content to check block type
-    editor.moveCursorTo(1);
+    editor.selection.moveCursorTo(1);
     expect(editor.getBlockInfo().blockType).toBe("paragraph");
   });
 
@@ -100,7 +100,7 @@ describe("ClearFormatting", () => {
     selectAll(editor);
     run(editor, "clearFormatting");
 
-    editor.moveCursorTo(1);
+    editor.selection.moveCursorTo(1);
     const align = editor.getBlockInfo().blockAttrs["align"];
     // "left" and undefined are both the default — neither should be "center"
     expect(align === undefined || align === "left").toBe(true);
@@ -113,7 +113,7 @@ describe("ClearFormatting", () => {
     selectAll(editor);
     run(editor, "clearFormatting");
 
-    editor.moveCursorTo(1);
+    editor.selection.moveCursorTo(1);
     expect(editor.getBlockInfo().blockType).toBe("paragraph");
   });
 
@@ -124,7 +124,7 @@ describe("ClearFormatting", () => {
     selectAll(editor);
     run(editor, "clearFormatting");
 
-    editor.moveCursorTo(1);
+    editor.selection.moveCursorTo(1);
     expect(editor.getBlockInfo().blockType).toBe("paragraph");
   });
 
@@ -141,7 +141,7 @@ describe("ClearFormatting", () => {
     run(editor, "clearFormatting");
 
     // Move to start and check — bold should be gone from the word
-    editor.moveCursorTo(1);
+    editor.selection.moveCursorTo(1);
     expect(editor.getActiveMarks()).not.toContain("bold");
   });
 
