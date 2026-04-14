@@ -81,19 +81,19 @@ describe("Editor — initial cursor placement", () => {
 describe("Editor.moveCursorTo", () => {
   it("does not throw when called with position 0", () => {
     const { editor, cleanup } = makeEditor();
-    expect(() => editor.moveCursorTo(0)).not.toThrow();
+    expect(() => editor.selection.moveCursorTo(0)).not.toThrow();
     cleanup();
   });
 
   it("clamps to a valid position when called with a negative number", () => {
     const { editor, cleanup } = makeEditor();
-    expect(() => editor.moveCursorTo(-999)).not.toThrow();
+    expect(() => editor.selection.moveCursorTo(-999)).not.toThrow();
     cleanup();
   });
 
   it("clamps to a valid position when called beyond doc end", () => {
     const { editor, cleanup } = makeEditor();
-    expect(() => editor.moveCursorTo(999999)).not.toThrow();
+    expect(() => editor.selection.moveCursorTo(999999)).not.toThrow();
     cleanup();
   });
 
@@ -101,7 +101,7 @@ describe("Editor.moveCursorTo", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
     // "Hello" in one paragraph: positions 1-5 are the characters
-    editor.moveCursorTo(3);
+    editor.selection.moveCursorTo(3);
     const sel = editor.getState().selection;
     expect(sel.empty).toBe(true);
     expect(sel.head).toBeGreaterThanOrEqual(1);
@@ -115,7 +115,7 @@ describe("Editor.setSelection", () => {
   it("creates a non-collapsed selection", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.setSelection(1, 4);
+    editor.selection.setSelection(1, 4);
     const sel = editor.getState().selection;
     expect(sel.empty).toBe(false);
     expect(sel.from).toBe(1);
@@ -126,7 +126,7 @@ describe("Editor.setSelection", () => {
   it("anchor and head can be reversed (backward selection)", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.setSelection(4, 1);
+    editor.selection.setSelection(4, 1);
     const sel = editor.getState().selection;
     expect(sel.from).toBe(1);
     expect(sel.to).toBe(4);
@@ -138,7 +138,7 @@ describe("Editor.setSelection", () => {
   it("equal anchor and head collapses to a cursor", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.setSelection(3, 3);
+    editor.selection.setSelection(3, 3);
     const sel = editor.getState().selection;
     expect(sel.empty).toBe(true);
     cleanup();
@@ -146,7 +146,7 @@ describe("Editor.setSelection", () => {
 
   it("does not throw with out-of-range positions", () => {
     const { editor, cleanup } = makeEditor();
-    expect(() => editor.setSelection(0, 999)).not.toThrow();
+    expect(() => editor.selection.setSelection(0, 999)).not.toThrow();
     cleanup();
   });
 });
@@ -157,9 +157,9 @@ describe("Editor.moveLeft / moveRight", () => {
   it("moveRight advances the cursor by one position", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.moveCursorTo(1);
+    editor.selection.moveCursorTo(1);
     const before = editor.getState().selection.head;
-    editor.moveRight();
+    editor.selection.moveRight();
     const after = editor.getState().selection.head;
     expect(after).toBeGreaterThan(before);
     cleanup();
@@ -168,9 +168,9 @@ describe("Editor.moveLeft / moveRight", () => {
   it("moveLeft moves the cursor back by one position", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.moveCursorTo(3);
+    editor.selection.moveCursorTo(3);
     const before = editor.getState().selection.head;
-    editor.moveLeft();
+    editor.selection.moveLeft();
     const after = editor.getState().selection.head;
     expect(after).toBeLessThan(before);
     cleanup();
@@ -179,9 +179,9 @@ describe("Editor.moveLeft / moveRight", () => {
   it("moveLeft at the document start is a no-op", () => {
     const { editor, cleanup } = makeEditor();
     // Move to start
-    editor.moveCursorTo(1);
+    editor.selection.moveCursorTo(1);
     const before = editor.getState().selection.head;
-    editor.moveLeft();
+    editor.selection.moveLeft();
     const after = editor.getState().selection.head;
     expect(after).toBe(before);
     cleanup();
@@ -191,9 +191,9 @@ describe("Editor.moveLeft / moveRight", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hi");
     const docSize = editor.getState().doc.content.size;
-    editor.moveCursorTo(docSize);
+    editor.selection.moveCursorTo(docSize);
     const before = editor.getState().selection.head;
-    editor.moveRight();
+    editor.selection.moveRight();
     const after = editor.getState().selection.head;
     expect(after).toBe(before);
     cleanup();
@@ -202,9 +202,9 @@ describe("Editor.moveLeft / moveRight", () => {
   it("moveRight(true) extends the selection rightward", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.moveCursorTo(2);
+    editor.selection.moveCursorTo(2);
     const anchor = editor.getState().selection.anchor;
-    editor.moveRight(true);
+    editor.selection.moveRight(true);
     const sel = editor.getState().selection;
     expect(sel.empty).toBe(false);
     expect(sel.anchor).toBe(anchor); // anchor does not move
@@ -215,9 +215,9 @@ describe("Editor.moveLeft / moveRight", () => {
   it("moveLeft(true) extends the selection leftward", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.moveCursorTo(4);
+    editor.selection.moveCursorTo(4);
     const anchor = editor.getState().selection.anchor;
-    editor.moveLeft(true);
+    editor.selection.moveLeft(true);
     const sel = editor.getState().selection;
     expect(sel.empty).toBe(false);
     expect(sel.anchor).toBe(anchor); // anchor does not move
@@ -228,7 +228,7 @@ describe("Editor.moveLeft / moveRight", () => {
   it("typing replaces the active selection", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.setSelection(1, 4); // select "Hel"
+    editor.selection.setSelection(1, 4); // select "Hel"
     type("X");                  // type replaces selection
     expect(editor.getState().doc.textContent).toBe("Xlo");
     cleanup();
@@ -261,7 +261,7 @@ describe("Editor — paste", () => {
     const { editor, type, cleanup } = makeEditor();
     const container = editor["ib"].container as HTMLElement;
     type("Hello");
-    editor.setSelection(1, 4); // select "Hel"
+    editor.selection.setSelection(1, 4); // select "Hel"
     paste(container, "X");
     expect(editor.getState().doc.textContent).toBe("Xlo");
     cleanup();
@@ -464,7 +464,7 @@ describe("Editor.getActiveMarks", () => {
   it("returns empty array when cursor is in plain text", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.moveCursorTo(3);
+    editor.selection.moveCursorTo(3);
     expect(editor.getActiveMarks()).toEqual([]);
     cleanup();
   });
@@ -480,9 +480,9 @@ describe("Editor.getActiveMarks", () => {
     const { editor, type, cleanup } = makeEditor();
     // Apply bold to "Hello" by selecting it then toggling
     type("Hello");
-    editor.setSelection(1, 6);
+    editor.selection.setSelection(1, 6);
     editor.commands["toggleBold"]?.();
-    editor.setSelection(1, 6);
+    editor.selection.setSelection(1, 6);
     expect(editor.getActiveMarks()).toContain("bold");
     cleanup();
   });
@@ -491,10 +491,10 @@ describe("Editor.getActiveMarks", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
     // Bold only "Hel" (positions 1-4)
-    editor.setSelection(1, 4);
+    editor.selection.setSelection(1, 4);
     editor.commands["toggleBold"]?.();
     // Now select the full word including non-bold part
-    editor.setSelection(1, 6);
+    editor.selection.setSelection(1, 6);
     expect(editor.getActiveMarks()).not.toContain("bold");
     cleanup();
   });
@@ -742,7 +742,7 @@ describe("Editor — underline and strikethrough", () => {
   it("toggling underline on a selection marks all text nodes", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.setSelection(1, 6);
+    editor.selection.setSelection(1, 6);
     editor.commands["toggleUnderline"]?.();
     let allUnderlined = true;
     editor.getState().doc.descendants((node) => {
@@ -757,10 +757,10 @@ describe("Editor — underline and strikethrough", () => {
   it("toggling strikethrough off removes the mark", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.setSelection(1, 6);
+    editor.selection.setSelection(1, 6);
     editor.commands["toggleStrikethrough"]?.();
     // toggleStrikethrough again should remove it
-    editor.setSelection(1, 6);
+    editor.selection.setSelection(1, 6);
     editor.commands["toggleStrikethrough"]?.();
     expect(editor.getActiveMarks()).not.toContain("strikethrough");
     cleanup();
@@ -979,7 +979,7 @@ describe("Editor — cursorPage", () => {
     const doc = editor.getState().doc;
     const para = doc.child(0)!;
     const endCursorPos = 1 + para.content.size; // position after last char of para
-    editor.moveCursorTo(endCursorPos);
+    editor.selection.moveCursorTo(endCursorPos);
 
     // ensureLayout again so _cursorPage reflects the new cursor position
     editor.ensureLayout();
@@ -1017,26 +1017,26 @@ describe("Editor — cursorPage", () => {
     // nodePos of para = 1 (first child of doc). End of para content = 1 + 359 = 360.
 
     // --- Part 1: cursor at the very start of the paragraph (page 1) ---
-    editor.moveCursorTo(2); // first character
+    editor.selection.moveCursorTo(2); // first character
     editor.ensureLayout();
     expect(editor.cursorPage).toBe(1);
 
     // --- Part 2: cursor in the middle lines (page 2) ---
     // Page 1 has 8 lines = 8 × 3 words = 24 words. First word on page 2 = word 25.
     // docPos of first char of word 25 = 1 + (24 words × 6 chars each) = 1 + 144 = 145.
-    editor.moveCursorTo(145);
+    editor.selection.moveCursorTo(145);
     editor.ensureLayout();
     expect(editor.cursorPage).toBe(2);
 
     // --- Part 3: cursor in the last lines (page 3) ---
     // Page 2 has 8 lines = 24 more words (words 25–48). First word on page 3 = word 49.
     // docPos of first char of word 49 = 1 + (48 words × 6 chars each) = 1 + 288 = 289.
-    editor.moveCursorTo(289);
+    editor.selection.moveCursorTo(289);
     editor.ensureLayout();
     expect(editor.cursorPage).toBe(3);
 
     // --- End of paragraph: still page 3 ---
-    editor.moveCursorTo(1 + para.content.size);
+    editor.selection.moveCursorTo(1 + para.content.size);
     editor.ensureLayout();
     expect(editor.cursorPage).toBe(3);
 
@@ -1068,7 +1068,7 @@ describe("Editor — copy and cut", () => {
     const { editor, type, cleanup } = makeEditor();
     const container = editor["ib"].container as HTMLElement;
     type("Hello");
-    editor.setSelection(1, 6);
+    editor.selection.setSelection(1, 6);
     const dt = dispatchClipboard(container, "copy");
     expect(dt.getData("text/plain")).toBe("Hello");
     cleanup();
@@ -1078,7 +1078,7 @@ describe("Editor — copy and cut", () => {
     const { editor, type, cleanup } = makeEditor();
     const container = editor["ib"].container as HTMLElement;
     type("Hello");
-    editor.setSelection(1, 6);
+    editor.selection.setSelection(1, 6);
     const dt = dispatchClipboard(container, "copy");
     const html = dt.getData("text/html");
     expect(html).toContain("Hello");
@@ -1089,7 +1089,7 @@ describe("Editor — copy and cut", () => {
     const { editor, type, cleanup } = makeEditor();
     const container = editor["ib"].container as HTMLElement;
     type("Hello");
-    editor.moveCursorTo(3); // collapsed cursor
+    editor.selection.moveCursorTo(3); // collapsed cursor
     const dt = dispatchClipboard(container, "copy");
     expect(dt.getData("text/plain")).toBe("");
     cleanup();
@@ -1099,7 +1099,7 @@ describe("Editor — copy and cut", () => {
     const { editor, type, cleanup } = makeEditor();
     const container = editor["ib"].container as HTMLElement;
     type("Hello");
-    editor.setSelection(1, 6);
+    editor.selection.setSelection(1, 6);
     const dt = dispatchClipboard(container, "cut");
     expect(dt.getData("text/plain")).toBe("Hello");
     cleanup();
@@ -1110,7 +1110,7 @@ describe("Editor — copy and cut", () => {
     const container = editor["ib"].container as HTMLElement;
     type("Hello World");
     // Select "Hello " (positions 1–7)
-    editor.setSelection(1, 7);
+    editor.selection.setSelection(1, 7);
     dispatchClipboard(container, "cut");
     expect(editor.getState().doc.textContent).toBe("World");
     cleanup();
@@ -1120,7 +1120,7 @@ describe("Editor — copy and cut", () => {
     const { editor, type, cleanup } = makeEditor();
     const container = editor["ib"].container as HTMLElement;
     type("Hello");
-    editor.setSelection(1, 6);
+    editor.selection.setSelection(1, 6);
     const dt = dispatchClipboard(container, "cut");
     const html = dt.getData("text/html");
     expect(html).toContain("Hello");
@@ -1131,7 +1131,7 @@ describe("Editor — copy and cut", () => {
     const { editor, type, cleanup } = makeEditor();
     const container = editor["ib"].container as HTMLElement;
     type("Hello");
-    editor.moveCursorTo(3); // collapsed cursor
+    editor.selection.moveCursorTo(3); // collapsed cursor
     dispatchClipboard(container, "cut");
     expect(editor.getState().doc.textContent).toBe("Hello");
     cleanup();
@@ -1141,9 +1141,9 @@ describe("Editor — copy and cut", () => {
     const { editor, type, cleanup } = makeEditor();
     const container = editor["ib"].container as HTMLElement;
     type("Bold");
-    editor.setSelection(1, 5);
+    editor.selection.setSelection(1, 5);
     editor.commands["toggleBold"]?.();
-    editor.setSelection(1, 5);
+    editor.selection.setSelection(1, 5);
     const dt = dispatchClipboard(container, "copy");
     const html = dt.getData("text/html");
     expect(html).toContain("<strong>");
@@ -1262,7 +1262,7 @@ describe("Editor — read-only mode", () => {
   it("blocks cut mutation in read-only mode (content unchanged)", () => {
     const { editor, type, cleanup } = makeEditor();
     type("do not cut");
-    editor.setSelection(1, 11);
+    editor.selection.setSelection(1, 11);
     const before = editor.getState().doc.textContent;
     editor.setReadOnly(true);
     const container = editor["ib"].container as HTMLElement;
@@ -1274,6 +1274,203 @@ describe("Editor — read-only mode", () => {
     });
     ta.dispatchEvent(event);
     expect(editor.getState().doc.textContent).toBe(before);
+    cleanup();
+  });
+});
+
+// ── Word boundary / selectWordAt / selectBlockAt ─────────────────────────────
+
+describe("Editor — word boundary helpers", () => {
+  it("selectWordAt selects a word in the middle of a sentence", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world foo");
+    // Position inside "world" (h=1, e=2, l=3, l=4, o=5, ' '=6, w=7)
+    const { from, to } = editor.selection.selectWordAt(8);
+    const selected = editor.getState().doc.textBetween(from, to);
+    expect(selected).toBe("world");
+    cleanup();
+  });
+
+  it("selectWordAt selects the first word", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    const { from, to } = editor.selection.selectWordAt(2);
+    const selected = editor.getState().doc.textBetween(from, to);
+    expect(selected).toBe("hello");
+    cleanup();
+  });
+
+  it("selectWordAt selects the last word", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    const { from, to } = editor.selection.selectWordAt(10);
+    const selected = editor.getState().doc.textBetween(from, to);
+    expect(selected).toBe("world");
+    cleanup();
+  });
+
+  it("selectWordAt on whitespace selects nothing or adjacent word", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    // Position 6 is the space between hello and world
+    const { from, to } = editor.selection.selectWordAt(6);
+    // Word boundary scanning from a space: left scans past space to "hello",
+    // right scans past space to "world" — result includes the space.
+    // The exact behavior depends on the scanning algorithm; just verify
+    // we don't crash and the selection is valid.
+    expect(from).toBeGreaterThanOrEqual(1);
+    expect(to).toBeLessThanOrEqual(12);
+    cleanup();
+  });
+
+  it("selectBlockAt selects the entire paragraph", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    editor.selection.selectBlockAt(3);
+    const sel = editor.getState().selection;
+    expect(sel.from).toBe(1);
+    expect(sel.to).toBe(12); // "hello world" = 11 chars, blockEnd = 12
+    cleanup();
+  });
+
+  it("wordBoundary(-1) jumps left past a word", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    // From end of "world" (pos 12), scan left
+    const pos = editor.selection.wordBoundary(12, -1);
+    // Should land at start of "world" (pos 7)
+    expect(pos).toBe(7);
+    cleanup();
+  });
+
+  it("wordBoundary(1) jumps right past a word", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    // From start of "hello" (pos 1), scan right
+    const pos = editor.selection.wordBoundary(1, 1);
+    // Should land at end of "hello" (pos 6)
+    expect(pos).toBe(6);
+    cleanup();
+  });
+});
+
+// ── Word navigation ──────────────────────────────────────────────────────────
+
+describe("Editor — word navigation", () => {
+  it("moveWordRight jumps to the end of the current word", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    editor.selection.moveCursorTo(1);
+    editor.selection.moveWordRight();
+    expect(editor.getState().selection.head).toBe(6); // end of "hello"
+    cleanup();
+  });
+
+  it("moveWordLeft jumps to the start of the current word", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    editor.selection.moveCursorTo(12); // end of "world"
+    editor.selection.moveWordLeft();
+    expect(editor.getState().selection.head).toBe(7); // start of "world"
+    cleanup();
+  });
+
+  it("moveWordRight(true) extends selection word-right", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    editor.selection.moveCursorTo(1);
+    editor.selection.moveWordRight(true);
+    const sel = editor.getState().selection;
+    expect(sel.anchor).toBe(1);
+    expect(sel.head).toBe(6);
+    expect(sel.empty).toBe(false);
+    cleanup();
+  });
+
+  it("moveWordLeft(true) extends selection word-left", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    editor.selection.moveCursorTo(12);
+    editor.selection.moveWordLeft(true);
+    const sel = editor.getState().selection;
+    expect(sel.anchor).toBe(12);
+    expect(sel.head).toBe(7);
+    expect(sel.empty).toBe(false);
+    cleanup();
+  });
+});
+
+// ── Word delete ──────────────────────────────────────────────────────────────
+
+describe("Editor — word delete", () => {
+  it("deleteWordBackward removes the word before the cursor", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    editor.selection.moveCursorTo(6); // after "hello"
+    editor.selection.deleteWordBackward();
+    expect(editor.getState().doc.textContent).toBe(" world");
+    cleanup();
+  });
+
+  it("deleteWordForward removes the word after the cursor", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    editor.selection.moveCursorTo(7); // start of "world"
+    editor.selection.deleteWordForward();
+    expect(editor.getState().doc.textContent).toBe("hello ");
+    cleanup();
+  });
+
+  it("deleteWordBackward with a selection deletes the selection", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    editor.selection.setSelection(1, 6);
+    editor.selection.deleteWordBackward();
+    expect(editor.getState().doc.textContent).toBe(" world");
+    cleanup();
+  });
+});
+
+// ── Doc start / end navigation ───────────────────────────────────────────────
+
+describe("Editor — doc start/end navigation", () => {
+  it("moveToDocStart moves to the beginning of the document", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    editor.selection.moveCursorTo(8);
+    editor.selection.moveToDocStart();
+    expect(editor.getState().selection.head).toBe(1);
+    cleanup();
+  });
+
+  it("moveToDocEnd moves to the end of the document", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello world");
+    editor.selection.moveCursorTo(1);
+    editor.selection.moveToDocEnd();
+    expect(editor.getState().selection.head).toBe(12);
+    cleanup();
+  });
+
+  it("moveToDocStart(true) extends selection to doc start", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello");
+    editor.selection.moveCursorTo(4);
+    editor.selection.moveToDocStart(true);
+    const sel = editor.getState().selection;
+    expect(sel.anchor).toBe(4);
+    expect(sel.head).toBe(1);
+    cleanup();
+  });
+
+  it("moveToDocEnd(true) extends selection to doc end", () => {
+    const { editor, type, cleanup } = makeEditor();
+    type("hello");
+    editor.selection.moveCursorTo(2);
+    editor.selection.moveToDocEnd(true);
+    const sel = editor.getState().selection;
+    expect(sel.anchor).toBe(2);
+    expect(sel.head).toBe(6);
     cleanup();
   });
 });

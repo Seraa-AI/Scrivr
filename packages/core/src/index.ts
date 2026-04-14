@@ -14,6 +14,8 @@ export { BaseEditor } from "./BaseEditor";
 export type { BaseEditorOptions } from "./BaseEditor";
 export { Editor } from "./Editor";
 export type { EditorOptions, EditorChangeHandler, SelectionSnapshot } from "./Editor";
+export { SelectionController } from "./SelectionController";
+export type { SelectionControllerDeps } from "./SelectionController";
 export { ServerEditor } from "./ServerEditor";
 export type { ServerEditorOptions } from "./ServerEditor";
 export * from "./model";

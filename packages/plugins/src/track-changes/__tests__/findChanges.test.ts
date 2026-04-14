@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { doc, p, h, TestEditor, schema } from "./helpers";
 import { CHANGE_OPERATION } from "../types";
+import type { NodeAttrChange, TextChange } from "../types";
 
 // ── Text change detection ──────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ describe("findChanges — node-attr-change detection", () => {
     const editor = new TestEditor(doc(p("hello")));
     editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.heading, { level: 2 }));
 
-    const change = editor.pendingChanges[0]! as import("../types").NodeAttrChange;
+    const change = editor.pendingChanges[0]! as NodeAttrChange;
     // paragraph has no level attr → null
     expect(change.oldAttrs?.level ?? null).toBeNull();
   });
@@ -101,7 +102,7 @@ describe("findChanges — node-attr-change detection", () => {
     const editor = new TestEditor(doc(p("hello")));
     editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.heading, { level: 2 }));
 
-    const change = editor.pendingChanges[0]! as import("../types").NodeAttrChange;
+    const change = editor.pendingChanges[0]! as NodeAttrChange;
     expect(change.newAttrs?.level).toBe(2);
   });
 
@@ -109,7 +110,7 @@ describe("findChanges — node-attr-change detection", () => {
     const editor = new TestEditor(doc(h(1, "hello")));
     editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.heading, { level: 2 }));
 
-    const change = editor.pendingChanges[0]! as import("../types").NodeAttrChange;
+    const change = editor.pendingChanges[0]! as NodeAttrChange;
     expect(change.oldAttrs?.level).toBe(1);
     expect(change.newAttrs?.level).toBe(2);
   });
@@ -222,7 +223,7 @@ describe("findChanges — text accumulation across adjacent text nodes", () => {
 
     const change = editor.pendingChanges[0]!;
     expect(change.type).toBe("text-change");
-    expect((change as import("../types").TextChange).text).toBe("!");
+    expect((change as TextChange).text).toBe("!");
   });
 
   it("multiple adjacent inserts from same author merge into one change with full text", () => {
@@ -232,7 +233,7 @@ describe("findChanges — text accumulation across adjacent text nodes", () => {
     editor.insertAt(7, "B");
 
     expect(editor.pendingChanges).toHaveLength(1);
-    const change = editor.pendingChanges[0]! as import("../types").TextChange;
+    const change = editor.pendingChanges[0]! as TextChange;
     expect(change.text).toBe("AB");
   });
 });

@@ -10,6 +10,7 @@
  */
 
 import { Schema } from "prosemirror-model";
+import type { Node as PmNode } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import type { Transaction } from "prosemirror-state";
 import { history, undo, redo } from "prosemirror-history";
@@ -88,7 +89,7 @@ export function h(level: number, text: string, attrs?: Record<string, unknown>) 
   return schema.nodes.heading.create({ level, ...attrs }, text ? schema.text(text) : undefined);
 }
 
-export function doc(...nodes: import("prosemirror-model").Node[]) {
+export function doc(...nodes: PmNode[]) {
   return schema.nodes.doc.create(null, nodes);
 }
 
@@ -115,7 +116,7 @@ export function ol(...items: ReturnType<typeof li>[]) {
 export class TestEditor {
   state: EditorState;
 
-  constructor(initialDoc: import("prosemirror-model").Node, authorID = "user1") {
+  constructor(initialDoc: PmNode, authorID = "user1") {
     this.state = EditorState.create({
       doc: initialDoc,
       plugins: [

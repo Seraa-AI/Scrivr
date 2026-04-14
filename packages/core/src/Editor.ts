@@ -1,4 +1,5 @@
-import { EditorState, Transaction, TextSelection, NodeSelection } from "prosemirror-state";
+import { EditorState, Transaction, NodeSelection } from "prosemirror-state";
+import { SelectionController } from "./SelectionController";
 import type {
   FontModifier,
   MarkDecorator,
@@ -153,6 +154,9 @@ export class Editor extends BaseEditor implements IEditor {
 
   // ── Input bridge ──────────────────────────────────────────────────────────
 
+  /** Owns all cursor movement, selection, and word/line navigation logic. */
+  readonly selection: SelectionController;
+
   /** Owns the hidden textarea, all DOM event listeners, and clipboard handling. */
   private readonly ib: InputBridge;
 
@@ -197,7 +201,7 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Overlay render handlers registered by extensions (e.g. CollaborationCursor).
-   * Called by ViewManager.paintOverlay() for each visible page.
+   * Called by TileManager.paintOverlay() for each visible page.
    */
   private readonly overlayRenderHandlers = new Set<OverlayRenderHandler>();
 
@@ -252,6 +256,14 @@ export class Editor extends BaseEditor implements IEditor {
       this.lc.setReady(false);
     }
 
+    this.selection = new SelectionController({
+      getState: () => this._state,
+      dispatch: (tr) => this._viewDispatch(tr),
+      ensureLayout: () => this.lc.ensureLayout(),
+      getCharMap: () => this.lc.charMap,
+      focus: () => this.focus(),
+    });
+
     const pasteTransformer = new PasteTransformer(
       this._manager.schema,
       this._manager.buildMarkdownRules(),
@@ -271,7 +283,7 @@ export class Editor extends BaseEditor implements IEditor {
       },
       keymap: this._manager.buildKeymap(),
       inputHandlers: this._manager.buildInputHandlers(),
-      navigator: this,
+      navigator: this.selection,
       pasteTransformer,
       onFocus: () => {
         this.cursorManager.start();
@@ -452,7 +464,7 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Select the inline node at docPos using a NodeSelection.
-   * Falls back to moveCursorTo if the node is not selectable.
+   * Falls back to selection.moveCursorTo if the node is not selectable.
    */
   selectNode(docPos: number): void {
     try {
@@ -460,7 +472,7 @@ export class Editor extends BaseEditor implements IEditor {
       this._viewDispatch(this._state.tr.setSelection(sel));
       this.focus();
     } catch {
-      this.moveCursorTo(docPos);
+      this.selection.moveCursorTo(docPos);
     }
   }
 
@@ -520,7 +532,7 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Register a canvas draw function on the overlay layer.
-   * Called by ViewManager.paintOverlay() after the local cursor and selection.
+   * Called by TileManager.paintOverlay() after the local cursor and selection.
    * Returns an unregister function.
    */
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void {
@@ -530,7 +542,7 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Invoke all registered overlay render handlers for a given page.
-   * Called by ViewManager.paintOverlay() — not intended for external use.
+   * Called by TileManager.paintOverlay() — not intended for external use.
    */
   runOverlayHandlers(
     ctx: CanvasRenderingContext2D,
@@ -577,66 +589,6 @@ export class Editor extends BaseEditor implements IEditor {
     this.ib.scrollCursorIntoView();
   }
 
-  /**
-   * Collapse the cursor to a specific doc position.
-   */
-  moveCursorTo(docPos: number): void {
-    this._applyMovement(docPos, false);
-    this.focus();
-  }
-
-  /**
-   * Set an explicit anchor + head, creating a non-collapsed selection.
-   */
-  setSelection(anchor: number, head: number): void {
-    const size = this._state.doc.content.size;
-    const a = Math.max(0, Math.min(anchor, size));
-    const h = Math.max(0, Math.min(head, size));
-    const $a = this._state.doc.resolve(a);
-    const $h = this._state.doc.resolve(h);
-    this._viewDispatch(this._state.tr.setSelection(TextSelection.between($a, $h)));
-    this.focus();
-  }
-
-  /** Move left one position. Pass extend=true to grow the selection (Shift+←). */
-  moveLeft(extend = false): void {
-    const head = this._state.selection.head;
-    if (head <= 0) return;
-    const $pos = this._state.doc.resolve(Math.max(0, head - 1));
-    const sel = TextSelection.findFrom($pos, -1);
-    if (sel) this._applyMovement(sel.head, extend);
-  }
-
-  /** Move right one position. Pass extend=true to grow the selection (Shift+→). */
-  moveRight(extend = false): void {
-    const head = this._state.selection.head;
-    const size = this._state.doc.content.size;
-    if (head >= size) return;
-    const $pos = this._state.doc.resolve(Math.min(size, head + 1));
-    const sel = TextSelection.findFrom($pos, 1);
-    if (sel) this._applyMovement(sel.head, extend);
-  }
-
-  /** Move up one line preserving x. Pass extend=true for Shift+↑. */
-  moveUp(extend = false): void {
-    this.lc.ensureLayout();
-    const head = this._state.selection.head;
-    const coords = this.lc.charMap.coordsAtPos(head);
-    if (!coords) return;
-    const pos = this.lc.charMap.posAbove(head, coords.x);
-    if (pos !== null) this._applyMovement(pos, extend);
-  }
-
-  /** Move down one line preserving x. Pass extend=true for Shift+↓. */
-  moveDown(extend = false): void {
-    this.lc.ensureLayout();
-    const head = this._state.selection.head;
-    const coords = this.lc.charMap.coordsAtPos(head);
-    if (!coords) return;
-    const pos = this.lc.charMap.posBelow(head, coords.x);
-    if (pos !== null) this._applyMovement(pos, extend);
-  }
-
   /** Whether the editor's textarea currently has focus. */
   get isFocused(): boolean {
     return this.ib.isFocused;
@@ -651,20 +603,6 @@ export class Editor extends BaseEditor implements IEditor {
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
-
-  /**
-   * Core movement primitive.
-   * extend=false → collapsed cursor at newHead
-   * extend=true  → selection from current anchor to newHead (Shift+arrow)
-   */
-  private _applyMovement(newHead: number, extend: boolean): void {
-    const size = this._state.doc.content.size;
-    const h = Math.max(0, Math.min(newHead, size));
-    const a = extend ? this._state.selection.anchor : h;
-    const $a = this._state.doc.resolve(Math.max(0, Math.min(a, size)));
-    const $h = this._state.doc.resolve(h);
-    this._viewDispatch(this._state.tr.setSelection(TextSelection.between($a, $h)));
-  }
 
   /**
    * The view-aware dispatch: applies state + invalidates layout + resets

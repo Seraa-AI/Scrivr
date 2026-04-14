@@ -2,6 +2,7 @@ import { Extension } from "../Extension";
 import type { Command } from "prosemirror-state";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { IEditor } from "../types";
+import type { Node as PmNode } from "prosemirror-model";
 
 // ── Image cache ───────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ function createInlineImageStrategy(): InlineStrategy {
       y: number,
       width: number,
       height: number,
-      node: import("prosemirror-model").Node,
+      node: PmNode,
     ): void {
       // Zero-size anchor spans for floating images — nothing to draw.
       if (width <= 0 || height <= 0) return;
