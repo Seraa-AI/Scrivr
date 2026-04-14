@@ -74,6 +74,72 @@ export function setupCanvas(
 }
 
 /**
+ * Returns the effective device pixel ratio, accounting for both the display's
+ * native ratio and any pinch-to-zoom applied via the Visual Viewport API.
+ *
+ * pinch-to-zoom changes `visualViewport.scale` but NOT `devicePixelRatio`.
+ * Without this, canvas rasterization stays at the base DPR and appears blurry
+ * when the user zooms in on trackpad/touch.
+ *
+ * Capped at 4 to prevent excessive memory usage.
+ */
+export function getEffectiveDpr(): number {
+  const baseDpr = window.devicePixelRatio ?? 1;
+  const pinchScale = window.visualViewport?.scale ?? 1;
+  return Math.min(baseDpr * pinchScale, 4);
+}
+
+/**
+ * Watches for device pixel ratio changes (browser zoom, display switch,
+ * pinch-to-zoom) and invokes the callback when the effective DPR changes.
+ *
+ * Returns a cleanup function that removes all listeners.
+ */
+export function watchDpr(onChange: (dpr: number) => void): () => void {
+  let currentDpr = getEffectiveDpr();
+
+  // matchMedia fires when browser zoom changes (devicePixelRatio changes).
+  // We create a new query each time the dpr changes because the media query
+  // matches a specific value.
+  let mql: MediaQueryList | null = null;
+  const handleMediaChange = (): void => {
+    // Remove old listener before creating new one
+    mql?.removeEventListener("change", handleMediaChange);
+    const newDpr = getEffectiveDpr();
+    if (Math.abs(newDpr - currentDpr) > 0.01) {
+      currentDpr = newDpr;
+      onChange(currentDpr);
+    }
+    // Re-listen at the new DPR value
+    mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    mql.addEventListener("change", handleMediaChange);
+  };
+  mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+  mql.addEventListener("change", handleMediaChange);
+
+  // visualViewport resize fires on pinch-to-zoom
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const handleViewportResize = (): void => {
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      const newDpr = getEffectiveDpr();
+      if (Math.abs(newDpr - currentDpr) > 0.01) {
+        currentDpr = newDpr;
+        onChange(currentDpr);
+      }
+    }, 150);
+  };
+  window.visualViewport?.addEventListener("resize", handleViewportResize);
+
+  return () => {
+    mql?.removeEventListener("change", handleMediaChange);
+    window.visualViewport?.removeEventListener("resize", handleViewportResize);
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
+  };
+}
+
+/**
  * Clears the entire canvas and resets the transform scale.
  *
  * Call at the start of every render pass.

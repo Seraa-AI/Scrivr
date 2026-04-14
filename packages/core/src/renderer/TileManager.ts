@@ -1,7 +1,7 @@
 import type { Editor } from "../Editor";
 import type { EditorState } from "prosemirror-state";
 import type { DocumentLayout, LayoutFragment } from "../layout/PageLayout";
-import { setupCanvas, clearCanvas } from "./canvas";
+import { setupCanvas, clearCanvas, watchDpr } from "./canvas";
 import { renderPage } from "./PageRenderer";
 import { drawBlock } from "./PageRenderer";
 import { clearOverlay, renderCursor, renderSelection } from "./OverlayRenderer";
@@ -139,6 +139,14 @@ export class TileManager {
     startOffsetY: number;
   } | null = null;
   private _firstPaintDone = false;
+  private _unwatchDpr: (() => void) | null = null;
+  /** Click-count tracking for double/triple-click. */
+  private _clickCount = 0;
+  private _lastClickTime = 0;
+  private _lastClickX = 0;
+  private _lastClickY = 0;
+  /** Word boundaries from double-click — used for word-granularity drag. */
+  private _wordAnchor: { from: number; to: number } | null = null;
 
   constructor(
     private readonly editor: Editor,
@@ -183,6 +191,17 @@ export class TileManager {
 
     // ── subscribe to editor ──────────────────────────────────────────────────
     this.unsubscribe = editor.subscribe(() => this.scheduleUpdate());
+
+    // ── DPR change detection (browser zoom, display switch, pinch-to-zoom) ──
+    this._unwatchDpr = watchDpr(() => {
+      // Force full repaint of all tiles at the new DPR
+      for (const tile of this.pool) {
+        tile.lastPaintedVersion = -1;
+        tile.lastRenderGeneration = -1;
+      }
+      this.scheduleUpdate();
+    });
+
     this.scheduleUpdate();
   }
 
@@ -766,8 +785,42 @@ export class TileManager {
       }
       return;
     }
+
+    // ── Click-count tracking (double/triple-click) ──────────────────────────
+    const now = Date.now();
+    const CLICK_TIMEOUT = 500; // ms
+    const CLICK_RADIUS = 5;   // px
+    if (
+      now - this._lastClickTime < CLICK_TIMEOUT &&
+      Math.abs(e.clientX - this._lastClickX) < CLICK_RADIUS &&
+      Math.abs(e.clientY - this._lastClickY) < CLICK_RADIUS
+    ) {
+      this._clickCount++;
+    } else {
+      this._clickCount = 1;
+    }
+    this._lastClickTime = now;
+    this._lastClickX = e.clientX;
+    this._lastClickY = e.clientY;
+
     this.isDragging = true;
     const pos = this.editor.charMap.posAtCoords(docX, docY, page);
+
+    // Triple-click → select entire block
+    if (this._clickCount >= 3) {
+      this._wordAnchor = null;
+      this.editor.selectBlockAt(pos);
+      return;
+    }
+
+    // Double-click → select word (and enable word-granularity drag)
+    if (this._clickCount === 2) {
+      const bounds = this.editor.selectWordAt(pos);
+      this._wordAnchor = bounds;
+      return;
+    }
+
+    this._wordAnchor = null;
 
     if (!e.shiftKey) {
       const doc = this.editor.getState().doc;
@@ -832,6 +885,25 @@ export class TileManager {
     // Text selection drag
     if (!this.isDragging || !hit) return;
     const pos = this.editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
+
+    // Word-granularity drag (after double-click)
+    if (this._wordAnchor) {
+      const { from: wFrom, to: wTo } = this._wordAnchor;
+      if (pos < wFrom) {
+        // Dragging left of the original word — extend to the word boundary at pos
+        const wordStart = this.editor.wordBoundary(pos, -1);
+        this.editor.setSelection(wTo, wordStart);
+      } else if (pos > wTo) {
+        // Dragging right of the original word
+        const wordEnd = this.editor.wordBoundary(pos, 1);
+        this.editor.setSelection(wFrom, wordEnd);
+      } else {
+        // Still within the original word
+        this.editor.setSelection(wFrom, wTo);
+      }
+      return;
+    }
+
     this.editor.setSelection(this.editor.getState().selection.anchor, pos);
   };
 
@@ -869,6 +941,7 @@ export class TileManager {
   destroy(): void {
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
     this.unsubscribe?.();
+    this._unwatchDpr?.();
     this.scrollParent?.removeEventListener("scroll", this.handleScroll);
     this.resizeObserver?.disconnect();
     this.tilesContainer.removeEventListener("mousedown", this.handleMouseDown);

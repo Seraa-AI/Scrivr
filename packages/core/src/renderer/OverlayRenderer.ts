@@ -111,14 +111,14 @@ export function renderTrackedInsert(
 
   // Pass 1 — glyph highlights
   for (const g of glyphs) {
-    ctx.fillRect(g.x, g.y, g.width, g.height);
+    snappedFillRect(ctx, g.x, g.y, g.width, g.height);
   }
 
   // Pass 2 — empty lines
   const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
   for (const line of lines) {
     if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
-      ctx.fillRect(line.x, line.y, line.height, line.height);
+      snappedFillRect(ctx, line.x, line.y, line.height, line.height);
     }
   }
 
@@ -151,14 +151,14 @@ export function renderTrackedDelete(
 
   // Pass 1 — glyph highlights
   for (const g of glyphs) {
-    ctx.fillRect(g.x, g.y, g.width, g.height);
+    snappedFillRect(ctx, g.x, g.y, g.width, g.height);
   }
 
   // Pass 2 — empty lines
   const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
   for (const line of lines) {
     if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
-      ctx.fillRect(line.x, line.y, line.height, line.height);
+      snappedFillRect(ctx, line.x, line.y, line.height, line.height);
     }
   }
 
@@ -225,7 +225,7 @@ export function renderTrackedAttrChange(
 
   for (const line of lines) {
     const barX = Math.max(0, line.x - BAR_GAP - BAR_WIDTH);
-    ctx.fillRect(barX, line.y, BAR_WIDTH, line.height);
+    snappedFillRect(ctx, barX, line.y, BAR_WIDTH, line.height);
   }
 
   ctx.restore();
@@ -252,12 +252,12 @@ export function renderTrackedConflict(
   // Amber wash on top of the existing change colour
   ctx.fillStyle = hexToRgba(AMBER, 0.18);
   for (const g of glyphs) {
-    ctx.fillRect(g.x, g.y, g.width, g.height);
+    snappedFillRect(ctx, g.x, g.y, g.width, g.height);
   }
   const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
   for (const line of lines) {
     if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
-      ctx.fillRect(line.x, line.y, line.height, line.height);
+      snappedFillRect(ctx, line.x, line.y, line.height, line.height);
     }
   }
 
@@ -277,6 +277,49 @@ export function renderTrackedConflict(
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Current device pixel ratio used for pixel-grid snapping.
+ * Updated by clearOverlay (called every frame) so all draw calls in the same
+ * paint cycle use the correct value without threading dpr through every API.
+ */
+let _activeDpr = 1;
+
+/** @internal Set the active DPR for testing snapRect without calling clearOverlay. */
+export function _setActiveDpr(dpr: number): void {
+  _activeDpr = dpr;
+}
+
+/**
+ * Snaps a rectangle to the device pixel grid so adjacent rects share exact
+ * pixel boundaries — eliminates antialiasing seams between selection rects.
+ * @internal Exported for testing only.
+ */
+export function snapRect(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): { x: number; y: number; w: number; h: number } {
+  const dpr = _activeDpr;
+  const sx = Math.round(x * dpr) / dpr;
+  const sy = Math.round(y * dpr) / dpr;
+  const sw = Math.round((x + w) * dpr) / dpr - sx;
+  const sh = Math.round((y + h) * dpr) / dpr - sy;
+  return { x: sx, y: sy, w: sw, h: sh };
+}
+
+/** fillRect snapped to the device pixel grid. */
+function snappedFillRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): void {
+  const r = snapRect(x, y, w, h);
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+}
 
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace("#", "");
@@ -301,6 +344,7 @@ export function clearOverlay(
   height: number,
   dpr: number,
 ): void {
+  _activeDpr = dpr;
   ctx.resetTransform();
   ctx.clearRect(0, 0, width * dpr, height * dpr);
   ctx.scale(dpr, dpr);
@@ -358,9 +402,9 @@ export function renderSelection(
   ctx.save();
   ctx.fillStyle = "rgba(59, 130, 246, 0.25)"; // blue-500 @ 25% opacity
 
-  // Pass 1 — glyph-based highlights (existing behaviour, unchanged)
+  // Pass 1 — glyph-based highlights (snapped to pixel grid to eliminate seams)
   for (const glyph of glyphs) {
-    ctx.fillRect(glyph.x, glyph.y, glyph.width, glyph.height);
+    snappedFillRect(ctx, glyph.x, glyph.y, glyph.width, glyph.height);
   }
 
   // Pass 2 — empty-line highlights
@@ -369,7 +413,7 @@ export function renderSelection(
   for (const line of lines) {
     if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
       // Empty paragraph — draw a narrow rect (line-height wide) at the left margin
-      ctx.fillRect(line.x, line.y, line.height, line.height);
+      snappedFillRect(ctx, line.x, line.y, line.height, line.height);
     }
   }
 

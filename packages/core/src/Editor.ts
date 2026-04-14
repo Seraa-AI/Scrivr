@@ -637,6 +637,109 @@ export class Editor extends BaseEditor implements IEditor {
     if (pos !== null) this._applyMovement(pos, extend);
   }
 
+  /** Move cursor to the previous word boundary. */
+  moveWordLeft(extend = false): void {
+    const head = this._state.selection.head;
+    const pos = this._findWordBoundary(head, -1);
+    if (pos !== head) this._applyMovement(pos, extend);
+  }
+
+  /** Move cursor to the next word boundary. */
+  moveWordRight(extend = false): void {
+    const head = this._state.selection.head;
+    const pos = this._findWordBoundary(head, 1);
+    if (pos !== head) this._applyMovement(pos, extend);
+  }
+
+  /** Delete from cursor to previous word boundary. */
+  deleteWordBackward(): void {
+    const { head, empty } = this._state.selection;
+    if (!empty) {
+      // If there's a selection, just delete it
+      const tr = this._state.tr.deleteSelection();
+      this._viewDispatch(tr);
+      return;
+    }
+    const wordStart = this._findWordBoundary(head, -1);
+    if (wordStart < head) {
+      this._viewDispatch(this._state.tr.delete(wordStart, head));
+    }
+  }
+
+  /** Delete from cursor to next word boundary. */
+  deleteWordForward(): void {
+    const { head, empty } = this._state.selection;
+    if (!empty) {
+      const tr = this._state.tr.deleteSelection();
+      this._viewDispatch(tr);
+      return;
+    }
+    const wordEnd = this._findWordBoundary(head, 1);
+    if (wordEnd > head) {
+      this._viewDispatch(this._state.tr.delete(head, wordEnd));
+    }
+  }
+
+  /** Move to start of the current visual line. */
+  moveToLineStart(extend = false): void {
+    this.lc.ensureLayout();
+    const head = this._state.selection.head;
+    const pos = this.lc.charMap.lineStartPos(head);
+    if (pos !== null) this._applyMovement(pos, extend);
+  }
+
+  /** Move to end of the current visual line. */
+  moveToLineEnd(extend = false): void {
+    this.lc.ensureLayout();
+    const head = this._state.selection.head;
+    const pos = this.lc.charMap.lineEndPos(head);
+    if (pos !== null) this._applyMovement(pos, extend);
+  }
+
+  /** Move to start of document. */
+  moveToDocStart(extend = false): void {
+    const $pos = this._state.doc.resolve(0);
+    const sel = TextSelection.findFrom($pos, 1);
+    if (sel) this._applyMovement(sel.head, extend);
+  }
+
+  /** Move to end of document. */
+  moveToDocEnd(extend = false): void {
+    const size = this._state.doc.content.size;
+    const $pos = this._state.doc.resolve(size);
+    const sel = TextSelection.findFrom($pos, -1);
+    if (sel) this._applyMovement(sel.head, extend);
+  }
+
+  /**
+   * Select the word at the given doc position.
+   * Returns { from, to } of the word boundaries.
+   */
+  selectWordAt(pos: number): { from: number; to: number } {
+    const from = this._findWordBoundary(pos, -1);
+    const to = this._findWordBoundary(pos, 1);
+    this.setSelection(from, to);
+    return { from, to };
+  }
+
+  /**
+   * Public access to word boundary scanning — used by TileManager/ViewManager
+   * for word-granularity drag selection after double-click.
+   */
+  wordBoundary(pos: number, dir: -1 | 1): number {
+    return this._findWordBoundary(pos, dir);
+  }
+
+  /**
+   * Select the entire block (paragraph/heading) containing the given position.
+   */
+  selectBlockAt(pos: number): void {
+    const $pos = this._state.doc.resolve(pos);
+    const blockStart = $pos.start($pos.depth);
+    const blockEnd = $pos.end($pos.depth);
+    this.setSelection(blockStart, blockEnd);
+  }
+
   /** Whether the editor's textarea currently has focus. */
   get isFocused(): boolean {
     return this.ib.isFocused;
@@ -651,6 +754,47 @@ export class Editor extends BaseEditor implements IEditor {
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Find the next word boundary from `pos` in `dir` (-1 = left, 1 = right).
+   * Matches native text editor behaviour: skip whitespace, then skip word chars
+   * (or vice versa depending on what's under the cursor).
+   */
+  private _findWordBoundary(pos: number, dir: -1 | 1): number {
+    const doc = this._state.doc;
+    const size = doc.content.size;
+
+    // Extract text of the block containing `pos`
+    const $pos = doc.resolve(pos);
+    const blockStart = $pos.start($pos.depth);
+    const blockEnd = $pos.end($pos.depth);
+    const blockText = doc.textBetween(blockStart, blockEnd);
+
+    // Offset within the block's text
+    let offset = pos - blockStart;
+
+    const ch = (i: number): string => blockText.charAt(i);
+
+    if (dir === -1) {
+      // Skip whitespace, then skip word chars (or skip punctuation)
+      while (offset > 0 && isWhitespace(ch(offset - 1))) offset--;
+      if (offset > 0 && isWordChar(ch(offset - 1))) {
+        while (offset > 0 && isWordChar(ch(offset - 1))) offset--;
+      } else {
+        while (offset > 0 && !isWordChar(ch(offset - 1)) && !isWhitespace(ch(offset - 1))) offset--;
+      }
+    } else {
+      const len = blockText.length;
+      while (offset < len && isWhitespace(ch(offset))) offset++;
+      if (offset < len && isWordChar(ch(offset))) {
+        while (offset < len && isWordChar(ch(offset))) offset++;
+      } else {
+        while (offset < len && !isWordChar(ch(offset)) && !isWhitespace(ch(offset))) offset++;
+      }
+    }
+
+    return Math.max(0, Math.min(blockStart + offset, size));
+  }
 
   /**
    * Core movement primitive.
@@ -699,4 +843,15 @@ export class Editor extends BaseEditor implements IEditor {
       this._notifyListeners();
     });
   }
+}
+
+// ── Module-level helpers ────────────────────────────────────────────────────
+
+/** Word character: letters, digits, underscore (matches \w). */
+function isWordChar(ch: string): boolean {
+  return /\w/.test(ch);
+}
+
+function isWhitespace(ch: string): boolean {
+  return /\s/.test(ch);
 }

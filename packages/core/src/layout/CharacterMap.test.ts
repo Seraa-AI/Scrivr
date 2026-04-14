@@ -322,4 +322,33 @@ describe("CharacterMap — posAbove / posBelow (vertical navigation)", () => {
       expect(map.posBelow(6, 0)).toBeNull();
     });
   });
+
+  // ── lineStartPos / lineEndPos ───────────────────────────────────────────────
+
+  describe("lineStartPos / lineEndPos", () => {
+    it("lineStartPos returns the start of the line containing the position", () => {
+      // Line 0: docPos 1-5, line 1: docPos 6-10
+      expect(map.lineStartPos(3)).toBe(1);
+      expect(map.lineStartPos(8)).toBe(6);
+    });
+
+    it("lineEndPos returns the end of the line containing the position", () => {
+      expect(map.lineEndPos(3)).toBe(6);
+      expect(map.lineEndPos(8)).toBe(11);
+    });
+
+    it("lineStartPos at line start returns the same position", () => {
+      expect(map.lineStartPos(1)).toBe(1);
+      expect(map.lineStartPos(6)).toBe(6);
+    });
+
+    it("lineEndPos at line start returns the end of that line", () => {
+      // pos 6 is the start of line 1 (docPos 6-10), so lineEnd = 11
+      expect(map.lineEndPos(6)).toBe(11);
+    });
+
+    it("lineStartPos of first glyph returns line start", () => {
+      expect(map.lineStartPos(1)).toBe(1);
+    });
+  });
 });

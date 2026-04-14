@@ -288,6 +288,30 @@ export class CharacterMap {
   }
 
   /**
+   * Returns the doc position at the start of the visual line containing `docPos`.
+   * Used for Home / Cmd+Left navigation.
+   */
+  lineStartPos(docPos: number): number | null {
+    const coords = this.coordsAtPos(docPos);
+    if (!coords) return null;
+    const line = this.lineAtCoords(coords.y, coords.page);
+    if (!line) return null;
+    return line.startDocPos;
+  }
+
+  /**
+   * Returns the doc position at the end of the visual line containing `docPos`.
+   * Used for End / Cmd+Right navigation.
+   */
+  lineEndPos(docPos: number): number | null {
+    const coords = this.coordsAtPos(docPos);
+    if (!coords) return null;
+    const line = this.lineAtCoords(coords.y, coords.page);
+    if (!line) return null;
+    return line.endDocPos;
+  }
+
+  /**
    * Returns all glyphs that fall within the given ProseMirror position range.
    * Used by the renderer to draw selection highlight rectangles.
    */

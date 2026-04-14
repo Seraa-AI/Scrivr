@@ -1,6 +1,6 @@
 import type { Editor } from "../Editor";
 import type { DocumentLayout, LayoutPage, PageConfig } from "../layout/PageLayout";
-import { setupCanvas } from "./canvas";
+import { setupCanvas, watchDpr } from "./canvas";
 import { renderPage } from "./PageRenderer";
 import { clearOverlay, renderCursor, renderSelection } from "./OverlayRenderer";
 import { NodeSelection } from "prosemirror-state";
@@ -49,6 +49,13 @@ export class ViewManager {
   private showMarginGuides: boolean;
   private pageStyle: Partial<CSSStyleDeclaration>;
   private unsubscribe: (() => void) | null = null;
+  private _unwatchDpr: (() => void) | null = null;
+  /** Click-count tracking for double/triple-click. */
+  private _clickCount = 0;
+  private _lastClickTime = 0;
+  private _lastClickX = 0;
+  private _lastClickY = 0;
+  private _wordAnchor: { from: number; to: number } | null = null;
   private resizeDrag: {
     handle: string;
     startX: number;
@@ -116,6 +123,15 @@ export class ViewManager {
     });
 
     this.unsubscribe = editor.subscribe(() => this.update());
+
+    // DPR change detection (browser zoom, display switch, pinch-to-zoom)
+    this._unwatchDpr = watchDpr(() => {
+      for (const entry of this.pages.values()) {
+        entry.lastPaintedVersion = -1;
+      }
+      this.update();
+    });
+
     this.update();
   }
 
@@ -173,6 +189,8 @@ export class ViewManager {
   destroy(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this._unwatchDpr?.();
+    this._unwatchDpr = null;
     this.observer.disconnect();
     this.pagesContainer.removeEventListener("mousedown", this.handleMouseDown);
     document.removeEventListener("mousemove", this.handleMouseMove);
@@ -409,8 +427,42 @@ export class ViewManager {
     }
 
     if (this.editor.readOnly) return;
+
+    // ── Click-count tracking (double/triple-click) ──────────────────────────
+    const now = Date.now();
+    const CLICK_TIMEOUT = 500;
+    const CLICK_RADIUS = 5;
+    if (
+      now - this._lastClickTime < CLICK_TIMEOUT &&
+      Math.abs(e.clientX - this._lastClickX) < CLICK_RADIUS &&
+      Math.abs(e.clientY - this._lastClickY) < CLICK_RADIUS
+    ) {
+      this._clickCount++;
+    } else {
+      this._clickCount = 1;
+    }
+    this._lastClickTime = now;
+    this._lastClickX = e.clientX;
+    this._lastClickY = e.clientY;
+
     this.isDragging = true;
     const pos = this.editor.charMap.posAtCoords(canvasX, canvasY, pageNumber);
+
+    // Triple-click → select entire block
+    if (this._clickCount >= 3) {
+      this._wordAnchor = null;
+      this.editor.selectBlockAt(pos);
+      return;
+    }
+
+    // Double-click → select word
+    if (this._clickCount === 2) {
+      const bounds = this.editor.selectWordAt(pos);
+      this._wordAnchor = bounds;
+      return;
+    }
+
+    this._wordAnchor = null;
 
     if (!e.shiftKey) {
       // Check if the click landed on an inline image node → NodeSelection.
@@ -495,6 +547,22 @@ export class ViewManager {
       e.clientY - pageRect.top,
       pageNumber,
     );
+
+    // Word-granularity drag (after double-click)
+    if (this._wordAnchor) {
+      const { from: wFrom, to: wTo } = this._wordAnchor;
+      if (pos < wFrom) {
+        const wordStart = this.editor.wordBoundary(pos, -1);
+        this.editor.setSelection(wTo, wordStart);
+      } else if (pos > wTo) {
+        const wordEnd = this.editor.wordBoundary(pos, 1);
+        this.editor.setSelection(wFrom, wordEnd);
+      } else {
+        this.editor.setSelection(wFrom, wTo);
+      }
+      return;
+    }
+
     this.editor.setSelection(this.editor.getState().selection.anchor, pos);
   };
 

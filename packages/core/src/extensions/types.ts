@@ -324,6 +324,14 @@ export interface EditorNavigator {
   moveRight(extend?: boolean): void;
   moveUp(extend?: boolean): void;
   moveDown(extend?: boolean): void;
+  moveWordLeft(extend?: boolean): void;
+  moveWordRight(extend?: boolean): void;
+  moveToLineStart(extend?: boolean): void;
+  moveToLineEnd(extend?: boolean): void;
+  moveToDocStart(extend?: boolean): void;
+  moveToDocEnd(extend?: boolean): void;
+  deleteWordBackward(): void;
+  deleteWordForward(): void;
 }
 
 /**
