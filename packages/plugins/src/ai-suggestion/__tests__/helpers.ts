@@ -22,7 +22,8 @@ import {
   applyAiSuggestion,
   rejectAiSuggestion,
 } from "../showHideApply";
-import type { IEditor, SelectionController } from "@scrivr/core";
+import type { IEditor, SelectionController, DocumentLayout } from "@scrivr/core";
+import type { Node as PmNode } from "prosemirror-model";
 import type { AiSuggestion } from "../types";
 import type {
   ApplyAiSuggestionOptions,
@@ -83,7 +84,7 @@ export function h(level: number, text: string, nodeId?: string) {
   );
 }
 
-export function doc(...nodes: import("prosemirror-model").Node[]) {
+export function doc(...nodes: PmNode[]) {
   return schema.nodes.doc.create(null, nodes);
 }
 
@@ -100,7 +101,7 @@ export class TestAiEditor implements IEditor {
   private _subscribers: Array<() => void> = [];
 
   constructor(
-    initialDoc: import("prosemirror-model").Node,
+    initialDoc: PmNode,
     authorID = "user1",
   ) {
     this.state = EditorState.create({
@@ -140,7 +141,7 @@ export class TestAiEditor implements IEditor {
   addOverlayRenderHandler(_handler: unknown): () => void {
     return () => {};
   }
-  get layout(): import("@scrivr/core").DocumentLayout {
+  get layout(): DocumentLayout {
     return null as never;
   }
   getViewportRect(_from: number, _to: number): DOMRect | null {

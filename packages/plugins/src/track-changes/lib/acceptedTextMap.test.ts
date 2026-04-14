@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Schema } from "prosemirror-model";
+import type { Mark } from "prosemirror-model";
 import {
   buildAcceptedTextMap,
   acceptedOffsetToDocPos,
@@ -40,7 +41,7 @@ const deleteMark = (authorID = "user") =>
  * Build a paragraph node with the given inline spec.
  * spec: array of { text, marks? }
  */
-function buildParagraph(spec: Array<{ text: string; marks?: import("prosemirror-model").Mark[] }>) {
+function buildParagraph(spec: Array<{ text: string; marks?: Mark[] }>) {
   const children = spec.map(({ text, marks = [] }) =>
     schema.text(text, marks),
   );

@@ -3,6 +3,7 @@ import { doc, p, h, ul, ol, li, TestEditor } from "./helpers";
 import { CHANGE_OPERATION, TrackChangesStatus } from "../types";
 import { trackChangesPlugin, trackChangesPluginKey } from "../engine/trackChangesPlugin";
 import { EditorState } from "prosemirror-state";
+import type { Transaction } from "prosemirror-state";
 import { history } from "prosemirror-history";
 import { schema } from "./helpers";
 
@@ -195,7 +196,7 @@ describe("trackTransaction — tracking disabled", () => {
     });
     return {
       state,
-      dispatch(tr: import("prosemirror-state").Transaction) {
+      dispatch(tr: Transaction) {
         this.state = this.state.apply(tr);
       },
       get pendingChanges() {

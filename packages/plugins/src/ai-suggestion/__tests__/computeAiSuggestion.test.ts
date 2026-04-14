@@ -6,12 +6,13 @@
  */
 
 import { describe, it, expect } from "vitest";
+import type { Node as PmNode } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { computeAiSuggestion } from "../computeAiSuggestion";
 import { doc, p, h } from "./helpers";
 
 
-function makeState(d: import("prosemirror-model").Node) {
+function makeState(d: PmNode) {
   return EditorState.create({ doc: d });
 }
 

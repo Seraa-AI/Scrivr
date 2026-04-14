@@ -13,6 +13,7 @@
 
 import type { CharacterMap, GlyphEntry } from "@scrivr/core";
 import type { AiOp } from "./types";
+import type { PosMapEntry } from "../track-changes/lib/acceptedTextMap";
 
 // ── Render instruction types ──────────────────────────────────────────────────
 
@@ -112,7 +113,7 @@ export function renderInsertMarker(
 
 export function buildOpRenderInstructions(
   ops: AiOp[],
-  map: import("../track-changes/lib/acceptedTextMap").PosMapEntry[],
+  map: PosMapEntry[],
   charMap: CharacterMap,
   pageNumber: number,
 ): RenderInstruction[] {
