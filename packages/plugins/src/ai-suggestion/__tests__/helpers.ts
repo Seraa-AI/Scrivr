@@ -159,9 +159,26 @@ export class TestAiEditor implements IEditor {
   getMarkdown(): string {
     return "";
   }
-  moveCursorTo(_pos: number): void {
-    /* no-op in tests */
-  }
+  /** SelectionController stub — only moveCursorTo is called by AI suggestion code. */
+  readonly selection = {
+    moveCursorTo: (_pos: number): void => {},
+    setSelection: (_a: number, _h: number): void => {},
+    moveLeft: (_e?: boolean): void => {},
+    moveRight: (_e?: boolean): void => {},
+    moveUp: (_e?: boolean): void => {},
+    moveDown: (_e?: boolean): void => {},
+    moveWordLeft: (_e?: boolean): void => {},
+    moveWordRight: (_e?: boolean): void => {},
+    moveToLineStart: (_e?: boolean): void => {},
+    moveToLineEnd: (_e?: boolean): void => {},
+    moveToDocStart: (_e?: boolean): void => {},
+    moveToDocEnd: (_e?: boolean): void => {},
+    deleteWordBackward: (): void => {},
+    deleteWordForward: (): void => {},
+    selectWordAt: (_p: number) => ({ from: 0, to: 0 }),
+    selectBlockAt: (_p: number): void => {},
+    wordBoundary: (_p: number, _d: -1 | 1) => 0,
+  } as import("@scrivr/core").SelectionController;
   get readOnly(): boolean { return false; }
   setReadOnly(_value: boolean): void {}
 
