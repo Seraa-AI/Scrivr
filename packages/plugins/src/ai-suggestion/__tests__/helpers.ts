@@ -22,7 +22,7 @@ import {
   applyAiSuggestion,
   rejectAiSuggestion,
 } from "../showHideApply";
-import type { IEditor } from "@scrivr/core";
+import type { IEditor, SelectionController } from "@scrivr/core";
 import type { AiSuggestion } from "../types";
 import type {
   ApplyAiSuggestionOptions,
@@ -178,7 +178,7 @@ export class TestAiEditor implements IEditor {
     selectWordAt: (_p: number) => ({ from: 0, to: 0 }),
     selectBlockAt: (_p: number): void => {},
     wordBoundary: (_p: number, _d: -1 | 1) => 0,
-  } as import("@scrivr/core").SelectionController;
+  } as SelectionController;
   get readOnly(): boolean { return false; }
   setReadOnly(_value: boolean): void {}
 
