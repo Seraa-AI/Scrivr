@@ -21,9 +21,9 @@ import {
 export function findChanges(state: EditorState): ChangeSet {
   const changes: IncompleteChange[] = [];
   // Map from change ID → active group. Supports multiple marks per text node
-  // (e.g. tracked_insert + tracked_delete stacked from different authors).
+  // (e.g. trackedInsert + trackedDelete stacked from different authors).
   const currentMap = new Map<string, { change: IncompleteChange; node: PMNode }>();
-  // Parallel map for inline mark-based changes (tracked_insert / tracked_delete marks).
+  // Parallel map for inline mark-based changes (trackedInsert / trackedDelete marks).
   const markMap = new Map<string, { change: IncompleteChange; node: PMNode }>();
 
   state.doc.descendants((node, pos) => {

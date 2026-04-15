@@ -133,11 +133,11 @@ describe("Enter key — font inheritance", () => {
   });
 });
 
-  it("new paragraph inherits fontFamily from inline font_family mark when no block attr is set", () => {
+  it("new paragraph inherits fontFamily from inline fontFamily mark when no block attr is set", () => {
     const { schema, keymap, state } = makeContext();
 
-    // Insert text, apply font_family mark inline (the common toolbar path)
-    const fontFamilyMark = schema.marks["font_family"]!.create({ family: "Times New Roman" });
+    // Insert text, apply fontFamily mark inline (the common toolbar path)
+    const fontFamilyMark = schema.marks["fontFamily"]!.create({ family: "Times New Roman" });
     const s1 = state.apply(
       state.tr
         .insertText("Hello")

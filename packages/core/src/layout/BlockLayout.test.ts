@@ -986,16 +986,16 @@ describe("layoutBlock — node fontFamily attr", () => {
 
 // ── Inline node handling — regression suite ───────────────────────────────────
 //
-// These tests lock in the correct behaviour for hard_break (Shift-Enter) and
+// These tests lock in the correct behaviour for hardBreak (Shift-Enter) and
 // inline images inside paragraphs.
 
 describe("extractSpans — inline node handling", () => {
   const { schema: skSchema, fontConfig } = buildStarterKitContext();
 
-  // ── hard_break: Shift-Enter creates two lines ─────────────────────────────
+  // ── hardBreak: Shift-Enter creates two lines ─────────────────────────────
 
-  it("hard_break inside a paragraph splits into two lines", () => {
-    const hb = skSchema.nodes["hard_break"]?.create();
+  it("hardBreak inside a paragraph splits into two lines", () => {
+    const hb = skSchema.nodes["hardBreak"]?.create();
     if (!hb) return;
     const para = skSchema.node("paragraph", null, [
       skSchema.text("Hello"),
@@ -1021,8 +1021,8 @@ describe("extractSpans — inline node handling", () => {
     expect(line1Spans.every((s) => s.kind === "text")).toBe(true);
   });
 
-  it("hard_break does NOT inflate line height — both lines stay at text line height", () => {
-    const hb = skSchema.nodes["hard_break"]?.create();
+  it("hardBreak does NOT inflate line height — both lines stay at text line height", () => {
+    const hb = skSchema.nodes["hardBreak"]?.create();
     if (!hb) return;
     const para = skSchema.node("paragraph", null, [
       skSchema.text("A"),
@@ -1045,10 +1045,10 @@ describe("extractSpans — inline node handling", () => {
     }
   });
 
-  it("paragraph containing only a hard_break falls back to ZWS — normal line height", () => {
-    // A paragraph with ONLY a hard_break has no renderable content after the
+  it("paragraph containing only a hardBreak falls back to ZWS — normal line height", () => {
+    // A paragraph with ONLY a hardBreak has no renderable content after the
     // break, so it uses the ZWS fallback (same as an empty paragraph).
-    const hb = skSchema.nodes["hard_break"]?.create();
+    const hb = skSchema.nodes["hardBreak"]?.create();
     if (!hb) return;
     const para = skSchema.node("paragraph", null, [hb]);
     const block = layoutBlock(para, {
@@ -1066,8 +1066,8 @@ describe("extractSpans — inline node handling", () => {
     expect(spans.every((s) => s.kind === "text")).toBe(true);
   });
 
-  it("trailing hard_break emits a phantom second line for the cursor after the break", () => {
-    const hb = skSchema.nodes["hard_break"]?.create();
+  it("trailing hardBreak emits a phantom second line for the cursor after the break", () => {
+    const hb = skSchema.nodes["hardBreak"]?.create();
     if (!hb) return;
     const para = skSchema.node("paragraph", null, [skSchema.text("Hello"), hb]);
     const block = layoutBlock(para, {

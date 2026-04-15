@@ -1,7 +1,7 @@
 /**
  * splitRangeForNewMark
  *
- * Applies a new tracked mark (tracked_insert or tracked_delete) to [from, to)
+ * Applies a new tracked mark (trackedInsert or trackedDelete) to [from, to)
  * respecting multi-author coexistence:
  *
  *   - Same author + same type on a text node → skip (no duplicate stacking).
@@ -35,8 +35,8 @@ export function splitRangeForNewMark(
   tr: Transaction,
   { mark, from, to, schema }: SplitRangeOptions,
 ): boolean {
-  const insertType = schema.marks.tracked_insert;
-  const deleteType = schema.marks.tracked_delete;
+  const insertType = schema.marks.trackedInsert;
+  const deleteType = schema.marks.trackedDelete;
   if (!insertType || !deleteType) {
     tr.addMark(from, to, mark);
     return true;
@@ -85,7 +85,7 @@ export function splitRangeForNewMark(
 }
 
 /**
- * Convenience wrapper: build and apply a tracked_delete mark for [from, to).
+ * Convenience wrapper: build and apply a trackedDelete mark for [from, to).
  */
 export function applyTrackedDelete(
   tr: Transaction,
@@ -94,14 +94,14 @@ export function applyTrackedDelete(
   dataTracked: Record<string, unknown>,
   schema: Schema,
 ): boolean {
-  const deleteType = schema.marks.tracked_delete as MarkType | undefined;
+  const deleteType = schema.marks.trackedDelete as MarkType | undefined;
   if (!deleteType) return false;
   const mark = deleteType.create({ dataTracked });
   return splitRangeForNewMark(tr, { mark, from, to, schema });
 }
 
 /**
- * Convenience wrapper: build and apply a tracked_insert mark for [from, to).
+ * Convenience wrapper: build and apply a trackedInsert mark for [from, to).
  */
 export function applyTrackedInsert(
   tr: Transaction,
@@ -110,7 +110,7 @@ export function applyTrackedInsert(
   dataTracked: Record<string, unknown>,
   schema: Schema,
 ): boolean {
-  const insertType = schema.marks.tracked_insert as MarkType | undefined;
+  const insertType = schema.marks.trackedInsert as MarkType | undefined;
   if (!insertType) return false;
   const mark = insertType.create({ dataTracked });
   return splitRangeForNewMark(tr, { mark, from, to, schema });

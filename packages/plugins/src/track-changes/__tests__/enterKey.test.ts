@@ -19,15 +19,15 @@ describe("enterKey — Enter at end of paragraph", () => {
     expect(ops).toContain("reference");
   });
 
-  it("does not produce any tracked_insert marks on text", () => {
+  it("does not produce any trackedInsert marks on text", () => {
     const editor = new TestEditor(doc(p("hello")));
     const tr = editor.state.tr.split(6);
     editor.dispatch(tr);
 
-    // Walk all text nodes — none should have tracked_insert
+    // Walk all text nodes — none should have trackedInsert
     let foundInsertMark = false;
     editor.state.doc.descendants(node => {
-      if (node.isText && node.marks.some(m => m.type === schema.marks.tracked_insert)) {
+      if (node.isText && node.marks.some(m => m.type === schema.marks.trackedInsert)) {
         foundInsertMark = true;
       }
     });
@@ -48,7 +48,7 @@ describe("enterKey — Enter at end of paragraph", () => {
 // ── Enter in the middle of a paragraph ────────────────────────────────────────
 
 describe("enterKey — Enter in the middle of 'hel|lo'", () => {
-  it("produces node_split + reference changes; 'lo' has no tracked_insert marks", () => {
+  it("produces node_split + reference changes; 'lo' has no trackedInsert marks", () => {
     const editor = new TestEditor(doc(p("hello")));
     // Split between "hel" and "lo": pos 4 (1 doc open + 3 chars)
     const tr = editor.state.tr.split(4);
@@ -59,10 +59,10 @@ describe("enterKey — Enter in the middle of 'hel|lo'", () => {
     expect(pending.map(c => c.dataTracked.operation)).toContain(CHANGE_OPERATION.node_split);
     expect(pending.map(c => c.dataTracked.operation)).toContain("reference");
 
-    // "lo" in the new paragraph must NOT carry a tracked_insert mark
+    // "lo" in the new paragraph must NOT carry a trackedInsert mark
     let foundInsertMark = false;
     editor.state.doc.descendants(node => {
-      if (node.isText && node.marks.some(m => m.type === schema.marks.tracked_insert)) {
+      if (node.isText && node.marks.some(m => m.type === schema.marks.trackedInsert)) {
         foundInsertMark = true;
       }
     });
@@ -145,7 +145,7 @@ describe("enterKey — reject", () => {
 // ── Text typed after Enter is still tracked ───────────────────────────────────
 
 describe("enterKey — text typed after Enter is tracked", () => {
-  it("text inserted into the new paragraph after Enter has tracked_insert marks", () => {
+  it("text inserted into the new paragraph after Enter has trackedInsert marks", () => {
     const editor = new TestEditor(doc(p("hello")));
     editor.dispatch(editor.state.tr.split(6)); // new empty paragraph
 

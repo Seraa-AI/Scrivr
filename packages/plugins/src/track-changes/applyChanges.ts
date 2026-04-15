@@ -77,8 +77,8 @@ export function applyChanges(
     }
 
     if (ChangeSet.isTextChange(change) && noChangeNeeded) {
-      tr.removeMark(from, deleteMap.map(change.to), schema.marks.tracked_insert);
-      tr.removeMark(from, deleteMap.map(change.to), schema.marks.tracked_delete);
+      tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedInsert);
+      tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedDelete);
     } else if (ChangeSet.isTextChange(change)) {
       tr.delete(from, deleteMap.map(change.to));
       deleteMap.appendMap(tr.steps[tr.steps.length - 1]!.getMap());
@@ -86,8 +86,8 @@ export function applyChanges(
       const attrs = { ...node.attrs, dataTracked: keepPairedChanges(node) };
       tr.setNodeMarkup(from, undefined, attrs, node.marks);
       if (node.isAtom) {
-        tr.removeMark(from, deleteMap.map(change.to), schema.marks.tracked_insert);
-        tr.removeMark(from, deleteMap.map(change.to), schema.marks.tracked_delete);
+        tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedInsert);
+        tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedDelete);
       }
       updateChangeChildrenAttributes(change.children, tr, deleteMap);
     } else if (ChangeSet.isNodeChange(change)) {

@@ -136,8 +136,8 @@ export function resolveFont(
       switch (mark.type.name) {
         case "bold":        parsed.weight = "bold"; break;
         case "italic":      parsed.style = "italic"; break;
-        case "font_size":   parsed.size = `${mark.attrs["size"] as number}px`; break;
-        case "font_family": parsed.family = mark.attrs["family"] as string; break;
+        case "fontSize":   parsed.size = `${mark.attrs["size"] as number}px`; break;
+        case "fontFamily": parsed.family = mark.attrs["family"] as string; break;
       }
     }
   }

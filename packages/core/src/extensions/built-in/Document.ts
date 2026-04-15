@@ -1,18 +1,18 @@
 import { Extension } from "../Extension";
 
 /**
- * Document — contributes the top-level `doc` and `hard_break` nodes.
+ * Document — contributes the top-level `doc` and `hardBreak` nodes.
  *
  * Every editor needs this. StarterKit includes it automatically.
  * `doc` and `text` are always added by ExtensionManager as a baseline,
- * but hard_break must be registered explicitly.
+ * but hardBreak must be registered explicitly.
  */
 export const Document = Extension.create({
   name: "document",
 
   addNodes() {
     return {
-      hard_break: {
+      hardBreak: {
         group: "inline",
         inline: true,
         selectable: false,

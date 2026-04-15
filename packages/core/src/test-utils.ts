@@ -105,7 +105,7 @@ export function doc(...blocks: Node[]): Node {
 
 /** Hard page-break node. */
 export function pageBreak(): Node {
-  return schema.node("page_break");
+  return schema.node("pageBreak");
 }
 
 export interface FullEditorContext {

@@ -681,7 +681,7 @@ export const HeaderFooter = Extension.create({
 
 Header/footer mini-docs must not contain tables, page breaks, floats, or further nested headers. Implementation:
 
-- Body-only core node specs get `group: "flow-only"` (tables, `page_break`, float anchors); header-safe nodes get `group: "block header-safe"`. This tagging happens in core's built-in extensions.
+- Body-only core node specs get `group: "flow-only"` (tables, `pageBreak`, float anchors); header-safe nodes get `group: "block header-safe"`. This tagging happens in core's built-in extensions.
 - The plugin builds a derived schema where `doc.content = "header-safe+"` using `Schema.spec.nodes` from the main schema, filtered to the `header-safe` group.
 - On `EditorSurface.toDocJSON()` commit, the plugin validates against the restricted schema. Paste from Word that contains a table in the header gets flattened to paragraphs during the paste transformer, not at commit.
 

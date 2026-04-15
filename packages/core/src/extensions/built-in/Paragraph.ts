@@ -20,11 +20,11 @@ const _split = splitBlockAs((parent, _atEnd, $from) => {
 
   if ("fontFamily" in (newType.spec.attrs ?? {})) {
     // Priority: explicit block-level fontFamily attr (set via setBlockFontFamily)
-    // → inline font_family mark at cursor position (set via setFontFamily or paste)
+    // → inline fontFamily mark at cursor position (set via setFontFamily or paste)
     // → null (fall back to blockStyle default)
     const blockFamily = parent.attrs["fontFamily"] as string | null ?? null;
     const markFamily = blockFamily == null
-      ? ($from.marks().find((m) => m.type.name === "font_family")?.attrs["family"] as string | undefined ?? null)
+      ? ($from.marks().find((m) => m.type.name === "fontFamily")?.attrs["family"] as string | undefined ?? null)
       : null;
     attrs["fontFamily"] = blockFamily ?? markFamily;
   }

@@ -70,10 +70,10 @@ describe("ClearFormatting", () => {
     type(editor, "hello");
     selectAll(editor);
     run(editor, "setFontSize", 24);
-    expect(editor.getActiveMarks()).toContain("font_size");
+    expect(editor.getActiveMarks()).toContain("fontSize");
 
     run(editor, "clearFormatting");
-    expect(editor.getActiveMarks()).not.toContain("font_size");
+    expect(editor.getActiveMarks()).not.toContain("fontSize");
   });
 
   it("converts heading to paragraph", () => {

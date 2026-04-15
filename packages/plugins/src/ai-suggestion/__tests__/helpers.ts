@@ -2,7 +2,7 @@
  * Shared test helpers for ai-suggestion integration tests.
  *
  * Provides a minimal ProseMirror schema (paragraph + heading + text +
- * tracked_insert/tracked_delete marks, all with nodeId attrs) and a
+ * trackedInsert/trackedDelete marks, all with nodeId attrs) and a
  * lightweight editor harness that wires up aiSuggestionPlugin +
  * trackChangesPlugin so apply/reject commands work end-to-end.
  */
@@ -57,11 +57,11 @@ export const schema = new Schema({
     text: { group: "inline" },
   },
   marks: {
-    tracked_insert: {
+    trackedInsert: {
       excludes: "",
       attrs: { dataTracked: { default: {} } },
     },
-    tracked_delete: {
+    trackedDelete: {
       excludes: "",
       attrs: { dataTracked: { default: {} } },
     },

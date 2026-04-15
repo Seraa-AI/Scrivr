@@ -2,7 +2,7 @@
  * Shared test helpers for track-changes integration tests.
  *
  * Provides a minimal ProseMirror schema (paragraph + heading + text +
- * tracked_insert/tracked_delete marks) and a lightweight editor harness that
+ * trackedInsert/trackedDelete marks) and a lightweight editor harness that
  * wires up the trackChangesPlugin + prosemirror-history so undo/redo works.
  *
  * NOTE: EditorState.apply() internally runs the appendTransaction loop, so
@@ -68,11 +68,11 @@ export const schema = new Schema({
     text: { group: "inline" },
   },
   marks: {
-    tracked_insert: {
+    trackedInsert: {
       excludes: "",
       attrs: { dataTracked: { default: {} } },
     },
-    tracked_delete: {
+    trackedDelete: {
       excludes: "",
       attrs: { dataTracked: { default: {} } },
     },

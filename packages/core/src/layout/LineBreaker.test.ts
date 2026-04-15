@@ -396,7 +396,7 @@ describe("LineBreaker — CharacterMap population", () => {
   });
 });
 
-describe("LineBreaker — hard_break", () => {
+describe("LineBreaker — hardBreak", () => {
   it("break token between two text spans produces two lines", () => {
     const lb = new LineBreaker(makeMeasurer());
     const lines = lb.breakIntoLines(

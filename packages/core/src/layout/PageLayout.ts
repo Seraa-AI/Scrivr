@@ -936,7 +936,7 @@ export function buildBlockFlow(
         spaceBefore: 0,
         spaceAfter: 0,
         availableWidth: 0,
-        blockType: "page_break",
+        blockType: "pageBreak",
         align: "left",
         indentLeft: 0,
         hasFloatAnchor: false,
@@ -1705,7 +1705,7 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
   const items: LayoutItem[] = [];
 
   doc.forEach((node, offset) => {
-    if (node.type.name === "page_break") {
+    if (node.type.name === "pageBreak") {
       items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
       return;
     }

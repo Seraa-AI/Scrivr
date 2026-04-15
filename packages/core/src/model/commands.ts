@@ -124,13 +124,13 @@ export function toggleStrikethrough(state: EditorState): Transaction | null {
 export function setFontSize(state: EditorState, size: number): Transaction | null {
   const { from, to, empty } = state.selection;
   if (empty) return null;
-  return state.tr.addMark(from, to, schema.marks["font_size"]!.create({ size }));
+  return state.tr.addMark(from, to, schema.marks["fontSize"]!.create({ size }));
 }
 
 export function setFontFamily(state: EditorState, family: string): Transaction | null {
   const { from, to, empty } = state.selection;
   if (empty) return null;
-  return state.tr.addMark(from, to, schema.marks["font_family"]!.create({ family }));
+  return state.tr.addMark(from, to, schema.marks["fontFamily"]!.create({ family }));
 }
 
 export function setColor(state: EditorState, color: string): Transaction | null {

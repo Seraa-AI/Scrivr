@@ -54,9 +54,9 @@ class MyExtension extends Extension {
 
 ### Schema
 
-Built-in nodes: `doc`, `paragraph`, `heading`, `bullet_list`, `ordered_list`, `list_item`, `table`, `table_row`, `table_cell`, `blockquote`, `code_block`, `image`, `hard_break`.
+Built-in nodes: `doc`, `paragraph`, `heading`, `bullet_list`, `ordered_list`, `list_item`, `table`, `tableRow`, `tableCell`, `blockquote`, `code_block`, `image`, `hardBreak`.
 
-Built-in marks: `bold`, `italic`, `underline`, `strikethrough`, `highlight`, `color`, `font_size`, `font_family`, `link`.
+Built-in marks: `bold`, `italic`, `underline`, `strikethrough`, `highlight`, `color`, `fontSize`, `fontFamily`, `link`.
 
 ## Key exports
 

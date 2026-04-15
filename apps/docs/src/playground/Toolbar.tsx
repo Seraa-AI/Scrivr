@@ -34,7 +34,7 @@ interface ToolbarProps {
   blockAttrs: Record<string, unknown>;
   /** Document-level default font family — shown when no explicit family is set on the selection. */
   defaultFontFamily?: string;
-  /** Document-level default font size in px — shown when no font_size mark is active. */
+  /** Document-level default font size in px — shown when no fontSize mark is active. */
   defaultFontSize?: number;
 }
 
@@ -220,7 +220,7 @@ function SizeSelect({
   defaultFontSize: number;
   onCommand: (cmd: string, args?: unknown[]) => void;
 }) {
-  const markSize = activeMarkAttrs["font_size"]?.["size"];
+  const markSize = activeMarkAttrs["fontSize"]?.["size"];
   // Fall back to document default size when no explicit mark is set.
   const activeSize = typeof markSize === "number" ? markSize : defaultFontSize;
   const value = String(activeSize);
@@ -263,7 +263,7 @@ function FamilySelect({
   defaultFontFamily: string;
   onCommand: (cmd: string, args?: unknown[]) => void;
 }) {
-  const inlineFamily = activeMarkAttrs["font_family"]?.["family"];
+  const inlineFamily = activeMarkAttrs["fontFamily"]?.["family"];
   const blockFamily = blockAttrs["fontFamily"];
   // Priority: inline mark → block attr → document default
   const activeFamily =

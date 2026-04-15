@@ -118,7 +118,7 @@ describe("getSchema", () => {
     ]);
     expect(schema.nodes["paragraph"]).toBeDefined();
     expect(schema.marks["bold"]).toBeDefined();
-    expect(schema.marks["font_size"]).toBeDefined();
+    expect(schema.marks["fontSize"]).toBeDefined();
   });
 });
 
@@ -202,7 +202,7 @@ describe("ExtensionManager", () => {
       expect(mods instanceof Map).toBe(true);
       expect(mods.has("bold")).toBe(true);
       expect(mods.has("italic")).toBe(true);
-      expect(mods.has("font_size")).toBe(true);
+      expect(mods.has("fontSize")).toBe(true);
     });
 
     it("returns an empty map when no extensions declare font modifiers", () => {
@@ -285,11 +285,11 @@ describe("ExtensionManager", () => {
   });
 
   describe("FontSize extension", () => {
-    it("contributes font_size mark, setFontSize command, font modifier, and toolbar items", () => {
+    it("contributes fontSize mark, setFontSize command, font modifier, and toolbar items", () => {
       const manager = new ExtensionManager([StarterKit]);
-      expect(manager.schema.marks["font_size"]).toBeDefined();
+      expect(manager.schema.marks["fontSize"]).toBeDefined();
       expect(manager.buildCommands()["setFontSize"]).toBeDefined();
-      expect(manager.buildFontModifiers().has("font_size")).toBe(true);
+      expect(manager.buildFontModifiers().has("fontSize")).toBe(true);
       const sizeButtons = manager.buildToolbarItems().filter((i) => i.command === "setFontSize");
       expect(sizeButtons.length).toBe(7); // default 7 sizes
     });

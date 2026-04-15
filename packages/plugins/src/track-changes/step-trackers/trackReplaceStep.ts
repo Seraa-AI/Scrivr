@@ -99,7 +99,7 @@ export function trackReplaceStep(
         ) {
           // Pass newSliceContent (not fragment) so that text carried into the
           // new paragraph ("lo" from splitting "hel|lo") is NOT marked as a
-          // new tracked_insert. Only the structural node_split/reference marks
+          // new trackedInsert. Only the structural node_split/reference marks
           // are added; the carried text stays untracked, matching Google Docs.
           fragment = setFragmentAsNodeSplit(
             newTr.doc.resolve(step.from),

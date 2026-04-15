@@ -63,7 +63,7 @@ Four-layer design:
 - `ClipboardSerializer` — serializes selection to `text/plain` + `text/html`
 
 **Model (`model/`)**
-- `schema.ts` — nodes: `doc`, `paragraph`, `heading`, `bullet_list`, `ordered_list`, `list_item`, `table`, `table_row`, `table_cell`, `blockquote`, `code_block`, `image`, `hard_break`; marks: `bold`, `italic`, `underline`, `strikethrough`, `highlight`, `color`, `font_size`, `font_family`, `link`
+- `schema.ts` — nodes: `doc`, `paragraph`, `heading`, `bulletList`, `orderedList`, `listItem`, `table`, `tableRow`, `tableCell`, `codeBlock`, `horizontalRule`, `pageBreak`, `image`, `hardBreak`, `text`; marks: `bold`, `italic`, `underline`, `strikethrough`, `highlight`, `color`, `fontSize`, `fontFamily`, `link`, `trackedInsert`, `trackedDelete`
 
 **Extensions (`extensions/`)**
 - `Extension` base class with `create`/`configure` config-object pattern

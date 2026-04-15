@@ -33,10 +33,10 @@ declare module "@scrivr/core" {
   }
 
   interface MarkAttributes {
-    tracked_insert: {
+    trackedInsert: {
       dataTracked: Record<string, unknown> | null;
     };
-    tracked_delete: {
+    trackedDelete: {
       dataTracked: Record<string, unknown> | null;
     };
   }
@@ -89,7 +89,7 @@ function deleteColor(authorID: string): string {
 /**
  * TrackChanges — opt-in track-changes plugin for @scrivr/plugins.
  *
- * Adds `tracked_insert` and `tracked_delete` marks to the schema (opt-in),
+ * Adds `trackedInsert` and `trackedDelete` marks to the schema (opt-in),
  * intercepts all transactions via appendTransaction, and exposes commands
  * for toggling tracking status and accepting/rejecting changes.
  *
@@ -110,12 +110,12 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
 
   addMarks() {
     return {
-      tracked_insert: {
+      trackedInsert: {
         attrs: {
           dataTracked: { default: null },
         },
         inclusive: false,
-        // Allow multiple tracked_insert marks on the same text node segment
+        // Allow multiple trackedInsert marks on the same text node segment
         // so that overlapping suggestions from different authors can coexist.
         // Each mark instance still carries a single author in dataTracked.
         excludes: "",
@@ -124,12 +124,12 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
           return ["ins", { "data-tracked": "insert" }, 0];
         },
       },
-      tracked_delete: {
+      trackedDelete: {
         attrs: {
           dataTracked: { default: null },
         },
         inclusive: false,
-        // Same as tracked_insert — allow stacking from multiple authors.
+        // Same as trackedInsert — allow stacking from multiple authors.
         excludes: "",
         parseDOM: [{ tag: "del[data-tracked]" }],
         toDOM() {
@@ -210,8 +210,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
 
       /**
        * Insert text as a pending suggestion, regardless of the current tracking
-       * status. The inserted text gets a `tracked_insert` mark attributed to
-       * `authorID`, and any replaced selection gets a `tracked_delete` mark.
+       * status. The inserted text gets a `trackedInsert` mark attributed to
+       * `authorID`, and any replaced selection gets a `trackedDelete` mark.
        *
        * This is the correct way for AI assistants to propose edits — they always
        * show up as suggestions the user can accept or reject, never as direct edits.
@@ -223,8 +223,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           const [text, from, to, authorID] = args as [string, number, number, string];
           const schema = state.schema;
-          const insertMarkType = schema.marks.tracked_insert;
-          const deleteMarkType = schema.marks.tracked_delete;
+          const insertMarkType = schema.marks.trackedInsert;
+          const deleteMarkType = schema.marks.trackedDelete;
           if (!insertMarkType) return false; // TrackChanges not in schema
 
           const now = Date.now();

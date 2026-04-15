@@ -122,24 +122,24 @@ describe("applyAiSuggestion — direct mode", () => {
 // ── applyAiSuggestion — tracked mode ─────────────────────────────────────────
 
 describe("applyAiSuggestion — tracked mode", () => {
-  it("records deletes as tracked_delete marks (text still present)", () => {
+  it("records deletes as trackedDelete marks (text still present)", () => {
     const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     editor.apply({ blockId: "n1", mode: "tracked" });
 
-    // The delete op creates a tracked_delete mark — the text is still in the doc
+    // The delete op creates a trackedDelete mark — the text is still in the doc
     const state = editor.getState();
     let hasDeleteMark = false;
     state.doc.descendants((node) => {
-      if (node.isText && node.marks.some((m) => m.type.name === "tracked_delete")) {
+      if (node.isText && node.marks.some((m) => m.type.name === "trackedDelete")) {
         hasDeleteMark = true;
       }
     });
     expect(hasDeleteMark).toBe(true);
   });
 
-  it("records inserts as tracked_insert marks", () => {
+  it("records inserts as trackedInsert marks", () => {
     const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
@@ -148,7 +148,7 @@ describe("applyAiSuggestion — tracked mode", () => {
     const state = editor.getState();
     let hasInsertMark = false;
     state.doc.descendants((node) => {
-      if (node.isText && node.marks.some((m) => m.type.name === "tracked_insert")) {
+      if (node.isText && node.marks.some((m) => m.type.name === "trackedInsert")) {
         hasInsertMark = true;
       }
     });

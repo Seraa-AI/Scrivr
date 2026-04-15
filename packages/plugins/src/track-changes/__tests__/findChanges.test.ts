@@ -58,7 +58,7 @@ describe("findChanges — text delete detection", () => {
     expect(change.dataTracked.operation).toBe(CHANGE_OPERATION.delete);
   });
 
-  it("deleted text stays in the document (tracked_delete keeps it visible)", () => {
+  it("deleted text stays in the document (trackedDelete keeps it visible)", () => {
     const editor = new TestEditor(doc(p("hello")));
     editor.deleteRange(5, 6); // delete "o"
 
@@ -131,13 +131,13 @@ describe("findChanges — conflict detection", () => {
   it("opposing insert+delete from different authors on the same text are flagged isConflict", () => {
     // Start with an empty paragraph; author1 inserts "hello".
     const editor = new TestEditor(doc(p("")), "author1");
-    editor.insertAt(1, "hello"); // tracked_insert on "hello" from author1
+    editor.insertAt(1, "hello"); // trackedInsert on "hello" from author1
 
     // Switch to author2 and delete the same range that author1 just inserted.
-    // deleteTextIfInserted sees a different-author insert → adds tracked_delete on top
+    // deleteTextIfInserted sees a different-author insert → adds trackedDelete on top
     // rather than removing the text. The same text node now has both marks.
     editor.setUserID("author2");
-    editor.deleteRange(1, 6); // covers "hello" (still in doc with tracked_insert)
+    editor.deleteRange(1, 6); // covers "hello" (still in doc with trackedInsert)
 
     const pending = editor.pendingChanges;
     // Both insert (author1) and delete (author2) should be pending
@@ -155,7 +155,7 @@ describe("findChanges — conflict detection", () => {
   it("same-author insert+delete do NOT produce a conflict", () => {
     const editor = new TestEditor(doc(p("hello")), "author1");
 
-    editor.deleteRange(1, 4); // delete "hel" — tracked_delete
+    editor.deleteRange(1, 4); // delete "hel" — trackedDelete
     editor.insertAt(1, "X"); // insert at same position
 
     const pending = editor.pendingChanges;

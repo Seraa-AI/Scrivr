@@ -17,7 +17,7 @@ describe("undo/redo — text deletion", () => {
     editor = new TestEditor(doc(p("hello")));
   });
 
-  it("deleting a character marks it as tracked_delete (not removed from doc)", () => {
+  it("deleting a character marks it as trackedDelete (not removed from doc)", () => {
     editor.deleteRange(5, 6); // delete "o"
 
     expect(editor.text).toBe("hello"); // "o" still present in doc (tracked)
@@ -47,8 +47,8 @@ describe("undo/redo — text deletion", () => {
     // Use non-adjacent chars ("h" at 1 and "o" at 5) so they stay as separate
     // marks — adjacent same-author deletions are correctly merged into one.
     editor = new TestEditor(doc(p("hello")));
-    editor.deleteRange(5, 6); // delete "o" → first tracked_delete
-    editor.deleteRange(2, 3); // delete "e" (non-adjacent) → second tracked_delete
+    editor.deleteRange(5, 6); // delete "o" → first trackedDelete
+    editor.deleteRange(2, 3); // delete "e" (non-adjacent) → second trackedDelete
 
     expect(editor.pendingChanges).toHaveLength(2);
 
@@ -67,7 +67,7 @@ describe("undo/redo — text insertion", () => {
     editor = new TestEditor(doc(p("hello")));
   });
 
-  it("inserting text marks it as tracked_insert", () => {
+  it("inserting text marks it as trackedInsert", () => {
     editor.insertAt(6, " world"); // after "hello" inside paragraph
 
     expect(editor.text).toBe("hello world");
@@ -99,7 +99,7 @@ describe("undo/redo — sequence of mixed edits", () => {
     const editor = new TestEditor(doc(p("hello")));
 
     editor.insertAt(6, "!"); // "hello!"
-    editor.deleteRange(2, 3); // delete "e" → tracked_delete
+    editor.deleteRange(2, 3); // delete "e" → trackedDelete
 
     expect(editor.pendingChanges).toHaveLength(2);
 

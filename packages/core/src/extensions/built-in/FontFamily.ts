@@ -18,15 +18,15 @@ const DEFAULT_FAMILIES = [
 ];
 
 /**
- * FontFamily — inline font family via the `font_family` mark.
+ * FontFamily — inline font family via the `fontFamily` mark.
  *
  * The family name is stored as-is and passed to ctx.font by the FontModifier.
- * StyleResolver already has a built-in fallback for `font_family`, but
+ * StyleResolver already has a built-in fallback for `fontFamily`, but
  * registering a proper modifier here keeps things explicit.
  *
  * Commands:
- *   setFontFamily(family: string)  — applies the font_family mark to the selection
- *   unsetFontFamily()              — removes the font_family mark from the selection
+ *   setFontFamily(family: string)  — applies the fontFamily mark to the selection
+ *   unsetFontFamily()              — removes the fontFamily mark from the selection
  */
 export const FontFamily = Extension.create<FontFamilyOptions>({
   name: "fontFamily",
@@ -37,9 +37,9 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
 
   addMarks() {
     return {
-      font_family: {
+      fontFamily: {
         attrs: { family: {}, dataTracked: { default: [] } },
-        excludes: "font_family",
+        excludes: "fontFamily",
         parseDOM: [
           {
             style: "font-family",
@@ -69,14 +69,14 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
       const { $from, $to } = state.selection;
       let tr = state.tr;
       let changed = false;
-      const fontFamilyMark = state.schema.marks["font_family"];
+      const fontFamilyMark = state.schema.marks["fontFamily"];
 
       state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
         if (!node.isTextblock) return;
         if (!("fontFamily" in node.attrs)) return;
         tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, fontFamily: family });
-        // Remove inline font_family marks from this block's entire content.
-        // Pasted content (e.g. from Google Docs) carries font_family marks on
+        // Remove inline fontFamily marks from this block's entire content.
+        // Pasted content (e.g. from Google Docs) carries fontFamily marks on
         // every span — without this, those inline marks override the block attr
         // and the toolbar font-family change appears to have no effect.
         if (fontFamilyMark) {
@@ -91,11 +91,11 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
     };
 
     return {
-      // Inline (character-level) — applies font_family mark to selected text
+      // Inline (character-level) — applies fontFamily mark to selected text
       setFontFamily:
         (family: unknown) =>
         (state, dispatch) => {
-          const markType = this.schema.marks["font_family"];
+          const markType = this.schema.marks["fontFamily"];
           if (!markType) return false;
           if (dispatch) {
             const { from, to } = state.selection;
@@ -106,7 +106,7 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
       unsetFontFamily:
         () =>
         (state, dispatch) => {
-          const markType = this.schema.marks["font_family"];
+          const markType = this.schema.marks["fontFamily"];
           if (!markType) return false;
           if (dispatch) {
             const { from, to } = state.selection;
@@ -124,7 +124,7 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
   addFontModifiers() {
     return new Map<string, FontModifier>([
       [
-        "font_family",
+        "fontFamily",
         (parsed: ParsedFont, attrs: Record<string, unknown>) => {
           const family = attrs["family"];
           if (typeof family === "string") {
@@ -144,10 +144,10 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
       labelStyle: { fontFamily: family },
       group: "family",
       // Active when the block attr is set, OR when every character in the
-      // selection carries the font_family mark for this family.
+      // selection carries the fontFamily mark for this family.
       isActive: (_activeMarks, _blockType, blockAttrs, activeMarkAttrs) =>
         blockAttrs["fontFamily"] === family ||
-        activeMarkAttrs?.["font_family"]?.["family"] === family,
+        activeMarkAttrs?.["fontFamily"]?.["family"] === family,
     }));
     return items;
   },

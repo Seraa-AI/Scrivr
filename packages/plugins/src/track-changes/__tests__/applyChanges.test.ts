@@ -7,7 +7,7 @@ import { CHANGE_OPERATION } from "../types";
 describe("applyChanges — accept tracked insert", () => {
   it("accepting a tracked insert keeps the text and removes the mark", () => {
     const editor = new TestEditor(doc(p("hello")));
-    editor.insertAt(6, "!"); // tracked_insert for "!"
+    editor.insertAt(6, "!"); // trackedInsert for "!"
 
     const [change] = editor.pendingChanges;
     expect(change!.dataTracked.operation).toBe(CHANGE_OPERATION.insert);
@@ -52,7 +52,7 @@ describe("applyChanges — reject tracked insert", () => {
 describe("applyChanges — accept tracked delete", () => {
   it("accepting a tracked delete removes the text from the doc", () => {
     const editor = new TestEditor(doc(p("hello")));
-    editor.deleteRange(5, 6); // delete "o" — kept in doc with tracked_delete
+    editor.deleteRange(5, 6); // delete "o" — kept in doc with trackedDelete
 
     expect(editor.text).toBe("hello"); // still visible (pending)
 
@@ -71,7 +71,7 @@ describe("applyChanges — accept tracked delete", () => {
 describe("applyChanges — reject tracked delete", () => {
   it("rejecting a tracked delete restores the text without the mark", () => {
     const editor = new TestEditor(doc(p("hello")));
-    editor.deleteRange(5, 6); // delete "o" — kept in doc with tracked_delete
+    editor.deleteRange(5, 6); // delete "o" — kept in doc with trackedDelete
 
     const [change] = editor.pendingChanges;
     editor.rejectChanges([change!.id]);
