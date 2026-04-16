@@ -5,7 +5,7 @@
 ### Patch Changes
 
 - c963158: Add standalone `getSchema()` function for building a ProseMirror schema from extensions without instantiating an Editor. Standardize all node/mark type names to camelCase (`tableRow`, `hardBreak`, `fontSize`, `fontFamily`, `trackedInsert`, `trackedDelete`, etc.) for a consistent naming convention across the schema.
-- 5752be2: Playground image and popover UX fixes.
+- 5752be2: Image interaction and popover UX fixes.
 
   **Images**
 

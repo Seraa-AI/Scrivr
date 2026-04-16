@@ -4,7 +4,7 @@
 
 ### Patch Changes
 
-- 5752be2: Playground image and popover UX fixes.
+- 5752be2: Image interaction and popover UX fixes.
 
   **Images**
 
