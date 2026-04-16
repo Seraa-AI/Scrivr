@@ -1,4 +1,5 @@
 import type { IEditor } from "@scrivr/core";
+import { subscribeViewUpdates, isAnchorInsideContainer } from "@scrivr/core";
 
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import {
@@ -147,7 +148,7 @@ export function createChangePopover(
     // A large change (whole paragraph, heading) would give a huge rect whose
     // top/bottom is far from where the cursor actually is.
     const rect = editor.getViewportRect(head, head);
-    if (!rect) {
+    if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
       if (visible) {
         visible = false;
         lastKey = null;
@@ -396,7 +397,11 @@ export function createChangePopover(
     }
   }
 
-  const unsubscribe = editor.subscribe(update);
+  // subscribe() covers doc/selection changes; subscribeViewUpdates also
+  // catches scroll / resize so the popover follows its anchor.
+  const offState = editor.subscribe(update);
+  const offView = subscribeViewUpdates(editor, update);
+  const unsubscribe = () => { offState(); offView(); };
 
   return () => {
     unsubscribe();

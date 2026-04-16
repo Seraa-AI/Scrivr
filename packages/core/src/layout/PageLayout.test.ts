@@ -1287,6 +1287,40 @@ describe("runPipeline — float image wrapping", () => {
     expect(resolved!.anchorPage).toBe(1);
   });
 
+  it("float overflow creates a new page when the anchor is on the last page", () => {
+    // Regression: toggling an image at the end of the doc from "inline" to
+    // a wrapping / break mode (square-left, square-right, top-bottom) turned
+    // the image into a float anchor. If the anchor paragraph's blockY plus
+    // the image height exceeded the page bottom, Pass 2 set floatPage to
+    // anchor.anchorPage + 1 without creating that page — the float had no
+    // tile to render on and silently disappeared while the NodeSelection
+    // (and image menu) stayed alive.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 300,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // pageBottom = 300 - 20 = 280. Anchor blockY = margins.top = 20 (first
+    // block). nodeHeight = 280 so candidateY + nodeHeight = 300 > 280 →
+    // Pass 2 moves the float to page 2, which no other block has created.
+    const img = schema.nodes["image"]!.create({ src: "", width: 100, height: 280, wrappingMode: "square-left" });
+    const para = schema.node("paragraph", null, [schema.text("leading text "), img]);
+    const layout = runPipeline(
+      schema.node("doc", null, [para]),
+      { pageConfig: smallPage, fontConfig, measurer: createMeasurer() },
+    );
+
+    const floats = layout.floats!;
+    expect(floats.length).toBe(1);
+    const f = floats[0]!;
+    expect(f.anchorPage).toBe(1);
+    // Float overflowed to page 2 and page 2 now exists so the tile renderer
+    // can iterate it.
+    expect(f.page).toBe(2);
+    expect(layout.pages.find((p) => p.pageNumber === f.page)).toBeDefined();
+  });
+
   it("float yDelta: long paragraph is split at page boundary rather than moved wholesale", () => {
     // Regression for the core bug: when float reflow (Pass 3) applies yDelta to
     // a subsequent block, pushing it past pageBottom, the block was previously
@@ -1383,14 +1417,16 @@ describe("runPipeline — float image wrapping", () => {
 //   FLOAT_MARGIN = 8, MOCK_LINE_HEIGHT = 18
 //
 // For a 200×200 image in break mode:
-//   floatX = 72 + (650 - 200) / 2 = 72 + 225 = 297  (centered)
-//   exclusion: x=72, right=722 (full content width), y=72-8=64, bottom=72+200+8=280
+//   floatX = 72 (content left edge, honours attrs.width)
+//   float.width = 200 (attrs.width, clamped to contentWidth)
+//   exclusion: x=72, right=722 (FULL content width — text can't wrap beside),
+//              y=72-8=64, bottom=72+200+8=280
 //   skipToY = 280 (first line at y=72 is inside [64,280] → gap to 280)
 
 describe("runPipeline — top-bottom (break) float", () => {
   const longText = "word ".repeat(80).trim();
 
-  it("float starts at content left and spans full content width", () => {
+  it("float honours attrs.width and starts at content left", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "top-bottom" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
@@ -1398,10 +1434,26 @@ describe("runPipeline — top-bottom (break) float", () => {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
     const float = layout.floats![0]!;
-    const contentX     = defaultPageConfig.margins.left;                                // 72
-    const contentWidth = defaultPageConfig.pageWidth - defaultPageConfig.margins.left - defaultPageConfig.margins.right; // 650
+    const contentX = defaultPageConfig.margins.left; // 72
+    // Image keeps its attrs.width — resize handles / ImageMenu W/H actually work.
     expect(float.x).toBeCloseTo(contentX, 1);
-    expect(float.width).toBeCloseTo(contentWidth, 1);
+    expect(float.width).toBeCloseTo(200, 1);
+  });
+
+  it("resize: changing attrs.width changes float.width (regression for forced full-width)", () => {
+    // Break mode used to force float.width = contentWidth regardless of
+    // attrs.width, which made resize handles and the ImageMenu W/H inputs
+    // visually ineffective even though the attrs were updated.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const small = schema.nodes["image"]!.create({ src: "", width: 150, height: 100, wrappingMode: "top-bottom" });
+    const large = schema.nodes["image"]!.create({ src: "", width: 400, height: 100, wrappingMode: "top-bottom" });
+    const paraSmall = schema.node("paragraph", null, [small, schema.text(longText)]);
+    const paraLarge = schema.node("paragraph", null, [large, schema.text(longText)]);
+    const opts = { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() };
+    const layoutSmall = runPipeline(schema.node("doc", null, [paraSmall]), opts);
+    const layoutLarge = runPipeline(schema.node("doc", null, [paraLarge]), opts);
+    expect(layoutSmall.floats![0]!.width).toBeCloseTo(150, 1);
+    expect(layoutLarge.floats![0]!.width).toBeCloseTo(400, 1);
   });
 
   it("no text line overlaps the image zone (text fully above or below)", () => {

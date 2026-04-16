@@ -11,6 +11,7 @@
  */
 
 import type { IEditor } from "@scrivr/core";
+import { subscribeViewUpdates, isAnchorInsideContainer } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { buildAcceptedTextMap, acceptedRangeToDocRange } from "../track-changes/lib/acceptedTextMap";
@@ -208,7 +209,7 @@ export function createSuggestionPopover(
     }
 
     const rect = editor.getViewportRect(found.from, found.to);
-    if (!rect) {
+    if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
       if (visible) { visible = false; lastKey = null; onHide(); }
       return;
     }
@@ -232,10 +233,14 @@ export function createSuggestionPopover(
     }
   }
 
-  const unsubscribe = editor.subscribe(update);
+  // subscribe() covers doc/selection changes; subscribeViewUpdates also
+  // catches scroll / resize so the popover follows its anchor.
+  const offState = editor.subscribe(update);
+  const offView = subscribeViewUpdates(editor, update);
 
   return () => {
-    unsubscribe();
+    offState();
+    offView();
     if (visible) { visible = false; lastKey = null; onHide(); }
   };
 }

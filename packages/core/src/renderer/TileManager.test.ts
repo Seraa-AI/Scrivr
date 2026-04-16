@@ -99,6 +99,7 @@ function makeMockEditor(isPageless = false, pageConfig = DEFAULT_PAGE_CONFIG) {
       return layoutRef.current;
     },
     setPageTopLookup: vi.fn(),
+    setScrollContainerLookup: vi.fn(),
     subscribe: vi.fn(() => vi.fn()),
     ensurePagePopulated: vi.fn(),
     charMap: {

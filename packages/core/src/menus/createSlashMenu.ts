@@ -17,6 +17,8 @@
  */
 import type { IEditor } from "../extensions/types";
 import type { EditorState } from "prosemirror-state";
+import { subscribeViewUpdates } from "./subscribeViewUpdates";
+import { isAnchorInsideContainer } from "./anchorVisibility";
 
 export interface SlashMenuCallbacks {
   /** Called when the slash menu should become visible. */
@@ -57,7 +59,7 @@ export function createSlashMenu(
     // Use cursor position for the rect (same as FloatingMenu).
     const cursorPos = state.selection.from;
     const rect = editor.getViewportRect(cursorPos, cursorPos);
-    if (!rect) {
+    if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
       if (visible) { visible = false; onHide(); }
       return;
     }
@@ -74,7 +76,7 @@ export function createSlashMenu(
     if (visible) { visible = false; onHide(); }
   }
 
-  const unsubscribe = editor.on("update", () => {
+  const unsubscribe = subscribeViewUpdates(editor, () => {
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => { rafId = null; update(); });
   });

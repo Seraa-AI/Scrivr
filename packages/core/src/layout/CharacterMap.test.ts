@@ -225,6 +225,37 @@ describe("CharacterMap", () => {
       // Existing page 1 data is intact
       expect(map.coordsAtPos(1)?.page).toBe(1);
     });
+  });
+
+  describe("objectRectAtPoint", () => {
+    it("returns the rect containing the point", () => {
+      const m = new CharacterMap();
+      m.registerObjectRect({ docPos: 10, x: 50, y: 100, width: 80, height: 60, page: 1 });
+      expect(m.objectRectAtPoint(60, 110, 1)?.docPos).toBe(10);
+      expect(m.objectRectAtPoint(50, 100, 1)?.docPos).toBe(10); // top-left corner
+      expect(m.objectRectAtPoint(130, 160, 1)?.docPos).toBe(10); // bottom-right corner
+    });
+
+    it("returns undefined when the point is outside every rect", () => {
+      const m = new CharacterMap();
+      m.registerObjectRect({ docPos: 10, x: 50, y: 100, width: 80, height: 60, page: 1 });
+      // 1px left of the rect — this is the bug 1 scenario where posAtCoords
+      // would still return the image's docPos but the click is NOT on the image.
+      expect(m.objectRectAtPoint(49, 130, 1)).toBeUndefined();
+      // 1px right of the rect
+      expect(m.objectRectAtPoint(131, 130, 1)).toBeUndefined();
+      // Above
+      expect(m.objectRectAtPoint(90, 99, 1)).toBeUndefined();
+    });
+
+    it("filters by page", () => {
+      const m = new CharacterMap();
+      m.registerObjectRect({ docPos: 10, x: 50, y: 100, width: 80, height: 60, page: 1 });
+      m.registerObjectRect({ docPos: 20, x: 50, y: 100, width: 80, height: 60, page: 2 });
+      expect(m.objectRectAtPoint(60, 110, 1)?.docPos).toBe(10);
+      expect(m.objectRectAtPoint(60, 110, 2)?.docPos).toBe(20);
+      expect(m.objectRectAtPoint(60, 110, 3)).toBeUndefined();
+    });
 
     it("clearing page 1 leaves an empty map (posAtCoords returns 0)", () => {
       map.clearPage(1);

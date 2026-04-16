@@ -97,6 +97,35 @@ export function computeNewSize(
 }
 
 /**
+ * Computes the ghost rect to draw during a live resize drag.
+ *
+ * The handle being dragged determines which edge is fixed: the edge opposite
+ * the drag point stays pinned so the box grows in the user's drag direction.
+ * Dragging "ML" (middle-left) to the left must expand the box leftward — the
+ * right edge (origX + startW) stays where it is and the new left edge sits at
+ * origX + startW - newW. Dragging "BR" grows down-right from the original
+ * top-left (origX, origY) with no adjustment.
+ *
+ * Center handles (TC, BC, ML, MR) only change one dimension — the logic above
+ * still applies because their id carries the relevant T/B/L/R letter.
+ */
+export function computeGhostRect(
+  handleId: string,
+  origX: number,
+  origY: number,
+  startW: number,
+  startH: number,
+  newW: number,
+  newH: number,
+): { x: number; y: number; width: number; height: number } {
+  let x = origX;
+  let y = origY;
+  if (handleId.includes("L")) x = origX + startW - newW; // right edge fixed
+  if (handleId.includes("T")) y = origY + startH - newH; // bottom edge fixed
+  return { x, y, width: newW, height: newH };
+}
+
+/**
  * Draws a selection border + 8 resize handles for the rect (x, y, w, h).
  * The ctx must already be scaled by dpr — draw in logical CSS pixels.
  */

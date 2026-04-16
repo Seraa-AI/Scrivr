@@ -12,3 +12,6 @@ export type { SlashMenuOptions, SlashMenuCallbacks, SlashMenuController } from "
 
 export { createImageMenu } from "./createImageMenu";
 export type { ImageMenuOptions, ImageMenuCallbacks, ImageMenuInfo } from "./createImageMenu";
+
+export { subscribeViewUpdates } from "./subscribeViewUpdates";
+export { isAnchorInsideContainer } from "./anchorVisibility";

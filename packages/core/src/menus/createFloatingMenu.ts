@@ -14,6 +14,8 @@
  */
 import type { IEditor } from "../extensions/types";
 import type { EditorState } from "prosemirror-state";
+import { subscribeViewUpdates } from "./subscribeViewUpdates";
+import { isAnchorInsideContainer } from "./anchorVisibility";
 
 export interface FloatingMenuCallbacks {
   onShow: (rect: DOMRect) => void;
@@ -47,7 +49,7 @@ export function createFloatingMenu(editor: IEditor, options: FloatingMenuOptions
 
     const { from } = state.selection;
     const rect = editor.getViewportRect(from, from);
-    if (!rect) {
+    if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
       if (visible) { visible = false; onHide(); }
       return;
     }
@@ -60,7 +62,7 @@ export function createFloatingMenu(editor: IEditor, options: FloatingMenuOptions
     }
   }
 
-  const unsubscribe = editor.on("update", () => {
+  const unsubscribe = subscribeViewUpdates(editor, () => {
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => { rafId = null; update(); });
   });
