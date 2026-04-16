@@ -118,22 +118,28 @@ describe("EditorSurface — toDocJSON", () => {
 // ── onUpdate subscription ────────────────────────────────────────────────────
 
 describe("EditorSurface — onUpdate", () => {
-  it("fires synchronously after dispatch", () => {
+  it("fires synchronously after dispatch with a SurfaceUpdate payload", () => {
     const s = makeSurface();
     const spy = vi.fn();
     s.onUpdate(spy);
-    s.dispatch(s.state.tr.insertText("a"));
+    const tr = s.state.tr.insertText("a");
+    s.dispatch(tr);
     expect(spy).toHaveBeenCalledTimes(1);
+    const update = spy.mock.calls[0]![0];
+    expect(update.docChanged).toBe(true);
+    expect(update.tr).toBe(tr);
+    expect(update.state).toBe(s.state);
   });
 
-  it("fires for selection-only transactions too", () => {
+  it("fires for selection-only transactions with docChanged:false", () => {
     // Renderers care about selection changes (cursor re-paint) even when
-    // the doc hasn't changed.
+    // the doc hasn't changed — and need to distinguish from content changes.
     const s = makeSurface();
     const spy = vi.fn();
     s.onUpdate(spy);
     s.dispatch(s.state.tr.setSelection(TextSelection.create(s.state.doc, 1)));
     expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]![0].docChanged).toBe(false);
   });
 
   it("unsubscribe stops notifications", () => {

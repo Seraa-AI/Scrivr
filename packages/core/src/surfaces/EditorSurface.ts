@@ -23,6 +23,19 @@ export interface EditorSurfaceInit {
   initialDocJSON: Record<string, unknown>;
 }
 
+/**
+ * Event delivered to `onUpdate` listeners after each dispatch. Carries enough
+ * to decide downstream work (re-paint vs re-measure) without re-reading state.
+ */
+export interface SurfaceUpdate {
+  /** Post-dispatch state — identical to `surface.state`. */
+  state: EditorState;
+  /** The transaction that was applied. */
+  tr: Transaction;
+  /** True iff the doc changed. Selection-only trs have this false. */
+  docChanged: boolean;
+}
+
 export class EditorSurface {
   readonly id: SurfaceId;
   readonly owner: string;
@@ -31,7 +44,7 @@ export class EditorSurface {
 
   private _state: EditorState;
   private _isDirty = false;
-  private readonly _listeners = new Set<() => void>();
+  private readonly _listeners = new Set<(update: SurfaceUpdate) => void>();
 
   /**
    * @internal
@@ -66,8 +79,10 @@ export class EditorSurface {
 
   /**
    * Apply a transaction. Flips `isDirty` if the doc changed, clears the
-   * charMap (stale glyph positions), and notifies listeners synchronously.
-   * Throws if called while the surface is committing (prevents commit loops).
+   * charMap (stale glyph positions), and notifies listeners synchronously
+   * with the full `SurfaceUpdate` so they can cheaply distinguish
+   * selection-only from content changes. Throws if called while the
+   * surface is committing (prevents commit loops).
    */
   dispatch(tr: Transaction): void {
     if (this._committing) {
@@ -78,11 +93,13 @@ export class EditorSurface {
       );
     }
     this._state = this._state.apply(tr);
-    if (tr.docChanged) {
+    const docChanged = tr.docChanged;
+    if (docChanged) {
       this._isDirty = true;
       this.charMap.clear();
     }
-    this._listeners.forEach((h) => h());
+    const update: SurfaceUpdate = { state: this._state, tr, docChanged };
+    this._listeners.forEach((h) => h(update));
   }
 
   /** Clear the dirty flag. Owners call this after a successful commit. */
@@ -96,11 +113,12 @@ export class EditorSurface {
   }
 
   /**
-   * Subscribe to post-dispatch notifications. Returns an unsubscribe thunk.
-   * Listeners fire synchronously inside `dispatch`; uncaught exceptions
-   * propagate (match `BaseEditor._notifyListeners` precedent).
+   * Subscribe to post-dispatch notifications. Handler receives a
+   * `SurfaceUpdate` so consumers can branch on `docChanged` without
+   * re-reading state. Returns an unsubscribe thunk. Listeners fire
+   * synchronously inside `dispatch`; uncaught exceptions propagate.
    */
-  onUpdate(handler: () => void): Unsubscribe {
+  onUpdate(handler: (update: SurfaceUpdate) => void): Unsubscribe {
     this._listeners.add(handler);
     return () => {
       this._listeners.delete(handler);
