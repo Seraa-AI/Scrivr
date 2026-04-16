@@ -77,6 +77,9 @@ export class Extension<Options extends object = object> {
       docAttrs: config.addDocAttrs?.call(p1) ?? {},
       // Phase 1 — chrome contribution consumed by the layout aggregator.
       pageChrome: config.addPageChrome?.call(p1) ?? null,
+      // Phase 1 — surface owner registration consumed by Editor via
+      // ExtensionManager.getSurfaceOwners() and installed on SurfaceRegistry.
+      surfaceOwner: config.addSurfaceOwner?.call(p1) ?? null,
       // Phase 2: only when schema is available
       plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
       ...(schema && config.addInitialDoc

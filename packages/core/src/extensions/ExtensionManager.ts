@@ -23,6 +23,7 @@ import type { FontConfig } from "../layout/FontConfig";
 import { defaultPageConfig } from "../layout/PageLayout";
 import type { PageConfig } from "../layout/PageLayout";
 import type { PageChromeContribution } from "../layout/PageMetrics";
+import type { SurfaceOwnerRegistration } from "../surfaces/types";
 
 /**
  * Build a ProseMirror Schema from an array of extensions.
@@ -225,6 +226,34 @@ export class ExtensionManager {
       if (ext.pageChrome !== null) contribs.push(ext.pageChrome);
     }
     return contribs;
+  }
+
+  /**
+   * Surface owner registrations keyed by `owner`. Throws if two extensions
+   * claim the same owner namespace — the SurfaceRegistry needs a single
+   * lifecycle mediator per owner or callbacks would collide silently.
+   * Installed onto SurfaceRegistry via `_setOwnerMediator()` during Editor
+   * construction.
+   */
+  getSurfaceOwners(): Map<string, SurfaceOwnerRegistration> {
+    const map = new Map<string, SurfaceOwnerRegistration>();
+    const sources = new Map<string, string>(); // owner → extension name
+    for (const ext of this.resolved) {
+      if (ext.surfaceOwner === null) continue;
+      const { owner } = ext.surfaceOwner;
+      if (map.has(owner)) {
+        const prev = sources.get(owner)!;
+        throw new Error(
+          `[ExtensionManager] Surface owner "${owner}" is contributed by ` +
+            `both "${prev}" and "${ext.name}". Owner namespaces must be ` +
+            `unique across all extensions. Rename one (e.g. ` +
+            `"${ext.name}_${owner}") or remove the duplicate extension.`,
+        );
+      }
+      map.set(owner, ext.surfaceOwner);
+      sources.set(owner, ext.name);
+    }
+    return map;
   }
 
   /**

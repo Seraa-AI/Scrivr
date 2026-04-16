@@ -24,6 +24,7 @@ import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
+import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { SelectionController } from "../SelectionController";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
@@ -412,6 +413,20 @@ export interface ExtensionConfig<Options = object> {
    */
   addPageChrome?(this: Phase1Context<Options>): PageChromeContribution;
 
+  /**
+   * Register the plugin as owner of one or more EditorSurfaces (headers,
+   * footnote bodies, etc.). `owner` must be unique across extensions; the
+   * ExtensionManager throws on collisions. Surfaces themselves are created
+   * lazily by the plugin (e.g. on first activation) and registered via
+   * `editor.surfaces.register(...)`.
+   *
+   * Lifecycle callbacks fired by SurfaceRegistry during `activate()`:
+   *   - onCommit(prev)    — prev is dirty; persist to flow doc. Throws abort activation.
+   *   - onDeactivate(prev) — prev is leaving; tear down editing state. Throws are logged.
+   *   - onActivate(next)   — next just became active; focus/init. Throws are logged.
+   */
+  addSurfaceOwner?(this: Phase1Context<Options>): SurfaceOwnerRegistration;
+
   // ── Phase 2: Behaviour ──────────────────────────────────────────────────────
   // Called with `this = ExtensionContext` — the built schema is available.
 
@@ -585,6 +600,8 @@ export interface ResolvedExtension {
   docAttrs: Record<string, AttributeSpec>;
   /** Page chrome contribution (header/footer/etc.) or null when absent. */
   pageChrome: PageChromeContribution | null;
+  /** Surface owner registration (plugin-owned edit regions) or null when absent. */
+  surfaceOwner: SurfaceOwnerRegistration | null;
   plugins: Plugin[];
   keymap: Record<string, Command>;
   commands: Record<string, (...args: unknown[]) => Command>;
