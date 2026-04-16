@@ -1798,6 +1798,74 @@ describe("paginateFlow — Stage 2", () => {
     );
     expect(pr.earlyTerminated).toBe(false);
   });
+
+  // ── Metrics-array contract ─────────────────────────────────────────────────
+  //
+  // Lock down result.metrics length vs result.pages length on all three
+  // delivery paths before PR 5 contributors can silently depend on a specific
+  // shape. The contract is: metrics aligns 1:1 with the pages the caller
+  // assembles — [...pr.pages, pr.currentPage] on normal completion,
+  // pr.pages alone on earlyTerminated, and includes the in-progress page
+  // on resumption/partial returns.
+
+  it("metrics contract: normal completion — length == pages.length + 1, pageNumbers match", () => {
+    // A doc that paginates cleanly across >1 page (need enough blocks to overflow).
+    // Each mock line = 18px, content height = 979 → ~54 lines per page.
+    // 70 paragraphs @ 1 line each → spills onto page 2.
+    const blocks = Array.from({ length: 70 }, (_, i) => p(`Paragraph ${i + 1}`));
+    const testDoc = doc(...blocks);
+    const measurer = createMeasurer();
+    const { margins } = defaultPageConfig;
+    const contentWidth = defaultPageConfig.pageWidth - margins.left - margins.right;
+    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
+    const metricsFor = makeMetricsFor();
+    const pr = paginateFlow(
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
+      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+    );
+    expect(pr.earlyTerminated).toBe(false);
+    expect(pr.pages.length).toBeGreaterThanOrEqual(1);
+    expect(pr.metrics).toHaveLength(pr.pages.length + 1);
+    // pageNumber alignment: metrics[i] corresponds to pages[i], and the trailing
+    // metrics entry is for the currentPage the caller will append.
+    for (let i = 0; i < pr.pages.length; i++) {
+      expect(pr.metrics[i]!.pageNumber).toBe(pr.pages[i]!.pageNumber);
+    }
+    expect(pr.metrics[pr.pages.length]!.pageNumber).toBe(pr.currentPage.pageNumber);
+  });
+
+  it("metrics contract: end-to-end via runPipeline — DocumentLayout.metrics matches pages", () => {
+    // runPipeline consumes paginateFlow's metrics and sets DocumentLayout.metrics.
+    // Verify the invariant holds after the post-paginate stages (float, fragments).
+    const blocks = Array.from({ length: 70 }, (_, i) => p(`Paragraph ${i + 1}`));
+    const layout = runPipeline(doc(...blocks), {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+    });
+    expect(layout.pages.length).toBeGreaterThan(1);
+    expect(layout.metrics).toHaveLength(layout.pages.length);
+    for (let i = 0; i < layout.pages.length; i++) {
+      expect(layout.metrics![i]!.pageNumber).toBe(layout.pages[i]!.pageNumber);
+    }
+  });
+
+  it("metrics contract: resumption partial return — in-progress page included", () => {
+    // maxBlocks triggers a partial return (isPartial=true). paginateFlow's
+    // metrics must include the currentPage entry because the caller ships
+    // [...pr.pages, pr.currentPage] in that path too.
+    const blocks = Array.from({ length: 70 }, (_, i) => p(`Paragraph ${i + 1}`));
+    const layout = runPipeline(doc(...blocks), {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+      maxBlocks: 10, // stops well before pagination completes
+    });
+    expect(layout.isPartial).toBe(true);
+    expect(layout.metrics).toHaveLength(layout.pages.length);
+    for (let i = 0; i < layout.pages.length; i++) {
+      expect(layout.metrics![i]!.pageNumber).toBe(layout.pages[i]!.pageNumber);
+    }
+  });
 });
 
 // ── Pageless mode ─────────────────────────────────────────────────────────────
