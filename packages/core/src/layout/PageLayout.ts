@@ -17,8 +17,11 @@ import {
   EMPTY_RESOLVED_CHROME,
   type PageMetrics,
   type ResolvedChrome,
+  type PageChromeContribution,
+  type PageChromeMeasureInput,
 } from "./PageMetrics";
 import { fitLinesInCapacity } from "./splitLines";
+import { runChromeLoop } from "./aggregateChrome";
 
 export interface PageConfig {
   pageWidth: number;
@@ -194,6 +197,13 @@ export interface DocumentLayout {
   convergence?: "stable" | "exhausted";
   /** How many iterations the chrome aggregator ran. Debug/telemetry only. */
   iterationCount?: number;
+  /**
+   * @internal
+   * Chrome contributor payloads keyed by contribution.name. runPipeline always
+   * writes an object (possibly empty); absent only on test fixtures that
+   * bypass runPipeline. Seeds the next run's previousRunPayload.
+   */
+  _chromePayloads?: Record<string, unknown>;
 }
 
 /**
@@ -358,6 +368,12 @@ export interface PageLayoutOptions {
    * Makes each chunk O(chunkSize) instead of O(totalBlocks) — total O(N).
    */
   resumption?: LayoutResumption;
+  /**
+   * Page chrome contributors from the ExtensionManager. Empty or omitted →
+   * runChromeLoop takes the zero-contributor fast path (one iteration,
+   * EMPTY_RESOLVED_CHROME, identical to pre-aggregator behaviour).
+   */
+  pageChromeContributions?: PageChromeContribution[];
 }
 
 /** A4 at 96dpi with 1-inch margins */
@@ -416,22 +432,45 @@ export function runPipeline(
   }
 }
 
-function _runPipelineBody(
+/**
+ * Flow-only pipeline result. Pages + metrics are populated, floats/fragments
+ * are not — those are applied once after the chrome-aggregator loop converges.
+ * Chrome contributors re-run this per iteration via the aggregator.
+ */
+export interface FlowPipelineResult {
+  /** Pass-1 DocumentLayout with pages, metrics, runId. No floats, no fragments. */
+  layout: DocumentLayout;
+  /** True when streaming cutoff stopped pagination mid-document. */
+  isPartial: boolean;
+  /** Geometry + font context — applyFloatLayout needs all of these. */
+  margins: PageConfig["margins"];
+  pageWidth: number;
+  contentWidth: number;
+  fontConfig: FontConfig;
+  fontModifiers: Map<string, FontModifier> | undefined;
+  measurer: TextMeasurer;
+  /** Y cursor at end of pagination — used for pageless totalContentHeight. */
+  y: number;
+}
+
+/**
+ * Stage 1 + Stage 2 of the pipeline (measure + paginate). Extracted so the
+ * chrome aggregator can call it N times per layout run while floats + fragments
+ * only run once on the final, converged pages.
+ */
+export function runFlowPipeline(
   doc: Node,
   options: PageLayoutOptions,
-): DocumentLayout {
-  const { fontModifiers, measureCache, previousLayout,pageConfig, measurer } = options;
-  const version = (options.previousVersion ?? 0) + 1;
-  const runId = version; // Same identity for now; can diverge later if needed.
+  resolved: ResolvedChrome,
+  runId: number,
+): FlowPipelineResult {
+  const { fontModifiers, measureCache, previousLayout, pageConfig, measurer } = options;
   const baseConfig = options.fontConfig ?? defaultFontConfig;
   const fontConfig = applyPageFont(baseConfig, pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY);
 
   const { pageWidth, pageHeight, margins } = pageConfig;
   const contentWidth = pageWidth - margins.left - margins.right;
   const maxBlocks = options.maxBlocks;
-
-  // No chrome contributors yet — will become an aggregator call when the lane lands.
-  const resolved = EMPTY_RESOLVED_CHROME;
 
   // Per-page metrics with single-entry cache (pages advance sequentially).
   let cachedMetricsPage = -1;
@@ -445,46 +484,40 @@ function _runPipelineBody(
     return cachedMetrics;
   };
 
-  // ── Resumption support: O(N) incremental chunked layout ───────────────────
-  // When resumption is provided, restore the cursor state from the previous
-  // chunk rather than re-iterating already-processed blocks. The items array
-  // is cached in the resumption object so collectLayoutItems() is only called
-  // on the first chunk.
+  // Resumption: restore cursor from prior chunk instead of re-walking the doc.
   const r = options.resumption;
   const items = r ? r.items : collectLayoutItems(doc, fontConfig);
   const startIndex = r ? r.nextItemIndex : 0;
-
-  // Restore page cursor from previous chunk, or start fresh.
   const pages: LayoutPage[] = r ? r.completedPages : [];
-  let currentPage: LayoutPage = r ? r.currentPage : { pageNumber: 1, blocks: [] };
-  let y = r ? r.currentY : metricsFor(1).contentTop;
-  let prevSpaceAfter = r ? r.prevSpaceAfter : 0;
-  const chunkVersion = r ? r.version : version;
+  const currentPage: LayoutPage = r ? r.currentPage : { pageNumber: 1, blocks: [] };
+  const initY = r ? r.currentY : metricsFor(1).contentTop;
+  const initPrevSpaceAfter = r ? r.prevSpaceAfter : 0;
+  const chunkVersion = r ? r.version : runId;
 
-  // ── Stage 1: measure ─────────────────────────────────────────────────────
+  // Stage 1: measure.
   const flowConfig: FlowConfig = { margins, contentWidth };
   const flowResult = buildBlockFlow(
     items, startIndex, flowConfig, fontConfig,
     measurer, fontModifiers, measureCache, maxBlocks,
   );
 
-  // ── Stage 2: paginate ─────────────────────────────────────────────────────
+  // Stage 2: paginate.
   const pr = paginateFlow(
     flowResult.flows, pageConfig, resolved, metricsFor, runId,
-    previousLayout, measureCache,
-    pages, currentPage, y, prevSpaceAfter,
-    pageConfig.pageless,
+    {
+      previousLayout,
+      measureCache,
+      pageless: pageConfig.pageless,
+      init: { pages, page: currentPage, y: initY, prevSpaceAfter: initPrevSpaceAfter },
+    },
   );
 
-  // ── Helper: compute per-page metrics array for a given page list ─────────
-  // Used by both the partial and final return paths. Mirrors what paginateFlow
-  // threaded through metricsFor(), but with a fresh 1-entry cache so we don't
-  // pollute the metricsFor cache at the end of the run.
-  const buildMetricsArray = (pageList: LayoutPage[]): PageMetrics[] =>
-    pageList.map((p) => computePageMetrics(pageConfig, resolved, p.pageNumber));
+  const isPartial = flowResult.reachedCutoff && !pr.earlyTerminated;
+  const context = {
+    margins, pageWidth, contentWidth, fontConfig, fontModifiers, measurer,
+  };
 
-  // ── Streaming layout cutoff ───────────────────────────────────────────────
-  if (flowResult.reachedCutoff && !pr.earlyTerminated) {
+  if (isPartial) {
     const resumption: LayoutResumption = {
       items,
       nextItemIndex: flowResult.cutoffIndex,
@@ -496,7 +529,7 @@ function _runPipelineBody(
       prevPageCount: pr.pages.length,
     };
     const partialPages = [...pr.pages, pr.currentPage];
-    const partialPass1: DocumentLayout = {
+    const layout: DocumentLayout = {
       pages: partialPages,
       pageConfig,
       version: chunkVersion,
@@ -505,58 +538,103 @@ function _runPipelineBody(
       totalContentHeight: pageConfig.pageless
         ? pr.y + margins.bottom
         : partialPages.length * pageHeight,
-      metrics: buildMetricsArray(partialPages),
+      metrics: pr.metrics,
       runId,
       convergence: "stable",
       iterationCount: 1,
     };
-    // ── Stage 3: float layout (partial chunk) ────────────────────────────────
-    return applyFloatLayout(partialPass1, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
+    return { layout, isPartial: true, ...context, y: pr.y };
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
-
-  // ── Stage 3: float layout ─────────────────────────────────────────────────
-  const pass1Result: DocumentLayout = {
+  const layout: DocumentLayout = {
     pages: allPages,
     pageConfig,
     version: chunkVersion,
     totalContentHeight: 0,
-    metrics: buildMetricsArray(allPages),
+    metrics: pr.metrics,
     runId,
     convergence: "stable",
     iterationCount: 1,
   };
-  const floated = applyFloatLayout(pass1Result, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
+  return { layout, isPartial: false, ...context, y: pr.y };
+}
 
-  // ── Stage 4: fragment index ───────────────────────────────────────────────
-  // buildFragments computes fragmentCount/fragmentIndex from the final page
-  // list, superseding the manual stamping loop that previously lived here.
+function _runPipelineBody(
+  doc: Node,
+  options: PageLayoutOptions,
+): DocumentLayout {
+  const { pageConfig, previousLayout } = options;
+  const { pageHeight, margins } = pageConfig;
+  const version = (options.previousVersion ?? 0) + 1;
+  const runId = version; // Same identity for now; can diverge later if needed.
+
+  // Resolve fontConfig once — shared with chrome contributors' measure() input
+  // so mini-doc layouts inside their hooks use the same typography.
+  const baseConfig = options.fontConfig ?? defaultFontConfig;
+  const resolvedFontConfig = applyPageFont(
+    baseConfig,
+    pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY,
+  );
+  const measureInput: PageChromeMeasureInput = {
+    doc,
+    pageConfig,
+    measurer: options.measurer,
+    fontConfig: resolvedFontConfig,
+  };
+
+  const contributions = options.pageChromeContributions ?? [];
+  const prevRunPayloads = previousLayout?._chromePayloads ?? {};
+  const prevRunFlowLayout = previousLayout ?? null;
+
+  // Stages 1 + 2 — measure + paginate, wrapped in the chrome aggregator loop.
+  // Zero contributors short-circuits after iteration 1 with identical output
+  // to the pre-aggregator single-pass path.
+  const chromeResult = runChromeLoop(
+    doc, options, contributions, runId,
+    prevRunPayloads, prevRunFlowLayout, measureInput,
+  );
+  const fp = chromeResult.flow;
+
+  // Propagate aggregator outcome + payloads into the layout returned to callers.
+  const layoutWithChrome: DocumentLayout = {
+    ...fp.layout,
+    convergence: chromeResult.convergence,
+    iterationCount: chromeResult.iterationCount,
+    _chromePayloads: chromeResult.chromePayloads,
+  };
+
+  // Stage 3: float layout — runs once on the final paginated pages.
+  const floated = applyFloatLayout(
+    layoutWithChrome, fp.margins, fp.pageWidth, fp.contentWidth,
+    fp.measurer, fp.fontConfig, fp.fontModifiers,
+  );
+  if (fp.isPartial) return floated;
+
+  // Stage 4: fragment index + totalContentHeight.
   const { fragments, fragmentsByPage } = buildFragments(floated.pages);
-
-  // ── Compute totalContentHeight ────────────────────────────────────────────
   const totalContentHeight = pageConfig.pageless
-    ? pr.y + margins.bottom
-    : allPages.length * pageHeight;
-
+    ? fp.y + margins.bottom
+    : floated.pages.length * pageHeight;
   return { ...floated, fragments, fragmentsByPage, totalContentHeight };
 }
 
-/** Stage 2: assign measured FlowBlocks to pages. All positions read through metricsFor(). */
-export function paginateFlow(
-  flows: FlowBlock[],
-  pageConfig: PageConfig,
-  resolved: ResolvedChrome,
-  metricsFor: (pageNumber: number) => PageMetrics,
-  runId: number,
-  previousLayout: DocumentLayout | undefined,
-  measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
-  initPages: LayoutPage[],
-  initPage: LayoutPage,
-  initY: number,
-  initPrevSpaceAfter: number,
-  pageless?: boolean,
-): {
+/** Options bag for paginateFlow — cross-cutting context + resumption cursor. */
+export interface PaginateFlowOptions {
+  previousLayout?: DocumentLayout | undefined;
+  measureCache?: WeakMap<Node, MeasureCacheEntry> | undefined;
+  pageless?: boolean | undefined;
+  /** Initial page cursor. Fresh run: pages=[], page=empty page 1. Resumption: from prior chunk. */
+  init: {
+    pages: LayoutPage[];
+    page: LayoutPage;
+    y: number;
+    prevSpaceAfter: number;
+  };
+}
+
+/** Result of paginateFlow. `metrics` aligns 1:1 with the pages the caller uses. */
+export interface PaginateFlowResult {
   /** All completed pages. When earlyTerminated, currentPage is already included. */
   pages: LayoutPage[];
   /** The page currently being built — only valid when earlyTerminated === false. */
@@ -567,14 +645,39 @@ export function paginateFlow(
   prevSpaceAfter: number;
   /** True when Phase 1b fired and all remaining pages were copied from previousLayout. */
   earlyTerminated: boolean;
-} {
-  void resolved; // Consumed via metricsFor; kept for future expansion.
+  /**
+   * Per-page metrics accumulated during pagination. Aligned with the pages
+   * the caller delivers: `earlyTerminated ? pages : [...pages, currentPage]`.
+   */
+  metrics: PageMetrics[];
+}
 
+/** Stage 2: assign measured FlowBlocks to pages. All positions read through metricsFor(). */
+export function paginateFlow(
+  flows: FlowBlock[],
+  pageConfig: PageConfig,
+  resolved: ResolvedChrome,
+  metricsFor: (pageNumber: number) => PageMetrics,
+  runId: number,
+  opts: PaginateFlowOptions,
+): PaginateFlowResult {
+  // `resolved` is threaded through metricsFor; reserved for future cache checks
+  // keyed off resolved.metricsVersion. Read access today is intentional no-op.
+  void resolved;
+
+  const { previousLayout, measureCache, pageless, init } = opts;
   const { margins } = pageConfig;
-  const pages = initPages;
-  let currentPage = initPage;
-  let y = initY;
-  let prevSpaceAfter = initPrevSpaceAfter;
+  const pages = init.pages;
+  let currentPage = init.page;
+  let y = init.y;
+  let prevSpaceAfter = init.prevSpaceAfter;
+
+  // Metrics aligned with [...pages, currentPage]. When early-term pushes
+  // currentPage into pages, this invariant still holds because the trailing
+  // entry is re-used as the corresponding pages entry.
+  const metrics: PageMetrics[] = [];
+  for (const p of pages) metrics.push(metricsFor(p.pageNumber));
+  metrics.push(metricsFor(currentPage.pageNumber));
 
   // Phase 1b: only valid after we've seen at least one cache miss (= the edit point).
   let seenCacheMiss = false;
@@ -586,6 +689,7 @@ export function paginateFlow(
       pages.push(currentPage);
       currentPage = newPage(pages.length + 1);
       y = metricsFor(currentPage.pageNumber).contentTop;
+      metrics.push(metricsFor(currentPage.pageNumber));
       prevSpaceAfter = 0;
       continue;
     }
@@ -682,6 +786,7 @@ export function paginateFlow(
         // Fetch the NEW page's metrics — differentFirstPage or footnote bands
         // can make this differ from the page we just left.
         const newPageContentTop = metricsFor(currentPage.pageNumber).contentTop;
+        metrics.push(metricsFor(currentPage.pageNumber));
         y = newPageContentTop;
         prevSpaceAfter = 0;
 
@@ -754,6 +859,7 @@ export function paginateFlow(
             }
             pages.push(currentPage);
             currentPage = newPage(pages.length + 1);
+            metrics.push(metricsFor(currentPage.pageNumber));
             prevSpaceAfter = 0;
             currentPartStartY = metricsFor(currentPage.pageNumber).contentTop;
             gapSuppressApplied = false;
@@ -805,6 +911,7 @@ export function paginateFlow(
         if (!isLastPart) {
           pages.push(currentPage);
           currentPage = newPage(pages.length + 1);
+          metrics.push(metricsFor(currentPage.pageNumber));
           prevSpaceAfter = 0;
           currentPartStartY = metricsFor(currentPage.pageNumber).contentTop;
           remainingLines = remainingLines.slice(linesFit);
@@ -854,6 +961,8 @@ export function paginateFlow(
           for (let bi = triggerIdx + 1; bi < prevCurPage.blocks.length; bi++) {
             currentPage.blocks.push(shiftBlock(prevCurPage.blocks[bi]!, delta, measureCache));
           }
+          // currentPage pushed into pages — its metrics entry is already the
+          // trailing one, now aligned 1:1 with pages.
           pages.push(currentPage);
 
           for (let pi = curPageIdx + 1; pi < prevPages.length; pi++) {
@@ -862,6 +971,7 @@ export function paginateFlow(
               pageNumber: prevPage.pageNumber,
               blocks: prevPage.blocks.map((b) => shiftBlock(b, delta, measureCache)),
             });
+            metrics.push(metricsFor(prevPage.pageNumber));
           }
 
           earlyTerminated = true;
@@ -871,7 +981,7 @@ export function paginateFlow(
     }
   }
 
-  return { pages, currentPage, y, prevSpaceAfter, earlyTerminated };
+  return { pages, currentPage, y, prevSpaceAfter, earlyTerminated, metrics };
 }
 
 /**

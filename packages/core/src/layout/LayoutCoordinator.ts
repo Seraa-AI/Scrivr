@@ -12,6 +12,7 @@ import type {
 import type { FontConfig } from "./FontConfig";
 import type { TextMeasurer } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
+import type { PageChromeContribution } from "./PageMetrics";
 import { populateCharMap } from "./BlockLayout";
 import { spanEndDocPos } from "./LineBreaker";
 
@@ -37,6 +38,9 @@ export interface LayoutCoordinatorOptions {
    *  Should trigger a re-render (notifyListeners). The RAF flush path is
    *  owned by Editor and calls ensureLayout() + its own post-flush work. */
   onUpdate: () => void;
+  /** Returns the current page chrome contributions — read per layout pass so
+   *  extensions registered after construction are picked up. */
+  getPageChromeContributions?: () => PageChromeContribution[];
 }
 
 /**
@@ -421,12 +425,14 @@ export class LayoutCoordinator {
     previousLayout?: DocumentLayout;
     resumption?: LayoutResumption | null;
   }): DocumentLayout {
+    const contribs = this.opts.getPageChromeContributions?.() ?? [];
     return runPipeline(this.opts.getDoc(), {
       pageConfig: this.opts.pageConfig,
       fontConfig: this.opts.fontConfig,
       measurer: this.opts.measurer,
       fontModifiers: this.opts.fontModifiers,
       measureCache: this._measureCache,
+      ...(contribs.length > 0 ? { pageChromeContributions: contribs } : {}),
       ...(opts.previousVersion !== undefined
         ? { previousVersion: opts.previousVersion }
         : {}),

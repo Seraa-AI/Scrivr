@@ -22,6 +22,7 @@ import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
 import { defaultPageConfig } from "../layout/PageLayout";
 import type { PageConfig } from "../layout/PageLayout";
+import type { PageChromeContribution } from "../layout/PageMetrics";
 
 /**
  * Build a ProseMirror Schema from an array of extensions.
@@ -212,6 +213,18 @@ export class ExtensionManager {
       Object.assign(commands, ext.commands);
     }
     return commands;
+  }
+
+  /**
+   * Page chrome contributions (headers, footers, footnote bands, etc.) in
+   * extension registration order. Passed into runChromeLoop each layout run.
+   */
+  getPageChromeContributions(): PageChromeContribution[] {
+    const contribs: PageChromeContribution[] = [];
+    for (const ext of this.resolved) {
+      if (ext.pageChrome !== null) contribs.push(ext.pageChrome);
+    }
+    return contribs;
   }
 
   /**

@@ -11,22 +11,11 @@ import type { TextMeasurer } from "./TextMeasurer";
 import {
   type PageConfig,
   type DocumentLayout,
-  type FlowConfig,
-  collectLayoutItems,
-  buildBlockFlow,
-  paginateFlow,
+  type PageLayoutOptions,
+  runFlowPipeline,
 } from "./PageLayout";
-import {
-  EMPTY_RESOLVED_CHROME,
-  computePageMetrics,
-  type PageMetrics,
-} from "./PageMetrics";
-import {
-  defaultFontConfig,
-  DEFAULT_FONT_FAMILY,
-  applyPageFont,
-  type FontConfig,
-} from "./FontConfig";
+import { EMPTY_RESOLVED_CHROME } from "./PageMetrics";
+import type { FontConfig } from "./FontConfig";
 
 export interface MiniPipelineOptions {
   /** PageConfig for the mini-doc. `pageless` is forced to true internally. */
@@ -36,63 +25,31 @@ export interface MiniPipelineOptions {
   fontModifiers?: Map<string, FontModifier>;
 }
 
-/** Measure a mini-doc synchronously on a single pageless page. */
+/**
+ * Measure a mini-doc synchronously on a single pageless page.
+ *
+ * Intentionally shares runFlowPipeline with runPipeline but bypasses the
+ * chrome aggregator loop — safe to call from inside a chrome contributor's
+ * measure() hook without triggering recursion. runPipeline's depth guard
+ * enforces this if misused.
+ */
 export function runMiniPipeline(
   doc: Node,
   options: MiniPipelineOptions,
 ): DocumentLayout {
-  const { measurer, fontModifiers } = options;
   const pageConfig: PageConfig = { ...options.pageConfig, pageless: true };
-
-  const baseConfig = options.fontConfig ?? defaultFontConfig;
-  const fontConfig = applyPageFont(
-    baseConfig,
-    pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY,
-  );
-
-  const { pageWidth, margins } = pageConfig;
-  const contentWidth = pageWidth - margins.left - margins.right;
-
-  const resolved = EMPTY_RESOLVED_CHROME;
-  const page1Metrics = computePageMetrics(pageConfig, resolved, 1);
-  const metricsFor = (pageNumber: number): PageMetrics =>
-    pageNumber === 1
-      ? page1Metrics
-      : computePageMetrics(pageConfig, resolved, pageNumber);
-
-  // Measure blocks
-  const items = collectLayoutItems(doc, fontConfig);
-  const flowConfig: FlowConfig = { margins, contentWidth };
-  const flowResult = buildBlockFlow(
-    items,
-    0,
-    flowConfig,
-    fontConfig,
-    measurer,
-    fontModifiers,
-    undefined,
-    undefined,
-  );
-
-  // Stack blocks on a single pageless page
-  const initPage: { pageNumber: number; blocks: [] } = { pageNumber: 1, blocks: [] };
-  const pr = paginateFlow(
-    flowResult.flows,
+  const plOptions: PageLayoutOptions = {
     pageConfig,
-    resolved,
-    metricsFor,
-    0,
-    undefined,
-    undefined,
-    [],
-    initPage,
-    page1Metrics.contentTop,
-    0,
-    true,
-  );
+    measurer: options.measurer,
+    ...(options.fontConfig !== undefined && { fontConfig: options.fontConfig }),
+    ...(options.fontModifiers !== undefined && { fontModifiers: options.fontModifiers }),
+  };
 
-  const singlePage = pr.currentPage;
-  const naturalHeight = pr.y - page1Metrics.contentTop;
+  // runId: 0 signals "not a real layout run" — cache layers key off runId === previousLayout.runId.
+  const fp = runFlowPipeline(doc, plOptions, EMPTY_RESOLVED_CHROME, 0);
+  const page1Metrics = fp.layout.metrics![0]!;
+  const singlePage = fp.layout.pages[0]!;
+  const naturalHeight = fp.y - page1Metrics.contentTop;
 
   return {
     pages: [singlePage],
@@ -103,5 +60,6 @@ export function runMiniPipeline(
     runId: 0,
     convergence: "stable",
     iterationCount: 1,
+    _chromePayloads: {},
   };
 }

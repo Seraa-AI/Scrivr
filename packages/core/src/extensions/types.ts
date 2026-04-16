@@ -23,6 +23,7 @@ import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
+import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SelectionController } from "../SelectionController";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
@@ -394,6 +395,23 @@ export interface ExtensionConfig<Options = object> {
    */
   addDocAttrs?(this: Phase1Context<Options>): Record<string, AttributeSpec>;
 
+  /**
+   * Contribute a page chrome band (header, footer, footnote strip, margin notes).
+   * The aggregator calls `measure()` every layout iteration and `render()` per
+   * page during paint. Extensions that want multiple bands split into multiple
+   * extensions (one contribution per extension).
+   *
+   * Example:
+   *   addPageChrome() {
+   *     return {
+   *       name: "headerFooter",
+   *       measure(input, ctx) { return { topForPage: () => 36, bottomForPage: () => 24, stable: true }; },
+   *       render(ctx) { ctx.ctx.fillText("header", 72, ctx.metrics.headerTop); },
+   *     };
+   *   }
+   */
+  addPageChrome?(this: Phase1Context<Options>): PageChromeContribution;
+
   // ── Phase 2: Behaviour ──────────────────────────────────────────────────────
   // Called with `this = ExtensionContext` — the built schema is available.
 
@@ -565,6 +583,8 @@ export interface ResolvedExtension {
    * Doc-level attribute contributions. See `ExtensionConfig.addDocAttrs`.
    */
   docAttrs: Record<string, AttributeSpec>;
+  /** Page chrome contribution (header/footer/etc.) or null when absent. */
+  pageChrome: PageChromeContribution | null;
   plugins: Plugin[];
   keymap: Record<string, Command>;
   commands: Record<string, (...args: unknown[]) => Command>;
