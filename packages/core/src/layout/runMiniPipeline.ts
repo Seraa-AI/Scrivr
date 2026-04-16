@@ -60,5 +60,6 @@ export function runMiniPipeline(
     runId: 0,
     convergence: "stable",
     iterationCount: 1,
+    _chromePayloads: {},
   };
 }

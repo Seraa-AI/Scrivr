@@ -17,8 +17,11 @@ import {
   EMPTY_RESOLVED_CHROME,
   type PageMetrics,
   type ResolvedChrome,
+  type PageChromeContribution,
+  type PageChromeMeasureInput,
 } from "./PageMetrics";
 import { fitLinesInCapacity } from "./splitLines";
+import { runChromeLoop } from "./aggregateChrome";
 
 export interface PageConfig {
   pageWidth: number;
@@ -194,6 +197,13 @@ export interface DocumentLayout {
   convergence?: "stable" | "exhausted";
   /** How many iterations the chrome aggregator ran. Debug/telemetry only. */
   iterationCount?: number;
+  /**
+   * @internal
+   * Chrome contributor payloads keyed by contribution.name. runPipeline always
+   * writes an object (possibly empty); absent only on test fixtures that
+   * bypass runPipeline. Seeds the next run's previousRunPayload.
+   */
+  _chromePayloads?: Record<string, unknown>;
 }
 
 /**
@@ -358,6 +368,12 @@ export interface PageLayoutOptions {
    * Makes each chunk O(chunkSize) instead of O(totalBlocks) — total O(N).
    */
   resumption?: LayoutResumption;
+  /**
+   * Page chrome contributors from the ExtensionManager. Empty or omitted →
+   * runChromeLoop takes the zero-contributor fast path (one iteration,
+   * EMPTY_RESOLVED_CHROME, identical to pre-aggregator behaviour).
+   */
+  pageChromeContributions?: PageChromeContribution[];
 }
 
 /** A4 at 96dpi with 1-inch margins */
@@ -548,18 +564,49 @@ function _runPipelineBody(
   doc: Node,
   options: PageLayoutOptions,
 ): DocumentLayout {
-  const { pageConfig } = options;
+  const { pageConfig, previousLayout } = options;
   const { pageHeight, margins } = pageConfig;
   const version = (options.previousVersion ?? 0) + 1;
   const runId = version; // Same identity for now; can diverge later if needed.
 
-  // Stages 1 + 2 — measure + paginate. No chrome contributors yet; that wires
-  // in when the aggregator loop lands.
-  const fp = runFlowPipeline(doc, options, EMPTY_RESOLVED_CHROME, runId);
+  // Resolve fontConfig once — shared with chrome contributors' measure() input
+  // so mini-doc layouts inside their hooks use the same typography.
+  const baseConfig = options.fontConfig ?? defaultFontConfig;
+  const resolvedFontConfig = applyPageFont(
+    baseConfig,
+    pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY,
+  );
+  const measureInput: PageChromeMeasureInput = {
+    doc,
+    pageConfig,
+    measurer: options.measurer,
+    fontConfig: resolvedFontConfig,
+  };
+
+  const contributions = options.pageChromeContributions ?? [];
+  const prevRunPayloads = previousLayout?._chromePayloads ?? {};
+  const prevRunFlowLayout = previousLayout ?? null;
+
+  // Stages 1 + 2 — measure + paginate, wrapped in the chrome aggregator loop.
+  // Zero contributors short-circuits after iteration 1 with identical output
+  // to the pre-aggregator single-pass path.
+  const chromeResult = runChromeLoop(
+    doc, options, contributions, runId,
+    prevRunPayloads, prevRunFlowLayout, measureInput,
+  );
+  const fp = chromeResult.flow;
+
+  // Propagate aggregator outcome + payloads into the layout returned to callers.
+  const layoutWithChrome: DocumentLayout = {
+    ...fp.layout,
+    convergence: chromeResult.convergence,
+    iterationCount: chromeResult.iterationCount,
+    _chromePayloads: chromeResult.chromePayloads,
+  };
 
   // Stage 3: float layout — runs once on the final paginated pages.
   const floated = applyFloatLayout(
-    fp.layout, fp.margins, fp.pageWidth, fp.contentWidth,
+    layoutWithChrome, fp.margins, fp.pageWidth, fp.contentWidth,
     fp.measurer, fp.fontConfig, fp.fontModifiers,
   );
   if (fp.isPartial) return floated;

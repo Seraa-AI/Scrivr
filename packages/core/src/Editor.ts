@@ -248,6 +248,7 @@ export class Editor extends BaseEditor implements IEditor {
       getDoc: () => this._state.doc,
       getHead: () => this._state.selection.head,
       onUpdate: () => this._notifyListeners(),
+      getPageChromeContributions: () => this._manager.getPageChromeContributions(),
     });
 
     // If startReady:false, cancel the idle layout and suppress all flushes
