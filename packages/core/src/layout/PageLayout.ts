@@ -416,22 +416,45 @@ export function runPipeline(
   }
 }
 
-function _runPipelineBody(
+/**
+ * Flow-only pipeline result. Pages + metrics are populated, floats/fragments
+ * are not — those are applied once after the chrome-aggregator loop converges.
+ * Chrome contributors re-run this per iteration via the aggregator.
+ */
+export interface FlowPipelineResult {
+  /** Pass-1 DocumentLayout with pages, metrics, runId. No floats, no fragments. */
+  layout: DocumentLayout;
+  /** True when streaming cutoff stopped pagination mid-document. */
+  isPartial: boolean;
+  /** Geometry + font context — applyFloatLayout needs all of these. */
+  margins: PageConfig["margins"];
+  pageWidth: number;
+  contentWidth: number;
+  fontConfig: FontConfig;
+  fontModifiers: Map<string, FontModifier> | undefined;
+  measurer: TextMeasurer;
+  /** Y cursor at end of pagination — used for pageless totalContentHeight. */
+  y: number;
+}
+
+/**
+ * Stage 1 + Stage 2 of the pipeline (measure + paginate). Extracted so the
+ * chrome aggregator can call it N times per layout run while floats + fragments
+ * only run once on the final, converged pages.
+ */
+export function runFlowPipeline(
   doc: Node,
   options: PageLayoutOptions,
-): DocumentLayout {
-  const { fontModifiers, measureCache, previousLayout,pageConfig, measurer } = options;
-  const version = (options.previousVersion ?? 0) + 1;
-  const runId = version; // Same identity for now; can diverge later if needed.
+  resolved: ResolvedChrome,
+  runId: number,
+): FlowPipelineResult {
+  const { fontModifiers, measureCache, previousLayout, pageConfig, measurer } = options;
   const baseConfig = options.fontConfig ?? defaultFontConfig;
   const fontConfig = applyPageFont(baseConfig, pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY);
 
   const { pageWidth, pageHeight, margins } = pageConfig;
   const contentWidth = pageWidth - margins.left - margins.right;
   const maxBlocks = options.maxBlocks;
-
-  // No chrome contributors yet — will become an aggregator call when the lane lands.
-  const resolved = EMPTY_RESOLVED_CHROME;
 
   // Per-page metrics with single-entry cache (pages advance sequentially).
   let cachedMetricsPage = -1;
@@ -445,42 +468,40 @@ function _runPipelineBody(
     return cachedMetrics;
   };
 
-  // ── Resumption support: O(N) incremental chunked layout ───────────────────
-  // When resumption is provided, restore the cursor state from the previous
-  // chunk rather than re-iterating already-processed blocks. The items array
-  // is cached in the resumption object so collectLayoutItems() is only called
-  // on the first chunk.
+  // Resumption: restore cursor from prior chunk instead of re-walking the doc.
   const r = options.resumption;
   const items = r ? r.items : collectLayoutItems(doc, fontConfig);
   const startIndex = r ? r.nextItemIndex : 0;
-
-  // Restore page cursor from previous chunk, or start fresh.
   const pages: LayoutPage[] = r ? r.completedPages : [];
-  let currentPage: LayoutPage = r ? r.currentPage : { pageNumber: 1, blocks: [] };
-  let y = r ? r.currentY : metricsFor(1).contentTop;
-  let prevSpaceAfter = r ? r.prevSpaceAfter : 0;
-  const chunkVersion = r ? r.version : version;
+  const currentPage: LayoutPage = r ? r.currentPage : { pageNumber: 1, blocks: [] };
+  const initY = r ? r.currentY : metricsFor(1).contentTop;
+  const initPrevSpaceAfter = r ? r.prevSpaceAfter : 0;
+  const chunkVersion = r ? r.version : runId;
 
-  // ── Stage 1: measure ─────────────────────────────────────────────────────
+  // Stage 1: measure.
   const flowConfig: FlowConfig = { margins, contentWidth };
   const flowResult = buildBlockFlow(
     items, startIndex, flowConfig, fontConfig,
     measurer, fontModifiers, measureCache, maxBlocks,
   );
 
-  // ── Stage 2: paginate ─────────────────────────────────────────────────────
+  // Stage 2: paginate.
   const pr = paginateFlow(
     flowResult.flows, pageConfig, resolved, metricsFor, runId,
     {
       previousLayout,
       measureCache,
       pageless: pageConfig.pageless,
-      init: { pages, page: currentPage, y, prevSpaceAfter },
+      init: { pages, page: currentPage, y: initY, prevSpaceAfter: initPrevSpaceAfter },
     },
   );
 
-  // ── Streaming layout cutoff ───────────────────────────────────────────────
-  if (flowResult.reachedCutoff && !pr.earlyTerminated) {
+  const isPartial = flowResult.reachedCutoff && !pr.earlyTerminated;
+  const context = {
+    margins, pageWidth, contentWidth, fontConfig, fontModifiers, measurer,
+  };
+
+  if (isPartial) {
     const resumption: LayoutResumption = {
       items,
       nextItemIndex: flowResult.cutoffIndex,
@@ -492,7 +513,7 @@ function _runPipelineBody(
       prevPageCount: pr.pages.length,
     };
     const partialPages = [...pr.pages, pr.currentPage];
-    const partialPass1: DocumentLayout = {
+    const layout: DocumentLayout = {
       pages: partialPages,
       pageConfig,
       version: chunkVersion,
@@ -506,14 +527,11 @@ function _runPipelineBody(
       convergence: "stable",
       iterationCount: 1,
     };
-    // ── Stage 3: float layout (partial chunk) ────────────────────────────────
-    return applyFloatLayout(partialPass1, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
+    return { layout, isPartial: true, ...context, y: pr.y };
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
-
-  // ── Stage 3: float layout ─────────────────────────────────────────────────
-  const pass1Result: DocumentLayout = {
+  const layout: DocumentLayout = {
     pages: allPages,
     pageConfig,
     version: chunkVersion,
@@ -523,18 +541,34 @@ function _runPipelineBody(
     convergence: "stable",
     iterationCount: 1,
   };
-  const floated = applyFloatLayout(pass1Result, margins, pageWidth, contentWidth, measurer, fontConfig, fontModifiers);
+  return { layout, isPartial: false, ...context, y: pr.y };
+}
 
-  // ── Stage 4: fragment index ───────────────────────────────────────────────
-  // buildFragments computes fragmentCount/fragmentIndex from the final page
-  // list, superseding the manual stamping loop that previously lived here.
+function _runPipelineBody(
+  doc: Node,
+  options: PageLayoutOptions,
+): DocumentLayout {
+  const { pageConfig } = options;
+  const { pageHeight, margins } = pageConfig;
+  const version = (options.previousVersion ?? 0) + 1;
+  const runId = version; // Same identity for now; can diverge later if needed.
+
+  // Stages 1 + 2 — measure + paginate. No chrome contributors yet; that wires
+  // in when the aggregator loop lands.
+  const fp = runFlowPipeline(doc, options, EMPTY_RESOLVED_CHROME, runId);
+
+  // Stage 3: float layout — runs once on the final paginated pages.
+  const floated = applyFloatLayout(
+    fp.layout, fp.margins, fp.pageWidth, fp.contentWidth,
+    fp.measurer, fp.fontConfig, fp.fontModifiers,
+  );
+  if (fp.isPartial) return floated;
+
+  // Stage 4: fragment index + totalContentHeight.
   const { fragments, fragmentsByPage } = buildFragments(floated.pages);
-
-  // ── Compute totalContentHeight ────────────────────────────────────────────
   const totalContentHeight = pageConfig.pageless
-    ? pr.y + margins.bottom
-    : allPages.length * pageHeight;
-
+    ? fp.y + margins.bottom
+    : floated.pages.length * pageHeight;
   return { ...floated, fragments, fragmentsByPage, totalContentHeight };
 }
 
