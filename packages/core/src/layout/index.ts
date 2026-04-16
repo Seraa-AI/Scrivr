@@ -12,6 +12,15 @@ export { runPipeline, buildFragments, defaultPageConfig, defaultPagelessConfig, 
 export type { PageConfig, LayoutPage, DocumentLayout, PageLayoutOptions, FloatLayout, LayoutFragment } from "./PageLayout";
 export { defaultFontConfig, getBlockStyle, DEFAULT_FONT_FAMILY } from "./FontConfig";
 export type { FontConfig, BlockStyle } from "./FontConfig";
+export type {
+  PageMetrics,
+  ChromeContribution,
+  ResolvedChrome,
+  LayoutIterationContext,
+  PageChromeMeasureInput,
+  PageChromePaintContext,
+  PageChromeContribution,
+} from "./PageMetrics";
 export { resolveFont } from "./StyleResolver";
 export { BlockRegistry } from "./BlockRegistry";
 export { LayoutCoordinator } from "./LayoutCoordinator";

@@ -3,7 +3,10 @@
  * footnotes) reserve vertical space without raw margin arithmetic.
  */
 
-import type { PageConfig } from "./PageLayout";
+import type { Node } from "prosemirror-model";
+import type { DocumentLayout, PageConfig } from "./PageLayout";
+import type { FontConfig } from "./FontConfig";
+import type { TextMeasurer } from "./TextMeasurer";
 
 /** Geometry for a single page, derived from PageConfig + chrome reservations. */
 export interface PageMetrics {
@@ -92,3 +95,63 @@ export const EMPTY_RESOLVED_CHROME: ResolvedChrome = Object.freeze({
   contributions: Object.freeze({} as Record<string, never>),
   metricsVersion: 0,
 });
+
+// ── Page chrome contributor API ─────────────────────────────────────────────
+// Plugins (HeaderFooter, Footnotes, margin notes) implement
+// PageChromeContribution and register it via Extension.addPageChrome(). The
+// aggregator loop in aggregateChrome.ts iterates contributors until every
+// one reports stable:true or MAX_ITERATIONS is reached.
+
+/** Input passed to every contributor's measure() call. */
+export interface PageChromeMeasureInput {
+  doc: Node;
+  pageConfig: PageConfig;
+  measurer: TextMeasurer;
+  fontConfig: FontConfig;
+}
+
+/**
+ * Per-iteration context threaded through measure() so contributors can detect
+ * stability, seed from the previous run, and read the flow layout produced by
+ * the previous iteration.
+ */
+export interface LayoutIterationContext {
+  /** Monotonic run id — increments once per full layout run. */
+  runId: number;
+  /** 1-indexed iteration within the current run. */
+  iteration: number;
+  /** Hard cap before the aggregator gives up. */
+  maxIterations: number;
+  /** Contributor payload from the previous iteration of THIS run (null on iter 1). */
+  previousIterationPayload: unknown | null;
+  /** Contributor payload from the previous RUN's final iteration (null on first run). */
+  previousRunPayload: unknown | null;
+  /** Flow layout produced using the previous iteration's chrome (null on iter 1). */
+  currentFlowLayout: DocumentLayout | null;
+  /** Flow layout from the previous run's final iteration (null on first run). */
+  previousRunFlowLayout: DocumentLayout | null;
+}
+
+/** Input passed to every contributor's render() call during content-canvas paint. */
+export interface PageChromePaintContext {
+  ctx: CanvasRenderingContext2D;
+  pageNumber: number;
+  totalPages: number;
+  metrics: PageMetrics;
+  pageConfig: PageConfig;
+  /** This contributor's payload from the final measure() call of the last run. */
+  payload: unknown;
+}
+
+/** Plugin-facing contributor registered via Extension.addPageChrome(). */
+export interface PageChromeContribution {
+  /** Unique name — routes payload back to render(). Namespace by extension. */
+  name: string;
+  /** Measure once per iteration; returns reserved space + stability signal. */
+  measure(
+    input: PageChromeMeasureInput,
+    ctx: LayoutIterationContext,
+  ): ChromeContribution;
+  /** Paint this contributor's chrome band for one page. */
+  render(ctx: PageChromePaintContext): void;
+}
