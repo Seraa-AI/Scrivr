@@ -1758,7 +1758,7 @@ describe("paginateFlow — Stage 2", () => {
     const metricsFor = makeMetricsFor();
     const pr = paginateFlow(
       flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      undefined, undefined, [], initPage, metricsFor(1).contentTop, 0,
+      { init: { pages: [], page: initPage, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     const allPages = [...pr.pages, pr.currentPage];
     expect(allPages).toHaveLength(1);
@@ -1777,7 +1777,7 @@ describe("paginateFlow — Stage 2", () => {
     const metricsFor = makeMetricsFor();
     const pr = paginateFlow(
       flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      undefined, undefined, [], initPage, metricsFor(1).contentTop, 0,
+      { init: { pages: [], page: initPage, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     const allPages = [...pr.pages, pr.currentPage];
     expect(allPages).toHaveLength(2);
@@ -1794,7 +1794,7 @@ describe("paginateFlow — Stage 2", () => {
     const metricsFor = makeMetricsFor();
     const pr = paginateFlow(
       flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      undefined, undefined, [], { pageNumber: 1, blocks: [] }, metricsFor(1).contentTop, 0,
+      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     expect(pr.earlyTerminated).toBe(false);
   });

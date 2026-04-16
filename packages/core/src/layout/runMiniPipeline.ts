@@ -82,13 +82,10 @@ export function runMiniPipeline(
     resolved,
     metricsFor,
     0,
-    undefined,
-    undefined,
-    [],
-    initPage,
-    page1Metrics.contentTop,
-    0,
-    true,
+    {
+      pageless: true,
+      init: { pages: [], page: initPage, y: page1Metrics.contentTop, prevSpaceAfter: 0 },
+    },
   );
 
   const singlePage = pr.currentPage;

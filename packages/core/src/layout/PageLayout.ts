@@ -471,17 +471,13 @@ function _runPipelineBody(
   // ── Stage 2: paginate ─────────────────────────────────────────────────────
   const pr = paginateFlow(
     flowResult.flows, pageConfig, resolved, metricsFor, runId,
-    previousLayout, measureCache,
-    pages, currentPage, y, prevSpaceAfter,
-    pageConfig.pageless,
+    {
+      previousLayout,
+      measureCache,
+      pageless: pageConfig.pageless,
+      init: { pages, page: currentPage, y, prevSpaceAfter },
+    },
   );
-
-  // ── Helper: compute per-page metrics array for a given page list ─────────
-  // Used by both the partial and final return paths. Mirrors what paginateFlow
-  // threaded through metricsFor(), but with a fresh 1-entry cache so we don't
-  // pollute the metricsFor cache at the end of the run.
-  const buildMetricsArray = (pageList: LayoutPage[]): PageMetrics[] =>
-    pageList.map((p) => computePageMetrics(pageConfig, resolved, p.pageNumber));
 
   // ── Streaming layout cutoff ───────────────────────────────────────────────
   if (flowResult.reachedCutoff && !pr.earlyTerminated) {
@@ -505,7 +501,7 @@ function _runPipelineBody(
       totalContentHeight: pageConfig.pageless
         ? pr.y + margins.bottom
         : partialPages.length * pageHeight,
-      metrics: buildMetricsArray(partialPages),
+      metrics: pr.metrics,
       runId,
       convergence: "stable",
       iterationCount: 1,
@@ -522,7 +518,7 @@ function _runPipelineBody(
     pageConfig,
     version: chunkVersion,
     totalContentHeight: 0,
-    metrics: buildMetricsArray(allPages),
+    metrics: pr.metrics,
     runId,
     convergence: "stable",
     iterationCount: 1,
@@ -542,21 +538,22 @@ function _runPipelineBody(
   return { ...floated, fragments, fragmentsByPage, totalContentHeight };
 }
 
-/** Stage 2: assign measured FlowBlocks to pages. All positions read through metricsFor(). */
-export function paginateFlow(
-  flows: FlowBlock[],
-  pageConfig: PageConfig,
-  resolved: ResolvedChrome,
-  metricsFor: (pageNumber: number) => PageMetrics,
-  runId: number,
-  previousLayout: DocumentLayout | undefined,
-  measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
-  initPages: LayoutPage[],
-  initPage: LayoutPage,
-  initY: number,
-  initPrevSpaceAfter: number,
-  pageless?: boolean,
-): {
+/** Options bag for paginateFlow — cross-cutting context + resumption cursor. */
+export interface PaginateFlowOptions {
+  previousLayout?: DocumentLayout | undefined;
+  measureCache?: WeakMap<Node, MeasureCacheEntry> | undefined;
+  pageless?: boolean | undefined;
+  /** Initial page cursor. Fresh run: pages=[], page=empty page 1. Resumption: from prior chunk. */
+  init: {
+    pages: LayoutPage[];
+    page: LayoutPage;
+    y: number;
+    prevSpaceAfter: number;
+  };
+}
+
+/** Result of paginateFlow. `metrics` aligns 1:1 with the pages the caller uses. */
+export interface PaginateFlowResult {
   /** All completed pages. When earlyTerminated, currentPage is already included. */
   pages: LayoutPage[];
   /** The page currently being built — only valid when earlyTerminated === false. */
@@ -567,14 +564,39 @@ export function paginateFlow(
   prevSpaceAfter: number;
   /** True when Phase 1b fired and all remaining pages were copied from previousLayout. */
   earlyTerminated: boolean;
-} {
-  void resolved; // Consumed via metricsFor; kept for future expansion.
+  /**
+   * Per-page metrics accumulated during pagination. Aligned with the pages
+   * the caller delivers: `earlyTerminated ? pages : [...pages, currentPage]`.
+   */
+  metrics: PageMetrics[];
+}
 
+/** Stage 2: assign measured FlowBlocks to pages. All positions read through metricsFor(). */
+export function paginateFlow(
+  flows: FlowBlock[],
+  pageConfig: PageConfig,
+  resolved: ResolvedChrome,
+  metricsFor: (pageNumber: number) => PageMetrics,
+  runId: number,
+  opts: PaginateFlowOptions,
+): PaginateFlowResult {
+  // `resolved` is threaded through metricsFor; reserved for future cache checks
+  // keyed off resolved.metricsVersion. Read access today is intentional no-op.
+  void resolved;
+
+  const { previousLayout, measureCache, pageless, init } = opts;
   const { margins } = pageConfig;
-  const pages = initPages;
-  let currentPage = initPage;
-  let y = initY;
-  let prevSpaceAfter = initPrevSpaceAfter;
+  const pages = init.pages;
+  let currentPage = init.page;
+  let y = init.y;
+  let prevSpaceAfter = init.prevSpaceAfter;
+
+  // Metrics aligned with [...pages, currentPage]. When early-term pushes
+  // currentPage into pages, this invariant still holds because the trailing
+  // entry is re-used as the corresponding pages entry.
+  const metrics: PageMetrics[] = [];
+  for (const p of pages) metrics.push(metricsFor(p.pageNumber));
+  metrics.push(metricsFor(currentPage.pageNumber));
 
   // Phase 1b: only valid after we've seen at least one cache miss (= the edit point).
   let seenCacheMiss = false;
@@ -586,6 +608,7 @@ export function paginateFlow(
       pages.push(currentPage);
       currentPage = newPage(pages.length + 1);
       y = metricsFor(currentPage.pageNumber).contentTop;
+      metrics.push(metricsFor(currentPage.pageNumber));
       prevSpaceAfter = 0;
       continue;
     }
@@ -682,6 +705,7 @@ export function paginateFlow(
         // Fetch the NEW page's metrics — differentFirstPage or footnote bands
         // can make this differ from the page we just left.
         const newPageContentTop = metricsFor(currentPage.pageNumber).contentTop;
+        metrics.push(metricsFor(currentPage.pageNumber));
         y = newPageContentTop;
         prevSpaceAfter = 0;
 
@@ -754,6 +778,7 @@ export function paginateFlow(
             }
             pages.push(currentPage);
             currentPage = newPage(pages.length + 1);
+            metrics.push(metricsFor(currentPage.pageNumber));
             prevSpaceAfter = 0;
             currentPartStartY = metricsFor(currentPage.pageNumber).contentTop;
             gapSuppressApplied = false;
@@ -805,6 +830,7 @@ export function paginateFlow(
         if (!isLastPart) {
           pages.push(currentPage);
           currentPage = newPage(pages.length + 1);
+          metrics.push(metricsFor(currentPage.pageNumber));
           prevSpaceAfter = 0;
           currentPartStartY = metricsFor(currentPage.pageNumber).contentTop;
           remainingLines = remainingLines.slice(linesFit);
@@ -854,6 +880,8 @@ export function paginateFlow(
           for (let bi = triggerIdx + 1; bi < prevCurPage.blocks.length; bi++) {
             currentPage.blocks.push(shiftBlock(prevCurPage.blocks[bi]!, delta, measureCache));
           }
+          // currentPage pushed into pages — its metrics entry is already the
+          // trailing one, now aligned 1:1 with pages.
           pages.push(currentPage);
 
           for (let pi = curPageIdx + 1; pi < prevPages.length; pi++) {
@@ -862,6 +890,7 @@ export function paginateFlow(
               pageNumber: prevPage.pageNumber,
               blocks: prevPage.blocks.map((b) => shiftBlock(b, delta, measureCache)),
             });
+            metrics.push(metricsFor(prevPage.pageNumber));
           }
 
           earlyTerminated = true;
@@ -871,7 +900,7 @@ export function paginateFlow(
     }
   }
 
-  return { pages, currentPage, y, prevSpaceAfter, earlyTerminated };
+  return { pages, currentPage, y, prevSpaceAfter, earlyTerminated, metrics };
 }
 
 /**
