@@ -1073,21 +1073,23 @@ export function applyFloatLayout(
     const contentRight = pageWidth - margins.right;
     const contentWidth = contentRight - contentX;
 
-    // Clamp nodeWidth so it never exceeds the available content width.
-    // For break (top-bottom) mode the image stretches to fill the full content
-    // width — the stored attrs.width is ignored for layout purposes.
-    const clampedNodeWidth = mode === "top-bottom" ? contentWidth : Math.min(nodeWidth, contentWidth);
+    // Clamp nodeWidth so it never exceeds the available content width. All
+    // wrapping modes — including break (top-bottom) — honour attrs.width so
+    // the resize handles and ImageMenu W/H inputs actually affect the
+    // rendered size. The break-mode EXCLUSION still spans the full content
+    // width (see below) so text never flows beside the image regardless of
+    // how narrow it becomes.
+    const clampedNodeWidth = Math.min(nodeWidth, contentWidth);
 
     let floatX: number;
     if (mode === "square-right") {
       // offsetX shifts from the default right-side position. Adding it means
       // dragging right increases offsetX and moves the image right (natural).
       floatX = contentRight - clampedNodeWidth + offsetX;
-    } else if (mode === "top-bottom") {
-      // Break mode: image starts at the content left edge (full-width).
-      floatX = contentX;
     } else {
-      // square-left, behind, front — default to left side
+      // square-left, top-bottom, behind, front — default to left side.
+      // For top-bottom: image sits at content left; exclusion spans full
+      // content width so text still can't wrap beside it.
       floatX = contentX + offsetX;
     }
     // Clamp so the float never escapes the page content area regardless of how
@@ -1153,6 +1155,19 @@ export function applyFloatLayout(
       anchorBlockY: anchor.anchorBlockY,
       anchorPage: anchor.anchorPage,
     });
+
+    // If the float was pushed onto a page that paginateFlow never created
+    // (the anchor paragraph is the last block in the doc and overflow moved
+    // the float past the current page's bottom), materialise an empty page
+    // for it. Otherwise renderPage only iterates `pages`, and the float has
+    // no tile to draw on — it silently disappears while the NodeSelection
+    // (and therefore the image menu) stays alive.
+    if (!pages.find((p) => p.pageNumber === floatPage)) {
+      const newP: LayoutPage = { pageNumber: floatPage, blocks: [] };
+      const insertAt = pages.findIndex((p) => p.pageNumber > floatPage);
+      if (insertAt === -1) pages.push(newP);
+      else pages.splice(insertAt, 0, newP);
+    }
 
     // 'behind' and 'front' float over text with no exclusion — text flows
     // through them. Only wrapping modes create exclusion zones.

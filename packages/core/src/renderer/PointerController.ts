@@ -86,12 +86,25 @@ export class PointerController {
   }
 
   /**
-   * Pending resize dimensions during a resize drag.
-   * Used by TileManager.paintOverlay to show ghost resize handles.
+   * Pending resize state during a resize drag.
+   * Used by TileManager.paintOverlay to position the ghost handles.
+   *
+   * `handle` identifies which edge(s) the user grabbed (TL/TC/TR/ML/MR/BL/BC/BR);
+   * paintOverlay uses it to pin the opposite edge so the ghost grows in the
+   * expected direction (e.g. dragging an "ML" handle left expands the box
+   * leftward, not rightward from the original left edge).
    */
-  get pendingResize(): { width: number; height: number } | null {
+  get pendingResize(): {
+    width: number;
+    height: number;
+    handle: string;
+  } | null {
     if (!this.resizeDrag) return null;
-    return { width: this.resizeDrag.pendingWidth, height: this.resizeDrag.pendingHeight };
+    return {
+      width: this.resizeDrag.pendingWidth,
+      height: this.resizeDrag.pendingHeight,
+      handle: this.resizeDrag.handle,
+    };
   }
 
   // ── Hit testing ─────────────────────────────────────────────────────────────
@@ -243,14 +256,15 @@ export class PointerController {
     this._wordAnchor = null;
 
     if (!e.shiftKey) {
-      const doc = editor.getState().doc;
-      const $pos = doc.resolve(pos);
-      if ($pos.nodeAfter?.type.name === "image") {
-        editor.selectNode(pos);
-        return;
-      }
-      if ($pos.nodeBefore?.type.name === "image") {
-        editor.selectNode(pos - $pos.nodeBefore.nodeSize);
+      // Click physically inside an inline image's rect → select the image.
+      // Anywhere else (including 1px outside the image or in the text immediately
+      // adjacent to it) → place the cursor via posAtCoords. Using the visual
+      // rect rather than nodeBefore/nodeAfter is required because posAtCoords
+      // snaps to imagePos / imagePos+1 for clicks on the preceding text glyph's
+      // right half, which would otherwise trigger an unwanted NodeSelection.
+      const imageHit = editor.charMap.objectRectAtPoint(docX, docY, page);
+      if (imageHit) {
+        editor.selectNode(imageHit.docPos);
         return;
       }
       editor.selection.moveCursorTo(pos);

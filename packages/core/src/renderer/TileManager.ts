@@ -6,7 +6,7 @@ import { renderPage } from "./PageRenderer";
 import { drawBlock } from "./PageRenderer";
 import { clearOverlay, renderCursor, renderSelection } from "./OverlayRenderer";
 import { NodeSelection } from "prosemirror-state";
-import { renderHandles } from "./ResizeController";
+import { computeGhostRect, renderHandles } from "./ResizeController";
 import { PointerController } from "./PointerController";
 
 /** Constants */
@@ -50,6 +50,12 @@ export interface TileEntry {
   lastSelectionKey: string; // "head:from:to"
   /** Last seen PM state — detects plugin-state-only transactions (e.g. AI suggestions). */
   lastPmState: EditorState | null;
+  /**
+   * Last seen resize-drag ghost key ("handle:width:height" or "").
+   * Lets the overlay repaint on every mousemove during a resize drag, even
+   * though doc state / selection / plugin state don't change until mouseup.
+   */
+  lastPendingResizeKey: string;
 }
 
 /** Helpers */
@@ -322,6 +328,7 @@ export class TileManager {
         tile.lastCursorTile = -1;
         tile.lastSelectionKey = "";
         tile.lastPmState = null;
+        tile.lastPendingResizeKey = "";
         tile.wrapper.style.top = `${idx * sh}px`;
         tile.wrapper.style.height = `${this.tileHeight}px`;
         tile.wrapper.style.display = "block";
@@ -512,6 +519,10 @@ export class TileManager {
 
     // ── Blink gate ────────────────────────────────────────────────────────
     const pmState = this.editor.getState();
+    const pending = this.pointer.pendingResize;
+    const pendingKey = pending
+      ? `${pending.handle}:${pending.width}:${pending.height}`
+      : "";
     const blinkDirty =
       tile.tileIndex === cursorTile && tile.lastBlinkState !== blinkOn;
     const moveDirty =
@@ -519,12 +530,18 @@ export class TileManager {
     // Also repaint when PM plugin state changes (e.g. AI suggestion shown/hidden)
     // without a cursor or selection movement.
     const pluginStateDirty = tile.lastPmState !== pmState;
-    if (!blinkDirty && !moveDirty && !pluginStateDirty) return;
+    // And on every resize-drag mousemove: doc/selection/plugin state don't
+    // change until mouseup, so without this the ghost handles would freeze
+    // at their starting size and the image would "snap" on release.
+    const pendingResizeDirty = tile.lastPendingResizeKey !== pendingKey;
+    if (!blinkDirty && !moveDirty && !pluginStateDirty && !pendingResizeDirty)
+      return;
 
     tile.lastBlinkState = blinkOn;
     tile.lastCursorTile = cursorTile;
     tile.lastSelectionKey = selKey;
     tile.lastPmState = pmState;
+    tile.lastPendingResizeKey = pendingKey;
 
     const dpr = tile.dpr || (window.devicePixelRatio ?? 1);
     const w = pageConfig.pageWidth;
@@ -563,11 +580,31 @@ export class TileManager {
     if (isNodeSel && pmSel.node.type.name === "image") {
       const objRect = this.editor.charMap.getObjectRect(pmSel.from);
       if (objRect && objRect.page === pageNum) {
-        // During resize drag, show ghost handles at the pending (uncommitted) size.
-        const pending = this.pointer.pendingResize;
-        const w = pending?.width ?? objRect.width;
-        const h = pending?.height ?? objRect.height;
-        renderHandles(overlayCtx, objRect.x, objRect.y, w, h);
+        // During resize drag, show ghost handles at the pending size, pinned
+        // to the edge opposite the dragged handle. Without computeGhostRect
+        // the ghost would always grow from objRect's top-left, so dragging a
+        // left/top handle in its expected direction would visually grow the
+        // box the wrong way (right/down) until mouseup committed the attrs.
+        if (pending) {
+          const g = computeGhostRect(
+            pending.handle,
+            objRect.x,
+            objRect.y,
+            objRect.width,
+            objRect.height,
+            pending.width,
+            pending.height,
+          );
+          renderHandles(overlayCtx, g.x, g.y, g.width, g.height);
+        } else {
+          renderHandles(
+            overlayCtx,
+            objRect.x,
+            objRect.y,
+            objRect.width,
+            objRect.height,
+          );
+        }
       }
     }
 
@@ -652,6 +689,7 @@ export class TileManager {
       lastCursorTile: -1,
       lastSelectionKey: "",
       lastPmState: null,
+      lastPendingResizeKey: "",
     };
   }
 

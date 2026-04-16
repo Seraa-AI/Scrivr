@@ -117,6 +117,35 @@ export class CharacterMap {
   }
 
   /**
+   * Returns the inline object rect on `page` that contains (x, y), or undefined.
+   *
+   * Used by the pointer controller to distinguish "click physically on an image"
+   * (→ select) from "click adjacent to an image in the text flow" (→ cursor).
+   * Relying on posAtCoords + nodeBefore/nodeAfter is not enough: posAtCoords
+   * snaps to image.docPos or image.docPos+1 for any click in the image's
+   * full-width glyph range AND for clicks landing on the right-half of the
+   * preceding text glyph, so it cannot tell those cases apart.
+   */
+  objectRectAtPoint(
+    x: number,
+    y: number,
+    page: number,
+  ): ObjectRectEntry | undefined {
+    for (const rect of this.objectRects.values()) {
+      if (rect.page !== page) continue;
+      if (
+        x >= rect.x &&
+        x <= rect.x + rect.width &&
+        y >= rect.y &&
+        y <= rect.y + rect.height
+      ) {
+        return rect;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * posAtCoords — the hit test.
    *
    * Given a click at (x, y) on a specific page, returns the ProseMirror
