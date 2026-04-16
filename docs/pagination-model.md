@@ -19,7 +19,7 @@ Key property: **Stage 1 is position-independent.** That lets its results be cach
 
 For each `FlowBlock` it tracks a `y` cursor (starting at `margins.top`) and a `currentPage`:
 
-1. **Page breaks** — hard `page_break` items flush the current page and reset `y` (skipped in pageless mode).
+1. **Page breaks** — hard `pageBreak` items flush the current page and reset `y` (skipped in pageless mode).
 2. **Margin collapsing** — `collapseMargins(prevSpaceAfter, flow.spaceBefore)` at `PageLayout.ts:1685`, suppressed for the first block on a page.
 3. **Overflow check**: `overflows = blockBottom > pageBottom && (!isFirstOnPage || flow.lines.length > 0)`. The `isFirstOnPage` guard prevents an over-tall leaf block from looping forever on fresh pages.
 4. **Three placement cases**:

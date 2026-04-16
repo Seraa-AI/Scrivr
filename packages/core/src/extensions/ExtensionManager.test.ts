@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ExtensionManager } from "./ExtensionManager";
+import { ExtensionManager, getSchema } from "./ExtensionManager";
 import { Extension } from "./Extension";
 import { StarterKit } from "./StarterKit";
 import { Bold } from "./built-in/Bold";
@@ -11,6 +11,116 @@ import { Highlight } from "./built-in/Highlight";
 import { Color } from "./built-in/Color";
 import { FontSize } from "./built-in/FontSize";
 import { Underline } from "./built-in/Underline";
+import { Heading } from "./built-in/Heading";
+import { Link } from "./built-in/Link";
+
+describe("getSchema", () => {
+  it("returns a ProseMirror Schema from StarterKit", () => {
+    const schema = getSchema([StarterKit]);
+    expect(schema.nodes["doc"]).toBeDefined();
+    expect(schema.nodes["text"]).toBeDefined();
+    expect(schema.nodes["paragraph"]).toBeDefined();
+    expect(schema.nodes["heading"]).toBeDefined();
+    expect(schema.marks["bold"]).toBeDefined();
+    expect(schema.marks["italic"]).toBeDefined();
+  });
+
+  it("always includes doc and text baseline nodes", () => {
+    const schema = getSchema([Paragraph]);
+    expect(schema.nodes["doc"]).toBeDefined();
+    expect(schema.nodes["text"]).toBeDefined();
+  });
+
+  it("collects nodes from individual extensions", () => {
+    const schema = getSchema([Document, Paragraph, Heading]);
+    expect(schema.nodes["paragraph"]).toBeDefined();
+    expect(schema.nodes["heading"]).toBeDefined();
+  });
+
+  it("collects marks from individual extensions", () => {
+    const schema = getSchema([Document, Paragraph, Bold, Italic, Link]);
+    expect(schema.marks["bold"]).toBeDefined();
+    expect(schema.marks["italic"]).toBeDefined();
+    expect(schema.marks["link"]).toBeDefined();
+  });
+
+  it("respects StarterKit.configure exclusions", () => {
+    const schema = getSchema([StarterKit.configure({ bold: false, italic: false })]);
+    expect(schema.marks["bold"]).toBeUndefined();
+    expect(schema.marks["italic"]).toBeUndefined();
+    // Other marks should still be present
+    expect(schema.marks["underline"]).toBeDefined();
+  });
+
+  it("later extensions override earlier ones on node key conflicts", () => {
+    const CustomParagraph = Extension.create({
+      name: "customParagraph",
+      addNodes() {
+        return {
+          paragraph: {
+            group: "block",
+            content: "inline*",
+            attrs: { customAttr: { default: "custom" } },
+          },
+        };
+      },
+    });
+    const schema = getSchema([Document, Paragraph, CustomParagraph]);
+    // The custom extension's paragraph should win
+    expect(schema.nodes["paragraph"]!.spec.attrs).toHaveProperty("customAttr");
+  });
+
+  it("merges doc attrs from extensions", () => {
+    const WithDocAttr = Extension.create({
+      name: "withDocAttr",
+      addDocAttrs() {
+        return { myAttr: { default: "hello" } };
+      },
+    });
+    const schema = getSchema([StarterKit, WithDocAttr]);
+    const doc = schema.nodes["doc"]!.createAndFill()!;
+    expect(doc.attrs.myAttr).toBe("hello");
+  });
+
+  it("throws on doc attr collision", () => {
+    const A = Extension.create({
+      name: "extA",
+      addDocAttrs() { return { shared: { default: null } }; },
+    });
+    const B = Extension.create({
+      name: "extB",
+      addDocAttrs() { return { shared: { default: null } }; },
+    });
+    expect(() => getSchema([A, B])).toThrow(
+      /Doc attribute "shared" is contributed by both "extA" and "extB"/,
+    );
+  });
+
+  it("produces the same schema as ExtensionManager for the same extensions", () => {
+    const extensions = [StarterKit];
+    const standalone = getSchema(extensions);
+    const fromManager = new ExtensionManager(extensions).schema;
+
+    // Same node and mark names
+    expect(Object.keys(standalone.nodes).sort()).toEqual(
+      Object.keys(fromManager.nodes).sort(),
+    );
+    expect(Object.keys(standalone.marks).sort()).toEqual(
+      Object.keys(fromManager.marks).sort(),
+    );
+  });
+
+  it("works with configured extensions", () => {
+    const schema = getSchema([
+      Paragraph,
+      Bold.configure({}),
+      FontSize.configure({}),
+    ]);
+    expect(schema.nodes["paragraph"]).toBeDefined();
+    expect(schema.marks["bold"]).toBeDefined();
+    expect(schema.marks["fontSize"]).toBeDefined();
+  });
+});
 
 describe("ExtensionManager", () => {
   describe("schema", () => {
@@ -92,7 +202,7 @@ describe("ExtensionManager", () => {
       expect(mods instanceof Map).toBe(true);
       expect(mods.has("bold")).toBe(true);
       expect(mods.has("italic")).toBe(true);
-      expect(mods.has("font_size")).toBe(true);
+      expect(mods.has("fontSize")).toBe(true);
     });
 
     it("returns an empty map when no extensions declare font modifiers", () => {
@@ -175,11 +285,11 @@ describe("ExtensionManager", () => {
   });
 
   describe("FontSize extension", () => {
-    it("contributes font_size mark, setFontSize command, font modifier, and toolbar items", () => {
+    it("contributes fontSize mark, setFontSize command, font modifier, and toolbar items", () => {
       const manager = new ExtensionManager([StarterKit]);
-      expect(manager.schema.marks["font_size"]).toBeDefined();
+      expect(manager.schema.marks["fontSize"]).toBeDefined();
       expect(manager.buildCommands()["setFontSize"]).toBeDefined();
-      expect(manager.buildFontModifiers().has("font_size")).toBe(true);
+      expect(manager.buildFontModifiers().has("fontSize")).toBe(true);
       const sizeButtons = manager.buildToolbarItems().filter((i) => i.command === "setFontSize");
       expect(sizeButtons.length).toBe(7); // default 7 sizes
     });

@@ -5,11 +5,11 @@ import { addTrackIdIfDoesntExist, getMergeableMarkTrackedAttrs, NewDeleteAttrs }
 
 /**
  * Deletes inserted text directly (same-author cancel); otherwise wraps it with
- * a tracked_delete mark — preserving the full grouping behaviour.
+ * a trackedDelete mark — preserving the full grouping behaviour.
  *
  * Author-awareness: only cancel the insert outright if it belongs to the SAME
  * author. A different author's insert is left in place and receives a
- * tracked_delete mark on top — the conflict will be detected and flagged at
+ * trackedDelete mark on top — the conflict will be detected and flagged at
  * read-time by findChanges (isConflict is a computed property, not stored in
  * mark attrs, so no fragmentation here).
  *
@@ -28,7 +28,7 @@ export function deleteTextIfInserted(
   const nodeEnd = pos + node.nodeSize;
   const end = to ? Math.min(nodeEnd, to) : nodeEnd;
 
-  const insertMark = node.marks.find(m => m.type === schema.marks.tracked_insert);
+  const insertMark = node.marks.find(m => m.type === schema.marks.trackedInsert);
   if (insertMark) {
     const insertAuthorID = (insertMark.attrs.dataTracked as { authorID?: string } | null)
       ?.authorID;
@@ -38,7 +38,7 @@ export function deleteTextIfInserted(
       newTr.replaceWith(start, end, Fragment.empty);
       return start;
     }
-    // Different author's insert: fall through so we apply tracked_delete on top.
+    // Different author's insert: fall through so we apply trackedDelete on top.
     // findChanges will compute isConflict when it sees overlapping ranges from
     // different authors — no mark mutation needed here.
   }
@@ -62,7 +62,7 @@ export function deleteTextIfInserted(
   newTr.addMark(
     fromStartOfMark,
     toEndOfMark,
-    schema.marks!.tracked_delete!.create({ dataTracked }),
+    schema.marks!.trackedDelete!.create({ dataTracked }),
   );
 
   return toEndOfMark;

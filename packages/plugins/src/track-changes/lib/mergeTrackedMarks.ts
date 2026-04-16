@@ -64,7 +64,7 @@ const assignId = (
 /**
  * Merges tracked marks between text nodes at a position
  *
- * Will work for any nodes that use tracked_insert or tracked_delete marks which may not be preferrable
+ * Will work for any nodes that use trackedInsert or trackedDelete marks which may not be preferrable
  * if used for block nodes (since we possibly want to show the individual changed nodes).
  * Merging is done based on the userID, operation type and status.
  * @param pos
@@ -79,10 +79,10 @@ export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, 
   if (!nodeAfter || !nodeBefore) return;
 
   const leftMarks = nodeBefore.marks.filter(
-    m => m.type === schema.marks.tracked_insert || m.type === schema.marks.tracked_delete,
+    m => m.type === schema.marks.trackedInsert || m.type === schema.marks.trackedDelete,
   );
   const rightMarks = nodeAfter.marks.filter(
-    m => m.type === schema.marks.tracked_insert || m.type === schema.marks.tracked_delete,
+    m => m.type === schema.marks.trackedInsert || m.type === schema.marks.trackedDelete,
   );
 
   if (leftMarks.length === 0 || rightMarks.length === 0) return;

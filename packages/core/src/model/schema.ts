@@ -95,17 +95,17 @@ export const schema = new Schema({
     /** Table — fixed-width columns, common in legal contracts */
     table: {
       group: "block",
-      content: "table_row+",
+      content: "tableRow+",
       attrs: {
         columnWidths: { default: [] as number[] }, // explicit widths in px
       },
     },
 
-    table_row: {
-      content: "table_cell+",
+    tableRow: {
+      content: "tableCell+",
     },
 
-    table_cell: {
+    tableCell: {
       content: "block+",
       attrs: {
         colspan: { default: 1 },
@@ -115,7 +115,7 @@ export const schema = new Schema({
     },
 
     /** Hard page break — forces content onto the next page */
-    page_break: {
+    pageBreak: {
       group: "block",
       isLeaf: true,
     },
@@ -144,7 +144,7 @@ export const schema = new Schema({
     },
 
     /** Hard line break within a paragraph (Shift+Enter) */
-    hard_break: {
+    hardBreak: {
       group: "inline",
       inline: true,
       isLeaf: true,
@@ -166,18 +166,18 @@ export const schema = new Schema({
 
     /** Typography */
 
-    font_size: {
+    fontSize: {
       attrs: {
         size: {}, // number, in pt (e.g. 12)
       },
-      excludes: "font_size", // only one font size at a time
+      excludes: "fontSize", // only one font size at a time
     },
 
-    font_family: {
+    fontFamily: {
       attrs: {
         family: {}, // e.g. "Times New Roman", "Arial"
       },
-      excludes: "font_family",
+      excludes: "fontFamily",
     },
 
     color: {
@@ -210,7 +210,7 @@ export const schema = new Schema({
     // These marks are applied by the track-changes plugin.
     // The DOCX exporter maps them to <w:ins> and <w:del> OOXML nodes.
 
-    tracked_insert: {
+    trackedInsert: {
       attrs: {
         dataTracked: { default: null },
       },
@@ -220,7 +220,7 @@ export const schema = new Schema({
       toDOM: () => ["ins", { "data-tracked": "insert" }, 0],
     },
 
-    tracked_delete: {
+    trackedDelete: {
       attrs: {
         dataTracked: { default: null },
       },

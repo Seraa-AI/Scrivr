@@ -189,7 +189,7 @@ function _applyTracked(
       } else if (op.type === "insert") {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         if (range) {
-          const insertMarkType = schema.marks.tracked_insert;
+          const insertMarkType = schema.marks.trackedInsert;
           if (insertMarkType) {
             const dataTracked = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs)) as Record<string, unknown>;
             if (op.groupId) dataTracked["groupId"] = op.groupId;
@@ -211,8 +211,8 @@ function _applyTracked(
 /**
  * Reject the current AI suggestion.
  *
- * Removes all tracked_insert marks applied by the suggestion and removes
- * tracked_delete marks (restoring the original text).
+ * Removes all trackedInsert marks applied by the suggestion and removes
+ * trackedDelete marks (restoring the original text).
  *
  * If `blockId` is provided, only that block's ops are reversed.
  * If `groupId` is provided, only ops matching that groupId are reversed.
@@ -261,26 +261,26 @@ export function rejectAiSuggestion(
       }
 
       if (op.type === "delete") {
-        // Rejecting a delete = restore the text. The tracked_delete mark
+        // Rejecting a delete = restore the text. The trackedDelete mark
         // needs to be removed so the text reappears as normal.
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
         if (range) {
-          const deleteMarkType = schema.marks.tracked_delete;
+          const deleteMarkType = schema.marks.trackedDelete;
           if (deleteMarkType) {
             tr.removeMark(range.from + insertedChars, range.to + insertedChars, deleteMarkType);
           }
         }
         acceptedOffset += tokenLen;
       } else if (op.type === "insert") {
-        // Rejecting an insert = remove the tracked_insert text written by
-        // applyAiSuggestion(tracked). Guard: only delete if a tracked_insert
+        // Rejecting an insert = remove the trackedInsert text written by
+        // applyAiSuggestion(tracked). Guard: only delete if a trackedInsert
         // mark is actually present at this position — if the suggestion was
         // never applied (fresh rejection), there is no inserted text to remove
         // and deleting would mangle the original document content.
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         if (range) {
           const fromPos = range.from + insertedChars;
-          const insertMarkType = schema.marks.tracked_insert;
+          const insertMarkType = schema.marks.trackedInsert;
           const nodeAfter = insertMarkType
             ? state.doc.resolve(fromPos).nodeAfter
             : null;

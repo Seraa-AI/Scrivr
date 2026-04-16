@@ -100,7 +100,7 @@ export class PasteTransformer {
     });
 
     // Collect only block-level nodes. parse() may produce inline nodes (e.g.
-    // hard_break) at the document level from Google Docs' trailing <br> tags.
+    // hardBreak) at the document level from Google Docs' trailing <br> tags.
     const blockNodes: Node[] = [];
     doc.content.forEach((n) => {
       if (n.isBlock) blockNodes.push(n);
@@ -349,7 +349,7 @@ export function cleanPastedHtml(root: HTMLElement): void {
   });
 
   // Strip CSS properties that are always default/noise — they create spurious
-  // marks (color, font_size, etc.) that pollute the parsed document.
+  // marks (color, fontSize, etc.) that pollute the parsed document.
   root.querySelectorAll("[style]").forEach((el) => {
     const s = (el as HTMLElement).style;
     s.removeProperty("background-color");

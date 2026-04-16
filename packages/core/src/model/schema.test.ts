@@ -16,10 +16,10 @@ describe("schema — nodes", () => {
       "codeBlock",
       "horizontalRule",
       "table",
-      "table_row",
-      "table_cell",
-      "page_break",
-      "hard_break",
+      "tableRow",
+      "tableCell",
+      "pageBreak",
+      "hardBreak",
     ];
     for (const name of required) {
       expect(schema.nodes[name], `missing node: ${name}`).toBeDefined();
@@ -44,13 +44,13 @@ describe("schema — marks", () => {
       "italic",
       "underline",
       "strikethrough",
-      "font_size",
-      "font_family",
+      "fontSize",
+      "fontFamily",
       "color",
       "link",
       "highlight",
-      "tracked_insert",
-      "tracked_delete",
+      "trackedInsert",
+      "trackedDelete",
     ];
     for (const name of required) {
       expect(schema.marks[name], `missing mark: ${name}`).toBeDefined();
@@ -61,12 +61,12 @@ describe("schema — marks", () => {
     expect(schema.marks["link"]!.spec.inclusive).toBe(false);
   });
 
-  it("font_size excludes itself (only one size at a time)", () => {
-    expect(schema.marks["font_size"]!.spec.excludes).toBe("font_size");
+  it("fontSize excludes itself (only one size at a time)", () => {
+    expect(schema.marks["fontSize"]!.spec.excludes).toBe("fontSize");
   });
 
-  it("tracked_insert has dataTracked attribute", () => {
-    const mark = schema.marks["tracked_insert"]!;
+  it("trackedInsert has dataTracked attribute", () => {
+    const mark = schema.marks["trackedInsert"]!;
     expect(mark.spec.attrs?.["dataTracked"]).toBeDefined();
   });
 });
@@ -94,12 +94,12 @@ describe("schema — document construction", () => {
     expect(boldText.marks[0]?.type.name).toBe("bold");
   });
 
-  it("can apply tracked_insert mark", () => {
+  it("can apply trackedInsert mark", () => {
     const inserted = schema.text("new clause", [
-      schema.marks["tracked_insert"]!.create({ dataTracked: { id: "abc", operation: "insert" } }),
+      schema.marks["trackedInsert"]!.create({ dataTracked: { id: "abc", operation: "insert" } }),
     ]);
     const mark = inserted.marks[0]!;
-    expect(mark.type.name).toBe("tracked_insert");
+    expect(mark.type.name).toBe("trackedInsert");
     expect(mark.attrs["dataTracked"]).toBeDefined();
   });
 

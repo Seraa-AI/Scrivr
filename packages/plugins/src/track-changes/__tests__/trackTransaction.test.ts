@@ -208,7 +208,7 @@ describe("trackTransaction — tracking disabled", () => {
     };
   }
 
-  it("inserting text does NOT create a tracked_insert mark", () => {
+  it("inserting text does NOT create a trackedInsert mark", () => {
     const editor = makeDisabledEditor();
     editor.dispatch(editor.state.tr.insertText("!", 6));
 
@@ -216,7 +216,7 @@ describe("trackTransaction — tracking disabled", () => {
     expect(editor.text).toBe("hello!");
   });
 
-  it("deleting text does NOT create a tracked_delete mark", () => {
+  it("deleting text does NOT create a trackedDelete mark", () => {
     const editor = makeDisabledEditor();
     editor.dispatch(editor.state.tr.delete(5, 6)); // delete "o"
 

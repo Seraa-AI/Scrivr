@@ -59,20 +59,20 @@ describe("resolveFont — combined marks", () => {
   });
 });
 
-describe("resolveFont — font_size mark", () => {
+describe("resolveFont — fontSize mark", () => {
   it("overrides the base font size", () => {
-    expect(resolveFont("14px Georgia", [mark("font_size", { size: 18 })])).toBe("18px Georgia");
+    expect(resolveFont("14px Georgia", [mark("fontSize", { size: 18 })])).toBe("18px Georgia");
   });
 });
 
-describe("resolveFont — font_family mark", () => {
+describe("resolveFont — fontFamily mark", () => {
   it("overrides the base font family", () => {
-    expect(resolveFont("14px Georgia", [mark("font_family", { family: "Arial" })])).toBe("14px Arial");
+    expect(resolveFont("14px Georgia", [mark("fontFamily", { family: "Arial" })])).toBe("14px Arial");
   });
 
   it("handles multi-word override family", () => {
     expect(
-      resolveFont("14px Georgia", [mark("font_family", { family: "Times New Roman" })])
+      resolveFont("14px Georgia", [mark("fontFamily", { family: "Times New Roman" })])
     ).toBe("14px Times New Roman");
   });
 });
@@ -120,7 +120,7 @@ describe("normalizeFont", () => {
     expect(normalizeFont("14px Georgia")).toBe("14px Georgia");
   });
 
-  it("preserves font size change (font_size mark scenario)", () => {
+  it("preserves font size change (fontSize mark scenario)", () => {
     // "bold 32px Georgia" and "32px Georgia" both normalize to "32px Georgia"
     // — they share the same line height, which is what we want
     expect(normalizeFont("bold 32px Georgia")).toBe("32px Georgia");

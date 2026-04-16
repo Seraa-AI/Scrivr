@@ -39,10 +39,10 @@ export function updateChangeAttrs(
     // Find the specific mark that corresponds to this change (matched by id).
     const oldMark = node.marks.find(
       m =>
-        (m.type === schema.marks.tracked_insert || m.type === schema.marks.tracked_delete) &&
+        (m.type === schema.marks.trackedInsert || m.type === schema.marks.trackedDelete) &&
         (m.attrs.dataTracked as { id?: string } | null)?.id === change.id,
     ) ?? node.marks.find(
-      m => m.type === schema.marks.tracked_insert || m.type === schema.marks.tracked_delete,
+      m => m.type === schema.marks.trackedInsert || m.type === schema.marks.trackedDelete,
     );
     if (!oldMark) {
       console.warn(
@@ -196,6 +196,6 @@ export function restoreNode(
   };
 
   tr.setNodeMarkup(pos, undefined, updatedAttrs, node.marks);
-  tr.removeMark(pos, pos + node.nodeSize, schema.marks.tracked_insert);
-  tr.removeMark(pos, pos + node.nodeSize, schema.marks.tracked_delete);
+  tr.removeMark(pos, pos + node.nodeSize, schema.marks.trackedInsert);
+  tr.removeMark(pos, pos + node.nodeSize, schema.marks.trackedDelete);
 }

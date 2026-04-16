@@ -54,12 +54,12 @@ import { skipTracking, TrackChangesAction, setAction } from "../actions";
 // ── Clear previous suggestions ────────────────────────────────────────────────
 
 /**
- * Removes all pending tracked_insert and tracked_delete marks attributed to
+ * Removes all pending trackedInsert and trackedDelete marks attributed to
  * `authorID` from the text nodes within `[nodeFrom+1, nodeTo-1]`.
  *
- * For tracked_insert text (text the author previously inserted), the inserted
+ * For trackedInsert text (text the author previously inserted), the inserted
  * characters are also deleted so positions snap back before the new diff runs.
- * For tracked_delete marks the mark is simply removed (the text stays, the new
+ * For trackedDelete marks the mark is simply removed (the text stays, the new
  * diff will re-delete it if still needed).
  *
  * Deletions are applied in reverse position order so earlier positions remain
@@ -72,15 +72,15 @@ function clearAuthorPendingMarks(
   authorID: string,
   schema: Schema,
 ): void {
-  const insertType = schema.marks.tracked_insert;
-  const deleteType = schema.marks.tracked_delete;
+  const insertType = schema.marks.trackedInsert;
+  const deleteType = schema.marks.trackedDelete;
   if (!insertType || !deleteType) return;
 
   // Collect ranges to delete (previous tracked inserts) — must be done in
   // reverse order to keep positions stable.
   const insertRanges: Array<{ from: number; to: number }> = [];
   // Deduplicate by text node start position. With excludes:"" a single text
-  // node can accumulate many tracked_insert marks from repeated AI calls.
+  // node can accumulate many trackedInsert marks from repeated AI calls.
   // Without deduplication, tr.delete() is called once per mark at the same
   // position, which in a PM transaction cascades into deleting N adjacent chars.
   const seenInsertFrom = new Set<number>();
@@ -221,7 +221,7 @@ function applyBlockToTr(
       // insert — find the doc position corresponding to the current accepted offset
       const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
       if (range) {
-        const insertMarkType = schema.marks.tracked_insert;
+        const insertMarkType = schema.marks.trackedInsert;
         if (insertMarkType) {
           const dataTracked = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs)) as Record<string, unknown>;
           if (op.groupId) dataTracked["groupId"] = op.groupId;

@@ -4,8 +4,8 @@
  * Given a ProseMirror block node, walks its inline content and produces:
  *
  *   acceptedText  — the "accept-all" view of the paragraph: plain text +
- *                   tracked_insert text (already accepted), WITHOUT
- *                   tracked_delete text (those chars would be removed on accept).
+ *                   trackedInsert text (already accepted), WITHOUT
+ *                   trackedDelete text (those chars would be removed on accept).
  *
  *   decoratedText — pseudo-XML annotated text for AI context:
  *                   <del author="Bob">quick </del><ins author="Bob">agile </ins>
@@ -57,8 +57,8 @@ export function buildAcceptedTextMap(
   const map: PosMapEntry[] = [];
   const decoratedParts: string[] = [];
 
-  const insertMarkType = schema.marks.tracked_insert;
-  const deleteMarkType = schema.marks.tracked_delete;
+  const insertMarkType = schema.marks.trackedInsert;
+  const deleteMarkType = schema.marks.trackedDelete;
 
   // nodeStartPos points BEFORE the node token itself.
   // The first child content starts at nodeStartPos + 1 (skipping the node's
@@ -105,7 +105,7 @@ export function buildAcceptedTextMap(
       // Do NOT add to acceptedChars / map — these chars won't exist in
       // the accepted view.
     } else {
-      // Plain text OR tracked_insert (insertion is already accepted view)
+      // Plain text OR trackedInsert (insertion is already accepted view)
       if (isInsert) {
         decoratedParts.push(
           `<ins${authorID ? ` author="${escapeAttr(authorID)}"` : ""}>${escapeXml(text)}</ins>`,

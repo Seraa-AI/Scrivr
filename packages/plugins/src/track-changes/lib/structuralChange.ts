@@ -108,7 +108,7 @@ export const dropOrphanChanges = (newTr: Transaction) => {
     ) {
       if (c.dataTracked.operation === CHANGE_OPERATION.delete) {
         if (c.type === "text-change") {
-          newTr.removeMark(c.from, c.to, newTr.doc.type.schema.marks.tracked_delete);
+          newTr.removeMark(c.from, c.to, newTr.doc.type.schema.marks.trackedDelete);
         } else if (c.type === "node-change") {
           newTr.setNodeMarkup(c.from, undefined, { ...c.node.attrs, dataTracked: null });
         }

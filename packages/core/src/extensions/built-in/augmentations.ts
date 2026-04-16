@@ -151,11 +151,11 @@ declare module "@scrivr/core" {
       /** CSS color string e.g. "#dc2626" */
       color: string;
     };
-    font_size: {
+    fontSize: {
       /** Font size in px */
       size: number;
     };
-    font_family: {
+    fontFamily: {
       /** Font family string e.g. "Georgia" */
       family: string;
     };

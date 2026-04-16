@@ -125,12 +125,12 @@ export function cutFragment(matched: number, deleted: number, content: Fragment)
 
 function markInlineNodeChange(node: PMNode, newTrackAttrs: NewTrackedAttrs, schema: Schema) {
   const filtered = node.marks.filter(
-    m => m.type !== schema.marks.tracked_insert && m.type !== schema.marks.tracked_delete,
+    m => m.type !== schema.marks.trackedInsert && m.type !== schema.marks.trackedDelete,
   );
   const mark =
     newTrackAttrs.operation === CHANGE_OPERATION.insert
-      ? schema.marks.tracked_insert
-      : schema.marks.tracked_delete;
+      ? schema.marks.trackedInsert
+      : schema.marks.trackedDelete;
   const createdMark = mark!.create({ dataTracked: addTrackIdIfDoesntExist(newTrackAttrs) });
   return node.mark(filtered.concat(createdMark));
 }

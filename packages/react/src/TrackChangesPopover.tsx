@@ -114,8 +114,8 @@ const MARK_ICONS: Record<string, string> = {
   strikethrough: "S",
   highlight: "H",
   color: "●",
-  font_size: "Aa",
-  font_family: "Ff",
+  fontSize: "Aa",
+  fontFamily: "Ff",
   link: "↗",
 };
 
@@ -126,8 +126,8 @@ const MARK_LABELS: Record<string, string> = {
   strikethrough: "Strikethrough",
   highlight: "Highlight",
   color: "Color",
-  font_size: "Font size",
-  font_family: "Font family",
+  fontSize: "Font size",
+  fontFamily: "Font family",
   link: "Link",
 };
 

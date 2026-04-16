@@ -292,7 +292,7 @@ export function layoutBlock(
   );
 
   // ── 2. Empty node fallback ────────────────────────────────────────────────
-  // An empty paragraph (or one containing only hard_break nodes) has no
+  // An empty paragraph (or one containing only hardBreak nodes) has no
   // renderable content. We create a virtual zero-width-space span so
   // LineBreaker returns one line and CharacterMap registers a cursor position.
   const hasRenderableContent = spans.some(s => s.kind !== "break");
@@ -494,14 +494,14 @@ function extractSpans(
     }
 
     // Hard line break: flush the current line and start a new one.
-    if (child.type.name === "hard_break") {
+    if (child.type.name === "hardBreak") {
       spans.push({ kind: "break", docPos: childDocPos });
       return;
     }
 
     // Inline non-text leaf node (image, widget, …).
     // Guard: only nodes with explicit numeric width/height attrs are inline
-    // objects. Structural inline leaves like hard_break have no size attrs and
+    // objects. Structural inline leaves like hardBreak have no size attrs and
     // must NOT be treated as inline objects — doing so would give them a 200px
     // height and create huge blank line boxes.
     if (child.isLeaf && !child.isText) {
@@ -769,7 +769,7 @@ export function populateCharMap(
       spacesBeforeSpan += countSpaces(span.text);
     }
 
-    // Register a zero-width glyph at the hard_break's doc position so
+    // Register a zero-width glyph at the hardBreak's doc position so
     // coordsAtPos(breakDocPos) returns the correct cursor location at line-end.
     if (line.terminalBreakDocPos !== undefined) {
       const breakX = block.x + lineOffsetX + line.width;

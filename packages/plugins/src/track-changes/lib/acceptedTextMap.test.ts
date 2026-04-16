@@ -16,11 +16,11 @@ const schema = new Schema({
     text:      { group: "inline" },
   },
   marks: {
-    tracked_insert: {
+    trackedInsert: {
       excludes: "",
       attrs: { dataTracked: { default: {} } },
     },
-    tracked_delete: {
+    trackedDelete: {
       excludes: "",
       attrs: { dataTracked: { default: {} } },
     },
@@ -28,12 +28,12 @@ const schema = new Schema({
 });
 
 const insertMark = (authorID = "ai") =>
-  schema.marks.tracked_insert.create({
+  schema.marks.trackedInsert.create({
     dataTracked: { id: "ins1", authorID, operation: "insert", status: "pending" },
   });
 
 const deleteMark = (authorID = "user") =>
-  schema.marks.tracked_delete.create({
+  schema.marks.trackedDelete.create({
     dataTracked: { id: "del1", authorID, operation: "delete", status: "pending" },
   });
 
@@ -64,7 +64,7 @@ describe("buildAcceptedTextMap", () => {
     });
   });
 
-  it("tracked_insert text IS included in acceptedText (already accepted)", () => {
+  it("trackedInsert text IS included in acceptedText (already accepted)", () => {
     const para = buildParagraph([
       { text: "hello " },
       { text: "world", marks: [insertMark()] },
@@ -73,7 +73,7 @@ describe("buildAcceptedTextMap", () => {
     expect(acceptedText).toBe("hello world");
   });
 
-  it("tracked_delete text is NOT included in acceptedText", () => {
+  it("trackedDelete text is NOT included in acceptedText", () => {
     const para = buildParagraph([
       { text: "hello " },
       { text: "quick ", marks: [deleteMark()] },

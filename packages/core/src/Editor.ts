@@ -48,7 +48,7 @@ export interface SelectionSnapshot {
   activeMarks: string[];
   /**
    * Attributes of each active mark, keyed by mark name.
-   * e.g. { color: { color: "#dc2626" }, font_size: { size: 18 } }
+   * e.g. { color: { color: "#dc2626" }, fontSize: { size: 18 } }
    */
   activeMarkAttrs: Record<string, Record<string, unknown>>;
   /** The ProseMirror node type name of the block containing the cursor: "paragraph", "heading", etc. */

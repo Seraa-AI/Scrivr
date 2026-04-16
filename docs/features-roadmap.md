@@ -521,7 +521,7 @@ Track Changes is one of the most critical features for legal document workflows.
 
 The `TrackChanges` extension in `@scrivr/plugins` is far more complete than a typical "in progress" plugin:
 
-- **Schema** — `tracked_insert` and `tracked_delete` marks with `excludes: ""` so multiple authors can stack their marks on the same text segment without collision
+- **Schema** — `trackedInsert` and `trackedDelete` marks with `excludes: ""` so multiple authors can stack their marks on the same text segment without collision
 - **8 tracked operations** — `insert`, `delete`, `set_node_attributes`, `wrap_with_node`, `node_split`, `reference`, `move`, `structure`
 - **All PM step types handled** — `ReplaceStep`, `AttrStep`, `AddMarkStep`, `RemoveMarkStep`, and node-mark variants (only `ReplaceAroundStep` for lift/wrap deferred)
 - **Multi-author support** — mark stacking via `excludes: ""` means author A's delete and author B's insert can coexist on the same text; each carries its own `authorID`

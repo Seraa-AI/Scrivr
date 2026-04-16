@@ -87,7 +87,7 @@ export interface NodeAttributes {} // augmented by extensions
  * declare module "@scrivr/core" {
  *   interface MarkAttributes {
  *     color: { color: string };
- *     font_size: { size: number };
+ *     fontSize: { size: number };
  *   }
  * }
  */

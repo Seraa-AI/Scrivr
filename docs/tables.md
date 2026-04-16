@@ -21,9 +21,9 @@ This document describes what to adopt from `prosemirror-tables`, what to rewrite
 The 4 node types map directly to Scrivr's schema. Define them manually (or call `tableNodes()`) with these specs:
 
 ```
-table        group: "block", content: "table_row+"
-table_row    content: "(table_cell | table_header)+"
-table_cell   content: "block+", attrs: {colspan, rowspan, colwidth, align}
+table        group: "block", content: "tableRow+"
+tableRow    content: "(tableCell | table_header)+"
+tableCell   content: "block+", attrs: {colspan, rowspan, colwidth, align}
 table_header content: "block+", attrs: {colspan, rowspan, colwidth, align}
 ```
 
@@ -34,7 +34,7 @@ All four use `isolating: true` — this prevents PM selection from crossing cell
 **Add `align` to cell attrs (not just `colwidth`).** Google Docs puts `text-align` on `<td>` directly, not just on the `<p>` inside. Capturing it at the cell level means paste from GDocs preserves per-cell alignment without any cleanup step:
 
 ```typescript
-table_cell: {
+tableCell: {
   content: "block+",
   attrs: {
     colspan:  { default: 1 },
@@ -56,7 +56,7 @@ table_cell: {
     return ["td", { colspan: node.attrs.colspan, ...(style ? { style } : {}) }, 0];
   },
 },
-// table_header mirrors table_cell with tag "th"
+// table_header mirrors tableCell with tag "th"
 ```
 
 `TableLayoutEngine` passes `cell.attrs.align` as the default alignment for every paragraph in that cell (overridable by the paragraph's own `align` attr).
@@ -148,7 +148,7 @@ Miss any level and `coordsAtPos` / `posAtCoords` will return wrong-page results.
 
 ### 🔨 `TableRowStrategy`
 
-Implements `BlockStrategy.render()` for `table_row` nodes. During render, draws:
+Implements `BlockStrategy.render()` for `tableRow` nodes. During render, draws:
 - Cell background fills
 - Cell border rectangles
 - Each cell's text content (re-uses `TextBlockStrategy` logic per cell)
@@ -199,7 +199,7 @@ interface CellSubBlock {
 ```typescript
 interface RowLayoutResult {
   /** The LayoutBlock for the row itself — used by PageLayout for page overflow */
-  rowBlock: LayoutBlock;  // blockType: "table_row", lines: [], height: maxCellHeight
+  rowBlock: LayoutBlock;  // blockType: "tableRow", lines: [], height: maxCellHeight
   /** Per-cell sub-layout — used by TableRowStrategy for rendering */
   cells: CellSubBlock[];
 }
@@ -210,7 +210,7 @@ interface RowLayoutResult {
 Add one optional field to `LayoutBlock`:
 
 ```typescript
-/** Table row rendering data — only present when blockType === "table_row" */
+/** Table row rendering data — only present when blockType === "tableRow" */
 cells?: CellSubBlock[];
 ```
 
@@ -252,8 +252,8 @@ export const Table = Extension.create({
   addNodes() {
     return {
       table:        { /* ... */ },
-      table_row:    { /* ... */ },
-      table_cell:   { /* ... */ },
+      tableRow:    { /* ... */ },
+      tableCell:   { /* ... */ },
       table_header: { /* ... */ },
     };
   },
@@ -287,7 +287,7 @@ export const Table = Extension.create({
 
   addBlockStyles() {
     return {
-      table_row: {
+      tableRow: {
         font: "14px 'Inter', sans-serif",
         spaceBefore: 0,
         spaceAfter: 0,
@@ -297,7 +297,7 @@ export const Table = Extension.create({
   },
 
   addLayoutHandlers() {
-    return { table_row: createTableRowStrategy() };
+    return { tableRow: createTableRowStrategy() };
   },
 
   addToolbarItems() {
@@ -321,7 +321,7 @@ export const Table = Extension.create({
 
 **Goal:** Tables can be inserted and edited; they render as placeholder boxes.
 
-1. Add `table`, `table_row`, `table_cell`, `table_header` node types
+1. Add `table`, `tableRow`, `tableCell`, `table_header` node types
    - Include `align` attr on cell nodes (GDocs compatibility — see Schema section)
 2. Install `tableEditing` plugin
 3. Wire all commands into `addCommands()` + Tab/Shift-Tab keymap
@@ -383,9 +383,9 @@ The only requirement: `TableLayoutEngine` must compute the correct absolute `nod
 
 ```
 tableNodePos              → before <table>
-tableNodePos + 1          → inside <table>, before first <table_row>
+tableNodePos + 1          → inside <table>, before first <tableRow>
 tableNodePos + 1 + R      → before a row (R = sum of sizes of preceding rows)
-tableNodePos + 1 + R + 1  → inside row, before first <table_cell>
+tableNodePos + 1 + R + 1  → inside row, before first <tableCell>
 ...etc.
 ```
 
@@ -409,7 +409,7 @@ All model-layer imports (`tableEditing`, `TableMap`, `CellSelection`, commands) 
 |------|--------|
 | `packages/core/src/extensions/built-in/Table.ts` | **Create** — Extension definition |
 | `packages/core/src/layout/TableLayoutEngine.ts` | **Create** — `layoutTable()`, `CellSubBlock`, `RowLayoutResult` |
-| `packages/core/src/layout/TableRowStrategy.ts` | **Create** — `BlockStrategy` for `table_row` |
+| `packages/core/src/layout/TableRowStrategy.ts` | **Create** — `BlockStrategy` for `tableRow` |
 | `packages/core/src/layout/BlockLayout.ts` | **Modify** — add `cells?: CellSubBlock[]` to `LayoutBlock` |
 | `packages/core/src/layout/PageLayout.ts` | **Modify** — detect table nodes, call `layoutTable()` |
 | `packages/core/src/input/ClipboardSerializer.ts` | **Modify** — add table HTML round-trip |

@@ -8,14 +8,14 @@ interface FontSizeOptions {
 }
 
 /**
- * FontSize — inline font size via the `font_size` mark.
+ * FontSize — inline font size via the `fontSize` mark.
  *
  * Size is stored in px (matching ctx.font convention).
  * The font metric change is handled by a FontModifier — no MarkDecorator needed.
  *
  * Commands:
- *   setFontSize(size: number)  — applies the font_size mark to the selection
- *   unsetFontSize()            — removes the font_size mark from the selection
+ *   setFontSize(size: number)  — applies the fontSize mark to the selection
+ *   unsetFontSize()            — removes the fontSize mark from the selection
  */
 export const FontSize = Extension.create<FontSizeOptions>({
   name: "fontSize",
@@ -26,9 +26,9 @@ export const FontSize = Extension.create<FontSizeOptions>({
 
   addMarks() {
     return {
-      font_size: {
+      fontSize: {
         attrs: { size: {}, dataTracked: { default: [] } },
-        excludes: "font_size",
+        excludes: "fontSize",
         parseDOM: [
           {
             style: "font-size",
@@ -60,7 +60,7 @@ export const FontSize = Extension.create<FontSizeOptions>({
       setFontSize:
         (size: unknown) =>
         (state, dispatch) => {
-          const markType = this.schema.marks["font_size"];
+          const markType = this.schema.marks["fontSize"];
           if (!markType) return false;
           if (dispatch) {
             const { from, to } = state.selection;
@@ -71,7 +71,7 @@ export const FontSize = Extension.create<FontSizeOptions>({
       unsetFontSize:
         () =>
         (state, dispatch) => {
-          const markType = this.schema.marks["font_size"];
+          const markType = this.schema.marks["fontSize"];
           if (!markType) return false;
           if (dispatch) {
             const { from, to } = state.selection;
@@ -85,7 +85,7 @@ export const FontSize = Extension.create<FontSizeOptions>({
   addFontModifiers() {
     return new Map<string, FontModifier>([
       [
-        "font_size",
+        "fontSize",
         (parsed: ParsedFont, attrs: Record<string, unknown>) => {
           const size = attrs["size"];
           if (typeof size === "number") {
@@ -104,7 +104,7 @@ export const FontSize = Extension.create<FontSizeOptions>({
       title: `Font size ${size}px`,
       group: "size",
       isActive: (_activeMarks, _blockType, _blockAttrs, activeMarkAttrs) =>
-        activeMarkAttrs?.["font_size"]?.["size"] === size,
+        activeMarkAttrs?.["fontSize"]?.["size"] === size,
     }));
     return items;
   },

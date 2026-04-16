@@ -337,7 +337,7 @@ export const defaultPdfNodeHandlers: PdfHandlers["nodes"] = {
     });
   },
 
-  // hard_break, table, table_row, table_cell when they exist
+  // hardBreak, table, tableRow, tableCell when they exist
 };
 
 export const defaultPdfMarkHandlers: PdfHandlers["marks"] = {
@@ -347,8 +347,8 @@ export const defaultPdfMarkHandlers: PdfHandlers["marks"] = {
   strikethrough: () => ({ strikethrough: true }),
   color: (mark) => ({ color: hexToRgb(mark.attrs.color) }),
   highlight: (mark) => ({ backgroundColor: hexToRgb(mark.attrs.color) }),
-  // font_size is already baked into block.lines via the layout pass
-  // font_family is looked up via ctx.fonts during span iteration
+  // fontSize is already baked into block.lines via the layout pass
+  // fontFamily is looked up via ctx.fonts during span iteration
   link: () => ({ color: { r: 0, g: 0, b: 1 }, underline: true }),
 };
 
@@ -715,7 +715,7 @@ export const defaultMarkdownNodeHandlers: MarkdownHandlers["nodes"] = {
   blockquote: (_, children) => children.split("\n").map(l => l ? `> ${l}` : l).join("\n"),
   code_block: (node, children) => `\`\`\`${node.attrs.language ?? ""}\n${children}\n\`\`\`\n\n`,
   image: (node) => `![${node.attrs.alt ?? ""}](${node.attrs.src})`,
-  hard_break: () => "  \n",
+  hardBreak: () => "  \n",
   text: (node) => node.text ?? "",
 };
 

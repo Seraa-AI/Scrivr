@@ -164,7 +164,7 @@ describe("font-size pt → px conversion (via parseDOM)", () => {
   it("converts 11pt to ~15px (96/72 ratio)", () => {
     const { schema } = makeContext();
     const doc = parseHtml(`<p><span style="font-size:11pt">text</span></p>`, schema);
-    const sizeMark = doc.firstChild?.firstChild?.marks.find((m) => m.type.name === "font_size");
+    const sizeMark = doc.firstChild?.firstChild?.marks.find((m) => m.type.name === "fontSize");
     // 11 * 96/72 = 14.666… → rounds to 15
     expect(sizeMark?.attrs["size"]).toBe(15);
   });
@@ -172,7 +172,7 @@ describe("font-size pt → px conversion (via parseDOM)", () => {
   it("converts 13pt to ~17px", () => {
     const { schema } = makeContext();
     const doc = parseHtml(`<p><span style="font-size:13pt">text</span></p>`, schema);
-    const sizeMark = doc.firstChild?.firstChild?.marks.find((m) => m.type.name === "font_size");
+    const sizeMark = doc.firstChild?.firstChild?.marks.find((m) => m.type.name === "fontSize");
     // 13 * 96/72 = 17.333… → rounds to 17
     expect(sizeMark?.attrs["size"]).toBe(17);
   });
@@ -180,14 +180,14 @@ describe("font-size pt → px conversion (via parseDOM)", () => {
   it("keeps px values unchanged", () => {
     const { schema } = makeContext();
     const doc = parseHtml(`<p><span style="font-size:16px">text</span></p>`, schema);
-    const sizeMark = doc.firstChild?.firstChild?.marks.find((m) => m.type.name === "font_size");
+    const sizeMark = doc.firstChild?.firstChild?.marks.find((m) => m.type.name === "fontSize");
     expect(sizeMark?.attrs["size"]).toBe(16);
   });
 
   it("converts 12pt (Word default) to 16px", () => {
     const { schema } = makeContext();
     const doc = parseHtml(`<p><span style="font-size:12pt">text</span></p>`, schema);
-    const sizeMark = doc.firstChild?.firstChild?.marks.find((m) => m.type.name === "font_size");
+    const sizeMark = doc.firstChild?.firstChild?.marks.find((m) => m.type.name === "fontSize");
     // 12 * 96/72 = 16 exactly
     expect(sizeMark?.attrs["size"]).toBe(16);
   });
@@ -254,10 +254,10 @@ describe("Google Docs HTML paste (integration)", () => {
     expect(para.type.name).toBe("paragraph");
     expect(para.attrs["align"]).toBe("center");
     // Google Docs puts font-family on <span>, not <p> — block fontFamily stays null;
-    // the family is carried as an inline font_family mark on the text node instead.
+    // the family is carried as an inline fontFamily mark on the text node instead.
     expect(para.attrs["fontFamily"]).toBeNull();
-    // font_family mark normalises to the primary family name (fallbacks stripped)
-    const familyMark = para.firstChild?.marks.find((m) => m.type.name === "font_family");
+    // fontFamily mark normalises to the primary family name (fallbacks stripped)
+    const familyMark = para.firstChild?.marks.find((m) => m.type.name === "fontFamily");
     expect(familyMark?.attrs["family"]).toBe("Arial");
     expect(para.textContent).toBe("Hello world");
   });

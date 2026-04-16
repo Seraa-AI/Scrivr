@@ -135,7 +135,7 @@ export function processChangeSteps(
 
         const textNewestStep = newTr.steps[newTr.steps.length - 1];
 
-        if (node.marks.find(m => m.type === schema.marks.tracked_insert)) {
+        if (node.marks.find(m => m.type === schema.marks.trackedInsert)) {
           deletedNodeMapping.appendMap(textNewestStep!.getMap());
         }
 
@@ -160,7 +160,7 @@ export function processChangeSteps(
           );
           const newestStep = newTr.steps[newTr.steps.length - 1];
 
-          if (c.node.marks.find(m => m.type === schema.marks.tracked_insert)) {
+          if (c.node.marks.find(m => m.type === schema.marks.trackedInsert)) {
             deletedNodeMapping.appendMap(newestStep!.getMap());
           }
 

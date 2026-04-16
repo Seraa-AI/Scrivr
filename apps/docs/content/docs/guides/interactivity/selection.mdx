@@ -26,7 +26,7 @@ snap.head           // moving end — where the caret is drawn
 
 snap.activeMarks                    // ['bold', 'italic']
 snap.activeMarkAttrs.color?.color   // '#dc2626'
-snap.activeMarkAttrs.font_size?.size // 18
+snap.activeMarkAttrs.fontSize?.size // 18
 
 snap.blockType      // 'paragraph' | 'heading' | 'bulletList' | ...
 snap.blockAttrs     // { level: 2, align: 'left' }
@@ -61,8 +61,8 @@ Returns attributes of each active mark, keyed by mark name:
 ```ts
 const attrs = editor.getActiveMarkAttrs();
 attrs.color?.color;       // '#dc2626'
-attrs.font_size?.size;    // 18
-attrs.font_family?.family; // 'Georgia'
+attrs.fontSize?.size;    // 18
+attrs.fontFamily?.family; // 'Georgia'
 ```
 
 ---

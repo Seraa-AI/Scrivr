@@ -16,13 +16,13 @@ export const BaseEditing = Extension.create({
   name: "baseEditing",
 
   addKeymap() {
-    const { hard_break } = this.schema.nodes;
+    const { hardBreak } = this.schema.nodes;
     return {
       Backspace: deleteBackward,
       Delete: deleteForward,
       "Shift-Enter": (state, dispatch) => {
-        if (!hard_break) return false;
-        if (dispatch) dispatch(state.tr.replaceSelectionWith(hard_break.create()).scrollIntoView());
+        if (!hardBreak) return false;
+        if (dispatch) dispatch(state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView());
         return true;
       },
       "Mod-a": selectAll,

@@ -101,10 +101,10 @@ describe("setBlockFontFamily", () => {
     expect(after2.doc.firstChild!.attrs["fontFamily"]).toBe("Verdana");
   });
 
-  it("clears inline font_family marks from the block so they don't override the attr", () => {
+  it("clears inline fontFamily marks from the block so they don't override the attr", () => {
     const { schema, commands, state } = makeContext();
-    // Simulate pasted content: text node with an inline font_family mark
-    const fontFamilyMarkType = schema.marks["font_family"]!;
+    // Simulate pasted content: text node with an inline fontFamily mark
+    const fontFamilyMarkType = schema.marks["fontFamily"]!;
     const textWithMark = schema.text("Hello", [fontFamilyMarkType.create({ family: "Arial" })]);
     const withInlineMark = state.apply(
       state.tr.replaceWith(1, 1, textWithMark)
@@ -112,15 +112,15 @@ describe("setBlockFontFamily", () => {
 
     // Verify the inline mark is present before the command
     const beforeMarks = withInlineMark.doc.firstChild!.firstChild!.marks;
-    expect(beforeMarks.some((m) => m.type.name === "font_family")).toBe(true);
+    expect(beforeMarks.some((m) => m.type.name === "fontFamily")).toBe(true);
 
     // Apply block font family — should set attr AND remove inline marks
     const next = run(withInlineMark, commands, "setBlockFontFamily", "Georgia");
     expect(next.doc.firstChild!.attrs["fontFamily"]).toBe("Georgia");
 
-    // Inline font_family marks should be gone so the block attr takes effect
+    // Inline fontFamily marks should be gone so the block attr takes effect
     next.doc.firstChild!.forEach((inline) => {
-      expect(inline.marks.some((m) => m.type.name === "font_family")).toBe(false);
+      expect(inline.marks.some((m) => m.type.name === "fontFamily")).toBe(false);
     });
   });
 });
@@ -149,7 +149,7 @@ describe("unsetBlockFontFamily", () => {
 // ── setFontFamily (inline mark, unchanged behaviour) ─────────────────────────
 
 describe("setFontFamily — inline mark", () => {
-  it("applies the font_family mark to selected text", () => {
+  it("applies the fontFamily mark to selected text", () => {
     const { schema, commands, state } = makeContext();
     // Insert text so the paragraph has a text node to mark
     const withText = state.apply(
@@ -158,7 +158,7 @@ describe("setFontFamily — inline mark", () => {
     const selected = selectAll(withText);
     const next = run(selected, commands, "setFontFamily", "Arial");
     const marks = next.doc.firstChild!.firstChild!.marks;
-    const familyMark = marks.find((m) => m.type.name === "font_family");
+    const familyMark = marks.find((m) => m.type.name === "fontFamily");
     expect(familyMark).toBeDefined();
     expect(familyMark!.attrs["family"]).toBe("Arial");
   });

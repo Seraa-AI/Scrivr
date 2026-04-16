@@ -173,7 +173,7 @@ export const TextBlockStrategy: BlockStrategy = {
         spacesBeforeSpan += countSpaces(span.text);
       }
 
-      // Register a zero-width glyph at the hard_break's doc position so
+      // Register a zero-width glyph at the hardBreak's doc position so
       // coordsAtPos(breakDocPos) returns the correct cursor location at line-end.
       if (line.terminalBreakDocPos !== undefined && !map.hasGlyph(line.terminalBreakDocPos)) {
         map.registerGlyph({

@@ -10,7 +10,7 @@ export function isValidTrackableMark(mark: Mark) {
   const spec = mark.type.spec;
   const name = mark.type.name;
   if (
-    !name.startsWith("tracked_") &&
+    !name.startsWith("tracked") &&
     spec.attrs?.dataTracked &&
     typeof spec.attrs?.dataTracked === "object"
   ) {
@@ -129,15 +129,15 @@ export function getTextNodeTrackedMarkData(node: PMNode | null, schema: Schema) 
   })[] = [];
 
   node.marks.forEach(mark => {
-    if (mark.type === schema.marks.tracked_insert || mark.type === schema.marks.tracked_delete) {
+    if (mark.type === schema.marks.trackedInsert || mark.type === schema.marks.trackedDelete) {
       const operation =
-        mark.type === schema.marks.tracked_insert ? CHANGE_OPERATION.insert : CHANGE_OPERATION.delete;
+        mark.type === schema.marks.trackedInsert ? CHANGE_OPERATION.insert : CHANGE_OPERATION.delete;
       marksTrackedData.push({ ...mark.attrs.dataTracked, operation });
     }
   });
 
   // Return all tracked mark data — a text node can have stacked marks from
-  // different authors (tracked_insert + tracked_delete coexisting via excludes:"").
+  // different authors (trackedInsert + trackedDelete coexisting via excludes:"").
   return marksTrackedData.length > 0 ? marksTrackedData : undefined;
 }
 

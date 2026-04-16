@@ -2,7 +2,7 @@
 import "./built-in/augmentations";
 
 export { Extension } from "./Extension";
-export { ExtensionManager } from "./ExtensionManager";
+export { ExtensionManager, getSchema } from "./ExtensionManager";
 export { StarterKit } from "./StarterKit";
 
 // Built-in extensions — individually importable

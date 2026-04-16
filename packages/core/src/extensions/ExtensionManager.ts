@@ -24,6 +24,64 @@ import { defaultPageConfig } from "../layout/PageLayout";
 import type { PageConfig } from "../layout/PageLayout";
 
 /**
+ * Build a ProseMirror Schema from an array of extensions.
+ *
+ * This is the standalone equivalent of TipTap's `getSchema()` — it runs only
+ * Phase 1 resolution (addNodes/addMarks/addDocAttrs) and returns the merged
+ * schema without instantiating an Editor or ExtensionManager.
+ *
+ * @example
+ *   import { getSchema, StarterKit } from "@inscribe/core";
+ *   const schema = getSchema([StarterKit]);
+ */
+export function getSchema(extensions: Extension[]): Schema {
+  // doc and text are always required by ProseMirror — provide them as baseline
+  const nodes: Record<string, object> = {
+    doc: { content: "block+" },
+    text: { group: "inline" },
+  };
+  const marks: Record<string, object> = {};
+
+  // Doc attr contributions — collision detection throws naming both owners.
+  const docAttrs: Record<string, AttributeSpec> = {};
+  const docAttrOwners: Record<string, string> = {};
+
+  for (const ext of extensions) {
+    const partial = ext.resolve(); // no schema — Phase 1 only
+    // Note: addNodes({ doc: ... }) can overwrite the doc spec and bypass
+    // collision detection. Use addDocAttrs() for doc-level attributes.
+    Object.assign(nodes, partial.nodes);
+    Object.assign(marks, partial.marks);
+
+    // Merge docAttrs contributions with collision detection.
+    for (const [attrName, spec] of Object.entries(partial.docAttrs)) {
+      if (attrName in docAttrs) {
+        const prevOwner = docAttrOwners[attrName]!;
+        throw new Error(
+          `[getSchema] Doc attribute "${attrName}" is contributed by ` +
+            `both "${prevOwner}" and "${partial.name}". Doc attributes must be ` +
+            `unique across all extensions. Rename one (e.g. ` +
+            `"${partial.name}_${attrName}") or remove the duplicate extension.`,
+        );
+      }
+      docAttrs[attrName] = spec;
+      docAttrOwners[attrName] = partial.name;
+    }
+  }
+
+  // Merge doc attrs into the doc node spec additively.
+  if (Object.keys(docAttrs).length > 0) {
+    const baseDoc = nodes["doc"] as Record<string, unknown>;
+    nodes["doc"] = {
+      ...baseDoc,
+      attrs: { ...(baseDoc.attrs as object | undefined), ...docAttrs },
+    };
+  }
+
+  return new Schema({ nodes, marks });
+}
+
+/**
  * ExtensionManager — orchestrates all registered extensions.
  *
  * Responsibilities:
@@ -45,57 +103,10 @@ export class ExtensionManager {
     this.extensions = extensions;
 
     // Phase 1: build schema (no schema context yet — addNodes/addMarks only)
-    this.schema = this.buildSchema(extensions);
+    this.schema = getSchema(extensions);
 
     // Phase 2+: resolve everything else with the built schema in context
     this.resolved = extensions.map((ext) => ext.resolve(this.schema));
-  }
-
-  private buildSchema(extensions: Extension[]): Schema {
-    // doc and text are always required by ProseMirror — provide them as baseline
-    const nodes: Record<string, object> = {
-      doc: { content: "block+" },
-      text: { group: "inline" },
-    };
-    const marks: Record<string, object> = {};
-
-    // Doc attr contributions — collision detection throws naming both owners.
-    const docAttrs: Record<string, AttributeSpec> = {};
-    const docAttrOwners: Record<string, string> = {};
-
-    for (const ext of extensions) {
-      const partial = ext.resolve(); // no schema — Phase 1 only
-      // Note: addNodes({ doc: ... }) can overwrite the doc spec and bypass
-      // collision detection. Use addDocAttrs() for doc-level attributes.
-      Object.assign(nodes, partial.nodes);
-      Object.assign(marks, partial.marks);
-
-      // Merge docAttrs contributions with collision detection.
-      for (const [attrName, spec] of Object.entries(partial.docAttrs)) {
-        if (attrName in docAttrs) {
-          const prevOwner = docAttrOwners[attrName]!;
-          throw new Error(
-            `[ExtensionManager] Doc attribute "${attrName}" is contributed by ` +
-              `both "${prevOwner}" and "${partial.name}". Doc attributes must be ` +
-              `unique across all extensions. Rename one (e.g. ` +
-              `"${partial.name}_${attrName}") or remove the duplicate extension.`,
-          );
-        }
-        docAttrs[attrName] = spec;
-        docAttrOwners[attrName] = partial.name;
-      }
-    }
-
-    // Merge doc attrs into the doc node spec additively.
-    if (Object.keys(docAttrs).length > 0) {
-      const baseDoc = nodes["doc"] as Record<string, unknown>;
-      nodes["doc"] = {
-        ...baseDoc,
-        attrs: { ...(baseDoc.attrs as object | undefined), ...docAttrs },
-      };
-    }
-
-    return new Schema({ nodes, marks });
   }
 
   /**

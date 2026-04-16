@@ -96,7 +96,7 @@ describe("runPipeline — multiple blocks", () => {
 
 // ── Hard page break ───────────────────────────────────────────────────────────
 
-describe("runPipeline — page_break node", () => {
+describe("runPipeline — pageBreak node", () => {
   it("forces content onto a new page", () => {
     const layout = runPipeline(doc(p("Page 1"), pageBreak(), p("Page 2")), {
       pageConfig: defaultPageConfig,
@@ -1719,7 +1719,7 @@ describe("buildBlockFlow — Stage 1", () => {
     expect(flows).toHaveLength(1);
   });
 
-  it("page_break item produces a zero-height isPageBreak FlowBlock", () => {
+  it("pageBreak item produces a zero-height isPageBreak FlowBlock", () => {
     const testDoc = doc(p("Before"), pageBreak(), p("After"));
     const measurer = createMeasurer();
     const items = collectLayoutItems(testDoc, defaultFontConfig);
@@ -1765,7 +1765,7 @@ describe("paginateFlow — Stage 2", () => {
     expect(allPages[0]!.blocks).toHaveLength(1);
   });
 
-  it("page_break FlowBlock forces a new page", () => {
+  it("pageBreak FlowBlock forces a new page", () => {
     const testDoc = doc(p("Page 1"), pageBreak(), p("Page 2"));
     const measurer = createMeasurer();
     const { margins } = defaultPageConfig;
@@ -1826,7 +1826,7 @@ describe("runPipeline — pageless mode", () => {
     }
   });
 
-  it("ignores page_break nodes — no new pages created", () => {
+  it("ignores pageBreak nodes — no new pages created", () => {
     const layout = runPipeline(doc(p("Before"), pageBreak(), p("After")), {
       pageConfig: defaultPagelessConfig,
       measurer: createMeasurer(),
