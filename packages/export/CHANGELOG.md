@@ -1,5 +1,15 @@
 # @scrivr/export
 
+## 1.0.4
+
+### Patch Changes
+
+- 5752be2: Picks up image interaction and popover UX fixes from `@scrivr/core` — no export-level changes. See the `@scrivr/core` changelog for details.
+
+- Updated dependencies [c963158]
+- Updated dependencies [5752be2]
+  - @scrivr/core@1.0.4
+
 ## 1.0.3
 
 ### Patch Changes

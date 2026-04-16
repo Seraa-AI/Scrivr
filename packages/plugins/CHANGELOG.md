@@ -1,5 +1,16 @@
 # @scrivr/plugins
 
+## 1.0.4
+
+### Patch Changes
+
+- c963158: Add standalone `getSchema()` function for building a ProseMirror schema from extensions without instantiating an Editor. Standardize all node/mark type names to camelCase (`tableRow`, `hardBreak`, `fontSize`, `fontFamily`, `trackedInsert`, `trackedDelete`, etc.) for a consistent naming convention across the schema.
+- 5752be2: `TrackChangesPopover` and `AiSuggestionPopover` now follow their anchor on scroll and hide when it leaves the visible content area — wired to the new `viewport` event and `isAnchorInsideContainer` helper from `@scrivr/core`. See the `@scrivr/core` changelog for the full set of image + popover fixes this release.
+
+- Updated dependencies [c963158]
+- Updated dependencies [5752be2]
+  - @scrivr/core@1.0.4
+
 ## 1.0.3
 
 ### Patch Changes

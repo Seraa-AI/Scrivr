@@ -1,5 +1,17 @@
 # @scrivr/react
 
+## 1.0.4
+
+### Patch Changes
+
+- c963158: Add standalone `getSchema()` function for building a ProseMirror schema from extensions without instantiating an Editor. Standardize all node/mark type names to camelCase (`tableRow`, `hardBreak`, `fontSize`, `fontFamily`, `trackedInsert`, `trackedDelete`, etc.) for a consistent naming convention across the schema.
+- 5752be2: Picks up image interaction and popover UX fixes from `@scrivr/core` — no React-level changes. See the `@scrivr/core` changelog for details.
+
+- Updated dependencies [c963158]
+- Updated dependencies [5752be2]
+  - @scrivr/core@1.0.4
+  - @scrivr/plugins@1.0.4
+
 ## 1.0.3
 
 ### Patch Changes
