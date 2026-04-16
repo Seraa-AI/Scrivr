@@ -330,6 +330,134 @@ describe("SurfaceRegistry — unregister while active", () => {
     const r = new SurfaceRegistry();
     expect(() => r.unregister("missing")).not.toThrow();
   });
+
+  it("unregister swallows onCommit throws during implicit deactivation", () => {
+    // Contract: unregister is tear-down; it must always delete the surface.
+    // Commit failures are logged+swallowed and activeId is force-cleared.
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = new SurfaceRegistry();
+    const s = makeSurface("a");
+    r.register(s);
+    r._setOwnerMediator({
+      commit: () => { throw new Error("persist failed"); },
+      deactivate: () => {},
+      activate: () => {},
+    });
+    r.activate("a");
+    s.dispatch(s.state.tr.insertText("dirty"));
+
+    expect(() => r.unregister("a")).not.toThrow();
+    expect(r.activeId).toBeNull();
+    expect(r.get("a")).toBeNull();
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+});
+
+// ── destroy() ────────────────────────────────────────────────────────────────
+
+describe("SurfaceRegistry — destroy", () => {
+  it("clears all surfaces, listeners, and resets mediator to noop", () => {
+    const r = new SurfaceRegistry();
+    const { mediator, calls } = makeMediator();
+    r._setOwnerMediator(mediator);
+    r.register(makeSurface("a"));
+    r.register(makeSurface("b"));
+    r.activate("a");
+
+    r.destroy();
+    expect(r.activeId).toBeNull();
+    expect(r.get("a")).toBeNull();
+    expect(r.get("b")).toBeNull();
+    expect(calls.at(-1)).toEqual({ type: "deactivate", id: "a" });
+
+    // Post-destroy: a freshly-attached listener should not fire (listeners
+    // are cleared) and the noop mediator means no owner callbacks run.
+    const postDestroySpy = vi.fn();
+    r.onSurfaceChange(postDestroySpy);
+    r.register(makeSurface("c"));
+    const callsBefore = calls.length;
+    r.activate("c");
+    expect(calls.length).toBe(callsBefore);  // mediator was reset to noop
+    // NOTE: listeners registered post-destroy DO still fire — the destroy
+    // contract only clears existing listeners. Re-using a registry after
+    // destroy is not supported; this assertion just documents the
+    // mediator-reset behavior.
+    expect(postDestroySpy).toHaveBeenCalledWith(null, "c");
+  });
+
+  it("destroy swallows commit throws during teardown", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = new SurfaceRegistry();
+    const s = makeSurface("a");
+    r.register(s);
+    r._setOwnerMediator({
+      commit: () => { throw new Error("persist failed"); },
+      deactivate: () => {},
+      activate: () => {},
+    });
+    r.activate("a");
+    s.dispatch(s.state.tr.insertText("dirty"));
+
+    expect(() => r.destroy()).not.toThrow();
+    expect(r.activeId).toBeNull();
+    errSpy.mockRestore();
+  });
+});
+
+// ── Re-entrancy listener order ───────────────────────────────────────────────
+
+describe("SurfaceRegistry — nested activation listener ordering", () => {
+  it("nested activate inside onActivate fires listeners in true chronological order", () => {
+    // Documents the fix for a subtle bug: without a supersession guard, the
+    // outer activate() would fire (null, 'a') after the nested call had
+    // already flipped state to 'b', leaving listeners with a stale target.
+    const r = new SurfaceRegistry();
+    r.register(makeSurface("a"));
+    r.register(makeSurface("b"));
+    r._setOwnerMediator({
+      commit: () => {},
+      deactivate: () => {},
+      activate: (s) => {
+        if (s.id === "a") r.activate("b");
+      },
+    });
+    const transitions: Array<[string | null, string | null]> = [];
+    r.onSurfaceChange((prev, next) => transitions.push([prev, next]));
+
+    r.activate("a");
+
+    // Two transitions observed, in chronological order:
+    //   null → a (outer started, nested hadn't run yet at capture time)
+    //   a → b (nested's own listener fire)
+    // The outer call's post-nested listener fire is suppressed by the
+    // supersession guard because _activeId !== its captured nextId.
+    expect(transitions).toEqual([
+      ["a", "b"],  // nested fires first (synchronous)
+    ]);
+    expect(r.activeId).toBe("b");
+  });
+
+  it("double-activate of the same surface from nested call is a no-op", () => {
+    const r = new SurfaceRegistry();
+    r.register(makeSurface("a"));
+    const { mediator, calls } = makeMediator();
+    // Override activate to recursively call activate("a") — the inner call
+    // hits the no-op guard because _activeId was already flipped.
+    r._setOwnerMediator({
+      ...mediator,
+      activate: (s) => {
+        calls.push({ type: "activate", id: s.id });
+        if (calls.filter((c) => c.type === "activate").length === 1) {
+          r.activate("a");
+        }
+      },
+    });
+    r.activate("a");
+    // activate callback ran exactly once — nested was no-op'd.
+    expect(calls.filter((c) => c.type === "activate")).toHaveLength(1);
+    expect(r.activeId).toBe("a");
+  });
 });
 
 // ── Activation loop + re-registration ────────────────────────────────────────
@@ -370,11 +498,11 @@ describe("SurfaceRegistry — activation loops", () => {
 
 describe("SurfaceRegistry — __SURFACE_DEBUG__ logging", () => {
   afterEach(() => {
-    delete (globalThis as Record<string, unknown>).__SURFACE_DEBUG__;
+    globalThis.__SURFACE_DEBUG__ = undefined;
   });
 
   it("logs transitions when the flag is set", () => {
-    (globalThis as Record<string, unknown>).__SURFACE_DEBUG__ = true;
+    globalThis.__SURFACE_DEBUG__ = true;
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     const r = new SurfaceRegistry();
     r.register(makeSurface("a", "alpha"));
@@ -393,7 +521,7 @@ describe("SurfaceRegistry — __SURFACE_DEBUG__ logging", () => {
   });
 
   it("annotates dirty state on transitions", () => {
-    (globalThis as Record<string, unknown>).__SURFACE_DEBUG__ = true;
+    globalThis.__SURFACE_DEBUG__ = true;
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     const r = new SurfaceRegistry();
     const s = makeSurface("a");

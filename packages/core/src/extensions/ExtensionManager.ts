@@ -246,8 +246,8 @@ export class ExtensionManager {
         throw new Error(
           `[ExtensionManager] Surface owner "${owner}" is contributed by ` +
             `both "${prev}" and "${ext.name}". Owner namespaces must be ` +
-            `unique across all extensions. Rename one (e.g. ` +
-            `"${ext.name}_${owner}") or remove the duplicate extension.`,
+            `unique across all extensions. Rename the owner in one of the ` +
+            `two extensions (e.g. "${owner}2") or remove the duplicate.`,
         );
       }
       map.set(owner, ext.surfaceOwner);

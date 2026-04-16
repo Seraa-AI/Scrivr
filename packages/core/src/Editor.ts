@@ -413,6 +413,10 @@ export class Editor extends BaseEditor implements IEditor {
       this._rafId = null;
     }
     super.destroy(); // emits "destroy", fires cleanup callbacks
+    // Run owner onDeactivate via implicit activate(null), unregister every
+    // surface, clear listeners, and reset the mediator to noop so any stray
+    // post-destroy callers can't re-invoke plugin callbacks.
+    this.surfaces.destroy();
     this.lc.destroy();
     this.overlayRenderHandlers.clear();
     this.cursorManager.stop();

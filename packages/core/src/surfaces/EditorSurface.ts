@@ -7,6 +7,13 @@
  * Rendering integration is deferred to the plugin that owns the surface — the
  * `charMap` ships empty and is populated by the plugin's paint hook. Dispatch
  * clears the charMap whenever content changes; activation does not touch it.
+ *
+ * **Sharp edge**: activating a surface before its charMap is populated means
+ * click-to-cursor and keyboard navigation will hit an empty glyph index and
+ * silently resolve to position 0. Plugins MUST populate the charMap (via the
+ * same layout/render pipeline the body uses) before making their surface
+ * usable for editing. There is no runtime guard today — see PR 7 roadmap for
+ * a surface-aware viewport lookup.
  */
 
 import { Node, type Schema } from "prosemirror-model";
@@ -81,8 +88,17 @@ export class EditorSurface {
    * Apply a transaction. Flips `isDirty` if the doc changed, clears the
    * charMap (stale glyph positions), and notifies listeners synchronously
    * with the full `SurfaceUpdate` so they can cheaply distinguish
-   * selection-only from content changes. Throws if called while the
-   * surface is committing (prevents commit loops).
+   * selection-only from content changes.
+   *
+   * Dispatching during lifecycle callbacks:
+   *   - onActivate / onDeactivate: allowed. The surface is a valid target
+   *     in those contexts (onActivate runs after _activeId flips; onDeactivate
+   *     runs against a surface that is simply leaving active). Listeners
+   *     fire as usual.
+   *   - onCommit: **forbidden**. Owners dispatch against the flow doc during
+   *     commit (persisting via DocAttrStep) — dispatching against the surface
+   *     would re-dirty it and spin the commit loop. This is guarded by
+   *     `_committing` and throws a clear error.
    */
   dispatch(tr: Transaction): void {
     if (this._committing) {

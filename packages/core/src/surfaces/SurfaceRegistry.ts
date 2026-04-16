@@ -53,6 +53,13 @@
 import type { EditorSurface } from "./EditorSurface";
 import type { SurfaceId, Unsubscribe } from "./types";
 
+// Typed `globalThis.__SURFACE_DEBUG__` flag used by activate() transition logs.
+// Augmentation keeps consumers from needing casts.
+declare global {
+  // eslint-disable-next-line no-var, vars-on-top
+  var __SURFACE_DEBUG__: boolean | undefined;
+}
+
 type SurfaceChangeHandler = (
   prev: SurfaceId | null,
   next: SurfaceId | null,
@@ -78,6 +85,8 @@ const noopMediator: SurfaceOwnerMediator = {
 export class SurfaceRegistry {
   private readonly _surfaces = new Map<SurfaceId, EditorSurface>();
   private _activeId: SurfaceId | null = null;
+  /** Cached to avoid re-looking up on every hot-path getState/dispatch call. */
+  private _activeSurface: EditorSurface | null = null;
   private readonly _changeListeners = new Set<SurfaceChangeHandler>();
   private _mediator: SurfaceOwnerMediator = noopMediator;
 
@@ -96,14 +105,59 @@ export class SurfaceRegistry {
    * Remove a surface from the registry. If the surface was active, activeId
    * becomes null and an onSurfaceChange is fired. The owner's onDeactivate
    * still runs during the implicit deactivation.
+   *
+   * Commit failures during teardown are logged and swallowed — unregister is
+   * semantically "tear this surface down", and a throwing onCommit there
+   * would otherwise leave the surface both registered and active (worse than
+   * dropping the persist). Callers that want commit-or-abort semantics
+   * should call `activate(null)` explicitly first, handle the throw, and
+   * then `unregister()`.
    */
   unregister(id: SurfaceId): void {
     const surface = this._surfaces.get(id);
     if (!surface) return;
     if (this._activeId === id) {
-      this.activate(null);
+      try {
+        this.activate(null);
+      } catch (err) {
+        console.error(
+          `[SurfaceRegistry] unregister("${id}") — onCommit threw during ` +
+          `implicit deactivation; swallowed because teardown cannot abort. ` +
+          `Activate(null) explicitly before unregister() to handle commit ` +
+          `failures.`,
+          err,
+        );
+        // Force the active state to null since the commit aborted activation.
+        this._activeId = null;
+        this._activeSurface = null;
+        this._changeListeners.forEach((h) => h(id, null));
+      }
     }
     this._surfaces.delete(id);
+  }
+
+  /**
+   * Tear down the registry. Unregisters every surface (which runs each
+   * owner's onDeactivate via the implicit activate(null)), clears all
+   * subscribers, and resets the owner mediator to a no-op so any stray
+   * callers after destroy don't fire owner callbacks.
+   *
+   * Called by `Editor.destroy()`. After this, the registry should not be
+   * reused — but accidental calls on a destroyed registry are safe no-ops.
+   */
+  destroy(): void {
+    if (this._activeId !== null) {
+      try {
+        this.activate(null);
+      } catch {
+        // Same rationale as unregister — teardown cannot abort.
+        this._activeId = null;
+        this._activeSurface = null;
+      }
+    }
+    this._surfaces.clear();
+    this._changeListeners.clear();
+    this._mediator = noopMediator;
   }
 
   get(id: SurfaceId): EditorSurface | null {
@@ -123,7 +177,7 @@ export class SurfaceRegistry {
   }
 
   get activeSurface(): EditorSurface | null {
-    return this._activeId === null ? null : this._surfaces.get(this._activeId) ?? null;
+    return this._activeSurface;
   }
 
   /**
@@ -131,6 +185,13 @@ export class SurfaceRegistry {
    * Throws from `onCommit` abort the activation; other lifecycle throws are
    * logged to `console.error` so one misbehaving plugin cannot strand the
    * registry mid-transition.
+   *
+   * Re-entrancy: if an owner callback (onCommit/onDeactivate/onActivate) or
+   * an onSurfaceChange listener calls `activate()` again, the nested call
+   * runs to completion, fires its own listeners, and the outer call detects
+   * that `_activeId` was superseded and skips its own listener fire — so
+   * listeners always observe the true chronological sequence of transitions
+   * without any stale `(prev, next)` pairs.
    */
   activate(nextId: SurfaceId | null): void {
     if (nextId === this._activeId) return;
@@ -143,9 +204,9 @@ export class SurfaceRegistry {
     }
 
     const prevId = this._activeId;
-    const prev = prevId === null ? null : this._surfaces.get(prevId) ?? null;
+    const prev = this._activeSurface;
 
-    if ((globalThis as Record<string, unknown>).__SURFACE_DEBUG__) {
+    if (globalThis.__SURFACE_DEBUG__) {
       const dirtyPart = prev && prev.isDirty ? " [dirty]" : "";
       const ownerPart =
         nextId === null
@@ -175,15 +236,26 @@ export class SurfaceRegistry {
     }
 
     this._activeId = nextId;
+    this._activeSurface = nextId === null ? null : this._surfaces.get(nextId)!;
 
     if (nextId !== null) {
-      const next = this._surfaces.get(nextId)!;
+      // `this._activeSurface` is non-null on this branch by construction;
+      // re-read it fresh so a nested activate() inside mediator.activate()
+      // sees the post-flip reference.
+      const next = this._activeSurface!;
       try {
         this._mediator.activate(next);
       } catch (err) {
         console.error(`[SurfaceRegistry] onActivate("${nextId}") threw:`, err);
       }
     }
+
+    // Supersession guard: if a nested activate() ran and changed `_activeId`
+    // to something other than what this call was trying to land on, a
+    // listener fire here with (prevId, nextId) would misrepresent state
+    // the user never observed. The nested call already fired the correct
+    // listeners for the actual path taken — skip ours.
+    if (this._activeId !== nextId) return;
 
     this._changeListeners.forEach((h) => h(prevId, nextId));
   }

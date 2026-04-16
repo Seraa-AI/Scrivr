@@ -162,4 +162,24 @@ describe("EditorSurface — onUpdate", () => {
     expect(a).toHaveBeenCalled();
     expect(b).toHaveBeenCalled();
   });
+
+  it("re-dispatch from inside a listener runs synchronously and notifies", () => {
+    // Contract: listeners may trigger further dispatches. Each dispatch
+    // runs to completion before the outer dispatch returns — matches
+    // BaseEditor's subscriber model. Uncaught exceptions would propagate.
+    const s = makeSurface();
+    const seen: number[] = [];
+    let once = true;
+    s.onUpdate((u) => {
+      seen.push(u.state.doc.content.size);
+      if (once) {
+        once = false;
+        s.dispatch(s.state.tr.insertText("!"));
+      }
+    });
+    s.dispatch(s.state.tr.insertText("a"));
+    // Two notifications: the outer "a" insert and the nested "!" insert.
+    expect(seen.length).toBe(2);
+    expect(seen[1]).toBeGreaterThan(seen[0]!);
+  });
 });
