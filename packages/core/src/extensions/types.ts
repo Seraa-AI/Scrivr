@@ -107,6 +107,12 @@ export interface IEditor extends IBaseEditor {
    */
   getNodeViewportRect(docPos: number): DOMRect | null;
   /**
+   * Current viewport DOMRect of the scrollable container, or null when no
+   * scroll container is attached. Popover controllers use this to hide when
+   * the anchor scrolls above/below the visible content area.
+   */
+  getScrollContainerRect(): DOMRect | null;
+  /**
    * Select the inline node at docPos using a ProseMirror NodeSelection.
    * Falls back to selection.moveCursorTo if the position is not selectable.
    */

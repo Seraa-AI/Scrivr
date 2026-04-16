@@ -15,6 +15,8 @@
  */
 import type { IEditor } from "../extensions/types";
 import type { EditorState } from "prosemirror-state";
+import { subscribeViewUpdates } from "./subscribeViewUpdates";
+import { isAnchorInsideContainer } from "./anchorVisibility";
 
 export interface BubbleMenuCallbacks {
   /** Called when the menu should become visible. `rect` is the selection's viewport DOMRect. */
@@ -57,7 +59,7 @@ export function createBubbleMenu(editor: IEditor, options: BubbleMenuOptions): (
 
     const { from, to } = state.selection;
     const rect = editor.getViewportRect(from, to);
-    if (!rect) {
+    if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
       if (visible) { visible = false; onHide(); }
       return;
     }
@@ -75,7 +77,7 @@ export function createBubbleMenu(editor: IEditor, options: BubbleMenuOptions): (
     timer = setTimeout(update, delay);
   }
 
-  const unsubscribe = editor.on("update", scheduleUpdate);
+  const unsubscribe = subscribeViewUpdates(editor, scheduleUpdate);
 
   return () => {
     if (timer) clearTimeout(timer);

@@ -111,6 +111,15 @@ export interface EditorEvents {
   blur: void;
   update: { docChanged: boolean };
   destroy: void;
+  /**
+   * Fired when the viewport changes without a state update — i.e. the user
+   * scrolled or the scroll container was resized. Doc/selection are unchanged.
+   *
+   * Anchored UI (popovers, bubble menus) subscribes to this so its
+   * viewport-space position can follow the anchor as it scrolls. State-only
+   * listeners should stick with `"update"` to avoid needless work on scroll.
+   */
+  viewport: void;
 }
 
 /**

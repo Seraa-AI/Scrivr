@@ -150,6 +150,9 @@ export class TestAiEditor implements IEditor {
   getNodeViewportRect(_docPos: number): DOMRect | null {
     return null;
   }
+  getScrollContainerRect(): DOMRect | null {
+    return null;
+  }
   selectNode(_docPos: number): void {}
   setNodeAttrs(_docPos: number, _attrs: Record<string, unknown>): void {}
   redraw(): void {}

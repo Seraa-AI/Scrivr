@@ -175,6 +175,12 @@ export class TileManager {
       };
     });
 
+    // Scroll container rect — popovers compare their anchor rect against this
+    // to hide when the anchor scrolls above a top toolbar / below a bottom bar.
+    editor.setScrollContainerLookup(
+      () => this.scrollParent?.getBoundingClientRect() ?? null,
+    );
+
     // ── subscribe to editor ──────────────────────────────────────────────────
     this.unsubscribe = editor.subscribe(() => this.scheduleUpdate());
 
@@ -262,7 +268,11 @@ export class TileManager {
         this.scrollParent.addEventListener("scroll", this.handleScroll, {
           passive: true,
         });
-        this.resizeObserver = new ResizeObserver(() => this.scheduleUpdate());
+        this.resizeObserver = new ResizeObserver(() => {
+          this.scheduleUpdate();
+          // Anchored popovers need to reposition when the viewport resizes.
+          this.editor.emit("viewport", undefined);
+        });
         this.resizeObserver.observe(this.scrollParent);
       }
     }
@@ -697,6 +707,12 @@ export class TileManager {
 
   private handleScroll = (): void => {
     this.scheduleUpdate();
+    // Notify anchored popovers (link, image menu, bubble menu, slash menu,
+    // track-changes, AI suggestion …) that their viewport-space anchor moved.
+    // The doc/selection haven't changed — we intentionally don't call the
+    // generic subscribers here because TileManager itself subscribes to them,
+    // which would create a scheduleUpdate loop.
+    this.editor.emit("viewport", undefined);
   };
 
   /** Destroy */
@@ -711,5 +727,6 @@ export class TileManager {
     this.activeTiles.clear();
     this.tilesContainer.remove();
     this.editor.setPageTopLookup(null);
+    this.editor.setScrollContainerLookup(null);
   }
 }

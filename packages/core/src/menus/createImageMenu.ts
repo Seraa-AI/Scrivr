@@ -24,6 +24,8 @@
 import { NodeSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import type { IEditor } from "../extensions/types";
+import { subscribeViewUpdates } from "./subscribeViewUpdates";
+import { isAnchorInsideContainer } from "./anchorVisibility";
 
 export interface ImageMenuInfo {
   /** The selected image ProseMirror node (access attrs via info.node.attrs). */
@@ -62,7 +64,7 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
     const docPos = sel.from;
     const node = sel.node;
     const rect = editor.getNodeViewportRect(docPos);
-    if (!rect) {
+    if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
       if (visible) { visible = false; lastDocPos = -1; onHide(); }
       return;
     }
@@ -78,7 +80,7 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
     }
   }
 
-  const unsubscribe = editor.on("update", () => {
+  const unsubscribe = subscribeViewUpdates(editor, () => {
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => { rafId = null; update(); });
   });

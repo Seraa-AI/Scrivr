@@ -575,6 +575,27 @@ export class Editor extends BaseEditor implements IEditor {
     this.ib.setPageScreenRectLookup(fn);
   }
 
+  private _scrollContainerLookup: (() => DOMRect | null) | null = null;
+
+  /**
+   * Register a function that returns the current DOMRect of the scrollable
+   * container holding the editor. Popovers use this to hide when their
+   * anchor scrolls above/below the visible content area — without it, a
+   * position:fixed popover renders over surrounding chrome (e.g. a toolbar)
+   * as the user scrolls past it. TileManager wires this on construction.
+   */
+  setScrollContainerLookup(fn: (() => DOMRect | null) | null): void {
+    this._scrollContainerLookup = fn;
+  }
+
+  /**
+   * Current viewport DOMRect of the scrollable container, or null if none
+   * is registered (SSR, ServerEditor, or editor not yet mounted).
+   */
+  getScrollContainerRect(): DOMRect | null {
+    return this._scrollContainerLookup?.() ?? null;
+  }
+
   /**
    * Positions the hidden textarea at the cursor's visual location.
    */

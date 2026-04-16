@@ -16,6 +16,8 @@
  */
 import type { Node, MarkType } from "prosemirror-model";
 import type { IEditor } from "../extensions/types";
+import { subscribeViewUpdates } from "./subscribeViewUpdates";
+import { isAnchorInsideContainer } from "./anchorVisibility";
 
 export interface LinkPopoverInfo {
   /** The href attribute of the link mark under the cursor. */
@@ -65,7 +67,7 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     const href = markInstance.attrs["href"] as string;
 
     const rect = editor.getViewportRect(from, to);
-    if (!rect) {
+    if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
       if (visible) { visible = false; onHide(); }
       return;
     }
@@ -80,7 +82,7 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     }
   }
 
-  const unsubscribe = editor.on("update", () => {
+  const unsubscribe = subscribeViewUpdates(editor, () => {
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => { rafId = null; update(); });
   });
