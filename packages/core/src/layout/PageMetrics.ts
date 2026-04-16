@@ -84,7 +84,11 @@ export function computePageMetrics(
     contentHeight,
     contentWidth,
     headerTop: margins.top,
-    footerTop: pageHeight - margins.bottom - footerHeight,
+    // Pageless mode has no footer band — keep footerTop aligned with
+    // contentBottom instead of subtracting margins we never respect.
+    footerTop: config.pageless
+      ? pageHeight
+      : pageHeight - margins.bottom - footerHeight,
     headerHeight,
     footerHeight,
   };

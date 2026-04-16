@@ -80,6 +80,9 @@ describe("computePageMetrics — zero contributors (Phase 0 baseline)", () => {
     // per the documented behavior — callers that respect `config.pageless`
     // never clamp against it.
     expect(m.contentBottom).toBe(0);
+    // footerTop mirrors contentBottom in pageless — no margins.bottom subtraction.
+    expect(m.footerTop).toBe(m.contentBottom);
+    expect(m.footerTop).toBe(defaultPagelessConfig.pageHeight);
   });
 });
 
