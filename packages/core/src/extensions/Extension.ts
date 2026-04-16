@@ -75,6 +75,8 @@ export class Extension<Options extends object = object> {
       // node's attrs spec during schema construction, before any Phase 2
       // context exists.
       docAttrs: config.addDocAttrs?.call(p1) ?? {},
+      // Phase 1 — chrome contribution consumed by the layout aggregator.
+      pageChrome: config.addPageChrome?.call(p1) ?? null,
       // Phase 2: only when schema is available
       plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
       ...(schema && config.addInitialDoc
