@@ -18,10 +18,36 @@
  *      - Throws are logged and swallowed.
  *   6. Fire onSurfaceChange(prevId, nextId) listeners synchronously.
  *
- * Invariant 5 (see docs/multi-surface-architecture.md §4): `editor.state`
- * always refers to the flow document, never an active surface. This registry
- * changes input routing; document identity (commands, external transactions)
- * continues to target flow regardless of activation.
+ * ## Flow-is-identity invariant (load-bearing)
+ *
+ * `editor.state` always refers to the flow document, never an active
+ * surface. This registry changes input routing; document identity (commands,
+ * external transactions like Y.js, subscribers that diff `editor.state.doc`)
+ * continues to target flow regardless of activation. If this ever breaks,
+ * save hooks silently target the wrong state — the exact class of bug the
+ * registry exists to prevent. Enforced by integration tests that assert
+ * `editor.getState()` remains flow-bound while a surface is active.
+ *
+ * ## Lazy-surface pattern (for plugin authors)
+ *
+ * Plugins typically maintain their own `Map<LogicalId, EditorSurface>` cache
+ * so surfaces are created on demand and persist across deactivations:
+ *
+ *   1. On first user intent to edit (e.g. double-click on a header region),
+ *      look up the surface by logical id; if missing, `new EditorSurface(...)`
+ *      + `registry.register(surface)`.
+ *   2. Call `registry.activate(surface.id)`.
+ *   3. On deactivation, LEAVE the surface registered — re-activation is then
+ *      free. Unregister only on editor destroy or surface deletion.
+ *
+ * This avoids allocating N surfaces for N potential edit regions at document
+ * load time (important for documents with hundreds of footnotes or comments).
+ *
+ * ## Debugging
+ *
+ * Set `globalThis.__SURFACE_DEBUG__ = true` to log every activation
+ * transition (prev, next, owner, dirty state). Matches the `__LAYOUT_DEBUG__`
+ * convention used by the layout engine.
  */
 
 import type { EditorSurface } from "./EditorSurface";
@@ -119,6 +145,18 @@ export class SurfaceRegistry {
     const prevId = this._activeId;
     const prev = prevId === null ? null : this._surfaces.get(prevId) ?? null;
 
+    if ((globalThis as Record<string, unknown>).__SURFACE_DEBUG__) {
+      const dirtyPart = prev && prev.isDirty ? " [dirty]" : "";
+      const ownerPart =
+        nextId === null
+          ? "body"
+          : `${this._surfaces.get(nextId)!.owner}:${nextId}`;
+      // eslint-disable-next-line no-console
+      console.log(
+        `[SurfaceRegistry] activate: ${prevId ?? "body"}${dirtyPart} → ${ownerPart}`,
+      );
+    }
+
     if (prev !== null) {
       if (prev.isDirty) {
         prev._committing = true;
@@ -148,6 +186,21 @@ export class SurfaceRegistry {
     }
 
     this._changeListeners.forEach((h) => h(prevId, nextId));
+  }
+
+  /**
+   * Debug/inspection snapshot. Safe to call at any time. Not part of the
+   * normal operational API — used by devtools, error reporters, and tests.
+   */
+  snapshot(): {
+    activeId: SurfaceId | null;
+    surfaces: Array<{ id: SurfaceId; owner: string; isDirty: boolean }>;
+  } {
+    const surfaces: Array<{ id: SurfaceId; owner: string; isDirty: boolean }> = [];
+    for (const s of this._surfaces.values()) {
+      surfaces.push({ id: s.id, owner: s.owner, isDirty: s.isDirty });
+    }
+    return { activeId: this._activeId, surfaces };
   }
 
   /**

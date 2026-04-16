@@ -313,3 +313,28 @@ describe("routing — unregister while active", () => {
     cleanup();
   });
 });
+
+// ── syncInputBridge defensive gate ───────────────────────────────────────────
+
+describe("routing — syncInputBridge gates on active surface", () => {
+  it("skips textarea positioning while a surface is active", () => {
+    // Rationale: syncPosition resolves selection.head via flow-layout
+    // coordinates. When a surface is active, head is a surface-doc position
+    // and would resolve to garbage in flow space. Until PR 7 wires a
+    // surface-aware viewport lookup, syncInputBridge is a no-op in the
+    // active-surface case rather than producing wrong coordinates.
+    const { editor, container, cleanup } = mountEditor();
+    const textarea = container.querySelector("textarea")!;
+    const topBefore = textarea.style.top;
+
+    const surface = makeSurface(editor, "test:1", "test");
+    editor.surfaces.register(surface);
+    editor.surfaces.activate("test:1");
+    surface.dispatch(surface.state.tr.insertText("hello"));
+    editor.syncInputBridge();
+
+    // Style unchanged — syncPosition was not called.
+    expect(textarea.style.top).toBe(topBefore);
+    cleanup();
+  });
+});

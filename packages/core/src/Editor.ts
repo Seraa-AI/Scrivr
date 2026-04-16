@@ -167,9 +167,8 @@ export class Editor extends BaseEditor implements IEditor {
   /**
    * Multi-surface registry — tracks plugin-owned edit regions (headers,
    * footnote bodies, etc.). The body/flow document is the implicit default
-   * (activeId === null). Per Invariant 5 in docs/multi-surface-architecture.md
-   * §4, editor.state always returns the flow state; activating a surface
-   * re-routes input, not document identity.
+   * (activeId === null). `editor.state` always returns flow state regardless
+   * of activation: surfaces re-route input, never document identity.
    */
   readonly surfaces: SurfaceRegistry;
 
@@ -657,8 +656,12 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Positions the hidden textarea at the cursor's visual location.
+   * Skipped while a surface is active: the textarea's current anchor path
+   * resolves `head` against flow layout, and surface-doc positions would
+   * produce garbage coordinates. TODO(pr7): surface-aware viewport lookup.
    */
   syncInputBridge(): void {
+    if (this.surfaces.activeSurface !== null) return;
     this.ib.syncPosition();
   }
 

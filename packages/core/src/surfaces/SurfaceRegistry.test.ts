@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { Schema } from "prosemirror-model";
 import { EditorSurface } from "./EditorSurface";
 import { SurfaceRegistry, type SurfaceOwnerMediator } from "./SurfaceRegistry";
@@ -329,5 +329,111 @@ describe("SurfaceRegistry — unregister while active", () => {
   it("unregister of unknown id is a no-op", () => {
     const r = new SurfaceRegistry();
     expect(() => r.unregister("missing")).not.toThrow();
+  });
+});
+
+// ── Activation loop + re-registration ────────────────────────────────────────
+
+describe("SurfaceRegistry — activation loops", () => {
+  it("A → B → A fires full lifecycle on each transition", () => {
+    const r = new SurfaceRegistry();
+    const { mediator, calls } = makeMediator();
+    r._setOwnerMediator(mediator);
+    r.register(makeSurface("a"));
+    r.register(makeSurface("b"));
+    r.activate("a");
+    r.activate("b");
+    r.activate("a");
+    expect(calls).toEqual([
+      { type: "activate", id: "a" },
+      { type: "deactivate", id: "a" },
+      { type: "activate", id: "b" },
+      { type: "deactivate", id: "b" },
+      { type: "activate", id: "a" },
+    ]);
+    expect(r.activeId).toBe("a");
+  });
+
+  it("re-registering an id after unregister works cleanly", () => {
+    const r = new SurfaceRegistry();
+    const first = makeSurface("shared");
+    r.register(first);
+    r.unregister("shared");
+
+    const second = makeSurface("shared");
+    expect(() => r.register(second)).not.toThrow();
+    expect(r.get("shared")).toBe(second);
+  });
+});
+
+// ── Debug logging ────────────────────────────────────────────────────────────
+
+describe("SurfaceRegistry — __SURFACE_DEBUG__ logging", () => {
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).__SURFACE_DEBUG__;
+  });
+
+  it("logs transitions when the flag is set", () => {
+    (globalThis as Record<string, unknown>).__SURFACE_DEBUG__ = true;
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const r = new SurfaceRegistry();
+    r.register(makeSurface("a", "alpha"));
+    r.activate("a");
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("body → alpha:a"));
+    spy.mockRestore();
+  });
+
+  it("does not log when the flag is absent", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const r = new SurfaceRegistry();
+    r.register(makeSurface("a"));
+    r.activate("a");
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("annotates dirty state on transitions", () => {
+    (globalThis as Record<string, unknown>).__SURFACE_DEBUG__ = true;
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const r = new SurfaceRegistry();
+    const s = makeSurface("a");
+    r.register(s);
+    r.activate("a");
+    s.dispatch(s.state.tr.insertText("x"));
+    r.activate(null);
+    // Second log call is the dirty A → body transition.
+    const dirtyCall = spy.mock.calls.find((c) => String(c[0]).includes("[dirty]"));
+    expect(dirtyCall).toBeDefined();
+    spy.mockRestore();
+  });
+});
+
+// ── snapshot() debug helper ──────────────────────────────────────────────────
+
+describe("SurfaceRegistry — snapshot", () => {
+  it("reports activeId + registered surfaces + dirty flags", () => {
+    const r = new SurfaceRegistry();
+    const a = makeSurface("a", "alpha");
+    const b = makeSurface("b", "beta");
+    r.register(a);
+    r.register(b);
+    r.activate("a");
+    a.dispatch(a.state.tr.insertText("hi"));
+
+    const snap = r.snapshot();
+    expect(snap.activeId).toBe("a");
+    expect(snap.surfaces).toHaveLength(2);
+    const aEntry = snap.surfaces.find((s) => s.id === "a")!;
+    expect(aEntry).toEqual({ id: "a", owner: "alpha", isDirty: true });
+    expect(snap.surfaces.find((s) => s.id === "b")).toEqual({
+      id: "b",
+      owner: "beta",
+      isDirty: false,
+    });
+  });
+
+  it("empty registry reports null activeId and no surfaces", () => {
+    const r = new SurfaceRegistry();
+    expect(r.snapshot()).toEqual({ activeId: null, surfaces: [] });
   });
 });

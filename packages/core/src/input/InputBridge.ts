@@ -183,6 +183,11 @@ export class InputBridge {
    */
   syncPosition(): void {
     if (!this.textarea) return;
+    // Defer to the caller to decide whether surface-active runs through this
+    // path. When `getViewportRect` can't resolve `head` (happens when a
+    // surface is active and head is a surface-doc position being interpreted
+    // against flow layout), leave the textarea where it was rather than
+    // positioning it to garbage coordinates.
     const { head } = this.opts.getState().selection;
     const rect = this.opts.getViewportRect(head, head);
     if (!rect) return;

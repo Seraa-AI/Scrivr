@@ -43,6 +43,17 @@ export interface BaseEditorOptions {
  */
 export class BaseEditor implements IBaseEditor {
   protected readonly _manager: ExtensionManager;
+  /**
+   * The flow document's state.
+   *
+   * Flow-is-identity invariant (load-bearing): this field MUST always
+   * reference the flow document. Never reassign it to an active
+   * EditorSurface's state. Input routing is re-targeted at the Editor level
+   * via wrapped `getState` callbacks; document identity lives here and must
+   * not move. Save hooks, commands, subscribers, and collaborative adapters
+   * all read through this — if it ever points at a surface they silently
+   * target the wrong document.
+   */
   protected _state: EditorState;
 
   private _readOnly = false;
