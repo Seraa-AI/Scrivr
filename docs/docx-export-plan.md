@@ -206,5 +206,78 @@ Define `DocxHandlers` + `DocxContext` as a **type-only PR** (no XML generation, 
 ## Dependencies
 
 - M2 export dispatch refactor (real handler shapes for PDF/Markdown)
-- A concrete XML builder library choice (e.g. raw string templates, `xmlbuilder2`, or custom)
 - Track changes support via `<w:ins>` / `<w:del>` revision marks (aligns with the existing TrackChanges extension)
+
+## XML / OPC library choice
+
+DOCX is a ZIP archive of XML files (OPC format). We need two capabilities: building XML nodes and assembling the ZIP package.
+
+### Option A: `docx` (npm `docx`)
+
+High-level, declarative API. Handlers return `docx.Paragraph`, `docx.TextRun`, etc. — the library handles XML serialization + OPC packaging.
+
+```ts
+import { Paragraph, TextRun, Document, Packer } from "docx";
+
+// Handler returns library objects
+const handler: DocxNodeHandler = (node, ctx, meta) =>
+  new Paragraph({ children: [new TextRun(node.textContent)] });
+
+// Package assembly is one call
+const buffer = await Packer.toBuffer(doc);
+```
+
+**Pros:** battle-tested, handles styles/numbering/relationships/content-types automatically, large community, good TypeScript types, abstracts away OOXML complexity (namespace prefixes, required elements, relationship IDs).
+
+**Cons:** large bundle (~200KB min), opinionated API surface (our handlers return library objects rather than raw XML — tighter coupling to the library), may constrain advanced scenarios where we need raw XML control (track changes revision marks, custom XML parts).
+
+### Option B: `pizzip` + raw XML templates
+
+Low-level: we build XML strings (or a lightweight builder), assemble the ZIP ourselves.
+
+```ts
+import PizZip from "pizzip";
+
+const xml = `<w:p><w:r><w:t>${escape(text)}</w:t></w:r></w:p>`;
+zip.file("word/document.xml", wrapDocument(bodyXml));
+```
+
+**Pros:** tiny bundle, full control over every byte of XML, no abstraction leakage, easy to emit track-changes revision marks exactly as needed.
+
+**Cons:** we own all OOXML correctness (namespaces, required elements, relationship bookkeeping), more code to maintain, easy to produce invalid documents.
+
+### Option C: Hybrid — `docx` for structure, raw XML for edge cases
+
+Use `docx` library for the 90% case (paragraphs, runs, tables, images, styles, numbering). For advanced features that need raw XML control (track changes `<w:ins>`/`<w:del>`, custom XML parts, field codes), use the library's `RawXml` escape hatch or supplement with direct XML injection.
+
+```ts
+import { Paragraph, TextRun, ExternalHyperlink } from "docx";
+
+// Normal handler — library objects
+const paragraphHandler = (node, ctx, meta) =>
+  new Paragraph({ style: "Normal", children: walkInlineChildren(node, ctx) });
+
+// Track changes — raw XML where the library doesn't cover it
+const trackedInsertHandler = (node, ctx, meta) =>
+  new Paragraph({
+    children: [new InsertedTextRun({ text: node.textContent, id: ctx.revisionId(), author: node.attrs.author, date: node.attrs.date })]
+  });
+```
+
+### Recommendation: Option A (`docx` library) with raw XML escape hatch
+
+**Why:**
+- The `docx` library handles the hardest parts automatically: style XML generation from specs, numbering `abstractNum`/`numId` management, relationship IDs for images/hyperlinks, `[Content_Types].xml`, OPC ZIP assembly. These map directly to our `DocxContext` design (`ctx.styles`, `ctx.numbering`, `ctx.rels`).
+- Our handler signature `(node, ctx, meta) → XmlNode` maps cleanly to returning `docx` library objects (`Paragraph`, `TextRun`, `Table`, `ImageRun`).
+- Track changes: the `docx` library supports `InsertedTextRun` and `DeletedTextRun` natively — aligns with our existing `trackedInsert`/`trackedDelete` marks.
+- Bundle size (~200KB) is acceptable for an export-only package that isn't loaded on every page view — it's lazy-imported when the user clicks "Export to DOCX."
+
+**What changes in DocxContext:**
+- `XmlBuilder` in the context shape becomes `docx.Document` (or a wrapper around it)
+- `XmlNode` return type from handlers becomes `docx.Paragraph | docx.Table | docx.TextRun | ...`
+- `ctx.styles` maps to `docx` style definitions passed to `new Document({ styles: ... })`
+- `ctx.numbering` maps to `docx` numbering config
+- `ctx.rels` is handled implicitly by the library (images are added via `ImageRun`, hyperlinks via `ExternalHyperlink`)
+- Package assembly: `Packer.toBuffer(doc)` or `Packer.toBlob(doc)` — no manual ZIP
+
+**When to finalize:** during the type-only PR that defines `DocxHandlers`. Import the `docx` library's types to verify our handler signatures align before writing any runtime code.
