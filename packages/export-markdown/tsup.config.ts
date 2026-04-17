@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
-  external: ["@scrivr/core", "@scrivr/export-pdf", "@scrivr/export-markdown"],
+  external: ["@scrivr/core", "prosemirror-markdown"],
 });

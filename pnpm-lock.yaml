@@ -203,19 +203,54 @@ importers:
 
   packages/export:
     dependencies:
-      '@pdf-lib/fontkit':
-        specifier: ^1.1.1
-        version: 1.1.1
       '@scrivr/core':
         specifier: workspace:*
         version: link:../core
-      pdf-lib:
-        specifier: ^1.17.1
-        version: 1.17.1
+      '@scrivr/export-markdown':
+        specifier: workspace:*
+        version: link:../export-markdown
+      '@scrivr/export-pdf':
+        specifier: workspace:*
+        version: link:../export-pdf
+    devDependencies:
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@25.5.0)(@vitest/ui@2.1.9)(happy-dom@20.8.4)(lightningcss@1.32.0)(terser@5.46.1)
+
+  packages/export-markdown:
+    dependencies:
       prosemirror-markdown:
         specifier: ^1.13.4
         version: 1.13.4
     devDependencies:
+      '@scrivr/core':
+        specifier: workspace:*
+        version: link:../core
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
+  packages/export-pdf:
+    dependencies:
+      '@pdf-lib/fontkit':
+        specifier: ^1.1.1
+        version: 1.1.1
+      pdf-lib:
+        specifier: ^1.17.1
+        version: 1.17.1
+    devDependencies:
+      '@scrivr/core':
+        specifier: workspace:*
+        version: link:../core
       prosemirror-model:
         specifier: ^1.25.4
         version: 1.25.4

@@ -1,0 +1,38 @@
+{
+  "name": "@scrivr/export-pdf",
+  "version": "1.0.4",
+  "description": "PDF export for Scrivr documents — same layout pipeline as the canvas renderer",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
+    "pdf-lib": "^1.17.1"
+  },
+  "peerDependencies": {
+    "@scrivr/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@scrivr/core": "workspace:*",
+    "prosemirror-model": "^1.25.4",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
+  }
+}

@@ -53,13 +53,11 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@pdf-lib/fontkit": "^1.1.1",
     "@scrivr/core": "workspace:*",
-    "pdf-lib": "^1.17.1",
-    "prosemirror-markdown": "^1.13.4"
+    "@scrivr/export-pdf": "workspace:*",
+    "@scrivr/export-markdown": "workspace:*"
   },
   "devDependencies": {
-    "prosemirror-model": "^1.25.4",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^2.1.9"
