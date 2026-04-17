@@ -3,7 +3,7 @@
   "changelog": "@changesets/cli/changelog",
   "commit": false,
   "fixed": [
-    ["@scrivr/core", "@scrivr/react", "@scrivr/plugins", "@scrivr/export"]
+    ["@scrivr/core", "@scrivr/react", "@scrivr/plugins", "@scrivr/export", "@scrivr/export-pdf", "@scrivr/export-markdown"]
   ],
   "linked": [],
   "access": "public",
