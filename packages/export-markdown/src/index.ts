@@ -1,3 +1,7 @@
+// Side-effect: augments FormatHandlers with the "markdown" key.
+import "./augmentation";
+export type { MarkdownHandlers } from "./augmentation";
+
 import type { Editor } from "@scrivr/core";
 
 /**

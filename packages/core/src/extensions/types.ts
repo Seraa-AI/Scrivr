@@ -25,6 +25,7 @@ import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
+import type { ExportContribution } from "./export";
 import type { SelectionController } from "../SelectionController";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
@@ -427,6 +428,14 @@ export interface ExtensionConfig<Options = object> {
    */
   addSurfaceOwner?(this: Phase1Context<Options>): SurfaceOwnerRegistration;
 
+  /**
+   * Contribute format-specific export handlers. The `format` key in each
+   * contribution must match a `FormatHandlers` augmentation declared by a
+   * format package (e.g. `@scrivr/export-pdf` augments `FormatHandlers.pdf`).
+   * Without a format package imported the type resolves to `never[]`.
+   */
+  addExports?(this: Phase1Context<Options>): ExportContribution[];
+
   // ── Phase 2: Behaviour ──────────────────────────────────────────────────────
   // Called with `this = ExtensionContext` — the built schema is available.
 
@@ -602,6 +611,8 @@ export interface ResolvedExtension {
   pageChrome: PageChromeContribution | null;
   /** Surface owner registration (plugin-owned edit regions) or null when absent. */
   surfaceOwner: SurfaceOwnerRegistration | null;
+  /** Format-specific export handler contributions. Empty array when absent. */
+  exports: ExportContribution[];
   plugins: Plugin[];
   keymap: Record<string, Command>;
   commands: Record<string, (...args: unknown[]) => Command>;

@@ -1,4 +1,8 @@
+// Side-effect: augments FormatHandlers with the "pdf" key.
+import "./augmentation";
+
 export { PdfExport } from "./PdfExport";
+export type { PdfHandlers } from "./augmentation";
 
 /**
  * PDF export — uses the same layout engine as the canvas renderer.
