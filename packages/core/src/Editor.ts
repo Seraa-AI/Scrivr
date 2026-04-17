@@ -22,6 +22,7 @@ import { InputBridge } from "./input/InputBridge";
 import { PasteTransformer } from "./input/PasteTransformer";
 import { BaseEditor } from "./BaseEditor";
 import type { EditorEvents } from "./types/augmentation";
+import { SurfaceRegistry } from "./surfaces/SurfaceRegistry";
 
 export type EditorChangeHandler = (state: EditorState) => void;
 
@@ -164,6 +165,14 @@ export class Editor extends BaseEditor implements IEditor {
   readonly cursorManager: CursorManager;
 
   /**
+   * Multi-surface registry — tracks plugin-owned edit regions (headers,
+   * footnote bodies, etc.). The body/flow document is the implicit default
+   * (activeId === null). `editor.state` always returns flow state regardless
+   * of activation: surfaces re-route input, never document identity.
+   */
+  readonly surfaces: SurfaceRegistry;
+
+  /**
    * Merged block styles from all extensions — the fontConfig passed to every
    * layoutDocument call. Built once at construction from ExtensionManager.
    */
@@ -240,6 +249,50 @@ export class Editor extends BaseEditor implements IEditor {
       this._notifyListeners();
     });
 
+    // ── Surface registry — plugins register their own surfaces lazily.
+    this.surfaces = new SurfaceRegistry();
+    const owners = this._manager.getSurfaceOwners();
+    this.surfaces._setOwnerMediator({
+      commit: (s) => {
+        const reg = owners.get(s.owner);
+        if (reg?.onCommit) {
+          // Throws propagate — commit failures must abort activation so the
+          // owner can surface a real error instead of silently discarding edits.
+          reg.onCommit(s);
+        }
+      },
+      deactivate: (s) => {
+        const reg = owners.get(s.owner);
+        try {
+          reg?.onDeactivate?.(s);
+        } catch (err) {
+          console.error(`[Editor] onDeactivate("${s.id}") threw:`, err);
+        }
+      },
+      activate: (s) => {
+        const reg = owners.get(s.owner);
+        try {
+          reg?.onActivate?.(s);
+        } catch (err) {
+          console.error(`[Editor] onActivate("${s.id}") threw:`, err);
+        }
+      },
+    });
+
+    // Routing helpers — InputBridge + SelectionController read/write via the
+    // active surface when one is set, else the flow document. editor.state
+    // continues to return flow state (Invariant 5); only input routes flip.
+    const getRoutedState = (): EditorState =>
+      this.surfaces.activeSurface?.state ?? this._state;
+    const getRoutedCharMap = (): CharacterMap =>
+      this.surfaces.activeSurface?.charMap ?? this.lc.charMap;
+    const routedDispatch = (tr: Transaction | null): void => {
+      if (tr === null) return;
+      const active = this.surfaces.activeSurface;
+      if (active) active.dispatch(tr);
+      else this._viewDispatch(tr);
+    };
+
     this.lc = new LayoutCoordinator({
       pageConfig: this.pageConfig,
       fontConfig: this.fontConfig,
@@ -258,10 +311,10 @@ export class Editor extends BaseEditor implements IEditor {
     }
 
     this.selection = new SelectionController({
-      getState: () => this._state,
-      dispatch: (tr) => this._viewDispatch(tr),
+      getState: getRoutedState,
+      dispatch: routedDispatch,
       ensureLayout: () => this.lc.ensureLayout(),
-      getCharMap: () => this.lc.charMap,
+      getCharMap: getRoutedCharMap,
       focus: () => this.focus(),
     });
 
@@ -272,11 +325,15 @@ export class Editor extends BaseEditor implements IEditor {
     );
 
     this.ib = new InputBridge({
-      getState: () => this._state,
-      dispatch: (tr) => { if (tr) this._viewDispatch(tr); },
+      getState: getRoutedState,
+      dispatch: routedDispatch,
       getSchema: () => this._manager.schema,
       getViewportRect: (from, to) => this.getViewportRect(from, to),
-      getCharMap: () => this.lc.charMap,
+      // TODO(pr7): getViewportRect still resolves positions against the flow
+      // layout. When a surface is active, `from`/`to` are surface-doc positions
+      // and need surface-aware coordinate lookup. Safe today because no plugin
+      // activates a surface yet.
+      getCharMap: getRoutedCharMap,
       getFloatPosition: (docPos: number) => {
         const f = this.layout.floats?.find((fl) => fl.docPos === docPos);
         if (!f) return null;
@@ -356,6 +413,10 @@ export class Editor extends BaseEditor implements IEditor {
       this._rafId = null;
     }
     super.destroy(); // emits "destroy", fires cleanup callbacks
+    // Run owner onDeactivate via implicit activate(null), unregister every
+    // surface, clear listeners, and reset the mediator to noop so any stray
+    // post-destroy callers can't re-invoke plugin callbacks.
+    this.surfaces.destroy();
     this.lc.destroy();
     this.overlayRenderHandlers.clear();
     this.cursorManager.stop();
@@ -599,8 +660,12 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Positions the hidden textarea at the cursor's visual location.
+   * Skipped while a surface is active: the textarea's current anchor path
+   * resolves `head` against flow layout, and surface-doc positions would
+   * produce garbage coordinates. TODO(pr7): surface-aware viewport lookup.
    */
   syncInputBridge(): void {
+    if (this.surfaces.activeSurface !== null) return;
     this.ib.syncPosition();
   }
 
