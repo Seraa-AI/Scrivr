@@ -48,8 +48,7 @@
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "echo 'no tests — compat shim only'",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
