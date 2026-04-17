@@ -90,23 +90,41 @@ The `image` handler uses `meta.inline` to decide:
 
 No guessing, no fragile `isInlineContext()` checks.
 
+## Lifecycle phases
+
+```
+onBeforeExport(ctx)     → precompute TOC, numbering, cross-refs, bookmarks
+walkTree(doc, handlers) → handlers produce XmlNode trees (pure, no global cursor)
+onBuildTreeComplete(ctx)→ post-walk fixups: inject bookmarks, resolve internal links
+onAfterExport(ctx)      → plugin cleanup
+assemblePackage(ctx)    → write /word/document.xml, styles.xml, numbering.xml, rels, [Content_Types].xml
+```
+
+`onBuildTreeComplete` is distinct from `onAfterExport` — it runs after the full tree exists but before OPC packaging. Features like cross-references and bookmark injection need the complete tree but can't wait until after the package is assembled.
+
 ## DocxContext shape (design reference)
 
 ```ts
 interface DocxContext {
-  // Style management — namespaced to prevent duplicate inflation.
-  // getOrCreate deduplicates; plugins don't freestyle random style names.
+  // Style management — split by Word style type to prevent mixing
+  // paragraph + character + table styles (produces invalid OOXML).
+  // getOrCreate deduplicates by name; plugins use semantic names
+  // ("heading1", "codeBlock") not plugin-specific names.
   styles: {
-    getOrCreate(name: string, spec: DocxStyleSpec): string; // returns style ID
-    resolve(name: string): string;
+    paragraph: { getOrCreate(name: string, spec: DocxParagraphStyleSpec): string };
+    character: { getOrCreate(name: string, spec: DocxCharacterStyleSpec): string };
+    table:     { getOrCreate(name: string, spec: DocxTableStyleSpec): string };
   };
 
-  // Numbering — Word's multi-level list system.
-  // Must be deterministic + reusable: nested lists across plugins or
-  // mixed node types (task list + bullet list) share abstractNums.
+  // Numbering — declarative API hides Word's abstractNum/numId internals.
+  // Plugins describe what they want; the engine maps to Word primitives.
+  // Deterministic + reusable: mixed list types across plugins share
+  // abstractNum definitions when their level specs match.
   numbering: {
-    register(abstractId: number, levels: DocxNumberingLevel[]): void;
-    instance(abstractId: number): number; // returns numId
+    getOrCreate(spec: {
+      type: "bullet" | "ordered" | "task";
+      levels: DocxNumberingLevel[];
+    }): { numId: number };
   };
 
   // OPC relationships — images, hyperlinks, external refs
@@ -115,17 +133,31 @@ interface DocxContext {
     addHyperlink(url: string): string;
   };
 
-  // Document tree builder
+  // Document tree — the root XmlBuilder. Handlers return XmlNode trees;
+  // the walker composes them. No mutable cursor (currentParagraph removed
+  // — handlers are pure tree producers, walker handles composition).
   document: XmlBuilder;
-  currentParagraph: XmlBuilder | null;
 
-  // Shared derived data across plugins. First-class pattern, not ad-hoc.
-  // Conventions: "headings" → HeadingEntry[], "footnotes" → FootnoteMap,
-  // "citations" → CitationMap. Populated in onBeforeExport, read in handlers.
-  // Prevents duplicate doc walks + inconsistent derived data.
-  shared: Map<string, unknown>;
+  // Shared derived data across plugins. Collaborative, not overwrite:
+  // getOrInit returns existing value or initializes with the factory.
+  // Populated in onBeforeExport, read in handlers. Prevents duplicate
+  // doc walks + inconsistent derived data across plugins.
+  //
+  // Conventions:
+  //   "headings"  → HeadingEntry[]
+  //   "footnotes" → FootnoteMap
+  //   "citations" → CitationMap
+  shared: {
+    getOrInit<T>(key: string, init: () => T): T;
+    get<T>(key: string): T | undefined;
+  };
 }
 ```
+
+**Design rules:**
+- Handlers are **pure tree producers**: `(node, ctx, meta) → XmlNode[]`. No mutating a global cursor.
+- The tree walker composes child results into parent nodes. Plugins never need to track "current paragraph."
+- `ctx.shared` uses `getOrInit` (append/collaborate) not `set` (overwrite) to prevent last-writer-wins bugs between plugins.
 
 ## Risks to watch
 
