@@ -22,7 +22,7 @@
     "@anthropic-ai/sdk": "^0.80.0",
     "@floating-ui/dom": "^1.7.6",
     "@scrivr/core": "workspace:*",
-    "@scrivr/export": "workspace:*",
+    "@scrivr/export-pdf": "workspace:*",
     "@scrivr/plugins": "workspace:*",
     "@scrivr/react": "workspace:*",
     "@tanstack/react-router": "1.168.3",

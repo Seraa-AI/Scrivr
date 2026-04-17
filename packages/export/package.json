@@ -1,7 +1,8 @@
 {
   "name": "@scrivr/export",
   "version": "1.0.4",
-  "description": "PDF and Markdown export for Scrivr documents",
+  "description": "DEPRECATED — use @scrivr/export-pdf and/or @scrivr/export-markdown directly",
+  "deprecated": "Use @scrivr/export-pdf and/or @scrivr/export-markdown directly. This package is a compat shim that re-exports from both.",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
   "repository": {

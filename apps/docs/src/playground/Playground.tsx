@@ -11,7 +11,7 @@ import {
 } from "@scrivr/react";
 import { useState } from "react";
 import type { EditorStateContext } from "@scrivr/react";
-import { PdfExport } from "@scrivr/export";
+import { PdfExport } from "@scrivr/export-pdf";
 import {
   Collaboration,
   CollaborationCursor,
