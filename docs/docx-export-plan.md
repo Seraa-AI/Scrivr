@@ -72,17 +72,38 @@ Handlers may need `isInlineContext(ctx)` branching.
 
 DOCX export is `buildTree() → finalize()`, not a streaming draw loop.
 
+## Handler signature
+
+Context sensitivity (inline vs block) must be explicit in the handler, not inferred from `ctx.currentParagraph`. This keeps the single-dispatch-table rule intact while solving DOCX's structural needs:
+
+```ts
+type DocxNodeHandler = (
+  node: Node,
+  ctx: DocxContext,
+  meta: { inline: boolean },
+) => XmlNode | XmlNode[];
+```
+
+The `image` handler uses `meta.inline` to decide:
+- `inline: true` → emit `<w:r>` with `<w:drawing>` inside
+- `inline: false` → emit standalone `<w:p>` with drawing
+
+No guessing, no fragile `isInlineContext()` checks.
+
 ## DocxContext shape (design reference)
 
 ```ts
 interface DocxContext {
-  // Style management — register named styles, emit references
+  // Style management — namespaced to prevent duplicate inflation.
+  // getOrCreate deduplicates; plugins don't freestyle random style names.
   styles: {
-    register(name: string, spec: DocxStyleSpec): void;
-    resolve(name: string): string; // returns style ID
+    getOrCreate(name: string, spec: DocxStyleSpec): string; // returns style ID
+    resolve(name: string): string;
   };
 
-  // Numbering — Word's multi-level list system
+  // Numbering — Word's multi-level list system.
+  // Must be deterministic + reusable: nested lists across plugins or
+  // mixed node types (task list + bullet list) share abstractNums.
   numbering: {
     register(abstractId: number, levels: DocxNumberingLevel[]): void;
     instance(abstractId: number): number; // returns numId
@@ -98,41 +119,53 @@ interface DocxContext {
   document: XmlBuilder;
   currentParagraph: XmlBuilder | null;
 
-  // Shared state across plugins (derived data like heading structure)
+  // Shared derived data across plugins. First-class pattern, not ad-hoc.
+  // Conventions: "headings" → HeadingEntry[], "footnotes" → FootnoteMap,
+  // "citations" → CitationMap. Populated in onBeforeExport, read in handlers.
+  // Prevents duplicate doc walks + inconsistent derived data.
   shared: Map<string, unknown>;
 }
 ```
 
 ## Risks to watch
 
-### Stateful preprocessing
+### Stateful preprocessing (`onBeforeExport` will get crowded)
 
-`onBeforeExport` runs before any handlers. DOCX needs TOC, numbering, cross-references, bookmarks — all precomputed. Two plugins walking the same heading tree creates duplication + ordering dependency. When 2+ plugins need the same derived data, introduce `ctx.shared` for coordination.
+`onBeforeExport` runs before any handlers. DOCX needs TOC, numbering, cross-references, bookmarks — all precomputed. Two plugins walking the same heading tree creates duplication + ordering dependency. `ctx.shared` is the coordination mechanism — promote it to a first-class documented pattern with named conventions (`"headings"`, `"footnotes"`, `"citations"`), not an afterthought.
 
-### Format drift is expected
+### Format drift is expected (don't fight it)
 
 A `CalloutBox` renders as:
 - PDF: colored rectangle + text
 - Markdown: `> [!INFO]`  
 - DOCX: styled table, or content control, or indented paragraph
 
-Don't force visual parity across formats. Each format expresses intent in its own idiom.
+Don't force visual parity across formats. Each format expresses intent in its own idiom. Plugins will naturally diverge — that's by design.
+
+### Style inflation across plugins
+
+If every plugin calls `styles.register("my-random-style", {...})` with ad-hoc names, documents bloat with duplicate/inconsistent styles. Mitigated by `getOrCreate` semantics — same name + same spec deduplicates. Establish naming conventions early (e.g. `"heading1"`, `"codeBlock"`, not plugin-specific names).
+
+### Numbering edge cases
+
+Word numbering is deceptively complex: `abstractNum` (definition) vs `numId` (instance), multi-level, cross-plugin. Nested lists from different plugins (task list + bullet list) must share `abstractNum` definitions correctly. Numbering must be deterministic and reusable.
 
 ### Inline atom context sensitivity
 
-Unique to DOCX among current formats. PDF's unified dispatch works because everything is "draw at coords." DOCX needs structural awareness: same node type, different output depending on whether it's inline or block context.
+Resolved by explicit `meta: { inline: boolean }` in the handler signature (see Handler signature section). No runtime guessing.
 
 ## Litmus test
 
 Before building, verify this scenario works end-to-end with the current architecture:
 
-> A plugin defines a custom node that:
-> - Renders visually on canvas
-> - Paginates correctly
-> - Exports to PDF, Markdown, AND DOCX
-> - Without touching core or other plugins
+> A plugin defines:
+> - A block node (e.g. CalloutBox)
+> - An inline atom node (e.g. MentionChip)
+> - A mark (e.g. CitationRef)
+>
+> All three render on canvas, paginate, and export correctly to PDF, Markdown, AND DOCX — without touching core or other plugins.
 
-If that's clean, the system is complete. If not, the gap surfaces during DOCX.
+If that passes, the system is complete. If any of the three categories fails, the gap surfaces during DOCX.
 
 ## Pre-implementation step
 
