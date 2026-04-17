@@ -81,8 +81,8 @@ export class Extension<Options extends object = object> {
       // ExtensionManager.getSurfaceOwners() and installed on SurfaceRegistry.
       surfaceOwner: config.addSurfaceOwner?.call(p1) ?? null,
       // Phase 1 — format-specific export contributions collected by format
-      // packages at export time (e.g. exportPdf walks addExports("pdf") contributions).
-      exports: config.addExports?.call(p1) ?? [],
+      // packages at export time (e.g. exportPdf walks addExports().pdf contributions).
+      exports: config.addExports?.call(p1) ?? {},
       // Phase 2: only when schema is available
       plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
       ...(schema && config.addInitialDoc
