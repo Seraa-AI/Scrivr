@@ -50,9 +50,9 @@ importers:
       '@scrivr/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@scrivr/export':
+      '@scrivr/export-pdf':
         specifier: workspace:*
-        version: link:../../packages/export
+        version: link:../../packages/export-pdf
       '@scrivr/plugins':
         specifier: workspace:*
         version: link:../../packages/plugins
