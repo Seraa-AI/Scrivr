@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/export",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "DEPRECATED — use @scrivr/export-pdf and/or @scrivr/export-markdown directly",
   "deprecated": "Use @scrivr/export-pdf and/or @scrivr/export-markdown directly. This package is a compat shim that re-exports from both.",
   "license": "Apache-2.0",

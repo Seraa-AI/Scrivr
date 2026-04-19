@@ -1,5 +1,25 @@
 # @scrivr/core
 
+## 1.0.5
+
+### Patch Changes
+
+- bf50408: Add `addPageChrome()` extension lane and the iterative chrome aggregator loop. Extensions can now contribute a `PageChromeContribution` (headers, footers, footnote bands, margin notes) that reserves per-page vertical space and paints on top of the content canvas. Zero shipping contributors yet — this lays the groundwork for the HeaderFooter plugin.
+
+  Internal refactor: `paginateFlow` now takes an options bag and returns per-page `metrics[]` directly; `runFlowPipeline` was extracted from `_runPipelineBody` so the aggregator can iterate measurement + pagination without re-running float/fragment passes. `DocumentLayout._chromePayloads` always populated (possibly empty) to seed the next run's contributor state.
+
+  Also fixes `computePageMetrics` returning a bogus `footerTop` in pageless mode (subtracted `margins.bottom` even though pageless has no footer band).
+
+- ff7390f: Split `@scrivr/export` into `@scrivr/export-pdf` (pdf-lib) and `@scrivr/export-markdown` (prosemirror-markdown) so each format carries only its own deps. The original `@scrivr/export` becomes a compat shim that re-exports from both — existing consumers keep working.
+
+  Add `addExports()` extension lane to `@scrivr/core` with the `FormatHandlers` augmentation pattern. Format packages declare their handler shape via module augmentation; extensions contribute format-tagged handlers via `addExports()`. Handler interfaces are placeholders until the M2 export dispatch refactor fills them.
+
+  Dependent packages bumped to pick up the new export extensibility types.
+
+- 8ccf3ea: Add `EditorSurface` + `SurfaceRegistry` + `addSurfaceOwner()` extension lane for multi-surface document editing. Plugins can now register plugin-owned edit regions (headers, footnote bodies, comment threads) that own their own `EditorState` and participate in a full activate/commit/deactivate lifecycle. Body (flow doc) remains the default active surface — `activeId === null` — and `editor.state` always returns flow state regardless of activation. Zero user-visible change. Enables the upcoming HeaderFooter plugin to ship fully editable in-place rather than paint-only.
+
+  Dependent packages bumped to pick up the new `@scrivr/core` surface API exports.
+
 ## 1.0.4
 
 ### Patch Changes

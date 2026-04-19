@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/react",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "React bindings for the Scrivr canvas document editor",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
