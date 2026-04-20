@@ -46,16 +46,16 @@ export interface HeaderFooterPolicy {
   /** Reserved for v2 — always false in v1. */
   differentOddEven: boolean;
 
-  defaultHeader?: HeaderFooterDefinition;
-  defaultFooter?: HeaderFooterDefinition;
+  defaultHeader?: HeaderFooterDefinition | undefined;
+  defaultFooter?: HeaderFooterDefinition | undefined;
 
   /** Used on page 1 when differentFirstPage is true. */
-  firstPageHeader?: HeaderFooterDefinition;
-  firstPageFooter?: HeaderFooterDefinition;
+  firstPageHeader?: HeaderFooterDefinition | undefined;
+  firstPageFooter?: HeaderFooterDefinition | undefined;
 
   /** Reserved for v2 — unused when differentOddEven is false. */
-  evenPageHeader?: HeaderFooterDefinition;
-  evenPageFooter?: HeaderFooterDefinition;
+  evenPageHeader?: HeaderFooterDefinition | undefined;
+  evenPageFooter?: HeaderFooterDefinition | undefined;
 }
 
 /** Context for slot resolution — grows a `section` field when sections land. */

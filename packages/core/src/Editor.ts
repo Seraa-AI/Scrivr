@@ -635,6 +635,14 @@ export class Editor extends BaseEditor implements IEditor {
   }
 
   /**
+   * Get the screen-space position of a page. Returns null if the page
+   * lookup is not registered (editor not mounted) or the page doesn't exist.
+   */
+  getPageScreenPosition(page: number): { screenLeft: number; screenTop: number } | null {
+    return this.ib.lookupPageScreenRect(page);
+  }
+
+  /**
    * Invalidate the layout cache so the next paint triggers a full re-layout.
    * Use when external factors change chrome heights (e.g. live surface editing
    * grows the header band).

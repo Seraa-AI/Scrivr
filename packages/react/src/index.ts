@@ -16,6 +16,8 @@ export type {
   AiSuggestionCardStyles,
 } from "./AiSuggestionCards";
 export { TrackChangesPanel } from "./TrackChangesPanel";
+export { HeaderFooterRibbon } from "./HeaderFooterRibbon";
+export type { HeaderFooterRibbonProps } from "./HeaderFooterRibbon";
 export type { UseCanvasEditorOptions } from "./useScrivrEditor";
 
 export { Scrivr } from "./Scrivr";

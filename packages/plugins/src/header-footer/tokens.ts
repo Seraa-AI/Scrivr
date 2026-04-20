@@ -1,6 +1,11 @@
 /**
  * Inline atom nodes for dynamic header/footer tokens.
  * These only exist in the schema when the HeaderFooter extension is loaded.
+ *
+ * Token substitution at paint time is not yet implemented — the nodes
+ * render their placeholder text ("#" / "DATE") for now. A future PR will
+ * add an InlineStrategy that substitutes the actual page number / date
+ * during drawBlock's span iteration.
  */
 
 import type { NodeSpec } from "prosemirror-model";

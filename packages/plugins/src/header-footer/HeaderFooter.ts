@@ -11,7 +11,7 @@
  */
 
 import { Extension } from "@scrivr/core";
-import type { IEditor, IBaseEditor } from "@scrivr/core";
+import type { IEditor, IBaseEditor, EditorSurface } from "@scrivr/core";
 import type { Node } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
 import type { HeaderFooterPolicy } from "./types";
@@ -27,15 +27,20 @@ function isViewEditor(editor: IBaseEditor): editor is IEditor {
   return "surfaces" in editor && "layout" in editor;
 }
 
-interface CursorManager { isVisible: boolean; resetSilent(): void }
+interface CursorManagerLike { isVisible: boolean; resetSilent(): void }
 
-function getCursorManager(editor: IBaseEditor): CursorManager | null {
+function isCursorManagerLike(value: unknown): value is CursorManagerLike {
+  if (typeof value !== "object" || value === null) return false;
+  return (
+    "isVisible" in value && typeof (value as { isVisible: unknown }).isVisible === "boolean" &&
+    "resetSilent" in value && typeof (value as { resetSilent: unknown }).resetSilent === "function"
+  );
+}
+
+function getCursorManager(editor: IBaseEditor): CursorManagerLike | null {
   if (!("cursorManager" in editor)) return null;
   const cm = editor.cursorManager;
-  if (typeof cm === "object" && cm !== null && "isVisible" in cm && "resetSilent" in cm) {
-    return cm as CursorManager;
-  }
-  return null;
+  return isCursorManagerLike(cm) ? cm : null;
 }
 
 function isCursorVisible(editor: IBaseEditor): boolean {
@@ -74,12 +79,13 @@ function isResolvedHeaderFooter(value: unknown): value is ResolvedHeaderFooter {
   return "policy" in value && "slots" in value;
 }
 
-/** Read the headerFooter policy from doc.attrs with a runtime guard. */
+/** Read the headerFooter policy from doc.attrs with shape validation. */
 function getHeaderFooterPolicy(doc: Node): HeaderFooterPolicy | null {
-  if ("headerFooter" in doc.attrs) {
-    return doc.attrs["headerFooter"]
-  }
-  return null;
+  if (!("headerFooter" in doc.attrs)) return null;
+  const val = doc.attrs["headerFooter"];
+  if (typeof val !== "object" || val === null) return null;
+  if (!("enabled" in val)) return null;
+  return val as HeaderFooterPolicy;
 }
 
 declare module "@scrivr/core" {
@@ -97,6 +103,31 @@ declare module "@scrivr/core" {
   interface NodeAttributes {
     doc: { headerFooter: HeaderFooterPolicy | null };
   }
+}
+
+/**
+ * Position the cursor in a surface near the given click coordinates.
+ * Polls rAF until the charMap is populated by the paint cycle (max 10 frames).
+ */
+function placeCursorAfterPaint(
+  surface: EditorSurface,
+  x: number,
+  y: number,
+  page: number,
+): void {
+  let attempts = 0;
+  const poll = () => {
+    // Position 1 is the first text position (0 is the doc node boundary)
+    if (surface.charMap.hasGlyph(1)) {
+      const pos = surface.charMap.posAtCoords(x, y, page);
+      const clamped = Math.min(pos, surface.state.doc.content.size);
+      const $pos = surface.state.doc.resolve(clamped);
+      surface.dispatch(surface.state.tr.setSelection(TextSelection.near($pos)));
+      return;
+    }
+    if (attempts++ < 10) requestAnimationFrame(poll);
+  };
+  requestAnimationFrame(poll);
 }
 
 /** Per-editor state. Uses a Map (not WeakMap) because onCommit needs iteration. */
@@ -194,10 +225,13 @@ export const HeaderFooter = Extension.create({
           const policy = getHeaderFooterPolicy(entry.editor.getState().doc);
           if (!policy) return;
 
+          const currentSlot = policy[slotKey];
+          if (!currentSlot) return;
+
           const updatedContent = surface.toDocJSON();
           const updatedPolicy = {
             ...policy,
-            [slotKey]: { ...policy[slotKey], content: updatedContent },
+            [slotKey]: { ...currentSlot, content: updatedContent },
           };
 
           const tr = entry.editor.getState().tr.setDocAttribute("headerFooter", updatedPolicy);
@@ -287,6 +321,8 @@ export const HeaderFooter = Extension.create({
       const entry = editorEntries.get(editor);
       if (entry) entry.activePage = page;
       editor.redraw();
+
+      placeCursorAfterPaint(surface, x, y, page);
     });
 
     return () => {

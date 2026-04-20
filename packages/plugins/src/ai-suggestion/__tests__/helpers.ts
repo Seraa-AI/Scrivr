@@ -171,6 +171,7 @@ export class TestAiEditor implements IEditor {
     return [];
   }
   invalidateLayout(): void {}
+  getPageScreenPosition() { return null; }
   readonly surfaces = {
     register: () => {},
     unregister: () => {},

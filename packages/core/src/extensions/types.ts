@@ -125,6 +125,8 @@ export interface IEditor extends IBaseEditor {
    * Falls back to selection.moveCursorTo if the position is not selectable.
    */
   selectNode(docPos: number): void;
+  /** Get screen-space position of a page canvas. Null when not mounted. */
+  getPageScreenPosition(page: number): { screenLeft: number; screenTop: number } | null;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
   redraw(): void;
   /** Invalidate the layout cache and trigger a re-layout on next paint. */

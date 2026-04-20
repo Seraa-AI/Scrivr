@@ -23,6 +23,9 @@ import type { SlotKey } from "./surfaces";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import { resolveSlot } from "./resolveSlot";
 
+/** Reusable throwaway CharacterMap for non-cursor pages. Avoids allocating on every paint. */
+const THROWAWAY_CHARMAP = new CharacterMap();
+
 export interface DrawChromeOptions {
   ctx: PageChromePaintContext;
   resolved: ResolvedHeaderFooter;
@@ -69,7 +72,7 @@ function drawBandIfPresent(
   // All pages show live content when editing. Only the cursor page populates
   // the surface charMap (for cursor placement and click-to-position).
   // Other pages use a throwaway charMap.
-  const charMap = isLive && isCursorPage ? activeSurface!.charMap : new CharacterMap();
+  const charMap = isLive && isCursorPage ? activeSurface!.charMap : THROWAWAY_CHARMAP;
   if (isLive && isCursorPage) charMap.clear();
 
   const layout = layoutAtBandY(doc, paintCtx, bandY);
@@ -77,12 +80,6 @@ function drawBandIfPresent(
   if (!page || page.blocks.length === 0) return;
 
   drawBlocks(paintCtx, layout, charMap);
-
-  if (isLive) {
-    drawActiveBandHighlight(paintCtx, kind);
-  }
-
-  drawSeparator(paintCtx, kind, bandY, bandHeight);
 }
 
 /** Font config for chrome bands — no space between paragraphs. */
@@ -119,50 +116,6 @@ function resolveSlotKey(
     return def === resolved.policy.firstPageHeader ? "firstPageHeader" : "defaultHeader";
   }
   return def === resolved.policy.firstPageFooter ? "firstPageFooter" : "defaultFooter";
-}
-
-function drawSeparator(
-  paintCtx: PageChromePaintContext,
-  kind: "header" | "footer",
-  bandY: number,
-  bandHeight: number,
-): void {
-  const { ctx, pageConfig } = paintCtx;
-  const { margins } = pageConfig;
-
-  const lineY = kind === "header" ? bandY + bandHeight : bandY;
-
-  ctx.save();
-  ctx.strokeStyle = "#d1d5db";
-  ctx.lineWidth = 0.5;
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(margins.left, lineY);
-  ctx.lineTo(pageConfig.pageWidth - margins.right, lineY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.restore();
-}
-
-function drawActiveBandHighlight(
-  paintCtx: PageChromePaintContext,
-  kind: "header" | "footer",
-): void {
-  const { ctx, pageConfig, metrics } = paintCtx;
-  const { margins } = pageConfig;
-  const bandY = kind === "header" ? metrics.headerTop : metrics.footerTop;
-  const bandHeight = kind === "header" ? metrics.headerHeight : metrics.footerHeight;
-
-  ctx.save();
-  ctx.strokeStyle = "#93c5fd";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(
-    margins.left,
-    bandY,
-    pageConfig.pageWidth - margins.left - margins.right,
-    bandHeight,
-  );
-  ctx.restore();
 }
 
 /** Draw all blocks. Same drawBlock as the body uses — no transforms. */

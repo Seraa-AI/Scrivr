@@ -10,3 +10,5 @@ export { resolveChrome } from "./resolveChrome";
 export type { ResolvedHeaderFooter, SlotLayout } from "./resolveChrome";
 export { HeaderFooterSurfaceCache, buildRestrictedSchema } from "./surfaces";
 export type { SlotKey } from "./surfaces";
+export { createHeaderFooterController } from "./HeaderFooterController";
+export type { HeaderFooterController, HeaderFooterState } from "./HeaderFooterController";

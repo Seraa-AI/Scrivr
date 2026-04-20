@@ -101,3 +101,9 @@ React is a thin shell. The engine owns layout and rendering.
 - Layout pipeline is being refactored toward explicit named stages (`buildBlockFlow` → `applyFloatLayout` → `paginateFlow` → `buildFragments`) — follow this pattern when touching `PageLayout.ts`
 - Float y-delta pushes long paragraphs past `pageBottom` → split at boundary (`splitBlockAtBoundary`), do not move wholesale
 - Zero-width caret sentinel on last line of each block prevents scroll-to-top bug in `coordsAtPos`
+
+## gstack
+
+Use the `/browse` skill from gstack for all web browsing. Never use `mcp__claude-in-chrome__*` tools.
+
+Available skills: `/office-hours`, `/plan-ceo-review`, `/plan-eng-review`, `/plan-design-review`, `/design-consultation`, `/design-shotgun`, `/design-html`, `/review`, `/ship`, `/land-and-deploy`, `/canary`, `/benchmark`, `/browse`, `/connect-chrome`, `/qa`, `/qa-only`, `/design-review`, `/setup-browser-cookies`, `/setup-deploy`, `/retro`, `/investigate`, `/document-release`, `/codex`, `/cso`, `/autoplan`, `/plan-devex-review`, `/devex-review`, `/careful`, `/freeze`, `/guard`, `/unfreeze`, `/gstack-upgrade`, `/learn`.
