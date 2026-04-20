@@ -18,6 +18,18 @@ export interface HeaderFooterDefinition {
   minHeight?: number;
   /** Optional upper bound on reserved height (px). Content beyond this clips. */
   maxHeight?: number;
+  /**
+   * Distance from the page edge to where header content starts (px).
+   * Replaces pageConfig.margins.top when a header is present.
+   * Default: uses pageConfig.margins.top.
+   */
+  marginTop?: number;
+  /**
+   * Distance from the page bottom edge to where footer content starts (px).
+   * Replaces pageConfig.margins.bottom when a footer is present.
+   * Default: uses pageConfig.margins.bottom.
+   */
+  marginBottom?: number;
   /** Space between the chrome band and the body content (px). Default 12. */
   margin?: number;
 }

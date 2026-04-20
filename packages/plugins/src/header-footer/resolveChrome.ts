@@ -11,6 +11,7 @@ import {
   runMiniPipeline,
   defaultFontConfig,
   type DocumentLayout,
+  type FontConfig,
   type PageChromeMeasureInput,
   type ChromeContribution,
   type LayoutIterationContext,
@@ -35,6 +36,10 @@ export interface ResolvedHeaderFooter {
     firstPageFooter?: SlotLayout | undefined;
   };
   policy: HeaderFooterPolicy;
+  /** Fallback marginTop from pageConfig — used when definition.marginTop is not set. */
+  defaultMarginTop: number;
+  /** Fallback marginBottom from pageConfig. */
+  defaultMarginBottom: number;
 }
 
 function measureSlot(
@@ -46,9 +51,17 @@ function measureSlot(
   const schema = input.doc.type.schema;
   const miniDoc = schema.nodeFromJSON(def.content);
 
-  const chromeFontConfig = {
+  const baseParagraph = defaultFontConfig["paragraph"];
+  const chromeFontConfig: FontConfig = {
     ...defaultFontConfig,
-    paragraph: { ...defaultFontConfig.paragraph, spaceBefore: 0, spaceAfter: 0 },
+    ...(baseParagraph ? {
+      paragraph: {
+        font: baseParagraph.font,
+        align: baseParagraph.align,
+        spaceBefore: 0,
+        spaceAfter: 0,
+      },
+    } : {}),
   };
 
   const layout = runMiniPipeline(miniDoc, {
@@ -74,6 +87,8 @@ export function resolveChrome(
 ): ChromeContribution {
   const resolved: ResolvedHeaderFooter = {
     policy,
+    defaultMarginTop: input.pageConfig.margins.top,
+    defaultMarginBottom: input.pageConfig.margins.bottom,
     slots: {
       defaultHeader: measureSlot(policy.defaultHeader, input),
       defaultFooter: measureSlot(policy.defaultFooter, input),
@@ -100,9 +115,42 @@ export function resolveChrome(
     return resolved.slots.defaultFooter;
   };
 
+  // topForPage returns the FULL distance from page edge to contentTop:
+  //   marginTop (where header band starts) + reservedHeight (content + gap)
+  // This replaces margins.top — header owns the top of the page.
+  const headerTopForPage = (pageNumber: number): number => {
+    const slot = pickHeader(pageNumber);
+    if (!slot) return 0;
+    const def = resolveSlot(policy, { pageNumber }, "header");
+    const marginTop = def?.marginTop ?? input.pageConfig.margins.top;
+    return marginTop + slot.reservedHeight;
+  };
+
+  const footerBottomForPage = (pageNumber: number): number => {
+    const slot = pickFooter(pageNumber);
+    if (!slot) return 0;
+    const def = resolveSlot(policy, { pageNumber }, "footer");
+    const marginBottom = def?.marginBottom ?? input.pageConfig.margins.bottom;
+    return marginBottom + slot.reservedHeight;
+  };
+
+  // Has any header or footer definition?
+  const hasHeader = !!(policy.defaultHeader || policy.firstPageHeader);
+  const hasFooter = !!(policy.defaultFooter || policy.firstPageFooter);
+
   return {
-    topForPage: (pageNumber) => pickHeader(pageNumber)?.reservedHeight ?? 0,
-    bottomForPage: (pageNumber) => pickFooter(pageNumber)?.reservedHeight ?? 0,
+    topForPage: headerTopForPage,
+    bottomForPage: footerBottomForPage,
+    replacesTopMargin: hasHeader,
+    replacesBottomMargin: hasFooter,
+    topBandStart: (pageNumber: number) => {
+      const def = resolveSlot(policy, { pageNumber }, "header");
+      return def?.marginTop ?? input.pageConfig.margins.top;
+    },
+    bottomBandStart: (pageNumber: number) => {
+      const def = resolveSlot(policy, { pageNumber }, "footer");
+      return def?.marginBottom ?? input.pageConfig.margins.bottom;
+    },
     payload: resolved,
     stable: true,
   };

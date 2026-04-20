@@ -669,31 +669,23 @@ describe("TileManager — body click deactivates surface", () => {
     const mockSurface = { id: "headerFooter:defaultHeader", owner: "headerFooter" };
     const { editor, layoutRef } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, mockSurface);
 
-    const layoutWithMetrics = makeLayout(2, DEFAULT_PAGE_CONFIG);
-    layoutWithMetrics.metrics = [
-      {
-        pageNumber: 1,
-        contentTop: 132,    // margins.top + headerHeight(60)
-        contentBottom: 991,
-        contentHeight: 859,
-        contentWidth: 650,
-        headerTop: 72,
-        footerTop: 991,
-        headerHeight: 60,
-        footerHeight: 60,
-      },
-      {
-        pageNumber: 2,
-        contentTop: 132,
-        contentBottom: 991,
-        contentHeight: 859,
-        contentWidth: 650,
-        headerTop: 72,
-        footerTop: 991,
-        headerHeight: 60,
-        footerHeight: 60,
-      },
-    ] as DocumentLayout["metrics"];
+    const chromeMetrics = {
+      contentTop: 132,
+      contentBottom: 991,
+      contentHeight: 859,
+      contentWidth: 650,
+      headerTop: 72,
+      footerTop: 991,
+      headerHeight: 60,
+      footerHeight: 60,
+    };
+    const layoutWithMetrics = {
+      ...makeLayout(2, DEFAULT_PAGE_CONFIG),
+      metrics: [
+        { pageNumber: 1, ...chromeMetrics },
+        { pageNumber: 2, ...chromeMetrics },
+      ],
+    };
 
     layoutRef.current = layoutWithMetrics;
     (editor as unknown as { surfaces: { activeSurface: unknown; activate: typeof activateFn } }).surfaces = {
@@ -723,18 +715,20 @@ describe("TileManager — body click deactivates surface", () => {
     const mockSurface = { id: "headerFooter:defaultHeader", owner: "headerFooter" };
     const { editor, layoutRef } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, mockSurface);
 
-    const layoutWithMetrics = makeLayout(1, DEFAULT_PAGE_CONFIG);
-    layoutWithMetrics.metrics = [{
-      pageNumber: 1,
-      contentTop: 132,
-      contentBottom: 991,
-      contentHeight: 859,
-      contentWidth: 650,
-      headerTop: 72,
-      footerTop: 991,
-      headerHeight: 60,
-      footerHeight: 60,
-    }] as DocumentLayout["metrics"];
+    const layoutWithMetrics = {
+      ...makeLayout(1, DEFAULT_PAGE_CONFIG),
+      metrics: [{
+        pageNumber: 1,
+        contentTop: 132,
+        contentBottom: 991,
+        contentHeight: 859,
+        contentWidth: 650,
+        headerTop: 72,
+        footerTop: 991,
+        headerHeight: 60,
+        footerHeight: 60,
+      }],
+    };
 
     layoutRef.current = layoutWithMetrics;
     (editor as unknown as { surfaces: { activeSurface: unknown; activate: typeof activateFn } }).surfaces = {
