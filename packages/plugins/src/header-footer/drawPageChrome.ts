@@ -78,7 +78,7 @@ function drawBandIfPresent(
   // the surface charMap (for cursor placement and click-to-position).
   // Other pages use a throwaway charMap.
   const charMap = isLive && isCursorPage ? activeSurface!.charMap : THROWAWAY_CHARMAP;
-  if (isLive && isCursorPage) charMap.clear();
+  charMap.clear();
 
   const layout = layoutAtBandY(doc, paintCtx, bandY);
   const page = layout.pages[0];

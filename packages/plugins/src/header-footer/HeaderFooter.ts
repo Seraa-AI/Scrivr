@@ -15,6 +15,7 @@ import type { IEditor, IBaseEditor, EditorSurface } from "@scrivr/core";
 import type { Node } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
 import type { HeaderFooterPolicy } from "./types";
+import { getHeaderFooterPolicy } from "./getPolicy";
 import { resolveChrome } from "./resolveChrome";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { drawPageChrome } from "./drawPageChrome";
@@ -92,15 +93,6 @@ function policyWithLiveSurface(policy: HeaderFooterPolicy): HeaderFooterPolicy {
 function isResolvedHeaderFooter(value: unknown): value is ResolvedHeaderFooter {
   if (typeof value !== "object" || value === null) return false;
   return "policy" in value && "slots" in value;
-}
-
-/** Read the headerFooter policy from doc.attrs with shape validation. */
-function getHeaderFooterPolicy(doc: Node): HeaderFooterPolicy | null {
-  if (!("headerFooter" in doc.attrs)) return null;
-  const val = doc.attrs["headerFooter"];
-  if (typeof val !== "object" || val === null) return null;
-  if (!("enabled" in val)) return null;
-  return val as HeaderFooterPolicy;
 }
 
 declare module "@scrivr/core" {

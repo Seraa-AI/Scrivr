@@ -13,6 +13,7 @@
 
 import type { IBaseEditor } from "@scrivr/core";
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
+import { getPolicyFromEditor } from "./getPolicy";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -97,12 +98,7 @@ const DEFAULT_POLICY: HeaderFooterPolicy = {
 };
 
 function getPolicy(editor: IBaseEditor): HeaderFooterPolicy | null {
-  const attrs = editor.getState().doc.attrs;
-  if (!("headerFooter" in attrs)) return null;
-  const val = attrs["headerFooter"];
-  if (typeof val !== "object" || val === null) return null;
-  if (!("enabled" in val)) return null;
-  return val as HeaderFooterPolicy;
+  return getPolicyFromEditor(editor);
 }
 
 /**

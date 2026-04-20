@@ -49,16 +49,8 @@ export const dateStrategy: InlineStrategy = {
   verticalAlign: "baseline",
   render(ctx, x, y, width, height, node) {
     const frozen = node.attrs["frozen"];
-    const format = node.attrs["format"] ?? "locale";
-    let text: string;
-
-    if (typeof frozen === "string") {
-      text = new Date(frozen).toLocaleDateString();
-    } else if (format === "locale") {
-      text = new Date().toLocaleDateString();
-    } else {
-      text = new Date().toLocaleDateString();
-    }
+    const now = typeof frozen === "string" ? new Date(frozen) : new Date();
+    const text = now.toLocaleDateString();
 
     ctx.save();
     ctx.fillStyle = "#9ca3af";
