@@ -81,6 +81,8 @@ export interface IBaseEditor {
   _applyTransaction(tr: Transaction): void;
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
+  /** Export contributions from all extensions, in registration order. */
+  getExportContributions(): ExportContributionMap[];
 }
 
 /**
