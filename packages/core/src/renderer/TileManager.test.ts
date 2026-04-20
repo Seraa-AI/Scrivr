@@ -584,6 +584,7 @@ describe("TileManager — overlay repaint with active surface", () => {
     const { editor } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, {
       id: "headerFooter:defaultHeader",
       owner: "headerFooter",
+      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
     });
 
     const tm = new TileManager(editor, container);
@@ -610,6 +611,7 @@ describe("TileManager — overlay repaint with active surface", () => {
     const { editor: editorWithSurface } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, {
       id: "headerFooter:defaultHeader",
       owner: "headerFooter",
+      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
     });
     const tm1 = new TileManager(editorWithSurface, container);
     tm1.update();
@@ -666,7 +668,11 @@ describe("TileManager — body click deactivates surface", () => {
 
   it("clicking in the body deactivates an active surface", () => {
     const activateFn = vi.fn();
-    const mockSurface = { id: "headerFooter:defaultHeader", owner: "headerFooter" };
+    const mockSurface = {
+      id: "headerFooter:defaultHeader",
+      owner: "headerFooter",
+      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
+    };
     const { editor, layoutRef } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, mockSurface);
 
     const chromeMetrics = {
@@ -712,7 +718,11 @@ describe("TileManager — body click deactivates surface", () => {
 
   it("clicking in a chrome band does NOT deactivate the surface", () => {
     const activateFn = vi.fn();
-    const mockSurface = { id: "headerFooter:defaultHeader", owner: "headerFooter" };
+    const mockSurface = {
+      id: "headerFooter:defaultHeader",
+      owner: "headerFooter",
+      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
+    };
     const { editor, layoutRef } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, mockSurface);
 
     const layoutWithMetrics = {
@@ -741,12 +751,13 @@ describe("TileManager — body click deactivates surface", () => {
     tm.update();
 
     const pointerDeps = (tm as unknown as { pointer: { deps: { onPageClick: (p: number, x: number, y: number, c: number) => boolean } } }).pointer.deps;
-    // Click at y=90, inside the header band (headerTop=72, contentTop=132)
-    const consumed = pointerDeps.onPageClick(1, 400, 90, 1);
 
-    // Click should be consumed (chrome band handles it)
-    expect(consumed).toBe(true);
-    // Surface should NOT be deactivated
+    // All clicks in chrome band with active surface fall through to
+    // PointerController's normal logic — single, double, triple click
+    // all work via the routed charMap/selection/commands.
+    expect(pointerDeps.onPageClick(1, 400, 90, 1)).toBe(false);
+    expect(pointerDeps.onPageClick(1, 400, 90, 2)).toBe(false);
+    expect(pointerDeps.onPageClick(1, 400, 90, 3)).toBe(false);
     expect(activateFn).not.toHaveBeenCalledWith(null);
 
     tm.destroy();

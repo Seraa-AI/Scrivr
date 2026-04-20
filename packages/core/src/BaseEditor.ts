@@ -197,7 +197,8 @@ export class BaseEditor implements IBaseEditor {
    * - Range selection: a mark is active only if it spans every text node in the range.
    */
   getActiveMarks(): string[] {
-    const { selection, storedMarks } = this._state;
+    const state = this._getActiveState();
+    const { selection, storedMarks } = state;
     const { from, to, empty } = selection;
 
     if (empty) {
@@ -209,7 +210,7 @@ export class BaseEditor implements IBaseEditor {
       const markType = this.schema.marks[name]!;
       let hasText = false;
       let allHaveMark = true;
-      this._state.doc.nodesBetween(from, to, (node) => {
+      state.doc.nodesBetween(from, to, (node) => {
         if (node.isText) {
           hasText = true;
           if (!markType.isInSet(node.marks)) allHaveMark = false;
@@ -224,7 +225,8 @@ export class BaseEditor implements IBaseEditor {
    * For a range selection, only marks active across the entire range are included.
    */
   getActiveMarkAttrs(): Record<string, Record<string, unknown>> {
-    const { selection, storedMarks } = this._state;
+    const state = this._getActiveState();
+    const { selection, storedMarks } = state;
     const { from, to, empty } = selection;
     const result: Record<string, Record<string, unknown>> = {};
 
@@ -236,7 +238,7 @@ export class BaseEditor implements IBaseEditor {
     } else {
       for (const name of this.getActiveMarks()) {
         const markType = this.schema.marks[name]!;
-        this._state.doc.nodesBetween(from, to, (node) => {
+        state.doc.nodesBetween(from, to, (node) => {
           if (node.isText && !(name in result)) {
             const found = markType.isInSet(node.marks);
             if (found) result[name] = found.attrs as Record<string, unknown>;
@@ -249,7 +251,7 @@ export class BaseEditor implements IBaseEditor {
   }
 
   getBlockInfo(): { blockType: string; blockAttrs: Record<string, unknown> } {
-    const { $from } = this._state.selection;
+    const { $from } = this._getActiveState().selection;
     for (let d = 1; d <= $from.depth; d++) {
       const node = $from.node(d);
       if (node.isBlock && d === 1) {
@@ -326,11 +328,16 @@ export class BaseEditor implements IBaseEditor {
    * `BaseEditor` routes through `_applyTransaction` (no view side-effects).
    * `Editor` overrides this to route through `dispatch()` (full view updates).
    */
-  protected _dispatchForCommands(tr: Transaction): void {
+  protected _dispatchToActive(tr: Transaction): void {
     this._applyTransaction(tr);
   }
 
   // ── Private ──────────────────────────────────────────────────────────────────
+
+  /** State for the active editing target — body or surface. Editor overrides to route. */
+  protected _getActiveState(): EditorState {
+    return this._state;
+  }
 
   private _buildCommands(): SafeFlatCommands {
     const rawCommands = this._manager.buildCommands();
@@ -338,7 +345,7 @@ export class BaseEditor implements IBaseEditor {
     for (const [name, factory] of Object.entries(rawCommands)) {
       bound[name] = (...args: unknown[]) => {
         const cmd = factory(...args);
-        cmd(this._state, (tr) => this._dispatchForCommands(tr));
+        cmd(this._getActiveState(), (tr) => this._dispatchToActive(tr));
       };
     }
     return bound as SafeFlatCommands;

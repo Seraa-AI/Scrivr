@@ -285,19 +285,9 @@ export const HeaderFooter = Extension.create({
       const def = policy[slotKey];
       if (!def) return;
 
-      const active = editor.surfaces.activeSurface;
-      const expectedId = `headerFooter:${slotKey}`;
-
-      // Single click in an already-active band — position the cursor
-      if (clickCount === 1 && active && active.id === expectedId) {
-        const pos = active.charMap.posAtCoords(x, y, page);
-        const $pos = active.state.doc.resolve(Math.min(pos, active.state.doc.content.size));
-        const sel = TextSelection.near($pos);
-        active.dispatch(active.state.tr.setSelection(sel));
-        return;
-      }
-
-      // Double-click — activate the surface
+      // Only double-click activates. Single clicks in an active surface fall
+      // through to PointerController's normal click/drag logic, which routes
+      // through editor.charMap and editor.selection (both surface-aware).
       if (clickCount !== 2) return;
 
       const isNew = !cache.get(slotKey);

@@ -138,9 +138,15 @@ export class PointerController {
     return { page, docX: visualX, docY };
   }
 
+  /** Get the ProseMirror selection from the active editing target (surface or body). */
+  private activeSelection() {
+    const { editor } = this.deps;
+    return editor.surfaces?.activeSurface?.state.selection ?? editor.getState().selection;
+  }
+
   private hitHandleAt(canvasX: number, canvasY: number, page: number) {
     const { editor } = this.deps;
-    const sel = editor.getState().selection;
+    const sel = this.activeSelection();
     if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image")
       return null;
     const r = editor.charMap.getObjectRect(sel.from);
@@ -179,7 +185,8 @@ export class PointerController {
     const resizeHit = this.hitHandleAt(docX, docY, page);
     if (resizeHit) {
       if (editor.readOnly) return;
-      const sel = editor.getState().selection as NodeSelection;
+      const sel = this.activeSelection();
+      if (!(sel instanceof NodeSelection)) return;
       const startW = sel.node.attrs["width"] as number;
       const startH = sel.node.attrs["height"] as number;
       this.resizeDrag = {
@@ -279,7 +286,7 @@ export class PointerController {
       }
       editor.selection.moveCursorTo(pos);
     } else {
-      editor.selection.setSelection(editor.getState().selection.anchor, pos);
+      editor.selection.setSelection(editor.getSelectionSnapshot().anchor, pos);
     }
   };
 
@@ -347,7 +354,7 @@ export class PointerController {
       return;
     }
 
-    editor.selection.setSelection(editor.getState().selection.anchor, pos);
+    editor.selection.setSelection(editor.getSelectionSnapshot().anchor, pos);
   };
 
   private handleMouseUp = (): void => {

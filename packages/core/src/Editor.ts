@@ -387,8 +387,17 @@ export class Editor extends BaseEditor implements IEditor {
    * Override: commands also go through the view-aware dispatch so every
    * command triggers layout + paint.
    */
-  protected override _dispatchForCommands(tr: Transaction): void {
-    this._viewDispatch(tr);
+  protected override _getActiveState(): EditorState {
+    return this.surfaces.activeSurface?.state ?? this._state;
+  }
+
+  protected override _dispatchToActive(tr: Transaction): void {
+    const active = this.surfaces.activeSurface;
+    if (active) {
+      active.dispatch(tr);
+    } else {
+      this._viewDispatch(tr);
+    }
   }
 
   /**
@@ -406,12 +415,13 @@ export class Editor extends BaseEditor implements IEditor {
     }
   }
 
-  /** Override to use full view dispatch so setNodeAttrs triggers a repaint. */
+  /** Override to route through active surface when one is set. */
   override setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void {
-    const node = this._state.doc.nodeAt(docPos);
+    const state = this._getActiveState();
+    const node = state.doc.nodeAt(docPos);
     if (!node) return;
-    this._viewDispatch(
-      this._state.tr.setNodeMarkup(docPos, undefined, { ...node.attrs, ...attrs }),
+    this._dispatchToActive(
+      state.tr.setNodeMarkup(docPos, undefined, { ...node.attrs, ...attrs }),
     );
   }
 
@@ -460,7 +470,7 @@ export class Editor extends BaseEditor implements IEditor {
    * The CharacterMap — glyph positions for hit-testing and cursor rendering.
    */
   get charMap(): CharacterMap {
-    return this.lc.charMap;
+    return this.surfaces.activeSurface?.charMap ?? this.lc.charMap;
   }
 
   /**
@@ -538,8 +548,9 @@ export class Editor extends BaseEditor implements IEditor {
    */
   selectNode(docPos: number): void {
     try {
-      const sel = NodeSelection.create(this._state.doc, docPos);
-      this._viewDispatch(this._state.tr.setSelection(sel));
+      const state = this._getActiveState();
+      const sel = NodeSelection.create(state.doc, docPos);
+      this._dispatchToActive(state.tr.setSelection(sel));
       this.focus();
     } catch {
       this.selection.moveCursorTo(docPos);
@@ -565,7 +576,8 @@ export class Editor extends BaseEditor implements IEditor {
    */
   getSelectionSnapshot(): SelectionSnapshot {
     this.lc.ensureLayout();
-    const { selection } = this._state;
+    const state = this.surfaces.activeSurface?.state ?? this._state;
+    const { selection } = state;
     const blockInfo = this.getBlockInfo();
     return {
       anchor: selection.anchor,

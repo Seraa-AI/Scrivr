@@ -18,7 +18,30 @@ const DEMO_DOC = {
           content: [
             {
               type: "paragraph",
-              content: [{ type: "text", text: "Scrivr — Document Header" }],
+              attrs: { align: "left" },
+              content: [
+                {
+                  type: "image",
+                  attrs: {
+                    src: "https://picsum.photos/200",
+                    alt: "Logo",
+                  },
+                },
+                {
+                  type: "text",
+                  text: "  ",
+                },
+                {
+                  type: "text",
+                  marks: [{ type: "bold" }, { type: "fontSize", attrs: { size: 16 } }],
+                  text: "Scrivr",
+                },
+                {
+                  type: "text",
+                  marks: [{ type: "color", attrs: { color: "#6b7280" } }],
+                  text: "  ·  Canvas Document Editor",
+                },
+              ],
             },
           ],
         },
@@ -30,10 +53,21 @@ const DEMO_DOC = {
           content: [
             {
               type: "paragraph",
-              content: [{ type: "text", text: "Page Footer — Confidential" }],
+              attrs: { align: "center" },
+              content: [
+                {
+                  type: "text",
+                  marks: [
+                    { type: "fontSize", attrs: { size: 10 } },
+                    { type: "color", attrs: { color: "#9ca3af" } },
+                  ],
+                  text: "Confidential — Do not distribute",
+                },
+              ],
             },
           ],
         },
+        margin: 24,
       },
     },
   },

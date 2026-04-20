@@ -169,13 +169,25 @@ export class TileManager {
 
         if (!inHeader && !inFooter) {
           // Click in the body while a surface is active — deactivate first
-          // so the body gets focus and posAtCoords uses the correct doc.
           if (this.editor.surfaces?.activeSurface) {
             this.editor.surfaces.activate(null);
           }
           return false;
         }
 
+        const surfaceActive = this.editor.surfaces?.activeSurface !== null;
+
+        if (surfaceActive) {
+          // Surface is already active — let ALL clicks fall through to
+          // PointerController's normal logic. Since editor.charMap,
+          // editor.selection, and editor.commands all route through the
+          // active surface, single click, double-click word select,
+          // triple-click block select, shift+click extend, and drag
+          // selection all work automatically.
+          return false;
+        }
+
+        // No surface active — emit chromeClick for activation (double-click).
         const band = inHeader ? "header" : "footer";
         this.editor.emit("chromeClick", { page, x: docX, y: docY, band, clickCount });
         return true;
@@ -595,7 +607,8 @@ export class TileManager {
       overlayCtx.translate(0, -tileTop);
     }
 
-    const pmSel = this.editor.getState().selection;
+    const pmSel = this.editor.surfaces?.activeSurface?.state.selection
+      ?? this.editor.getState().selection;
     const isNodeSel = pmSel instanceof NodeSelection;
     const pageNum = isPageless ? 1 : tile.tileIndex + 1;
 

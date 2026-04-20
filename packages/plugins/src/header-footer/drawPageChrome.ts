@@ -118,21 +118,40 @@ function resolveSlotKey(
   return def === resolved.policy.firstPageFooter ? "firstPageFooter" : "defaultFooter";
 }
 
-/** Draw all blocks. Same drawBlock as the body uses — no transforms. */
+/** Draw all blocks using the same rendering path as the body. */
 function drawBlocks(
   paintCtx: PageChromePaintContext,
   layout: DocumentLayout,
   charMap: CharacterMap,
 ): void {
-  const { ctx, measurer, markDecorators, pageNumber } = paintCtx;
+  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber } = paintCtx;
   const page = layout.pages[0];
   if (!page) return;
 
   let lineIndexOffset = 0;
   for (const block of page.blocks) {
-    lineIndexOffset = drawBlock(
-      ctx, block, measurer, charMap,
-      pageNumber, lineIndexOffset, markDecorators,
-    );
+    // Use block strategy when available — handles inline images, custom nodes.
+    // Falls back to raw drawBlock for basic text rendering.
+    const strategy = blockRegistry?.get(block.blockType);
+    if (strategy) {
+      lineIndexOffset = strategy.render(
+        block,
+        {
+          ctx,
+          pageNumber,
+          lineIndexOffset,
+          dpr: 1,
+          measurer,
+          ...(markDecorators ? { markDecorators } : {}),
+          ...(inlineRegistry ? { inlineRegistry } : {}),
+        },
+        charMap,
+      );
+    } else {
+      lineIndexOffset = drawBlock(
+        ctx, block, measurer, charMap,
+        pageNumber, lineIndexOffset, markDecorators,
+      );
+    }
   }
 }

@@ -173,6 +173,8 @@ export function renderPage(options: RenderPageOptions): void {
         payload,
         measurer,
         ...(markDecorators ? { markDecorators } : {}),
+        ...(blockRegistry ? { blockRegistry } : {}),
+        ...(inlineRegistry ? { inlineRegistry } : {}),
       });
     }
   }

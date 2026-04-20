@@ -8,6 +8,7 @@ import type { DocumentLayout, PageConfig } from "./PageLayout";
 import type { FontConfig } from "./FontConfig";
 import type { TextMeasurer } from "./TextMeasurer";
 import type { MarkDecorator } from "../extensions/types";
+import type { BlockRegistry, InlineRegistry } from "./BlockRegistry";
 
 /** Geometry for a single page, derived from PageConfig + chrome reservations. */
 export interface PageMetrics {
@@ -204,6 +205,10 @@ export interface PageChromePaintContext {
   measurer: TextMeasurer;
   /** Mark decorators from extensions — for rendering styled text in chrome bands. */
   markDecorators?: Map<string, MarkDecorator>;
+  /** Block registry — dispatches block rendering to the correct strategy. */
+  blockRegistry?: BlockRegistry;
+  /** Inline object registry — renders inline images, widgets, etc. */
+  inlineRegistry?: InlineRegistry;
 }
 
 /** Plugin-facing contributor registered via Extension.addPageChrome(). */

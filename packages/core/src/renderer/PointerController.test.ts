@@ -34,6 +34,7 @@ interface MockEditor {
   };
   layout: { floats?: unknown[] };
   getState: ReturnType<typeof vi.fn>;
+  getSelectionSnapshot: ReturnType<typeof vi.fn>;
 }
 
 function makeMockEditor(overrides: Partial<MockEditor> = {}): MockEditor {
@@ -54,6 +55,9 @@ function makeMockEditor(overrides: Partial<MockEditor> = {}): MockEditor {
     layout: {},
     getState: vi.fn(() => ({
       selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true },
+    })),
+    getSelectionSnapshot: vi.fn(() => ({
+      head: 0, anchor: 0, from: 0, to: 0, empty: true,
     })),
     ...overrides,
   };
