@@ -49,30 +49,44 @@ function isCursorVisible(editor: IBaseEditor): boolean {
 }
 
 /**
+ * Cached active surface info — set by onUpdate/onSurfaceChange, read by
+ * measure(). O(1) lookup instead of iterating editorEntries on every
+ * measure() call (which runs per page per layout run).
+ */
+let liveSurface: { slotKey: SlotKey; surface: EditorSurface } | null = null;
+
+function updateLiveSurfaceCache(): void {
+  for (const entry of editorEntries.values()) {
+    const surface = entry.editor.surfaces.activeSurface;
+    if (surface && surface.owner === "headerFooter") {
+      const slotKey = HeaderFooterSurfaceCache.slotKeyFromId(surface.id);
+      if (slotKey) {
+        liveSurface = { slotKey, surface };
+        return;
+      }
+    }
+  }
+  liveSurface = null;
+}
+
+/**
  * If a header/footer surface is active, replace its slot's content in the
  * policy with the live surface doc. This makes measure() compute the correct
  * height as the user types — the band grows instead of clipping.
  */
 function policyWithLiveSurface(policy: HeaderFooterPolicy): HeaderFooterPolicy {
-  for (const entry of editorEntries.values()) {
-    const surface = entry.editor.surfaces.activeSurface;
-    if (!surface || surface.owner !== "headerFooter") continue;
+  if (!liveSurface) return policy;
 
-    const slotKey = HeaderFooterSurfaceCache.slotKeyFromId(surface.id);
-    if (!slotKey) continue;
+  const currentSlot = policy[liveSurface.slotKey];
+  if (!currentSlot) return policy;
 
-    const currentSlot = policy[slotKey];
-    if (!currentSlot) continue;
-
-    return {
-      ...policy,
-      [slotKey]: {
-        ...currentSlot,
-        content: surface.state.doc.toJSON(),
-      },
-    };
-  }
-  return policy;
+  return {
+    ...policy,
+    [liveSurface.slotKey]: {
+      ...currentSlot,
+      content: liveSurface.surface.state.doc.toJSON(),
+    },
+  };
 }
 
 function isResolvedHeaderFooter(value: unknown): value is ResolvedHeaderFooter {
@@ -305,8 +319,7 @@ export const HeaderFooter = Extension.create({
       if (isNew) {
         surface.onUpdate(({ docChanged }) => {
           getCursorManager(editor)?.resetSilent();
-          // When content changes, invalidate layout so measure() re-runs with
-          // the live doc and the band height grows to fit.
+          updateLiveSurfaceCache();
           if (docChanged) {
             editor.invalidateLayout();
           } else {
@@ -319,6 +332,7 @@ export const HeaderFooter = Extension.create({
       editor.surfaces.activate(surface.id);
       const entry = editorEntries.get(editor);
       if (entry) entry.activePage = page;
+      updateLiveSurfaceCache();
       editor.redraw();
 
       placeCursorAfterPaint(surface, x, y, page);
@@ -342,6 +356,7 @@ export const HeaderFooter = Extension.create({
           if (!active || active.owner !== "headerFooter") continue;
           // Deactivate — triggers onCommit if dirty
           entry.editor.surfaces.activate(null);
+          updateLiveSurfaceCache();
           return true;
         }
         return false;
