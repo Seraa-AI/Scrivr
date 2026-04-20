@@ -10,6 +10,7 @@ import { Schema } from "prosemirror-model";
 import type { NodeSpec, MarkSpec } from "prosemirror-model";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
+import { history, undo, redo } from "prosemirror-history";
 import { EditorSurface } from "@scrivr/core";
 import type { HeaderFooterDefinition } from "./types";
 
@@ -73,7 +74,11 @@ export class HeaderFooterSurfaceCache {
       owner: "headerFooter",
       schema: this.schema,
       initialDocJSON: JSON.parse(JSON.stringify(def.content)),
-      plugins: [keymap(baseKeymap)],
+      plugins: [
+        history(),
+        keymap({ "Mod-z": undo, "Mod-Shift-z": redo, "Mod-y": redo }),
+        keymap(baseKeymap),
+      ],
     });
 
     this.surfaces.set(slotKey, surface);
