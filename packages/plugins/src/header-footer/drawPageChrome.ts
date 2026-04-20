@@ -22,6 +22,7 @@ import type { ResolvedHeaderFooter, SlotLayout } from "./resolveChrome";
 import type { SlotKey } from "./surfaces";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import { resolveSlot } from "./resolveSlot";
+import { setTokenContext } from "./tokenStrategies";
 
 /** Reusable throwaway CharacterMap for non-cursor pages. Avoids allocating on every paint. */
 const THROWAWAY_CHARMAP = new CharacterMap();
@@ -36,6 +37,10 @@ export interface DrawChromeOptions {
 
 export function drawPageChrome(options: DrawChromeOptions): void {
   const { ctx, resolved, activeSurface, activePage } = options;
+
+  // Set page context so token strategies render actual values (page number, total pages)
+  setTokenContext(ctx.pageNumber, ctx.totalPages);
+
   // All pages show live edits when a surface is active. Only the active
   // page populates the charMap (for cursor placement + click positioning).
   drawBandIfPresent(ctx, resolved, "header", activeSurface, ctx.pageNumber === activePage);

@@ -67,7 +67,25 @@ const DEMO_DOC = {
                     { type: "fontSize", attrs: { size: 10 } },
                     { type: "color", attrs: { color: "#9ca3af" } },
                   ],
-                  text: "Confidential — Do not distribute",
+                  text: "Page ",
+                },
+                { type: "pageNumber" },
+                {
+                  type: "text",
+                  marks: [
+                    { type: "fontSize", attrs: { size: 10 } },
+                    { type: "color", attrs: { color: "#9ca3af" } },
+                  ],
+                  text: " of ",
+                },
+                { type: "totalPages" },
+                {
+                  type: "text",
+                  marks: [
+                    { type: "fontSize", attrs: { size: 10 } },
+                    { type: "color", attrs: { color: "#9ca3af" } },
+                  ],
+                  text: "  ·  Confidential — Do not distribute",
                 },
               ],
             },
