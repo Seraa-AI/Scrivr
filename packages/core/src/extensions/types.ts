@@ -25,6 +25,7 @@ import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
+import type { SurfaceRegistry } from "../surfaces/SurfaceRegistry";
 import type { ExportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
 
@@ -79,6 +80,8 @@ export interface IBaseEditor {
   setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void;
   /** Apply a transaction from an external source (e.g. Y.js remote sync). */
   _applyTransaction(tr: Transaction): void;
+  /** The merged ProseMirror Schema built from all extensions. */
+  readonly schema: Schema;
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
 }
@@ -91,6 +94,8 @@ export interface IBaseEditor {
  *   `const viewEditor = editor as IEditor;`
  */
 export interface IEditor extends IBaseEditor {
+  /** Surface registry — plugins register and activate surfaces for multi-surface editing. */
+  readonly surfaces: SurfaceRegistry;
   /** Register a canvas draw function for the overlay layer. Returns unregister. */
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void;
   /** Current document layout (lazily recomputed when dirty). */
@@ -122,6 +127,8 @@ export interface IEditor extends IBaseEditor {
   selectNode(docPos: number): void;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
   redraw(): void;
+  /** Invalidate the layout cache and trigger a re-layout on next paint. */
+  invalidateLayout(): void;
   /**
    * Signal that the editor is (or is no longer) ready to render.
    * Call setReady(false) before a collaborative provider connects to suppress
@@ -469,7 +476,8 @@ export interface ExtensionConfig<Options = object> {
    *   };
    * }
    */
-  addCommands?(this: ExtensionContext<Options>): Record<string, (...args: unknown[]) => Command>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  addCommands?(this: ExtensionContext<Options>): Record<string, (...args: any[]) => Command>;
 
   // ── Phase 3: Layout ─────────────────────────────────────────────────────────
   // Block extensions only. Inline extensions use addMarkDecorators instead.
@@ -616,7 +624,8 @@ export interface ResolvedExtension {
   exports: ExportContributionMap;
   plugins: Plugin[];
   keymap: Record<string, Command>;
-  commands: Record<string, (...args: unknown[]) => Command>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  commands: Record<string, (...args: any[]) => Command>;
   /** Map of node type name → BlockStrategy, contributed by this extension. */
   layoutHandlers: Record<string, BlockStrategy>;
   /** Map of node type name → InlineStrategy, contributed by this extension. */

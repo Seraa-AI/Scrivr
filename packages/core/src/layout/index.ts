@@ -21,6 +21,8 @@ export type {
   PageChromePaintContext,
   PageChromeContribution,
 } from "./PageMetrics";
+export { runMiniPipeline } from "./runMiniPipeline";
+export type { MiniPipelineOptions } from "./runMiniPipeline";
 export { resolveFont } from "./StyleResolver";
 export { BlockRegistry } from "./BlockRegistry";
 export { LayoutCoordinator } from "./LayoutCoordinator";

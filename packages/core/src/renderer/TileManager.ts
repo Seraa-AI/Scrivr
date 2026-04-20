@@ -160,6 +160,26 @@ export class TileManager {
       isPageless: () => this.editor.isPageless,
       visualYToDocY: (y) => this.visualYToDocY(y),
       scheduleUpdate: () => this.scheduleUpdate(),
+      onPageClick: (page, docX, docY, clickCount) => {
+        const layout = this.editor.layout;
+        const metrics = layout.metrics?.[page - 1];
+        if (!metrics) return false;
+        const inHeader = metrics.headerHeight > 0 && docY < metrics.contentTop;
+        const inFooter = metrics.footerHeight > 0 && docY > metrics.footerTop;
+
+        if (!inHeader && !inFooter) {
+          // Click in the body while a surface is active — deactivate first
+          // so the body gets focus and posAtCoords uses the correct doc.
+          if (this.editor.surfaces?.activeSurface) {
+            this.editor.surfaces.activate(null);
+          }
+          return false;
+        }
+
+        const band = inHeader ? "header" : "footer";
+        this.editor.emit("chromeClick", { page, x: docX, y: docY, band, clickCount });
+        return true;
+      },
     });
     this.pointer.attach();
 
@@ -432,6 +452,12 @@ export class TileManager {
         ? { inlineRegistry: this.editor.inlineRegistry }
         : {}),
       ...(layout.floats ? { floats: layout.floats } : {}),
+      ...(this.editor.pageChromeContributions?.length
+        ? { pageChromeContributions: this.editor.pageChromeContributions }
+        : {}),
+      ...(layout._chromePayloads ? { chromePayloads: layout._chromePayloads } : {}),
+      ...(layout.metrics?.[tile.tileIndex] ? { pageMetrics: layout.metrics[tile.tileIndex] } : {}),
+      totalPages: layout.pages.length,
     });
   }
 
@@ -544,7 +570,11 @@ export class TileManager {
     // change until mouseup, so without this the ghost handles would freeze
     // at their starting size and the image would "snap" on release.
     const pendingResizeDirty = tile.lastPendingResizeKey !== pendingKey;
-    if (!blinkDirty && !moveDirty && !pluginStateDirty && !pendingResizeDirty)
+    // Surface state changes (typing in header/footer) don't affect the body's
+    // pmState/selection, so the checks above miss them. When a surface is
+    // active, always repaint the overlay so the cursor tracks correctly.
+    const surfaceStateDirty = this.editor.surfaces?.activeSurface !== null;
+    if (!blinkDirty && !moveDirty && !pluginStateDirty && !pendingResizeDirty && !surfaceStateDirty)
       return;
 
     tile.lastBlinkState = blinkOn;
@@ -580,8 +610,9 @@ export class TileManager {
       renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to);
     }
 
-    // ── Cursor ────────────────────────────────────────────────────────────
-    if (!isNodeSel && blinkOn && tile.tileIndex === cursorTile) {
+    // ── Cursor (suppressed when a surface is active — chrome bands own their cursor) ──
+    const surfaceActive = this.editor.surfaces?.activeSurface !== null;
+    if (!isNodeSel && blinkOn && tile.tileIndex === cursorTile && !surfaceActive) {
       const coords = this.editor.charMap.coordsAtPos(sel.head, pageNum);
       if (coords) renderCursor(overlayCtx, coords);
     }

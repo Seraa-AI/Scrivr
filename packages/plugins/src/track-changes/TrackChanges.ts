@@ -153,9 +153,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
   addCommands() {
     return {
       setTrackingStatus:
-        (...args: unknown[]) =>
+        (status?: TrackChangesStatus) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
-          const status = args[0] as TrackChangesStatus | undefined;
           const currentStatus = trackChangesPluginKey.getState(state)?.status;
           if (!currentStatus) return false;
 
@@ -175,10 +174,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         },
 
       setChangeStatuses:
-        (...args: unknown[]) =>
+        (status: CHANGE_STATUS, ids: string[]) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
-          const status = args[0] as CHANGE_STATUS;
-          const ids = args[1] as string[];
           const pluginState = trackChangesPluginKey.getState(state);
           if (!pluginState?.canAcceptReject) return false;
 
@@ -192,15 +189,14 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         },
 
       setTrackChangesUserID:
-        (...args: unknown[]) =>
+        (userID: string) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
-          const userID = args[0] as string;
           dispatch?.(setAction(state.tr, TrackChangesAction.setUserID, userID));
           return true;
         },
 
       refreshChanges:
-        (..._args: unknown[]) =>
+        () =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           dispatch?.(
             setAction(state.tr, TrackChangesAction.refreshChanges, true),
@@ -219,9 +215,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
        * args: [text: string, from: number, to: number, authorID: string]
        */
       insertAsSuggestion:
-        (...args: unknown[]) =>
+        (text: string, from: number, to: number, authorID: string) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
-          const [text, from, to, authorID] = args as [string, number, number, string];
           const schema = state.schema;
           const insertMarkType = schema.marks.trackedInsert;
           const deleteMarkType = schema.marks.trackedDelete;

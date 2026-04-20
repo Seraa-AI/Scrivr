@@ -95,6 +95,7 @@ React is a thin shell. The engine owns layout and rendering.
 
 ## Key Conventions
 
+- **No `as` type assertions.** Never use `as X` to narrow types. Write runtime predicate/guard functions that validate shape and return typed values. A single `as` inside a guard (after an `in`/`typeof` check) is acceptable — scattered `as` casts at call sites are not. Use `satisfies` when validating a value matches a type without widening. Module augmentation (`Commands`, `NodeAttributes`) should make consumer casts unnecessary.
 - `PageView.tsx` is deprecated — `ViewManager.ts` is the active renderer
 - Match Word/Google Docs/Pages conventions for cursor behavior, shortcuts, paste, formatting by default
 - Layout pipeline is being refactored toward explicit named stages (`buildBlockFlow` → `applyFloatLayout` → `paginateFlow` → `buildFragments`) — follow this pattern when touching `PageLayout.ts`

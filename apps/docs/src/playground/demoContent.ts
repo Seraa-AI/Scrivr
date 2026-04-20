@@ -7,6 +7,36 @@ import { Extension } from "@scrivr/core";
  */
 const DEMO_DOC = {
   type: "doc",
+  attrs: {
+    headerFooter: {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: {
+        content: {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Scrivr — Document Header" }],
+            },
+          ],
+        },
+        margin: 32,
+      },
+      defaultFooter: {
+        content: {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Page Footer — Confidential" }],
+            },
+          ],
+        },
+      },
+    },
+  },
   content: [
     {
       type: "heading",

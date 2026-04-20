@@ -284,6 +284,12 @@ importers:
       '@scrivr/core':
         specifier: workspace:*
         version: link:../core
+      prosemirror-commands:
+        specifier: ^1.6.0
+        version: 1.7.1
+      prosemirror-keymap:
+        specifier: ^1.2.0
+        version: 1.2.3
     devDependencies:
       '@hocuspocus/provider':
         specifier: ^3.4.4

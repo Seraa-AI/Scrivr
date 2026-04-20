@@ -54,7 +54,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@scrivr/core": "workspace:*"
+    "@scrivr/core": "workspace:*",
+    "prosemirror-commands": "^1.6.0",
+    "prosemirror-keymap": "^1.2.0"
   },
   "peerDependencies": {
     "@hocuspocus/provider": ">=3.0.0",

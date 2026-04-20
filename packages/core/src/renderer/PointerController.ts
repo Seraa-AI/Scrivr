@@ -28,6 +28,12 @@ export interface PointerControllerDeps {
   isPageless: () => boolean;
   visualYToDocY: (y: number) => { page: number; docY: number };
   scheduleUpdate: () => void;
+  /**
+   * Called before default text-selection on a page click. If the handler
+   * returns true, the click is consumed (e.g. chrome band activation or
+   * cursor positioning within an active surface).
+   */
+  onPageClick?: (page: number, docX: number, docY: number, clickCount: number) => boolean;
 }
 
 /**
@@ -235,6 +241,10 @@ export class PointerController {
     this._lastClickTime = now;
     this._lastClickX = e.clientX;
     this._lastClickY = e.clientY;
+
+    // Chrome band click — consumed for both activation (double-click) and
+    // cursor positioning (single click when surface is already active).
+    if (this.deps.onPageClick?.(page, docX, docY, this._clickCount)) return;
 
     this.isDragging = true;
     const pos = editor.charMap.posAtCoords(docX, docY, page);

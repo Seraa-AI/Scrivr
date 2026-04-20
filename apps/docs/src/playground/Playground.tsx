@@ -17,6 +17,7 @@ import {
   CollaborationCursor,
   TrackChanges,
   AiToolkit,
+  HeaderFooter,
 } from "@scrivr/plugins";
 import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
@@ -91,6 +92,7 @@ const EXTENSIONS =
         CollaborationCursor.configure({
           user: { name: identity.userName, color: identity.userColor },
         }),
+        HeaderFooter,
         PdfExport.configure({ filename: identity.room }),
         TrackChanges.configure({
           userID: identity.userName,
@@ -101,6 +103,7 @@ const EXTENSIONS =
       ]
     : [
         StarterKit,
+        HeaderFooter,
         PdfExport.configure({ filename: "scrivr-demo" }),
         TrackChanges.configure({ userID: "demo-user", canAcceptReject: true }),
         ...(AI_ENABLED ? [AiToolkit] : []),

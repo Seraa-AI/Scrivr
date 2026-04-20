@@ -208,8 +208,10 @@ export class ExtensionManager {
    * Merged command map from all extensions.
    * Exposed on the Editor as editor.commands.
    */
-  buildCommands(): Record<string, (...args: unknown[]) => Command> {
-    const commands: Record<string, (...args: unknown[]) => Command> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  buildCommands(): Record<string, (...args: any[]) => Command> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const commands: Record<string, (...args: any[]) => Command> = {};
     for (const ext of this.resolved) {
       Object.assign(commands, ext.commands);
     }

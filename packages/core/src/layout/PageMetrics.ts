@@ -7,6 +7,7 @@ import type { Node } from "prosemirror-model";
 import type { DocumentLayout, PageConfig } from "./PageLayout";
 import type { FontConfig } from "./FontConfig";
 import type { TextMeasurer } from "./TextMeasurer";
+import type { MarkDecorator } from "../extensions/types";
 
 /** Geometry for a single page, derived from PageConfig + chrome reservations. */
 export interface PageMetrics {
@@ -145,6 +146,10 @@ export interface PageChromePaintContext {
   pageConfig: PageConfig;
   /** This contributor's payload from the final measure() call of the last run. */
   payload: unknown;
+  /** Text measurer — for rendering mini-layout blocks in chrome bands. */
+  measurer: TextMeasurer;
+  /** Mark decorators from extensions — for rendering styled text in chrome bands. */
+  markDecorators?: Map<string, MarkDecorator>;
 }
 
 /** Plugin-facing contributor registered via Extension.addPageChrome(). */

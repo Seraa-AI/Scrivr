@@ -23,6 +23,7 @@ import { PasteTransformer } from "./input/PasteTransformer";
 import { BaseEditor } from "./BaseEditor";
 import type { EditorEvents } from "./types/augmentation";
 import { SurfaceRegistry } from "./surfaces/SurfaceRegistry";
+import type { PageChromeContribution } from "./layout/PageMetrics";
 
 export type EditorChangeHandler = (state: EditorState) => void;
 
@@ -209,6 +210,12 @@ export class Editor extends BaseEditor implements IEditor {
   readonly inlineRegistry: InlineRegistry;
 
   /**
+   * Page chrome contributions from all extensions (headers, footers, etc.).
+   * Passed to renderPage for paint-time dispatch.
+   */
+  readonly pageChromeContributions: PageChromeContribution[];
+
+  /**
    * Overlay render handlers registered by extensions (e.g. CollaborationCursor).
    * Called by TileManager.paintOverlay() for each visible page.
    */
@@ -243,6 +250,7 @@ export class Editor extends BaseEditor implements IEditor {
     this.toolbarItems  = this._manager.buildToolbarItems();
     this.blockRegistry = this._manager.buildBlockRegistry();
     this.inlineRegistry = this._manager.buildInlineRegistry();
+    this.pageChromeContributions = this._manager.getPageChromeContributions();
 
     this.cursorManager = new CursorManager(() => {
       onCursorTick?.(this.cursorManager.isVisible);
@@ -624,6 +632,16 @@ export class Editor extends BaseEditor implements IEditor {
   redraw(): void {
     this.renderGeneration++;
     this._notifyListeners();
+  }
+
+  /**
+   * Invalidate the layout cache so the next paint triggers a full re-layout.
+   * Use when external factors change chrome heights (e.g. live surface editing
+   * grows the header band).
+   */
+  invalidateLayout(): void {
+    this.lc.invalidate();
+    this.redraw();
   }
 
   /**

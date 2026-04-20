@@ -120,6 +120,8 @@ export interface EditorEvents {
    * listeners should stick with `"update"` to avoid needless work on scroll.
    */
   viewport: void;
+  /** Fired when a click lands in a chrome band (header/footer area). */
+  chromeClick: { page: number; x: number; y: number; band: "header" | "footer"; clickCount: number };
 }
 
 /**
