@@ -103,9 +103,11 @@ export function HeaderFooterRibbon({ editor, gap = 24, className }: HeaderFooter
         if (bandHeight <= 0) return null;
 
         const pageOffsetY = i * (pageConfig.pageHeight + gap);
+        // Header ribbon: sits in the margin gap just above body contentTop.
+        // Footer ribbon: sits just above the footer band (at footerTop - ribbon height).
         const ribbonY = isHeader
           ? pageOffsetY + metrics.contentTop - 28
-          : pageOffsetY + metrics.contentBottom;
+          : pageOffsetY + metrics.footerTop - 28;
 
         return (
           <div

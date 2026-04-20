@@ -2,8 +2,8 @@ import { Extension } from "@scrivr/core";
 
 /**
  * Initial document loaded in the playground.
- * Showcases the full range of Scrivr formatting capabilities.
- * Extend this as new features land.
+ * Showcases the full range of Scrivr formatting capabilities
+ * including headers and footers with inline images.
  */
 const DEMO_DOC = {
   type: "doc",
@@ -25,15 +25,21 @@ const DEMO_DOC = {
                   attrs: {
                     src: "https://picsum.photos/200",
                     alt: "Logo",
+                    width: 180,
+                    height: 93,
+                    width: 180,
+                    height: 93,
+                    verticalAlign: "baseline",
+                    wrappingMode: "inline",
                   },
                 },
+                { type: "text", text: "  " },
                 {
                   type: "text",
-                  text: "  ",
-                },
-                {
-                  type: "text",
-                  marks: [{ type: "bold" }, { type: "fontSize", attrs: { size: 16 } }],
+                  marks: [
+                    { type: "bold" },
+                    { type: "fontSize", attrs: { size: 16 } },
+                  ],
                   text: "Scrivr",
                 },
                 {
