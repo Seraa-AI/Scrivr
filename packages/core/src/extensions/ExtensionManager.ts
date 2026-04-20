@@ -24,7 +24,6 @@ import { defaultPageConfig } from "../layout/PageLayout";
 import type { PageConfig } from "../layout/PageLayout";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
-import type { ExportContributionMap } from "./export";
 
 /**
  * Build a ProseMirror Schema from an array of extensions.
@@ -255,14 +254,6 @@ export class ExtensionManager {
       sources.set(owner, ext.name);
     }
     return map;
-  }
-
-  /**
-   * Export contributions from all extensions, in registration order.
-   * Format packages call this at export time to collect handler contributions.
-   */
-  getExportContributions(): ExportContributionMap[] {
-    return this.resolved.map((ext) => ext.exports);
   }
 
   /**

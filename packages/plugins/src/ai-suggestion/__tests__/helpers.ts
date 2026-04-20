@@ -163,9 +163,6 @@ export class TestAiEditor implements IEditor {
   getMarkdown(): string {
     return "";
   }
-  getExportContributions() {
-    return [];
-  }
   /** SelectionController stub — only moveCursorTo is called by AI suggestion code. */
   readonly selection = {
     moveCursorTo: (_pos: number): void => {},

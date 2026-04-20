@@ -6,7 +6,6 @@ import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import type { IBaseEditor } from "./extensions/types";
-import type { ExportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 
 export interface BaseEditorOptions {
@@ -174,10 +173,6 @@ export class BaseEditor implements IBaseEditor {
   /** Emit a typed editor event. Called internally — extensions may also call this. */
   emit<K extends keyof EditorEvents>(event: K, payload: EditorEvents[K]): void {
     this._eventHandlers.get(event)?.forEach((h) => h(payload));
-  }
-
-  getExportContributions(): ExportContributionMap[] {
-    return this._manager.getExportContributions();
   }
 
   getMarkdownSerializer(): MarkdownSerializer {

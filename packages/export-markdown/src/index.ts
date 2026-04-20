@@ -2,7 +2,7 @@
 import "./augmentation";
 export type { MarkdownHandlers } from "./augmentation";
 
-import type { BaseEditor } from "@scrivr/core";
+import type { Editor } from "@scrivr/core";
 
 /**
  * exportToMarkdown — serializes the editor's current document to a Markdown string.
@@ -11,13 +11,11 @@ import type { BaseEditor } from "@scrivr/core";
  * so custom nodes and marks are automatically included if they implement
  * addMarkdownSerializerRules() in their Extension definition.
  *
- * Accepts any editor that extends BaseEditor (Editor, ServerEditor).
- *
  * @example
  * const md = exportToMarkdown(editor);
  * navigator.clipboard.writeText(md);
  */
-export function exportToMarkdown(editor: BaseEditor): string {
+export function exportToMarkdown(editor: Editor): string {
   const serializer = editor.getMarkdownSerializer();
   return serializer.serialize(editor.getState().doc);
 }

@@ -543,7 +543,6 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       Object.assign(marks, rules.marks ?? {});
     };
 
-    if (opts.document !== false) merge(Document.resolve().markdownSerializerRules);
     if (opts.paragraph !== false) merge(Paragraph.resolve().markdownSerializerRules);
     if (opts.heading !== false) {
       const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;

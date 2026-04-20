@@ -1,52 +1,19 @@
 /**
  * Module augmentation — declares the "pdf" format key on FormatHandlers.
  * Imported for its side-effect at the entry point of @scrivr/export-pdf.
+ *
+ * When this package is loaded, `ExportContribution` includes
+ * `{ format: "pdf"; handlers: PdfHandlers }` so extensions can declare
+ * PDF-specific export contributions via `addExports()`.
+ *
+ * The actual PdfHandlers shape is a placeholder until M2 (export dispatch
+ * refactor) lands — at that point it will carry per-node-type draw
+ * functions, font resolvers, etc.
  */
 
-import type { LayoutBlock, LayoutPage } from "@scrivr/core";
-import type { PDFFont } from "pdf-lib";
-import type { PdfContext } from "./context";
-
-/** Style modifiers returned by mark handlers, applied during line rendering. */
-export interface PdfSpanStyle {
-  font?: PDFFont;
-  color?: { r: number; g: number; b: number };
-  underline?: boolean;
-  strikethrough?: boolean;
-  backgroundColor?: { r: number; g: number; b: number; opacity?: number };
-}
-
-/** Draw a block (or inline atom) onto a PDF page. */
-export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfContext) => void;
-
-/** Return style modifiers for a mark during span iteration. */
-export type PdfMarkHandler = (
-  mark: { name: string; attrs: Record<string, unknown> },
-  ctx: PdfContext,
-) => PdfSpanStyle;
-
-/**
- * Draw chrome (headers, footers, footnote bands) onto a PDF page.
- * Generic parameter P is the plugin-specific payload type.
- */
-export type PdfChromeHandler<P = unknown> = (
-  layoutPage: LayoutPage,
-  payload: P,
-  ctx: PdfContext,
-) => void;
-
-export interface PdfHandlers {
-  /** Per-block drawing + inline atom dispatch table, keyed by node.type.name. */
-  nodes?: Record<string, PdfNodeHandler>;
-  /** Per-mark inline styling, keyed by mark.type.name. */
-  marks?: Record<string, PdfMarkHandler>;
-  /** Per-page chrome, keyed by chrome contributor name. */
-  chrome?: Record<string, PdfChromeHandler<unknown>>;
-  /** Runs once before page iteration. Async allowed. */
-  onBeforeExport?(ctx: PdfContext): void | Promise<void>;
-  /** Runs once after all pages are drawn, before save. */
-  onAfterExport?(ctx: PdfContext): void | Promise<void>;
-}
+/** Placeholder — filled in during M2 export dispatch refactor. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface PdfHandlers {}
 
 declare module "@scrivr/core" {
   interface FormatHandlers {
