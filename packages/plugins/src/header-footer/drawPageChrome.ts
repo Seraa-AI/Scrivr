@@ -91,9 +91,17 @@ function drawBandIfPresent(
 }
 
 /** Font config for chrome bands — no space between paragraphs. */
+const baseParagraph = defaultFontConfig["paragraph"];
 const chromeFontConfig: FontConfig = {
   ...defaultFontConfig,
-  paragraph: { ...defaultFontConfig.paragraph, spaceBefore: 0, spaceAfter: 0 },
+  ...(baseParagraph ? {
+    paragraph: {
+      font: baseParagraph.font,
+      align: baseParagraph.align,
+      spaceBefore: 0,
+      spaceAfter: 0,
+    },
+  } : {}),
 };
 
 /** Run mini-layout with margins.top = bandY so blocks land at the correct page Y. */
