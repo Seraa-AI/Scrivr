@@ -20,6 +20,9 @@ export function setTokenContext(pageNumber: number, totalPages: number): void {
   currentTotalPages = totalPages;
 }
 
+export function getCurrentPageNumber(): number { return currentPageNumber; }
+export function getCurrentTotalPages(): number { return currentTotalPages; }
+
 /**
  * Draw token text using the canvas's current font (inherited from the
  * surrounding text span). Tokens adopt the same style as their context.

@@ -20,7 +20,12 @@ import { resolveChrome } from "./resolveChrome";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { drawPageChrome } from "./drawPageChrome";
 import { pageNumberNode, totalPagesNode, dateNode } from "./tokens";
-import { renderHeaderFooterPdf } from "./pdfExport";
+import {
+  renderHeaderFooterPdf,
+  renderPageNumberPdf,
+  renderTotalPagesPdf,
+  renderDatePdf,
+} from "./pdfExport";
 import { pageNumberStrategy, totalPagesStrategy, dateStrategy } from "./tokenStrategies";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import type { SlotKey } from "./surfaces";
@@ -160,6 +165,11 @@ export const HeaderFooter = Extension.create({
   addExports() {
     return {
       pdf: {
+        nodes: {
+          pageNumber: renderPageNumberPdf,
+          totalPages: renderTotalPagesPdf,
+          date: renderDatePdf,
+        },
         chrome: {
           headerFooter: renderHeaderFooterPdf,
         },

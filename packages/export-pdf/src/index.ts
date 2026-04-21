@@ -249,13 +249,34 @@ async function embedImages(
     if (src) srcs.add(src);
   }
 
-  for (const page of layout.pages) {
-    for (const block of page.blocks) {
+  const collectFromBlocks = (blocks: DocumentLayout["pages"][0]["blocks"]) => {
+    for (const block of blocks) {
       for (const line of block.lines) {
         for (const span of line.spans) {
           if (span.kind === "object" && span.node.type.name === "image") {
             const src = span.node.attrs["src"] as string | undefined;
             if (src) srcs.add(src);
+          }
+        }
+      }
+    }
+  };
+
+  // Body content
+  for (const page of layout.pages) {
+    collectFromBlocks(page.blocks);
+  }
+
+  // Chrome payloads (header/footer mini-layouts may contain inline images)
+  if (layout._chromePayloads) {
+    for (const payload of Object.values(layout._chromePayloads)) {
+      if (typeof payload === "object" && payload !== null && "slots" in payload) {
+        const slots = (payload as { slots: Record<string, { layout?: { pages?: Array<{ blocks: DocumentLayout["pages"][0]["blocks"] }> } }> }).slots;
+        for (const slot of Object.values(slots)) {
+          if (slot?.layout?.pages) {
+            for (const page of slot.layout.pages) {
+              collectFromBlocks(page.blocks);
+            }
           }
         }
       }

@@ -6,18 +6,21 @@
  * are offset from the stored margins.top to the actual band Y position.
  */
 
+import type { LayoutBlock } from "@scrivr/core";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import type { SlotKey } from "./surfaces";
 import { resolveSlot } from "./resolveSlot";
-import { setTokenContext } from "./tokenStrategies";
+import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./tokenStrategies";
 
 /** Minimal shape of the PDF context — avoids importing from @scrivr/export-pdf. */
 interface PdfContextLike {
   layout: {
     pages: Array<{ pageNumber: number }>;
-    pageConfig: { margins: { top: number; bottom: number } };
+    pageConfig: { pageHeight: number; margins: { top: number; bottom: number } };
     metrics?: Array<{ headerTop: number; headerHeight: number; footerTop: number; footerHeight: number }>;
   };
+  page: { drawText(text: string, opts: { x: number; y: number; size: number; font: unknown; color: unknown }): void };
+  fonts: { resolve(cssFont: string): unknown; fallback: unknown };
   draw: {
     lines(
       block: { x: number; y: number; width: number; availableWidth: number; lines: unknown[]; [k: string]: unknown },
@@ -102,4 +105,46 @@ function renderBand(
     pdfCtx.width = offsetBlock.width;
     pdfCtx.draw.lines(offsetBlock, pdfCtx);
   }
+}
+
+// ── PDF node handlers for token inline atoms ─────────────────────────────────
+
+const PT_PER_PX = 72 / 96;
+
+function flipY(yPx: number, pageHeightPt: number): number {
+  return pageHeightPt - yPx * PT_PER_PX;
+}
+
+function drawTokenOnPdf(text: string, block: LayoutBlock, ctx: PdfContextLike): void {
+  const pageHeightPt = ctx.layout.pageConfig.pageHeight * PT_PER_PX;
+  const font = ctx.fonts.fallback;
+  const size = 10 * PT_PER_PX;
+  ctx.page.drawText(text, {
+    x: block.x * PT_PER_PX,
+    y: flipY(block.y + block.height, pageHeightPt),
+    size,
+    font,
+    // Structural match for pdf-lib's RGB color without importing the library
+    color: { type: "RGB", red: 0.61, green: 0.64, blue: 0.69 },
+  });
+}
+
+/** PDF node handler for pageNumber token. */
+export function renderPageNumberPdf(block: LayoutBlock, ctx: unknown): void {
+  if (!isPdfContext(ctx)) return;
+  drawTokenOnPdf(String(getCurrentPageNumber()), block, ctx);
+}
+
+/** PDF node handler for totalPages token. */
+export function renderTotalPagesPdf(block: LayoutBlock, ctx: unknown): void {
+  if (!isPdfContext(ctx)) return;
+  drawTokenOnPdf(String(getCurrentTotalPages()), block, ctx);
+}
+
+/** PDF node handler for date token. */
+export function renderDatePdf(block: LayoutBlock, ctx: unknown): void {
+  if (!isPdfContext(ctx)) return;
+  const frozen = block.node.attrs["frozen"];
+  const now = typeof frozen === "string" ? new Date(frozen) : new Date();
+  drawTokenOnPdf(now.toLocaleDateString(), block, ctx);
 }

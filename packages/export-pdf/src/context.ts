@@ -299,11 +299,15 @@ export function extractFontSizePx(cssFont: string): number {
   return match?.[1] !== undefined ? parseFloat(match[1]) : 12;
 }
 
-/** Remove characters that WinAnsi encoding cannot represent. */
+/**
+ * Remove characters that WinAnsi encoding cannot represent.
+ * WinAnsi covers U+0020–U+00FF plus Windows-1252 extras: smart quotes,
+ * em/en dash, bullet, ellipsis, trademark, etc. (U+2000–U+203A range).
+ */
 export function sanitizeForWinAnsi(text: string): string {
   return text
     .replace(/[\u200b\u200c\u200d\u00ad\ufeff]/g, "") // zero-width / invisible
-    .replace(/[^\u0020-\u00ff\u0100-\u02dc]/g, "?"); // replace out-of-range
+    .replace(/[^\u0020-\u00ff\u0100-\u02dc\u2013-\u2026\u2030\u2039\u203a\u2122]/g, "?");
 }
 
 /** Extract text fill color from marks. */
