@@ -1,9 +1,10 @@
 /**
  * Slot resolution — picks the correct header/footer definition for a given page.
- * Pure function, no side effects, no imports beyond types.
+ * Pure functions, no side effects.
  */
 
 import type { HeaderFooterPolicy, HeaderFooterDefinition, SlotContext } from "./types";
+import type { SlotKey } from "./surfaces";
 
 /**
  * Resolve which HeaderFooterDefinition applies to a specific page.
@@ -26,4 +27,21 @@ export function resolveSlot(
     return policy[kind === "header" ? "evenPageHeader" : "evenPageFooter"] ?? null;
   }
   return policy[kind === "header" ? "defaultHeader" : "defaultFooter"] ?? null;
+}
+
+/**
+ * Given a policy and page number, determine which SlotKey applies.
+ * Shared by canvas rendering and PDF export.
+ */
+export function resolveSlotKey(
+  policy: HeaderFooterPolicy,
+  pageNumber: number,
+  kind: "header" | "footer",
+): SlotKey | null {
+  const def = resolveSlot(policy, { pageNumber }, kind);
+  if (!def) return null;
+  if (kind === "header") {
+    return def === policy.firstPageHeader ? "firstPageHeader" : "defaultHeader";
+  }
+  return def === policy.firstPageFooter ? "firstPageFooter" : "defaultFooter";
 }

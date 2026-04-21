@@ -9,15 +9,14 @@
 import type { Node } from "prosemirror-model";
 import {
   runMiniPipeline,
-  defaultFontConfig,
   type DocumentLayout,
-  type FontConfig,
   type PageChromeMeasureInput,
   type ChromeContribution,
   type LayoutIterationContext,
 } from "@scrivr/core";
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { resolveSlot } from "./resolveSlot";
+import { chromeFontConfig } from "./chromeFontConfig";
 
 /** Measured layout + reserved height for one header/footer slot. */
 export interface SlotLayout {
@@ -50,19 +49,6 @@ function measureSlot(
 
   const schema = input.doc.type.schema;
   const miniDoc = schema.nodeFromJSON(def.content);
-
-  const baseParagraph = defaultFontConfig["paragraph"];
-  const chromeFontConfig: FontConfig = {
-    ...defaultFontConfig,
-    ...(baseParagraph ? {
-      paragraph: {
-        font: baseParagraph.font,
-        align: baseParagraph.align,
-        spaceBefore: 0,
-        spaceAfter: 0,
-      },
-    } : {}),
-  };
 
   const layout = runMiniPipeline(miniDoc, {
     pageConfig: input.pageConfig,

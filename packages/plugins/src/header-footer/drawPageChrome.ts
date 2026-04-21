@@ -11,18 +11,16 @@ import {
   drawBlock,
   runMiniPipeline,
   CharacterMap,
-  defaultFontConfig,
   type EditorSurface,
   type DocumentLayout,
   type PageChromePaintContext,
-  type FontConfig,
 } from "@scrivr/core";
 import type { Node } from "prosemirror-model";
 import type { ResolvedHeaderFooter, SlotLayout } from "./resolveChrome";
-import type { SlotKey } from "./surfaces";
 import { HeaderFooterSurfaceCache } from "./surfaces";
-import { resolveSlot } from "./resolveSlot";
+import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext } from "./tokenStrategies";
+import { chromeFontConfig } from "./chromeFontConfig";
 
 /** Reusable throwaway CharacterMap for non-cursor pages. Avoids allocating on every paint. */
 const THROWAWAY_CHARMAP = new CharacterMap();
@@ -59,7 +57,7 @@ function drawBandIfPresent(
     : paintCtx.metrics.footerHeight;
   if (bandHeight <= 0) return;
 
-  const slotKey = resolveSlotKey(resolved, paintCtx.pageNumber, kind);
+  const slotKey = resolveSlotKey(resolved.policy, paintCtx.pageNumber, kind);
   if (!slotKey) return;
 
   const slot = resolved.slots[slotKey];
@@ -90,20 +88,6 @@ function drawBandIfPresent(
   }
 }
 
-/** Font config for chrome bands — no space between paragraphs. */
-const baseParagraph = defaultFontConfig["paragraph"];
-const chromeFontConfig: FontConfig = {
-  ...defaultFontConfig,
-  ...(baseParagraph ? {
-    paragraph: {
-      font: baseParagraph.font,
-      align: baseParagraph.align,
-      spaceBefore: 0,
-      spaceAfter: 0,
-    },
-  } : {}),
-};
-
 /** Run mini-layout with margins.top = bandY so blocks land at the correct page Y. */
 function layoutAtBandY(
   doc: Node,
@@ -118,20 +102,6 @@ function layoutAtBandY(
     measurer: paintCtx.measurer,
     fontConfig: chromeFontConfig,
   });
-}
-
-function resolveSlotKey(
-  resolved: ResolvedHeaderFooter,
-  pageNumber: number,
-  kind: "header" | "footer",
-): SlotKey | null {
-  const def = resolveSlot(resolved.policy, { pageNumber }, kind);
-  if (!def) return null;
-
-  if (kind === "header") {
-    return def === resolved.policy.firstPageHeader ? "firstPageHeader" : "defaultHeader";
-  }
-  return def === resolved.policy.firstPageFooter ? "firstPageFooter" : "defaultFooter";
 }
 
 /**

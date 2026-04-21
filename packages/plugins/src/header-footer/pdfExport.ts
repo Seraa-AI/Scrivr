@@ -8,8 +8,7 @@
 
 import type { LayoutBlock } from "@scrivr/core";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
-import type { SlotKey } from "./surfaces";
-import { resolveSlot } from "./resolveSlot";
+import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./tokenStrategies";
 
 /** Minimal shape of the PDF context — avoids importing from @scrivr/export-pdf. */
@@ -42,19 +41,6 @@ function isPdfContext(value: unknown): value is PdfContextLike {
   return "layout" in value && "draw" in value;
 }
 
-function resolveSlotKey(
-  resolved: ResolvedHeaderFooter,
-  pageNumber: number,
-  kind: "header" | "footer",
-): SlotKey | null {
-  const def = resolveSlot(resolved.policy, { pageNumber }, kind);
-  if (!def) return null;
-  if (kind === "header") {
-    return def === resolved.policy.firstPageHeader ? "firstPageHeader" : "defaultHeader";
-  }
-  return def === resolved.policy.firstPageFooter ? "firstPageFooter" : "defaultFooter";
-}
-
 /**
  * PDF chrome handler for headerFooter. Called once per page by the export
  * pipeline's chrome dispatch loop.
@@ -84,7 +70,7 @@ function renderBand(
   bandY: number,
   pdfCtx: PdfContextLike,
 ): void {
-  const slotKey = resolveSlotKey(resolved, pageNumber, kind);
+  const slotKey = resolveSlotKey(resolved.policy, pageNumber, kind);
   if (!slotKey) return;
 
   const slot = resolved.slots[slotKey];
