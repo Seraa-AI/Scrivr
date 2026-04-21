@@ -570,6 +570,11 @@ export class TileManager {
     const pageNum = isPageless ? 1 : tile.tileIndex + 1;
 
     // ── Selection ─────────────────────────────────────────────────────────
+    // Ensure this page's charMap is populated — during drag selection the
+    // cursor may be on another page and paintContent may not have run for
+    // this tile yet, leaving its glyphs missing from the charMap.
+    if (!sel.empty) this.editor.ensurePagePopulated(pageNum);
+
     if (!sel.empty && !isNodeSel) {
       const lines = this.editor.charMap
         .linesInRange(sel.from, sel.to)
