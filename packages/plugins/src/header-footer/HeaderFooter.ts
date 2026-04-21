@@ -12,7 +12,6 @@
 
 import { Extension } from "@scrivr/core";
 import type { IEditor, IBaseEditor, EditorSurface } from "@scrivr/core";
-import type { Node } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
 import type { HeaderFooterPolicy } from "./types";
 import { getHeaderFooterPolicy } from "./getPolicy";

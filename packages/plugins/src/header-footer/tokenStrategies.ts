@@ -60,7 +60,8 @@ export const dateStrategy: InlineStrategy = {
   verticalAlign: "baseline",
   render(ctx: CanvasRenderingContext2D, x: number, y: number, _w: number, h: number, node: Node) {
     const frozen = node.attrs["frozen"];
-    const now = typeof frozen === "string" ? new Date(frozen) : new Date();
+    const parsed = typeof frozen === "string" ? new Date(frozen) : new Date();
+    const now = isNaN(parsed.getTime()) ? new Date() : parsed;
     drawTokenText(ctx, now.toLocaleDateString(), x, y, h);
   },
 };

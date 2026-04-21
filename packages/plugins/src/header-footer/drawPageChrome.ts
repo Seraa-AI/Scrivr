@@ -72,19 +72,22 @@ function drawBandIfPresent(
   const isLive = activeSurface !== null
     && HeaderFooterSurfaceCache.slotKeyFromId(activeSurface.id) === slotKey;
 
-  const doc = isLive ? activeSurface!.state.doc : slot.doc;
-
-  // All pages show live content when editing. Only the cursor page populates
-  // the surface charMap (for cursor placement and click-to-position).
-  // Other pages use a throwaway charMap.
-  const charMap = isLive && isCursorPage ? activeSurface!.charMap : THROWAWAY_CHARMAP;
-  charMap.clear();
-
-  const layout = layoutAtBandY(doc, paintCtx, bandY);
-  const page = layout.pages[0];
-  if (!page || page.blocks.length === 0) return;
-
-  drawBlocks(paintCtx, layout, charMap);
+  if (isLive) {
+    // Live editing: re-layout from the surface's current doc
+    const charMap = isCursorPage ? activeSurface!.charMap : THROWAWAY_CHARMAP;
+    charMap.clear();
+    const layout = layoutAtBandY(activeSurface!.state.doc, paintCtx, bandY);
+    const page = layout.pages[0];
+    if (!page || page.blocks.length === 0) return;
+    drawBlocks(paintCtx, layout, charMap);
+  } else {
+    // Stored path: reuse the pre-computed layout, offset Y to the band position.
+    // No runMiniPipeline call — the layout was already computed during measure().
+    const storedPage = slot.layout.pages[0];
+    if (!storedPage || storedPage.blocks.length === 0) return;
+    const offsetY = bandY - slot.layout.pageConfig.margins.top;
+    drawBlocksWithOffset(paintCtx, storedPage.blocks, offsetY);
+  }
 }
 
 /** Font config for chrome bands — no space between paragraphs. */
@@ -121,6 +124,48 @@ function resolveSlotKey(
     return def === resolved.policy.firstPageHeader ? "firstPageHeader" : "defaultHeader";
   }
   return def === resolved.policy.firstPageFooter ? "firstPageFooter" : "defaultFooter";
+}
+
+/**
+ * Draw stored blocks with a Y offset applied via canvas translate.
+ * Uses a throwaway charMap since stored content isn't interactively editable.
+ */
+function drawBlocksWithOffset(
+  paintCtx: PageChromePaintContext,
+  blocks: DocumentLayout["pages"][0]["blocks"],
+  offsetY: number,
+): void {
+  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber } = paintCtx;
+
+  ctx.save();
+  ctx.translate(0, offsetY);
+
+  let lineIndexOffset = 0;
+  for (const block of blocks) {
+    const strategy = blockRegistry?.get(block.blockType);
+    if (strategy) {
+      lineIndexOffset = strategy.render(
+        block,
+        {
+          ctx,
+          pageNumber,
+          lineIndexOffset,
+          dpr: 1,
+          measurer,
+          ...(markDecorators ? { markDecorators } : {}),
+          ...(inlineRegistry ? { inlineRegistry } : {}),
+        },
+        THROWAWAY_CHARMAP,
+      );
+    } else {
+      lineIndexOffset = drawBlock(
+        ctx, block, measurer, THROWAWAY_CHARMAP,
+        pageNumber, lineIndexOffset, markDecorators,
+      );
+    }
+  }
+
+  ctx.restore();
 }
 
 /** Draw all blocks using the same rendering path as the body. */

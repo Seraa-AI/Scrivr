@@ -145,6 +145,7 @@ export function renderTotalPagesPdf(block: LayoutBlock, ctx: unknown): void {
 export function renderDatePdf(block: LayoutBlock, ctx: unknown): void {
   if (!isPdfContext(ctx)) return;
   const frozen = block.node.attrs["frozen"];
-  const now = typeof frozen === "string" ? new Date(frozen) : new Date();
+  const parsed = typeof frozen === "string" ? new Date(frozen) : new Date();
+  const now = isNaN(parsed.getTime()) ? new Date() : parsed;
   drawTokenOnPdf(now.toLocaleDateString(), block, ctx);
 }

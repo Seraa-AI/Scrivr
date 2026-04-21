@@ -56,6 +56,8 @@ export interface TileEntry {
    * though doc state / selection / plugin state don't change until mouseup.
    */
   lastPendingResizeKey: string;
+  /** Surface selection key — detects cursor movement in header/footer surfaces. */
+  lastSurfaceSelKey: string;
 }
 
 /** Helpers */
@@ -189,7 +191,13 @@ export class TileManager {
 
         // No surface active — emit chromeClick for activation (double-click).
         const band = inHeader ? "header" : "footer";
-        this.editor.emit("chromeClick", { page, x: docX, y: docY, band, clickCount });
+        this.editor.emit("chromeClick", {
+          page,
+          x: docX,
+          y: docY,
+          band,
+          clickCount,
+        });
         return true;
       },
     });
@@ -332,7 +340,9 @@ export class TileManager {
     /** Grow pool to cover the visible range (pre-allocate on first layout to avoid mid-scroll DOM insertions) */
     const needed = Math.max(
       lastVisible - firstVisible + 1,
-      this.pool.length === 1 ? Math.ceil(viewportH / sh) + 2 * this.overscan : 0,
+      this.pool.length === 1
+        ? Math.ceil(viewportH / sh) + 2 * this.overscan
+        : 0,
     );
     this.ensurePoolSize(needed);
 
@@ -371,6 +381,7 @@ export class TileManager {
         tile.lastSelectionKey = "";
         tile.lastPmState = null;
         tile.lastPendingResizeKey = "";
+        tile.lastSurfaceSelKey = "";
         tile.wrapper.style.top = `${idx * sh}px`;
         tile.wrapper.style.height = `${this.tileHeight}px`;
         tile.wrapper.style.display = "block";
@@ -467,8 +478,12 @@ export class TileManager {
       ...(this.editor.pageChromeContributions?.length
         ? { pageChromeContributions: this.editor.pageChromeContributions }
         : {}),
-      ...(layout._chromePayloads ? { chromePayloads: layout._chromePayloads } : {}),
-      ...(layout.metrics?.[tile.tileIndex] ? { pageMetrics: layout.metrics[tile.tileIndex] } : {}),
+      ...(layout._chromePayloads
+        ? { chromePayloads: layout._chromePayloads }
+        : {}),
+      ...(layout.metrics?.[tile.tileIndex]
+        ? { pageMetrics: layout.metrics[tile.tileIndex] }
+        : {}),
       totalPages: layout.pages.length,
     });
   }
@@ -582,11 +597,20 @@ export class TileManager {
     // change until mouseup, so without this the ghost handles would freeze
     // at their starting size and the image would "snap" on release.
     const pendingResizeDirty = tile.lastPendingResizeKey !== pendingKey;
-    // Surface state changes (typing in header/footer) don't affect the body's
-    // pmState/selection, so the checks above miss them. When a surface is
-    // active, always repaint the overlay so the cursor tracks correctly.
-    const surfaceStateDirty = this.editor.surfaces?.activeSurface !== null;
-    if (!blinkDirty && !moveDirty && !pluginStateDirty && !pendingResizeDirty && !surfaceStateDirty)
+    // Surface state changes: track the surface's selection head so the overlay
+    // repaints when the cursor moves in a header/footer, not on every blink tick.
+    const surfaceState = this.editor.surfaces?.activeSurface?.state ?? null;
+    const surfaceSelKey = surfaceState
+      ? `${surfaceState.selection.head}:${surfaceState.selection.from}:${surfaceState.selection.to}`
+      : "";
+    const surfaceStateDirty = tile.lastSurfaceSelKey !== surfaceSelKey;
+    if (
+      !blinkDirty &&
+      !moveDirty &&
+      !pluginStateDirty &&
+      !pendingResizeDirty &&
+      !surfaceStateDirty
+    )
       return;
 
     tile.lastBlinkState = blinkOn;
@@ -594,6 +618,7 @@ export class TileManager {
     tile.lastSelectionKey = selKey;
     tile.lastPmState = pmState;
     tile.lastPendingResizeKey = pendingKey;
+    tile.lastSurfaceSelKey = surfaceSelKey;
 
     const dpr = tile.dpr || (window.devicePixelRatio ?? 1);
     const w = pageConfig.pageWidth;
@@ -607,8 +632,9 @@ export class TileManager {
       overlayCtx.translate(0, -tileTop);
     }
 
-    const pmSel = this.editor.surfaces?.activeSurface?.state.selection
-      ?? this.editor.getState().selection;
+    const pmSel =
+      this.editor.surfaces?.activeSurface?.state.selection ??
+      this.editor.getState().selection;
     const isNodeSel = pmSel instanceof NodeSelection;
     const pageNum = isPageless ? 1 : tile.tileIndex + 1;
 
@@ -625,7 +651,12 @@ export class TileManager {
 
     // ── Cursor (suppressed when a surface is active — chrome bands own their cursor) ──
     const surfaceActive = this.editor.surfaces?.activeSurface !== null;
-    if (!isNodeSel && blinkOn && tile.tileIndex === cursorTile && !surfaceActive) {
+    if (
+      !isNodeSel &&
+      blinkOn &&
+      tile.tileIndex === cursorTile &&
+      !surfaceActive
+    ) {
       const coords = this.editor.charMap.coordsAtPos(sel.head, pageNum);
       if (coords) renderCursor(overlayCtx, coords);
     }
@@ -744,6 +775,7 @@ export class TileManager {
       lastSelectionKey: "",
       lastPmState: null,
       lastPendingResizeKey: "",
+      lastSurfaceSelKey: "",
     };
   }
 

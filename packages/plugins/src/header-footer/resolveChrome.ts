@@ -134,9 +134,12 @@ export function resolveChrome(
     return marginBottom + slot.reservedHeight;
   };
 
-  // Has any header or footer definition?
-  const hasHeader = !!(policy.defaultHeader || policy.firstPageHeader);
-  const hasFooter = !!(policy.defaultFooter || policy.firstPageFooter);
+  // A contributor replaces the margin only when it has something to show on
+  // every possible page. If only firstPageHeader is defined (no default),
+  // pages 2+ would get topForPage=0, and replacesTopMargin would cause
+  // contentTop=0 — body content flush to the page edge.
+  const hasHeader = !!policy.defaultHeader;
+  const hasFooter = !!policy.defaultFooter;
 
   return {
     topForPage: headerTopForPage,

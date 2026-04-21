@@ -153,6 +153,7 @@ function updateSlot(
 interface SurfacesLike {
   activeSurface: { id: string; owner: string } | null;
   onSurfaceChange: (h: () => void) => () => void;
+  activate: (id: string | null) => void;
 }
 
 function hasSurfaces(editor: IBaseEditor): editor is IBaseEditor & { surfaces: SurfacesLike } {
@@ -197,6 +198,16 @@ function shallowEqual(a: HeaderFooterState, b: HeaderFooterState): boolean {
 }
 
 // ── Factory ──────────────────────────────────────────────────────────────────
+
+/** Deactivate the active surface if it belongs to a slot being removed. */
+function deactivateIfSlotActive(editor: IBaseEditor, bandKeyword: string): void {
+  if (!hasSurfaces(editor)) return;
+  const active = editor.surfaces.activeSurface;
+  if (!active || active.owner !== "headerFooter") return;
+  if (active.id.includes(bandKeyword)) {
+    editor.surfaces.activate(null);
+  }
+}
 
 export function createHeaderFooterController(editor: IBaseEditor): HeaderFooterController {
   const listeners = new Set<(state: HeaderFooterState) => void>();
@@ -289,6 +300,7 @@ export function createHeaderFooterController(editor: IBaseEditor): HeaderFooterC
     },
 
     removeHeader() {
+      deactivateIfSlotActive(editor, "Header");
       updatePolicy(editor, (p) => ({
         ...p,
         defaultHeader: undefined,
@@ -297,6 +309,7 @@ export function createHeaderFooterController(editor: IBaseEditor): HeaderFooterC
     },
 
     removeFooter() {
+      deactivateIfSlotActive(editor, "Footer");
       updatePolicy(editor, (p) => ({
         ...p,
         defaultFooter: undefined,
