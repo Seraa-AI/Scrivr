@@ -104,8 +104,12 @@ describe("CharacterMap", () => {
       expect(pos).toBeGreaterThan(0);
     });
 
-    it("returns 0 when clicking on the wrong page", () => {
-      expect(map.posAtCoords(50, 65, 2)).toBe(0);
+    it("falls back to previous page when clicking on a page with no content", () => {
+      // Clicking on page 2 where no content exists should find the nearest
+      // line on the previous page rather than returning 0 (doc start).
+      // This handles float-only pages where the anchor paragraph reflowed.
+      const pos = map.posAtCoords(50, 65, 2);
+      expect(pos).toBeGreaterThan(0);
     });
   });
 
@@ -199,10 +203,10 @@ describe("CharacterMap", () => {
 
       map.clearPage(2);
 
-      // Page 2 glyphs/lines are gone
-      expect(map.posAtCoords(40, 60, 2)).toBe(0);
-      // Scope to page 2 — no preceding glyph on page 2 should remain after clear
+      // Page 2 glyphs/lines are gone — coordsAtPos scoped to page 2 returns null
       expect(map.coordsAtPos(20, 2)).toBeNull();
+      // posAtCoords falls back to page 1 (nearest content) rather than returning 0
+      expect(map.posAtCoords(40, 60, 2)).toBeGreaterThan(0);
 
       // Page 1 is untouched
       const coords = map.coordsAtPos(1);
