@@ -310,6 +310,7 @@ export class Editor extends BaseEditor implements IEditor {
       getHead: () => this._state.selection.head,
       onUpdate: () => this._notifyListeners(),
       getPageChromeContributions: () => this._manager.getPageChromeContributions(),
+      inlineRegistry: this.inlineRegistry,
     });
 
     // If startReady:false, cancel the idle layout and suppress all flushes

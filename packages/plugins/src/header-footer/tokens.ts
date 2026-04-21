@@ -6,9 +6,10 @@
  * spans for them. Without these, collectInlineSpans() in BlockLayout.ts
  * skips the nodes entirely and no InlineStrategy render is called.
  *
- * The width/height values are placeholders — the actual rendered text
- * may be wider or narrower. A stable-width measurement system (using the
- * widest digit) is a future improvement.
+ * Width values are tuned for the default 14px body font and 10px footer font.
+ * Single digits measure ~6-8px at these sizes. The rendered text may overflow
+ * slightly for multi-digit numbers (100+), but this is acceptable — the text
+ * draws correctly, only the hit-testing width is approximate.
  */
 
 import type { NodeSpec } from "prosemirror-model";
@@ -19,8 +20,8 @@ export const pageNumberNode: NodeSpec = {
   atom: true,
   selectable: false,
   attrs: {
-    width: { default: 8 },
-    height: { default: 12 },
+    width: { default: 7 },
+    height: { default: 10 },
   },
   parseDOM: [{ tag: "span[data-page-number]" }],
   toDOM: () => ["span", { "data-page-number": "" }, "#"],
@@ -32,8 +33,8 @@ export const totalPagesNode: NodeSpec = {
   atom: true,
   selectable: false,
   attrs: {
-    width: { default: 8 },
-    height: { default: 12 },
+    width: { default: 7 },
+    height: { default: 10 },
   },
   parseDOM: [{ tag: "span[data-total-pages]" }],
   toDOM: () => ["span", { "data-total-pages": "" }, "#"],
@@ -45,8 +46,8 @@ export const dateNode: NodeSpec = {
   atom: true,
   selectable: false,
   attrs: {
-    width: { default: 80 },
-    height: { default: 14 },
+    width: { default: 60 },
+    height: { default: 10 },
     format: { default: "locale" },
     /** Frozen ISO string — when set, used instead of "now". Default is frozen (today). */
     frozen: { default: null },

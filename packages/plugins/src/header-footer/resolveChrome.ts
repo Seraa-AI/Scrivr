@@ -134,12 +134,17 @@ export function resolveChrome(
     return marginBottom + slot.reservedHeight;
   };
 
-  // A contributor replaces the margin only when it has something to show on
-  // every possible page. If only firstPageHeader is defined (no default),
-  // pages 2+ would get topForPage=0, and replacesTopMargin would cause
-  // contentTop=0 — body content flush to the page edge.
-  const hasHeader = !!policy.defaultHeader;
-  const hasFooter = !!policy.defaultFooter;
+  // A contributor replaces the margin only when it guarantees a non-zero
+  // value on every possible page. When differentFirstPage is true, page 1
+  // uses the first-page slot and pages 2+ use the default slot — both must
+  // exist. Without this, the missing slot returns topForPage=0, and
+  // replacesTopMargin causes contentTop=0 (body flush to page edge).
+  const hasHeader = policy.differentFirstPage
+    ? !!(policy.defaultHeader && policy.firstPageHeader)
+    : !!policy.defaultHeader;
+  const hasFooter = policy.differentFirstPage
+    ? !!(policy.defaultFooter && policy.firstPageFooter)
+    : !!policy.defaultFooter;
 
   return {
     topForPage: headerTopForPage,

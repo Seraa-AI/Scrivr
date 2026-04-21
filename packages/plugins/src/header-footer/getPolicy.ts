@@ -11,8 +11,8 @@ import type { HeaderFooterPolicy } from "./types";
 function isHeaderFooterPolicy(val: unknown): val is HeaderFooterPolicy {
   if (typeof val !== "object" || val === null) return false;
   if (!("enabled" in val) || typeof (val as Record<string, unknown>)["enabled"] !== "boolean") return false;
-  if (!("differentFirstPage" in val)) return false;
-  if (!("differentOddEven" in val)) return false;
+  if (!("differentFirstPage" in val) || typeof (val as Record<string, unknown>)["differentFirstPage"] !== "boolean") return false;
+  if (!("differentOddEven" in val) || typeof (val as Record<string, unknown>)["differentOddEven"] !== "boolean") return false;
   return true;
 }
 

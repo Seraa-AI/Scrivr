@@ -10,6 +10,7 @@ import type {
   LayoutResumption,
 } from "./PageLayout";
 import type { FontConfig } from "./FontConfig";
+import type { InlineRegistry } from "./BlockRegistry";
 import type { TextMeasurer } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
 import type { PageChromeContribution } from "./PageMetrics";
@@ -41,6 +42,8 @@ export interface LayoutCoordinatorOptions {
   /** Returns the current page chrome contributions — read per layout pass so
    *  extensions registered after construction are picked up. */
   getPageChromeContributions?: () => PageChromeContribution[];
+  /** Inline object registry — enables dynamic measurement for tokens. */
+  inlineRegistry?: InlineRegistry;
 }
 
 /**
@@ -439,6 +442,7 @@ export class LayoutCoordinator {
       ...(opts.maxBlocks !== undefined ? { maxBlocks: opts.maxBlocks } : {}),
       ...(opts.previousLayout ? { previousLayout: opts.previousLayout } : {}),
       ...(opts.resumption ? { resumption: opts.resumption } : {}),
+      ...(this.opts.inlineRegistry ? { inlineRegistry: this.opts.inlineRegistry } : {}),
     });
   }
 

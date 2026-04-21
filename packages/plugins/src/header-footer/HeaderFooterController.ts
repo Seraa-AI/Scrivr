@@ -159,7 +159,7 @@ interface SurfacesLike {
 function hasSurfaces(editor: IBaseEditor): editor is IBaseEditor & { surfaces: SurfacesLike } {
   if (!("surfaces" in editor)) return false;
   const s = editor.surfaces;
-  return typeof s === "object" && s !== null && "activeSurface" in s && "onSurfaceChange" in s;
+  return typeof s === "object" && s !== null && "activeSurface" in s && "onSurfaceChange" in s && "activate" in s;
 }
 
 function parseActiveBand(editor: IBaseEditor): { band: "header" | "footer"; page: number } | null {

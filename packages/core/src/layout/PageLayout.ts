@@ -10,6 +10,7 @@ import {
   applyPageFont,
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock } from "./BlockLayout";
+import type { InlineRegistry } from "./BlockRegistry";
 import type { LayoutLine, ConstraintProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
 import {
@@ -374,6 +375,8 @@ export interface PageLayoutOptions {
    * EMPTY_RESOLVED_CHROME, identical to pre-aggregator behaviour).
    */
   pageChromeContributions?: PageChromeContribution[];
+  /** Inline object registry — enables dynamic measurement for tokens during layout. */
+  inlineRegistry?: InlineRegistry;
 }
 
 /** A4 at 96dpi with 1-inch margins */
@@ -498,7 +501,7 @@ export function runFlowPipeline(
   const flowConfig: FlowConfig = { margins, contentWidth };
   const flowResult = buildBlockFlow(
     items, startIndex, flowConfig, fontConfig,
-    measurer, fontModifiers, measureCache, maxBlocks,
+    measurer, fontModifiers, measureCache, maxBlocks, options.inlineRegistry,
   );
 
   // Stage 2: paginate.
@@ -607,7 +610,7 @@ function _runPipelineBody(
   // Stage 3: float layout — runs once on the final paginated pages.
   const floated = applyFloatLayout(
     layoutWithChrome, fp.margins, fp.pageWidth, fp.contentWidth,
-    fp.measurer, fp.fontConfig, fp.fontModifiers,
+    fp.measurer, fp.fontConfig, fp.fontModifiers, options.inlineRegistry,
   );
   if (fp.isPartial) return floated;
 
@@ -1029,6 +1032,7 @@ export function buildBlockFlow(
   fontModifiers: Map<string, FontModifier> | undefined,
   measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
   maxBlocks?: number,
+  inlineRegistry?: InlineRegistry,
 ): { flows: FlowBlock[]; reachedCutoff: boolean; cutoffIndex: number } {
   const { margins, contentWidth } = config;
   const flows: FlowBlock[] = [];
@@ -1075,7 +1079,7 @@ export function buildBlockFlow(
     // Measure — position-independent (targetY=0, page=1 are not stored in entry).
     const entry = resolveBlockEntry(
       node, nodePos, blockX, 0, blockWidth, 1,
-      measurer, fontConfig, fontModifiers, measureCache,
+      measurer, fontConfig, fontModifiers, measureCache, inlineRegistry,
     );
 
     flows.push({
@@ -1133,6 +1137,7 @@ export function applyFloatLayout(
   measurer: TextMeasurer,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
+  inlineRegistry?: InlineRegistry,
 ): DocumentLayout {
   const { pages } = pass1Result;
 
@@ -1376,6 +1381,7 @@ export function applyFloatLayout(
           fontConfig,
           ...(fontModifiers ? { fontModifiers } : {}),
           constraintProvider,
+          ...(inlineRegistry ? { inlineRegistry } : {}),
         });
 
         const finalBlock = clampBlockToPage(reflowed, pageBottom);
@@ -1891,6 +1897,7 @@ function resolveBlockEntry(
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
   measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
+  inlineRegistry?: InlineRegistry,
 ): MeasureCacheEntry {
   const cached = measureCache?.get(node);
   if (cached && cached.availableWidth === blockWidth) {
@@ -1919,6 +1926,7 @@ function resolveBlockEntry(
     measurer,
     fontConfig,
     ...(fontModifiers ? { fontModifiers } : {}),
+    ...(inlineRegistry ? { inlineRegistry } : {}),
   });
 
   const entry: MeasureCacheEntry = {
