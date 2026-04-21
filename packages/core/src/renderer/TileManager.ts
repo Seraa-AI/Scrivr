@@ -56,8 +56,6 @@ export interface TileEntry {
    * though doc state / selection / plugin state don't change until mouseup.
    */
   lastPendingResizeKey: string;
-  /** Surface selection key — detects cursor movement in header/footer surfaces. */
-  lastSurfaceSelKey: string;
 }
 
 /** Helpers */
@@ -381,7 +379,6 @@ export class TileManager {
         tile.lastSelectionKey = "";
         tile.lastPmState = null;
         tile.lastPendingResizeKey = "";
-        tile.lastSurfaceSelKey = "";
         tile.wrapper.style.top = `${idx * sh}px`;
         tile.wrapper.style.height = `${this.tileHeight}px`;
         tile.wrapper.style.display = "block";
@@ -597,13 +594,11 @@ export class TileManager {
     // change until mouseup, so without this the ghost handles would freeze
     // at their starting size and the image would "snap" on release.
     const pendingResizeDirty = tile.lastPendingResizeKey !== pendingKey;
-    // Surface state changes: track the surface's selection head so the overlay
-    // repaints when the cursor moves in a header/footer, not on every blink tick.
-    const surfaceState = this.editor.surfaces?.activeSurface?.state ?? null;
-    const surfaceSelKey = surfaceState
-      ? `${surfaceState.selection.head}:${surfaceState.selection.from}:${surfaceState.selection.to}`
-      : "";
-    const surfaceStateDirty = tile.lastSurfaceSelKey !== surfaceSelKey;
+    // When a surface is active, always repaint the overlay so the cursor
+    // blinks correctly and selection updates are visible. The header cursor
+    // is drawn by an overlay handler that needs blink-tick repaints.
+    const surfaceActive = this.editor.surfaces?.activeSurface !== null;
+    const surfaceStateDirty = surfaceActive;
     if (
       !blinkDirty &&
       !moveDirty &&
@@ -618,7 +613,6 @@ export class TileManager {
     tile.lastSelectionKey = selKey;
     tile.lastPmState = pmState;
     tile.lastPendingResizeKey = pendingKey;
-    tile.lastSurfaceSelKey = surfaceSelKey;
 
     const dpr = tile.dpr || (window.devicePixelRatio ?? 1);
     const w = pageConfig.pageWidth;
@@ -650,7 +644,6 @@ export class TileManager {
     }
 
     // ── Cursor (suppressed when a surface is active — chrome bands own their cursor) ──
-    const surfaceActive = this.editor.surfaces?.activeSurface !== null;
     if (
       !isNodeSel &&
       blinkOn &&
@@ -775,7 +768,6 @@ export class TileManager {
       lastSelectionKey: "",
       lastPmState: null,
       lastPendingResizeKey: "",
-      lastSurfaceSelKey: "",
     };
   }
 
