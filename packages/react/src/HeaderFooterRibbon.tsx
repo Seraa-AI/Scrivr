@@ -87,7 +87,6 @@ export function HeaderFooterRibbon({ editor, gap = 24, className }: HeaderFooter
 
   const layout = editor.layout;
   const isHeader = state.activeBand === "header";
-  const label = isHeader ? "Header" : "Footer";
   const differentFirstPage = state.policy?.differentFirstPage ?? false;
   const pageConfig = layout.pageConfig;
   const pageCount = layout.pages.length;
@@ -98,6 +97,11 @@ export function HeaderFooterRibbon({ editor, gap = 24, className }: HeaderFooter
         const pageNum = i + 1;
         const metrics = layout.metrics?.[i];
         if (!metrics) return null;
+
+        const isFirstPage = pageNum === 1 && differentFirstPage;
+        const label = isHeader
+          ? (isFirstPage ? "First Page Header" : "Header")
+          : (isFirstPage ? "First Page Footer" : "Footer");
 
         const bandHeight = isHeader ? metrics.headerHeight : metrics.footerHeight;
         if (bandHeight <= 0) return null;
@@ -182,6 +186,7 @@ export function HeaderFooterRibbon({ editor, gap = 24, className }: HeaderFooter
                     isHeader={isHeader}
                     controller={controllerRef.current}
                     policy={state.policy}
+                    editor={editor}
                     onClose={() => setOptionsOpen(null)}
                     onRemoveHeader={handleRemoveHeader}
                     onRemoveFooter={handleRemoveFooter}
@@ -200,6 +205,7 @@ interface OptionsDropdownProps {
   isHeader: boolean;
   controller: HeaderFooterController | null;
   policy: HeaderFooterState["policy"];
+  editor: Editor;
   onClose: () => void;
   onRemoveHeader: () => void;
   onRemoveFooter: () => void;
@@ -209,6 +215,7 @@ function OptionsDropdown({
   isHeader,
   controller,
   policy,
+  editor,
   onClose,
   onRemoveHeader,
   onRemoveFooter,
@@ -275,6 +282,13 @@ function OptionsDropdown({
       />
 
       <div style={{ borderTop: "1px solid #f1f5f9", marginTop: 8, paddingTop: 8 }}>
+        <div style={{ fontWeight: 600, marginBottom: 6, color: "#111827" }}>Insert</div>
+        <InsertButton label="Page number" onClick={() => { editor.commands.insertPageNumber(); onClose(); }} />
+        <InsertButton label="Total pages" onClick={() => { editor.commands.insertTotalPages(); onClose(); }} />
+        <InsertButton label="Date" onClick={() => { editor.commands.insertDate(); onClose(); }} />
+      </div>
+
+      <div style={{ borderTop: "1px solid #f1f5f9", marginTop: 8, paddingTop: 8 }}>
         <button
           onClick={isHeader ? onRemoveHeader : onRemoveFooter}
           style={{
@@ -292,6 +306,28 @@ function OptionsDropdown({
         </button>
       </div>
     </div>
+  );
+}
+
+function InsertButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      onMouseDown={(e) => e.preventDefault()}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        background: "none",
+        border: "none",
+        fontSize: 12,
+        color: "#374151",
+        cursor: "pointer",
+        padding: "4px 0",
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

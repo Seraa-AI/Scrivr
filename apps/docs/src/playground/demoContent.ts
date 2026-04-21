@@ -10,8 +10,63 @@ const DEMO_DOC = {
   attrs: {
     headerFooter: {
       enabled: true,
-      differentFirstPage: false,
+      differentFirstPage: true,
       differentOddEven: false,
+      firstPageHeader: {
+        content: {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              attrs: { align: "center" },
+              content: [
+                {
+                  type: "text",
+                  marks: [
+                    { type: "bold" },
+                    { type: "fontSize", attrs: { size: 20 } },
+                  ],
+                  text: "Scrivr",
+                },
+              ],
+            },
+            {
+              type: "paragraph",
+              attrs: { align: "center" },
+              content: [
+                {
+                  type: "text",
+                  marks: [{ type: "color", attrs: { color: "#6b7280" } }],
+                  text: "Canvas Document Editor — Playground Demo",
+                },
+              ],
+            },
+          ],
+        },
+        margin: 32,
+      },
+      firstPageFooter: {
+        content: {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              attrs: { align: "center" },
+              content: [
+                {
+                  type: "text",
+                  marks: [
+                    { type: "fontSize", attrs: { size: 10 } },
+                    { type: "color", attrs: { color: "#9ca3af" } },
+                  ],
+                  text: "Draft — For Internal Review Only",
+                },
+              ],
+            },
+          ],
+        },
+        margin: 24,
+      },
       defaultHeader: {
         content: {
           type: "doc",
@@ -25,8 +80,6 @@ const DEMO_DOC = {
                   attrs: {
                     src: "https://picsum.photos/200",
                     alt: "Logo",
-                    width: 180,
-                    height: 93,
                     width: 180,
                     height: 93,
                     verticalAlign: "baseline",
@@ -47,6 +100,30 @@ const DEMO_DOC = {
                   marks: [{ type: "color", attrs: { color: "#6b7280" } }],
                   text: "  ·  Canvas Document Editor",
                 },
+              ],
+            },
+            {
+              type: "paragraph",
+              attrs: { align: "right" },
+              content: [
+                {
+                  type: "text",
+                  marks: [
+                    { type: "fontSize", attrs: { size: 10 } },
+                    { type: "color", attrs: { color: "#9ca3af" } },
+                  ],
+                  text: "Page ",
+                },
+                { type: "pageNumber" },
+                {
+                  type: "text",
+                  marks: [
+                    { type: "fontSize", attrs: { size: 10 } },
+                    { type: "color", attrs: { color: "#9ca3af" } },
+                  ],
+                  text: " of ",
+                },
+                { type: "totalPages" },
               ],
             },
           ],
@@ -383,6 +460,22 @@ const DEMO_DOC = {
       attrs: { align: "left" },
       content: [
         {
+          type: "image",
+          attrs: {
+            src: "https://picsum.photos/300/200",
+            alt: "Layout diagram",
+            width: 300,
+            height: 200,
+            wrappingMode: "square-right",
+          },
+        },
+      ],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "left" },
+      content: [
+        {
           type: "text",
           text: "Scrivr uses a custom layout pipeline that computes line breaks, page boundaries, and float positions — independent of the browser's CSS engine. The output is ",
         },
@@ -393,7 +486,7 @@ const DEMO_DOC = {
         },
         {
           type: "text",
-          text: " between the canvas view and PDF export.",
+          text: " between the canvas view and PDF export. Every page is rendered onto an HTML5 Canvas element with sub-pixel precision. The layout engine runs a multi-pass pipeline: first building the block flow from the ProseMirror document tree, then applying float exclusion zones, paginating across page boundaries, and finally building fragments for the tile renderer. Each pass is pure — no DOM dependency, no CSS reflow. This means the exact same layout can be reproduced server-side for PDF generation, ensuring what you see on screen is exactly what you get in the exported document.",
         },
       ],
     },

@@ -110,6 +110,12 @@ declare module "@scrivr/core" {
       updateHeaderFooter: (partial: Partial<HeaderFooterPolicy>) => ReturnType;
       /** Remove the header/footer policy entirely. */
       removeHeaderFooter: () => ReturnType;
+      /** Insert a page number token at the cursor. */
+      insertPageNumber: () => ReturnType;
+      /** Insert a total pages token at the cursor. */
+      insertTotalPages: () => ReturnType;
+      /** Insert a date token at the cursor. */
+      insertDate: () => ReturnType;
     };
   }
 
@@ -141,6 +147,64 @@ function placeCursorAfterPaint(
     if (attempts++ < 10) requestAnimationFrame(poll);
   };
   requestAnimationFrame(poll);
+}
+
+/**
+ * Ensure a header/footer is enabled, created, and the surface is active.
+ * Called by token insert commands so clicking the toolbar button is a
+ * one-click "add page numbers to my document" action.
+ */
+function ensureHeaderFooterActive(slotKey: SlotKey): void {
+  for (const entry of editorEntries.values()) {
+    const { editor, cache } = entry;
+
+    // Already editing a header/footer — do nothing
+    if (editor.surfaces.activeSurface?.owner === "headerFooter") return;
+
+    // Ensure policy exists
+    let policy = getHeaderFooterPolicy(editor.getState().doc);
+    if (!policy || !policy.enabled) {
+      const defaultContent = { type: "doc" as const, content: [{ type: "paragraph" }] };
+      policy = {
+        enabled: true,
+        differentFirstPage: false,
+        differentOddEven: false,
+        defaultHeader: { content: defaultContent },
+        defaultFooter: { content: defaultContent, margin: 24 },
+      };
+      editor._applyTransaction(
+        editor.getState().tr.setDocAttribute("headerFooter", policy),
+      );
+      // Re-read after dispatch
+      policy = getHeaderFooterPolicy(editor.getState().doc);
+      if (!policy) return;
+    }
+
+    // Ensure the slot exists
+    const def = policy[slotKey];
+    if (!def) return;
+
+    // Create and activate the surface
+    const isNew = !cache.get(slotKey);
+    const surface = cache.getOrCreate(slotKey, def);
+    if (isNew) {
+      surface.onUpdate(({ docChanged }) => {
+        getCursorManager(editor)?.resetSilent();
+        updateLiveSurfaceCache();
+        if (docChanged) {
+          editor.invalidateLayout();
+        } else {
+          editor.redraw();
+        }
+      });
+      editor.surfaces.register(surface);
+    }
+    editor.surfaces.activate(surface.id);
+    entry.activePage = 1;
+    updateLiveSurfaceCache();
+    editor.redraw();
+    return;
+  }
 }
 
 /** Per-editor state. Uses a Map (not WeakMap) because onCommit needs iteration. */
@@ -244,7 +308,50 @@ export const HeaderFooter = Extension.create({
         if (dispatch) dispatch(state.tr.setDocAttribute("headerFooter", null));
         return true;
       },
+
+      insertPageNumber: () => (state, dispatch) => {
+        ensureHeaderFooterActive("defaultFooter");
+        const nodeType = state.schema.nodes["pageNumber"];
+        if (!nodeType) return false;
+        if (dispatch) dispatch(state.tr.replaceSelectionWith(nodeType.create()));
+        return true;
+      },
+
+      insertTotalPages: () => (state, dispatch) => {
+        ensureHeaderFooterActive("defaultFooter");
+        const nodeType = state.schema.nodes["totalPages"];
+        if (!nodeType) return false;
+        if (dispatch) dispatch(state.tr.replaceSelectionWith(nodeType.create()));
+        return true;
+      },
+
+      insertDate: () => (state, dispatch) => {
+        ensureHeaderFooterActive("defaultFooter");
+        const nodeType = state.schema.nodes["date"];
+        if (!nodeType) return false;
+        if (dispatch) dispatch(state.tr.replaceSelectionWith(nodeType.create()));
+        return true;
+      },
     };
+  },
+
+  addToolbarItems() {
+    return [
+      {
+        command: "insertPageNumber",
+        label: "#",
+        title: "Insert page number",
+        group: "insert",
+        isActive: () => false,
+      },
+      {
+        command: "insertDate",
+        label: "📅",
+        title: "Insert date",
+        group: "insert",
+        isActive: () => false,
+      },
+    ];
   },
 
   addSurfaceOwner() {
