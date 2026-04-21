@@ -27,6 +27,6 @@ export { resolveFont } from "./StyleResolver";
 export { BlockRegistry } from "./BlockRegistry";
 export { LayoutCoordinator } from "./LayoutCoordinator";
 export type { LayoutCoordinatorOptions } from "./LayoutCoordinator";
-export type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
+export type { BlockStrategy, BlockRenderContext, InlineStrategy } from "./BlockRegistry";
 export { TextBlockStrategy } from "./TextBlockStrategy";
 export { ListItemStrategy } from "./ListItemStrategy";

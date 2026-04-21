@@ -19,8 +19,8 @@ export const pageNumberNode: NodeSpec = {
   atom: true,
   selectable: false,
   attrs: {
-    width: { default: 20 },
-    height: { default: 14 },
+    width: { default: 8 },
+    height: { default: 12 },
   },
   parseDOM: [{ tag: "span[data-page-number]" }],
   toDOM: () => ["span", { "data-page-number": "" }, "#"],
@@ -32,8 +32,8 @@ export const totalPagesNode: NodeSpec = {
   atom: true,
   selectable: false,
   attrs: {
-    width: { default: 20 },
-    height: { default: 14 },
+    width: { default: 8 },
+    height: { default: 12 },
   },
   parseDOM: [{ tag: "span[data-total-pages]" }],
   toDOM: () => ["span", { "data-total-pages": "" }, "#"],
