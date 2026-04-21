@@ -110,11 +110,11 @@ declare module "@scrivr/core" {
       updateHeaderFooter: (partial: Partial<HeaderFooterPolicy>) => ReturnType;
       /** Remove the header/footer policy entirely. */
       removeHeaderFooter: () => ReturnType;
-      /** Insert a page number token at the cursor. */
+      /** Insert a page number token at the cursor. Only works in an active surface. */
       insertPageNumber: () => ReturnType;
-      /** Insert a total pages token at the cursor. */
+      /** Insert a total pages token at the cursor. Only works in an active surface. */
       insertTotalPages: () => ReturnType;
-      /** Insert a date token at the cursor. */
+      /** Insert a date token at the cursor. Only works in an active surface. */
       insertDate: () => ReturnType;
     };
   }
@@ -272,25 +272,6 @@ export const HeaderFooter = Extension.create({
         return true;
       },
     };
-  },
-
-  addToolbarItems() {
-    return [
-      {
-        command: "insertPageNumber",
-        label: "#",
-        title: "Insert page number",
-        group: "insert",
-        isActive: () => false,
-      },
-      {
-        command: "insertDate",
-        label: "📅",
-        title: "Insert date",
-        group: "insert",
-        isActive: () => false,
-      },
-    ];
   },
 
   addSurfaceOwner() {
