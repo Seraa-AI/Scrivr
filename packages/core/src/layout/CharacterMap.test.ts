@@ -104,8 +104,10 @@ describe("CharacterMap", () => {
       expect(pos).toBeGreaterThan(0);
     });
 
-    it("returns 0 when clicking on the wrong page", () => {
-      expect(map.posAtCoords(50, 65, 2)).toBe(0);
+    it("falls back to previous page when clicking on a page with no lines", () => {
+      // Page 2 has no lines — should fall back to the last line on page 1
+      // Click at x=50 which is near the start of content, so returns docPos 2
+      expect(map.posAtCoords(50, 65, 2)).toBe(2);
     });
   });
 
@@ -201,8 +203,8 @@ describe("CharacterMap", () => {
 
       // Page 2 glyphs/lines are gone — coordsAtPos scoped to page 2 returns null
       expect(map.coordsAtPos(20, 2)).toBeNull();
-      // Page 2 glyphs/lines are gone
-      expect(map.posAtCoords(40, 60, 2)).toBe(0);
+      // Page 2 has no lines — posAtCoords falls back to page 1's last line
+      expect(map.posAtCoords(40, 60, 2)).not.toBe(20);
 
       // Page 1 is untouched
       const coords = map.coordsAtPos(1);
@@ -380,6 +382,36 @@ describe("CharacterMap — posAbove / posBelow (vertical navigation)", () => {
 
     it("lineStartPos of first glyph returns line start", () => {
       expect(map.lineStartPos(1)).toBe(1);
+    });
+  });
+
+  describe("posAtCoords — empty page fallback", () => {
+    it("falls back to last line on previous page when clicked page has no lines", () => {
+      // Page 2 has no lines (e.g. float-only page). Clicking on it should
+      // return the end of the last line on page 1, not 0.
+      const m = new CharacterMap();
+      m.registerLine({ page: 1, lineIndex: 0, y: 60, height: 20, x: 0, contentWidth: 400, startDocPos: 1, endDocPos: 6 });
+      m.registerGlyph({ docPos: 1, x: 0, y: 60, lineY: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
+      m.registerGlyph({ docPos: 5, x: 40, y: 60, lineY: 60, width: 10, height: 20, page: 1, lineIndex: 0 });
+
+      const pos = m.posAtCoords(100, 100, 2);
+      expect(pos).not.toBe(0);
+      expect(pos).toBe(6); // endDocPos of the last line on page 1
+    });
+
+    it("falls back to first line on next page when page 1 is empty", () => {
+      const m = new CharacterMap();
+      m.registerLine({ page: 2, lineIndex: 0, y: 60, height: 20, x: 0, contentWidth: 400, startDocPos: 10, endDocPos: 15 });
+      m.registerGlyph({ docPos: 10, x: 0, y: 60, lineY: 60, width: 10, height: 20, page: 2, lineIndex: 0 });
+
+      const pos = m.posAtCoords(0, 100, 1);
+      expect(pos).not.toBe(0);
+      expect(pos).toBe(10); // startDocPos of the first line on page 2
+    });
+
+    it("returns 0 only when no lines exist anywhere", () => {
+      const m = new CharacterMap();
+      expect(m.posAtCoords(100, 100, 1)).toBe(0);
     });
   });
 });

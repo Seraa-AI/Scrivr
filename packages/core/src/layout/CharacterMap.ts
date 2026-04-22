@@ -158,9 +158,19 @@ export class CharacterMap {
    *      after it; otherwise snap to the position before it.
    */
   posAtCoords(x: number, y: number, page: number): number {
-    // Try exact hit first; fall back to nearest line if click is in a margin
-    const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
+    // Try exact hit first; fall back to nearest line if click is in a margin.
+    // If the clicked page has no lines at all (float-only page, empty page),
+    // fall back to the last line on the previous page or first line on the next.
+    const line =
+      this.lineAtCoords(y, page) ??
+      this.nearestLine(y, page) ??
+      this.lastLineOnPage(page - 1) ??
+      this.firstLineOnPage(page + 1);
     if (!line) return 0;
+
+    // Use the line's actual page for glyph lookups — when the fallback crosses
+    // pages (e.g. clicking a float-only page), the line lives on a different page.
+    const linePage = line.page;
 
     // Filter by lineY rather than glyph.y so that:
     // (a) table cells — which share the same lineY but have different lineIndex
@@ -168,7 +178,7 @@ export class CharacterMap {
     // (b) inline objects that inflate lineHeight — whose glyphs are vertically
     //     offset from the line top — are still found alongside text glyphs.
     const lineGlyphs = this.glyphs
-      .filter((g) => g.page === page && g.lineY === line.y)
+      .filter((g) => g.page === linePage && g.lineY === line.y)
       .sort((a, b) => a.x - b.x);
 
     if (!lineGlyphs.length) return line.startDocPos;
@@ -185,7 +195,7 @@ export class CharacterMap {
     // owns the rightmost glyph (handles multi-cell rows correctly).
     const rightmost = lineGlyphs[lineGlyphs.length - 1]!;
     const rightLine = this.lines.find(
-      (l) => l.page === page && l.lineIndex === rightmost.lineIndex,
+      (l) => l.page === linePage && l.lineIndex === rightmost.lineIndex,
     );
     return rightLine?.endDocPos ?? rightmost.docPos + 1;
   }
@@ -398,5 +408,16 @@ export class CharacterMap {
       );
       return lineDist < closestDist ? line : closest;
     });
+  }
+
+  // Last line on a given page — used as fallback when the clicked page has no lines.
+  private lastLineOnPage(page: number): LineEntry | undefined {
+    const pageLines = this.lines.filter((l) => l.page === page);
+    return pageLines.length ? pageLines[pageLines.length - 1] : undefined;
+  }
+
+  // First line on a given page — fallback when clicking a line-less page 1.
+  private firstLineOnPage(page: number): LineEntry | undefined {
+    return this.lines.find((l) => l.page === page);
   }
 }
