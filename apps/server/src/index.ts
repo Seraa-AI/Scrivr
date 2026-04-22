@@ -29,7 +29,7 @@ function docPath(name: string): string {
 
 // ── Server ────────────────────────────────────────────────────────────────────
 
-const AUTH_TOKEN = process.env.COLLAB_AUTH_TOKEN;
+const AUTH_TOKEN = process.env.AUTH_TOKEN;
 
 const server = Server.configure({
   port: 1235,
