@@ -158,14 +158,8 @@ export class CharacterMap {
    *      after it; otherwise snap to the position before it.
    */
   posAtCoords(x: number, y: number, page: number): number {
-    // Try exact hit first; fall back to nearest line if click is in a margin.
-    // If this page has no lines (e.g. only a float image with its anchor on
-    // another page), try the previous page's last line so the cursor lands
-    // at the end of the nearest text rather than jumping to doc start.
-    const line =
-      this.lineAtCoords(y, page)
-      ?? this.nearestLine(y, page)
-      ?? this.nearestLine(y, page - 1);
+    // Try exact hit first; fall back to nearest line if click is in a margin
+    const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
     if (!line) return 0;
 
     // Filter by lineY rather than glyph.y so that:
