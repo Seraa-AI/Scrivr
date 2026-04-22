@@ -1,5 +1,35 @@
 # @scrivr/export
 
+## 1.0.5
+
+### Patch Changes
+
+- f6950b5: Add token authentication and connection lifecycle callbacks to the Collaboration plugin and collab server.
+
+  **@scrivr/plugins** — `Collaboration.configure()` now accepts `token` (string or async function) forwarded to HocuspocusProvider for WebSocket auth, plus optional `onConnect`/`onDisconnect` callbacks for connection lifecycle visibility.
+
+- 0f6d00a: Fix cross-page selection highlight and cursor fallback for float-only pages
+- ff7390f: Split `@scrivr/export` into `@scrivr/export-pdf` (pdf-lib) and `@scrivr/export-markdown` (prosemirror-markdown) so each format carries only its own deps. The original `@scrivr/export` becomes a compat shim that re-exports from both — existing consumers keep working.
+
+  Add `addExports()` extension lane to `@scrivr/core` with the `FormatHandlers` augmentation pattern. Format packages declare their handler shape via module augmentation; extensions contribute format-tagged handlers via `addExports()`. Handler interfaces are placeholders until the M2 export dispatch refactor fills them.
+
+  Dependent packages bumped to pick up the new export extensibility types.
+
+- 8ccf3ea: Add `EditorSurface` + `SurfaceRegistry` + `addSurfaceOwner()` extension lane for multi-surface document editing. Plugins can now register plugin-owned edit regions (headers, footnote bodies, comment threads) that own their own `EditorState` and participate in a full activate/commit/deactivate lifecycle. Body (flow doc) remains the default active surface — `activeId === null` — and `editor.state` always returns flow state regardless of activation. Zero user-visible change. Enables the upcoming HeaderFooter plugin to ship fully editable in-place rather than paint-only.
+
+  Dependent packages bumped to pick up the new `@scrivr/core` surface API exports.
+
+- Updated dependencies [bf50408]
+- Updated dependencies [f6950b5]
+- Updated dependencies [0f6d00a]
+- Updated dependencies [81970d5]
+- Updated dependencies [ff7390f]
+- Updated dependencies [a198d0f]
+- Updated dependencies [8ccf3ea]
+  - @scrivr/core@1.0.5
+  - @scrivr/export-pdf@1.0.5
+  - @scrivr/export-markdown@1.0.5
+
 ## 1.0.4
 
 ### Patch Changes
