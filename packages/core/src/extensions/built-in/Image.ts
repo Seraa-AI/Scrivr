@@ -21,7 +21,9 @@ function getCachedImage(src: string): HTMLImageElement | null {
     imageCache.set(src, img);
     redrawCallbacks.forEach((cb) => cb());
   };
-  img.onerror = () => { imageCache.set(src, "error"); };
+  img.onerror = () => {
+    imageCache.set(src, "error");
+  };
   img.crossOrigin = "anonymous";
   img.src = src;
   return null;
@@ -29,14 +31,16 @@ function getCachedImage(src: string): HTMLImageElement | null {
 
 // ── Per-instance state ────────────────────────────────────────────────────────
 
-interface InstanceState { cleanup: () => void }
+interface InstanceState {
+  cleanup: () => void;
+}
 const instanceState = new WeakMap<object, InstanceState>();
 
 // ── Inline image strategy ─────────────────────────────────────────────────────
 
-const PLACEHOLDER_BG     = "#f1f5f9";
+const PLACEHOLDER_BG = "#f1f5f9";
 const PLACEHOLDER_BORDER = "#e2e8f0";
-const PLACEHOLDER_TEXT   = "#94a3b8";
+const PLACEHOLDER_TEXT = "#94a3b8";
 
 function createInlineImageStrategy(): InlineStrategy {
   return {
@@ -53,7 +57,7 @@ function createInlineImageStrategy(): InlineStrategy {
       if (width <= 0 || height <= 0) return;
 
       const src = node.attrs["src"] as string | undefined;
-      const alt = node.attrs["alt"] as string | undefined ?? "";
+      const alt = (node.attrs["alt"] as string | undefined) ?? "";
 
       ctx.save();
 
@@ -73,7 +77,7 @@ function createInlineImageStrategy(): InlineStrategy {
       }
 
       ctx.strokeStyle = PLACEHOLDER_BORDER;
-      ctx.lineWidth   = 1;
+      ctx.lineWidth = 1;
       ctx.strokeRect(x, y, width, height);
 
       ctx.restore();
@@ -83,7 +87,10 @@ function createInlineImageStrategy(): InlineStrategy {
 
 function drawPlaceholder(
   ctx: CanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
   label: string,
 ): void {
   ctx.fillStyle = PLACEHOLDER_BG;
@@ -91,7 +98,7 @@ function drawPlaceholder(
 
   const cx = x + w / 2;
   const cy = y + h / 2 - 10;
-  const r  = Math.min(20, h / 6);
+  const r = Math.min(20, h / 6);
   ctx.fillStyle = PLACEHOLDER_TEXT;
   ctx.beginPath();
   ctx.arc(cx - r * 0.4, cy - r * 0.3, r * 0.4, 0, Math.PI * 2);
@@ -122,7 +129,7 @@ function insertImage(): Command {
 
     // Insert inline at the current cursor position (inside the paragraph)
     const node = imageType.create({ src, alt: "" });
-    const tr   = state.tr.replaceSelectionWith(node).scrollIntoView();
+    const tr = state.tr.replaceSelectionWith(node).scrollIntoView();
     dispatch(tr);
     return true;
   };
@@ -139,9 +146,9 @@ export const Image = Extension.create({
         inline: true,
         group: "inline",
         attrs: {
-          src:    { default: "" },
-          alt:    { default: "" },
-          width:  { default: 200 },
+          src: { default: "" },
+          alt: { default: "" },
+          width: { default: 200 },
           height: { default: 200 },
           nodeId: { default: null },
           /** Vertical alignment within the line box — matches InlineObjectVerticalAlign */
@@ -157,19 +164,29 @@ export const Image = Extension.create({
             getAttrs(dom) {
               const el = dom as HTMLImageElement;
               return {
-                src:    el.getAttribute("src") ?? "",
-                alt:    el.getAttribute("alt") ?? "",
-                width:  el.getAttribute("width")  ? parseInt(el.getAttribute("width")!)  : 200,
-                height: el.getAttribute("height") ? parseInt(el.getAttribute("height")!) : 200,
+                src: el.getAttribute("src") ?? "",
+                alt: el.getAttribute("alt") ?? "",
+                width: el.getAttribute("width")
+                  ? parseInt(el.getAttribute("width")!)
+                  : 200,
+                height: el.getAttribute("height")
+                  ? parseInt(el.getAttribute("height")!)
+                  : 200,
               };
             },
           },
         ],
         toDOM(node) {
           const { src, alt, width, height } = node.attrs as {
-            src: string; alt: string; width: number; height: number;
+            src: string;
+            alt: string;
+            width: number;
+            height: number;
           };
-          return ["img", { src, alt, width: String(width), height: String(height) }];
+          return [
+            "img",
+            { src, alt, width: String(width), height: String(height) },
+          ];
         },
       },
     };
