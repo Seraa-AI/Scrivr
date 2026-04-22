@@ -22,6 +22,14 @@ export interface InlineStrategy {
    */
   verticalAlign?: "baseline" | "middle" | "top";
 
+  /**
+   * Optional dynamic measurement. Called during layout to compute the actual
+   * width and height for this inline object. When present, overrides the
+   * node's width/height attrs. This lets tokens (page number, date) size
+   * themselves based on the current font instead of using fixed placeholders.
+   */
+  measure?(node: Node, font: string, measurer: TextMeasurer): { width: number; height: number };
+
   render(
     ctx: CanvasRenderingContext2D,
     x: number,

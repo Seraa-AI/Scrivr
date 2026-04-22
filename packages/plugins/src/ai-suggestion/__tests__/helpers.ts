@@ -117,6 +117,10 @@ export class TestAiEditor implements IEditor {
     });
   }
 
+  get schema() {
+    return this.state.schema;
+  }
+
   getState(): EditorState {
     return this.state;
   }
@@ -166,6 +170,17 @@ export class TestAiEditor implements IEditor {
   getExportContributions() {
     return [];
   }
+  invalidateLayout(): void {}
+  getPageScreenPosition() { return null; }
+  readonly surfaces = {
+    register: () => {},
+    unregister: () => {},
+    activate: () => {},
+    get activeId() { return null; },
+    get activeSurface() { return null; },
+    onSurfaceChange: () => () => {},
+    destroy: () => {},
+  } as never;
   /** SelectionController stub — only moveCursorTo is called by AI suggestion code. */
   readonly selection = {
     moveCursorTo: (_pos: number): void => {},

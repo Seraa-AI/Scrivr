@@ -8,6 +8,7 @@ import {
   LinkPopover,
   SlashMenu,
   ImageMenu,
+  HeaderFooterRibbon,
 } from "@scrivr/react";
 import { useState } from "react";
 import type { EditorStateContext } from "@scrivr/react";
@@ -17,6 +18,7 @@ import {
   CollaborationCursor,
   TrackChanges,
   AiToolkit,
+  HeaderFooter,
 } from "@scrivr/plugins";
 import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
@@ -91,6 +93,7 @@ const EXTENSIONS =
         CollaborationCursor.configure({
           user: { name: identity.userName, color: identity.userColor },
         }),
+        HeaderFooter,
         PdfExport.configure({ filename: identity.room }),
         TrackChanges.configure({
           userID: identity.userName,
@@ -101,6 +104,7 @@ const EXTENSIONS =
       ]
     : [
         StarterKit,
+        HeaderFooter,
         PdfExport.configure({ filename: "scrivr-demo" }),
         TrackChanges.configure({ userID: "demo-user", canAcceptReject: true }),
         ...(AI_ENABLED ? [AiToolkit] : []),
@@ -264,11 +268,13 @@ export function Playground() {
       <div className="flex flex-1 overflow-hidden relative">
         <main className="flex-1 overflow-auto p-1 md:p-4">
           <div style={{ display: "flex", alignItems: "flex-start", gap: 24, margin: "0 auto", width: "fit-content" }}>
-            <Scrivr
-              editor={editor}
-              style={{ position: "relative" }}
-              pageStyle={{ boxShadow: "none", border: "1px solid #e8eaed" }}
-            />
+            <div style={{ position: "relative" }}>
+              <Scrivr
+                editor={editor}
+                pageStyle={{ boxShadow: "none", border: "1px solid #e8eaed" }}
+              />
+              <HeaderFooterRibbon editor={editor} />
+            </div>
             {AI_ENABLED && (
               <AiSuggestionCardsPanel editor={editor} mode="tracked" />
             )}

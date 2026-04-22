@@ -17,7 +17,7 @@
  */
 
 import { Node, type Schema } from "prosemirror-model";
-import { EditorState, type Transaction } from "prosemirror-state";
+import { EditorState, type Transaction, type Plugin } from "prosemirror-state";
 import { CharacterMap } from "../layout/CharacterMap";
 import type { SurfaceId, Unsubscribe } from "./types";
 
@@ -28,6 +28,8 @@ export interface EditorSurfaceInit {
   schema: Schema;
   /** PM JSON form of the initial document (e.g. from flow `doc.attrs.header`). */
   initialDocJSON: Record<string, unknown>;
+  /** Optional ProseMirror plugins (keymaps, input rules) for this surface's state. */
+  plugins?: Plugin[];
 }
 
 /**
@@ -67,7 +69,11 @@ export class EditorSurface {
     this.charMap = new CharacterMap();
 
     const doc = Node.fromJSON(init.schema, init.initialDocJSON);
-    this._state = EditorState.create({ schema: init.schema, doc });
+    this._state = EditorState.create({
+      schema: init.schema,
+      doc,
+      ...(init.plugins ? { plugins: init.plugins } : {}),
+    });
   }
 
   /** Current state. Always reflects the most recent dispatch. */

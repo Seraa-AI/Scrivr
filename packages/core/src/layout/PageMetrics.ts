@@ -7,6 +7,8 @@ import type { Node } from "prosemirror-model";
 import type { DocumentLayout, PageConfig } from "./PageLayout";
 import type { FontConfig } from "./FontConfig";
 import type { TextMeasurer } from "./TextMeasurer";
+import type { MarkDecorator } from "../extensions/types";
+import type { BlockRegistry, InlineRegistry } from "./BlockRegistry";
 
 /** Geometry for a single page, derived from PageConfig + chrome reservations. */
 export interface PageMetrics {
@@ -32,10 +34,25 @@ export interface PageMetrics {
 
 /** One chrome contribution (header, footer, footnote band, etc.). */
 export interface ChromeContribution {
-  /** Reserved top space on a given page (px). */
+  /**
+   * Total space reserved from the TOP of the page (px). When replacesTopMargin
+   * is true, this replaces margins.top entirely — the value represents the
+   * full distance from the page edge to contentTop.
+   */
   topForPage(pageNumber: number): number;
-  /** Reserved bottom space on a given page (px). */
+  /**
+   * Total space reserved from the BOTTOM of the page (px). When
+   * replacesBottomMargin is true, this replaces margins.bottom entirely.
+   */
   bottomForPage(pageNumber: number): number;
+  /** If true, topForPage replaces margins.top instead of adding to it. */
+  replacesTopMargin?: boolean;
+  /** If true, bottomForPage replaces margins.bottom instead of adding to it. */
+  replacesBottomMargin?: boolean;
+  /** Where the top chrome band starts (px from page edge). Used for headerTop in metrics. */
+  topBandStart?: (pageNumber: number) => number;
+  /** Where the bottom chrome band starts (px from page bottom). Used for footerTop in metrics. */
+  bottomBandStart?: (pageNumber: number) => number;
   /** Opaque state routed back to the contributor at paint time. */
   payload?: unknown;
   /** True when this contributor's reservations have stabilized. */
@@ -61,19 +78,38 @@ export function computePageMetrics(
 
   let headerHeight = 0;
   let footerHeight = 0;
+  let topMarginReplaced = false;
+  let bottomMarginReplaced = false;
 
   for (const contribution of Object.values(resolved.contributions)) {
-    headerHeight += contribution.topForPage(pageNumber);
-    // Pageless mode has no footer — flow grows unbounded.
+    const top = contribution.topForPage(pageNumber);
+    if (contribution.replacesTopMargin) {
+      // This contributor's value replaces margins.top entirely
+      headerHeight = top;
+      topMarginReplaced = true;
+    } else {
+      headerHeight += top;
+    }
+
     if (!config.pageless) {
-      footerHeight += contribution.bottomForPage(pageNumber);
+      const bottom = contribution.bottomForPage(pageNumber);
+      if (contribution.replacesBottomMargin) {
+        footerHeight = bottom;
+        bottomMarginReplaced = true;
+      } else {
+        footerHeight += bottom;
+      }
     }
   }
 
-  const contentTop = margins.top + headerHeight;
+  // When a contributor replaces the margin, contentTop is headerHeight directly
+  // (it already includes the distance from the page edge). Otherwise, add to margins.
+  const contentTop = topMarginReplaced ? headerHeight : margins.top + headerHeight;
   const contentBottom = config.pageless
     ? pageHeight
-    : pageHeight - margins.bottom - footerHeight;
+    : bottomMarginReplaced
+      ? pageHeight - footerHeight
+      : pageHeight - margins.bottom - footerHeight;
   const contentHeight = contentBottom - contentTop;
   const contentWidth = pageWidth - margins.left - margins.right;
 
@@ -83,14 +119,16 @@ export function computePageMetrics(
     contentBottom,
     contentHeight,
     contentWidth,
-    headerTop: margins.top,
-    // Pageless mode has no footer band — keep footerTop aligned with
-    // contentBottom instead of subtracting margins we never respect.
+    headerTop: topMarginReplaced ? computeBandStart(resolved, pageNumber, "top", margins.top) : margins.top,
     footerTop: config.pageless
       ? pageHeight
-      : pageHeight - margins.bottom - footerHeight,
-    headerHeight,
-    footerHeight,
+      : contentBottom,
+    headerHeight: topMarginReplaced
+      ? headerHeight - computeBandStart(resolved, pageNumber, "top", margins.top)
+      : headerHeight,
+    footerHeight: bottomMarginReplaced
+      ? footerHeight - computeBandStart(resolved, pageNumber, "bottom", margins.bottom)
+      : footerHeight,
   };
 }
 
@@ -99,6 +137,24 @@ export const EMPTY_RESOLVED_CHROME: ResolvedChrome = Object.freeze({
   contributions: Object.freeze({} as Record<string, never>),
   metricsVersion: 0,
 });
+
+/** Find the band start position from contributions that replace margins. */
+function computeBandStart(
+  resolved: ResolvedChrome,
+  pageNumber: number,
+  side: "top" | "bottom",
+  fallback: number,
+): number {
+  for (const contribution of Object.values(resolved.contributions)) {
+    if (side === "top" && contribution.replacesTopMargin && contribution.topBandStart) {
+      return contribution.topBandStart(pageNumber);
+    }
+    if (side === "bottom" && contribution.replacesBottomMargin && contribution.bottomBandStart) {
+      return contribution.bottomBandStart(pageNumber);
+    }
+  }
+  return fallback;
+}
 
 // ── Page chrome contributor API ─────────────────────────────────────────────
 // Plugins (HeaderFooter, Footnotes, margin notes) implement
@@ -145,6 +201,14 @@ export interface PageChromePaintContext {
   pageConfig: PageConfig;
   /** This contributor's payload from the final measure() call of the last run. */
   payload: unknown;
+  /** Text measurer — for rendering mini-layout blocks in chrome bands. */
+  measurer: TextMeasurer;
+  /** Mark decorators from extensions — for rendering styled text in chrome bands. */
+  markDecorators?: Map<string, MarkDecorator>;
+  /** Block registry — dispatches block rendering to the correct strategy. */
+  blockRegistry?: BlockRegistry;
+  /** Inline object registry — renders inline images, widgets, etc. */
+  inlineRegistry?: InlineRegistry;
 }
 
 /** Plugin-facing contributor registered via Extension.addPageChrome(). */

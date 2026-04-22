@@ -85,7 +85,11 @@ function makeLayout(
   } as unknown as DocumentLayout;
 }
 
-function makeMockEditor(isPageless = false, pageConfig = DEFAULT_PAGE_CONFIG) {
+function makeMockEditor(
+  isPageless = false,
+  pageConfig = DEFAULT_PAGE_CONFIG,
+  activeSurface: unknown = null,
+) {
   const layoutRef = { current: makeLayout(10, pageConfig) };
 
   const editor = {
@@ -124,6 +128,8 @@ function makeMockEditor(isPageless = false, pageConfig = DEFAULT_PAGE_CONFIG) {
     blockRegistry: undefined,
     inlineRegistry: undefined,
     markDecorators: undefined,
+    surfaces: { activeSurface },
+    pageChromeContributions: [],
   } as unknown as Editor;
 
   return { editor, layoutRef };
@@ -542,5 +548,218 @@ describe("TileManager — destroy", () => {
     const tm = new TileManager(editor, container);
     tm.destroy();
     expect(() => tm.destroy()).not.toThrow();
+  });
+});
+
+describe("TileManager — overlay repaint with active surface", () => {
+  let container: HTMLDivElement;
+  let scrollParent: HTMLDivElement;
+
+  beforeEach(() => {
+    stubCanvas();
+    scrollParent = document.createElement("div");
+    scrollParent.style.overflowY = "scroll";
+    Object.defineProperty(scrollParent, "clientHeight", {
+      value: 800,
+      configurable: true,
+    });
+    Object.defineProperty(scrollParent, "scrollTop", {
+      value: 0,
+      configurable: true,
+      writable: true,
+    });
+    container = document.createElement("div");
+    scrollParent.appendChild(container);
+    document.body.appendChild(scrollParent);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    scrollParent.remove();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("overlay repaints on every update cycle when a surface is active", () => {
+    const { editor } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, {
+      id: "headerFooter:defaultHeader",
+      owner: "headerFooter",
+      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
+    });
+
+    const tm = new TileManager(editor, container);
+    tm.update(); // first paint
+
+    // The overlay handler should have been called
+    expect(editor.runOverlayHandlers).toHaveBeenCalled();
+
+    const callCountAfterFirst = vi.mocked(editor.runOverlayHandlers).mock.calls.length;
+
+    // Update again without changing any body state — overlay should STILL repaint
+    // because a surface is active (surfaceStateDirty = true).
+    tm.update();
+
+    expect(vi.mocked(editor.runOverlayHandlers).mock.calls.length).toBeGreaterThan(
+      callCountAfterFirst,
+    );
+
+    tm.destroy();
+  });
+
+  it("overlay call count grows faster with active surface than without", () => {
+    // With surface active — every update repaints overlay
+    const { editor: editorWithSurface } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, {
+      id: "headerFooter:defaultHeader",
+      owner: "headerFooter",
+      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
+    });
+    const tm1 = new TileManager(editorWithSurface, container);
+    tm1.update();
+    tm1.update();
+    tm1.update();
+    const withSurface = vi.mocked(editorWithSurface.runOverlayHandlers).mock.calls.length;
+    tm1.destroy();
+
+    // Without surface — overlay may skip some repaints after stabilizing
+    const container2 = document.createElement("div");
+    scrollParent.appendChild(container2);
+    const { editor: editorNoSurface } = makeMockEditor();
+    const tm2 = new TileManager(editorNoSurface, container2);
+    tm2.update();
+    tm2.update();
+    tm2.update();
+    const withoutSurface = vi.mocked(editorNoSurface.runOverlayHandlers).mock.calls.length;
+    tm2.destroy();
+    container2.remove();
+
+    // Active surface should cause at least as many overlay repaints
+    expect(withSurface).toBeGreaterThanOrEqual(withoutSurface);
+  });
+});
+
+describe("TileManager — body click deactivates surface", () => {
+  let container: HTMLDivElement;
+  let scrollParent: HTMLDivElement;
+
+  beforeEach(() => {
+    stubCanvas();
+    scrollParent = document.createElement("div");
+    scrollParent.style.overflowY = "scroll";
+    Object.defineProperty(scrollParent, "clientHeight", {
+      value: 800,
+      configurable: true,
+    });
+    Object.defineProperty(scrollParent, "scrollTop", {
+      value: 0,
+      configurable: true,
+      writable: true,
+    });
+    container = document.createElement("div");
+    scrollParent.appendChild(container);
+    document.body.appendChild(scrollParent);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    scrollParent.remove();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("clicking in the body deactivates an active surface", () => {
+    const activateFn = vi.fn();
+    const mockSurface = {
+      id: "headerFooter:defaultHeader",
+      owner: "headerFooter",
+      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
+    };
+    const { editor, layoutRef } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, mockSurface);
+
+    const chromeMetrics = {
+      contentTop: 132,
+      contentBottom: 991,
+      contentHeight: 859,
+      contentWidth: 650,
+      headerTop: 72,
+      footerTop: 991,
+      headerHeight: 60,
+      footerHeight: 60,
+    };
+    const layoutWithMetrics = {
+      ...makeLayout(2, DEFAULT_PAGE_CONFIG),
+      metrics: [
+        { pageNumber: 1, ...chromeMetrics },
+        { pageNumber: 2, ...chromeMetrics },
+      ],
+    };
+
+    layoutRef.current = layoutWithMetrics;
+    (editor as unknown as { surfaces: { activeSurface: unknown; activate: typeof activateFn } }).surfaces = {
+      activeSurface: mockSurface,
+      activate: activateFn,
+    };
+    (editor as unknown as { emit: ReturnType<typeof vi.fn> }).emit = vi.fn();
+
+    const tm = new TileManager(editor, container);
+    tm.update();
+
+    // Simulate onPageClick with coords in the body area (y=500, well below contentTop=132)
+    // Access the pointer's onPageClick through the deps
+    const pointerDeps = (tm as unknown as { pointer: { deps: { onPageClick: (p: number, x: number, y: number, c: number) => boolean } } }).pointer.deps;
+    const consumed = pointerDeps.onPageClick(1, 400, 500, 1);
+
+    // Click should NOT be consumed (returns false so body handles it)
+    expect(consumed).toBe(false);
+    // But the surface should have been deactivated first
+    expect(activateFn).toHaveBeenCalledWith(null);
+
+    tm.destroy();
+  });
+
+  it("clicking in a chrome band does NOT deactivate the surface", () => {
+    const activateFn = vi.fn();
+    const mockSurface = {
+      id: "headerFooter:defaultHeader",
+      owner: "headerFooter",
+      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
+    };
+    const { editor, layoutRef } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, mockSurface);
+
+    const layoutWithMetrics = {
+      ...makeLayout(1, DEFAULT_PAGE_CONFIG),
+      metrics: [{
+        pageNumber: 1,
+        contentTop: 132,
+        contentBottom: 991,
+        contentHeight: 859,
+        contentWidth: 650,
+        headerTop: 72,
+        footerTop: 991,
+        headerHeight: 60,
+        footerHeight: 60,
+      }],
+    };
+
+    layoutRef.current = layoutWithMetrics;
+    (editor as unknown as { surfaces: { activeSurface: unknown; activate: typeof activateFn } }).surfaces = {
+      activeSurface: mockSurface,
+      activate: activateFn,
+    };
+    (editor as unknown as { emit: ReturnType<typeof vi.fn> }).emit = vi.fn();
+
+    const tm = new TileManager(editor, container);
+    tm.update();
+
+    const pointerDeps = (tm as unknown as { pointer: { deps: { onPageClick: (p: number, x: number, y: number, c: number) => boolean } } }).pointer.deps;
+
+    // All clicks in chrome band with active surface fall through to
+    // PointerController's normal logic — single, double, triple click
+    // all work via the routed charMap/selection/commands.
+    expect(pointerDeps.onPageClick(1, 400, 90, 1)).toBe(false);
+    expect(pointerDeps.onPageClick(1, 400, 90, 2)).toBe(false);
+    expect(pointerDeps.onPageClick(1, 400, 90, 3)).toBe(false);
+    expect(activateFn).not.toHaveBeenCalledWith(null);
+
+    tm.destroy();
   });
 });

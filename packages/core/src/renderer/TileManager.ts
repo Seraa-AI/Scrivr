@@ -160,6 +160,44 @@ export class TileManager {
       isPageless: () => this.editor.isPageless,
       visualYToDocY: (y) => this.visualYToDocY(y),
       scheduleUpdate: () => this.scheduleUpdate(),
+      onPageClick: (page, docX, docY, clickCount) => {
+        const layout = this.editor.layout;
+        const metrics = layout.metrics?.[page - 1];
+        if (!metrics) return false;
+        const inHeader = metrics.headerHeight > 0 && docY < metrics.contentTop;
+        const inFooter = metrics.footerHeight > 0 && docY > metrics.footerTop;
+
+        if (!inHeader && !inFooter) {
+          // Click in the body while a surface is active — deactivate first
+          if (this.editor.surfaces?.activeSurface) {
+            this.editor.surfaces.activate(null);
+          }
+          return false;
+        }
+
+        const surfaceActive = this.editor.surfaces?.activeSurface !== null;
+
+        if (surfaceActive) {
+          // Surface is already active — let ALL clicks fall through to
+          // PointerController's normal logic. Since editor.charMap,
+          // editor.selection, and editor.commands all route through the
+          // active surface, single click, double-click word select,
+          // triple-click block select, shift+click extend, and drag
+          // selection all work automatically.
+          return false;
+        }
+
+        // No surface active — emit chromeClick for activation (double-click).
+        const band = inHeader ? "header" : "footer";
+        this.editor.emit("chromeClick", {
+          page,
+          x: docX,
+          y: docY,
+          band,
+          clickCount,
+        });
+        return true;
+      },
     });
     this.pointer.attach();
 
@@ -300,7 +338,9 @@ export class TileManager {
     /** Grow pool to cover the visible range (pre-allocate on first layout to avoid mid-scroll DOM insertions) */
     const needed = Math.max(
       lastVisible - firstVisible + 1,
-      this.pool.length === 1 ? Math.ceil(viewportH / sh) + 2 * this.overscan : 0,
+      this.pool.length === 1
+        ? Math.ceil(viewportH / sh) + 2 * this.overscan
+        : 0,
     );
     this.ensurePoolSize(needed);
 
@@ -432,6 +472,16 @@ export class TileManager {
         ? { inlineRegistry: this.editor.inlineRegistry }
         : {}),
       ...(layout.floats ? { floats: layout.floats } : {}),
+      ...(this.editor.pageChromeContributions?.length
+        ? { pageChromeContributions: this.editor.pageChromeContributions }
+        : {}),
+      ...(layout._chromePayloads
+        ? { chromePayloads: layout._chromePayloads }
+        : {}),
+      ...(layout.metrics?.[tile.tileIndex]
+        ? { pageMetrics: layout.metrics[tile.tileIndex] }
+        : {}),
+      totalPages: layout.pages.length,
     });
   }
 
@@ -544,7 +594,18 @@ export class TileManager {
     // change until mouseup, so without this the ghost handles would freeze
     // at their starting size and the image would "snap" on release.
     const pendingResizeDirty = tile.lastPendingResizeKey !== pendingKey;
-    if (!blinkDirty && !moveDirty && !pluginStateDirty && !pendingResizeDirty)
+    // When a surface is active, always repaint the overlay so the cursor
+    // blinks correctly and selection updates are visible. The header cursor
+    // is drawn by an overlay handler that needs blink-tick repaints.
+    const surfaceActive = this.editor.surfaces?.activeSurface !== null;
+    const surfaceStateDirty = surfaceActive;
+    if (
+      !blinkDirty &&
+      !moveDirty &&
+      !pluginStateDirty &&
+      !pendingResizeDirty &&
+      !surfaceStateDirty
+    )
       return;
 
     tile.lastBlinkState = blinkOn;
@@ -565,7 +626,9 @@ export class TileManager {
       overlayCtx.translate(0, -tileTop);
     }
 
-    const pmSel = this.editor.getState().selection;
+    const pmSel =
+      this.editor.surfaces?.activeSurface?.state.selection ??
+      this.editor.getState().selection;
     const isNodeSel = pmSel instanceof NodeSelection;
     const pageNum = isPageless ? 1 : tile.tileIndex + 1;
 
@@ -580,8 +643,13 @@ export class TileManager {
       renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to);
     }
 
-    // ── Cursor ────────────────────────────────────────────────────────────
-    if (!isNodeSel && blinkOn && tile.tileIndex === cursorTile) {
+    // ── Cursor (suppressed when a surface is active — chrome bands own their cursor) ──
+    if (
+      !isNodeSel &&
+      blinkOn &&
+      tile.tileIndex === cursorTile &&
+      !surfaceActive
+    ) {
       const coords = this.editor.charMap.coordsAtPos(sel.head, pageNum);
       if (coords) renderCursor(overlayCtx, coords);
     }

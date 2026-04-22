@@ -1349,4 +1349,99 @@ describe("TextBlockStrategy — inline image rendering", () => {
     // Image strategy was also called
     expect(renderFn).toHaveBeenCalledOnce();
   });
+
+  it("InlineStrategy.measure() overrides node width/height attrs during layout", () => {
+    // Create an inline image node with small placeholder dimensions
+    const img = skSchema.nodes["image"]?.create({
+      src: "a.png",
+      width: 10,
+      height: 10,
+    });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+
+    // Strategy with measure() that returns larger dimensions
+    const measureFn = vi.fn(() => ({ width: 50, height: 30 }));
+    const renderFn = vi.fn();
+    const strategy: InlineStrategy = { measure: measureFn, render: renderFn };
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("image", strategy);
+
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+      inlineRegistry,
+    });
+
+    // measure() should have been called during layout
+    expect(measureFn).toHaveBeenCalledOnce();
+
+    // The object span should use the measured dimensions, not the attr values
+    const objectSpans = block.lines.flatMap((l) => l.spans).filter((s) => s.kind === "object");
+    expect(objectSpans).toHaveLength(1);
+    expect(objectSpans[0]!.width).toBe(50);
+    expect(objectSpans[0]!.height).toBe(30);
+  });
+
+  it("falls back to node attrs when InlineStrategy has no measure()", () => {
+    const img = skSchema.nodes["image"]?.create({
+      src: "a.png",
+      width: 100,
+      height: 80,
+    });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [img]);
+
+    // Strategy WITHOUT measure()
+    const strategy: InlineStrategy = { render: vi.fn() };
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("image", strategy);
+
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+      inlineRegistry,
+    });
+
+    const objectSpans = block.lines.flatMap((l) => l.spans).filter((s) => s.kind === "object");
+    expect(objectSpans).toHaveLength(1);
+    expect(objectSpans[0]!.width).toBe(100);
+    expect(objectSpans[0]!.height).toBe(80);
+  });
+
+  it("falls back to node attrs when no inlineRegistry is provided", () => {
+    const img = skSchema.nodes["image"]?.create({
+      src: "a.png",
+      width: 100,
+      height: 80,
+    });
+    if (!img) return;
+    const para = skSchema.node("paragraph", null, [img]);
+
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+      // no inlineRegistry
+    });
+
+    const objectSpans = block.lines.flatMap((l) => l.spans).filter((s) => s.kind === "object");
+    expect(objectSpans).toHaveLength(1);
+    expect(objectSpans[0]!.width).toBe(100);
+    expect(objectSpans[0]!.height).toBe(80);
+  });
 });

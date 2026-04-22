@@ -1,6 +1,7 @@
 import { Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
 import { TextMeasurer } from "./TextMeasurer";
+import type { InlineRegistry } from "./BlockRegistry";
 import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type ConstraintProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import {
@@ -143,6 +144,8 @@ export interface BlockLayoutOptions {
    * to get a { x, width } override. Absent = default maxWidth behaviour.
    */
   constraintProvider?: ConstraintProvider;
+  /** Inline object registry — used to call measure() on tokens during layout. */
+  inlineRegistry?: InlineRegistry | undefined;
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────────
@@ -260,6 +263,7 @@ export function layoutBlock(
     lineIndexOffset = 0,
     fontModifiers,
     constraintProvider,
+    inlineRegistry,
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
@@ -289,6 +293,8 @@ export function layoutBlock(
     baseFont,
     fontConfig,
     fontModifiers,
+    measurer,
+    inlineRegistry,
   );
 
   // ── 2. Empty node fallback ────────────────────────────────────────────────
@@ -472,6 +478,8 @@ function extractSpans(
   baseFont: string,
   _fontConfig: FontConfig,
   fontModifiers?: Map<string, FontModifier>,
+  measurer?: TextMeasurer,
+  inlineRegistry?: InlineRegistry,
 ): InputSpan[] {
   const spans: InputSpan[] = [];
 
@@ -538,12 +546,27 @@ function extractSpans(
           rawAlign === "text-bottom"
             ? rawAlign
             : "baseline";
+        let objWidth = typeof w === "number" ? w : 200;
+        let objHeight = typeof h === "number" ? h : 200;
+
+        // If an InlineStrategy provides measure(), use it for dynamic sizing.
+        // Tokens (pageNumber, totalPages, date) use this to size based on font.
+        if (measurer && inlineRegistry) {
+          const strategy = inlineRegistry.get(child.type.name);
+          if (strategy?.measure) {
+            const font = resolveFont(baseFont, child.marks, fontModifiers);
+            const measured = strategy.measure(child, font, measurer);
+            objWidth = measured.width;
+            objHeight = measured.height;
+          }
+        }
+
         spans.push({
           kind: "object",
           node: child,
           docPos: childDocPos,
-          width: typeof w === "number" ? w : 200,
-          height: typeof h === "number" ? h : 200,
+          width: objWidth,
+          height: objHeight,
           verticalAlign,
         });
       }

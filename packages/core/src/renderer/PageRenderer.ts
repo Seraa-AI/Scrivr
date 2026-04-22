@@ -5,6 +5,7 @@ import { TextMeasurer } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
 import type { MarkDecorator } from "../extensions/types";
 import type { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
+import type { PageChromeContribution, PageMetrics } from "../layout/PageMetrics";
 
 export interface RenderPageOptions {
   ctx: CanvasRenderingContext2D;
@@ -30,6 +31,14 @@ export interface RenderPageOptions {
   inlineRegistry?: InlineRegistry;
   /** Float images on this page — rendered after (or before for 'behind') regular blocks */
   floats?: FloatLayout[];
+  /** Chrome contributions (headers, footers, etc.) to render after block content. */
+  pageChromeContributions?: PageChromeContribution[];
+  /** Payloads from the chrome loop, keyed by contribution name. */
+  chromePayloads?: Record<string, unknown>;
+  /** Page metrics for this specific page (carries chrome heights). */
+  pageMetrics?: PageMetrics;
+  /** Total page count — passed to chrome render context for token substitution. */
+  totalPages?: number;
 }
 
 /**
@@ -59,6 +68,10 @@ export function renderPage(options: RenderPageOptions): void {
     blockRegistry,
     inlineRegistry,
     floats,
+    pageChromeContributions,
+    chromePayloads,
+    pageMetrics,
+    totalPages,
   } = options;
 
   const { pageWidth, pageHeight, margins } = pageConfig;
@@ -144,6 +157,26 @@ export function renderPage(options: RenderPageOptions): void {
       height: float.height,
       page: float.page,
     });
+  }
+
+  // ── Draw page chrome bands (headers, footers, etc.) ─────────────────────
+  if (pageChromeContributions && chromePayloads && pageMetrics) {
+    for (const contrib of pageChromeContributions) {
+      const payload = chromePayloads[contrib.name];
+      if (payload === undefined) continue;
+      contrib.render({
+        ctx,
+        pageNumber: page.pageNumber,
+        totalPages: totalPages ?? 1,
+        metrics: pageMetrics,
+        pageConfig,
+        payload,
+        measurer,
+        ...(markDecorators ? { markDecorators } : {}),
+        ...(blockRegistry ? { blockRegistry } : {}),
+        ...(inlineRegistry ? { inlineRegistry } : {}),
+      });
+    }
   }
 }
 
