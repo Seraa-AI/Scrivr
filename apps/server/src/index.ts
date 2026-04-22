@@ -29,8 +29,19 @@ function docPath(name: string): string {
 
 // ── Server ────────────────────────────────────────────────────────────────────
 
+const AUTH_TOKEN = process.env.COLLAB_AUTH_TOKEN;
+
 const server = Server.configure({
   port: 1235,
+
+  async onAuthenticate({ token, documentName }) {
+    if (!AUTH_TOKEN) return; // no token configured — allow all connections
+    if (token !== AUTH_TOKEN) {
+      console.log(`[auth] ✗ rejected connection to "${documentName}" — invalid token`);
+      throw new Error("Unauthorized");
+    }
+    console.log(`[auth] ✓ authenticated for "${documentName}"`);
+  },
 
   async onLoadDocument({ document, documentName }) {
     const file = docPath(documentName);
