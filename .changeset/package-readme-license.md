@@ -2,7 +2,6 @@
 "@scrivr/core": patch
 "@scrivr/react": patch
 "@scrivr/plugins": patch
-"@scrivr/export": patch
 "@scrivr/export-pdf": patch
 "@scrivr/export-markdown": patch
 ---
