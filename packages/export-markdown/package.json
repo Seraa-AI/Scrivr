@@ -3,6 +3,20 @@
   "version": "1.0.5",
   "description": "Markdown export for Scrivr documents",
   "license": "Apache-2.0",
+  "author": "Seraa AI <hello@seraa.ai>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Seraa-AI/Scrivr.git",
+    "directory": "packages/export-markdown"
+  },
+  "homepage": "https://github.com/Seraa-AI/Scrivr#readme",
+  "keywords": [
+    "markdown",
+    "export",
+    "editor",
+    "prosemirror",
+    "scrivr"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
