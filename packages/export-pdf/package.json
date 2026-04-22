@@ -2,6 +2,7 @@
   "name": "@scrivr/export-pdf",
   "version": "1.0.5",
   "description": "PDF export for Scrivr documents — same layout pipeline as the canvas renderer",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
