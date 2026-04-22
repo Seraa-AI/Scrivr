@@ -26,6 +26,12 @@ interface CollaborationOptions {
   url?: string;
   /** Document / room name — all clients with the same name share the document. */
   name?: string;
+  /** Authentication token sent to the server's onAuthenticate hook. */
+  token?: string | (() => string) | (() => Promise<string>);
+  /** Called when the WebSocket connection is established. */
+  onConnect?: () => void;
+  /** Called when the WebSocket connection is closed. */
+  onDisconnect?: () => void;
 }
 
 /**
@@ -113,10 +119,15 @@ export const Collaboration = Extension.create<CollaborationOptions>({
       url,
       name,
       document: ydoc,
+      token: this.options.token ?? null,
       onSynced: () => {
         binding.markSynced();
         editor.setReady(true);
       },
+      ...(this.options.onConnect ? { onConnect: this.options.onConnect } : {}),
+      ...(this.options.onDisconnect
+        ? { onDisconnect: this.options.onDisconnect }
+        : {}),
     });
 
     // Store provider so CollaborationCursor can read awareness
