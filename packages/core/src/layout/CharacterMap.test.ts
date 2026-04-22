@@ -199,10 +199,10 @@ describe("CharacterMap", () => {
 
       map.clearPage(2);
 
+      // Page 2 glyphs/lines are gone — coordsAtPos scoped to page 2 returns null
+      expect(map.coordsAtPos(20, 2)).toBeNull();
       // Page 2 glyphs/lines are gone
       expect(map.posAtCoords(40, 60, 2)).toBe(0);
-      // Scope to page 2 — no preceding glyph on page 2 should remain after clear
-      expect(map.coordsAtPos(20, 2)).toBeNull();
 
       // Page 1 is untouched
       const coords = map.coordsAtPos(1);
