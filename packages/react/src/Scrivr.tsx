@@ -63,7 +63,13 @@ export function Scrivr({
     <div
       ref={containerRef}
       className={className}
-      style={{ position: "relative", ...style }}
+      style={{
+        position: "relative",
+        letterSpacing: "normal",
+        wordSpacing: "normal",
+        textTransform: "none",
+        ...style,
+      }}
     />
   );
 }
