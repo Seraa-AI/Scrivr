@@ -223,15 +223,6 @@ export class PointerController {
       return;
     }
 
-    if (editor.readOnly) {
-      const state = editor.getState();
-      if (!state.selection.empty) {
-        const { head } = state.selection;
-        editor.selection.setSelection(head, head);
-      }
-      return;
-    }
-
     // ── Click-count tracking (double/triple-click) ──────────────────────────
     const now = Date.now();
     const CLICK_TIMEOUT = 500;
@@ -251,7 +242,7 @@ export class PointerController {
 
     // Chrome band click — consumed for both activation (double-click) and
     // cursor positioning (single click when surface is already active).
-    if (this.deps.onPageClick?.(page, docX, docY, this._clickCount)) return;
+    if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this._clickCount)) return;
 
     this.isDragging = true;
     const pos = editor.charMap.posAtCoords(docX, docY, page);
@@ -274,15 +265,12 @@ export class PointerController {
 
     if (!e.shiftKey) {
       // Click physically inside an inline image's rect → select the image.
-      // Anywhere else (including 1px outside the image or in the text immediately
-      // adjacent to it) → place the cursor via posAtCoords. Using the visual
-      // rect rather than nodeBefore/nodeAfter is required because posAtCoords
-      // snaps to imagePos / imagePos+1 for clicks on the preceding text glyph's
-      // right half, which would otherwise trigger an unwanted NodeSelection.
-      const imageHit = editor.charMap.objectRectAtPoint(docX, docY, page);
-      if (imageHit) {
-        editor.selectNode(imageHit.docPos);
-        return;
+      if (!editor.readOnly) {
+        const imageHit = editor.charMap.objectRectAtPoint(docX, docY, page);
+        if (imageHit) {
+          editor.selectNode(imageHit.docPos);
+          return;
+        }
       }
       editor.selection.moveCursorTo(pos);
     } else {

@@ -349,6 +349,7 @@ export class BaseEditor implements IBaseEditor {
     const bound: Record<string, (...args: unknown[]) => void> = {};
     for (const [name, factory] of Object.entries(rawCommands)) {
       bound[name] = (...args: unknown[]) => {
+        if (this._readOnly) return;
         const cmd = factory(...args);
         cmd(this._getActiveState(), (tr) => this._dispatchToActive(tr));
       };
