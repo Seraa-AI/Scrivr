@@ -23,7 +23,12 @@ interface FloatingMenuProps {
   className?: string;
 }
 
-export function FloatingMenu({ editor, children, shouldShow, className }: FloatingMenuProps) {
+export function FloatingMenu({
+  editor,
+  children,
+  shouldShow,
+  className,
+}: FloatingMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
@@ -33,7 +38,10 @@ export function FloatingMenu({ editor, children, shouldShow, className }: Floati
     const opts: FloatingMenuOptions = {
       onShow: setRect,
       onMove: setRect,
-      onHide: () => { setRect(null); setPos(null); },
+      onHide: () => {
+        setRect(null);
+        setPos(null);
+      },
     };
     if (shouldShow) opts.shouldShow = shouldShow;
     return createFloatingMenu(editor, opts);
@@ -44,15 +52,19 @@ export function FloatingMenu({ editor, children, shouldShow, className }: Floati
 
     const virtualEl = {
       getBoundingClientRect: () => rect,
-      getClientRects:        () => [rect] as unknown as DOMRectList,
+      getClientRects: () => [rect],
     };
 
     let cancelled = false;
     computePosition(virtualEl, menuRef.current, {
       placement: "left",
       middleware: [offset(8), flip(), shift({ padding: 8 })],
-    }).then(({ x, y }) => { if (!cancelled) setPos({ x, y }); });
-    return () => { cancelled = true; };
+    }).then(({ x, y }) => {
+      if (!cancelled) setPos({ x, y });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [rect]);
 
   if (!rect) return null;
@@ -62,10 +74,10 @@ export function FloatingMenu({ editor, children, shouldShow, className }: Floati
       ref={menuRef}
       className={className}
       style={{
-        position:   "fixed",
-        left:       pos?.x ?? 0,
-        top:        pos?.y ?? 0,
-        zIndex:     50,
+        position: "fixed",
+        left: pos?.x ?? 0,
+        top: pos?.y ?? 0,
+        zIndex: 50,
         visibility: pos ? "visible" : "hidden",
       }}
     >
