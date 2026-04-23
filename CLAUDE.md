@@ -95,11 +95,12 @@ React is a thin shell. The engine owns layout and rendering.
 
 ## Key Conventions
 
+- **TDD — tests first.** Write a failing test before implementing any feature or fix. Red → green → refactor. For visual/rendering bugs that can't be unit-tested, describe the manual verification steps before coding.
 - **No `as` type assertions.** Never use `as X` to narrow types. Write runtime predicate/guard functions that validate shape and return typed values. A single `as` inside a guard (after an `in`/`typeof` check) is acceptable — scattered `as` casts at call sites are not. Use `satisfies` when validating a value matches a type without widening. Module augmentation (`Commands`, `NodeAttributes`) should make consumer casts unnecessary.
 - `PageView.tsx` is deprecated — `ViewManager.ts` is the active renderer
 - Match Word/Google Docs/Pages conventions for cursor behavior, shortcuts, paste, formatting by default
-- Layout pipeline is being refactored toward explicit named stages (`buildBlockFlow` → `applyFloatLayout` → `paginateFlow` → `buildFragments`) — follow this pattern when touching `PageLayout.ts`
-- Float y-delta pushes long paragraphs past `pageBottom` → split at boundary (`splitBlockAtBoundary`), do not move wholesale
+- Layout pipeline: `buildBlockFlow` → `assignGlobalY` → `resolveFloats` (constraint loop) → `paginateFlow` → `projectFloatsOntoPages` → `buildFragments`
+- Float page membership is determined by the unconstrained anchor position (pre-reflow), matching CSS spec
 - Zero-width caret sentinel on last line of each block prevents scroll-to-top bug in `coordsAtPos`
 
 ## gstack
