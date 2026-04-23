@@ -7,8 +7,8 @@
  */
 
 export interface ExclusionRect {
-  /** Page number (1-based) this exclusion is on */
-  page: number;
+  /** Page number (1-based) this exclusion is on. Optional in global-Y mode. */
+  page?: number;
   /** Left edge of exclusion zone (image left - margin) in page coordinates */
   x: number;
   /** Right edge (image right + margin) in page coordinates */
@@ -49,7 +49,7 @@ export class ExclusionManager {
    * Returns null if no exclusion affects this line.
    */
   getConstraint(
-    page: number,
+    page: number | undefined,
     absoluteY: number,
     lineHeight: number,
     contentX: number,
@@ -60,7 +60,7 @@ export class ExclusionManager {
     let affected = false;
 
     for (const r of this.rects) {
-      if (r.page !== page) continue;
+      if (page !== undefined && r.page !== page) continue;
       // Does this line's Y range overlap the exclusion's Y range?
       if (absoluteY + lineHeight <= r.y || absoluteY >= r.bottom) continue;
       affected = true;
@@ -83,13 +83,13 @@ export class ExclusionManager {
    * Returns the Y coordinate past all full-width exclusions overlapping absoluteY.
    * Used to skip 'top-bottom' float gaps in PageLayout.
    */
-  getNextFreeY(page: number, absoluteY: number): number {
+  getNextFreeY(page: number | undefined, absoluteY: number): number {
     let y = absoluteY;
     let changed = true;
     while (changed) {
       changed = false;
       for (const r of this.rects) {
-        if (r.page !== page) continue;
+        if (page !== undefined && r.page !== page) continue;
         if (r.side !== "full") continue;
         if (y >= r.y && y < r.bottom) {
           y = r.bottom;
@@ -102,6 +102,11 @@ export class ExclusionManager {
 
   hasExclusionsOnPage(page: number): boolean {
     return this.rects.some((r) => r.page === page);
+  }
+
+  /** True if any exclusion rect overlaps the given Y range (global-Y mode). */
+  hasExclusionsInRange(yStart: number, yEnd: number): boolean {
+    return this.rects.some((r) => yStart < r.bottom && yEnd > r.y);
   }
 
   clear(): void {
