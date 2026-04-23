@@ -458,6 +458,8 @@ export interface FlowPipelineResult {
   measurer: TextMeasurer;
   /** Y cursor at end of pagination — used for pageless totalContentHeight. */
   y: number;
+  /** FlowBlocks with globalY set. Used by _runPipelineBody for float page assignment. */
+  flows: FlowBlock[];
 }
 
 /**
@@ -508,6 +510,10 @@ export function runFlowPipeline(
     measurer, fontModifiers, measureCache, maxBlocks, options.inlineRegistry,
   );
 
+  // Stage 1.5: assign continuous global Y coordinates.
+  // Purely additive — stamps globalY on each flow for future use.
+  assignGlobalY(flowResult.flows, initY);
+
   // Stage 2: paginate.
   const pr = paginateFlow(
     flowResult.flows, pageConfig, resolved, metricsFor, runId,
@@ -550,7 +556,7 @@ export function runFlowPipeline(
       convergence: "stable",
       iterationCount: 1,
     };
-    return { layout, isPartial: true, ...context, y: pr.y };
+    return { layout, isPartial: true, ...context, y: pr.y, flows: flowResult.flows };
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
@@ -564,7 +570,7 @@ export function runFlowPipeline(
     convergence: "stable",
     iterationCount: 1,
   };
-  return { layout, isPartial: false, ...context, y: pr.y };
+  return { layout, isPartial: false, ...context, y: pr.y, flows: flowResult.flows };
 }
 
 function _runPipelineBody(
