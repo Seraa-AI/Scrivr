@@ -158,8 +158,7 @@ export class CharacterMap {
    *      after it; otherwise snap to the position before it.
    */
   posAtCoords(x: number, y: number, page: number): number {
-    // Try exact hit first; fall back to nearest line if click is in a margin
-    const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
+    const line = this.nearestLineOrAdjacent(y, page);
     if (!line) return 0;
 
     // Filter by lineY rather than glyph.y so that:
@@ -373,6 +372,23 @@ export class CharacterMap {
   /** Returns true if a line entry exists for this page + lineIndex */
   hasLine(page: number, lineIndex: number): boolean {
     return this.lines.some((l) => l.page === page && l.lineIndex === lineIndex);
+  }
+
+  /**
+   * Finds the nearest line on the given page, or searches adjacent pages
+   * when the target page has no text lines (e.g. a float-only page).
+   */
+  private nearestLineOrAdjacent(y: number, page: number): LineEntry | undefined {
+    const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
+    if (line) return line;
+    // Float-only page — try adjacent pages.
+    const prev = this.nearestLine(y, page - 1);
+    const next = this.nearestLine(y, page + 1);
+    if (!prev) return next;
+    if (!next) return prev;
+    const prevDist = Math.abs(y - prev.y - prev.height);
+    const nextDist = Math.abs(y - next.y);
+    return prevDist <= nextDist ? prev : next;
   }
 
   // Internal — find which line a y coordinate lands on

@@ -728,6 +728,7 @@ export class TileManager {
       width: "100%", // tilesContainer carries pageWidth; 100% fills it
       display: "none", // hidden until assigned by update()
       cursor: "text",
+      overflow: "hidden",
       userSelect: "none",
       // Paged mode defaults — overridden by pageStyle option
       ...(!this.editor.isPageless

@@ -1,5 +1,5 @@
 import { Extension } from "../Extension";
-import type { Command } from "prosemirror-state";
+import { type Command, type EditorState, TextSelection } from "prosemirror-state";
 import { splitBlockAs } from "prosemirror-commands";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 
@@ -33,8 +33,26 @@ const _split = splitBlockAs((parent, _atEnd, $from) => {
   return { type: newType, attrs };
 });
 
+/** True when the node immediately before the cursor is a float anchor image. */
+function cursorIsAfterFloat(state: EditorState): boolean {
+  const nodeBefore = state.selection.$from.nodeBefore;
+  if (!nodeBefore || nodeBefore.type.name !== "image") return false;
+  const mode = nodeBefore.attrs["wrappingMode"] as string | undefined;
+  return mode !== undefined && mode !== "inline";
+}
+
 export const splitBlockInheritAttrs: Command = (state, dispatch) => {
-  return _split(state, dispatch && ((tr) => {
+  // If cursor is right after a float anchor, move the split point before it
+  // so the float naturally lands in the second (lower) block.
+  let splitState = state;
+  if (cursorIsAfterFloat(state)) {
+    const floatSize = state.selection.$from.nodeBefore!.nodeSize;
+    const newPos = state.selection.from - floatSize;
+    const tr = state.tr.setSelection(TextSelection.create(state.doc, newPos));
+    splitState = state.apply(tr);
+  }
+
+  return _split(splitState, dispatch && ((tr) => {
     // Preserve stored inline marks, same as splitBlockKeepMarks.
     const marks = state.storedMarks ?? (state.selection.$from.parentOffset ? state.selection.$from.marks() : null);
     if (marks) tr.ensureMarks(marks);
