@@ -1,6 +1,7 @@
 import { EditorState, Transaction } from "prosemirror-state";
-import { MarkdownSerializer } from "prosemirror-markdown";
-import type { Schema } from "prosemirror-model";
+import { MarkdownParser, MarkdownSerializer } from "prosemirror-markdown";
+import MarkdownIt from "markdown-it";
+import type { Schema, Node } from "prosemirror-model";
 
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
@@ -183,6 +184,27 @@ export class BaseEditor implements IBaseEditor {
   getMarkdownSerializer(): MarkdownSerializer {
     const { nodes, marks } = this._manager.buildMarkdownSerializerRules();
     return new MarkdownSerializer(nodes, marks);
+  }
+
+  /** Returns the merged markdown parser token map from all extensions. */
+  getMarkdownParserTokens(): Record<string, import("./extensions/types").MarkdownParserTokenSpec> {
+    return this._manager.buildMarkdownParserTokens();
+  }
+
+  /**
+   * Parse a markdown string into a ProseMirror document node.
+   *
+   * Uses the same parser tokens registered by extensions via
+   * `addMarkdownParserTokens()`, so all custom node/mark mappings
+   * are included automatically.
+   */
+  parseMarkdown(text: string): Node {
+    const tokens = this.getMarkdownParserTokens();
+    const md = new MarkdownIt({ html: false });
+    const parser = new MarkdownParser(this.schema, md, tokens);
+    const doc = parser.parse(text);
+    if (!doc) throw new Error("Failed to parse markdown");
+    return doc;
   }
 
   /** Plain text content of the document. */

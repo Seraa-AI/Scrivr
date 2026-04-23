@@ -84,6 +84,10 @@ export interface IBaseEditor {
   readonly schema: Schema;
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
+  /** Returns the merged markdown parser token map from all extensions. */
+  getMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec>;
+  /** Parse a markdown string into a ProseMirror document node. */
+  parseMarkdown(text: string): Node;
   /** Export contributions from all extensions, in registration order. */
   getExportContributions(): ExportContributionMap[];
 }
