@@ -52,9 +52,38 @@ The system operates in two distinct spaces. The POC mixed them, causing the offs
 
 This means `floatOffset.y` is a visual-space concept. It shifts where the image is painted. It does NOT shift the exclusion rect, the constraint zone, or the anchor's globalY.
 
-### 2.2 Two-Phase Solver
+### 2.2 Input Normalization (Non-Optional)
 
-The pipeline is a 2-phase solver with a read-only projection:
+The solver assumes inputs are bounded and valid. User-authored documents can contain anything — enormous images, dozens of floats on one paragraph, extreme offsets. If unchecked, these blow up stacking (O(n^2)), cause infinite push chains, or produce layouts wider than the page.
+
+**All constraints entering the solver MUST be normalized into a valid, bounded domain.**
+
+This happens at Stage 1.6, before float resolution:
+
+```ts
+function normalizeConstraints(flows, pageConfig): NormalizedFloatInput[]
+```
+
+**Rules:**
+
+| Rule | What | Why |
+|------|------|-----|
+| **Size clamping** | `width = clamp(width, 1, contentWidth)`, `height = clamp(height, 1, pageHeight * 2)` | Prevents infinite stacking and layout explosions |
+| **Offset clamping** | `offsetY = clamp(offsetY, -pageHeight, pageHeight)`, `offsetX = clamp(offsetX, -contentWidth, contentWidth)` | Prevents floats teleporting far from anchor |
+| **Float count guard** | If `floatsPerAnchorBlock > MAX_FLOATS_PER_BLOCK` (e.g. 8), excess floats degrade to `top-bottom` | Prevents O(n^2) stacking resolution |
+| **Invalid mode fallback** | Unknown or conflicting `wrappingMode` → `top-bottom` | Top-bottom is the safe mode — no side constraints, just vertical displacement |
+| **Zero-dimension guard** | `width < 1` or `height < 1` → skip float entirely (no exclusion, no render) | Prevents zero-area exclusion rects that confuse the solver |
+
+`top-bottom` is the universal safe mode because it creates no side constraints — just a vertical gap. Any float that can't be safely resolved degrades to top-bottom rather than being dropped.
+
+### 2.3 Three-Phase Solver
+
+The pipeline is a 3-phase solver with a read-only projection:
+
+**Phase 0 — Input Normalization**
+- Clamp sizes, offsets, counts
+- Degrade invalid inputs to safe modes
+- Guarantee: all inputs to Phase A are bounded and valid
 
 **Phase A — Constraint Declaration**
 - Floats define exclusion regions (spatial constraints)
@@ -62,7 +91,7 @@ The pipeline is a 2-phase solver with a read-only projection:
 
 **Phase B — Constraint Satisfaction**
 - Blocks adapt to constraints via fixed-point reflow
-- Heights change monotonically (see 2.3)
+- Heights change monotonically (see 2.4)
 - Float positions are pinned (no re-resolution)
 
 **Phase C — Projection (read-only)**
@@ -70,39 +99,63 @@ The pipeline is a 2-phase solver with a read-only projection:
 - Float globalY maps to page-local coordinates
 - No mutation, no reflow
 
-### 2.3 System Invariants
+### 2.4 Constraint Priority
+
+When multiple constraints affect the same float position, they are applied in strict priority order. Higher-priority constraints override lower ones deterministically:
+
+| Priority | Constraint | Effect |
+|----------|------------|--------|
+| 1 (highest) | **Anchor position** | Base reference — `layoutY = anchor.globalY` |
+| 2 | **Barriers** | Page structure — push float past page boundary |
+| 3 | **Float stacking** | Avoid overlap with prior floats |
+| 4 | **Wrapping mode** | Determines X position and exclusion side |
+| 5 (lowest) | **Offset** | Visual-only shift — never overrides layout position |
+
+This means: a barrier push always wins over stacking preference. Stacking always wins over wrapping mode (a left-float may be pushed down even if there's room to the right). Offset never influences constraint resolution.
+
+### 2.5 System Invariants
 
 These must hold at all times. Violations indicate bugs in the solver, not edge cases.
 
 | Invariant | Why |
 |-----------|-----|
+| **Inputs are bounded** | All float dimensions, offsets, and counts are clamped before entering the solver. No unbounded input reaches constraint resolution. |
 | **Constraints are monotonic** | Exclusion zones only grow or stay fixed. They never shrink during the constraint loop. |
 | **Reflow is monotonic in height** | `newHeight >= oldHeight` for every block in every iteration. If a block shrinks, the constraint loop can oscillate. This is the formal guarantee that prevents the 298→90→298 cycle. |
+| **Layout terminates in finite steps** | The constraint loop has a hard cap (`MAX_ITERATIONS = 5`). If exceeded, remaining float constraints are dropped and blocks reflow at full width. The system always produces output. |
 | **Layout space never reads from visual space** | `floatOffset`, rendered positions, and page-local coordinates never feed back into constraint resolution. |
 | **Barriers are frozen** | Computed once from unconstrained flow heights, then frozen for the entire constraint loop. Floats respect barriers; barriers do not react to floats. |
 | **Float positions are pinned** | Resolved once before the loop from unconstrained positions. Never re-resolved during constraint satisfaction. |
+| **Constraint priority is deterministic** | When constraints conflict, the priority order in 2.4 determines the winner. Same input always produces same output. |
 | **Pagination is projection** | `paginateFlow` receives final constrained heights. It assigns blocks to pages. It does not re-layout anything. |
 
-### 2.4 The Pipeline
+### 2.6 The Pipeline
 
 ```
 Stage 1:    buildBlockFlow          — measure all blocks (unconstrained)
 Stage 1.5:  assignGlobalY           — stamp continuous Y with CSS-style margin collapsing
 
+        ┌── Phase 0: Input Normalization ─────────────────────────────────┐
+        │  Stage 1.6: normalizeConstraints — clamp sizes, offsets,        │
+        │             counts. Degrade invalid floats to top-bottom.       │
+        │  Guarantee: all inputs to Phase A are bounded and valid.        │
+        └─────────────────────────────────────────────────────────────────┘
+
         ┌── Phase A: Constraint Declaration ──────────────────────────────┐
         │  Step 1: Compute barriers from unconstrained flow heights       │
         │  Step 2: resolveFloatsGlobalY — position floats in layout       │
-        │          space, apply barrier pushes, resolve stacking,         │
-        │          build exclusion rects (all in layout space)            │
+        │          space. Per float: anchor → barrier push → stacking.    │
+        │          Build exclusion rects (all in layout space).           │
         │  *** Freeze barriers and float positions ***                    │
         └─────────────────────────────────────────────────────────────────┘
 
-        ┌── Phase B: Constraint Satisfaction (fixed-point, max 3 iter) ──┐
+        ┌── Phase B: Constraint Satisfaction (fixed-point, max 5 iter) ──┐
         │  Step 3: reflowConstrainedBlocks — re-layout overlapping       │
         │          blocks with narrowed width                             │
         │  Step 4: recomputeGlobalY — update downstream positions        │
         │  Assert: newHeight >= oldHeight (monotonic reflow)              │
         │  Break when no heights change                                   │
+        │  If iterations exhausted → degradeLayout (drop constraints)     │
         └─────────────────────────────────────────────────────────────────┘
 
 Stage 2:    paginateFlow            — assign blocks to pages (read-only)
@@ -110,7 +163,7 @@ Stage 3:    projectFloatsOntoPages  — map layout-space globalY → visual-spac
 Stage 4:    buildFragments          — fragment index for tile renderer
 ```
 
-### 2.5 Net Result (from POC)
+### 2.7 Net Result (from POC)
 
 - **-397 lines** of code (deleted ~550 lines of applyFloatLayout, added ~153 for new functions)
 - Paragraph duplication bug fixed for free
@@ -137,7 +190,29 @@ Walks all FlowBlocks top-to-bottom, applies CSS-style margin collapsing between 
 - No overlap: `block[i].globalY + block[i].height <= block[i+1].globalY`
 - Idempotent: calling twice produces the same result
 
-### 3.2 `resolveFloatsGlobalY(flows, margins, pageWidth, contentWidth, pageBreakYs)`
+### 3.2 `normalizeConstraints(flows, pageConfig)` — Phase 0
+
+Walks all float anchors and clamps their attributes into the solver's valid domain. Returns normalized float inputs. Runs at Stage 1.6, after `assignGlobalY` and before `resolveFloatsGlobalY`.
+
+**Clamping rules:**
+
+```ts
+const MAX_FLOATS_PER_BLOCK = 8;
+const MAX_PUSH_DISTANCE = pageHeight * 3;  // safety cap for stacking chains
+
+width  = clamp(width, 1, contentWidth);
+height = clamp(height, 1, pageHeight * 2);
+offsetY = clamp(offsetY, -pageHeight, pageHeight);
+offsetX = clamp(offsetX, -contentWidth, contentWidth);
+```
+
+**Degradation rules:**
+- Unknown or missing `wrappingMode` → `top-bottom`
+- `width < 1` or `height < 1` → skip float entirely (no exclusion, no render)
+- If a single anchor block has more than `MAX_FLOATS_PER_BLOCK` floats, excess floats (by doc order) degrade to `top-bottom`
+- If stacking pushes a float more than `MAX_PUSH_DISTANCE` from its anchor → convert to `top-bottom`
+
+### 3.3 `resolveFloatsGlobalY(flows, margins, pageWidth, contentWidth, pageBreakYs)` — Phase A
 
 Finds zero-width float anchor spans in flows, positions each float in layout space, builds exclusion rects. This is Phase A of the constraint solver.
 
@@ -184,7 +259,7 @@ The exclusion rect is built from `layoutY` / `layoutX`. The renderer reads `rend
 
 **Key invariant:** Float positions are resolved ONCE from unconstrained flow positions and pinned. They are never re-resolved during the constraint loop. Barriers are frozen before this function runs.
 
-### 3.3 `reflowConstrainedBlocks(flows, exclusionMgr, margins, contentWidth, measurer, fontConfig, ...)`
+### 3.4 `reflowConstrainedBlocks(flows, exclusionMgr, margins, contentWidth, measurer, fontConfig, ...)` — Phase B
 
 For each flow whose lines overlap an exclusion zone, re-layout the block with a `constraintProvider` that narrows the available width.
 
@@ -201,11 +276,11 @@ For each flow whose lines overlap an exclusion zone, re-layout the block with a 
 
 **After the loop body:** caller runs `recomputeGlobalY(flows, firstChangedIndex + 1)` to update downstream block positions.
 
-### 3.4 `recomputeGlobalY(flows, startIndex)`
+### 3.5 `recomputeGlobalY(flows, startIndex)`
 
 Re-stamps `globalY` on flows from `startIndex` onward using the same margin-collapsing logic as `assignGlobalY`. Only called after `reflowConstrainedBlocks` changes block heights.
 
-### 3.5 `projectFloatsOntoPages(paginatedLayout, resolvedFloats, pageConfig)`
+### 3.6 `projectFloatsOntoPages(paginatedLayout, resolvedFloats, pageConfig)` — Phase C
 
 After pagination, maps each float from global-Y to page-local coordinates.
 
@@ -219,7 +294,7 @@ After pagination, maps each float from global-Y to page-local coordinates.
 3. Materialise empty `LayoutPage` entries for floats that land on non-existent pages
 4. Run `clearOrphanedConstraints` on continuation blocks
 
-### 3.6 `clearOrphanedConstraints(pages, floats)`
+### 3.7 `clearOrphanedConstraints(pages, floats)`
 
 When a constrained block splits across pages during pagination, overflow lines may carry stale `constraintX` / `effectiveWidth` from the pre-pagination reflow. Lines on continuation blocks that don't overlap any float on their page get cleared.
 
@@ -227,7 +302,7 @@ When a constrained block splits across pages during pagination, overflow lines m
 - No wrapping floats on page → clear ALL continuation block constraints
 - Has wrapping floats → per-line overlap check, clear only non-overlapping lines
 
-### 3.7 `ExclusionManager` (dual-mode)
+### 3.8 `ExclusionManager` (dual-mode)
 
 Manages exclusion rects for both legacy page-scoped and new global-Y usage.
 
@@ -285,15 +360,43 @@ When a float constrains a block, lines wrap tighter → more lines → taller bl
 
 This should be enforced with a runtime assertion in debug mode.
 
-### 4.4 Pagination is read-only for constraints
+### 4.4 Layout always terminates (degradation strategy)
+
+The constraint loop has a hard cap of `MAX_ITERATIONS = 5`. If convergence is not reached:
+
+```ts
+if (iterations >= MAX_ITERATIONS) {
+  degradeLayout(flows, exclusionMgr);
+}
+```
+
+**`degradeLayout` is not vague — it has a defined behavior:**
+
+1. Drop all remaining float constraints (clear the ExclusionManager)
+2. Reflow all constrained blocks at full width
+3. Float positions are preserved (they're already pinned) — only the text wrapping is removed
+
+The result: floats render at their correct positions, but text doesn't wrap around them. This is visually imperfect but geometrically valid — no overlaps, no infinite loops, no crashes.
+
+**Additional degradation rules (applied during Phase A, not Phase B):**
+
+| Condition | Action |
+|-----------|--------|
+| Float pushed more than `MAX_PUSH_DISTANCE` from anchor | Convert to `top-bottom` |
+| Float-on-float overlap cannot be resolved after all stacking | Stack vertically ignoring side preference |
+| Float extends below document | Clamp to last page bottom |
+
+**The principle:** A good layout engine does not try to be correct under pathological input. It tries to be **predictable** (same bad input → same layout), **stable** (small changes → small effects), **bounded** (no infinite loops), and **recoverable** (safe fallback).
+
+### 4.5 Pagination is read-only for constraints
 
 `paginateFlow` receives flows with final constrained heights. It assigns blocks to pages and splits at boundaries. It does NOT re-layout anything. This is the "pagination is projection" principle.
 
-### 4.5 Float page membership from pre-reflow anchor position
+### 4.6 Float page membership from pre-reflow anchor position
 
 CSS spec rule: a float's page is determined by where its anchor was BEFORE text reflowed around it. The constraint loop grows blocks (more lines = taller), but that growth must not change which page a float belongs to. `projectFloatsOntoPages` uses the anchor's paginated position, which reflects pre-reflow height.
 
-### 4.6 `updateFloatAnchors` — defined but not called
+### 4.7 `updateFloatAnchors` — defined but not called
 
 This function re-derives float globalY from shifted anchors. It exists for future use (non-zero-height anchors like captioned floats), but calling it inside the constraint loop would re-introduce oscillation. Currently all float anchors are zero-height, so anchor positions don't shift during reflow.
 
@@ -394,9 +497,11 @@ for each float:
   freeze position
 ```
 
-### 7.3 Non-zero-height anchor support
+### 7.3 Non-zero-height anchor support + anchor index tracking
 
 `updateFloatAnchors` is defined but not called. Currently safe because all float anchors are zero-height spans. If we add captioned floats or float groups with non-zero anchor height, the constraint loop needs to call `updateFloatAnchors` after `recomputeGlobalY` — without re-resolving float positions (to avoid oscillation).
+
+**Future-proofing:** Store `float.anchorIndex` (index into `flows[]`) at resolution time. After `recomputeGlobalY`, update `float.layoutY = flows[anchorIndex].globalY`. This keeps the float's layout position in sync with its anchor without re-running stacking or barrier logic. Only the Y position shifts — X, exclusion width, and side are unchanged.
 
 ### 7.4 Streaming + partial float resolution
 
@@ -404,11 +509,13 @@ Partial layout + constraints = invalid system. When `maxBlocks` cutoff stops lay
 
 **Fix:** Disable float constraint resolution in partial runs. Floats in partial layouts render at their anchor positions without exclusion zones. On the final (complete) run, the full constraint solver runs. This is simpler and correct — partial layout is a streaming UX optimization, not a layout guarantee.
 
-### 7.5 List indent + exclusion coordinate space
+### 7.5 X coordinate space consistency
 
 `ExclusionManager.getConstraint` receives `blockContentX = margins.left + indentLeft`. Exclusion rects are in absolute content coordinates. If the exclusion was placed at absolute X but the block queries at indented X, constraints could over- or under-constrain.
 
-**Fix:** Verify with a test: nested list with float inside a list item. Check that constraint width accounts for the indent correctly.
+**The rule:** All X coordinates must be resolved in the same coordinate space. The recommended approach: floats are placed relative to the **page content area** (absolute), and `getConstraint` translates the result into the block's local coordinate space. This is what the POC does — verify it's correct with a test.
+
+**Fix:** Test: nested list (2 levels deep) with float inside a list item. Assert that constraint width accounts for the indent correctly and text wraps at the right column.
 
 ### 7.6 Early termination + floats guard
 
@@ -489,6 +596,23 @@ Round-trip test that proves no hidden state leaks:
 
 If this fails, the solver has hidden mutable state that survives across runs.
 
+#### Degenerate layout tests (break tests)
+
+These are not realistic — they exist to prove the system doesn't crash, loop, or produce invalid geometry under pathological input.
+
+| Case | What it tests |
+|------|---------------|
+| 50 floats all on same anchor paragraph | Float count guard + stacking performance |
+| Float height = 10x page height | Size clamping + barrier push chain |
+| Negative offsets pushing float above document start (y < 0) | Offset clamping + layout space bounds |
+| Floats alternating left/right on every line of a paragraph | Dense constraint overlap resolution |
+| Zero-width content area (margins = pageWidth) | Zero-dimension guard |
+| Float wider than content area | Size clamping to contentWidth |
+| All floats on a single page | Stacking + MAX_PUSH_DISTANCE degradation |
+| Float + constraint loop that doesn't converge in 3 iterations | Degradation path (drop constraints at MAX_ITERATIONS) |
+
+**Assertion for all degenerate tests:** Layout completes without throwing. `assertLayoutInvariants` passes. Output is deterministic (same input → same output on repeated runs).
+
 #### Mutation tests
 
 - Insert text before float → invariants hold
@@ -501,38 +625,40 @@ If this fails, the solver has hidden mutable state that survives across runs.
 
 ### Phase 1: Type foundation + invariant harness
 
-1. Split `FloatLayout` into `layoutY`/`layoutX` + `renderY`/`renderX` (3.2). This is the structural change that prevents coordinate space leaks at the type level.
-2. Add monotonic height assertion in `reflowConstrainedBlocks` (debug mode)
-3. Build `assertLayoutInvariants` harness
-4. Write idempotence, oscillation detector, and constraint stability tests
-5. Write adversarial float case tests against the CURRENT pipeline (validates the harness)
+1. Split `FloatLayout` into `layoutY`/`layoutX` + `renderY`/`renderX` (3.3). This is the structural change that prevents coordinate space leaks at the type level.
+2. Implement `normalizeConstraints` (3.2) — size clamping, offset clamping, count guard, invalid mode fallback.
+3. Add monotonic height assertion in `reflowConstrainedBlocks` (debug mode)
+4. Add convergence guard + `degradeLayout` fallback (4.4)
+5. Build `assertLayoutInvariants` harness
+6. Write idempotence, oscillation detector, and constraint stability tests
+7. Write adversarial + degenerate layout tests against the CURRENT pipeline (validates the harness)
 
 ### Phase 2: Coordinate space enforcement
 
-6. Write failing test: top-bottom float with negative `floatOffset.y`, assert no dead space gap
-7. Wire `resolveFloatsGlobalY` to use `layoutY = anchor.globalY` (no Y offset). ExclusionManager reads `layoutY`.
-8. Wire `projectFloatsOntoPages` to derive `renderY = layoutY + offsetY`. Renderer reads `renderY`.
-9. Verify all modes (square-left, square-right, top-bottom, behind, front)
+8. Write failing test: top-bottom float with negative `floatOffset.y`, assert no dead space gap
+9. Wire `resolveFloatsGlobalY` to use `layoutY = anchor.globalY` (no Y offset). ExclusionManager reads `layoutY`.
+10. Wire `projectFloatsOntoPages` to derive `renderY = layoutY + offsetY`. Renderer reads `renderY`.
+11. Verify all modes (square-left, square-right, top-bottom, behind, front)
 
 ### Phase 3: Solver correctness
 
-10. Fix stacking order: barrier push THEN stacking resolution (7.2)
-11. List indent + exclusion coordinate space test (7.5)
-12. Early termination + floats guard test (7.6)
-13. Disable float resolution in partial/streaming runs (7.4)
+12. Fix stacking order: barrier push THEN stacking resolution (7.2)
+13. X coordinate space test: nested list + float (7.5)
+14. Early termination + floats guard test (7.6)
+15. Disable float resolution in partial/streaming runs (7.4)
 
 ### Phase 4: Fuzz testing
 
-14. Build random document generator
-15. Run fuzz harness (500 docs x invariant checks)
-16. Fix any failures found
+16. Build random document generator (include degenerate inputs: extreme sizes, many floats, deep nesting)
+17. Run fuzz harness (500 docs x invariant checks)
+18. Fix any failures found
 
 ### Phase 5: Input model fixes
 
-17. Float-only page click: hit-test floats first, resolve to `docPos` (6.3)
-18. Enter-after-float: deeper split-logic float awareness (6.2)
-19. Test 6.2 + 6.3 interaction together
-20. Cross-page selection highlight (separate PR, not float-specific)
+19. Float-only page click: hit-test floats first, resolve to `docPos` (6.3)
+20. Enter-after-float: deeper split-logic float awareness (6.2)
+21. Test 6.2 + 6.3 interaction together
+22. Cross-page selection highlight (separate PR, not float-specific)
 
 ---
 
@@ -551,7 +677,46 @@ If this fails, the solver has hidden mutable state that survives across runs.
 
 ---
 
-## 11. Key Lessons from the POC
+## 11. Failure & Degradation Strategy
+
+A robust layout engine defines how it fails, not just how it succeeds. Every degradation rule produces valid (if imperfect) geometry. The user sees a slightly wrong layout, never a crash or infinite loop.
+
+### 11.1 Degradation ladder
+
+Conditions are checked in order. The first matching condition triggers its action. Processing continues — degradation is per-float, not global.
+
+| # | Condition | Action | Result |
+|---|-----------|--------|--------|
+| 1 | Float dimensions invalid (`width < 1` or `height < 1`) | Skip float entirely | No exclusion, no render |
+| 2 | Unknown `wrappingMode` | Convert to `top-bottom` | Safe vertical displacement |
+| 3 | Float count exceeds `MAX_FLOATS_PER_BLOCK` per anchor | Excess floats → `top-bottom` | Prevents O(n^2) stacking |
+| 4 | Stacking pushes float beyond `MAX_PUSH_DISTANCE` | Convert to `top-bottom` | Float stays near anchor |
+| 5 | Float-on-float overlap unresolvable after stacking | Stack vertically ignoring side preference | Guaranteed no overlap |
+| 6 | Constraint loop exceeds `MAX_ITERATIONS` | Drop all remaining float constraints, reflow at full width | Text doesn't wrap but floats render correctly |
+
+### 11.2 Post-degradation guarantees
+
+After any degradation:
+- `assertLayoutInvariants` still passes
+- Output is deterministic (same input → same degraded layout)
+- No float overlaps text (exclusion zones may be absent, but floats are positioned)
+- No infinite loops (all paths terminate)
+
+### 11.3 Observability
+
+Degradation events should be logged in debug mode:
+
+```ts
+if (__DEV__) {
+  console.warn(`[layout] float at docPos=${f.docPos} degraded: ${reason}`);
+}
+```
+
+This surfaces pathological input during development without affecting production.
+
+---
+
+## 12. Key Lessons from the POC
 
 ### Constraint engine lessons
 
