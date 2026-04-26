@@ -22,24 +22,40 @@ const _split = splitBlockAs((parent, _atEnd, $from) => {
     // Priority: explicit block-level fontFamily attr (set via setBlockFontFamily)
     // → inline fontFamily mark at cursor position (set via setFontFamily or paste)
     // → null (fall back to blockStyle default)
-    const blockFamily = parent.attrs["fontFamily"] as string | null ?? null;
-    const markFamily = blockFamily == null
-      ? ($from.marks().find((m) => m.type.name === "fontFamily")?.attrs["family"] as string | undefined ?? null)
-      : null;
+    const blockFamily = (parent.attrs["fontFamily"] as string | null) ?? null;
+    const markFamily =
+      blockFamily == null
+        ? (($from.marks().find((m) => m.type.name === "fontFamily")?.attrs[
+            "family"
+          ] as string | undefined) ?? null)
+        : null;
     attrs["fontFamily"] = blockFamily ?? markFamily;
   }
-  if ("align" in (newType.spec.attrs ?? {})) attrs["align"] = parent.attrs["align"] ?? "left";
+  if ("align" in (newType.spec.attrs ?? {}))
+    attrs["align"] = parent.attrs["align"] ?? "left";
+  if ("indent" in (newType.spec.attrs ?? {}))
+    attrs["indent"] = parent.attrs["indent"] ?? 0;
+  if ("textIndent" in (newType.spec.attrs ?? {}))
+    attrs["textIndent"] = parent.attrs["textIndent"] ?? 0;
 
   return { type: newType, attrs };
 });
 
 export const splitBlockInheritAttrs: Command = (state, dispatch) => {
-  return _split(state, dispatch && ((tr) => {
-    // Preserve stored inline marks, same as splitBlockKeepMarks.
-    const marks = state.storedMarks ?? (state.selection.$from.parentOffset ? state.selection.$from.marks() : null);
-    if (marks) tr.ensureMarks(marks);
-    dispatch(tr);
-  }));
+  return _split(
+    state,
+    dispatch &&
+      ((tr) => {
+        // Preserve stored inline marks, same as splitBlockKeepMarks.
+        const marks =
+          state.storedMarks ??
+          (state.selection.$from.parentOffset
+            ? state.selection.$from.marks()
+            : null);
+        if (marks) tr.ensureMarks(marks);
+        dispatch(tr);
+      }),
+  );
 };
 
 /**
@@ -57,31 +73,46 @@ export const Paragraph = Extension.create({
         group: "block",
         content: "inline*",
         attrs: {
-          align:       { default: "left" },
-          fontFamily:  { default: null },
-          nodeId:      { default: null },
+          align: { default: "left" },
+          indent: { default: 0 },
+          textIndent: { default: 0 },
+          fontFamily: { default: null },
+          nodeId: { default: null },
           dataTracked: { default: [] },
         },
-        parseDOM: [{
-          tag: "p",
-          getAttrs(dom) {
-            const el = dom as HTMLElement;
-            const rawFamily = el.style.fontFamily;
-            const fontFamily = rawFamily
-              ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() || null
-              : null;
-            return {
-              align:      el.style.textAlign || "left",
-              fontFamily: fontFamily,
-              nodeId:     el.getAttribute("data-node-id") ?? null,
-            };
+        parseDOM: [
+          {
+            tag: "p",
+            getAttrs(dom) {
+              const el = dom as HTMLElement;
+              const rawFamily = el.style.fontFamily;
+              const fontFamily = rawFamily
+                ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() ||
+                  null
+                : null;
+              const rawMarginLeft = parseFloat(el.style.marginLeft) || 0;
+              const rawTextIndent = parseFloat(el.style.textIndent) || 0;
+              return {
+                align: el.style.textAlign || "left",
+                indent: rawMarginLeft > 0 ? Math.round(rawMarginLeft / 24) : 0,
+                textIndent: rawTextIndent > 0 ? rawTextIndent : 0,
+                fontFamily: fontFamily,
+                nodeId: el.getAttribute("data-node-id") ?? null,
+              };
+            },
           },
-        }],
+        ],
         toDOM: (node) => {
           let style = `text-align:${node.attrs.align as string}`;
-          if (node.attrs.fontFamily) style += `;font-family:${node.attrs.fontFamily as string}`;
+          if (node.attrs.indent)
+            style += `;margin-left:${(node.attrs.indent as number) * 24}px`;
+          if (node.attrs.textIndent)
+            style += `;text-indent:${node.attrs.textIndent as number}px`;
+          if (node.attrs.fontFamily)
+            style += `;font-family:${node.attrs.fontFamily as string}`;
           const attrs: Record<string, string> = { style };
-          if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+          if (node.attrs.nodeId)
+            attrs["data-node-id"] = node.attrs.nodeId as string;
           return ["p", attrs, 0];
         },
       },
@@ -100,7 +131,12 @@ export const Paragraph = Extension.create({
 
   addBlockStyles() {
     return {
-      paragraph: { font: "14px", spaceBefore: 0, spaceAfter: 10, align: "left" as const },
+      paragraph: {
+        font: "14px",
+        spaceBefore: 0,
+        spaceAfter: 10,
+        align: "left" as const,
+      },
     };
   },
 

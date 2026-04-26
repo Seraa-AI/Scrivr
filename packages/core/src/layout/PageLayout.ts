@@ -1867,7 +1867,8 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
       return;
     }
 
-    items.push({ node, nodePos: offset, indentLeft: 0 });
+    const blockIndent = (node.attrs["indent"] as number) ?? 0;
+    items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
   });
 
   return items;

@@ -15,6 +15,7 @@ import { FontFamily } from "./built-in/FontFamily";
 import { Link } from "./built-in/Link";
 import { List } from "./built-in/List";
 import { Alignment } from "./built-in/Alignment";
+import { Indent } from "./built-in/Indent";
 import { CodeBlock, insertCodeIndent } from "./built-in/CodeBlock";
 import { HorizontalRule } from "./built-in/HorizontalRule";
 import { Image } from "./built-in/Image";
@@ -209,6 +210,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.alignment !== false) {
       Object.assign(km, Alignment.resolve(this.schema).keymap);
     }
+    Object.assign(km, Indent.resolve(this.schema).keymap);
     if (opts.underline !== false) {
       Object.assign(km, Underline.resolve(this.schema).keymap);
     }
@@ -277,6 +279,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.alignment !== false) {
       Object.assign(cmds, Alignment.resolve(this.schema).commands);
     }
+    Object.assign(cmds, Indent.resolve(this.schema).commands);
     if (opts.codeBlock !== false) {
       Object.assign(cmds, CodeBlock.resolve(this.schema).commands);
     }
@@ -410,6 +413,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.alignment !== false) {
       items.push(...Alignment.resolve().toolbarItems);
     }
+    items.push(...Indent.resolve().toolbarItems);
     if (opts.bold !== false) {
       const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
       items.push(...ext.resolve().toolbarItems);

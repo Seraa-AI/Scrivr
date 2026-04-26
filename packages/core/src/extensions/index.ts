@@ -20,6 +20,7 @@ export { FontSize } from "./built-in/FontSize";
 export { FontFamily } from "./built-in/FontFamily";
 export { Link } from "./built-in/Link";
 export { Alignment } from "./built-in/Alignment";
+export { Indent, INDENT_STEP, TEXT_INDENT_STEP } from "./built-in/Indent";
 export { List } from "./built-in/List";
 export { Pagination } from "./built-in/Pagination";
 export { Image } from "./built-in/Image";

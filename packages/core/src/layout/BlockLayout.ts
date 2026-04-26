@@ -309,6 +309,26 @@ export function layoutBlock(
   // ── 3. Break into lines ───────────────────────────────────────────────────
   const breaker = new LineBreaker(measurer);
 
+  // First-line indent: reduce first line's width so text wraps earlier.
+  const rawTextIndent = node.attrs["textIndent"];
+  const textIndent = typeof rawTextIndent === "number" && rawTextIndent > 0 ? rawTextIndent : 0;
+
+  // Wrap the constraint provider to apply textIndent on the first line.
+  let firstLineConsumed = false;
+  const indentAwareConstraint: ConstraintProvider | undefined =
+    textIndent > 0
+      ? (lineY: number) => {
+          const base = constraintProvider?.(lineY) ?? null;
+          if (!firstLineConsumed) {
+            firstLineConsumed = true;
+            const baseWidth = base?.width ?? availableWidth;
+            const baseX = base?.x ?? 0;
+            return { x: baseX + textIndent, width: baseWidth - textIndent };
+          }
+          return base;
+        }
+      : constraintProvider;
+
   // We pass the CharacterMap only after we know the alignment offset.
   // If alignment is left (no offset), we can pass it directly.
   // For center/right we populate the map manually below after offsetting.
@@ -319,7 +339,7 @@ export function layoutBlock(
     {
       defaultFontFamily: parsedBase.family,
       defaultFontSize: parseFloat(parsedBase.size),
-      ...(constraintProvider ? { constraintProvider, startY: y } : {}),
+      ...(indentAwareConstraint ? { constraintProvider: indentAwareConstraint, startY: y } : {}),
     },
   );
 

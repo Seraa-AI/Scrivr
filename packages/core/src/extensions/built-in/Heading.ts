@@ -24,6 +24,8 @@ export const Heading = Extension.create<HeadingOptions>({
         attrs: {
           level:       { default: 1 },
           align:       { default: "left" },
+          indent:      { default: 0 },
+          textIndent:  { default: 0 },
           fontFamily:  { default: null },
           nodeId:      { default: null },
           dataTracked: { default: [] },
@@ -37,9 +39,13 @@ export const Heading = Extension.create<HeadingOptions>({
             const fontFamily = rawFamily
               ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() || null
               : null;
+            const rawMarginLeft = parseFloat(el.style.marginLeft) || 0;
+            const rawTextIndent = parseFloat(el.style.textIndent) || 0;
             return {
               level,
               align:      el.style.textAlign || "left",
+              indent:     rawMarginLeft > 0 ? Math.round(rawMarginLeft / 24) : 0,
+              textIndent: rawTextIndent > 0 ? rawTextIndent : 0,
               fontFamily: fontFamily,
               nodeId:     el.getAttribute("data-node-id") ?? null,
             };
@@ -48,6 +54,8 @@ export const Heading = Extension.create<HeadingOptions>({
         toDOM: (node) => {
           const styles: string[] = [];
           if (node.attrs.align && node.attrs.align !== "left") styles.push(`text-align:${node.attrs.align as string}`);
+          if (node.attrs.indent) styles.push(`margin-left:${(node.attrs.indent as number) * 24}px`);
+          if (node.attrs.textIndent) styles.push(`text-indent:${node.attrs.textIndent as number}px`);
           if (node.attrs.fontFamily) styles.push(`font-family:${node.attrs.fontFamily as string}`);
           const attrs: Record<string, string> = {};
           if (styles.length) attrs["style"] = styles.join(";");

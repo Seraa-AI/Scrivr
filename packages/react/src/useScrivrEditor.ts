@@ -7,6 +7,8 @@ export interface UseCanvasEditorOptions {
   extensions?: Extension[];
   /** Page dimensions and margins. Defaults to A4 with 1-inch margins. */
   pageConfig?: PageConfig;
+  /** When true, the editor blocks all mutations. Default: false. */
+  readOnly?: boolean;
   /**
    * Called on every document or selection change.
    * Mirrors TipTap's onUpdate.
@@ -54,6 +56,7 @@ export function useScrivrEditor(
     const instance = new Editor({
       extensions: opts.extensions ?? [StarterKit],
       ...(opts.pageConfig ? { pageConfig: opts.pageConfig } : {}),
+      readOnly: opts.readOnly ?? false,
       onChange: (state) => {
         opts.onUpdate?.({ editor: instance });
         opts.onSelectionUpdate?.({ editor: instance });

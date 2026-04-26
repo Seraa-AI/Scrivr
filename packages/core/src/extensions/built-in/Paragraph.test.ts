@@ -152,6 +152,113 @@ describe("Enter key — font inheritance", () => {
     expect(next.doc.child(1).attrs["fontFamily"]).toBe("Times New Roman");
   });
 
+// ── Enter key: indent inheritance ────────────────────────────────────────────
+
+describe("Enter key — indent inheritance", () => {
+  it("new paragraph inherits indent from the source paragraph", () => {
+    const { schema, keymap, state } = makeContext();
+
+    const para = schema.nodes["paragraph"]!.create(
+      { indent: 2 },
+      schema.text("Indented text"),
+    );
+    const s1 = state.apply(state.tr.replaceWith(0, state.doc.content.size, para));
+    const s2 = moveTo(s1, s1.doc.firstChild!.nodeSize - 1);
+    const next = pressEnter(s2, keymap)!;
+
+    expect(next.doc.child(1).attrs["indent"]).toBe(2);
+  });
+
+  it("new paragraph inherits textIndent from the source paragraph", () => {
+    const { schema, keymap, state } = makeContext();
+
+    const para = schema.nodes["paragraph"]!.create(
+      { textIndent: 48 },
+      schema.text("First-line indented"),
+    );
+    const s1 = state.apply(state.tr.replaceWith(0, state.doc.content.size, para));
+    const s2 = moveTo(s1, s1.doc.firstChild!.nodeSize - 1);
+    const next = pressEnter(s2, keymap)!;
+
+    expect(next.doc.child(1).attrs["textIndent"]).toBe(48);
+  });
+
+  it("new paragraph inherits indent, textIndent, and align together", () => {
+    const { schema, keymap, state } = makeContext();
+
+    const para = schema.nodes["paragraph"]!.create(
+      { align: "center", indent: 1, textIndent: 24 },
+      schema.text("Full attrs"),
+    );
+    const s1 = state.apply(state.tr.replaceWith(0, state.doc.content.size, para));
+    const s2 = moveTo(s1, s1.doc.firstChild!.nodeSize - 1);
+    const next = pressEnter(s2, keymap)!;
+
+    const newPara = next.doc.child(1);
+    expect(newPara.attrs["align"]).toBe("center");
+    expect(newPara.attrs["indent"]).toBe(1);
+    expect(newPara.attrs["textIndent"]).toBe(24);
+  });
+
+  it("default indent is 0 when source has no indent", () => {
+    const { keymap, state } = makeContext();
+
+    const s1 = insert(state, "Hello");
+    const next = pressEnter(s1, keymap)!;
+
+    expect(next.doc.child(1).attrs["indent"]).toBe(0);
+    expect(next.doc.child(1).attrs["textIndent"]).toBe(0);
+  });
+});
+
+// ── Indent commands ─────────────────────────────────────────────────────────
+
+describe("Indent commands", () => {
+  it("increaseIndent increments the indent attr", () => {
+    const { state } = makeContext();
+    const s1 = insert(state, "Hello");
+
+    const manager = new ExtensionManager([StarterKit]);
+    const cmds = manager.buildCommands();
+    let next: EditorState | null = null;
+    cmds["increaseIndent"]!()(s1, (tr) => { next = s1.apply(tr); });
+
+    expect(next).not.toBeNull();
+    expect(next!.doc.firstChild!.attrs["indent"]).toBe(1);
+  });
+
+  it("decreaseIndent does not go below 0", () => {
+    const { state } = makeContext();
+    const s1 = insert(state, "Hello");
+
+    const manager = new ExtensionManager([StarterKit]);
+    const cmds = manager.buildCommands();
+    let next: EditorState | null = null;
+    const handled = cmds["decreaseIndent"]!()(s1, (tr) => { next = s1.apply(tr); });
+
+    // indent is already 0, command should return false
+    expect(handled).toBe(false);
+  });
+
+  it("increaseIndent caps at max indent level", () => {
+    const { schema, state } = makeContext();
+
+    const para = schema.nodes["paragraph"]!.create(
+      { indent: 8 },
+      schema.text("Max indented"),
+    );
+    const s1 = state.apply(state.tr.replaceWith(0, state.doc.content.size, para));
+    const s2 = moveTo(s1, 2);
+
+    const manager = new ExtensionManager([StarterKit]);
+    const cmds = manager.buildCommands();
+    let next: EditorState | null = null;
+    const handled = cmds["increaseIndent"]!()(s2, (tr) => { next = s2.apply(tr); });
+
+    expect(handled).toBe(false);
+  });
+});
+
 // ── Enter key at end of heading ───────────────────────────────────────────────
 
 describe("Enter key — heading → paragraph", () => {

@@ -167,6 +167,12 @@ export class TestAiEditor implements IEditor {
   getMarkdown(): string {
     return "";
   }
+  getMarkdownParserTokens() {
+    return {};
+  }
+  parseMarkdown(): PmNode {
+    return this.state.doc;
+  }
   getExportContributions() {
     return [];
   }
