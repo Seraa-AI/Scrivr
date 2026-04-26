@@ -1,5 +1,15 @@
 # @scrivr/export-docx
 
+## 0.0.2
+
+### Patch Changes
+
+- Updated dependencies [39e008c]
+- Updated dependencies [36a7776]
+- Updated dependencies [88016a6]
+- Updated dependencies [ddd1448]
+  - @scrivr/core@1.0.6
+
 ## 0.0.1
 
 ### Patch Changes

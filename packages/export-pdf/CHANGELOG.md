@@ -1,5 +1,21 @@
 # @scrivr/export-pdf
 
+## 1.0.6
+
+### Patch Changes
+
+- 36a7776: **@scrivr/react** — Add `readOnly` option to `useScrivrEditor` hook. Reset `letterSpacing`, `wordSpacing`, `textTransform` on the `<Scrivr>` container to prevent host app CSS from causing cursor drift.
+
+  **@scrivr/core** — New `Indent` extension with block indent (`Mod-]`/`Mod-[`, 0-8 levels at 24px each) and first-line indent (`textIndent` attr in px). Both inherited on Enter split, parsed from paste, serialized to DOM. Expose `getMarkdownParserTokens()` and `parseMarkdown(text)` on `BaseEditor` for server-side markdown parsing.
+
+- 88016a6: Add LICENSE file and README to all packages. Add missing `license` field to export-pdf, export-markdown, and export-docx package.json files.
+- ddd1448: Allow mouse selection (click, drag, double/triple-click) in readOnly mode so users can select and copy text. Block programmatic command dispatch (`editor.commands.*`) in readOnly to prevent extensions from bypassing InputBridge.
+- Updated dependencies [39e008c]
+- Updated dependencies [36a7776]
+- Updated dependencies [88016a6]
+- Updated dependencies [ddd1448]
+  - @scrivr/core@1.0.6
+
 ## 1.0.5
 
 ### Patch Changes
