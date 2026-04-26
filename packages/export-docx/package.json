@@ -1,7 +1,7 @@
 {
   "name": "@scrivr/export-docx",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "DOCX export for Scrivr documents — type-only skeleton, no implementation yet",
   "license": "Apache-2.0",
   "type": "module",
