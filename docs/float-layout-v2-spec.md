@@ -126,10 +126,10 @@ Re-stamps `globalY` on flows from `startIndex` onward using the same margin-coll
 After pagination, maps each float from global-Y to page-local coordinates.
 
 **Algorithm:**
-1. Build anchor map: walk paginated pages → blocks → lines → spans, collect `docPos → { page, blockY }` for float anchors
+1. Build anchor map: walk paginated pages → blocks → lines → spans, collect `docPos → { page, pageLocalY }` for float anchors. `pageLocalY` is the block's Y within the page (page-local coordinates, set by `paginateFlow`).
 2. For each float:
-   - `delta = float.globalY - float.anchorBlockY`
-   - `candidateY = anchor.blockY + delta`
+   - `delta = float.globalY - float.anchorGlobalY` (both in global-Y space)
+   - `candidateY = anchor.pageLocalY + delta` (project the global-Y delta into page-local space)
    - If `candidateY + height > pageBottom` → overflow to `anchorPage + 1`, place at `contentTop`
    - Otherwise: `page = anchor.page, y = candidateY`
 3. Materialise empty `LayoutPage` entries for floats that land on non-existent pages
@@ -226,9 +226,11 @@ These are validated and should be kept as-is in v2:
 
 In the old system, `applyFloatLayout` applied offsets in page-local coordinates AFTER pagination. The text paragraph was already placed, and the float shifted visually without creating a gap in the flow. The new system shifts the float in continuous Y space BEFORE pagination, which creates a gap that pagination preserves.
 
-**Fix direction:** For top-bottom mode, the exclusion zone should span from `anchor.globalY` (not `candidateY`) downward: `[anchor.globalY, anchor.globalY + imageHeight + margin]`. The Y offset should only affect where the image is RENDERED (`float.y`), not where text is BLOCKED (exclusion rect). Side-float modes (square-left, square-right) may need the same treatment — offset shifts the rendered image but the exclusion hugs the anchor.
+**Fix direction:** For top-bottom mode, the exclusion zone should span from `anchor.globalY` (not `candidateY`) downward: `[anchor.globalY, anchor.globalY + imageHeight + margin]`. The Y offset should only affect where the image is RENDERED (`float.y`), not where text is BLOCKED (exclusion rect).
 
-**Rule:** `floatOffset` is a rendering offset, not a constraint offset. Exclusion rects are always anchored to `anchor.globalY`. The float's visual position (`float.globalY`) includes the offset.
+**Side-float modes (`square-left`, `square-right`) need the same treatment.** In the POC, `floatOffset.y` shifts the exclusion rect for all modes identically. For side floats, a negative Y offset pulls the exclusion zone above the anchor, creating a gap between the anchor paragraph and the float's text-blocking zone. The rule is universal: the exclusion rect Y is always anchored to `anchor.globalY` regardless of mode. The offset only shifts the rendered image position. The X component of `floatOffset` is different — it shifts both the rendered position AND the exclusion rect's X, because horizontal offset changes which text columns the float blocks.
+
+**Rule:** `floatOffset` is a rendering offset for Y, a structural offset for X. Exclusion rect Y is always `anchor.globalY`. Exclusion rect X includes `floatOffset.x`. The float's visual position includes both offsets.
 
 ### 6.2 Enter after float inserts text above — PARTIALLY FIXED
 
@@ -250,6 +252,8 @@ In the old system, `applyFloatLayout` applied offsets in page-local coordinates 
 
 **Fix direction for v2:** If the page has floats but no text lines, resolve the click to the float anchor's doc position instead of searching adjacent pages. This requires `posAtCoords` to be float-aware: check if the click coordinates fall within a float's bounding box, and if so, return the float's `docPos`.
 
+**Interaction with 6.2 (Enter after float):** If the user clicks a float-only page and the cursor resolves to the float anchor's `docPos`, then presses Enter, `cursorIsAfterFloat` must handle this correctly. The cursor would be AT the float anchor position (not after it — `nodeBefore` may be text, not the float). The v2 fixes for 6.2 and 6.3 should be tested together: click float-only page → cursor at anchor → Enter → verify split doesn't orphan the float.
+
 ### 6.4 Cross-page selection highlight — OPEN (pre-existing)
 
 **Symptom:** Selection highlight renders on page 1 but doesn't continue onto page 2 when selection spans pages.
@@ -266,7 +270,14 @@ These are edge cases identified during review. Not blocking for v2 but should be
 
 Barriers are estimated from unconstrained flow heights. After the constraint loop changes heights, barriers could be stale. If a constrained block's height growth pushes a downstream float across a page boundary, the barrier is wrong.
 
-**Fix:** After the constraint loop converges, recompute barriers from the final constrained heights. If any barrier moved, re-check float positions (single pass, no re-resolve).
+**Fix:** After the constraint loop converges, recompute barriers from the final constrained heights. If any barrier moved, push affected floats past the new barrier (single pass).
+
+**Distinction from re-resolve (important):** This is NOT a re-resolve. Re-resolving means recomputing float positions from scratch (anchor lookup, stacking, X positioning) — which causes oscillation (see 4.1). A barrier correction is a one-time downward push: if `float.globalY < newBarrier < float.globalY + height`, move the float to `newBarrier`. The float's X position, stacking order, and exclusion rect width are unchanged. Only its Y shifts. This is safe because:
+- It's a single pass after convergence, not inside the constraint loop
+- The push is monotonically downward (barriers only move down when blocks grow)
+- No block heights change as a result (the constraint loop already converged)
+
+If a barrier push causes float-on-float overlap, that's handled by 7.2 (float chain stacking) as a separate single pass.
 
 ### 7.2 Float chain + barrier stacking
 
@@ -344,6 +355,8 @@ Random document generator: 1-20 paragraphs, 30% float probability, random modes/
 #### Oscillation detector
 
 Run pipeline 5 times, hash each result. If 5 unique hashes → oscillation. If repeated hash → stable or converged.
+
+**Hash surface:** Hash only deterministic geometry tuples in document order, not object identity or references. Specifically: `(block.globalY, block.height, block.lines.length)` for each flow block, plus `(float.globalY, float.page, float.x, float.height)` for each float. Exclude `runId`, object references, and any generated IDs. This avoids false negatives from non-deterministic object ordering or identity changes between runs.
 
 #### Cache corruption test
 
