@@ -32,30 +32,91 @@ Stage 4: buildFragments      — fragment index for tile renderer
 
 ---
 
-## 2. Solution: Pre-Pagination Constraint Solving
+## 2. Solution: A Constraint-Based Layout Engine
 
-Move all float resolution and text reflow **before** pagination. Work in continuous global-Y space (one tall strip, no page boundaries). Pagination becomes a read-only projection.
+This is not "float positioning." It is a 2-phase constraint solver — closer to a browser layout engine than a document editor's ad-hoc pass system. That framing matters because the open bugs and hardening items are not edge cases — they are missing invariants in a constraint system.
 
-### The new pipeline
+### 2.1 Two Coordinate Spaces (Enforced Separation)
+
+The system operates in two distinct spaces. The POC mixed them, causing the offset spacing regression (6.1) and mental confusion throughout. v2 enforces strict separation:
+
+| Space | Owner | Used by | Feeds back into layout? |
+|-------|-------|---------|-------------------------|
+| **Layout space** (structural) | Constraint solver | `ExclusionManager`, `reflowConstrainedBlocks`, `paginateFlow` | N/A — this IS layout |
+| **Visual space** (rendering) | Renderer | `PageRenderer`, `TileManager` | **Never.** Visual space is derived and read-only. |
+
+**The rule:**
+
+> Layout space is immutable and constraint-driven.
+> Visual space is derived from layout space and never feeds back into layout.
+
+This means `floatOffset.y` is a visual-space concept. It shifts where the image is painted. It does NOT shift the exclusion rect, the constraint zone, or the anchor's globalY.
+
+### 2.2 Two-Phase Solver
+
+The pipeline is a 2-phase solver with a read-only projection:
+
+**Phase A — Constraint Declaration**
+- Floats define exclusion regions (spatial constraints)
+- Page break barriers define forbidden Y ranges (pagination constraints)
+
+**Phase B — Constraint Satisfaction**
+- Blocks adapt to constraints via fixed-point reflow
+- Heights change monotonically (see 2.3)
+- Float positions are pinned (no re-resolution)
+
+**Phase C — Projection (read-only)**
+- Pagination assigns blocks to pages
+- Float globalY maps to page-local coordinates
+- No mutation, no reflow
+
+### 2.3 System Invariants
+
+These must hold at all times. Violations indicate bugs in the solver, not edge cases.
+
+| Invariant | Why |
+|-----------|-----|
+| **Constraints are monotonic** | Exclusion zones only grow or stay fixed. They never shrink during the constraint loop. |
+| **Reflow is monotonic in height** | `newHeight >= oldHeight` for every block in every iteration. If a block shrinks, the constraint loop can oscillate. This is the formal guarantee that prevents the 298→90→298 cycle. |
+| **Layout space never reads from visual space** | `floatOffset`, rendered positions, and page-local coordinates never feed back into constraint resolution. |
+| **Barriers are frozen** | Computed once from unconstrained flow heights, then frozen for the entire constraint loop. Floats respect barriers; barriers do not react to floats. |
+| **Float positions are pinned** | Resolved once before the loop from unconstrained positions. Never re-resolved during constraint satisfaction. |
+| **Pagination is projection** | `paginateFlow` receives final constrained heights. It assigns blocks to pages. It does not re-layout anything. |
+
+### 2.4 The Pipeline
 
 ```
 Stage 1:    buildBlockFlow          — measure all blocks (unconstrained)
 Stage 1.5:  assignGlobalY           — stamp continuous Y with CSS-style margin collapsing
-Stage 1.75: constraint loop         — resolve floats + reflow text (pre-pagination)
-  ├── Step 1: Estimate page boundaries from unconstrained flow heights
-  ├── Step 2: resolveFloatsGlobalY — position floats, build global-Y exclusions
-  └── Step 3: reflowConstrainedBlocks — re-layout overlapping blocks (fixed-point, max 3 iter)
-Stage 2:    paginateFlow            — assign blocks to pages (read-only for constraints)
-Stage 3:    projectFloatsOntoPages  — derive page-local float coords from globalY
+
+        ┌── Phase A: Constraint Declaration ──────────────────────────────┐
+        │  Step 1: Compute barriers from unconstrained flow heights       │
+        │  Step 2: resolveFloatsGlobalY — position floats in layout       │
+        │          space, apply barrier pushes, resolve stacking,         │
+        │          build exclusion rects (all in layout space)            │
+        │  *** Freeze barriers and float positions ***                    │
+        └─────────────────────────────────────────────────────────────────┘
+
+        ┌── Phase B: Constraint Satisfaction (fixed-point, max 3 iter) ──┐
+        │  Step 3: reflowConstrainedBlocks — re-layout overlapping       │
+        │          blocks with narrowed width                             │
+        │  Step 4: recomputeGlobalY — update downstream positions        │
+        │  Assert: newHeight >= oldHeight (monotonic reflow)              │
+        │  Break when no heights change                                   │
+        └─────────────────────────────────────────────────────────────────┘
+
+Stage 2:    paginateFlow            — assign blocks to pages (read-only)
+Stage 3:    projectFloatsOntoPages  — map layout-space globalY → visual-space page-local coords
 Stage 4:    buildFragments          — fragment index for tile renderer
 ```
 
-### Net result (from POC)
+### 2.5 Net Result (from POC)
 
 - **-397 lines** of code (deleted ~550 lines of applyFloatLayout, added ~153 for new functions)
 - Paragraph duplication bug fixed for free
 - ExclusionManager works in both page-scoped (legacy) and global-Y (new) modes
 - Constraint loop converges in 1-2 iterations for typical documents
+- Architecture is extensible beyond floats (tables, columns, margin notes can declare constraints using the same solver)
 
 ---
 
@@ -78,27 +139,50 @@ Walks all FlowBlocks top-to-bottom, applies CSS-style margin collapsing between 
 
 ### 3.2 `resolveFloatsGlobalY(flows, margins, pageWidth, contentWidth, pageBreakYs)`
 
-Finds zero-width float anchor spans in flows, positions each float in global-Y space, builds exclusion rects.
+Finds zero-width float anchor spans in flows, positions each float in layout space, builds exclusion rects. This is Phase A of the constraint solver.
 
 **Returns:** `{ floats: FloatLayout[], exclusionMgr: ExclusionManager } | null`
 Returns `null` when no float anchors exist (fast path — skip entire constraint loop).
+
+**FloatLayout type (v2 — layout/visual split):**
+
+```ts
+type FloatLayout = {
+  docPos: number;
+  mode: WrappingMode;
+  width: number;
+  height: number;
+
+  // LAYOUT SPACE — used by constraint solver + ExclusionManager
+  layoutY: number;         // ALWAYS = anchor.globalY (never includes offset)
+  layoutX: number;         // content-area X + floatOffset.x (X offset IS structural)
+  anchorGlobalY: number;   // anchor block's globalY at resolution time
+
+  // VISUAL SPACE — used by renderer only, derived after projection
+  renderY: number;         // layoutY + floatOffset.y (applied during projectFloatsOntoPages)
+  renderX: number;         // layoutX (same — X offset already included)
+  page: number;            // assigned by projectFloatsOntoPages
+};
+```
+
+The exclusion rect is built from `layoutY` / `layoutX`. The renderer reads `renderY` / `renderX`. Visual space never feeds back into layout.
 
 **Per-float positioning:**
 
 1. **Collect anchor:** Walk flows → lines → spans, find `span.kind === "object" && span.width === 0` with `wrappingMode` set
 2. **Read attributes:** `wrappingMode`, `floatOffset.x`, `floatOffset.y`, node width/height
-3. **X position:**
+3. **X position (layout space — includes X offset):**
    - `square-left`: `contentX + offsetX`
    - `square-right`: `contentRight - width + offsetX`
    - `top-bottom`: centered or full-width (implementation choice)
    - `behind` / `front`: same X logic, no exclusion rect
    - Clamped to `[contentX, contentRight - width]`
-4. **Y position:** `candidateY = anchor.globalY + offsetY`
-5. **Stacking:** While any previously-placed same-side float overlaps horizontally AND vertically, push `candidateY` below it (`overlap.globalY + overlap.height + FLOAT_MARGIN`)
-6. **Page break barriers:** If `candidateY` and `candidateY + height` straddle a barrier Y, push `candidateY = barrierY` (float goes entirely to next page)
-7. **Exclusion rect:** Add to ExclusionManager with `FLOAT_MARGIN_GLOBAL = 8px` padding on all sides. Side is `"left"` / `"right"` / `"full"` based on wrapping mode. No `page` field (global-Y mode).
+4. **Y position (layout space — NO Y offset):** `layoutY = anchor.globalY`
+5. **Stacking:** While any previously-placed same-side float overlaps horizontally AND vertically, push `layoutY` below it (`overlap.layoutY + overlap.height + FLOAT_MARGIN`)
+6. **Page break barriers:** If `layoutY` and `layoutY + height` straddle a barrier Y, push `layoutY = barrierY` (float goes entirely to next page). **Then** re-check stacking against ALL prior floats (not just same-side) — barrier push can create new overlaps.
+7. **Exclusion rect:** Built from `layoutY` with `FLOAT_MARGIN_GLOBAL = 8px` padding. Side is `"left"` / `"right"` / `"full"` based on wrapping mode. No `page` field (global-Y mode).
 
-**Key invariant:** Float positions are resolved ONCE from unconstrained flow positions and pinned. They are never re-resolved during the constraint loop.
+**Key invariant:** Float positions are resolved ONCE from unconstrained flow positions and pinned. They are never re-resolved during the constraint loop. Barriers are frozen before this function runs.
 
 ### 3.3 `reflowConstrainedBlocks(flows, exclusionMgr, margins, contentWidth, measurer, fontConfig, ...)`
 
@@ -171,21 +255,45 @@ Iter 2: float moves back → constrained → height 298px
 ```
 Fix: resolve float positions from UNCONSTRAINED flow positions. Pin them. The constraint loop only changes block heights and downstream globalY values.
 
-### 4.2 Page boundaries are estimated, not exact
+### 4.2 Barriers are frozen, not reactive
 
-The chicken-and-egg: you can't know page boundaries before pagination, but floats need page awareness to avoid straddling page breaks. Solution: walk unconstrained flows, accumulate heights, mark barrier Y values where page breaks will occur. These estimates are accurate because:
-- Zero-height float anchors don't change height during reflow
-- Barrier estimation uses the same margin-collapsing logic as `paginateFlow`
+Barriers are **constraints derived from pagination rules**, not estimates that get refined. They are computed once from unconstrained flow heights and frozen for the entire constraint loop.
 
-### 4.3 Pagination is read-only for constraints
+The temptation is: "heights changed after reflow, so recompute barriers and re-check floats." This creates a hidden feedback loop:
+
+```
+barriers → float placement → reflow → height changes → barriers (!!!)
+```
+
+Instead:
+- **Step 1:** Compute barriers from unconstrained flow
+- **Step 2:** Resolve floats against those barriers
+- **Step 3:** Freeze barriers for the entire constraint loop
+- **After convergence:** `paginateFlow` handles the actual page breaks (which may differ slightly from barrier estimates). `projectFloatsOntoPages` handles overflow.
+
+Floats respect barriers. Barriers do not react to floats.
+
+### 4.3 Reflow must be monotonic in height
+
+The constraint loop's convergence depends on block heights only increasing or staying equal:
+
+```
+newHeight >= oldHeight   // MUST hold for every block, every iteration
+```
+
+When a float constrains a block, lines wrap tighter → more lines → taller block. The block never gets shorter because constraints only narrow width (never widen it — exclusion zones are pinned). If this invariant is ever violated, the system can oscillate.
+
+This should be enforced with a runtime assertion in debug mode.
+
+### 4.4 Pagination is read-only for constraints
 
 `paginateFlow` receives flows with final constrained heights. It assigns blocks to pages and splits at boundaries. It does NOT re-layout anything. This is the "pagination is projection" principle.
 
-### 4.4 Float page membership from pre-reflow anchor position
+### 4.5 Float page membership from pre-reflow anchor position
 
 CSS spec rule: a float's page is determined by where its anchor was BEFORE text reflowed around it. The constraint loop grows blocks (more lines = taller), but that growth must not change which page a float belongs to. `projectFloatsOntoPages` uses the anchor's paginated position, which reflects pre-reflow height.
 
-### 4.5 `updateFloatAnchors` — defined but not called
+### 4.6 `updateFloatAnchors` — defined but not called
 
 This function re-derives float globalY from shifted anchors. It exists for future use (non-zero-height anchors like captioned floats), but calling it inside the constraint loop would re-introduce oscillation. Currently all float anchors are zero-height, so anchor positions don't shift during reflow.
 
@@ -218,29 +326,25 @@ These are validated and should be kept as-is in v2:
 
 ## 6. What the POC Got Wrong (Open Bugs)
 
-### 6.1 Float offset spacing regression — OPEN
+### 6.1 Coordinate space violation — visual offset leaking into layout space
 
 **Symptom:** Top-bottom float with negative `floatOffset.y` (e.g. `{x: -48, y: -45}`) creates ~45px blank gap above and below the image.
 
-**Root cause:** In `resolveFloatsGlobalY`, the exclusion rect Y is derived from `candidateY = anchor.globalY + offsetY`. For top-bottom mode, the offset shifts the exclusion zone away from the anchor, leaving dead space between the anchor paragraph and the exclusion zone.
+**Root cause:** The POC computed `float.globalY = anchor.globalY + offsetY`, then built the exclusion rect from that mixed-space value. This violates the coordinate space separation rule (2.1): `floatOffset.y` is a visual-space concept that leaked into layout space.
 
-In the old system, `applyFloatLayout` applied offsets in page-local coordinates AFTER pagination. The text paragraph was already placed, and the float shifted visually without creating a gap in the flow. The new system shifts the float in continuous Y space BEFORE pagination, which creates a gap that pagination preserves.
+**Fix:** Already specified by the `FloatLayout` type split in 3.2. `layoutY = anchor.globalY` (always). `renderY = layoutY + offsetY` (applied during projection). ExclusionManager uses `layoutY`. Dead space eliminated because the exclusion zone starts exactly at the anchor, not 45px above it.
 
-**Fix direction:** For top-bottom mode, the exclusion zone should span from `anchor.globalY` (not `candidateY`) downward: `[anchor.globalY, anchor.globalY + imageHeight + margin]`. The Y offset should only affect where the image is RENDERED (`float.y`), not where text is BLOCKED (exclusion rect).
+This is not a per-mode fix. It's a universal rule enforced by the type system: `layoutY` and `layoutX` are the only fields the solver reads. `renderY` and `renderX` are the only fields the renderer reads.
 
-**Side-float modes (`square-left`, `square-right`) need the same treatment.** In the POC, `floatOffset.y` shifts the exclusion rect for all modes identically. For side floats, a negative Y offset pulls the exclusion zone above the anchor, creating a gap between the anchor paragraph and the float's text-blocking zone. The rule is universal: the exclusion rect Y is always anchored to `anchor.globalY` regardless of mode. The offset only shifts the rendered image position. The X component of `floatOffset` is different — it shifts both the rendered position AND the exclusion rect's X, because horizontal offset changes which text columns the float blocks.
-
-**Rule:** `floatOffset` is a rendering offset for Y, a structural offset for X. Exclusion rect Y is always `anchor.globalY`. Exclusion rect X includes `floatOffset.x`. The float's visual position includes both offsets.
-
-### 6.2 Enter after float inserts text above — PARTIALLY FIXED
+### 6.2 Doc model vs layout model mismatch — PARTIALLY FIXED
 
 **Symptom:** With a float image in top-bottom mode, text typed after the image appears visually below it. Pressing Enter splits the paragraph, but text ends up above the image.
 
 **POC fix:** `cursorIsAfterFloat` in `Paragraph.ts` adjusts the split point so the float anchor lands in the lower block. This works for the simple case (cursor immediately after float).
 
-**Remaining issue:** The fix is positional — it checks `nodeBefore`. If the cursor is several characters past the float (text between float and cursor), the split may still produce unexpected results. The fundamental tension is that doc order (float is inline, mixed with text) disagrees with visual order (float is rendered below/beside text).
+**The deeper issue:** This is not a UI bug — it's a model mismatch. Float anchors are inline nodes in the ProseMirror doc tree (doc-order position), but the layout engine renders them at displaced visual positions (layout-space position). Paragraph splits respect doc order, not layout order. The POC fix patches one case but doesn't resolve the fundamental tension.
 
-**Fix direction for v2:** Consider making the split logic float-aware at a deeper level. After any split in a paragraph containing a float, verify that the float anchor ends up in the block that corresponds to its VISUAL position, not just its doc position.
+**Fix direction for v2:** Short-term: make the split logic float-aware at a deeper level — after any split in a paragraph containing a float, verify that the float anchor ends up in the block that corresponds to its layout-space position. Long-term: float anchors should be structural nodes (not inline hacks) so doc order matches layout intent. This is a larger model change that would also simplify 6.3.
 
 ### 6.3 Float-only page cursor jumps to position 0 — PARTIALLY FIXED
 
@@ -250,7 +354,7 @@ In the old system, `applyFloatLayout` applied offsets in page-local coordinates 
 
 **Remaining issue:** The fix finds the nearest line on an adjacent page, but the user's click was on the float-only page. The cursor lands on the adjacent page's text, not near the float. For a better UX, clicking near a float should select the float's anchor position.
 
-**Fix direction for v2:** If the page has floats but no text lines, resolve the click to the float anchor's doc position instead of searching adjacent pages. This requires `posAtCoords` to be float-aware: check if the click coordinates fall within a float's bounding box, and if so, return the float's `docPos`.
+**Fix direction for v2:** Hit-test floats FIRST, then fall back to text lines. If click coordinates fall within a float's bounding box, return the float's `docPos`. Only search text lines (and adjacent pages) if no float was hit. This inverts the current order (text first → float never).
 
 **Interaction with 6.2 (Enter after float):** If the user clicks a float-only page and the cursor resolves to the float anchor's `docPos`, then presses Enter, `cursorIsAfterFloat` must handle this correctly. The cursor would be AT the float anchor position (not after it — `nodeBefore` may be text, not the float). The v2 fixes for 6.2 and 6.3 should be tested together: click float-only page → cursor at anchor → Enter → verify split doesn't orphan the float.
 
@@ -266,24 +370,29 @@ In the old system, `applyFloatLayout` applied offsets in page-local coordinates 
 
 These are edge cases identified during review. Not blocking for v2 but should be addressed before the float system is considered production-ready.
 
-### 7.1 Page barrier recomputation after constraint loop
+### 7.1 Barrier accuracy vs frozen barriers
 
-Barriers are estimated from unconstrained flow heights. After the constraint loop changes heights, barriers could be stale. If a constrained block's height growth pushes a downstream float across a page boundary, the barrier is wrong.
+Per 4.2, barriers are frozen for the constraint loop. But barrier estimates come from unconstrained flow heights, and the constraint loop changes heights. The actual page breaks (from `paginateFlow`) may differ from the barrier estimates.
 
-**Fix:** After the constraint loop converges, recompute barriers from the final constrained heights. If any barrier moved, push affected floats past the new barrier (single pass).
+**Why this is acceptable:** Barriers exist to prevent floats from straddling page boundaries. If a barrier estimate is slightly off, the worst case is a float placed just above or below where the actual page break lands. `projectFloatsOntoPages` handles overflow — if a float extends past the actual page bottom, it gets pushed to the next page. The projection stage is the safety net.
 
-**Distinction from re-resolve (important):** This is NOT a re-resolve. Re-resolving means recomputing float positions from scratch (anchor lookup, stacking, X positioning) — which causes oscillation (see 4.1). A barrier correction is a one-time downward push: if `float.globalY < newBarrier < float.globalY + height`, move the float to `newBarrier`. The float's X position, stacking order, and exclusion rect width are unchanged. Only its Y shifts. This is safe because:
-- It's a single pass after convergence, not inside the constraint loop
-- The push is monotonically downward (barriers only move down when blocks grow)
-- No block heights change as a result (the constraint loop already converged)
+**When it becomes a problem:** If barrier inaccuracy causes a float to be placed on the wrong side of a page break, the exclusion zone constrains text on the wrong page. This is detectable: after `paginateFlow`, check if any float's `layoutY` range straddles an actual page boundary. If so, the barrier was too inaccurate. In practice this requires extreme height growth (a block doubling in height during reflow) which is rare.
 
-If a barrier push causes float-on-float overlap, that's handled by 7.2 (float chain stacking) as a separate single pass.
+**No post-convergence barrier recomputation.** That creates the hidden feedback loop described in 4.2. The correct fix is better barrier estimation upfront (e.g., conservative estimates that slightly over-predict page breaks).
 
-### 7.2 Float chain + barrier stacking
+### 7.2 Float stacking must happen in final position space
 
-When a page-break barrier pushes float B down, B could now overlap float A (which was placed before the push). After barrier adjustment, re-run stacking resolution against prior floats.
+In the POC, stacking runs before barrier pushes. A barrier push can move float B below float A, creating a new overlap that stacking already "resolved."
 
-**Fix:** In `resolveFloatsGlobalY`, after barrier push, re-check overlap with all previously-placed floats (not just same-side).
+**Fix:** In `resolveFloatsGlobalY`, for each float: place at `layoutY`, apply barrier adjustment, THEN resolve stacking against ALL prior floats. This is a mandatory ordering, not a post-hoc patch:
+
+```
+for each float:
+  layoutY = anchor.globalY
+  if straddles barrier → push past barrier
+  while overlaps any prior float → push below it
+  freeze position
+```
 
 ### 7.3 Non-zero-height anchor support
 
@@ -291,9 +400,9 @@ When a page-break barrier pushes float B down, B could now overlap float A (whic
 
 ### 7.4 Streaming + partial float resolution
 
-When `maxBlocks` cutoff stops layout mid-document, floats are resolved from incomplete flows. Downstream anchors don't exist yet, so float stacking and exclusion zones are incomplete. On resume, positions could shift.
+Partial layout + constraints = invalid system. When `maxBlocks` cutoff stops layout mid-document, floats are resolved from incomplete flows. Downstream anchors don't exist yet, so stacking and exclusion zones are incomplete. On resume, all positions could shift — violating the stability invariant.
 
-**Options:** Disable float resolution in partial runs, or persist float state across chunks.
+**Fix:** Disable float constraint resolution in partial runs. Floats in partial layouts render at their anchor positions without exclusion zones. On the final (complete) run, the full constraint solver runs. This is simpler and correct — partial layout is a streaming UX optimization, not a layout guarantee.
 
 ### 7.5 List indent + exclusion coordinate space
 
@@ -362,6 +471,24 @@ Run pipeline 5 times, hash each result. If 5 unique hashes → oscillation. If r
 
 `runPipeline(doc, { measureCache: undefined })` must equal `runPipeline(doc, { measureCache: new WeakMap() })`.
 
+#### Monotonic height assertion
+
+Add a debug-mode assertion inside `reflowConstrainedBlocks`: after each block reflow, assert `newHeight >= oldHeight`. If this fires, the constraint system can oscillate and the invariant from 2.3 is violated.
+
+#### Constraint stability under mutation
+
+Round-trip test that proves no hidden state leaks:
+
+```
+1. result_A = layout(doc)
+2. insert text near float → layout(doc')
+3. delete that text → layout(doc)
+4. result_B = layout(doc)
+5. assert result_A === result_B (same hash surface as oscillation detector)
+```
+
+If this fails, the solver has hidden mutable state that survives across runs.
+
 #### Mutation tests
 
 - Insert text before float → invariants hold
@@ -372,42 +499,40 @@ Run pipeline 5 times, hash each result. If 5 unique hashes → oscillation. If r
 
 ## 9. Implementation Plan for v2
 
-### Phase 1: Foundation (no behavior change)
+### Phase 1: Type foundation + invariant harness
 
-1. Add changeset (patch for `@scrivr/core`)
-2. Build `assertLayoutInvariants` harness
-3. Write idempotence + oscillation detector tests
-4. Write adversarial float case tests against the CURRENT pipeline (they should pass — this validates the harness)
+1. Split `FloatLayout` into `layoutY`/`layoutX` + `renderY`/`renderX` (3.2). This is the structural change that prevents coordinate space leaks at the type level.
+2. Add monotonic height assertion in `reflowConstrainedBlocks` (debug mode)
+3. Build `assertLayoutInvariants` harness
+4. Write idempotence, oscillation detector, and constraint stability tests
+5. Write adversarial float case tests against the CURRENT pipeline (validates the harness)
 
-### Phase 2: Fix the float offset bug
+### Phase 2: Coordinate space enforcement
 
-5. Write failing test: top-bottom float with negative `floatOffset.y`, assert no dead space gap
-6. Fix `resolveFloatsGlobalY`: separate rendered position (`float.globalY` includes offset) from exclusion zone (`anchored to anchor.globalY`). The exclusion rect should be:
-   ```
-   y: anchor.globalY - FLOAT_MARGIN
-   bottom: anchor.globalY + nodeHeight + FLOAT_MARGIN
-   ```
-   The float's visual `globalY` remains `anchor.globalY + offsetY`.
-7. Verify fix doesn't break side-float offset behavior
+6. Write failing test: top-bottom float with negative `floatOffset.y`, assert no dead space gap
+7. Wire `resolveFloatsGlobalY` to use `layoutY = anchor.globalY` (no Y offset). ExclusionManager reads `layoutY`.
+8. Wire `projectFloatsOntoPages` to derive `renderY = layoutY + offsetY`. Renderer reads `renderY`.
+9. Verify all modes (square-left, square-right, top-bottom, behind, front)
 
-### Phase 3: Hardening
+### Phase 3: Solver correctness
 
-8. Barrier recomputation after constraint loop (7.1)
-9. Float chain + barrier stacking (7.2)
-10. List indent + exclusion coordinate space test (7.5)
-11. Early termination + floats guard test (7.6)
+10. Fix stacking order: barrier push THEN stacking resolution (7.2)
+11. List indent + exclusion coordinate space test (7.5)
+12. Early termination + floats guard test (7.6)
+13. Disable float resolution in partial/streaming runs (7.4)
 
 ### Phase 4: Fuzz testing
 
-12. Build random document generator
-13. Run fuzz harness (500 docs × invariant checks)
-14. Fix any failures found
+14. Build random document generator
+15. Run fuzz harness (500 docs x invariant checks)
+16. Fix any failures found
 
-### Phase 5: Remaining bug fixes
+### Phase 5: Input model fixes
 
-15. Improve Enter-after-float to handle cursor-not-immediately-after-float
-16. Float-only page click → resolve to float anchor docPos
-17. Cross-page selection highlight (separate PR, not float-specific)
+17. Float-only page click: hit-test floats first, resolve to `docPos` (6.3)
+18. Enter-after-float: deeper split-logic float awareness (6.2)
+19. Test 6.2 + 6.3 interaction together
+20. Cross-page selection highlight (separate PR, not float-specific)
 
 ---
 
@@ -428,12 +553,22 @@ Run pipeline 5 times, hash each result. If 5 unique hashes → oscillation. If r
 
 ## 11. Key Lessons from the POC
 
-1. **Never re-resolve floats inside the constraint loop.** Oscillation is guaranteed when a float constrains its own anchor block. Resolve once, pin, reflow only.
+### Constraint engine lessons
 
-2. **Page boundaries must be estimated before the constraint loop.** Without barriers, floats get projected to wrong pages and text gets constrained for floats that aren't beside it.
+1. **This is a constraint solver, not a float positioner.** The POC crossed into building a constraint-based layout engine (closer to a browser than a document editor). That shift matters — the "bugs" are missing invariants, not edge cases.
 
-3. **`floatOffset` is cosmetic, not structural.** The offset shifts where the image is painted, not where text is blocked. The POC applied offset to both, creating dead space. v2 must separate rendered position from exclusion zone.
+2. **Enforce coordinate space separation at the type level.** Layout space (`layoutY`, `layoutX`) is for the solver. Visual space (`renderY`, `renderX`) is for the renderer. The POC mixed them with a single `globalY` field, causing the offset bug. v2 splits `FloatLayout` into two explicit position pairs.
 
-4. **Add browser console diagnostics when debugging layout.** The ExclusionManager semantics were correct during the POC — the bug was in page projection. Reasoning from code alone would have led to the wrong fix.
+3. **Constraints must be monotonic.** Exclusion zones only grow. Block heights only increase. Barriers are frozen. Float positions are pinned. Any violation of monotonicity introduces oscillation risk.
 
-5. **The "pagination is projection" principle works.** Making pagination read-only eliminated an entire class of mutation bugs (paragraph duplication, Pass 4 reconciliation).
+4. **Barriers are constraints, not estimates.** Treating them as "estimates that get refined" creates a hidden feedback loop. Compute once, freeze, let projection handle the rest.
+
+### Debugging lessons
+
+5. **Add browser console diagnostics when debugging layout.** The ExclusionManager semantics were correct during the POC — the bug was in page projection. Reasoning from code alone would have led to the wrong fix.
+
+6. **The "pagination is projection" principle works.** Making pagination read-only eliminated an entire class of mutation bugs (paragraph duplication, Pass 4 reconciliation).
+
+### Architecture insight
+
+7. **This architecture extends beyond floats.** The 2-phase solver (declare constraints → satisfy constraints → project to pages) is the same pattern needed for tables, columns, margin notes, and any future layout feature that constrains text flow. The constraint solver is the foundation, not a float-specific system.
