@@ -80,6 +80,13 @@ export interface IBaseEditor {
   setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void;
   /** Apply a transaction from an external source (e.g. Y.js remote sync). */
   _applyTransaction(tr: Transaction): void;
+  /**
+   * Apply a ProseMirror transaction through the full dispatch pipeline.
+   * Use for state mutations not covered by commands (e.g. tr.setMeta,
+   * deleteSelection, custom transforms). Routes through the same path
+   * as command-dispatched transactions.
+   */
+  applyTransaction(tr: Transaction): void;
   /** The merged ProseMirror Schema built from all extensions. */
   readonly schema: Schema;
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */

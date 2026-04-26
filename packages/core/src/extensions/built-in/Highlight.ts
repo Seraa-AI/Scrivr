@@ -116,3 +116,19 @@ export const Highlight = Extension.create<HighlightOptions>({
     }];
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    highlight: {
+      /** Toggle a highlight mark on the selection. */
+      toggleHighlight: (color?: string) => ReturnType;
+    };
+  }
+
+  interface MarkAttributes {
+    highlight: {
+      /** Highlight color — only used in multicolor mode */
+      color?: string;
+    };
+  }
+}

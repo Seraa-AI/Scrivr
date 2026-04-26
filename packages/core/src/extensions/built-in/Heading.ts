@@ -177,3 +177,35 @@ export const Heading = Extension.create<HeadingOptions>({
     return items;
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    heading: {
+      /** Set the current block to heading level 1. */
+      setHeading1: () => ReturnType;
+      /** Set the current block to heading level 2. */
+      setHeading2: () => ReturnType;
+      /** Set the current block to heading level 3. */
+      setHeading3: () => ReturnType;
+      /** Set the current block to heading level 4. */
+      setHeading4: () => ReturnType;
+      /** Set the current block to heading level 5. */
+      setHeading5: () => ReturnType;
+      /** Set the current block to heading level 6. */
+      setHeading6: () => ReturnType;
+      /** Set the current block to a plain paragraph. */
+      setParagraph: () => ReturnType;
+    };
+  }
+
+  interface NodeAttributes {
+    heading: {
+      /** Heading level 1–6. */
+      level: number;
+      /** Text alignment override. */
+      align?: "left" | "center" | "right" | "justify";
+      /** Font family override. */
+      fontFamily?: string | null;
+    };
+  }
+}

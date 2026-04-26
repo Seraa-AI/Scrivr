@@ -152,3 +152,21 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
     return items;
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    fontFamily: {
+      /** Apply a font family to the current block(s). */
+      setFontFamily: (family: string) => ReturnType;
+      /** Remove the font family override from the current block(s). */
+      unsetFontFamily: () => ReturnType;
+    };
+  }
+
+  interface MarkAttributes {
+    fontFamily: {
+      /** Font family string e.g. "Georgia" */
+      family: string;
+    };
+  }
+}

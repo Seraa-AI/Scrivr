@@ -141,3 +141,12 @@ export const HorizontalRule = Extension.create({
     ];
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    horizontalRule: {
+      /** Insert a horizontal rule at the cursor. */
+      insertHorizontalRule: () => ReturnType;
+    };
+  }
+}

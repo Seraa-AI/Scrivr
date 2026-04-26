@@ -104,3 +104,21 @@ export const Color = Extension.create<ColorOptions>({
     return items;
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    color: {
+      /** Apply a text color to the selection. */
+      setColor: (color: string) => ReturnType;
+      /** Remove the text color mark from the selection. */
+      unsetColor: () => ReturnType;
+    };
+  }
+
+  interface MarkAttributes {
+    color: {
+      /** CSS color string e.g. "#dc2626" */
+      color: string;
+    };
+  }
+}

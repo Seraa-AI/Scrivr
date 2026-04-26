@@ -226,3 +226,31 @@ export const List = Extension.create({
     };
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    list: {
+      /** Toggle a bullet list at the current block. */
+      toggleBulletList: () => ReturnType;
+      /** Toggle an ordered list at the current block. */
+      toggleOrderedList: () => ReturnType;
+      /** Lift a list item out of its list. */
+      liftListItem: () => ReturnType;
+      /** Sink a list item into a nested list. */
+      sinkListItem: () => ReturnType;
+    };
+  }
+
+  interface NodeAttributes {
+    bullet_list: {
+      /** Node ID assigned by UniqueId extension. */
+      id?: string;
+    };
+    ordered_list: {
+      /** Node ID assigned by UniqueId extension. */
+      id?: string;
+      /** Starting number for the ordered list. */
+      order?: number;
+    };
+  }
+}

@@ -232,3 +232,12 @@ export const Image = Extension.create({
     };
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    image: {
+      /** Open the system file picker and insert an image at the cursor. */
+      insertImage: () => ReturnType;
+    };
+  }
+}

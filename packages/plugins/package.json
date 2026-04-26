@@ -63,8 +63,8 @@
     "prosemirror-model": ">=1.0.0",
     "prosemirror-state": ">=1.0.0",
     "prosemirror-transform": ">=1.0.0",
-    "y-prosemirror": ">=1.0.0",
-    "yjs": ">=13.0.0"
+    "y-prosemirror": ">=1.0.0 <2",
+    "yjs": ">=13.6.0 <14"
   },
   "peerDependenciesMeta": {
     "@hocuspocus/provider": {
