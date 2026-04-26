@@ -177,3 +177,12 @@ export { CodeBlockStrategy };
 // Re-export Tab command for StarterKit chaining
 export { insertCodeIndent };
 
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    codeBlock: {
+      /** Toggle a code block at the current block. */
+      toggleCodeBlock: () => ReturnType;
+    };
+  }
+}
+

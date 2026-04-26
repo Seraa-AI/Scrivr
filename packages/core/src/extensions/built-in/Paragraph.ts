@@ -121,3 +121,14 @@ export const Paragraph = Extension.create({
     };
   },
 });
+
+declare module "@scrivr/core" {
+  interface NodeAttributes {
+    paragraph: {
+      /** Text alignment override. */
+      align?: "left" | "center" | "right" | "justify";
+      /** Font family override. */
+      fontFamily?: string | null;
+    };
+  }
+}

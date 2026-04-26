@@ -136,3 +136,12 @@ export const ClearFormatting = Extension.create({
     ];
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    clearFormatting: {
+      /** Remove all marks and reset block formatting in the selection. */
+      clearFormatting: () => ReturnType;
+    };
+  }
+}

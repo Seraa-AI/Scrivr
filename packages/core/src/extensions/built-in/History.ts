@@ -52,3 +52,14 @@ export const History = Extension.create<HistoryOptions>({
     };
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    history: {
+      /** Undo the last change. */
+      undo: () => ReturnType;
+      /** Redo the last undone change. */
+      redo: () => ReturnType;
+    };
+  }
+}

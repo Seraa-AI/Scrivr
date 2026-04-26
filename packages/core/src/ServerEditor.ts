@@ -1,4 +1,4 @@
-import { EditorState, Transaction } from "prosemirror-state";
+import { EditorState } from "prosemirror-state";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import { BaseEditor } from "./BaseEditor";
@@ -51,15 +51,6 @@ export class ServerEditor extends BaseEditor {
     // View-only extensions (CollaborationCursor etc.) that cast to IEditor
     // inside onEditorReady will get a runtime error if called — this is by design.
     this._fireEditorReady();
-  }
-
-  /**
-   * Apply a ProseMirror transaction.
-   * Alias of `_applyTransaction` with a friendlier name for server workflows.
-   * Plugins (e.g. TrackChanges) run their `appendTransaction` hooks as normal.
-   */
-  applyTransaction(tr: Transaction): void {
-    this._applyTransaction(tr);
   }
 
   /**

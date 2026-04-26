@@ -77,3 +77,12 @@ export const Bold = Extension.create<BoldOptions>({
     };
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    bold: {
+      /** Toggle the bold mark on the selection. */
+      toggleBold: () => ReturnType;
+    };
+  }
+}

@@ -1,6 +1,3 @@
-// Side-effect import — registers all built-in extension declare module blocks
-import "./built-in/augmentations";
-
 export { Extension } from "./Extension";
 export { ExtensionManager, getSchema } from "./ExtensionManager";
 export { StarterKit } from "./StarterKit";

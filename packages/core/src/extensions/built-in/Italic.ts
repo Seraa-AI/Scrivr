@@ -69,3 +69,12 @@ export const Italic = Extension.create<ItalicOptions>({
     };
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    italic: {
+      /** Toggle the italic mark on the selection. */
+      toggleItalic: () => ReturnType;
+    };
+  }
+}

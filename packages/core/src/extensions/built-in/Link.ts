@@ -143,3 +143,25 @@ export const Link = Extension.create({
     };
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    link: {
+      /** Prompt for a URL and apply a link mark to the selection. */
+      setLink: () => ReturnType;
+      /** Update the href of an existing link at [from, to]. */
+      setLinkHref: (from: number, to: number, href: string) => ReturnType;
+      /** Remove the link mark from the selection. */
+      unsetLink: () => ReturnType;
+    };
+  }
+
+  interface MarkAttributes {
+    link: {
+      /** The link href URL */
+      href: string;
+      /** Optional link title */
+      title?: string;
+    };
+  }
+}

@@ -94,3 +94,18 @@ export const Alignment = Extension.create({
     ];
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    alignment: {
+      /** Left-align the current block. */
+      setAlignLeft: () => ReturnType;
+      /** Center-align the current block. */
+      setAlignCenter: () => ReturnType;
+      /** Right-align the current block. */
+      setAlignRight: () => ReturnType;
+      /** Justify the current block. */
+      setAlignJustify: () => ReturnType;
+    };
+  }
+}

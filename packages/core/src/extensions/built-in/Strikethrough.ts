@@ -68,3 +68,12 @@ export const Strikethrough = Extension.create({
     };
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    strikethrough: {
+      /** Toggle the strikethrough mark on the selection. */
+      toggleStrikethrough: () => ReturnType;
+    };
+  }
+}

@@ -109,3 +109,21 @@ export const FontSize = Extension.create<FontSizeOptions>({
     return items;
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    fontSize: {
+      /** Set the font size (in px) for the selection. */
+      setFontSize: (size: number) => ReturnType;
+      /** Remove the font size mark from the selection. */
+      unsetFontSize: () => ReturnType;
+    };
+  }
+
+  interface MarkAttributes {
+    fontSize: {
+      /** Font size in px */
+      size: number;
+    };
+  }
+}

@@ -134,6 +134,22 @@ export class BaseEditor implements IBaseEditor {
     this._applyState(tr);
   }
 
+  /**
+   * Apply a ProseMirror transaction through the full dispatch pipeline.
+   *
+   * Use this for any state mutation not covered by commands — e.g. plugin
+   * metadata via `tr.setMeta()`, programmatic `deleteSelection`, or custom
+   * transforms. The transaction goes through the same path as command-
+   * dispatched transactions: plugin appendTransaction hooks run, layout is
+   * invalidated, subscribers are notified, and a render flush is scheduled.
+   *
+   * In `Editor` (browser) this routes through the view-aware dispatch.
+   * In `ServerEditor` it delegates to the base `_applyState` pipeline.
+   */
+  applyTransaction(tr: Transaction): void {
+    this._applyTransaction(tr);
+  }
+
   getMarkdown(): string {
     return this.getMarkdownSerializer().serialize(this._state.doc);
   }

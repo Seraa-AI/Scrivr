@@ -66,3 +66,12 @@ export const Underline = Extension.create({
     };
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    underline: {
+      /** Toggle the underline mark on the selection. */
+      toggleUnderline: () => ReturnType;
+    };
+  }
+}
