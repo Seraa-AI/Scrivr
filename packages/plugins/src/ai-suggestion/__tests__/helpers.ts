@@ -130,6 +130,10 @@ export class TestAiEditor implements IEditor {
     for (const cb of this._subscribers) cb();
   }
 
+  applyTransaction(tr: Transaction): void {
+    this._applyTransaction(tr);
+  }
+
   subscribe(cb: () => void): () => void {
     this._subscribers.push(cb);
     return () => {
