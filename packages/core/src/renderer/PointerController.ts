@@ -160,10 +160,10 @@ export class PointerController {
     for (const float of floats) {
       if (float.page !== page) continue;
       if (
-        canvasX >= float.x &&
-        canvasX <= float.x + float.width &&
-        canvasY >= float.y &&
-        canvasY <= float.y + float.height
+        canvasX >= float.renderX &&
+        canvasX <= float.renderX + float.width &&
+        canvasY >= float.renderY &&
+        canvasY <= float.renderY + float.height
       ) {
         return float;
       }

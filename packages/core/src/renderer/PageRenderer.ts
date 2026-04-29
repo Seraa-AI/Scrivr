@@ -151,8 +151,8 @@ export function renderPage(options: RenderPageOptions): void {
   for (const float of pageFloats) {
     map.registerObjectRect({
       docPos: float.docPos,
-      x: float.x,
-      y: float.y,
+      x: float.renderX,
+      y: float.renderY,
       width: float.width,
       height: float.height,
       page: float.page,
@@ -190,19 +190,19 @@ function drawFloat(
   map: CharacterMap,
   inlineRegistry?: InlineRegistry,
 ): void {
-  const { x, y, width, height, node, docPos, page } = float;
+  const { renderX, renderY, width, height, node, docPos, page } = float;
 
   // Always register with actual float dimensions. populateCharMap registers a
   // 0×0 placeholder for the zero-width anchor span; we overwrite it here so
   // getNodeViewportRect / createImageMenu sees the real visual rect.
-  map.registerObjectRect({ docPos, x, y, width, height, page });
+  map.registerObjectRect({ docPos, x: renderX, y: renderY, width, height, page });
   // Only register the anchor glyph if populateCharMap hasn't already done it.
   if (!map.hasGlyph(docPos)) {
     map.registerGlyph({
       docPos,
-      x,
-      y,
-      lineY: y,
+      x: renderX,
+      y: renderY,
+      lineY: renderY,
       width: 0,
       height: 0,
       page,
@@ -213,7 +213,7 @@ function drawFloat(
   // Use inline strategy if available.
   const strategy = inlineRegistry?.get(node.type.name);
   if (strategy) {
-    strategy.render(ctx, x, y, width, height, node);
+    strategy.render(ctx, renderX, renderY, width, height, node);
     return;
   }
 
@@ -221,7 +221,7 @@ function drawFloat(
   ctx.save();
   ctx.strokeStyle = "#e2e8f0";
   ctx.lineWidth = 1;
-  ctx.strokeRect(x, y, width, height);
+  ctx.strokeRect(renderX, renderY, width, height);
   ctx.restore();
 }
 

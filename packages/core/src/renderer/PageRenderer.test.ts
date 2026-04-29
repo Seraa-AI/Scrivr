@@ -125,8 +125,8 @@ describe("renderPage — float objectRect correctness", () => {
     expect(rect).toBeDefined();
     expect(rect!.width).toBe(float.width);
     expect(rect!.height).toBe(float.height);
-    expect(rect!.x).toBe(float.x);
-    expect(rect!.y).toBe(float.y);
+    expect(rect!.x).toBe(float.renderX);
+    expect(rect!.y).toBe(float.renderY);
     expect(rect!.page).toBe(float.page);
   });
 
@@ -138,8 +138,8 @@ describe("renderPage — float objectRect correctness", () => {
     expect(rect).toBeDefined();
     expect(rect!.width).toBe(float.width);
     expect(rect!.height).toBe(float.height);
-    expect(rect!.x).toBe(float.x);
-    expect(rect!.y).toBe(float.y);
+    expect(rect!.x).toBe(float.renderX);
+    expect(rect!.y).toBe(float.renderY);
   });
 
   it("'square-left' float: objectRect has real dimensions after renderPage", () => {

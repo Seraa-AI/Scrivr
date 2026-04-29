@@ -58,15 +58,9 @@ export interface FloatLayout {
   docPos: number;
   /** Page this float appears on (1-based). Set by projectFloatsOntoPages. */
   page: number;
-  /**
-   * Left edge in page coordinates.
-   * @deprecated Transition alias — use `renderX` for rendering, `layoutX` for solver.
-   */
+  /** Left edge in page coordinates (alias for renderX). */
   x: number;
-  /**
-   * Top edge in page coordinates.
-   * @deprecated Transition alias — use `renderY` for rendering, `layoutY` for solver.
-   */
+  /** Top edge in page coordinates (alias for renderY). */
   y: number;
   width: number;
   height: number;
