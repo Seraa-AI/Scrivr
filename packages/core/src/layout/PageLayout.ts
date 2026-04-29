@@ -463,8 +463,14 @@ export function runPipeline(
 export interface FlowPipelineResult {
   /** Pass-1 DocumentLayout with pages, metrics, runId. No floats, no fragments. */
   layout: DocumentLayout;
-  /** Measured FlowBlocks — used by the constraint solver after chrome convergence. */
+  /** Measured FlowBlocks with globalY stamped. */
   flows: FlowBlock[];
+  /**
+   * Floats resolved in global-Y space by the pre-pagination constraint loop.
+   * null when the document has no float anchors. Used by _runPipelineBody
+   * for page-local float projection.
+   */
+  resolvedFloats: { floats: FloatLayout[]; exclusionMgr: ExclusionManager } | null;
   /** True when streaming cutoff stopped pagination mid-document. */
   isPartial: boolean;
   /** Geometry + font context — constraint solver needs all of these. */
@@ -526,7 +532,29 @@ export function runFlowPipeline(
     measurer, fontModifiers, measureCache, maxBlocks, options.inlineRegistry,
   );
 
-  // Stage 2: paginate.
+  // Stage 1.5: assign continuous global-Y coordinates.
+  assignGlobalY(flowResult.flows, initY);
+
+  // Stage 1.75: pre-pagination float constraint resolution.
+  // Resolve float positions in global-Y space, then reflow constrained blocks
+  // so text wraps around floats BEFORE pagination assigns blocks to pages.
+  let resolvedFloats: { floats: FloatLayout[]; exclusionMgr: ExclusionManager } | null = null;
+
+  if (!pageConfig.pageless) {
+    const normalizedInputs = normalizeConstraints(flowResult.flows, pageConfig);
+    if (normalizedInputs.length > 0) {
+      const barriers = computeBarriers(flowResult.flows, pageConfig, resolved);
+      const solveResult = solveConstraints(
+        flowResult.flows, normalizedInputs, margins, pageWidth, contentWidth,
+        barriers, measurer, fontConfig, fontModifiers, options.inlineRegistry,
+      );
+      if (solveResult) {
+        resolvedFloats = { floats: solveResult.floats, exclusionMgr: new ExclusionManager() };
+      }
+    }
+  }
+
+  // Stage 2: paginate (flows now have constraint-reflowed heights).
   const pr = paginateFlow(
     flowResult.flows, pageConfig, resolved, metricsFor, runId,
     {
@@ -568,7 +596,7 @@ export function runFlowPipeline(
       convergence: "stable",
       iterationCount: 1,
     };
-    return { layout, flows: flowResult.flows, isPartial: true, ...context, y: pr.y };
+    return { layout, flows: flowResult.flows, resolvedFloats, isPartial: true, ...context, y: pr.y };
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
@@ -582,7 +610,7 @@ export function runFlowPipeline(
     convergence: "stable",
     iterationCount: 1,
   };
-  return { layout, flows: flowResult.flows, isPartial: false, ...context, y: pr.y };
+  return { layout, flows: flowResult.flows, resolvedFloats, isPartial: false, ...context, y: pr.y };
 }
 
 function _runPipelineBody(
@@ -629,63 +657,21 @@ function _runPipelineBody(
     _chromePayloads: chromeResult.chromePayloads,
   };
 
-  // Stage 3: float layout via global-Y constraint solver.
-  //
-  // For partial (streaming) layouts, skip the constraint solver entirely —
-  // floats render at anchor positions without exclusion zones. The full
-  // solver runs on the complete layout.
-  if (fp.isPartial) {
-    return layoutWithChrome;
-  }
+  // Stage 3: project pre-resolved global-Y floats onto paginated pages.
+  // Constraint resolution already happened in runFlowPipeline (Stage 1.75).
+  // When resolvedFloats is null, the document has no floats — skip entirely.
+  const floated = fp.resolvedFloats
+    ? projectFloatsOntoPages(layoutWithChrome, fp.resolvedFloats, pageConfig)
+    : layoutWithChrome;
 
-  // Stage 1.5: stamp continuous Y coordinates on flows.
-  assignGlobalY(fp.flows, fp.margins.top);
-
-  // Stage 1.6: normalize float inputs (clamp sizes, degrade invalid modes).
-  const normalizedInputs = normalizeConstraints(fp.flows, pageConfig);
-
-  // Phase A + B: resolve floats and reflow constrained blocks.
-  let floats: FloatLayout[] | undefined;
-  if (normalizedInputs.length > 0) {
-    const barriers = computeBarriers(fp.flows, pageConfig, chromeResult.resolved);
-    const solveResult = solveConstraints(
-      fp.flows, normalizedInputs, fp.margins, fp.pageWidth, fp.contentWidth,
-      barriers, fp.measurer, fp.fontConfig, fp.fontModifiers, options.inlineRegistry,
-    );
-    if (solveResult) {
-      // Phase C: project float positions onto paginated pages.
-      const metricsFor = (pn: number) => computePageMetrics(pageConfig, chromeResult.resolved, pn);
-      const pr = paginateFlow(fp.flows, pageConfig, chromeResult.resolved, metricsFor, runId, {
-        // Do NOT pass previousLayout — flows have been mutated by constraint
-        // reflow, so Phase 1b early termination would copy stale blocks.
-        init: {
-          pages: [],
-          page: { pageNumber: 1, blocks: [] },
-          y: metricsFor(1).contentTop,
-          prevSpaceAfter: 0,
-        },
-      });
-      const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
-      const pageMetrics = allPages.map((p) => metricsFor(p.pageNumber));
-
-      floats = projectFloatsOntoPages(
-        allPages, solveResult.floats, pageConfig, pageMetrics, normalizedInputs,
-      );
-
-      // Rebuild layoutWithChrome with the re-paginated pages (heights may have
-      // changed during constraint reflow).
-      layoutWithChrome.pages = allPages;
-      layoutWithChrome.metrics = pageMetrics;
-      layoutWithChrome.floats = floats;
-    }
-  }
+  if (fp.isPartial) return floated;
 
   // Stage 4: fragment index + totalContentHeight.
-  const { fragments, fragmentsByPage } = buildFragments(layoutWithChrome.pages);
+  const { fragments, fragmentsByPage } = buildFragments(floated.pages);
   const totalContentHeight = pageConfig.pageless
     ? fp.y + margins.bottom
-    : layoutWithChrome.pages.length * pageHeight;
-  return { ...layoutWithChrome, fragments, fragmentsByPage, totalContentHeight };
+    : floated.pages.length * pageHeight;
+  return { ...floated, fragments, fragmentsByPage, totalContentHeight };
 }
 
 /** Options bag for paginateFlow — cross-cutting context + resumption cursor. */
@@ -1647,83 +1633,104 @@ export function solveConstraints(
  * - Handle overflow (float doesn't fit on page → push to next page)
  * - Materialise empty pages for overflow floats
  */
-export function projectFloatsOntoPages(
-  pages: LayoutPage[],
-  floats: FloatLayout[],
+/**
+ * Stage 3: project pre-resolved global-Y floats onto paginated pages.
+ *
+ * Constraint resolution already happened in Stage 1.75 (inside runFlowPipeline).
+ * This pass:
+ *   1. Finds each float's anchor on the paginated pages
+ *   2. Derives page-local Y from the anchor's paginated position
+ *   3. Handles page overflow and materialises empty pages
+ *   4. Snapshots _pass1Pages for Phase 1b
+ */
+function projectFloatsOntoPages(
+  paginatedLayout: DocumentLayout,
+  resolvedFloats: { floats: FloatLayout[]; exclusionMgr: ExclusionManager },
   pageConfig: PageConfig,
-  metrics: PageMetrics[],
-  inputs: NormalizedFloatInput[],
-): FloatLayout[] {
-  if (floats.length === 0) return floats;
+): DocumentLayout {
+  const { pages } = paginatedLayout;
 
-  // Build anchor map: walk paginated pages to find each float anchor's page-local position
-  const anchorMap = new Map<number, { page: number; pageLocalY: number }>();
+  // Snapshot Pass 1 page/block positions for Phase 1b early termination.
+  const pass1Pages: LayoutPage[] = pages.map((p) => ({
+    pageNumber: p.pageNumber,
+    blocks: [...p.blocks],
+  }));
+
+  // Per-page metrics lookup.
+  const metricsForPage = (pageNumber: number): PageMetrics => {
+    const idx = pageNumber - 1;
+    const m = paginatedLayout.metrics?.[idx];
+    if (m && m.pageNumber === pageNumber) return m;
+    return computePageMetrics(pageConfig, EMPTY_RESOLVED_CHROME, pageNumber);
+  };
+
+  // Build anchor map from paginated pages: docPos → { page, blockY }.
+  const anchorMap = new Map<number, { page: number; blockY: number }>();
   for (const page of pages) {
     for (const block of page.blocks) {
       for (const line of block.lines) {
         for (const span of line.spans) {
-          if (span.kind !== "object") continue;
-          if (span.width !== 0) continue;
+          if (span.kind !== "object" || span.width !== 0) continue;
           const wm = span.node.attrs["wrappingMode"] as string | undefined;
           if (!wm || wm === "inline") continue;
-          anchorMap.set(span.docPos, { page: page.pageNumber, pageLocalY: block.y });
+          anchorMap.set(span.docPos, { page: page.pageNumber, blockY: block.y });
         }
       }
     }
   }
 
-  for (let fi = 0; fi < floats.length; fi++) {
-    const f = floats[fi]!;
-    const input = inputs[fi]!;
+  // Project each float onto its anchor's page.
+  const floats = resolvedFloats.floats.map((f) => {
     const anchor = anchorMap.get(f.docPos);
+    if (!anchor) return f;
 
-    if (!anchor) {
-      // Anchor not found in paginated output — degrade gracefully
-      f.page = 1;
-      f.renderY = f.layoutY;
-      f.renderX = f.layoutX;
-      f.x = f.renderX;
-      f.y = f.renderY;
-      f.anchorPage = 1;
-      f.anchorBlockY = f.anchorGlobalY;
-      continue;
-    }
-
-    // Delta: how far the float is from its anchor in layout space
+    // Page membership from paginated anchor position.
     const delta = f.layoutY - f.anchorGlobalY;
-    // Page-local candidate Y: anchor's page position + delta + visual offset
-    let candidateY = anchor.pageLocalY + delta + input.offsetY;
-
+    const candidateY = anchor.blockY + delta;
     let floatPage = anchor.page;
-    const pageIdx = floatPage - 1;
-    const pageMetrics = metrics[pageIdx] ?? computePageMetrics(pageConfig, EMPTY_RESOLVED_CHROME, floatPage);
+    const anchorPage = anchor.page;
 
-    // Overflow check: if float doesn't fit on this page, push to next
+    // If the float extends past the page bottom, overflow to the next page.
+    const pageBottom = metricsForPage(floatPage).contentBottom;
     if (f.mode !== "behind" && f.mode !== "front" &&
-        candidateY + f.height > pageMetrics.contentBottom) {
-      floatPage = anchor.page + 1;
-      const nextMetrics = metrics[floatPage - 1] ?? computePageMetrics(pageConfig, EMPTY_RESOLVED_CHROME, floatPage);
-      candidateY = nextMetrics.contentTop;
-
-      // Materialise empty page if needed
-      if (!pages.find((p) => p.pageNumber === floatPage)) {
-        const newPage: LayoutPage = { pageNumber: floatPage, blocks: [] };
-        const insertAt = pages.findIndex((p) => p.pageNumber > floatPage);
-        if (insertAt === -1) pages.push(newPage);
-        else pages.splice(insertAt, 0, newPage);
-      }
+        candidateY + f.height > pageBottom) {
+      floatPage = anchorPage + 1;
+      const nextContentTop = metricsForPage(floatPage).contentTop;
+      return {
+        ...f,
+        page: floatPage,
+        y: nextContentTop,
+        x: f.layoutX,
+        renderY: nextContentTop,
+        renderX: f.layoutX,
+        anchorPage,
+        anchorBlockY: anchor.blockY,
+      };
     }
 
-    f.page = floatPage;
-    f.renderY = candidateY;
-    f.renderX = f.layoutX;
-    f.x = f.renderX;
-    f.y = f.renderY;
-    f.anchorPage = anchor.page;
-    f.anchorBlockY = anchor.pageLocalY;
+    return {
+      ...f,
+      page: floatPage,
+      y: candidateY,
+      x: f.layoutX,
+      renderY: candidateY,
+      renderX: f.layoutX,
+      anchorPage,
+      anchorBlockY: anchor.blockY,
+    };
+  });
+
+  // Materialise empty pages for floats that landed on non-existent pages.
+  for (const f of floats) {
+    if (!pages.find((p) => p.pageNumber === f.page)) {
+      const newP: LayoutPage = { pageNumber: f.page, blocks: [] };
+      const insertAt = pages.findIndex((p) => p.pageNumber > f.page);
+      if (insertAt === -1) pages.push(newP);
+      else pages.splice(insertAt, 0, newP);
+    }
   }
 
-  return floats;
+  return { ...paginatedLayout, floats, _pass1Pages: pass1Pages };
 }
 
 /**

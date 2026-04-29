@@ -9,7 +9,6 @@ import {
   resolveFloatsGlobalY,
   reflowConstrainedBlocks,
   solveConstraints,
-  projectFloatsOntoPages,
   buildBlockFlow,
   collectLayoutItems,
   paginateFlow,
@@ -840,68 +839,43 @@ describe("solveConstraints", () => {
   });
 });
 
-// ── Phase 6: projectFloatsOntoPages ─────────────────────────────────────────
-
-/** Run the full new pipeline manually (pre-swap) to test projection. */
-function runNewPipeline(docNode: import("prosemirror-model").Node, fontConfig: import("./FontConfig").FontConfig) {
-  const margins = defaultPageConfig.margins;
-  const contentWidth = defaultPageConfig.pageWidth - margins.left - margins.right;
-  const measurer = createMeasurer();
-  const metricsFor = (pn: number) => computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, pn);
-
-  const flows = buildFlows(docNode, fontConfig);
-  assignGlobalY(flows, margins.top);
-  const inputs = normalizeConstraints(flows, defaultPageConfig);
-  const barriers = computeBarriers(flows, defaultPageConfig, EMPTY_RESOLVED_CHROME);
-  const solveResult = solveConstraints(
-    flows, inputs, margins, defaultPageConfig.pageWidth, contentWidth, barriers,
-    measurer, fontConfig, undefined, undefined,
-  );
-
-  const pr = paginateFlow(flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1, {
-    init: {
-      pages: [],
-      page: { pageNumber: 1, blocks: [] },
-      y: metricsFor(1).contentTop,
-      prevSpaceAfter: 0,
-    },
-  });
-  const pages: LayoutPage[] = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
-  const pageMetrics = pages.map((p) => metricsFor(p.pageNumber));
-
-  if (!solveResult) return { pages, floats: [], inputs, pageMetrics };
-
-  const projected = projectFloatsOntoPages(pages, solveResult.floats, defaultPageConfig, pageMetrics, inputs);
-  return { pages, floats: projected, inputs, pageMetrics };
-}
+// ── Phase 6: projectFloatsOntoPages (via full runPipeline) ──────────────────
 
 describe("projectFloatsOntoPages", () => {
   it("projects float onto page 1 with aliases matching", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = floatImage(schema, "square-left", 200, 200);
     const para = schema.node("paragraph", null, [img, schema.text("hello world test")]);
-    const { floats } = runNewPipeline(schema.node("doc", null, [para]), fontConfig);
-    expect(floats.length).toBe(1);
-    expect(floats[0]!.page).toBe(1);
-    expect(floats[0]!.x).toBe(floats[0]!.renderX);
-    expect(floats[0]!.y).toBe(floats[0]!.renderY);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    expect(layout.floats!.length).toBe(1);
+    expect(layout.floats![0]!.page).toBe(1);
+    expect(layout.floats![0]!.x).toBe(layout.floats![0]!.renderX);
+    expect(layout.floats![0]!.y).toBe(layout.floats![0]!.renderY);
   });
 
   it("projects float without offset: renderY = page-local anchor Y", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = floatImage(schema, "square-left", 200, 200);
     const para = schema.node("paragraph", null, [img, schema.text("hello world test")]);
-    const { floats } = runNewPipeline(schema.node("doc", null, [para]), fontConfig);
-    // Anchor is at top of page 1 (margins.top = 72), no offset
-    expect(floats[0]!.renderY).toBe(defaultPageConfig.margins.top);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    expect(layout.floats![0]!.renderY).toBe(defaultPageConfig.margins.top);
   });
 
-  it("projects float with negative offsetY: renderY shifted down from anchor", () => {
+  it("float in second paragraph has correct Y (not at page top)", () => {
     const { schema, fontConfig } = buildStarterKitContext();
-    const img = floatImage(schema, "square-left", 200, 200, { x: 0, y: -30 });
-    const para = schema.node("paragraph", null, [img, schema.text("hello world test")]);
-    const { floats } = runNewPipeline(schema.node("doc", null, [para]), fontConfig);
-    // renderY = anchor pageLocalY + delta (0) + offsetY (-30) = 72 + 0 + (-30) = 42
-    expect(floats[0]!.renderY).toBe(defaultPageConfig.margins.top - 30);
+    const longText = "word ".repeat(60).trim();
+    const p1 = schema.node("paragraph", null, [schema.text("First paragraph")]);
+    const img = floatImage(schema, "square-left", 200, 200);
+    const p2 = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = runPipeline(schema.node("doc", null, [p1, p2]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    expect(layout.floats!.length).toBe(1);
+    // Float should be at the Y of the second paragraph block, NOT at margins.top
+    expect(layout.floats![0]!.y).toBeGreaterThan(defaultPageConfig.margins.top);
   });
 });
