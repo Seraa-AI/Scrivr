@@ -701,6 +701,27 @@ describe("resolveFloatsGlobalY — barriers", () => {
     expect(f.layoutY).toBeGreaterThanOrEqual(barrier);
   });
 
+  it("barrier-pushed float does not constrain the previous page fragment", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = floatImage(schema, "square-right", 300, 200);
+    const para = schema.node("paragraph", null, [img, schema.text("hello")]);
+    const flows = buildFlowsWithGlobalY(schema.node("doc", null, [para]), fontConfig);
+    const barrier = margins.top + contentHeight;
+    flows[0]!.globalY = barrier - 20;
+    const inputs = normalizeConstraints(flows, defaultPageConfig);
+    const result = resolveFloatsGlobalY(
+      flows, inputs, margins, defaultPageConfig.pageWidth, contentWidth, [barrier],
+    );
+
+    expect(result!.floats[0]!.layoutY).toBe(barrier);
+    expect(
+      result!.exclusionMgr.getConstraint(undefined, barrier - 18, 18, margins.left, contentWidth),
+    ).toBeNull();
+    expect(
+      result!.exclusionMgr.getConstraint(undefined, barrier, 18, margins.left, contentWidth),
+    ).not.toBeNull();
+  });
+
   it("float fitting entirely above barrier: no push", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = floatImage(schema, "square-left", 200, 100);
@@ -1040,6 +1061,39 @@ function fullPipeline(docNode: import("prosemirror-model").Node, fontConfig: imp
   });
 }
 
+function assertNoTextFloatOverlap(layout: DocumentLayout): void {
+  for (const page of layout.pages) {
+    const floats = (layout.floats ?? []).filter(
+      (f) => f.page === page.pageNumber && f.mode !== "behind" && f.mode !== "front",
+    );
+    if (floats.length === 0) continue;
+
+    for (const block of page.blocks) {
+      let lineY = block.y;
+      for (const line of block.lines) {
+        const hasText = line.spans.some((span) => span.kind === "text" && span.text.trim().length > 0);
+        if (hasText) {
+          const lineX = block.x + (line.constraintX ?? 0);
+          const lineRight = lineX + line.width;
+          const lineBottom = lineY + line.lineHeight;
+          for (const float of floats) {
+            const overlaps =
+              lineX < float.x + float.width &&
+              lineRight > float.x &&
+              lineY < float.y + float.height &&
+              lineBottom > float.y;
+            expect(
+              overlaps,
+              `Text line (${lineX},${lineY},${line.width},${line.lineHeight}) overlaps ${float.mode} float (${float.x},${float.y},${float.width},${float.height}) on page ${page.pageNumber}`,
+            ).toBe(false);
+          }
+        }
+        lineY += line.lineHeight;
+      }
+    }
+  }
+}
+
 // ── Float position integration ──────────────────────────────────────────────
 
 describe("integration: float position matches anchor block", () => {
@@ -1163,6 +1217,30 @@ describe("integration: text wraps around floats", () => {
     // Behind mode = no exclusion → text doesn't reflow → same height
     expect(behindHeight).toBe(baseHeight);
   });
+
+  it("square-left dragged to the right edge: text moves below instead of under the float", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = floatImage(schema, "square-left", 300, 200, { x: 420, y: 0 });
+    const para = schema.node("paragraph", null, [
+      img,
+      schema.text("float exclusion zones pagination across page boundaries building fragments for the tile renderer"),
+    ]);
+    const layout = fullPipeline(schema.node("doc", null, [para]), fontConfig);
+
+    assertNoTextFloatOverlap(layout);
+  });
+
+  it("square-right dragged to the left edge: text moves below instead of under the float", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = floatImage(schema, "square-right", 300, 200, { x: -420, y: 0 });
+    const para = schema.node("paragraph", null, [
+      img,
+      schema.text("float exclusion zones pagination across page boundaries building fragments for the tile renderer"),
+    ]);
+    const layout = fullPipeline(schema.node("doc", null, [para]), fontConfig);
+
+    assertNoTextFloatOverlap(layout);
+  });
 });
 
 // ── Float stacking ──────────────────────────────────────────────────────────
@@ -1235,6 +1313,38 @@ describe("integration: floats and page boundaries", () => {
     const floatBlock = blocks[0]!;
     const afterBlock = blocks[1]!;
     expect(afterBlock.y).toBeGreaterThanOrEqual(floatBlock.y + floatBlock.height);
+  });
+
+  it("line on a page before the projected float keeps full width", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      ...defaultPageConfig,
+      pageHeight: 260,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const contentWidth = smallPage.pageWidth - smallPage.margins.left - smallPage.margins.right;
+    const lead = schema.node("paragraph", null, [schema.text("word ".repeat(55).trim())]);
+    const floatPara = schema.node("paragraph", null, [
+      floatImage(schema, "square-right", 300, 200),
+      schema.text("float anchor text"),
+    ]);
+    const layout = runPipeline(schema.node("doc", null, [lead, floatPara]), {
+      pageConfig: smallPage,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const firstFloatPage = Math.min(...layout.floats!.map((f) => f.page));
+    for (const page of layout.pages.filter((p) => p.pageNumber < firstFloatPage)) {
+      for (const block of page.blocks) {
+        for (const line of block.lines) {
+          expect(line.constraintX).toBeUndefined();
+          if (line.effectiveWidth !== undefined) {
+            expect(line.effectiveWidth).toBe(contentWidth);
+          }
+        }
+      }
+    }
   });
 });
 

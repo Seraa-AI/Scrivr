@@ -1420,6 +1420,7 @@ export function resolveFloatsGlobalY(
 
     // Y position (layout space — NO Y offset)
     let layoutY = anchorGlobalY;
+    let pushedByBarrier = false;
 
     // Skip stacking and barriers for behind/front floats
     if (input.mode !== "behind" && input.mode !== "front") {
@@ -1427,6 +1428,7 @@ export function resolveFloatsGlobalY(
       for (const barrier of barriers) {
         if (layoutY < barrier && layoutY + input.height > barrier) {
           layoutY = barrier;
+          pushedByBarrier = true;
         }
       }
 
@@ -1483,11 +1485,15 @@ export function resolveFloatsGlobalY(
       // For top-bottom, exclusion spans full content width
       const exclLeft = side === "full" ? contentX : layoutX - FLOAT_MARGIN_GLOBAL;
       const exclRight = side === "full" ? contentRight : layoutX + input.width + FLOAT_MARGIN_GLOBAL;
+      // When a float is pushed across a page barrier, its margin box must not
+      // leak upward into the previous fragment. Browsers apply float avoidance
+      // in the fragment where the float is placed, not the prior page.
+      const exclTop = pushedByBarrier ? layoutY : layoutY - FLOAT_MARGIN_GLOBAL;
 
       exclusionMgr.addRect({
         x: exclLeft,
         right: exclRight,
-        y: layoutY - FLOAT_MARGIN_GLOBAL,
+        y: exclTop,
         bottom: layoutY + input.height + FLOAT_MARGIN_GLOBAL,
         side,
         docPos: input.docPos,
@@ -1538,9 +1544,9 @@ export function reflowConstrainedBlocks(
       const blockContentX = margins.left + flow.indentLeft;
       const blockAvailWidth = contentWidth - flow.indentLeft;
 
-      const constraintProvider: ConstraintProvider = (absoluteLineY: number) => {
+      const constraintProvider: ConstraintProvider = (absoluteLineY: number, lineHeight = 1) => {
         return exclusionMgr.getConstraint(
-          undefined, absoluteLineY, 1, blockContentX, blockAvailWidth,
+          undefined, absoluteLineY, lineHeight, blockContentX, blockAvailWidth,
         );
       };
 
@@ -1765,12 +1771,13 @@ function projectFloatsOntoPages(
 }
 
 /**
- * Clears stale float constraints on continuation blocks.
+ * Clears stale float constraints after global-Y floats are projected to pages.
  *
- * When a constrained block splits across pages, overflow lines carry
- * constraintX / effectiveWidth from the pre-pagination line-break pass.
- * Lines on continuation blocks that don't overlap any wrapping float on
- * their page revert to full width.
+ * The constraint solver runs before pagination, so a line can be narrowed by a
+ * float that later projects to another page. Browser layout only applies a
+ * float exclusion when the line box and float margin box are on the same page
+ * and overlap vertically, so any projected line outside those page-local float
+ * zones must return to full width.
  */
 function clearOrphanedConstraints(
   pages: LayoutPage[],
@@ -1782,9 +1789,8 @@ function clearOrphanedConstraints(
     );
 
     if (pageFloats.length === 0) {
-      // No wrapping floats on this page — clear all constraints on continuations.
+      // No wrapping floats on this page — every line should use full width.
       for (const block of page.blocks) {
-        if (!block.isContinuation) continue;
         for (const line of block.lines) {
           clearLineConstraints(line);
         }
@@ -1794,7 +1800,6 @@ function clearOrphanedConstraints(
 
     // Page has floats — only clear lines that fall outside all float zones.
     for (const block of page.blocks) {
-      if (!block.isContinuation) continue;
       let lineY = block.y;
       for (const line of block.lines) {
         if (line.constraintX !== undefined || line.effectiveWidth !== undefined) {
@@ -2054,11 +2059,11 @@ function _applyFloatLayout_DEAD(
         const blockContentX = block.x;
         const blockAvailWidth = block.availableWidth;
 
-        const constraintProvider: ConstraintProvider = (absoluteLineY: number) => {
+        const constraintProvider: ConstraintProvider = (absoluteLineY: number, lineHeight = 1) => {
           return exclusionMgr.getConstraint(
             pageNum,
             absoluteLineY,
-            1,
+            lineHeight,
             blockContentX,
             blockAvailWidth,
           );

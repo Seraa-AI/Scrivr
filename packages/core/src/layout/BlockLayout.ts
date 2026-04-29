@@ -317,8 +317,8 @@ export function layoutBlock(
   let firstLineConsumed = false;
   const indentAwareConstraint: ConstraintProvider | undefined =
     textIndent > 0
-      ? (lineY: number) => {
-          const base = constraintProvider?.(lineY) ?? null;
+      ? (lineY: number, lineHeight?: number) => {
+          const base = constraintProvider?.(lineY, lineHeight) ?? null;
           if (!firstLineConsumed) {
             firstLineConsumed = true;
             const baseWidth = base?.width ?? availableWidth;

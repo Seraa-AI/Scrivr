@@ -214,6 +214,7 @@ export function computeObjectRenderY(
  */
 export type ConstraintProvider = (
   absoluteLineY: number,
+  lineHeight?: number,
 ) => { x: number; width: number; skipToY?: number } | null;
 
 /**
@@ -289,12 +290,35 @@ export class LineBreaker {
       }
     }
 
-    for (const word of words) {
+    const estimateProbeLineHeight = (line: LayoutSpan[], token: Token): number => {
+      if (line.length > 0) return buildLine(line, this.measurer).lineHeight;
+      if (token.kind === "object") return Math.max(token.height, DEFAULT_CURSOR_HEIGHT);
+      if (token.kind === "break") {
+        const font = lastSeenFont ?? `${defaultFontSize}px ${defaultFontFamily}`;
+        return this.measurer.getFontMetrics(normalizeFont(font)).lineHeight;
+      }
+      return this.measurer.getFontMetrics(normalizeFont(token.font)).lineHeight;
+    };
+    const pushSpacerLine = (height: number): void => {
+      lines.push({
+        spans: [],
+        width: 0,
+        ascent: 0,
+        descent: 0,
+        lineHeight: height,
+        textAscent: 0,
+        cursorHeight: 0,
+        xHeight: 0,
+      });
+    };
+
+    for (let wi = 0; wi < words.length; wi++) {
+      const word = words[wi]!;
       // Determine the effective width for the current line, applying any
       // float constraint from the ConstraintProvider.
       let absoluteLineY = startY + cumulativeLineY;
       let constraint = constraintProvider
-        ? constraintProvider(absoluteLineY)
+        ? constraintProvider(absoluteLineY, estimateProbeLineHeight(currentLine, word))
         : null;
 
       // Handle top-bottom ('full') float: flush any partial line then emit a
@@ -303,7 +327,7 @@ export class LineBreaker {
       // height = lines.reduce(sum + lineHeight) correctly reserves the space,
       // and the renderer's lineY advances past the image before drawing the
       // next real line.
-      if (
+      while (
         constraint?.skipToY !== undefined &&
         constraint.skipToY > absoluteLineY
       ) {
@@ -320,25 +344,16 @@ export class LineBreaker {
         }
         const gapHeight = constraint.skipToY - startY - cumulativeLineY;
         if (gapHeight > 0) {
-          lines.push({
-            spans: [],
-            width: 0,
-            ascent: 0,
-            descent: 0,
-            lineHeight: gapHeight,
-            textAscent: 0,
-            cursorHeight: 0,
-            xHeight: 0,
-          });
+          pushSpacerLine(gapHeight);
           cumulativeLineY += gapHeight;
         }
         absoluteLineY = startY + cumulativeLineY;
         constraint = constraintProvider
-          ? constraintProvider(absoluteLineY)
+          ? constraintProvider(absoluteLineY, estimateProbeLineHeight(currentLine, word))
           : null;
       }
 
-      const effectiveMaxWidth = constraint ? constraint.width : maxWidth;
+      let effectiveMaxWidth = constraint ? constraint.width : maxWidth;
 
       // Record constraint on the first word of a new line.
       if (currentLine.length === 0) {
@@ -389,6 +404,14 @@ export class LineBreaker {
       const fitsOnCurrentLine = currentWidth + wordWidth <= effectiveMaxWidth;
       const lineIsEmpty = currentLine.length === 0;
 
+      if (!fitsOnCurrentLine && lineIsEmpty && constraint && wordWidth <= maxWidth) {
+        const spacerHeight = Math.max(estimateProbeLineHeight(currentLine, word), 1);
+        pushSpacerLine(spacerHeight);
+        cumulativeLineY += spacerHeight;
+        wi--;
+        continue;
+      }
+
       if (!fitsOnCurrentLine && !lineIsEmpty) {
         const finishedLine = buildLine(currentLine, this.measurer);
         if (currentLineEffectiveWidth !== undefined)
@@ -400,15 +423,39 @@ export class LineBreaker {
         currentLine = [];
         currentWidth = 0;
         // Sample constraint for the new line that's about to start.
-        const newAbsoluteLineY = startY + cumulativeLineY;
-        const newConstraint = constraintProvider
-          ? constraintProvider(newAbsoluteLineY)
+        let newAbsoluteLineY = startY + cumulativeLineY;
+        let newConstraint = constraintProvider
+          ? constraintProvider(newAbsoluteLineY, estimateProbeLineHeight(currentLine, word))
           : null;
+        while (
+          newConstraint?.skipToY !== undefined &&
+          newConstraint.skipToY > newAbsoluteLineY
+        ) {
+          const gapHeight = newConstraint.skipToY - startY - cumulativeLineY;
+          if (gapHeight > 0) {
+            pushSpacerLine(gapHeight);
+            cumulativeLineY += gapHeight;
+          }
+          newAbsoluteLineY = startY + cumulativeLineY;
+          newConstraint = constraintProvider
+            ? constraintProvider(newAbsoluteLineY, estimateProbeLineHeight(currentLine, word))
+            : null;
+        }
+        constraint = newConstraint;
+        effectiveMaxWidth = constraint ? constraint.width : maxWidth;
         currentLineEffectiveWidth = newConstraint
           ? newConstraint.width
           : undefined;
         currentLineConstraintX =
           newConstraint && newConstraint.x > 0 ? newConstraint.x : undefined;
+
+        if (wordWidth > effectiveMaxWidth && constraint && wordWidth <= maxWidth) {
+          const spacerHeight = Math.max(estimateProbeLineHeight(currentLine, word), 1);
+          pushSpacerLine(spacerHeight);
+          cumulativeLineY += spacerHeight;
+          wi--;
+          continue;
+        }
       }
 
       if (word.kind === "object") {

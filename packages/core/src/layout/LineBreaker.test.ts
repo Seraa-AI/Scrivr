@@ -325,6 +325,65 @@ describe("LineBreaker — skipToY (top-bottom float)", () => {
       .trim();
     expect(reconstructed).toBe(text);
   });
+
+  it("honours skipToY after a wrap flush before placing the next word", () => {
+    const lb = new LineBreaker(makeMeasurer());
+    const constraintProvider = (y: number, lineHeight = 1) =>
+      y < 60 && y + lineHeight > 18 ? { x: 0, width: 0, skipToY: 60 } : null;
+
+    const lines = lb.breakIntoLines(
+      [{ kind: "text" as const, text: "aaaaaa bbbbbb cccccc", font: "14px serif", docPos: 1 }],
+      60,
+      { defaultFontFamily: "serif", defaultFontSize: 14, constraintProvider },
+    );
+
+    let y = 0;
+    for (const line of lines) {
+      if (line.spans.length > 0) {
+        expect(y < 60 && y + line.lineHeight > 18).toBe(false);
+      }
+      y += line.lineHeight;
+    }
+  });
+
+  it("queries constraints with the full line box height, not a 1px probe", () => {
+    const lb = new LineBreaker(makeMeasurer());
+    const constraintProvider = (y: number, lineHeight = 1) =>
+      y < 60 && y + lineHeight > 20 ? { x: 10, width: 80 } : null;
+
+    const lines = lb.breakIntoLines(
+      [{ kind: "text" as const, text: "line", font: "14px serif", docPos: 1 }],
+      200,
+      { defaultFontFamily: "serif", defaultFontSize: 14, startY: 10, constraintProvider },
+    );
+
+    expect(lines[0]!.constraintX).toBe(10);
+    expect(lines[0]!.effectiveWidth).toBe(80);
+  });
+
+  it("moves an empty constrained line down when the next word cannot fit beside a side float", () => {
+    const lb = new LineBreaker(makeMeasurer());
+    const constraintProvider = (y: number, lineHeight = 1) =>
+      y < 72 && y + lineHeight > 0 ? { x: 0, width: 20 } : null;
+
+    const lines = lb.breakIntoLines(
+      [{ kind: "text" as const, text: "abcdef", font: "14px serif", docPos: 1 }],
+      200,
+      { defaultFontFamily: "serif", defaultFontSize: 14, constraintProvider },
+    );
+
+    let y = 0;
+    const textLine = lines.find((line) => line.spans.some((span) => span.kind === "text"));
+    for (const line of lines) {
+      if (line === textLine) break;
+      y += line.lineHeight;
+    }
+
+    expect(textLine).toBeDefined();
+    expect(y).toBeGreaterThanOrEqual(72);
+    expect(textLine!.constraintX).toBeUndefined();
+    expect(textLine!.effectiveWidth).toBeUndefined();
+  });
 });
 
 describe("LineBreaker — CharacterMap population", () => {
