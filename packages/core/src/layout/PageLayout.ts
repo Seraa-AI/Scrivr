@@ -1730,7 +1730,60 @@ function projectFloatsOntoPages(
     }
   }
 
+  clearOrphanedConstraints(pages, floats);
   return { ...paginatedLayout, floats, _pass1Pages: pass1Pages };
+}
+
+/**
+ * Clears stale float constraints on continuation blocks.
+ *
+ * When a constrained block splits across pages, overflow lines carry
+ * constraintX / effectiveWidth from the pre-pagination line-break pass.
+ * Lines on continuation blocks that don't overlap any wrapping float on
+ * their page revert to full width.
+ */
+function clearOrphanedConstraints(
+  pages: LayoutPage[],
+  floats: FloatLayout[],
+): void {
+  for (const page of pages) {
+    const pageFloats = floats.filter(
+      (f) => f.page === page.pageNumber && f.mode !== "behind" && f.mode !== "front",
+    );
+
+    if (pageFloats.length === 0) {
+      // No wrapping floats on this page — clear all constraints on continuations.
+      for (const block of page.blocks) {
+        if (!block.isContinuation) continue;
+        for (const line of block.lines) {
+          clearLineConstraints(line);
+        }
+      }
+      continue;
+    }
+
+    // Page has floats — only clear lines that fall outside all float zones.
+    for (const block of page.blocks) {
+      if (!block.isContinuation) continue;
+      let lineY = block.y;
+      for (const line of block.lines) {
+        if (line.constraintX !== undefined || line.effectiveWidth !== undefined) {
+          const overlaps = pageFloats.some(
+            (f) => lineY < f.y + f.height && lineY + line.lineHeight > f.y,
+          );
+          if (!overlaps) clearLineConstraints(line);
+        }
+        lineY += line.lineHeight;
+      }
+    }
+  }
+}
+
+/** Remove constraintX / effectiveWidth from a line. */
+function clearLineConstraints(line: LayoutLine): void {
+  const rec = line as unknown as Record<string, unknown>;
+  delete rec["constraintX"];
+  delete rec["effectiveWidth"];
 }
 
 /**

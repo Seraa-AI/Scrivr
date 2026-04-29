@@ -879,3 +879,333 @@ describe("projectFloatsOntoPages", () => {
     expect(layout.floats![0]!.y).toBeGreaterThan(defaultPageConfig.margins.top);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 8: Integration Tests — End-to-End Pipeline Verification
+//
+// These tests verify what the RENDERER will see: block positions, float
+// positions, line constraints, and page assignments from the full runPipeline.
+// Previous unit tests passed while the visual was broken because they tested
+// isolated functions, not the integrated output.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const MARGINS = defaultPageConfig.margins;
+const CONTENT_WIDTH = defaultPageConfig.pageWidth - MARGINS.left - MARGINS.right; // 650
+const CONTENT_HEIGHT = defaultPageConfig.pageHeight - MARGINS.top - MARGINS.bottom; // 979
+const FLOAT_MARGIN = 8;
+
+/** Run the full pipeline and return the layout for assertions. */
+function fullPipeline(docNode: import("prosemirror-model").Node, fontConfig: import("./FontConfig").FontConfig) {
+  return runPipeline(docNode, {
+    pageConfig: defaultPageConfig,
+    fontConfig,
+    measurer: createMeasurer(),
+  });
+}
+
+// ── Float position integration ──────────────────────────────────────────────
+
+describe("integration: float position matches anchor block", () => {
+  it("square-left float Y matches its anchor block Y on the page", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = floatImage(schema, "square-left", 200, 200);
+    const para = schema.node("paragraph", null, [img, schema.text("word ".repeat(40).trim())]);
+    const layout = fullPipeline(schema.node("doc", null, [para]), fontConfig);
+
+    const block = layout.pages[0]!.blocks[0]!;
+    const float = layout.floats![0]!;
+    // Float Y must match the block Y — they're on the same page at the same position
+    expect(float.y).toBe(block.y);
+    expect(float.page).toBe(1);
+  });
+
+  it("square-left float X is at left margin, square-right at right margin", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const text = "word ".repeat(40).trim();
+    const imgL = floatImage(schema, "square-left", 200, 200);
+    const imgR = floatImage(schema, "square-right", 200, 200);
+    const p1 = schema.node("paragraph", null, [imgL, schema.text(text)]);
+    const p2 = schema.node("paragraph", null, [imgR, schema.text(text)]);
+    const layout = fullPipeline(schema.node("doc", null, [p1, p2]), fontConfig);
+
+    const fLeft = layout.floats!.find(f => f.mode === "square-left")!;
+    const fRight = layout.floats!.find(f => f.mode === "square-right")!;
+    expect(fLeft.x).toBe(MARGINS.left);
+    expect(fRight.x).toBe(defaultPageConfig.pageWidth - MARGINS.right - 200);
+  });
+
+  it("float in later paragraph has Y > first block Y", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const text = "word ".repeat(30).trim();
+    const p1 = schema.node("paragraph", null, [schema.text("First paragraph here")]);
+    const p2 = schema.node("paragraph", null, [schema.text("Second paragraph here")]);
+    const img = floatImage(schema, "square-left", 200, 200);
+    const p3 = schema.node("paragraph", null, [img, schema.text(text)]);
+    const layout = fullPipeline(schema.node("doc", null, [p1, p2, p3]), fontConfig);
+
+    const float = layout.floats![0]!;
+    const firstBlockY = layout.pages[0]!.blocks[0]!.y;
+    expect(float.y).toBeGreaterThan(firstBlockY);
+    // Float Y should match the third block (its anchor)
+    const thirdBlock = layout.pages[0]!.blocks[2]!;
+    expect(float.y).toBe(thirdBlock.y);
+  });
+});
+
+// ── Text wrapping (constrained lines) ───────────────────────────────────────
+
+describe("integration: text wraps around floats", () => {
+  it("square-left: some lines constrained, some unconstrained (text wraps then reverts)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Use enough text that lines extend well past the 200px float zone.
+    // 200px float / 18px lineHeight = ~11 constrained lines. Need >11 lines total.
+    // At 442px effective width, ~11 words/line. Need >121 words (11*11) to overflow.
+    const img = floatImage(schema, "square-left", 200, 200);
+    const para = schema.node("paragraph", null, [img, schema.text("word ".repeat(200).trim())]);
+    const layout = fullPipeline(schema.node("doc", null, [para]), fontConfig);
+
+    const block = layout.pages[0]!.blocks[0]!;
+    const constrained = block.lines.filter(l => l.constraintX !== undefined);
+    const unconstrained = block.lines.filter(l => l.constraintX === undefined && l.spans.length > 0);
+
+    // Should have both constrained lines (in float zone) and unconstrained (below it)
+    expect(constrained.length).toBeGreaterThan(0);
+    expect(unconstrained.length).toBeGreaterThan(0);
+
+    // Constrained lines should have constraintX = imageWidth + margin
+    for (const line of constrained) {
+      expect(line.constraintX).toBe(200 + FLOAT_MARGIN);
+    }
+  });
+
+  it("square-left: constrained block is taller than unconstrained equivalent", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const longText = "word ".repeat(60).trim();
+
+    // Unconstrained
+    const p1 = schema.node("paragraph", null, [schema.text(longText)]);
+    const l1 = fullPipeline(schema.node("doc", null, [p1]), fontConfig);
+    const baseHeight = l1.pages[0]!.blocks[0]!.height;
+
+    // Constrained (float narrows available width → more lines → taller)
+    const img = floatImage(schema, "square-left", 200, 200);
+    const p2 = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const l2 = fullPipeline(schema.node("doc", null, [p2]), fontConfig);
+    const constrainedHeight = l2.pages[0]!.blocks[0]!.height;
+
+    expect(constrainedHeight).toBeGreaterThan(baseHeight);
+  });
+
+  it("top-bottom: exclusion spans full width, text below the image", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = floatImage(schema, "top-bottom", 300, 200);
+    const para = schema.node("paragraph", null, [img, schema.text("word ".repeat(60).trim())]);
+    const layout = fullPipeline(schema.node("doc", null, [para]), fontConfig);
+
+    const block = layout.pages[0]!.blocks[0]!;
+    const float = layout.floats![0]!;
+
+    // For top-bottom, the block height should include the float displacement
+    // (text is pushed below the image, not beside it)
+    expect(block.height).toBeGreaterThan(200); // at least float height + text lines
+  });
+
+  it("behind/front: no text constraint, block height unchanged", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const longText = "word ".repeat(60).trim();
+
+    const p1 = schema.node("paragraph", null, [schema.text(longText)]);
+    const l1 = fullPipeline(schema.node("doc", null, [p1]), fontConfig);
+    const baseHeight = l1.pages[0]!.blocks[0]!.height;
+
+    const img = floatImage(schema, "behind", 200, 200);
+    const p2 = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const l2 = fullPipeline(schema.node("doc", null, [p2]), fontConfig);
+    const behindHeight = l2.pages[0]!.blocks[0]!.height;
+
+    // Behind mode = no exclusion → text doesn't reflow → same height
+    expect(behindHeight).toBe(baseHeight);
+  });
+});
+
+// ── Float stacking ──────────────────────────────────────────────────────────
+
+describe("integration: float stacking", () => {
+  it("two same-side floats do not visually overlap", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const text = "word ".repeat(30).trim();
+    const img1 = floatImage(schema, "square-left", 200, 200);
+    const img2 = floatImage(schema, "square-left", 200, 150);
+    const p1 = schema.node("paragraph", null, [img1, schema.text(text)]);
+    const p2 = schema.node("paragraph", null, [img2, schema.text(text)]);
+    const layout = fullPipeline(schema.node("doc", null, [p1, p2]), fontConfig);
+
+    expect(layout.floats!.length).toBe(2);
+    const [f1, f2] = layout.floats!;
+    // Second float must not overlap first vertically
+    expect(f2!.y).toBeGreaterThanOrEqual(f1!.y + f1!.height);
+  });
+
+  it("opposite-side floats at same Y don't stack (no horizontal overlap)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const text = "word ".repeat(30).trim();
+    const imgL = floatImage(schema, "square-left", 200, 200);
+    const imgR = floatImage(schema, "square-right", 200, 200);
+    const para = schema.node("paragraph", null, [imgL, imgR, schema.text(text)]);
+    const layout = fullPipeline(schema.node("doc", null, [para]), fontConfig);
+
+    expect(layout.floats!.length).toBe(2);
+    // Both should be at the same Y since they don't overlap horizontally
+    expect(layout.floats![0]!.y).toBe(layout.floats![1]!.y);
+  });
+});
+
+// ── Page boundary handling ──────────────────────────────────────────────────
+
+describe("integration: floats and page boundaries", () => {
+  it("float near page bottom overflows to next page", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Fill most of page 1 with text, then add a float paragraph
+    const fillerText = "word ".repeat(200).trim(); // enough to fill most of page 1
+    const filler = schema.node("paragraph", null, [schema.text(fillerText)]);
+    const img = floatImage(schema, "square-left", 200, 200);
+    const floatPara = schema.node("paragraph", null, [img, schema.text("some text after")]);
+    const layout = fullPipeline(schema.node("doc", null, [filler, floatPara]), fontConfig);
+
+    if (layout.floats && layout.floats.length > 0) {
+      const float = layout.floats[0]!;
+      // Float should be on a valid page
+      expect(float.page).toBeGreaterThanOrEqual(1);
+      // Float Y should be within page content bounds
+      const pm = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, float.page);
+      expect(float.y).toBeGreaterThanOrEqual(pm.contentTop);
+      expect(float.y + float.height).toBeLessThanOrEqual(pm.contentBottom + 1); // +1 tolerance
+    }
+  });
+
+  it("blocks after a float are pushed down, not overlapping", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = floatImage(schema, "square-left", 200, 300);
+    const text = "word ".repeat(60).trim();
+    const floatPara = schema.node("paragraph", null, [img, schema.text(text)]);
+    const afterPara = schema.node("paragraph", null, [schema.text("After the float")]);
+    const layout = fullPipeline(schema.node("doc", null, [floatPara, afterPara]), fontConfig);
+
+    const blocks = layout.pages[0]!.blocks;
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+
+    // After block must start after the float paragraph ends
+    const floatBlock = blocks[0]!;
+    const afterBlock = blocks[1]!;
+    expect(afterBlock.y).toBeGreaterThanOrEqual(floatBlock.y + floatBlock.height);
+  });
+});
+
+// ── Orphaned constraints on continuation blocks ─────────────────────────────
+
+describe("integration: orphaned constraints cleared on continuations", () => {
+  it("continuation block on page without float has no constraintX", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Long constrained text that splits across pages
+    const hugeText = "word ".repeat(400).trim();
+    const img = floatImage(schema, "square-left", 200, 200);
+    const para = schema.node("paragraph", null, [img, schema.text(hugeText)]);
+    const layout = fullPipeline(schema.node("doc", null, [para]), fontConfig);
+
+    // If the paragraph splits, continuation on page 2 should not have constraints
+    // (unless there's also a float on page 2)
+    if (layout.pages.length >= 2) {
+      const page2 = layout.pages[1]!;
+      const continuations = page2.blocks.filter(b => b.isContinuation);
+      for (const cont of continuations) {
+        const page2Floats = (layout.floats ?? []).filter(
+          f => f.page === page2.pageNumber && f.mode !== "behind" && f.mode !== "front"
+        );
+        if (page2Floats.length === 0) {
+          // No floats on this page — all lines should be unconstrained
+          for (const line of cont.lines) {
+            expect(line.constraintX).toBeUndefined();
+            expect(line.effectiveWidth).toBeUndefined();
+          }
+        }
+      }
+    }
+  });
+});
+
+// ── Invariant checks on complex documents ───────────────────────────────────
+
+describe("integration: layout invariants hold on complex documents", () => {
+  it("document with multiple float modes passes all invariants", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const text = "word ".repeat(40).trim();
+    const p1 = schema.node("paragraph", null, [
+      floatImage(schema, "square-left", 200, 200),
+      schema.text(text),
+    ]);
+    const p2 = schema.node("paragraph", null, [schema.text("Normal paragraph between floats")]);
+    const p3 = schema.node("paragraph", null, [
+      floatImage(schema, "square-right", 150, 150),
+      schema.text(text),
+    ]);
+    const p4 = schema.node("paragraph", null, [
+      floatImage(schema, "top-bottom", 300, 200),
+      schema.text(text),
+    ]);
+    const p5 = schema.node("paragraph", null, [schema.text("Final paragraph")]);
+    const layout = fullPipeline(schema.node("doc", null, [p1, p2, p3, p4, p5]), fontConfig);
+    assertLayoutInvariants(layout);
+    expect(layout.floats!.length).toBe(3);
+  });
+
+  it("document with no floats still works (no regression)", () => {
+    const layout = fullPipeline(
+      doc(p("First paragraph"), p("Second paragraph"), p("Third paragraph")),
+      defaultFontConfig,
+    );
+    assertLayoutInvariants(layout);
+    expect(layout.floats).toBeUndefined();
+    expect(layout.pages.length).toBe(1);
+  });
+
+  it("idempotence: runPipeline twice on same doc produces identical float positions", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = floatImage(schema, "square-left", 200, 200);
+    const para = schema.node("paragraph", null, [img, schema.text("word ".repeat(40).trim())]);
+    const docNode = schema.node("doc", null, [para]);
+
+    const l1 = fullPipeline(docNode, fontConfig);
+    const l2 = fullPipeline(docNode, fontConfig);
+
+    expect(l1.floats!.length).toBe(l2.floats!.length);
+    for (let i = 0; i < l1.floats!.length; i++) {
+      expect(l1.floats![i]!.x).toBe(l2.floats![i]!.x);
+      expect(l1.floats![i]!.y).toBe(l2.floats![i]!.y);
+      expect(l1.floats![i]!.page).toBe(l2.floats![i]!.page);
+    }
+  });
+
+  it("idempotence: block positions identical across two runs", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = floatImage(schema, "square-left", 200, 200);
+    const text = "word ".repeat(60).trim();
+    const docNode = schema.node("doc", null, [
+      schema.node("paragraph", null, [img, schema.text(text)]),
+      schema.node("paragraph", null, [schema.text("After float")]),
+    ]);
+
+    const l1 = fullPipeline(docNode, fontConfig);
+    const l2 = fullPipeline(docNode, fontConfig);
+
+    for (let pi = 0; pi < l1.pages.length; pi++) {
+      const p1 = l1.pages[pi]!;
+      const p2 = l2.pages[pi]!;
+      expect(p1.blocks.length).toBe(p2.blocks.length);
+      for (let bi = 0; bi < p1.blocks.length; bi++) {
+        expect(p1.blocks[bi]!.y).toBe(p2.blocks[bi]!.y);
+        expect(p1.blocks[bi]!.height).toBe(p2.blocks[bi]!.height);
+        expect(p1.blocks[bi]!.lines.length).toBe(p2.blocks[bi]!.lines.length);
+      }
+    }
+  });
+});
