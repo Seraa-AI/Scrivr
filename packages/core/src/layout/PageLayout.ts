@@ -656,8 +656,8 @@ function _runPipelineBody(
       // Phase C: project float positions onto paginated pages.
       const metricsFor = (pn: number) => computePageMetrics(pageConfig, chromeResult.resolved, pn);
       const pr = paginateFlow(fp.flows, pageConfig, chromeResult.resolved, metricsFor, runId, {
-        previousLayout: options.previousLayout,
-        measureCache: options.measureCache,
+        // Do NOT pass previousLayout — flows have been mutated by constraint
+        // reflow, so Phase 1b early termination would copy stale blocks.
         init: {
           pages: [],
           page: { pageNumber: 1, blocks: [] },
@@ -1678,7 +1678,7 @@ export function projectFloatsOntoPages(
     const anchor = anchorMap.get(f.docPos);
 
     if (!anchor) {
-      // Anchor not found in paginated output — shouldn't happen, but degrade gracefully
+      // Anchor not found in paginated output — degrade gracefully
       f.page = 1;
       f.renderY = f.layoutY;
       f.renderX = f.layoutX;
