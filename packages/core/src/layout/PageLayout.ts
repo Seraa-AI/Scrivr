@@ -419,7 +419,7 @@ export const defaultPagelessConfig: PageConfig = {
  * Drives all three pipeline stages in order:
  *   Stage 1  buildBlockFlow   — position-independent measurement
  *   Stage 2  paginateFlow     — assign blocks to pages
- *   Stage 3  applyFloatLayout — float positions + exclusion reflow
+ *   Stage 3  constraint solver — float positions + exclusion reflow (global-Y)
  *
  * Returns a fully positioned DocumentLayout. Does NOT touch the CharacterMap.
  * This function is the single source of truth for orchestration; both
@@ -463,9 +463,11 @@ export function runPipeline(
 export interface FlowPipelineResult {
   /** Pass-1 DocumentLayout with pages, metrics, runId. No floats, no fragments. */
   layout: DocumentLayout;
+  /** Measured FlowBlocks — used by the constraint solver after chrome convergence. */
+  flows: FlowBlock[];
   /** True when streaming cutoff stopped pagination mid-document. */
   isPartial: boolean;
-  /** Geometry + font context — applyFloatLayout needs all of these. */
+  /** Geometry + font context — constraint solver needs all of these. */
   margins: PageConfig["margins"];
   pageWidth: number;
   contentWidth: number;
@@ -566,7 +568,7 @@ export function runFlowPipeline(
       convergence: "stable",
       iterationCount: 1,
     };
-    return { layout, isPartial: true, ...context, y: pr.y };
+    return { layout, flows: flowResult.flows, isPartial: true, ...context, y: pr.y };
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
@@ -580,7 +582,7 @@ export function runFlowPipeline(
     convergence: "stable",
     iterationCount: 1,
   };
-  return { layout, isPartial: false, ...context, y: pr.y };
+  return { layout, flows: flowResult.flows, isPartial: false, ...context, y: pr.y };
 }
 
 function _runPipelineBody(
@@ -627,19 +629,63 @@ function _runPipelineBody(
     _chromePayloads: chromeResult.chromePayloads,
   };
 
-  // Stage 3: float layout — runs once on the final paginated pages.
-  const floated = applyFloatLayout(
-    layoutWithChrome, fp.margins, fp.pageWidth, fp.contentWidth,
-    fp.measurer, fp.fontConfig, fp.fontModifiers, options.inlineRegistry,
-  );
-  if (fp.isPartial) return floated;
+  // Stage 3: float layout via global-Y constraint solver.
+  //
+  // For partial (streaming) layouts, skip the constraint solver entirely —
+  // floats render at anchor positions without exclusion zones. The full
+  // solver runs on the complete layout.
+  if (fp.isPartial) {
+    return layoutWithChrome;
+  }
+
+  // Stage 1.5: stamp continuous Y coordinates on flows.
+  assignGlobalY(fp.flows, fp.margins.top);
+
+  // Stage 1.6: normalize float inputs (clamp sizes, degrade invalid modes).
+  const normalizedInputs = normalizeConstraints(fp.flows, pageConfig);
+
+  // Phase A + B: resolve floats and reflow constrained blocks.
+  let floats: FloatLayout[] | undefined;
+  if (normalizedInputs.length > 0) {
+    const barriers = computeBarriers(fp.flows, pageConfig, chromeResult.resolved);
+    const solveResult = solveConstraints(
+      fp.flows, normalizedInputs, fp.margins, fp.pageWidth, fp.contentWidth,
+      barriers, fp.measurer, fp.fontConfig, fp.fontModifiers, options.inlineRegistry,
+    );
+    if (solveResult) {
+      // Phase C: project float positions onto paginated pages.
+      const metricsFor = (pn: number) => computePageMetrics(pageConfig, chromeResult.resolved, pn);
+      const pr = paginateFlow(fp.flows, pageConfig, chromeResult.resolved, metricsFor, runId, {
+        previousLayout: options.previousLayout,
+        measureCache: options.measureCache,
+        init: {
+          pages: [],
+          page: { pageNumber: 1, blocks: [] },
+          y: metricsFor(1).contentTop,
+          prevSpaceAfter: 0,
+        },
+      });
+      const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
+      const pageMetrics = allPages.map((p) => metricsFor(p.pageNumber));
+
+      floats = projectFloatsOntoPages(
+        allPages, solveResult.floats, pageConfig, pageMetrics, normalizedInputs,
+      );
+
+      // Rebuild layoutWithChrome with the re-paginated pages (heights may have
+      // changed during constraint reflow).
+      layoutWithChrome.pages = allPages;
+      layoutWithChrome.metrics = pageMetrics;
+      layoutWithChrome.floats = floats;
+    }
+  }
 
   // Stage 4: fragment index + totalContentHeight.
-  const { fragments, fragmentsByPage } = buildFragments(floated.pages);
+  const { fragments, fragmentsByPage } = buildFragments(layoutWithChrome.pages);
   const totalContentHeight = pageConfig.pageless
     ? fp.y + margins.bottom
-    : floated.pages.length * pageHeight;
-  return { ...floated, fragments, fragmentsByPage, totalContentHeight };
+    : layoutWithChrome.pages.length * pageHeight;
+  return { ...layoutWithChrome, fragments, fragmentsByPage, totalContentHeight };
 }
 
 /** Options bag for paginateFlow — cross-cutting context + resumption cursor. */
@@ -1519,9 +1565,9 @@ export function reflowConstrainedBlocks(
       page: 0, // pre-pagination — no page assignment yet
       measurer,
       fontConfig,
-      fontModifiers,
+      ...(fontModifiers ? { fontModifiers } : {}),
       constraintProvider,
-      inlineRegistry,
+      ...(inlineRegistry ? { inlineRegistry } : {}),
     });
 
     if (reflowed.height !== flow.height || reflowed.lines.length !== flow.lines.length) {
@@ -1681,22 +1727,10 @@ export function projectFloatsOntoPages(
 }
 
 /**
- * Stage 3 of the layout pipeline: compute float positions, populate the
- * ExclusionManager, and re-flow any blocks that overlap an exclusion zone.
- *
- * Pure geometry over paginated blocks — no measuring except targeted reflow of
- * blocks that intersect an exclusion zone. Called for both complete layouts and
- * partial (streaming) layouts so floats in the initial chunk appear immediately.
- *
- * @param pass1Result  Paginated layout from paginateFlow() (Stages 1+2).
- * @param margins      Page margins.
- * @param pageWidth    Full page width (used to compute content area for floats).
- * @param contentWidth Content width (pageWidth - margins.left - margins.right).
- * @param measurer     TextMeasurer — used only for targeted block reflow.
- * @param fontConfig   Font config forwarded to layoutBlock() during reflow.
- * @param fontModifiers Font modifiers forwarded to layoutBlock() during reflow.
+ * @deprecated Legacy float layout — replaced by the global-Y constraint solver.
+ * Kept temporarily for reference; will be deleted once the new pipeline is stable.
  */
-export function applyFloatLayout(
+function _applyFloatLayout_DEAD(
   pass1Result: DocumentLayout,
   margins: PageConfig["margins"],
   pageWidth: number,

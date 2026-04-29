@@ -2,9 +2,21 @@ import { describe, it, expect } from "vitest";
 import {
   runPipeline,
   defaultPageConfig,
+  assignGlobalY,
+  recomputeGlobalY,
+  normalizeConstraints,
+  computeBarriers,
+  resolveFloatsGlobalY,
+  reflowConstrainedBlocks,
+  solveConstraints,
+  projectFloatsOntoPages,
+  buildBlockFlow,
+  collectLayoutItems,
+  paginateFlow,
 } from "./PageLayout";
-import type { DocumentLayout, FloatLayout, LayoutPage } from "./PageLayout";
+import type { DocumentLayout, FloatLayout, LayoutPage, FlowBlock, NormalizedFloatInput } from "./PageLayout";
 import { computePageMetrics, EMPTY_RESOLVED_CHROME } from "./PageMetrics";
+import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import {
   buildStarterKitContext,
   createMeasurer,
@@ -14,6 +26,7 @@ import {
   MOCK_LINE_HEIGHT,
 } from "../test-utils";
 import { ExclusionManager } from "./ExclusionManager";
+import { schema } from "../model/schema";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 // lineHeight = 18, margins = 72 each, contentWidth = 794 - 72 - 72 = 650
@@ -188,25 +201,7 @@ describe("ExclusionManager — global-Y mode", () => {
 
 // ── Mock FlowBlock helper ────────────────────────────────────────────────────
 
-import type { FlowBlock } from "./PageLayout";
-import {
-  assignGlobalY,
-  recomputeGlobalY,
-  normalizeConstraints,
-  computeBarriers,
-  resolveFloatsGlobalY,
-  reflowConstrainedBlocks,
-  solveConstraints,
-  projectFloatsOntoPages,
-  buildBlockFlow,
-  collectLayoutItems,
-  paginateFlow,
-} from "./PageLayout";
-import type { LayoutPage } from "./PageLayout";
-import type { NormalizedFloatInput } from "./PageLayout";
-import { defaultFontConfig, applyPageFont } from "./FontConfig";
-import { EMPTY_RESOLVED_CHROME } from "./PageMetrics";
-import { schema } from "../model/schema";
+// (imports consolidated at top of file)
 
 /** Creates a minimal FlowBlock for unit testing globalY functions. */
 function mockFlow(overrides: Partial<FlowBlock> & { height: number }): FlowBlock {
