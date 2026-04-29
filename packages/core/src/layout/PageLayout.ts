@@ -1518,53 +1518,80 @@ export function reflowConstrainedBlocks(
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
   inlineRegistry: InlineRegistry | undefined,
-): { changed: boolean; firstChangedIndex: number } {
+  /** Track which flows were constrained on a previous iteration. */
+  previouslyConstrained?: Set<number>,
+): { changed: boolean; firstChangedIndex: number; constrained: Set<number> } {
   let changed = false;
   let firstChangedIndex = flows.length;
+  const constrained = new Set<number>();
 
   for (let i = 0; i < flows.length; i++) {
     const flow = flows[i]!;
     if (flow.isPageBreak || flow.globalY === undefined) continue;
 
-    // Check if any of this flow's lines overlap an exclusion
     const flowTop = flow.globalY;
     const flowBottom = flowTop + flow.height;
-    if (!exclusionMgr.hasExclusionsInRange(flowTop, flowBottom)) continue;
+    const overlaps = exclusionMgr.hasExclusionsInRange(flowTop, flowBottom);
 
-    // Build constraint provider in global-Y space
-    const blockContentX = margins.left + flow.indentLeft;
-    const blockAvailWidth = contentWidth - flow.indentLeft;
-    const blockY = flow.globalY;
+    if (overlaps) {
+      // Build constraint provider in global-Y space
+      const blockContentX = margins.left + flow.indentLeft;
+      const blockAvailWidth = contentWidth - flow.indentLeft;
 
-    const constraintProvider: ConstraintProvider = (absoluteLineY: number) => {
-      return exclusionMgr.getConstraint(
-        undefined, absoluteLineY, 1, blockContentX, blockAvailWidth,
-      );
-    };
+      const constraintProvider: ConstraintProvider = (absoluteLineY: number) => {
+        return exclusionMgr.getConstraint(
+          undefined, absoluteLineY, 1, blockContentX, blockAvailWidth,
+        );
+      };
 
-    // Re-layout with constraint
-    const reflowed = layoutBlock(flow.node, {
-      nodePos: flow.nodePos,
-      x: blockContentX,
-      y: blockY,
-      availableWidth: blockAvailWidth,
-      page: 0, // pre-pagination — no page assignment yet
-      measurer,
-      fontConfig,
-      ...(fontModifiers ? { fontModifiers } : {}),
-      constraintProvider,
-      ...(inlineRegistry ? { inlineRegistry } : {}),
-    });
+      const reflowed = layoutBlock(flow.node, {
+        nodePos: flow.nodePos,
+        x: blockContentX,
+        y: flow.globalY,
+        availableWidth: blockAvailWidth,
+        page: 0,
+        measurer,
+        fontConfig,
+        ...(fontModifiers ? { fontModifiers } : {}),
+        constraintProvider,
+        ...(inlineRegistry ? { inlineRegistry } : {}),
+      });
 
-    if (reflowed.height !== flow.height || reflowed.lines.length !== flow.lines.length) {
-      flow.lines = reflowed.lines;
-      flow.height = reflowed.height;
-      changed = true;
-      if (i < firstChangedIndex) firstChangedIndex = i;
+      constrained.add(i);
+      if (reflowed.height !== flow.height || reflowed.lines.length !== flow.lines.length) {
+        flow.lines = reflowed.lines;
+        flow.height = reflowed.height;
+        changed = true;
+        if (i < firstChangedIndex) firstChangedIndex = i;
+      }
+    } else if (previouslyConstrained?.has(i)) {
+      // This flow was constrained on a previous iteration but no longer overlaps.
+      // Re-layout at full width to remove stale spacer lines.
+      const blockContentX = margins.left + flow.indentLeft;
+      const blockAvailWidth = contentWidth - flow.indentLeft;
+
+      const reflowed = layoutBlock(flow.node, {
+        nodePos: flow.nodePos,
+        x: blockContentX,
+        y: flow.globalY,
+        availableWidth: blockAvailWidth,
+        page: 0,
+        measurer,
+        fontConfig,
+        ...(fontModifiers ? { fontModifiers } : {}),
+        ...(inlineRegistry ? { inlineRegistry } : {}),
+      });
+
+      if (reflowed.height !== flow.height || reflowed.lines.length !== flow.lines.length) {
+        flow.lines = reflowed.lines;
+        flow.height = reflowed.height;
+        changed = true;
+        if (i < firstChangedIndex) firstChangedIndex = i;
+      }
     }
   }
 
-  return { changed, firstChangedIndex };
+  return { changed, firstChangedIndex, constrained };
 }
 
 /**
@@ -1593,11 +1620,14 @@ export function solveConstraints(
 
   // Phase B: fixed-point reflow loop
   let converged = false;
+  let previouslyConstrained: Set<number> | undefined;
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     const result = reflowConstrainedBlocks(
       flows, resolved.exclusionMgr, margins, contentWidth,
       measurer, fontConfig, fontModifiers, inlineRegistry,
+      previouslyConstrained,
     );
+    previouslyConstrained = result.constrained;
     if (!result.changed) {
       converged = true;
       break;

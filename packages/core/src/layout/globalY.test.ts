@@ -880,6 +880,143 @@ describe("projectFloatsOntoPages", () => {
   });
 });
 
+// ── Real document reproduction (from demo doc JSON) ─────────────────────────
+
+describe("integration: demo document reproduction", () => {
+  // This reproduces the exact structure from the user's demo document:
+  // - Several text paragraphs + headings
+  // - A "Layout Engine" heading
+  // - A STANDALONE paragraph containing ONLY a top-bottom float image
+  // - A SEPARATE long text paragraph after the float
+  //
+  // The bug: text in the paragraph AFTER the float was rendering UNDER the image
+  // instead of below it. The float's exclusion zone wasn't displacing the next
+  // paragraph's text because the float was in a different block.
+
+  it("top-bottom float in standalone paragraph: next paragraph text starts BELOW the float", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+
+    // Build the key part of the demo doc: heading → float paragraph → text paragraph
+    const heading = schema.node("heading", { level: 2 }, [schema.text("Layout Engine")]);
+    const floatImg = floatImage(schema, "top-bottom", 300, 200, { x: 14, y: -24 });
+    const floatPara = schema.node("paragraph", null, [floatImg]);
+    const longText = "Scrivr uses a custom layout pipeline that computes line breaks page boundaries and float positions independent of the browser CSS engine. The output is identical between the canvas view and PDF export. Every page is rendered onto an HTML5 Canvas element with sub-pixel precision. The layout engine runs a multi-pass pipeline first building the block flow from the ProseMirror document tree then applying float exclusion zones paginating across page boundaries and finally building fragments for the tile renderer. Each pass is pure no DOM dependency no CSS reflow. This means the exact same layout can be reproduced server-side for PDF generation ensuring what you see on screen is exactly what you get in the exported document.";
+    const textPara = schema.node("paragraph", null, [schema.text(longText)]);
+    const afterPara = schema.node("paragraph", null, [
+      schema.text("The pipeline runs incrementally during idle time keeping the editor responsive even on 100 plus page documents."),
+    ]);
+
+    // Include some content before the float to push it down the page
+    const intro = schema.node("paragraph", null, [
+      schema.text("A canvas-rendered document editor built for high-fidelity multi-page documents."),
+    ]);
+
+    const docNode = schema.node("doc", null, [
+      schema.node("heading", { level: 1 }, [schema.text("Welcome to Scrivr")]),
+      intro,
+      heading,
+      floatPara,
+      textPara,
+      afterPara,
+    ]);
+
+    const layout = runPipeline(docNode, {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    assertLayoutInvariants(layout);
+    expect(layout.floats).toBeDefined();
+    expect(layout.floats!.length).toBe(1);
+
+    const float = layout.floats![0]!;
+
+    // Find the text paragraph block (the one AFTER the float paragraph)
+    // The float paragraph has the float anchor; the text paragraph has actual text content
+    const allBlocks = layout.pages.flatMap(p => p.blocks);
+    // The float is in its own paragraph. The next block is the long text.
+    // Find blocks by checking if they have text lines with actual spans
+    // Filter to blocks that have actual text content (not empty spacer blocks)
+    const textBlocks = allBlocks.filter(b =>
+      b.lines.some(l => l.spans.length > 0 && l.spans.some(s => s.kind === "text"))
+    );
+    // The long text paragraph should be the one starting with "Scrivr uses"
+    // Find the longest text block (the long paragraph after the float)
+    const longTextBlock = textBlocks.reduce((best, b) =>
+      b.lines.length > (best?.lines.length ?? 0) ? b : best,
+    textBlocks[0]);
+
+    expect(longTextBlock).toBeDefined();
+    expect(longTextBlock!.lines.length).toBeGreaterThan(5); // the long paragraph
+
+    // THE KEY ASSERTION: the text paragraph must start BELOW the float image.
+    // float.y + float.height = bottom of the float image.
+    // The text block's Y must be >= that value.
+    console.log("Float:", { x: float.x, y: float.y, h: float.height, page: float.page, mode: float.mode });
+    console.log("Text block:", { y: longTextBlock!.y, h: longTextBlock!.height, lines: longTextBlock!.lines.length });
+    console.log("Float bottom:", float.y + float.height);
+
+    expect(
+      longTextBlock!.y,
+      `Text paragraph Y (${longTextBlock!.y}) must be >= float bottom (${float.y + float.height})`
+    ).toBeGreaterThanOrEqual(float.y + float.height);
+  });
+
+  it("top-bottom float in standalone paragraph: text does NOT render under the image", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+
+    const floatImg = floatImage(schema, "top-bottom", 300, 200);
+    const floatPara = schema.node("paragraph", null, [floatImg]);
+    const textPara = schema.node("paragraph", null, [
+      schema.text("word ".repeat(80).trim()),
+    ]);
+
+    const docNode = schema.node("doc", null, [floatPara, textPara]);
+    const layout = runPipeline(docNode, {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const float = layout.floats![0]!;
+    const textBlock = layout.pages[0]!.blocks.find(b =>
+      b.lines.some(l => l.spans.some(s => s.kind === "text" && s.text.startsWith("word")))
+    )!;
+
+    // Text must start below the float, not under it
+    expect(textBlock.y).toBeGreaterThanOrEqual(float.y + float.height);
+  });
+
+  it("top-bottom float: no excess blank space between float and text", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+
+    const floatImg = floatImage(schema, "top-bottom", 300, 200);
+    const floatPara = schema.node("paragraph", null, [floatImg]);
+    const textPara = schema.node("paragraph", null, [
+      schema.text("word ".repeat(80).trim()),
+    ]);
+
+    const docNode = schema.node("doc", null, [floatPara, textPara]);
+    const layout = runPipeline(docNode, {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const float = layout.floats![0]!;
+    const textBlock = layout.pages[0]!.blocks.find(b =>
+      b.lines.some(l => l.spans.some(s => s.kind === "text" && s.text.startsWith("word")))
+    )!;
+
+    // Gap between float bottom and text top should be reasonable (margin collapsing + float margin)
+    // Float margin = 8, paragraph spacing typically 10-12. Should not be > 50px.
+    const gap = textBlock.y - (float.y + float.height);
+    console.log("Gap between float bottom and text top:", gap);
+    expect(gap).toBeLessThan(50);
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Phase 8: Integration Tests — End-to-End Pipeline Verification
 //
