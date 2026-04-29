@@ -293,6 +293,8 @@ describe("buildPdf", () => {
       width: 150, height: 150, mode: "square-right",
       node: schema.nodes.image!.create({ src: png1x1 }),
       anchorBlockY: MARGIN, anchorPage: 1,
+      layoutY: MARGIN, layoutX: MARGIN, anchorGlobalY: MARGIN,
+      renderY: MARGIN, renderX: MARGIN,
     };
 
     const layout = makeLayout(
@@ -308,6 +310,8 @@ describe("buildPdf", () => {
       width: 100, height: 100, mode: "square-left",
       node: schema.nodes.image!.create({ src: "https://unreachable.invalid/img.png" }),
       anchorBlockY: MARGIN, anchorPage: 1,
+      layoutY: MARGIN, layoutX: MARGIN, anchorGlobalY: MARGIN,
+      renderY: MARGIN, renderX: MARGIN,
     };
 
     const layout = makeLayout(

@@ -108,6 +108,26 @@ export function pageBreak(): Node {
   return schema.node("pageBreak");
 }
 
+/**
+ * Creates a float image node with the given wrapping mode.
+ * Requires a schema from `buildStarterKitContext()` (base schema has no image node).
+ */
+export function floatImage(
+  s: Schema,
+  mode: string,
+  width = 200,
+  height = 200,
+  offset?: { x: number; y: number },
+): Node {
+  return s.nodes["image"]!.create({
+    src: "",
+    width,
+    height,
+    wrappingMode: mode,
+    ...(offset ? { floatOffset: offset } : {}),
+  });
+}
+
 export interface FullEditorContext {
   /** ProseMirror schema built from StarterKit — includes all built-in nodes and marks. */
   schema: Schema;

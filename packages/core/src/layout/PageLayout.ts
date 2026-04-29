@@ -56,11 +56,17 @@ export interface LayoutPage {
 export interface FloatLayout {
   /** ProseMirror doc position of the float anchor span */
   docPos: number;
-  /** Page this float appears on (1-based) */
+  /** Page this float appears on (1-based). Set by projectFloatsOntoPages. */
   page: number;
-  /** Left edge in page coordinates */
+  /**
+   * Left edge in page coordinates.
+   * @deprecated Transition alias — use `renderX` for rendering, `layoutX` for solver.
+   */
   x: number;
-  /** Top edge in page coordinates */
+  /**
+   * Top edge in page coordinates.
+   * @deprecated Transition alias — use `renderY` for rendering, `layoutY` for solver.
+   */
   y: number;
   width: number;
   height: number;
@@ -68,19 +74,31 @@ export interface FloatLayout {
   mode: string;
   /** The ProseMirror image node */
   node: Node;
+
+  // ── Layout space (constraint solver) ──────────────────────────────────
+  /** Y position in layout space = anchor.globalY. Never includes floatOffset.y. */
+  layoutY: number;
+  /** X position in layout space = contentX + mode-based offset. Includes floatOffset.x. */
+  layoutX: number;
+  /** Anchor block's globalY at float resolution time. */
+  anchorGlobalY: number;
+
+  // ── Visual space (renderer) ───────────────────────────────────────────
+  /** Page-local Y for rendering = projected layoutY + floatOffset.y. */
+  renderY: number;
+  /** Page-local X for rendering = layoutX (X offset already structural). */
+  renderX: number;
+
   /**
    * Pass 1 y-coordinate of the anchor block — stored so Pass 4 can apply the
    * correct yDelta correction without overwriting Fix 1's stacking offset.
-   * Pass 4 computes: newY = f.y + (finalAnchorY - anchorBlockY), which shifts
-   * the float by exactly how much the anchor block moved in Pass 3, preserving
-   * any extra downward offset that float stacking added.
+   * @deprecated Used by legacy applyFloatLayout. Replaced by anchorGlobalY.
    */
   anchorBlockY: number;
   /**
    * Page number of the anchor span (where the image node lives in the doc).
    * May differ from `page` when float stacking pushes the float past the page
-   * bottom and it overflows onto the next page. Pass 4 uses this to avoid
-   * resetting the float's page back to the anchor's page.
+   * bottom and it overflows onto the next page.
    */
   anchorPage: number;
 }
@@ -314,6 +332,8 @@ export interface FlowBlock {
   inputHash: number;
   /** True when this entry represents a hard page break node. */
   isPageBreak?: true;
+  /** Continuous Y coordinate in global document space. Stamped by assignGlobalY. */
+  globalY?: number;
   /** True when the block measurement was a cache hit. */
   wasCacheHit: boolean;
   // Phase 1b: cache snapshot taken before this run's measurement.
@@ -1113,6 +1133,553 @@ export function buildBlockFlow(
   return { flows, reachedCutoff: false, cutoffIndex: items.length };
 }
 
+// ── Global-Y coordinate assignment ──────────────────────────────────────────
+
+/**
+ * Stamps continuous `globalY` coordinates on each FlowBlock using CSS-style
+ * margin collapsing between adjacent blocks.
+ *
+ * Mutates `flow.globalY` in place. Page break nodes receive a `globalY` marker
+ * but contribute zero height to the running total.
+ */
+export function assignGlobalY(flows: FlowBlock[], startY: number): void {
+  if (flows.length === 0) return;
+
+  flows[0]!.globalY = startY;
+  let prevBottom = startY + flows[0]!.height;
+  let prevSpaceAfter = flows[0]!.spaceAfter;
+
+  for (let i = 1; i < flows.length; i++) {
+    const flow = flows[i]!;
+    const gap = collapseMargins(prevSpaceAfter, flow.spaceBefore);
+    flow.globalY = prevBottom + gap;
+
+    if (flow.isPageBreak) {
+      // Page break: gets globalY but contributes zero height
+      prevSpaceAfter = flow.spaceAfter;
+    } else {
+      prevBottom = flow.globalY + flow.height;
+      prevSpaceAfter = flow.spaceAfter;
+    }
+  }
+}
+
+/**
+ * Re-stamps `globalY` from `startIndex` onward using the same margin-collapsing
+ * logic as `assignGlobalY`. Blocks before `startIndex` are untouched.
+ *
+ * Called after `reflowConstrainedBlocks` changes block heights so downstream
+ * positions stay correct.
+ */
+export function recomputeGlobalY(flows: FlowBlock[], startIndex: number): void {
+  if (startIndex >= flows.length || startIndex <= 0) return;
+
+  const prev = flows[startIndex - 1]!;
+  let prevBottom = prev.globalY! + prev.height;
+  let prevSpaceAfter = prev.spaceAfter;
+
+  for (let i = startIndex; i < flows.length; i++) {
+    const flow = flows[i]!;
+    const gap = collapseMargins(prevSpaceAfter, flow.spaceBefore);
+    flow.globalY = prevBottom + gap;
+
+    if (flow.isPageBreak) {
+      prevSpaceAfter = flow.spaceAfter;
+    } else {
+      prevBottom = flow.globalY + flow.height;
+      prevSpaceAfter = flow.spaceAfter;
+    }
+  }
+}
+
+// ── Float input normalization ────────────────────────────────────────────────
+
+const VALID_WRAPPING_MODES = new Set([
+  "square-left", "square-right", "top-bottom", "behind", "front",
+]);
+const MAX_FLOATS_PER_BLOCK = 8;
+
+/**
+ * Normalized float input — clamped and validated, safe for the constraint solver.
+ */
+export interface NormalizedFloatInput {
+  /** Index of the anchor flow in the flows array. */
+  anchorIndex: number;
+  /** ProseMirror doc position of the float anchor span. */
+  docPos: number;
+  /** The ProseMirror image node. */
+  node: Node;
+  /** Wrapping mode (validated — always one of the 5 known modes). */
+  mode: string;
+  /** Clamped width (1 ≤ width ≤ contentWidth). */
+  width: number;
+  /** Clamped height (1 ≤ height ≤ 2 * pageHeight). */
+  height: number;
+  /** Clamped X offset. */
+  offsetX: number;
+  /** Clamped Y offset. */
+  offsetY: number;
+}
+
+/**
+ * Walks all FlowBlocks, finds float anchor spans, and normalizes their
+ * attributes into the solver's valid domain. Returns an array of normalized
+ * float inputs ready for `resolveFloatsGlobalY`.
+ *
+ * Clamping prevents unbounded stacking, infinite push chains, and layouts
+ * wider than the page. Invalid inputs degrade to `top-bottom` (the safe mode).
+ */
+export function normalizeConstraints(
+  flows: FlowBlock[],
+  pageConfig: PageConfig,
+): NormalizedFloatInput[] {
+  const { pageWidth, pageHeight, margins } = pageConfig;
+  const contentWidth = pageWidth - margins.left - margins.right;
+  const result: NormalizedFloatInput[] = [];
+
+  // Track float count per anchor block for the per-block cap.
+  const floatsPerBlock = new Map<number, number>();
+
+  for (let fi = 0; fi < flows.length; fi++) {
+    const flow = flows[fi]!;
+    if (!flow.hasFloatAnchor) continue;
+
+    for (const line of flow.lines) {
+      for (const span of line.spans) {
+        if (span.kind !== "object") continue;
+        if (span.width !== 0) continue; // only zero-width float anchors
+        const attrs = span.node.attrs as {
+          width?: number;
+          height?: number;
+          wrappingMode?: string;
+          floatOffset?: { x: number; y: number };
+        };
+        const rawMode = attrs.wrappingMode;
+        if (!rawMode || rawMode === "inline") continue;
+
+        // Validate raw dimensions
+        const rawWidth = typeof attrs.width === "number" ? attrs.width : 200;
+        const rawHeight = typeof attrs.height === "number" ? attrs.height : 200;
+
+        // Skip zero-dimension floats entirely
+        if (rawWidth < 1 || rawHeight < 1) continue;
+
+        // Clamp dimensions
+        const width = Math.min(Math.max(rawWidth, 1), contentWidth);
+        const height = Math.min(Math.max(rawHeight, 1), pageHeight * 2);
+
+        // Clamp offsets
+        const rawOffsetX = attrs.floatOffset?.x ?? 0;
+        const rawOffsetY = attrs.floatOffset?.y ?? 0;
+        const offsetX = Math.max(-contentWidth, Math.min(rawOffsetX, contentWidth));
+        const offsetY = Math.max(-pageHeight, Math.min(rawOffsetY, pageHeight));
+
+        // Validate mode — unknown modes degrade to top-bottom
+        let mode = rawMode;
+        if (!VALID_WRAPPING_MODES.has(mode)) {
+          mode = "top-bottom";
+        }
+
+        // Per-block float count cap — excess floats degrade to top-bottom
+        const count = (floatsPerBlock.get(fi) ?? 0) + 1;
+        floatsPerBlock.set(fi, count);
+        if (count > MAX_FLOATS_PER_BLOCK) {
+          mode = "top-bottom";
+        }
+
+        result.push({
+          anchorIndex: fi,
+          docPos: span.docPos,
+          node: span.node,
+          mode,
+          width,
+          height,
+          offsetX,
+          offsetY,
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+// ── Barrier computation ─────────────────────────────────────────────────────
+
+/**
+ * Computes page-break barrier Y coordinates from unconstrained flow heights.
+ * A barrier marks the bottom of each page's content area in continuous global-Y
+ * space. Floats that straddle a barrier are pushed entirely past it.
+ *
+ * Barriers are frozen after this call — they never react to constraint changes.
+ */
+export function computeBarriers(
+  flows: FlowBlock[],
+  pageConfig: PageConfig,
+  resolved: ResolvedChrome,
+): number[] {
+  if (flows.length === 0) return [];
+
+  const barriers: number[] = [];
+  let pageNumber = 1;
+  const metrics1 = computePageMetrics(pageConfig, resolved, pageNumber);
+  // In global-Y space, content starts at margins.top and pages are consecutive.
+  // Page 1 content: [contentTop, contentBottom] = [margins.top, margins.top + contentHeight].
+  // In global-Y: barriers are where page content ends, i.e. at accumulated content heights.
+  let pageContentBottom = metrics1.contentBottom; // page 1 bottom in page-local = global-Y
+
+  // Walk flows, emit a barrier whenever a flow extends past the current page bottom
+  for (const flow of flows) {
+    if (flow.globalY === undefined) continue;
+    const flowBottom = flow.globalY + flow.height;
+    while (flowBottom > pageContentBottom) {
+      barriers.push(pageContentBottom);
+      pageNumber++;
+      const nextMetrics = computePageMetrics(pageConfig, resolved, pageNumber);
+      const nextContentHeight = nextMetrics.contentBottom - nextMetrics.contentTop;
+      // In global-Y, the next page's content immediately follows (no margin gap)
+      pageContentBottom = pageContentBottom + nextContentHeight;
+    }
+  }
+
+  return barriers;
+}
+
+// ── Float resolution (Phase A) ──────────────────────────────────────────────
+
+const FLOAT_MARGIN_GLOBAL = 8; // px gap around each float
+
+/**
+ * Phase A of the constraint solver: positions floats in layout space and builds
+ * exclusion rects. Float positions are determined by anchor globalY, barrier
+ * pushes, and stacking — in that priority order. Visual offset (floatOffset.y)
+ * is NOT applied here; it only affects renderY in the projection stage.
+ *
+ * Returns `null` when no float anchors exist (fast path).
+ */
+export function resolveFloatsGlobalY(
+  flows: FlowBlock[],
+  inputs: NormalizedFloatInput[],
+  margins: PageConfig["margins"],
+  pageWidth: number,
+  contentWidth: number,
+  barriers: number[],
+): { floats: FloatLayout[]; exclusionMgr: ExclusionManager } | null {
+  if (inputs.length === 0) return null;
+
+  const exclusionMgr = new ExclusionManager();
+  const floats: FloatLayout[] = [];
+  const contentX = margins.left;
+  const contentRight = pageWidth - margins.right;
+
+  for (const input of inputs) {
+    const anchorFlow = flows[input.anchorIndex]!;
+    const anchorGlobalY = anchorFlow.globalY!;
+
+    // X position (layout space — includes X offset, it IS structural)
+    let layoutX: number;
+    if (input.mode === "square-right") {
+      layoutX = contentRight - input.width + input.offsetX;
+    } else {
+      layoutX = contentX + input.offsetX;
+    }
+    // Clamp X so float stays within content area
+    layoutX = Math.max(contentX, Math.min(layoutX, contentRight - input.width));
+
+    // Y position (layout space — NO Y offset)
+    let layoutY = anchorGlobalY;
+
+    // Skip stacking and barriers for behind/front floats
+    if (input.mode !== "behind" && input.mode !== "front") {
+      // Barrier push: if float straddles a barrier, push past it
+      for (const barrier of barriers) {
+        if (layoutY < barrier && layoutY + input.height > barrier) {
+          layoutY = barrier;
+        }
+      }
+
+      // Stacking: push below any overlapping previously-placed wrapping float
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const placed of floats) {
+          if (placed.mode === "behind" || placed.mode === "front") continue;
+          const hOverlap =
+            layoutX < placed.layoutX + placed.width &&
+            layoutX + input.width > placed.layoutX;
+          const vOverlap =
+            layoutY < placed.layoutY + placed.height &&
+            layoutY + input.height > placed.layoutY;
+          if (hOverlap && vOverlap) {
+            layoutY = placed.layoutY + placed.height;
+            changed = true;
+          }
+        }
+      }
+    }
+
+    const float: FloatLayout = {
+      docPos: input.docPos,
+      node: input.node,
+      mode: input.mode,
+      width: input.width,
+      height: input.height,
+      // Layout space
+      layoutY,
+      layoutX,
+      anchorGlobalY,
+      // Visual space (populated by projectFloatsOntoPages — placeholder for now)
+      renderY: layoutY,
+      renderX: layoutX,
+      // Legacy aliases (set during projection)
+      page: 0,
+      x: layoutX,
+      y: layoutY,
+      anchorBlockY: anchorGlobalY,
+      anchorPage: 0,
+    };
+
+    floats.push(float);
+
+    // Build exclusion rect (layout space) — skip behind/front
+    if (input.mode !== "behind" && input.mode !== "front") {
+      const side: "left" | "right" | "full" =
+        input.mode === "square-left" ? "left" :
+        input.mode === "square-right" ? "right" :
+        "full";
+
+      // For top-bottom, exclusion spans full content width
+      const exclLeft = side === "full" ? contentX : layoutX - FLOAT_MARGIN_GLOBAL;
+      const exclRight = side === "full" ? contentRight : layoutX + input.width + FLOAT_MARGIN_GLOBAL;
+
+      exclusionMgr.addRect({
+        x: exclLeft,
+        right: exclRight,
+        y: layoutY - FLOAT_MARGIN_GLOBAL,
+        bottom: layoutY + input.height + FLOAT_MARGIN_GLOBAL,
+        side,
+        docPos: input.docPos,
+      });
+    }
+  }
+
+  return { floats, exclusionMgr };
+}
+
+// ── Constraint satisfaction (Phase B) ────────────────────────────────────────
+
+const MAX_ITERATIONS = 5;
+
+/**
+ * Phase B step: for each flow whose lines overlap an exclusion zone, re-layout
+ * the block with a constraintProvider that narrows available width.
+ *
+ * Returns `{ changed, firstChangedIndex }` so the caller can recompute globalY
+ * from the first affected block onward.
+ */
+export function reflowConstrainedBlocks(
+  flows: FlowBlock[],
+  exclusionMgr: ExclusionManager,
+  margins: PageConfig["margins"],
+  contentWidth: number,
+  measurer: TextMeasurer,
+  fontConfig: FontConfig,
+  fontModifiers: Map<string, FontModifier> | undefined,
+  inlineRegistry: InlineRegistry | undefined,
+): { changed: boolean; firstChangedIndex: number } {
+  let changed = false;
+  let firstChangedIndex = flows.length;
+
+  for (let i = 0; i < flows.length; i++) {
+    const flow = flows[i]!;
+    if (flow.isPageBreak || flow.globalY === undefined) continue;
+
+    // Check if any of this flow's lines overlap an exclusion
+    const flowTop = flow.globalY;
+    const flowBottom = flowTop + flow.height;
+    if (!exclusionMgr.hasExclusionsInRange(flowTop, flowBottom)) continue;
+
+    // Build constraint provider in global-Y space
+    const blockContentX = margins.left + flow.indentLeft;
+    const blockAvailWidth = contentWidth - flow.indentLeft;
+    const blockY = flow.globalY;
+
+    const constraintProvider: ConstraintProvider = (absoluteLineY: number) => {
+      return exclusionMgr.getConstraint(
+        undefined, absoluteLineY, 1, blockContentX, blockAvailWidth,
+      );
+    };
+
+    // Re-layout with constraint
+    const reflowed = layoutBlock(flow.node, {
+      nodePos: flow.nodePos,
+      x: blockContentX,
+      y: blockY,
+      availableWidth: blockAvailWidth,
+      page: 0, // pre-pagination — no page assignment yet
+      measurer,
+      fontConfig,
+      fontModifiers,
+      constraintProvider,
+      inlineRegistry,
+    });
+
+    if (reflowed.height !== flow.height || reflowed.lines.length !== flow.lines.length) {
+      flow.lines = reflowed.lines;
+      flow.height = reflowed.height;
+      changed = true;
+      if (i < firstChangedIndex) firstChangedIndex = i;
+    }
+  }
+
+  return { changed, firstChangedIndex };
+}
+
+/**
+ * Fixed-point constraint solver: resolves floats, then iteratively reflows
+ * constrained blocks until heights stabilize (or MAX_ITERATIONS is reached).
+ *
+ * Returns `null` when no float anchors exist (fast path).
+ */
+export function solveConstraints(
+  flows: FlowBlock[],
+  inputs: NormalizedFloatInput[],
+  margins: PageConfig["margins"],
+  pageWidth: number,
+  contentWidth: number,
+  barriers: number[],
+  measurer: TextMeasurer,
+  fontConfig: FontConfig,
+  fontModifiers: Map<string, FontModifier> | undefined,
+  inlineRegistry: InlineRegistry | undefined,
+): { floats: FloatLayout[]; converged: boolean } | null {
+  // Phase A: resolve float positions + build exclusions
+  const resolved = resolveFloatsGlobalY(
+    flows, inputs, margins, pageWidth, contentWidth, barriers,
+  );
+  if (!resolved) return null;
+
+  // Phase B: fixed-point reflow loop
+  let converged = false;
+  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    const result = reflowConstrainedBlocks(
+      flows, resolved.exclusionMgr, margins, contentWidth,
+      measurer, fontConfig, fontModifiers, inlineRegistry,
+    );
+    if (!result.changed) {
+      converged = true;
+      break;
+    }
+    // Update downstream globalY values after height changes
+    recomputeGlobalY(flows, result.firstChangedIndex + 1);
+  }
+
+  if (!converged) {
+    // Degradation: drop all constraints, reflow at full width
+    resolved.exclusionMgr.clear();
+    reflowConstrainedBlocks(
+      flows, resolved.exclusionMgr, margins, contentWidth,
+      measurer, fontConfig, fontModifiers, inlineRegistry,
+    );
+    recomputeGlobalY(flows, 0);
+  }
+
+  return { floats: resolved.floats, converged };
+}
+
+// ── Float projection (Phase C) ──────────────────────────────────────────────
+
+/**
+ * Phase C: projects float positions from global-Y layout space to page-local
+ * visual space. This is a read-only projection — no reflow, no mutation of
+ * block positions.
+ *
+ * For each float:
+ * - Find which page its anchor landed on after pagination
+ * - Compute the delta between anchor's globalY and its page-local Y
+ * - Apply that delta + visual offset to produce renderY
+ * - Handle overflow (float doesn't fit on page → push to next page)
+ * - Materialise empty pages for overflow floats
+ */
+export function projectFloatsOntoPages(
+  pages: LayoutPage[],
+  floats: FloatLayout[],
+  pageConfig: PageConfig,
+  metrics: PageMetrics[],
+  inputs: NormalizedFloatInput[],
+): FloatLayout[] {
+  if (floats.length === 0) return floats;
+
+  // Build anchor map: walk paginated pages to find each float anchor's page-local position
+  const anchorMap = new Map<number, { page: number; pageLocalY: number }>();
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      for (const line of block.lines) {
+        for (const span of line.spans) {
+          if (span.kind !== "object") continue;
+          if (span.width !== 0) continue;
+          const wm = span.node.attrs["wrappingMode"] as string | undefined;
+          if (!wm || wm === "inline") continue;
+          anchorMap.set(span.docPos, { page: page.pageNumber, pageLocalY: block.y });
+        }
+      }
+    }
+  }
+
+  for (let fi = 0; fi < floats.length; fi++) {
+    const f = floats[fi]!;
+    const input = inputs[fi]!;
+    const anchor = anchorMap.get(f.docPos);
+
+    if (!anchor) {
+      // Anchor not found in paginated output — shouldn't happen, but degrade gracefully
+      f.page = 1;
+      f.renderY = f.layoutY;
+      f.renderX = f.layoutX;
+      f.x = f.renderX;
+      f.y = f.renderY;
+      f.anchorPage = 1;
+      f.anchorBlockY = f.anchorGlobalY;
+      continue;
+    }
+
+    // Delta: how far the float is from its anchor in layout space
+    const delta = f.layoutY - f.anchorGlobalY;
+    // Page-local candidate Y: anchor's page position + delta + visual offset
+    let candidateY = anchor.pageLocalY + delta + input.offsetY;
+
+    let floatPage = anchor.page;
+    const pageIdx = floatPage - 1;
+    const pageMetrics = metrics[pageIdx] ?? computePageMetrics(pageConfig, EMPTY_RESOLVED_CHROME, floatPage);
+
+    // Overflow check: if float doesn't fit on this page, push to next
+    if (f.mode !== "behind" && f.mode !== "front" &&
+        candidateY + f.height > pageMetrics.contentBottom) {
+      floatPage = anchor.page + 1;
+      const nextMetrics = metrics[floatPage - 1] ?? computePageMetrics(pageConfig, EMPTY_RESOLVED_CHROME, floatPage);
+      candidateY = nextMetrics.contentTop;
+
+      // Materialise empty page if needed
+      if (!pages.find((p) => p.pageNumber === floatPage)) {
+        const newPage: LayoutPage = { pageNumber: floatPage, blocks: [] };
+        const insertAt = pages.findIndex((p) => p.pageNumber > floatPage);
+        if (insertAt === -1) pages.push(newPage);
+        else pages.splice(insertAt, 0, newPage);
+      }
+    }
+
+    f.page = floatPage;
+    f.renderY = candidateY;
+    f.renderX = f.layoutX;
+    f.x = f.renderX;
+    f.y = f.renderY;
+    f.anchorPage = anchor.page;
+    f.anchorBlockY = anchor.pageLocalY;
+  }
+
+  return floats;
+}
+
 /**
  * Stage 3 of the layout pipeline: compute float positions, populate the
  * ExclusionManager, and re-flow any blocks that overlap an exclusion zone.
@@ -1267,6 +1834,13 @@ export function applyFloatLayout(
       height: nodeHeight,
       mode,
       node,
+      // v2 layout/visual split — legacy applyFloatLayout sets these equal
+      // to page-local values since it operates post-pagination.
+      layoutY: candidateY,
+      layoutX: floatX,
+      anchorGlobalY: anchor.anchorBlockY,
+      renderY: candidateY,
+      renderX: floatX,
       anchorBlockY: anchor.anchorBlockY,
       anchorPage: anchor.anchorPage,
     });

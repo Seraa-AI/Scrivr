@@ -4,16 +4,24 @@
  * Float images carve rectangular exclusion zones out of the page's text area.
  * When a paragraph's lines are laid out, the ConstraintProvider queries this
  * manager to narrow the available line width around each float.
+ *
+ * Supports two modes:
+ *   - **Page-scoped** (legacy): each rect has a `page` field, queries filter by page.
+ *   - **Global-Y** (v2 solver): rects may omit `page`, queries with `page=undefined`
+ *     match purely on Y-range overlap.
  */
 
 export interface ExclusionRect {
-  /** Page number (1-based) this exclusion is on */
-  page: number;
+  /**
+   * Page number (1-based) this exclusion is on.
+   * Optional for global-Y mode — when omitted, the rect matches any page query.
+   */
+  page?: number;
   /** Left edge of exclusion zone (image left - margin) in page coordinates */
   x: number;
   /** Right edge (image right + margin) in page coordinates */
   right: number;
-  /** Top of image (absolute page Y) */
+  /** Top of image (absolute page Y or global Y) */
   y: number;
   /** Bottom of image */
   bottom: number;
@@ -47,9 +55,12 @@ export class ExclusionManager {
    * Returns the tightest available line constraint at absoluteY for lineHeight pixels.
    * contentX and contentWidth define the full available area without floats.
    * Returns null if no exclusion affects this line.
+   *
+   * When `page` is `undefined`, operates in global-Y mode — matches any rect
+   * regardless of its page field (pure Y-range overlap).
    */
   getConstraint(
-    page: number,
+    page: number | undefined,
     absoluteY: number,
     lineHeight: number,
     contentX: number,
@@ -60,7 +71,9 @@ export class ExclusionManager {
     let affected = false;
 
     for (const r of this.rects) {
-      if (r.page !== page) continue;
+      // Page filter: skip rects on different pages. In global-Y mode (page=undefined)
+      // or when the rect has no page, skip the filter entirely.
+      if (page !== undefined && r.page !== undefined && r.page !== page) continue;
       // Does this line's Y range overlap the exclusion's Y range?
       if (absoluteY + lineHeight <= r.y || absoluteY >= r.bottom) continue;
       affected = true;
@@ -80,6 +93,17 @@ export class ExclusionManager {
   }
 
   /**
+   * Returns true if any exclusion rect's Y range overlaps [yStart, yEnd).
+   * Operates in global-Y mode — ignores page field.
+   */
+  hasExclusionsInRange(yStart: number, yEnd: number): boolean {
+    for (const r of this.rects) {
+      if (yEnd > r.y && yStart < r.bottom) return true;
+    }
+    return false;
+  }
+
+  /**
    * Returns the Y coordinate past all full-width exclusions overlapping absoluteY.
    * Used to skip 'top-bottom' float gaps in PageLayout.
    */
@@ -89,7 +113,7 @@ export class ExclusionManager {
     while (changed) {
       changed = false;
       for (const r of this.rects) {
-        if (r.page !== page) continue;
+        if (r.page !== undefined && r.page !== page) continue;
         if (r.side !== "full") continue;
         if (y >= r.y && y < r.bottom) {
           y = r.bottom;
