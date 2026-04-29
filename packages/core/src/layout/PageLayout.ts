@@ -655,7 +655,15 @@ function _runPipelineBody(
   // Constraint resolution already happened in runFlowPipeline (Stage 1.75).
   // When resolvedFloats is null, the document has no floats — skip entirely.
   const floated = fp.resolvedFloats
-    ? projectFloatsOntoPages(layoutWithChrome, fp.resolvedFloats, pageConfig)
+    ? projectFloatsOntoPages(layoutWithChrome, fp.resolvedFloats, pageConfig, {
+        margins: fp.margins,
+        pageWidth: pageConfig.pageWidth,
+        contentWidth: fp.contentWidth,
+        measurer: fp.measurer,
+        fontConfig: fp.fontConfig,
+        fontModifiers: fp.fontModifiers,
+        ...(options.inlineRegistry ? { inlineRegistry: options.inlineRegistry } : {}),
+      })
     : layoutWithChrome;
 
   if (fp.isPartial) return floated;
@@ -1677,6 +1685,7 @@ function projectFloatsOntoPages(
   paginatedLayout: DocumentLayout,
   resolvedFloats: { floats: FloatLayout[]; exclusionMgr: ExclusionManager },
   pageConfig: PageConfig,
+  reflowContext?: ProjectedFloatReflowContext,
 ): DocumentLayout {
   const { pages } = paginatedLayout;
 
@@ -1761,7 +1770,426 @@ function projectFloatsOntoPages(
   }
 
   clearOrphanedConstraints(pages, floats);
+  if (reflowContext) {
+    reconcileProjectedFloatConstraints(paginatedLayout, floats, pageConfig, reflowContext);
+  }
   return { ...paginatedLayout, floats, _pass1Pages: pass1Pages };
+}
+
+interface ProjectedFloatReflowContext {
+  margins: PageConfig["margins"];
+  pageWidth: number;
+  contentWidth: number;
+  measurer: TextMeasurer;
+  fontConfig: FontConfig;
+  fontModifiers: Map<string, FontModifier> | undefined;
+  inlineRegistry?: InlineRegistry;
+}
+
+function reconcileProjectedFloatConstraints(
+  layout: DocumentLayout,
+  floats: FloatLayout[],
+  pageConfig: PageConfig,
+  ctx: ProjectedFloatReflowContext,
+): void {
+  const metricsForPage = (pageNumber: number): PageMetrics => {
+    const idx = pageNumber - 1;
+    const m = layout.metrics?.[idx];
+    if (m && m.pageNumber === pageNumber) return m;
+    return computePageMetrics(pageConfig, EMPTY_RESOLVED_CHROME, pageNumber);
+  };
+
+  const floatBases = new Map<number, ProjectedFloatBase>();
+  for (const f of floats) {
+    floatBases.set(f.docPos, { page: f.page, y: f.y, renderY: f.renderY });
+  }
+
+  const maxIterations = 4;
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    const before = projectedReconciliationHash(layout.pages, floats);
+    const exclusionsByPage = buildProjectedExclusions(floats, ctx);
+
+    reflowProjectedPages(layout, floats, exclusionsByPage, metricsForPage, ctx);
+    reconcileFloatAnchors(layout.pages, floats, floatBases);
+    clearOrphanedConstraints(layout.pages, floats);
+
+    const after = projectedReconciliationHash(layout.pages, floats);
+    if (after === before) break;
+  }
+
+  enforceProjectedLineAvoidance(layout.pages, floats, ctx);
+}
+
+interface ProjectedFloatBase {
+  page: number;
+  y: number;
+  renderY: number;
+}
+
+function reflowProjectedPages(
+  layout: DocumentLayout,
+  floats: FloatLayout[],
+  exclusionsByPage: Map<number, ExclusionManager>,
+  metricsForPage: (pageNumber: number) => PageMetrics,
+  ctx: ProjectedFloatReflowContext,
+): void {
+  const sourceCounts = countBlockSources(layout.pages);
+
+  for (let pi = 0; pi < layout.pages.length; pi++) {
+    const page = layout.pages[pi]!;
+    const exclusionMgr = exclusionsByPage.get(page.pageNumber) ?? null;
+    const pageBottom = metricsForPage(page.pageNumber).contentBottom;
+    const pageFloats = floats.filter(
+      (f) => f.page === page.pageNumber && f.mode !== "behind" && f.mode !== "front",
+    );
+    let yDelta = 0;
+    const overflowToNext: LayoutBlock[] = [];
+
+    for (let bi = 0; bi < page.blocks.length; bi++) {
+      let block = page.blocks[bi]!;
+      if (yDelta !== 0) {
+        block = { ...block, y: block.y + yDelta };
+        page.blocks[bi] = block;
+      }
+      if (block.lines.length === 0) continue;
+
+      const source = block.sourceNodePos ?? block.nodePos;
+      if ((sourceCounts.get(source) ?? 0) > 1) {
+        if (exclusionMgr) {
+          const adjusted = adjustFragmentLinesForProjectedExclusions(
+            block,
+            page.pageNumber,
+            exclusionMgr,
+            pageFloats,
+          );
+          if (adjusted.y !== block.y || adjusted.height !== block.height) {
+            yDelta += (adjusted.y - block.y) + (adjusted.height - block.height);
+            page.blocks[bi] = adjusted;
+            block = adjusted;
+          }
+          if (block.y + block.height > pageBottom) {
+            const { kept, overflow } = splitBlockAtBoundary(block, pageBottom);
+            if (kept) {
+              page.blocks[bi] = kept;
+            } else {
+              page.blocks.splice(bi, 1);
+              bi--;
+            }
+            overflowToNext.push(overflow);
+          }
+        }
+        continue;
+      }
+
+      const blockContentX = block.x;
+      const blockAvailWidth = block.availableWidth;
+      const constraintProvider: ConstraintProvider | undefined = exclusionMgr
+        ? (absoluteLineY: number, lineHeight = 1) =>
+            exclusionMgr.getConstraint(
+              page.pageNumber,
+              absoluteLineY,
+              lineHeight,
+              blockContentX,
+              blockAvailWidth,
+            )
+        : undefined;
+
+      const reflowed = layoutBlock(block.node, {
+        nodePos: block.nodePos,
+        x: block.x,
+        y: block.y,
+        availableWidth: block.availableWidth,
+        page: page.pageNumber,
+        measurer: ctx.measurer,
+        fontConfig: ctx.fontConfig,
+        ...(ctx.fontModifiers ? { fontModifiers: ctx.fontModifiers } : {}),
+        ...(constraintProvider ? { constraintProvider } : {}),
+        ...(ctx.inlineRegistry ? { inlineRegistry: ctx.inlineRegistry } : {}),
+      });
+
+      const measuredBlock = preserveBlockMetadata(block, reflowed);
+      const finalBlock = exclusionMgr
+        ? adjustFragmentLinesForProjectedExclusions(
+            measuredBlock,
+            page.pageNumber,
+            exclusionMgr,
+            pageFloats,
+          )
+        : measuredBlock;
+      yDelta += (finalBlock.y - block.y) + (finalBlock.height - block.height);
+      page.blocks[bi] = finalBlock;
+
+      if (finalBlock.y + finalBlock.height > pageBottom) {
+        const { kept, overflow } = splitBlockAtBoundary(finalBlock, pageBottom);
+        sourceCounts.set(source, 2);
+        if (kept) {
+          page.blocks[bi] = kept;
+        } else {
+          page.blocks.splice(bi, 1);
+          bi--;
+        }
+        overflowToNext.push(overflow);
+      }
+    }
+
+    if (overflowToNext.length > 0) {
+      prependOverflowBlocks(layout.pages, page.pageNumber + 1, overflowToNext, metricsForPage);
+    }
+  }
+}
+
+function countBlockSources(pages: LayoutPage[]): Map<number, number> {
+  const sourceCounts = new Map<number, number>();
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      const src = block.sourceNodePos ?? block.nodePos;
+      sourceCounts.set(src, (sourceCounts.get(src) ?? 0) + 1);
+    }
+  }
+  return sourceCounts;
+}
+
+function adjustFragmentLinesForProjectedExclusions(
+  block: LayoutBlock,
+  pageNumber: number,
+  exclusionMgr: ExclusionManager,
+  pageFloats: FloatLayout[],
+): LayoutBlock {
+  let adjusted: LayoutBlock = { ...block, lines: [...block.lines] };
+  let lineY = adjusted.y;
+
+  for (let li = 0; li < adjusted.lines.length; li++) {
+    const line = adjusted.lines[li]!;
+    if (!lineHasVisibleText(line)) {
+      lineY += line.lineHeight;
+      continue;
+    }
+
+    const constraint = exclusionMgr.getConstraint(
+      pageNumber,
+      lineY,
+      line.lineHeight,
+      adjusted.x,
+      adjusted.availableWidth,
+    );
+
+    if (constraint?.skipToY !== undefined && constraint.skipToY > lineY) {
+      const spacerHeight = constraint.skipToY - lineY;
+      adjusted.lines.splice(li, 0, makeSpacerLine(spacerHeight));
+      adjusted = { ...adjusted, height: adjusted.height + spacerHeight };
+      lineY += spacerHeight;
+      li++;
+    } else if (constraint && line.width <= constraint.width) {
+      applyLineConstraint(line, constraint.x, constraint.width);
+    } else if (constraint) {
+      const floatBottom = deepestOverlappingFloatBottom(pageFloats, lineY, line.lineHeight);
+      if (floatBottom > lineY) {
+        const delta = floatBottom - lineY;
+        adjusted = { ...adjusted, y: adjusted.y + delta };
+        lineY += delta;
+      }
+    }
+
+    lineY += line.lineHeight;
+  }
+
+  return adjusted;
+}
+
+function makeSpacerLine(height: number): LayoutLine {
+  return {
+    spans: [],
+    width: 0,
+    ascent: 0,
+    descent: 0,
+    lineHeight: height,
+    textAscent: 0,
+    cursorHeight: 0,
+    xHeight: 0,
+  };
+}
+
+function deepestOverlappingFloatBottom(
+  floats: FloatLayout[],
+  lineY: number,
+  lineHeight: number,
+): number {
+  let bottom = 0;
+  for (const f of floats) {
+    const top = f.y - FLOAT_MARGIN_GLOBAL;
+    const btm = f.y + f.height + FLOAT_MARGIN_GLOBAL;
+    if (lineY < btm && lineY + lineHeight > top) {
+      bottom = Math.max(bottom, btm);
+    }
+  }
+  return bottom;
+}
+
+function enforceProjectedLineAvoidance(
+  pages: LayoutPage[],
+  floats: FloatLayout[],
+  ctx: ProjectedFloatReflowContext,
+): void {
+  const exclusionsByPage = buildProjectedExclusions(floats, ctx);
+
+  for (const page of pages) {
+    const exclusionMgr = exclusionsByPage.get(page.pageNumber);
+    if (!exclusionMgr) continue;
+
+    for (const block of page.blocks) {
+      let lineY = block.y;
+      for (const line of block.lines) {
+        if (lineHasVisibleText(line)) {
+          const constraint = exclusionMgr.getConstraint(
+            page.pageNumber,
+            lineY,
+            line.lineHeight,
+            block.x,
+            block.availableWidth,
+          );
+          if (
+            constraint &&
+            constraint.skipToY === undefined &&
+            line.width <= constraint.width
+          ) {
+            applyLineConstraint(line, constraint.x, constraint.width);
+          }
+        }
+        lineY += line.lineHeight;
+      }
+    }
+  }
+}
+
+function lineHasVisibleText(line: LayoutLine): boolean {
+  return line.spans.some((span) => span.kind === "text" && span.text.trim().length > 0);
+}
+
+function applyLineConstraint(line: LayoutLine, x: number, width: number): void {
+  if (x > 0) line.constraintX = x;
+  else delete (line as unknown as Record<string, unknown>)["constraintX"];
+  line.effectiveWidth = width;
+}
+
+function buildProjectedExclusions(
+  floats: FloatLayout[],
+  ctx: ProjectedFloatReflowContext,
+): Map<number, ExclusionManager> {
+  const byPage = new Map<number, ExclusionManager>();
+  const contentX = ctx.margins.left;
+  const contentRight = ctx.pageWidth - ctx.margins.right;
+
+  for (const f of floats) {
+    if (f.mode === "behind" || f.mode === "front") continue;
+    const side: "left" | "right" | "full" =
+      f.mode === "square-left" ? "left" :
+      f.mode === "square-right" ? "right" :
+      "full";
+    const mgr = byPage.get(f.page) ?? new ExclusionManager();
+    byPage.set(f.page, mgr);
+    mgr.addRect({
+      page: f.page,
+      x: side === "full" ? contentX : f.x - FLOAT_MARGIN_GLOBAL,
+      right: side === "full" ? contentRight : f.x + f.width + FLOAT_MARGIN_GLOBAL,
+      y: f.y - FLOAT_MARGIN_GLOBAL,
+      bottom: f.y + f.height + FLOAT_MARGIN_GLOBAL,
+      side,
+      docPos: f.docPos,
+    });
+  }
+
+  return byPage;
+}
+
+function preserveBlockMetadata(original: LayoutBlock, reflowed: LayoutBlock): LayoutBlock {
+  return {
+    ...original,
+    lines: reflowed.lines,
+    height: reflowed.height,
+    align: reflowed.align,
+    availableWidth: reflowed.availableWidth,
+  };
+}
+
+function prependOverflowBlocks(
+  pages: LayoutPage[],
+  pageNumber: number,
+  overflowBlocks: LayoutBlock[],
+  metricsForPage: (pageNumber: number) => PageMetrics,
+): void {
+  let nextPage = pages.find((p) => p.pageNumber === pageNumber);
+  if (!nextPage) {
+    nextPage = { pageNumber, blocks: [] };
+    const insertAt = pages.findIndex((p) => p.pageNumber > pageNumber);
+    if (insertAt === -1) pages.push(nextPage);
+    else pages.splice(insertAt, 0, nextPage);
+  }
+
+  const nextPageContentTop = metricsForPage(nextPage.pageNumber).contentTop;
+  let nextY = nextPageContentTop;
+  const reposBlocks = overflowBlocks.map((b) => {
+    const rb = { ...b, y: nextY };
+    nextY += b.height;
+    return rb;
+  });
+  const totalHeight = nextY - nextPageContentTop;
+
+  for (let j = 0; j < nextPage.blocks.length; j++) {
+    nextPage.blocks[j] = { ...nextPage.blocks[j]!, y: nextPage.blocks[j]!.y + totalHeight };
+  }
+  nextPage.blocks.unshift(...reposBlocks);
+}
+
+function reconcileFloatAnchors(
+  pages: LayoutPage[],
+  floats: FloatLayout[],
+  floatBases: Map<number, ProjectedFloatBase>,
+): void {
+  const finalAnchorY = new Map<number, { y: number; page: number }>();
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      for (const line of block.lines) {
+        for (const span of line.spans) {
+          if (span.kind !== "object" || span.width !== 0) continue;
+          const wm = span.node.attrs["wrappingMode"] as string | undefined;
+          if (!wm || wm === "inline") continue;
+          finalAnchorY.set(span.docPos, { y: block.y, page: page.pageNumber });
+        }
+      }
+    }
+  }
+
+  for (let fi = 0; fi < floats.length; fi++) {
+    const f = floats[fi]!;
+    const final = finalAnchorY.get(f.docPos);
+    if (!final) continue;
+    const base = floatBases.get(f.docPos);
+    if (!base) continue;
+    const yDelta = final.y - f.anchorBlockY;
+    const newY = base.y + yDelta;
+    const newRenderY = base.renderY + yDelta;
+    const newPage = f.anchorPage === base.page ? final.page : base.page;
+    if (newY !== f.y || newRenderY !== f.renderY || newPage !== f.page) {
+      floats[fi] = { ...f, y: newY, renderY: newRenderY, page: newPage };
+    }
+  }
+}
+
+function projectedReconciliationHash(pages: LayoutPage[], floats: FloatLayout[]): string {
+  const parts: string[] = [];
+  for (const page of pages) {
+    parts.push(`p:${page.pageNumber}`);
+    for (const block of page.blocks) {
+      parts.push(`b:${block.nodePos}:${block.y}:${block.height}:${block.lines.length}`);
+      for (const line of block.lines) {
+        parts.push(`l:${line.width}:${line.lineHeight}:${line.constraintX ?? ""}:${line.effectiveWidth ?? ""}`);
+      }
+    }
+  }
+  for (const f of floats) {
+    parts.push(`f:${f.docPos}:${f.page}:${f.x}:${f.y}:${f.renderY}`);
+  }
+  return parts.join("|");
 }
 
 /**
