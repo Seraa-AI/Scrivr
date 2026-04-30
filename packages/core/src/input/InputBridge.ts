@@ -54,11 +54,12 @@ export interface InputBridgeOptions {
   /** CharacterMap — used by scrollCursorIntoView for cursor coordinates. */
   getCharMap: () => CharacterMap;
   /**
-   * Returns the visual page/y/height for a float at docPos, or null when
-   * the position is not a float. Used by scrollCursorIntoView to scroll to
-   * the float's actual rendered page rather than the anchor span's page.
+   * Returns the visual page/y/height for an anchored object at docPos, or null
+   * when the position is not an anchored object. Used by scrollCursorIntoView
+   * to scroll to the object's actual rendered page rather than the anchor
+   * span's page.
    */
-  getFloatPosition?: (
+  getAnchoredObjectPosition?: (
     docPos: number,
   ) => { page: number; y: number; height: number } | null;
   /** Keymap built from all extensions — consulted on every keydown. */
@@ -207,14 +208,15 @@ export class InputBridge {
     const sel = this.opts.getState().selection;
     const { head } = sel;
 
-    // Float nodes: their anchor glyph is registered on the anchor paragraph's
-    // page (always page 1 when overflowed to page 2+). Use the float's actual
-    // rendered position instead so we scroll to the correct page.
-    // NodeSelection: anchor = from (position before the node), head = to = from + nodeSize.
-    // layout.floats stores docPos = from, so we look up sel.from, not head.
-    const floatPos = this.opts.getFloatPosition?.(sel.from);
-    const coords = floatPos
-      ? { page: floatPos.page, y: floatPos.y, height: floatPos.height }
+    // Anchored objects: their anchor glyph is registered on the anchor
+    // paragraph's page (always page 1 when overflowed to page 2+). Use the
+    // object's actual rendered position instead so we scroll to the correct
+    // page. NodeSelection: anchor = from (position before the node), head = to
+    // = from + nodeSize. layout.anchoredObjects stores docPos = from, so we
+    // look up sel.from, not head.
+    const anchoredPos = this.opts.getAnchoredObjectPosition?.(sel.from);
+    const coords = anchoredPos
+      ? { page: anchoredPos.page, y: anchoredPos.y, height: anchoredPos.height }
       : this.opts.getCharMap().coordsAtPos(head);
     if (!coords) return;
 

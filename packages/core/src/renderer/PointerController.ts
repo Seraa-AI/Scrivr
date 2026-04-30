@@ -41,9 +41,9 @@ export interface PointerControllerDeps {
  * PointerController — owns all mouse interaction logic for TileManager.
  *
  * Responsibilities:
- *   - Hit testing (text, resize handles, float bodies)
+ *   - Hit testing (text, resize handles, anchored-object bodies)
  *   - Click counting (double/triple-click word/paragraph selection)
- *   - Drag tracking (text selection, image resize, float body drag)
+ *   - Drag tracking (text selection, image resize, anchored-object body drag)
  *   - Hover cursor management
  */
 export class PointerController {
@@ -58,7 +58,7 @@ export class PointerController {
     pendingWidth: number;
     pendingHeight: number;
   } | null = null;
-  private floatDrag: {
+  private anchoredDrag: {
     docPos: number;
     nodeSize: number;
     /** Mouse position at drag start, in client coordinates. */
@@ -68,6 +68,19 @@ export class PointerController {
     startImageX: number;
     /** Image's docPos rect at drag start (for posBelow / posAbove fallback). */
     rect: { x: number; y: number; width: number; height: number; page: number };
+    /** Mouse position relative to the image's top-left at mousedown. */
+    grabOffsetX: number;
+    grabOffsetY: number;
+    /** Live overlay state — refreshed on mousemove, read by TileManager. */
+    overlay: {
+      /** Page where the ghost is drawn (= page under the cursor). */
+      ghostPage: number;
+      /** Page-local top-left of the ghost rect. */
+      ghostX: number;
+      ghostY: number;
+      /** Page + coords of the resolved insertion caret, or null if unresolved. */
+      caret: { page: number; x: number; y: number; height: number } | null;
+    };
   } | null = null;
 
   /** Click-count tracking for double/triple-click. */
@@ -118,6 +131,41 @@ export class PointerController {
     };
   }
 
+  /**
+   * Live drag overlay state during an anchored-object drag. Read by
+   * TileManager.paintOverlay to render a translucent ghost of the image
+   * at the cursor position and a caret marker at the resolved insertion
+   * point. Returns null when no anchored-object drag is in progress.
+   *
+   * The overlay is paint-only — per docs/anchored-objects/04-edit-ux.md
+   * § "Preview non-interference rule" it never influences hit testing,
+   * selection, or insertion-point resolution.
+   */
+  get pendingAnchoredDrag(): {
+    sourcePage: number;
+    sourceX: number;
+    sourceY: number;
+    width: number;
+    height: number;
+    ghostPage: number;
+    ghostX: number;
+    ghostY: number;
+    caret: { page: number; x: number; y: number; height: number } | null;
+  } | null {
+    if (!this.anchoredDrag) return null;
+    return {
+      sourcePage: this.anchoredDrag.rect.page,
+      sourceX: this.anchoredDrag.rect.x,
+      sourceY: this.anchoredDrag.rect.y,
+      width: this.anchoredDrag.rect.width,
+      height: this.anchoredDrag.rect.height,
+      ghostPage: this.anchoredDrag.overlay.ghostPage,
+      ghostX: this.anchoredDrag.overlay.ghostX,
+      ghostY: this.anchoredDrag.overlay.ghostY,
+      caret: this.anchoredDrag.overlay.caret,
+    };
+  }
+
   // ── Hit testing ─────────────────────────────────────────────────────────────
 
   private hitTest(
@@ -159,7 +207,7 @@ export class PointerController {
     return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
   }
 
-  private hitFloatAt(canvasX: number, canvasY: number, page: number) {
+  private hitAnchoredAt(canvasX: number, canvasY: number, page: number) {
     const objects = this.deps.editor.layout.anchoredObjects;
     if (!objects) return null;
     for (const object of objects) {
@@ -213,22 +261,35 @@ export class PointerController {
     // horizontal movement updates `xAlign: "custom"` + `x`; vertical
     // movement updates the docPos. Diagonal drag commits both atomically
     // via Editor.moveAndUpdateNode.
-    const floatHit = this.hitFloatAt(docX, docY, page);
-    if (floatHit) {
+    const anchoredHit = this.hitAnchoredAt(docX, docY, page);
+    if (anchoredHit) {
       if (editor.readOnly) return;
-      editor.selectNode(floatHit.docPos);
-      this.floatDrag = {
-        docPos: floatHit.docPos,
-        nodeSize: floatHit.node.nodeSize,
+      editor.selectNode(anchoredHit.docPos);
+      // Mouse position relative to the image's top-left at mousedown — used
+      // by mousemove to keep the ghost rect anchored to the cursor's grab
+      // point (so the image doesn't snap to the cursor's top-left).
+      const grabOffsetX = docX - anchoredHit.x;
+      const grabOffsetY = docY - anchoredHit.y;
+      this.anchoredDrag = {
+        docPos: anchoredHit.docPos,
+        nodeSize: anchoredHit.node.nodeSize,
         startClientX: e.clientX,
         startClientY: e.clientY,
-        startImageX: floatHit.x,
+        startImageX: anchoredHit.x,
         rect: {
-          x: floatHit.x,
-          y: floatHit.y,
-          width: floatHit.width,
-          height: floatHit.height,
-          page: floatHit.page,
+          x: anchoredHit.x,
+          y: anchoredHit.y,
+          width: anchoredHit.width,
+          height: anchoredHit.height,
+          page: anchoredHit.page,
+        },
+        grabOffsetX,
+        grabOffsetY,
+        overlay: {
+          ghostPage: anchoredHit.page,
+          ghostX: anchoredHit.x,
+          ghostY: anchoredHit.y,
+          caret: null,
         },
       };
       this.setCursorAll("move");
@@ -312,8 +373,12 @@ export class PointerController {
       return;
     }
 
-    // Float drag — mousemove just preserves cursor; deltas resolved on mouseup.
-    if (this.floatDrag) {
+    // Anchored-object drag — keep the ghost overlay tracking the cursor and
+    // resolve the live insertion caret. Deltas commit on mouseup; this block
+    // is paint-only.
+    if (this.anchoredDrag) {
+      this.updateAnchoredDragOverlay(e);
+      this.deps.scheduleUpdate();
       return;
     }
 
@@ -321,9 +386,9 @@ export class PointerController {
     const hit = this.hitTest(e.clientX, e.clientY);
     if (hit) {
       const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
-      const floatHit =
-        !resizeHit && this.hitFloatAt(hit.docX, hit.docY, hit.page);
-      const cursor = resizeHit ? resizeHit.cursor : floatHit ? "move" : "text";
+      const anchoredHit =
+        !resizeHit && this.hitAnchoredAt(hit.docX, hit.docY, hit.page);
+      const cursor = resizeHit ? resizeHit.cursor : anchoredHit ? "move" : "text";
       this.setCursorAll(cursor);
     }
 
@@ -357,9 +422,9 @@ export class PointerController {
       this.resizeDrag = null;
       this.setCursorAll("text");
     }
-    if (this.floatDrag) {
-      this.commitFloatDrag(e);
-      this.floatDrag = null;
+    if (this.anchoredDrag) {
+      this.commitAnchoredDrag(e);
+      this.anchoredDrag = null;
       this.setCursorAll("text");
     }
     this.isDragging = false;
@@ -376,27 +441,27 @@ export class PointerController {
    * Pure no-op when total movement is below a small threshold (treats
    * the gesture as a click, not a drag). Skips when `wrapMode` is
    * `inline` (the click target is an inline image, never an anchored
-   * object — guarded above by `hitFloatAt`).
+   * object — guarded above by `hitAnchoredAt`).
    */
-  private commitFloatDrag(e: MouseEvent): void {
+  private commitAnchoredDrag(e: MouseEvent): void {
     const { editor } = this.deps;
-    if (!this.floatDrag) return;
+    if (!this.anchoredDrag) return;
 
-    const dx = e.clientX - this.floatDrag.startClientX;
-    const dy = e.clientY - this.floatDrag.startClientY;
+    const dx = e.clientX - this.anchoredDrag.startClientX;
+    const dy = e.clientY - this.anchoredDrag.startClientY;
 
     const DRAG_THRESHOLD = 3;
     if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) {
       return;
     }
 
-    const { docPos, nodeSize } = this.floatDrag;
+    const { docPos, nodeSize } = this.anchoredDrag;
 
     // Resolve horizontal target X.
     // For modes whose horizontal placement is user-controlled (`square`,
     // `top-bottom`, `behind`, `front`), update the structural attrs so
     // layout reflows around the new rectangle. `inline` wouldn't be
-    // here — only anchored objects produce a hit in `hitFloatAt`.
+    // here — only anchored objects produce a hit in `hitAnchoredAt`.
     const newX = this.resolveDragTargetX(dx);
 
     // Resolve vertical target docPos.
@@ -432,11 +497,11 @@ export class PointerController {
    */
   private resolveDragTargetX(dx: number): number | null {
     const { editor } = this.deps;
-    if (!this.floatDrag) return null;
+    if (!this.anchoredDrag) return null;
     const HORIZONTAL_THRESHOLD = 3;
     if (Math.abs(dx) < HORIZONTAL_THRESHOLD) return null;
 
-    const node = editor.getState().doc.nodeAt(this.floatDrag.docPos);
+    const node = editor.getState().doc.nodeAt(this.anchoredDrag.docPos);
     if (!node) return null;
 
     const { pageWidth, margins } = editor.layout.pageConfig;
@@ -444,7 +509,7 @@ export class PointerController {
     const contentWidth = pageWidth - margins.left - margins.right;
     const attrs = normalizeImageAttrs(node);
 
-    const proposedX = this.floatDrag.startImageX + dx;
+    const proposedX = this.anchoredDrag.startImageX + dx;
     // Clamp so the image stays inside the content area.
     const clampedX = Math.max(
       contentX,
@@ -460,12 +525,18 @@ export class PointerController {
    */
   private resolveDragTargetDocPos(e: MouseEvent): number | null {
     const { editor } = this.deps;
-    if (!this.floatDrag) return null;
+    if (!this.anchoredDrag) return null;
 
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return null;
 
-    const { docPos, nodeSize } = this.floatDrag;
+    // Cross-page drag: charMap's posAtCoords is page-scoped — `nearestLine`
+    // returns undefined on un-populated pages and the lookup falls through
+    // to docPos 0, which would move the image to the document's start.
+    // Force-populate the destination page before resolving.
+    editor.ensurePagePopulated(hit.page);
+
+    const { docPos, nodeSize } = this.anchoredDrag;
     const from = docPos;
     const to = docPos + nodeSize;
 
@@ -475,9 +546,9 @@ export class PointerController {
     // posBelow with the image's center X to find the nearest
     // paragraph in the drag direction.
     if (pos >= from && pos <= to) {
-      const dy = e.clientY - this.floatDrag.startClientY;
+      const dy = e.clientY - this.anchoredDrag.startClientY;
       if (Math.abs(dy) < 1) return null; // pure horizontal — no docPos change
-      const probeX = this.floatDrag.rect.x + this.floatDrag.rect.width / 2;
+      const probeX = this.anchoredDrag.rect.x + this.anchoredDrag.rect.width / 2;
       const fallback = dy >= 0
         ? editor.charMap.posBelow(from, probeX)
         : editor.charMap.posAbove(from, probeX);
@@ -487,6 +558,47 @@ export class PointerController {
 
     if (pos === from) return null;
     return pos;
+  }
+
+  /**
+   * Refresh the live drag overlay state (ghost rect + insertion caret) from
+   * the current mouse position. Paint-only: never mutates layout, never
+   * affects hit testing.
+   */
+  private updateAnchoredDragOverlay(e: MouseEvent): void {
+    if (!this.anchoredDrag) return;
+    const { editor } = this.deps;
+    const hit = this.hitTest(e.clientX, e.clientY);
+    if (!hit) return;
+
+    // Ghost top-left = current cursor minus the grab offset captured at
+    // mousedown. Stays anchored to where the user originally grabbed.
+    const ghostX = hit.docX - this.anchoredDrag.grabOffsetX;
+    const ghostY = hit.docY - this.anchoredDrag.grabOffsetY;
+
+    // Resolve the insertion caret on the destination page. Populate the
+    // page first — same reason as resolveDragTargetDocPos: posAtCoords is
+    // page-scoped and falls through to docPos 0 on un-populated pages.
+    editor.ensurePagePopulated(hit.page);
+    let caret: { page: number; x: number; y: number; height: number } | null = null;
+    const targetDocPos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
+    const from = this.anchoredDrag.docPos;
+    const to = from + this.anchoredDrag.nodeSize;
+    // Suppress the caret when the cursor is over the source node itself —
+    // the user clearly hasn't picked a real drop target yet.
+    if (targetDocPos < from || targetDocPos > to) {
+      const coords = editor.charMap.coordsAtPos(targetDocPos, hit.page);
+      if (coords) {
+        caret = { page: coords.page, x: coords.x, y: coords.y, height: coords.height };
+      }
+    }
+
+    this.anchoredDrag.overlay = {
+      ghostPage: hit.page,
+      ghostX,
+      ghostY,
+      caret,
+    };
   }
 
   private setCursorAll(cursor: string): void {

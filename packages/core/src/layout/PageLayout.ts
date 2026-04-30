@@ -267,8 +267,8 @@ export interface FlowBlock {
   listMarker?: string;
   listMarkerX?: number;
   indentLeft: number;
-  /** True if any line span is a zero-width float anchor. */
-  hasFloatAnchor: boolean;
+  /** True if any line span is a zero-width anchored-object anchor. */
+  hasAnchoredObject: boolean;
   /** djb2 hash of nodePos + textContent + availableWidth for incremental re-layout. */
   inputHash: number;
   /** True when this entry represents a hard page break node. */
@@ -1443,7 +1443,7 @@ function computeInputHash(nodePos: number, node: Node, availableWidth: number): 
   return djb2(`${nodePos}:${(node as { textContent?: string }).textContent ?? ""}:${availableWidth}`);
 }
 
-function blockHasFloatAnchor(lines: LayoutLine[]): boolean {
+function blockHasAnchoredObject(lines: LayoutLine[]): boolean {
   for (const line of lines) {
     for (const span of line.spans) {
       if (span.kind !== "object" || span.width !== 0) continue;
@@ -1484,7 +1484,7 @@ export function buildBlockFlow(
         blockType: "pageBreak",
         align: "left",
         indentLeft: 0,
-        hasFloatAnchor: false,
+        hasAnchoredObject: false,
         inputHash: 0,
         isPageBreak: true,
         wasCacheHit: false,
@@ -1535,7 +1535,7 @@ export function buildBlockFlow(
             listMarkerX: blockX - MARKER_RIGHT_GAP,
           } : {}),
           indentLeft,
-          hasFloatAnchor: false,
+          hasAnchoredObject: false,
           inputHash: computeInputHash(fragmentNodePos, fragmentNode, blockWidth),
           wasCacheHit: false,
           partKind: "fragment",
@@ -1564,7 +1564,7 @@ export function buildBlockFlow(
           listMarkerX: blockX - MARKER_RIGHT_GAP,
         } : {}),
         indentLeft,
-        hasFloatAnchor: true,
+        hasAnchoredObject: true,
         inputHash: computeInputHash(topBottom.imageDocPos, topBottom.image, blockWidth),
         wasCacheHit: false,
         partKind: "anchored-object",
@@ -1609,7 +1609,7 @@ export function buildBlockFlow(
         listMarkerX: blockX - MARKER_RIGHT_GAP,
       } : {}),
       indentLeft,
-      hasFloatAnchor: blockHasFloatAnchor(entry.lines),
+      hasAnchoredObject: blockHasAnchoredObject(entry.lines),
       inputHash: computeInputHash(nodePos, node, blockWidth),
       wasCacheHit: isHit,
       ...(preCached?.placedTargetY    !== undefined ? { preCachedTargetY:    preCached.placedTargetY    } : {}),

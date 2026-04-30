@@ -276,6 +276,88 @@ export function renderTrackedConflict(
   ctx.restore();
 }
 
+// ── Anchored-object drag overlay ─────────────────────────────────────────────
+
+/**
+ * Faint dashed outline at the original location of an anchored object that's
+ * being dragged. Tells the user "this is where the image came from" so the
+ * ghost-vs-source relationship is obvious.
+ */
+export function renderAnchoredDragSource(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  if (width <= 0 || height <= 0) return;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(148, 163, 184, 0.10)"; // slate-400 wash
+  snappedFillRect(ctx, x, y, width, height);
+
+  ctx.strokeStyle = "rgba(100, 116, 139, 0.55)"; // slate-500
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(
+    Math.round(x) + 0.5,
+    Math.round(y) + 0.5,
+    Math.round(width) - 1,
+    Math.round(height) - 1,
+  );
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+/**
+ * Translucent rect that follows the cursor while an anchored object is being
+ * dragged. Shows where the image will land if the user releases now.
+ */
+export function renderAnchoredDragGhost(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  if (width <= 0 || height <= 0) return;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(59, 130, 246, 0.18)"; // blue-500 wash
+  snappedFillRect(ctx, x, y, width, height);
+
+  ctx.strokeStyle = "rgba(37, 99, 235, 0.85)"; // blue-600
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(
+    Math.round(x) + 0.5,
+    Math.round(y) + 0.5,
+    Math.round(width) - 1,
+    Math.round(height) - 1,
+  );
+  ctx.restore();
+}
+
+/**
+ * Vertical caret at the resolved insertion point during an anchored-object
+ * drag — mirrors Word/Docs "this is where the anchor will land" indicator.
+ */
+export function renderAnchoredDragCaret(
+  ctx: CanvasRenderingContext2D,
+  coords: { x: number; y: number; height: number },
+): void {
+  const x = Math.round(coords.x) + 0.5;
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(37, 99, 235, 0.9)"; // blue-600
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x, coords.y + 1);
+  ctx.lineTo(x, coords.y + coords.height - 1);
+  ctx.stroke();
+  ctx.restore();
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /**

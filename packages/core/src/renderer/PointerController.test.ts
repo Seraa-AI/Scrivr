@@ -29,6 +29,7 @@ interface MockEditor {
   };
   charMap: {
     posAtCoords: ReturnType<typeof vi.fn>;
+    coordsAtPos: ReturnType<typeof vi.fn>;
     objectRectAtPoint: ReturnType<typeof vi.fn>;
     getObjectRect: ReturnType<typeof vi.fn>;
     posBelow: ReturnType<typeof vi.fn>;
@@ -43,6 +44,7 @@ interface MockEditor {
   setNodeAttrs: ReturnType<typeof vi.fn>;
   moveNode: ReturnType<typeof vi.fn>;
   moveAndUpdateNode: ReturnType<typeof vi.fn>;
+  ensurePagePopulated: ReturnType<typeof vi.fn>;
 }
 
 function makeMockEditor(overrides: Partial<MockEditor> = {}): MockEditor {
@@ -57,6 +59,7 @@ function makeMockEditor(overrides: Partial<MockEditor> = {}): MockEditor {
     },
     charMap: {
       posAtCoords: vi.fn(() => 10),
+      coordsAtPos: vi.fn(() => ({ x: 0, y: 0, height: 16, page: 1 })),
       objectRectAtPoint: vi.fn(() => undefined),
       getObjectRect: vi.fn(() => undefined),
       posBelow: vi.fn(() => null),
@@ -86,6 +89,7 @@ function makeMockEditor(overrides: Partial<MockEditor> = {}): MockEditor {
     setNodeAttrs: vi.fn(),
     moveNode: vi.fn(),
     moveAndUpdateNode: vi.fn(),
+    ensurePagePopulated: vi.fn(),
     ...overrides,
   };
 }

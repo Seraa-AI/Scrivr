@@ -4,7 +4,14 @@ import type { DocumentLayout, LayoutFragment } from "../layout/PageLayout";
 import { setupCanvas, clearCanvas, watchDpr } from "./canvas";
 import { renderPage } from "./PageRenderer";
 import { drawBlock } from "./PageRenderer";
-import { clearOverlay, renderCursor, renderSelection } from "./OverlayRenderer";
+import {
+  clearOverlay,
+  renderCursor,
+  renderSelection,
+  renderAnchoredDragSource,
+  renderAnchoredDragGhost,
+  renderAnchoredDragCaret,
+} from "./OverlayRenderer";
 import { NodeSelection } from "prosemirror-state";
 import { computeGhostRect, renderHandles } from "./ResizeController";
 import { PointerController } from "./PointerController";
@@ -56,6 +63,12 @@ export interface TileEntry {
    * though doc state / selection / plugin state don't change until mouseup.
    */
   lastPendingResizeKey: string;
+  /**
+   * Last seen anchored-object drag ghost key. Same purpose as
+   * lastPendingResizeKey — keeps the ghost rect + caret marker in sync
+   * with the cursor during mousemove without waiting for mouseup.
+   */
+  lastPendingAnchoredDragKey: string;
 }
 
 /** Helpers */
@@ -379,6 +392,7 @@ export class TileManager {
         tile.lastSelectionKey = "";
         tile.lastPmState = null;
         tile.lastPendingResizeKey = "";
+        tile.lastPendingAnchoredDragKey = "";
         tile.wrapper.style.top = `${idx * sh}px`;
         tile.wrapper.style.height = `${this.tileHeight}px`;
         tile.wrapper.style.display = "block";
@@ -583,6 +597,11 @@ export class TileManager {
     const pendingKey = pending
       ? `${pending.handle}:${pending.width}:${pending.height}`
       : "";
+    const pendingAnchored = this.pointer.pendingAnchoredDrag;
+    const pendingAnchoredKey = pendingAnchored
+      ? `${pendingAnchored.ghostPage}:${pendingAnchored.ghostX}:${pendingAnchored.ghostY}` +
+        `:${pendingAnchored.caret?.page ?? "-"}:${pendingAnchored.caret?.x ?? "-"}:${pendingAnchored.caret?.y ?? "-"}`
+      : "";
     const blinkDirty =
       tile.tileIndex === cursorTile && tile.lastBlinkState !== blinkOn;
     const moveDirty =
@@ -594,6 +613,9 @@ export class TileManager {
     // change until mouseup, so without this the ghost handles would freeze
     // at their starting size and the image would "snap" on release.
     const pendingResizeDirty = tile.lastPendingResizeKey !== pendingKey;
+    // Same idea for anchored-object drag — the ghost rect and caret marker
+    // need to track the cursor in real time.
+    const pendingAnchoredDragDirty = tile.lastPendingAnchoredDragKey !== pendingAnchoredKey;
     // When a surface is active, always repaint the overlay so the cursor
     // blinks correctly and selection updates are visible. The header cursor
     // is drawn by an overlay handler that needs blink-tick repaints.
@@ -604,6 +626,7 @@ export class TileManager {
       !moveDirty &&
       !pluginStateDirty &&
       !pendingResizeDirty &&
+      !pendingAnchoredDragDirty &&
       !surfaceStateDirty
     )
       return;
@@ -613,6 +636,7 @@ export class TileManager {
     tile.lastSelectionKey = selKey;
     tile.lastPmState = pmState;
     tile.lastPendingResizeKey = pendingKey;
+    tile.lastPendingAnchoredDragKey = pendingAnchoredKey;
 
     const dpr = tile.dpr || (window.devicePixelRatio ?? 1);
     const w = pageConfig.pageWidth;
@@ -688,6 +712,37 @@ export class TileManager {
             objRect.height,
           );
         }
+      }
+    }
+
+    // ── Anchored-object drag overlay (ghost + caret) ─────────────────────
+    // Drawn between handles and extension overlays so it sits above content
+    // but below extension-rendered chrome (e.g. AI carets, bubble menus).
+    if (pendingAnchored) {
+      // Source-page outline: a faint dashed rect where the image lives
+      // structurally — gives the user a visual anchor while they drag.
+      if (pendingAnchored.sourcePage === pageNum) {
+        renderAnchoredDragSource(
+          overlayCtx,
+          pendingAnchored.sourceX,
+          pendingAnchored.sourceY,
+          pendingAnchored.width,
+          pendingAnchored.height,
+        );
+      }
+      // Ghost on the destination page: translucent rect tracking the cursor.
+      if (pendingAnchored.ghostPage === pageNum) {
+        renderAnchoredDragGhost(
+          overlayCtx,
+          pendingAnchored.ghostX,
+          pendingAnchored.ghostY,
+          pendingAnchored.width,
+          pendingAnchored.height,
+        );
+      }
+      // Insertion caret on whichever page resolved the target docPos.
+      if (pendingAnchored.caret && pendingAnchored.caret.page === pageNum) {
+        renderAnchoredDragCaret(overlayCtx, pendingAnchored.caret);
       }
     }
 
@@ -773,6 +828,7 @@ export class TileManager {
       lastSelectionKey: "",
       lastPmState: null,
       lastPendingResizeKey: "",
+      lastPendingAnchoredDragKey: "",
     };
   }
 

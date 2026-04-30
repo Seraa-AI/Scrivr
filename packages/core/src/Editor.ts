@@ -343,7 +343,7 @@ export class Editor extends BaseEditor implements IEditor {
       // and need surface-aware coordinate lookup. Safe today because no plugin
       // activates a surface yet.
       getCharMap: getRoutedCharMap,
-      getFloatPosition: (docPos: number) => {
+      getAnchoredObjectPosition: (docPos: number) => {
         const f = this.layout.anchoredObjects?.find((fl) => fl.docPos === docPos);
         if (!f) return null;
         return { page: f.page, y: f.y, height: f.height };
