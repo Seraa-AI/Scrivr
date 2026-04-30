@@ -38,55 +38,93 @@ For each non-inline mode, a focused test pins the user-visible
 behavior. Each must pass against the implementation defined by
 docs `01` and `02`.
 
-### Square-left
+### Square — `xAlign: "left"`
 
 ```
-Setup: paragraph A is just an anchored image (square-left,
-       w=200, h=250).
+Setup: paragraph A contains an anchored image (wrapMode: "square",
+       xAlign: "left", w=200, h=250).
        paragraph B follows A with a long text run.
        Filler placed before A so the image lands near a page
        boundary.
 
 Assertions:
   ▸ A and the visible image are on the same page.
-  ▸ B's first line top y >= image.y - tolerance.
+  ▸ Anchor docPos is in paragraph A (anchor and image co-located).
+  ▸ Image painted at x = contentX.
+  ▸ B's first line y >= image.y - tolerance.
   ▸ B's lines whose y is within [image.y, image.y+image.height]
-    have constraintX > 0 and effectiveWidth < contentWidth.
-  ▸ B's lines whose y >= image.y + image.height + FLOAT_MARGIN
+    have constraintX > 0 and effectiveWidth < contentWidth (text
+    wraps on the right of the image).
+  ▸ B's lines whose y >= image.y + image.height + margin
     use full content width.
+  ▸ A's flow contribution is its text height — NOT image.height.
+    (Square mode does not push following content past the image's
+    bottom; following content wraps beside.)
 ```
 
-### Square-right
+### Square — `xAlign: "right"`
 
-Mirror of square-left:
-- Same setup with `square-right`.
-- B's constrained lines have `effectiveWidth < contentWidth` and
-  start at `contentX` (left side); image sits on the right.
+Mirror of `xAlign: "left"`:
+- Image painted at `x = contentX + contentWidth - image.width`.
+- B's constrained lines start at `contentX` and end before the
+  image's left edge (text wraps on the left).
+
+### Square — `xAlign: "center"`
+
+```
+Setup: paragraph A contains square image with xAlign: "center",
+       w=200, h=250. contentWidth = 600. Long text in B.
+
+Assertions:
+  ▸ Image painted at x = contentX + (600-200)/2 = contentX + 200.
+  ▸ B's lines in the image's Y range pick the WIDER side via
+    wider-side wrap. With image centered, leftAvail = 200 - margin
+    and rightAvail = 200 - margin (equal); deterministic tie-break
+    picks the right side.
+  ▸ Each constrained line lies entirely outside the image's
+    horizontal range.
+```
+
+### Square — `xAlign: "custom"` with arbitrary `x`
+
+```
+Setup: square image with xAlign: "custom", x = contentX + 80,
+       w=200, h=250. Long text in B.
+
+Assertions:
+  ▸ Image painted at x = contentX + 80 (clamped to keep image inside
+    content area).
+  ▸ B's lines in the image's Y range wrap on whichever side has
+    more room (left = 80 - margin; right = contentWidth - 280 -
+    margin; right wins → constraintX = image.right + margin).
+```
 
 ### Top-bottom
 
 ```
-Setup: paragraph A contains only a top-bottom image (h=200).
-       paragraph B follows A with text.
-       Filler placed so A lands near a page boundary.
+Setup: paragraph A contains only a top-bottom image (h=200,
+       xAlign: "left"). Paragraph B follows A with text. Filler
+       placed so A lands near a page boundary.
 
 Assertions:
   ▸ A and the visible image are on the same page.
-  ▸ B's first line top y >= image.y + image.height + FLOAT_MARGIN.
+  ▸ B's first line y >= image.y + image.height + margin.
   ▸ No line of B has constraintX or effectiveWidth set.
+  ▸ A's flow contribution = image.height (block reserves full
+    flow width).
 ```
 
 ### Behind
 
 ```
-Setup: paragraph A contains only a behind image (h=200).
-       paragraph B follows A with text.
+Setup: paragraph A contains only a behind image (h=200,
+       xAlign: "left"). Paragraph B follows A with text.
 
 Assertions:
   ▸ A and the visible image are on the same page.
-  ▸ B's first line top y >= image.y + image.height + margin
-    (behind block takes its slot).
-  ▸ B's lines have NO constraintX or effectiveWidth set.
+  ▸ B's first line y >= image.y + image.height + margin (behind
+    block takes its slot).
+  ▸ B's lines have no constraintX or effectiveWidth set.
   ▸ Renderer paint order: image is drawn before B's text.
 ```
 
@@ -117,24 +155,29 @@ Assertions:
 ### Multi-image stacking
 
 ```
-Setup: two anchored objects of the same wrap mode (e.g. both
-       square-left) with paragraphs between them, placed near a
-       page boundary so stacking forces the second below the
-       first.
+Setup: two top-bottom anchored objects (h=200 each) with
+       paragraphs between them, placed near a page boundary so
+       the second cannot fit on the first's page.
 
 Assertions:
-  ▸ The second object's y >= first object's y + first.height
-    + FLOAT_MARGIN.
-  ▸ Both objects' anchor pages match their object pages
-    (anchor follows displacement).
+  ▸ Each object's anchor docPos lands on the same paginated
+    page as the object itself (anchor follows displacement).
+  ▸ The second object's globalY >= first object's globalY +
+    first.height + margin (clearance applied).
   ▸ Universal contract holds across all blocks.
+  ▸ For square-mode multi-image: see `01-placement-and-wrap-
+    policies.md` § Stacking semantics — square images do not
+    cross-stack vertically; if their wrap zones horizontally
+    overlap, lines resolve against whichever zone they hit
+    first.
 ```
 
 ### Universal contract across mixed modes
 
 ```
-Setup: a doc that mixes square-left, square-right, top-bottom,
-       behind, front, and inline modes in arbitrary order.
+Setup: a doc that mixes square (with various xAlign values),
+       top-bottom, behind, front, and inline modes in arbitrary
+       order.
 
 Assertion: the universal contract holds for every anchored
 object in the document.
@@ -271,14 +314,21 @@ form the executable spec.
 
 | # | Test | Pins |
 |---|---|---|
-| 1 | square-right standalone near page bottom | universal contract, anchor-push, same page |
-| 2 | square-left standalone near page bottom | mirror of 1 |
-| 3 | top-bottom standalone near page bottom | clearance + same page |
-| 4 | behind: anchor and image on same page, layout unaffected by paint order | per-mode behind |
-| 5 | front: same as 4 with paint reversed | per-mode front |
-| 6 | inline-anchored top-bottom splits paragraph into three flow blocks | Rule 2, top-bottom |
-| 7 | multi-image stacking — each follows its own anchor, no detachment | stacking + universal |
-| 8 | universal contract across mixed modes in one doc | the bug-killer |
+| 1 | `square` `xAlign: "left"` standalone near page bottom | universal contract, anchor co-located, wider-side wrap (right) |
+| 2 | `square` `xAlign: "right"` standalone near page bottom | mirror of 1 (wider-side wrap on left) |
+| 3 | `square` `xAlign: "center"` with long text | both-side availability + wider-side tie-break |
+| 4 | `square` `xAlign: "custom"` with arbitrary x | clamping, wider-side wrap, anchor co-located |
+| 5 | `top-bottom` standalone near page bottom | clearance + same page |
+| 6 | `behind`: anchor and image on same page, layout unaffected by paint order | per-mode behind |
+| 7 | `front`: same as 6 with paint reversed | per-mode front |
+| 8 | inline-anchored `top-bottom` splits paragraph into three flow blocks | Rule 2, top-bottom |
+| 9 | inline-anchored `square` does NOT split paragraph | Rule 2 narrowing |
+| 10 | multi-image stacking — each follows its own anchor, no detachment | stacking + universal |
+| 11 | universal contract across mixed modes in one doc | the bug-killer |
+| 12 | drag horizontally → setNodeAttrs(`xAlign:"custom"`, `x`) only; no moveNode | drag mechanics, anchor co-location |
+| 13 | drag vertically → moveNode only; no setNodeAttrs | drag mechanics |
+| 14 | drag diagonally → both in one transaction; layout sees one consistent state | drag mechanics atomicity |
+| 15 | legacy `wrappingMode: "square-left"` normalizes to `wrapMode: "square", xAlign: "left"` on read | attribute compatibility |
 
 Once these pass, the model and pipeline are verified at the
 contract level.

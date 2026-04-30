@@ -55,72 +55,83 @@ manipulation.
 
 ### What a drag does
 
+A drag updates two channels in **one atomic transaction**:
+
 ```
-visual drag → find nearest valid document insertion point
-            → move the image node there in the PM doc
-            → relayout from scratch
-            → floatOffset is left untouched
+horizontal channel (X)  → setAttrs({ xAlign: "custom", x: <newX> })
+vertical channel (Y)    → moveNode to docPos of paragraph nearest the painted Y
 ```
+
+Pure horizontal drag = setAttrs only.
+Pure vertical drag = moveNode only.
+Diagonal drag = both, in one transaction.
+
+After the transaction commits, layout reruns. Anchor and image are
+co-located by construction (anchor docPos sits in the paragraph
+nearest the image's painted Y; image's painted X matches `xAlign` /
+`x`). There is no "anchor and image disagreed" intermediate state.
 
 ### What a drag MUST NOT do
 
 ```
-visual drag → floatOffset.x/y = new position - old position
+visual drag → floatOffset.x/y = newPosition - oldPosition
 ```
 
-Pushing `floatOffset` to track the drag breaks every wrap-mode
-contract:
-
-- The solver computes wrap zones from the structural position;
-  the painted image ends up far from where text wraps.
-- Cross-page drags become impossible (you can't push `offsetY`
-  far enough without the image overlapping unrelated content).
-- Re-layout doesn't move the image because nothing structural
-  changed.
+Layout never reads `floatOffset`. Writing it gives the image a paint
+position the layout solver doesn't know about — the wrap zone is
+solved against the structural position while the image renders
+elsewhere. Same class of bug as the v2 attempt's offset-driven
+constraint drift.
 
 ### Drag mechanics
 
-1. **Drag start.** Capture the source anchor docPos and the
-   drag origin (mouse Y).
-2. **Drag move.** Compute the visual cursor position. Resolve
-   the **nearest valid insertion point** — the docPos in the
-   document where dropping would put the image. Use the same
-   posAtCoords machinery the cursor uses.
+1. **Drag start.** Capture the source anchor docPos and the drag
+   origin (mouse X / Y) in page-relative coordinates.
+2. **Drag move.** Compute the live cursor position. Resolve the
+   **target docPos** = the docPos of the paragraph nearest the
+   painted Y. Resolve the **target X** = the painted X clamped to
+   the content area.
 3. **Drag preview.** Render a ghost of the image at the cursor
-   position (paint-only, doesn't affect flow). Optionally show
-   the target anchor position with a caret marker.
+   position (paint-only, doesn't affect flow).
 
    **Preview non-interference rule:** the drag preview must not
-   influence hit testing for layout, selection, or insertion-point
-   resolution. The preview is a paint artifact only. Without this
-   rule, the preview can pick wrong insertion points or flicker
-   between the displayed ghost position and the actual resolved
-   docPos.
-4. **Drag drop.** Issue a transaction: delete the image node
-   from its source position, insert it at the resolved target
-   position. `floatOffset` is preserved across the move (it's
-   the user's nudge preference, not the drag delta).
+   influence hit testing for layout, selection, or
+   insertion-point resolution. The preview is a paint artifact
+   only.
+4. **Drag drop.** Issue **one transaction** containing the
+   composite update:
+
+   ```
+   tr.setNodeAttrs(imagePos, { xAlign: "custom", x: targetX })
+     .moveNode(imagePos, targetDocPos)   // only if targetDocPos differs
+   ```
+
+   Both channels commit together. If the target docPos equals the
+   source, the moveNode is omitted and only the X attrs change.
+   If the target X is unchanged (pure vertical drag), the
+   setNodeAttrs is omitted.
 5. **Layout rerun.** The pipeline runs end-to-end with the new
-   anchor position. The contract holds by construction —
-   anchor and image land on the same page wherever they go.
+   attrs. The image renders at the new (X, Y); the wrap zone is
+   solved at the same rectangle. Anchor docPos matches the
+   painted Y by construction.
 
 ### Cross-page drag
 
-Dragging an image to a different page works the same way: the
-target docPos lands inside a paragraph on the new page. The
-solver places the anchored object at that paragraph's flow
-position. No special "move to page N" handling — it's just a
-structural move that happens to cross a page boundary.
+Dragging an image to a different page is just a vertical drag whose
+target docPos happens to land in a paragraph on a different page.
+The transaction moves the node, layout re-runs, the image renders on
+the new page. No special "move to page N" handling.
 
 ### Drag within the same paragraph
 
-Dragging within the source paragraph only changes structure if
-the anchor crosses a **valid insertion boundary** — e.g. before
-or after another inline node, or to a position that changes the
-split-fragment ordering. Otherwise the operation is a strict
-no-op and **no transaction is emitted**. This prevents
-unnecessary reflows when the user lifts the mouse near the
-original position.
+For pure horizontal drag (no vertical component), the docPos doesn't
+change — only `xAlign` and `x` update. This is the common
+"slide image left/right" interaction and was structurally a no-op in
+the legacy `square-left` / `square-right` model. The new model
+expresses it cleanly.
+
+For mixed drag where the visual Y crosses a paragraph boundary, the
+target docPos changes; both channels commit.
 
 ## 3. Resizing
 
@@ -154,48 +165,67 @@ down (its block height grows).
 For behind/front: same as top-bottom, since the block takes its
 slot.
 
-## 4. Mode toggle
+## 4. Mode toggle and align toolbar
 
-User changes `wrappingMode` via menu, command, or keyboard
-shortcut. Each transition is a structural change:
+User changes `wrapMode` and/or `xAlign` via menu, command, toolbar
+button, or keyboard shortcut.
+
+### `wrapMode` transitions
 
 | From → To | Structural change |
 |---|---|
-| `inline` → any non-inline | Image stays at its docPos; the anchor span becomes zero-width; the parent paragraph is split at layout time per Rule 2 (no PM doc change, but cursor-position and selection mappings must adapt to the split flow representation — see "Cursor behavior" below). |
-| any non-inline → `inline` | The image node's `wrappingMode` updates to `inline`; the parent paragraph stops splitting and lays out as a single text block with the image as inline content. |
-| `square-left` ↔ `square-right` | Anchor preserved; flow position preserved; wrap zone moves to the other side. |
-| `square-*` → `top-bottom` | Wrap zone replaced with full clearance; following content stacks vertically. |
-| `top-bottom` → `square-*` | Clearance replaced with side wrap zone. |
-| any wrap → `behind` / `front` | Wrap zone removed; flow slot retained (block still takes its height); paint layer changes. |
+| `inline` → any non-inline | `node.attrs.wrapMode` updates; if the new mode has non-zero flow contribution (`top-bottom`, `behind`, `front`), the parent paragraph splits at layout time (Rule 2). For `square`, no split — the anchor span stays inline at its docPos. |
+| any non-inline → `inline` | `node.attrs.wrapMode` updates; the parent paragraph stops splitting (if it was) and lays out as a single text block with the image as inline content. |
+| `square` → `top-bottom` | Wrap zone replaced with flow clearance; the image's flow contribution becomes `image.height`; following paragraphs stack below. `xAlign` / `x` preserved (image renders at the same X within the new full-width block). |
+| `top-bottom` → `square` | Flow clearance removed; wrap zone emitted at the image's painted rectangle; following paragraphs may now wrap beside. `xAlign` / `x` preserved. |
+| any non-inline → `behind` / `front` | Wrap zone (if any) removed; flow slot retained at `image.height`; paint layer changes. |
+| `behind` ↔ `front` | Paint layer flips; no other change. |
+
+### Align toolbar
+
+Toolbar buttons update `xAlign` directly:
+
+| Button | Sets |
+|---|---|
+| Left | `xAlign: "left"` (image flush at `contentX`) |
+| Center | `xAlign: "center"` |
+| Right | `xAlign: "right"` (image flush at right edge) |
+| (Drag overrides) | `xAlign: "custom"`, `x: <draggedX>` |
+
+Toggling between the three named alignments is a pure attrs update.
+`x` is left untouched (it only takes effect when `xAlign` is
+`"custom"`), so a user can drag for fine placement, click "Center"
+to snap, then click "Custom" (or drag again) to recall their
+custom X if the editor exposes that.
 
 After every transition, the contract from `03` must still hold:
 following content does not render before the object's flow
 effect is satisfied.
 
-## 5. Offset controls
+## 5. Position is structural; no paint-only offset
 
 ```
-floatOffset.x / floatOffset.y are visual-only.
-They never change flow, wrap zones, pagination, or anchor
-position.
+xAlign / x are structural attributes.
+There is no separate paint-only X or Y offset.
 ```
 
-UI surfaces (panels, keyboard nudge keys) that adjust offsets
-must clamp them to small, sensible ranges (a handful of pixels
-in each direction). Large structural moves are NOT offset
-adjustments — they are drags or property edits.
+The legacy `floatOffset.x` / `floatOffset.y` attributes are retired
+in v1. Layout never reads them. Position changes go through `xAlign`
+and `x`:
 
-If a user wants the image at a different page or at a notably
-different vertical position in the page, the right action is
-**drag** (or change the anchor docPos directly), not
-`floatOffset`.
+- "Slide image left/right" — drag horizontally → setAttrs(`xAlign:
+  "custom"`, `x: <newX>`).
+- "Snap to left / center / right" — toolbar button → setAttrs(`xAlign:
+  "left" | "center" | "right"`).
+- "Fine vertical adjustment" — there is none. Vertical position is
+  the anchor's flow Y. To move the image vertically, the user must
+  edit document content above it (insert / delete paragraphs) or
+  vertically drag the image (which moves the anchor docPos).
 
-The pipeline enforces this from the other side: it solves wrap
-geometry against the structural position, ignoring `floatOffset`.
-A user who pushes `floatOffset.y` past the image's flow position
-will see the image render far from its wrap zone — visually
-broken, deliberately. This is the model telling the user "use
-drag instead."
+This is intentional: the model never has two channels expressing
+position. There is no scenario where a paint position differs from
+the structural position, so no scenario where wrap geometry and
+visible image diverge.
 
 ## 6. Cursor behavior
 
@@ -238,37 +268,61 @@ exists because the v2 attempt did the opposite and the model
 broke.
 
 ```
-✗ Do not let users move an image without changing its anchor.
-✗ Do not create independent page-positioned images.
-✗ Do not use floatOffset.y to move an object across pages.
-✗ Do not let projection repair bad anchor placement.
-✗ Do not silently rewrite floatOffset on layout passes.
-✗ Do not snap the anchor to the image's offset position.
+✗ Do not let vertical movement update floatOffset (or any paint-only Y).
+✗ Do not let horizontal movement update floatOffset (or any paint-only X).
+✗ Do not encode horizontal placement in wrapMode (no square-left / square-right).
+✗ Do not write attrs in two transactions (X then Y) — combine them so layout sees one consistent state.
+✗ Do not let projection repair anchor / image placement disagreements.
+✗ Do not snap the anchor to a position other than what the user dragged to.
+✗ Do not let layout read `floatOffset` (legacy attribute, retired).
 ```
 
-The complete forbidden pattern:
+The complete forbidden pattern (from v2):
 
 ```
-user drags image
-  → controller writes floatOffset.y
-  → layout re-runs but anchor is unchanged
-  → solver places image at anchor.flow_y (no change)
+user drags image right
+  → controller writes floatOffset.x = 200
+  → layout re-runs; solver ignores floatOffset (correct)
+  → image renders at anchor's flow position + 200px (paint-only)
+  → wrap zone solved at original X
+  → text wraps as if image was at xAlign:left, but image renders centered
+  → visually broken
+```
+
+```
+user drags image down
+  → controller writes floatOffset.y = 300
+  → layout re-runs but anchor docPos unchanged
+  → solver places image at anchor.flow_y (no Y change)
   → renderer paints image at anchor.flow_y + floatOffset.y
-  → image visually far from wrap zone
+  → image visually distant from wrap zone
   → text and image disagree about page
 ```
 
-Every step here is a violation of the model. The drag controller
-must instead:
+The correct pattern:
 
 ```
-user drags image
-  → controller computes target docPos from cursor coords
-  → transaction moves the image node to target docPos
-  → layout re-runs with new anchor position
-  → solver places image at NEW anchor.flow_y
-  → renderer paints image at solved position
+user drags image right
+  → controller commits tr.setNodeAttrs(imagePos, {
+      xAlign: "custom",
+      x: targetX
+    })
+  → layout re-runs with new attrs
+  → solver places image at targetX, wrap zone at the new rectangle
   → contract holds by construction
+
+user drags image down
+  → controller computes target docPos from painted Y
+  → controller commits tr.moveNode(imagePos, targetDocPos)
+  → layout re-runs with new anchor position
+  → solver places image at NEW anchor's flow_y
+  → contract holds by construction
+
+user drags diagonally
+  → controller commits BOTH in one transaction:
+      tr.setNodeAttrs(imagePos, { xAlign: "custom", x: targetX })
+        .moveNode(imagePos, targetDocPos)
+  → layout re-runs once, image lands at (targetX, new flow_y)
 ```
 
 ## 8. Edit stability invariant
@@ -306,7 +360,7 @@ matches the current repo:
 | `InputBridge` | Cursor / arrow navigation; treat image node as atomic. |
 | `OverlayRenderer` | Paint drag preview and selection chrome at offset position. |
 | Image extension's resize handles | Update `node.attrs.width / height`; trigger layout. |
-| Image extension's mode toolbar | Update `node.attrs.wrappingMode`; trigger layout. |
+| Image extension's mode + align toolbar | Update `node.attrs.wrapMode` (mode buttons) and `node.attrs.xAlign` (align buttons); trigger layout. |
 
 When implementing each surface, refer to:
 - this doc for **what** the action does,

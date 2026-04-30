@@ -127,46 +127,37 @@ or full-page diagrams.
   to leak content "above" its rendered position on any page
   it appears on.
 
-### F3. Anchor independent of the cursor's paragraph
+### F3. Free horizontal positioning — **shipped in v1**
 
-**What it adds.** Word lets users drag an image's visual position
-without moving its anchor — and lets users drag the anchor
-indicator (a separate UI affordance) without moving the visual.
-The result is "anchored to paragraph X, but visually positioned
-relative to page Y at coordinates Z."
+(Previously listed here as deferred. Pulled into v1 as part of the
+Word-model adoption: `wrapMode: "square"` + `xAlign: "left" |
+"center" | "right" | "custom"` + `x` for custom horizontal position.
+Drag commits both `xAlign / x` updates and (if vertical movement)
+`moveNode` in one transaction.)
 
-**Why deferred.** This is exactly the kind of two-channel
-position model that broke the v2 attempt. Adding it without
-extreme care invites the projection-patches-anchor-mismatches
-class of bugs back. It's also a feature most users don't reach
-for; the structural-drag UX from v1 covers the common cases.
+What v1 does NOT yet support and remains deferred:
 
-**Constraints any implementation must preserve:**
+- **`positionMode: "fix-on-page"`.** Image pinned to a page rather
+  than tracking its anchor through flow. Word's "Fix Position on
+  Page" toggle. The constraints below still apply; v1 hardcodes
+  `positionMode: "move-with-text"`.
+- **Anchor indicator UI.** A separate handle that the user drags
+  to detach the anchor from the image's visual position. v1's
+  anchor and image are co-located by drag mechanics; this is
+  intentional. F3.5 if pursued: add a "detach anchor" action
+  that takes the image into a `fix-on-page` mode.
 
-- `floatOffset.x / y` must remain a small visual nudge, NOT
-  the channel through which independent anchor positioning
-  is implemented. Independent positioning needs its own
-  attribute pair (e.g. `pageOffset.x / y`) with explicit
-  semantics that include solver awareness.
-- The model gains a new positioning mode; the existing modes
-  (flow-follows-anchor) are unchanged.
-- The drag UX gains an explicit "detach anchor" action with
-  visible UI; the default drag still moves the structural
-  anchor.
-- The pipeline's Stage 3 must compute placements that respect
-  the explicit detached position while still emitting wrap
-  zones consistent with the painted image position. (This is
-  the hard part — the wrap zone needs to follow the painted
-  position, not the structural anchor, only for objects that
-  have explicitly opted into independent positioning.)
-- **No paint-to-layout coupling.** Independent positioning
-  must NOT allow wrap zones to be driven by paint offsets
-  (`floatOffset`). Any positioning that affects wrap geometry
-  is **structural** and must be expressed as explicit Stage 3
-  inputs (e.g. a separate `pageOffset.x / y` attribute pair
-  whose values are read by the solver, not just the renderer).
-  This prevents the offset-driven constraint drift class of
-  bugs that broke the v2 attempt.
+**Constraints any future fix-on-page implementation must preserve:**
+
+- The new positioning mode lives on a new attribute (`positionMode`),
+  read by Stage 3. There is still no paint-only X / Y offset.
+- Stage 3 partitions inputs into flow-anchored and page-anchored
+  sets. Both partitions are resolved **inside Stage 3** — no
+  separate post-pagination solver. Single-authority invariant
+  preserved.
+- Page-anchored placements still emit wrap zones (or clearances)
+  computed from their painted position. Wrap geometry is solved
+  against the same painted position the renderer paints.
 
 ### F4. Tight / through wrap (non-rectangular wrap zones)
 
@@ -211,6 +202,41 @@ itself.
 
 **Why deferred.** Niche. Power-user feature. Tight / through
 (F4) covers most of what users actually want.
+
+### F7. Two-sided wrap (single line straddling an image)
+
+**What it adds.** A single line of text whose horizontal extent
+spans BOTH sides of an image — text on the left of the image,
+the image as a horizontal "hole," text on the right of the image
+— all on the same line Y.
+
+Google Docs does this when an image is sufficiently centered and
+both available regions are wide enough to fit content. v1 does
+**wider-side wrap** only: each line picks the side with more
+available width and wraps on that side; the other side is left
+empty. This produces visible asymmetry around centered images
+relative to Google Docs.
+
+**Why deferred.** LineBreaker today produces one continuous line
+per logical line. Two-sided wrap requires either:
+- multi-segment lines (one logical line, two visual segments
+  separated by the image hole), or
+- splitting a logical line into two visual lines on the same Y
+  in different X regions.
+
+Either approach is a non-trivial LineBreaker change. The visual
+gain over wider-side wrap is real but bounded.
+
+**Constraints any implementation must preserve:**
+
+- The wider-side wrap path remains the fallback for short text
+  that doesn't justify the multi-segment overhead.
+- The universal contract is unchanged.
+- Wrap-zone geometry remains rectangular (this is independent of
+  F4 tight/through — F7 changes how lines navigate around a
+  rectangular zone, not the zone's shape).
+- The line-breaking algorithm must remain deterministic and
+  monotonic — same input produces the same output.
 
 ## Deferred — UX features
 

@@ -9,3 +9,4 @@ apps/server/data/
 .pnpm-store/
 .env
 *.code-workspace
+*MS-OE376*.docx

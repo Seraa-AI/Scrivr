@@ -37,32 +37,47 @@ For each top-level node in the document, produce one or more
 `FlowBlock` entries. Plain blocks (paragraph, heading, list item,
 HR, page break, code block, etc.) produce a single FlowBlock each.
 
-**Inline-anchored split** (Rule 2 of `00-model.md`): if a
-paragraph contains one or more non-inline anchor spans, normalize
-it into a sequence of FlowBlocks alternating between text
-fragments and anchored-object blocks:
+**Attribute normalization.** As each image anchor is encountered,
+its raw attributes are normalized once into the new model:
 
 ```
-paragraph: [text-A] [anchorA] [text-B] [anchorB] [text-C]
+{ wrapMode, positionMode, xAlign, x, width, height, margin }
+```
+
+Legacy values (`wrappingMode: "square-left"` → `wrapMode: "square",
+xAlign: "left"`; `wrappingMode: "square-right"` → `wrapMode: "square",
+xAlign: "right"`; `floatOffset` → discarded) are mapped here. The
+solver and downstream stages never branch on legacy attribute names.
+
+**Inline-anchored split** (Rule 2 of `00-model.md`): if a paragraph
+contains one or more anchors whose `wrapMode` has **non-zero flow
+contribution** — `top-bottom`, `behind`, `front` — split the
+paragraph into alternating fragment / anchored-object-block entries:
+
+```
+paragraph: [text-A] [topBottomAnchor] [text-B]
                 ↓
 flows:     fragment(text-A)
-           anchored-object-block(A)
+           anchored-object-block(topBottomAnchor)
            fragment(text-B)
-           anchored-object-block(B)
-           fragment(text-C)
 ```
 
-The split is recursive across all non-inline anchors in the
-paragraph. `inline`-mode images are NOT split out — they remain
-inline content of the parent fragment.
+`wrapMode: "square"` does **not** trigger the split — the anchor
+paragraph stays as a single FlowBlock with a zero-width inline anchor
+span at the image's docPos. Square's flow contribution is zero; its
+effect on flow comes through wrap-zone constraints applied to lines
+during reflow, not through a flow block of its own.
 
-Each FlowBlock carries enough metadata to reconstruct doc
-position (`sourceNodePos`, `partKind`, `splitAnchorDocPos`) so
-the renderer can map fragments back to their source paragraph
-for cursor and selection.
+`inline`-mode images of course never split.
+
+Each FlowBlock produced by a split carries enough metadata
+(`sourceNodePos`, `partKind`, `splitAnchorDocPos`) for the renderer
+to map fragments back to their source paragraph for cursor and
+selection.
 
 Output: `FlowBlock[]` with `lines` and `height` measured at
-unconstrained content width.
+unconstrained content width, plus a per-paragraph list of square-mode
+anchor spans (used by Stage 3 to emit wrap zones).
 
 ## Stage 2 — Stamp continuous global Y (`assignGlobalY`)
 
@@ -98,16 +113,25 @@ modification.
 A `SolverResult`:
 
 ```
-placements:  AnchoredObjectPlacement[]   — { docPos, mode, x, y, width, height, paint }
-wrapZones:   WrapZone[]                  — { side, x, right, top, bottom, anchorDocPos }
+placements:  AnchoredObjectPlacement[]   — { docPos, wrapMode, x, y, width, height, paint }
+wrapZones:   WrapZone[]                  — { x, right, top, bottom, anchorDocPos }
 clearances:  FlowClearance[]             — { afterFlowIndex, y, anchorDocPos }
 status:      "stable" | "exhausted"
 iterations:  number
 ```
 
-The pipeline does **not** retain a separate `FloatLayout` type
-that participates in projection — placements are emitted once
-here and projection is a pure mapping (Stage 5).
+`AnchoredObjectPlacement.x` is the resolved horizontal position from
+`xAlign` / `x` (every non-inline mode); `.y` is the painted Y in
+continuous global-Y space. There is no separate paint offset.
+
+`WrapZone` carries the actual placed rectangle (no `side` field — the
+side that text wraps on is computed per-line at reflow time from the
+zone's geometry vs. content area, per `01-placement-and-wrap-policies.md`
+§ wider-side wrap).
+
+The pipeline does **not** retain a separate `FloatLayout` type that
+participates in projection — placements are emitted once here and
+projection is a pure mapping (Stage 5).
 
 ### Algorithm (bounded fixed-point loop)
 
@@ -161,23 +185,32 @@ The anchor follows whatever increases the object's Y.
 After any push, `recomputeGlobalY(flows, anchorIndex + 1)`
 re-stamps downstream flows; the outer loop re-iterates.
 
-The two contributors to `object.layoutY > anchor.globalY` are:
+The contributors to `object.layoutY > anchor.globalY` are:
 
-1. **Barrier overflow.** The block's footprint (`anchor.globalY →
-   anchor.globalY + height`) extends past the anchor's page
-   barrier, AND the block would fit on the next page. The placer
-   moves `object.layoutY` to the barrier. Skip the move if the
-   block wouldn't fit on the next page either (oversized object,
-   handled per Edge cases below).
+1. **Barrier overflow (top-bottom / behind / front).** The block's
+   footprint (`anchor.globalY → anchor.globalY + image.height`)
+   extends past the anchor's page barrier AND the block would fit
+   on the next page. The placer moves `object.layoutY` to the
+   barrier. Skip the move if the block wouldn't fit on the next
+   page either (oversized object — see Edge cases).
 
-2. **Stacking.** The block was pushed below a previously-placed
-   wrapping object's bottom because their wrap footprints overlap.
-   The placer moves `object.layoutY` to the stacked Y.
+2. **Visual-overflow push (square).** The image's painted
+   rectangle (`anchor.flow_y → anchor.flow_y + image.height`)
+   extends past the anchor's page barrier even though the anchor
+   paragraph itself fits. The placer moves `object.layoutY` to
+   the barrier so the image renders on the same page as a
+   re-positioned anchor. Same fit-on-next-page guard as above.
 
-After either contributor moves `object.layoutY`, the anchor-push
+3. **Stacking (top-bottom only).** The block was pushed below a
+   previously-placed `top-bottom` block because they collide
+   vertically. `square` zones do **not** participate in block
+   stacking (they have no flow contribution); horizontal
+   collision between `square` images on the same Y is resolved
+   per `01-placement-and-wrap-policies.md` § Stacking semantics.
+
+After any contributor moves `object.layoutY`, the anchor-push
 rule fires automatically (`anchor.globalY := max(...)`). This
-unifies the previous "three triggers" framing into a single
-invariant.
+unifies the four cases into a single invariant.
 
 ### Monotonicity guarantee
 
@@ -191,27 +224,49 @@ This guarantees termination and prevents oscillation bugs
 iteration cap is a safety net for adversarial inputs, not a
 correctness mechanism.
 
-### Wrap zones (square modes)
+### Wrap zones (square mode)
 
-For each `square-left` / `square-right` placement, emit a
-`WrapZone`:
+For each `square` anchor span, emit a `WrapZone` from the image's
+**actual painted rectangle** (resolved horizontal X via `xAlign` /
+`x`, vertical Y from anchor's flow position):
 
 ```
-zone.side   = "left" | "right"
-zone.x      = block.left  (square-left) or contentX        (square-right)
-zone.right  = block.right (square-left) or block.right     (square-right)
-zone.top    = block.y - FLOAT_MARGIN
-zone.bottom = block.y + height + FLOAT_MARGIN
+imageX      = resolveX(width, xAlign, x, contentX, contentWidth)
+zone.left   = imageX - margin
+zone.right  = imageX + width + margin
+zone.top    = anchor.flow_y - margin
+zone.bottom = anchor.flow_y + height + margin
 ```
 
 `reflowAgainstWrapZones` walks every flow whose Y range overlaps
 any wrap zone and re-runs `layoutBlock` with a `ConstraintProvider`
-that returns the narrower line width and offset for each line's
-absolute Y. Output line metadata always includes `constraintX`
-and `effectiveWidth` whenever a constraint applied — even when
-the text fit naturally inside the constrained width without
-wrapping. This is what permits short paragraphs to render offset
-past a left float.
+that, for each line's absolute Y, returns the **wider available
+side**:
+
+```
+function constraintForLineY(absoluteY, lineHeight):
+  for each zone whose [zone.top, zone.bottom] overlaps [absoluteY, absoluteY + lineHeight]:
+    leftAvail  = max(0, zone.left  - contentX)
+    rightAvail = max(0, contentRight - zone.right)
+    if leftAvail > rightAvail and lineWidth fits in leftAvail:
+      return { startX: contentX,  width: leftAvail }
+    else if rightAvail > 0 and lineWidth fits in rightAvail:
+      return { startX: zone.right, width: rightAvail }
+    else:
+      return { skipBelow: zone.bottom }   // line clears past the zone
+  return null  // no constraint, full content width
+```
+
+Output line metadata always includes `constraintX` and
+`effectiveWidth` whenever a constraint applied — even when the text
+fit naturally inside the constrained width without wrapping. This
+permits short paragraphs to render offset past a wrap zone.
+
+Multiple overlapping wrap zones (rare): take the union — pick
+whichever side has more room across all overlapping zones.
+
+**Two-sided wrap (a single line spanning both sides of an image
+with the image as a hole) is deferred — see `05-future.md`.**
 
 ### Clearances (top-bottom only)
 
@@ -219,7 +274,7 @@ For each `top-bottom` placement, emit a `FlowClearance`:
 
 ```
 clearance.afterFlowIndex = anchorIndex
-clearance.y              = block.y + height + FLOAT_MARGIN
+clearance.y              = block.y + height + margin
 ```
 
 `applyClearances` walks following flows in order and pushes any
@@ -233,9 +288,16 @@ follow.
 participate in flow only by occupying their own block slot
 (`height = image.height` set in Stage 1, accounted for by Stage
 2's `assignGlobalY`). They impose no additional constraint on
-following content. This is the explicit non-influence rule for
-behind/front — text near them flows as if they were absent
-beyond the slot they take.
+following content.
+
+`square` placements emit **no clearance and no flow contribution**.
+Their effect on flow is the wrap zone alone. The anchor paragraph
+remains in flow at its natural text height; the next paragraph's
+`globalY` is computed from the anchor paragraph's text height, not
+from the image's height. (If the image is taller than the anchor
+paragraph's text, the wrap zone extends past the anchor paragraph's
+bottom and constrains following paragraphs' line widths until the
+zone's bottom is reached.)
 
 ## Stage 4 — Paginate against solver output (`paginateFlow`)
 
@@ -345,7 +407,7 @@ Output: `DocumentLayout` with `pages` (from Stage 4) and
 PM doc
   │
   ▼  Stage 1: buildBlockFlow
-FlowBlock[] (split paragraphs at non-inline anchors)
+FlowBlock[] (normalize attrs; split paragraphs at top-bottom/behind/front anchors)
   │
   ▼  Stage 2: assignGlobalY
 FlowBlock[] with globalY
@@ -383,9 +445,16 @@ last iteration's output is consumed by Stage 4.
 
 ### Multiple anchors in the same paragraph
 
-Stage 1 splits recursively. Stage 3 treats each anchored-object
-block independently; stacking and clearances apply across them
-in document order.
+Stage 1 splits recursively for non-zero-flow modes (`top-bottom`,
+`behind`, `front`). Stage 3 treats each anchored-object block
+independently; stacking and clearances apply across them in document
+order.
+
+`square` anchors in the same paragraph do not split — each contributes
+its own wrap zone, and the paragraph's lines are constrained by
+whichever zone overlaps each line's Y range (see
+`01-placement-and-wrap-policies.md` § Multiple anchored objects in
+one paragraph).
 
 ### Empty pages from anchor pushes
 
