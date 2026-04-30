@@ -59,10 +59,11 @@ export class PointerController {
   } | null = null;
   private floatDrag: {
     docPos: number;
+    nodeSize: number;
     startX: number;
     startY: number;
-    startOffsetX: number;
-    startOffsetY: number;
+    rect: { x: number; y: number; width: number; height: number; page: number };
+    targetPos: number;
   } | null = null;
 
   /** Click-count tracking for double/triple-click. */
@@ -155,17 +156,17 @@ export class PointerController {
   }
 
   private hitFloatAt(canvasX: number, canvasY: number, page: number) {
-    const floats = this.deps.editor.layout.floats;
-    if (!floats) return null;
-    for (const float of floats) {
-      if (float.page !== page) continue;
+    const objects = this.deps.editor.layout.anchoredObjects;
+    if (!objects) return null;
+    for (const object of objects) {
+      if (object.page !== page) continue;
       if (
-        canvasX >= float.x &&
-        canvasX <= float.x + float.width &&
-        canvasY >= float.y &&
-        canvasY <= float.y + float.height
+        canvasX >= object.x &&
+        canvasX <= object.x + object.width &&
+        canvasY >= object.y &&
+        canvasY <= object.y + object.height
       ) {
-        return float;
+        return object;
       }
     }
     return null;
@@ -208,16 +209,19 @@ export class PointerController {
     if (floatHit) {
       if (editor.readOnly) return;
       editor.selectNode(floatHit.docPos);
-      const attrs = floatHit.node.attrs as {
-        floatOffset?: { x: number; y: number };
-      };
-      const off = attrs.floatOffset ?? { x: 0, y: 0 };
       this.floatDrag = {
         docPos: floatHit.docPos,
+        nodeSize: floatHit.node.nodeSize,
         startX: e.clientX,
         startY: e.clientY,
-        startOffsetX: off.x,
-        startOffsetY: off.y,
+        rect: {
+          x: floatHit.x,
+          y: floatHit.y,
+          width: floatHit.width,
+          height: floatHit.height,
+          page: floatHit.page,
+        },
+        targetPos: floatHit.docPos,
       };
       this.setCursorAll("move");
       return;
@@ -302,14 +306,7 @@ export class PointerController {
 
     // Float drag
     if (this.floatDrag) {
-      const { docPos, startX, startY, startOffsetX, startOffsetY } =
-        this.floatDrag;
-      editor.setNodeAttrs(docPos, {
-        floatOffset: {
-          x: startOffsetX + (e.clientX - startX),
-          y: startOffsetY + (e.clientY - startY),
-        },
-      });
+      this.floatDrag.targetPos = this.resolveFloatDragTarget(e);
       return;
     }
 
@@ -345,7 +342,7 @@ export class PointerController {
     editor.selection.setSelection(editor.getSelectionSnapshot().anchor, pos);
   };
 
-  private handleMouseUp = (): void => {
+  private handleMouseUp = (e: MouseEvent): void => {
     const { editor } = this.deps;
     if (this.resizeDrag) {
       const { docPos, pendingWidth, pendingHeight } = this.resizeDrag;
@@ -354,6 +351,8 @@ export class PointerController {
       this.setCursorAll("text");
     }
     if (this.floatDrag) {
+      this.floatDrag.targetPos = this.resolveFloatDragTarget(e);
+      editor.moveNode(this.floatDrag.docPos, this.floatDrag.targetPos);
       this.floatDrag = null;
       this.setCursorAll("text");
     }
@@ -365,5 +364,49 @@ export class PointerController {
     for (const entry of this.deps.pool) {
       entry.wrapper.style.cursor = cursor;
     }
+  }
+
+  private resolveFloatDragTarget(e: MouseEvent): number {
+    const { editor } = this.deps;
+    if (!this.floatDrag) return 0;
+
+    const hit = this.hitTest(e.clientX, e.clientY);
+    if (!hit) return this.floatDrag.targetPos;
+
+    let pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
+    const from = this.floatDrag.docPos;
+    const to = from + this.floatDrag.nodeSize;
+    if (pos >= from && pos <= to) {
+      const dx = e.clientX - this.floatDrag.startX;
+      const dy = e.clientY - this.floatDrag.startY;
+      const fallback = Math.abs(dx) > Math.abs(dy)
+        ? this.resolveHorizontalFloatDragTarget(dx)
+        : e.clientY >= this.floatDrag.startY
+          ? editor.charMap.posBelow(from, hit.docX)
+          : editor.charMap.posAbove(from, hit.docX);
+      if (fallback !== null && fallback !== undefined) pos = fallback;
+    }
+    return pos;
+  }
+
+  private resolveHorizontalFloatDragTarget(dx: number): number | null {
+    const { editor } = this.deps;
+    if (!this.floatDrag) return null;
+    const rect = this.floatDrag.rect;
+    const y = rect.y + rect.height / 2;
+    const x = dx >= 0
+      ? rect.x + rect.width + 1
+      : Math.max(0, rect.x - 1);
+    const pos = editor.charMap.posAtCoords(x, y, rect.page);
+    const from = this.floatDrag.docPos;
+    const to = from + this.floatDrag.nodeSize;
+    if (pos < from || pos > to) return pos;
+
+    const state = editor.getState();
+    const $from = state.doc.resolve(from);
+    if ($from.depth > 0) {
+      return dx >= 0 ? $from.end($from.depth) : $from.start($from.depth);
+    }
+    return dx >= 0 ? state.doc.content.size : 0;
   }
 }

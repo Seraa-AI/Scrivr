@@ -9,7 +9,8 @@ export type { InputSpan, LayoutSpan, LayoutLine, ConstraintProvider } from "./Li
 export { layoutBlock, resolveLeafBlockDimensions, computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
 export type { LayoutBlock, BlockLayoutOptions } from "./BlockLayout";
 export { runPipeline, buildFragments, defaultPageConfig, defaultPagelessConfig, collapseMargins } from "./PageLayout";
-export type { PageConfig, LayoutPage, DocumentLayout, PageLayoutOptions, FloatLayout, LayoutFragment } from "./PageLayout";
+export type { PageConfig, LayoutPage, DocumentLayout, PageLayoutOptions, LayoutFragment } from "./PageLayout";
+export type { AnchoredObjectMode, AnchoredObjectInput, AnchoredObjectPlacement, WrapZone, FlowClearance, AnchoredObjectSolverResult } from "./AnchoredObjects";
 export { defaultFontConfig, getBlockStyle, DEFAULT_FONT_FAMILY } from "./FontConfig";
 export type { FontConfig, BlockStyle } from "./FontConfig";
 export type {

@@ -95,14 +95,14 @@ function hrBlock(y = MARGIN + 100): LayoutBlock {
 
 function makeLayout(
   blocks: LayoutBlock[],
-  floats: DocumentLayout["floats"] = [],
+  anchoredObjects: DocumentLayout["anchoredObjects"] = [],
 ): DocumentLayout {
   return {
     pages: [{ pageNumber: 1, blocks }],
     pageConfig: PAGE_CONFIG,
     version: 1,
     totalContentHeight: PAGE_H,
-    floats,
+    anchoredObjects,
     fragments: [],
   };
 }
@@ -288,11 +288,11 @@ describe("buildPdf", () => {
     const png1x1 =
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
-    const float = {
+    const float: NonNullable<DocumentLayout["anchoredObjects"]>[number] = {
       docPos: 0, page: 1, x: MARGIN, y: MARGIN,
       width: 150, height: 150, mode: "square-right",
       node: schema.nodes.image!.create({ src: png1x1 }),
-      anchorBlockY: MARGIN, anchorPage: 1,
+      anchorGlobalY: MARGIN, anchorPage: 1,
     };
 
     const layout = makeLayout(
@@ -303,11 +303,11 @@ describe("buildPdf", () => {
   });
 
   it("handles a float image with an unreachable URL (graceful placeholder)", async () => {
-    const float = {
+    const float: NonNullable<DocumentLayout["anchoredObjects"]>[number] = {
       docPos: 0, page: 1, x: MARGIN, y: MARGIN,
       width: 100, height: 100, mode: "square-left",
       node: schema.nodes.image!.create({ src: "https://unreachable.invalid/img.png" }),
-      anchorBlockY: MARGIN, anchorPage: 1,
+      anchorGlobalY: MARGIN, anchorPage: 1,
     };
 
     const layout = makeLayout(
@@ -326,7 +326,7 @@ describe("buildPdf", () => {
       pageConfig: PAGE_CONFIG,
       version: 1,
       totalContentHeight: PAGE_H * 2,
-      floats: [],
+      anchoredObjects: [],
       fragments: [],
     };
     const bytes = await buildPdf(layout);

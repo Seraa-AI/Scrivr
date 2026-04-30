@@ -471,7 +471,7 @@ export class TileManager {
       ...(this.editor.inlineRegistry
         ? { inlineRegistry: this.editor.inlineRegistry }
         : {}),
-      ...(layout.floats ? { floats: layout.floats } : {}),
+      ...(layout.anchoredObjects ? { anchoredObjects: layout.anchoredObjects } : {}),
       ...(this.editor.pageChromeContributions?.length
         ? { pageChromeContributions: this.editor.pageChromeContributions }
         : {}),

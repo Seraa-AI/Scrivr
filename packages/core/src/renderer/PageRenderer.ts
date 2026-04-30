@@ -1,4 +1,5 @@
-import { LayoutPage, PageConfig, FloatLayout } from "../layout/PageLayout";
+import { LayoutPage, PageConfig } from "../layout/PageLayout";
+import type { AnchoredObjectPlacement } from "../layout/AnchoredObjects";
 import { LayoutBlock, computeAlignmentOffset } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
 import { TextMeasurer } from "../layout/TextMeasurer";
@@ -29,8 +30,8 @@ export interface RenderPageOptions {
   blockRegistry?: BlockRegistry;
   /** Inline object registry — dispatches inline spans to their render strategies */
   inlineRegistry?: InlineRegistry;
-  /** Float images on this page — rendered after (or before for 'behind') regular blocks */
-  floats?: FloatLayout[];
+  /** Anchored objects on this page — rendered according to their paint layer. */
+  anchoredObjects?: AnchoredObjectPlacement[];
   /** Chrome contributions (headers, footers, etc.) to render after block content. */
   pageChromeContributions?: PageChromeContribution[];
   /** Payloads from the chrome loop, keyed by contribution name. */
@@ -67,7 +68,7 @@ export function renderPage(options: RenderPageOptions): void {
     markDecorators,
     blockRegistry,
     inlineRegistry,
-    floats,
+    anchoredObjects,
     pageChromeContributions,
     chromePayloads,
     pageMetrics,
@@ -102,7 +103,7 @@ export function renderPage(options: RenderPageOptions): void {
   if (renderVersion !== currentVersion()) return;
 
   // Floats on this page, partitioned by render order.
-  const pageFloats = floats?.filter((f) => f.page === page.pageNumber) ?? [];
+  const pageFloats = anchoredObjects?.filter((f) => f.page === page.pageNumber) ?? [];
   const behindFloats = pageFloats.filter((f) => f.mode === "behind");
   const frontFloats  = pageFloats.filter((f) => f.mode !== "behind");
 
@@ -186,7 +187,7 @@ export function renderPage(options: RenderPageOptions): void {
  */
 function drawFloat(
   ctx: CanvasRenderingContext2D,
-  float: FloatLayout,
+  float: AnchoredObjectPlacement,
   map: CharacterMap,
   inlineRegistry?: InlineRegistry,
 ): void {
@@ -420,4 +421,3 @@ export function drawBlock(
 
   return lineIndexOffset + block.lines.length;
 }
-

@@ -31,10 +31,14 @@ interface MockEditor {
     posAtCoords: ReturnType<typeof vi.fn>;
     objectRectAtPoint: ReturnType<typeof vi.fn>;
     getObjectRect: ReturnType<typeof vi.fn>;
+    posBelow: ReturnType<typeof vi.fn>;
+    posAbove: ReturnType<typeof vi.fn>;
   };
-  layout: { floats?: unknown[] };
+  layout: { anchoredObjects?: unknown[] };
   getState: ReturnType<typeof vi.fn>;
   getSelectionSnapshot: ReturnType<typeof vi.fn>;
+  setNodeAttrs: ReturnType<typeof vi.fn>;
+  moveNode: ReturnType<typeof vi.fn>;
 }
 
 function makeMockEditor(overrides: Partial<MockEditor> = {}): MockEditor {
@@ -51,14 +55,26 @@ function makeMockEditor(overrides: Partial<MockEditor> = {}): MockEditor {
       posAtCoords: vi.fn(() => 10),
       objectRectAtPoint: vi.fn(() => undefined),
       getObjectRect: vi.fn(() => undefined),
+      posBelow: vi.fn(() => null),
+      posAbove: vi.fn(() => null),
     },
     layout: {},
     getState: vi.fn(() => ({
+      doc: {
+        resolve: vi.fn(() => ({
+          depth: 1,
+          start: vi.fn(() => 1),
+          end: vi.fn(() => 30),
+        })),
+        content: { size: 40 },
+      },
       selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true },
     })),
     getSelectionSnapshot: vi.fn(() => ({
       head: 0, anchor: 0, from: 0, to: 0, empty: true,
     })),
+    setNodeAttrs: vi.fn(),
+    moveNode: vi.fn(),
     ...overrides,
   };
 }
@@ -92,6 +108,28 @@ function makeController(editor: MockEditor): {
 function mousedown(container: HTMLDivElement, x: number, y: number): void {
   container.dispatchEvent(
     new MouseEvent("mousedown", {
+      clientX: x,
+      clientY: y,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
+function mousemove(x: number, y: number): void {
+  document.dispatchEvent(
+    new MouseEvent("mousemove", {
+      clientX: x,
+      clientY: y,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
+function mouseup(x = 0, y = 0): void {
+  document.dispatchEvent(
+    new MouseEvent("mouseup", {
       clientX: x,
       clientY: y,
       bubbles: true,
@@ -190,5 +228,155 @@ describe("PointerController — image click routing", () => {
 
     expect(editor.selectNode).not.toHaveBeenCalled();
     expect(editor.selection.setSelection).toHaveBeenCalled();
+  });
+
+  it("drag anchored image moves the node structurally instead of writing floatOffset", () => {
+    const imageNode = {
+      attrs: {
+        width: 80,
+        height: 60,
+        wrappingMode: "square-left",
+        floatOffset: { x: 0, y: 0 },
+      },
+    };
+    editor = makeMockEditor({
+      layout: {
+        anchoredObjects: [{
+          docPos: 5,
+          page: 1,
+          x: 100,
+          y: 50,
+          width: 80,
+          height: 60,
+          mode: "square-left",
+          node: imageNode,
+          anchorGlobalY: 50,
+          anchorPage: 1,
+        }],
+      },
+    });
+    controller.detach();
+    container.remove();
+    ({ controller, container } = makeController(editor));
+
+    editor.charMap.posAtCoords.mockReturnValue(42);
+
+    mousedown(container, 140, 80);
+    mousemove(260, 220);
+    mouseup(260, 220);
+
+    expect(editor.selectNode).toHaveBeenCalledWith(5);
+    expect(editor.moveNode).toHaveBeenCalledWith(5, 42);
+    expect(editor.setNodeAttrs).not.toHaveBeenCalled();
+  });
+
+  it("drag anchored image avoids dropping back onto its own anchor", () => {
+    const imageNode = {
+      nodeSize: 1,
+      attrs: {
+        width: 80,
+        height: 60,
+        wrappingMode: "square-left",
+      },
+    };
+    editor = makeMockEditor({
+      layout: {
+        anchoredObjects: [{
+          docPos: 5,
+          page: 1,
+          x: 100,
+          y: 50,
+          width: 80,
+          height: 60,
+          mode: "square-left",
+          node: imageNode,
+          anchorGlobalY: 50,
+          anchorPage: 1,
+        }],
+      },
+    });
+    controller.detach();
+    container.remove();
+    ({ controller, container } = makeController(editor));
+
+    editor.charMap.posAtCoords.mockReturnValue(5);
+    editor.charMap.posBelow.mockReturnValue(18);
+
+    mousedown(container, 140, 80);
+    mousemove(140, 200);
+    mouseup(140, 200);
+
+    expect(editor.moveNode).toHaveBeenCalledWith(5, 18);
+    expect(editor.setNodeAttrs).not.toHaveBeenCalled();
+  });
+
+  it("drag anchored image right resolves inside the parent textblock", () => {
+    const imageNode = {
+      nodeSize: 1,
+      attrs: { width: 80, height: 60, wrappingMode: "square-left" },
+    };
+    editor = makeMockEditor({
+      layout: {
+        anchoredObjects: [{
+          docPos: 5,
+          page: 1,
+          x: 100,
+          y: 50,
+          width: 80,
+          height: 60,
+          mode: "square-left",
+          node: imageNode,
+          anchorGlobalY: 50,
+          anchorPage: 1,
+        }],
+      },
+    });
+    controller.detach();
+    container.remove();
+    ({ controller, container } = makeController(editor));
+
+    editor.charMap.posAtCoords.mockReturnValue(5);
+
+    mousedown(container, 140, 80);
+    mousemove(260, 84);
+    mouseup(260, 84);
+
+    expect(editor.moveNode).toHaveBeenCalledWith(5, 30);
+    expect(editor.setNodeAttrs).not.toHaveBeenCalled();
+  });
+
+  it("drag anchored image left resolves inside the parent textblock", () => {
+    const imageNode = {
+      nodeSize: 1,
+      attrs: { width: 80, height: 60, wrappingMode: "square-left" },
+    };
+    editor = makeMockEditor({
+      layout: {
+        anchoredObjects: [{
+          docPos: 5,
+          page: 1,
+          x: 100,
+          y: 50,
+          width: 80,
+          height: 60,
+          mode: "square-left",
+          node: imageNode,
+          anchorGlobalY: 50,
+          anchorPage: 1,
+        }],
+      },
+    });
+    controller.detach();
+    container.remove();
+    ({ controller, container } = makeController(editor));
+
+    editor.charMap.posAtCoords.mockReturnValue(5);
+
+    mousedown(container, 140, 80);
+    mousemove(40, 84);
+    mouseup(40, 84);
+
+    expect(editor.moveNode).toHaveBeenCalledWith(5, 1);
+    expect(editor.setNodeAttrs).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { Node } from "prosemirror-model";
+import { Fragment, Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
 import { TextMeasurer } from "./TextMeasurer";
 import {
@@ -13,6 +13,11 @@ import { layoutBlock, LayoutBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
 import type { LayoutLine, ConstraintProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
+import {
+  ANCHORED_OBJECT_MARGIN,
+  isAnchoredObjectMode,
+  type AnchoredObjectPlacement,
+} from "./AnchoredObjects";
 import {
   computePageMetrics,
   EMPTY_RESOLVED_CHROME,
@@ -46,43 +51,6 @@ export interface PageConfig {
 export interface LayoutPage {
   pageNumber: number;
   blocks: LayoutBlock[];
-}
-
-/**
- * A float image that has been lifted out of the normal flow.
- * Produced by the Pass 2 float analysis step in layoutDocument.
- * Consumed by PageRenderer to draw the image at its absolute position.
- */
-export interface FloatLayout {
-  /** ProseMirror doc position of the float anchor span */
-  docPos: number;
-  /** Page this float appears on (1-based) */
-  page: number;
-  /** Left edge in page coordinates */
-  x: number;
-  /** Top edge in page coordinates */
-  y: number;
-  width: number;
-  height: number;
-  /** wrappingMode value — 'square-left' | 'square-right' | 'top-bottom' | 'behind' | 'front' */
-  mode: string;
-  /** The ProseMirror image node */
-  node: Node;
-  /**
-   * Pass 1 y-coordinate of the anchor block — stored so Pass 4 can apply the
-   * correct yDelta correction without overwriting Fix 1's stacking offset.
-   * Pass 4 computes: newY = f.y + (finalAnchorY - anchorBlockY), which shifts
-   * the float by exactly how much the anchor block moved in Pass 3, preserving
-   * any extra downward offset that float stacking added.
-   */
-  anchorBlockY: number;
-  /**
-   * Page number of the anchor span (where the image node lives in the doc).
-   * May differ from `page` when float stacking pushes the float past the page
-   * bottom and it overflows onto the next page. Pass 4 uses this to avoid
-   * resetting the float's page back to the anchor's page.
-   */
-  anchorPage: number;
 }
 
 /**
@@ -153,23 +121,11 @@ export interface DocumentLayout {
    */
   resumption?: LayoutResumption;
   /**
-   * Float images lifted out of the normal text flow.
-   * Each entry has absolute page coordinates so PageRenderer can draw it.
-   * Absent (or empty) when the document has no floating images.
+   * Anchored objects (non-inline images) placed by Stage 3.
+   * Each placement has page-local coordinates for the renderer and the
+   * structural anchor info needed for hit-testing and selection.
    */
-  floats?: FloatLayout[];
-  /**
-   * Snapshot of the Pass 1 page/block positions BEFORE runFloatPass mutated
-   * them. Set only when the layout contains floats.
-   *
-   * Phase 1b early termination copies blocks from previousLayout. If it
-   * copied from the float-processed pages, those blocks would carry stale
-   * Pass-3 yDelta values. When the new run's Pass 3 then adds its own yDelta
-   * on top, positions double-shift and blocks overflow the page, disappearing
-   * from the visible area. Phase 1b must copy from these clean Pass 1
-   * positions so runFloatPass starts from a correct baseline every time.
-   */
-  _pass1Pages?: LayoutPage[];
+  anchoredObjects?: AnchoredObjectPlacement[];
   /**
    * Flat fragment index — one entry per page-part of each block, sorted by
    * page then y. Used by the tile renderer for O(log N) binary search in
@@ -316,6 +272,14 @@ export interface FlowBlock {
   isPageBreak?: true;
   /** True when the block measurement was a cache hit. */
   wasCacheHit: boolean;
+  partKind?: "block" | "fragment" | "anchored-object";
+  anchoredObjectDocPos?: number;
+  anchoredObjectNode?: Node;
+  anchoredObjectMode?: string;
+  /** Continuous document-flow Y before page projection. */
+  globalY?: number;
+  /** Initial continuous Y before anchored-object solver pushes. */
+  originalGlobalY?: number;
   // Phase 1b: cache snapshot taken before this run's measurement.
   preCachedTargetY?: number;
   preCachedPage?: number;
@@ -324,6 +288,337 @@ export interface FlowBlock {
   /** Cached placedContentTop snapshot for early-termination guard. */
   preCachedContentTop?: number;
   prevNodePos?: number;
+}
+
+export function assignGlobalY(flows: FlowBlock[], initialY: number): FlowBlock[] {
+  let y = initialY;
+  let prevSpaceAfter = 0;
+
+  return flows.map((flow, index) => {
+    const gap = index === 0 ? 0 : collapseMargins(prevSpaceAfter, flow.spaceBefore);
+    const globalY = y + gap;
+    y = globalY + flow.height;
+    prevSpaceAfter = flow.spaceAfter;
+    return { ...flow, globalY, originalGlobalY: globalY };
+  });
+}
+
+function restampGlobalYFrom(flows: FlowBlock[], startIndex: number): FlowBlock[] {
+  const next = [...flows];
+  for (let i = Math.max(1, startIndex); i < next.length; i++) {
+    const prev = next[i - 1]!;
+    const flow = next[i]!;
+    const prevGlobalY = prev.globalY ?? 0;
+    const gap = collapseMargins(prev.spaceAfter, flow.spaceBefore);
+    const globalY = prevGlobalY + prev.height + gap;
+    next[i] = { ...flow, globalY };
+  }
+  return next;
+}
+
+function getAnchoredObjectAnchors(flow: FlowBlock): Array<{ docPos: number; node: Node; mode: AnchoredObjectPlacement["mode"] }> {
+  if (flow.partKind === "anchored-object" && flow.anchoredObjectMode === "top-bottom" && flow.anchoredObjectNode && flow.anchoredObjectDocPos !== undefined) {
+    return [{ docPos: flow.anchoredObjectDocPos, node: flow.anchoredObjectNode, mode: "top-bottom" }];
+  }
+  const anchors: Array<{ docPos: number; node: Node; mode: AnchoredObjectPlacement["mode"] }> = [];
+  for (const line of flow.lines) {
+    for (const span of line.spans) {
+      if (span.kind !== "object" || span.width !== 0) continue;
+      const mode = span.node.attrs["wrappingMode"];
+      if (!isAnchoredObjectMode(mode)) continue;
+      anchors.push({ docPos: span.docPos, node: span.node, mode });
+    }
+  }
+  return anchors;
+}
+
+function topBottomImageInfo(node: Node, nodePos: number): {
+  image: Node;
+  imageDocPos: number;
+  imageIndex: number;
+  before: Node[];
+  after: Node[];
+} | null {
+  let found: {
+    image: Node;
+    imageDocPos: number;
+    imageIndex: number;
+    before: Node[];
+    after: Node[];
+  } | null = null;
+  const before: Node[] = [];
+  const after: Node[] = [];
+
+  node.forEach((child, offset, index) => {
+    if (found) {
+      after.push(child);
+      return;
+    }
+    if (child.type.name === "image" && child.attrs["wrappingMode"] === "top-bottom") {
+      found = {
+        image: child,
+        imageDocPos: nodePos + 1 + offset,
+        imageIndex: index,
+        before,
+        after,
+      };
+      return;
+    }
+    before.push(child);
+  });
+
+  return found;
+}
+
+function pageStartGlobal(pageConfig: PageConfig, metricsFor: (pageNumber: number) => PageMetrics, pageNumber: number): number {
+  if (pageConfig.pageless) return metricsFor(1).contentTop;
+  let y = metricsFor(1).contentTop;
+  for (let p = 1; p < pageNumber; p++) {
+    y += metricsFor(p).contentHeight;
+  }
+  return y;
+}
+
+function pageForGlobalY(pageConfig: PageConfig, metricsFor: (pageNumber: number) => PageMetrics, globalY: number): number {
+  if (pageConfig.pageless) return 1;
+  let pageNumber = 1;
+  while (globalY >= pageStartGlobal(pageConfig, metricsFor, pageNumber) + metricsFor(pageNumber).contentHeight) {
+    pageNumber++;
+  }
+  return pageNumber;
+}
+
+function pageLocalYForGlobalY(
+  pageConfig: PageConfig,
+  metricsFor: (pageNumber: number) => PageMetrics,
+  pageNumber: number,
+  globalY: number,
+): number {
+  return metricsFor(pageNumber).contentTop + (globalY - pageStartGlobal(pageConfig, metricsFor, pageNumber));
+}
+
+function resolveAnchoredObjects(
+  inputFlows: FlowBlock[],
+  pageConfig: PageConfig,
+  metricsFor: (pageNumber: number) => PageMetrics,
+  measurer: TextMeasurer,
+  fontConfig: FontConfig,
+  fontModifiers: Map<string, FontModifier> | undefined,
+  inlineRegistry?: InlineRegistry,
+): { flows: FlowBlock[]; placements: AnchoredObjectPlacement[] } {
+  let flows = inputFlows;
+  const placements: AnchoredObjectPlacement[] = [];
+  const contentX = pageConfig.margins.left;
+  const contentRight = pageConfig.pageWidth - pageConfig.margins.right;
+  const contentWidth = contentRight - contentX;
+
+  for (let i = 0; i < flows.length; i++) {
+    const flow = flows[i]!;
+    const anchors = getAnchoredObjectAnchors(flow);
+    if (anchors.length === 0) continue;
+
+    for (const anchor of anchors) {
+      const attrs = anchor.node.attrs as {
+        width?: number;
+        height?: number;
+        floatOffset?: { x?: number; y?: number };
+      };
+      const width = Math.min(typeof attrs.width === "number" ? attrs.width : 200, contentWidth);
+      const height = typeof attrs.height === "number" ? attrs.height : 200;
+      let globalY = flows[i]!.globalY ?? 0;
+      let pageNumber = pageForGlobalY(pageConfig, metricsFor, globalY);
+      let localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
+      const metrics = metricsFor(pageNumber);
+
+      if (
+        (anchor.mode === "top-bottom" || anchor.mode === "square-left" || anchor.mode === "square-right") &&
+        !pageConfig.pageless &&
+        localY + height > metrics.contentBottom &&
+        height <= metricsFor(pageNumber + 1).contentHeight
+      ) {
+        const pushedGlobalY = pageStartGlobal(pageConfig, metricsFor, pageNumber + 1);
+        flows = [
+          ...flows.slice(0, i),
+          { ...flows[i]!, globalY: pushedGlobalY },
+          ...flows.slice(i + 1),
+        ];
+        flows = restampGlobalYFrom(flows, i + 1);
+        globalY = pushedGlobalY;
+        pageNumber = pageForGlobalY(pageConfig, metricsFor, globalY);
+        localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
+      }
+
+      const offsetX = attrs.floatOffset?.x ?? 0;
+      const offsetY = attrs.floatOffset?.y ?? 0;
+      const baseX = anchor.mode === "square-right"
+        ? contentRight - width
+        : contentX;
+      const x = Math.max(contentX, Math.min(baseX + offsetX, contentRight - width));
+      if (anchor.mode === "square-left" || anchor.mode === "square-right") {
+        let stackedGlobalY = globalY;
+        for (const placed of placements) {
+          if (placed.mode !== anchor.mode || placed.page !== pageNumber) continue;
+          const hOverlap = x < placed.x + placed.width && x + width > placed.x;
+          const vOverlap = localY < placed.y + placed.height && localY + height > placed.y;
+          if (hOverlap && vOverlap) {
+            const placedGlobalY = placed.anchorGlobalY + placed.height + ANCHORED_OBJECT_MARGIN;
+            stackedGlobalY = Math.max(stackedGlobalY, placedGlobalY);
+          }
+        }
+        if (stackedGlobalY > globalY) {
+          flows = [
+            ...flows.slice(0, i),
+            { ...flows[i]!, globalY: stackedGlobalY },
+            ...flows.slice(i + 1),
+          ];
+          flows = restampGlobalYFrom(flows, i + 1);
+          globalY = stackedGlobalY;
+          pageNumber = pageForGlobalY(pageConfig, metricsFor, globalY);
+          localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
+        }
+        if (
+          !pageConfig.pageless &&
+          localY + height > metricsFor(pageNumber).contentBottom &&
+          height <= metricsFor(pageNumber + 1).contentHeight
+        ) {
+          const pushedGlobalY = pageStartGlobal(pageConfig, metricsFor, pageNumber + 1);
+          flows = [
+            ...flows.slice(0, i),
+            { ...flows[i]!, globalY: pushedGlobalY },
+            ...flows.slice(i + 1),
+          ];
+          flows = restampGlobalYFrom(flows, i + 1);
+          globalY = pushedGlobalY;
+          pageNumber = pageForGlobalY(pageConfig, metricsFor, globalY);
+          localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
+        }
+      }
+
+      placements.push({
+        docPos: anchor.docPos,
+        page: pageNumber,
+        x,
+        y: localY + offsetY,
+        width,
+        height,
+        mode: anchor.mode,
+        node: anchor.node,
+        anchorGlobalY: globalY,
+        anchorPage: pageNumber,
+      });
+
+      if (anchor.mode === "square-left" || anchor.mode === "square-right") {
+        flows = reflowFlowsAgainstSquareObject(
+          flows,
+          i,
+          {
+            mode: anchor.mode,
+            pageNumber,
+            globalY,
+            localY,
+            width,
+            height,
+            contentX,
+            contentWidth,
+          },
+          measurer,
+          fontConfig,
+          fontModifiers,
+          inlineRegistry,
+        );
+      }
+
+      if (anchor.mode !== "top-bottom") continue;
+      const clearanceY = globalY + height + ANCHORED_OBJECT_MARGIN;
+      for (let j = i + 1; j < flows.length; j++) {
+        const candidate = flows[j]!;
+        if ((candidate.globalY ?? 0) >= clearanceY) break;
+        flows = [
+          ...flows.slice(0, j),
+          { ...candidate, globalY: clearanceY },
+          ...flows.slice(j + 1),
+        ];
+        flows = restampGlobalYFrom(flows, j + 1);
+      }
+    }
+  }
+
+  return { flows, placements };
+}
+
+function reflowFlowsAgainstSquareObject(
+  inputFlows: FlowBlock[],
+  startIndex: number,
+  zone: {
+    mode: "square-left" | "square-right";
+    pageNumber: number;
+    globalY: number;
+    localY: number;
+    width: number;
+    height: number;
+    contentX: number;
+    contentWidth: number;
+  },
+  measurer: TextMeasurer,
+  fontConfig: FontConfig,
+  fontModifiers: Map<string, FontModifier> | undefined,
+  inlineRegistry?: InlineRegistry,
+): FlowBlock[] {
+  let flows = inputFlows;
+  const zoneTop = zone.globalY - ANCHORED_OBJECT_MARGIN;
+  const zoneBottom = zone.globalY + zone.height + ANCHORED_OBJECT_MARGIN;
+  const constrainedWidth = Math.max(0, zone.contentWidth - zone.width - ANCHORED_OBJECT_MARGIN);
+
+  for (let idx = startIndex; idx < flows.length; idx++) {
+    const flow = flows[idx]!;
+    const flowY = flow.globalY ?? 0;
+    if (flowY >= zoneBottom) break;
+    if (flow.lines.length === 0 || flowY + flow.height <= zoneTop) continue;
+
+    const constraintProvider: ConstraintProvider = (absoluteLineY: number) => {
+      const lineHeight = 1;
+      if (absoluteLineY + lineHeight <= zoneTop || absoluteLineY >= zoneBottom) {
+        return null;
+      }
+      if (zone.mode === "square-left") {
+        return { x: zone.width + ANCHORED_OBJECT_MARGIN, width: constrainedWidth };
+      }
+      return { x: 0, width: constrainedWidth };
+    };
+
+    const reflowed = layoutBlock(flow.node, {
+      nodePos: flow.nodePos,
+      x: zone.contentX + flow.indentLeft,
+      y: flowY,
+      availableWidth: flow.availableWidth,
+      page: zone.pageNumber,
+      measurer,
+      fontConfig,
+      ...(fontModifiers ? { fontModifiers } : {}),
+      constraintProvider,
+      ...(inlineRegistry ? { inlineRegistry } : {}),
+    });
+
+    const nextFlow: FlowBlock = {
+      ...flow,
+      lines: reflowed.lines,
+      height: reflowed.height,
+      blockType: reflowed.blockType,
+      align: reflowed.align,
+      availableWidth: reflowed.availableWidth,
+    };
+
+    if (nextFlow.height !== flow.height || nextFlow.lines !== flow.lines) {
+      flows = [
+        ...flows.slice(0, idx),
+        nextFlow,
+        ...flows.slice(idx + 1),
+      ];
+      flows = restampGlobalYFrom(flows, idx + 1);
+    }
+  }
+
+  return flows;
 }
 
 export interface PageLayoutOptions {
@@ -393,13 +688,16 @@ export const defaultPagelessConfig: PageConfig = {
   pageless: true,
 };
 
+const GLOBAL_Y_PAGE_START_TOLERANCE = 24;
+
 /**
  * runPipeline — top-level layout orchestrator.
  *
- * Drives all three pipeline stages in order:
- *   Stage 1  buildBlockFlow   — position-independent measurement
- *   Stage 2  paginateFlow     — assign blocks to pages
- *   Stage 3  applyFloatLayout — float positions + exclusion reflow
+ * Drives the layout pipeline in order:
+ *   Stage 1  buildBlockFlow                 — position-independent measurement
+ *   Stage 2  assignGlobalY                  — continuous flow coordinates
+ *   Stage 3  resolveAnchoredObjects          — anchored-object placement/pushes
+ *   Stage 4  paginateFlow                   — assign blocks to pages
  *
  * Returns a fully positioned DocumentLayout. Does NOT touch the CharacterMap.
  * This function is the single source of truth for orchestration; both
@@ -436,8 +734,8 @@ export function runPipeline(
 }
 
 /**
- * Flow-only pipeline result. Pages + metrics are populated, floats/fragments
- * are not — those are applied once after the chrome-aggregator loop converges.
+ * Flow pipeline result. Pages, metrics, and anchored-object placements are
+ * populated; fragments are applied after the chrome-aggregator loop converges.
  * Chrome contributors re-run this per iteration via the aggregator.
  */
 export interface FlowPipelineResult {
@@ -445,7 +743,7 @@ export interface FlowPipelineResult {
   layout: DocumentLayout;
   /** True when streaming cutoff stopped pagination mid-document. */
   isPartial: boolean;
-  /** Geometry + font context — applyFloatLayout needs all of these. */
+  /** Geometry + font context used by the flow pipeline. */
   margins: PageConfig["margins"];
   pageWidth: number;
   contentWidth: number;
@@ -454,6 +752,8 @@ export interface FlowPipelineResult {
   measurer: TextMeasurer;
   /** Y cursor at end of pagination — used for pageless totalContentHeight. */
   y: number;
+  /** Anchored objects resolved before pagination. */
+  anchoredObjects: AnchoredObjectPlacement[];
 }
 
 /**
@@ -504,9 +804,20 @@ export function runFlowPipeline(
     measurer, fontModifiers, measureCache, maxBlocks, options.inlineRegistry,
   );
 
-  // Stage 2: paginate.
+  // Stage 2: assign continuous flow coordinates and resolve anchored objects.
+  const flowsWithGlobalY = assignGlobalY(flowResult.flows, metricsFor(1).contentTop);
+  const anchoredFlow = resolveAnchoredObjects(
+    flowsWithGlobalY,
+    pageConfig,
+    metricsFor,
+    measurer,
+    fontConfig,
+    fontModifiers,
+    options.inlineRegistry,
+  );
+
   const pr = paginateFlow(
-    flowResult.flows, pageConfig, resolved, metricsFor, runId,
+    anchoredFlow.flows, pageConfig, resolved, metricsFor, runId,
     {
       previousLayout,
       measureCache,
@@ -545,8 +856,9 @@ export function runFlowPipeline(
       runId,
       convergence: "stable",
       iterationCount: 1,
+      anchoredObjects: anchoredFlow.placements,
     };
-    return { layout, isPartial: true, ...context, y: pr.y };
+    return { layout, isPartial: true, ...context, y: pr.y, anchoredObjects: anchoredFlow.placements };
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
@@ -559,8 +871,9 @@ export function runFlowPipeline(
     runId,
     convergence: "stable",
     iterationCount: 1,
+    anchoredObjects: anchoredFlow.placements,
   };
-  return { layout, isPartial: false, ...context, y: pr.y };
+  return { layout, isPartial: false, ...context, y: pr.y, anchoredObjects: anchoredFlow.placements };
 }
 
 function _runPipelineBody(
@@ -607,19 +920,14 @@ function _runPipelineBody(
     _chromePayloads: chromeResult.chromePayloads,
   };
 
-  // Stage 3: float layout — runs once on the final paginated pages.
-  const floated = applyFloatLayout(
-    layoutWithChrome, fp.margins, fp.pageWidth, fp.contentWidth,
-    fp.measurer, fp.fontConfig, fp.fontModifiers, options.inlineRegistry,
-  );
-  if (fp.isPartial) return floated;
+  if (fp.isPartial) return layoutWithChrome;
 
   // Stage 4: fragment index + totalContentHeight.
-  const { fragments, fragmentsByPage } = buildFragments(floated.pages);
+  const { fragments, fragmentsByPage } = buildFragments(layoutWithChrome.pages);
   const totalContentHeight = pageConfig.pageless
     ? fp.y + margins.bottom
-    : floated.pages.length * pageHeight;
-  return { ...floated, fragments, fragmentsByPage, totalContentHeight };
+    : layoutWithChrome.pages.length * pageHeight;
+  return { ...layoutWithChrome, fragments, fragmentsByPage, totalContentHeight };
 }
 
 /** Options bag for paginateFlow — cross-cutting context + resumption cursor. */
@@ -701,13 +1009,35 @@ export function paginateFlow(
 
     if (!flow.wasCacheHit) seenCacheMiss = true;
 
+    if (!pageless && flow.globalY !== undefined) {
+      while (
+        flow.globalY >=
+        pageStartGlobal(pageConfig, metricsFor, currentPage.pageNumber) +
+          metricsFor(currentPage.pageNumber).contentHeight
+      ) {
+        pages.push(currentPage);
+        currentPage = newPage(pages.length + 1);
+        y = metricsFor(currentPage.pageNumber).contentTop;
+        metrics.push(metricsFor(currentPage.pageNumber));
+        prevSpaceAfter = 0;
+      }
+    }
+
     // ── Margin collapsing ────────────────────────────────────────────────────
     const isFirstOnPage = currentPage.blocks.length === 0;
     const gap = isFirstOnPage
       ? 0
       : collapseMargins(prevSpaceAfter, flow.spaceBefore);
 
-    const targetY = y + gap;
+    const naturalY = y + gap;
+    const pageLocalGlobalY =
+      !pageless && flow.globalY !== undefined
+        ? pageLocalYForGlobalY(pageConfig, metricsFor, currentPage.pageNumber, flow.globalY)
+        : naturalY;
+    const firstOnPageNatural =
+      isFirstOnPage &&
+      Math.abs(pageLocalGlobalY - metricsFor(currentPage.pageNumber).contentTop) <= GLOBAL_Y_PAGE_START_TOLERANCE;
+    const targetY = firstOnPageNatural ? naturalY : Math.max(naturalY, pageLocalGlobalY);
     const blockX = margins.left + flow.indentLeft;
     const blockWidth = flow.availableWidth;
 
@@ -952,7 +1282,7 @@ export function paginateFlow(
       flow.preCachedContentTop === currentMetrics.contentTop
     ) {
       const delta = flow.prevNodePos !== undefined ? nodePos - flow.prevNodePos : 0;
-      const prevPages = previousLayout._pass1Pages ?? previousLayout.pages;
+      const prevPages = previousLayout.pages;
       const curPageIdx = currentPage.pageNumber - 1;
 
       if (curPageIdx < prevPages.length) {
@@ -1071,6 +1401,82 @@ export function buildBlockFlow(
     const blockStyle = getBlockStyle(fontConfig, styleKey ?? node.type.name, level);
     const blockWidth = contentWidth - indentLeft;
     const blockX = margins.left + indentLeft;
+    const topBottom = topBottomImageInfo(node, nodePos);
+
+    if (topBottom) {
+      const makeFragmentNode = (children: Node[]): Node | null =>
+        children.length > 0
+          ? node.type.create(node.attrs, Fragment.fromArray(children), node.marks)
+          : null;
+      const pushTextFragment = (
+        fragmentNode: Node | null,
+        fragmentNodePos: number,
+        spaceBefore: number,
+        spaceAfter: number,
+      ) => {
+        if (!fragmentNode) return;
+        const entry = resolveBlockEntry(
+          fragmentNode, fragmentNodePos, blockX, 0, blockWidth, 1,
+          measurer, fontConfig, fontModifiers, undefined, inlineRegistry,
+        );
+        flows.push({
+          node: fragmentNode,
+          nodePos: fragmentNodePos,
+          lines: entry.lines,
+          height: entry.height,
+          spaceBefore,
+          spaceAfter,
+          availableWidth: blockWidth,
+          blockType: entry.blockType,
+          align: entry.align,
+          ...(listMarker !== undefined ? {
+            listMarker,
+            listMarkerX: blockX - MARKER_RIGHT_GAP,
+          } : {}),
+          indentLeft,
+          hasFloatAnchor: false,
+          inputHash: computeInputHash(fragmentNodePos, fragmentNode, blockWidth),
+          wasCacheHit: false,
+          partKind: "fragment",
+        });
+      };
+
+      const beforeNode = makeFragmentNode(topBottom.before);
+      const afterNode = makeFragmentNode(topBottom.after);
+      const imageHeight = typeof topBottom.image.attrs["height"] === "number"
+        ? topBottom.image.attrs["height"] as number
+        : 200;
+
+      pushTextFragment(beforeNode, nodePos, blockStyle.spaceBefore, 0);
+      flows.push({
+        node: topBottom.image,
+        nodePos: topBottom.imageDocPos,
+        lines: [],
+        height: imageHeight,
+        spaceBefore: beforeNode ? 0 : blockStyle.spaceBefore,
+        spaceAfter: afterNode ? ANCHORED_OBJECT_MARGIN : blockStyle.spaceAfter,
+        availableWidth: blockWidth,
+        blockType: "image",
+        align: "left",
+        ...(listMarker !== undefined ? {
+          listMarker,
+          listMarkerX: blockX - MARKER_RIGHT_GAP,
+        } : {}),
+        indentLeft,
+        hasFloatAnchor: true,
+        inputHash: computeInputHash(topBottom.imageDocPos, topBottom.image, blockWidth),
+        wasCacheHit: false,
+        partKind: "anchored-object",
+        anchoredObjectDocPos: topBottom.imageDocPos,
+        anchoredObjectNode: topBottom.image,
+        anchoredObjectMode: "top-bottom",
+      });
+      const afterNodePos = topBottom.imageDocPos + topBottom.image.nodeSize - 1;
+      pushTextFragment(afterNode, afterNodePos, 0, blockStyle.spaceAfter);
+
+      processedBlocks++;
+      continue;
+    }
 
     // Phase 1b: capture cache snapshot BEFORE resolveBlockEntry may update it.
     const preCached = measureCache?.get(node);
@@ -1113,644 +1519,6 @@ export function buildBlockFlow(
   return { flows, reachedCutoff: false, cutoffIndex: items.length };
 }
 
-/**
- * Stage 3 of the layout pipeline: compute float positions, populate the
- * ExclusionManager, and re-flow any blocks that overlap an exclusion zone.
- *
- * Pure geometry over paginated blocks — no measuring except targeted reflow of
- * blocks that intersect an exclusion zone. Called for both complete layouts and
- * partial (streaming) layouts so floats in the initial chunk appear immediately.
- *
- * @param pass1Result  Paginated layout from paginateFlow() (Stages 1+2).
- * @param margins      Page margins.
- * @param pageWidth    Full page width (used to compute content area for floats).
- * @param contentWidth Content width (pageWidth - margins.left - margins.right).
- * @param measurer     TextMeasurer — used only for targeted block reflow.
- * @param fontConfig   Font config forwarded to layoutBlock() during reflow.
- * @param fontModifiers Font modifiers forwarded to layoutBlock() during reflow.
- */
-export function applyFloatLayout(
-  pass1Result: DocumentLayout,
-  margins: PageConfig["margins"],
-  pageWidth: number,
-  contentWidth: number,
-  measurer: TextMeasurer,
-  fontConfig: FontConfig,
-  fontModifiers: Map<string, FontModifier> | undefined,
-  inlineRegistry?: InlineRegistry,
-): DocumentLayout {
-  const { pages } = pass1Result;
-
-  // Only run when the document actually contains floating images.
-  // When no floats exist, skip entirely — zero overhead for the common case.
-  const floatAnchors = collectFloatAnchors(pages);
-  if (floatAnchors.length === 0) {
-    return pass1Result;
-  }
-
-  // Per-page metrics lookup. Falls back to computing from EMPTY_RESOLVED_CHROME.
-  const metricsForPage = (pageNumber: number): PageMetrics => {
-    const idx = pageNumber - 1;
-    const m = pass1Result.metrics?.[idx];
-    if (m && m.pageNumber === pageNumber) return m;
-    return computePageMetrics(pass1Result.pageConfig, EMPTY_RESOLVED_CHROME, pageNumber);
-  };
-
-  // Snapshot Pass 1 page/block positions before any mutation.
-  // Phase 1b copies blocks from previousLayout; it must copy from these clean
-  // positions rather than the float-adjusted ones. See DocumentLayout._pass1Pages.
-  const pass1Pages: LayoutPage[] = pages.map((p) => ({
-    pageNumber: p.pageNumber,
-    blocks: [...p.blocks],
-  }));
-
-  // Pass 2: compute float positions and populate the ExclusionManager.
-  const exclusionMgr = new ExclusionManager();
-  const floats: FloatLayout[] = [];
-  const FLOAT_MARGIN = 8; // px gap around each float
-
-  for (const anchor of floatAnchors) {
-    const node = anchor.node;
-    const attrs = node.attrs as {
-      width?: number;
-      height?: number;
-      wrappingMode?: string;
-      floatOffset?: { x: number; y: number };
-    };
-
-    const nodeWidth  = typeof attrs.width  === "number" ? attrs.width  : 200;
-    const nodeHeight = typeof attrs.height === "number" ? attrs.height : 200;
-    const mode       = attrs.wrappingMode ?? "inline";
-    const offsetX    = attrs.floatOffset?.x ?? 0;
-    const offsetY    = attrs.floatOffset?.y ?? 0;
-
-    const contentX = margins.left;
-    const contentRight = pageWidth - margins.right;
-    const contentWidth = contentRight - contentX;
-
-    // Clamp nodeWidth so it never exceeds the available content width. All
-    // wrapping modes — including break (top-bottom) — honour attrs.width so
-    // the resize handles and ImageMenu W/H inputs actually affect the
-    // rendered size. The break-mode EXCLUSION still spans the full content
-    // width (see below) so text never flows beside the image regardless of
-    // how narrow it becomes.
-    const clampedNodeWidth = Math.min(nodeWidth, contentWidth);
-
-    let floatX: number;
-    if (mode === "square-right") {
-      // offsetX shifts from the default right-side position. Adding it means
-      // dragging right increases offsetX and moves the image right (natural).
-      floatX = contentRight - clampedNodeWidth + offsetX;
-    } else {
-      // square-left, top-bottom, behind, front — default to left side.
-      // For top-bottom: image sits at content left; exclusion spans full
-      // content width so text still can't wrap beside it.
-      floatX = contentX + offsetX;
-    }
-    // Clamp so the float never escapes the page content area regardless of how
-    // floatOffset was set (drag, paste, serialised state, etc.).
-    floatX = Math.max(contentX, Math.min(floatX, contentRight - clampedNodeWidth));
-
-    // Fix 1: downward scan — push this float below any already-placed float on
-    // the same page that it would physically overlap. This implements the CSS
-    // VizAssert "find smallest Y where float fits" rule: a float cannot occupy
-    // horizontal space already taken by a previously placed float at that Y.
-    // 'behind'/'front' floats are exempt — they render above/below text and
-    // never create exclusion zones, so stacking rules don't apply.
-    //
-    // Per-page: contentBottom reads via metricsForPage so differentFirstPage
-    // headers and future footnote bands produce the correct clamp bound for
-    // this anchor's specific page.
-    const floatPageBottom = metricsForPage(anchor.anchorPage).contentBottom;
-
-    // Helper: run the downward-scan stacking loop for a given page + candidateY.
-    const resolveStacking = (onPage: number, startY: number): number => {
-      let cy = startY;
-      if (mode === "behind" || mode === "front") return cy;
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (const placed of floats) {
-          if (placed.page !== onPage) continue;
-          if (placed.mode === "behind" || placed.mode === "front") continue;
-          const hOverlap = floatX < placed.x + placed.width && floatX + clampedNodeWidth > placed.x;
-          const vOverlap = cy < placed.y + placed.height && cy + nodeHeight > placed.y;
-          if (hOverlap && vOverlap) {
-            cy = placed.y + placed.height;
-            changed = true;
-          }
-        }
-      }
-      return cy;
-    };
-
-    let candidateY = resolveStacking(anchor.anchorPage, anchor.anchorBlockY + offsetY);
-
-    // If stacking pushed the float past the page bottom, overflow it to the
-    // next page and re-run stacking there so it doesn't overlap any floats
-    // already placed on that page.
-    let floatPage = anchor.anchorPage;
-    if (mode !== "behind" && mode !== "front" && candidateY + nodeHeight > floatPageBottom) {
-      floatPage = anchor.anchorPage + 1;
-      // When overflowing to the next page, reset to THAT page's contentTop
-      // (not the current page's) — this matters once chrome contributors
-      // produce different reservations per page.
-      candidateY = resolveStacking(floatPage, metricsForPage(floatPage).contentTop);
-    }
-
-    floats.push({
-      docPos: anchor.docPos,
-      page: floatPage,
-      x: floatX,
-      y: candidateY,
-      width: clampedNodeWidth,
-      height: nodeHeight,
-      mode,
-      node,
-      anchorBlockY: anchor.anchorBlockY,
-      anchorPage: anchor.anchorPage,
-    });
-
-    // If the float was pushed onto a page that paginateFlow never created
-    // (the anchor paragraph is the last block in the doc and overflow moved
-    // the float past the current page's bottom), materialise an empty page
-    // for it. Otherwise renderPage only iterates `pages`, and the float has
-    // no tile to draw on — it silently disappears while the NodeSelection
-    // (and therefore the image menu) stays alive.
-    if (!pages.find((p) => p.pageNumber === floatPage)) {
-      const newP: LayoutPage = { pageNumber: floatPage, blocks: [] };
-      const insertAt = pages.findIndex((p) => p.pageNumber > floatPage);
-      if (insertAt === -1) pages.push(newP);
-      else pages.splice(insertAt, 0, newP);
-    }
-
-    // 'behind' and 'front' float over text with no exclusion — text flows
-    // through them. Only wrapping modes create exclusion zones.
-    if (mode === "behind" || mode === "front") continue;
-
-    // Determine which side text is excluded from.
-    const side: "left" | "right" | "full" =
-      mode === "square-left" ? "left" :
-      mode === "square-right" ? "right" :
-      "full"; // top-bottom
-
-    // For top-bottom (break) mode the exclusion must span the full content width
-    // so no text can flow beside the image. For left/right wrap only the image
-    // footprint (+ margin) is excluded.
-    const exclLeft  = side === "full" ? contentX     : floatX - FLOAT_MARGIN;
-    const exclRight = side === "full" ? contentRight : floatX + clampedNodeWidth + FLOAT_MARGIN;
-
-    exclusionMgr.addRect({
-      page: floatPage,
-      x: exclLeft,
-      right: exclRight,
-      y: candidateY - FLOAT_MARGIN,
-      bottom: candidateY + nodeHeight + FLOAT_MARGIN,
-      side,
-      docPos: anchor.docPos,
-    });
-  }
-
-  // Pass 3: re-layout blocks whose Y range overlaps an exclusion zone, then
-  // cascade any height change to every subsequent block on the same page.
-  //
-  // `pageBottom` is fetched per-page inside the loop (not hoisted) because
-  // different pages can reserve different footer band heights once chrome
-  // contributors produce per-page variations. With zero contributors every
-  // page has the same contentBottom so there's no functional difference.
-  for (const page of pages) {
-    if (!exclusionMgr.hasExclusionsOnPage(page.pageNumber)) continue;
-
-    const pageBottom = metricsForPage(page.pageNumber).contentBottom;
-
-    const pageNum = page.pageNumber;
-    // Accumulated height delta from all re-layouts so far on this page.
-    // Applied to subsequent blocks so they don't overlap the taller reflowed blocks.
-    let yDelta = 0;
-    // Non-overlapping blocks pushed past the page bottom by yDelta accumulation.
-    // Collected here and prepended to the next page after the inner loop.
-    const overflowToNext: LayoutBlock[] = [];
-
-    for (let bi = 0; bi < page.blocks.length; bi++) {
-      let block = page.blocks[bi]!;
-
-      // Shift this block's Y by the accumulated delta from previous re-layouts.
-      if (yDelta !== 0) {
-        block = { ...block, y: block.y + yDelta };
-        page.blocks[bi] = block;
-      }
-
-      // Skip leaf blocks (no lines to reflow or clamp).
-      if (block.lines.length === 0) continue;
-
-      const hasOverlap = exclusionMgr.getConstraint(
-        pageNum,
-        block.y,
-        block.height || 1,
-        margins.left,
-        contentWidth,
-      ) !== null;
-
-      if (hasOverlap) {
-        // Build a ConstraintProvider bound to this block's absolute position.
-        const blockContentX = block.x;
-        const blockAvailWidth = block.availableWidth;
-
-        const constraintProvider: ConstraintProvider = (absoluteLineY: number) => {
-          return exclusionMgr.getConstraint(
-            pageNum,
-            absoluteLineY,
-            1,
-            blockContentX,
-            blockAvailWidth,
-          );
-        };
-
-        // Re-measure the block with the constraint provider.
-        // layoutBlock always lays out the FULL paragraph node. When this block
-        // was split across pages in Pass 1, the reflowed result contains all
-        // lines — far more than can fit on this page — causing content to
-        // overflow into the bottom margin. Clamp lines to the page boundary.
-        const reflowed = layoutBlock(block.node, {
-          nodePos: block.nodePos,
-          x: block.x,
-          y: block.y,
-          availableWidth: block.availableWidth,
-          page: pageNum,
-          measurer,
-          fontConfig,
-          ...(fontModifiers ? { fontModifiers } : {}),
-          constraintProvider,
-          ...(inlineRegistry ? { inlineRegistry } : {}),
-        });
-
-        const finalBlock = clampBlockToPage(reflowed, pageBottom);
-
-        // Accumulate the height difference so subsequent blocks shift accordingly.
-        yDelta += finalBlock.height - block.height;
-        page.blocks[bi] = finalBlock;
-      } else if (block.y + block.height > pageBottom) {
-        // Non-overlapping block pushed past the page bottom by yDelta.
-        // Split it so lines that fit stay on this page; the rest move to the next.
-        const { kept, overflow } = splitBlockAtBoundary(block, pageBottom);
-        if (kept) {
-          page.blocks[bi] = kept;
-        } else {
-          page.blocks.splice(bi, 1);
-          bi--;
-        }
-        overflowToNext.push(overflow);
-      }
-    }
-
-    // Prepend overflow blocks to the next page, repositioned at the top of its
-    // content area. Existing next-page blocks shift down to make room.
-    if (overflowToNext.length > 0) {
-      const nextPageNum = pageNum + 1;
-      let nextPage = pages.find((p) => p.pageNumber === nextPageNum);
-      if (!nextPage) {
-        nextPage = { pageNumber: nextPageNum, blocks: [] };
-        const insertAt = pages.findIndex((p) => p.pageNumber > nextPageNum);
-        if (insertAt === -1) pages.push(nextPage);
-        else pages.splice(insertAt, 0, nextPage);
-      }
-
-      // Stack overflow blocks at the top of the next page's content area.
-      // Use the NEXT page's contentTop (not the current page's) so chrome
-      // reservations on the next page are respected.
-      const nextPageContentTop = metricsForPage(nextPage.pageNumber).contentTop;
-      let nextY = nextPageContentTop;
-      const reposBlocks: LayoutBlock[] = overflowToNext.map((b) => {
-        const rb = { ...b, y: nextY };
-        nextY += b.height;
-        return rb;
-      });
-      const totalHeight = nextY - nextPageContentTop;
-
-      // Push existing next-page blocks down to accommodate the inserted blocks.
-      for (let j = 0; j < nextPage.blocks.length; j++) {
-        nextPage.blocks[j] = { ...nextPage.blocks[j]!, y: nextPage.blocks[j]!.y + totalHeight };
-      }
-      nextPage.blocks.unshift(...reposBlocks);
-    }
-  }
-
-  // Pass 3b: Overflow cascade — propagate block overflow to pages that were
-  // skipped by Pass 3 because they have no float exclusions.
-  //
-  // Pass 3 runs only on pages that have exclusion zones. When it moves blocks
-  // from page N to page N+1 (overflowToNext), it pushes page N+1's existing
-  // blocks DOWN. If those pushed blocks now exceed page N+1's bottom, they stay
-  // there — Pass 3 never visits page N+1 because it has no exclusions.
-  //
-  // This pass iterates every page in forward order and moves any text block
-  // whose bottom exceeds pageBottom to the next page, cascading as far as
-  // needed. It is safe to re-run on pages already handled by Pass 3 because
-  // those pages have no remaining overflowing blocks after Pass 3.
-  for (let pi = 0; pi < pages.length; pi++) {
-    const page = pages[pi]!;
-    const overflowBlocks: LayoutBlock[] = [];
-    // Per-page pageBottom (was hoisted in the pre-refactor code). With zero
-    // chrome contributors every page has the same value so behavior is
-    // unchanged; when contributors produce per-page variations this reads
-    // the correct clamp bound for each page independently.
-    const pagePageBottom = metricsForPage(page.pageNumber).contentBottom;
-
-    for (let bi = 0; bi < page.blocks.length; bi++) {
-      const block = page.blocks[bi]!;
-      // Leaf blocks (images, HRs) keep their position even when they overflow —
-      // same policy as Pass 3. Text blocks are split at the page boundary.
-      if (block.lines.length === 0) continue;
-      if (block.y + block.height > pagePageBottom) {
-        const { kept, overflow } = splitBlockAtBoundary(block, pagePageBottom);
-        if (kept) {
-          page.blocks[bi] = kept;
-        } else {
-          page.blocks.splice(bi, 1);
-          bi--;
-        }
-        overflowBlocks.push(overflow);
-      }
-    }
-
-    if (overflowBlocks.length === 0) continue;
-
-    const nextPageNum = page.pageNumber + 1;
-    let nextPage = pages.find((p) => p.pageNumber === nextPageNum);
-    if (!nextPage) {
-      nextPage = { pageNumber: nextPageNum, blocks: [] };
-      const insertAt = pages.findIndex((p) => p.pageNumber > nextPageNum);
-      if (insertAt === -1) pages.push(nextPage);
-      else pages.splice(insertAt, 0, nextPage);
-    }
-
-    const nextPageContentTop = metricsForPage(nextPage.pageNumber).contentTop;
-    let nextY = nextPageContentTop;
-    const reposBlocks: LayoutBlock[] = overflowBlocks.map((b) => {
-      const rb = { ...b, y: nextY };
-      nextY += b.height;
-      return rb;
-    });
-    const totalHeight = nextY - nextPageContentTop;
-
-    for (let j = 0; j < nextPage.blocks.length; j++) {
-      nextPage.blocks[j] = { ...nextPage.blocks[j]!, y: nextPage.blocks[j]!.y + totalHeight };
-    }
-    nextPage.blocks.unshift(...reposBlocks);
-    // Do NOT increment pi — we need to re-examine this same page index in case
-    // the newly inserted nextPage is at pages[pi+1] and itself overflows.
-  }
-
-  // Pass 4: Reconcile float Y values after Pass 3 may have shifted anchor blocks.
-  //
-  // Pass 3 applies a `yDelta` to every block that follows a reflowed block,
-  // updating block.y in-place. But the FloatLayout entries were computed in
-  // Pass 2 from the original Pass 1 block positions. If a block *before* a
-  // float's anchor paragraph was reflowed (grew taller due to text wrapping),
-  // the anchor block shifts by yDelta while the float remains at the old Y —
-  // causing the float to visually drift above its anchor.
-  //
-  // Fix: walk the final block list, find each float anchor span, record the
-  // block's new Y, then remap every FloatLayout to that corrected position.
-  // This corrects the rendered position; the exclusion zones (used by Pass 3,
-  // now complete) are not retroactively changed.
-  if (floats.length > 0) {
-    const finalAnchorY = new Map<number, { y: number; page: number }>();
-    for (const page of pages) {
-      for (const block of page.blocks) {
-        for (const line of block.lines) {
-          for (const span of line.spans) {
-            if (span.kind !== "object" || span.width !== 0) continue;
-            const wm = span.node.attrs["wrappingMode"] as string | undefined;
-            if (!wm || wm === "inline") continue;
-            finalAnchorY.set(span.docPos, { y: block.y, page: page.pageNumber });
-          }
-        }
-      }
-    }
-
-    for (let fi = 0; fi < floats.length; fi++) {
-      const f = floats[fi]!;
-      const final = finalAnchorY.get(f.docPos);
-      if (!final) continue;
-      // Shift by exactly how much the anchor block moved in Pass 3 (yDelta).
-      // Using (final.y - f.anchorBlockY) rather than (final.y + offsetY) is
-      // critical: the latter would reset f.y to the un-stacked position,
-      // undoing any downward displacement that Fix 1's stacking applied.
-      const yDelta = final.y - f.anchorBlockY;
-      const newY = f.y + yDelta;
-      // Only update the float's page to match the anchor when the float was NOT
-      // overflow-placed onto a different page by Pass 2. If anchorPage !== page,
-      // the float deliberately lives on page N+1 to avoid exceeding page N's
-      // bottom — resetting it to final.page would move it back and hide it.
-      const newPage = f.anchorPage === f.page ? final.page : f.page;
-      if (newY !== f.y || newPage !== f.page) {
-        floats[fi] = { ...f, y: newY, page: newPage };
-      }
-    }
-  }
-
-  return { ...pass1Result, floats, _pass1Pages: pass1Pages };
-}
-
-/**
- * Truncates a block's lines so that `block.y + block.height <= pageBottom`.
- * Returns the same block reference when no clamping is needed.
- * Forces at least one line when the block starts below the page bottom so the
- * block is never completely empty (prevents cursor / hit-test holes).
- */
-/**
- * Stage 4 of the layout pipeline: build the LayoutFragment index.
- *
- * Iterates pages in order and emits one LayoutFragment per LayoutBlock.
- * Split blocks (fragmentCount > 1) produce multiple fragments — one per
- * page-slice — with incrementing fragmentIndex values.
- *
- * The returned array is sorted by page ascending, then by y ascending within
- * each page (natural iteration order over pages[].blocks[]).
- *
- * Also builds fragmentsByPage: a parallel array indexed by (pageNumber - 1)
- * for O(1) lookup in paged-mode tile rendering.
- */
-export function buildFragments(pages: LayoutPage[]): {
-  fragments: LayoutFragment[];
-  fragmentsByPage: LayoutFragment[][];
-} {
-  // Pass 1: count how many page-parts each source block contributes.
-  // This lets us emit the correct fragmentCount on every fragment without
-  // requiring it to be pre-stamped on LayoutBlock.
-  const partCounts = new Map<number, number>();
-  for (const page of pages) {
-    for (const block of page.blocks) {
-      const src = block.sourceNodePos ?? block.nodePos;
-      partCounts.set(src, (partCounts.get(src) ?? 0) + 1);
-    }
-  }
-
-  // Pass 2: emit fragments in page / y order.
-  const fragments: LayoutFragment[] = [];
-  const fragmentsByPage: LayoutFragment[][] = [];
-  const nextIndex = new Map<number, number>(); // tracks fragmentIndex per sourceNodePos
-
-  for (const page of pages) {
-    const pageFrags: LayoutFragment[] = [];
-
-    for (const block of page.blocks) {
-      const sourceNodePos = block.sourceNodePos ?? block.nodePos;
-      const fragmentCount = partCounts.get(sourceNodePos) ?? 1;
-      const fragmentIndex = nextIndex.get(sourceNodePos) ?? 0;
-      nextIndex.set(sourceNodePos, fragmentIndex + 1);
-
-      const frag: LayoutFragment = {
-        fragmentIndex,
-        fragmentCount,
-        sourceNodePos,
-        page: page.pageNumber,
-        x: block.x,
-        y: block.y,
-        width: block.availableWidth,
-        height: block.height,
-        lineStart: 0,
-        lineCount: block.lines.length,
-        block,
-      };
-      fragments.push(frag);
-      pageFrags.push(frag);
-    }
-
-    fragmentsByPage[page.pageNumber - 1] = pageFrags;
-  }
-
-  return { fragments, fragmentsByPage };
-}
-
-function clampBlockToPage(block: LayoutBlock, pageBottom: number): LayoutBlock {
-  const available = pageBottom - block.y;
-  if (block.height <= available) return block;
-
-  let h = 0;
-  let lineCount = 0;
-  for (const line of block.lines) {
-    if (h + line.lineHeight > available) break;
-    h += line.lineHeight;
-    lineCount++;
-  }
-  // Force at least one line only when the block starts above the page bottom
-  // and there is at least a sliver of space. Blocks that start at or below
-  // pageBottom (available ≤ 0) become empty (they're fully off-page).
-  if (lineCount === 0 && available > 0 && block.lines.length > 0) {
-    lineCount = 1;
-    h = block.lines[0]!.lineHeight;
-  }
-  return {
-    ...block,
-    lines: block.lines.slice(0, lineCount),
-    height: h,
-    continuesOnNextPage: true as const,
-  };
-}
-
-/**
- * Split a text block at the page boundary, returning both the part that fits
- * on the current page and the overflow part for the next page.
- *
- * Used by Pass 3 and Pass 3b when a yDelta shift pushes a block past pageBottom.
- * Unlike clampBlockToPage (which discards overflow lines), this preserves ALL
- * content by returning the overflow as a continuation block.
- *
- * Returns `kept: null` when no lines fit at all (block.y >= pageBottom or
- * first line doesn't fit) — in that case the entire block is the overflow.
- */
-function splitBlockAtBoundary(
-  block: LayoutBlock,
-  pageBottom: number,
-  keptFragmentIndex?: number,
-  overflowFragmentIndex?: number,
-): { kept: LayoutBlock | null; overflow: LayoutBlock } {
-  const available = pageBottom - block.y;
-  let linesFit = 0;
-  let heightFit = 0;
-  for (const line of block.lines) {
-    if (heightFit + line.lineHeight > available) break;
-    linesFit++;
-    heightFit += line.lineHeight;
-  }
-
-  if (linesFit === 0) {
-    // No lines fit on the current page — move entire block to next page unchanged.
-    // This is not a continuation (no content was placed on the current page), so
-    // preserve the original block's flags (same as the old whole-block-move behavior).
-    return { kept: null, overflow: block };
-  }
-
-  const kept: LayoutBlock = {
-    ...block,
-    height: heightFit,
-    lines: block.lines.slice(0, linesFit),
-    spaceAfter: 0,
-    continuesOnNextPage: true as const,
-    ...(keptFragmentIndex !== undefined ? {
-      fragmentIndex: keptFragmentIndex,
-      sourceNodePos: block.sourceNodePos ?? block.nodePos,
-    } : {}),
-  };
-
-  // Helper: spread block without list marker props (continuation parts don't show markers).
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { listMarker: _lm, listMarkerX: _lmx, ...blockWithoutMarker } = block;
-
-  const overflow: LayoutBlock = {
-    ...blockWithoutMarker,
-    // y will be repositioned by the caller when it stacks overflow blocks
-    height: block.height - heightFit,
-    lines: block.lines.slice(linesFit),
-    spaceBefore: 0,
-    isContinuation: true as const,
-    ...(overflowFragmentIndex !== undefined ? {
-      fragmentIndex: overflowFragmentIndex,
-      sourceNodePos: block.sourceNodePos ?? block.nodePos,
-    } : {}),
-  };
-
-  return { kept, overflow };
-}
-
-/** Float anchor: a zero-width object span referencing a floating image node. */
-interface FloatAnchor {
-  docPos: number;
-  node: Node;
-  anchorBlockY: number;
-  anchorPage: number;
-}
-
-/**
- * Walks all laid-out blocks and collects float anchors — zero-width object
- * spans whose node has wrappingMode !== 'inline' and !== undefined.
- */
-function collectFloatAnchors(pages: LayoutPage[]): FloatAnchor[] {
-  const anchors: FloatAnchor[] = [];
-
-  for (const page of pages) {
-    for (const block of page.blocks) {
-      for (const line of block.lines) {
-        for (const span of line.spans) {
-          if (span.kind !== "object") continue;
-          if (span.width !== 0) continue; // only zero-width float anchors
-          const wrappingMode = span.node.attrs["wrappingMode"] as string | undefined;
-          if (!wrappingMode || wrappingMode === "inline") continue;
-          anchors.push({
-            docPos: span.docPos,
-            node: span.node,
-            anchorBlockY: block.y,
-            anchorPage: page.pageNumber,
-          });
-        }
-      }
-    }
-  }
-
-  return anchors;
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1954,3 +1722,69 @@ export function collapseMargins(
 ): number {
   return Math.max(spaceAfter, spaceBefore);
 }
+
+/**
+ * Stage 4 of the layout pipeline: build the LayoutFragment index.
+ *
+ * Iterates pages in order and emits one LayoutFragment per LayoutBlock.
+ * Split blocks (fragmentCount > 1) produce multiple fragments — one per
+ * page-slice — with incrementing fragmentIndex values.
+ *
+ * The returned array is sorted by page ascending, then by y ascending within
+ * each page (natural iteration order over pages[].blocks[]).
+ *
+ * Also builds fragmentsByPage: a parallel array indexed by (pageNumber - 1)
+ * for O(1) lookup in paged-mode tile rendering.
+ */
+export function buildFragments(pages: LayoutPage[]): {
+  fragments: LayoutFragment[];
+  fragmentsByPage: LayoutFragment[][];
+} {
+  // Pass 1: count how many page-parts each source block contributes.
+  // This lets us emit the correct fragmentCount on every fragment without
+  // requiring it to be pre-stamped on LayoutBlock.
+  const partCounts = new Map<number, number>();
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      const src = block.sourceNodePos ?? block.nodePos;
+      partCounts.set(src, (partCounts.get(src) ?? 0) + 1);
+    }
+  }
+
+  // Pass 2: emit fragments in page / y order.
+  const fragments: LayoutFragment[] = [];
+  const fragmentsByPage: LayoutFragment[][] = [];
+  const nextIndex = new Map<number, number>(); // tracks fragmentIndex per sourceNodePos
+
+  for (const page of pages) {
+    const pageFrags: LayoutFragment[] = [];
+
+    for (const block of page.blocks) {
+      const sourceNodePos = block.sourceNodePos ?? block.nodePos;
+      const fragmentCount = partCounts.get(sourceNodePos) ?? 1;
+      const fragmentIndex = nextIndex.get(sourceNodePos) ?? 0;
+      nextIndex.set(sourceNodePos, fragmentIndex + 1);
+
+      const frag: LayoutFragment = {
+        fragmentIndex,
+        fragmentCount,
+        sourceNodePos,
+        page: page.pageNumber,
+        x: block.x,
+        y: block.y,
+        width: block.availableWidth,
+        height: block.height,
+        lineStart: 0,
+        lineCount: block.lines.length,
+        block,
+      };
+      fragments.push(frag);
+      pageFrags.push(frag);
+    }
+
+    fragmentsByPage[page.pageNumber - 1] = pageFrags;
+  }
+
+  return { fragments, fragmentsByPage };
+}
+

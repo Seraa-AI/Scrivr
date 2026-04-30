@@ -344,7 +344,7 @@ export class Editor extends BaseEditor implements IEditor {
       // activates a surface yet.
       getCharMap: getRoutedCharMap,
       getFloatPosition: (docPos: number) => {
-        const f = this.layout.floats?.find((fl) => fl.docPos === docPos);
+        const f = this.layout.anchoredObjects?.find((fl) => fl.docPos === docPos);
         if (!f) return null;
         return { page: f.page, y: f.y, height: f.height };
       },
@@ -424,6 +424,30 @@ export class Editor extends BaseEditor implements IEditor {
     this._dispatchToActive(
       state.tr.setNodeMarkup(docPos, undefined, { ...node.attrs, ...attrs }),
     );
+  }
+
+  moveNode(docPos: number, targetPos: number): boolean {
+    const state = this._getActiveState();
+    const node = state.doc.nodeAt(docPos);
+    if (!node) return false;
+
+    const from = docPos;
+    const to = docPos + node.nodeSize;
+    if (targetPos >= from && targetPos <= to) return false;
+
+    const mappedTarget = targetPos > from ? targetPos - node.nodeSize : targetPos;
+    const insertPos = Math.max(0, Math.min(mappedTarget, state.doc.content.size - node.nodeSize));
+
+    try {
+      let tr = state.tr.delete(from, to);
+      const finalInsertPos = Math.max(0, Math.min(insertPos, tr.doc.content.size));
+      tr = tr.insert(finalInsertPos, node);
+      tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
+      this._dispatchToActive(tr);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   override destroy(): void {

@@ -76,6 +76,53 @@ describe("Editor — initial cursor placement", () => {
   });
 });
 
+describe("Editor.moveNode", () => {
+  function installImageParagraph(editor: Editor) {
+    const schema = editor.schema;
+    const image = schema.nodes["image"]!.create({
+      src: "",
+      width: 100,
+      height: 80,
+      wrappingMode: "square-left",
+      floatOffset: { x: 0, y: 0 },
+    });
+    const para = schema.node("paragraph", null, [
+      schema.text("A"),
+      image,
+      schema.text("B"),
+    ]);
+    editor.applyTransaction(
+      editor.getState().tr.replaceWith(0, editor.getState().doc.content.size, para),
+    );
+    return { imagePos: 2, paragraphEnd: editor.getState().doc.resolve(2).end(1), paragraphStart: editor.getState().doc.resolve(2).start(1) };
+  }
+
+  it("moves an inline image structurally to the start of its paragraph", () => {
+    const { editor, cleanup } = makeEditor();
+    const { imagePos, paragraphStart } = installImageParagraph(editor);
+
+    expect(editor.moveNode(imagePos, paragraphStart)).toBe(true);
+
+    const movedPara = editor.getState().doc.firstChild!;
+    expect(movedPara.child(0).type.name).toBe("image");
+    expect(movedPara.textContent).toBe("AB");
+    expect(editor.getState().selection.from).toBe(1);
+    cleanup();
+  });
+
+  it("moves an inline image structurally to the end of its paragraph", () => {
+    const { editor, cleanup } = makeEditor();
+    const { imagePos, paragraphEnd } = installImageParagraph(editor);
+
+    expect(editor.moveNode(imagePos, paragraphEnd)).toBe(true);
+
+    const movedPara = editor.getState().doc.firstChild!;
+    expect(movedPara.child(movedPara.childCount - 1).type.name).toBe("image");
+    expect(movedPara.textContent).toBe("AB");
+    cleanup();
+  });
+});
+
 // ── moveCursorTo ─────────────────────────────────────────────────────────────
 
 describe("Editor.moveCursorTo", () => {
