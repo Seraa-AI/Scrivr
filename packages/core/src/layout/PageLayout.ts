@@ -884,7 +884,16 @@ export function runFlowPipeline(
   );
 
   // Stage 2: assign continuous flow coordinates and resolve anchored objects.
-  const flowsWithGlobalY = assignGlobalY(flowResult.flows, metricsFor(1).contentTop);
+  // For resumed chunks, seed globalY at the resumption cursor's continuous
+  // position (= start of currentPage in continuous global-Y space + the page-
+  // local Y the prior chunk left off at). Without this, anchors in a later
+  // chunk would resolve as if the chunk's flows started near the document's
+  // top — wrong page assignment, wrong wrap decisions.
+  const seedGlobalY = r
+    ? pageStartGlobal(pageConfig, metricsFor, currentPage.pageNumber)
+      + (initY - metricsFor(currentPage.pageNumber).contentTop)
+    : metricsFor(1).contentTop;
+  const flowsWithGlobalY = assignGlobalY(flowResult.flows, seedGlobalY);
   const anchoredFlow = resolveAnchoredObjects(
     flowsWithGlobalY,
     pageConfig,
@@ -894,6 +903,19 @@ export function runFlowPipeline(
     fontModifiers,
     options.inlineRegistry,
   );
+
+  // Merge anchored placements from prior streamed chunks with the current
+  // chunk's placements. Without this, resumed layouts overwrite the
+  // accumulated anchoredObjects list — placements from earlier chunks
+  // disappear from rendering, hit testing, and PDF export.
+  const carriedPlacements = r
+    ? (previousLayout?.anchoredObjects ?? []).filter(
+        (p) => !anchoredFlow.placements.some((q) => q.docPos === p.docPos),
+      )
+    : [];
+  const mergedPlacements = carriedPlacements.length > 0
+    ? [...carriedPlacements, ...anchoredFlow.placements]
+    : anchoredFlow.placements;
 
   const pr = paginateFlow(
     anchoredFlow.flows, pageConfig, resolved, metricsFor, runId,
@@ -935,9 +957,9 @@ export function runFlowPipeline(
       runId,
       convergence: "stable",
       iterationCount: 1,
-      anchoredObjects: anchoredFlow.placements,
+      anchoredObjects: mergedPlacements,
     };
-    return { layout, isPartial: true, ...context, y: pr.y, anchoredObjects: anchoredFlow.placements };
+    return { layout, isPartial: true, ...context, y: pr.y, anchoredObjects: mergedPlacements };
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
@@ -950,9 +972,9 @@ export function runFlowPipeline(
     runId,
     convergence: "stable",
     iterationCount: 1,
-    anchoredObjects: anchoredFlow.placements,
+    anchoredObjects: mergedPlacements,
   };
-  return { layout, isPartial: false, ...context, y: pr.y, anchoredObjects: anchoredFlow.placements };
+  return { layout, isPartial: false, ...context, y: pr.y, anchoredObjects: mergedPlacements };
 }
 
 function _runPipelineBody(
@@ -1550,7 +1572,12 @@ export function buildBlockFlow(
         anchoredObjectNode: topBottom.image,
         anchoredObjectMode: "top-bottom",
       });
-      const afterNodePos = topBottom.imageDocPos + topBottom.image.nodeSize - 1;
+      // Position immediately after the image node. For an inline leaf image
+      // (nodeSize === 1) this is `imageDocPos + 1`; the previous formula
+      // (`imageDocPos + nodeSize - 1`) collapsed to `imageDocPos`, so cursor
+      // mapping and selection for the after-text resolved to the image's
+      // own position instead of past it.
+      const afterNodePos = topBottom.imageDocPos + topBottom.image.nodeSize;
       pushTextFragment(afterNode, afterNodePos, 0, blockStyle.spaceAfter);
 
       processedBlocks++;
