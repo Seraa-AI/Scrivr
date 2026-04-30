@@ -104,8 +104,8 @@ export function renderPage(options: RenderPageOptions): void {
 
   // Floats on this page, partitioned by render order.
   const pageFloats = anchoredObjects?.filter((f) => f.page === page.pageNumber) ?? [];
-  const behindFloats = pageFloats.filter((f) => f.mode === "behind");
-  const frontFloats  = pageFloats.filter((f) => f.mode !== "behind");
+  const behindFloats = pageFloats.filter((f) => f.wrapMode === "behind");
+  const frontFloats  = pageFloats.filter((f) => f.wrapMode !== "behind");
 
   // ── Draw 'behind' floats BEFORE blocks ────────────────────────────────────
   for (const float of behindFloats) {

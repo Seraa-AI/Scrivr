@@ -15,8 +15,11 @@ import type { LayoutLine, ConstraintProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
 import {
   ANCHORED_OBJECT_MARGIN,
-  isAnchoredObjectMode,
+  normalizeImageAttrs,
+  resolveImageX,
   type AnchoredObjectPlacement,
+  type WrapMode,
+  type NormalizedImageAttrs,
 } from "./AnchoredObjects";
 import {
   computePageMetrics,
@@ -316,17 +319,34 @@ function restampGlobalYFrom(flows: FlowBlock[], startIndex: number): FlowBlock[]
   return next;
 }
 
-function getAnchoredObjectAnchors(flow: FlowBlock): Array<{ docPos: number; node: Node; mode: AnchoredObjectPlacement["mode"] }> {
-  if (flow.partKind === "anchored-object" && flow.anchoredObjectMode === "top-bottom" && flow.anchoredObjectNode && flow.anchoredObjectDocPos !== undefined) {
-    return [{ docPos: flow.anchoredObjectDocPos, node: flow.anchoredObjectNode, mode: "top-bottom" }];
+interface AnchorRef {
+  docPos: number;
+  node: Node;
+  attrs: NormalizedImageAttrs;
+}
+
+function getAnchoredObjectAnchors(flow: FlowBlock): AnchorRef[] {
+  if (
+    flow.partKind === "anchored-object" &&
+    flow.anchoredObjectMode === "top-bottom" &&
+    flow.anchoredObjectNode &&
+    flow.anchoredObjectDocPos !== undefined
+  ) {
+    return [
+      {
+        docPos: flow.anchoredObjectDocPos,
+        node: flow.anchoredObjectNode,
+        attrs: normalizeImageAttrs(flow.anchoredObjectNode),
+      },
+    ];
   }
-  const anchors: Array<{ docPos: number; node: Node; mode: AnchoredObjectPlacement["mode"] }> = [];
+  const anchors: AnchorRef[] = [];
   for (const line of flow.lines) {
     for (const span of line.spans) {
       if (span.kind !== "object" || span.width !== 0) continue;
-      const mode = span.node.attrs["wrappingMode"];
-      if (!isAnchoredObjectMode(mode)) continue;
-      anchors.push({ docPos: span.docPos, node: span.node, mode });
+      const attrs = normalizeImageAttrs(span.node);
+      if (attrs.wrapMode === "inline") continue;
+      anchors.push({ docPos: span.docPos, node: span.node, attrs });
     }
   }
   return anchors;
@@ -354,7 +374,7 @@ function topBottomImageInfo(node: Node, nodePos: number): {
       after.push(child);
       return;
     }
-    if (child.type.name === "image" && child.attrs["wrappingMode"] === "top-bottom") {
+    if (child.type.name === "image" && normalizeImageAttrs(child).wrapMode === "top-bottom") {
       found = {
         image: child,
         imageDocPos: nodePos + 1 + offset,
@@ -418,22 +438,22 @@ function resolveAnchoredObjects(
     if (anchors.length === 0) continue;
 
     for (const anchor of anchors) {
-      const attrs = anchor.node.attrs as {
-        width?: number;
-        height?: number;
-        floatOffset?: { x?: number; y?: number };
-      };
-      const width = Math.min(typeof attrs.width === "number" ? attrs.width : 200, contentWidth);
-      const height = typeof attrs.height === "number" ? attrs.height : 200;
+      const attrs = anchor.attrs;
+      const width = Math.min(attrs.width, contentWidth);
+      const height = attrs.height;
+      const wrapMode = attrs.wrapMode;
       let globalY = flows[i]!.globalY ?? 0;
       let pageNumber = pageForGlobalY(pageConfig, metricsFor, globalY);
       let localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
-      const metrics = metricsFor(pageNumber);
 
+      // Anchor-push: any wrapping mode whose visual extent overflows its
+      // anchor's page is pushed to the next page (provided the next page
+      // can fit it). This applies uniformly to square / top-bottom /
+      // behind / front.
       if (
-        (anchor.mode === "top-bottom" || anchor.mode === "square-left" || anchor.mode === "square-right") &&
+        wrapMode !== "inline" &&
         !pageConfig.pageless &&
-        localY + height > metrics.contentBottom &&
+        localY + height > metricsFor(pageNumber).contentBottom &&
         height <= metricsFor(pageNumber + 1).contentHeight
       ) {
         const pushedGlobalY = pageStartGlobal(pageConfig, metricsFor, pageNumber + 1);
@@ -448,16 +468,18 @@ function resolveAnchoredObjects(
         localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
       }
 
-      const offsetX = attrs.floatOffset?.x ?? 0;
-      const offsetY = attrs.floatOffset?.y ?? 0;
-      const baseX = anchor.mode === "square-right"
-        ? contentRight - width
-        : contentX;
-      const x = Math.max(contentX, Math.min(baseX + offsetX, contentRight - width));
-      if (anchor.mode === "square-left" || anchor.mode === "square-right") {
+      // Resolve horizontal X — single expression for every non-inline mode.
+      const x = resolveImageX({ width, xAlign: attrs.xAlign, x: attrs.x }, contentX, contentWidth);
+
+      // Square stacking: when two square images on the same page have wrap
+      // zones that horizontally and vertically overlap, push the second
+      // below the first. Tracked by image rect (not by xAlign) so a
+      // user-positioned center image and a user-positioned right image at
+      // overlapping Y still resolve cleanly.
+      if (wrapMode === "square") {
         let stackedGlobalY = globalY;
         for (const placed of placements) {
-          if (placed.mode !== anchor.mode || placed.page !== pageNumber) continue;
+          if (placed.wrapMode !== "square" || placed.page !== pageNumber) continue;
           const hOverlap = x < placed.x + placed.width && x + width > placed.x;
           const vOverlap = localY < placed.y + placed.height && localY + height > placed.y;
           if (hOverlap && vOverlap) {
@@ -476,6 +498,7 @@ function resolveAnchoredObjects(
           pageNumber = pageForGlobalY(pageConfig, metricsFor, globalY);
           localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
         }
+        // Re-check page fit after stacking.
         if (
           !pageConfig.pageless &&
           localY + height > metricsFor(pageNumber).contentBottom &&
@@ -498,26 +521,32 @@ function resolveAnchoredObjects(
         docPos: anchor.docPos,
         page: pageNumber,
         x,
-        y: localY + offsetY,
+        y: localY,
         width,
         height,
-        mode: anchor.mode,
+        wrapMode,
         node: anchor.node,
         anchorGlobalY: globalY,
         anchorPage: pageNumber,
       });
 
-      if (anchor.mode === "square-left" || anchor.mode === "square-right") {
+      // Square: emit a wrap zone constraint for sibling lines whose Y
+      // overlaps the painted rectangle. The anchor paragraph stays in
+      // flow at its natural text height (no flow contribution); subsequent
+      // paragraphs that fall within the zone get their lines narrowed.
+      if (wrapMode === "square") {
         flows = reflowFlowsAgainstSquareObject(
           flows,
           i,
           {
-            mode: anchor.mode,
+            wrapText: attrs.wrapText,
             pageNumber,
             globalY,
             localY,
+            x,
             width,
             height,
+            margin: attrs.margin,
             contentX,
             contentWidth,
           },
@@ -526,20 +555,28 @@ function resolveAnchoredObjects(
           fontModifiers,
           inlineRegistry,
         );
+        continue;
       }
 
-      if (anchor.mode !== "top-bottom") continue;
-      const clearanceY = globalY + height + ANCHORED_OBJECT_MARGIN;
-      for (let j = i + 1; j < flows.length; j++) {
-        const candidate = flows[j]!;
-        if ((candidate.globalY ?? 0) >= clearanceY) break;
-        flows = [
-          ...flows.slice(0, j),
-          { ...candidate, globalY: clearanceY },
-          ...flows.slice(j + 1),
-        ];
-        flows = restampGlobalYFrom(flows, j + 1);
+      // Top-bottom: emit a flow clearance pushing following blocks past
+      // the image's bottom.
+      if (wrapMode === "top-bottom") {
+        const clearanceY = globalY + height + attrs.margin;
+        for (let j = i + 1; j < flows.length; j++) {
+          const candidate = flows[j]!;
+          if ((candidate.globalY ?? 0) >= clearanceY) break;
+          flows = [
+            ...flows.slice(0, j),
+            { ...candidate, globalY: clearanceY },
+            ...flows.slice(j + 1),
+          ];
+          flows = restampGlobalYFrom(flows, j + 1);
+        }
+        continue;
       }
+
+      // behind / front — flow block already accounted for via Stage 1's
+      // anchored-object-block split; no wrap zone, no clearance.
     }
   }
 
@@ -550,12 +587,16 @@ function reflowFlowsAgainstSquareObject(
   inputFlows: FlowBlock[],
   startIndex: number,
   zone: {
-    mode: "square-left" | "square-right";
+    /** Per-image wrap-side override; `largest` (default) picks the wider side. */
+    wrapText: import("./AnchoredObjects").WrapText;
     pageNumber: number;
     globalY: number;
     localY: number;
+    /** Painted X of the image (page-local). */
+    x: number;
     width: number;
     height: number;
+    margin: number;
     contentX: number;
     contentWidth: number;
   },
@@ -565,9 +606,43 @@ function reflowFlowsAgainstSquareObject(
   inlineRegistry?: InlineRegistry,
 ): FlowBlock[] {
   let flows = inputFlows;
-  const zoneTop = zone.globalY - ANCHORED_OBJECT_MARGIN;
-  const zoneBottom = zone.globalY + zone.height + ANCHORED_OBJECT_MARGIN;
-  const constrainedWidth = Math.max(0, zone.contentWidth - zone.width - ANCHORED_OBJECT_MARGIN);
+  const margin = zone.margin;
+  const zoneLeft = zone.x - margin;
+  const zoneRight = zone.x + zone.width + margin;
+  const zoneTop = zone.globalY - margin;
+  const zoneBottom = zone.globalY + zone.height + margin;
+  const contentRight = zone.contentX + zone.contentWidth;
+
+  // Available widths on each side of the image's wrap zone, within the
+  // content area. Either may be 0 when the image is flush against an edge.
+  const leftAvail = Math.max(0, zoneLeft - zone.contentX);
+  const rightAvail = Math.max(0, contentRight - zoneRight);
+
+  // Resolve which side text wraps on. `largest` picks the wider side at
+  // line-resolution time; `left` / `right` force a specific side.
+  const sideForLine = (
+    requiredWidth: number,
+  ): { x: number; width: number } | "skip" | null => {
+    // Apply per-image override or compute from geometry.
+    if (zone.wrapText === "left") {
+      if (leftAvail <= 0 || requiredWidth > leftAvail) return "skip";
+      return { x: 0, width: leftAvail };
+    }
+    if (zone.wrapText === "right") {
+      if (rightAvail <= 0 || requiredWidth > rightAvail) return "skip";
+      return { x: zoneRight - zone.contentX, width: rightAvail };
+    }
+    // "largest" (default) — pick wider side that fits; deterministic
+    // tie-break: when widths are equal, prefer right.
+    const leftFits = leftAvail >= requiredWidth;
+    const rightFits = rightAvail >= requiredWidth;
+    if (!leftFits && !rightFits) return "skip";
+    if (leftFits && !rightFits) return { x: 0, width: leftAvail };
+    if (!leftFits && rightFits) return { x: zoneRight - zone.contentX, width: rightAvail };
+    return rightAvail >= leftAvail
+      ? { x: zoneRight - zone.contentX, width: rightAvail }
+      : { x: 0, width: leftAvail };
+  };
 
   for (let idx = startIndex; idx < flows.length; idx++) {
     const flow = flows[idx]!;
@@ -575,15 +650,19 @@ function reflowFlowsAgainstSquareObject(
     if (flowY >= zoneBottom) break;
     if (flow.lines.length === 0 || flowY + flow.height <= zoneTop) continue;
 
-    const constraintProvider: ConstraintProvider = (absoluteLineY: number) => {
-      const lineHeight = 1;
+    const constraintProvider: ConstraintProvider = (absoluteLineY: number, lineHeight = 1) => {
       if (absoluteLineY + lineHeight <= zoneTop || absoluteLineY >= zoneBottom) {
         return null;
       }
-      if (zone.mode === "square-left") {
-        return { x: zone.width + ANCHORED_OBJECT_MARGIN, width: constrainedWidth };
+      // requiredWidth = 1 here as a probe; LineBreaker handles per-line
+      // word-fit checks with its own measurement.
+      const side = sideForLine(1);
+      if (side === null) return null;
+      if (side === "skip") {
+        // Force the line below the wrap zone.
+        return { x: 0, width: 0, skipToY: zoneBottom };
       }
-      return { x: 0, width: constrainedWidth };
+      return { x: side.x, width: side.width };
     };
 
     const reflowed = layoutBlock(flow.node, {

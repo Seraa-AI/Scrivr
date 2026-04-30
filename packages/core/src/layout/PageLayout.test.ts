@@ -998,7 +998,9 @@ describe("runPipeline — float image wrapping", () => {
     });
     expect(layout.anchoredObjects).toBeDefined();
     expect(layout.anchoredObjects!.length).toBe(1);
-    expect(layout.anchoredObjects![0]!.mode).toBe("square-left");
+    // Legacy `wrappingMode: "square-left"` normalizes to wrapMode: "square"
+    // with xAlign: "left"; the placement carries the new wrapMode.
+    expect(layout.anchoredObjects![0]!.wrapMode).toBe("square");
   });
 
   it("square-left: constrained lines have constraintX set (text pushed right of image)", () => {
@@ -1457,7 +1459,7 @@ describe("runPipeline — top-bottom (break) float", () => {
     });
 
     const anchored = layout.anchoredObjects![0]!;
-    expect(anchored.mode).toBe("top-bottom");
+    expect(anchored.wrapMode).toBe("top-bottom");
     expect(anchored.page).toBe(anchored.anchorPage);
 
     const anchorPage = layout.pages.find((p) => p.pageNumber === anchored.anchorPage)!;

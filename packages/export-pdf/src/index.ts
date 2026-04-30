@@ -138,7 +138,7 @@ export async function buildPdf(
     // Anchored objects behind blocks
     const pageObjects = (layout.anchoredObjects ?? []).filter((o) => o.page === pageNumber);
     for (const object of pageObjects) {
-      if (object.mode === "behind") {
+      if (object.wrapMode === "behind") {
         drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache);
       }
     }
@@ -156,7 +156,7 @@ export async function buildPdf(
 
     // Anchored objects in front of (or alongside) blocks
     for (const object of pageObjects) {
-      if (object.mode !== "behind") {
+      if (object.wrapMode !== "behind") {
         drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache);
       }
     }
