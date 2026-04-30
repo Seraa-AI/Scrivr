@@ -450,6 +450,49 @@ export class Editor extends BaseEditor implements IEditor {
     }
   }
 
+  /**
+   * Atomically move a node to `targetPos` AND update its attrs in a single
+   * transaction. Used by drag mechanics where a diagonal drag changes both
+   * the structural anchor (vertical) and the placement attrs (horizontal)
+   * in one user action — committing them separately produces two re-layouts
+   * with an inconsistent intermediate state.
+   *
+   * Equivalent to `moveNode` + `setNodeAttrs` but composed in one tr so
+   * layout sees a single consistent post-edit state.
+   */
+  moveAndUpdateNode(
+    docPos: number,
+    targetPos: number,
+    attrs: Record<string, unknown>,
+  ): boolean {
+    const state = this._getActiveState();
+    const node = state.doc.nodeAt(docPos);
+    if (!node) return false;
+
+    const from = docPos;
+    const to = docPos + node.nodeSize;
+    if (targetPos >= from && targetPos <= to) {
+      // Same position — degenerate to plain attrs update.
+      this.setNodeAttrs(docPos, attrs);
+      return true;
+    }
+
+    const mappedTarget = targetPos > from ? targetPos - node.nodeSize : targetPos;
+    const insertPos = Math.max(0, Math.min(mappedTarget, state.doc.content.size - node.nodeSize));
+
+    try {
+      const updated = node.type.create({ ...node.attrs, ...attrs }, node.content, node.marks);
+      let tr = state.tr.delete(from, to);
+      const finalInsertPos = Math.max(0, Math.min(insertPos, tr.doc.content.size));
+      tr = tr.insert(finalInsertPos, updated);
+      tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
+      this._dispatchToActive(tr);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   override destroy(): void {
     if (this._rafId !== null) {
       cancelAnimationFrame(this._rafId);

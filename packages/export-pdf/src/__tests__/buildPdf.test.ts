@@ -290,7 +290,7 @@ describe("buildPdf", () => {
 
     const float: NonNullable<DocumentLayout["anchoredObjects"]>[number] = {
       docPos: 0, page: 1, x: MARGIN, y: MARGIN,
-      width: 150, height: 150, mode: "square-right",
+      width: 150, height: 150, wrapMode: "square",
       node: schema.nodes.image!.create({ src: png1x1 }),
       anchorGlobalY: MARGIN, anchorPage: 1,
     };
@@ -305,7 +305,7 @@ describe("buildPdf", () => {
   it("handles a float image with an unreachable URL (graceful placeholder)", async () => {
     const float: NonNullable<DocumentLayout["anchoredObjects"]>[number] = {
       docPos: 0, page: 1, x: MARGIN, y: MARGIN,
-      width: 100, height: 100, mode: "square-left",
+      width: 100, height: 100, wrapMode: "square",
       node: schema.nodes.image!.create({ src: "https://unreachable.invalid/img.png" }),
       anchorGlobalY: MARGIN, anchorPage: 1,
     };

@@ -5,6 +5,7 @@ import {
   hitHandle,
   computeNewSize,
 } from "./ResizeController";
+import { normalizeImageAttrs } from "../layout/AnchoredObjects";
 
 /**
  * Minimal view of a tile entry — PointerController only needs access to
@@ -60,10 +61,13 @@ export class PointerController {
   private floatDrag: {
     docPos: number;
     nodeSize: number;
-    startX: number;
-    startY: number;
+    /** Mouse position at drag start, in client coordinates. */
+    startClientX: number;
+    startClientY: number;
+    /** Image's painted X at drag start, in page-local coordinates. */
+    startImageX: number;
+    /** Image's docPos rect at drag start (for posBelow / posAbove fallback). */
     rect: { x: number; y: number; width: number; height: number; page: number };
-    targetPos: number;
   } | null = null;
 
   /** Click-count tracking for double/triple-click. */
@@ -204,7 +208,11 @@ export class PointerController {
       return;
     }
 
-    // Float body drag — mutation, block in read-only
+    // Anchored-object body drag — mutation, block in read-only.
+    // Per docs/anchored-objects/04-edit-ux.md: drag is structural —
+    // horizontal movement updates `xAlign: "custom"` + `x`; vertical
+    // movement updates the docPos. Diagonal drag commits both atomically
+    // via Editor.moveAndUpdateNode.
     const floatHit = this.hitFloatAt(docX, docY, page);
     if (floatHit) {
       if (editor.readOnly) return;
@@ -212,8 +220,9 @@ export class PointerController {
       this.floatDrag = {
         docPos: floatHit.docPos,
         nodeSize: floatHit.node.nodeSize,
-        startX: e.clientX,
-        startY: e.clientY,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startImageX: floatHit.x,
         rect: {
           x: floatHit.x,
           y: floatHit.y,
@@ -221,7 +230,6 @@ export class PointerController {
           height: floatHit.height,
           page: floatHit.page,
         },
-        targetPos: floatHit.docPos,
       };
       this.setCursorAll("move");
       return;
@@ -304,9 +312,8 @@ export class PointerController {
       return;
     }
 
-    // Float drag
+    // Float drag — mousemove just preserves cursor; deltas resolved on mouseup.
     if (this.floatDrag) {
-      this.floatDrag.targetPos = this.resolveFloatDragTarget(e);
       return;
     }
 
@@ -351,13 +358,136 @@ export class PointerController {
       this.setCursorAll("text");
     }
     if (this.floatDrag) {
-      this.floatDrag.targetPos = this.resolveFloatDragTarget(e);
-      editor.moveNode(this.floatDrag.docPos, this.floatDrag.targetPos);
+      this.commitFloatDrag(e);
       this.floatDrag = null;
       this.setCursorAll("text");
     }
     this.isDragging = false;
   };
+
+  /**
+   * Resolve and commit an anchored-object drag. Per
+   * docs/anchored-objects/04-edit-ux.md § Dragging:
+   *
+   *   horizontal channel  → setNodeAttrs({ xAlign: "custom", x: targetX })
+   *   vertical channel    → moveNode to nearest paragraph at the painted Y
+   *   diagonal            → both atomically (one transaction)
+   *
+   * Pure no-op when total movement is below a small threshold (treats
+   * the gesture as a click, not a drag). Skips when `wrapMode` is
+   * `inline` (the click target is an inline image, never an anchored
+   * object — guarded above by `hitFloatAt`).
+   */
+  private commitFloatDrag(e: MouseEvent): void {
+    const { editor } = this.deps;
+    if (!this.floatDrag) return;
+
+    const dx = e.clientX - this.floatDrag.startClientX;
+    const dy = e.clientY - this.floatDrag.startClientY;
+
+    const DRAG_THRESHOLD = 3;
+    if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) {
+      return;
+    }
+
+    const { docPos, nodeSize } = this.floatDrag;
+
+    // Resolve horizontal target X.
+    // For modes whose horizontal placement is user-controlled (`square`,
+    // `top-bottom`, `behind`, `front`), update the structural attrs so
+    // layout reflows around the new rectangle. `inline` wouldn't be
+    // here — only anchored objects produce a hit in `hitFloatAt`.
+    const newX = this.resolveDragTargetX(dx);
+
+    // Resolve vertical target docPos.
+    // Vertical drag moves the PM image node to the paragraph nearest
+    // the painted Y. If the painted Y is still inside the source
+    // node's range, no docPos change.
+    const newDocPos = this.resolveDragTargetDocPos(e);
+
+    const wantsAttrsUpdate = newX !== null;
+    const wantsMove =
+      newDocPos !== null && (newDocPos < docPos || newDocPos > docPos + nodeSize);
+
+    const attrs = wantsAttrsUpdate ? { xAlign: "custom" as const, x: newX } : null;
+
+    if (wantsMove && attrs) {
+      editor.moveAndUpdateNode(docPos, newDocPos, attrs);
+    } else if (wantsMove) {
+      editor.moveNode(docPos, newDocPos);
+    } else if (attrs) {
+      editor.setNodeAttrs(docPos, attrs);
+    }
+  }
+
+  /**
+   * Resolve the new content-area-relative X for the image. Returns
+   * `null` when horizontal movement is too small to constitute a
+   * structural change.
+   *
+   * The new X is computed as the image's start X plus the cursor's
+   * horizontal delta, then clamped so the image stays inside the
+   * content area. `xAlign` is set to `"custom"` by the caller so
+   * layout reads `x` directly.
+   */
+  private resolveDragTargetX(dx: number): number | null {
+    const { editor } = this.deps;
+    if (!this.floatDrag) return null;
+    const HORIZONTAL_THRESHOLD = 3;
+    if (Math.abs(dx) < HORIZONTAL_THRESHOLD) return null;
+
+    const node = editor.getState().doc.nodeAt(this.floatDrag.docPos);
+    if (!node) return null;
+
+    const { pageWidth, margins } = editor.layout.pageConfig;
+    const contentX = margins.left;
+    const contentWidth = pageWidth - margins.left - margins.right;
+    const attrs = normalizeImageAttrs(node);
+
+    const proposedX = this.floatDrag.startImageX + dx;
+    // Clamp so the image stays inside the content area.
+    const clampedX = Math.max(
+      contentX,
+      Math.min(proposedX, contentX + contentWidth - attrs.width),
+    );
+    return clampedX;
+  }
+
+  /**
+   * Resolve the new docPos for the image based on the painted Y.
+   * Returns `null` when the painted Y still resolves to the source
+   * paragraph (no structural change needed).
+   */
+  private resolveDragTargetDocPos(e: MouseEvent): number | null {
+    const { editor } = this.deps;
+    if (!this.floatDrag) return null;
+
+    const hit = this.hitTest(e.clientX, e.clientY);
+    if (!hit) return null;
+
+    const { docPos, nodeSize } = this.floatDrag;
+    const from = docPos;
+    const to = docPos + nodeSize;
+
+    let pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
+    // If the resolved docPos falls inside the source node itself
+    // (we're still hovering over the original anchor), use posAbove /
+    // posBelow with the image's center X to find the nearest
+    // paragraph in the drag direction.
+    if (pos >= from && pos <= to) {
+      const dy = e.clientY - this.floatDrag.startClientY;
+      if (Math.abs(dy) < 1) return null; // pure horizontal — no docPos change
+      const probeX = this.floatDrag.rect.x + this.floatDrag.rect.width / 2;
+      const fallback = dy >= 0
+        ? editor.charMap.posBelow(from, probeX)
+        : editor.charMap.posAbove(from, probeX);
+      if (fallback === null || fallback === undefined) return null;
+      pos = fallback;
+    }
+
+    if (pos === from) return null;
+    return pos;
+  }
 
   private setCursorAll(cursor: string): void {
     this.deps.tilesContainer.style.cursor = cursor;
@@ -366,47 +496,4 @@ export class PointerController {
     }
   }
 
-  private resolveFloatDragTarget(e: MouseEvent): number {
-    const { editor } = this.deps;
-    if (!this.floatDrag) return 0;
-
-    const hit = this.hitTest(e.clientX, e.clientY);
-    if (!hit) return this.floatDrag.targetPos;
-
-    let pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
-    const from = this.floatDrag.docPos;
-    const to = from + this.floatDrag.nodeSize;
-    if (pos >= from && pos <= to) {
-      const dx = e.clientX - this.floatDrag.startX;
-      const dy = e.clientY - this.floatDrag.startY;
-      const fallback = Math.abs(dx) > Math.abs(dy)
-        ? this.resolveHorizontalFloatDragTarget(dx)
-        : e.clientY >= this.floatDrag.startY
-          ? editor.charMap.posBelow(from, hit.docX)
-          : editor.charMap.posAbove(from, hit.docX);
-      if (fallback !== null && fallback !== undefined) pos = fallback;
-    }
-    return pos;
-  }
-
-  private resolveHorizontalFloatDragTarget(dx: number): number | null {
-    const { editor } = this.deps;
-    if (!this.floatDrag) return null;
-    const rect = this.floatDrag.rect;
-    const y = rect.y + rect.height / 2;
-    const x = dx >= 0
-      ? rect.x + rect.width + 1
-      : Math.max(0, rect.x - 1);
-    const pos = editor.charMap.posAtCoords(x, y, rect.page);
-    const from = this.floatDrag.docPos;
-    const to = from + this.floatDrag.nodeSize;
-    if (pos < from || pos > to) return pos;
-
-    const state = editor.getState();
-    const $from = state.doc.resolve(from);
-    if ($from.depth > 0) {
-      return dx >= 0 ? $from.end($from.depth) : $from.start($from.depth);
-    }
-    return dx >= 0 ? state.doc.content.size : 0;
-  }
 }
