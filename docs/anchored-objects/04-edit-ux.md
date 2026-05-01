@@ -203,6 +203,19 @@ After every transition, the contract from `03` must still hold:
 following content does not render before the object's flow
 effect is satisfied.
 
+### Wrap-side hint (Square only)
+
+The wrap-mode picker's "Square" entry must communicate that v1 wraps
+on the wider side only — not both sides simultaneously. Required
+tooltip text:
+
+> Text wraps on the wider side. Two-sided wrap is deferred.
+
+This sets accurate expectations for centered images, where Google
+Docs would split text across both sides of the image. v1 leaves the
+narrower side empty by design — see `05-future.md` § F7 for the
+follow-up that lifts this restriction.
+
 ## 5. Position is structural; no paint-only offset
 
 ```

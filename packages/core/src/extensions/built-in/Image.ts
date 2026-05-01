@@ -224,6 +224,10 @@ export const Image = Extension.create({
   },
 
   addToolbarItems() {
+    // When the wrap-mode picker (Square / Top-Bottom / Behind / Front / Inline)
+    // lands here, the Square entry's tooltip must read:
+    //   "Text wraps on the wider side. Two-sided wrap is deferred."
+    // Spec: docs/anchored-objects/04-edit-ux.md § Wrap-side hint (Square only).
     return [
       {
         command: "insertImage",

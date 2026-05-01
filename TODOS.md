@@ -4,6 +4,13 @@ Captured from `/plan-eng-review` of `docs/anchored-objects/` on the
 `anchored-objects-refactor` branch (2026-05-01). Each entry is sized for
 follow-up work, not this PR.
 
+## Recently completed
+
+- **#19 (Cache invalidation tests for D19)** — covered by the new
+  `runPipeline — float image wrapping > Phase 1b does not copy a cached tail
+  after a changed square zone overlaps it` test in `PageLayout.test.ts`,
+  alongside the `flow.overlapsWrapZone` invalidation in `paginateFlow`.
+
 ## 1. Stale-mark legacy layout pipeline docs
 
 **What.** Add a banner at the top of each of these docs noting they describe
@@ -198,3 +205,185 @@ ordering, not flag state).
 **Cons.** Three small tests; tightly coupled to internals.
 
 **Depends on.** 4A merged with 6A applied.
+
+---
+
+# CEO Review additions (2026-05-01, HOLD SCOPE)
+
+## 13. PointerController pointer capture during drag (D9)
+
+**What.** PointerController calls `setPointerCapture(pointerId)` on dragstart
+and ignores subsequent `pointerdown` until release. Closes the double-click
+rapid-drag race condition.
+
+**Why.** Spec's "one atomic transaction" rule for drag depends on no
+mid-drag races. Without pointer capture, two transactions can fire.
+
+**Effort.** Human ~1 hr / CC ~10 min. ~5 LOC + test.
+**Priority.** P2.
+**Depends on.** None — orthogonal to solver work.
+
+## 14. Layout perf benchmark (D11)
+
+**What.** New file `packages/core/src/layout/PageLayout.bench.ts` using
+vitest's bench API. Cases: empty doc, 10-anchor doc, 100-anchor doc,
+1000-paragraph pure-text doc. Asserts each case under target ms threshold.
+
+**Why.** No layout perf regression detector exists. 4A's loop is the first
+non-trivial iteration cost in the layout path; future regressions ship
+silently without a bench.
+
+**Effort.** Human ~3 hr / CC ~20 min. ~50 LOC.
+**Priority.** P2.
+**Depends on.** 4A merged so the bench has the loop to measure.
+
+## 15. floatOffset deprecation strategy (D13 + codex 15)
+
+**What.** Decide migration path for legacy `floatOffset.{x,y}` reads.
+Current plan: runtime warning on every read. Codex 15 says this punishes
+legacy docs that still render compatibly. Better: warn only on explicit
+external/API access (e.g., a `migrateFloatOffsetWarning` opt-in), or
+silent-deprecate and rely on CHANGELOG + migration tool.
+
+**Why.** Layout no longer reads floatOffset. Legacy docs persist on disk.
+Deprecation strategy needs a separate decision; not load-bearing for the
+solver PR.
+
+**Effort.** Human ~half day decision + ~1 hr code / CC ~30 min.
+**Priority.** P3.
+**Depends on.** TODO #10 (migration tool) for the per-doc migration path.
+
+## 16. behind/front Word-aligned spec correction tests (D20)
+
+**What.** Tests pinning Word-aligned behind/front semantics: no flow
+contribution, no wrap zone, no Rule 2 split, painted at
+`(anchor.flow_y, resolveX(...))`. Asserts text flows past the image as
+if it weren't there.
+
+**Why.** Spec corrected in this PR (D20) but the test contract for the
+new behavior isn't part of Test-11A's scope. Without specific tests,
+behind/front behavior could regress silently.
+
+**Effort.** Human ~2 hr / CC ~15 min. ~40 LOC.
+**Priority.** P1.
+**Depends on.** D20 spec edits + behind/front code path simplified
+(drop split logic).
+
+## 17. Stage3Continuation for incremental streaming (D18 long-term)
+
+**What.** Define `Stage3Continuation { placements, activeWrapZones,
+flowGlobalYSeed, solverPushedBoundaryState, barrierProviderState }`.
+Allows true incremental Stage 3 across `maxBlocks` chunks. Current PR
+defers Stage 3 to a background pass after Stage 1/2 chunked completion.
+
+**Why.** Long docs with anchored objects currently layout in full when
+streaming would be desired. Incremental Stage 3 unlocks streaming-with-images.
+
+**Effort.** Human ~1-2 days / CC ~3 hr. ~150 LOC.
+**Priority.** P3 (defer until streaming-with-anchored-objects has a real user need).
+**Depends on.** 4A merged.
+
+## 18. Solver invariant tests (codex 9: monotonicity proof)
+
+**What.** Add tests for solver invariants from
+`docs/anchored-objects/03-test-contract.md` § Solver invariants:
+monotonicity, anchor monotonicity, wrap-zone locality, idempotence.
+Per-iteration assertion that anchor.globalY is non-decreasing across
+iterations.
+
+**Why.** Spec asserts monotonicity as a guarantee but no test proves it.
+Without tests, future code changes can break the invariant silently.
+
+**Effort.** Human ~half day / CC ~1 hr. ~120 LOC across 4 tests.
+**Priority.** P2.
+**Depends on.** 4A merged.
+
+## 19. Cache invalidation tests for D19
+
+**What.** Tests for the targeted cache invalidation: a cached layout where
+a square image's `xAlign` changes must re-paginate downstream flows
+overlapping the wrap zone. Pin the cache-invalidation rule.
+
+**Why.** D19 fixes a silent correctness gap. Without tests, the
+invalidation rule can degrade.
+
+**Effort.** Human ~1 hr / CC ~15 min. ~30 LOC across 2 tests.
+**Priority.** P1.
+**Depends on.** D19 implemented in 4A.
+
+## 20. Anchored-object debug overlay renderer
+
+**What.** Opt-in overlay (e.g., `editor.config({ debug: { anchoredObjects:
+true } })`) that paints wrap zones, anchor positions, and solver-pushed
+markers on top of the canvas. Powerful for debugging wrap-zone issues.
+
+**Why.** D12's debug API surfaces state via JS; the overlay surfaces it
+visually. When debugging "why does this look weird," visual is faster
+than JS introspection.
+
+**Effort.** Human ~half day / CC ~1 hr. ~80 LOC overlay renderer.
+**Priority.** P3.
+**Depends on.** D12 landed.
+
+## 21. Production layout time metric
+
+**What.** Editor emits `layout:complete` event with `{ duration_ms,
+anchoredObjectCount, iterationCount, reflowCount }` after every
+`runPipeline`. Consumers wire to their observability stack.
+
+**Why.** D11's bench catches regressions in CI; this catches regressions
+in real user docs. Sole-maintainer + traction context: production data
+is the only way to find perf cliffs in real-world docs.
+
+**Effort.** Human ~1 hr / CC ~15 min. ~10 LOC.
+**Priority.** P3.
+**Depends on.** None.
+
+## 22. Run /plan-design-review on anchored-object UX
+
+**What.** Before implementation work on the mode-toggle / alignment
+toolbar / drag preview UI lands, run `/plan-design-review` on
+`docs/anchored-objects/04-edit-ux.md`. Catches AI slop / generic UI
+patterns.
+
+**Why.** v1 ships 5 wrap modes + 4 alignments + drag UX. Without a
+design pass, the toolbar/menu UX risks feeling generic.
+
+**Effort.** ~30 min review session.
+**Priority.** P2 (before toolbar implementation).
+**Depends on.** None.
+
+## 23. DESIGN.md for Scrivr
+
+**What.** Run `/design-consultation` to produce a `DESIGN.md` capturing
+the editor's design system: typography, color, spacing, motion, brand
+voice. Currently no DESIGN.md exists.
+
+**Why.** v1 anchored-objects ships as part of a broader editor that
+gains traction. Without a design source-of-truth, every new feature
+risks reinventing visual language.
+
+**Effort.** Human ~half day / CC ~30 min consultation + writeup.
+**Priority.** P3 (not gating any current PR).
+**Depends on.** None.
+
+## 24. Strengthened Test-11A maintenance (D21)
+
+**What.** Test-11A asserts 5 invariants in this PR (ordering, visited
+count, uniqueness, exactly-one-placement-per-anchor, anchor-same-page).
+Maintain as the layout's primary correctness gate. When new wrap modes
+or split rules are added, extend Test-11A's setup but never weaken its
+assertions.
+
+**Why.** Test-11A is the bug-killer test. Weakening it = re-opening the
+v2 bug class. This is documentation, not work, but worth tracking.
+
+**Effort.** N/A — convention rule.
+**Priority.** P1.
+**Depends on.** Test-11A landed in this PR.
+
+## 25. Stale-mark legacy CSS-float docs (was TODO #1)
+
+(See TODO #1 above. Same item; promoted to actively-recommended in this
+CEO review since older docs assume the CSS-float pipeline being abandoned.)
+
