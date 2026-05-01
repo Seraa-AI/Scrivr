@@ -291,7 +291,7 @@ describe("buildPdf", () => {
       docPos: 0, page: 1, x: MARGIN, y: MARGIN,
       width: 150, height: 150, wrapMode: "square",
       node: schema.nodes.image!.create({ src: png1x1 }),
-      anchorGlobalY: MARGIN, anchorPage: 1,
+      anchorGlobalY: MARGIN, anchorPage: 1, globalY: MARGIN,
     };
 
     const layout = makeLayout(
@@ -306,7 +306,7 @@ describe("buildPdf", () => {
       docPos: 0, page: 1, x: MARGIN, y: MARGIN,
       width: 100, height: 100, wrapMode: "square",
       node: schema.nodes.image!.create({ src: "https://unreachable.invalid/img.png" }),
-      anchorGlobalY: MARGIN, anchorPage: 1,
+      anchorGlobalY: MARGIN, anchorPage: 1, globalY: MARGIN,
     };
 
     const layout = makeLayout(

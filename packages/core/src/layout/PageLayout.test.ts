@@ -1518,6 +1518,155 @@ describe("runPipeline — float image wrapping", () => {
   });
 });
 
+// ── Anchored image — yOffset (Phase 1) ───────────────────────────────────────
+
+describe("runPipeline — yOffset (Phase 1)", () => {
+  // defaultPageConfig: pageWidth=794, pageHeight=1122, margins=72
+  //   contentTop = 72, contentBottom = 1050, contentHeight = 978
+  const longText = "word ".repeat(60).trim();
+
+  it("yOffset=0 default: placement.globalY === anchorGlobalY (no-op)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200, wrapMode: "square",
+    });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.anchoredObjects![0]!;
+    expect(float.globalY).toBe(float.anchorGlobalY);
+    expect(float.clamped).toBeUndefined();
+  });
+
+  it("yOffset=40: paint and exclusion shift together", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const baseImg = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200, wrapMode: "square",
+    });
+    const offsetImg = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200, wrapMode: "square", yOffset: 40,
+    });
+    const baseDoc = schema.node("doc", null, [
+      schema.node("paragraph", null, [baseImg, schema.text(longText)]),
+    ]);
+    const offsetDoc = schema.node("doc", null, [
+      schema.node("paragraph", null, [offsetImg, schema.text(longText)]),
+    ]);
+    const baseLayout = runPipeline(baseDoc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const offsetLayout = runPipeline(offsetDoc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const base = baseLayout.anchoredObjects![0]!;
+    const offset = offsetLayout.anchoredObjects![0]!;
+
+    // Painted top shifts by exactly yOffset.
+    expect(offset.globalY - base.globalY).toBe(40);
+    expect(offset.y - base.y).toBe(40);
+    // Anchor flow position is unchanged — the flow doesn't move with yOffset.
+    expect(offset.anchorGlobalY).toBe(base.anchorGlobalY);
+  });
+
+  it("legacy floatOffset.y migrates to yOffset on read", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const legacyImg = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200,
+      wrappingMode: "square-left",
+      floatOffset: { x: 0, y: 40 },
+    });
+    const newImg = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200, wrapMode: "square", yOffset: 40,
+    });
+    const legacyDoc = schema.node("doc", null, [
+      schema.node("paragraph", null, [legacyImg, schema.text(longText)]),
+    ]);
+    const newDoc = schema.node("doc", null, [
+      schema.node("paragraph", null, [newImg, schema.text(longText)]),
+    ]);
+    const legacyLayout = runPipeline(legacyDoc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const newLayout = runPipeline(newDoc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    expect(legacyLayout.anchoredObjects![0]!.globalY).toBe(
+      newLayout.anchoredObjects![0]!.globalY,
+    );
+  });
+
+  it("page-edge clamp: large positive yOffset clamps to page bottom and sets clamped flag", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 300,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // contentTop=20, contentBottom=280, contentHeight=260
+    // image height=80 → max painted top within page = 280 - 80 = 200 (local) = 200 (global)
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 100, height: 80, wrapMode: "square", yOffset: 1000,
+    });
+    const para = schema.node("paragraph", null, [img, schema.text("text")]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: smallPage, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.anchoredObjects![0]!;
+    expect(float.page).toBe(1);
+    expect(float.anchorPage).toBe(1);
+    expect(float.clamped).toBe(true);
+    // Painted bottom must not exceed page bottom.
+    expect(float.y + float.height).toBeLessThanOrEqual(280 + 0.001);
+  });
+
+  it("page-edge clamp: negative yOffset clamps to page top", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 300,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // Anchor on page 1; large negative yOffset would paint above contentTop.
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 100, height: 80, wrapMode: "square", yOffset: -500,
+    });
+    const para = schema.node("paragraph", null, [img, schema.text("text")]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: smallPage, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.anchoredObjects![0]!;
+    expect(float.clamped).toBe(true);
+    expect(float.y).toBeGreaterThanOrEqual(20 - 0.001);
+  });
+
+  it("square stacking: stacks against painted bottom (yOffset-aware)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Two square images at the same xAlign. Without yOffset they stack
+    // anchor-bottom against anchor-bottom. With image1.yOffset=100, image2
+    // should stack against image1's painted bottom (anchor + 100 + height),
+    // not its anchor bottom.
+    const img1 = schema.nodes["image"]!.create({
+      src: "", width: 100, height: 80, wrapMode: "square", yOffset: 100,
+    });
+    const img2 = schema.nodes["image"]!.create({
+      src: "", width: 100, height: 80, wrapMode: "square",
+    });
+    const para1 = schema.node("paragraph", null, [img1, schema.text("first")]);
+    const para2 = schema.node("paragraph", null, [img2, schema.text("second")]);
+    const layout = runPipeline(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() },
+    );
+    const floats = layout.anchoredObjects!;
+    expect(floats.length).toBe(2);
+    const f1 = floats[0]!;
+    const f2 = floats[1]!;
+    // f2's painted top must be at or below f1's painted bottom + margin.
+    expect(f2.globalY).toBeGreaterThanOrEqual(f1.globalY + f1.height);
+  });
+});
+
 // ── Float image — top-bottom (break) mode ────────────────────────────────────
 //
 // defaultPageConfig: pageWidth=794, margins=72 all sides

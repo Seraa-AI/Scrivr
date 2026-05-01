@@ -76,6 +76,17 @@ export class PointerController {
     startClientY: number;
     /** Image's painted X at drag start, in page-local coordinates. */
     startImageX: number;
+    /**
+     * Anchor flow's globalY snapshot. Frozen at pointerdown — never recomputed
+     * during the gesture. Phase 2 spec ("snapshot or die"): drag math reads
+     * the snapshot, never live layout, otherwise feedback loops re-create the
+     * docPos-mutation drag bug.
+     */
+    anchorGlobalY: number;
+    /** Image's painted globalY at gesture start. Used to derive yOffset on commit. */
+    startImageGlobalY: number;
+    /** yOffset attr value at pointerdown (= startImageGlobalY - anchorGlobalY). */
+    startYOffset: number;
     /** Image's docPos rect at drag start (for posBelow / posAbove fallback). */
     rect: { x: number; y: number; width: number; height: number; page: number };
     /** Mouse position relative to the image's top-left at mousedown. */
@@ -319,6 +330,9 @@ export class PointerController {
         startClientX: e.clientX,
         startClientY: e.clientY,
         startImageX: anchoredHit.x,
+        anchorGlobalY: anchoredHit.anchorGlobalY,
+        startImageGlobalY: anchoredHit.globalY,
+        startYOffset: anchoredHit.globalY - anchoredHit.anchorGlobalY,
         rect: {
           x: anchoredHit.x,
           y: anchoredHit.y,
@@ -484,17 +498,23 @@ export class PointerController {
   };
 
   /**
-   * Resolve and commit an anchored-object drag. Per
-   * docs/anchored-objects/04-edit-ux.md § Dragging:
+   * Resolve and commit an anchored-object drag. Per the yOffset redesign
+   * (docs/anchored-objects/06-yoffset-redesign.md § Phase 2):
    *
-   *   horizontal channel  → setNodeAttrs({ xAlign: "custom", x: targetX })
-   *   vertical channel    → moveNode to nearest paragraph at the painted Y
-   *   diagonal            → both atomically (one transaction)
+   *   Same-page drop → setNodeAttrs({ xAlign, x, yOffset }) — pure attr
+   *                    update; the image moves freely along its anchor's
+   *                    page without changing docPos.
+   *   Cross-page drop → moveAndUpdateNode(newAnchorPos, { xAlign, x, yOffset: 0 })
+   *                     — anchor relocates; yOffset resets so the image
+   *                     lands at the new anchor's natural position.
+   *
+   * Drag math reads the gesture-begin snapshot (anchorGlobalY, startYOffset)
+   * — never live layout. "Snapshot or die": if anchorGlobalY were
+   * recomputed mid-drag, the image's vertical position would feed back
+   * into the drag math and produce flicker / jumps.
    *
    * Pure no-op when total movement is below a small threshold (treats
-   * the gesture as a click, not a drag). Skips when `wrapMode` is
-   * `inline` (the click target is an inline image, never an anchored
-   * object — guarded above by `hitAnchoredAt`).
+   * the gesture as a click). Gap drops mirror the disabled overlay state.
    */
   private commitAnchoredDrag(e: MouseEvent): void {
     const { editor } = this.deps;
@@ -519,27 +539,63 @@ export class PointerController {
       return;
     }
 
-    const { docPos, nodeSize } = this.anchoredDrag;
+    const { docPos, startYOffset } = this.anchoredDrag;
+    const sourcePage = this.anchoredDrag.rect.page;
+    const samePage = !finalHit || finalHit.page === sourcePage;
 
-    // Resolve horizontal target X.
-    // For modes whose horizontal placement is user-controlled (`square`,
-    // `top-bottom`, `behind`, `front`), update the structural attrs so
-    // layout reflows around the new rectangle. `inline` wouldn't be
-    // here — only anchored objects produce a hit in `hitAnchoredAt`.
+    // Resolve horizontal target X. For modes whose horizontal placement is
+    // user-controlled (square / top-bottom / behind / front) this updates
+    // structural attrs so layout reflows around the new rectangle.
     const newX = this.resolveDragTargetX(dx);
-
-    // Resolve vertical target docPos.
-    // Vertical drag moves the PM image node to the paragraph nearest
-    // the painted Y. If the painted Y is still inside the source
-    // node's range, no docPos change.
-    const newDocPos = this.resolveDragTargetDocPos(e);
-
-    // Clamp-no-move guard: a horizontal drag that clamped to the same X (e.g.
-    // dragging left while already at contentX) produces newX === startImageX.
-    // Without this guard we'd dispatch a setNodeAttrs that flips xAlign from
-    // a named value to "custom" with no visual change AND triggers a re-layout.
     const horizontallyStill =
       newX === null || Math.abs(newX - this.anchoredDrag.startImageX) < 1;
+
+    if (samePage) {
+      // Same-page drag: yOffset commit, no docPos change. The anchor
+      // paragraph stays where it is; the image translates freely on its
+      // page (clamped by layout to the anchor's page bounds).
+      // Y_THRESHOLD matches the X HORIZONTAL_THRESHOLD so a "pure horizontal"
+      // drag with mouse jitter doesn't write a spurious yOffset.
+      const Y_THRESHOLD = 3;
+      const newYOffset = startYOffset + dy;
+      const verticallyStill = Math.abs(dy) < Y_THRESHOLD;
+
+      if (horizontallyStill && verticallyStill) {
+        dragDebugLog(editor, "clampedNoMove", {
+          docPos,
+          attemptedX: newX,
+          startImageX: this.anchoredDrag.startImageX,
+          attemptedYOffset: newYOffset,
+          startYOffset,
+        });
+        return;
+      }
+
+      const attrs: Record<string, unknown> = {};
+      if (!horizontallyStill && newX !== null) {
+        attrs["xAlign"] = "custom";
+        attrs["x"] = newX;
+      }
+      if (!verticallyStill) {
+        attrs["yOffset"] = newYOffset;
+      }
+      editor.setNodeAttrs(docPos, attrs);
+      dragDebugLog(editor, "commit", {
+        commitPath: "setNodeAttrs",
+        docPos,
+        newX,
+        newYOffset,
+      });
+      return;
+    }
+
+    // Cross-page drop: anchor must relocate. Resolve a new anchor docPos
+    // on the destination page; reset yOffset so the image lands at the new
+    // anchor's natural position. Preserving exact visual position across
+    // page breaks (= adjusted yOffset against new anchor) is deferred —
+    // it requires a pageStartGlobal helper not yet exposed to PointerController.
+    const newDocPos = this.resolveDragTargetDocPos(e);
+    const { nodeSize } = this.anchoredDrag;
     const verticallyStill =
       newDocPos === null || (newDocPos >= docPos && newDocPos <= docPos + nodeSize);
 
@@ -547,28 +603,31 @@ export class PointerController {
       dragDebugLog(editor, "clampedNoMove", {
         docPos,
         attemptedX: newX,
-        startImageX: this.anchoredDrag.startImageX,
         attemptedDocPos: newDocPos,
+        crossPage: true,
       });
       return;
     }
 
     let commitPath: "moveAndUpdateNode" | "moveNode" | "setNodeAttrs";
     if (!horizontallyStill && !verticallyStill && newX !== null && newDocPos !== null) {
-      editor.moveAndUpdateNode(docPos, newDocPos, { xAlign: "custom", x: newX });
+      editor.moveAndUpdateNode(docPos, newDocPos, {
+        xAlign: "custom",
+        x: newX,
+        yOffset: 0,
+      });
       commitPath = "moveAndUpdateNode";
     } else if (!verticallyStill && newDocPos !== null) {
-      editor.moveNode(docPos, newDocPos);
-      commitPath = "moveNode";
+      editor.moveAndUpdateNode(docPos, newDocPos, { yOffset: 0 });
+      commitPath = "moveAndUpdateNode";
     } else if (newX !== null) {
       editor.setNodeAttrs(docPos, { xAlign: "custom", x: newX });
       commitPath = "setNodeAttrs";
     } else {
-      // Guarded above: at least one of horizontally/vertically still is false.
       return;
     }
 
-    dragDebugLog(editor, "commit", { commitPath, docPos, newX, newDocPos });
+    dragDebugLog(editor, "commit", { commitPath, docPos, newX, newDocPos, crossPage: true });
   }
 
   /**

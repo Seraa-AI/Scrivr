@@ -502,18 +502,27 @@ function resolveAnchoredObjects(
       const width = Math.min(attrs.width, contentWidth);
       const height = attrs.height;
       const wrapMode = attrs.wrapMode;
-      let globalY = flows[i]!.globalY ?? 0;
-      let pageNumber = barriers.pageForGlobalY(globalY);
-      let localY = barriers.localYForGlobalY(pageNumber, globalY);
+      const yOffset = attrs.yOffset;
+
+      // anchorGlobalY: the anchor flow's globalY (post anchor-push / stacking).
+      // paintedGlobalY: where the image actually paints (= anchor + yOffset, clamped).
+      // Anchor-push and stacking operate on flow geometry (anchor); paint, exclusion,
+      // and the clamp operate on the painted position. Phase 1 V1 invariant:
+      // image.page === anchor.page (clamp pulls a runaway yOffset back onto the page).
+      let anchorGlobalY = flows[i]!.globalY ?? 0;
+      let pageNumber = barriers.pageForGlobalY(anchorGlobalY);
+      let anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
 
       // Anchor-push: any wrapping mode whose visual extent overflows its
       // anchor's page is pushed to the next page (provided the next page
       // can fit it). This applies uniformly to square / top-bottom /
-      // behind / front.
+      // behind / front. yOffset is intentionally not factored in — the
+      // anchor flow's natural fit decides the page; yOffset only shifts
+      // within the resulting page (and clamps if it would escape).
       if (
         wrapMode !== "inline" &&
         !pageConfig.pageless &&
-        localY + height > barriers.contentBottomLocal(pageNumber) &&
+        anchorLocalY + height > barriers.contentBottomLocal(pageNumber) &&
         height <= barriers.contentHeight(pageNumber + 1)
       ) {
         const pushedGlobalY = barriers.pageStartGlobal(pageNumber + 1);
@@ -523,45 +532,48 @@ function resolveAnchoredObjects(
           ...flows.slice(i + 1),
         ];
         flows = restampGlobalYFrom(flows, i + 1);
-        globalY = pushedGlobalY;
-        pageNumber = barriers.pageForGlobalY(globalY);
-        localY = barriers.localYForGlobalY(pageNumber, globalY);
+        anchorGlobalY = pushedGlobalY;
+        pageNumber = barriers.pageForGlobalY(anchorGlobalY);
+        anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
       }
 
       // Resolve horizontal X — single expression for every non-inline mode.
       const x = resolveImageX({ width, xAlign: attrs.xAlign, x: attrs.x }, contentX, contentWidth);
 
-      // Square stacking: when two square images on the same page have wrap
-      // zones that horizontally and vertically overlap, push the second
-      // below the first. Tracked by image rect (not by xAlign) so a
-      // user-positioned center image and a user-positioned right image at
-      // overlapping Y still resolve cleanly.
+      // Square stacking: detect overlap by *painted* rect (anchor + yOffset)
+      // for both the new and prior placements. Stacking shifts the anchor
+      // flow by the same delta as the painted target, preserving yOffset.
       if (wrapMode === "square") {
-        let stackedGlobalY = globalY;
+        const newPaintedGlobalY = anchorGlobalY + yOffset;
+        let stackedPaintedGlobalY = newPaintedGlobalY;
         for (const placed of placements) {
           if (placed.wrapMode !== "square" || placed.page !== pageNumber) continue;
           const hOverlap = x < placed.x + placed.width && x + width > placed.x;
-          const vOverlap = localY < placed.y + placed.height && localY + height > placed.y;
+          const vOverlap =
+            newPaintedGlobalY < placed.globalY + placed.height &&
+            newPaintedGlobalY + height > placed.globalY;
           if (hOverlap && vOverlap) {
-            const placedGlobalY = placed.anchorGlobalY + placed.height + ANCHORED_OBJECT_MARGIN;
-            stackedGlobalY = Math.max(stackedGlobalY, placedGlobalY);
+            const placedBottomGlobalY = placed.globalY + placed.height + ANCHORED_OBJECT_MARGIN;
+            stackedPaintedGlobalY = Math.max(stackedPaintedGlobalY, placedBottomGlobalY);
           }
         }
-        if (stackedGlobalY > globalY) {
+        if (stackedPaintedGlobalY > newPaintedGlobalY) {
+          const delta = stackedPaintedGlobalY - newPaintedGlobalY;
+          const stackedAnchorGlobalY = anchorGlobalY + delta;
           flows = [
             ...flows.slice(0, i),
-            { ...flows[i]!, globalY: stackedGlobalY, solverPushedThisFlow: true },
+            { ...flows[i]!, globalY: stackedAnchorGlobalY, solverPushedThisFlow: true },
             ...flows.slice(i + 1),
           ];
           flows = restampGlobalYFrom(flows, i + 1);
-          globalY = stackedGlobalY;
-          pageNumber = barriers.pageForGlobalY(globalY);
-          localY = barriers.localYForGlobalY(pageNumber, globalY);
+          anchorGlobalY = stackedAnchorGlobalY;
+          pageNumber = barriers.pageForGlobalY(anchorGlobalY);
+          anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
         }
-        // Re-check page fit after stacking.
+        // Re-check page fit after stacking (anchor-flow geometry, like above).
         if (
           !pageConfig.pageless &&
-          localY + height > barriers.contentBottomLocal(pageNumber) &&
+          anchorLocalY + height > barriers.contentBottomLocal(pageNumber) &&
           height <= barriers.contentHeight(pageNumber + 1)
         ) {
           const pushedGlobalY = barriers.pageStartGlobal(pageNumber + 1);
@@ -571,37 +583,57 @@ function resolveAnchoredObjects(
             ...flows.slice(i + 1),
           ];
           flows = restampGlobalYFrom(flows, i + 1);
-          globalY = pushedGlobalY;
-          pageNumber = barriers.pageForGlobalY(globalY);
-          localY = barriers.localYForGlobalY(pageNumber, globalY);
+          anchorGlobalY = pushedGlobalY;
+          pageNumber = barriers.pageForGlobalY(anchorGlobalY);
+          anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
         }
       }
+
+      // Apply yOffset and clamp into the anchor's page so the image stays on
+      // the same page as its anchor. `clamped` is surfaced on the placement
+      // for Phase 2's drag overlay (visual stickiness at the boundary).
+      const desiredGlobalY = anchorGlobalY + yOffset;
+      let paintedGlobalY = desiredGlobalY;
+      let clamped = false;
+      if (!pageConfig.pageless) {
+        const pageStart = barriers.pageStartGlobal(pageNumber);
+        const pageEnd = pageStart + Math.max(0, barriers.contentHeight(pageNumber) - height);
+        if (paintedGlobalY < pageStart) {
+          paintedGlobalY = pageStart;
+          clamped = paintedGlobalY !== desiredGlobalY;
+        } else if (paintedGlobalY > pageEnd) {
+          paintedGlobalY = pageEnd;
+          clamped = paintedGlobalY !== desiredGlobalY;
+        }
+      }
+      const paintedLocalY = barriers.localYForGlobalY(pageNumber, paintedGlobalY);
 
       placements.push({
         docPos: anchor.docPos,
         page: pageNumber,
         x,
-        y: localY,
+        y: paintedLocalY,
         width,
         height,
         wrapMode,
         node: anchor.node,
-        anchorGlobalY: globalY,
+        anchorGlobalY,
         anchorPage: pageNumber,
+        globalY: paintedGlobalY,
+        ...(clamped ? { clamped: true } : {}),
       });
 
-      // Square: emit a wrap zone constraint for sibling lines whose Y
-      // overlaps the painted rectangle. The anchor paragraph stays in
-      // flow at its natural text height (no flow contribution); subsequent
-      // paragraphs that fall within the zone get their lines narrowed.
+      // Square: emit a wrap zone constraint at the *painted* rectangle so
+      // text wraps the image's actual position, not its anchor flow row.
+      // Subsequent paragraphs that fall within the zone get their lines narrowed.
       if (wrapMode === "square") {
         flows = reflowFlowsAgainstSquareObject(
           flows,
           i,
           {
             pageNumber,
-            globalY,
-            localY,
+            globalY: paintedGlobalY,
+            localY: paintedLocalY,
             x,
             width,
             height,

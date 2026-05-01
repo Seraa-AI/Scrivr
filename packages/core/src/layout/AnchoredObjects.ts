@@ -56,6 +56,13 @@ export interface NormalizedImageAttrs {
   xAlign: XAlign;
   /** Set only when `xAlign === "custom"`. Content-area-relative px. */
   x: number | null;
+  /**
+   * Vertical placement delta from the anchor flow's globalY, in px.
+   * `imageRect.y = anchorFlow.globalY + yOffset` is the single source of
+   * truth for paint, exclusion, hit-test, and PDF. Default `0` is invisible
+   * — pre-yOffset documents render identically.
+   */
+  yOffset: number;
   margin: number;
 }
 
@@ -66,6 +73,7 @@ interface RawImageAttrs {
   positionMode?: unknown;
   xAlign?: unknown;
   x?: unknown;
+  yOffset?: unknown;
   margin?: unknown;
   // Legacy
   wrappingMode?: unknown;
@@ -88,11 +96,10 @@ interface RawImageAttrs {
  *        anything else  → matching wrapMode, default xAlign
  *   3. Defaults if neither is set: inline, left, no x.
  *
- * `floatOffset` is intentionally discarded — `04-edit-ux.md` § Rule 4
- * retired the paint-only offset attribute. Position changes go through
- * `xAlign` / `x`. Legacy values written by older versions are silently
- * dropped on read; PM round-trip preserves them in the doc but layout
- * ignores them.
+ * Legacy `floatOffset.y` is folded into structural `yOffset` on read
+ * (see `06-yoffset-redesign.md` § Phase 1). `floatOffset.x` is discarded
+ * — horizontal placement goes through `xAlign` / `x`. PM round-trip
+ * preserves the legacy attr in the doc but layout reads only `yOffset`.
  */
 export function normalizeImageAttrs(node: Node): NormalizedImageAttrs {
   const a = node.attrs as RawImageAttrs;
@@ -104,8 +111,37 @@ export function normalizeImageAttrs(node: Node): NormalizedImageAttrs {
     positionMode: "move-with-text",
     xAlign: resolveXAlign(a),
     x: resolveCustomX(a),
+    yOffset: resolveYOffset(a),
     margin: numberOrDefault(a.margin, ANCHORED_OBJECT_MARGIN),
   };
+}
+
+/**
+ * Resolve the structural `yOffset` from raw attrs. A non-zero `yOffset`
+ * is authoritative. The schema default of `0` is ambiguous (could be
+ * "unset" on a legacy doc or "user reset" on a new doc), so we fall back
+ * to the legacy `floatOffset.y`. New code should always write `yOffset`
+ * directly and never rely on `floatOffset` being preserved.
+ */
+function resolveYOffset(a: RawImageAttrs): number {
+  if (typeof a.yOffset === "number" && Number.isFinite(a.yOffset) && a.yOffset !== 0) {
+    return a.yOffset;
+  }
+  return getLegacyFloatOffsetY(a);
+}
+
+/**
+ * Read `floatOffset.y` from a legacy image node without an `as` cast.
+ * Returns 0 if the attribute is absent or malformed. Used as the fallback
+ * source for `yOffset` so documents written before Phase 1 keep their
+ * vertical placement.
+ */
+function getLegacyFloatOffsetY(a: RawImageAttrs): number {
+  const fo = a.floatOffset;
+  if (fo === null || typeof fo !== "object") return 0;
+  if (!("y" in fo)) return 0;
+  const y = (fo as { y: unknown }).y;
+  return typeof y === "number" && Number.isFinite(y) ? y : 0;
 }
 
 function resolveWrapMode(a: RawImageAttrs): WrapMode {
@@ -227,9 +263,24 @@ export interface AnchoredObjectPlacement {
   height: number;
   wrapMode: WrapMode;
   node: Node;
-  /** Final continuous global-Y coordinate used by the solver. */
+  /**
+   * Anchor flow's globalY at solve time (post anchor-push / stacking).
+   * Phase 2's drag snapshot reads this; do not use for paint or exclusion.
+   */
   anchorGlobalY: number;
   anchorPage: number;
+  /**
+   * Painted top in continuous global-Y. Equals `anchorGlobalY + yOffset`
+   * after the page-edge clamp. Single source of truth for paint coords,
+   * exclusion rects, hit-testing, and PDF export.
+   */
+  globalY: number;
+  /**
+   * True if the user-set `yOffset` was clamped to keep the image on its
+   * anchor's page. Drag overlay reads this to render an explicit boundary
+   * indicator (Phase 2). Absent/false when no clamp was applied.
+   */
+  clamped?: boolean;
 }
 
 /**

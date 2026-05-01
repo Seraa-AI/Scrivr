@@ -163,12 +163,14 @@ export const Image = Extension.create({
           xAlign: { default: "left" },
           /** Custom horizontal X (content-area-relative px); used when xAlign === "custom" */
           x: { default: null },
+          /** Vertical placement delta from anchor's globalY (px). Painted top = anchor.globalY + yOffset. */
+          yOffset: { default: 0 },
           /** Wrap-zone breathing room in px */
           margin: { default: 8 },
           // ── Legacy attrs (read-side compat — see normalizeImageAttrs) ────
           /** @deprecated — replaced by `wrapMode` + `xAlign`. Mapped on read. */
           wrappingMode: { default: "inline" },
-          /** @deprecated — paint-only offset retired in v1. Layout ignores. */
+          /** @deprecated — `floatOffset.y` is read-side mapped to `yOffset` by normalizeImageAttrs. */
           floatOffset: { default: { x: 0, y: 0 } },
         },
         parseDOM: [

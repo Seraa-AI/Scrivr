@@ -230,6 +230,7 @@ const placement = (overrides: Partial<ImageRect> = {}) => ({
   },
   anchorGlobalY: SQUARE_RECT.y,
   anchorPage: SQUARE_RECT.page,
+  globalY: SQUARE_RECT.y,
 });
 
 describe("PointerController — drag UX", () => {
@@ -321,8 +322,8 @@ describe("PointerController — drag UX", () => {
       const grabX = startImageX + 30;
       const grabY = SQUARE_RECT.y + 30;
       mousedown(container, grabX, grabY);
-      mousemove(grabX - 200, grabY + 4);   // way off the left edge
-      mouseup(grabX - 200, grabY + 4);
+      mousemove(grabX - 200, grabY);   // pure horizontal — way off the left edge
+      mouseup(grabX - 200, grabY);
 
       expect(editor.setNodeAttrs).not.toHaveBeenCalled();
       expect(editor.moveNode).not.toHaveBeenCalled();
@@ -390,9 +391,11 @@ describe("PointerController — drag UX", () => {
       mouseup(SQUARE_RECT.x + 30, 1304);
 
       // Layout fallback resolved page 2's block start → nodePos+1 = 43.
-      // dx = 0 (pure vertical) so we get moveNode, not moveAndUpdateNode.
-      expect(editor.moveNode).toHaveBeenCalledWith(5, 43);
-      expect(editor.moveAndUpdateNode).not.toHaveBeenCalled();
+      // Phase 2: cross-page commits via moveAndUpdateNode (atomic move + attr
+      // reset) so the new anchor and yOffset land in one transaction. dx = 0
+      // so xAlign/x aren't included; only yOffset: 0.
+      expect(editor.moveAndUpdateNode).toHaveBeenCalledWith(5, 43, { yOffset: 0 });
+      expect(editor.moveNode).not.toHaveBeenCalled();
       expect(editor.setNodeAttrs).not.toHaveBeenCalled();
     });
   });
