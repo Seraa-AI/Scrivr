@@ -87,3 +87,74 @@ describe("ExclusionManager — available segments", () => {
     });
   });
 });
+
+describe("ExclusionManager — getNextFreeY", () => {
+  it("returns the input y when no full-width exclusion overlaps", () => {
+    const mgr = new ExclusionManager();
+    mgr.addRect({
+      page: 1,
+      x: 100,
+      right: 200,
+      y: 50,
+      bottom: 150,
+      side: "left",
+      docPos: 1,
+    });
+
+    expect(mgr.getNextFreeY(1, 80)).toBe(80);
+  });
+
+  it("jumps past a full-width exclusion that contains y", () => {
+    const mgr = new ExclusionManager();
+    mgr.addRect({
+      page: 1,
+      x: 0,
+      right: 600,
+      y: 100,
+      bottom: 220,
+      side: "full",
+      docPos: 1,
+    });
+
+    expect(mgr.getNextFreeY(1, 120)).toBe(220);
+  });
+
+  it("chains through stacked full-width exclusions", () => {
+    const mgr = new ExclusionManager();
+    mgr.addRect({
+      page: 1,
+      x: 0,
+      right: 600,
+      y: 100,
+      bottom: 200,
+      side: "full",
+      docPos: 1,
+    });
+    mgr.addRect({
+      page: 1,
+      x: 0,
+      right: 600,
+      y: 200,
+      bottom: 300,
+      side: "full",
+      docPos: 2,
+    });
+
+    expect(mgr.getNextFreeY(1, 120)).toBe(300);
+  });
+
+  it("ignores side='left' exclusions even when they overlap y", () => {
+    const mgr = new ExclusionManager();
+    mgr.addRect({
+      page: 1,
+      x: 100,
+      right: 200,
+      y: 50,
+      bottom: 150,
+      side: "left",
+      docPos: 1,
+    });
+
+    expect(mgr.getNextFreeY(1, 80)).toBe(80);
+  });
+});

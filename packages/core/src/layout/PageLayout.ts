@@ -12,7 +12,7 @@ import {
 import { layoutBlock, LayoutBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
 import type { LayoutLine, LineSpaceProvider } from "./LineBreaker";
-import type { AvailableSegment } from "./ExclusionManager";
+import { ExclusionManager } from "./ExclusionManager";
 import {
   ANCHORED_OBJECT_MARGIN,
   normalizeImageAttrs,
@@ -653,6 +653,18 @@ function reflowFlowsAgainstSquareObject(
   const zoneRight = zone.x + zone.width + margin;
   const zoneTop = zone.globalY - margin;
   const zoneBottom = zone.globalY + zone.height + margin;
+
+  const exclusions = new ExclusionManager();
+  exclusions.addRect({
+    page: zone.pageNumber,
+    x: zoneLeft,
+    right: zoneRight,
+    y: zoneTop,
+    bottom: zoneBottom,
+    side: "left",
+    docPos: 0,
+  });
+
   for (let idx = startIndex; idx < flows.length; idx++) {
     const flow = flows[idx]!;
     const flowY = flow.globalY ?? 0;
@@ -663,20 +675,29 @@ function reflowFlowsAgainstSquareObject(
 
     const blockContentX = zone.contentX + flow.indentLeft;
     const lineSpaceProvider: LineSpaceProvider = (absoluteLineY: number, lineHeight = 1) => {
-      if (absoluteLineY + lineHeight <= zoneTop || absoluteLineY >= zoneBottom) {
-        return { segments: [{ x: 0, width: flow.availableWidth }] };
-      }
-
-      const segments = subtractExclusionFromSegments(
-        [{ x: 0, width: flow.availableWidth }],
-        zoneLeft - blockContentX,
-        zoneRight - blockContentX,
+      const space = exclusions.getAvailableSegments(
+        zone.pageNumber,
+        absoluteLineY,
+        lineHeight,
+        blockContentX,
+        flow.availableWidth,
       );
-
-      if (segments.length === 0) {
+      // ExclusionManager returns segments in the same coordinate space as
+      // contentX (here: absolute page-local). LineSpaceProvider's contract
+      // requires block-content-relative coords, so translate.
+      const segments = space.segments.map((s) => ({
+        x: s.x - blockContentX,
+        width: s.width,
+      }));
+      // Square wrap with a single full-width-ish image: rect punches all
+      // segments out without side="full". Fall back to zoneBottom so the
+      // line breaker advances past the image instead of dropping words.
+      if (segments.length === 0 && space.skipToY === undefined) {
         return { segments, skipToY: zoneBottom };
       }
-      return { segments };
+      return space.skipToY !== undefined
+        ? { segments, skipToY: space.skipToY }
+        : { segments };
     };
 
     const reflowed = layoutBlock(flow.node, {
@@ -718,34 +739,6 @@ function reflowFlowsAgainstSquareObject(
   }
 
   return flows;
-}
-
-function subtractExclusionFromSegments(
-  segments: AvailableSegment[],
-  rectLeft: number,
-  rectRight: number,
-): AvailableSegment[] {
-  const next: AvailableSegment[] = [];
-
-  for (const segment of segments) {
-    const segLeft = segment.x;
-    const segRight = segment.x + segment.width;
-    const overlapLeft = Math.max(segLeft, rectLeft);
-    const overlapRight = Math.min(segRight, rectRight);
-
-    if (overlapRight <= overlapLeft) {
-      next.push(segment);
-      continue;
-    }
-
-    const leftWidth = overlapLeft - segLeft;
-    const rightWidth = segRight - overlapRight;
-
-    if (leftWidth > 0) next.push({ x: segLeft, width: leftWidth });
-    if (rightWidth > 0) next.push({ x: overlapRight, width: rightWidth });
-  }
-
-  return next;
 }
 
 export interface PageLayoutOptions {
@@ -1493,8 +1486,11 @@ function blockHasAnchoredObject(lines: LayoutLine[]): boolean {
   for (const line of lines) {
     for (const span of line.spans) {
       if (span.kind !== "object" || span.width !== 0) continue;
-      const wm = span.node.attrs["wrappingMode"] as string | undefined;
-      if (wm && wm !== "inline") return true;
+      // Read through normalizeImageAttrs so both the canonical `wrapMode`
+      // attr and the legacy `wrappingMode` shorthand are honoured. Reading
+      // legacy alone misses nodes set via the new ImageMenu (which writes
+      // `wrapMode: "square", wrappingMode: "inline"`).
+      if (normalizeImageAttrs(span.node).wrapMode !== "inline") return true;
     }
   }
   return false;

@@ -1489,7 +1489,8 @@ describe("runPipeline — float image wrapping", () => {
       wrapMode: "square", xAlign: "custom", x: 300,
     });
     const anchorPara = schema.node("paragraph", null, [img]);
-    const text = schema.node("paragraph", null, [schema.text("word ".repeat(30).trim())]);
+    const originalText = "word ".repeat(30).trim();
+    const text = schema.node("paragraph", null, [schema.text(originalText)]);
     const layout = runPipeline(schema.node("doc", null, [anchorPara, text]), {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
@@ -1499,6 +1500,21 @@ describe("runPipeline — float image wrapping", () => {
     expect(firstLine.segments).toHaveLength(2);
     expect(firstLine.spans.some((span) => span.x < 220)).toBe(true);
     expect(firstLine.spans.some((span) => span.x > 340)).toBe(true);
+
+    // Reconstructing all spans across every line in span-x then line order
+    // must equal a prefix of the original text — words must not be dropped,
+    // duplicated, or reordered when the line crosses the exclusion hole.
+    const reconstructed = layout.pages[0]!.blocks[1]!.lines
+      .flatMap((line) =>
+        [...line.spans]
+          .sort((a, b) => a.x - b.x)
+          .filter((s): s is Extract<typeof s, { kind: "text" }> => s.kind === "text")
+          .map((s) => s.text),
+      )
+      .join("")
+      .replace(/​/g, "");
+    expect(originalText.startsWith(reconstructed.trimEnd())).toBe(true);
+    expect(reconstructed.trim().length).toBeGreaterThan(0);
   });
 });
 

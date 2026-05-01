@@ -204,7 +204,7 @@ export function createDrawHelpers(
       const line = block.lines[li]!;
       const isLastLineOfBlock =
         li === block.lines.length - 1 && !block.continuesOnNextPage;
-      const positioned = (line as { positioned?: boolean }).positioned === true;
+      const positioned = line.positioned === true;
       const lineOffsetX = positioned
         ? 0
         : computeAlignmentOffset(block.align, block.availableWidth, line.width);
