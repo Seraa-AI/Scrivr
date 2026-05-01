@@ -1,5 +1,5 @@
 /**
- * PageRenderer tests — float objectRect correctness.
+ * PageRenderer tests — anchored objectRect correctness.
  *
  * Regression coverage for the bug where 'behind' floats ended up with 0×0
  * objectRects in the CharacterMap after renderPage.
@@ -81,7 +81,7 @@ function renderWithStrategy(
   });
 
   const page = layout.pages[0]!;
-  const floats = layout.floats ?? [];
+  const floats = layout.anchoredObjects ?? [];
   const map = new CharacterMap();
 
   // BlockRegistry with TextBlockStrategy — this is what triggers the 0×0 overwrite
@@ -106,7 +106,7 @@ function renderWithStrategy(
     map,
     blockRegistry,
     inlineRegistry,
-    floats,
+    anchoredObjects: floats,
   });
 
   return { map, floats };
@@ -116,8 +116,8 @@ function renderWithStrategy(
 
 beforeEach(() => mockCanvas());
 
-describe("renderPage — float objectRect correctness", () => {
-  it("'behind' float: objectRect has real dimensions after renderPage", () => {
+describe("renderPage — anchored objectRect correctness", () => {
+  it("'behind' anchoredObject: objectRect has real dimensions after renderPage", () => {
     const { map, floats } = renderWithStrategy("behind");
     const float = floats[0]!;
     const rect = map.getObjectRect(float.docPos);
@@ -130,7 +130,7 @@ describe("renderPage — float objectRect correctness", () => {
     expect(rect!.page).toBe(float.page);
   });
 
-  it("'front' float: objectRect has real dimensions after renderPage", () => {
+  it("'front' anchoredObject: objectRect has real dimensions after renderPage", () => {
     const { map, floats } = renderWithStrategy("front");
     const float = floats[0]!;
     const rect = map.getObjectRect(float.docPos);
@@ -142,7 +142,7 @@ describe("renderPage — float objectRect correctness", () => {
     expect(rect!.y).toBe(float.y);
   });
 
-  it("'square-left' float: objectRect has real dimensions after renderPage", () => {
+  it("'square-left' anchoredObject: objectRect has real dimensions after renderPage", () => {
     const { map, floats } = renderWithStrategy("square-left");
     const float = floats[0]!;
     const rect = map.getObjectRect(float.docPos);
@@ -152,7 +152,7 @@ describe("renderPage — float objectRect correctness", () => {
     expect(rect!.height).toBe(float.height);
   });
 
-  it("'square-right' float: objectRect has real dimensions after renderPage", () => {
+  it("'square-right' anchoredObject: objectRect has real dimensions after renderPage", () => {
     const { map, floats } = renderWithStrategy("square-right");
     const float = floats[0]!;
     const rect = map.getObjectRect(float.docPos);
@@ -230,7 +230,7 @@ describe("renderPage — image strategy zero-size guard", () => {
         map,
         blockRegistry,
         inlineRegistry,
-        floats: layout.floats ?? [],
+        anchoredObjects: layout.anchoredObjects ?? [],
       });
     }).not.toThrow();
   });

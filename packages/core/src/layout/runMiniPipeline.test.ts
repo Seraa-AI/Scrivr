@@ -84,7 +84,7 @@ describe("runMiniPipeline", () => {
       // Fields that should NOT be set for mini-docs
       expect(layout.fragments).toBeUndefined();
       expect(layout.fragmentsByPage).toBeUndefined();
-      expect(layout.floats).toBeUndefined();
+      expect(layout.anchoredObjects).toBeUndefined();
       expect(layout.isPartial).toBeFalsy();
       expect(layout.resumption).toBeUndefined();
     });

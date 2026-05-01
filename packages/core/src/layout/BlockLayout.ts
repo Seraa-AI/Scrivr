@@ -2,6 +2,7 @@ import { Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
 import { TextMeasurer } from "./TextMeasurer";
 import type { InlineRegistry } from "./BlockRegistry";
+import { normalizeImageAttrs } from "./AnchoredObjects";
 import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type ConstraintProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import {
@@ -536,12 +537,16 @@ function extractSpans(
       const w = child.attrs["width"] as number | null | undefined;
       const h = child.attrs["height"] as number | null | undefined;
       if (typeof w === "number" || typeof h === "number") {
-        // Float anchor: when wrappingMode is not 'inline' (and not undefined/null),
-        // emit a zero-width/zero-height object span. This keeps the doc position
-        // in the line box but contributes no line width or height — the actual
-        // image is rendered independently by PageLayout's float pass.
-        const wrappingMode = child.attrs["wrappingMode"] as string | undefined;
-        const isFloat = wrappingMode !== undefined && wrappingMode !== "inline";
+        // Anchored-object anchor span: when the image's resolved wrapMode is
+        // anything other than "inline", emit a zero-width/zero-height object
+        // span. This keeps the doc position in the line box but contributes
+        // no line width or height — PageLayout's resolveAnchoredObjects pass
+        // places the visible image at its xAlign/x and creates the wrap
+        // zone. Read through normalizeImageAttrs so both new (`wrapMode`)
+        // and legacy (`wrappingMode`) attribute sets are honoured.
+        const isFloat =
+          child.type.name === "image" &&
+          normalizeImageAttrs(child).wrapMode !== "inline";
 
         if (isFloat) {
           spans.push({

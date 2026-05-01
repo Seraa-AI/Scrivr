@@ -9,7 +9,7 @@ import { PDFDocument, rgb, type PDFPage, type PDFImage } from "pdf-lib";
 import type {
   IEditor,
   DocumentLayout,
-  FloatLayout,
+  AnchoredObjectPlacement,
 } from "@scrivr/core";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers } from "./context";
@@ -135,11 +135,11 @@ export async function buildPdf(
     ctx.page = currentPage;
     ctx.layoutPage = layoutPage;
 
-    // Float images behind blocks
-    const pageFloats = (layout.floats ?? []).filter((f) => f.page === pageNumber);
-    for (const float of pageFloats) {
-      if (float.mode === "behind") {
-        drawPdfFloat(currentPage, float, pageHeightPt, imageCache);
+    // Anchored objects behind blocks
+    const pageObjects = (layout.anchoredObjects ?? []).filter((o) => o.page === pageNumber);
+    for (const object of pageObjects) {
+      if (object.wrapMode === "behind") {
+        drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache);
       }
     }
 
@@ -154,10 +154,10 @@ export async function buildPdf(
       }
     }
 
-    // Float images in front of blocks
-    for (const float of pageFloats) {
-      if (float.mode !== "behind") {
-        drawPdfFloat(currentPage, float, pageHeightPt, imageCache);
+    // Anchored objects in front of (or alongside) blocks
+    for (const object of pageObjects) {
+      if (object.wrapMode !== "behind") {
+        drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache);
       }
     }
 
@@ -177,19 +177,19 @@ export async function buildPdf(
   return pdfDoc.save();
 }
 
-// ── Float rendering (not dispatched — part of core pipeline) ─────────────────
+// ── Anchored-object rendering (not dispatched — part of core pipeline) ──────
 
-function drawPdfFloat(
+function drawPdfAnchoredObject(
   page: PDFPage,
-  float: FloatLayout,
+  object: AnchoredObjectPlacement,
   pageHeightPt: number,
   imageCache: Map<string, PDFImage | null>,
 ): void {
-  const src = float.node.attrs["src"] as string | undefined;
-  const x = float.x * PT_PER_PX;
-  const y = flipY(float.y + float.height, pageHeightPt);
-  const w = float.width * PT_PER_PX;
-  const h = float.height * PT_PER_PX;
+  const src = object.node.attrs["src"] as string | undefined;
+  const x = object.x * PT_PER_PX;
+  const y = flipY(object.y + object.height, pageHeightPt);
+  const w = object.width * PT_PER_PX;
+  const h = object.height * PT_PER_PX;
 
   if (src) {
     const image = imageCache.get(src);
@@ -244,8 +244,8 @@ async function embedImages(
 ): Promise<Map<string, PDFImage | null>> {
   const srcs = new Set<string>();
 
-  for (const float of layout.floats ?? []) {
-    const src = float.node.attrs["src"] as string | undefined;
+  for (const object of layout.anchoredObjects ?? []) {
+    const src = object.node.attrs["src"] as string | undefined;
     if (src) srcs.add(src);
   }
 

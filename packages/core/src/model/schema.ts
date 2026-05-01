@@ -133,6 +133,15 @@ export const schema = new Schema({
         height: { default: 200 },
         nodeId: { default: null },
         verticalAlign: { default: "baseline" },
+        // ── Anchored-object attrs (current model) ─────────────────────────
+        // See docs/anchored-objects/00-model.md.
+        wrapMode: { default: "inline" },
+        positionMode: { default: "move-with-text" },
+        xAlign: { default: "left" },
+        x: { default: null },
+        wrapText: { default: "largest" },
+        margin: { default: 8 },
+        // ── Legacy attrs (read-side compat — see normalizeImageAttrs) ────
         wrappingMode: { default: "inline" },
         floatOffset: { default: { x: 0, y: 0 } },
       },

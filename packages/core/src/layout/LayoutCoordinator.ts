@@ -255,19 +255,16 @@ export class LayoutCoordinator {
       lineOffset += block.lines.length;
     }
 
-    // Stamp real float objectRects. populateCharMap registers the anchor
-    // span's zero-width objectRect (because floats are zero-width in the
-    // inline flow); overwrite with the actual layout position/dimensions so
-    // getNodeViewportRect returns the correct rect immediately (before the
-    // TileManager paint re-stamps them via renderPage/drawFloat).
-    for (const float of this._layout.floats ?? []) {
-      if (float.page !== pageNumber) continue;
+    // Stamp anchored-object rects so getNodeViewportRect returns the rendered
+    // object bounds immediately, before the tile paint pass re-stamps them.
+    for (const object of this._layout.anchoredObjects ?? []) {
+      if (object.page !== pageNumber) continue;
       this.charMap.registerObjectRect({
-        docPos: float.docPos,
-        x: float.x,
-        y: float.y,
-        width: float.width,
-        height: float.height,
+        docPos: object.docPos,
+        x: object.x,
+        y: object.y,
+        width: object.width,
+        height: object.height,
         page: pageNumber,
       });
     }

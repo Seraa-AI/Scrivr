@@ -153,9 +153,24 @@ export const Image = Extension.create({
           nodeId: { default: null },
           /** Vertical alignment within the line box — matches InlineObjectVerticalAlign */
           verticalAlign: { default: "baseline" },
-          /** Text wrapping mode: 'inline' | 'square-left' | 'square-right' | 'top-bottom' | 'behind' | 'front' */
+          // ── Anchored-object attrs (current model) ─────────────────────────
+          // See docs/anchored-objects/00-model.md.
+          /** `inline | square | top-bottom | behind | front` */
+          wrapMode: { default: "inline" },
+          /** v1 supports `move-with-text` only */
+          positionMode: { default: "move-with-text" },
+          /** `left | center | right | custom` */
+          xAlign: { default: "left" },
+          /** Custom horizontal X (content-area-relative px); used when xAlign === "custom" */
+          x: { default: null },
+          /** Wrap-side override: `largest | left | right` (`bothSides` reserved for F7) */
+          wrapText: { default: "largest" },
+          /** Wrap-zone breathing room in px */
+          margin: { default: 8 },
+          // ── Legacy attrs (read-side compat — see normalizeImageAttrs) ────
+          /** @deprecated — replaced by `wrapMode` + `xAlign`. Mapped on read. */
           wrappingMode: { default: "inline" },
-          /** Float offset relative to the anchor paragraph origin { x, y } in px */
+          /** @deprecated — paint-only offset retired in v1. Layout ignores. */
           floatOffset: { default: { x: 0, y: 0 } },
         },
         parseDOM: [
@@ -209,6 +224,10 @@ export const Image = Extension.create({
   },
 
   addToolbarItems() {
+    // When the wrap-mode picker (Square / Top-Bottom / Behind / Front / Inline)
+    // lands here, the Square entry's tooltip must read:
+    //   "Text wraps on the wider side. Two-sided wrap is deferred."
+    // Spec: docs/anchored-objects/04-edit-ux.md § Wrap-side hint (Square only).
     return [
       {
         command: "insertImage",
