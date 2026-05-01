@@ -491,6 +491,11 @@ function resolveAnchoredObjects(
   const contentRight = pageConfig.pageWidth - pageConfig.margins.right;
   const contentWidth = contentRight - contentX;
   const barriers = createPageBarrierProvider(pageConfig, metricsFor);
+  // Phase 4: one ExclusionManager per page, accumulating every square rect.
+  // Sequential anchors share the same manager so a flow that overlaps two
+  // images on the same page reflows against the union of both rects rather
+  // than one at a time (which lost the prior rect's segments).
+  const exclusionsByPage = new Map<number, ExclusionManager>();
 
   for (let i = 0; i < flows.length; i++) {
     const flow = flows[i]!;
@@ -626,18 +631,36 @@ function resolveAnchoredObjects(
       // Square: emit a wrap zone constraint at the *painted* rectangle so
       // text wraps the image's actual position, not its anchor flow row.
       // Subsequent paragraphs that fall within the zone get their lines narrowed.
+      // The rect is added to the page's shared ExclusionManager so the next
+      // square anchor on this page reflows flows against the *union* of all
+      // rects added so far — multi-image overlap on the same flow compounds
+      // segments rather than overwriting each other.
       if (wrapMode === "square") {
-        flows = reflowFlowsAgainstSquareObject(
+        let exclusions = exclusionsByPage.get(pageNumber);
+        if (!exclusions) {
+          exclusions = new ExclusionManager();
+          exclusionsByPage.set(pageNumber, exclusions);
+        }
+        const margin = attrs.margin;
+        const zoneTop = paintedGlobalY - margin;
+        const zoneBottom = paintedGlobalY + height + margin;
+        exclusions.addRect({
+          page: pageNumber,
+          x: x - margin,
+          right: x + width + margin,
+          y: zoneTop,
+          bottom: zoneBottom,
+          side: "left",
+          docPos: anchor.docPos,
+        });
+        flows = reflowFlowsAgainstSquareExclusions(
           flows,
           i,
+          exclusions,
           {
             pageNumber,
-            globalY: paintedGlobalY,
-            localY: paintedLocalY,
-            x,
-            width,
-            height,
-            margin: attrs.margin,
+            zoneTop,
+            zoneBottom,
             contentX,
             contentWidth,
           },
@@ -659,18 +682,30 @@ function resolveAnchoredObjects(
   return { flows, placements };
 }
 
-function reflowFlowsAgainstSquareObject(
+/**
+ * Reflow flows from `startIndex` onward against the page's shared
+ * `ExclusionManager`. The manager is owned by `resolveAnchoredObjects` and
+ * accumulates every square rect on this page; lines on overlapping flows
+ * see the union of all rects, which is what makes multi-image-on-same-flow
+ * wrap correctly.
+ *
+ * Iteration is bounded by the *current* anchor's zone for early-exit (any
+ * flow past the latest rect's bottom can't have grown further). Sequential
+ * anchors in document order — the common case — re-iterate downstream
+ * flows against the current manager state, so adding a rect always reflows
+ * everything below it. Pathological out-of-document-order overlaps (anchor
+ * A late in the doc with a yOffset that places its rect above anchor B
+ * earlier in the doc) are not handled by this iteration; that's a Phase 4
+ * follow-up if the case appears in real documents.
+ */
+function reflowFlowsAgainstSquareExclusions(
   inputFlows: FlowBlock[],
   startIndex: number,
+  exclusions: ExclusionManager,
   zone: {
     pageNumber: number;
-    globalY: number;
-    localY: number;
-    /** Painted X of the image (page-local). */
-    x: number;
-    width: number;
-    height: number;
-    margin: number;
+    zoneTop: number;
+    zoneBottom: number;
     contentX: number;
     contentWidth: number;
   },
@@ -680,22 +715,8 @@ function reflowFlowsAgainstSquareObject(
   inlineRegistry?: InlineRegistry,
 ): FlowBlock[] {
   let flows = inputFlows;
-  const margin = zone.margin;
-  const zoneLeft = zone.x - margin;
-  const zoneRight = zone.x + zone.width + margin;
-  const zoneTop = zone.globalY - margin;
-  const zoneBottom = zone.globalY + zone.height + margin;
-
-  const exclusions = new ExclusionManager();
-  exclusions.addRect({
-    page: zone.pageNumber,
-    x: zoneLeft,
-    right: zoneRight,
-    y: zoneTop,
-    bottom: zoneBottom,
-    side: "left",
-    docPos: 0,
-  });
+  const zoneTop = zone.zoneTop;
+  const zoneBottom = zone.zoneBottom;
 
   for (let idx = startIndex; idx < flows.length; idx++) {
     const flow = flows[idx]!;

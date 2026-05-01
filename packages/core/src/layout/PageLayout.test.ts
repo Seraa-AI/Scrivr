@@ -1667,6 +1667,58 @@ describe("runPipeline — yOffset (Phase 1)", () => {
   });
 });
 
+// ── Phase 4: page-level ExclusionManager for square wrap ─────────────────────
+
+describe("runPipeline — page-level square exclusions (Phase 4)", () => {
+  it("two square images on same page → text wraps between both rects, not over one of them", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // contentX=72, contentRight=722, contentWidth=650.
+    // imgL painted at xAlign="left"  → x=72,  exclusion [64, 230]
+    // imgR painted at xAlign="right" → x=572, exclusion [564, 730]
+    // Middle gap available for text: [230, 564].
+    const imgL = schema.nodes["image"]!.create({
+      src: "", width: 150, height: 200,
+      wrapMode: "square", xAlign: "left",
+    });
+    const imgR = schema.nodes["image"]!.create({
+      src: "", width: 150, height: 200,
+      wrapMode: "square", xAlign: "right",
+    });
+    const longText = "word ".repeat(60).trim();
+    const para1 = schema.node("paragraph", null, [imgL, imgR, schema.text("a")]);
+    const para2 = schema.node("paragraph", null, [schema.text(longText)]);
+    const layout = runPipeline(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() },
+    );
+
+    // Both placements present.
+    const anchored = layout.anchoredObjects!;
+    expect(anchored).toHaveLength(2);
+    expect(anchored.every((p) => p.wrapMode === "square")).toBe(true);
+
+    // Text paragraph: wrapped lines must fall entirely between the two
+    // images' painted rects. Pre-Phase-4 the second reflow overwrote the
+    // first's segment data, so text would land underneath imgL.
+    const textBlock = layout.pages[0]!.blocks[1]!;
+    const positionedLines = textBlock.lines.filter((l) => l.positioned);
+    expect(positionedLines.length).toBeGreaterThan(0);
+
+    // span.x is block-content-relative; add block.x for page-absolute coords.
+    const blockX = textBlock.x;
+    const A_RIGHT = 72 + 150 + 8; // 230 (page-absolute)
+    const B_LEFT = 72 + 650 - 150 - 8; // 564
+    for (const line of positionedLines) {
+      for (const span of line.spans) {
+        if (span.kind !== "text") continue;
+        const absX = blockX + span.x;
+        expect(absX).toBeGreaterThanOrEqual(A_RIGHT - 1);
+        expect(absX + span.width).toBeLessThanOrEqual(B_LEFT + 1);
+      }
+    }
+  });
+});
+
 // ── Float image — top-bottom (break) mode ────────────────────────────────────
 //
 // defaultPageConfig: pageWidth=794, margins=72 all sides
