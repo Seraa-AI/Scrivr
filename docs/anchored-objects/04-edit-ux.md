@@ -174,7 +174,7 @@ button, or keyboard shortcut.
 | From → To | Structural change |
 |---|---|
 | `inline` → any non-inline | `node.attrs.wrapMode` updates; if the new mode has non-zero flow contribution (`top-bottom`, `behind`, `front`), the parent paragraph splits at layout time (Rule 2). For `square`, no split — the anchor span stays inline at its docPos. |
-| any non-inline → `inline` | `node.attrs.wrapMode` updates; the parent paragraph stops splitting (if it was) and lays out as a single text block with the image as inline content. |
+| any non-inline → `inline` | Resolve the image's current painted center to a text insertion point, move the image node there, then clear floating placement attrs (`x`, `yOffset`, legacy `floatOffset`) and set `wrapMode: "inline"`. Inline mode is the one-time conversion where visual position becomes doc position again. |
 | `square` → `top-bottom` | Wrap zone replaced with a full-width anchored-object block; the image's flow contribution becomes `image.height + margin`; following paragraphs stack below. `xAlign` / `x` preserved (image renders at the same X within the new full-width block). |
 | `top-bottom` → `square` | Full-width anchored-object block removed; wrap zone emitted at the image's painted rectangle; following paragraphs may now wrap beside. `xAlign` / `x` preserved. |
 | any non-inline → `behind` / `front` | Wrap zone (if any) removed; flow slot retained at `image.height`; paint layer changes. |

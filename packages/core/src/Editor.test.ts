@@ -123,6 +123,50 @@ describe("Editor.moveNode", () => {
   });
 });
 
+describe("Editor.convertImageToInlineAtVisualPosition", () => {
+  it("moves a floating image to the visual insertion point and clears placement attrs", () => {
+    const { editor, cleanup } = makeEditor();
+    const schema = editor.schema;
+    const image = schema.nodes["image"]!.create({
+      src: "",
+      width: 100,
+      height: 80,
+      wrapMode: "square",
+      xAlign: "custom",
+      x: 120,
+      yOffset: -20,
+      floatOffset: { x: 0, y: 40 },
+    });
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [schema.text("Before")]),
+      schema.node("paragraph", null, [image]),
+    ]);
+    editor.applyTransaction(
+      editor.getState().tr.replaceWith(0, editor.getState().doc.content.size, doc.content),
+    );
+
+    let imagePos = -1;
+    editor.getState().doc.descendants((node, pos) => {
+      if (node.type.name === "image") imagePos = pos;
+    });
+    expect(imagePos).toBeGreaterThan(0);
+
+    const posAtCoords = vi.spyOn(editor.charMap, "posAtCoords").mockReturnValue(1);
+    expect(editor.convertImageToInlineAtVisualPosition(imagePos)).toBe(true);
+
+    const firstParagraph = editor.getState().doc.child(0);
+    const movedImage = firstParagraph.child(0);
+    expect(movedImage.type.name).toBe("image");
+    expect(movedImage.attrs["wrapMode"]).toBe("inline");
+    expect(movedImage.attrs["wrappingMode"]).toBe("inline");
+    expect(movedImage.attrs["x"]).toBeNull();
+    expect(movedImage.attrs["yOffset"]).toBe(0);
+    expect(movedImage.attrs["floatOffset"]).toEqual({ x: 0, y: 0 });
+    expect(posAtCoords).toHaveBeenCalled();
+    cleanup();
+  });
+});
+
 // ── moveCursorTo ─────────────────────────────────────────────────────────────
 
 describe("Editor.moveCursorTo", () => {

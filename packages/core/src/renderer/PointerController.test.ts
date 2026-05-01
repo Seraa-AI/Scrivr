@@ -78,7 +78,7 @@ function makeMockEditor(overrides: Partial<MockEditor> = {}): MockEditor {
           start: vi.fn(() => 1),
           end: vi.fn(() => 30),
         })),
-        nodeAt: vi.fn(() => ({ attrs: { width: 80, height: 60, wrappingMode: "square-left" } })),
+        nodeAt: vi.fn(() => ({ nodeSize: 1, attrs: { width: 80, height: 60, wrappingMode: "inline" } })),
         content: { size: 40 },
       },
       selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true },
@@ -243,6 +243,33 @@ describe("PointerController — image click routing", () => {
 
     expect(editor.selectNode).not.toHaveBeenCalled();
     expect(editor.selection.setSelection).toHaveBeenCalled();
+  });
+
+  it("dragging an inline image moves the image node structurally", () => {
+    editor.charMap.objectRectAtPoint.mockReturnValue(IMAGE_RECT);
+    editor.charMap.posAtCoords.mockReturnValue(24);
+
+    mousedown(container, 140, 80);
+    mousemove(260, 120);
+    mouseup(260, 120);
+
+    expect(editor.selectNode).toHaveBeenCalledWith(IMAGE_RECT.docPos);
+    expect(editor.moveNode).toHaveBeenCalledWith(IMAGE_RECT.docPos, 24);
+    expect(editor.setNodeAttrs).not.toHaveBeenCalled();
+    expect(editor.moveAndUpdateNode).not.toHaveBeenCalled();
+  });
+
+  it("clicking an inline image without dragging only selects it", () => {
+    editor.charMap.objectRectAtPoint.mockReturnValue(IMAGE_RECT);
+    editor.charMap.posAtCoords.mockReturnValue(24);
+
+    mousedown(container, 140, 80);
+    mouseup(140, 80);
+
+    expect(editor.selectNode).toHaveBeenCalledWith(IMAGE_RECT.docPos);
+    expect(editor.moveNode).not.toHaveBeenCalled();
+    expect(editor.setNodeAttrs).not.toHaveBeenCalled();
+    expect(editor.moveAndUpdateNode).not.toHaveBeenCalled();
   });
 
   // Placement record used by the four drag tests. Fields match the

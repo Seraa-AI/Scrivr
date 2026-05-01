@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   layoutBlock,
+  isHiddenAnchorLine,
   populateCharMap,
   resolveLeafBlockDimensions,
 } from "./BlockLayout";
@@ -1188,7 +1189,7 @@ describe("extractSpans — inline node handling", () => {
 describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
   const { schema: skSchema, fontConfig } = buildStarterKitContext();
 
-  it("paragraph with only a non-inline image collapses to default font line, not image height", () => {
+  it("paragraph with only a non-inline image is an invisible zero-height anchor flow", () => {
     const img = skSchema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
@@ -1205,11 +1206,41 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
       measurer: createMeasurer(),
       fontConfig,
     });
-    // One line, one default-font line height. NOT 200 (image height).
+    // The zero-size object sentinel remains, but the paragraph does not
+    // create a visible blank line behind the floating image.
     expect(block.lines).toHaveLength(1);
-    expect(block.lines[0]!.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
-    expect(block.height).toBeCloseTo(MOCK_LINE_HEIGHT);
-    expect(block.height).toBeLessThan(200);
+    expect(isHiddenAnchorLine(block.lines[0]!)).toBe(true);
+    expect(block.lines[0]!.lineHeight).toBe(0);
+    expect(block.lines[0]!.cursorHeight).toBe(0);
+    expect(block.height).toBe(0);
+    expect(block.spaceBefore).toBe(0);
+    expect(block.spaceAfter).toBe(0);
+  });
+
+  it("anchor-only paragraph does not register cursor glyphs", () => {
+    const map = new CharacterMap();
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 200,
+      wrapMode: "square",
+    });
+    const para = skSchema.node("paragraph", null, [img]);
+
+    layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+      map,
+      lineIndexOffset: 0,
+    });
+
+    expect(map.coordsAtPos(1)).toBeNull();
+    expect(map.coordsAtPos(2)).toBeNull();
   });
 
   it("anchored-image sentinel is preserved on the line so getAnchoredObjectAnchors finds it", () => {

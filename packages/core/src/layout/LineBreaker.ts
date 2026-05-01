@@ -864,7 +864,11 @@ function buildLine(spans: LayoutSpan[], measurer: TextMeasurer): LayoutLine {
   // inline image inflates lineHeight. Falls back to DEFAULT_CURSOR_HEIGHT
   // for object-only lines (no text spans present).
   const cursorHeight =
-    textLineHeight > 0 ? textLineHeight : DEFAULT_CURSOR_HEIGHT;
+    textLineHeight > 0
+      ? textLineHeight
+      : lineHeight > 0
+        ? DEFAULT_CURSOR_HEIGHT
+        : 0;
 
   return {
     spans,

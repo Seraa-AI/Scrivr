@@ -116,6 +116,15 @@ export interface LayoutBlock {
   sourceNodePos?: number;
 }
 
+export function isHiddenAnchorLine(line: LayoutLine): boolean {
+  return (
+    line.lineHeight === 0 &&
+    line.cursorHeight === 0 &&
+    line.spans.length > 0 &&
+    line.spans.every((span) => span.kind === "object" && span.width === 0 && span.height === 0)
+  );
+}
+
 export interface BlockLayoutOptions {
   /** Absolute doc position of this node — used to resolve child positions */
   nodePos: number;
@@ -303,13 +312,12 @@ export function layoutBlock(
   // An empty paragraph (or one containing only hardBreak nodes) has no
   // renderable content. We create a virtual zero-width-space span so
   // LineBreaker returns one line and CharacterMap registers a cursor position.
-  // Phase 3 of the yOffset redesign widens "renderable" to "non-zero":
-  // a paragraph whose only spans are anchored-object sentinels (zero-size
-  // object spans) carries a docPos but no metrics, so the line collapses
-  // to 0 height without a ZWS injection alongside.
-  // The sentinel must be preserved (getAnchoredObjectAnchors scans
-  // flow.lines[].spans for it), so when there are existing zero-size
-  // spans we APPEND the ZWS rather than substituting.
+  //
+  // Anchor-only paragraphs are different: a paragraph whose only content is
+  // non-inline image sentinels is structural ownership, not visible document
+  // content. Preserve those zero-size object spans so anchored-object layout
+  // can find them, but do not inject a ZWS. That yields a zero-height flow
+  // instead of the blank line users were seeing behind floating images.
   const hasNonZeroContent = spans.some(
     (s) =>
       s.kind === "text" ||
@@ -318,6 +326,7 @@ export function layoutBlock(
   const hasZeroSizeObjectSentinel = spans.some(
     (s) => s.kind === "object" && s.width === 0 && s.height === 0,
   );
+  const isAnchorOnlyFlow = !hasNonZeroContent && hasZeroSizeObjectSentinel;
   const zwsSpan: InputSpan = {
     kind: "text",
     text: "​",
@@ -326,8 +335,8 @@ export function layoutBlock(
   };
   const inputSpans: InputSpan[] = hasNonZeroContent
     ? spans
-    : hasZeroSizeObjectSentinel
-      ? [...spans, zwsSpan]
+    : isAnchorOnlyFlow
+      ? spans
       : [zwsSpan];
 
   // ── 3. Break into lines ───────────────────────────────────────────────────
@@ -383,6 +392,8 @@ export function layoutBlock(
 
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li]!;
+      if (isHiddenAnchorLine(line)) continue;
+
       const lineIndex = lineIndexOffset + li;
       const isLastLine = li === lines.length - 1;
 
@@ -504,8 +515,8 @@ export function layoutBlock(
     width: availableWidth,
     height,
     lines,
-    spaceBefore: blockStyle.spaceBefore,
-    spaceAfter: blockStyle.spaceAfter,
+    spaceBefore: isAnchorOnlyFlow ? 0 : blockStyle.spaceBefore,
+    spaceAfter: isAnchorOnlyFlow ? 0 : blockStyle.spaceAfter,
     blockType: node.type.name,
     align: resolvedAlign,
     availableWidth,

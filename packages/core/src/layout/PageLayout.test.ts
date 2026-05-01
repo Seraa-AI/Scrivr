@@ -1596,6 +1596,34 @@ describe("runPipeline — yOffset (Phase 1)", () => {
     );
   });
 
+  it("negative yOffset wraps flows above the anchor paragraph", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({
+      src: "",
+      width: 200,
+      height: 90,
+      wrapMode: "square",
+      xAlign: "center",
+      yOffset: -80,
+    });
+    const before = schema.node("paragraph", null, [schema.text(longText)]);
+    const anchorOnly = schema.node("paragraph", null, [img]);
+
+    const layout = runPipeline(schema.node("doc", null, [before, anchorOnly]), {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const firstBlock = layout.pages[0]!.blocks[0]!;
+    const anchorBlock = layout.pages[0]!.blocks[1]!;
+    expect(anchorBlock.height).toBe(0);
+    expect(anchorBlock.spaceBefore).toBe(0);
+    expect(anchorBlock.spaceAfter).toBe(0);
+    expect(anchorBlock.lines[0]!.cursorHeight).toBe(0);
+    expect(firstBlock.lines.some((line) => line.positioned)).toBe(true);
+  });
+
   it("page-edge clamp: large positive yOffset clamps to page bottom and sets clamped flag", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const smallPage = {

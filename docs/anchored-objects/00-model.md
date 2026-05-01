@@ -161,30 +161,34 @@ zero-height and carries no layout weight.
 
 ### Rule 4 — Position is structural; there is no paint-only X/Y offset
 
-The image's position is expressed entirely by `xAlign` / `x` (horizontal)
-and the anchor's flow position (vertical). Both are read by the layout
-solver. There is **no** paint-only offset attribute that lets the image
-render at a position different from where the wrap zone was solved.
+The image's position is expressed by `xAlign` / `x` (horizontal) and
+`anchor.globalY + yOffset` (vertical). All of these are read by the
+layout solver. There is **no** paint-only offset attribute that lets
+the image render at a position different from where the wrap zone was
+solved.
 
 Drag mechanics:
 - **Horizontal drag** → set `xAlign: "custom"` and `x` to the new content-
   area-relative position. Layout reflows; wrap zone is computed at the
   new rectangle.
-- **Vertical drag** → move the PM image node to the docPos of the
-  paragraph nearest the painted Y. The anchor docPos and the image's
-  visual Y stay co-located by construction.
-- **Diagonal drag** → both, atomically in one transaction.
+- **Vertical drag** → update `yOffset`. The anchor docPos stays stable;
+  layout reflows around the image's actual painted rectangle.
+- **Diagonal drag** → update `x` / `xAlign` and `yOffset` atomically.
 
 This subsumes the legacy `floatOffset.x` / `floatOffset.y` attributes,
 which are retired. Layout never reads them.
 
-### Rule 5 — Anchor and image stay co-located
+### Rule 5 — Anchor owns the image; geometry positions it
 
-By construction (Rule 4 drag mechanics) the anchor docPos always sits
-in (or directly adjacent to) the paragraph nearest the image's painted
-position. The user never observes "the image is here but its docPos is
-elsewhere." Click-the-image targets the same docPos that vertical drag
-would resolve to.
+The anchor docPos is allowed to be elsewhere in document order from the
+painted rectangle. It answers "what text does this image move with?",
+not "where is the image painted?" Text wrapping is driven by the page-
+level anchored-object rectangle.
+
+When a non-inline image is reset to inline, the editor performs the
+inverse conversion once: it resolves the current painted X/Y to the
+nearest text insertion point, moves the image node there, and clears
+`x`, `yOffset`, and legacy `floatOffset`.
 
 For pagination, this also means: if a `top-bottom` / `behind` / `front`
 object cannot fit on its anchor's page, the anchor moves to the next

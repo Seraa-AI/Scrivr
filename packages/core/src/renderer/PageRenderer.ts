@@ -1,6 +1,6 @@
 import { LayoutPage, PageConfig } from "../layout/PageLayout";
 import type { AnchoredObjectPlacement } from "../layout/AnchoredObjects";
-import { LayoutBlock, computeAlignmentOffset } from "../layout/BlockLayout";
+import { LayoutBlock, computeAlignmentOffset, isHiddenAnchorLine } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
 import { TextMeasurer } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
@@ -250,6 +250,8 @@ export function drawBlock(
 
   for (let li = 0; li < block.lines.length; li++) {
     const line = block.lines[li]!;
+    if (isHiddenAnchorLine(line)) continue;
+
     const globalLineIndex = lineIndexOffset + li;
 
     // Alignment offset — must match what BlockLayout computed.

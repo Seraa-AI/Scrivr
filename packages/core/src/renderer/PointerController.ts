@@ -108,6 +108,13 @@ export class PointerController {
       disabled: boolean;
     };
   } | null = null;
+  private inlineImageDrag: {
+    docPos: number;
+    nodeSize: number;
+    startClientX: number;
+    startClientY: number;
+    rect: { x: number; y: number; width: number; height: number; page: number };
+  } | null = null;
 
   /** Click-count tracking for double/triple-click. */
   private _clickCount = 0;
@@ -401,6 +408,23 @@ export class PointerController {
         const imageHit = editor.charMap.objectRectAtPoint(docX, docY, page);
         if (imageHit) {
           editor.selectNode(imageHit.docPos);
+          const node = editor.getState().doc.nodeAt(imageHit.docPos);
+          if (node) {
+            this.inlineImageDrag = {
+              docPos: imageHit.docPos,
+              nodeSize: node.nodeSize,
+              startClientX: e.clientX,
+              startClientY: e.clientY,
+              rect: {
+                x: imageHit.x,
+                y: imageHit.y,
+                width: imageHit.width,
+                height: imageHit.height,
+                page: imageHit.page,
+              },
+            };
+            this.setCursorAll("move");
+          }
           return;
         }
       }
@@ -449,13 +473,22 @@ export class PointerController {
       return;
     }
 
+    if (this.inlineImageDrag) {
+      this.setCursorAll("move");
+      return;
+    }
+
     // Hover cursor
     const hit = this.hitTest(e.clientX, e.clientY);
     if (hit) {
       const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
       const anchoredHit =
         !resizeHit && this.hitAnchoredAt(hit.docX, hit.docY, hit.page);
-      const cursor = resizeHit ? resizeHit.cursor : anchoredHit ? "move" : "text";
+      const inlineImageHit =
+        !resizeHit && !anchoredHit
+          ? editor.charMap.objectRectAtPoint(hit.docX, hit.docY, hit.page)
+          : undefined;
+      const cursor = resizeHit ? resizeHit.cursor : anchoredHit || inlineImageHit ? "move" : "text";
       this.setCursorAll(cursor);
     }
 
@@ -494,8 +527,37 @@ export class PointerController {
       this.anchoredDrag = null;
       this.setCursorAll("text");
     }
+    if (this.inlineImageDrag) {
+      this.commitInlineImageDrag(e);
+      this.inlineImageDrag = null;
+      this.setCursorAll("text");
+    }
     this.isDragging = false;
   };
+
+  private commitInlineImageDrag(e: MouseEvent): void {
+    const { editor } = this.deps;
+    if (!this.inlineImageDrag) return;
+
+    const dx = e.clientX - this.inlineImageDrag.startClientX;
+    const dy = e.clientY - this.inlineImageDrag.startClientY;
+    const DRAG_THRESHOLD = 3;
+    if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+
+    const targetDocPos = this.resolveDragTargetDocPosFrom(e, this.inlineImageDrag);
+    if (targetDocPos === null) return;
+
+    const { docPos, nodeSize } = this.inlineImageDrag;
+    if (targetDocPos >= docPos && targetDocPos <= docPos + nodeSize) return;
+
+    editor.moveNode(docPos, targetDocPos);
+    dragDebugLog(editor, "commit", {
+      commitPath: "moveNode",
+      docPos,
+      newDocPos: targetDocPos,
+      inline: true,
+    });
+  }
 
   /**
    * Resolve and commit an anchored-object drag. Per the yOffset redesign
@@ -669,8 +731,20 @@ export class PointerController {
    * paragraph (no structural change needed).
    */
   private resolveDragTargetDocPos(e: MouseEvent): number | null {
-    const { editor } = this.deps;
     if (!this.anchoredDrag) return null;
+    return this.resolveDragTargetDocPosFrom(e, this.anchoredDrag);
+  }
+
+  private resolveDragTargetDocPosFrom(
+    e: MouseEvent,
+    drag: {
+      docPos: number;
+      nodeSize: number;
+      rect: { x: number; y: number; width: number; height: number; page: number };
+      startClientY: number;
+    },
+  ): number | null {
+    const { editor } = this.deps;
 
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return null;
@@ -683,7 +757,7 @@ export class PointerController {
     // Force-populate the destination page before resolving.
     editor.ensurePagePopulated(hit.page);
 
-    const { docPos, nodeSize } = this.anchoredDrag;
+    const { docPos, nodeSize } = drag;
     const from = docPos;
     const to = docPos + nodeSize;
 
@@ -693,9 +767,9 @@ export class PointerController {
     // posBelow with the image's center X to find the nearest
     // paragraph in the drag direction.
     if (pos >= from && pos <= to) {
-      const dy = e.clientY - this.anchoredDrag.startClientY;
+      const dy = e.clientY - drag.startClientY;
       if (Math.abs(dy) < 1) return null; // pure horizontal — no docPos change
-      const probeX = this.anchoredDrag.rect.x + this.anchoredDrag.rect.width / 2;
+      const probeX = drag.rect.x + drag.rect.width / 2;
       const fallback = dy >= 0
         ? editor.charMap.posBelow(from, probeX)
         : editor.charMap.posAbove(from, probeX);

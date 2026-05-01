@@ -155,6 +155,10 @@ export function ImageMenu({ editor }: ImageMenuProps) {
 
   function handleWrapChange(mode: WrappingMode) {
     setWrappingMode(mode);
+    if (mode === "inline" && wrappingMode !== "inline") {
+      editor?.convertImageToInlineAtVisualPosition(info!.docPos);
+      return;
+    }
     applyAttr({ wrapMode: mode, wrappingMode: "inline" });
   }
 

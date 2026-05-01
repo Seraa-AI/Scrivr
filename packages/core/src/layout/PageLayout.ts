@@ -655,7 +655,6 @@ function resolveAnchoredObjects(
         });
         flows = reflowFlowsAgainstSquareExclusions(
           flows,
-          i,
           exclusions,
           {
             pageNumber,
@@ -703,24 +702,15 @@ function resolveAnchoredObjects(
 }
 
 /**
- * Reflow flows from `startIndex` onward against the page's shared
- * `ExclusionManager`. The manager is owned by `resolveAnchoredObjects` and
- * accumulates every square rect on this page; lines on overlapping flows
- * see the union of all rects, which is what makes multi-image-on-same-flow
- * wrap correctly.
+ * Reflow every flow whose Y range intersects the latest exclusion zone.
  *
- * Iteration is bounded by the *current* anchor's zone for early-exit (any
- * flow past the latest rect's bottom can't have grown further). Sequential
- * anchors in document order — the common case — re-iterate downstream
- * flows against the current manager state, so adding a rect always reflows
- * everything below it. Pathological out-of-document-order overlaps (anchor
- * A late in the doc with a yOffset that places its rect above anchor B
- * earlier in the doc) are not handled by this iteration; that's a Phase 4
- * follow-up if the case appears in real documents.
+ * This deliberately does not start at the anchor flow index. `yOffset` makes
+ * the painted rectangle independent from anchor order, so an image anchored
+ * in paragraph B can exclude text in paragraph A. The Y-range checks below
+ * are the only gate: docPos owns the object, geometry drives wrapping.
  */
 function reflowFlowsAgainstSquareExclusions(
   inputFlows: FlowBlock[],
-  startIndex: number,
   exclusions: ExclusionManager,
   zone: {
     pageNumber: number;
@@ -738,7 +728,7 @@ function reflowFlowsAgainstSquareExclusions(
   const zoneTop = zone.zoneTop;
   const zoneBottom = zone.zoneBottom;
 
-  for (let idx = startIndex; idx < flows.length; idx++) {
+  for (let idx = 0; idx < flows.length; idx++) {
     const flow = flows[idx]!;
     const flowY = flow.globalY ?? 0;
     if (flowY >= zoneBottom) break;
@@ -1569,6 +1559,16 @@ function blockHasAnchoredObject(lines: LayoutLine[]): boolean {
   return false;
 }
 
+function isAnchorOnlyFlowEntry(entry: Pick<MeasureCacheEntry, "height" | "lines">): boolean {
+  if (entry.height !== 0 || entry.lines.length === 0) return false;
+  return entry.lines.every((line) =>
+    line.lineHeight === 0 &&
+    line.cursorHeight === 0 &&
+    line.spans.length > 0 &&
+    line.spans.every((span) => span.kind === "object" && span.width === 0 && span.height === 0),
+  );
+}
+
 export function buildBlockFlow(
   items: LayoutItem[],
   startIndex: number,
@@ -1710,14 +1710,15 @@ export function buildBlockFlow(
       node, nodePos, blockX, 0, blockWidth, 1,
       measurer, fontConfig, fontModifiers, measureCache, inlineRegistry,
     );
+    const anchorOnlyFlow = isAnchorOnlyFlowEntry(entry);
 
     flows.push({
       node,
       nodePos,
       lines: entry.lines,
       height: entry.height,
-      spaceBefore: blockStyle.spaceBefore,
-      spaceAfter: blockStyle.spaceAfter,
+      spaceBefore: anchorOnlyFlow ? 0 : blockStyle.spaceBefore,
+      spaceAfter: anchorOnlyFlow ? 0 : blockStyle.spaceAfter,
       availableWidth: blockWidth,
       blockType: entry.blockType,
       align: entry.align,
