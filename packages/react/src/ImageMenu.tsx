@@ -159,7 +159,13 @@ export function ImageMenu({ editor }: ImageMenuProps) {
       editor?.convertImageToInlineAtVisualPosition(info!.docPos);
       return;
     }
-    applyAttr({ wrapMode: mode, wrappingMode: "inline" });
+    // Top-bottom keeps the FlowBlock split in Phase 5 V1; a lingering yOffset
+    // from a prior square-mode drag would paint the image away from where the
+    // FlowBlock reserves vertical flow. Clear yOffset on the transition into
+    // top-bottom so the image lands at the anchor flow's natural Y.
+    const extra: Record<string, unknown> =
+      mode === "top-bottom" ? { yOffset: 0 } : {};
+    applyAttr({ wrapMode: mode, wrappingMode: "inline", ...extra });
   }
 
   return createPortal(

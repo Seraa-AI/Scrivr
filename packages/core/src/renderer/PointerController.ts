@@ -87,6 +87,14 @@ export class PointerController {
     startImageGlobalY: number;
     /** yOffset attr value at pointerdown (= startImageGlobalY - anchorGlobalY). */
     startYOffset: number;
+    /**
+     * wrapMode at pointerdown. Used by the same-page drag commit to suppress
+     * yOffset writes for top-bottom — Phase 5 V1 still has a FlowBlock split
+     * that reserves vertical flow at the anchor's natural Y, so a non-zero
+     * yOffset would create a visible gap above the painted image. Phase 5 V2
+     * (FlowBlock rip-out) lifts this restriction.
+     */
+    wrapMode: string;
     /** Image's docPos rect at drag start (for posBelow / posAbove fallback). */
     rect: { x: number; y: number; width: number; height: number; page: number };
     /** Mouse position relative to the image's top-left at mousedown. */
@@ -340,6 +348,7 @@ export class PointerController {
         anchorGlobalY: anchoredHit.anchorGlobalY,
         startImageGlobalY: anchoredHit.globalY,
         startYOffset: anchoredHit.globalY - anchoredHit.anchorGlobalY,
+        wrapMode: anchoredHit.wrapMode,
         rect: {
           x: anchoredHit.x,
           y: anchoredHit.y,
@@ -619,8 +628,13 @@ export class PointerController {
       // Y_THRESHOLD matches the X HORIZONTAL_THRESHOLD so a "pure horizontal"
       // drag with mouse jitter doesn't write a spurious yOffset.
       const Y_THRESHOLD = 3;
+      // Top-bottom keeps the FlowBlock split in Phase 5 V1, so a non-zero
+      // yOffset would paint the image away from where the FlowBlock reserves
+      // vertical flow — visible as a blank band above the image. Suppress
+      // yOffset writes for top-bottom until Phase 5 V2 unifies the path.
+      const yOffsetSupported = this.anchoredDrag.wrapMode !== "top-bottom";
       const newYOffset = startYOffset + dy;
-      const verticallyStill = Math.abs(dy) < Y_THRESHOLD;
+      const verticallyStill = !yOffsetSupported || Math.abs(dy) < Y_THRESHOLD;
 
       if (horizontallyStill && verticallyStill) {
         dragDebugLog(editor, "clampedNoMove", {
@@ -629,6 +643,7 @@ export class PointerController {
           startImageX: this.anchoredDrag.startImageX,
           attemptedYOffset: newYOffset,
           startYOffset,
+          wrapMode: this.anchoredDrag.wrapMode,
         });
         return;
       }
@@ -646,7 +661,7 @@ export class PointerController {
         commitPath: "setNodeAttrs",
         docPos,
         newX,
-        newYOffset,
+        newYOffset: yOffsetSupported ? newYOffset : "suppressed (top-bottom)",
       });
       return;
     }

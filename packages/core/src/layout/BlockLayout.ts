@@ -741,6 +741,8 @@ export function populateCharMap(
 
   for (let li = 0; li < block.lines.length; li++) {
     const line = block.lines[li]!;
+    if (isHiddenAnchorLine(line)) continue;
+
     const globalLineIndex = lineIndexOffset + li;
     const isLastLine = li === block.lines.length - 1;
     // Match TextBlockStrategy.render: the justify last-line exception (no

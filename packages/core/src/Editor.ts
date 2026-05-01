@@ -553,6 +553,18 @@ export class Editor extends BaseEditor implements IEditor {
     const to = docPos + node.nodeSize;
     if (targetPos > 0 && (targetPos < from || targetPos > to)) {
       if (this.moveAndUpdateNode(docPos, targetPos, inlineAttrs)) return true;
+      // moveAndUpdateNode rejected the position (PM placement guard).
+      // Falling back to attrs-only update keeps the image inline at its
+      // current docPos rather than failing the gesture; logged so the
+      // divergence is traceable when debugging "image stayed in place
+      // after toggling to inline."
+      if (this.debug?.drag) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[convertImageToInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
+          { from, to, targetPos },
+        );
+      }
     }
 
     this.setNodeAttrs(docPos, inlineAttrs);
