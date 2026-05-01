@@ -24,84 +24,73 @@ imageRect.y   = anchorFlow.globalY + yOffset
 exclusionRect = imageRect ± margin
 ```
 
-The flow no longer "owns" the image's vertical position — the flow only owns the *anchor*. Layout is a hybrid: text flow is structural, anchored objects are positioned rectangles, and the line breaker reacts to those rectangles via `ExclusionManager`.
+The flow no longer "owns" the image's vertical position — the flow only owns the *anchor*. Layout becomes a hybrid: text flow is structural, anchored objects are positioned rectangles, and the line breaker reacts to those rectangles via `ExclusionManager`.
 
 The mental model for drag follows from this:
 
 > **During drag, we are not editing the document. We are editing a rectangle in space. The document is reconciled only on drop.**
 
-## Phase 1 — Strip image height from paragraph measurement
+## Today's reality: square and top-bottom are not yet symmetric
 
-This is the unlock. Without it, every other phase feels broken.
+The endpoint is "all wrap modes feed `ExclusionManager`," but today they don't.
 
-**Where:** the span-extraction step that feeds `LineBreaker.breakIntoLines`. Anchored image nodes already emit `width: 0` sentinel object spans (see `blockHasAnchoredObject` in `PageLayout.ts`), but their `height` and `verticalAlign` still flow into `buildLine`'s Pass 2 metric inflation (`LineBreaker.ts:828–853`).
+**Square wrap** already follows the rect → exclusion → segments path:
 
-**Change:** when the extractor sees an image with `normalizeImageAttrs(node).wrapMode !== "inline"`, emit `{ kind: "object", width: 0, height: 0, verticalAlign: "baseline" }` — a pure docPos sentinel. `buildLine`'s height-inflation branches no-op on height=0.
+```
+applyFloatLayout
+  → resolveAnchoredObjects (computes placement)
+  → reflowFlowsAgainstSquareObject
+     → ExclusionManager (one rect)
+     → layoutBlock(...lineSpaceProvider) re-runs per overlapping flow
+```
 
-**Effect:** an image-only paragraph measures to one default font line, not "image height + line." The image still paints — it's resolved out of `LayoutPage.anchoredObjects[]`.
+**Top-bottom wrap** does not. In `buildBlockFlow`, a top-bottom image is detected up-front and emitted as a special `FlowBlock`:
 
-**Validation invariants** (must pass before moving to Phase 2):
+```ts
+{ partKind: "anchored-object", height: imageHeight, spaceAfter: margin }
+```
 
-- Empty image-only paragraph height = 1 default font line, **not** image height.
-- Caret lands correctly on the zero-width sentinel inside the image-only paragraph.
-- Selection across the anchor paragraph doesn't jump or skip the image's docPos.
-- Wrap layout in adjacent paragraphs is unchanged (because exclusion rect is still computed from `LayoutPage.anchoredObjects`, which Phase 1 doesn't touch).
+That reserves vertical flow height *before* exclusion layout runs. The comment in `resolveAnchoredObjects` confirms it: top-bottom's vertical flow is represented by the Stage-1 anchored-object block, no second clearance barrier needed.
 
-**Test impact:** many `PageLayout.test.ts` assertions encode "block.height includes image height." Expect a churn diff on those. The wrap-zone tests should be unaffected.
+So the migration has to convert top-bottom from a flow-height reservation into a `side: "full"` exclusion rect — that's a real phase, not a free fold.
 
-## Phase 2 — `yOffset` as a structural attribute
+## Phasing
+
+The six phases land in this order. Each is independently shippable; the order is chosen so each phase's invariants hold against the previous one.
+
+### Phase 1 — Add structural `yOffset` attribute
+
+Pure data-model addition. Default value 0 → no visual change for any existing document.
 
 **Schema** (`packages/core/src/extensions/built-in/Image.ts`):
 ```ts
 yOffset: { default: 0 }
 ```
 
-**`normalizeImageAttrs`** (`AnchoredObjects.ts`) — single line absorbs the legacy paint-only `floatOffset.y`:
+**`normalizeImageAttrs`** absorbs the legacy paint-only `floatOffset.y` in one line:
 ```ts
 yOffset: numberOrDefault(a.yOffset, numberOrDefault(a.floatOffset?.y, 0))
 ```
 
-**Single insertion point** in `applyFloatLayout` / `resolveAnchoredObjects` (`PageLayout.ts:~599`):
+**Single threading point** in `applyFloatLayout` / `resolveAnchoredObjects` (`PageLayout.ts:~599`):
 ```ts
 const objectGlobalY = anchorFlow.globalY + attrs.yOffset;
 ```
 
-That one line is the whole semantic change. Everything downstream — exclusion rect, paint coords, PDF, hit-testing, `getNodeRect`, drag handles — already reads from `LayoutPage.anchoredObjects[].globalY`. Single source of truth.
+Everything downstream — exclusion rect, paint coords, PDF, hit-testing, `getNodeRect`, drag handles — reads from `LayoutPage.anchoredObjects[].globalY`. Single source of truth.
 
-**Cache invalidation:** `computeInputHash` (`PageLayout.ts:1481`) must include `yOffset`. One line.
+**Page-edge policy (V1: clamp)** — clamp `yOffset` so the image stays on its anchor's page. New invariant: `image.page === anchor.page`. Stickiness near a page edge must be **visually explicit** (ghost goes red, or stops at boundary). Silent clamping is a debugging trap. V2 (deferred): per-page rect splitting akin to the existing top-bottom split-at-boundary.
 
-### Page-edge policy (V1: clamp)
-
-If `yOffset` lifts the image above the page top or pushes it past the bottom, the rect would land on a different page than its anchor. V1 policy: **clamp `yOffset` so the image stays on its anchor's page**.
-
-**This creates a new invariant:**
-```
-image.page === anchor.page
-```
-
-Consequences:
-- No split rects, no multi-page exclusion, no cross-page hit-testing complexity.
-- Dragging near a page edge "sticks" — the image stops moving when it hits the page boundary.
-- This stickiness must be **visually explicit** (e.g. ghost goes red, or stops at the boundary), never silent. Silent clamping is a debugging trap.
-
-V2 evolution (deferred): per-page rect splitting, similar to the existing top-bottom split-at-boundary mechanism. The architecture supports it; the V1 invariant is the simplification, not a permanent constraint.
-
-### Subsumed bugs / TODOs
-
-- `bug_float_offset_spacing_regression.md` — top-bottom float negative `floatOffset.y` excess spacing. Subsumed: `yOffset` is now structural, not paint-only.
-- `bug_float_anchor_page_separation.md` — image overflows but anchor stays. Subsumed by the page-edge clamp invariant.
-- `todo_anchor_stacked_reflow.md` — multi-image overlap on same flow. Becomes trivial under this model: every image is its own rect via `ExclusionManager`, no per-paragraph compounding.
-
-## Phase 3 — Drag rewrite (where the bug actually dies)
+### Phase 2 — Drag stops mutating docPos; commits yOffset
 
 The current bug:
 ```
 drag → mutate docPos → layout changes → docPos target shifts → chaos
 ```
 
-The fix is the gesture-begin snapshot. Drag-time math reads the snapshot, never live layout.
+Fix is the gesture-begin snapshot. Drag-time math reads the snapshot, never live layout.
 
-**Snapshot at `onPointerDown`** — both fields, both frozen for the gesture's lifetime:
+Snapshot at `onPointerDown` — both fields, both frozen for the gesture's lifetime:
 ```ts
 start = {
   anchorDocPos: number,
@@ -111,46 +100,98 @@ start = {
 
 If `anchorGlobalY` is recomputed mid-drag, the bug returns. Snapshot or die.
 
-**Same-page drop** (no page boundary crossed):
+**Same-page drop** — pure attr update, docPos doesn't change:
 ```ts
 const newYOffset = clamp(drop.imageGlobalY - start.anchorGlobalY, pageBounds);
-tr.setNodeAttrs(start.anchorDocPos, {
-  xAlign: "custom",
-  x: drop.x,
-  yOffset: newYOffset,
-});
+tr.setNodeAttrs(start.anchorDocPos, { xAlign: "custom", x: drop.x, yOffset: newYOffset });
 ```
-docPos does not change. One transaction, one undo step.
 
-**Cross-page drop** (anchor must move to a paragraph on the new page):
+**Cross-page drop** — anchor must move; visual position preserved by construction:
 ```ts
 const newAnchor = findAnchorAt(drop.coords);
 const adjustedYOffset = drop.imageGlobalY - newAnchor.globalY;
 tr.moveNode(start.anchorDocPos, newAnchor.pos)
-  .setNodeAttrs(newAnchor.pos, {
-    xAlign: "custom",
-    x: drop.x,
-    yOffset: adjustedYOffset,
-  });
+  .setNodeAttrs(newAnchor.pos, { xAlign: "custom", x: drop.x, yOffset: adjustedYOffset });
 ```
-The two-op transaction is still a single undo step. Visual position is preserved by construction.
 
-**Live ghost during drag:** the existing `pendingAnchoredDrag` overlay (`feedback_anchored_drag_overlay_v1.md`) already paints the image at the cursor's current Y without committing. Phase 3 changes the commit, not the ghost. No new overlay plumbing.
+The existing `pendingAnchoredDrag` overlay handles the live ghost. Phase 2 changes the commit, not the overlay.
 
-**What's eliminated:**
-- Paragraph-snap behavior during drag (no more "vertical drag jumps to the next paragraph's top").
-- Cross-page flicker (no more docPos churn during the gesture).
-- Feedback loop between drag and layout.
+After Phases 1+2 land, the data model and the drag interaction are correct, but paragraph height still includes image height. The system is functionally correct (drag works, exclusions work) but visually wasteful for image-only paragraphs.
 
-## Phase 4 — Re-anchor on drop (polish, with anti-jitter)
+### Phase 3 — Floating images stop contributing paragraph height
+
+The visual unlock. Before this, image-only paragraphs reserve image-height of vertical space. After, they reserve one default font line.
+
+**Where:** the span-extraction step that feeds `LineBreaker.breakIntoLines`. Anchored image nodes already emit `width: 0` sentinel object spans (see `blockHasAnchoredObject`), but their `height` and `verticalAlign` still flow into `buildLine`'s Pass 2 metric inflation (`LineBreaker.ts:828–853`).
+
+**Change:** when the extractor sees an image with `normalizeImageAttrs(node).wrapMode !== "inline"`, emit:
+```ts
+{ kind: "object", width: 0, height: 0, verticalAlign: "baseline" }
+```
+A pure docPos sentinel. `buildLine`'s height-inflation branches no-op on height=0.
+
+**Validation invariants** before moving to Phase 4:
+- Empty image-only paragraph height = 1 default font line, not image height.
+- Caret lands correctly on the zero-width sentinel inside the image-only paragraph.
+- Selection across the anchor paragraph doesn't jump or skip the image's docPos.
+- Wrap layout in adjacent paragraphs is unchanged.
+
+**Test impact:** many `PageLayout.test.ts` assertions encode "block.height includes image height." Expect a churn diff on those.
+
+### Phase 4 — Convert square reflow from per-object to page-level exclusions
+
+Today `reflowFlowsAgainstSquareObject` is called once per anchored object inside a per-object loop. Each call builds its own single-rect `ExclusionManager`. Multi-image overlap on the same flow doesn't compound segments correctly (the `todo_anchor_stacked_reflow.md` issue).
+
+**Change:** build one `ExclusionManager` per page in `applyFloatLayout`, populate it with all square rects, then do a single reflow pass over flows that overlap any rect. Per-object loop disappears.
+
+**Cache invalidation widens.** `flow.overlapsWrapZone` was per-flow; under yOffset, any image's rect can move anywhere on the page, so a flow's overlap status depends on every rect on the page.
+
+`computeInputHash` should hash the **effective exclusion geometry**, not raw image attrs:
+
+```ts
+pageRectsDigest = hash(rects.map(r => `${r.page}:${r.x}:${r.right}:${r.y}:${r.bottom}:${r.side}:${r.docPos}`))
+```
+
+Idempotent under attribute changes that don't move the rect, robust under attribute changes that do. Every flow measured against that page's exclusions includes the digest in its layout key.
+
+### Phase 5 — Convert top-bottom from flow-block reservation to `side: "full"` exclusion
+
+Rip out the `partKind: "anchored-object"` `FlowBlock` path in `buildBlockFlow`. Top-bottom images become rects in the same `ExclusionManager` as square wrap, with `side: "full"`. `LineBreaker` already emits `skipToY` for full-width exclusions (validated in `ExclusionManager.test.ts`).
+
+**API correction needed in `ExclusionManager`.** A `side: "full"` rect must span the queried content width, otherwise `subtractRectFromSegments` leaves side segments and `skipToY` is silently dropped (segments.length !== 0 → skipToY suppressed in the return). Two options:
+
+1. **Helper:** `addFullWidthRect({ page, y, bottom, contentX, contentWidth, docPos })` — call sites can't get this wrong.
+2. **Validation in `addRect`:** require callers to pass content bounds for `side: "full"` rects, error or warn if rect doesn't span.
+
+The helper option is preferred — it's a non-breaking API addition, reads naturally at the call site, and `addRect` stays minimal.
+
+After Phase 5, top-bottom and square share one code path. The wrap-mode dispatch lives entirely in the rect's `side` property.
+
+### Phase 6 — `zIndex` for stacking order
+
+Now that all rects live in `LayoutPage.anchoredObjects[]`, paint and hit-test ordering is mechanical.
+
+**Schema:** `zIndex: { default: 0 }`.
+
+**Sort by consumer:**
+- `PageRenderer` paint: ascending `zIndex`, then docPos (stable).
+- Hit-test (`PointerController`, click, drag): descending `zIndex`, then reverse docPos.
+- `ExclusionManager`: unsorted — exclusions are union math, z-order doesn't affect segments.
+
+**Keep `wrapMode` and `zIndex` orthogonal.** `wrapMode` controls exclusion behavior (`square` / `top-bottom` / `behind` / `front` / `inline`). `zIndex` controls paint stacking among anchored objects. They answer different questions; folding `behind`/`front` into z-ranges is a future API simplification, not part of this work.
+
+User-facing "Send to back" / "Bring to front" commands map to `setNodeAttrs({ zIndex: minZ - 1 | maxZ + 1 })`. Renormalize occasionally so values don't drift.
+
+## Polish (not numbered phases)
+
+### Re-anchor on drop with anti-jitter
 
 After commit, optionally swap to a closer anchor while preserving visual position:
 
 ```ts
 const oldImageGlobalY = oldAnchor.globalY + oldYOffset;
 const candidate = findClosestParagraphAt(oldImageGlobalY);
-
-const RE_ANCHOR_THRESHOLD = 24; // px; tune to taste
+const RE_ANCHOR_THRESHOLD = 24; // px
 const wouldReduce = Math.abs(oldYOffset) - Math.abs(candidate.globalY - oldImageGlobalY);
 if (wouldReduce > RE_ANCHOR_THRESHOLD) {
   const newYOffset = oldImageGlobalY - candidate.globalY;
@@ -159,36 +200,45 @@ if (wouldReduce > RE_ANCHOR_THRESHOLD) {
 ```
 
 Constraints:
-- **Never re-anchor across pages.** Page boundaries belong to Phase 3's cross-page path, which is explicit user intent.
-- **Threshold-gated.** Without the `wouldReduce > THRESHOLD` guard, small drags trigger anchor jitter — every drop changes the anchor by a few pixels and undo history fills with anchor swaps. The threshold makes re-anchor a meaningful event, not a side effect.
+- **Never re-anchor across pages** — page boundaries belong to Phase 2's cross-page path, which is explicit user intent.
+- **Threshold-gated.** Without the guard, small drags trigger anchor jitter — every drop changes the anchor by a few pixels, undo history fills with anchor swaps.
 
-This phase is independent of phases 1–3 and ships separately.
+Independent of all phases; ships when the polish is needed.
 
 ## Invariants the redesign establishes
+
+After Phases 1–5:
 
 1. `paragraph.height === text.height` (no image contribution).
 2. `image.page === anchor.page` (V1 page-edge clamp).
 3. Exclusion rect is the single source of truth for paint, wrap, hit-test, PDF.
 4. During drag, document structure is read-only; only the gesture-end commit mutates the doc.
-5. `yOffset` is structural — every consumer that reads image position must read it through `LayoutPage.anchoredObjects[].globalY`, never recompute from `flow.globalY` directly.
+5. `yOffset` is structural — every consumer reads image position through `LayoutPage.anchoredObjects[].globalY`, never recomputing from `flow.globalY`.
+6. All wrap modes feed one `ExclusionManager`. The wrap-mode dispatch is the rect's `side` property.
+
+After Phase 6, add:
+
+7. Anchored-object paint and hit-test order = `zIndex` ascending / descending.
+
+## Subsumed bugs / TODOs
+
+- `bug_float_offset_spacing_regression.md` — top-bottom float negative `floatOffset.y` excess spacing. Subsumed by Phase 1: yOffset is structural, not paint-only.
+- `bug_float_anchor_page_separation.md` — image overflows but anchor stays. Subsumed by Phase 1's page-edge clamp invariant.
+- `todo_anchor_stacked_reflow.md` — multi-image overlap on same flow doesn't compound. Subsumed by Phase 4's page-level ExclusionManager.
 
 ## Future evolution
 
-`yOffset` is anchor-relative ("move with text"). Word and Docs both also support **page-relative** positioning ("fix position on page"):
+`positionMode: "fixed-on-page"` — Word's "fix position on page" mode. Image's globalY = `pageTop + yOffset`, ignoring the anchor flow. Anchor becomes a pure undo/select grouping. The schema field already exists as a placeholder; adding the branch in `applyFloatLayout` is the entire change. Ship when a concrete consumer needs it.
 
-```ts
-positionMode: "move-with-text" | "fixed-on-page"
-```
+## Recommended ship order summary
 
-Under `fixed-on-page`, the image's globalY is computed from page top + offset, ignoring the anchor flow entirely. The anchor is then purely an undo/select grouping.
-
-The current architecture supports this trivially — it's a `switch` in the `objectGlobalY` computation. The schema already has a `positionMode: "move-with-text"` field as a placeholder. Add the `fixed-on-page` branch when a concrete consumer needs it (per `project_page_orientation_roadmap.md` shipping discipline).
-
-## Recommended ship order
-
-1. **Phase 1 alone** — validate the three Phase-1 invariants against the demo doc and existing test suite. Test diff is loud; resolve before moving on.
-2. **Phase 2** — yOffset attr, single-line layout change, cache hash, clamp policy. No drag changes yet. Default `yOffset: 0` keeps all existing docs visually identical.
-3. **Phase 3** — drag rewrite. The user-visible win (cross-page drag stops flickering) lands here.
-4. **Phase 4** — re-anchor polish. Independent, optional, can defer past the initial PR.
+| # | Phase | Visible to user? | Depends on |
+|---|---|---|---|
+| 1 | yOffset attr + structural threading | No (yOffset=0 default) | — |
+| 2 | Drag commits yOffset, freezes anchor | Yes — drag flicker fixed | 1 |
+| 3 | Image height out of paragraph | Yes — empty-anchor case fixes | 1 |
+| 4 | Square: per-object → page-level exclusions | No | 1 |
+| 5 | Top-bottom: FlowBlock → side:"full" rect | No | 4 |
+| 6 | zIndex paint/hit-test ordering | Yes — send-to-back works | 5 |
 
 Each phase is independently shippable and revertible. Resist combining.
