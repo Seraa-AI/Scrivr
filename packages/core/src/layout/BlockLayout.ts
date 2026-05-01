@@ -303,10 +303,32 @@ export function layoutBlock(
   // An empty paragraph (or one containing only hardBreak nodes) has no
   // renderable content. We create a virtual zero-width-space span so
   // LineBreaker returns one line and CharacterMap registers a cursor position.
-  const hasRenderableContent = spans.some(s => s.kind !== "break");
-  const inputSpans: InputSpan[] = hasRenderableContent
+  // Phase 3 of the yOffset redesign widens "renderable" to "non-zero":
+  // a paragraph whose only spans are anchored-object sentinels (zero-size
+  // object spans) carries a docPos but no metrics, so the line collapses
+  // to 0 height without a ZWS injection alongside.
+  // The sentinel must be preserved (getAnchoredObjectAnchors scans
+  // flow.lines[].spans for it), so when there are existing zero-size
+  // spans we APPEND the ZWS rather than substituting.
+  const hasNonZeroContent = spans.some(
+    (s) =>
+      s.kind === "text" ||
+      (s.kind === "object" && (s.width > 0 || s.height > 0)),
+  );
+  const hasZeroSizeObjectSentinel = spans.some(
+    (s) => s.kind === "object" && s.width === 0 && s.height === 0,
+  );
+  const zwsSpan: InputSpan = {
+    kind: "text",
+    text: "​",
+    font: baseFont,
+    docPos: nodePos + 1,
+  };
+  const inputSpans: InputSpan[] = hasNonZeroContent
     ? spans
-    : [{ kind: "text", text: "\u200B", font: baseFont, docPos: nodePos + 1 }];
+    : hasZeroSizeObjectSentinel
+      ? [...spans, zwsSpan]
+      : [zwsSpan];
 
   // ── 3. Break into lines ───────────────────────────────────────────────────
   const breaker = new LineBreaker(measurer);

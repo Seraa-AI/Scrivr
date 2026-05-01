@@ -1183,6 +1183,105 @@ describe("extractSpans — inline node handling", () => {
   });
 });
 
+// ── Phase 3: anchored-image sentinel does not inflate paragraph height ───────
+
+describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
+  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+
+  it("paragraph with only a non-inline image collapses to default font line, not image height", () => {
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 200,
+      wrapMode: "square",
+    });
+    const para = skSchema.node("paragraph", null, [img]);
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+    });
+    // One line, one default-font line height. NOT 200 (image height).
+    expect(block.lines).toHaveLength(1);
+    expect(block.lines[0]!.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    expect(block.height).toBeCloseTo(MOCK_LINE_HEIGHT);
+    expect(block.height).toBeLessThan(200);
+  });
+
+  it("anchored-image sentinel is preserved on the line so getAnchoredObjectAnchors finds it", () => {
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 200,
+      wrapMode: "square",
+    });
+    const para = skSchema.node("paragraph", null, [img]);
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+    });
+    const allSpans = block.lines.flatMap((l) => l.spans);
+    const sentinel = allSpans.find(
+      (s) => s.kind === "object" && s.width === 0 && s.height === 0,
+    );
+    expect(sentinel).toBeDefined();
+  });
+
+  it("text + non-inline image: line height is text height (image contributes nothing)", () => {
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 200,
+      wrapMode: "square",
+    });
+    const para = skSchema.node("paragraph", null, [
+      img,
+      skSchema.text("text alongside an anchored image"),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 600,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+    });
+    // First line height matches text — image's 200px height is excluded.
+    expect(block.lines[0]!.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    expect(block.lines[0]!.lineHeight).toBeLessThan(200);
+  });
+
+  it("inline image (wrapMode:inline) still inflates line height as before — Phase 3 only changes non-inline", () => {
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 150,
+      wrapMode: "inline",
+    });
+    const para = skSchema.node("paragraph", null, [img]);
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+    });
+    expect(block.lines[0]!.lineHeight).toBe(150);
+  });
+});
+
 // ── TextBlockStrategy — inline object rendering ───────────────────────────────
 //
 // Verifies that TextBlockStrategy correctly dispatches object spans to the
