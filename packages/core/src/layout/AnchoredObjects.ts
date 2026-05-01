@@ -135,15 +135,22 @@ function resolveWrapMode(a: RawImageAttrs): WrapMode {
 }
 
 function resolveXAlign(a: RawImageAttrs): XAlign {
-  // New attrs are authoritative only when `wrapMode` is explicitly
-  // non-default. Otherwise the schema-default `xAlign: "left"` would
-  // hide the legacy `wrappingMode: "square-right"` mapping. Keep the
-  // resolution rule symmetric with `resolveWrapMode`.
-  if (isWrapMode(a.wrapMode) && a.wrapMode !== "inline") {
-    return isXAlign(a.xAlign) ? a.xAlign : "left";
+  // Hard precedence: an explicit non-default xAlign always wins. Drag and
+  // toolbar commits set `xAlign` directly (e.g. "custom" + a numeric `x`);
+  // the legacy `wrappingMode: "square-right"` branch below would otherwise
+  // shadow that and pin the image at the page's right edge after every drag.
+  // Schema-default "left" stays ambiguous (could be explicit or default), so
+  // it falls through to the legacy/default branches below.
+  if (isXAlign(a.xAlign) && a.xAlign !== "left") {
+    return a.xAlign;
   }
+  // wrapMode-explicit nodes use their xAlign as-is (default-or-explicit "left").
+  if (isWrapMode(a.wrapMode) && a.wrapMode !== "inline") {
+    return "left";
+  }
+  // Legacy fallback for documents written before the wrapMode/xAlign split.
   if (a.wrappingMode === "square-right") return "right";
-  return isXAlign(a.xAlign) ? a.xAlign : "left";
+  return "left";
 }
 
 function resolveCustomX(a: RawImageAttrs): number | null {
