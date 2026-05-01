@@ -285,6 +285,8 @@ export interface FlowBlock {
   originalGlobalY?: number;
   /** True when Stage 3 intentionally moved this flow's globalY. */
   solverPushedThisFlow?: boolean;
+  /** True when this flow's Y range intersected a Stage 3 square wrap zone. */
+  overlapsWrapZone?: boolean;
   // Phase 1b: cache snapshot taken before this run's measurement.
   preCachedTargetY?: number;
   preCachedPage?: number;
@@ -693,6 +695,8 @@ function reflowFlowsAgainstSquareObject(
     if (flowY >= zoneBottom) break;
     if (flow.lines.length === 0 || flowY + flow.height <= zoneTop) continue;
 
+    const wrappedFlow: FlowBlock = { ...flow, overlapsWrapZone: true };
+
     const constraintProvider: ConstraintProvider = (absoluteLineY: number, lineHeight = 1) => {
       if (absoluteLineY + lineHeight <= zoneTop || absoluteLineY >= zoneBottom) {
         return null;
@@ -722,7 +726,7 @@ function reflowFlowsAgainstSquareObject(
     });
 
     const nextFlow: FlowBlock = {
-      ...flow,
+      ...wrappedFlow,
       lines: reflowed.lines,
       height: reflowed.height,
       blockType: reflowed.blockType,
@@ -737,6 +741,12 @@ function reflowFlowsAgainstSquareObject(
         ...flows.slice(idx + 1),
       ];
       flows = restampGlobalYFrom(flows, idx + 1);
+    } else if (!flow.overlapsWrapZone) {
+      flows = [
+        ...flows.slice(0, idx),
+        wrappedFlow,
+        ...flows.slice(idx + 1),
+      ];
     }
   }
 
@@ -1407,8 +1417,10 @@ export function paginateFlow(
 
     // Early termination: copy downstream pages from previous run when
     // targetY, page, runId, and contentTop all match the cached placement.
+    const canUsePreviousLayoutTail = !flow.solverPushedThisFlow && !flow.overlapsWrapZone;
     if (
       previousLayout &&
+      canUsePreviousLayoutTail &&
       seenCacheMiss &&
       flow.wasCacheHit &&
       flow.preCachedTargetY !== undefined &&

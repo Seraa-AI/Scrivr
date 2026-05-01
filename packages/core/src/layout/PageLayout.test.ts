@@ -1200,6 +1200,53 @@ describe("runPipeline — float image wrapping", () => {
     expect(trailingCount).toBe(2);
   });
 
+  it("Phase 1b does not copy a cached tail after a changed square zone overlaps it", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const measurer = createMeasurer();
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const opts = { pageConfig: defaultPageConfig, fontConfig, measurer, measureCache: cache };
+    const floatText = "anchor";
+    const wrappedText = "word ".repeat(60).trim();
+    const tail = schema.node("paragraph", null, [schema.text("tail")]);
+
+    const smallImg = schema.nodes["image"]!.create({
+      src: "",
+      width: 120,
+      height: 20,
+      wrappingMode: "square-left",
+    });
+    const largeImg = schema.nodes["image"]!.create({
+      src: "",
+      width: 200,
+      height: 220,
+      wrappingMode: "square-left",
+    });
+    const doc1 = schema.node("doc", null, [
+      schema.node("paragraph", null, [smallImg, schema.text(floatText)]),
+      schema.node("paragraph", null, [schema.text(wrappedText)]),
+      tail,
+    ]);
+    const doc2 = schema.node("doc", null, [
+      schema.node("paragraph", null, [largeImg, schema.text(floatText)]),
+      doc1.child(1),
+      tail,
+    ]);
+
+    const layout1 = runPipeline(doc1, opts);
+    const cachedLayout = runPipeline(doc2, { ...opts, previousLayout: layout1 });
+    const freshLayout = runPipeline(doc2, {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const cachedTail = cachedLayout.pages.flatMap((page) => page.blocks).find((block) => block.node === tail)!;
+    const freshTail = freshLayout.pages.flatMap((page) => page.blocks).find((block) => block.node === tail)!;
+    const originalTail = layout1.pages.flatMap((page) => page.blocks).find((block) => block.node === tail)!;
+    expect(freshTail.y).toBeGreaterThan(originalTail.y);
+    expect(cachedTail.y).toBe(freshTail.y);
+  });
+
   it("float stacking: two same-side floats do not overlap each other", () => {
     // Fix 1: downward scan. A second square-left float anchored near the first
     // must be pushed below it, not placed at the same Y.
@@ -1438,6 +1485,49 @@ describe("runPipeline — float image wrapping", () => {
       }
     }
   });
+
+  // wrapText override branches in reflowFlowsAgainstSquareObject.
+  // Default `largest` picks the wider side per line; `left`/`right` force
+  // a side regardless of which is wider. `bothSides` is reserved for F7.
+  it("wrapText='left' forces text into the left zone even when right is wider", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // 100×100 image at x=200 (content area starts at 72): leftAvail ≈ 120,
+    // rightAvail ≈ 414. Without the override, default `largest` picks right.
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 100, height: 100,
+      wrapMode: "square", xAlign: "custom", x: 200, wrapText: "left",
+    });
+    const anchorPara = schema.node("paragraph", null, [img]);
+    const text = schema.node("paragraph", null, [schema.text(longText)]);
+    const layout = runPipeline(schema.node("doc", null, [anchorPara, text]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const wrappedBlock = layout.pages[0]!.blocks[1]!;
+    // First constrained line sits in the left zone (constraintX=0, narrow width).
+    const firstLine = wrappedBlock.lines[0]!;
+    expect(firstLine.effectiveWidth).toBeLessThan(150);
+    expect(firstLine.constraintX ?? 0).toBeLessThan(100);
+  });
+
+  it("wrapText='right' forces text into the right zone even when left is wider", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Same image but right-side-flush: leftAvail ≈ 414, rightAvail ≈ 120.
+    // wrapText='right' forces the narrow right side regardless.
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 100, height: 100,
+      wrapMode: "square", xAlign: "custom", x: 500, wrapText: "right",
+    });
+    const anchorPara = schema.node("paragraph", null, [img]);
+    const text = schema.node("paragraph", null, [schema.text(longText)]);
+    const layout = runPipeline(schema.node("doc", null, [anchorPara, text]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const wrappedBlock = layout.pages[0]!.blocks[1]!;
+    const firstLine = wrappedBlock.lines[0]!;
+    // Constrained to the right zone: constraintX is past the image's right edge.
+    expect(firstLine.constraintX ?? 0).toBeGreaterThan(500);
+    expect(firstLine.effectiveWidth).toBeLessThan(150);
+  });
 });
 
 // ── Float image — top-bottom (break) mode ────────────────────────────────────
@@ -1624,6 +1714,63 @@ describe("runPipeline — top-bottom (break) float", () => {
           }
         }
       }
+    }
+  });
+});
+
+// ── Anchored modes — behind / front ──────────────────────────────────────────
+//
+// behind/front emit a placement with no wrap zone — text flows past the
+// image's painted rectangle as if it weren't there (it's painted under or over,
+// not beside). Spec: docs/anchored-objects/01-placement-and-wrap-policies.md.
+
+describe("runPipeline — behind / front anchored modes", () => {
+  const longText = "word ".repeat(60).trim();
+
+  const buildLayout = (mode: "behind" | "front") => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200, wrapMode: mode,
+    });
+    const anchorPara = schema.node("paragraph", null, [img]);
+    const text = schema.node("paragraph", null, [schema.text(longText)]);
+    return runPipeline(schema.node("doc", null, [anchorPara, text]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+  };
+
+  it("behind: emits a placement with wrapMode='behind'", () => {
+    const layout = buildLayout("behind");
+    expect(layout.anchoredObjects).toHaveLength(1);
+    expect(layout.anchoredObjects![0]!.wrapMode).toBe("behind");
+  });
+
+  it("front: emits a placement with wrapMode='front'", () => {
+    const layout = buildLayout("front");
+    expect(layout.anchoredObjects).toHaveLength(1);
+    expect(layout.anchoredObjects![0]!.wrapMode).toBe("front");
+  });
+
+  it("behind: emits no wrap zone — following text uses full content width", () => {
+    const layout = buildLayout("behind");
+    const textBlock = layout.pages[0]!.blocks[1]!;
+    // No constraintX, full effectiveWidth (650 = 794 - 72*2).
+    // Unconstrained lines: no constraintX, no effectiveWidth set (LineBreaker
+    // only stamps these when a wrap zone narrows the line).
+    for (const line of textBlock.lines) {
+      expect(line.constraintX ?? 0).toBe(0);
+      expect(line.effectiveWidth ?? 650).toBe(650);
+    }
+  });
+
+  it("front: emits no wrap zone — following text uses full content width", () => {
+    const layout = buildLayout("front");
+    const textBlock = layout.pages[0]!.blocks[1]!;
+    // Unconstrained lines: no constraintX, no effectiveWidth set (LineBreaker
+    // only stamps these when a wrap zone narrows the line).
+    for (const line of textBlock.lines) {
+      expect(line.constraintX ?? 0).toBe(0);
+      expect(line.effectiveWidth ?? 650).toBe(650);
     }
   });
 });
