@@ -155,15 +155,18 @@ is the content area minus all exclusion regions:
 W = A - UNION(E_1, E_2, ..., E_n)
 ```
 
-where `A` is the content area and `E_i` are exclusion rects. The layout
-algorithm finds the largest available rectangle `R` within `W` that can
-accommodate the next line of text.
+where `A` is the content area and `E_i` are exclusion rects. At each
+line's Y range, the layout algorithm subtracts active rectangles from
+the content area and gets zero or more available inline segments. A
+left/right float is just a case where only one useful segment remains;
+a centered square object can produce two.
 
 In Scrivr, the `ExclusionManager` implements this:
 - `addRect(rect)` — register an exclusion zone
-- `getConstraint(page, y, lineHeight, contentX, contentWidth)` — query
-  available width at a given Y position
-- `hasExclusionsInRange(yStart, yEnd)` — fast overlap test
+- `getAvailableSegments(page, y, lineHeight, contentX, contentWidth)` —
+  query all usable inline segments at a given Y position
+- `hasExclusionsOnPage(page)` / `getNextFreeY(page, y)` — page-level
+  checks and full-width exclusion skipping
 
 ### 5.2 Page Boundaries as Constraints
 
@@ -408,13 +411,13 @@ future layout features:
 
 Every layout feature reduces to one question:
 
-> **Given this Y position, what horizontal X range is available for content?**
+> **Given this Y position, what horizontal X segments are available for content?**
 
-That's what `ExclusionManager.getConstraint(y, lineHeight)` answers. Floats
-declare rects that narrow the X range. Columns would declare a gutter rect
-that splits it. Margin notes would declare a side rect. The line breaker
-doesn't care what declared the constraint — it just asks the query and wraps
-text into the available space.
+That's what `ExclusionManager.getAvailableSegments(y, lineHeight)` answers.
+Anchored objects declare rects that subtract from the available segments.
+Columns would declare a gutter rect that splits them. Margin notes would
+declare a side rect. The line breaker doesn't care what declared the
+exclusion — it just asks the query and wraps text into the available space.
 
 This is also how the surface system connects to the layout engine.
 `PageChromeContribution` (headers, footers, footnotes) reserves vertical

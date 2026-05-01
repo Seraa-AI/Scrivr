@@ -42,20 +42,21 @@ const PAGE_CONFIG = {
 
 function textLine(
   text: string,
-  opts: { constraintX?: number; effectiveWidth?: number; font?: string } = {},
+  opts: { x?: number; positioned?: boolean; font?: string } = {},
 ): LayoutLine {
   const font = opts.font ?? "16px Helvetica";
+  const x = opts.x ?? 0;
+  const width = text.length * 9;
   return {
-    spans: [{ kind: "text", text, font, x: 0, width: text.length * 9, docPos: 0 }],
-    width: text.length * 9,
+    spans: [{ kind: "text", text, font, x, width, docPos: 0 }],
+    width: x + width,
     lineHeight: 24,
     ascent: 18,
     descent: 6,
     cursorHeight: 20,
     textAscent: 18,
     xHeight: 8,
-    ...(opts.constraintX !== undefined && { constraintX: opts.constraintX }),
-    ...(opts.effectiveWidth !== undefined && { effectiveWidth: opts.effectiveWidth }),
+    ...(opts.positioned ? { positioned: true, segments: [{ x, width: AVAIL_W - x }] } : {}),
   };
 }
 
@@ -243,24 +244,22 @@ describe("buildPdf", () => {
     await expect(buildPdf(layout)).resolves.toBeInstanceOf(Uint8Array);
   });
 
-  it("handles float-constrained lines (constraintX + effectiveWidth)", async () => {
-    const constraintX = 166; // float width + gap
-    const effectiveWidth = AVAIL_W - constraintX;
+  it("handles segment-positioned lines", async () => {
+    const segmentX = 166; // image width + gap
     const lines = [
-      textLine("Constrained text line one", { constraintX, effectiveWidth }),
-      textLine("Constrained text line two", { constraintX, effectiveWidth }),
+      textLine("Segmented text line one", { x: segmentX, positioned: true }),
+      textLine("Segmented text line two", { x: segmentX, positioned: true }),
       textLine("Full-width line after float"),
     ];
     const layout = makeLayout([paragraphBlock(lines)]);
     await expect(buildPdf(layout)).resolves.toBeInstanceOf(Uint8Array);
   });
 
-  it("float-constrained lines start further right than unconstrained lines", async () => {
-    const constraintX = 200;
-    const effectiveWidth = AVAIL_W - constraintX;
+  it("segment-positioned lines start further right than unconstrained lines", async () => {
+    const segmentX = 200;
 
     const constrained = makeLayout([
-      paragraphBlock([textLine("Test line", { constraintX, effectiveWidth })]),
+      paragraphBlock([textLine("Test line", { x: segmentX, positioned: true })]),
     ]);
     const unconstrained = makeLayout([
       paragraphBlock([textLine("Test line")]),
@@ -272,7 +271,7 @@ describe("buildPdf", () => {
     ]);
 
     // Extract the Tm (text matrix) operator — "x y Tm" sets the text position.
-    // Constrained x should be greater than unconstrained x.
+    // Segment-positioned x should be greater than unconstrained x.
     const extractX = (content: string): number => {
       const m = content.match(/[\d.]+ [\d.]+ [\d.]+ [\d.]+ ([\d.]+) [\d.]+ Tm/);
       return m ? parseFloat(m[1]!) : 0;

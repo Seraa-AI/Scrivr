@@ -1,5 +1,11 @@
 # Pagination Model
 
+> **Partially stale.** This document still describes the older
+> `applyFloatLayout`-after-pagination pipeline. The current anchored-object
+> pipeline resolves placements and wrap constraints before pagination; use
+> `docs/anchored-objects/02-layout-pipeline.md` for float/anchored-object
+> behavior.
+
 This document explains how pagination works in Scrivr, evaluates how well the current pipeline accommodates planned features (headers/footers, columns, tables), and calls out the concrete refactor points.
 
 ## The pipeline

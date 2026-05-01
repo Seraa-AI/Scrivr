@@ -28,8 +28,7 @@ type VerticalAlign =
   | "text-bottom";
 type WrappingMode =
   | "inline"
-  | "square-left"
-  | "square-right"
+  | "square"
   | "top-bottom"
   | "behind"
   | "front";
@@ -67,14 +66,9 @@ const ALIGN_OPTIONS: { value: VerticalAlign; label: string; title: string }[] =
 const WRAP_OPTIONS: { value: WrappingMode; label: string; title: string }[] = [
   { value: "inline", label: "In line", title: "Image sits inline with text" },
   {
-    value: "square-left",
-    label: "← Wrap",
-    title: "Text wraps to the right of the image",
-  },
-  {
-    value: "square-right",
-    label: "Wrap →",
-    title: "Text wraps to the left of the image",
+    value: "square",
+    label: "Wrap",
+    title: "Text wraps around all sides of the image",
   },
   {
     value: "top-bottom",
@@ -102,16 +96,12 @@ export function ImageMenu({ editor }: ImageMenuProps) {
         setInfo(i);
         setWidth(String(Math.round(i.node.attrs["width"] as number)));
         setHeight(String(Math.round(i.node.attrs["height"] as number)));
-        setWrappingMode(
-          (i.node.attrs["wrappingMode"] as WrappingMode) ?? "inline",
-        );
+        setWrappingMode(resolveWrappingMode(i.node.attrs));
       },
       onMove: (r, i) => {
         setRect(r);
         setInfo(i);
-        setWrappingMode(
-          (i.node.attrs["wrappingMode"] as WrappingMode) ?? "inline",
-        );
+        setWrappingMode(resolveWrappingMode(i.node.attrs));
       },
       onHide: () => {
         setRect(null);
@@ -165,7 +155,7 @@ export function ImageMenu({ editor }: ImageMenuProps) {
 
   function handleWrapChange(mode: WrappingMode) {
     setWrappingMode(mode);
-    applyAttr({ wrappingMode: mode });
+    applyAttr({ wrapMode: mode, wrappingMode: "inline" });
   }
 
   return createPortal(
@@ -273,6 +263,31 @@ export function ImageMenu({ editor }: ImageMenuProps) {
     </div>,
     document.body,
   );
+}
+
+function resolveWrappingMode(attrs: Record<string, unknown>): WrappingMode {
+  const wrapMode = attrs["wrapMode"];
+  if (
+    wrapMode === "square" ||
+    wrapMode === "top-bottom" ||
+    wrapMode === "behind" ||
+    wrapMode === "front"
+  ) {
+    return wrapMode;
+  }
+
+  const legacy = attrs["wrappingMode"];
+  if (legacy === "square-left" || legacy === "square-right") return "square";
+  if (
+    legacy === "inline" ||
+    legacy === "top-bottom" ||
+    legacy === "behind" ||
+    legacy === "front"
+  ) {
+    return legacy;
+  }
+  if (wrapMode === "inline") return "inline";
+  return "inline";
 }
 
 const styles = {

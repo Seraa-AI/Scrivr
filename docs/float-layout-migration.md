@@ -1,5 +1,11 @@
 # Global-Y Float Layout Migration
 
+> **Historical note.** This describes the migration away from the
+> post-pagination float pass. The current authoritative design is the
+> anchored-object model in `docs/anchored-objects/`. Where this document
+> mentions `floatOffset`, `FloatLayout`, or one-width `ExclusionManager`
+> constraints, treat that as retired CSS-float-era context.
+
 ## What Changed
 
 Scrivr's float layout system was rewritten from a post-pagination pass (`applyFloatLayout`) to a pre-pagination constraint solver. The new system resolves float positions and reflows text in continuous Y space before pagination sees the flows. Net result: -397 lines of code, one bug fixed for free, and a cleaner architecture.

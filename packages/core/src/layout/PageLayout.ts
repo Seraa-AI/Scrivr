@@ -11,8 +11,8 @@ import {
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
-import type { LayoutLine, ConstraintProvider } from "./LineBreaker";
-import { ExclusionManager } from "./ExclusionManager";
+import type { LayoutLine, LineSpaceProvider } from "./LineBreaker";
+import type { AvailableSegment } from "./ExclusionManager";
 import {
   ANCHORED_OBJECT_MARGIN,
   normalizeImageAttrs,
@@ -599,7 +599,6 @@ function resolveAnchoredObjects(
           flows,
           i,
           {
-            wrapText: attrs.wrapText,
             pageNumber,
             globalY,
             localY,
@@ -632,8 +631,6 @@ function reflowFlowsAgainstSquareObject(
   inputFlows: FlowBlock[],
   startIndex: number,
   zone: {
-    /** Per-image wrap-side override; `largest` (default) picks the wider side. */
-    wrapText: import("./AnchoredObjects").WrapText;
     pageNumber: number;
     globalY: number;
     localY: number;
@@ -656,39 +653,6 @@ function reflowFlowsAgainstSquareObject(
   const zoneRight = zone.x + zone.width + margin;
   const zoneTop = zone.globalY - margin;
   const zoneBottom = zone.globalY + zone.height + margin;
-  const contentRight = zone.contentX + zone.contentWidth;
-
-  // Available widths on each side of the image's wrap zone, within the
-  // content area. Either may be 0 when the image is flush against an edge.
-  const leftAvail = Math.max(0, zoneLeft - zone.contentX);
-  const rightAvail = Math.max(0, contentRight - zoneRight);
-
-  // Resolve which side text wraps on. `largest` picks the wider side at
-  // line-resolution time; `left` / `right` force a specific side.
-  const sideForLine = (
-    requiredWidth: number,
-  ): { x: number; width: number } | "skip" | null => {
-    // Apply per-image override or compute from geometry.
-    if (zone.wrapText === "left") {
-      if (leftAvail <= 0 || requiredWidth > leftAvail) return "skip";
-      return { x: 0, width: leftAvail };
-    }
-    if (zone.wrapText === "right") {
-      if (rightAvail <= 0 || requiredWidth > rightAvail) return "skip";
-      return { x: zoneRight - zone.contentX, width: rightAvail };
-    }
-    // "largest" (default) — pick wider side that fits; deterministic
-    // tie-break: when widths are equal, prefer right.
-    const leftFits = leftAvail >= requiredWidth;
-    const rightFits = rightAvail >= requiredWidth;
-    if (!leftFits && !rightFits) return "skip";
-    if (leftFits && !rightFits) return { x: 0, width: leftAvail };
-    if (!leftFits && rightFits) return { x: zoneRight - zone.contentX, width: rightAvail };
-    return rightAvail >= leftAvail
-      ? { x: zoneRight - zone.contentX, width: rightAvail }
-      : { x: 0, width: leftAvail };
-  };
-
   for (let idx = startIndex; idx < flows.length; idx++) {
     const flow = flows[idx]!;
     const flowY = flow.globalY ?? 0;
@@ -697,31 +661,34 @@ function reflowFlowsAgainstSquareObject(
 
     const wrappedFlow: FlowBlock = { ...flow, overlapsWrapZone: true };
 
-    const constraintProvider: ConstraintProvider = (absoluteLineY: number, lineHeight = 1) => {
+    const blockContentX = zone.contentX + flow.indentLeft;
+    const lineSpaceProvider: LineSpaceProvider = (absoluteLineY: number, lineHeight = 1) => {
       if (absoluteLineY + lineHeight <= zoneTop || absoluteLineY >= zoneBottom) {
-        return null;
+        return { segments: [{ x: 0, width: flow.availableWidth }] };
       }
-      // requiredWidth = 1 here as a probe; LineBreaker handles per-line
-      // word-fit checks with its own measurement.
-      const side = sideForLine(1);
-      if (side === null) return null;
-      if (side === "skip") {
-        // Force the line below the wrap zone.
-        return { x: 0, width: 0, skipToY: zoneBottom };
+
+      const segments = subtractExclusionFromSegments(
+        [{ x: 0, width: flow.availableWidth }],
+        zoneLeft - blockContentX,
+        zoneRight - blockContentX,
+      );
+
+      if (segments.length === 0) {
+        return { segments, skipToY: zoneBottom };
       }
-      return { x: side.x, width: side.width };
+      return { segments };
     };
 
     const reflowed = layoutBlock(flow.node, {
       nodePos: flow.nodePos,
-      x: zone.contentX + flow.indentLeft,
+      x: blockContentX,
       y: flowY,
       availableWidth: flow.availableWidth,
       page: zone.pageNumber,
       measurer,
       fontConfig,
       ...(fontModifiers ? { fontModifiers } : {}),
-      constraintProvider,
+      lineSpaceProvider,
       ...(inlineRegistry ? { inlineRegistry } : {}),
     });
 
@@ -751,6 +718,34 @@ function reflowFlowsAgainstSquareObject(
   }
 
   return flows;
+}
+
+function subtractExclusionFromSegments(
+  segments: AvailableSegment[],
+  rectLeft: number,
+  rectRight: number,
+): AvailableSegment[] {
+  const next: AvailableSegment[] = [];
+
+  for (const segment of segments) {
+    const segLeft = segment.x;
+    const segRight = segment.x + segment.width;
+    const overlapLeft = Math.max(segLeft, rectLeft);
+    const overlapRight = Math.min(segRight, rectRight);
+
+    if (overlapRight <= overlapLeft) {
+      next.push(segment);
+      continue;
+    }
+
+    const leftWidth = overlapLeft - segLeft;
+    const rightWidth = segRight - overlapRight;
+
+    if (leftWidth > 0) next.push({ x: segLeft, width: leftWidth });
+    if (rightWidth > 0) next.push({ x: overlapRight, width: rightWidth });
+  }
+
+  return next;
 }
 
 export interface PageLayoutOptions {

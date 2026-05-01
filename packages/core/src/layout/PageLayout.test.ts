@@ -1024,7 +1024,7 @@ describe("runPipeline — float image wrapping", () => {
     expect(layout.anchoredObjects![0]!.wrapMode).toBe("square");
   });
 
-  it("square-left: constrained lines have constraintX set (text pushed right of image)", () => {
+  it("square-left: constrained lines are positioned in the right available segment", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
@@ -1038,16 +1038,13 @@ describe("runPipeline — float image wrapping", () => {
     });
     const block = layout.pages[0]!.blocks[0]!;
     const unconstrainedBlock = unconstrained.pages[0]!.blocks[0]!;
-    // First line should be constrained (float starts at block.y = margins.top)
     const firstLine = block.lines[0]!;
-    // constraintX = nodeWidth + FLOAT_MARGIN = 200 + 8 = 208
-    expect(firstLine.constraintX).toBe(208);
-    // effectiveWidth = contentWidth - nodeWidth - FLOAT_MARGIN = 650 - 200 - 8 = 442
-    expect(firstLine.effectiveWidth).toBe(442);
+    expect(firstLine.positioned).toBe(true);
+    expect(Math.min(...firstLine.spans.map((span) => span.x))).toBe(208);
     expect(block.lines.length).toBeGreaterThan(unconstrainedBlock.lines.length);
   });
 
-  it("square-right: constrained lines have effectiveWidth set (text wraps in left zone)", () => {
+  it("square-right: constrained lines are positioned in the left available segment", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-right" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
@@ -1056,10 +1053,9 @@ describe("runPipeline — float image wrapping", () => {
     });
     const block = layout.pages[0]!.blocks[0]!;
     const firstLine = block.lines[0]!;
-    // For square-right, text stays at left (constraintX = 0 / undefined)
-    expect(firstLine.constraintX).toBeUndefined();
-    // effectiveWidth = contentWidth - nodeWidth - FLOAT_MARGIN = 650 - 200 - 8 = 442
-    expect(firstLine.effectiveWidth).toBe(442);
+    expect(firstLine.positioned).toBe(true);
+    expect(Math.min(...firstLine.spans.map((span) => span.x))).toBe(0);
+    expect(Math.max(...firstLine.spans.map((span) => span.x + span.width))).toBeLessThanOrEqual(442);
   });
 
   it("square-left: float x position is at left margin", () => {
@@ -1103,7 +1099,7 @@ describe("runPipeline — float image wrapping", () => {
     let cumulativeH = 0;
     for (const line of block.lines) {
       cumulativeH += line.lineHeight;
-      if (cumulativeH > 200 && line.constraintX === undefined && line.effectiveWidth === undefined) {
+      if (cumulativeH > 200 && !line.positioned) {
         foundUnconstrained = true;
         break;
       }
@@ -1486,47 +1482,23 @@ describe("runPipeline — float image wrapping", () => {
     }
   });
 
-  // wrapText override branches in reflowFlowsAgainstSquareObject.
-  // Default `largest` picks the wider side per line; `left`/`right` force
-  // a side regardless of which is wider. `bothSides` is reserved for F7.
-  it("wrapText='left' forces text into the left zone even when right is wider", () => {
+  it("square wrap places one visual line into all available segments", () => {
     const { schema, fontConfig } = buildStarterKitContext();
-    // 100×100 image at x=200 (content area starts at 72): leftAvail ≈ 120,
-    // rightAvail ≈ 414. Without the override, default `largest` picks right.
     const img = schema.nodes["image"]!.create({
-      src: "", width: 100, height: 100,
-      wrapMode: "square", xAlign: "custom", x: 200, wrapText: "left",
+      src: "", width: 120, height: 100,
+      wrapMode: "square", xAlign: "custom", x: 300,
     });
     const anchorPara = schema.node("paragraph", null, [img]);
-    const text = schema.node("paragraph", null, [schema.text(longText)]);
+    const text = schema.node("paragraph", null, [schema.text("word ".repeat(30).trim())]);
     const layout = runPipeline(schema.node("doc", null, [anchorPara, text]), {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
-    const wrappedBlock = layout.pages[0]!.blocks[1]!;
-    // First constrained line sits in the left zone (constraintX=0, narrow width).
-    const firstLine = wrappedBlock.lines[0]!;
-    expect(firstLine.effectiveWidth).toBeLessThan(150);
-    expect(firstLine.constraintX ?? 0).toBeLessThan(100);
-  });
 
-  it("wrapText='right' forces text into the right zone even when left is wider", () => {
-    const { schema, fontConfig } = buildStarterKitContext();
-    // Same image but right-side-flush: leftAvail ≈ 414, rightAvail ≈ 120.
-    // wrapText='right' forces the narrow right side regardless.
-    const img = schema.nodes["image"]!.create({
-      src: "", width: 100, height: 100,
-      wrapMode: "square", xAlign: "custom", x: 500, wrapText: "right",
-    });
-    const anchorPara = schema.node("paragraph", null, [img]);
-    const text = schema.node("paragraph", null, [schema.text(longText)]);
-    const layout = runPipeline(schema.node("doc", null, [anchorPara, text]), {
-      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
-    });
-    const wrappedBlock = layout.pages[0]!.blocks[1]!;
-    const firstLine = wrappedBlock.lines[0]!;
-    // Constrained to the right zone: constraintX is past the image's right edge.
-    expect(firstLine.constraintX ?? 0).toBeGreaterThan(500);
-    expect(firstLine.effectiveWidth).toBeLessThan(150);
+    const firstLine = layout.pages[0]!.blocks[1]!.lines[0]!;
+    expect(firstLine.positioned).toBe(true);
+    expect(firstLine.segments).toHaveLength(2);
+    expect(firstLine.spans.some((span) => span.x < 220)).toBe(true);
+    expect(firstLine.spans.some((span) => span.x > 340)).toBe(true);
   });
 });
 
@@ -1702,16 +1674,11 @@ describe("runPipeline — top-bottom (break) float", () => {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
     const blocks = layout.pages.flatMap((p) => p.blocks).filter((b) => b.lines.length > 0);
-    const contentWidth = defaultPageConfig.pageWidth - defaultPageConfig.margins.left - defaultPageConfig.margins.right; // 650
-    // All real lines must use the full content width (no constraintX narrowing).
+    // All real lines must use normal full-width layout.
     for (const block of blocks) {
       for (const line of block.lines) {
         if (line.spans.length > 0) {
-          expect(line.constraintX ?? 0).toBe(0);
-          // effectiveWidth should be undefined (full width) or equal to contentWidth.
-          if (line.effectiveWidth !== undefined) {
-            expect(line.effectiveWidth).toBeCloseTo(contentWidth, 1);
-          }
+          expect(line.positioned ?? false).toBe(false);
         }
       }
     }
@@ -1754,23 +1721,16 @@ describe("runPipeline — behind / front anchored modes", () => {
   it("behind: emits no wrap zone — following text uses full content width", () => {
     const layout = buildLayout("behind");
     const textBlock = layout.pages[0]!.blocks[1]!;
-    // No constraintX, full effectiveWidth (650 = 794 - 72*2).
-    // Unconstrained lines: no constraintX, no effectiveWidth set (LineBreaker
-    // only stamps these when a wrap zone narrows the line).
     for (const line of textBlock.lines) {
-      expect(line.constraintX ?? 0).toBe(0);
-      expect(line.effectiveWidth ?? 650).toBe(650);
+      expect(line.positioned ?? false).toBe(false);
     }
   });
 
   it("front: emits no wrap zone — following text uses full content width", () => {
     const layout = buildLayout("front");
     const textBlock = layout.pages[0]!.blocks[1]!;
-    // Unconstrained lines: no constraintX, no effectiveWidth set (LineBreaker
-    // only stamps these when a wrap zone narrows the line).
     for (const line of textBlock.lines) {
-      expect(line.constraintX ?? 0).toBe(0);
-      expect(line.effectiveWidth ?? 650).toBe(650);
+      expect(line.positioned ?? false).toBe(false);
     }
   });
 });

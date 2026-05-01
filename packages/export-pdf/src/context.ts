@@ -204,18 +204,19 @@ export function createDrawHelpers(
       const line = block.lines[li]!;
       const isLastLineOfBlock =
         li === block.lines.length - 1 && !block.continuesOnNextPage;
-      const lineConstraintX = line.constraintX ?? 0;
-      const effectiveWidth = line.effectiveWidth ?? block.availableWidth;
-      const lineOffsetX =
-        lineConstraintX +
-        computeAlignmentOffset(block.align, effectiveWidth, line.width);
-      const spaceBonus = computeJustifySpaceBonus(
-        block.align,
-        line.spans,
-        effectiveWidth,
-        line.width,
-        isLastLineOfBlock,
-      );
+      const positioned = (line as { positioned?: boolean }).positioned === true;
+      const lineOffsetX = positioned
+        ? 0
+        : computeAlignmentOffset(block.align, block.availableWidth, line.width);
+      const spaceBonus = positioned
+        ? 0
+        : computeJustifySpaceBonus(
+            block.align,
+            line.spans,
+            block.availableWidth,
+            line.width,
+            isLastLineOfBlock,
+          );
       const baselineY = lineY + line.ascent;
       const pdfBaseline = flipY(baselineY, pageHeightPt);
 

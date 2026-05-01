@@ -29,9 +29,12 @@ export const TextBlockStrategy: BlockStrategy = {
       // split part that continues on the next page.
       const isLastLineOfBlock = isLastLine && !block.continuesOnNextPage;
 
-      const lineConstraintX = line.constraintX ?? 0;
-      const lineOffsetX = lineConstraintX + computeAlignmentOffset(align, line.effectiveWidth ?? availableWidth, line.width);
-      const spaceBonus = computeJustifySpaceBonus(align, line.spans, line.effectiveWidth ?? availableWidth, line.width, isLastLineOfBlock);
+      const lineOffsetX = line.positioned
+        ? 0
+        : computeAlignmentOffset(align, availableWidth, line.width);
+      const spaceBonus = line.positioned
+        ? 0
+        : computeJustifySpaceBonus(align, line.spans, availableWidth, line.width, isLastLineOfBlock);
       const lineY = block.y + getTotalLineHeight(lines, li);
       const baseline = lineY + line.ascent;
 

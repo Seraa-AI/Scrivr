@@ -29,14 +29,6 @@ export type PositionMode = "move-with-text";
 export type XAlign = "left" | "center" | "right" | "custom";
 
 /**
- * Per-image override of which side text wraps on around a `square`
- * image. `largest` (the v1 default) is wider-side wrap; `left` and
- * `right` force wrap on a specific side. `bothSides` is reserved for
- * F7 (deferred — single line straddling the image).
- */
-export type WrapText = "largest" | "left" | "right" | "bothSides";
-
-/**
  * The legacy single-mode attribute kept for backward compatibility
  * with documents created before the `wrapMode` + `xAlign` split.
  * Read-only — layout never branches on these directly; they are
@@ -64,7 +56,6 @@ export interface NormalizedImageAttrs {
   xAlign: XAlign;
   /** Set only when `xAlign === "custom"`. Content-area-relative px. */
   x: number | null;
-  wrapText: WrapText;
   margin: number;
 }
 
@@ -75,7 +66,6 @@ interface RawImageAttrs {
   positionMode?: unknown;
   xAlign?: unknown;
   x?: unknown;
-  wrapText?: unknown;
   margin?: unknown;
   // Legacy
   wrappingMode?: unknown;
@@ -114,7 +104,6 @@ export function normalizeImageAttrs(node: Node): NormalizedImageAttrs {
     positionMode: "move-with-text",
     xAlign: resolveXAlign(a),
     x: resolveCustomX(a),
-    wrapText: resolveWrapText(a.wrapText),
     margin: numberOrDefault(a.margin, ANCHORED_OBJECT_MARGIN),
   };
 }
@@ -156,18 +145,6 @@ function resolveXAlign(a: RawImageAttrs): XAlign {
 function resolveCustomX(a: RawImageAttrs): number | null {
   if (typeof a.x === "number" && Number.isFinite(a.x)) return a.x;
   return null;
-}
-
-function resolveWrapText(value: unknown): WrapText {
-  if (
-    value === "largest" ||
-    value === "left" ||
-    value === "right" ||
-    value === "bothSides"
-  ) {
-    return value;
-  }
-  return "largest";
 }
 
 function numberOrDefault(value: unknown, fallback: number): number {
@@ -269,7 +246,6 @@ export interface WrapZone {
   top: number;
   /** zone bottom in continuous global-Y */
   bottom: number;
-  wrapText: WrapText;
   anchorDocPos: number;
 }
 

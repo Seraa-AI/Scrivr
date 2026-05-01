@@ -253,9 +253,9 @@ export function drawBlock(
     const globalLineIndex = lineIndexOffset + li;
 
     // Alignment offset — must match what BlockLayout computed.
-    // For float-constrained lines, constraintX shifts the line right (square-left floats).
-    const lineConstraintX = line.constraintX ?? 0;
-    const lineOffsetX = lineConstraintX + computeAlignmentOffset(block.align, line.effectiveWidth ?? contentWidth, line.width);
+    const lineOffsetX = line.positioned
+      ? 0
+      : computeAlignmentOffset(block.align, contentWidth, line.width);
     const baseline = lineY + line.ascent;
     // textY: where the cursor draws — aligned to the text, not the full line.
     const textY = line.textAscent > 0

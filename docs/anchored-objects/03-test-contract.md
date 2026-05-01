@@ -53,8 +53,8 @@ Assertions:
   ▸ Image painted at x = contentX.
   ▸ B's first line y >= image.y - tolerance.
   ▸ B's lines whose y is within [image.y, image.y+image.height]
-    have constraintX > 0 and effectiveWidth < contentWidth (text
-    wraps on the right of the image).
+    are `positioned` and every span lies inside the right-side
+    available segment.
   ▸ B's lines whose y >= image.y + image.height + margin
     use full content width.
   ▸ A's flow contribution is its text height — NOT image.height.
@@ -77,12 +77,10 @@ Setup: paragraph A contains square image with xAlign: "center",
 
 Assertions:
   ▸ Image painted at x = contentX + (600-200)/2 = contentX + 200.
-  ▸ B's lines in the image's Y range pick the WIDER side via
-    wider-side wrap. With image centered, leftAvail = 200 - margin
-    and rightAvail = 200 - margin (equal); deterministic tie-break
-    picks the right side.
-  ▸ Each constrained line lies entirely outside the image's
-    horizontal range.
+  ▸ B's lines in the image's Y range use both available segments
+    when words fit on both sides.
+  ▸ Each positioned span lies entirely outside the image's horizontal
+    range.
 ```
 
 ### Square — `xAlign: "custom"` with arbitrary `x`
@@ -96,7 +94,7 @@ Assertions:
     content area).
   ▸ B's lines in the image's Y range wrap on whichever side has
     more room (left = 80 - margin; right = contentWidth - 280 -
-    margin; right wins → constraintX = image.right + margin).
+    margin; right wins → spans start at image.right + margin).
 ```
 
 ### Top-bottom
@@ -109,7 +107,7 @@ Setup: paragraph A contains only a top-bottom image (h=200,
 Assertions:
   ▸ A and the visible image are on the same page.
   ▸ B's first line y >= image.y + image.height + margin.
-  ▸ No line of B has constraintX or effectiveWidth set.
+  ▸ No line of B is segment-positioned.
   ▸ A's flow contribution = image.height (block reserves full
     flow width).
 ```
@@ -124,7 +122,7 @@ Assertions:
   ▸ A and the visible image are on the same page.
   ▸ B's first line y >= image.y + image.height + margin (behind
     block takes its slot).
-  ▸ B's lines have no constraintX or effectiveWidth set.
+  ▸ B's lines are not segment-positioned.
   ▸ Renderer paint order: image is drawn before B's text.
 ```
 
@@ -203,9 +201,8 @@ Hold on every `DocumentLayout`, regardless of input shape:
    - one is a square-mode anchored-object block, and
    - the other is a content fragment whose lines are constrained
      to the non-overlapping horizontal region defined by the
-     wrap zone (`constraintX` and `effectiveWidth` set such that
-     the line lies entirely outside the anchored-object block's
-     horizontal footprint).
+     wrap zone (each span lies entirely inside one of the line's
+     available segments).
 
    Any other vertical overlap is a bug — including two
    square-mode anchored-object blocks overlapping each other,
@@ -218,18 +215,17 @@ Hold on every `DocumentLayout`, regardless of input shape:
    contentBottom`, except for the documented oversized-object
    edge case (`object.height > pageContentHeight`).
 
-4. **Constraint metadata round-trip.**
+4. **Available segment round-trip.**
    For every line whose Y range overlaps a wrap zone on the same
-   page, the line carries `constraintX` and `effectiveWidth` such
-   that `block.x + constraintX + line.width <= zone.x` (for
-   right-wrap on a square-left object) or analogous for
-   square-right.
+   page, the line's usable inline area is the page content area
+   minus all active exclusion rectangles. Segment-positioned lines
+   carry the segment list used to place their spans.
 
-5. **Wrap zones do not overlap their associated object.**
-   For a `square-left` object, `zone.right = object.right +
-   FLOAT_MARGIN`; constrained lines start at `zone.right`. For
-   `square-right`, `zone.left = object.left - FLOAT_MARGIN`;
-   constrained lines end at `zone.left`.
+5. **Text never crosses an active exclusion rectangle.**
+   For each constrained line, every emitted text span's horizontal
+   extent must lie wholly inside one of that line's available
+   segments. Square wrap must preserve multiple segments on the same
+   visual line when both sides have usable width.
 
 ## Solver invariants
 
@@ -266,8 +262,7 @@ Hold across iterations of Stage 3:
 3. **Wrap-zone locality.**
    A wrap zone only affects flows whose `globalY` range overlaps
    the zone's vertical extent. Flows entirely outside the zone
-   must remain unconstrained (no `constraintX` /
-   `effectiveWidth` set). This catches:
+   must remain unconstrained (`positioned` is unset). This catches:
    - ghost constraints (lines narrowed by a zone they don't
      intersect)
    - stale constraint metadata after the solver moved a flow
@@ -356,8 +351,9 @@ Random documents whose **shape resembles real user input**:
   top-bottom, occasionally square modes, rarely behind/front).
 - Image sizes within the content area's reasonable bounds (not
   uniformly random over `[50, 550]`).
-- `floatOffset` either zero or small (single-digit pixels), not
-  uniformly distributed over `[-100, 100]`.
+- Legacy `floatOffset` attrs either absent or near defaults; layout
+  ignores them, so fuzzing large offsets mainly tests compatibility
+  preservation rather than geometry.
 
 This kind of fuzz catches real bugs without over-driving the
 design.
@@ -369,7 +365,7 @@ Random documents with extreme synthetic parameters:
 - Density >40% anchored objects per paragraph.
 - Uniform-random image sizes including ones taller than any
   page.
-- Uniform-random `floatOffset` values up to ±100 px.
+- Uniform-random legacy `floatOffset` values up to ±100 px.
 - Mode mix that ignores realistic distribution.
 
 These find synthetic edge cases that are not user bugs. A failure

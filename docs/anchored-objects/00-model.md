@@ -67,7 +67,8 @@ Detailed semantics, geometry, and wider-side wrap rules per mode live in
 | **wrap effect / wrap footprint** | The constraint the object imposes on surrounding text. |
 | **paint effect** | How the object is rendered, including layer order. |
 | **anchored-object block** | A flow block produced by the layout pipeline to represent the object's flow contribution. Emitted only for modes whose flow contribution is non-zero. |
-| **wrap zone** | A rectangular region where text is excluded or narrowed — derived from the image's actual painted rectangle. |
+| **wrap zone / exclusion rectangle** | A rectangular region removed from the usable inline space for overlapping text lines — derived from the image's actual painted rectangle. |
+| **available segment** | A horizontal run of usable inline space left after subtracting active exclusion rectangles from the content area at a line's Y position. |
 
 > **Naming.** "Float" is a legacy / user-facing term. Internally — and
 > in every doc in this directory — the engine uses **anchored object**.
@@ -188,7 +189,38 @@ would resolve to.
 For pagination, this also means: if a `top-bottom` / `behind` / `front`
 object cannot fit on its anchor's page, the anchor moves to the next
 page too, taking the object with it. (The `square` case is handled by
-the wrap zone — text wraps; nothing is "pushed.")
+the wrap zone / exclusion rectangle — text wraps; nothing is "pushed.")
+
+## Exclusion-segment model
+
+The clean wrapping model is:
+
+```
+wrapMode = behavior
+xAlign/x = placement
+availableSegments = content area - active exclusion rectangles
+```
+
+A square anchored object does not wrap text directly. It is placed
+first, then its painted rectangle plus `margin` becomes an exclusion
+rectangle. Each line asks: "at this Y range, what horizontal segments
+remain usable?"
+
+For a centered image, the answer can be two segments:
+
+```
+left text segment | excluded image rectangle | right text segment
+```
+
+For a left-aligned image, the left segment has zero or tiny width, so
+the practical result is right-side wrapping. For a right-aligned image,
+the practical result is left-side wrapping. `top-bottom` is the same
+geometry with a full-content-width exclusion rectangle, so the line has
+no usable segments and skips below the object.
+
+The line breaker consumes this segment list directly. Square wrap does
+not choose a side: every surviving segment remains available, so one
+visual line can place text on both sides of the same image.
 
 ## The strongest invariant
 
@@ -219,11 +251,6 @@ These exist in Word/Docs but are explicitly **not** part of the v1 model:
   move the anchor without moving the image's visual position.
 - **Tight / through wrap** — non-rectangular wrap zones following
   the image's alpha shape; user-edited wrap boundary.
-- **Two-sided wrap** — text simultaneously on both sides of an image
-  in the same line (a line with a "hole" in the middle). v1 uses
-  wider-side wrap: each line picks the side with more available
-  space.
-
 These are documented in `05-future.md` as deferred work. The v1
 contract assumes:
 - Every anchored object has exactly one anchor in flow.
@@ -231,8 +258,9 @@ contract assumes:
   co-located by drag mechanics (Rule 5).
 - Oversized objects render at their anchor and accept visual overflow.
 - Wrap zones are rectangular.
-- Lines that overlap a `square` wrap zone wrap on a single side
-  (the side with more available width).
+- Lines that overlap a `square` wrap zone are laid out inside the
+  available segments left after all active exclusion rectangles are
+  subtracted from content width.
 
 ## OOXML mapping
 
@@ -251,7 +279,7 @@ need translation:
 | `xAlign: "center"` | `<wp:positionH relativeFrom="margin"><wp:align>center</wp:align></wp:positionH>` |
 | `xAlign: "right"` | `<wp:positionH relativeFrom="margin"><wp:align>right</wp:align></wp:positionH>` |
 | `xAlign: "custom"`, `x` | `<wp:positionH relativeFrom="margin"><wp:posOffset>…</wp:posOffset></wp:positionH>` |
-| `wrapText` | `wrapText` attribute on `<wp:wrapSquare/>` (`largest` / `left` / `right` / `bothSides`) |
+| square segment behavior | equivalent to OOXML `<wp:wrapSquare wrapText="bothSides"/>` |
 | `positionMode: "move-with-text"` | implicit when `<wp:positionV>` is anchor- or paragraph-relative |
 | (deferred) `positionMode: "fix-on-page"` | `<wp:positionV relativeFrom="page">` |
 | (deferred) tight wrap | `<wp:wrapTight>` + `<wp:wrapPolygon>` |

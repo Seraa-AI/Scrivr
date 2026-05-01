@@ -1,5 +1,12 @@
 # Float Layout v2 — Full Specification
 
+> **Superseded design note.** This document records the retired
+> CSS-float-era solver design. The authoritative model is now
+> `docs/anchored-objects/00-model.md` through `05-future.md`.
+> In particular, layout no longer reads `floatOffset`, and square
+> wrapping should be understood as exclusion rectangles producing
+> available line segments, not as a float mode choosing one side.
+
 > **Status:** Draft spec. The POC lives on branch `fix/float-global-layout` (PR #51).
 > This document captures everything learned from the POC so the next implementation
 > can start from a clear picture.

@@ -19,7 +19,6 @@ interface FakeAttrs {
   positionMode?: string;
   xAlign?: string;
   x?: number | null;
-  wrapText?: string;
   margin?: number;
   wrappingMode?: string;
   floatOffset?: { x: number; y: number };

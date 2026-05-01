@@ -139,7 +139,6 @@ export const schema = new Schema({
         positionMode: { default: "move-with-text" },
         xAlign: { default: "left" },
         x: { default: null },
-        wrapText: { default: "largest" },
         margin: { default: 8 },
         // ── Legacy attrs (read-side compat — see normalizeImageAttrs) ────
         wrappingMode: { default: "inline" },

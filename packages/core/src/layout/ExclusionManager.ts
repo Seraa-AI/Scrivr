@@ -1,9 +1,9 @@
 /**
- * ExclusionManager — tracks float image exclusion zones for text wrapping.
+ * ExclusionManager — tracks anchored-object exclusion zones for text wrapping.
  *
- * Float images carve rectangular exclusion zones out of the page's text area.
- * When a paragraph's lines are laid out, the ConstraintProvider queries this
- * manager to narrow the available line width around each float.
+ * Anchored objects carve rectangular exclusion zones out of the page's text
+ * area. When text lines are laid out, they query the remaining available
+ * inline segments at their Y position.
  */
 
 export interface ExclusionRect {
@@ -23,15 +23,22 @@ export interface ExclusionRect {
   docPos: number;
 }
 
-export interface LineConstraint {
-  /** Left edge offset — delta from contentX (the block's content left edge) */
+export interface AvailableSegment {
+  /** Absolute X coordinate of the usable inline segment. */
   x: number;
-  /** Available width (0 means no space — top-bottom / full case) */
+  /** Usable inline width in CSS pixels. */
   width: number;
+}
+
+export interface LineSpace {
   /**
-   * When set, the line breaker should flush the current partial line and jump
-   * cumulativeLineY to this absolute Y before sampling the next constraint.
-   * Used for 'full' (top-bottom) floats so text skips cleanly past the image.
+   * Usable inline regions after subtracting all active exclusion rects from
+   * the content area. Multiple entries represent a line with a hole in it.
+   */
+  segments: AvailableSegment[];
+  /**
+   * Set when every usable segment has been removed by a full-width exclusion.
+   * A segmented line breaker can jump to this Y instead of emitting empty lines.
    */
   skipToY?: number;
 }
@@ -44,39 +51,38 @@ export class ExclusionManager {
   }
 
   /**
-   * Returns the tightest available line constraint at absoluteY for lineHeight pixels.
-   * contentX and contentWidth define the full available area without floats.
-   * Returns null if no exclusion affects this line.
+   * Returns all horizontal text opportunities at absoluteY after subtracting
+   * active exclusion rectangles from the content area.
+   *
+   * This is the clean anchored-object model: placed objects contribute
+   * rectangles; line layout asks which inline segments remain at its current Y.
    */
-  getConstraint(
+  getAvailableSegments(
     page: number,
     absoluteY: number,
     lineHeight: number,
     contentX: number,
     contentWidth: number,
-  ): LineConstraint | null {
-    let leftEdge = contentX;
-    let rightEdge = contentX + contentWidth;
-    let affected = false;
+  ): LineSpace {
+    const lineBottom = absoluteY + lineHeight;
+    let segments: AvailableSegment[] = [{ x: contentX, width: contentWidth }];
+    let skipToY: number | undefined;
 
     for (const r of this.rects) {
       if (r.page !== page) continue;
-      // Does this line's Y range overlap the exclusion's Y range?
-      if (absoluteY + lineHeight <= r.y || absoluteY >= r.bottom) continue;
-      affected = true;
-      if (r.side === "left") {
-        leftEdge = Math.max(leftEdge, r.right);
-      } else if (r.side === "right") {
-        rightEdge = Math.min(rightEdge, r.x);
-      } else {
-        // 'full' — top-bottom: signal the line breaker to skip past this zone
-        return { x: 0, width: 0, skipToY: r.bottom };
+      if (lineBottom <= r.y || absoluteY >= r.bottom) continue;
+
+      if (r.side === "full") {
+        skipToY = Math.max(skipToY ?? r.bottom, r.bottom);
       }
+
+      segments = subtractRectFromSegments(segments, r.x, r.right);
     }
 
-    if (!affected) return null;
-    const width = Math.max(0, rightEdge - leftEdge);
-    return { x: leftEdge - contentX, width };
+    segments = segments.filter((segment) => segment.width > 0);
+    return skipToY !== undefined && segments.length === 0
+      ? { segments, skipToY }
+      : { segments };
   }
 
   /**
@@ -107,4 +113,36 @@ export class ExclusionManager {
   clear(): void {
     this.rects = [];
   }
+}
+
+function subtractRectFromSegments(
+  segments: AvailableSegment[],
+  rectLeft: number,
+  rectRight: number,
+): AvailableSegment[] {
+  const next: AvailableSegment[] = [];
+
+  for (const segment of segments) {
+    const segLeft = segment.x;
+    const segRight = segment.x + segment.width;
+    const overlapLeft = Math.max(segLeft, rectLeft);
+    const overlapRight = Math.min(segRight, rectRight);
+
+    if (overlapRight <= overlapLeft) {
+      next.push(segment);
+      continue;
+    }
+
+    const leftWidth = overlapLeft - segLeft;
+    const rightWidth = segRight - overlapRight;
+
+    if (leftWidth > 0) {
+      next.push({ x: segLeft, width: leftWidth });
+    }
+    if (rightWidth > 0) {
+      next.push({ x: overlapRight, width: rightWidth });
+    }
+  }
+
+  return next;
 }
