@@ -672,10 +672,30 @@ function resolveAnchoredObjects(
         continue;
       }
 
-      // Top-bottom's vertical flow is fully represented by the Stage 1
-      // anchored-object block: height reserves the object, spaceAfter reserves
-      // attrs.margin, and any Stage 3 globalY push re-stamps downstream flows.
-      // No second clearance barrier is needed here.
+      // Top-bottom: the Stage 1 anchored-object FlowBlock still reserves
+      // the vertical flow space (height = imageHeight, spaceAfter = margin)
+      // — that's how text-before / image / text-after are positioned.
+      // Phase 5 V1: also contribute a `side: "full"` rect to the page's
+      // shared ExclusionManager so square-wrap reflows on the same page
+      // see the top-bottom band as a real exclusion (the architectural
+      // unification — all wrap modes feed one manager). The rip-out of
+      // the FlowBlock partKind path itself is deferred to Phase 5 V2.
+      if (wrapMode === "top-bottom") {
+        let exclusions = exclusionsByPage.get(pageNumber);
+        if (!exclusions) {
+          exclusions = new ExclusionManager();
+          exclusionsByPage.set(pageNumber, exclusions);
+        }
+        const margin = attrs.margin;
+        exclusions.addFullWidthRect({
+          page: pageNumber,
+          y: paintedGlobalY - margin,
+          bottom: paintedGlobalY + height + margin,
+          contentX,
+          contentWidth,
+          docPos: anchor.docPos,
+        });
+      }
     }
   }
 

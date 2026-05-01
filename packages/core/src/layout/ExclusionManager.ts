@@ -51,6 +51,36 @@ export class ExclusionManager {
   }
 
   /**
+   * Add a full-width exclusion rect that always produces `skipToY` for any
+   * overlapping line. The rect's `x` / `right` are forced to span the
+   * caller-provided content area so `subtractRectFromSegments` can never
+   * leave a side segment that suppresses `skipToY` in the return value.
+   *
+   * Use this for top-bottom anchored objects where the wrap intent is
+   * "no text on this Y band" — `addRect` with hand-set `x`/`right` is
+   * easy to get wrong (a 1px content-bounds mismatch silently turns
+   * skipToY off).
+   */
+  addFullWidthRect(rect: {
+    page: number;
+    y: number;
+    bottom: number;
+    contentX: number;
+    contentWidth: number;
+    docPos: number;
+  }): void {
+    this.rects.push({
+      page: rect.page,
+      x: rect.contentX,
+      right: rect.contentX + rect.contentWidth,
+      y: rect.y,
+      bottom: rect.bottom,
+      side: "full",
+      docPos: rect.docPos,
+    });
+  }
+
+  /**
    * Returns all horizontal text opportunities at absoluteY after subtracting
    * active exclusion rectangles from the content area.
    *
