@@ -6,6 +6,16 @@ import {
   computeNewSize,
 } from "./ResizeController";
 import { normalizeImageAttrs } from "../layout/AnchoredObjects";
+import { dragDebugLog } from "./DragDebugOverlay";
+
+/**
+ * How close to the rect edge the pointer must be for a resize-handle hit to
+ * register. Pointers further inside than this fall through to body-drag
+ * hit-testing — without it, an image bigger than ~24px would have no
+ * surface available for body drag because resize-handle hit areas would
+ * fully cover the rect via getHandles' 8-point grid.
+ */
+const EDGE_BAND_PX = 12;
 
 /**
  * Minimal view of a tile entry — PointerController only needs access to
@@ -80,6 +90,11 @@ export class PointerController {
       ghostY: number;
       /** Page + coords of the resolved insertion caret, or null if unresolved. */
       caret: { page: number; x: number; y: number; height: number } | null;
+      /**
+       * True when the cursor is in a region that can't accept a drop (currently
+       * inter-page gaps). Renderer fades the ghost; mouseup commits a no-op.
+       */
+      disabled: boolean;
     };
   } | null = null;
 
@@ -151,6 +166,7 @@ export class PointerController {
     ghostX: number;
     ghostY: number;
     caret: { page: number; x: number; y: number; height: number } | null;
+    disabled: boolean;
   } | null {
     if (!this.anchoredDrag) return null;
     return {
@@ -163,6 +179,7 @@ export class PointerController {
       ghostX: this.anchoredDrag.overlay.ghostX,
       ghostY: this.anchoredDrag.overlay.ghostY,
       caret: this.anchoredDrag.overlay.caret,
+      disabled: this.anchoredDrag.overlay.disabled,
     };
   }
 
@@ -171,19 +188,22 @@ export class PointerController {
   private hitTest(
     clientX: number,
     clientY: number,
-  ): { page: number; docX: number; docY: number } | null {
+  ): { page: number; docX: number; docY: number; gap?: boolean } | null {
     const containerRect = this.deps.tilesContainer.getBoundingClientRect();
     const visualX = clientX - containerRect.left;
     const visualY = clientY - containerRect.top;
 
-    // In paged mode, check if the click landed in an inter-page gap.
+    // In paged mode, mark inter-page-gap hits with gap:true. Drag callers
+    // treat gap hits as invalid drop targets (no transaction, no caret);
+    // text-click callers still get a docY clamped to the page bottom so the
+    // existing "click below text in a page" behaviour is preserved.
     if (!this.deps.isPageless()) {
       const sh = this.deps.slotHeight();
       const th = this.deps.tileHeight();
       const posInSlot = visualY % sh;
       if (posInSlot >= th) {
         const tileIndex = Math.floor(visualY / sh);
-        return { page: tileIndex + 1, docX: visualX, docY: th };
+        return { page: tileIndex + 1, docX: visualX, docY: th, gap: true };
       }
     }
 
@@ -202,8 +222,30 @@ export class PointerController {
     const sel = this.activeSelection();
     if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image")
       return null;
-    const r = editor.charMap.getObjectRect(sel.from);
+    // Step 6: read through editor.getNodeRect so anchored placements come
+    // from layout.anchoredObjects (Stage 3 authoritative) and inline images
+    // continue to fall back to charMap. Prevents handle-vs-body drift on
+    // virtualized pages.
+    const r = editor.getNodeRect(sel.from);
     if (!r || r.page !== page) return null;
+
+    // Inner body — pointer is well inside the rect, away from any edge.
+    // Fall through so the anchored-body drag wins; otherwise resize handles
+    // would steal hits from the entire bounding box, leaving no surface for
+    // body drag on normally-sized images.
+    const insideRect =
+      canvasX >= r.x && canvasX <= r.x + r.width &&
+      canvasY >= r.y && canvasY <= r.y + r.height;
+    if (insideRect) {
+      const distToEdge = Math.min(
+        canvasX - r.x,
+        r.x + r.width - canvasX,
+        canvasY - r.y,
+        r.y + r.height - canvasY,
+      );
+      if (distToEdge > EDGE_BAND_PX) return null;
+    }
+
     return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
   }
 
@@ -253,6 +295,7 @@ export class PointerController {
         pendingHeight: startH,
       };
       this.setCursorAll(resizeHit.cursor);
+      dragDebugLog(editor, "down", { hitKind: "resize", handle: resizeHit.id, docPos: sel.from, page, docX, docY });
       return;
     }
 
@@ -290,9 +333,11 @@ export class PointerController {
           ghostX: anchoredHit.x,
           ghostY: anchoredHit.y,
           caret: null,
+          disabled: false,
         },
       };
       this.setCursorAll("move");
+      dragDebugLog(editor, "down", { hitKind: "anchored", docPos: anchoredHit.docPos, page, docX, docY });
       return;
     }
 
@@ -378,6 +423,14 @@ export class PointerController {
     // is paint-only.
     if (this.anchoredDrag) {
       this.updateAnchoredDragOverlay(e);
+      const dx = e.clientX - this.anchoredDrag.startClientX;
+      const dy = e.clientY - this.anchoredDrag.startClientY;
+      dragDebugLog(editor, "move", {
+        dx,
+        dy,
+        ghostPage: this.anchoredDrag.overlay.ghostPage,
+        caretPage: this.anchoredDrag.overlay.caret?.page ?? null,
+      });
       this.deps.scheduleUpdate();
       return;
     }
@@ -455,6 +508,17 @@ export class PointerController {
       return;
     }
 
+    // Drop in inter-page gap → no transaction. The ghost was already shown
+    // disabled during mousemove; commit must mirror that.
+    const finalHit = this.hitTest(e.clientX, e.clientY);
+    if (finalHit?.gap) {
+      dragDebugLog(editor, "gapDrop", {
+        docPos: this.anchoredDrag.docPos,
+        page: finalHit.page,
+      });
+      return;
+    }
+
     const { docPos, nodeSize } = this.anchoredDrag;
 
     // Resolve horizontal target X.
@@ -470,19 +534,41 @@ export class PointerController {
     // node's range, no docPos change.
     const newDocPos = this.resolveDragTargetDocPos(e);
 
-    const wantsAttrsUpdate = newX !== null;
-    const wantsMove =
-      newDocPos !== null && (newDocPos < docPos || newDocPos > docPos + nodeSize);
+    // Clamp-no-move guard: a horizontal drag that clamped to the same X (e.g.
+    // dragging left while already at contentX) produces newX === startImageX.
+    // Without this guard we'd dispatch a setNodeAttrs that flips xAlign from
+    // a named value to "custom" with no visual change AND triggers a re-layout.
+    const horizontallyStill =
+      newX === null || Math.abs(newX - this.anchoredDrag.startImageX) < 1;
+    const verticallyStill =
+      newDocPos === null || (newDocPos >= docPos && newDocPos <= docPos + nodeSize);
 
-    const attrs = wantsAttrsUpdate ? { xAlign: "custom" as const, x: newX } : null;
-
-    if (wantsMove && attrs) {
-      editor.moveAndUpdateNode(docPos, newDocPos, attrs);
-    } else if (wantsMove) {
-      editor.moveNode(docPos, newDocPos);
-    } else if (attrs) {
-      editor.setNodeAttrs(docPos, attrs);
+    if (horizontallyStill && verticallyStill) {
+      dragDebugLog(editor, "clampedNoMove", {
+        docPos,
+        attemptedX: newX,
+        startImageX: this.anchoredDrag.startImageX,
+        attemptedDocPos: newDocPos,
+      });
+      return;
     }
+
+    let commitPath: "moveAndUpdateNode" | "moveNode" | "setNodeAttrs";
+    if (!horizontallyStill && !verticallyStill && newX !== null && newDocPos !== null) {
+      editor.moveAndUpdateNode(docPos, newDocPos, { xAlign: "custom", x: newX });
+      commitPath = "moveAndUpdateNode";
+    } else if (!verticallyStill && newDocPos !== null) {
+      editor.moveNode(docPos, newDocPos);
+      commitPath = "moveNode";
+    } else if (newX !== null) {
+      editor.setNodeAttrs(docPos, { xAlign: "custom", x: newX });
+      commitPath = "setNodeAttrs";
+    } else {
+      // Guarded above: at least one of horizontally/vertically still is false.
+      return;
+    }
+
+    dragDebugLog(editor, "commit", { commitPath, docPos, newX, newDocPos });
   }
 
   /**
@@ -529,6 +615,8 @@ export class PointerController {
 
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return null;
+    // Step 4 invariant: gap drops never resolve a docPos.
+    if (hit.gap) return null;
 
     // Cross-page drag: charMap's posAtCoords is page-scoped — `nearestLine`
     // returns undefined on un-populated pages and the lookup falls through
@@ -554,10 +642,45 @@ export class PointerController {
         : editor.charMap.posAbove(from, probeX);
       if (fallback === null || fallback === undefined) return null;
       pos = fallback;
+    } else if (pos === 0 && from !== 0) {
+      // Cross-page failure: posAtCoords returned 0 because the destination
+      // page has no charMap data (virtualized page that paintContent hasn't
+      // touched yet). Walk layout.pages by Y range so cross-page drag never
+      // silently collapses to docPos 0 and moves the image to doc start.
+      const layoutFallback = this.resolveByLayoutFragments(hit.page, hit.docY);
+      if (layoutFallback !== null) pos = layoutFallback;
     }
 
     if (pos === from) return null;
     return pos;
+  }
+
+  /**
+   * Last-resort docPos resolver for cross-page drag. Walks the destination
+   * page's layout blocks and returns the start-of-content docPos for the
+   * block whose Y range contains `docY`, or for the nearest block when no
+   * block strictly contains the point. Returns null on pages with no blocks.
+   */
+  private resolveByLayoutFragments(pageNumber: number, docY: number): number | null {
+    const layout = this.deps.editor.layout;
+    const pages = layout.pages;
+    if (!pages || pages.length === 0) return null;
+    const page = pages[pageNumber - 1];
+    if (!page || page.blocks.length === 0) return null;
+
+    let best: { block: typeof page.blocks[number]; distance: number } | null = null;
+    for (const block of page.blocks) {
+      const top = block.y;
+      const bottom = block.y + block.height;
+      if (docY >= top && docY <= bottom) {
+        // Exact hit — return the start of this block's content.
+        return block.nodePos + 1;
+      }
+      const distance = docY < top ? top - docY : docY - bottom;
+      if (!best || distance < best.distance) best = { block, distance };
+    }
+
+    return best ? best.block.nodePos + 1 : null;
   }
 
   /**
@@ -575,6 +698,21 @@ export class PointerController {
     // mousedown. Stays anchored to where the user originally grabbed.
     const ghostX = hit.docX - this.anchoredDrag.grabOffsetX;
     const ghostY = hit.docY - this.anchoredDrag.grabOffsetY;
+
+    // Inter-page gap: invalid drop target. Keep the ghost rendered (so the
+    // user sees what they're dragging) but mark disabled so the renderer
+    // fades it and suppresses the caret.
+    if (hit.gap) {
+      this.anchoredDrag.overlay = {
+        ghostPage: hit.page,
+        ghostX,
+        ghostY,
+        caret: null,
+        disabled: true,
+      };
+      this.setCursorAll("not-allowed");
+      return;
+    }
 
     // Resolve the insertion caret on the destination page. Populate the
     // page first — same reason as resolveDragTargetDocPos: posAtCoords is
@@ -598,7 +736,10 @@ export class PointerController {
       ghostX,
       ghostY,
       caret,
+      disabled: false,
     };
+    // Restore the move cursor in case we just exited a gap.
+    this.setCursorAll("move");
   }
 
   private setCursorAll(cursor: string): void {

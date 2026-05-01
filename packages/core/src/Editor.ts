@@ -17,13 +17,14 @@ import { defaultPageConfig } from "./layout/PageLayout";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
 import type { FontConfig } from "./layout/FontConfig";
 import { LayoutCoordinator } from "./layout/LayoutCoordinator";
-import type { CharacterMap } from "./layout/CharacterMap";
+import type { CharacterMap, ObjectRectEntry } from "./layout/CharacterMap";
 import { InputBridge } from "./input/InputBridge";
 import { PasteTransformer } from "./input/PasteTransformer";
 import { BaseEditor } from "./BaseEditor";
 import type { EditorEvents } from "./types/augmentation";
 import { SurfaceRegistry } from "./surfaces/SurfaceRegistry";
 import type { PageChromeContribution } from "./layout/PageMetrics";
+import { installDragDebugOverlay, type DragDebugConfig } from "./renderer/DragDebugOverlay";
 
 export type EditorChangeHandler = (state: EditorState) => void;
 
@@ -110,6 +111,13 @@ export interface EditorOptions {
    * Defaults to false.
    */
   readOnly?: boolean;
+  /**
+   * Diagnostic flags. Currently only `drag` — when true, PointerController
+   * console.debugs structured drag events and DragDebugOverlay paints anchored
+   * vs charMap rects on every page. Mutable at runtime via `editor.debug`;
+   * call `editor.redraw()` after toggling to repaint overlays.
+   */
+  debug?: DragDebugConfig;
 }
 
 /**
@@ -221,6 +229,15 @@ export class Editor extends BaseEditor implements IEditor {
    */
   private readonly overlayRenderHandlers = new Set<OverlayRenderHandler>();
 
+  /**
+   * Diagnostic flags. Mutable — flip `editor.debug.drag = true; editor.redraw()`
+   * to enable the drag debug overlay and structured drag-event logging.
+   */
+  debug: DragDebugConfig;
+
+  /** Dispose handle for the always-installed drag debug overlay handler. */
+  private readonly _disposeDragDebug: () => void;
+
   constructor({
     extensions = [StarterKit],
     pageConfig,
@@ -229,6 +246,7 @@ export class Editor extends BaseEditor implements IEditor {
     onCursorTick,
     startReady = true,
     readOnly = false,
+    debug = {},
   }: EditorOptions) {
     // BaseEditor handles: manager, state, commands, storage, event emitter
     super({ extensions });
@@ -369,6 +387,11 @@ export class Editor extends BaseEditor implements IEditor {
     // Apply initial read-only state after infrastructure is ready.
     if (readOnly) this.setReadOnly(true);
 
+    // Drag debug overlay — always installed; self-gates on `this.debug.drag`
+    // at paint time so toggling at runtime requires no re-registration.
+    this.debug = debug;
+    this._disposeDragDebug = installDragDebugOverlay(this);
+
     // Fire onEditorReady after ALL infrastructure (including view) is set up.
     this._fireEditorReady();
   }
@@ -504,6 +527,7 @@ export class Editor extends BaseEditor implements IEditor {
     // post-destroy callers can't re-invoke plugin callbacks.
     this.surfaces.destroy();
     this.lc.destroy();
+    this._disposeDragDebug();
     this.overlayRenderHandlers.clear();
     this.cursorManager.stop();
     this.unmount();
@@ -598,8 +622,7 @@ export class Editor extends BaseEditor implements IEditor {
   }
 
   getNodeViewportRect(docPos: number): DOMRect | null {
-    this.lc.ensureLayout();
-    const rect = this.lc.charMap.getObjectRect(docPos);
+    const rect = this.getNodeRect(docPos);
     if (!rect) return null;
     const pageScreenRect = this.ib.lookupPageScreenRect(rect.page);
     if (!pageScreenRect) return null;
@@ -608,6 +631,37 @@ export class Editor extends BaseEditor implements IEditor {
       pageScreenRect.screenTop  + rect.y,
       rect.width, rect.height,
     );
+  }
+
+  /**
+   * Single-source-of-truth rect lookup for image-like nodes.
+   *
+   * Anchored objects (`wrapMode !== "inline"`) are authoritative in
+   * `layout.anchoredObjects` — Stage 3 owns their position. Inline images
+   * register a rect in `charMap.objectRects` during paint. `getNodeRect`
+   * checks the anchored set first, falls back to the charMap.
+   *
+   * Without this consolidation, hitHandleAt and overlay handle painting
+   * could read a stale charMap rect on a virtualized page where Stage 3
+   * already moved the anchor — handles render at the wrong place and the
+   * resize drag pivots on the wrong corner.
+   */
+  getNodeRect(docPos: number): ObjectRectEntry | undefined {
+    this.lc.ensureLayout();
+    const anchored = this.lc.current.anchoredObjects?.find(
+      (o) => o.docPos === docPos,
+    );
+    if (anchored) {
+      return {
+        docPos: anchored.docPos,
+        x: anchored.x,
+        y: anchored.y,
+        width: anchored.width,
+        height: anchored.height,
+        page: anchored.page,
+      };
+    }
+    return this.lc.charMap.getObjectRect(docPos);
   }
 
   /**

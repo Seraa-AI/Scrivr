@@ -312,6 +312,10 @@ export function renderAnchoredDragSource(
 /**
  * Translucent rect that follows the cursor while an anchored object is being
  * dragged. Shows where the image will land if the user releases now.
+ *
+ * `disabled` swaps the blue accent for a muted slate wash so the user can
+ * see what they're dragging but is signalled "this drop won't commit" — used
+ * when the cursor is in an inter-page gap (no valid drop target).
  */
 export function renderAnchoredDragGhost(
   ctx: CanvasRenderingContext2D,
@@ -319,21 +323,32 @@ export function renderAnchoredDragGhost(
   y: number,
   width: number,
   height: number,
+  options?: { disabled?: boolean },
 ): void {
   if (width <= 0 || height <= 0) return;
 
+  const disabled = options?.disabled === true;
+  const fill = disabled
+    ? "rgba(148, 163, 184, 0.18)"  // slate-400 wash
+    : "rgba(59, 130, 246, 0.18)";  // blue-500 wash
+  const stroke = disabled
+    ? "rgba(100, 116, 139, 0.85)"  // slate-500
+    : "rgba(37, 99, 235, 0.85)";   // blue-600
+
   ctx.save();
-  ctx.fillStyle = "rgba(59, 130, 246, 0.18)"; // blue-500 wash
+  ctx.fillStyle = fill;
   snappedFillRect(ctx, x, y, width, height);
 
-  ctx.strokeStyle = "rgba(37, 99, 235, 0.85)"; // blue-600
+  ctx.strokeStyle = stroke;
   ctx.lineWidth = 1.5;
+  if (disabled) ctx.setLineDash([4, 3]);
   ctx.strokeRect(
     Math.round(x) + 0.5,
     Math.round(y) + 0.5,
     Math.round(width) - 1,
     Math.round(height) - 1,
   );
+  if (disabled) ctx.setLineDash([]);
   ctx.restore();
 }
 

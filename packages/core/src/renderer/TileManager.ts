@@ -600,7 +600,8 @@ export class TileManager {
     const pendingAnchored = this.pointer.pendingAnchoredDrag;
     const pendingAnchoredKey = pendingAnchored
       ? `${pendingAnchored.ghostPage}:${pendingAnchored.ghostX}:${pendingAnchored.ghostY}` +
-        `:${pendingAnchored.caret?.page ?? "-"}:${pendingAnchored.caret?.x ?? "-"}:${pendingAnchored.caret?.y ?? "-"}`
+        `:${pendingAnchored.caret?.page ?? "-"}:${pendingAnchored.caret?.x ?? "-"}:${pendingAnchored.caret?.y ?? "-"}` +
+        `:${pendingAnchored.disabled ? "1" : "0"}`
       : "";
     const blinkDirty =
       tile.tileIndex === cursorTile && tile.lastBlinkState !== blinkOn;
@@ -685,7 +686,9 @@ export class TileManager {
 
     // ── Image selection handles ───────────────────────────────────────────
     if (isNodeSel && pmSel.node.type.name === "image") {
-      const objRect = this.editor.charMap.getObjectRect(pmSel.from);
+      // Single-source rect lookup — anchored from layout.anchoredObjects,
+      // inline from charMap. Drops the handle-vs-body drift class.
+      const objRect = this.editor.getNodeRect(pmSel.from);
       if (objRect && objRect.page === pageNum) {
         // During resize drag, show ghost handles at the pending size, pinned
         // to the edge opposite the dragged handle. Without computeGhostRect
@@ -738,6 +741,7 @@ export class TileManager {
           pendingAnchored.ghostY,
           pendingAnchored.width,
           pendingAnchored.height,
+          { disabled: pendingAnchored.disabled },
         );
       }
       // Insertion caret on whichever page resolved the target docPos.
