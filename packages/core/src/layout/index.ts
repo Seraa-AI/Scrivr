@@ -20,7 +20,6 @@ export type {
   AnchoredObjectInput,
   AnchoredObjectPlacement,
   WrapZone,
-  FlowClearance,
   AnchoredObjectSolverResult,
 } from "./AnchoredObjects";
 export { ANCHORED_OBJECT_MARGIN, normalizeImageAttrs, resolveImageX, isWrapModeValue, isLegacyWrappingMode } from "./AnchoredObjects";

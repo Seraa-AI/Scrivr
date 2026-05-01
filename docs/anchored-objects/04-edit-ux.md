@@ -151,8 +151,9 @@ layout engine then:
 
 - Updates the anchored-object block's `height` to the new
   `node.height`.
-- Recomputes the wrap zone (square modes) or clearance
-  (top-bottom) from the new dimensions.
+- Recomputes the wrap zone for square modes. For top-bottom,
+  the anchored-object block's height and `spaceAfter` carry the
+  vertical flow.
 - Reflows constrained sibling blocks against the new wrap zone.
 
 For square modes: a wider image shrinks the available text
@@ -176,8 +177,8 @@ button, or keyboard shortcut.
 |---|---|
 | `inline` → any non-inline | `node.attrs.wrapMode` updates; if the new mode has non-zero flow contribution (`top-bottom`, `behind`, `front`), the parent paragraph splits at layout time (Rule 2). For `square`, no split — the anchor span stays inline at its docPos. |
 | any non-inline → `inline` | `node.attrs.wrapMode` updates; the parent paragraph stops splitting (if it was) and lays out as a single text block with the image as inline content. |
-| `square` → `top-bottom` | Wrap zone replaced with flow clearance; the image's flow contribution becomes `image.height`; following paragraphs stack below. `xAlign` / `x` preserved (image renders at the same X within the new full-width block). |
-| `top-bottom` → `square` | Flow clearance removed; wrap zone emitted at the image's painted rectangle; following paragraphs may now wrap beside. `xAlign` / `x` preserved. |
+| `square` → `top-bottom` | Wrap zone replaced with a full-width anchored-object block; the image's flow contribution becomes `image.height + margin`; following paragraphs stack below. `xAlign` / `x` preserved (image renders at the same X within the new full-width block). |
+| `top-bottom` → `square` | Full-width anchored-object block removed; wrap zone emitted at the image's painted rectangle; following paragraphs may now wrap beside. `xAlign` / `x` preserved. |
 | any non-inline → `behind` / `front` | Wrap zone (if any) removed; flow slot retained at `image.height`; paint layer changes. |
 | `behind` ↔ `front` | Paint layer flips; no other change. |
 

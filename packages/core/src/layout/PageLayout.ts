@@ -283,6 +283,8 @@ export interface FlowBlock {
   globalY?: number;
   /** Initial continuous Y before anchored-object solver pushes. */
   originalGlobalY?: number;
+  /** True when Stage 3 intentionally moved this flow's globalY. */
+  solverPushedThisFlow?: boolean;
   // Phase 1b: cache snapshot taken before this run's measurement.
   preCachedTargetY?: number;
   preCachedPage?: number;
@@ -417,6 +419,61 @@ function pageLocalYForGlobalY(
   return metricsFor(pageNumber).contentTop + (globalY - pageStartGlobal(pageConfig, metricsFor, pageNumber));
 }
 
+interface PageBarrierProvider {
+  pageForGlobalY(globalY: number): number;
+  pageStartGlobal(pageNumber: number): number;
+  contentBottomLocal(pageNumber: number): number;
+  contentHeight(pageNumber: number): number;
+  localYForGlobalY(pageNumber: number, globalY: number): number;
+}
+
+function createPageBarrierProvider(
+  pageConfig: PageConfig,
+  metricsFor: (pageNumber: number) => PageMetrics,
+): PageBarrierProvider {
+  const pageStartCache = new Map<number, number>();
+  pageStartCache.set(1, metricsFor(1).contentTop);
+
+  const pageStartFor = (pageNumber: number): number => {
+    if (pageConfig.pageless) return metricsFor(1).contentTop;
+    const cached = pageStartCache.get(pageNumber);
+    if (cached !== undefined) return cached;
+
+    let nearestPage = 1;
+    for (const page of pageStartCache.keys()) {
+      if (page < pageNumber && page > nearestPage) nearestPage = page;
+    }
+
+    let y = pageStartCache.get(nearestPage)!;
+    for (let page = nearestPage; page < pageNumber; page++) {
+      y += metricsFor(page).contentHeight;
+      pageStartCache.set(page + 1, y);
+    }
+    return y;
+  };
+
+  return {
+    pageForGlobalY(globalY: number): number {
+      if (pageConfig.pageless) return 1;
+      let pageNumber = 1;
+      while (globalY >= pageStartFor(pageNumber) + metricsFor(pageNumber).contentHeight) {
+        pageNumber++;
+      }
+      return pageNumber;
+    },
+    pageStartGlobal: pageStartFor,
+    contentBottomLocal(pageNumber: number): number {
+      return metricsFor(pageNumber).contentBottom;
+    },
+    contentHeight(pageNumber: number): number {
+      return metricsFor(pageNumber).contentHeight;
+    },
+    localYForGlobalY(pageNumber: number, globalY: number): number {
+      return metricsFor(pageNumber).contentTop + (globalY - pageStartFor(pageNumber));
+    },
+  };
+}
+
 function resolveAnchoredObjects(
   inputFlows: FlowBlock[],
   pageConfig: PageConfig,
@@ -431,6 +488,7 @@ function resolveAnchoredObjects(
   const contentX = pageConfig.margins.left;
   const contentRight = pageConfig.pageWidth - pageConfig.margins.right;
   const contentWidth = contentRight - contentX;
+  const barriers = createPageBarrierProvider(pageConfig, metricsFor);
 
   for (let i = 0; i < flows.length; i++) {
     const flow = flows[i]!;
@@ -443,8 +501,8 @@ function resolveAnchoredObjects(
       const height = attrs.height;
       const wrapMode = attrs.wrapMode;
       let globalY = flows[i]!.globalY ?? 0;
-      let pageNumber = pageForGlobalY(pageConfig, metricsFor, globalY);
-      let localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
+      let pageNumber = barriers.pageForGlobalY(globalY);
+      let localY = barriers.localYForGlobalY(pageNumber, globalY);
 
       // Anchor-push: any wrapping mode whose visual extent overflows its
       // anchor's page is pushed to the next page (provided the next page
@@ -453,19 +511,19 @@ function resolveAnchoredObjects(
       if (
         wrapMode !== "inline" &&
         !pageConfig.pageless &&
-        localY + height > metricsFor(pageNumber).contentBottom &&
-        height <= metricsFor(pageNumber + 1).contentHeight
+        localY + height > barriers.contentBottomLocal(pageNumber) &&
+        height <= barriers.contentHeight(pageNumber + 1)
       ) {
-        const pushedGlobalY = pageStartGlobal(pageConfig, metricsFor, pageNumber + 1);
+        const pushedGlobalY = barriers.pageStartGlobal(pageNumber + 1);
         flows = [
           ...flows.slice(0, i),
-          { ...flows[i]!, globalY: pushedGlobalY },
+          { ...flows[i]!, globalY: pushedGlobalY, solverPushedThisFlow: true },
           ...flows.slice(i + 1),
         ];
         flows = restampGlobalYFrom(flows, i + 1);
         globalY = pushedGlobalY;
-        pageNumber = pageForGlobalY(pageConfig, metricsFor, globalY);
-        localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
+        pageNumber = barriers.pageForGlobalY(globalY);
+        localY = barriers.localYForGlobalY(pageNumber, globalY);
       }
 
       // Resolve horizontal X — single expression for every non-inline mode.
@@ -490,30 +548,30 @@ function resolveAnchoredObjects(
         if (stackedGlobalY > globalY) {
           flows = [
             ...flows.slice(0, i),
-            { ...flows[i]!, globalY: stackedGlobalY },
+            { ...flows[i]!, globalY: stackedGlobalY, solverPushedThisFlow: true },
             ...flows.slice(i + 1),
           ];
           flows = restampGlobalYFrom(flows, i + 1);
           globalY = stackedGlobalY;
-          pageNumber = pageForGlobalY(pageConfig, metricsFor, globalY);
-          localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
+          pageNumber = barriers.pageForGlobalY(globalY);
+          localY = barriers.localYForGlobalY(pageNumber, globalY);
         }
         // Re-check page fit after stacking.
         if (
           !pageConfig.pageless &&
-          localY + height > metricsFor(pageNumber).contentBottom &&
-          height <= metricsFor(pageNumber + 1).contentHeight
+          localY + height > barriers.contentBottomLocal(pageNumber) &&
+          height <= barriers.contentHeight(pageNumber + 1)
         ) {
-          const pushedGlobalY = pageStartGlobal(pageConfig, metricsFor, pageNumber + 1);
+          const pushedGlobalY = barriers.pageStartGlobal(pageNumber + 1);
           flows = [
             ...flows.slice(0, i),
-            { ...flows[i]!, globalY: pushedGlobalY },
+            { ...flows[i]!, globalY: pushedGlobalY, solverPushedThisFlow: true },
             ...flows.slice(i + 1),
           ];
           flows = restampGlobalYFrom(flows, i + 1);
           globalY = pushedGlobalY;
-          pageNumber = pageForGlobalY(pageConfig, metricsFor, globalY);
-          localY = pageLocalYForGlobalY(pageConfig, metricsFor, pageNumber, globalY);
+          pageNumber = barriers.pageForGlobalY(globalY);
+          localY = barriers.localYForGlobalY(pageNumber, globalY);
         }
       }
 
@@ -558,25 +616,10 @@ function resolveAnchoredObjects(
         continue;
       }
 
-      // Top-bottom: emit a flow clearance pushing following blocks past
-      // the image's bottom.
-      if (wrapMode === "top-bottom") {
-        const clearanceY = globalY + height + attrs.margin;
-        for (let j = i + 1; j < flows.length; j++) {
-          const candidate = flows[j]!;
-          if ((candidate.globalY ?? 0) >= clearanceY) break;
-          flows = [
-            ...flows.slice(0, j),
-            { ...candidate, globalY: clearanceY },
-            ...flows.slice(j + 1),
-          ];
-          flows = restampGlobalYFrom(flows, j + 1);
-        }
-        continue;
-      }
-
-      // behind / front — flow block already accounted for via Stage 1's
-      // anchored-object-block split; no wrap zone, no clearance.
+      // Top-bottom's vertical flow is fully represented by the Stage 1
+      // anchored-object block: height reserves the object, spaceAfter reserves
+      // attrs.margin, and any Stage 3 globalY push re-stamps downstream flows.
+      // No second clearance barrier is needed here.
     }
   }
 
@@ -766,8 +809,6 @@ export const defaultPagelessConfig: PageConfig = {
   margins: { top: 40, right: 73, bottom: 40, left: 73 },
   pageless: true,
 };
-
-const GLOBAL_Y_PAGE_START_TOLERANCE = 24;
 
 /**
  * runPipeline — top-level layout orchestrator.
@@ -1135,9 +1176,7 @@ export function paginateFlow(
       !pageless && flow.globalY !== undefined
         ? pageLocalYForGlobalY(pageConfig, metricsFor, currentPage.pageNumber, flow.globalY)
         : naturalY;
-    const firstOnPageNatural =
-      isFirstOnPage &&
-      Math.abs(pageLocalGlobalY - metricsFor(currentPage.pageNumber).contentTop) <= GLOBAL_Y_PAGE_START_TOLERANCE;
+    const firstOnPageNatural = isFirstOnPage && !flow.solverPushedThisFlow;
     const targetY = firstOnPageNatural ? naturalY : Math.max(naturalY, pageLocalGlobalY);
     const blockX = margins.left + flow.indentLeft;
     const blockWidth = flow.availableWidth;
@@ -1544,9 +1583,11 @@ export function buildBlockFlow(
 
       const beforeNode = makeFragmentNode(topBottom.before);
       const afterNode = makeFragmentNode(topBottom.after);
-      const imageHeight = typeof topBottom.image.attrs["height"] === "number"
-        ? topBottom.image.attrs["height"] as number
-        : 200;
+      const imageAttrs = normalizeImageAttrs(topBottom.image);
+      const imageHeight = imageAttrs.height;
+      const imageSpaceAfter = afterNode
+        ? imageAttrs.margin
+        : Math.max(blockStyle.spaceAfter, imageAttrs.margin);
 
       pushTextFragment(beforeNode, nodePos, blockStyle.spaceBefore, 0);
       flows.push({
@@ -1555,7 +1596,7 @@ export function buildBlockFlow(
         lines: [],
         height: imageHeight,
         spaceBefore: beforeNode ? 0 : blockStyle.spaceBefore,
-        spaceAfter: afterNode ? ANCHORED_OBJECT_MARGIN : blockStyle.spaceAfter,
+        spaceAfter: imageSpaceAfter,
         availableWidth: blockWidth,
         blockType: "image",
         align: "left",
@@ -1893,4 +1934,3 @@ export function buildFragments(pages: LayoutPage[]): {
 
   return { fragments, fragmentsByPage };
 }
-

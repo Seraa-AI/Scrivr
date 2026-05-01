@@ -163,7 +163,7 @@ Assertions:
   ▸ Each object's anchor docPos lands on the same paginated
     page as the object itself (anchor follows displacement).
   ▸ The second object's globalY >= first object's globalY +
-    first.height + margin (clearance applied).
+    first.height + margin (anchored-object block spacing applied).
   ▸ Universal contract holds across all blocks.
   ▸ For square-mode multi-image: see `01-placement-and-wrap-
     policies.md` § Stacking semantics — square images do not
@@ -235,22 +235,33 @@ Hold on every `DocumentLayout`, regardless of input shape:
 
 Hold across iterations of Stage 3:
 
-1. **Monotonicity.**
+1. **Flow-anchor monotonicity.**
    Within a single solver run, every flow's `globalY` is
-   non-decreasing across iterations. Every anchored object's
-   `layoutY` is non-decreasing across iterations. Neither value
-   ever moves backward. **This guarantees convergence and
-   prevents oscillation.**
+   non-decreasing across iterations. Every flow-anchored object's
+   internal `objectGlobalY` is non-decreasing across iterations.
+   Neither value ever moves backward. **This guarantees convergence
+   and prevents oscillation.**
 
-2. **Anchor monotonicity.**
-   For every anchored object O, the anchor's resolved `globalY`
-   is non-decreasing across iterations and is always
+   This is not a cross-run persistence rule. A fresh layout after
+   an edit may place the same docPos at a lower `globalY` if earlier
+   content was deleted.
+
+2. **Flow-anchor push monotonicity.**
+   For every flow-anchored object O, the anchor's resolved
+   `globalY` is non-decreasing across iterations and is always
    `>= its original Stage 2 position`. The anchor never moves
-   backward — neither relative to a prior iteration nor relative
-   to its initial assignment. This guarantees:
+   backward within that solver run — neither relative to a prior
+   iteration nor relative to its initial assignment. This guarantees:
    - no backward jumps
    - no unstable anchor movement
    - placement consistent with user expectations
+
+   Future page-anchored objects are explicitly outside this invariant.
+   Their placement is derived from a page barrier plus page-relative
+   offset; if prior document content is deleted, that barrier may move
+   backward between layout runs and the object's resolved `globalY`
+   may move backward with it. F1 tests must assert per-run stability
+   and page-relative preservation, not doc-flow anchor monotonicity.
 
 3. **Wrap-zone locality.**
    A wrap zone only affects flows whose `globalY` range overlaps
@@ -318,7 +329,7 @@ form the executable spec.
 | 2 | `square` `xAlign: "right"` standalone near page bottom | mirror of 1 (wider-side wrap on left) |
 | 3 | `square` `xAlign: "center"` with long text | both-side availability + wider-side tie-break |
 | 4 | `square` `xAlign: "custom"` with arbitrary x | clamping, wider-side wrap, anchor co-located |
-| 5 | `top-bottom` standalone near page bottom | clearance + same page |
+| 5 | `top-bottom` standalone near page bottom | block spacing + same page |
 | 6 | `behind`: anchor and image on same page, layout unaffected by paint order | per-mode behind |
 | 7 | `front`: same as 6 with paint reversed | per-mode front |
 | 8 | inline-anchored `top-bottom` splits paragraph into three flow blocks | Rule 2, top-bottom |

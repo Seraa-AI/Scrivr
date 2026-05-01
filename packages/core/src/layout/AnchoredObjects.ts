@@ -9,7 +9,7 @@ export const ANCHORED_OBJECT_MARGIN = 8;
  *   inline      — image is part of normal line layout (no anchor)
  *   square      — rectangular wrap zone at the image's painted rect;
  *                 text wraps around the image's actual position
- *   top-bottom  — full-width clearance; following content starts below
+ *   top-bottom  — full-width flow block; following content starts below
  *   behind      — flow block, no wrap, painted behind text
  *   front       — flow block, no wrap, painted over text
  */
@@ -243,6 +243,7 @@ export interface AnchoredObjectPlacement {
   height: number;
   wrapMode: WrapMode;
   node: Node;
+  /** Final continuous global-Y coordinate used by the solver. */
   anchorGlobalY: number;
   anchorPage: number;
 }
@@ -265,16 +266,9 @@ export interface WrapZone {
   anchorDocPos: number;
 }
 
-export interface FlowClearance {
-  afterFlowIndex: number;
-  y: number;
-  anchorDocPos: number;
-}
-
 export interface AnchoredObjectSolverResult {
   placements: AnchoredObjectPlacement[];
   wrapZones: WrapZone[];
-  clearances: FlowClearance[];
   status: "stable" | "exhausted";
   iterations: number;
 }

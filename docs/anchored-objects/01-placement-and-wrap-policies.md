@@ -89,7 +89,7 @@ painted rectangle.
 ### Flow effect
 
 The anchor paragraph stays in flow at its natural text height. The
-image does **not** add a full-height block clearance. There is no
+image does **not** add a full-height object block. There is no
 anchored-object block of `image.height` reserved between the anchor
 paragraph and the next paragraph. The image's vertical footprint is
 expressed only through its wrap zone.
@@ -182,15 +182,16 @@ imageY = blockY
 ```
 
 The block reserves the **full flow width** (`contentWidth`) regardless
-of `image.width`. Following content stacks below `blockY +
-image.height`. The image inside the block renders at the resolved
-`imageX`.
+of `image.width`. Its `height` is `image.height`, and its
+`spaceAfter` is `image.margin`, so following content stacks below
+`blockY + image.height + margin`. The image inside the block renders
+at the resolved `imageX`.
 
 ### Wrap effect
 
-A **flow clearance** is emitted at `blockY + image.height + margin`.
-Following flow blocks must start at or below this Y. There is no side
-wrap zone — text never sits beside a top-bottom object.
+No side wrap zone is emitted — text never sits beside a top-bottom
+object. The vertical exclusion is the anchored-object block itself,
+not a separate Stage 3 clearance.
 
 ### Inline-anchored split (Rule 2)
 

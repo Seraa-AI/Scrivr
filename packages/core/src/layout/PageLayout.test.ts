@@ -940,6 +940,27 @@ describe("runPipeline — gap suppression at page boundary", () => {
     expect(layout.pages[2]!.blocks[0]!.isContinuation).toBe(true);
     expect(layout.pages[2]!.blocks[0]!.lines).toHaveLength(1);
   });
+
+  it("drops a large collapsed margin when a natural page break starts a fresh page", () => {
+    const fontConfig = {
+      ...defaultFontConfig,
+      heading_1: {
+        ...defaultFontConfig.heading_1!,
+        spaceBefore: 50,
+      },
+    };
+
+    const layout = runPipeline(doc(p(twoLineIntro), heading(1, "Title")), {
+      pageConfig: splitPage,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    expect(layout.pages).toHaveLength(2);
+    const headingBlock = layout.pages[1]!.blocks[0]!;
+    expect(headingBlock.node.type.name).toBe("heading");
+    expect(headingBlock.y).toBe(splitPage.margins.top);
+  });
 });
 
 describe("runPipeline — pageConfig.fontFamily", () => {
@@ -1558,6 +1579,28 @@ describe("runPipeline — top-bottom (break) float", () => {
     const textBlock = blocks.find((b) => b.node.type.name === "paragraph")!;
     expect(imageBlock.height).toBe(200);
     expect(textBlock.y).toBeGreaterThanOrEqual(imageBlock.y + imageBlock.height + 8);
+  });
+
+  it("top-bottom block spaceAfter carries the image margin without a Stage 3 clearance", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({
+      src: "",
+      width: 200,
+      height: 100,
+      wrappingMode: "top-bottom",
+      margin: 32,
+    });
+    const para = schema.node("paragraph", null, [img, schema.text("after image")]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const blocks = layout.pages.flatMap((p) => p.blocks);
+    const imageBlock = blocks.find((b) => b.node === img)!;
+    const textBlock = blocks.find((b) => b.node.type.name === "paragraph")!;
+    expect(textBlock.y).toBeCloseTo(imageBlock.y + imageBlock.height + 32, 3);
   });
 
   it("exclusion spans full content width (no text constrained to a narrow column)", () => {

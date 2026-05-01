@@ -108,21 +108,47 @@ modification.
 - `PageMetrics` for each page (from `computePageMetrics`).
 - `pageConfig`.
 
+### Page Barrier Policy
+
+Stage 3 uses a lazy, metrics-backed barrier provider:
+
+```
+barriers = createPageBarrierProvider(pageConfig, metricsFor)
+
+barriers.pageForGlobalY(globalY)
+barriers.pageStartGlobal(pageNumber)
+barriers.contentBottomGlobal(pageNumber)
+barriers.localYForGlobalY(pageNumber, globalY)
+```
+
+The provider memoizes page starts and reads page geometry through
+`metricsFor(pageNumber)`. It extends only as far as the solver asks.
+Do not precompute an eager barrier array from `maxFlowBottom`, and do
+not scatter raw `metricsFor(pageNumber).contentBottom` checks through
+the solver.
+
+This is the 4A loop-refactor target. It matches the shipped behavior
+semantically, keeps orientation/header/footer page metrics as the
+single source of truth, and avoids allocating or invalidating barriers
+for pages the current solver pass never touches.
+
 ### Outputs
 
 A `SolverResult`:
 
 ```
-placements:  AnchoredObjectPlacement[]   — { docPos, wrapMode, x, y, width, height, paint }
+placements:  AnchoredObjectPlacement[]   — { docPos, page, x, y, width, height, anchorGlobalY }
 wrapZones:   WrapZone[]                  — { x, right, top, bottom, anchorDocPos }
-clearances:  FlowClearance[]             — { afterFlowIndex, y, anchorDocPos }
 status:      "stable" | "exhausted"
 iterations:  number
 ```
 
 `AnchoredObjectPlacement.x` is the resolved horizontal position from
-`xAlign` / `x` (every non-inline mode); `.y` is the painted Y in
-continuous global-Y space. There is no separate paint offset.
+`xAlign` / `x` (every non-inline mode), in page-local coordinates.
+`.y` is the painted top in page-local coordinates. `anchorGlobalY`
+is the final continuous global-Y coordinate used by the solver for
+stacking and re-stamping. There is no exported `layoutY` field and
+no separate paint offset.
 
 `WrapZone` carries the actual placed rectangle (no `side` field — the
 side that text wraps on is computed per-line at reflow time from the
@@ -136,19 +162,18 @@ projection is a pure mapping (Stage 5).
 ### Algorithm (bounded fixed-point loop)
 
 ```
-loop max N iterations (default: 8):
-  barriers ← computePageBarriers(flows, pageConfig)
+barriers ← createPageBarrierProvider(pageConfig, metricsFor)
 
+loop max N iterations (default: 8):
   for each input in document order:
-    object.layoutY ← anchor.globalY
-    object.layoutY ← applyBarrier(object.layoutY, height, barriers)
-    object.layoutY ← applyStacking(object.layoutY, prior placements)
-    if anchor.globalY < object.layoutY:
-      anchor.globalY ← object.layoutY      # the unified push rule
+    objectGlobalY ← anchor.globalY
+    objectGlobalY ← applyBarrier(objectGlobalY, height, barriers)
+    objectGlobalY ← applyStacking(objectGlobalY, prior placements)
+    if anchor.globalY < objectGlobalY:
+      anchor.globalY ← objectGlobalY      # the unified push rule
       recomputeGlobalY(flows, anchorIndex + 1)
       anchorPushed ← true
 
-  applyClearances(flows, result.clearances)   # top-bottom only
   changed ← reflowAgainstWrapZones(flows, result.wrapZones)
                                               # narrows lines beside square objects
   if changed:
@@ -175,29 +200,31 @@ real documents; the iteration cap exists only as a safety net.
 The unified rule is:
 
 ```
-anchor.globalY = max(anchor.globalY, object.layoutY)
+anchor.globalY = max(anchor.globalY, objectGlobalY)
 ```
 
-`object.layoutY` is the resolved Y of the anchored object after
-`placeAnchoredObjects` has applied barrier and stacking logic.
-The anchor follows whatever increases the object's Y.
+`objectGlobalY` is the internal resolved continuous Y of the
+anchored object after `placeAnchoredObjects` has applied barrier
+and stacking logic. The anchor follows whatever increases the
+object's Y. It is a solver-local variable, not a field on
+`AnchoredObjectPlacement`.
 
 After any push, `recomputeGlobalY(flows, anchorIndex + 1)`
 re-stamps downstream flows; the outer loop re-iterates.
 
-The contributors to `object.layoutY > anchor.globalY` are:
+The contributors to `objectGlobalY > anchor.globalY` are:
 
 1. **Barrier overflow (top-bottom / behind / front).** The block's
    footprint (`anchor.globalY → anchor.globalY + image.height`)
    extends past the anchor's page barrier AND the block would fit
-   on the next page. The placer moves `object.layoutY` to the
+   on the next page. The placer moves `objectGlobalY` to the
    barrier. Skip the move if the block wouldn't fit on the next
    page either (oversized object — see Edge cases).
 
 2. **Visual-overflow push (square).** The image's painted
    rectangle (`anchor.flow_y → anchor.flow_y + image.height`)
    extends past the anchor's page barrier even though the anchor
-   paragraph itself fits. The placer moves `object.layoutY` to
+   paragraph itself fits. The placer moves `objectGlobalY` to
    the barrier so the image renders on the same page as a
    re-positioned anchor. Same fit-on-next-page guard as above.
 
@@ -208,21 +235,29 @@ The contributors to `object.layoutY > anchor.globalY` are:
    collision between `square` images on the same Y is resolved
    per `01-placement-and-wrap-policies.md` § Stacking semantics.
 
-After any contributor moves `object.layoutY`, the anchor-push
+After any contributor moves `objectGlobalY`, the anchor-push
 rule fires automatically (`anchor.globalY := max(...)`). This
 unifies the four cases into a single invariant.
 
 ### Monotonicity guarantee
 
-The solver is monotonic across iterations:
+For flow-anchored objects, the solver is monotonic across iterations
+within one layout run:
 
 - `anchor.globalY` only ever increases.
-- `object.layoutY` only ever increases.
+- `objectGlobalY` only ever increases.
 
 This guarantees termination and prevents oscillation bugs
 (anchor pushed forward then released, then re-pushed). The
 iteration cap is a safety net for adversarial inputs, not a
 correctness mechanism.
+
+This guarantee is run-local and flow-anchor-specific. A new layout
+run after a document edit starts from freshly assigned Stage 2 flow
+positions, so the same docPos may resolve to a lower `globalY` when
+earlier content is deleted. Future page-anchored objects must use a
+separate page-relative stability invariant; their absolute global Y
+tracks page barriers and may move backward across runs.
 
 ### Wrap zones (square mode)
 
@@ -268,29 +303,28 @@ whichever side has more room across all overlapping zones.
 **Two-sided wrap (a single line spanning both sides of an image
 with the image as a hole) is deferred — see `05-future.md`.**
 
-### Clearances (top-bottom only)
+### Top-bottom Flow
 
-For each `top-bottom` placement, emit a `FlowClearance`:
+`top-bottom` emits no Stage 3 clearance. Its vertical flow is
+represented by the anchored-object block emitted in Stage 1:
 
 ```
-clearance.afterFlowIndex = anchorIndex
-clearance.y              = block.y + height + margin
+block.height     = image.height
+block.spaceAfter = image.margin
 ```
 
-`applyClearances` walks following flows in order and pushes any
-flow whose `globalY < clearance.y` to `clearance.y`, then
-re-stamps downstream globalYs. This handles cases where
-solver-induced anchor pushes shift the top-bottom block after
-its initial Stage 2 placement and downstream flows need to
-follow.
+Stage 2's `assignGlobalY` stacks following flows after that block
+using normal margin collapsing. If Stage 3 later pushes the
+top-bottom block to the next page or below another object, it
+mutates that block's `globalY` and re-stamps downstream flows from
+the next index. The followers move because they are downstream of
+the block, not because a second clearance barrier is applied.
 
-`behind` and `front` placements emit **no clearance**. They
-participate in flow only by occupying their own block slot
-(`height = image.height` set in Stage 1, accounted for by Stage
-2's `assignGlobalY`). They impose no additional constraint on
-following content.
+This keeps top-bottom flow single-sourced. A separate clearance
+would duplicate `block.height + block.spaceAfter` and can drift
+from the block spacing model.
 
-`square` placements emit **no clearance and no flow contribution**.
+`square` placements emit no clearance and no flow contribution.
 Their effect on flow is the wrap zone alone. The anchor paragraph
 remains in flow at its natural text height; the next paragraph's
 `globalY` is computed from the anchor paragraph's text height, not
@@ -367,19 +401,21 @@ For each FlowBlock:
 Output: `LayoutPage[]` with `LayoutBlock[]` placed in page-local
 coordinates.
 
-## Stage 5 — Project to page-local coordinates (`projectAnchoredObjects`)
+## Stage 5 — Attach anchored-object placements
 
-Projection is a **pure mapping**.
-
-For each `AnchoredObjectPlacement` from Stage 3:
+Stage 3 already emits `AnchoredObjectPlacement` records in the
+renderer's page-local coordinate shape:
 
 ```
-anchor       ← anchorMap.get(placement.docPos)        // built from paginated pages
-delta        ← placement.layoutY - placement.anchorGlobalY
-renderY      ← anchor.blockY + delta + floatOffset.y   // visual offset paint-only
-renderX      ← placement.layoutX + floatOffset.x
-page         ← anchor.page                              // anchor and object same page (Stage 3 guarantees)
+page    ← placement.page
+renderX ← placement.x
+renderY ← placement.y
 ```
+
+This stage only attaches those placements to the returned
+`DocumentLayout`. It does not recompute Y from `anchorGlobalY`,
+does not read a `placement.layoutY` field, and does not apply a
+paint-only `floatOffset`.
 
 The strongest invariant from `00-model.md` ("no following content
 renders before its anchored object") holds by construction
@@ -389,8 +425,7 @@ because:
 - Stage 3 pushed the anchor itself if needed so anchor and object
   share a page.
 - Stage 4 paginated honouring Stage 3's globalYs.
-- Stage 5 reads the paginated anchor position and emits the
-  matching object position.
+- Stage 5 preserves Stage 3's emitted placement coordinates.
 
 There is no Stage 6 to "patch" disagreements. If projection's
 output ever places the object on a different page from the
@@ -415,10 +450,10 @@ FlowBlock[] with globalY
   ▼  Stage 3: solver loop (bounded fixed-point)
   │   ┌─ placeAnchoredObjects → may push anchor.globalY ─┐
   │   │                                                   │
-  │   └─ applyClearances → reflowAgainstWrapZones ────────┘
+  │   └─ reflowAgainstWrapZones ──────────────────────────┘
   │   converged when no push AND no reflow change
   │
-SolverResult { placements, wrapZones, clearances, status, iterations }
+SolverResult { placements, wrapZones, status, iterations }
   │
   ▼  Stage 4: paginateFlow (honours flow.globalY)
 LayoutPage[] with placed blocks in page-local Y
@@ -447,8 +482,7 @@ last iteration's output is consumed by Stage 4.
 
 Stage 1 splits recursively for non-zero-flow modes (`top-bottom`,
 `behind`, `front`). Stage 3 treats each anchored-object block
-independently; stacking and clearances apply across them in document
-order.
+independently; stacking applies across them in document order.
 
 `square` anchors in the same paragraph do not split — each contributes
 its own wrap zone, and the paragraph's lines are constrained by

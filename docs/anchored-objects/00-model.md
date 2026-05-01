@@ -30,8 +30,8 @@ is user-controlled per `xAlign` / `x`.
 | Mode | Flow effect | Wrap effect | Paint effect |
 |---|---|---|---|
 | `inline` | counts as inline content in its line | participates in line layout | inline rendering |
-| `square` | anchor stays in flow; image does NOT add a full-height block clearance | wrap zone at the image's actual painted rectangle; overlapping lines are constrained to the side(s) with available space | normal layer |
-| `top-bottom` | anchored-object block at `anchor.y → anchor.y + image.height` across full flow width | text in that Y range is excluded; following flow starts at object.bottom | normal layer |
+| `square` | anchor stays in flow; image does NOT add a full-height object block | wrap zone at the image's actual painted rectangle; overlapping lines are constrained to the side(s) with available space | normal layer |
+| `top-bottom` | anchored-object block at `anchor.y → anchor.y + image.height + margin` across full flow width | text in that Y range is excluded by the object block; following flow starts below it | normal layer |
 | `behind` | anchored-object block at `anchor.y → anchor.y + image.height` | none | painted **behind** text |
 | `front` | anchored-object block at `anchor.y → anchor.y + image.height` | none | painted **over** text |
 
@@ -68,7 +68,6 @@ Detailed semantics, geometry, and wider-side wrap rules per mode live in
 | **paint effect** | How the object is rendered, including layer order. |
 | **anchored-object block** | A flow block produced by the layout pipeline to represent the object's flow contribution. Emitted only for modes whose flow contribution is non-zero. |
 | **wrap zone** | A rectangular region where text is excluded or narrowed — derived from the image's actual painted rectangle. |
-| **flow clearance** | A vertical Y barrier requiring following content to start at or below it. |
 
 > **Naming.** "Float" is a legacy / user-facing term. Internally — and
 > in every doc in this directory — the engine uses **anchored object**.
@@ -95,12 +94,13 @@ dependent:
 
 - `square` — anchor paragraph stays in flow at its natural
   text height. The image does **not** add a full-height block
-  clearance; instead it imposes a wrap zone at its actual
+  slot; instead it imposes a wrap zone at its actual
   painted rectangle. Following content may wrap beside the
   image until the image's bottom is reached.
 - `top-bottom` — emits an anchored-object block of height
-  `image.height` across the full flow width. Following content
-  must start past the block.
+  `image.height` across the full flow width, with `image.margin`
+  as block spacing after it. Following content must start past
+  the block.
 - `behind` / `front` — emits an anchored-object block of
   height `image.height`. Following content stacks below normally.
   No wrap effect; differs from `top-bottom` only in paint order.

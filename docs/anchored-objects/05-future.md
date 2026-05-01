@@ -33,7 +33,7 @@ fits.
 ### Single-authority invariant
 
 ```
-All layout decisions — placement, wrap, clearance, anchor
+All layout decisions — placement, wrap, flow contribution, anchor
 position — are resolved in Stage 3. No future feature may
 introduce a second stage that modifies flow positions after
 pagination.
@@ -84,15 +84,48 @@ post-pagination solver:
 
 - Flow-anchored inputs use `anchor.flow.globalY` as today.
 - Page-anchored inputs use a **page-relative Y** derived from
-  the page barriers Stage 3 already computes (each barrier
-  defines a page's contentTop / contentBottom in continuous
-  global-Y space; a page-anchored object's resolved Y is
-  computed from its target page's barrier plus an offset).
+  Stage 3's lazy barrier provider. Each queried page defines a
+  contentTop / contentBottom in continuous global-Y space; a
+  page-anchored object's resolved Y is computed from its target
+  page's barrier plus an offset.
 
 Both flow- and page-anchored placements are emitted from the
 same Stage 3 result. Pagination consumes them; projection maps
 them. Stage 5 still emits placements; renderer treats both kinds
 the same. The single-authority invariant is preserved.
+
+**Readiness gate for F1.** Page anchoring cannot reuse the
+flow-anchor monotonicity invariant from `03-test-contract.md`.
+That invariant is intentionally run-local and applies only to
+flow-anchored objects whose anchors may be pushed forward by the
+solver. A page-anchored object derives its global Y from:
+
+```
+pageStartGlobal(targetPage) + pageRelativeOffset
+```
+
+When the user deletes content earlier in the document,
+`pageStartGlobal(targetPage)` may move backward on the next layout
+run. The object must move backward with that page if its
+page-relative offset is unchanged. Treating that as a monotonicity
+violation would incorrectly preserve stale global coordinates and
+turn page anchoring into hidden flow anchoring.
+
+F1 is ready only when the implementation and tests encode these two
+separate invariants:
+
+- **Flow-anchored:** within one Stage 3 run, `anchor.globalY` and
+  internal `objectGlobalY` are non-decreasing across solver iterations.
+- **Page-anchored:** within one Stage 3 run, the object's
+  `(targetPage, pageRelativeOffset)` is stable unless edited; across
+  layout runs, its absolute `globalY` is recomputed from the current
+  page barrier and may increase or decrease.
+
+Required F1 regression: create a page-anchored object, delete content
+before its target page, rerun layout, and assert the object keeps the
+same page-relative Y while its absolute `globalY` follows the moved
+page barrier. No cache or previous-layout reuse may pin it to the old
+global coordinate.
 
 ### F2. Image splitting across pages
 
@@ -155,9 +188,9 @@ What v1 does NOT yet support and remains deferred:
   sets. Both partitions are resolved **inside Stage 3** — no
   separate post-pagination solver. Single-authority invariant
   preserved.
-- Page-anchored placements still emit wrap zones (or clearances)
-  computed from their painted position. Wrap geometry is solved
-  against the same painted position the renderer paints.
+- Page-anchored placements still emit wrap zones computed from
+  their painted position. Wrap geometry is solved against the same
+  painted position the renderer paints.
 
 ### F4. Tight / through wrap (non-rectangular wrap zones)
 
@@ -312,9 +345,8 @@ When adding a feature in the future:
 3. **Identify the new attribute(s)**, if any, and where they
    live (node attrs, mark attrs, separate registry).
 4. **Specify the wrap effect** in terms of the existing
-   primitives (`WrapZone`, `FlowClearance`) or extend them
-   explicitly. New primitives must not duplicate existing
-   ones.
+   primitives (`WrapZone`, anchored-object block spacing) or extend
+   them explicitly. New primitives must not duplicate existing ones.
 5. **Update `00-model.md` first**, before pipeline or test
    doc changes. The spine is the contract; everything else
    inherits.
