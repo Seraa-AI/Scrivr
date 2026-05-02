@@ -103,7 +103,7 @@ changes, 02 must track.
 
 **What.** `reflowFlowsAgainstSquareObject` calls `layoutBlock` per
 overlapping flow, per iteration. Cache constrained line metrics keyed on
-`(node, constraintProvider geometry)` so unchanged constraints don't
+`(node, line-space segment geometry)` so unchanged exclusions don't
 re-measure.
 
 **Why.** Once 4A's loop lands, reflow runs N×iteration times. For
@@ -132,9 +132,9 @@ array at the end) or document the exception.
 
 ## 8. Measure cache invalidation for constrained reflow path
 
-**What.** Verify `measureCache` is keyed on availableWidth/constraintX such
+**What.** Verify `measureCache` is keyed on available segment geometry so
 that a paragraph laid out unconstrained at width 600 doesn't return the
-wrong cache hit when re-laid-out constrained at effective width 350.
+wrong cache hit when re-laid-out inside segmented line space.
 
 **Why.** Bug class: text wraps wrong on second iteration because cached
 measurements for unconstrained width are reused.
@@ -386,4 +386,3 @@ v2 bug class. This is documentation, not work, but worth tracking.
 
 (See TODO #1 above. Same item; promoted to actively-recommended in this
 CEO review since older docs assume the CSS-float pipeline being abandoned.)
-

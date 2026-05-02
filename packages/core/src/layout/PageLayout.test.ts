@@ -1024,7 +1024,7 @@ describe("runPipeline — float image wrapping", () => {
     expect(layout.anchoredObjects![0]!.wrapMode).toBe("square");
   });
 
-  it("square-left: constrained lines have constraintX set (text pushed right of image)", () => {
+  it("square-left: constrained lines are positioned in the right available segment", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
@@ -1038,16 +1038,13 @@ describe("runPipeline — float image wrapping", () => {
     });
     const block = layout.pages[0]!.blocks[0]!;
     const unconstrainedBlock = unconstrained.pages[0]!.blocks[0]!;
-    // First line should be constrained (float starts at block.y = margins.top)
     const firstLine = block.lines[0]!;
-    // constraintX = nodeWidth + FLOAT_MARGIN = 200 + 8 = 208
-    expect(firstLine.constraintX).toBe(208);
-    // effectiveWidth = contentWidth - nodeWidth - FLOAT_MARGIN = 650 - 200 - 8 = 442
-    expect(firstLine.effectiveWidth).toBe(442);
+    expect(firstLine.positioned).toBe(true);
+    expect(Math.min(...firstLine.spans.map((span) => span.x))).toBe(208);
     expect(block.lines.length).toBeGreaterThan(unconstrainedBlock.lines.length);
   });
 
-  it("square-right: constrained lines have effectiveWidth set (text wraps in left zone)", () => {
+  it("square-right: constrained lines are positioned in the left available segment", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-right" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
@@ -1056,10 +1053,9 @@ describe("runPipeline — float image wrapping", () => {
     });
     const block = layout.pages[0]!.blocks[0]!;
     const firstLine = block.lines[0]!;
-    // For square-right, text stays at left (constraintX = 0 / undefined)
-    expect(firstLine.constraintX).toBeUndefined();
-    // effectiveWidth = contentWidth - nodeWidth - FLOAT_MARGIN = 650 - 200 - 8 = 442
-    expect(firstLine.effectiveWidth).toBe(442);
+    expect(firstLine.positioned).toBe(true);
+    expect(Math.min(...firstLine.spans.map((span) => span.x))).toBe(0);
+    expect(Math.max(...firstLine.spans.map((span) => span.x + span.width))).toBeLessThanOrEqual(442);
   });
 
   it("square-left: float x position is at left margin", () => {
@@ -1103,7 +1099,7 @@ describe("runPipeline — float image wrapping", () => {
     let cumulativeH = 0;
     for (const line of block.lines) {
       cumulativeH += line.lineHeight;
-      if (cumulativeH > 200 && line.constraintX === undefined && line.effectiveWidth === undefined) {
+      if (cumulativeH > 200 && !line.positioned) {
         foundUnconstrained = true;
         break;
       }
@@ -1486,47 +1482,268 @@ describe("runPipeline — float image wrapping", () => {
     }
   });
 
-  // wrapText override branches in reflowFlowsAgainstSquareObject.
-  // Default `largest` picks the wider side per line; `left`/`right` force
-  // a side regardless of which is wider. `bothSides` is reserved for F7.
-  it("wrapText='left' forces text into the left zone even when right is wider", () => {
+  it("square wrap places one visual line into all available segments", () => {
     const { schema, fontConfig } = buildStarterKitContext();
-    // 100×100 image at x=200 (content area starts at 72): leftAvail ≈ 120,
-    // rightAvail ≈ 414. Without the override, default `largest` picks right.
     const img = schema.nodes["image"]!.create({
-      src: "", width: 100, height: 100,
-      wrapMode: "square", xAlign: "custom", x: 200, wrapText: "left",
+      src: "", width: 120, height: 100,
+      wrapMode: "square", xAlign: "custom", x: 300,
     });
     const anchorPara = schema.node("paragraph", null, [img]);
-    const text = schema.node("paragraph", null, [schema.text(longText)]);
+    const originalText = "word ".repeat(30).trim();
+    const text = schema.node("paragraph", null, [schema.text(originalText)]);
     const layout = runPipeline(schema.node("doc", null, [anchorPara, text]), {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
-    const wrappedBlock = layout.pages[0]!.blocks[1]!;
-    // First constrained line sits in the left zone (constraintX=0, narrow width).
-    const firstLine = wrappedBlock.lines[0]!;
-    expect(firstLine.effectiveWidth).toBeLessThan(150);
-    expect(firstLine.constraintX ?? 0).toBeLessThan(100);
+
+    const firstLine = layout.pages[0]!.blocks[1]!.lines[0]!;
+    expect(firstLine.positioned).toBe(true);
+    expect(firstLine.segments).toHaveLength(2);
+    expect(firstLine.spans.some((span) => span.x < 220)).toBe(true);
+    expect(firstLine.spans.some((span) => span.x > 340)).toBe(true);
+
+    // Reconstructing all spans across every line in span-x then line order
+    // must equal a prefix of the original text — words must not be dropped,
+    // duplicated, or reordered when the line crosses the exclusion hole.
+    const reconstructed = layout.pages[0]!.blocks[1]!.lines
+      .flatMap((line) =>
+        [...line.spans]
+          .sort((a, b) => a.x - b.x)
+          .filter((s): s is Extract<typeof s, { kind: "text" }> => s.kind === "text")
+          .map((s) => s.text),
+      )
+      .join("")
+      .replace(/​/g, "");
+    expect(originalText.startsWith(reconstructed.trimEnd())).toBe(true);
+    expect(reconstructed.trim().length).toBeGreaterThan(0);
+  });
+});
+
+// ── Anchored image — yOffset (Phase 1) ───────────────────────────────────────
+
+describe("runPipeline — yOffset (Phase 1)", () => {
+  // defaultPageConfig: pageWidth=794, pageHeight=1122, margins=72
+  //   contentTop = 72, contentBottom = 1050, contentHeight = 978
+  const longText = "word ".repeat(60).trim();
+
+  it("yOffset=0 default: placement.globalY === anchorGlobalY (no-op)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200, wrapMode: "square",
+    });
+    const para = schema.node("paragraph", null, [img, schema.text(longText)]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.anchoredObjects![0]!;
+    expect(float.globalY).toBe(float.anchorGlobalY);
+    expect(float.clamped).toBeUndefined();
   });
 
-  it("wrapText='right' forces text into the right zone even when left is wider", () => {
+  it("yOffset=40: paint and exclusion shift together", () => {
     const { schema, fontConfig } = buildStarterKitContext();
-    // Same image but right-side-flush: leftAvail ≈ 414, rightAvail ≈ 120.
-    // wrapText='right' forces the narrow right side regardless.
-    const img = schema.nodes["image"]!.create({
-      src: "", width: 100, height: 100,
-      wrapMode: "square", xAlign: "custom", x: 500, wrapText: "right",
+    const baseImg = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200, wrapMode: "square",
     });
-    const anchorPara = schema.node("paragraph", null, [img]);
-    const text = schema.node("paragraph", null, [schema.text(longText)]);
-    const layout = runPipeline(schema.node("doc", null, [anchorPara, text]), {
+    const offsetImg = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200, wrapMode: "square", yOffset: 40,
+    });
+    const baseDoc = schema.node("doc", null, [
+      schema.node("paragraph", null, [baseImg, schema.text(longText)]),
+    ]);
+    const offsetDoc = schema.node("doc", null, [
+      schema.node("paragraph", null, [offsetImg, schema.text(longText)]),
+    ]);
+    const baseLayout = runPipeline(baseDoc, {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
-    const wrappedBlock = layout.pages[0]!.blocks[1]!;
-    const firstLine = wrappedBlock.lines[0]!;
-    // Constrained to the right zone: constraintX is past the image's right edge.
-    expect(firstLine.constraintX ?? 0).toBeGreaterThan(500);
-    expect(firstLine.effectiveWidth).toBeLessThan(150);
+    const offsetLayout = runPipeline(offsetDoc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const base = baseLayout.anchoredObjects![0]!;
+    const offset = offsetLayout.anchoredObjects![0]!;
+
+    // Painted top shifts by exactly yOffset.
+    expect(offset.globalY - base.globalY).toBe(40);
+    expect(offset.y - base.y).toBe(40);
+    // Anchor flow position is unchanged — the flow doesn't move with yOffset.
+    expect(offset.anchorGlobalY).toBe(base.anchorGlobalY);
+  });
+
+  it("legacy floatOffset.y migrates to yOffset on read", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const legacyImg = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200,
+      wrappingMode: "square-left",
+      floatOffset: { x: 0, y: 40 },
+    });
+    const newImg = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 200, wrapMode: "square", yOffset: 40,
+    });
+    const legacyDoc = schema.node("doc", null, [
+      schema.node("paragraph", null, [legacyImg, schema.text(longText)]),
+    ]);
+    const newDoc = schema.node("doc", null, [
+      schema.node("paragraph", null, [newImg, schema.text(longText)]),
+    ]);
+    const legacyLayout = runPipeline(legacyDoc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    const newLayout = runPipeline(newDoc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+    expect(legacyLayout.anchoredObjects![0]!.globalY).toBe(
+      newLayout.anchoredObjects![0]!.globalY,
+    );
+  });
+
+  it("negative yOffset wraps flows above the anchor paragraph", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({
+      src: "",
+      width: 200,
+      height: 90,
+      wrapMode: "square",
+      xAlign: "center",
+      yOffset: -80,
+    });
+    const before = schema.node("paragraph", null, [schema.text(longText)]);
+    const anchorOnly = schema.node("paragraph", null, [img]);
+
+    const layout = runPipeline(schema.node("doc", null, [before, anchorOnly]), {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const firstBlock = layout.pages[0]!.blocks[0]!;
+    const anchorBlock = layout.pages[0]!.blocks[1]!;
+    expect(anchorBlock.height).toBe(0);
+    expect(anchorBlock.spaceBefore).toBe(0);
+    expect(anchorBlock.spaceAfter).toBe(0);
+    expect(anchorBlock.lines[0]!.cursorHeight).toBe(0);
+    expect(firstBlock.lines.some((line) => line.positioned)).toBe(true);
+  });
+
+  it("page-edge clamp: large positive yOffset clamps to page bottom and sets clamped flag", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 300,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // contentTop=20, contentBottom=280, contentHeight=260
+    // image height=80 → max painted top within page = 280 - 80 = 200 (local) = 200 (global)
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 100, height: 80, wrapMode: "square", yOffset: 1000,
+    });
+    const para = schema.node("paragraph", null, [img, schema.text("text")]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: smallPage, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.anchoredObjects![0]!;
+    expect(float.page).toBe(1);
+    expect(float.anchorPage).toBe(1);
+    expect(float.clamped).toBe(true);
+    // Painted bottom must not exceed page bottom.
+    expect(float.y + float.height).toBeLessThanOrEqual(280 + 0.001);
+  });
+
+  it("page-edge clamp: negative yOffset clamps to page top", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 300,
+      pageHeight: 300,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    // Anchor on page 1; large negative yOffset would paint above contentTop.
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 100, height: 80, wrapMode: "square", yOffset: -500,
+    });
+    const para = schema.node("paragraph", null, [img, schema.text("text")]);
+    const layout = runPipeline(schema.node("doc", null, [para]), {
+      pageConfig: smallPage, fontConfig, measurer: createMeasurer(),
+    });
+    const float = layout.anchoredObjects![0]!;
+    expect(float.clamped).toBe(true);
+    expect(float.y).toBeGreaterThanOrEqual(20 - 0.001);
+  });
+
+  it("square stacking: stacks against painted bottom (yOffset-aware)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Two square images at the same xAlign. Without yOffset they stack
+    // anchor-bottom against anchor-bottom. With image1.yOffset=100, image2
+    // should stack against image1's painted bottom (anchor + 100 + height),
+    // not its anchor bottom.
+    const img1 = schema.nodes["image"]!.create({
+      src: "", width: 100, height: 80, wrapMode: "square", yOffset: 100,
+    });
+    const img2 = schema.nodes["image"]!.create({
+      src: "", width: 100, height: 80, wrapMode: "square",
+    });
+    const para1 = schema.node("paragraph", null, [img1, schema.text("first")]);
+    const para2 = schema.node("paragraph", null, [img2, schema.text("second")]);
+    const layout = runPipeline(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() },
+    );
+    const floats = layout.anchoredObjects!;
+    expect(floats.length).toBe(2);
+    const f1 = floats[0]!;
+    const f2 = floats[1]!;
+    // f2's painted top must be at or below f1's painted bottom + margin.
+    expect(f2.globalY).toBeGreaterThanOrEqual(f1.globalY + f1.height);
+  });
+});
+
+// ── Phase 4: page-level ExclusionManager for square wrap ─────────────────────
+
+describe("runPipeline — page-level square exclusions (Phase 4)", () => {
+  it("two square images on same page → text wraps between both rects, not over one of them", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // contentX=72, contentRight=722, contentWidth=650.
+    // imgL painted at xAlign="left"  → x=72,  exclusion [64, 230]
+    // imgR painted at xAlign="right" → x=572, exclusion [564, 730]
+    // Middle gap available for text: [230, 564].
+    const imgL = schema.nodes["image"]!.create({
+      src: "", width: 150, height: 200,
+      wrapMode: "square", xAlign: "left",
+    });
+    const imgR = schema.nodes["image"]!.create({
+      src: "", width: 150, height: 200,
+      wrapMode: "square", xAlign: "right",
+    });
+    const longText = "word ".repeat(60).trim();
+    const para1 = schema.node("paragraph", null, [imgL, imgR, schema.text("a")]);
+    const para2 = schema.node("paragraph", null, [schema.text(longText)]);
+    const layout = runPipeline(
+      schema.node("doc", null, [para1, para2]),
+      { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() },
+    );
+
+    // Both placements present.
+    const anchored = layout.anchoredObjects!;
+    expect(anchored).toHaveLength(2);
+    expect(anchored.every((p) => p.wrapMode === "square")).toBe(true);
+
+    // Text paragraph: wrapped lines must fall entirely between the two
+    // images' painted rects. Pre-Phase-4 the second reflow overwrote the
+    // first's segment data, so text would land underneath imgL.
+    const textBlock = layout.pages[0]!.blocks[1]!;
+    const positionedLines = textBlock.lines.filter((l) => l.positioned);
+    expect(positionedLines.length).toBeGreaterThan(0);
+
+    // span.x is block-content-relative; add block.x for page-absolute coords.
+    const blockX = textBlock.x;
+    const A_RIGHT = 72 + 150 + 8; // 230 (page-absolute)
+    const B_LEFT = 72 + 650 - 150 - 8; // 564
+    for (const line of positionedLines) {
+      for (const span of line.spans) {
+        if (span.kind !== "text") continue;
+        const absX = blockX + span.x;
+        expect(absX).toBeGreaterThanOrEqual(A_RIGHT - 1);
+        expect(absX + span.width).toBeLessThanOrEqual(B_LEFT + 1);
+      }
+    }
   });
 });
 
@@ -1702,16 +1919,11 @@ describe("runPipeline — top-bottom (break) float", () => {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
     const blocks = layout.pages.flatMap((p) => p.blocks).filter((b) => b.lines.length > 0);
-    const contentWidth = defaultPageConfig.pageWidth - defaultPageConfig.margins.left - defaultPageConfig.margins.right; // 650
-    // All real lines must use the full content width (no constraintX narrowing).
+    // All real lines must use normal full-width layout.
     for (const block of blocks) {
       for (const line of block.lines) {
         if (line.spans.length > 0) {
-          expect(line.constraintX ?? 0).toBe(0);
-          // effectiveWidth should be undefined (full width) or equal to contentWidth.
-          if (line.effectiveWidth !== undefined) {
-            expect(line.effectiveWidth).toBeCloseTo(contentWidth, 1);
-          }
+          expect(line.positioned ?? false).toBe(false);
         }
       }
     }
@@ -1754,23 +1966,16 @@ describe("runPipeline — behind / front anchored modes", () => {
   it("behind: emits no wrap zone — following text uses full content width", () => {
     const layout = buildLayout("behind");
     const textBlock = layout.pages[0]!.blocks[1]!;
-    // No constraintX, full effectiveWidth (650 = 794 - 72*2).
-    // Unconstrained lines: no constraintX, no effectiveWidth set (LineBreaker
-    // only stamps these when a wrap zone narrows the line).
     for (const line of textBlock.lines) {
-      expect(line.constraintX ?? 0).toBe(0);
-      expect(line.effectiveWidth ?? 650).toBe(650);
+      expect(line.positioned ?? false).toBe(false);
     }
   });
 
   it("front: emits no wrap zone — following text uses full content width", () => {
     const layout = buildLayout("front");
     const textBlock = layout.pages[0]!.blocks[1]!;
-    // Unconstrained lines: no constraintX, no effectiveWidth set (LineBreaker
-    // only stamps these when a wrap zone narrows the line).
     for (const line of textBlock.lines) {
-      expect(line.constraintX ?? 0).toBe(0);
-      expect(line.effectiveWidth ?? 650).toBe(650);
+      expect(line.positioned ?? false).toBe(false);
     }
   });
 });

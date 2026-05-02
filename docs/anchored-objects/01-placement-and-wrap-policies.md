@@ -20,7 +20,6 @@ Every anchored object has these intrinsic properties from its node:
 | `positionMode` | `node.attrs.positionMode` | v1: `"move-with-text"` only |
 | `xAlign` | `node.attrs.xAlign` | `"left"`, `"center"`, `"right"`, `"custom"` |
 | `x` | `node.attrs.x` | content-area-relative X when `xAlign === "custom"` |
-| `wrapText` | `node.attrs.wrapText` | `"largest"` (default, v1), `"left"`, `"right"`. (`"bothSides"` reserved — see `05-future.md` § F7.) Per-image override of which side text wraps on. |
 | `margin` | `node.attrs.margin` | breathing room around the wrap zone, in CSS px (default `FLOAT_MARGIN`) |
 | anchor docPos | the node's PM position | the cursor target / flow anchor |
 
@@ -117,40 +116,24 @@ zone.bottom = imageY + height + margin
 The zone is the image's actual painted rectangle plus margin.
 
 For each line of text whose Y range overlaps `[zone.top, zone.bottom]`,
-the layout computes the available regions:
+the model subtracts the exclusion rectangle from the content area:
 
 ```
-leftAvail  = max(0, zone.left  - contentX)
-rightAvail = max(0, contentRight - zone.right)
+segments = subtract(
+  [{ x: contentX, width: contentWidth }],
+  [zone.left, zone.right],
+)
 ```
 
-### `wrapText` selection
+For a centered image, this can leave two segments. For an edge-aligned
+image, one segment is usually zero-width and the result behaves like
+classic left or right wrapping.
 
-The image's `wrapText` attribute selects which side(s) text wraps on:
-
-| `wrapText` | Behaviour |
-|---|---|
-| `"largest"` (default) | Each line picks the side with more available width. If both sides are exactly equal, picks the right (deterministic tie-break). |
-| `"left"` | Lines wrap **only on the left** of the image. If `leftAvail < line.required`, the line clears below the zone. |
-| `"right"` | Lines wrap **only on the right** of the image. If `rightAvail < line.required`, the line clears below the zone. |
-| `"bothSides"` | (deferred — F7) Single line straddles the image with text on both sides. |
-
-For `"largest"`, lines that don't fit on either side clear past
-`zone.bottom`.
-
-In practice with default `"largest"`:
-- Image at `xAlign: "left"` → `leftAvail = 0`, lines wrap on the right.
-- Image at `xAlign: "right"` → `rightAvail = 0`, lines wrap on the left.
-- Image centered → both sides have room; lines pick the wider (or
-  right on tie).
-
-A user can override the natural choice by setting `wrapText: "left"`
-on a right-aligned image (forcing text on the narrow left strip),
-matching Word's per-image wrap-side control.
-
-**`wrapText: "bothSides"` (a single line using both sides simultaneously,
-with the image as a hole)** is explicitly deferred — see `05-future.md`
-§ F7.
+Square wrap always keeps every surviving segment. If the image is
+centered, one visual line may contain text on both sides of the image.
+If the image is edge-aligned, one side naturally has no usable width,
+so the result looks like classic left or right wrapping without needing
+a separate wrap-side mode.
 
 ### Cross-paragraph wrap
 
@@ -164,7 +147,7 @@ paragraph beside the image until the image's bottom is reached.
 `square` does **not** invoke Rule 2's paragraph split. The anchor
 paragraph stays as one flow block with a zero-width anchor span at
 the image's docPos. Paragraph text laid out normally; lines whose Y
-falls in the wrap zone get the wider-side constraint.
+falls in the wrap zone are placed inside the available segment list.
 
 ### Paint
 

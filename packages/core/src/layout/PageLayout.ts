@@ -11,7 +11,7 @@ import {
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
-import type { LayoutLine, ConstraintProvider } from "./LineBreaker";
+import type { LayoutLine, LineSpaceProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
 import {
   ANCHORED_OBJECT_MARGIN,
@@ -491,6 +491,11 @@ function resolveAnchoredObjects(
   const contentRight = pageConfig.pageWidth - pageConfig.margins.right;
   const contentWidth = contentRight - contentX;
   const barriers = createPageBarrierProvider(pageConfig, metricsFor);
+  // Phase 4: one ExclusionManager per page, accumulating every square rect.
+  // Sequential anchors share the same manager so a flow that overlaps two
+  // images on the same page reflows against the union of both rects rather
+  // than one at a time (which lost the prior rect's segments).
+  const exclusionsByPage = new Map<number, ExclusionManager>();
 
   for (let i = 0; i < flows.length; i++) {
     const flow = flows[i]!;
@@ -502,18 +507,27 @@ function resolveAnchoredObjects(
       const width = Math.min(attrs.width, contentWidth);
       const height = attrs.height;
       const wrapMode = attrs.wrapMode;
-      let globalY = flows[i]!.globalY ?? 0;
-      let pageNumber = barriers.pageForGlobalY(globalY);
-      let localY = barriers.localYForGlobalY(pageNumber, globalY);
+      const yOffset = attrs.yOffset;
+
+      // anchorGlobalY: the anchor flow's globalY (post anchor-push / stacking).
+      // paintedGlobalY: where the image actually paints (= anchor + yOffset, clamped).
+      // Anchor-push and stacking operate on flow geometry (anchor); paint, exclusion,
+      // and the clamp operate on the painted position. Phase 1 V1 invariant:
+      // image.page === anchor.page (clamp pulls a runaway yOffset back onto the page).
+      let anchorGlobalY = flows[i]!.globalY ?? 0;
+      let pageNumber = barriers.pageForGlobalY(anchorGlobalY);
+      let anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
 
       // Anchor-push: any wrapping mode whose visual extent overflows its
       // anchor's page is pushed to the next page (provided the next page
       // can fit it). This applies uniformly to square / top-bottom /
-      // behind / front.
+      // behind / front. yOffset is intentionally not factored in — the
+      // anchor flow's natural fit decides the page; yOffset only shifts
+      // within the resulting page (and clamps if it would escape).
       if (
         wrapMode !== "inline" &&
         !pageConfig.pageless &&
-        localY + height > barriers.contentBottomLocal(pageNumber) &&
+        anchorLocalY + height > barriers.contentBottomLocal(pageNumber) &&
         height <= barriers.contentHeight(pageNumber + 1)
       ) {
         const pushedGlobalY = barriers.pageStartGlobal(pageNumber + 1);
@@ -523,45 +537,48 @@ function resolveAnchoredObjects(
           ...flows.slice(i + 1),
         ];
         flows = restampGlobalYFrom(flows, i + 1);
-        globalY = pushedGlobalY;
-        pageNumber = barriers.pageForGlobalY(globalY);
-        localY = barriers.localYForGlobalY(pageNumber, globalY);
+        anchorGlobalY = pushedGlobalY;
+        pageNumber = barriers.pageForGlobalY(anchorGlobalY);
+        anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
       }
 
       // Resolve horizontal X — single expression for every non-inline mode.
       const x = resolveImageX({ width, xAlign: attrs.xAlign, x: attrs.x }, contentX, contentWidth);
 
-      // Square stacking: when two square images on the same page have wrap
-      // zones that horizontally and vertically overlap, push the second
-      // below the first. Tracked by image rect (not by xAlign) so a
-      // user-positioned center image and a user-positioned right image at
-      // overlapping Y still resolve cleanly.
+      // Square stacking: detect overlap by *painted* rect (anchor + yOffset)
+      // for both the new and prior placements. Stacking shifts the anchor
+      // flow by the same delta as the painted target, preserving yOffset.
       if (wrapMode === "square") {
-        let stackedGlobalY = globalY;
+        const newPaintedGlobalY = anchorGlobalY + yOffset;
+        let stackedPaintedGlobalY = newPaintedGlobalY;
         for (const placed of placements) {
           if (placed.wrapMode !== "square" || placed.page !== pageNumber) continue;
           const hOverlap = x < placed.x + placed.width && x + width > placed.x;
-          const vOverlap = localY < placed.y + placed.height && localY + height > placed.y;
+          const vOverlap =
+            newPaintedGlobalY < placed.globalY + placed.height &&
+            newPaintedGlobalY + height > placed.globalY;
           if (hOverlap && vOverlap) {
-            const placedGlobalY = placed.anchorGlobalY + placed.height + ANCHORED_OBJECT_MARGIN;
-            stackedGlobalY = Math.max(stackedGlobalY, placedGlobalY);
+            const placedBottomGlobalY = placed.globalY + placed.height + ANCHORED_OBJECT_MARGIN;
+            stackedPaintedGlobalY = Math.max(stackedPaintedGlobalY, placedBottomGlobalY);
           }
         }
-        if (stackedGlobalY > globalY) {
+        if (stackedPaintedGlobalY > newPaintedGlobalY) {
+          const delta = stackedPaintedGlobalY - newPaintedGlobalY;
+          const stackedAnchorGlobalY = anchorGlobalY + delta;
           flows = [
             ...flows.slice(0, i),
-            { ...flows[i]!, globalY: stackedGlobalY, solverPushedThisFlow: true },
+            { ...flows[i]!, globalY: stackedAnchorGlobalY, solverPushedThisFlow: true },
             ...flows.slice(i + 1),
           ];
           flows = restampGlobalYFrom(flows, i + 1);
-          globalY = stackedGlobalY;
-          pageNumber = barriers.pageForGlobalY(globalY);
-          localY = barriers.localYForGlobalY(pageNumber, globalY);
+          anchorGlobalY = stackedAnchorGlobalY;
+          pageNumber = barriers.pageForGlobalY(anchorGlobalY);
+          anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
         }
-        // Re-check page fit after stacking.
+        // Re-check page fit after stacking (anchor-flow geometry, like above).
         if (
           !pageConfig.pageless &&
-          localY + height > barriers.contentBottomLocal(pageNumber) &&
+          anchorLocalY + height > barriers.contentBottomLocal(pageNumber) &&
           height <= barriers.contentHeight(pageNumber + 1)
         ) {
           const pushedGlobalY = barriers.pageStartGlobal(pageNumber + 1);
@@ -571,42 +588,78 @@ function resolveAnchoredObjects(
             ...flows.slice(i + 1),
           ];
           flows = restampGlobalYFrom(flows, i + 1);
-          globalY = pushedGlobalY;
-          pageNumber = barriers.pageForGlobalY(globalY);
-          localY = barriers.localYForGlobalY(pageNumber, globalY);
+          anchorGlobalY = pushedGlobalY;
+          pageNumber = barriers.pageForGlobalY(anchorGlobalY);
+          anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
         }
       }
+
+      // Apply yOffset and clamp into the anchor's page so the image stays on
+      // the same page as its anchor. `clamped` is surfaced on the placement
+      // for Phase 2's drag overlay (visual stickiness at the boundary).
+      const desiredGlobalY = anchorGlobalY + yOffset;
+      let paintedGlobalY = desiredGlobalY;
+      let clamped = false;
+      if (!pageConfig.pageless) {
+        const pageStart = barriers.pageStartGlobal(pageNumber);
+        const pageEnd = pageStart + Math.max(0, barriers.contentHeight(pageNumber) - height);
+        if (paintedGlobalY < pageStart) {
+          paintedGlobalY = pageStart;
+          clamped = paintedGlobalY !== desiredGlobalY;
+        } else if (paintedGlobalY > pageEnd) {
+          paintedGlobalY = pageEnd;
+          clamped = paintedGlobalY !== desiredGlobalY;
+        }
+      }
+      const paintedLocalY = barriers.localYForGlobalY(pageNumber, paintedGlobalY);
 
       placements.push({
         docPos: anchor.docPos,
         page: pageNumber,
         x,
-        y: localY,
+        y: paintedLocalY,
         width,
         height,
         wrapMode,
         node: anchor.node,
-        anchorGlobalY: globalY,
+        anchorGlobalY,
         anchorPage: pageNumber,
+        globalY: paintedGlobalY,
+        ...(clamped ? { clamped: true } : {}),
       });
 
-      // Square: emit a wrap zone constraint for sibling lines whose Y
-      // overlaps the painted rectangle. The anchor paragraph stays in
-      // flow at its natural text height (no flow contribution); subsequent
-      // paragraphs that fall within the zone get their lines narrowed.
+      // Square: emit a wrap zone constraint at the *painted* rectangle so
+      // text wraps the image's actual position, not its anchor flow row.
+      // Subsequent paragraphs that fall within the zone get their lines narrowed.
+      // The rect is added to the page's shared ExclusionManager so the next
+      // square anchor on this page reflows flows against the *union* of all
+      // rects added so far — multi-image overlap on the same flow compounds
+      // segments rather than overwriting each other.
       if (wrapMode === "square") {
-        flows = reflowFlowsAgainstSquareObject(
+        let exclusions = exclusionsByPage.get(pageNumber);
+        if (!exclusions) {
+          exclusions = new ExclusionManager();
+          exclusionsByPage.set(pageNumber, exclusions);
+        }
+        const margin = attrs.margin;
+        const zoneTop = paintedGlobalY - margin;
+        const zoneBottom = paintedGlobalY + height + margin;
+        exclusions.addRect({
+          page: pageNumber,
+          x: x - margin,
+          right: x + width + margin,
+          y: zoneTop,
+          bottom: zoneBottom,
+          side: "left",
+          docPos: anchor.docPos,
+        });
+        flows = reflowFlowsAgainstSquareExclusions(
           flows,
-          i,
+          exclusions,
           {
-            wrapText: attrs.wrapText,
             pageNumber,
-            globalY,
-            localY,
-            x,
-            width,
-            height,
-            margin: attrs.margin,
+            zoneTop,
+            zoneBottom,
             contentX,
             contentWidth,
           },
@@ -618,30 +671,51 @@ function resolveAnchoredObjects(
         continue;
       }
 
-      // Top-bottom's vertical flow is fully represented by the Stage 1
-      // anchored-object block: height reserves the object, spaceAfter reserves
-      // attrs.margin, and any Stage 3 globalY push re-stamps downstream flows.
-      // No second clearance barrier is needed here.
+      // Top-bottom: the Stage 1 anchored-object FlowBlock still reserves
+      // the vertical flow space (height = imageHeight, spaceAfter = margin)
+      // — that's how text-before / image / text-after are positioned.
+      // Phase 5 V1: also contribute a `side: "full"` rect to the page's
+      // shared ExclusionManager so square-wrap reflows on the same page
+      // see the top-bottom band as a real exclusion (the architectural
+      // unification — all wrap modes feed one manager). The rip-out of
+      // the FlowBlock partKind path itself is deferred to Phase 5 V2.
+      if (wrapMode === "top-bottom") {
+        let exclusions = exclusionsByPage.get(pageNumber);
+        if (!exclusions) {
+          exclusions = new ExclusionManager();
+          exclusionsByPage.set(pageNumber, exclusions);
+        }
+        const margin = attrs.margin;
+        exclusions.addFullWidthRect({
+          page: pageNumber,
+          y: paintedGlobalY - margin,
+          bottom: paintedGlobalY + height + margin,
+          contentX,
+          contentWidth,
+          docPos: anchor.docPos,
+        });
+      }
     }
   }
 
   return { flows, placements };
 }
 
-function reflowFlowsAgainstSquareObject(
+/**
+ * Reflow every flow whose Y range intersects the latest exclusion zone.
+ *
+ * This deliberately does not start at the anchor flow index. `yOffset` makes
+ * the painted rectangle independent from anchor order, so an image anchored
+ * in paragraph B can exclude text in paragraph A. The Y-range checks below
+ * are the only gate: docPos owns the object, geometry drives wrapping.
+ */
+function reflowFlowsAgainstSquareExclusions(
   inputFlows: FlowBlock[],
-  startIndex: number,
+  exclusions: ExclusionManager,
   zone: {
-    /** Per-image wrap-side override; `largest` (default) picks the wider side. */
-    wrapText: import("./AnchoredObjects").WrapText;
     pageNumber: number;
-    globalY: number;
-    localY: number;
-    /** Painted X of the image (page-local). */
-    x: number;
-    width: number;
-    height: number;
-    margin: number;
+    zoneTop: number;
+    zoneBottom: number;
     contentX: number;
     contentWidth: number;
   },
@@ -651,45 +725,10 @@ function reflowFlowsAgainstSquareObject(
   inlineRegistry?: InlineRegistry,
 ): FlowBlock[] {
   let flows = inputFlows;
-  const margin = zone.margin;
-  const zoneLeft = zone.x - margin;
-  const zoneRight = zone.x + zone.width + margin;
-  const zoneTop = zone.globalY - margin;
-  const zoneBottom = zone.globalY + zone.height + margin;
-  const contentRight = zone.contentX + zone.contentWidth;
+  const zoneTop = zone.zoneTop;
+  const zoneBottom = zone.zoneBottom;
 
-  // Available widths on each side of the image's wrap zone, within the
-  // content area. Either may be 0 when the image is flush against an edge.
-  const leftAvail = Math.max(0, zoneLeft - zone.contentX);
-  const rightAvail = Math.max(0, contentRight - zoneRight);
-
-  // Resolve which side text wraps on. `largest` picks the wider side at
-  // line-resolution time; `left` / `right` force a specific side.
-  const sideForLine = (
-    requiredWidth: number,
-  ): { x: number; width: number } | "skip" | null => {
-    // Apply per-image override or compute from geometry.
-    if (zone.wrapText === "left") {
-      if (leftAvail <= 0 || requiredWidth > leftAvail) return "skip";
-      return { x: 0, width: leftAvail };
-    }
-    if (zone.wrapText === "right") {
-      if (rightAvail <= 0 || requiredWidth > rightAvail) return "skip";
-      return { x: zoneRight - zone.contentX, width: rightAvail };
-    }
-    // "largest" (default) — pick wider side that fits; deterministic
-    // tie-break: when widths are equal, prefer right.
-    const leftFits = leftAvail >= requiredWidth;
-    const rightFits = rightAvail >= requiredWidth;
-    if (!leftFits && !rightFits) return "skip";
-    if (leftFits && !rightFits) return { x: 0, width: leftAvail };
-    if (!leftFits && rightFits) return { x: zoneRight - zone.contentX, width: rightAvail };
-    return rightAvail >= leftAvail
-      ? { x: zoneRight - zone.contentX, width: rightAvail }
-      : { x: 0, width: leftAvail };
-  };
-
-  for (let idx = startIndex; idx < flows.length; idx++) {
+  for (let idx = 0; idx < flows.length; idx++) {
     const flow = flows[idx]!;
     const flowY = flow.globalY ?? 0;
     if (flowY >= zoneBottom) break;
@@ -697,31 +736,43 @@ function reflowFlowsAgainstSquareObject(
 
     const wrappedFlow: FlowBlock = { ...flow, overlapsWrapZone: true };
 
-    const constraintProvider: ConstraintProvider = (absoluteLineY: number, lineHeight = 1) => {
-      if (absoluteLineY + lineHeight <= zoneTop || absoluteLineY >= zoneBottom) {
-        return null;
+    const blockContentX = zone.contentX + flow.indentLeft;
+    const lineSpaceProvider: LineSpaceProvider = (absoluteLineY: number, lineHeight = 1) => {
+      const space = exclusions.getAvailableSegments(
+        zone.pageNumber,
+        absoluteLineY,
+        lineHeight,
+        blockContentX,
+        flow.availableWidth,
+      );
+      // ExclusionManager returns segments in the same coordinate space as
+      // contentX (here: absolute page-local). LineSpaceProvider's contract
+      // requires block-content-relative coords, so translate.
+      const segments = space.segments.map((s) => ({
+        x: s.x - blockContentX,
+        width: s.width,
+      }));
+      // Square wrap with a single full-width-ish image: rect punches all
+      // segments out without side="full". Fall back to zoneBottom so the
+      // line breaker advances past the image instead of dropping words.
+      if (segments.length === 0 && space.skipToY === undefined) {
+        return { segments, skipToY: zoneBottom };
       }
-      // requiredWidth = 1 here as a probe; LineBreaker handles per-line
-      // word-fit checks with its own measurement.
-      const side = sideForLine(1);
-      if (side === null) return null;
-      if (side === "skip") {
-        // Force the line below the wrap zone.
-        return { x: 0, width: 0, skipToY: zoneBottom };
-      }
-      return { x: side.x, width: side.width };
+      return space.skipToY !== undefined
+        ? { segments, skipToY: space.skipToY }
+        : { segments };
     };
 
     const reflowed = layoutBlock(flow.node, {
       nodePos: flow.nodePos,
-      x: zone.contentX + flow.indentLeft,
+      x: blockContentX,
       y: flowY,
       availableWidth: flow.availableWidth,
       page: zone.pageNumber,
       measurer,
       fontConfig,
       ...(fontModifiers ? { fontModifiers } : {}),
-      constraintProvider,
+      lineSpaceProvider,
       ...(inlineRegistry ? { inlineRegistry } : {}),
     });
 
@@ -1498,11 +1549,24 @@ function blockHasAnchoredObject(lines: LayoutLine[]): boolean {
   for (const line of lines) {
     for (const span of line.spans) {
       if (span.kind !== "object" || span.width !== 0) continue;
-      const wm = span.node.attrs["wrappingMode"] as string | undefined;
-      if (wm && wm !== "inline") return true;
+      // Read through normalizeImageAttrs so both the canonical `wrapMode`
+      // attr and the legacy `wrappingMode` shorthand are honoured. Reading
+      // legacy alone misses nodes set via the new ImageMenu (which writes
+      // `wrapMode: "square", wrappingMode: "inline"`).
+      if (normalizeImageAttrs(span.node).wrapMode !== "inline") return true;
     }
   }
   return false;
+}
+
+function isAnchorOnlyFlowEntry(entry: Pick<MeasureCacheEntry, "height" | "lines">): boolean {
+  if (entry.height !== 0 || entry.lines.length === 0) return false;
+  return entry.lines.every((line) =>
+    line.lineHeight === 0 &&
+    line.cursorHeight === 0 &&
+    line.spans.length > 0 &&
+    line.spans.every((span) => span.kind === "object" && span.width === 0 && span.height === 0),
+  );
 }
 
 export function buildBlockFlow(
@@ -1646,14 +1710,15 @@ export function buildBlockFlow(
       node, nodePos, blockX, 0, blockWidth, 1,
       measurer, fontConfig, fontModifiers, measureCache, inlineRegistry,
     );
+    const anchorOnlyFlow = isAnchorOnlyFlowEntry(entry);
 
     flows.push({
       node,
       nodePos,
       lines: entry.lines,
       height: entry.height,
-      spaceBefore: blockStyle.spaceBefore,
-      spaceAfter: blockStyle.spaceAfter,
+      spaceBefore: anchorOnlyFlow ? 0 : blockStyle.spaceBefore,
+      spaceAfter: anchorOnlyFlow ? 0 : blockStyle.spaceAfter,
       availableWidth: blockWidth,
       blockType: entry.blockType,
       align: entry.align,

@@ -274,34 +274,29 @@ zone.bottom = anchor.flow_y + height + margin
 ```
 
 `reflowAgainstWrapZones` walks every flow whose Y range overlaps
-any wrap zone and re-runs `layoutBlock` with a `ConstraintProvider`
-that, for each line's absolute Y, returns the **wider available
-side**:
+any wrap zone and re-runs `layoutBlock` with line-space constraints.
+The model-level operation is rectangle subtraction: collect every
+exclusion rectangle active at the line's Y range, subtract them from
+the content area, and return the remaining available segments:
 
 ```
-function constraintForLineY(absoluteY, lineHeight):
+function availableSegmentsForLine(absoluteY, lineHeight):
+  segments = [{ x: contentX, width: contentWidth }]
   for each zone whose [zone.top, zone.bottom] overlaps [absoluteY, absoluteY + lineHeight]:
-    leftAvail  = max(0, zone.left  - contentX)
-    rightAvail = max(0, contentRight - zone.right)
-    if leftAvail > rightAvail and lineWidth fits in leftAvail:
-      return { startX: contentX,  width: leftAvail }
-    else if rightAvail > 0 and lineWidth fits in rightAvail:
-      return { startX: zone.right, width: rightAvail }
-    else:
-      return { skipBelow: zone.bottom }   // line clears past the zone
-  return null  // no constraint, full content width
+    segments = subtract([zone.left, zone.right], from: segments)
+  if segments is empty:
+    return { segments: [], skipBelow: max(active zone.bottom) }
+  return { segments }
 ```
 
-Output line metadata always includes `constraintX` and
-`effectiveWidth` whenever a constraint applied — even when the text
-fit naturally inside the constrained width without wrapping. This
-permits short paragraphs to render offset past a wrap zone.
+`LineBreaker` consumes the resulting `Segment[]` directly. A
+`LayoutLine` whose spans are already positioned inside segments carries
+`positioned: true` and the `segments` used for that line; renderers and
+CharacterMap population then use the span x positions directly.
 
-Multiple overlapping wrap zones (rare): take the union — pick
-whichever side has more room across all overlapping zones.
-
-**Two-sided wrap (a single line spanning both sides of an image
-with the image as a hole) is deferred — see `05-future.md`.**
+Multiple overlapping wrap zones naturally compose by repeated
+subtraction. There is no special "left float plus right float" case:
+each active rectangle removes inline space from the same segment list.
 
 ### Top-bottom Flow
 

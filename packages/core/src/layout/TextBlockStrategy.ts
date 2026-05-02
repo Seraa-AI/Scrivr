@@ -1,5 +1,5 @@
 import type { CharacterMap } from "./CharacterMap";
-import type { LayoutBlock } from "./BlockLayout";
+import { isHiddenAnchorLine, type LayoutBlock } from "./BlockLayout";
 import { computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
 import { computeObjectRenderY } from "./LineBreaker";
 import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
@@ -22,6 +22,8 @@ export const TextBlockStrategy: BlockStrategy = {
 
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li]!;
+      if (isHiddenAnchorLine(line)) continue;
+
       const globalLineIndex = lineIndexOffset + li;
       const isLastLine = li === lines.length - 1;
       // For justify alignment, the "last line" exception (no stretching) applies only
@@ -29,9 +31,12 @@ export const TextBlockStrategy: BlockStrategy = {
       // split part that continues on the next page.
       const isLastLineOfBlock = isLastLine && !block.continuesOnNextPage;
 
-      const lineConstraintX = line.constraintX ?? 0;
-      const lineOffsetX = lineConstraintX + computeAlignmentOffset(align, line.effectiveWidth ?? availableWidth, line.width);
-      const spaceBonus = computeJustifySpaceBonus(align, line.spans, line.effectiveWidth ?? availableWidth, line.width, isLastLineOfBlock);
+      const lineOffsetX = line.positioned
+        ? 0
+        : computeAlignmentOffset(align, availableWidth, line.width);
+      const spaceBonus = line.positioned
+        ? 0
+        : computeJustifySpaceBonus(align, line.spans, availableWidth, line.width, isLastLineOfBlock);
       const lineY = block.y + getTotalLineHeight(lines, li);
       const baseline = lineY + line.ascent;
 

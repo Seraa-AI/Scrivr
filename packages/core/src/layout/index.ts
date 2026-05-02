@@ -1,11 +1,11 @@
 export { CharacterMap } from "./CharacterMap";
 export { ExclusionManager } from "./ExclusionManager";
-export type { ExclusionRect, LineConstraint } from "./ExclusionManager";
+export type { AvailableSegment, ExclusionRect, LineSpace } from "./ExclusionManager";
 export type { GlyphEntry, LineEntry, CoordsResult } from "./CharacterMap";
 export { TextMeasurer } from "./TextMeasurer";
 export type { FontMetrics, RunMetrics } from "./TextMeasurer";
 export { LineBreaker } from "./LineBreaker";
-export type { InputSpan, LayoutSpan, LayoutLine, ConstraintProvider } from "./LineBreaker";
+export type { InputSpan, LayoutSpan, LayoutLine, LineSpaceProvider } from "./LineBreaker";
 export { layoutBlock, resolveLeafBlockDimensions, computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
 export type { LayoutBlock, BlockLayoutOptions } from "./BlockLayout";
 export { runPipeline, buildFragments, defaultPageConfig, defaultPagelessConfig, collapseMargins } from "./PageLayout";
@@ -14,7 +14,6 @@ export type {
   WrapMode,
   PositionMode,
   XAlign,
-  WrapText,
   LegacyWrappingMode,
   NormalizedImageAttrs,
   AnchoredObjectInput,

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   layoutBlock,
+  isHiddenAnchorLine,
   populateCharMap,
   resolveLeafBlockDimensions,
 } from "./BlockLayout";
@@ -1180,6 +1181,135 @@ describe("extractSpans — inline node handling", () => {
     // "Hi" → docPos 1,2; image → docPos 3; sentinel → docPos 4
     expect(map.hasGlyph(3)).toBe(true); // the image glyph
     expect(map.hasGlyph(4)).toBe(true); // sentinel past the image
+  });
+});
+
+// ── Phase 3: anchored-image sentinel does not inflate paragraph height ───────
+
+describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
+  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+
+  it("paragraph with only a non-inline image is an invisible zero-height anchor flow", () => {
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 200,
+      wrapMode: "square",
+    });
+    const para = skSchema.node("paragraph", null, [img]);
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+    });
+    // The zero-size object sentinel remains, but the paragraph does not
+    // create a visible blank line behind the floating image.
+    expect(block.lines).toHaveLength(1);
+    expect(isHiddenAnchorLine(block.lines[0]!)).toBe(true);
+    expect(block.lines[0]!.lineHeight).toBe(0);
+    expect(block.lines[0]!.cursorHeight).toBe(0);
+    expect(block.height).toBe(0);
+    expect(block.spaceBefore).toBe(0);
+    expect(block.spaceAfter).toBe(0);
+  });
+
+  it("anchor-only paragraph does not register cursor glyphs", () => {
+    const map = new CharacterMap();
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 200,
+      wrapMode: "square",
+    });
+    const para = skSchema.node("paragraph", null, [img]);
+
+    layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+      map,
+      lineIndexOffset: 0,
+    });
+
+    expect(map.coordsAtPos(1)).toBeNull();
+    expect(map.coordsAtPos(2)).toBeNull();
+  });
+
+  it("anchored-image sentinel is preserved on the line so getAnchoredObjectAnchors finds it", () => {
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 200,
+      wrapMode: "square",
+    });
+    const para = skSchema.node("paragraph", null, [img]);
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+    });
+    const allSpans = block.lines.flatMap((l) => l.spans);
+    const sentinel = allSpans.find(
+      (s) => s.kind === "object" && s.width === 0 && s.height === 0,
+    );
+    expect(sentinel).toBeDefined();
+  });
+
+  it("text + non-inline image: line height is text height (image contributes nothing)", () => {
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 200,
+      wrapMode: "square",
+    });
+    const para = skSchema.node("paragraph", null, [
+      img,
+      skSchema.text("text alongside an anchored image"),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 600,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+    });
+    // First line height matches text — image's 200px height is excluded.
+    expect(block.lines[0]!.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    expect(block.lines[0]!.lineHeight).toBeLessThan(200);
+  });
+
+  it("inline image (wrapMode:inline) still inflates line height as before — Phase 3 only changes non-inline", () => {
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 150,
+      wrapMode: "inline",
+    });
+    const para = skSchema.node("paragraph", null, [img]);
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+    });
+    expect(block.lines[0]!.lineHeight).toBe(150);
   });
 });
 

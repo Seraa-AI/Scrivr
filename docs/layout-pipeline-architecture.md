@@ -100,7 +100,7 @@ Currently implicit — `collectLayoutItems()` produces a flat `LayoutItem[]`. A 
 
 ### Stage 2 — Inline Layout Engine
 
-**Input:** `LayoutNode`, `ConstraintProvider`, `PageConfig`, `FontConfig`
+**Input:** `LayoutNode`, `LineSpaceProvider`, `PageConfig`, `FontConfig`
 **Output:** `InlineLayoutResult`
 
 ```ts

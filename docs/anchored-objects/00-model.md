@@ -67,7 +67,8 @@ Detailed semantics, geometry, and wider-side wrap rules per mode live in
 | **wrap effect / wrap footprint** | The constraint the object imposes on surrounding text. |
 | **paint effect** | How the object is rendered, including layer order. |
 | **anchored-object block** | A flow block produced by the layout pipeline to represent the object's flow contribution. Emitted only for modes whose flow contribution is non-zero. |
-| **wrap zone** | A rectangular region where text is excluded or narrowed — derived from the image's actual painted rectangle. |
+| **wrap zone / exclusion rectangle** | A rectangular region removed from the usable inline space for overlapping text lines — derived from the image's actual painted rectangle. |
+| **available segment** | A horizontal run of usable inline space left after subtracting active exclusion rectangles from the content area at a line's Y position. |
 
 > **Naming.** "Float" is a legacy / user-facing term. Internally — and
 > in every doc in this directory — the engine uses **anchored object**.
@@ -160,35 +161,70 @@ zero-height and carries no layout weight.
 
 ### Rule 4 — Position is structural; there is no paint-only X/Y offset
 
-The image's position is expressed entirely by `xAlign` / `x` (horizontal)
-and the anchor's flow position (vertical). Both are read by the layout
-solver. There is **no** paint-only offset attribute that lets the image
-render at a position different from where the wrap zone was solved.
+The image's position is expressed by `xAlign` / `x` (horizontal) and
+`anchor.globalY + yOffset` (vertical). All of these are read by the
+layout solver. There is **no** paint-only offset attribute that lets
+the image render at a position different from where the wrap zone was
+solved.
 
 Drag mechanics:
 - **Horizontal drag** → set `xAlign: "custom"` and `x` to the new content-
   area-relative position. Layout reflows; wrap zone is computed at the
   new rectangle.
-- **Vertical drag** → move the PM image node to the docPos of the
-  paragraph nearest the painted Y. The anchor docPos and the image's
-  visual Y stay co-located by construction.
-- **Diagonal drag** → both, atomically in one transaction.
+- **Vertical drag** → update `yOffset`. The anchor docPos stays stable;
+  layout reflows around the image's actual painted rectangle.
+- **Diagonal drag** → update `x` / `xAlign` and `yOffset` atomically.
 
 This subsumes the legacy `floatOffset.x` / `floatOffset.y` attributes,
 which are retired. Layout never reads them.
 
-### Rule 5 — Anchor and image stay co-located
+### Rule 5 — Anchor owns the image; geometry positions it
 
-By construction (Rule 4 drag mechanics) the anchor docPos always sits
-in (or directly adjacent to) the paragraph nearest the image's painted
-position. The user never observes "the image is here but its docPos is
-elsewhere." Click-the-image targets the same docPos that vertical drag
-would resolve to.
+The anchor docPos is allowed to be elsewhere in document order from the
+painted rectangle. It answers "what text does this image move with?",
+not "where is the image painted?" Text wrapping is driven by the page-
+level anchored-object rectangle.
+
+When a non-inline image is reset to inline, the editor performs the
+inverse conversion once: it resolves the current painted X/Y to the
+nearest text insertion point, moves the image node there, and clears
+`x`, `yOffset`, and legacy `floatOffset`.
 
 For pagination, this also means: if a `top-bottom` / `behind` / `front`
 object cannot fit on its anchor's page, the anchor moves to the next
 page too, taking the object with it. (The `square` case is handled by
-the wrap zone — text wraps; nothing is "pushed.")
+the wrap zone / exclusion rectangle — text wraps; nothing is "pushed.")
+
+## Exclusion-segment model
+
+The clean wrapping model is:
+
+```
+wrapMode = behavior
+xAlign/x = placement
+availableSegments = content area - active exclusion rectangles
+```
+
+A square anchored object does not wrap text directly. It is placed
+first, then its painted rectangle plus `margin` becomes an exclusion
+rectangle. Each line asks: "at this Y range, what horizontal segments
+remain usable?"
+
+For a centered image, the answer can be two segments:
+
+```
+left text segment | excluded image rectangle | right text segment
+```
+
+For a left-aligned image, the left segment has zero or tiny width, so
+the practical result is right-side wrapping. For a right-aligned image,
+the practical result is left-side wrapping. `top-bottom` is the same
+geometry with a full-content-width exclusion rectangle, so the line has
+no usable segments and skips below the object.
+
+The line breaker consumes this segment list directly. Square wrap does
+not choose a side: every surviving segment remains available, so one
+visual line can place text on both sides of the same image.
 
 ## The strongest invariant
 
@@ -219,11 +255,6 @@ These exist in Word/Docs but are explicitly **not** part of the v1 model:
   move the anchor without moving the image's visual position.
 - **Tight / through wrap** — non-rectangular wrap zones following
   the image's alpha shape; user-edited wrap boundary.
-- **Two-sided wrap** — text simultaneously on both sides of an image
-  in the same line (a line with a "hole" in the middle). v1 uses
-  wider-side wrap: each line picks the side with more available
-  space.
-
 These are documented in `05-future.md` as deferred work. The v1
 contract assumes:
 - Every anchored object has exactly one anchor in flow.
@@ -231,8 +262,9 @@ contract assumes:
   co-located by drag mechanics (Rule 5).
 - Oversized objects render at their anchor and accept visual overflow.
 - Wrap zones are rectangular.
-- Lines that overlap a `square` wrap zone wrap on a single side
-  (the side with more available width).
+- Lines that overlap a `square` wrap zone are laid out inside the
+  available segments left after all active exclusion rectangles are
+  subtracted from content width.
 
 ## OOXML mapping
 
@@ -251,7 +283,7 @@ need translation:
 | `xAlign: "center"` | `<wp:positionH relativeFrom="margin"><wp:align>center</wp:align></wp:positionH>` |
 | `xAlign: "right"` | `<wp:positionH relativeFrom="margin"><wp:align>right</wp:align></wp:positionH>` |
 | `xAlign: "custom"`, `x` | `<wp:positionH relativeFrom="margin"><wp:posOffset>…</wp:posOffset></wp:positionH>` |
-| `wrapText` | `wrapText` attribute on `<wp:wrapSquare/>` (`largest` / `left` / `right` / `bothSides`) |
+| square segment behavior | equivalent to OOXML `<wp:wrapSquare wrapText="bothSides"/>` |
 | `positionMode: "move-with-text"` | implicit when `<wp:positionV>` is anchor- or paragraph-relative |
 | (deferred) `positionMode: "fix-on-page"` | `<wp:positionV relativeFrom="page">` |
 | (deferred) tight wrap | `<wp:wrapTight>` + `<wp:wrapPolygon>` |

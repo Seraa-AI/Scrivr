@@ -163,14 +163,14 @@ export const Image = Extension.create({
           xAlign: { default: "left" },
           /** Custom horizontal X (content-area-relative px); used when xAlign === "custom" */
           x: { default: null },
-          /** Wrap-side override: `largest | left | right` (`bothSides` reserved for F7) */
-          wrapText: { default: "largest" },
+          /** Vertical placement delta from anchor's globalY (px). Painted top = anchor.globalY + yOffset. */
+          yOffset: { default: 0 },
           /** Wrap-zone breathing room in px */
           margin: { default: 8 },
           // ── Legacy attrs (read-side compat — see normalizeImageAttrs) ────
           /** @deprecated — replaced by `wrapMode` + `xAlign`. Mapped on read. */
           wrappingMode: { default: "inline" },
-          /** @deprecated — paint-only offset retired in v1. Layout ignores. */
+          /** @deprecated — `floatOffset.y` is read-side mapped to `yOffset` by normalizeImageAttrs. */
           floatOffset: { default: { x: 0, y: 0 } },
         },
         parseDOM: [
@@ -226,8 +226,8 @@ export const Image = Extension.create({
   addToolbarItems() {
     // When the wrap-mode picker (Square / Top-Bottom / Behind / Front / Inline)
     // lands here, the Square entry's tooltip must read:
-    //   "Text wraps on the wider side. Two-sided wrap is deferred."
-    // Spec: docs/anchored-objects/04-edit-ux.md § Wrap-side hint (Square only).
+    //   "Text wraps around the image's exclusion rectangle. Current line layout uses one side at a time."
+    // Spec: docs/anchored-objects/04-edit-ux.md § Wrap-segment hint (Square only).
     return [
       {
         command: "insertImage",

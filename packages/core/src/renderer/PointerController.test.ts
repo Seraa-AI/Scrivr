@@ -78,7 +78,7 @@ function makeMockEditor(overrides: Partial<MockEditor> = {}): MockEditor {
           start: vi.fn(() => 1),
           end: vi.fn(() => 30),
         })),
-        nodeAt: vi.fn(() => ({ attrs: { width: 80, height: 60, wrappingMode: "square-left" } })),
+        nodeAt: vi.fn(() => ({ nodeSize: 1, attrs: { width: 80, height: 60, wrappingMode: "inline" } })),
         content: { size: 40 },
       },
       selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true },
@@ -245,6 +245,33 @@ describe("PointerController — image click routing", () => {
     expect(editor.selection.setSelection).toHaveBeenCalled();
   });
 
+  it("dragging an inline image moves the image node structurally", () => {
+    editor.charMap.objectRectAtPoint.mockReturnValue(IMAGE_RECT);
+    editor.charMap.posAtCoords.mockReturnValue(24);
+
+    mousedown(container, 140, 80);
+    mousemove(260, 120);
+    mouseup(260, 120);
+
+    expect(editor.selectNode).toHaveBeenCalledWith(IMAGE_RECT.docPos);
+    expect(editor.moveNode).toHaveBeenCalledWith(IMAGE_RECT.docPos, 24);
+    expect(editor.setNodeAttrs).not.toHaveBeenCalled();
+    expect(editor.moveAndUpdateNode).not.toHaveBeenCalled();
+  });
+
+  it("clicking an inline image without dragging only selects it", () => {
+    editor.charMap.objectRectAtPoint.mockReturnValue(IMAGE_RECT);
+    editor.charMap.posAtCoords.mockReturnValue(24);
+
+    mousedown(container, 140, 80);
+    mouseup(140, 80);
+
+    expect(editor.selectNode).toHaveBeenCalledWith(IMAGE_RECT.docPos);
+    expect(editor.moveNode).not.toHaveBeenCalled();
+    expect(editor.setNodeAttrs).not.toHaveBeenCalled();
+    expect(editor.moveAndUpdateNode).not.toHaveBeenCalled();
+  });
+
   // Placement record used by the four drag tests. Fields match the
   // current AnchoredObjectPlacement shape (wrapMode, not legacy mode).
   const makeSquarePlacement = () => ({
@@ -262,12 +289,14 @@ describe("PointerController — image click routing", () => {
     },
     anchorGlobalY: 50,
     anchorPage: 1,
+    globalY: 50,
   });
 
-  it("diagonal drag of anchored image commits moveAndUpdateNode (one tx)", () => {
+  it("diagonal same-page drag commits setNodeAttrs with x and yOffset (one tx)", () => {
     // Mouse start (140, 80) → end (260, 220). dx=+120 (substantial X) and
-    // dy=+140 (cross-paragraph Y). New model: a single atomic transaction
-    // that moves the docPos AND updates xAlign/x.
+    // dy=+140 (vertical). Phase 2 (yOffset model): same-page drag is a pure
+    // attr update. The image's anchor paragraph doesn't change; xAlign/x
+    // and yOffset commit in one setNodeAttrs call.
     editor = makeMockEditor({
       layout: {
         ...makeMockEditor().layout,
@@ -285,21 +314,19 @@ describe("PointerController — image click routing", () => {
     mouseup(260, 220);
 
     expect(editor.selectNode).toHaveBeenCalledWith(5);
-    expect(editor.moveAndUpdateNode).toHaveBeenCalledTimes(1);
-    const call = editor.moveAndUpdateNode.mock.calls[0]!;
-    expect(call[0]).toBe(5);                     // source docPos
-    expect(call[1]).toBe(42);                    // target docPos
-    expect(call[2]).toMatchObject({ xAlign: "custom" });
-    expect(typeof call[2].x).toBe("number");
+    expect(editor.setNodeAttrs).toHaveBeenCalledTimes(1);
+    const call = editor.setNodeAttrs.mock.calls[0]!;
+    expect(call[0]).toBe(5); // source docPos — unchanged on same-page drag
+    expect(call[1]).toMatchObject({ xAlign: "custom" });
+    expect(typeof call[1].x).toBe("number");
+    expect(call[1].yOffset).toBe(140); // dy = +140
     expect(editor.moveNode).not.toHaveBeenCalled();
-    expect(editor.setNodeAttrs).not.toHaveBeenCalled();
+    expect(editor.moveAndUpdateNode).not.toHaveBeenCalled();
   });
 
-  it("vertical-only drag commits moveNode without touching attrs", () => {
+  it("vertical-only same-page drag commits setNodeAttrs({yOffset}) without docPos move", () => {
     // Pure vertical drag (140, 80) → (140, 200). dx=0, dy=+120.
-    // Cursor lands back on the source node; posBelow falls back to
-    // the next paragraph's docPos (18). New model: moveNode only,
-    // no attrs update because horizontal didn't move.
+    // Phase 2: anchor doesn't move; only yOffset writes.
     editor = makeMockEditor({
       layout: {
         ...makeMockEditor().layout,
@@ -317,15 +344,18 @@ describe("PointerController — image click routing", () => {
     mousemove(140, 200);
     mouseup(140, 200);
 
-    expect(editor.moveNode).toHaveBeenCalledWith(5, 18);
+    expect(editor.setNodeAttrs).toHaveBeenCalledTimes(1);
+    const call = editor.setNodeAttrs.mock.calls[0]!;
+    expect(call[0]).toBe(5);
+    expect(call[1]).toEqual({ yOffset: 120 });
+    expect(editor.moveNode).not.toHaveBeenCalled();
     expect(editor.moveAndUpdateNode).not.toHaveBeenCalled();
-    expect(editor.setNodeAttrs).not.toHaveBeenCalled();
   });
 
   it("horizontal-only drag right commits setNodeAttrs(xAlign:'custom', x) only", () => {
-    // Mouse (140, 80) → (260, 84). dx=+120, dy=+4 (within
-    // posAtCoords lands on the source node, so docPos stays put.
-    // New model: setNodeAttrs with xAlign:"custom" + new x.
+    // Mouse (140, 80) → (260, 80). dx=+120, dy=0 — pure horizontal.
+    // Y_THRESHOLD suppresses yOffset for natural mouse jitter on horizontal
+    // gestures; here dy is exactly 0 so yOffset must not appear.
     editor = makeMockEditor({
       layout: {
         ...makeMockEditor().layout,
@@ -339,20 +369,21 @@ describe("PointerController — image click routing", () => {
     editor.charMap.posAtCoords.mockReturnValue(5);
 
     mousedown(container, 140, 80);
-    mousemove(260, 84);
-    mouseup(260, 84);
+    mousemove(260, 80);
+    mouseup(260, 80);
 
     expect(editor.setNodeAttrs).toHaveBeenCalledTimes(1);
     const call = editor.setNodeAttrs.mock.calls[0]!;
     expect(call[0]).toBe(5);
     expect(call[1]).toMatchObject({ xAlign: "custom" });
     expect(typeof call[1].x).toBe("number");
+    expect(call[1]).not.toHaveProperty("yOffset");
     expect(editor.moveNode).not.toHaveBeenCalled();
     expect(editor.moveAndUpdateNode).not.toHaveBeenCalled();
   });
 
   it("horizontal-only drag left commits setNodeAttrs only with smaller x", () => {
-    // Mouse (140, 80) → (40, 84). dx=-100, dy=+4 (sub-threshold).
+    // Mouse (140, 80) → (40, 80). dx=-100, dy=0.
     editor = makeMockEditor({
       layout: {
         ...makeMockEditor().layout,
@@ -366,14 +397,15 @@ describe("PointerController — image click routing", () => {
     editor.charMap.posAtCoords.mockReturnValue(5);
 
     mousedown(container, 140, 80);
-    mousemove(40, 84);
-    mouseup(40, 84);
+    mousemove(40, 80);
+    mouseup(40, 80);
 
     expect(editor.setNodeAttrs).toHaveBeenCalledTimes(1);
     const call = editor.setNodeAttrs.mock.calls[0]!;
     expect(call[0]).toBe(5);
     expect(call[1]).toMatchObject({ xAlign: "custom" });
     expect(typeof call[1].x).toBe("number");
+    expect(call[1]).not.toHaveProperty("yOffset");
     // Dragging left should produce a smaller x than the start (clamped to
     // contentX = 40 in this fixture, since margins.left = 40).
     expect(call[1].x).toBeLessThan(100);

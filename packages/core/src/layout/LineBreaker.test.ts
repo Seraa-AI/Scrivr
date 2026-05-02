@@ -283,9 +283,9 @@ describe("LineBreaker — skipToY (top-bottom float)", () => {
     // startY = 0, so absoluteLineY = cumulativeLineY.
     // First word lands at y=0 (no constraint) → line 1 produced.
     // Second word lands at y=18 which is inside [20, 60) → skipToY=60 jumps cumulativeLineY to 60.
-    const constraintProvider = (y: number) => {
-      if (y >= 18 && y < 60) return { x: 0, width: 0, skipToY: 60 };
-      return null;
+    const lineSpaceProvider = (y: number) => {
+      if (y >= 18 && y < 60) return { segments: [], skipToY: 60 };
+      return { segments: [{ x: 0, width: 200 }] };
     };
     const lines = lb.breakIntoLines(
       [
@@ -297,7 +297,7 @@ describe("LineBreaker — skipToY (top-bottom float)", () => {
         },
       ],
       200,
-      { defaultFontFamily: "serif", defaultFontSize: 14, constraintProvider },
+      { defaultFontFamily: "serif", defaultFontSize: 14, lineSpaceProvider },
     );
     // There should be no line whose startY falls inside the exclusion zone.
     // We can verify by checking that text spans before and after the gap both exist
@@ -307,13 +307,15 @@ describe("LineBreaker — skipToY (top-bottom float)", () => {
 
   it("all words are preserved when a skipToY gap is inserted", () => {
     const lb = new LineBreaker(makeMeasurer());
-    const constraintProvider = (y: number) =>
-      y >= 18 && y < 60 ? { x: 0, width: 0, skipToY: 60 } : null;
+    const lineSpaceProvider = (y: number) =>
+      y >= 18 && y < 60
+        ? { segments: [], skipToY: 60 }
+        : { segments: [{ x: 0, width: 400 }] };
     const text = "before float after end";
     const lines = lb.breakIntoLines(
       [{ kind: "text" as const, text, font: "14px serif", docPos: 1 }],
       400,
-      { defaultFontFamily: "serif", defaultFontSize: 14, constraintProvider },
+      { defaultFontFamily: "serif", defaultFontSize: 14, lineSpaceProvider },
     );
     const reconstructed = lines
       .flatMap((l) =>
@@ -324,6 +326,32 @@ describe("LineBreaker — skipToY (top-bottom float)", () => {
       .join("")
       .trim();
     expect(reconstructed).toBe(text);
+  });
+});
+
+describe("LineBreaker — segmented line space", () => {
+  it("continues a visual line in the next segment when the current segment fills", () => {
+    const lb = new LineBreaker(makeMeasurer());
+    const lines = lb.breakIntoLines(
+      [{ kind: "text" as const, text: "aaaa bbbb cccc", font: "14px serif", docPos: 1 }],
+      200,
+      {
+        defaultFontFamily: "serif",
+        defaultFontSize: 14,
+        lineSpaceProvider: () => ({
+          segments: [
+            { x: 0, width: 48 },
+            { x: 120, width: 80 },
+          ],
+        }),
+      },
+    );
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.positioned).toBe(true);
+    expect(lines[0]!.segments).toHaveLength(2);
+    expect(lines[0]!.spans.some((span) => span.x === 0)).toBe(true);
+    expect(lines[0]!.spans.some((span) => span.x === 120)).toBe(true);
   });
 });
 

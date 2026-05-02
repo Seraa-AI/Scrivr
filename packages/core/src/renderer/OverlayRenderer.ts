@@ -458,6 +458,8 @@ export function renderCursor(
   ctx: CanvasRenderingContext2D,
   coords: CoordsResult,
 ): void {
+  if (coords.height <= 0) return;
+
   // +0.5 sub-pixel offset → 1px stroke lands on a physical pixel boundary
   const x = Math.round(coords.x) + 0.5;
 
@@ -501,6 +503,7 @@ export function renderSelection(
 
   // Pass 1 — glyph-based highlights (snapped to pixel grid to eliminate seams)
   for (const glyph of glyphs) {
+    if (glyph.height <= 0) continue;
     snappedFillRect(ctx, glyph.x, glyph.y, glyph.width, glyph.height);
   }
 
@@ -508,6 +511,7 @@ export function renderSelection(
   // Build a set of lineIndex values that already have at least one glyph drawn
   const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
   for (const line of lines) {
+    if (line.height <= 0) continue;
     if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
       // Empty paragraph — draw a narrow rect (line-height wide) at the left margin
       snappedFillRect(ctx, line.x, line.y, line.height, line.height);

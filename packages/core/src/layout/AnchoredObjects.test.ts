@@ -19,10 +19,10 @@ interface FakeAttrs {
   positionMode?: string;
   xAlign?: string;
   x?: number | null;
-  wrapText?: string;
+  yOffset?: number;
   margin?: number;
   wrappingMode?: string;
-  floatOffset?: { x: number; y: number };
+  floatOffset?: unknown;
 }
 
 function makeImageNode(attrs: FakeAttrs): Node {
@@ -123,6 +123,69 @@ describe("normalizeImageAttrs — legacy → new model", () => {
       expect(out.xAlign).toBe("custom");
       expect(out.x).toBe(200);
     });
+  });
+});
+
+describe("normalizeImageAttrs — yOffset migration (Phase 1)", () => {
+  it("default yOffset is 0", () => {
+    const node = makeImageNode({ width: 100, height: 100, wrapMode: "square" });
+    expect(normalizeImageAttrs(node).yOffset).toBe(0);
+  });
+
+  it("explicit yOffset wins", () => {
+    const node = makeImageNode({
+      width: 100, height: 100, wrapMode: "square", yOffset: 42,
+    });
+    expect(normalizeImageAttrs(node).yOffset).toBe(42);
+  });
+
+  it("legacy floatOffset.y migrates to yOffset when yOffset absent", () => {
+    const node = makeImageNode({
+      width: 100, height: 100, wrapMode: "square",
+      floatOffset: { x: 0, y: 60 },
+    });
+    expect(normalizeImageAttrs(node).yOffset).toBe(60);
+  });
+
+  it("explicit yOffset overrides legacy floatOffset.y", () => {
+    const node = makeImageNode({
+      width: 100, height: 100, wrapMode: "square",
+      yOffset: 10,
+      floatOffset: { x: 0, y: 60 },
+    });
+    expect(normalizeImageAttrs(node).yOffset).toBe(10);
+  });
+
+  it("malformed floatOffset (string) → 0", () => {
+    const node = makeImageNode({
+      width: 100, height: 100, wrapMode: "square",
+      floatOffset: "not an object",
+    });
+    expect(normalizeImageAttrs(node).yOffset).toBe(0);
+  });
+
+  it("malformed floatOffset (null) → 0", () => {
+    const node = makeImageNode({
+      width: 100, height: 100, wrapMode: "square",
+      floatOffset: null,
+    });
+    expect(normalizeImageAttrs(node).yOffset).toBe(0);
+  });
+
+  it("floatOffset without .y → 0", () => {
+    const node = makeImageNode({
+      width: 100, height: 100, wrapMode: "square",
+      floatOffset: { x: 5 },
+    });
+    expect(normalizeImageAttrs(node).yOffset).toBe(0);
+  });
+
+  it("floatOffset.y non-numeric → 0", () => {
+    const node = makeImageNode({
+      width: 100, height: 100, wrapMode: "square",
+      floatOffset: { x: 0, y: "twenty" },
+    });
+    expect(normalizeImageAttrs(node).yOffset).toBe(0);
   });
 });
 

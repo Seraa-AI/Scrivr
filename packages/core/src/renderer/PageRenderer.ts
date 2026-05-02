@@ -1,6 +1,6 @@
 import { LayoutPage, PageConfig } from "../layout/PageLayout";
 import type { AnchoredObjectPlacement } from "../layout/AnchoredObjects";
-import { LayoutBlock, computeAlignmentOffset } from "../layout/BlockLayout";
+import { LayoutBlock, computeAlignmentOffset, isHiddenAnchorLine } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
 import { TextMeasurer } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
@@ -250,12 +250,14 @@ export function drawBlock(
 
   for (let li = 0; li < block.lines.length; li++) {
     const line = block.lines[li]!;
+    if (isHiddenAnchorLine(line)) continue;
+
     const globalLineIndex = lineIndexOffset + li;
 
     // Alignment offset — must match what BlockLayout computed.
-    // For float-constrained lines, constraintX shifts the line right (square-left floats).
-    const lineConstraintX = line.constraintX ?? 0;
-    const lineOffsetX = lineConstraintX + computeAlignmentOffset(block.align, line.effectiveWidth ?? contentWidth, line.width);
+    const lineOffsetX = line.positioned
+      ? 0
+      : computeAlignmentOffset(block.align, contentWidth, line.width);
     const baseline = lineY + line.ascent;
     // textY: where the cursor draws — aligned to the text, not the full line.
     const textY = line.textAscent > 0

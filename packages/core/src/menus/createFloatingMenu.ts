@@ -33,7 +33,7 @@ export interface FloatingMenuOptions extends FloatingMenuCallbacks {
 
 export function createFloatingMenu(editor: IEditor, options: FloatingMenuOptions): () => void {
   const { onShow, onHide, onMove } = options;
-  const shouldShow = options.shouldShow ?? defaultShouldShow;
+  const shouldShow = options.shouldShow ?? defaultFloatingMenuShouldShow;
 
   let visible = false;
   let rafId: number | null = null;
@@ -74,7 +74,7 @@ export function createFloatingMenu(editor: IEditor, options: FloatingMenuOptions
   };
 }
 
-function defaultShouldShow(state: EditorState): boolean {
+export function defaultFloatingMenuShouldShow(state: EditorState): boolean {
   const { selection } = state;
   const { empty, $anchor } = selection;
   if (!empty) return false;
@@ -83,6 +83,8 @@ function defaultShouldShow(state: EditorState): boolean {
   const isRootTextBlock = $anchor.depth === 1 && $anchor.parent.isTextblock;
   if (!isRootTextBlock) return false;
 
-  // Block must be empty
-  return $anchor.parent.textContent === "";
+  // Block must be structurally empty. An anchor-only floating-image paragraph
+  // has no textContent, but it is not an editable empty paragraph and should
+  // not show the block insertion menu.
+  return $anchor.parent.childCount === 0;
 }

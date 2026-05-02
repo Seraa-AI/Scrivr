@@ -3,7 +3,7 @@ import type { FontModifier } from "../extensions/types";
 import { TextMeasurer } from "./TextMeasurer";
 import type { InlineRegistry } from "./BlockRegistry";
 import { normalizeImageAttrs } from "./AnchoredObjects";
-import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type ConstraintProvider } from "./LineBreaker";
+import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import {
   FontConfig,
@@ -116,6 +116,15 @@ export interface LayoutBlock {
   sourceNodePos?: number;
 }
 
+export function isHiddenAnchorLine(line: LayoutLine): boolean {
+  return (
+    line.lineHeight === 0 &&
+    line.cursorHeight === 0 &&
+    line.spans.length > 0 &&
+    line.spans.every((span) => span.kind === "object" && span.width === 0 && span.height === 0)
+  );
+}
+
 export interface BlockLayoutOptions {
   /** Absolute doc position of this node — used to resolve child positions */
   nodePos: number;
@@ -140,11 +149,12 @@ export interface BlockLayoutOptions {
   /** Mark name → font modifier. When provided, resolveFont uses it instead of the built-in switch. */
   fontModifiers?: Map<string, FontModifier>;
   /**
-   * Optional float constraint provider — narrows line width around floating images.
-   * When provided, each line queries this function at its absolute Y position
-   * to get a { x, width } override. Absent = default maxWidth behaviour.
+   * Optional exclusion constraint provider — narrows line width around anchored
+   * object exclusion rectangles. When provided, each line queries this function
+   * at its absolute Y position to get a { x, width } override. Absent = default
+   * maxWidth behaviour.
    */
-  constraintProvider?: ConstraintProvider;
+  lineSpaceProvider?: LineSpaceProvider;
   /** Inline object registry — used to call measure() on tokens during layout. */
   inlineRegistry?: InlineRegistry | undefined;
 }
@@ -263,7 +273,7 @@ export function layoutBlock(
     map,
     lineIndexOffset = 0,
     fontModifiers,
-    constraintProvider,
+    lineSpaceProvider,
     inlineRegistry,
   } = options;
 
@@ -302,10 +312,32 @@ export function layoutBlock(
   // An empty paragraph (or one containing only hardBreak nodes) has no
   // renderable content. We create a virtual zero-width-space span so
   // LineBreaker returns one line and CharacterMap registers a cursor position.
-  const hasRenderableContent = spans.some(s => s.kind !== "break");
-  const inputSpans: InputSpan[] = hasRenderableContent
+  //
+  // Anchor-only paragraphs are different: a paragraph whose only content is
+  // non-inline image sentinels is structural ownership, not visible document
+  // content. Preserve those zero-size object spans so anchored-object layout
+  // can find them, but do not inject a ZWS. That yields a zero-height flow
+  // instead of the blank line users were seeing behind floating images.
+  const hasNonZeroContent = spans.some(
+    (s) =>
+      s.kind === "text" ||
+      (s.kind === "object" && (s.width > 0 || s.height > 0)),
+  );
+  const hasZeroSizeObjectSentinel = spans.some(
+    (s) => s.kind === "object" && s.width === 0 && s.height === 0,
+  );
+  const isAnchorOnlyFlow = !hasNonZeroContent && hasZeroSizeObjectSentinel;
+  const zwsSpan: InputSpan = {
+    kind: "text",
+    text: "​",
+    font: baseFont,
+    docPos: nodePos + 1,
+  };
+  const inputSpans: InputSpan[] = hasNonZeroContent
     ? spans
-    : [{ kind: "text", text: "\u200B", font: baseFont, docPos: nodePos + 1 }];
+    : isAnchorOnlyFlow
+      ? spans
+      : [zwsSpan];
 
   // ── 3. Break into lines ───────────────────────────────────────────────────
   const breaker = new LineBreaker(measurer);
@@ -314,21 +346,28 @@ export function layoutBlock(
   const rawTextIndent = node.attrs["textIndent"];
   const textIndent = typeof rawTextIndent === "number" && rawTextIndent > 0 ? rawTextIndent : 0;
 
-  // Wrap the constraint provider to apply textIndent on the first line.
+  // Wrap the line-space provider to apply textIndent on the first line.
   let firstLineConsumed = false;
-  const indentAwareConstraint: ConstraintProvider | undefined =
+  const indentAwareLineSpace: LineSpaceProvider | undefined =
     textIndent > 0
       ? (lineY: number) => {
-          const base = constraintProvider?.(lineY) ?? null;
+          const base = lineSpaceProvider?.(lineY, 1) ?? { segments: [{ x: 0, width: availableWidth }] };
           if (!firstLineConsumed) {
             firstLineConsumed = true;
-            const baseWidth = base?.width ?? availableWidth;
-            const baseX = base?.x ?? 0;
-            return { x: baseX + textIndent, width: baseWidth - textIndent };
+            return {
+              ...base,
+              segments: base.segments
+                .map((segment, index) =>
+                  index === 0
+                    ? { x: segment.x + textIndent, width: Math.max(0, segment.width - textIndent) }
+                    : segment,
+                )
+                .filter((segment) => segment.width > 0),
+            };
           }
           return base;
         }
-      : constraintProvider;
+      : lineSpaceProvider;
 
   // We pass the CharacterMap only after we know the alignment offset.
   // If alignment is left (no offset), we can pass it directly.
@@ -340,7 +379,7 @@ export function layoutBlock(
     {
       defaultFontFamily: parsedBase.family,
       defaultFontSize: parseFloat(parsedBase.size),
-      ...(indentAwareConstraint ? { constraintProvider: indentAwareConstraint, startY: y } : {}),
+      ...(indentAwareLineSpace ? { lineSpaceProvider: indentAwareLineSpace, startY: y } : {}),
     },
   );
 
@@ -353,16 +392,18 @@ export function layoutBlock(
 
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li]!;
+      if (isHiddenAnchorLine(line)) continue;
+
       const lineIndex = lineIndexOffset + li;
       const isLastLine = li === lines.length - 1;
 
-      // For float-constrained lines, constraintX shifts the line right (square-left).
-      const lineConstraintX = line.constraintX ?? 0;
-      const lineOffsetX = lineConstraintX + computeAlignmentOffset(
-        resolvedAlign,
-        line.effectiveWidth ?? availableWidth,
-        line.width,
-      );
+      const lineOffsetX = line.positioned
+        ? 0
+        : computeAlignmentOffset(
+            resolvedAlign,
+            availableWidth,
+            line.width,
+          );
 
       // textY: top of the cursor rectangle for text glyphs.
       // When a baseline image inflates line.ascent, text sits at the bottom of
@@ -474,8 +515,8 @@ export function layoutBlock(
     width: availableWidth,
     height,
     lines,
-    spaceBefore: blockStyle.spaceBefore,
-    spaceAfter: blockStyle.spaceAfter,
+    spaceBefore: isAnchorOnlyFlow ? 0 : blockStyle.spaceBefore,
+    spaceAfter: isAnchorOnlyFlow ? 0 : blockStyle.spaceAfter,
     blockType: node.type.name,
     align: resolvedAlign,
     availableWidth,
@@ -700,6 +741,8 @@ export function populateCharMap(
 
   for (let li = 0; li < block.lines.length; li++) {
     const line = block.lines[li]!;
+    if (isHiddenAnchorLine(line)) continue;
+
     const globalLineIndex = lineIndexOffset + li;
     const isLastLine = li === block.lines.length - 1;
     // Match TextBlockStrategy.render: the justify last-line exception (no
@@ -707,19 +750,22 @@ export function populateCharMap(
     // not just the last line of a fragment that continues on the next page.
     const isLastLineOfBlock = isLastLine && !block.continuesOnNextPage;
 
-    const lineConstraintX = line.constraintX ?? 0;
-    const lineOffsetX = lineConstraintX + computeAlignmentOffset(
-      block.align,
-      line.effectiveWidth ?? block.availableWidth,
-      line.width,
-    );
-    const spaceBonus = computeJustifySpaceBonus(
-      block.align,
-      line.spans,
-      line.effectiveWidth ?? block.availableWidth,
-      line.width,
-      isLastLineOfBlock,
-    );
+    const lineOffsetX = line.positioned
+      ? 0
+      : computeAlignmentOffset(
+          block.align,
+          block.availableWidth,
+          line.width,
+        );
+    const spaceBonus = line.positioned
+      ? 0
+      : computeJustifySpaceBonus(
+          block.align,
+          line.spans,
+          block.availableWidth,
+          line.width,
+          isLastLineOfBlock,
+        );
 
     // textY: top of cursor rectangles for text glyphs.
     // Aligns to the actual text position when a baseline image inflates line.ascent.

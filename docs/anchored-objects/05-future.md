@@ -236,41 +236,6 @@ itself.
 **Why deferred.** Niche. Power-user feature. Tight / through
 (F4) covers most of what users actually want.
 
-### F7. Two-sided wrap (single line straddling an image)
-
-**What it adds.** A single line of text whose horizontal extent
-spans BOTH sides of an image — text on the left of the image,
-the image as a horizontal "hole," text on the right of the image
-— all on the same line Y.
-
-Google Docs does this when an image is sufficiently centered and
-both available regions are wide enough to fit content. v1 does
-**wider-side wrap** only: each line picks the side with more
-available width and wraps on that side; the other side is left
-empty. This produces visible asymmetry around centered images
-relative to Google Docs.
-
-**Why deferred.** LineBreaker today produces one continuous line
-per logical line. Two-sided wrap requires either:
-- multi-segment lines (one logical line, two visual segments
-  separated by the image hole), or
-- splitting a logical line into two visual lines on the same Y
-  in different X regions.
-
-Either approach is a non-trivial LineBreaker change. The visual
-gain over wider-side wrap is real but bounded.
-
-**Constraints any implementation must preserve:**
-
-- The wider-side wrap path remains the fallback for short text
-  that doesn't justify the multi-segment overhead.
-- The universal contract is unchanged.
-- Wrap-zone geometry remains rectangular (this is independent of
-  F4 tight/through — F7 changes how lines navigate around a
-  rectangular zone, not the zone's shape).
-- The line-breaking algorithm must remain deterministic and
-  monotonic — same input produces the same output.
-
 ## Deferred — UX features
 
 ### F7. Touch / pointer specifics
@@ -303,8 +268,8 @@ the collaboration plan. Constraints:
 - Drag transactions are normal PM transactions (move node from
   docPos A to docPos B). Yjs / OT replays them like any other
   transaction. No special anchored-object collaboration path.
-- `floatOffset` writes are also normal attribute updates. No
-  conflict resolution beyond standard last-writer-wins on
+- Horizontal placement writes (`xAlign` / `x`) are normal attribute
+  updates. No conflict resolution beyond standard last-writer-wins on
   attributes.
 - The universal contract holds locally for each replica's
   view of the document; once the document state syncs, the

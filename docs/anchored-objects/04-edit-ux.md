@@ -12,14 +12,13 @@ and the test contract from [`03-test-contract.md`](./03-test-contract.md).
 
 ```
 Editing changes structure.
-Offsets only change paint.
+There is no paint-only position channel.
 ```
 
 Every editing action — drag, resize, mode toggle, cursor
 movement — operates on the **document structure** (the PM doc).
-`floatOffset` is reserved for fine visual nudges that the user
-chooses not to express structurally. The two channels never
-substitute for each other.
+Legacy `floatOffset` attrs may still exist on old documents, but
+layout and editing do not read or write them.
 
 The single sharpest expression:
 
@@ -38,15 +37,14 @@ If the engine ever satisfies a drag by writing a large value to
 | Click on the anchor span position | Place the cursor at the anchor docPos |
 | Shift+click on the image | Extend the selection to include the anchor docPos in the surrounding range |
 
-Hit testing uses the **painted bounds** (object's render rect,
-including `floatOffset`). Selection always resolves to the
+Hit testing uses the **painted bounds** (object's render rect).
+Selection always resolves to the
 **structural anchor** — the docPos of the image node — so a
-selection survives any subsequent paint nudges.
+selection survives layout recomputation.
 
-A consequence: selecting an anchored object whose paint position
-has been offset still places the cursor at the anchor's flow
-position, not the offset position. This keeps cursor and document
-in sync regardless of visual nudges.
+A consequence: selecting an anchored object places the cursor at
+the anchor's flow position. The image's painted position and wrap
+zone are solved from the same structural coordinates.
 
 ## 2. Dragging (the key section)
 
@@ -176,7 +174,7 @@ button, or keyboard shortcut.
 | From → To | Structural change |
 |---|---|
 | `inline` → any non-inline | `node.attrs.wrapMode` updates; if the new mode has non-zero flow contribution (`top-bottom`, `behind`, `front`), the parent paragraph splits at layout time (Rule 2). For `square`, no split — the anchor span stays inline at its docPos. |
-| any non-inline → `inline` | `node.attrs.wrapMode` updates; the parent paragraph stops splitting (if it was) and lays out as a single text block with the image as inline content. |
+| any non-inline → `inline` | Resolve the image's current painted center to a text insertion point, move the image node there, then clear floating placement attrs (`x`, `yOffset`, legacy `floatOffset`) and set `wrapMode: "inline"`. Inline mode is the one-time conversion where visual position becomes doc position again. |
 | `square` → `top-bottom` | Wrap zone replaced with a full-width anchored-object block; the image's flow contribution becomes `image.height + margin`; following paragraphs stack below. `xAlign` / `x` preserved (image renders at the same X within the new full-width block). |
 | `top-bottom` → `square` | Full-width anchored-object block removed; wrap zone emitted at the image's painted rectangle; following paragraphs may now wrap beside. `xAlign` / `x` preserved. |
 | any non-inline → `behind` / `front` | Wrap zone (if any) removed; flow slot retained at `image.height`; paint layer changes. |
@@ -203,18 +201,18 @@ After every transition, the contract from `03` must still hold:
 following content does not render before the object's flow
 effect is satisfied.
 
-### Wrap-side hint (Square only)
+### Wrap-segment hint (Square only)
 
-The wrap-mode picker's "Square" entry must communicate that v1 wraps
-on the wider side only — not both sides simultaneously. Required
+The wrap-mode picker's "Square" entry must communicate the actual
+current behavior without encoding placement into wrap mode. Required
 tooltip text:
 
-> Text wraps on the wider side. Two-sided wrap is deferred.
+> Text wraps around the image's exclusion rectangle. Current line layout uses one side at a time.
 
-This sets accurate expectations for centered images, where Google
-Docs would split text across both sides of the image. v1 leaves the
-narrower side empty by design — see `05-future.md` § F7 for the
-follow-up that lifts this restriction.
+This sets accurate expectations for centered images while preserving
+the model: the image is placed by `xAlign` / `x`, then its rectangle is
+subtracted from each affected line. The one-side behavior is a current
+LineBreaker limitation, not a separate "center wrap" mode.
 
 ## 5. Position is structural; no paint-only offset
 

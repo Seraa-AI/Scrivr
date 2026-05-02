@@ -516,6 +516,61 @@ export class Editor extends BaseEditor implements IEditor {
     }
   }
 
+  /**
+   * Convert a floating image back to inline content at its current painted
+   * location. Floating modes treat docPos as ownership and attrs as geometry;
+   * inline mode is the opposite, so this is the one place where visual X/Y is
+   * resolved back to a document insertion point.
+   */
+  convertImageToInlineAtVisualPosition(docPos: number): boolean {
+    const state = this._getActiveState();
+    const node = state.doc.nodeAt(docPos);
+    if (!node || node.type.name !== "image") return false;
+
+    const inlineAttrs: Record<string, unknown> = {
+      wrapMode: "inline",
+      wrappingMode: "inline",
+      xAlign: "left",
+      x: null,
+      yOffset: 0,
+      floatOffset: { x: 0, y: 0 },
+    };
+
+    const rect = this.getNodeRect(docPos);
+    if (!rect) {
+      this.setNodeAttrs(docPos, inlineAttrs);
+      return true;
+    }
+
+    this.ensurePagePopulated(rect.page);
+    const targetPos = this.charMap.posAtCoords(
+      rect.x + rect.width / 2,
+      rect.y + rect.height / 2,
+      rect.page,
+    );
+
+    const from = docPos;
+    const to = docPos + node.nodeSize;
+    if (targetPos > 0 && (targetPos < from || targetPos > to)) {
+      if (this.moveAndUpdateNode(docPos, targetPos, inlineAttrs)) return true;
+      // moveAndUpdateNode rejected the position (PM placement guard).
+      // Falling back to attrs-only update keeps the image inline at its
+      // current docPos rather than failing the gesture; logged so the
+      // divergence is traceable when debugging "image stayed in place
+      // after toggling to inline."
+      if (this.debug?.drag) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[convertImageToInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
+          { from, to, targetPos },
+        );
+      }
+    }
+
+    this.setNodeAttrs(docPos, inlineAttrs);
+    return true;
+  }
+
   override destroy(): void {
     if (this._rafId !== null) {
       cancelAnimationFrame(this._rafId);
