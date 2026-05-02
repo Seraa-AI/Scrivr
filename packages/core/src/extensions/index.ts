@@ -21,6 +21,9 @@ export { Indent, INDENT_STEP, TEXT_INDENT_STEP } from "./built-in/Indent";
 export { List } from "./built-in/List";
 export { Pagination } from "./built-in/Pagination";
 export { Image } from "./built-in/Image";
+export { CodeBlock } from "./built-in/CodeBlock";
+export { HorizontalRule } from "./built-in/HorizontalRule";
+export { PageBreak } from "./built-in/PageBreak";
 export { ClearFormatting } from "./built-in/ClearFormatting";
 
 export type {

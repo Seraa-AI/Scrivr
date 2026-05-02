@@ -28,6 +28,8 @@ Float-image bug fixes, new `PageBreak` extension, and stricter `ToolbarItemSpec`
   - `Heading.ts` — Commands augmentation switched to a mapped type `[K in 1|2|3|4|5|6 as setHeading${K}]: () => ReturnType` so the toolbar's template literal narrows; `HeadingLevel = 1|...|6` exported and `HeadingOptions.levels` narrowed to `HeadingLevel[]`. `StarterKitOptions.heading.levels` updated to match.
   - `Indent.ts` — added the missing Commands augmentation for `increaseIndent` / `decreaseIndent`.
 
+- **Public re-exports for `CodeBlock`, `HorizontalRule`, `PageBreak`.** These extensions had `declare module "@scrivr/core"` augmentations but weren't re-exported from `extensions/index.ts`, so the augmentations never reached consumers' type graph (consumer apps saw `setHeading1`/`setLink`/`toggleBold` but not `toggleCodeBlock`/`insertHorizontalRule`/`insertPageBreak`). Adding the exports propagates the augmentations and unblocks typed `editor.commands.*` calls in consumer apps.
+
 - **Tests.** 12 new cases:
   - `BlockLayout.test.ts` — anchor-only paragraph stays zero-height when overlapping its own exclusion zone.
   - `PageLayout.test.ts` — anchor-only paragraph contributes no vertical gap before following text; floats at page bottom don't leak exclusion onto the next page.
