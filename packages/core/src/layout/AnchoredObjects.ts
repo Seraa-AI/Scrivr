@@ -213,32 +213,34 @@ function isXAlign(value: unknown): value is XAlign {
  * Resolves the painted X (in page coordinates) from the normalized
  * placement attributes. Single expression for every non-inline mode.
  *
- * Clamped so the image stays entirely inside the content area
- * regardless of `xAlign` or `x` value.
+ * Named alignments (`left`/`center`/`right`) snap to content bounds —
+ * the typography convention and Word's default "Margin" horizontal anchor.
+ * `xAlign: "custom"` is the user's free-positioning result (drag commit);
+ * it clamps to *page* bounds so the image can hang into the left or right
+ * margin without escaping the page. Top/bottom margins are not relaxed
+ * because headers and footers live there.
  */
 export function resolveImageX(
   attrs: Pick<NormalizedImageAttrs, "width" | "xAlign" | "x">,
   contentX: number,
   contentWidth: number,
+  pageWidth: number,
 ): number {
-  const maxX = contentX + Math.max(0, contentWidth - attrs.width);
+  const contentMaxX = contentX + Math.max(0, contentWidth - attrs.width);
 
-  let x: number;
   switch (attrs.xAlign) {
     case "left":
-      x = contentX;
-      break;
+      return contentX;
     case "center":
-      x = contentX + Math.max(0, (contentWidth - attrs.width) / 2);
-      break;
+      return contentX + Math.max(0, (contentWidth - attrs.width) / 2);
     case "right":
-      x = maxX;
-      break;
-    case "custom":
-      x = attrs.x ?? contentX;
-      break;
+      return contentMaxX;
+    case "custom": {
+      const pageMaxX = Math.max(0, pageWidth - attrs.width);
+      const x = attrs.x ?? contentX;
+      return clamp(x, 0, pageMaxX);
+    }
   }
-  return clamp(x, contentX, maxX);
 }
 
 function clamp(value: number, lo: number, hi: number): number {

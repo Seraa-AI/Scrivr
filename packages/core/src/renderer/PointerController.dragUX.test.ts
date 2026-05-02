@@ -304,12 +304,14 @@ describe("PointerController — drag UX", () => {
   });
 
   describe("Step 3 — clamp-no-move", () => {
-    it("dragging a square-left image further left dispatches no PM transaction", () => {
-      // square-left image painted at contentX = 40 (margins.left). Dragging
-      // farther left clamps newX to contentX, equal to startImageX. The
+    it("dragging a page-left-edge image further left dispatches no PM transaction", () => {
+      // Image already painted at the page-left edge (x = 0). The Word-aligned
+      // clamp permits images to extend into the margins, so the no-move
+      // boundary is now the page edge, not the content edge. Dragging
+      // farther left clamps newX to 0 — equal to startImageX — and the
       // commit guard must skip the setNodeAttrs that would otherwise flip
       // xAlign to "custom" with no visual change.
-      const startImageX = 40;
+      const startImageX = 0;
       editor = makeMockEditor({
         layout: {
           ...makeMockEditor().layout,
@@ -322,7 +324,7 @@ describe("PointerController — drag UX", () => {
       const grabX = startImageX + 30;
       const grabY = SQUARE_RECT.y + 30;
       mousedown(container, grabX, grabY);
-      mousemove(grabX - 200, grabY);   // pure horizontal — way off the left edge
+      mousemove(grabX - 200, grabY);   // pure horizontal — way off the page edge
       mouseup(grabX - 200, grabY);
 
       expect(editor.setNodeAttrs).not.toHaveBeenCalled();

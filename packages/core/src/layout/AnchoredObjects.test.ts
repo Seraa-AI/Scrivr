@@ -197,42 +197,63 @@ describe("normalizeImageAttrs — yOffset migration (Phase 1)", () => {
 describe("resolveImageX", () => {
   const contentX = 40;
   const contentWidth = 720; // page 800, margins 40
+  const pageWidth = 800;
   const width = 300;
+
+  // Named alignments respect content bounds (typography convention — Word's
+  // default "Margin" horizontal anchor). Only xAlign:"custom" — produced by
+  // explicit drag — gets the loosened page-bounds clamp so the image can
+  // hang into the left or right margin (Word's behaviour).
 
   it("xAlign:left → flush at contentX", () => {
     expect(
-      resolveImageX({ width, xAlign: "left", x: null }, contentX, contentWidth),
+      resolveImageX({ width, xAlign: "left", x: null }, contentX, contentWidth, pageWidth),
     ).toBe(contentX);
   });
 
   it("xAlign:right → flush at contentX + contentWidth - width", () => {
     expect(
-      resolveImageX({ width, xAlign: "right", x: null }, contentX, contentWidth),
+      resolveImageX({ width, xAlign: "right", x: null }, contentX, contentWidth, pageWidth),
     ).toBe(contentX + contentWidth - width);
   });
 
   it("xAlign:center → centered within content area", () => {
     expect(
-      resolveImageX({ width, xAlign: "center", x: null }, contentX, contentWidth),
+      resolveImageX({ width, xAlign: "center", x: null }, contentX, contentWidth, pageWidth),
     ).toBe(contentX + (contentWidth - width) / 2);
   });
 
-  it("xAlign:custom + x → returns x clamped to content area", () => {
+  it("xAlign:custom + x inside content → returns x unchanged", () => {
     expect(
-      resolveImageX({ width, xAlign: "custom", x: 100 }, contentX, contentWidth),
+      resolveImageX({ width, xAlign: "custom", x: 100 }, contentX, contentWidth, pageWidth),
     ).toBe(100);
   });
 
-  it("xAlign:custom + x past right edge → clamped to maxX", () => {
+  it("xAlign:custom + x in left margin → allowed (extends into margin)", () => {
+    // 20 is inside [0, contentX=40] — i.e., left margin band. Word allows it.
     expect(
-      resolveImageX({ width, xAlign: "custom", x: 9999 }, contentX, contentWidth),
-    ).toBe(contentX + contentWidth - width);
+      resolveImageX({ width, xAlign: "custom", x: 20 }, contentX, contentWidth, pageWidth),
+    ).toBe(20);
   });
 
-  it("xAlign:custom + x past left edge → clamped to contentX", () => {
+  it("xAlign:custom + x in right margin → allowed (extends into margin)", () => {
+    // 480 + 300 = 780, inside [pageWidth - margin = 760, pageWidth = 800]
+    // → image extends into right margin but stays within page.
     expect(
-      resolveImageX({ width, xAlign: "custom", x: -100 }, contentX, contentWidth),
-    ).toBe(contentX);
+      resolveImageX({ width, xAlign: "custom", x: 480 }, contentX, contentWidth, pageWidth),
+    ).toBe(480);
+  });
+
+  it("xAlign:custom + x past page right edge → clamped to pageWidth - width", () => {
+    expect(
+      resolveImageX({ width, xAlign: "custom", x: 9999 }, contentX, contentWidth, pageWidth),
+    ).toBe(pageWidth - width);
+  });
+
+  it("xAlign:custom + x past page left edge → clamped to 0", () => {
+    expect(
+      resolveImageX({ width, xAlign: "custom", x: -100 }, contentX, contentWidth, pageWidth),
+    ).toBe(0);
   });
 });
 

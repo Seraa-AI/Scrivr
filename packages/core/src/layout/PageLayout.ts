@@ -489,7 +489,12 @@ function resolveAnchoredObjects(
       }
 
       // Resolve horizontal X — single expression for every non-inline mode.
-      const x = resolveImageX({ width, xAlign: attrs.xAlign, x: attrs.x }, contentX, contentWidth);
+      const x = resolveImageX(
+        { width, xAlign: attrs.xAlign, x: attrs.x },
+        contentX,
+        contentWidth,
+        pageConfig.pageWidth,
+      );
 
       // Square stacking: detect overlap by *painted* rect (anchor + yOffset)
       // for both the new and prior placements. Stacking shifts the anchor

@@ -752,9 +752,10 @@ export class PointerController {
    * structural change.
    *
    * The new X is computed as the image's start X plus the cursor's
-   * horizontal delta, then clamped so the image stays inside the
-   * content area. `xAlign` is set to `"custom"` by the caller so
-   * layout reads `x` directly.
+   * horizontal delta, then clamped to *page* bounds (Word-aligned: an
+   * image dragged sideways may extend into the left/right margins but
+   * cannot escape the page). `xAlign` is set to `"custom"` by the caller
+   * so layout reads `x` directly.
    */
   private resolveDragTargetX(dx: number): number | null {
     const { editor } = this.deps;
@@ -765,17 +766,11 @@ export class PointerController {
     const node = editor.getState().doc.nodeAt(this.anchoredDrag.docPos);
     if (!node) return null;
 
-    const { pageWidth, margins } = editor.layout.pageConfig;
-    const contentX = margins.left;
-    const contentWidth = pageWidth - margins.left - margins.right;
+    const { pageWidth } = editor.layout.pageConfig;
     const attrs = normalizeImageAttrs(node);
 
     const proposedX = this.anchoredDrag.startImageX + dx;
-    // Clamp so the image stays inside the content area.
-    const clampedX = Math.max(
-      contentX,
-      Math.min(proposedX, contentX + contentWidth - attrs.width),
-    );
+    const clampedX = Math.max(0, Math.min(proposedX, pageWidth - attrs.width));
     return clampedX;
   }
 
