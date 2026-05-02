@@ -9,7 +9,12 @@
  * legacy mapping shadows the new value and the image never moves.
  */
 import { describe, it, expect } from "vitest";
-import { normalizeImageAttrs, resolveImageX } from "./AnchoredObjects";
+import {
+  normalizeImageAttrs,
+  resolveImageX,
+  compareAnchoredObjectPaintOrder,
+  compareAnchoredObjectHitOrder,
+} from "./AnchoredObjects";
 import type { Node } from "prosemirror-model";
 
 interface FakeAttrs {
@@ -228,5 +233,35 @@ describe("resolveImageX", () => {
     expect(
       resolveImageX({ width, xAlign: "custom", x: -100 }, contentX, contentWidth),
     ).toBe(contentX);
+  });
+});
+
+describe("compareAnchoredObjectPaintOrder / HitOrder", () => {
+  // Paint order paints lower zIndex first (behind), then docPos as a stable
+  // tiebreaker so two objects with the same z don't visually flicker between
+  // re-layouts. Hit-test reverses paint order so the topmost object catches
+  // pointer events first.
+  const items = [
+    { zIndex: 1, docPos: 5 },
+    { zIndex: 0, docPos: 10 },
+    { zIndex: 0, docPos: 3 },
+    { zIndex: 1, docPos: 1 },
+  ];
+
+  it("paint order: ascending zIndex, then ascending docPos", () => {
+    const sorted = [...items].sort(compareAnchoredObjectPaintOrder);
+    expect(sorted.map((i) => i.docPos)).toEqual([3, 10, 1, 5]);
+  });
+
+  it("hit order: descending zIndex, then descending docPos (paint order reversed)", () => {
+    const sorted = [...items].sort(compareAnchoredObjectHitOrder);
+    expect(sorted.map((i) => i.docPos)).toEqual([5, 1, 10, 3]);
+  });
+
+  it("equal zIndex + docPos → 0 (stable comparator)", () => {
+    const a = { zIndex: 0, docPos: 0 };
+    const b = { zIndex: 0, docPos: 0 };
+    expect(compareAnchoredObjectPaintOrder(a, b)).toBe(0);
+    expect(compareAnchoredObjectHitOrder(a, b)).toBe(0);
   });
 });

@@ -63,6 +63,7 @@ export interface NormalizedImageAttrs {
    * — pre-yOffset documents render identically.
    */
   yOffset: number;
+  zIndex: number;
   margin: number;
 }
 
@@ -74,6 +75,7 @@ interface RawImageAttrs {
   xAlign?: unknown;
   x?: unknown;
   yOffset?: unknown;
+  zIndex?: unknown;
   margin?: unknown;
   // Legacy
   wrappingMode?: unknown;
@@ -112,6 +114,7 @@ export function normalizeImageAttrs(node: Node): NormalizedImageAttrs {
     xAlign: resolveXAlign(a),
     x: resolveCustomX(a),
     yOffset: resolveYOffset(a),
+    zIndex: numberOrDefault(a.zIndex, 0),
     margin: numberOrDefault(a.margin, ANCHORED_OBJECT_MARGIN),
   };
 }
@@ -262,6 +265,7 @@ export interface AnchoredObjectPlacement {
   width: number;
   height: number;
   wrapMode: WrapMode;
+  zIndex: number;
   node: Node;
   /**
    * Anchor flow's globalY at solve time (post anchor-push / stacking).
@@ -305,6 +309,20 @@ export interface AnchoredObjectSolverResult {
   wrapZones: WrapZone[];
   status: "stable" | "exhausted";
   iterations: number;
+}
+
+export function compareAnchoredObjectPaintOrder(
+  a: Pick<AnchoredObjectPlacement, "zIndex" | "docPos">,
+  b: Pick<AnchoredObjectPlacement, "zIndex" | "docPos">,
+): number {
+  return a.zIndex - b.zIndex || a.docPos - b.docPos;
+}
+
+export function compareAnchoredObjectHitOrder(
+  a: Pick<AnchoredObjectPlacement, "zIndex" | "docPos">,
+  b: Pick<AnchoredObjectPlacement, "zIndex" | "docPos">,
+): number {
+  return b.zIndex - a.zIndex || b.docPos - a.docPos;
 }
 
 /** Type guard: is the value one of the v1 wrap modes? */

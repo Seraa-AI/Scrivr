@@ -5,7 +5,15 @@ import {
   hitHandle,
   computeNewSize,
 } from "./ResizeController";
-import { normalizeImageAttrs } from "../layout/AnchoredObjects";
+import {
+  compareAnchoredObjectHitOrder,
+  normalizeImageAttrs,
+} from "../layout/AnchoredObjects";
+import {
+  pageLocalYToGlobalForMetrics,
+  pageStartGlobalForMetrics,
+  type PageFlowMetrics,
+} from "../layout/PageMetrics";
 import { dragDebugLog } from "./DragDebugOverlay";
 
 /**
@@ -16,6 +24,9 @@ import { dragDebugLog } from "./DragDebugOverlay";
  * fully cover the rect via getHandles' 8-point grid.
  */
 const EDGE_BAND_PX = 12;
+const DRAG_THRESHOLD_PX = 3;
+const AXIS_STILL_THRESHOLD_PX = 3;
+const RE_ANCHOR_THRESHOLD_PX = 24;
 
 /**
  * Minimal view of a tile entry — PointerController only needs access to
@@ -87,13 +98,7 @@ export class PointerController {
     startImageGlobalY: number;
     /** yOffset attr value at pointerdown (= startImageGlobalY - anchorGlobalY). */
     startYOffset: number;
-    /**
-     * wrapMode at pointerdown. Used by the same-page drag commit to suppress
-     * yOffset writes for top-bottom — Phase 5 V1 still has a FlowBlock split
-     * that reserves vertical flow at the anchor's natural Y, so a non-zero
-     * yOffset would create a visible gap above the painted image. Phase 5 V2
-     * (FlowBlock rip-out) lifts this restriction.
-     */
+    /** wrapMode at pointerdown. */
     wrapMode: string;
     /** Image's docPos rect at drag start (for posBelow / posAbove fallback). */
     rect: { x: number; y: number; width: number; height: number; page: number };
@@ -122,6 +127,13 @@ export class PointerController {
     startClientX: number;
     startClientY: number;
     rect: { x: number; y: number; width: number; height: number; page: number };
+    overlay: {
+      ghostPage: number;
+      ghostX: number;
+      ghostY: number;
+      caret: { page: number; x: number; y: number; height: number } | null;
+      disabled: boolean;
+    };
   } | null = null;
 
   /** Click-count tracking for double/triple-click. */
@@ -173,10 +185,10 @@ export class PointerController {
   }
 
   /**
-   * Live drag overlay state during an anchored-object drag. Read by
+   * Live drag overlay state during an image drag. Read by
    * TileManager.paintOverlay to render a translucent ghost of the image
    * at the cursor position and a caret marker at the resolved insertion
-   * point. Returns null when no anchored-object drag is in progress.
+   * point. Returns null when no image drag is in progress.
    *
    * The overlay is paint-only — per docs/anchored-objects/04-edit-ux.md
    * § "Preview non-interference rule" it never influences hit testing,
@@ -194,18 +206,19 @@ export class PointerController {
     caret: { page: number; x: number; y: number; height: number } | null;
     disabled: boolean;
   } | null {
-    if (!this.anchoredDrag) return null;
+    const drag = this.anchoredDrag ?? this.inlineImageDrag;
+    if (!drag) return null;
     return {
-      sourcePage: this.anchoredDrag.rect.page,
-      sourceX: this.anchoredDrag.rect.x,
-      sourceY: this.anchoredDrag.rect.y,
-      width: this.anchoredDrag.rect.width,
-      height: this.anchoredDrag.rect.height,
-      ghostPage: this.anchoredDrag.overlay.ghostPage,
-      ghostX: this.anchoredDrag.overlay.ghostX,
-      ghostY: this.anchoredDrag.overlay.ghostY,
-      caret: this.anchoredDrag.overlay.caret,
-      disabled: this.anchoredDrag.overlay.disabled,
+      sourcePage: drag.rect.page,
+      sourceX: drag.rect.x,
+      sourceY: drag.rect.y,
+      width: drag.rect.width,
+      height: drag.rect.height,
+      ghostPage: drag.overlay.ghostPage,
+      ghostX: drag.overlay.ghostX,
+      ghostY: drag.overlay.ghostY,
+      caret: drag.overlay.caret,
+      disabled: drag.overlay.disabled,
     };
   }
 
@@ -278,8 +291,10 @@ export class PointerController {
   private hitAnchoredAt(canvasX: number, canvasY: number, page: number) {
     const objects = this.deps.editor.layout.anchoredObjects;
     if (!objects) return null;
-    for (const object of objects) {
-      if (object.page !== page) continue;
+    const pageObjects = objects
+      .filter((object) => object.page === page)
+      .sort(compareAnchoredObjectHitOrder);
+    for (const object of pageObjects) {
       if (
         canvasX >= object.x &&
         canvasX <= object.x + object.width &&
@@ -431,6 +446,13 @@ export class PointerController {
                 height: imageHit.height,
                 page: imageHit.page,
               },
+              overlay: {
+                ghostPage: imageHit.page,
+                ghostX: imageHit.x,
+                ghostY: imageHit.y,
+                caret: null,
+                disabled: false,
+              },
             };
             this.setCursorAll("move");
           }
@@ -483,7 +505,9 @@ export class PointerController {
     }
 
     if (this.inlineImageDrag) {
+      this.updateInlineImageDragOverlay(e);
       this.setCursorAll("move");
+      this.deps.scheduleUpdate();
       return;
     }
 
@@ -550,8 +574,7 @@ export class PointerController {
 
     const dx = e.clientX - this.inlineImageDrag.startClientX;
     const dy = e.clientY - this.inlineImageDrag.startClientY;
-    const DRAG_THRESHOLD = 3;
-    if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+    if (Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) return;
 
     const targetDocPos = this.resolveDragTargetDocPosFrom(e, this.inlineImageDrag);
     if (targetDocPos === null) return;
@@ -594,8 +617,7 @@ export class PointerController {
     const dx = e.clientX - this.anchoredDrag.startClientX;
     const dy = e.clientY - this.anchoredDrag.startClientY;
 
-    const DRAG_THRESHOLD = 3;
-    if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) {
+    if (Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) {
       return;
     }
 
@@ -625,16 +647,10 @@ export class PointerController {
       // Same-page drag: yOffset commit, no docPos change. The anchor
       // paragraph stays where it is; the image translates freely on its
       // page (clamped by layout to the anchor's page bounds).
-      // Y_THRESHOLD matches the X HORIZONTAL_THRESHOLD so a "pure horizontal"
-      // drag with mouse jitter doesn't write a spurious yOffset.
-      const Y_THRESHOLD = 3;
-      // Top-bottom keeps the FlowBlock split in Phase 5 V1, so a non-zero
-      // yOffset would paint the image away from where the FlowBlock reserves
-      // vertical flow — visible as a blank band above the image. Suppress
-      // yOffset writes for top-bottom until Phase 5 V2 unifies the path.
-      const yOffsetSupported = this.anchoredDrag.wrapMode !== "top-bottom";
+      // Matches the horizontal still threshold so a "pure horizontal" drag
+      // with mouse jitter doesn't write a spurious yOffset.
       const newYOffset = startYOffset + dy;
-      const verticallyStill = !yOffsetSupported || Math.abs(dy) < Y_THRESHOLD;
+      const verticallyStill = Math.abs(dy) < AXIS_STILL_THRESHOLD_PX;
 
       if (horizontallyStill && verticallyStill) {
         dragDebugLog(editor, "clampedNoMove", {
@@ -656,21 +672,33 @@ export class PointerController {
       if (!verticallyStill) {
         attrs["yOffset"] = newYOffset;
       }
+      const reanchor = !verticallyStill
+        ? this.resolveSamePageReanchor(newYOffset, attrs)
+        : null;
+      if (reanchor) {
+        editor.moveAndUpdateNode(docPos, reanchor.docPos, reanchor.attrs);
+        dragDebugLog(editor, "commit", {
+          commitPath: "moveAndUpdateNode",
+          docPos,
+          newDocPos: reanchor.docPos,
+          newX,
+          newYOffset: reanchor.attrs["yOffset"],
+          reanchor: true,
+        });
+        return;
+      }
       editor.setNodeAttrs(docPos, attrs);
       dragDebugLog(editor, "commit", {
         commitPath: "setNodeAttrs",
         docPos,
         newX,
-        newYOffset: yOffsetSupported ? newYOffset : "suppressed (top-bottom)",
+        newYOffset,
       });
       return;
     }
 
-    // Cross-page drop: anchor must relocate. Resolve a new anchor docPos
-    // on the destination page; reset yOffset so the image lands at the new
-    // anchor's natural position. Preserving exact visual position across
-    // page breaks (= adjusted yOffset against new anchor) is deferred —
-    // it requires a pageStartGlobal helper not yet exposed to PointerController.
+    // Cross-page drop: anchor relocates, but the image keeps its exact visual
+    // top by committing yOffset against the destination anchor's global Y.
     const newDocPos = this.resolveDragTargetDocPos(e);
     const { nodeSize } = this.anchoredDrag;
     const verticallyStill =
@@ -687,15 +715,19 @@ export class PointerController {
     }
 
     let commitPath: "moveAndUpdateNode" | "moveNode" | "setNodeAttrs";
+    const crossPageYOffset = newDocPos !== null
+      ? this.resolveCrossPageDropYOffset(e, newDocPos)
+      : 0;
+
     if (!horizontallyStill && !verticallyStill && newX !== null && newDocPos !== null) {
       editor.moveAndUpdateNode(docPos, newDocPos, {
         xAlign: "custom",
         x: newX,
-        yOffset: 0,
+        yOffset: crossPageYOffset,
       });
       commitPath = "moveAndUpdateNode";
     } else if (!verticallyStill && newDocPos !== null) {
-      editor.moveAndUpdateNode(docPos, newDocPos, { yOffset: 0 });
+      editor.moveAndUpdateNode(docPos, newDocPos, { yOffset: crossPageYOffset });
       commitPath = "moveAndUpdateNode";
     } else if (newX !== null) {
       editor.setNodeAttrs(docPos, { xAlign: "custom", x: newX });
@@ -704,7 +736,14 @@ export class PointerController {
       return;
     }
 
-    dragDebugLog(editor, "commit", { commitPath, docPos, newX, newDocPos, crossPage: true });
+    dragDebugLog(editor, "commit", {
+      commitPath,
+      docPos,
+      newX,
+      newDocPos,
+      newYOffset: crossPageYOffset,
+      crossPage: true,
+    });
   }
 
   /**
@@ -738,6 +777,112 @@ export class PointerController {
       Math.min(proposedX, contentX + contentWidth - attrs.width),
     );
     return clampedX;
+  }
+
+  private resolveSamePageReanchor(
+    committedYOffset: number,
+    attrs: Record<string, unknown>,
+  ): { docPos: number; attrs: Record<string, unknown> } | null {
+    if (!this.anchoredDrag) return null;
+    const sourcePage = this.anchoredDrag.rect.page;
+    const imageGlobalY = this.anchoredDrag.anchorGlobalY + committedYOffset;
+    const sourceFrom = this.anchoredDrag.docPos;
+    const sourceTo = sourceFrom + this.anchoredDrag.nodeSize;
+
+    let best: { docPos: number; globalY: number; distance: number } | null = null;
+    const page = this.deps.editor.layout.pages?.[sourcePage - 1];
+    if (!page) return null;
+
+    for (const block of page.blocks) {
+      const docPos = block.nodePos + 1;
+      if (docPos >= sourceFrom && docPos <= sourceTo) continue;
+      const globalY = this.pageLocalYToGlobal(sourcePage, block.y);
+      const distance = Math.abs(imageGlobalY - globalY);
+      if (!best || distance < best.distance) {
+        best = { docPos, globalY, distance };
+      }
+    }
+
+    if (!best) return null;
+    const wouldReduce = Math.abs(committedYOffset) - best.distance;
+    if (wouldReduce <= RE_ANCHOR_THRESHOLD_PX) return null;
+    return {
+      docPos: best.docPos,
+      attrs: {
+        ...attrs,
+        yOffset: imageGlobalY - best.globalY,
+      },
+    };
+  }
+
+  private resolveCrossPageDropYOffset(e: MouseEvent, newDocPos: number): number {
+    if (!this.anchoredDrag) return 0;
+    const hit = this.hitTest(e.clientX, e.clientY);
+    if (!hit || hit.gap) return 0;
+
+    const ghostTopLocalY = hit.docY - this.anchoredDrag.grabOffsetY;
+    const ghostGlobalY = this.pageLocalYToGlobal(hit.page, ghostTopLocalY);
+    const anchorGlobalY = this.globalYForDocPos(newDocPos, hit.page);
+    return ghostGlobalY - anchorGlobalY;
+  }
+
+  private metricsForPage(pageNumber: number): PageFlowMetrics {
+    const layout = this.deps.editor.layout;
+    const metrics = layout.metrics?.[pageNumber - 1];
+    if (metrics) return metrics;
+    const fallbackContentHeight = typeof layout.pageConfig.pageHeight === "number"
+      ? layout.pageConfig.pageHeight - layout.pageConfig.margins.top - layout.pageConfig.margins.bottom
+      : 0;
+    return {
+      contentTop: layout.pageConfig.margins.top,
+      contentHeight: fallbackContentHeight,
+    };
+  }
+
+  private pageStartGlobal(pageNumber: number): number {
+    const layout = this.deps.editor.layout;
+    return pageStartGlobalForMetrics(
+      layout.pageConfig,
+      (page) => this.metricsForPage(page),
+      pageNumber,
+    );
+  }
+
+  private pageLocalYToGlobal(pageNumber: number, localY: number): number {
+    const layout = this.deps.editor.layout;
+    return pageLocalYToGlobalForMetrics(
+      layout.pageConfig,
+      (page) => this.metricsForPage(page),
+      pageNumber,
+      localY,
+    );
+  }
+
+  private globalYForDocPos(docPos: number, preferredPage: number): number {
+    const { editor } = this.deps;
+    editor.ensurePagePopulated(preferredPage);
+    const coords = editor.charMap.coordsAtPos(docPos, preferredPage);
+    if (coords && coords.page === preferredPage) {
+      return this.pageLocalYToGlobal(coords.page, coords.y);
+    }
+
+    const layout = editor.layout;
+    const page = layout.pages?.[preferredPage - 1];
+    if (page) {
+      let nearestBlockY: number | null = null;
+      for (const block of page.blocks) {
+        const nodeSize = block.node?.nodeSize;
+        const containsDocPos = nodeSize === undefined
+          ? docPos === block.nodePos || docPos === block.nodePos + 1
+          : docPos >= block.nodePos && docPos <= block.nodePos + nodeSize;
+        if (containsDocPos) {
+          return this.pageLocalYToGlobal(preferredPage, block.y);
+        }
+        if (block.nodePos <= docPos) nearestBlockY = block.y;
+      }
+      if (nearestBlockY !== null) return this.pageLocalYToGlobal(preferredPage, nearestBlockY);
+    }
+    return this.pageStartGlobal(preferredPage);
   }
 
   /**
@@ -888,6 +1033,47 @@ export class PointerController {
     };
     // Restore the move cursor in case we just exited a gap.
     this.setCursorAll("move");
+  }
+
+  private updateInlineImageDragOverlay(e: MouseEvent): void {
+    if (!this.inlineImageDrag) return;
+    const { editor } = this.deps;
+    const hit = this.hitTest(e.clientX, e.clientY);
+    if (!hit) return;
+
+    const ghostX = hit.docX - this.inlineImageDrag.rect.width / 2;
+    const ghostY = hit.docY - this.inlineImageDrag.rect.height / 2;
+    if (hit.gap) {
+      this.inlineImageDrag.overlay = {
+        ghostPage: hit.page,
+        ghostX,
+        ghostY,
+        caret: null,
+        disabled: true,
+      };
+      this.setCursorAll("not-allowed");
+      return;
+    }
+
+    editor.ensurePagePopulated(hit.page);
+    let caret: { page: number; x: number; y: number; height: number } | null = null;
+    const targetDocPos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
+    const from = this.inlineImageDrag.docPos;
+    const to = from + this.inlineImageDrag.nodeSize;
+    if (targetDocPos < from || targetDocPos > to) {
+      const coords = editor.charMap.coordsAtPos(targetDocPos, hit.page);
+      if (coords) {
+        caret = { page: coords.page, x: coords.x, y: coords.y, height: coords.height };
+      }
+    }
+
+    this.inlineImageDrag.overlay = {
+      ghostPage: hit.page,
+      ghostX,
+      ghostY,
+      caret,
+      disabled: false,
+    };
   }
 
   private setCursorAll(cursor: string): void {

@@ -10,6 +10,7 @@ import {
 } from "./PageLayout";
 import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
 import { computePageMetrics, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
+import type { LayoutBlock } from "./BlockLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, MOCK_LINE_HEIGHT } from "../test-utils";
 
@@ -1762,6 +1763,14 @@ describe("runPipeline — page-level square exclusions (Phase 4)", () => {
 
 describe("runPipeline — top-bottom (break) float", () => {
   const longText = "word ".repeat(80).trim();
+  const firstLineY = (block: LayoutBlock): number => {
+    let y = block.y;
+    for (const line of block.lines) {
+      if (line.spans.length > 0) return y;
+      y += line.lineHeight;
+    }
+    return y;
+  };
 
   it("contract: anchor and top-bottom object move to the same page near a boundary", () => {
     const { schema, fontConfig } = buildStarterKitContext();
@@ -1791,7 +1800,9 @@ describe("runPipeline — top-bottom (break) float", () => {
     expect(anchored.page).toBe(anchored.anchorPage);
 
     const anchorPage = layout.pages.find((p) => p.pageNumber === anchored.anchorPage)!;
-    expect(anchorPage.blocks.some((b) => b.node === img)).toBe(true);
+    expect(anchorPage.blocks.some((b) =>
+      b.lines.some((line) => line.spans.some((span) => span.kind === "object" && span.node === img)),
+    )).toBe(true);
   });
 
   it("float honours attrs.width and starts at content left", () => {
@@ -1874,7 +1885,7 @@ describe("runPipeline — top-bottom (break) float", () => {
     }
   });
 
-  it("block height includes the image gap (height > just the text lines)", () => {
+  it("block height includes the image gap through full-width exclusion", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "top-bottom" });
     const para = schema.node("paragraph", null, [img, schema.text(longText)]);
@@ -1882,13 +1893,13 @@ describe("runPipeline — top-bottom (break) float", () => {
       pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
     });
     const blocks = layout.pages.flatMap((p) => p.blocks);
-    const imageBlock = blocks.find((b) => b.node === img)!;
     const textBlock = blocks.find((b) => b.node.type.name === "paragraph")!;
-    expect(imageBlock.height).toBe(200);
-    expect(textBlock.y).toBeGreaterThanOrEqual(imageBlock.y + imageBlock.height + 8);
+    const float = layout.anchoredObjects![0]!;
+    expect(textBlock.height).toBeGreaterThan(200);
+    expect(firstLineY(textBlock)).toBeGreaterThanOrEqual(float.y + float.height + 8);
   });
 
-  it("top-bottom block spaceAfter carries the image margin without a Stage 3 clearance", () => {
+  it("top-bottom full-width exclusion carries the image margin", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({
       src: "",
@@ -1905,9 +1916,9 @@ describe("runPipeline — top-bottom (break) float", () => {
     });
 
     const blocks = layout.pages.flatMap((p) => p.blocks);
-    const imageBlock = blocks.find((b) => b.node === img)!;
     const textBlock = blocks.find((b) => b.node.type.name === "paragraph")!;
-    expect(textBlock.y).toBeCloseTo(imageBlock.y + imageBlock.height + 32, 3);
+    const float = layout.anchoredObjects![0]!;
+    expect(firstLineY(textBlock)).toBeCloseTo(float.y + float.height + 32, 3);
   });
 
   it("exclusion spans full content width (no text constrained to a narrow column)", () => {
@@ -2383,5 +2394,80 @@ describe("runPipeline — pageless mode", () => {
   it("defaultPagelessConfig has pageless: true", () => {
     expect(defaultPagelessConfig.pageless).toBe(true);
     expect(defaultPagelessConfig.pageHeight).toBe(0);
+  });
+});
+
+// ── pageRectsDigest cache invalidation ────────────────────────────────────────
+
+describe("runPipeline — pageRectsDigest invalidation", () => {
+  // Pagination's previousLayout reuse is gated on a digest of the merged
+  // anchored-object placements. When placements change between runs, the
+  // digest mismatches and pagination is computed fresh against the new wrap
+  // zones. A run with previousLayout therefore must match a fresh run.
+
+  it("changed image width drops the pagination cache (cached run matches fresh)", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, fontConfig, measurer };
+
+    const wrapped = "word ".repeat(60).trim();
+    const tail = schema.node("paragraph", null, [schema.text("tail")]);
+    const makeDoc = (imgWidth: number, imgHeight: number) => {
+      const img = schema.nodes["image"]!.create({
+        src: "",
+        width: imgWidth,
+        height: imgHeight,
+        wrappingMode: "square-left",
+      });
+      return schema.node("doc", null, [
+        schema.node("paragraph", null, [img, schema.text("anchor")]),
+        schema.node("paragraph", null, [schema.text(wrapped)]),
+        tail,
+      ]);
+    };
+
+    const layout1 = runPipeline(makeDoc(120, 80), opts);
+    const docB = makeDoc(260, 240);
+    const cached = runPipeline(docB, { ...opts, previousLayout: layout1 });
+    const fresh = runPipeline(docB, {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const cachedTail = cached.pages.flatMap((p) => p.blocks).find((b) => b.node === tail)!;
+    const freshTail = fresh.pages.flatMap((p) => p.blocks).find((b) => b.node === tail)!;
+    const cachedFloat = cached.anchoredObjects![0]!;
+    const freshFloat = fresh.anchoredObjects![0]!;
+
+    expect(cachedTail.y).toBe(freshTail.y);
+    expect(cachedFloat.x).toBe(freshFloat.x);
+    expect(cachedFloat.width).toBe(freshFloat.width);
+    expect(cachedFloat.height).toBe(freshFloat.height);
+  });
+
+  it("identical placements between runs allow previousLayout reuse without divergence", () => {
+    // Sanity-check the other direction: when placements digest matches,
+    // previousLayout is reused — the cached run must still match the fresh
+    // run (correctness over reuse).
+    const { schema, fontConfig } = buildStarterKitContext();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, fontConfig, measurer };
+
+    const para = schema.node("paragraph", null, [schema.text("hello")]);
+    const same = schema.node("doc", null, [para, schema.node("paragraph", null, [schema.text("world")])]);
+
+    const layout1 = runPipeline(same, opts);
+    const cached = runPipeline(same, { ...opts, previousLayout: layout1 });
+    const fresh = runPipeline(same, {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const cachedFirst = cached.pages[0]!.blocks[0]!;
+    const freshFirst = fresh.pages[0]!.blocks[0]!;
+    expect(cachedFirst.y).toBe(freshFirst.y);
+    expect(cached.pages.length).toBe(fresh.pages.length);
   });
 });

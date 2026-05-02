@@ -11,6 +11,7 @@ import type {
   DocumentLayout,
   AnchoredObjectPlacement,
 } from "@scrivr/core";
+import { compareAnchoredObjectPaintOrder } from "@scrivr/core";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers } from "./context";
 import type { PdfContext } from "./context";
@@ -136,7 +137,9 @@ export async function buildPdf(
     ctx.layoutPage = layoutPage;
 
     // Anchored objects behind blocks
-    const pageObjects = (layout.anchoredObjects ?? []).filter((o) => o.page === pageNumber);
+    const pageObjects = (layout.anchoredObjects ?? [])
+      .filter((o) => o.page === pageNumber)
+      .sort(compareAnchoredObjectPaintOrder);
     for (const object of pageObjects) {
       if (object.wrapMode === "behind") {
         drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache);

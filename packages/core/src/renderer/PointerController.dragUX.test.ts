@@ -400,6 +400,100 @@ describe("PointerController — drag UX", () => {
     });
   });
 
+  describe("Step 7 — same-page re-anchor", () => {
+    // Dragging an image far down its own page parks it next to a different
+    // paragraph than its docPos anchor. resolveSamePageReanchor catches the
+    // case where the new anchor would dramatically shrink |yOffset| (past
+    // RE_ANCHOR_THRESHOLD_PX = 24) and re-parents the image so the saved
+    // yOffset stays small. Without this the offset accumulates across drags.
+    it("dy past threshold re-anchors to the closer paragraph", () => {
+      const sourceBlock = { nodePos: 4, y: 50, height: 100 };
+      const targetBlock = { nodePos: 20, y: 200, height: 100 };
+      editor = makeMockEditor({
+        layout: {
+          ...makeMockEditor().layout,
+          anchoredObjects: [placement()],
+          pages: [
+            { pageNumber: 1, blocks: [sourceBlock, targetBlock] },
+          ],
+        },
+      });
+      // Stay on the source range so resolveDragTargetDocPos returns null
+      // (same-page yOffset commit path).
+      editor.charMap.posAtCoords.mockReturnValue(5);
+      ({ controller, container } = makeController(editor, { isPageless: true }));
+
+      mousedown(container, SQUARE_RECT.x + 30, SQUARE_RECT.y + 30);
+      mousemove(SQUARE_RECT.x + 30, SQUARE_RECT.y + 30 + 200); // dy = 200
+      mouseup(SQUARE_RECT.x + 30, SQUARE_RECT.y + 30 + 200);
+
+      // imageGlobalY = anchorGlobalY (50) + newYOffset (200) = 250.
+      // Distance to targetBlock at y=200 → 50. wouldReduce = 200 - 50 = 150 > 24.
+      // Re-anchor to targetBlock.nodePos + 1 = 21 with yOffset = 250 - 200 = 50.
+      expect(editor.moveAndUpdateNode).toHaveBeenCalledWith(5, 21, { yOffset: 50 });
+      expect(editor.setNodeAttrs).not.toHaveBeenCalled();
+    });
+
+    it("no closer paragraph → keeps the original anchor (setNodeAttrs path)", () => {
+      // Re-anchor only fires when a sibling paragraph is dramatically closer
+      // to the painted top than the source. Here the only other block is far
+      // below the dropped position, so wouldReduce stays <= 24 and the
+      // same-page commit goes through setNodeAttrs with the new yOffset.
+      const sourceBlock = { nodePos: 4, y: 50, height: 100 };
+      const farBlock = { nodePos: 20, y: 400, height: 100 };
+      editor = makeMockEditor({
+        layout: {
+          ...makeMockEditor().layout,
+          anchoredObjects: [placement()],
+          pages: [{ pageNumber: 1, blocks: [sourceBlock, farBlock] }],
+        },
+      });
+      editor.charMap.posAtCoords.mockReturnValue(5);
+      ({ controller, container } = makeController(editor, { isPageless: true }));
+
+      mousedown(container, SQUARE_RECT.x + 30, SQUARE_RECT.y + 30);
+      mousemove(SQUARE_RECT.x + 30, SQUARE_RECT.y + 30 + 30);
+      mouseup(SQUARE_RECT.x + 30, SQUARE_RECT.y + 30 + 30);
+
+      expect(editor.setNodeAttrs).toHaveBeenCalledWith(5, { yOffset: 30 });
+      expect(editor.moveAndUpdateNode).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Step 8 — cross-page yOffset preserves visual position", () => {
+    // Cross-page drops must commit a yOffset measured against the destination
+    // anchor's globalY, not 0. Otherwise the image snaps to the new anchor's
+    // natural row, ignoring where the user dropped it.
+    it("drop on a destination page commits non-zero yOffset against the new anchor", () => {
+      editor = makeMockEditor({
+        layout: {
+          ...makeMockEditor().layout,
+          anchoredObjects: [placement()],
+          pages: [
+            { pageNumber: 1, blocks: [{ nodePos: 0, y: 0, height: 200 }] },
+            { pageNumber: 2, blocks: [{ nodePos: 42, y: 50, height: 120 }] },
+          ],
+        },
+      });
+      editor.charMap.posAtCoords.mockImplementation(
+        (_x: number, _y: number, page: number) => (page === 2 ? 0 : 5),
+      );
+      ({ controller, container } = makeController(editor, {
+        isPageless: false,
+        tileHeight: 1200,
+        slotHeight: 1224,
+      }));
+
+      // grabOffsetY = 80 - 50 = 30. Drop at page 2 docY = 120 → ghost top at
+      // localY 90. Anchor block on page 2 at localY 50. Expected yOffset = 40.
+      mousedown(container, SQUARE_RECT.x + 30, SQUARE_RECT.y + 30);
+      mousemove(SQUARE_RECT.x + 30, 1224 + 120);
+      mouseup(SQUARE_RECT.x + 30, 1224 + 120);
+
+      expect(editor.moveAndUpdateNode).toHaveBeenCalledWith(5, 43, { yOffset: 40 });
+    });
+  });
+
   describe("Step 6 — single source of truth", () => {
     it("hitHandleAt reads from editor.getNodeRect (layout.anchoredObjects authoritative)", () => {
       // Drift fixture: charMap reports a stale rect at x=999; layout.anchoredObjects
