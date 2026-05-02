@@ -25,6 +25,7 @@ import type { EditorEvents } from "./types/augmentation";
 import { SurfaceRegistry } from "./surfaces/SurfaceRegistry";
 import type { PageChromeContribution } from "./layout/PageMetrics";
 import { installDragDebugOverlay, type DragDebugConfig } from "./renderer/DragDebugOverlay";
+import { installAnchoredObjectDebugOverlay } from "./renderer/AnchoredObjectDebugOverlay";
 
 export type EditorChangeHandler = (state: EditorState) => void;
 
@@ -237,6 +238,8 @@ export class Editor extends BaseEditor implements IEditor {
 
   /** Dispose handle for the always-installed drag debug overlay handler. */
   private readonly _disposeDragDebug: () => void;
+  /** Dispose handle for the always-installed anchored-object debug overlay. */
+  private readonly _disposeAnchoredDebug: () => void;
 
   constructor({
     extensions = [StarterKit],
@@ -387,10 +390,12 @@ export class Editor extends BaseEditor implements IEditor {
     // Apply initial read-only state after infrastructure is ready.
     if (readOnly) this.setReadOnly(true);
 
-    // Drag debug overlay — always installed; self-gates on `this.debug.drag`
-    // at paint time so toggling at runtime requires no re-registration.
+    // Debug overlays — always installed; self-gate on the corresponding
+    // `this.debug.<flag>` at paint time so toggling at runtime requires no
+    // re-registration.
     this.debug = debug;
     this._disposeDragDebug = installDragDebugOverlay(this);
+    this._disposeAnchoredDebug = installAnchoredObjectDebugOverlay(this);
 
     // Fire onEditorReady after ALL infrastructure (including view) is set up.
     this._fireEditorReady();
@@ -583,6 +588,7 @@ export class Editor extends BaseEditor implements IEditor {
     this.surfaces.destroy();
     this.lc.destroy();
     this._disposeDragDebug();
+    this._disposeAnchoredDebug();
     this.overlayRenderHandlers.clear();
     this.cursorManager.stop();
     this.unmount();
