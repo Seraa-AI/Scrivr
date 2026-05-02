@@ -544,4 +544,91 @@ describe("PointerController — drag UX", () => {
       // failed above if it were, since the charMap rect is at (999, 999).
     });
   });
+
+  describe("Step 9 — pointer capture during drag", () => {
+    // Closes the double-click rapid-drag race: while a drag is active, a
+    // second mousedown must NOT re-enter hit-testing and start a new drag.
+    // Without the guard, two PM transactions can fire from a single
+    // user gesture (e.g. accidental double-click during drag).
+
+    it("ignores a second mousedown while an anchored-object drag is active", () => {
+      editor = makeMockEditor({
+        layout: {
+          ...makeMockEditor().layout,
+          anchoredObjects: [placement()],
+        },
+      });
+      ({ controller, container } = makeController(editor, { isPageless: true }));
+
+      // Start an anchored drag at the image's body.
+      mousedown(container, SQUARE_RECT.x + 30, SQUARE_RECT.y + 30);
+      const initialDrag = controller.pendingAnchoredDrag;
+      expect(initialDrag).not.toBeNull();
+      const initialSourceX = initialDrag!.sourceX;
+      const initialSourceY = initialDrag!.sourceY;
+
+      // Second mousedown elsewhere — must be ignored. Without the guard,
+      // hit-test would fire selection.moveCursorTo and corrupt drag state.
+      const moveCursorBefore = editor.selection.moveCursorTo.mock.calls.length;
+      mousedown(container, 500, 500);
+
+      // Drag state unchanged.
+      expect(controller.pendingAnchoredDrag).not.toBeNull();
+      expect(controller.pendingAnchoredDrag?.sourceX).toBe(initialSourceX);
+      expect(controller.pendingAnchoredDrag?.sourceY).toBe(initialSourceY);
+      // The second mousedown produced no side effects.
+      expect(editor.selection.moveCursorTo.mock.calls.length).toBe(moveCursorBefore);
+      expect(editor.selectNode).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores a second mousedown while a resize drag is active", () => {
+      editor = makeMockEditor({
+        layout: {
+          ...makeMockEditor().layout,
+          anchoredObjects: [placement()],
+        },
+      });
+      const sel = imageNodeSelection(5);
+      editor.getState.mockReturnValue({
+        doc: {
+          resolve: vi.fn(() => ({ depth: 1, start: () => 1, end: () => 30 })),
+          nodeAt: vi.fn(() => sel.node),
+          content: { size: 40 },
+        },
+        selection: sel,
+      });
+      editor.getNodeRect.mockReturnValue({ ...SQUARE_RECT });
+      ({ controller, container } = makeController(editor, { isPageless: true }));
+
+      // Start a resize drag at the TL handle.
+      mousedown(container, SQUARE_RECT.x, SQUARE_RECT.y);
+      const initialResize = controller.pendingResize;
+      expect(initialResize?.handle).toBe("TL");
+
+      // Second mousedown — must be ignored.
+      mousedown(container, 500, 500);
+      expect(controller.pendingResize?.handle).toBe("TL");
+    });
+
+    it("allows a fresh mousedown after mouseup releases the drag", () => {
+      editor = makeMockEditor({
+        layout: {
+          ...makeMockEditor().layout,
+          anchoredObjects: [placement()],
+        },
+      });
+      ({ controller, container } = makeController(editor, { isPageless: true }));
+
+      // Drag start → release → drag start again.
+      mousedown(container, SQUARE_RECT.x + 30, SQUARE_RECT.y + 30);
+      expect(controller.pendingAnchoredDrag).not.toBeNull();
+      mouseup(SQUARE_RECT.x + 30, SQUARE_RECT.y + 30);
+      expect(controller.pendingAnchoredDrag).toBeNull();
+
+      mousedown(container, SQUARE_RECT.x + 40, SQUARE_RECT.y + 40);
+      expect(controller.pendingAnchoredDrag).not.toBeNull();
+      // Second drag started from the new grab point, not the first.
+      expect(editor.selectNode).toHaveBeenCalledTimes(2);
+    });
+  });
 });
