@@ -1041,7 +1041,9 @@ describe("runPipeline — float image wrapping", () => {
     const unconstrainedBlock = unconstrained.pages[0]!.blocks[0]!;
     const firstLine = block.lines[0]!;
     expect(firstLine.positioned).toBe(true);
-    expect(Math.min(...firstLine.spans.map((span) => span.x))).toBe(208);
+    // Image is 200px wide at content-left; first text segment starts at
+    // 200 + ANCHORED_OBJECT_MARGIN (12) = 212.
+    expect(Math.min(...firstLine.spans.map((span) => span.x))).toBe(212);
     expect(block.lines.length).toBeGreaterThan(unconstrainedBlock.lines.length);
   });
 
