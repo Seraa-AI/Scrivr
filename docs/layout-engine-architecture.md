@@ -3,6 +3,13 @@
 > How Scrivr's canvas-based layout engine works, why it departs from browser
 > layout, and the mathematical foundations that keep it stable.
 
+> **Partially superseded.** Sections that describe float wrap as a
+> per-image, two-sided constraint reflect the retired CSS-float-era model.
+> The authoritative wrap design is now exclusion rectangles + segments —
+> see [`docs/anchored-objects/`](./anchored-objects/), in particular
+> `06-yoffset-redesign.md` and `07-extensibility.md`. Page math, font
+> metrics, and the canvas-vs-DOM rationale in this doc remain accurate.
+
 ---
 
 ## 1. Why Canvas, Not DOM

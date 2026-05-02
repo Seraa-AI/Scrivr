@@ -168,11 +168,11 @@ Phase 3 / structural cleanup: a paragraph whose only content is non-inline image
 
 `isHiddenAnchorLine(line)` already cross-cuts the layout/paint/hit-test layers; cell layout just needs to honor the same predicate when computing cell height.
 
-### Top-bottom in nested containers (Phase 5 V2 prerequisite)
+### Top-bottom in nested containers
 
-Top-bottom currently keeps the `partKind: "anchored-object"` FlowBlock split for V1 (we suppress `yOffset` writes for top-bottom in PointerController + ImageMenu to compensate). Phase 5 V2 rips out the split.
+Phase 5 V2 has landed (PR #59) — the `partKind: "anchored-object"` FlowBlock split is gone, and top-bottom feeds the same `reflowFlowsAgainstExclusions` path as square. The yOffset suppression in PointerController + ImageMenu has been removed.
 
-When Phase 5 V2 lands AND tables ship, top-bottom inside a table cell should behave the same as top-bottom inside a column or page: contribute a `side: "full"` rect to the cell's `ExclusionManager`. Spans the cell's content width, not the page's. Already covered by `addFullWidthRect(contentX, contentWidth)`.
+When tables ship, top-bottom inside a table cell behaves the same as top-bottom inside a column or page: contribute a `side: "full"` rect to the cell's `ExclusionManager`, spanning the cell's content width via `addFullWidthRect(contentX, contentWidth)`. The plumbing is already correct; the only new work is supplying `(contentX, contentWidth)` from the cell instead of the page.
 
 ### Float anchored to a non-paragraph element
 
