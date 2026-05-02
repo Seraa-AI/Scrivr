@@ -167,8 +167,8 @@ export const Image = Extension.create({
           yOffset: { default: 0 },
           /** Paint/hit-test stacking order among anchored objects. */
           zIndex: { default: 0 },
-          /** Wrap-zone breathing room in px */
-          margin: { default: 8 },
+          /** Wrap-zone breathing room in px (Word's ~0.13" Square default). */
+          margin: { default: 12 },
           // ── Legacy attrs (read-side compat — see normalizeImageAttrs) ────
           /** @deprecated — replaced by `wrapMode` + `xAlign`. Mapped on read. */
           wrappingMode: { default: "inline" },

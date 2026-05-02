@@ -1,6 +1,11 @@
 import type { Node } from "prosemirror-model";
 
-export const ANCHORED_OBJECT_MARGIN = 8;
+// Default breathing room around an anchored object's exclusion rect, in px.
+// Word's "Square" / "Tight" wrap defaults are ~0.13" ≈ 12px; matching that
+// gives visible space between text and image at typical reading sizes.
+// 8px (the previous default) was tight enough that text appeared flush
+// against the image's visible pixels.
+export const ANCHORED_OBJECT_MARGIN = 12;
 
 /**
  * Wrap behaviour for an anchored object — Word's five wrap styles.
