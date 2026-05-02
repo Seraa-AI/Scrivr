@@ -311,6 +311,14 @@ export class PointerController {
 
   private handleMouseDown = (e: MouseEvent): void => {
     e.preventDefault();
+    // Pointer capture analogue. While any drag is in flight, a second
+    // mousedown must NOT re-enter hit-testing — otherwise an accidental
+    // double-click during drag fires two PM transactions, or text selection
+    // resolves at a stale point. Equivalent to setPointerCapture +
+    // pointerdown ignore; we use mouse events so we guard explicitly.
+    if (this.isDragging || this.resizeDrag || this.anchoredDrag || this.inlineImageDrag) {
+      return;
+    }
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return;
