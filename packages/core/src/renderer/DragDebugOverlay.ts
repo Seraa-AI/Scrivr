@@ -23,6 +23,16 @@ import type { Editor } from "../Editor";
 
 export interface DragDebugConfig {
   drag?: boolean;
+  /**
+   * Anchored-object debug overlay. Paints wrap-zone fill (margin-inflated
+   * exclusion rect), clamp indicator, and a wrapMode + zIndex label on every
+   * placement. Useful when "the image looks wrong" — visualises the
+   * exclusion area and paint-order metadata that normally lives only in
+   * `LayoutPage.anchoredObjects[]`. See `AnchoredObjectDebugOverlay.ts`.
+   * Self-gates at paint time; flip at runtime via
+   * `editor.debug.anchoredObjects = true; editor.redraw()`.
+   */
+  anchoredObjects?: boolean;
 }
 
 interface DebugCarrier {
