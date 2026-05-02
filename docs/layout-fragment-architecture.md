@@ -1,5 +1,13 @@
 # Layout Fragment Architecture
 
+> **Partially superseded.** Pagination fragments and fragment indexing are
+> still load-bearing; the linked pipeline-refactor doc
+> ([`layout-pipeline-architecture.md`](./layout-pipeline-architecture.md))
+> describes the retired CSS-float-era staging. For current anchored-object
+> handling — including how floats interact with fragmentation through
+> per-page `ExclusionManager` rects — see
+> [`docs/anchored-objects/`](./anchored-objects/).
+
 ## Overview
 
 The layout engine is already close to a Google-Docs-class pagination engine. The engine is not missing fragmentation — it is missing **fragment identity and fragment indexing**. The right solution is to formalize what already works, not redesign the pipeline.

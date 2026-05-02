@@ -1,5 +1,15 @@
 # Layout Pipeline Architecture
 
+> **Superseded.** This describes the CSS-float-era pipeline design
+> (`applyFloatLayout`, `FloatLayout[]`, one-width `ExclusionManager`
+> constraints). The authoritative architecture is now the anchored-object
+> model in [`docs/anchored-objects/`](./anchored-objects/) — square and
+> top-bottom share one rect-driven exclusion path
+> (`reflowFlowsAgainstExclusions`), and `LineBreaker` consumes available
+> inline segments rather than a single constraint. Read this doc only for
+> historical context on the staged-pipeline ambition; the stages themselves
+> have been redesigned around exclusion rects + `LineSpace.segments[]`.
+
 ## Overview
 
 This document describes the target pipeline architecture for the layout engine — modeled on how Chrome, Google Docs, and Figma structure their rendering pipelines. The goal is to split the monolithic `layoutDocument()` into independent stages with clean interfaces, enabling tables, columns, footnotes, and collaborative editing without chaos.

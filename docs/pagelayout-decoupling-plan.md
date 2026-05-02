@@ -1,5 +1,14 @@
 # PageLayout Decoupling Plan
 
+> **Superseded.** Written against the CSS-float-era pipeline
+> (`applyAnchorsAndFloatConstraints`, `wrappingMode` / `floatOffset` attrs).
+> The codebase took a different direction: rect-driven exclusions through a
+> shared per-page `ExclusionManager`, with paint geometry split from
+> ownership via the `yOffset` attribute. The decoupling argument here is
+> still useful as historical motivation; the specific stage names and APIs
+> are not. Authoritative architecture is in
+> [`docs/anchored-objects/`](./anchored-objects/).
+
 > Trigger: this branch exposed that `PageLayout` is carrying too many layout,
 > pagination, anchored-object, and rendering responsibilities. The MS-OE376
 > Word implementation notes reinforce the same conclusion: a document renderer

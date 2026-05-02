@@ -1,5 +1,14 @@
 # 06 — yOffset redesign: anchor as ownership, rect as placement
 
+> **Status — landed.** Phases 1–6 plus the same-page re-anchor and
+> cross-page exact-position drop polish all shipped (PRs #58 and #59).
+> Top-bottom and square share one rect-driven exclusion path, `yOffset` is
+> the single source of paint truth, and `zIndex` controls paint/hit order.
+> Genuinely-deferred items: the per-page rect splitting at page boundaries
+> alternative to V1's clamp policy (see § Page-edge policy below) and any
+> `positionMode: "fixed-on-page"` work. The doc below is preserved as the
+> design record; treat the "Phase N — …" headings as historical.
+
 ## Problem
 
 The current pipeline conflates two responsibilities into the image's document position:
@@ -232,13 +241,16 @@ After Phase 6, add:
 
 ## Recommended ship order summary
 
-| # | Phase | Visible to user? | Depends on |
-|---|---|---|---|
-| 1 | yOffset attr + structural threading | No (yOffset=0 default) | — |
-| 2 | Drag commits yOffset, freezes anchor | Yes — drag flicker fixed | 1 |
-| 3 | Image height out of paragraph | Yes — empty-anchor case fixes | 1 |
-| 4 | Square: per-object → page-level exclusions | No | 1 |
-| 5 | Top-bottom: FlowBlock → side:"full" rect | No | 4 |
-| 6 | zIndex paint/hit-test ordering | Yes — send-to-back works | 5 |
+| # | Phase | Visible to user? | Depends on | State |
+|---|---|---|---|---|
+| 1 | yOffset attr + structural threading | No (yOffset=0 default) | — | ✅ landed (#58) |
+| 2 | Drag commits yOffset, freezes anchor | Yes — drag flicker fixed | 1 | ✅ landed (#58) |
+| 3 | Image height out of paragraph | Yes — empty-anchor case fixes | 1 | ✅ landed (#58) |
+| 4 | Square: per-object → page-level exclusions | No | 1 | ✅ landed (#58) |
+| 5 V1 | Top-bottom: contributes side:"full" rect | No | 4 | ✅ landed (#58) |
+| 5 V2 | Top-bottom: rip out FlowBlock split | No | 5 V1 | ✅ landed (#59) |
+| 6 | zIndex paint/hit-test ordering | Yes — send-to-back works | 5 V2 | ✅ landed (#59) |
+| Polish | Same-page re-anchor, cross-page exact-position drop | Yes | 2 | ✅ landed (#59) |
 
-Each phase is independently shippable and revertible. Resist combining.
+Each phase shipped independently. The discipline of resisting combination
+held — every phase landed alone with its own changeset and tests.

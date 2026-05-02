@@ -2,6 +2,14 @@
 
 Status: **design** — synthesises the header/footer plan, the footnote pressure-test, and the comments-as-markers decision into one architectural reference.
 
+> **Partially superseded.** The frame and primitives (surfaces, regions,
+> chrome contributions) remain valid and align with the systems-design
+> rules surfaced in [`docs/anchored-objects/07-extensibility.md`](./anchored-objects/07-extensibility.md).
+> Sections referencing the CSS-float-era layout pipeline
+> (`applyFloatLayout`, single-side wrap constraints) are stale — the
+> current model is exclusion rectangles + `LineSpace.segments[]` shared
+> by every wrap mode.
+
 **Companion doc**: `docs/header-footer-plan.md` is the first concrete surface feature and specifies the prerequisite refactors (`PageMetrics`, extension lanes, `DocAttrStep`, `SurfaceRegistry`). This doc is the broader frame it fits into — read this to understand *why* those primitives exist and what else will be built on top.
 
 ---
