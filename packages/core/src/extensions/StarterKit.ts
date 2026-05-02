@@ -1,7 +1,7 @@
 import { Extension } from "./Extension";
 import { Document } from "./built-in/Document";
 import { Paragraph } from "./built-in/Paragraph";
-import { Heading } from "./built-in/Heading";
+import { Heading, type HeadingLevel } from "./built-in/Heading";
 import { Bold } from "./built-in/Bold";
 import { Italic } from "./built-in/Italic";
 import { History } from "./built-in/History";
@@ -18,6 +18,7 @@ import { Alignment } from "./built-in/Alignment";
 import { Indent } from "./built-in/Indent";
 import { CodeBlock, insertCodeIndent } from "./built-in/CodeBlock";
 import { HorizontalRule } from "./built-in/HorizontalRule";
+import { PageBreak } from "./built-in/PageBreak";
 import { Image } from "./built-in/Image";
 import { Typography } from "./built-in/Typography";
 import { Pagination } from "./built-in/Pagination";
@@ -38,7 +39,7 @@ interface StarterKitOptions {
   /** Pass false to exclude this extension entirely */
   document?: false;
   paragraph?: false;
-  heading?: false | { levels?: number[] };
+  heading?: false | { levels?: HeadingLevel[] };
   bold?: false | { shortcut?: boolean };
   italic?: false | { shortcut?: boolean };
   history?: false | { depth?: number; newGroupDelay?: number };
@@ -53,6 +54,7 @@ interface StarterKitOptions {
   alignment?: false;
   codeBlock?: false;
   horizontalRule?: false;
+  pageBreak?: false;
   image?: false;
   typography?: false;
   trailingNode?: false;
@@ -95,6 +97,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.horizontalRule !== false) {
       Object.assign(nodes, HorizontalRule.resolve().nodes);
+    }
+    if (opts.pageBreak !== false) {
+      Object.assign(nodes, PageBreak.resolve().nodes);
     }
     if (opts.image !== false) {
       Object.assign(nodes, Image.resolve().nodes);
@@ -224,6 +229,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.clearFormatting !== false) {
       Object.assign(km, ClearFormatting.resolve(this.schema).keymap);
     }
+    if (opts.pageBreak !== false) {
+      Object.assign(km, PageBreak.resolve(this.schema).keymap);
+    }
 
     return km;
   },
@@ -285,6 +293,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.horizontalRule !== false) {
       Object.assign(cmds, HorizontalRule.resolve(this.schema).commands);
+    }
+    if (opts.pageBreak !== false) {
+      Object.assign(cmds, PageBreak.resolve(this.schema).commands);
     }
     if (opts.image !== false) {
       Object.assign(cmds, Image.resolve(this.schema).commands);
@@ -455,6 +466,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.horizontalRule !== false) {
       items.push(...HorizontalRule.resolve().toolbarItems);
+    }
+    if (opts.pageBreak !== false) {
+      items.push(...PageBreak.resolve().toolbarItems);
     }
     if (opts.image !== false) {
       items.push(...Image.resolve().toolbarItems);

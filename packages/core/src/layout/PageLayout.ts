@@ -11,7 +11,7 @@ import {
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
-import type { LayoutLine, LineSpaceProvider } from "./LineBreaker";
+import { LineBreaker, type InputSpan, type LayoutLine, type LineSpaceProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
 import {
   ANCHORED_OBJECT_MARGIN,
@@ -32,6 +32,7 @@ import {
 } from "./PageMetrics";
 import { fitLinesInCapacity } from "./splitLines";
 import { runChromeLoop } from "./aggregateChrome";
+import { parseFont } from "./StyleResolver";
 
 export interface PageConfig {
   pageWidth: number;
@@ -285,6 +286,8 @@ export interface FlowBlock {
   solverPushedThisFlow?: boolean;
   /** True when this flow's Y range intersected a Stage 3 square wrap zone. */
   overlapsWrapZone?: boolean;
+  /** Page whose anchored-object exclusion constraints were applied to this flow. */
+  wrapZonePage?: number;
   // Phase 1b: cache snapshot taken before this run's measurement.
   preCachedTargetY?: number;
   preCachedPage?: number;
@@ -594,8 +597,10 @@ function resolveAnchoredObjects(
           exclusionsByPage.set(pageNumber, exclusions);
         }
         const margin = attrs.margin;
-        const zoneTop = paintedGlobalY - margin;
-        const zoneBottom = paintedGlobalY + height + margin;
+        const pageStart = barriers.pageStartGlobal(pageNumber);
+        const pageEnd = pageStart + barriers.contentHeight(pageNumber);
+        const zoneTop = Math.max(pageStart, paintedGlobalY - margin);
+        const zoneBottom = Math.min(pageEnd, paintedGlobalY + height + margin);
         exclusions.addRect({
           page: pageNumber,
           x: x - margin,
@@ -633,10 +638,14 @@ function resolveAnchoredObjects(
           exclusionsByPage.set(pageNumber, exclusions);
         }
         const margin = attrs.margin;
+        const pageStart = barriers.pageStartGlobal(pageNumber);
+        const pageEnd = pageStart + barriers.contentHeight(pageNumber);
+        const zoneTop = Math.max(pageStart, paintedGlobalY - margin);
+        const zoneBottom = Math.min(pageEnd, paintedGlobalY + height + margin);
         exclusions.addFullWidthRect({
           page: pageNumber,
-          y: paintedGlobalY - margin,
-          bottom: paintedGlobalY + height + margin,
+          y: zoneTop,
+          bottom: zoneBottom,
           contentX,
           contentWidth,
           docPos: anchor.docPos,
@@ -646,8 +655,8 @@ function resolveAnchoredObjects(
           exclusions,
           {
             pageNumber,
-            zoneTop: paintedGlobalY - margin,
-            zoneBottom: paintedGlobalY + height + margin,
+            zoneTop,
+            zoneBottom,
             contentX,
             contentWidth,
           },
@@ -696,7 +705,11 @@ function reflowFlowsAgainstExclusions(
     if (flowY >= zoneBottom) break;
     if (flow.lines.length === 0 || flowY + flow.height <= zoneTop) continue;
 
-    const wrappedFlow: FlowBlock = { ...flow, overlapsWrapZone: true };
+    const wrappedFlow: FlowBlock = {
+      ...flow,
+      overlapsWrapZone: true,
+      wrapZonePage: zone.pageNumber,
+    };
 
     const blockContentX = zone.contentX + flow.indentLeft;
     const lineSpaceProvider: LineSpaceProvider = (absoluteLineY: number, lineHeight = 1) => {
@@ -990,6 +1003,7 @@ export function runFlowPipeline(
     {
       previousLayout: previousLayoutForPagination,
       measureCache,
+      measurer,
       pageless: pageConfig.pageless,
       init: { pages, page: currentPage, y: initY, prevSpaceAfter: initPrevSpaceAfter },
     },
@@ -1103,6 +1117,7 @@ function _runPipelineBody(
 export interface PaginateFlowOptions {
   previousLayout?: DocumentLayout | undefined;
   measureCache?: WeakMap<Node, MeasureCacheEntry> | undefined;
+  measurer?: TextMeasurer | undefined;
   pageless?: boolean | undefined;
   /** Initial page cursor. Fresh run: pages=[], page=empty page 1. Resumption: from prior chunk. */
   init: {
@@ -1145,7 +1160,7 @@ export function paginateFlow(
   // keyed off resolved.metricsVersion. Read access today is intentional no-op.
   void resolved;
 
-  const { previousLayout, measureCache, pageless, init } = opts;
+  const { previousLayout, measureCache, measurer = new TextMeasurer(), pageless, init } = opts;
   const { margins } = pageConfig;
   const pages = init.pages;
   let currentPage = init.page;
@@ -1224,7 +1239,12 @@ export function paginateFlow(
       availableWidth: blockWidth,
     });
 
-    const block = buildBlock(blockX, targetY);
+    const block = normalizeWrappedBlockForPage(
+      buildBlock(blockX, targetY),
+      flow,
+      currentPage.pageNumber,
+      measurer,
+    );
 
     if (flow.listMarker !== undefined) {
       block.listMarker = flow.listMarker;
@@ -1240,7 +1260,7 @@ export function paginateFlow(
     const currentMetrics = metricsFor(currentPage.pageNumber);
 
     // ── Page overflow check (disabled in pageless mode) ───────────────────────
-    const blockBottom = targetY + flow.height;
+    const blockBottom = targetY + block.height;
     const pageBottom = currentMetrics.contentBottom;
     const contentHeight = currentMetrics.contentHeight;
     // Text blocks can always be split; leaf blocks need the !isFirstOnPage guard
@@ -1265,7 +1285,7 @@ export function paginateFlow(
         console.log(`  → NORMAL PLACEMENT (page ${currentPage.pageNumber})`);
       }
       currentPage.blocks.push(block);
-      y = targetY + flow.height;
+      y = targetY + block.height;
       prevSpaceAfter = flow.spaceAfter;
     } else if (flow.lines.length === 0) {
       // ── Leaf block (image, HR): move whole block to next page ──────────────
@@ -1275,7 +1295,7 @@ export function paginateFlow(
           console.log(`  → LEAF too-tall: forced onto current page ${currentPage.pageNumber}`);
         }
         currentPage.blocks.push(block);
-        y = targetY + flow.height;
+        y = targetY + block.height;
         prevSpaceAfter = flow.spaceAfter;
       } else {
         if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
@@ -1290,7 +1310,12 @@ export function paginateFlow(
         y = newPageContentTop;
         prevSpaceAfter = 0;
 
-        const reflow = buildBlock(blockX, newPageContentTop);
+        const reflow = normalizeWrappedBlockForPage(
+          buildBlock(blockX, newPageContentTop),
+          flow,
+          currentPage.pageNumber,
+          measurer,
+        );
         if (flow.listMarker !== undefined) {
           reflow.listMarker = flow.listMarker;
           reflow.listMarkerX = flow.listMarkerX!;
@@ -1298,7 +1323,7 @@ export function paginateFlow(
         }
 
         currentPage.blocks.push(reflow);
-        y = newPageContentTop + flow.height;
+        y = newPageContentTop + reflow.height;
         prevSpaceAfter = flow.spaceAfter;
       }
     } else {
@@ -1325,7 +1350,6 @@ export function paginateFlow(
 
         const fitResult = fitLinesInCapacity(remainingLines, pageAvailable);
         let linesFit = fitResult.fitted.length;
-        let heightFit = fitResult.fittedHeight;
 
         if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
           console.log(
@@ -1343,7 +1367,6 @@ export function paginateFlow(
               console.log(`    → linesFit=0 FORCE 1 line (top-of-page / sub-pixel guard)`);
             }
             linesFit = 1;
-            heightFit = remainingLines[0]!.lineHeight;
           } else if (splitMetrics.contentBottom - y >= remainingLines[0]!.lineHeight - 0.5) {
             // Inter-block gap pushed targetY into dead zone. Suppress and retry.
             if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
@@ -1369,7 +1392,11 @@ export function paginateFlow(
 
         const isLastPart = linesFit >= remainingLines.length;
         const isCont = hasPlacedAnyPart;
-        const partLines = remainingLines.slice(0, linesFit);
+        const rawPartLines = remainingLines.slice(0, linesFit);
+        const partLines = shouldNormalizeWrappedLines(flow, currentPage.pageNumber, isCont)
+          ? rebreakWrappedLinesWithoutExclusions(rawPartLines, blockWidth, measurer)
+          : rawPartLines;
+        const partHeight = partLines.reduce((sum, line) => sum + line.lineHeight, 0);
 
         const partBlock: LayoutBlock = {
           node,
@@ -1377,7 +1404,7 @@ export function paginateFlow(
           x: blockX,
           y: partStartY,
           width: blockWidth,
-          height: heightFit,
+          height: partHeight,
           lines: partLines,
           spaceBefore: isCont ? 0 : flow.spaceBefore,
           spaceAfter: isLastPart ? flow.spaceAfter : 0,
@@ -1416,7 +1443,7 @@ export function paginateFlow(
           currentPartStartY = metricsFor(currentPage.pageNumber).contentTop;
           remainingLines = remainingLines.slice(linesFit);
         } else {
-          y = partStartY + heightFit;
+          y = partStartY + partHeight;
           prevSpaceAfter = flow.spaceAfter;
           break;
         }
@@ -1679,6 +1706,74 @@ function shiftBlock(
   }
 
   return shifted;
+}
+
+function rebreakWrappedLinesWithoutExclusions(
+  lines: LayoutLine[],
+  availableWidth: number,
+  measurer: TextMeasurer,
+): LayoutLine[] {
+  const spans: InputSpan[] = [];
+
+  for (const line of lines) {
+    if (line.spans.length === 0 && line.cursorHeight === 0) continue;
+    for (const span of line.spans) {
+      if (span.kind === "text") {
+        spans.push({
+          kind: "text",
+          text: span.text,
+          font: span.font,
+          docPos: span.docPos,
+          ...(span.marks !== undefined ? { marks: span.marks } : {}),
+        });
+      } else {
+        spans.push({
+          kind: "object",
+          node: span.node,
+          width: span.width,
+          height: span.height,
+          docPos: span.docPos,
+          verticalAlign: span.verticalAlign,
+        });
+      }
+    }
+    if (line.terminalBreakDocPos !== undefined) {
+      spans.push({ kind: "break", docPos: line.terminalBreakDocPos });
+    }
+  }
+
+  if (spans.length === 0) return [];
+  const firstText = spans.find((span) => span.kind === "text");
+  const parsed = parseFont(firstText?.font ?? `14px ${DEFAULT_FONT_FAMILY}`);
+  return new LineBreaker(measurer).breakIntoLines(spans, availableWidth, {
+    defaultFontFamily: parsed.family,
+    defaultFontSize: parseFloat(parsed.size),
+  });
+}
+
+function shouldNormalizeWrappedLines(
+  flow: Pick<FlowBlock, "overlapsWrapZone" | "wrapZonePage">,
+  pageNumber: number,
+  isContinuation: boolean,
+): boolean {
+  if (!flow.overlapsWrapZone) return false;
+  return isContinuation || flow.wrapZonePage !== pageNumber;
+}
+
+function normalizeWrappedBlockForPage(
+  block: LayoutBlock,
+  flow: Pick<FlowBlock, "overlapsWrapZone" | "wrapZonePage">,
+  pageNumber: number,
+  measurer: TextMeasurer,
+): LayoutBlock {
+  if (!shouldNormalizeWrappedLines(flow, pageNumber, false)) return block;
+
+  const lines = rebreakWrappedLinesWithoutExclusions(block.lines, block.availableWidth, measurer);
+  return {
+    ...block,
+    lines,
+    height: lines.reduce((sum, line) => sum + line.lineHeight, 0),
+  };
 }
 
 /** A single item ready for layout — either a plain block or an expanded list item. */

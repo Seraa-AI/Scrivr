@@ -1,6 +1,8 @@
-import { TextSelection } from "prosemirror-state";
+import { NodeSelection, TextSelection } from "prosemirror-state";
 import type { EditorState, Transaction } from "prosemirror-state";
+import type { Node as PmNode } from "prosemirror-model";
 import type { CharacterMap } from "./layout/CharacterMap";
+import { normalizeImageAttrs } from "./layout/AnchoredObjects";
 import type { EditorNavigator } from "./extensions/types";
 
 /**
@@ -58,23 +60,44 @@ export class SelectionController implements EditorNavigator {
 
   /** Move left one position. Pass extend=true to grow the selection (Shift+←). */
   moveLeft(extend = false): void {
-    const state = this.deps.getState();
-    const head = state.selection.head;
-    if (head <= 0) return;
-    const $pos = state.doc.resolve(Math.max(0, head - 1));
-    const sel = TextSelection.findFrom($pos, -1);
-    if (sel) this._applyMovement(sel.head, extend);
+    this._moveHorizontally(-1, extend);
   }
 
   /** Move right one position. Pass extend=true to grow the selection (Shift+→). */
   moveRight(extend = false): void {
+    this._moveHorizontally(1, extend);
+  }
+
+  private _moveHorizontally(dir: -1 | 1, extend: boolean): void {
+    this.deps.ensureLayout();
     const state = this.deps.getState();
-    const head = state.selection.head;
+    const doc = state.doc;
+    let head = state.selection.head;
     const size = state.doc.content.size;
-    if (head >= size) return;
-    const $pos = state.doc.resolve(Math.min(size, head + 1));
-    const sel = TextSelection.findFrom($pos, 1);
-    if (sel) this._applyMovement(sel.head, extend);
+    if ((dir < 0 && head <= 0) || (dir > 0 && head >= size)) return;
+
+    while (head >= 0 && head <= size) {
+      const $pos = doc.resolve(Math.max(0, Math.min(head + dir, size)));
+      const sel = TextSelection.findFrom($pos, dir);
+      if (!sel || sel.head === head) return;
+
+      const hiddenAnchorPos = hiddenAnchorImagePosAt(doc, sel.head, dir);
+      if (hiddenAnchorPos !== null) {
+        if (!extend) {
+          this._applyNodeSelection(hiddenAnchorPos);
+          return;
+        }
+        head = dir > 0 ? hiddenAnchorPos + 1 : hiddenAnchorPos;
+        continue;
+      }
+
+      if (this.deps.getCharMap().coordsAtPos(sel.head)) {
+        this._applyMovement(sel.head, extend);
+        return;
+      }
+
+      head = sel.head;
+    }
   }
 
   /** Move up one line preserving x. Pass extend=true for Shift+↑. */
@@ -218,6 +241,11 @@ export class SelectionController implements EditorNavigator {
     this.deps.dispatch(state.tr.setSelection(TextSelection.between($a, $h)));
   }
 
+  private _applyNodeSelection(docPos: number): void {
+    const state = this.deps.getState();
+    this.deps.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, docPos)));
+  }
+
   /**
    * Find the next word boundary from `pos` in `dir` (-1 = left, 1 = right).
    * Matches native text editor behaviour: skip whitespace, then skip word chars
@@ -265,4 +293,15 @@ function isWordChar(ch: string): boolean {
 
 function isWhitespace(ch: string): boolean {
   return /\s/.test(ch);
+}
+
+function hiddenAnchorImagePosAt(doc: PmNode, pos: number, dir: -1 | 1): number | null {
+  const $pos = doc.resolve(pos);
+  if (dir > 0 && isNonInlineImage($pos.nodeAfter)) return pos;
+  if (dir < 0 && isNonInlineImage($pos.nodeBefore)) return pos - $pos.nodeBefore.nodeSize;
+  return null;
+}
+
+function isNonInlineImage(node: PmNode | null): node is PmNode {
+  return node?.type.name === "image" && normalizeImageAttrs(node).wrapMode !== "inline";
 }

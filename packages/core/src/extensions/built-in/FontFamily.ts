@@ -156,10 +156,14 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
     fontFamily: {
-      /** Apply a font family to the current block(s). */
+      /** Apply a fontFamily mark to the current selection. */
       setFontFamily: (family: string) => ReturnType;
-      /** Remove the font family override from the current block(s). */
+      /** Remove the fontFamily mark from the current selection. */
       unsetFontFamily: () => ReturnType;
+      /** Set the fontFamily attr on every block in the current selection. */
+      setBlockFontFamily: (family: string) => ReturnType;
+      /** Clear the fontFamily attr on every block in the current selection. */
+      unsetBlockFontFamily: () => ReturnType;
     };
   }
 

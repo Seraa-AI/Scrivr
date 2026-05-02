@@ -1243,6 +1243,33 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
     expect(map.coordsAtPos(2)).toBeNull();
   });
 
+  it("anchor-only paragraph stays zero-height even when it overlaps its own exclusion zone", () => {
+    const img = skSchema.nodes["image"]!.create({
+      src: "a.png",
+      width: 200,
+      height: 200,
+      wrapMode: "top-bottom",
+    });
+    const para = skSchema.node("paragraph", null, [img]);
+
+    const block = layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 40,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      fontConfig,
+      lineSpaceProvider: () => ({ segments: [], skipToY: 260 }),
+    });
+
+    expect(block.lines).toHaveLength(1);
+    expect(isHiddenAnchorLine(block.lines[0]!)).toBe(true);
+    expect(block.height).toBe(0);
+    expect(block.spaceBefore).toBe(0);
+    expect(block.spaceAfter).toBe(0);
+  });
+
   it("anchored-image sentinel is preserved on the line so getAnchoredObjectAnchors finds it", () => {
     const img = skSchema.nodes["image"]!.create({
       src: "a.png",
