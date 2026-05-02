@@ -165,6 +165,8 @@ export const Image = Extension.create({
           x: { default: null },
           /** Vertical placement delta from anchor's globalY (px). Painted top = anchor.globalY + yOffset. */
           yOffset: { default: 0 },
+          /** Paint/hit-test stacking order among anchored objects. */
+          zIndex: { default: 0 },
           /** Wrap-zone breathing room in px */
           margin: { default: 8 },
           // ── Legacy attrs (read-side compat — see normalizeImageAttrs) ────

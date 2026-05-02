@@ -21,17 +21,30 @@ export type {
   WrapZone,
   AnchoredObjectSolverResult,
 } from "./AnchoredObjects";
-export { ANCHORED_OBJECT_MARGIN, normalizeImageAttrs, resolveImageX, isWrapModeValue, isLegacyWrappingMode } from "./AnchoredObjects";
+export {
+  ANCHORED_OBJECT_MARGIN,
+  normalizeImageAttrs,
+  resolveImageX,
+  isWrapModeValue,
+  isLegacyWrappingMode,
+  compareAnchoredObjectPaintOrder,
+  compareAnchoredObjectHitOrder,
+} from "./AnchoredObjects";
 export { defaultFontConfig, getBlockStyle, DEFAULT_FONT_FAMILY } from "./FontConfig";
 export type { FontConfig, BlockStyle } from "./FontConfig";
 export type {
   PageMetrics,
+  PageFlowMetrics,
   ChromeContribution,
   ResolvedChrome,
   LayoutIterationContext,
   PageChromeMeasureInput,
   PageChromePaintContext,
   PageChromeContribution,
+} from "./PageMetrics";
+export {
+  pageStartGlobalForMetrics,
+  pageLocalYToGlobalForMetrics,
 } from "./PageMetrics";
 export { runMiniPipeline } from "./runMiniPipeline";
 export type { MiniPipelineOptions } from "./runMiniPipeline";

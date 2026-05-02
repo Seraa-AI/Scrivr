@@ -1,5 +1,8 @@
 import { LayoutPage, PageConfig } from "../layout/PageLayout";
-import type { AnchoredObjectPlacement } from "../layout/AnchoredObjects";
+import {
+  compareAnchoredObjectPaintOrder,
+  type AnchoredObjectPlacement,
+} from "../layout/AnchoredObjects";
 import { LayoutBlock, computeAlignmentOffset, isHiddenAnchorLine } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
 import { TextMeasurer } from "../layout/TextMeasurer";
@@ -103,7 +106,8 @@ export function renderPage(options: RenderPageOptions): void {
   if (renderVersion !== currentVersion()) return;
 
   // Floats on this page, partitioned by render order.
-  const pageFloats = anchoredObjects?.filter((f) => f.page === page.pageNumber) ?? [];
+  const pageFloats = (anchoredObjects?.filter((f) => f.page === page.pageNumber) ?? [])
+    .sort(compareAnchoredObjectPaintOrder);
   const behindFloats = pageFloats.filter((f) => f.wrapMode === "behind");
   const frontFloats  = pageFloats.filter((f) => f.wrapMode !== "behind");
 

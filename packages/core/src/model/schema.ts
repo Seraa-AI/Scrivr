@@ -140,6 +140,7 @@ export const schema = new Schema({
         xAlign: { default: "left" },
         x: { default: null },
         yOffset: { default: 0 },
+        zIndex: { default: 0 },
         margin: { default: 8 },
         // ── Legacy attrs (read-side compat — see normalizeImageAttrs) ────
         wrappingMode: { default: "inline" },

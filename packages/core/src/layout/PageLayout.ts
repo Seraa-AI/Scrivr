@@ -1,4 +1,4 @@
-import { Fragment, Node } from "prosemirror-model";
+import { Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
 import { TextMeasurer } from "./TextMeasurer";
 import {
@@ -24,6 +24,7 @@ import {
 import {
   computePageMetrics,
   EMPTY_RESOLVED_CHROME,
+  pageStartGlobalForMetrics,
   type PageMetrics,
   type ResolvedChrome,
   type PageChromeContribution,
@@ -275,10 +276,7 @@ export interface FlowBlock {
   isPageBreak?: true;
   /** True when the block measurement was a cache hit. */
   wasCacheHit: boolean;
-  partKind?: "block" | "fragment" | "anchored-object";
-  anchoredObjectDocPos?: number;
-  anchoredObjectNode?: Node;
-  anchoredObjectMode?: string;
+  partKind?: "block" | "fragment";
   /** Continuous document-flow Y before page projection. */
   globalY?: number;
   /** Initial continuous Y before anchored-object solver pushes. */
@@ -330,20 +328,6 @@ interface AnchorRef {
 }
 
 function getAnchoredObjectAnchors(flow: FlowBlock): AnchorRef[] {
-  if (
-    flow.partKind === "anchored-object" &&
-    flow.anchoredObjectMode === "top-bottom" &&
-    flow.anchoredObjectNode &&
-    flow.anchoredObjectDocPos !== undefined
-  ) {
-    return [
-      {
-        docPos: flow.anchoredObjectDocPos,
-        node: flow.anchoredObjectNode,
-        attrs: normalizeImageAttrs(flow.anchoredObjectNode),
-      },
-    ];
-  }
   const anchors: AnchorRef[] = [];
   for (const line of flow.lines) {
     for (const span of line.spans) {
@@ -356,57 +340,10 @@ function getAnchoredObjectAnchors(flow: FlowBlock): AnchorRef[] {
   return anchors;
 }
 
-function topBottomImageInfo(node: Node, nodePos: number): {
-  image: Node;
-  imageDocPos: number;
-  imageIndex: number;
-  before: Node[];
-  after: Node[];
-} | null {
-  let found: {
-    image: Node;
-    imageDocPos: number;
-    imageIndex: number;
-    before: Node[];
-    after: Node[];
-  } | null = null;
-  const before: Node[] = [];
-  const after: Node[] = [];
-
-  node.forEach((child, offset, index) => {
-    if (found) {
-      after.push(child);
-      return;
-    }
-    if (child.type.name === "image" && normalizeImageAttrs(child).wrapMode === "top-bottom") {
-      found = {
-        image: child,
-        imageDocPos: nodePos + 1 + offset,
-        imageIndex: index,
-        before,
-        after,
-      };
-      return;
-    }
-    before.push(child);
-  });
-
-  return found;
-}
-
-function pageStartGlobal(pageConfig: PageConfig, metricsFor: (pageNumber: number) => PageMetrics, pageNumber: number): number {
-  if (pageConfig.pageless) return metricsFor(1).contentTop;
-  let y = metricsFor(1).contentTop;
-  for (let p = 1; p < pageNumber; p++) {
-    y += metricsFor(p).contentHeight;
-  }
-  return y;
-}
-
 function pageForGlobalY(pageConfig: PageConfig, metricsFor: (pageNumber: number) => PageMetrics, globalY: number): number {
   if (pageConfig.pageless) return 1;
   let pageNumber = 1;
-  while (globalY >= pageStartGlobal(pageConfig, metricsFor, pageNumber) + metricsFor(pageNumber).contentHeight) {
+  while (globalY >= pageStartGlobalForMetrics(pageConfig, metricsFor, pageNumber) + metricsFor(pageNumber).contentHeight) {
     pageNumber++;
   }
   return pageNumber;
@@ -418,7 +355,16 @@ function pageLocalYForGlobalY(
   pageNumber: number,
   globalY: number,
 ): number {
-  return metricsFor(pageNumber).contentTop + (globalY - pageStartGlobal(pageConfig, metricsFor, pageNumber));
+  const pageStart = pageStartGlobalForMetrics(pageConfig, metricsFor, pageNumber);
+  return metricsFor(pageNumber).contentTop + (globalY - pageStart);
+}
+
+function pageRectsDigest(rects: readonly AnchoredObjectPlacement[] | undefined): string {
+  if (!rects || rects.length === 0) return "";
+  return rects
+    .map((r) => `${r.page}:${r.x}:${r.x + r.width}:${r.y}:${r.y + r.height}:${r.wrapMode}:${r.docPos}`)
+    .sort()
+    .join("|");
 }
 
 interface PageBarrierProvider {
@@ -621,6 +567,7 @@ function resolveAnchoredObjects(
         width,
         height,
         wrapMode,
+        zIndex: attrs.zIndex,
         node: anchor.node,
         anchorGlobalY,
         anchorPage: pageNumber,
@@ -653,7 +600,7 @@ function resolveAnchoredObjects(
           side: "left",
           docPos: anchor.docPos,
         });
-        flows = reflowFlowsAgainstSquareExclusions(
+        flows = reflowFlowsAgainstExclusions(
           flows,
           exclusions,
           {
@@ -671,14 +618,9 @@ function resolveAnchoredObjects(
         continue;
       }
 
-      // Top-bottom: the Stage 1 anchored-object FlowBlock still reserves
-      // the vertical flow space (height = imageHeight, spaceAfter = margin)
-      // — that's how text-before / image / text-after are positioned.
-      // Phase 5 V1: also contribute a `side: "full"` rect to the page's
-      // shared ExclusionManager so square-wrap reflows on the same page
-      // see the top-bottom band as a real exclusion (the architectural
-      // unification — all wrap modes feed one manager). The rip-out of
-      // the FlowBlock partKind path itself is deferred to Phase 5 V2.
+      // Top-bottom: reserve vertical flow through the same exclusion path as
+      // square wrap. A full-width rect makes LineBreaker skip lines in this
+      // Y band, so there is no separate synthetic FlowBlock for the image.
       if (wrapMode === "top-bottom") {
         let exclusions = exclusionsByPage.get(pageNumber);
         if (!exclusions) {
@@ -694,6 +636,21 @@ function resolveAnchoredObjects(
           contentWidth,
           docPos: anchor.docPos,
         });
+        flows = reflowFlowsAgainstExclusions(
+          flows,
+          exclusions,
+          {
+            pageNumber,
+            zoneTop: paintedGlobalY - margin,
+            zoneBottom: paintedGlobalY + height + margin,
+            contentX,
+            contentWidth,
+          },
+          measurer,
+          fontConfig,
+          fontModifiers,
+          inlineRegistry,
+        );
       }
     }
   }
@@ -709,7 +666,7 @@ function resolveAnchoredObjects(
  * in paragraph B can exclude text in paragraph A. The Y-range checks below
  * are the only gate: docPos owns the object, geometry drives wrapping.
  */
-function reflowFlowsAgainstSquareExclusions(
+function reflowFlowsAgainstExclusions(
   inputFlows: FlowBlock[],
   exclusions: ExclusionManager,
   zone: {
@@ -752,9 +709,9 @@ function reflowFlowsAgainstSquareExclusions(
         x: s.x - blockContentX,
         width: s.width,
       }));
-      // Square wrap with a single full-width-ish image: rect punches all
-      // segments out without side="full". Fall back to zoneBottom so the
-      // line breaker advances past the image instead of dropping words.
+      // Square wrap with a single full-width-ish image can punch all segments
+      // out without side="full". Fall back to zoneBottom so the line breaker
+      // advances past the image instead of dropping words.
       if (segments.length === 0 && space.skipToY === undefined) {
         return { segments, skipToY: zoneBottom };
       }
@@ -992,7 +949,7 @@ export function runFlowPipeline(
   // chunk would resolve as if the chunk's flows started near the document's
   // top — wrong page assignment, wrong wrap decisions.
   const seedGlobalY = r
-    ? pageStartGlobal(pageConfig, metricsFor, currentPage.pageNumber)
+    ? pageStartGlobalForMetrics(pageConfig, metricsFor, currentPage.pageNumber)
       + (initY - metricsFor(currentPage.pageNumber).contentTop)
     : metricsFor(1).contentTop;
   const flowsWithGlobalY = assignGlobalY(flowResult.flows, seedGlobalY);
@@ -1018,11 +975,15 @@ export function runFlowPipeline(
   const mergedPlacements = carriedPlacements.length > 0
     ? [...carriedPlacements, ...anchoredFlow.placements]
     : anchoredFlow.placements;
+  const previousLayoutForPagination =
+    pageRectsDigest(previousLayout?.anchoredObjects) === pageRectsDigest(mergedPlacements)
+      ? previousLayout
+      : undefined;
 
   const pr = paginateFlow(
     anchoredFlow.flows, pageConfig, resolved, metricsFor, runId,
     {
-      previousLayout,
+      previousLayout: previousLayoutForPagination,
       measureCache,
       pageless: pageConfig.pageless,
       init: { pages, page: currentPage, y: initY, prevSpaceAfter: initPrevSpaceAfter },
@@ -1215,7 +1176,7 @@ export function paginateFlow(
     if (!pageless && flow.globalY !== undefined) {
       while (
         flow.globalY >=
-        pageStartGlobal(pageConfig, metricsFor, currentPage.pageNumber) +
+        pageStartGlobalForMetrics(pageConfig, metricsFor, currentPage.pageNumber) +
           metricsFor(currentPage.pageNumber).contentHeight
       ) {
         pages.push(currentPage);
@@ -1617,90 +1578,6 @@ export function buildBlockFlow(
     const blockStyle = getBlockStyle(fontConfig, styleKey ?? node.type.name, level);
     const blockWidth = contentWidth - indentLeft;
     const blockX = margins.left + indentLeft;
-    const topBottom = topBottomImageInfo(node, nodePos);
-
-    if (topBottom) {
-      const makeFragmentNode = (children: Node[]): Node | null =>
-        children.length > 0
-          ? node.type.create(node.attrs, Fragment.fromArray(children), node.marks)
-          : null;
-      const pushTextFragment = (
-        fragmentNode: Node | null,
-        fragmentNodePos: number,
-        spaceBefore: number,
-        spaceAfter: number,
-      ) => {
-        if (!fragmentNode) return;
-        const entry = resolveBlockEntry(
-          fragmentNode, fragmentNodePos, blockX, 0, blockWidth, 1,
-          measurer, fontConfig, fontModifiers, undefined, inlineRegistry,
-        );
-        flows.push({
-          node: fragmentNode,
-          nodePos: fragmentNodePos,
-          lines: entry.lines,
-          height: entry.height,
-          spaceBefore,
-          spaceAfter,
-          availableWidth: blockWidth,
-          blockType: entry.blockType,
-          align: entry.align,
-          ...(listMarker !== undefined ? {
-            listMarker,
-            listMarkerX: blockX - MARKER_RIGHT_GAP,
-          } : {}),
-          indentLeft,
-          hasAnchoredObject: false,
-          inputHash: computeInputHash(fragmentNodePos, fragmentNode, blockWidth),
-          wasCacheHit: false,
-          partKind: "fragment",
-        });
-      };
-
-      const beforeNode = makeFragmentNode(topBottom.before);
-      const afterNode = makeFragmentNode(topBottom.after);
-      const imageAttrs = normalizeImageAttrs(topBottom.image);
-      const imageHeight = imageAttrs.height;
-      const imageSpaceAfter = afterNode
-        ? imageAttrs.margin
-        : Math.max(blockStyle.spaceAfter, imageAttrs.margin);
-
-      pushTextFragment(beforeNode, nodePos, blockStyle.spaceBefore, 0);
-      flows.push({
-        node: topBottom.image,
-        nodePos: topBottom.imageDocPos,
-        lines: [],
-        height: imageHeight,
-        spaceBefore: beforeNode ? 0 : blockStyle.spaceBefore,
-        spaceAfter: imageSpaceAfter,
-        availableWidth: blockWidth,
-        blockType: "image",
-        align: "left",
-        ...(listMarker !== undefined ? {
-          listMarker,
-          listMarkerX: blockX - MARKER_RIGHT_GAP,
-        } : {}),
-        indentLeft,
-        hasAnchoredObject: true,
-        inputHash: computeInputHash(topBottom.imageDocPos, topBottom.image, blockWidth),
-        wasCacheHit: false,
-        partKind: "anchored-object",
-        anchoredObjectDocPos: topBottom.imageDocPos,
-        anchoredObjectNode: topBottom.image,
-        anchoredObjectMode: "top-bottom",
-      });
-      // Position immediately after the image node. For an inline leaf image
-      // (nodeSize === 1) this is `imageDocPos + 1`; the previous formula
-      // (`imageDocPos + nodeSize - 1`) collapsed to `imageDocPos`, so cursor
-      // mapping and selection for the after-text resolved to the image's
-      // own position instead of past it.
-      const afterNodePos = topBottom.imageDocPos + topBottom.image.nodeSize;
-      pushTextFragment(afterNode, afterNodePos, 0, blockStyle.spaceAfter);
-
-      processedBlocks++;
-      continue;
-    }
-
     // Phase 1b: capture cache snapshot BEFORE resolveBlockEntry may update it.
     const preCached = measureCache?.get(node);
     const isHit = preCached !== undefined && preCached.availableWidth === blockWidth;

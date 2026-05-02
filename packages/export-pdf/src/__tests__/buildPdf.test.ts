@@ -290,6 +290,7 @@ describe("buildPdf", () => {
     const float: NonNullable<DocumentLayout["anchoredObjects"]>[number] = {
       docPos: 0, page: 1, x: MARGIN, y: MARGIN,
       width: 150, height: 150, wrapMode: "square",
+      zIndex: 0,
       node: schema.nodes.image!.create({ src: png1x1 }),
       anchorGlobalY: MARGIN, anchorPage: 1, globalY: MARGIN,
     };
@@ -305,6 +306,7 @@ describe("buildPdf", () => {
     const float: NonNullable<DocumentLayout["anchoredObjects"]>[number] = {
       docPos: 0, page: 1, x: MARGIN, y: MARGIN,
       width: 100, height: 100, wrapMode: "square",
+      zIndex: 0,
       node: schema.nodes.image!.create({ src: "https://unreachable.invalid/img.png" }),
       anchorGlobalY: MARGIN, anchorPage: 1, globalY: MARGIN,
     };

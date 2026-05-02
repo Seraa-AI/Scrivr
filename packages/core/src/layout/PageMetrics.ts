@@ -32,6 +32,31 @@ export interface PageMetrics {
   footerHeight: number;
 }
 
+export type PageFlowMetrics = Pick<PageMetrics, "contentTop" | "contentHeight">;
+
+export function pageStartGlobalForMetrics(
+  pageConfig: PageConfig,
+  metricsFor: (pageNumber: number) => PageFlowMetrics,
+  pageNumber: number,
+): number {
+  if (pageConfig.pageless) return metricsFor(1).contentTop;
+  let y = metricsFor(1).contentTop;
+  for (let page = 1; page < pageNumber; page++) {
+    y += metricsFor(page).contentHeight;
+  }
+  return y;
+}
+
+export function pageLocalYToGlobalForMetrics(
+  pageConfig: PageConfig,
+  metricsFor: (pageNumber: number) => PageFlowMetrics,
+  pageNumber: number,
+  localY: number,
+): number {
+  return pageStartGlobalForMetrics(pageConfig, metricsFor, pageNumber)
+    + (localY - metricsFor(pageNumber).contentTop);
+}
+
 /** One chrome contribution (header, footer, footnote band, etc.). */
 export interface ChromeContribution {
   /**
