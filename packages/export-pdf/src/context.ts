@@ -241,15 +241,19 @@ export function createDrawHelpers(
             const handler = nodeHandlers[span.node.type.name];
             if (handler) {
               const objY = computeObjectRenderY(lineY, line, span);
-              const atomBlock = {
+              // Inline atoms render as a one-shot leaf block inside the host
+              // line — empty `lines` and `kind: "leaf"` keep the dispatched
+              // handler on the leaf code path (e.g. defaults.image).
+              const atomBlock: LayoutBlock = {
                 ...block,
+                kind: "leaf",
                 node: span.node,
                 x: spanAbsX,
                 y: objY,
                 width: span.width,
                 height: span.height,
                 lines: [],
-              } as LayoutBlock;
+              };
               const atomCtx = { ...ctx, x: spanAbsX, y: objY, width: span.width };
               handler(atomBlock, atomCtx);
             }
