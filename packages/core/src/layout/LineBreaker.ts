@@ -800,6 +800,8 @@ function buildLine(spans: LayoutSpan[], measurer: TextMeasurer): LayoutLine {
   const seenFonts = new Set<string>();
 
   for (const span of spans) {
+    // Rightmost edge — segmented lines may place spans into non-contiguous x ranges,
+    // so a sum-of-widths would underestimate. Single-segment lines see the same value either way.
     width = Math.max(width, span.x + span.width);
     if (span.kind !== "text") continue;
     const normFont = normalizeFont(span.font);
