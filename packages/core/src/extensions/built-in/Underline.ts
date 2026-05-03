@@ -32,9 +32,9 @@ export const Underline = Extension.create({
 
   addMarkDecorators() {
     const decorator: MarkDecorator = {
-      decoratePost(ctx: CanvasRenderingContext2D, rect: SpanRect) {
+      decoratePost(ctx, rect, _theme, effectiveTextColor) {
         ctx.save();
-        ctx.strokeStyle = "#1e293b";
+        ctx.strokeStyle = effectiveTextColor;
         ctx.lineWidth = 1;
         ctx.beginPath();
         const underlineY = rect.y + Math.ceil(rect.descent * 0.6);

@@ -26,6 +26,14 @@ import { SurfaceRegistry } from "./surfaces/SurfaceRegistry";
 import type { PageChromeContribution } from "./layout/PageMetrics";
 import { installDragDebugOverlay, type DragDebugConfig } from "./renderer/DragDebugOverlay";
 import { installAnchoredObjectDebugOverlay } from "./renderer/AnchoredObjectDebugOverlay";
+import {
+  defaultEditorTheme,
+  mergeEditorTheme,
+  themeContainsCssVars,
+  type EditorTheme,
+  type ResolvedTheme,
+} from "./model/theme";
+import { resolveTheme, disposeProbe } from "./model/resolveTheme";
 
 export type EditorChangeHandler = (state: EditorState) => void;
 
@@ -136,6 +144,23 @@ export interface EditorOptions {
    * call `editor.redraw()` after toggling to repaint overlays.
    */
   debug?: DragDebugConfig;
+  /**
+   * Canvas paint colors. Each token accepts any CSS color string, including
+   * `var(--token)` references that resolve against `themeRoot`. Defaults
+   * match the historical hardcoded values, so apps that don't pass `theme`
+   * see zero visual change.
+   *
+   * Toggle dark mode by changing CSS variables on `themeRoot` (the editor
+   * auto-repaints) or by calling `editor.setTheme({...})` with new literals.
+   */
+  theme?: EditorTheme;
+  /**
+   * Element whose computed CSS variables drive `var(--...)` lookups in the
+   * theme. Defaults to the mounted container (set in `mount()`). For
+   * Tailwind `darkMode: 'class'` setups where the `dark` class is on
+   * `<html>`, set this to `document.documentElement` so toggles are seen.
+   */
+  themeRoot?: HTMLElement;
 }
 
 /**
@@ -156,10 +181,30 @@ export class Editor extends BaseEditor implements IEditor {
   private readonly _onFocusChange: ((focused: boolean) => void) | undefined;
 
   /**
-   * Incremented by redraw() to signal asset-only repaints (e.g. image load).
-   * TileManager compares against this to bypass the layout-version paint guard.
+   * Incremented by redraw() and setTheme() to signal asset-only or
+   * theme-only repaints. TileManager compares against this to bypass the
+   * layout-version paint guard.
    */
   renderGeneration = 0;
+
+  // ── Theme ─────────────────────────────────────────────────────────────────
+
+  /** User-provided theme (may contain `var(--token)` strings). */
+  private _theme: EditorTheme;
+  /** Resolved theme — literal colors only. Replaced atomically on setTheme. */
+  private _resolvedTheme: ResolvedTheme;
+  /**
+   * Element used as the CSS-variable resolution root. Set lazily — at
+   * construct if user provided `themeRoot`, else at `mount()` to the mounted
+   * container, else falls back to `document.documentElement`.
+   */
+  private _themeRoot: HTMLElement | null;
+  /** True when the user explicitly passed `themeRoot` — don't override on mount. */
+  private readonly _explicitThemeRoot: boolean;
+  /** MutationObserver watching themeRoot for class/style/data-theme flips. */
+  private _themeObserver: MutationObserver | null = null;
+  /** rAF token for coalesced theme refresh. */
+  private _themeRefreshScheduled = false;
 
   /** Page dimensions and margins — passed to LayoutCoordinator and read by renderers. */
   readonly pageConfig: PageConfig;
@@ -267,9 +312,22 @@ export class Editor extends BaseEditor implements IEditor {
     startReady = true,
     readOnly = false,
     debug = {},
+    theme,
+    themeRoot,
   }: EditorOptions) {
     // BaseEditor handles: manager, state, commands, storage, event emitter
     super({ extensions });
+
+    // ── Theme ──────────────────────────────────────────────────────────────
+    // Initialise before any paint-related setup so renderers can read it.
+    this._theme = mergeEditorTheme({}, theme ?? {});
+    this._explicitThemeRoot = themeRoot != null;
+    this._themeRoot =
+      themeRoot ??
+      (typeof document !== "undefined" ? document.documentElement : null);
+    this._resolvedTheme = this._themeRoot
+      ? resolveTheme(this._theme, this._themeRoot)
+      : { ...defaultEditorTheme };
 
     this._onChange = onChange;
     this._onFocusChange = onFocusChange;
@@ -610,6 +668,7 @@ export class Editor extends BaseEditor implements IEditor {
     this.overlayRenderHandlers.clear();
     this.cursorManager.stop();
     this.unmount();
+    if (this._themeRoot) disposeProbe(this._themeRoot);
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -799,6 +858,11 @@ export class Editor extends BaseEditor implements IEditor {
    */
   mount(container: HTMLElement): void {
     this.ib.mount(container);
+    if (!this._explicitThemeRoot) {
+      this._themeRoot = container;
+      this._resolvedTheme = resolveTheme(this._theme, container);
+    }
+    this._installThemeObserver();
   }
 
   /**
@@ -806,7 +870,76 @@ export class Editor extends BaseEditor implements IEditor {
    * destroying the Editor itself. Safe to call multiple times.
    */
   unmount(): void {
+    this._uninstallThemeObserver();
     this.ib.unmount();
+  }
+
+  // ── Theme API ──────────────────────────────────────────────────────────────
+
+  /** The current input theme (may contain `var(--token)` strings). */
+  getTheme(): EditorTheme {
+    return this._theme;
+  }
+
+  /** The resolved theme (literal colors only) used by every paint site. */
+  getResolvedTheme(): ResolvedTheme {
+    return this._resolvedTheme;
+  }
+
+  /**
+   * Update the theme. Pass an object with one or more tokens; tokens not
+   * mentioned are left alone. Pass `null` for a token to reset it to the
+   * default. Triggers re-resolution and a redraw.
+   *
+   * @example
+   * editor.setTheme({ pageBg: "#1e1e1e", defaultText: "#e0e0e0" });
+   * editor.setTheme({ pageBg: null });  // reset pageBg to default
+   * editor.setTheme({});                // pure refresh — re-resolve current
+   *
+   * Per-instance precedence: this overrides any extension's theme contribution.
+   */
+  setTheme(partial: Partial<{ [K in keyof EditorTheme]: EditorTheme[K] | null }>): void {
+    this._theme = mergeEditorTheme(this._theme, partial);
+    if (this._themeRoot) {
+      this._resolvedTheme = resolveTheme(this._theme, this._themeRoot);
+    }
+    this._installThemeObserver();
+    this.redraw();
+  }
+
+  private _installThemeObserver(): void {
+    this._uninstallThemeObserver();
+    if (!this._themeRoot) return;
+    if (!themeContainsCssVars(this._theme)) return;
+    if (typeof MutationObserver === "undefined") return;
+    const observer = new MutationObserver(() => this._scheduleThemeRefresh());
+    observer.observe(this._themeRoot, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme"],
+    });
+    this._themeObserver = observer;
+  }
+
+  private _uninstallThemeObserver(): void {
+    if (this._themeObserver) {
+      this._themeObserver.disconnect();
+      this._themeObserver = null;
+    }
+  }
+
+  private _scheduleThemeRefresh(): void {
+    if (this._themeRefreshScheduled) return;
+    this._themeRefreshScheduled = true;
+    const raf =
+      typeof requestAnimationFrame !== "undefined"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16) as unknown as number;
+    raf(() => {
+      this._themeRefreshScheduled = false;
+      if (!this._themeRoot) return;
+      this._resolvedTheme = resolveTheme(this._theme, this._themeRoot);
+      this.redraw();
+    });
   }
 
   focus(): void {
@@ -833,7 +966,7 @@ export class Editor extends BaseEditor implements IEditor {
     pageConfig: PageConfig,
   ): void {
     for (const handler of this.overlayRenderHandlers) {
-      handler(ctx, pageNumber, pageConfig, this.lc.charMap);
+      handler(ctx, pageNumber, pageConfig, this.lc.charMap, this._resolvedTheme);
     }
   }
 

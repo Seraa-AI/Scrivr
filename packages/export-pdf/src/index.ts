@@ -5,15 +5,16 @@ export { PdfExport } from "./PdfExport";
 export type { PdfHandlers, PdfNodeHandler, PdfMarkHandler, PdfChromeHandler, PdfSpanStyle } from "./augmentation";
 export type { PdfContext, PdfFontRegistry, PdfDrawHelpers } from "./context";
 
-import { PDFDocument, rgb, type PDFPage, type PDFImage } from "pdf-lib";
+import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
 import type {
   IEditor,
   DocumentLayout,
   AnchoredObjectPlacement,
+  ResolvedTheme,
 } from "@scrivr/core";
-import { compareAnchoredObjectPaintOrder } from "@scrivr/core";
+import { compareAnchoredObjectPaintOrder, defaultPdfTheme } from "@scrivr/core";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
-import { PT_PER_PX, createDrawHelpers } from "./context";
+import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
 import type { PdfContext } from "./context";
 import {
   embedStandardFonts,
@@ -35,6 +36,19 @@ export interface PdfExportOptions {
     weight: "normal" | "bold",
     style: "normal" | "italic",
   ) => Promise<ArrayBuffer | null>;
+  /**
+   * Optional theme override. Shallow-merged over the print-ready
+   * `defaultPdfTheme`. The PDF default ignores the canvas theme entirely —
+   * passing `theme` is the explicit opt-in for a themed export. Values must
+   * be literal CSS colors (hex or rgb/rgba); `var(...)` strings are not
+   * supported because the resolver is browser-only.
+   *
+   * @example
+   * editor.commands.exportPdf({
+   *   theme: { pageBg: "#1e1e1e", defaultText: "#e0e0e0" },
+   * });
+   */
+  theme?: Partial<ResolvedTheme>;
 }
 
 /** Public API */
@@ -47,7 +61,7 @@ export async function exportToPdf(
   editor: IEditor,
   options?: PdfExportOptions,
 ): Promise<Uint8Array> {
-  return buildPdf(editor.layout, options, editor);
+  return buildPdf(editor.layout, options ?? {}, editor);
 }
 
 /**
@@ -107,6 +121,11 @@ export async function buildPdf(
     defaultMarkHandlers,
   );
 
+  // Resolve PDF theme: defaults are always print-ready; caller's `theme`
+  // option (literal colors only) shallow-merges over them. We deliberately
+  // ignore `editor.theme` so a dark canvas still produces a printable PDF.
+  const resolvedTheme: ResolvedTheme = { ...defaultPdfTheme, ...(options?.theme ?? {}) };
+
   // ── Phase 3: Build context shell ───────────────────────────────────────
   const ctx: PdfContext = {
     doc: pdfDoc,
@@ -120,6 +139,7 @@ export async function buildPdf(
     images: imageCache,
     draw,
     editor: editor ?? null,
+    theme: resolvedTheme,
   };
 
   // ── Phase 4: Pre-export hooks ──────────────────────────────────────────
@@ -142,7 +162,7 @@ export async function buildPdf(
       .sort(compareAnchoredObjectPaintOrder);
     for (const object of pageObjects) {
       if (object.wrapMode === "behind") {
-        drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache);
+        drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache, resolvedTheme);
       }
     }
 
@@ -160,7 +180,7 @@ export async function buildPdf(
     // Anchored objects in front of (or alongside) blocks
     for (const object of pageObjects) {
       if (object.wrapMode !== "behind") {
-        drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache);
+        drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache, resolvedTheme);
       }
     }
 
@@ -187,6 +207,7 @@ function drawPdfAnchoredObject(
   object: AnchoredObjectPlacement,
   pageHeightPt: number,
   imageCache: Map<string, PDFImage | null>,
+  theme: ResolvedTheme,
 ): void {
   const src = object.node.attrs["src"] as string | undefined;
   const x = object.x * PT_PER_PX;
@@ -202,15 +223,15 @@ function drawPdfAnchoredObject(
     }
   }
 
-  // Placeholder for missing/failed images.
+  // Placeholder for missing/failed images — themed to match canvas behaviour.
   page.drawRectangle({
     x,
     y,
     width: w,
     height: h,
-    borderColor: rgb(0.88, 0.91, 0.94),
+    borderColor: parseCssColor(theme.imagePlaceholderBorder),
     borderWidth: 1,
-    color: rgb(0.95, 0.96, 0.98),
+    color: parseCssColor(theme.imagePlaceholderBg),
   });
 }
 

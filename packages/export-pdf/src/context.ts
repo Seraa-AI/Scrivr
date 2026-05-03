@@ -20,6 +20,7 @@ import {
   type LayoutBlock,
   type LayoutLine,
   type IEditor,
+  type ResolvedTheme,
 } from "@scrivr/core";
 import type { PdfNodeHandler, PdfMarkHandler, PdfSpanStyle } from "./augmentation";
 
@@ -42,6 +43,13 @@ export interface PdfContext {
   draw: PdfDrawHelpers;
   /** null when called via buildPdf(layout) without an editor instance. */
   editor: IEditor | null;
+  /**
+   * Resolved colors used by every PDF handler. Defaults to the print-ready
+   * `defaultPdfTheme` regardless of the canvas theme; callers opt into a
+   * themed PDF by passing `exportPdf({ theme })` (which is shallow-merged
+   * over `defaultPdfTheme`).
+   */
+  theme: ResolvedTheme;
 }
 
 export interface PdfFontRegistry {
@@ -59,8 +67,14 @@ export interface PdfDrawHelpers {
   lines(block: LayoutBlock, ctx: PdfContext): void;
   /** Draw an image at layout coordinates (handles Y-flip). */
   image(image: PDFImage, rect: { x: number; y: number; width: number; height: number }): void;
-  /** Draw a placeholder rectangle for missing images. */
-  imagePlaceholder(rect: { x: number; y: number; width: number; height: number }): void;
+  /**
+   * Draw a placeholder rectangle for missing images. Pass `theme` to color
+   * the placeholder against the active PDF theme; omit for the legacy default.
+   */
+  imagePlaceholder(
+    rect: { x: number; y: number; width: number; height: number },
+    theme?: ResolvedTheme,
+  ): void;
 }
 
 // ── Flip helper ──────────────────────────────────────────────────────────────
@@ -93,15 +107,18 @@ export function createDrawHelpers(
 
   function drawImagePlaceholder(
     rect: { x: number; y: number; width: number; height: number },
+    theme?: ResolvedTheme,
   ): void {
+    const borderColor = theme ? parseCssColor(theme.imagePlaceholderBorder) : rgb(0.88, 0.91, 0.94);
+    const fillColor = theme ? parseCssColor(theme.imagePlaceholderBg) : rgb(0.95, 0.96, 0.98);
     getPage().drawRectangle({
       x: rect.x * PT_PER_PX,
       y: flipY(rect.y + rect.height, pageHeightPt),
       width: rect.width * PT_PER_PX,
       height: rect.height * PT_PER_PX,
-      borderColor: rgb(0.88, 0.91, 0.94),
+      borderColor,
       borderWidth: 1,
-      color: rgb(0.95, 0.96, 0.98),
+      color: fillColor,
     });
   }
 
@@ -133,6 +150,8 @@ export function createDrawHelpers(
     },
     spanAbsX: number,
     baselineY: number,
+    theme: ResolvedTheme,
+    effectiveTextColor: ReturnType<typeof rgb>,
   ): void {
     if (!span.marks) return;
     const page = getPage();
@@ -144,8 +163,10 @@ export function createDrawHelpers(
 
     for (const mark of span.marks) {
       if (mark.name === "underline" || mark.name === "link") {
+        // Underline follows the effective text color so colored text gets a
+        // matching underline. Link uses theme.link explicitly.
         const lineColor =
-          mark.name === "link" ? rgb(0.15, 0.39, 0.92) : rgb(0, 0, 0);
+          mark.name === "link" ? parseCssColor(theme.link) : effectiveTextColor;
         page.drawLine({
           start: { x: x1, y: flipY(baselineY + fontSize * 0.15, pageHeightPt) },
           end: { x: x2, y: flipY(baselineY + fontSize * 0.15, pageHeightPt) },
@@ -158,7 +179,7 @@ export function createDrawHelpers(
           start: { x: x1, y: flipY(baselineY - fontSize * 0.3, pageHeightPt) },
           end: { x: x2, y: flipY(baselineY - fontSize * 0.3, pageHeightPt) },
           thickness,
-          color: rgb(0, 0, 0),
+          color: effectiveTextColor,
         });
       }
       if (mark.name === "highlight") {
@@ -181,6 +202,8 @@ export function createDrawHelpers(
 
   function drawLines(block: LayoutBlock, ctx: PdfContext): void {
     const page = getPage();
+    const themeListMarker = parseCssColor(ctx.theme.listMarker);
+    const themeDefaultText = parseCssColor(ctx.theme.defaultText);
 
     // Draw list marker if present.
     const firstLine = block.lines[0];
@@ -195,7 +218,7 @@ export function createDrawHelpers(
         y: flipY(block.y + firstLine.ascent, pageHeightPt),
         size: fontSize * PT_PER_PX,
         font: markerFont,
-        color: rgb(0, 0, 0),
+        color: themeListMarker,
       });
     }
 
@@ -271,7 +294,7 @@ export function createDrawHelpers(
 
         const fontSize = extractFontSizePx(span.font);
         const font = fontRegistry.resolve(span.font);
-        const color = extractColor(span.marks);
+        const color = extractColor(span.marks, ctx.theme, themeDefaultText);
 
         page.drawText(text, {
           x: spanAbsX * PT_PER_PX,
@@ -281,7 +304,7 @@ export function createDrawHelpers(
           color,
         });
 
-        drawDecorations(span, spanAbsX, baselineY);
+        drawDecorations(span, spanAbsX, baselineY, ctx.theme, color);
 
         spacesBeforeSpan += countSpaces(span.text);
       }
@@ -315,15 +338,21 @@ export function sanitizeForWinAnsi(text: string): string {
     .replace(/[^\u0020-\u00ff\u0100-\u02dc\u2013-\u2026\u2030\u2039\u203a\u2122]/g, "?");
 }
 
-/** Extract text fill color from marks. */
+/**
+ * Extract text fill color from marks. User-applied `color` mark wins; link
+ * mark falls through to `theme.link`; everything else gets `theme.defaultText`
+ * (passed in pre-resolved to avoid re-parsing per span).
+ */
 function extractColor(
-  marks?: Array<{ name: string; attrs: Record<string, unknown> }>,
+  marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
+  theme: ResolvedTheme,
+  defaultTextColor: ReturnType<typeof rgb>,
 ): ReturnType<typeof rgb> {
   const colorMark = marks?.find((m) => m.name === "color");
   const colorVal = colorMark?.attrs["color"];
   if (typeof colorVal === "string") return parseHexColor(colorVal);
-  if (marks?.some((m) => m.name === "link")) return rgb(0.15, 0.39, 0.92);
-  return rgb(0, 0, 0);
+  if (marks?.some((m) => m.name === "link")) return parseCssColor(theme.link);
+  return defaultTextColor;
 }
 
 /** Parse "#rrggbb" or "#rgb" → pdf-lib rgb(). Falls back to black. */
@@ -343,6 +372,27 @@ export function parseHexColor(hex: string): ReturnType<typeof rgb> {
       parseInt(clean.slice(2, 4), 16) / 255,
       parseInt(clean.slice(4, 6), 16) / 255,
     );
+  }
+  return rgb(0, 0, 0);
+}
+
+/**
+ * Parse any CSS color literal (`#hex`, `#rgb`, `rgb(...)`, `rgba(...)`) into a
+ * pdf-lib `rgb()` color. Used for resolving theme tokens that callers may pass
+ * in any of these forms. Falls back to black on unrecognized input.
+ */
+export function parseCssColor(value: string): ReturnType<typeof rgb> {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("#")) return parseHexColor(trimmed);
+  const rgbMatch = /^rgba?\(([^)]+)\)$/.exec(trimmed);
+  if (rgbMatch) {
+    const parts = rgbMatch[1]!.split(",").map((p) => p.trim());
+    const r = parseFloat(parts[0] ?? "0");
+    const g = parseFloat(parts[1] ?? "0");
+    const b = parseFloat(parts[2] ?? "0");
+    if ([r, g, b].every(Number.isFinite)) {
+      return rgb(r / 255, g / 255, b / 255);
+    }
   }
   return rgb(0, 0, 0);
 }

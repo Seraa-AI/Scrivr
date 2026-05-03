@@ -33,9 +33,9 @@ export const Strikethrough = Extension.create({
 
   addMarkDecorators() {
     const decorator: MarkDecorator = {
-      decoratePost(ctx: CanvasRenderingContext2D, rect: SpanRect) {
+      decoratePost(ctx, rect, _theme, effectiveTextColor) {
         ctx.save();
-        ctx.strokeStyle = "#1e293b";
+        ctx.strokeStyle = effectiveTextColor;
         ctx.lineWidth = 1;
         ctx.beginPath();
         const strikeY = rect.y - rect.ascent * 0.35;

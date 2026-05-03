@@ -479,6 +479,7 @@ export class TileManager {
       map: this.editor.charMap,
       markDecorators: this.editor.markDecorators,
       showMarginGuides: this.showMarginGuides,
+      theme: this.editor.getResolvedTheme(),
       ...(this.editor.blockRegistry
         ? { blockRegistry: this.editor.blockRegistry }
         : {}),
@@ -523,7 +524,8 @@ export class TileManager {
     tile.overlayCanvas.style.height = `${h}px`;
 
     const ctx = tile.contentCanvas.getContext("2d", { alpha: false })!;
-    clearCanvas(ctx, w, h, dpr);
+    const theme = this.editor.getResolvedTheme();
+    clearCanvas(ctx, w, h, dpr, theme.pageBg);
     // After clearCanvas: transform = scale(dpr). Translate so block.y coords work naturally.
     ctx.save();
     ctx.translate(0, -tileTop);
@@ -544,6 +546,7 @@ export class TileManager {
             lineIndexOffset,
             dpr,
             measurer: this.editor.measurer,
+            theme,
             ...(this.editor.markDecorators
               ? { markDecorators: this.editor.markDecorators }
               : {}),
@@ -561,6 +564,7 @@ export class TileManager {
           this.editor.charMap,
           1,
           lineIndexOffset,
+          theme,
           this.editor.markDecorators,
         );
       }
@@ -670,7 +674,7 @@ export class TileManager {
       const glyphs = this.editor.charMap
         .glyphsInRange(sel.from, sel.to)
         .filter((g) => g.page === pageNum);
-      renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to);
+      renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to, this.editor.getResolvedTheme().selectionFill);
     }
 
     // ── Cursor (suppressed when a surface is active — chrome bands own their cursor) ──
@@ -681,7 +685,7 @@ export class TileManager {
       !surfaceActive
     ) {
       const coords = this.editor.charMap.coordsAtPos(sel.head, pageNum);
-      if (coords) renderCursor(overlayCtx, coords);
+      if (coords) renderCursor(overlayCtx, coords, this.editor.getResolvedTheme().cursor);
     }
 
     // ── Image selection handles ───────────────────────────────────────────
@@ -705,7 +709,7 @@ export class TileManager {
             pending.width,
             pending.height,
           );
-          renderHandles(overlayCtx, g.x, g.y, g.width, g.height);
+          renderHandles(overlayCtx, g.x, g.y, g.width, g.height, this.editor.getResolvedTheme().resizeHandle);
         } else {
           renderHandles(
             overlayCtx,
@@ -713,6 +717,7 @@ export class TileManager {
             objRect.y,
             objRect.width,
             objRect.height,
+            this.editor.getResolvedTheme().resizeHandle,
           );
         }
       }

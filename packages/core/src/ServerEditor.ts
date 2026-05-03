@@ -2,6 +2,7 @@ import { EditorState } from "prosemirror-state";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import { BaseEditor } from "./BaseEditor";
+import { themeContainsCssVars, type EditorTheme } from "./model/theme";
 
 export interface ServerEditorOptions {
   /**
@@ -15,6 +16,15 @@ export interface ServerEditorOptions {
    * If omitted the editor starts with an empty document.
    */
   content?: Record<string, unknown>;
+  /**
+   * Theme accepted for type parity with the browser `Editor`. ServerEditor
+   * never paints, so theme is stored but unused. Values containing `var(...)`
+   * cannot be resolved without a DOM — the constructor warns on those once.
+   *
+   * For PDF export from the server, pass literal colors via
+   * `editor.commands.exportPdf({ theme: { ... } })` (typed `Partial<ResolvedTheme>`).
+   */
+  theme?: EditorTheme;
 }
 
 /**
@@ -45,8 +55,15 @@ export interface ServerEditorOptions {
  *   const updatedDoc = editor.toJSON();
  */
 export class ServerEditor extends BaseEditor {
-  constructor({ extensions = [StarterKit], content }: ServerEditorOptions = {}) {
+  constructor({ extensions = [StarterKit], content, theme }: ServerEditorOptions = {}) {
     super({ extensions, ...(content ? { content } : {}) });
+    if (theme && themeContainsCssVars(theme)) {
+      console.warn(
+        "[ServerEditor] theme contains var(--...) values that cannot be resolved without a DOM. " +
+          "Use literal colors for server-side themes, or pass theme via " +
+          "`editor.commands.exportPdf({ theme: { ... } })` for PDF export.",
+      );
+    }
     // Fire onEditorReady after all state is initialised.
     // View-only extensions (CollaborationCursor etc.) that cast to IEditor
     // inside onEditorReady will get a runtime error if called — this is by design.
