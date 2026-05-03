@@ -375,6 +375,7 @@ export function layoutBlock(
   const isAnchorOnlyFlow = !hasNonZeroContent && hasZeroSizeObjectSentinel;
   if (isAnchorOnlyFlow) {
     return {
+      kind: "text",
       node,
       nodePos,
       x,
