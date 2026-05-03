@@ -194,7 +194,7 @@ export class LayoutCoordinator {
     const doc = this.opts.getDoc();
     let lineOffset = 0;
     for (const block of page.blocks) {
-      if (block.lines.length === 0) {
+      if (block.kind === "leaf") {
         // Leaf block (HR, image, …). nodePos and nodePos+nodeSize are document-level
         // gap positions — TextSelection.between snaps them to the nearest text node,
         // always landing in the paragraph BEFORE the block. Resolve to real text
@@ -328,7 +328,7 @@ export class LayoutCoordinator {
       this._pageMap.set(page.pageNumber, page);
 
       for (const block of page.blocks) {
-        if (block.lines.length === 0) {
+        if (block.kind === "leaf") {
           // Leaf block (image, HR): single entry covering the full node range.
           this._fragmentIndex.push({
             start: block.nodePos,
