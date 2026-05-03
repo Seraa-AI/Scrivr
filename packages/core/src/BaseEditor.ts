@@ -1,6 +1,5 @@
 import { EditorState, Transaction } from "prosemirror-state";
-import { MarkdownParser, MarkdownSerializer } from "prosemirror-markdown";
-import MarkdownIt from "markdown-it";
+import { MarkdownSerializer } from "prosemirror-markdown";
 import type { Schema, Node } from "prosemirror-model";
 
 import { ExtensionManager } from "./extensions/ExtensionManager";
@@ -9,6 +8,7 @@ import type { Extension } from "./extensions/Extension";
 import type { IBaseEditor } from "./extensions/types";
 import type { ExportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
+import { parseMarkdownToDoc } from "./model/parseMarkdown";
 
 export interface BaseEditorOptions {
   /**
@@ -17,10 +17,15 @@ export interface BaseEditorOptions {
    */
   extensions?: Extension[];
   /**
-   * Optional initial document as a ProseMirror JSON object.
-   * If omitted the editor starts with an empty document.
+   * Optional initial document. Strings are parsed as markdown using the
+   * merged token map from all extensions; objects are parsed as ProseMirror
+   * JSON. If omitted, falls back to extensions' `addInitialDoc` (e.g.
+   * `DefaultContent`), then the schema default empty document.
+   *
+   * Per-instance precedence: this option overrides any extension's
+   * `addInitialDoc` contribution.
    */
-  content?: Record<string, unknown>;
+  content?: string | Record<string, unknown>;
 }
 
 /**
@@ -83,9 +88,16 @@ export class BaseEditor implements IBaseEditor {
   constructor({ extensions = [StarterKit], content }: BaseEditorOptions = {}) {
     this._manager = new ExtensionManager(extensions);
 
-    const initialDoc = content
-      ? this._manager.schema.nodeFromJSON(content)
-      : this._manager.buildInitialDoc();
+    const initialDoc =
+      typeof content === "string"
+        ? parseMarkdownToDoc(
+            this._manager.schema,
+            this._manager.buildMarkdownParserTokens(),
+            content,
+          )
+        : content != null
+          ? this._manager.schema.nodeFromJSON(content)
+          : this._manager.buildInitialDoc();
 
     this._state = EditorState.create({
       schema: this._manager.schema,
@@ -215,12 +227,7 @@ export class BaseEditor implements IBaseEditor {
    * are included automatically.
    */
   parseMarkdown(text: string): Node {
-    const tokens = this.getMarkdownParserTokens();
-    const md = new MarkdownIt({ html: false });
-    const parser = new MarkdownParser(this.schema, md, tokens);
-    const doc = parser.parse(text);
-    if (!doc) throw new Error("Failed to parse markdown");
-    return doc;
+    return parseMarkdownToDoc(this.schema, this.getMarkdownParserTokens(), text);
   }
 
   /** Plain text content of the document. */

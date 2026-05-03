@@ -25,6 +25,7 @@ import type { PageConfig } from "../layout/PageLayout";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { ExportContributionMap } from "./export";
+import { parseMarkdownToDoc } from "../model/parseMarkdown";
 
 /**
  * Build a ProseMirror Schema from an array of extensions.
@@ -129,11 +130,22 @@ export class ExtensionManager {
   /**
    * Returns the first non-null initial doc contributed by any extension.
    * Used by Editor to seed EditorState.create() with a doc that matches
-   * a plugin's internal mapping (e.g. initProseMirrorDoc for ySyncPlugin).
+   * a plugin's internal mapping (e.g. initProseMirrorDoc for ySyncPlugin)
+   * or app-supplied content (e.g. DefaultContent).
+   *
+   * Factories are invoked here — *after* every extension has resolved — so
+   * the merged markdown parser tokens are available via `env.parseMarkdown`.
    */
   buildInitialDoc(): ProseMirrorNode | undefined {
+    const tokens = this.buildMarkdownParserTokens();
+    const env = {
+      schema: this.schema,
+      parseMarkdown: (text: string) => parseMarkdownToDoc(this.schema, tokens, text),
+    };
     for (const ext of this.resolved) {
-      if (ext.initialDoc) return ext.initialDoc;
+      if (!ext.initialDocFactory) continue;
+      const doc = ext.initialDocFactory(env);
+      if (doc != null) return doc;
     }
     return undefined;
   }

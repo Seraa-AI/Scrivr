@@ -11,10 +11,12 @@ export interface ServerEditorOptions {
    */
   extensions?: Extension[];
   /**
-   * Optional initial document as a ProseMirror JSON object.
-   * If omitted the editor starts with an empty document.
+   * Optional initial document. Strings are parsed as markdown using the
+   * merged token map from all extensions; objects are parsed as ProseMirror
+   * JSON. If omitted, falls back to extensions' `addInitialDoc` (e.g.
+   * `DefaultContent`).
    */
-  content?: Record<string, unknown>;
+  content?: string | Record<string, unknown>;
 }
 
 /**
