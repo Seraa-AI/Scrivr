@@ -16,7 +16,7 @@
 import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark } from "prosemirror-model";
 import type { MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState } from "prosemirror-state";
-import type { EditorEvents } from "../types/augmentation";
+import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
@@ -278,8 +278,15 @@ export interface MarkdownBlockRule {
  * Core data only — no React, no DOM.
  */
 export interface ToolbarItemSpec {
-  /** The command name to call on editor.commands */
-  command: string;
+  /**
+   * The command name to call on editor.commands.
+   *
+   * Typed against the augmented `Commands<ReturnType>` interface — extensions
+   * that contribute toolbar items must also `declare module "@scrivr/core"`
+   * to add their commands. Without an augmented Commands interface this falls
+   * back to `string`.
+   */
+  command: keyof SafeFlatCommands;
   /** Extra arguments passed verbatim to the command when this item is activated */
   args?: unknown[];
   /** Display content, e.g. "B" or "I" */

@@ -1993,6 +1993,78 @@ describe("runPipeline — behind / front anchored modes", () => {
   });
 });
 
+describe("runPipeline — anchor-only image paragraphs", () => {
+  it("square image anchor paragraph contributes no vertical gap before following text", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({
+      src: "",
+      width: 160,
+      height: 100,
+      wrapMode: "square",
+      xAlign: "right",
+      yOffset: 260,
+    });
+    const title = schema.node("heading", { level: 2 }, [schema.text("Layout Engine")]);
+    const anchor = schema.node("paragraph", null, [img]);
+    const body = schema.node("paragraph", null, [schema.text("Scrivr uses a custom layout pipeline.")]);
+
+    const withAnchor = runPipeline(schema.node("doc", null, [title, anchor, body]), {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+    const withoutAnchor = runPipeline(schema.node("doc", null, [title, body]), {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const anchorBlock = withAnchor.pages.flatMap((page) => page.blocks).find((block) => block.node === anchor)!;
+    const bodyWithAnchor = withAnchor.pages.flatMap((page) => page.blocks).find((block) => block.node === body)!;
+    const bodyWithoutAnchor = withoutAnchor.pages.flatMap((page) => page.blocks).find((block) => block.node === body)!;
+
+    expect(anchorBlock.height).toBe(0);
+    expect(anchorBlock.spaceBefore).toBe(0);
+    expect(anchorBlock.spaceAfter).toBe(0);
+    expect(bodyWithAnchor.y).toBeCloseTo(bodyWithoutAnchor.y, 1);
+  });
+
+  it("square image margin at page bottom does not create an exclusion gap on the next page", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const smallPage = {
+      pageWidth: 260,
+      pageHeight: 160,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const img = schema.nodes["image"]!.create({
+      src: "",
+      width: 190,
+      height: 60,
+      wrapMode: "square",
+      xAlign: "center",
+      yOffset: 1000,
+      margin: 12,
+    });
+    const filler = schema.node("paragraph", null, [schema.text("one two three four five six seven eight nine ten")]);
+    const anchor = schema.node("paragraph", null, [img]);
+    const body = schema.node("paragraph", null, [schema.text("body ".repeat(80).trim())]);
+
+    const layout = runPipeline(schema.node("doc", null, [filler, anchor, body]), {
+      pageConfig: smallPage,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+
+    const page2Body = layout.pages[1]!.blocks.find((block) => block.node === body)!;
+    expect(page2Body.y).toBe(smallPage.margins.top);
+    expect(page2Body.lines[0]!.spans.length).toBeGreaterThan(0);
+    for (const line of page2Body.lines.filter((line) => line.spans.length > 0)) {
+      expect(line.positioned ?? false).toBe(false);
+      expect(Math.min(...line.spans.map((span) => span.x))).toBe(0);
+    }
+  });
+});
+
 // ── Fragment identity fields ───────────────────────────────────────────────────
 //
 // ── buildFragments — Stage 4 ─────────────────────────────────────────────────

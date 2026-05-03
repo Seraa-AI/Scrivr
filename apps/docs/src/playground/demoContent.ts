@@ -184,12 +184,12 @@ const DEMO_DOC = {
       content: [
         {
           type: "text",
-          text: "A canvas-rendered document editor built for high-fidelity, multi-page documents. Unlike DOM-based editors, Scrivr paints each page directly onto an HTML ",
+          text: "A canvas-rendered document editor built for high-fidelity, multi-page documents. Each page is painted directly to an HTML ",
         },
         { type: "text", marks: [{ type: "bold" }], text: "canvas element" },
         {
           type: "text",
-          text: " — giving you pixel-perfect pagination and PDF export that are identical down to the pixel.",
+          text: ", so the screen view and the PDF export are pixel-identical.",
         },
       ],
     },
@@ -460,16 +460,11 @@ const DEMO_DOC = {
       attrs: { align: "left" },
       content: [
         {
-          type: "image",
-          attrs: {
-            src: "https://picsum.photos/300/200",
-            alt: "Layout diagram",
-            width: 300,
-            height: 200,
-            wrapMode: "square",
-            xAlign: "center",
-          },
+          type: "text",
+          text: "The layout engine runs four passes per document: build the block flow from ProseMirror, apply float exclusion zones, paginate across page boundaries, and build render fragments. Each pass is pure — no DOM, no CSS reflow — so the same layout can be reproduced server-side for ",
         },
+        { type: "text", marks: [{ type: "bold" }], text: "PDF export" },
+        { type: "text", text: " that matches the screen exactly." },
       ],
     },
     {
@@ -478,33 +473,176 @@ const DEMO_DOC = {
       content: [
         {
           type: "text",
-          text: "Scrivr uses a custom layout pipeline that computes line breaks, page boundaries, and float positions — independent of the browser's CSS engine. The output is ",
-        },
-        {
-          type: "text",
-          marks: [{ type: "bold" }],
-          text: "identical",
-        },
-        {
-          type: "text",
-          text: " between the canvas view and PDF export. Every page is rendered onto an HTML5 Canvas element with sub-pixel precision. The layout engine runs a multi-pass pipeline: first building the block flow from the ProseMirror document tree, then applying float exclusion zones, paginating across page boundaries, and finally building fragments for the tile renderer. Each pass is pure — no DOM dependency, no CSS reflow. This means the exact same layout can be reproduced server-side for PDF generation, ensuring what you see on screen is exactly what you get in the exported document.",
-        },
-      ],
-    },
-    {
-      type: "paragraph",
-      attrs: { align: "left" },
-      content: [
-        {
-          type: "text",
-          text: "The pipeline runs incrementally during idle time, keeping the editor ",
+          text: "The pipeline runs incrementally during idle time, so the editor stays ",
         },
         {
           type: "text",
           marks: [{ type: "bold" }, { type: "italic" }],
-          text: "responsive even on 100+ page documents",
+          text: "responsive on 100+ page documents",
         },
         { type: "text", text: "." },
+      ],
+    },
+
+    // ── Floating images ───────────────────────────────────────────────────────
+    {
+      type: "heading",
+      attrs: { level: 2, align: "left" },
+      content: [{ type: "text", text: "Floating Images" }],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "left" },
+      content: [
+        {
+          type: "text",
+          text: "Anchored images live outside the text flow. Drag one to reposition it; surrounding text reflows around it automatically. Five wrap modes match Word's behaviour — ",
+        },
+        { type: "text", marks: [{ type: "bold" }], text: "inline" },
+        { type: "text", text: ", " },
+        { type: "text", marks: [{ type: "bold" }], text: "square" },
+        { type: "text", text: ", " },
+        { type: "text", marks: [{ type: "bold" }], text: "top-and-bottom" },
+        { type: "text", text: ", " },
+        { type: "text", marks: [{ type: "bold" }], text: "behind text" },
+        { type: "text", text: ", and " },
+        { type: "text", marks: [{ type: "bold" }], text: "in front of text" },
+        { type: "text", text: "." },
+      ],
+    },
+
+    {
+      type: "heading",
+      attrs: { level: 3, align: "left" },
+      content: [{ type: "text", text: "Square wrap" }],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "left" },
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: "https://picsum.photos/seed/square/220/160",
+            alt: "Square-wrap demo",
+            width: 220,
+            height: 160,
+            wrapMode: "square",
+            xAlign: "left",
+          },
+        },
+        {
+          type: "text",
+          text: "Square wrap creates a rectangular exclusion zone at the image's painted position. Every line of text that overlaps the zone reflows around it, line by line. The exclusion follows the image when you drag — including across page boundaries, where the wrap clamps to the float's own page so the next page begins at full width. Margin around the image is independent of the surrounding paragraph spacing, so you can tune breathing room without disrupting the document's vertical rhythm. Try grabbing the image and dropping it on the right side of the column to watch the text reflow in place.",
+        },
+      ],
+    },
+
+    {
+      type: "heading",
+      attrs: { level: 3, align: "left" },
+      content: [{ type: "text", text: "Top and bottom" }],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "left" },
+      content: [
+        {
+          type: "text",
+          text: "Top-and-bottom wrap reserves the full content width for the image. The text in this paragraph sits above the figure, exactly as you'd expect from a Word or Pages document — paragraphs flow naturally until they meet the image's top margin, then they stop and resume on the other side.",
+        },
+      ],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "left" },
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: "https://picsum.photos/seed/topbottom/420/130",
+            alt: "Top-and-bottom wrap demo",
+            width: 420,
+            height: 130,
+            wrapMode: "top-bottom",
+            xAlign: "center",
+          },
+        },
+        {
+          type: "text",
+          text: "Once the image's bottom margin clears, text resumes at full width — like this paragraph. This is the right choice for diagrams, screenshots, and figures meant to stand alone with surrounding text framing them above and below. Drag the image up or down to see how the body text repositions in response: the top-and-bottom margins move with the float, and any paragraphs caught in between flow above or below as their position shifts.",
+        },
+      ],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "left" },
+      content: [
+        {
+          type: "text",
+          text: "Unlike square wrap, no text sits beside the image — the full content width is reserved for the figure regardless of its actual width. This keeps the layout predictable for figures of varying sizes.",
+        },
+      ],
+    },
+
+    { type: "pageBreak" },
+    {
+      type: "heading",
+      attrs: { level: 3, align: "left" },
+      content: [{ type: "text", text: "Behind and in front of text" }],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "justify" },
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: "https://picsum.photos/seed/behind/300/180",
+            alt: "Behind-text wrap demo",
+            width: 300,
+            height: 180,
+            wrapMode: "behind",
+            xAlign: "right",
+            yOffset: 40,
+          },
+        },
+        {
+          type: "text",
+          text: "Behind-text reserves no flow space — text continues at full width and the image paints as a Z-layer beneath it. This is the classic watermark or letterhead pattern: a logo or pale graphic sits behind the body without disrupting the typography. The anchor and yOffset model is identical to square and top-and-bottom, so dragging the image never changes the document structure underneath the text.",
+        },
+      ],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "left" },
+      content: [
+        {
+          type: "text",
+          text: "In-front-of-text inverts the Z-order: the image paints over the body text instead of behind it. Same anchor model, opposite layer.",
+        },
+      ],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "justify" },
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: "https://picsum.photos/seed/front/240/160",
+            alt: "In-front-of-text wrap demo",
+            width: 240,
+            height: 160,
+            wrapMode: "front",
+            xAlign: "left",
+            yOffset: 30,
+          },
+        },
+        {
+          type: "text",
+          text: "In-front-of-text is rarer than behind — used for callouts, stamps, or annotation overlays where the image is meant to cover part of the text on purpose. The text below this paragraph is full-width and unaware of the image's presence; the image simply paints over it at its anchor position. Drag the image and the text underneath stays exactly where it is — only the float moves.",
+        },
       ],
     },
   ],

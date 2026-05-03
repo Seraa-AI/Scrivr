@@ -147,6 +147,29 @@ export function isHiddenAnchorLine(line: LayoutLine): boolean {
   );
 }
 
+function createHiddenAnchorLine(spans: InputSpan[]): LayoutLine {
+  return {
+    spans: spans
+      .filter((span) => span.kind === "object")
+      .map((span) => ({
+        kind: "object" as const,
+        node: span.node,
+        x: 0,
+        width: 0,
+        height: 0,
+        docPos: span.docPos,
+        verticalAlign: span.verticalAlign,
+      })),
+    width: 0,
+    ascent: 0,
+    descent: 0,
+    lineHeight: 0,
+    textAscent: 0,
+    cursorHeight: 0,
+    xHeight: 0,
+  };
+}
+
 export interface BlockLayoutOptions {
   /** Absolute doc position of this node — used to resolve child positions */
   nodePos: number;
@@ -350,17 +373,31 @@ export function layoutBlock(
     (s) => s.kind === "object" && s.width === 0 && s.height === 0,
   );
   const isAnchorOnlyFlow = !hasNonZeroContent && hasZeroSizeObjectSentinel;
+  if (isAnchorOnlyFlow) {
+    return {
+      kind: "text",
+      node,
+      nodePos,
+      x,
+      y,
+      width: availableWidth,
+      height: 0,
+      lines: [createHiddenAnchorLine(spans)],
+      spaceBefore: 0,
+      spaceAfter: 0,
+      blockType: node.type.name,
+      align: resolvedAlign,
+      availableWidth,
+    };
+  }
+
   const zwsSpan: InputSpan = {
     kind: "text",
     text: "​",
     font: baseFont,
     docPos: nodePos + 1,
   };
-  const inputSpans: InputSpan[] = hasNonZeroContent
-    ? spans
-    : isAnchorOnlyFlow
-      ? spans
-      : [zwsSpan];
+  const inputSpans: InputSpan[] = hasNonZeroContent ? spans : [zwsSpan];
 
   // ── 3. Break into lines ───────────────────────────────────────────────────
   const breaker = new LineBreaker(measurer);

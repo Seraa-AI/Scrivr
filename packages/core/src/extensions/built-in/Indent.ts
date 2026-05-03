@@ -122,3 +122,14 @@ export const Indent = Extension.create({
     ];
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    indent: {
+      /** Increase block indent by one step. */
+      increaseIndent: () => ReturnType;
+      /** Decrease block indent by one step (no-op when already at 0). */
+      decreaseIndent: () => ReturnType;
+    };
+  }
+}

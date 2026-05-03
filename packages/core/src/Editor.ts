@@ -7,7 +7,7 @@ import type {
   OverlayRenderHandler,
   IEditor,
 } from "./extensions/types";
-import type { Schema } from "prosemirror-model";
+import type { Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
@@ -59,6 +59,23 @@ export interface SelectionSnapshot {
   blockType: string;
   /** Attributes of that block node — e.g. { level: 1, align: "left" } for a heading */
   blockAttrs: Record<string, unknown>;
+}
+
+function moveDeleteRange(
+  doc: PmNode,
+  docPos: number,
+  node: PmNode,
+): { from: number; to: number } {
+  if (!node.isInline) return { from: docPos, to: docPos + node.nodeSize };
+
+  const $pos = doc.resolve(docPos);
+  const parent = $pos.parent;
+  if (!parent.isTextblock || parent.childCount !== 1 || parent.firstChild !== node) {
+    return { from: docPos, to: docPos + node.nodeSize };
+  }
+
+  const parentFrom = $pos.before($pos.depth);
+  return { from: parentFrom, to: parentFrom + parent.nodeSize };
 }
 
 export interface EditorOptions {
@@ -462,13 +479,12 @@ export class Editor extends BaseEditor implements IEditor {
     const from = docPos;
     const to = docPos + node.nodeSize;
     if (targetPos >= from && targetPos <= to) return false;
-
-    const mappedTarget = targetPos > from ? targetPos - node.nodeSize : targetPos;
-    const insertPos = Math.max(0, Math.min(mappedTarget, state.doc.content.size - node.nodeSize));
+    const deleteRange = moveDeleteRange(state.doc, docPos, node);
+    if (targetPos >= deleteRange.from && targetPos <= deleteRange.to) return false;
 
     try {
-      let tr = state.tr.delete(from, to);
-      const finalInsertPos = Math.max(0, Math.min(insertPos, tr.doc.content.size));
+      let tr = state.tr.delete(deleteRange.from, deleteRange.to);
+      const finalInsertPos = Math.max(0, Math.min(tr.mapping.map(targetPos, -1), tr.doc.content.size));
       tr = tr.insert(finalInsertPos, node);
       tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
       this._dispatchToActive(tr);
@@ -504,14 +520,16 @@ export class Editor extends BaseEditor implements IEditor {
       this.setNodeAttrs(docPos, attrs);
       return true;
     }
-
-    const mappedTarget = targetPos > from ? targetPos - node.nodeSize : targetPos;
-    const insertPos = Math.max(0, Math.min(mappedTarget, state.doc.content.size - node.nodeSize));
+    const deleteRange = moveDeleteRange(state.doc, docPos, node);
+    if (targetPos >= deleteRange.from && targetPos <= deleteRange.to) {
+      this.setNodeAttrs(docPos, attrs);
+      return true;
+    }
 
     try {
       const updated = node.type.create({ ...node.attrs, ...attrs }, node.content, node.marks);
-      let tr = state.tr.delete(from, to);
-      const finalInsertPos = Math.max(0, Math.min(insertPos, tr.doc.content.size));
+      let tr = state.tr.delete(deleteRange.from, deleteRange.to);
+      const finalInsertPos = Math.max(0, Math.min(tr.mapping.map(targetPos, -1), tr.doc.content.size));
       tr = tr.insert(finalInsertPos, updated);
       tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
       this._dispatchToActive(tr);

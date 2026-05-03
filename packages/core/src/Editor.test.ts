@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Editor } from "./Editor";
 import { StarterKit } from "./extensions/StarterKit";
+import { NodeSelection } from "prosemirror-state";
 import type { EditorState } from "prosemirror-state";
 
 /**
@@ -55,6 +56,32 @@ function makeEditor() {
     cleanup,
     getState: () => latestState ?? editor.getState(),
   };
+}
+
+function findNodePos(state: EditorState, typeName: string): number | null {
+  let found: number | null = null;
+  state.doc.descendants((node, pos) => {
+    if (found !== null) return false;
+    if (node.type.name === typeName) {
+      found = pos;
+      return false;
+    }
+    return true;
+  });
+  return found;
+}
+
+function findTextPos(state: EditorState, text: string): number | null {
+  let found: number | null = null;
+  state.doc.descendants((node, pos) => {
+    if (found !== null) return false;
+    if (node.isText && node.text?.includes(text)) {
+      found = pos;
+      return false;
+    }
+    return true;
+  });
+  return found;
 }
 
 // ── Initial cursor placement ──────────────────────────────────────────────────
@@ -156,6 +183,7 @@ describe("Editor.convertImageToInlineAtVisualPosition", () => {
 
     const firstParagraph = editor.getState().doc.child(0);
     const movedImage = firstParagraph.child(0);
+    expect(editor.getState().doc.childCount).toBe(1);
     expect(movedImage.type.name).toBe("image");
     expect(movedImage.attrs["wrapMode"]).toBe("inline");
     expect(movedImage.attrs["wrappingMode"]).toBe("inline");
@@ -163,6 +191,37 @@ describe("Editor.convertImageToInlineAtVisualPosition", () => {
     expect(movedImage.attrs["yOffset"]).toBe(0);
     expect(movedImage.attrs["floatOffset"]).toEqual({ x: 0, y: 0 });
     expect(posAtCoords).toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("removes the old image-only anchor paragraph when moving the image", () => {
+    const { editor, cleanup } = makeEditor();
+    const schema = editor.schema;
+    const image = schema.nodes["image"]!.create({
+      src: "",
+      width: 100,
+      height: 80,
+      wrapMode: "square",
+    });
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [schema.text("Before")]),
+      schema.node("paragraph", null, [image]),
+      schema.node("paragraph", null, [schema.text("After")]),
+    ]);
+    editor.applyTransaction(
+      editor.getState().tr.replaceWith(0, editor.getState().doc.content.size, doc.content),
+    );
+
+    const imagePos = findNodePos(editor.getState(), "image")!;
+    const afterPos = findTextPos(editor.getState(), "After")!;
+
+    expect(editor.moveAndUpdateNode(imagePos, afterPos, { yOffset: 0 })).toBe(true);
+
+    const paragraphs = Array.from({ length: editor.getState().doc.childCount }, (_, index) =>
+      editor.getState().doc.child(index),
+    );
+    expect(paragraphs.map((node) => node.textContent)).toEqual(["Before", "After"]);
+    expect(paragraphs.every((node) => node.childCount > 0)).toBe(true);
     cleanup();
   });
 });
@@ -313,6 +372,64 @@ describe("Editor.moveLeft / moveRight", () => {
     expect(sel.empty).toBe(false);
     expect(sel.anchor).toBe(anchor); // anchor does not move
     expect(sel.head).toBeLessThan(anchor);
+    cleanup();
+  });
+
+  it("moveRight selects a non-inline image instead of landing in its hidden anchor paragraph", () => {
+    const { editor, cleanup } = makeEditor();
+    const schema = editor.schema;
+    const image = schema.nodes["image"]!.create({
+      src: "",
+      width: 120,
+      height: 80,
+      wrapMode: "square",
+    });
+    const title = "Layout Engine";
+    const doc = schema.node("doc", null, [
+      schema.node("heading", { level: 2 }, [schema.text(title)]),
+      schema.node("paragraph", null, [image]),
+      schema.node("paragraph", null, [schema.text("Body text")]),
+    ]);
+    editor.applyTransaction(
+      editor.getState().tr.replaceWith(0, editor.getState().doc.content.size, doc.content),
+    );
+
+    const imagePos = findNodePos(editor.getState(), "image")!;
+    editor.selection.moveCursorTo(1 + title.length);
+    editor.selection.moveRight();
+
+    const sel = editor.getState().selection;
+    expect(sel).toBeInstanceOf(NodeSelection);
+    expect(sel.from).toBe(imagePos);
+    cleanup();
+  });
+
+  it("shift+moveRight skips a hidden anchor paragraph when extending selection", () => {
+    const { editor, cleanup } = makeEditor();
+    const schema = editor.schema;
+    const image = schema.nodes["image"]!.create({
+      src: "",
+      width: 120,
+      height: 80,
+      wrapMode: "square",
+    });
+    const title = "Layout Engine";
+    const doc = schema.node("doc", null, [
+      schema.node("heading", { level: 2 }, [schema.text(title)]),
+      schema.node("paragraph", null, [image]),
+      schema.node("paragraph", null, [schema.text("Body text")]),
+    ]);
+    editor.applyTransaction(
+      editor.getState().tr.replaceWith(0, editor.getState().doc.content.size, doc.content),
+    );
+
+    const imagePos = findNodePos(editor.getState(), "image")!;
+    editor.selection.moveCursorTo(1 + title.length);
+    editor.selection.moveRight(true);
+
+    const sel = editor.getState().selection;
+    expect(sel).not.toBeInstanceOf(NodeSelection);
+    expect(sel.head).toBeGreaterThan(imagePos + image.nodeSize);
     cleanup();
   });
 

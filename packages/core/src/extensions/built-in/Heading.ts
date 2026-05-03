@@ -5,8 +5,10 @@ import type { ToolbarItemSpec } from "../types";
 import type { BlockStyle } from "../../layout/FontConfig";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 
+export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
+
 interface HeadingOptions {
-  levels: number[];
+  levels: HeadingLevel[];
 }
 
 export const Heading = Extension.create<HeadingOptions>({
@@ -181,18 +183,8 @@ export const Heading = Extension.create<HeadingOptions>({
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
     heading: {
-      /** Set the current block to heading level 1. */
-      setHeading1: () => ReturnType;
-      /** Set the current block to heading level 2. */
-      setHeading2: () => ReturnType;
-      /** Set the current block to heading level 3. */
-      setHeading3: () => ReturnType;
-      /** Set the current block to heading level 4. */
-      setHeading4: () => ReturnType;
-      /** Set the current block to heading level 5. */
-      setHeading5: () => ReturnType;
-      /** Set the current block to heading level 6. */
-      setHeading6: () => ReturnType;
+      [K in 1 | 2 | 3 | 4 | 5 | 6 as `setHeading${K}`]: () => ReturnType;
+    } & {
       /** Set the current block to a plain paragraph. */
       setParagraph: () => ReturnType;
     };
