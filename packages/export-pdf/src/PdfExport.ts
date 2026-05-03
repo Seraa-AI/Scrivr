@@ -88,3 +88,12 @@ export const PdfExport = Extension.create<PdfExportOptions>({
     };
   },
 });
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    pdfExport: {
+      /** Export the current document as a PDF and trigger a browser download. */
+      exportPdf: () => ReturnType;
+    };
+  }
+}
