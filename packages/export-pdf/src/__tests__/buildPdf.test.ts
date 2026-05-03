@@ -62,6 +62,7 @@ function textLine(
 
 function paragraphBlock(lines: LayoutLine[], y = MARGIN, align: LayoutBlock["align"] = "left"): LayoutBlock {
   return {
+    kind: "text",
     node: schema.nodes.paragraph!.create(),
     nodePos: 0,
     x: MARGIN,
@@ -79,6 +80,7 @@ function paragraphBlock(lines: LayoutLine[], y = MARGIN, align: LayoutBlock["ali
 
 function hrBlock(y = MARGIN + 100): LayoutBlock {
   return {
+    kind: "leaf",
     node: schema.nodes.horizontalRule!.create(),
     nodePos: 0,
     x: MARGIN,

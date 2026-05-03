@@ -9,7 +9,7 @@ import {
   BlockStyle,
   applyPageFont,
 } from "./FontConfig";
-import { layoutBlock, LayoutBlock } from "./BlockLayout";
+import { layoutBlock, LayoutBlock, type LayoutBlockKind } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
 import { LineBreaker, type InputSpan, type LayoutLine, type LineSpaceProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
@@ -214,6 +214,8 @@ export interface MeasureCacheEntry {
    * are absolute and must be adjusted when the block shifts in the document.
    */
   nodePos: number;
+  /** Mirrors `LayoutBlock.kind` so consumers can route without re-measuring. */
+  kind: LayoutBlockKind;
   height: number;
   lines: LayoutLine[];
   spaceBefore: number;
@@ -257,6 +259,12 @@ export interface FlowBlock {
   /** Original ProseMirror node. */
   node: Node;
   nodePos: number;
+  /**
+   * Mirrors `LayoutBlock.kind` so the pagination loop and exclusion reflow can
+   * route on the discriminator instead of probing `lines.length`. Page-break
+   * markers are tagged `"leaf"` (no inline content of their own).
+   */
+  kind: LayoutBlockKind;
   /** Measured lines — position-independent (lineHeight only, no absolute Y). */
   lines: LayoutLine[];
   height: number;
@@ -703,7 +711,9 @@ function reflowFlowsAgainstExclusions(
     const flow = flows[idx]!;
     const flowY = flow.globalY ?? 0;
     if (flowY >= zoneBottom) break;
-    if (flow.lines.length === 0 || flowY + flow.height <= zoneTop) continue;
+    // Skip leaf flows (image/HR/pageBreak) — exclusion reflow only narrows
+    // text flow lines, leaves can never be re-broken around a wrap zone.
+    if (flow.kind === "leaf" || flowY + flow.height <= zoneTop) continue;
 
     const wrappedFlow: FlowBlock = {
       ...flow,
@@ -1225,6 +1235,7 @@ export function paginateFlow(
 
     // Build a positioned LayoutBlock from the FlowBlock measurements.
     const buildBlock = (x: number, bY: number): LayoutBlock => ({
+      kind: flow.kind,
       node,
       nodePos,
       x,
@@ -1265,7 +1276,7 @@ export function paginateFlow(
     const contentHeight = currentMetrics.contentHeight;
     // Text blocks can always be split; leaf blocks need the !isFirstOnPage guard
     // to avoid infinite empty-page loops when the block exceeds contentHeight.
-    const overflows = !pageless && blockBottom > pageBottom && (!isFirstOnPage || flow.lines.length > 0);
+    const overflows = !pageless && blockBottom > pageBottom && (!isFirstOnPage || flow.kind !== "leaf");
 
     // ── Layout debug log ──────────────────────────────────────────────────────
     if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
@@ -1287,7 +1298,7 @@ export function paginateFlow(
       currentPage.blocks.push(block);
       y = targetY + block.height;
       prevSpaceAfter = flow.spaceAfter;
-    } else if (flow.lines.length === 0) {
+    } else if (flow.kind === "leaf") {
       // ── Leaf block (image, HR): move whole block to next page ──────────────
       const tooTallForAnyPage = flow.height > contentHeight;
       if (tooTallForAnyPage) {
@@ -1399,6 +1410,9 @@ export function paginateFlow(
         const partHeight = partLines.reduce((sum, line) => sum + line.lineHeight, 0);
 
         const partBlock: LayoutBlock = {
+          // Split path only runs for flows with rendered lines, so every part
+          // is a text-kind continuation of its source block.
+          kind: "text",
           node,
           nodePos,
           x: blockX,
@@ -1552,8 +1566,11 @@ function blockHasAnchoredObject(lines: LayoutLine[]): boolean {
   return false;
 }
 
-function isAnchorOnlyFlowEntry(entry: Pick<MeasureCacheEntry, "height" | "lines">): boolean {
-  if (entry.height !== 0 || entry.lines.length === 0) return false;
+function isAnchorOnlyFlowEntry(entry: Pick<MeasureCacheEntry, "kind" | "height" | "lines">): boolean {
+  // Anchor-only flow is a text-kind paragraph whose only content is hidden
+  // anchor sentinels — leaf blocks can never qualify, even when their height
+  // happens to be zero.
+  if (entry.kind !== "text" || entry.height !== 0) return false;
   return entry.lines.every((line) =>
     line.lineHeight === 0 &&
     line.cursorHeight === 0 &&
@@ -1584,6 +1601,7 @@ export function buildBlockFlow(
       flows.push({
         node: item.node,
         nodePos: item.nodePos,
+        kind: "leaf",
         lines: [],
         height: 0,
         spaceBefore: 0,
@@ -1624,6 +1642,7 @@ export function buildBlockFlow(
     flows.push({
       node,
       nodePos,
+      kind: entry.kind,
       lines: entry.lines,
       height: entry.height,
       spaceBefore: anchorOnlyFlow ? 0 : blockStyle.spaceBefore,
@@ -1902,6 +1921,7 @@ function resolveBlockEntry(
   const entry: MeasureCacheEntry = {
     availableWidth: blockWidth,
     nodePos,
+    kind: measured.kind,
     height: measured.height,
     lines: measured.lines,
     spaceBefore: measured.spaceBefore,

@@ -62,7 +62,29 @@ export function resolveLeafBlockDimensions(
   };
 }
 
+/**
+ * Discriminator for the variety of block this LayoutBlock represents.
+ *
+ *   - `"text"`     — block contributes textual lines that drive rendering and
+ *                    cursor placement (paragraph, heading, list_item, codeBlock).
+ *                    `lines` is non-empty (anchor-only paragraphs hold a single
+ *                    hidden line — still "text").
+ *   - `"leaf"`     — block has no inline content and contributes no lines
+ *                    (image, horizontalRule, pageBreak, and inline-atom
+ *                    sub-blocks dispatched by the PDF exporter). `lines` is `[]`.
+ *   - `"tableRow"` — reserved for the upcoming Table extension; carries
+ *                    per-cell sub-blocks instead of `lines`. Not produced by
+ *                    any current code path.
+ *
+ * Consumers branch on `kind` instead of probing `lines.length === 0`, so the
+ * shape of the discriminator is the single source of truth for renderer,
+ * pagination, hit-testing, and export dispatch.
+ */
+export type LayoutBlockKind = "text" | "leaf" | "tableRow";
+
 export interface LayoutBlock {
+  /** Discriminator — see LayoutBlockKind for the invariants per variant. */
+  kind: LayoutBlockKind;
   /** The original ProseMirror node — used by BlockStrategy.render() */
   node: Node;
   /** ProseMirror position of this node in the document — used to map cursor positions to pages */
@@ -246,6 +268,7 @@ export function layoutLeafBlock(
     : null;
 
   return {
+    kind: "leaf",
     node,
     nodePos,
     x,
@@ -544,6 +567,7 @@ export function layoutBlock(
   }
 
   return {
+    kind: "text",
     node,
     nodePos,
     x,
@@ -748,7 +772,7 @@ export function populateCharMap(
   // Leaf block (HR, image, etc.) — no lines, just before/after cursor positions.
   // One line covers the full block height. Two side-by-side half-width glyphs
   // let posAtCoords distinguish left-click (before) from right-click (after).
-  if (block.lines.length === 0) {
+  if (block.kind === "leaf") {
     const beforePos = block.nodePos;
     const afterPos  = block.nodePos + block.node.nodeSize;
     const halfWidth = block.availableWidth / 2;

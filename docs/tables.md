@@ -1,417 +1,479 @@
 # Table Extension Implementation Plan
 
-## Overview
+## Direction
 
-Tables are the most complex block type in Scrivr. They require:
-1. A new ProseMirror schema (4 node types)
-2. Model-layer editing commands (merge/split cells, add/delete rows/columns)
-3. A custom layout engine that understands cell spans and row heights
-4. A canvas renderer that draws cell borders and text
-5. A `CellSelection` overlay for multi-cell selections
-6. Optional: canvas column resizing
+Tables should be implemented as a Scrivr-owned, Word-grounded table engine. Do not add `prosemirror-tables` as a runtime dependency in `@scrivr/core`.
 
-This document describes what to adopt from `prosemirror-tables`, what to rewrite for canvas, and the phased implementation order.
+Use `prosemirror-tables` as reference material only. Its command behavior, table map algorithm, and normalization rules are useful, but its package brings `prosemirror-view` and DOM-oriented plugin props that do not fit Scrivr's canvas-only architecture.
 
----
+The target shape:
 
-## What to Adopt from `prosemirror-tables`
+1. Word-compatible schema concepts.
+2. Internal table map and commands.
+3. Canvas-native layout/render/selection.
+4. DOCX-friendly import/export mapping later.
 
-### ✅ Schema — `tableNodes()`
+## Word Baseline
 
-The 4 node types map directly to Scrivr's schema. Define them manually (or call `tableNodes()`) with these specs:
+MS-OE376's Word deviations confirm the v1 scope:
 
-```
-table        group: "block", content: "tableRow+"
-tableRow    content: "(tableCell | table_header)+"
-tableCell   content: "block+", attrs: {colspan, rowspan, colwidth, align}
-table_header content: "block+", attrs: {colspan, rowspan, colwidth, align}
-```
+- Use fixed table layout. Word supports `tblLayout: autofit | fixed`; v1 ships fixed only.
+- Use row-level page overflow. Word can split rows, but v1 moves the whole row to the next page for predictable output.
+- Use a fixed cell padding constant. Word's `tcMar` is per-cell; defer per-cell margins until the styling layer exists.
+- Paint simple cell-level borders. Word's border conflict resolution between table, row, cell, and spacing rules is deferred polish.
+- Store column widths at table level, matching Word's `tblGrid`.
 
-All four use `isolating: true` — this prevents PM selection from crossing cell boundaries without `CellSelection`.
+Defer these Word features explicitly:
 
-`colwidth` is `number[] | null` — one entry per column the cell spans. Used by layout to size each column.
+- Floating tables (`tblpPr`, `tblOverlap`) — future anchored-object integration.
+- AutoFit table layout and `doNotAutofitConstrainedTables` — separate intrinsic sizing project.
+- Repeated header rows (`tblHeader`) — add after row pagination is stable.
+- Table styles and conditional formatting (`tblStyle`, `tblLook`, `cnfStyle`) — requires a styling layer.
+- `textDirection`, `bidiVisual`, `tcFitText`, and `noWrap`.
 
-**Add `align` to cell attrs (not just `colwidth`).** Google Docs puts `text-align` on `<td>` directly, not just on the `<p>` inside. Capturing it at the cell level means paste from GDocs preserves per-cell alignment without any cleanup step:
+## Schema
 
-```typescript
-tableCell: {
-  content: "block+",
-  attrs: {
-    colspan:  { default: 1 },
-    rowspan:  { default: 1 },
-    colwidth: { default: null },
-    align:    { default: "left" },   // ← GDocs fix
-  },
-  parseDOM: [{
-    tag: "td",
-    getAttrs: (dom) => ({
-      colspan:  Number((dom as HTMLElement).getAttribute("colspan")) || 1,
-      rowspan:  Number((dom as HTMLElement).getAttribute("rowspan")) || 1,
-      colwidth: parseColwidth((dom as HTMLElement).getAttribute("colwidth")),
-      align:    (dom as HTMLElement).style.textAlign || "left",  // ← reads GDocs inline style
-    }),
-  }],
-  toDOM(node) {
-    const style = node.attrs.align !== "left" ? `text-align:${node.attrs.align as string}` : undefined;
-    return ["td", { colspan: node.attrs.colspan, ...(style ? { style } : {}) }, 0];
-  },
-},
-// table_header mirrors tableCell with tag "th"
+Use four node types:
+
+```ts
+table       group: "block", content: "tableRow+"
+tableRow   content: "(tableCell | tableHeader)+"
+tableCell  content: "block+"
+tableHeader content: "block+"
 ```
 
-`TableLayoutEngine` passes `cell.attrs.align` as the default alignment for every paragraph in that cell (overridable by the paragraph's own `align` attr).
+Canonical attrs:
 
-### ✅ `tableEditing` Plugin
+```ts
+table: {
+  layout: "fixed",        // future: "autofit"
+  grid: number[],         // Word tblGrid equivalent, CSS px
+}
 
-Pure model code — no DOM dependency. It provides:
-- `fixTables(state)` — normalizes mismatched `colspan`/`rowspan` after paste/undo
-- `CellSelection` normalization on every transaction
-- Table paste logic (pastes into selected cells)
+tableRow: {
+  repeatHeader: boolean,          // Word tblHeader; render deferred
+  allowBreakAcrossPages: boolean, // v1 false
+}
 
-Import directly. No changes needed.
-
-### ✅ All Commands
-
-Import directly from `prosemirror-tables`:
-- `addRowBefore`, `addRowAfter`, `deleteRow`
-- `addColumnBefore`, `addColumnAfter`, `deleteColumn`
-- `mergeCells`, `splitCell`
-- `setCellAttr`
-- `toggleHeaderRow`, `toggleHeaderColumn`, `toggleHeaderCell`
-- `goToNextCell` (Tab / Shift-Tab)
-- `deleteTable`
-
-Wire these into `addCommands()` and `addKeymap()`.
-
-### ✅ `TableMap`
-
-The utility class that resolves cell positions from the flat PM structure. Canvas layout uses `TableMap.get(tableNode)` to:
-- Get the total number of columns
-- Find which cell occupies a given `(row, col)` position
-- Resolve `colspan`/`rowspan` into absolute column ranges
-
-No changes needed.
-
-### ✅ `CellSelection`
-
-Extends `Selection`. Used for multi-cell copy/paste, merge, and delete. Import and register in the schema. The `tableEditing` plugin creates `CellSelection` automatically when the user would otherwise select across cell boundaries.
-
----
-
-## What to Build from Scratch
-
-### 🔨 `TableLayoutEngine`
-
-`prosemirror-tables` has no layout concept — it's PM model only. We need `TableLayoutEngine` to:
-
-1. Use `TableMap` to determine column count and span geometry
-2. Compute column widths from `colwidth` attrs (or divide `availableWidth` evenly)
-3. Apply cell padding before passing `availableWidth` to `layoutBlock()` — text must not touch cell borders
-4. For each row, lay out each cell's paragraph children using `layoutBlock()`, with the correct absolute `x`, `y`, `availableWidth = cellWidth - paddingH`
-5. Row height = `max(cellHeight + paddingV for all cells in row)`
-6. Thread `lineIndexOffset` across all cells in all rows
-7. Register all glyphs into the shared `CharacterMap` — no changes to CharacterMap itself
-
-Returns `RowLayoutResult[]`, one per row.
-
-#### Cell Box Model
-
-GDocs cells often carry `padding: 5pt` on `<td>`. Our schema doesn't capture cell padding — apply a hardcoded internal padding constant instead:
-
-```typescript
-const CELL_PADDING_H = 6; // px, left + right per side
-const CELL_PADDING_V = 4; // px, top + bottom per side
-
-// Inside layoutTable():
-const textX          = cellX + CELL_PADDING_H;
-const textY          = cellY + CELL_PADDING_V;
-const textWidth      = cellWidth - CELL_PADDING_H * 2;
-```
-
-`layoutBlock(cellParagraph, { x: textX, y: textY, availableWidth: textWidth, ... })`.
-Cell bounding box for border drawing remains `(cellX, cellY, cellWidth, cellHeight)`.
-
-#### Coordinate Chain
-
-Every value must be in absolute page coordinates — `CharacterMap` is keyed by docPos/page and has no relative-offset concept:
-
-```
-tableX, tableY           — from PageLayout (left margin + y cursor)
-  └─ rowY                = tableY + sum(heights of preceding rows)
-      └─ cellX           = tableX + sum(widths of preceding columns)
-          └─ textX       = cellX + CELL_PADDING_H
-          └─ textY       = rowY  + CELL_PADDING_V
-          └─ textWidth   = cellWidth - CELL_PADDING_H * 2
-```
-
-Miss any level and `coordsAtPos` / `posAtCoords` will return wrong-page results.
-
-### 🔨 `TableRowStrategy`
-
-Implements `BlockStrategy.render()` for `tableRow` nodes. During render, draws:
-- Cell background fills
-- Cell border rectangles
-- Each cell's text content (re-uses `TextBlockStrategy` logic per cell)
-- Header cell background (if `table_header`)
-
-Each `RowLayoutResult` carries `cellSubBlocks[]` (the `LayoutBlock` from `layoutBlock()` for each cell's paragraph). The strategy iterates them and draws each one.
-
-### 🔨 `CellSelection` Canvas Overlay
-
-When `editor.state.selection` is a `CellSelection`, the overlay canvas draws:
-- A semi-transparent blue rectangle over each selected cell's bounding box
-- (The bounding boxes come from layout results — stored in a `tableRowMap` keyed by `nodePos`)
-
-Register via `addOverlayRenderHandler()` (same pattern as collaboration cursors).
-
-### 🔨 Column Resize Hit-Testing
-
-`prosemirror-tables`' `columnResizing` plugin is entirely DOM-specific (mouse events on NodeViews). For canvas we need:
-
-1. **Hit-test** — on `mousemove`, check if the cursor is within ±4px of a column border. If so, change cursor to `col-resize`.
-2. **Drag** — on `mousedown` at a column border, begin a resize drag. On `mousemove`, update the `colwidth` attr via a transaction. On `mouseup`, commit.
-3. Store column border x-positions in a `columnBorderMap` populated by `TableLayoutEngine` alongside cell bounding boxes.
-
-This is a Phase 4 feature (deferred).
-
----
-
-## Data Structures
-
-### `CellSubBlock`
-
-```typescript
-interface CellSubBlock {
-  cellNode: Node;
-  cellNodePos: number;
-  /** Sub-LayoutBlocks for each paragraph inside the cell */
-  blocks: LayoutBlock[];
-  /** Bounding box of the entire cell (for selection overlay + border drawing) */
-  cellX: number;
-  cellY: number;
-  cellWidth: number;
-  cellHeight: number;
+tableCell/tableHeader: {
+  gridSpan: number,               // Word gridSpan, default 1
+  vMerge: "none" | "restart" | "continue",
+  hMerge: "none" | "restart" | "continue", // optional; gridSpan is usually enough
+  hAlign: "left" | "center" | "right" | "justify",
+  vAlign: "top" | "center" | "bottom",
+  background: string | null,
+  margins: null | { top: number; right: number; bottom: number; left: number },
+  borders: null | CellBorders,
 }
 ```
 
-### `RowLayoutResult`
+Rules:
 
-```typescript
-interface RowLayoutResult {
-  /** The LayoutBlock for the row itself — used by PageLayout for page overflow */
-  rowBlock: LayoutBlock;  // blockType: "tableRow", lines: [], height: maxCellHeight
-  /** Per-cell sub-layout — used by TableRowStrategy for rendering */
-  cells: CellSubBlock[];
+- `table.grid` is the source of truth for column widths.
+- `gridSpan` tells layout how many grid columns a cell covers.
+- `vMerge` models vertical merges without inventing a separate rowspan source of truth.
+- `hAlign` captures Google Docs/Word cell-level `text-align`; paragraph alignment may override it.
+- `vAlign` is part of v1 schema even if layout initially treats all cells as top-aligned.
+- `margins` and `borders` may remain `null` in v1 while layout uses default padding and simple strokes.
+
+## Internal Modules
+
+Create a table subsystem under core:
+
+```txt
+packages/core/src/extensions/built-in/Table.ts
+packages/core/src/table/TableMap.ts
+packages/core/src/table/commands.ts
+packages/core/src/table/normalize.ts          // tableIntegrityPlugin — document validity
+packages/core/src/table/editingGuards.ts      // tableEditingGuards — editing UX
+packages/core/src/table/selection.ts
+packages/core/src/table/insert.ts
+packages/core/src/layout/TableLayoutEngine.ts
+packages/core/src/layout/TableRowStrategy.ts
+```
+
+Code comments in these modules describe behaviour and constraints, not phase numbers or PR refs (per `feedback_comments_self_contained.md`). Phase context lives in this doc and the changelog; comments rot if they reference either.
+
+`TableMap.ts` is the central algorithm. It should build a grid view of a table node:
+
+```ts
+interface TableMap {
+  width: number;
+  height: number;
+  map: number[]; // row-major cell offsets relative to table start
+  /**
+   * Per-cell rowSpan derived from `vMerge` chains during build. Schema keeps
+   * Word's `vMerge: "restart" | "continue"` (DOCX-faithful) but engine code
+   * reads `rowSpan` directly so it never has to walk a chain at query time.
+   * Chain breaks are detected and repaired during build, not at usage.
+   */
+  rowSpanAt(cellOffset: number): number;
+  findCell(cellOffset: number): Rect;
+  cellsInRect(rect: Rect): number[];
+  positionAt(row: number, col: number): number | null;
 }
 ```
 
-### `LayoutBlock` extension (minimal)
+Borrow the concept from `prosemirror-tables`, but implement it against Scrivr's Word-shaped attrs: `gridSpan`, `vMerge`, and table-level `grid`.
 
-Add one optional field to `LayoutBlock`:
+**Cache key.** `TableMap` is cached as `WeakMap<Node, TableMap>` keyed on the table node identity. PM transactions produce a new node on any structural change, so identity is sufficient — no attrs hash needed. The Phase 4 perf test covering `MeasureCacheEntry` identity preservation extends to verify `TableMap` instances are reused across non-structural transactions and rebuilt on structural ones.
 
-```typescript
-/** Table row rendering data — only present when blockType === "tableRow" */
-cells?: CellSubBlock[];
-```
+## Commands
 
-This avoids a side-channel registry and keeps everything in the block tree.
+Implement these internally:
 
----
+- `insertTable({ rows, cols })`
+- `deleteTable()`
+- `addRowBefore()`
+- `addRowAfter()`
+- `deleteRow()`
+- `addColumnBefore()`
+- `addColumnAfter()`
+- `deleteColumn()`
+- `mergeCells()`
+- `splitCell()`
+- `setCellAttr(name, value)`
+- `setTableGrid(widths)`
+- `toggleHeaderRow()`
+- `goToNextCell(direction)`
 
-## `PageLayout.layoutDocument()` Integration
+Command invariants:
 
-The current `layoutDocument()` calls `layoutBlock(node, options)` for every top-level block. Tables need special handling:
+- Every table row resolves to the same grid width.
+- Adding/deleting columns updates `table.grid`.
+- Adding/deleting columns also updates affected `gridSpan` cells.
+- Vertical merges use `vMerge: "restart" | "continue"` and must remain contiguous.
+- Commands return normal ProseMirror `Command`s and must not require `EditorView`.
 
-```typescript
-if (node.type.name === "table") {
-  const rowResults = layoutTable(node, nodePos, options, fontConfig, measurer);
-  for (const { rowBlock } of rowResults) {
-    // Same overflow logic as any other block, but:
-    // - entry.lines.length === 0  →  leaf overflow (whole row moves)
-    // - No line splitting within rows (v1)
-    placeBlock(rowBlock);
-  }
-} else {
-  const entry = layoutBlock(node, options);
-  placeBlock(entry);
-}
-```
+**Conflict resolution for column / row ops vs merged cells.** Match Word's behaviour: **shrink the merge.**
 
-Row-level overflow falls naturally into the existing `entry.lines.length === 0` branch (leaf block path) — the whole row moves to the next page rather than splitting lines.
+- Deleting a column inside a `gridSpan > 1` cell decrements the span; the cell stays merged across the remaining columns.
+- Deleting a row inside a `vMerge` chain decrements the chain; if it removes the `restart` cell, the next `continue` is promoted to `restart`.
+- Inserting a column inside a `gridSpan` cell extends the span by 1 (the new column is part of the existing merge, not a separate cell).
+- Inserting a row inside a `vMerge` chain extends it by adding a new `continue` row.
 
-Line splitting within cells (when a cell's text spans many lines) is supported in v2: once `TableLayoutEngine` produces `LayoutLine[]` per cell, the `lines` of the tallest cell can be used to split a row at a line boundary. Skip for v1.
+Without an explicit policy, the alternatives (split-on-delete, refuse-the-command) leave structures the normalisation pass has to invent rules for, and the `N = 8` termination guard fires repeatedly. Picking one policy upfront and writing the tests for it keeps the integrity layer simple.
 
----
+## Normalization And Editing Guards
 
-## Extension Structure
+Two layers, separately wired:
 
-```typescript
-export const Table = Extension.create({
-  name: "table",
+### `tableIntegrityPlugin()` — document validity
 
-  addNodes() {
-    return {
-      table:        { /* ... */ },
-      tableRow:    { /* ... */ },
-      tableCell:   { /* ... */ },
-      table_header: { /* ... */ },
-    };
-  },
+Implement `normalizeTables(state): Transaction | null`. It repairs:
 
-  addProseMirrorPlugins() {
-    return [tableEditing()];
-  },
+- Missing or invalid `table.grid`.
+- Rows narrower/wider than the table grid.
+- Cells with `gridSpan < 1`.
+- Broken `vMerge` continuations.
+- Overlapping cell occupancy in the computed grid.
 
-  addCommands() {
-    return {
-      addRowBefore:     () => addRowBefore,
-      addRowAfter:      () => addRowAfter,
-      deleteRow:        () => deleteRow,
-      addColumnBefore:  () => addColumnBefore,
-      addColumnAfter:   () => addColumnAfter,
-      deleteColumn:     () => deleteColumn,
-      mergeCells:       () => mergeCells,
-      splitCell:        () => splitCell,
-      toggleHeaderRow:  () => toggleHeaderRow,
-      deleteTable:      () => deleteTable,
-      insertTable:      () => insertTableCommand,
-    };
-  },
+`tableIntegrityPlugin()` calls `normalizeTables()` in `appendTransaction`.
 
-  addKeymap() {
-    return {
-      Tab:       goToNextCell(1),
-      "Shift-Tab": goToNextCell(-1),
-    };
-  },
+**Termination guard.** `normalizeTables` runs as a fixed-point loop; cap at `N = 8` iterations and return a `status: "exhausted"` marker if any rule still fires at the cap. Without the guard, a malformed input + a buggy repair rule loops forever inside `appendTransaction`. Mirrors the solver-loop discipline in `docs/anchored-objects/03-test-contract.md` § Solver invariants.
 
-  addBlockStyles() {
-    return {
-      tableRow: {
-        font: "14px 'Inter', sans-serif",
-        spaceBefore: 0,
-        spaceAfter: 0,
-        align: "left" as const,
-      },
-    };
-  },
+### `tableEditingGuards()` — editing UX
 
-  addLayoutHandlers() {
-    return { tableRow: createTableRowStrategy() };
-  },
+Separate plugin. Replaces what upstream `tableEditing()` did beyond pure validity:
 
-  addToolbarItems() {
-    return [{ command: "insertTable", label: "⊞", title: "Insert table", group: "insert", isActive: () => false }];
-  },
+- Detect when a text selection starts in one cell and ends in another; promote to a `CellRange`.
+- Prevent `Backspace` / `Delete` inside an empty cell from escaping through cell boundaries — clear cell content or move within the cell, never delete the table boundary.
+- If a `CellRange` is active and the clipboard contains a table, distribute pasted cells into the selected rectangle.
+- If a `CellRange` is active and the clipboard contains plain text/blocks, fill the selected cells in row-major order.
+- `Tab` / `Shift-Tab` cell navigation (also creates a new row when tabbing past the last cell).
+- Clear selected cells without destroying table structure.
 
-  onEditorReady(editor) {
-    // Register CellSelection overlay
-    return editor.addOverlayRenderHandler((ctx, state, charMap, pages) => {
-      drawCellSelectionOverlay(ctx, state, pages);
+`tableIntegrityPlugin` is about valid documents; `tableEditingGuards` is about user intent and editing safety. Keeping them separate makes invariants honest and tests focused.
+
+## Layout
+
+`TableLayoutEngine` responsibilities:
+
+1. Read `table.grid` and scale/fit it into `availableWidth`.
+2. Build a `TableMap` for span geometry. Cache once per table; do not rebuild per row.
+3. Precompute a cumulative `columnX: number[]` array so each cell's `x` is a single array lookup, not an O(n) prefix sum per cell.
+4. Apply default cell padding (`CELL_PADDING_H = 6`, `CELL_PADDING_V = 4`, file-local for v1) unless `cell.attrs.margins` exists.
+5. For each visible cell, compute absolute cell bounds.
+6. Lay out each block inside each cell with `layoutBlock()`.
+7. Compute row height from max cell content height plus padding.
+8. Return one row-level layout block per row for pagination.
+
+Each `RowLayoutResult` carries a `tableId: string` (stable per-document table identifier) so selection overlays, hit-tests, and future column-resize work can group per-table without re-walking the doc tree.
+
+### Sandboxed cell layout contract
+
+Each cell is a sandboxed block layout context. `TableLayoutEngine` threads `lineIndexOffset` explicitly through the cell loop:
+
+```ts
+let globalLineOffset = options.lineIndexOffset;
+for (const row of rows) {
+  for (const cell of cellsInRow(row)) {
+    const result = layoutBlock(cellParagraph, {
+      x: textX,
+      y: textY,
+      availableWidth: textWidth,
+      lineIndexOffset: globalLineOffset,
+      // ...
     });
-  },
-});
+    globalLineOffset += result.lines.length;
+  }
+}
 ```
 
----
+Each cell receives a starting offset and the engine merges the result into the global flow. Without this, glyph indices collide across cells, cursor navigation jumps between unrelated docPos ranges, and `CharacterMap` ends up with overlapping ranges.
+
+Cell coordinates must be absolute page coordinates:
+
+```txt
+tableX, tableY
+  rowY = tableY + previous row heights
+    cellX = tableX + columnX[colIndex]
+      textX = cellX + padding.left
+      textY = rowY + padding.top
+```
+
+V1 pagination:
+
+- A row is atomic.
+- If a row does not fit, move it to the next page.
+- Do not split rows or repeat header rows in v1.
+
+**Pathological row policy.** A single row whose content height exceeds the full content page height places on the next page and clips at the page bottom. Mirrors Word's `cantSplit` behaviour per MS-OE376 §2.4.6 ("Word starts the row on a new page and cuts off overflowing contents"). Without an explicit policy this case is undefined and the renderer can paint off-page or crash.
+
+## LayoutBlock Shape
+
+Tables make `LayoutBlock` polymorphic. Add an explicit discriminator rather than relying only on `cells?: ...`.
+
+```ts
+type LayoutBlockKind = "text" | "leaf" | "tableRow";
+
+interface LayoutBlock {
+  kind: LayoutBlockKind;
+  // existing fields...
+  lines: LayoutLine[];
+  cells?: CellSubBlock[];
+}
+```
+
+Invariants:
+
+- `kind === "text"`: `cells` absent, `lines` drives rendering.
+- `kind === "leaf"`: `cells` absent, `lines` empty.
+- `kind === "tableRow"`: `cells` present, `lines` empty.
+
+This keeps the current structure mostly intact while making renderer/export branching explicit.
+
+## Rendering
+
+`TableRowStrategy` draws:
+
+- Cell backgrounds.
+- Simple cell borders.
+- Header cell background.
+- Nested cell content by rendering each cell's child `LayoutBlock`s.
+
+The renderer should not re-compute table geometry. It consumes the cell geometry produced by `TableLayoutEngine`.
+
+## Selection
+
+Implement a Scrivr-owned canvas cell selection.
+
+V1 can start with a lightweight internal selection helper rather than a full ProseMirror `Selection` subclass:
+
+```ts
+interface CellRange {
+  tablePos: number;
+  anchorCellPos: number;
+  headCellPos: number;
+}
+```
+
+Eventually this may become a real `Selection` subclass if copy/paste and collaborative selection need it.
+
+Overlay behavior:
+
+- Hit-test cells using layout cell bounds.
+- Drag across cells to set a rectangular `CellRange`.
+- Draw selected cell rectangles on the overlay canvas.
+- Merge/split/delete commands read the current table cell range.
+
+## Clipboard And Import
+
+HTML paste:
+
+- Parse `<table>`, `<tr>`, `<td>`, `<th>`.
+- Convert `<colgroup>` or cell widths into `table.grid` where possible.
+- Convert `colspan` to `gridSpan`.
+- Convert `rowspan` to `vMerge` restart/continue cells.
+- Preserve cell `text-align` as `hAlign`.
+- Preserve `vertical-align` as `vAlign`.
+- Strip Word/GDocs noise: `mso-*`, `border-collapse`, `border-spacing`, excessive inline padding.
+
+DOCX later:
+
+- `tblGrid` maps directly to `table.grid`.
+- `gridSpan` maps to `cell.gridSpan`.
+- `vMerge` maps to `cell.vMerge`.
+- `tcMar` maps to `cell.margins`.
+- `tblHeader` maps to `row.repeatHeader`.
+- `tblLayout` maps to `table.layout`.
 
 ## Phased Implementation
 
-### Phase 1 — Schema + Commands (no layout yet)
+### Phase 0 — Design Cleanup
 
-**Goal:** Tables can be inserted and edited; they render as placeholder boxes.
+1. Remove `prosemirror-tables` as a planned dependency.
+2. Update docs and TODOs to say "reference only."
+3. Decide exact schema attrs and defaults.
+4. Add tests for schema parse/create invariants.
 
-1. Add `table`, `tableRow`, `tableCell`, `table_header` node types
-   - Include `align` attr on cell nodes (GDocs compatibility — see Schema section)
-2. Install `tableEditing` plugin
-3. Wire all commands into `addCommands()` + Tab/Shift-Tab keymap
-4. Register a placeholder `TableRowStrategy` that draws a gray rectangle (no text)
-5. `PageLayout` detects `table` nodes and calls a stub `layoutTable()` that returns one row block per row with fixed height (e.g. 40px) and `lines: []`
-6. `ClipboardSerializer` — add `table`, `td`, `th` → HTML round-trip (update `parseDOM` / `toDOM`)
-7. **GDocs paste sanitization** — in `PasteTransformer.cleanPastedHtml()`, add table-specific rules:
-   - Detect GDocs payload: `<meta>` tag with `google-docs` or `<b id="docs-internal-guid-...">` wrapper
-   - Strip `border-collapse`, `border-spacing`, `mso-*` from `<table>` style
-   - Strip cell padding from `<td>`/`<th>` style (our fixed `CELL_PADDING_H/V` replaces it)
-   - Preserve only `text-align` on `<td>` (captured by `align` attr)
-8. Tests: insert table, add/delete rows/columns, merge cells, Tab navigation, undo/redo, paste from GDocs preserves alignment
+### Phase 1 — Schema And Basic Insert
 
-### Phase 2 — Layout Engine + Text Rendering
+Goal: tables can exist in documents and render as placeholders.
 
-**Goal:** Cell text appears correctly positioned; cursor click works inside cells.
+1. **Delete the existing `table` / `tableRow` / `tableCell` stubs from `packages/core/src/model/schema.ts`.** They use an incompatible `columnWidths` attr, lack `isolating`, and have no parseDOM. The Table extension becomes the single source of truth. (Cross-ref `todo_schema_ts_deprecation.md` — the broader schema.ts deprecation is tracked separately; this is the scope-bounded slice for tables.)
+2. Add `kind: LayoutBlockKind` discriminator to `LayoutBlock` and migrate every existing consumer from `lines.length === 0` checks to explicit `kind` branches (image, hr, pageBreak, anchor-only-flow detection, leaf overflow path in `paginateFlow`, PDF defaults, renderer dispatch).
+3. **REGRESSION CRITICAL test sweep.** Verify every existing block type renders unchanged after the discriminator lands: paragraph, heading, list, listItem, image, hr, pageBreak. Sweep `LayoutBlock.test.ts`, `PageRenderer.test.ts`, `PageLayout.test.ts`, `buildPdf.test.ts`. No AskUserQuestion — this is mandatory before any Table-extension code lands.
+4. Create `Table` extension.
+5. Add `table`, `tableRow`, `tableCell`, `tableHeader` node specs.
+6. Add `insertTable({ rows, cols })`.
+7. Add `deleteTable()`.
+8. Add stub `TableLayoutEngine` that returns fixed-height row blocks with `kind: "tableRow"` and `cells: []`.
+9. Add placeholder `TableRowStrategy`.
+10. Wire `StarterKit` option for tables.
+11. Tests: create table, serialize JSON, undo/redo insert/delete.
 
-1. Implement `layoutTable()`:
-   - Use `TableMap.get(tableNode)` to get column/row geometry
-   - Compute column widths from `colwidth` attrs or equal division
-   - For each row, for each cell: call `layoutBlock(cellParagraphNode, { nodePos, x, y, availableWidth: cellWidth })`
-   - Aggregate `CellSubBlock[]` per row, compute row height, build `RowLayoutResult`
-   - Thread `lineIndexOffset` across all cells
-2. Store `cells: CellSubBlock[]` on each `RowLayoutResult.rowBlock`
-3. Implement `TableRowStrategy.render()`:
-   - Draw cell borders (`strokeRect` for each cell bbox)
-   - For each cell's sub-blocks, call `TextBlockStrategy.render()` with the sub-block and correct `lineIndexOffset`
-4. `CharacterMap` populated automatically by `TextBlockStrategy.render()` — no changes
-5. Tests: cursor placement inside cells, click-to-focus, charmap glyph registration
+### Phase 2 — TableMap And Normalization
 
-### Phase 3 — CellSelection Overlay
+Goal: table structure is stable after commands/paste.
 
-**Goal:** Drag-selecting across cells highlights the selected range.
+1. Implement internal `TableMap`.
+2. Implement `normalizeTables()`.
+3. Install `tableIntegrityPlugin()`.
+4. Test invalid grids, missing cells, bad spans, broken vertical merges.
+5. Add HTML parse tests for basic tables.
 
-1. Register overlay render handler via `onEditorReady`
-2. When `state.selection instanceof CellSelection`:
-   - Call `selection.forEachCell((cellNode, cellPos) => ...)` to get selected cell positions
-   - Look up each cell's bounding box from the layout result (stored in `LayoutBlock.cells`)
-   - Draw `rgba(59, 130, 246, 0.2)` rect over each selected cell
-3. Tests: multi-cell selection visually covers correct cells
+### Phase 3 — Row/Column Commands
 
-### Phase 4 — Column Resizing (deferred)
+Goal: edit table structure without layout polish.
 
-**Goal:** Drag column borders to resize.
+1. Implement add/delete row.
+2. Implement add/delete column.
+3. Update `table.grid` during column operations.
+4. Preserve and adjust `gridSpan` and `vMerge`.
+5. Add `goToNextCell()`.
+6. Tests for rectangular tables and merged-cell edge cases.
 
-1. `TableLayoutEngine` stores column border x-positions in `columnBorderMap` (keyed by `nodePos`)
-2. `Editor` mouse event handlers check `columnBorderMap` on `mousemove`
-3. `col-resize` cursor when within ±4px of a border
-4. Drag → `setCellAttr("colwidth", [...])` transaction on `mouseup`
-5. Tests: resize updates layout, colwidth attrs persisted
+### Phase 4 — Real Layout, Rendering, And PDF Parity
 
----
+Goal: cell text renders, cursor hit-testing works, PDF export keeps parity.
 
-## CharacterMap: No Changes Required
+1. Compute column widths from `table.grid` and precompute the `columnX` cumulative array.
+2. Cache `TableMap` once per table.
+3. Layout cell child blocks with default padding using the sandboxed `lineIndexOffset` contract above.
+4. Store `cells` on `kind: "tableRow"` layout blocks.
+5. Render borders/backgrounds/text via `TableRowStrategy`.
+6. Register character map entries through child block rendering (no CharacterMap changes).
+7. **PDF table handler** in `packages/export-pdf/src/defaults.ts`. Lands in the same PR as canvas render — required by `feedback_pdf_parity.md`. Renders rows + cells + borders + text + merged cells; honours row-overflow page-boundary placement.
+8. Tests:
+   - Cursor placement inside cells, row overflow, page transition.
+   - Pathological-row policy (row > page height clips on next page).
+   - **Cache identity perf test.** After a structural command (add column / delete row), surviving cells' `MeasureCacheEntry` instances are the same object. Catches PM Node-identity breakage that would defeat the existing measurement cache.
+   - **Phase 1b inputHash invalidation test.** Modifying a cell's content invalidates that row's pagination cache without expanding `pageRectsDigest` to track table geometry.
+   - PDF parity: golden tests render a sample table and assert PDF byte structure matches canvas semantics (borders, cell bounds, merged cells, row breaks).
 
-The `CharacterMap` is flat — keyed by `docPos`. Cell paragraphs have `docPos` values just like top-level paragraphs. `TextBlockStrategy.render()` registers their glyphs with the correct absolute `docPos`. Hit-testing (`posAtCoords`, `coordsAtPos`) works without any changes.
+### Phase 5 — Editing Semantics
 
-The only requirement: `TableLayoutEngine` must compute the correct absolute `nodePos` for each cell's paragraph child. ProseMirror positions inside a table:
+Goal: cell editing UX matches Word/Docs expectations.
 
-```
-tableNodePos              → before <table>
-tableNodePos + 1          → inside <table>, before first <tableRow>
-tableNodePos + 1 + R      → before a row (R = sum of sizes of preceding rows)
-tableNodePos + 1 + R + 1  → inside row, before first <tableCell>
-...etc.
-```
+1. Implement `tableEditingGuards()` plugin (separate from `tableIntegrityPlugin()`).
+2. Cross-cell text selection promotion: detect a text selection that starts in one cell and ends in another; convert to a `CellRange`.
+3. `Backspace` / `Delete` inside an empty cell clears content or moves within the cell — never deletes the table boundary.
+4. `Tab` / `Shift-Tab` cell navigation; tabbing past the last cell creates a new row.
+5. Paste into a `CellRange`: distribute pasted table cells into the selected rectangle; fill plain text/blocks row-major.
+6. Tests: cross-cell selection, deletion at cell boundaries, paste table into selected cells, paste plain text into cells, undo/redo across all of the above.
 
-`TableMap` provides `cellPos(row, col)` which returns the absolute position of any cell's opening token. The paragraph inside a cell is at `cellPos + 1 + 1` (inside cell + past cell opening = inside first paragraph). Use PM's `node.resolve()` / `doc.nodeAt()` to walk positions rather than computing manually.
+### Phase 6 — Cell Selection And Merge/Split
 
----
+Goal: common table editing workflows work on canvas.
+
+1. Implement cell hit-testing from layout cell bounds.
+2. Implement drag cell range selection.
+3. Draw selection overlay.
+4. Implement `mergeCells()`.
+5. Implement `splitCell()`.
+6. Tests: rectangular selections, merge/split, delete selected cells.
+
+### Phase 7 — Clipboard Round Trip
+
+Goal: paste/copy common tables.
+
+1. Add table support to `ClipboardSerializer`.
+2. Add table rules to `PasteTransformer`.
+3. Preserve `grid`, `gridSpan`, `vMerge`, `hAlign`, and `vAlign`.
+4. Tests with simple HTML, GDocs-like HTML, and Word-like HTML.
+
+### Phase 8 — Markdown And DOCX Export
+
+Goal: extra export targets beyond the PDF parity that landed in Phase 4.
+
+1. Markdown serializer for simple tables when possible (skip merged cells; markdown can't represent them).
+2. DOCX exporter mapping to `tblGrid`, `gridSpan`, `vMerge`, `tcMar`, borders.
+
+### Phase 9 — Deferred Polish
+
+1. Column resizing.
+2. Repeated header rows.
+3. Row splitting.
+4. AutoFit.
+5. Floating tables.
+6. Table styles and border conflict resolution.
+7. **`tableLayoutCache: Map<tablePos, { cells: Map<cellPos, bbox> }>`** — centralise cell bounding boxes so selection overlay, hit-testing, and column resize don't re-walk per-row `CellSubBlock` arrays. Land when Phase 6 (selection) or column-resize work reveals the friction.
+8. Migrate `CellRange` to a real ProseMirror `Selection` subclass when copy/paste or collab cursor sync demands it.
 
 ## Dependencies
 
-```bash
-pnpm add prosemirror-tables
-```
+No new runtime dependency is required for v1.
 
-All model-layer imports (`tableEditing`, `TableMap`, `CellSelection`, commands) come from `prosemirror-tables`. No DOM APIs are used from this package — only the model/plugin layer.
+Reference material:
 
----
+- `prosemirror-tables` for table map, normalization, and command behavior.
+- MS-OE376 / WordprocessingML for schema and import/export semantics.
 
-## Files to Create / Modify
+If code is copied from `prosemirror-tables`, preserve MIT attribution and license notes. Prefer clean-room implementation shaped around Scrivr's model.
+
+## Files To Create / Modify
 
 | File | Action |
 |------|--------|
-| `packages/core/src/extensions/built-in/Table.ts` | **Create** — Extension definition |
-| `packages/core/src/layout/TableLayoutEngine.ts` | **Create** — `layoutTable()`, `CellSubBlock`, `RowLayoutResult` |
-| `packages/core/src/layout/TableRowStrategy.ts` | **Create** — `BlockStrategy` for `tableRow` |
-| `packages/core/src/layout/BlockLayout.ts` | **Modify** — add `cells?: CellSubBlock[]` to `LayoutBlock` |
-| `packages/core/src/layout/PageLayout.ts` | **Modify** — detect table nodes, call `layoutTable()` |
-| `packages/core/src/input/ClipboardSerializer.ts` | **Modify** — add table HTML round-trip |
-| `packages/core/src/extensions/built-in/Table.test.ts` | **Create** — unit tests for all phases |
-| `packages/core/src/layout/TableLayoutEngine.test.ts` | **Create** — layout unit tests |
+| `packages/core/src/extensions/built-in/Table.ts` | Create table extension |
+| `packages/core/src/table/TableMap.ts` | Create Word-shaped table map |
+| `packages/core/src/table/commands.ts` | Create table commands |
+| `packages/core/src/table/normalize.ts` | Create `tableIntegrityPlugin` + `normalizeTables` (document validity) |
+| `packages/core/src/table/editingGuards.ts` | Create `tableEditingGuards` plugin (editing UX) |
+| `packages/core/src/table/selection.ts` | Create canvas cell selection helpers |
+| `packages/core/src/layout/TableLayoutEngine.ts` | Create table layout |
+| `packages/core/src/layout/TableRowStrategy.ts` | Create canvas renderer strategy |
+| `packages/core/src/model/schema.ts` | Delete the existing `table` / `tableRow` / `tableCell` stubs |
+| `packages/core/src/layout/BlockLayout.ts` | Add `kind` discriminator + `cells?: CellSubBlock[]`; migrate every `lines.length === 0` consumer |
+| `packages/core/src/layout/PageLayout.ts` | Detect tables and call table layout |
+| `packages/core/src/input/ClipboardSerializer.ts` | Add table HTML round-trip |
+| `packages/core/src/input/PasteTransformer.ts` | Add table paste cleanup/parsing |
+| `packages/core/src/extensions/StarterKit.ts` | Add table option and registration |
+| `packages/export-pdf/src/defaults.ts` | Add table export handler |
+| `packages/export-docx/src/*` | Later DOCX table handlers |
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | not run |
+| Codex Review | `/codex review` | Independent 2nd opinion | 1 | issues_found | outside-AI review pasted inline by user; 5 architecture improvements captured |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | issues_found | 13 plan additions to land — 5 architecture, 3 code quality, 2 perf, 2 critical failure-mode gaps, 1 regression sweep; 80 test paths surfaced; 3 TODOs accepted; PDF parity bundled into Phase 4 |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | n/a — backend feature |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | n/a |
+
+- **CROSS-MODEL:** Outside-AI review (pasted by user during Issue 7) and this Eng Review converge on three points: (a) sandboxed cell layout context with explicit `lineIndexOffset` threading, (b) split between document validity and editing UX, (c) row-atomic page overflow is correct.
+- **UNRESOLVED:** 0 — every issue either resolved with user decision or captured as TODO/plan addition.
+- **VERDICT:** ENG CLEARED — ready to implement after the 13 plan additions are edited into `docs/tables.md`. CEO review is optional; this is a feature-execution doc, not a strategic scope decision.
+
