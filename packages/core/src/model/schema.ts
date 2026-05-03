@@ -92,28 +92,6 @@ export const schema = new Schema({
       toDOM: () => ["hr"],
     },
 
-    /** Table — fixed-width columns, common in legal contracts */
-    table: {
-      group: "block",
-      content: "tableRow+",
-      attrs: {
-        columnWidths: { default: [] as number[] }, // explicit widths in px
-      },
-    },
-
-    tableRow: {
-      content: "tableCell+",
-    },
-
-    tableCell: {
-      content: "block+",
-      attrs: {
-        colspan: { default: 1 },
-        rowspan: { default: 1 },
-        background: { default: null as string | null },
-      },
-    },
-
     /** Hard page break — forces content onto the next page */
     pageBreak: {
       group: "block",
