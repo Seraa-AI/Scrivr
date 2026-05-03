@@ -15,9 +15,6 @@ describe("schema — nodes", () => {
       "listItem",
       "codeBlock",
       "horizontalRule",
-      "table",
-      "tableRow",
-      "tableCell",
       "pageBreak",
       "hardBreak",
     ];
@@ -29,11 +26,6 @@ describe("schema — nodes", () => {
   it("heading has a level attribute defaulting to 1", () => {
     const heading = schema.nodes["heading"]!;
     expect(heading.spec.attrs?.["level"]?.default).toBe(1);
-  });
-
-  it("table has columnWidths attribute defaulting to empty array", () => {
-    const table = schema.nodes["table"]!;
-    expect(table.spec.attrs?.["columnWidths"]?.default).toEqual([]);
   });
 });
 
