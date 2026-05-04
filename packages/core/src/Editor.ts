@@ -327,7 +327,7 @@ export class Editor extends BaseEditor implements IEditor {
       (typeof document !== "undefined" ? document.documentElement : null);
     this._resolvedTheme = this._themeRoot
       ? resolveTheme(this._theme, this._themeRoot)
-      : { ...defaultEditorTheme };
+      : Object.freeze({ ...defaultEditorTheme });
 
     this._onChange = onChange;
     this._onFocusChange = onFocusChange;
@@ -898,7 +898,7 @@ export class Editor extends BaseEditor implements IEditor {
    *
    * Per-instance precedence: this overrides any extension's theme contribution.
    */
-  setTheme(partial: Partial<{ [K in keyof EditorTheme]: EditorTheme[K] | null }>): void {
+  setTheme(partial: { [K in keyof EditorTheme]?: EditorTheme[K] | null | undefined }): void {
     this._theme = mergeEditorTheme(this._theme, partial);
     if (this._themeRoot) {
       this._resolvedTheme = resolveTheme(this._theme, this._themeRoot);

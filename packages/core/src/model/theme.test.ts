@@ -10,7 +10,7 @@ import { resolveTheme, resolveThemeColor, disposeProbe } from "./resolveTheme";
 
 describe("theme — defaults", () => {
   it("defaultEditorTheme has every documented token", () => {
-    const required = [
+    const required: Array<keyof typeof defaultEditorTheme> = [
       "pageBg",
       "pageShadow",
       "defaultText",
@@ -26,7 +26,7 @@ describe("theme — defaults", () => {
     ];
     for (const key of required) {
       expect(defaultEditorTheme).toHaveProperty(key);
-      expect(typeof defaultEditorTheme[key as keyof typeof defaultEditorTheme]).toBe("string");
+      expect(typeof defaultEditorTheme[key]).toBe("string");
     }
   });
 
@@ -42,10 +42,8 @@ describe("theme — defaults", () => {
   });
 
   it("defaults are frozen", () => {
-    expect(() => {
-      // @ts-expect-error testing runtime immutability
-      defaultEditorTheme.pageBg = "red";
-    }).toThrow();
+    expect(Object.isFrozen(defaultEditorTheme)).toBe(true);
+    expect(Object.isFrozen(defaultPdfTheme)).toBe(true);
   });
 });
 
@@ -152,9 +150,6 @@ describe("resolveTheme", () => {
 
   it("returns a frozen object", () => {
     const resolved = resolveTheme({ pageBg: "#fff" }, root);
-    expect(() => {
-      // @ts-expect-error testing runtime immutability
-      resolved.pageBg = "red";
-    }).toThrow();
+    expect(Object.isFrozen(resolved)).toBe(true);
   });
 });

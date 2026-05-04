@@ -7,29 +7,106 @@
  * 3. ServerEditor + literal-only theme works server-side (no DOM, no resolver).
  */
 import { describe, it, expect, vi } from "vitest";
+import { Schema } from "prosemirror-model";
 import { ServerEditor, StarterKit, defaultPdfTheme } from "@scrivr/core";
+import type { DocumentLayout, LayoutBlock, LayoutLine } from "@scrivr/core";
 import { buildPdf } from "../index";
+
+// ── Layout fixture helpers ────────────────────────────────────────────────────
+
+const PAGE_W = 794;
+const PAGE_H = 1123;
+const MARGIN = 72;
+const AVAIL_W = PAGE_W - 2 * MARGIN;
+
+const schema = new Schema({
+  nodes: {
+    doc: { content: "block+" },
+    paragraph: { group: "block", content: "inline*" },
+    text: { group: "inline" },
+  },
+  marks: {},
+});
+
+const PAGE_CONFIG = {
+  pageWidth: PAGE_W,
+  pageHeight: PAGE_H,
+  margins: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN },
+};
+
+function textLine(text: string): LayoutLine {
+  return {
+    spans: [{ kind: "text", text, font: "16px Helvetica", x: 0, width: text.length * 9, docPos: 0 }],
+    width: text.length * 9,
+    lineHeight: 24,
+    ascent: 18,
+    descent: 6,
+    cursorHeight: 20,
+    textAscent: 18,
+    xHeight: 8,
+  };
+}
+
+function paragraphBlock(lines: LayoutLine[]): LayoutBlock {
+  return {
+    kind: "text",
+    node: schema.nodes.paragraph!.create(),
+    nodePos: 0,
+    x: MARGIN,
+    y: MARGIN,
+    width: AVAIL_W,
+    height: lines.reduce((s, l) => s + l.lineHeight, 0),
+    lines,
+    spaceBefore: 0,
+    spaceAfter: 0,
+    blockType: "paragraph",
+    align: "left",
+    availableWidth: AVAIL_W,
+  };
+}
+
+function buildLayout(blocks: LayoutBlock[] = []): DocumentLayout {
+  return {
+    pages: [{ pageNumber: 1, blocks }],
+    pageConfig: PAGE_CONFIG,
+    version: 1,
+    totalContentHeight: PAGE_H,
+    anchoredObjects: [],
+    fragments: [],
+  };
+}
+
+function byteEquals(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("buildPdf — theme defaults", () => {
   it("produces a non-empty PDF binary with the default print theme", async () => {
-    const editor = new ServerEditor({ extensions: [StarterKit] });
-    const bytes = await buildPdf(editor.layout ?? buildLayout(), undefined, undefined);
+    const bytes = await buildPdf(buildLayout());
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(0);
   });
 
-  it("ignores the editor.theme entirely (default ≠ canvas)", async () => {
-    // Construct a ServerEditor with a "dark" theme. PDF default should still
-    // be print-ready because exportToPdf is not given an explicit theme.
-    const darkBytes = await buildPdf(
-      buildLayout(),
-      undefined,
-      undefined,
-    );
-    // Check the bytes match what a no-theme call produces.
-    const lightBytes = await buildPdf(buildLayout(), undefined, undefined);
-    // Both should be valid PDFs of similar size — same default.
-    expect(darkBytes.length).toBe(lightBytes.length);
+  it("default path produces different bytes than a dark-theme override (proves default ≠ override)", async () => {
+    // The point of this test: default path uses defaultPdfTheme; override
+    // path uses caller-provided colors. If the bytes are identical, the
+    // override isn't reaching the PDF — REGRESSION CRITICAL.
+    const layout = buildLayout([paragraphBlock([textLine("Hello world")])]);
+    const defaultBytes = await buildPdf(layout);
+    const darkBytes = await buildPdf(layout, {
+      theme: { pageBg: "#1e1e1e", defaultText: "#e0e0e0", link: "#60a5fa" },
+    });
+    expect(defaultBytes).toBeInstanceOf(Uint8Array);
+    expect(darkBytes).toBeInstanceOf(Uint8Array);
+    // Override paints different colors → at least one byte differs in the
+    // content stream. If this passes equality, the theme isn't reaching paint.
+    expect(byteEquals(defaultBytes, darkBytes)).toBe(false);
   });
 });
 
@@ -38,7 +115,6 @@ describe("buildPdf — theme override", () => {
     const bytes = await buildPdf(
       buildLayout(),
       { theme: { pageBg: "#1e1e1e", defaultText: "#e0e0e0" } },
-      undefined,
     );
     expect(bytes.length).toBeGreaterThan(0);
   });
@@ -72,15 +148,3 @@ describe("ServerEditor — theme + var() warning", () => {
     expect(defaultPdfTheme.defaultText).toBe("#000000");
   });
 });
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function buildLayout() {
-  // Minimal layout with a single empty page — exercises the build pipeline
-  // without depending on canvas measurement.
-  return {
-    pageConfig: { pageWidth: 794, pageHeight: 1123, margins: { top: 72, right: 72, bottom: 72, left: 72 } },
-    pages: [],
-    version: 1,
-  } as unknown as Parameters<typeof buildPdf>[0];
-}

@@ -157,7 +157,7 @@ export const defaultPdfTheme: ResolvedTheme = Object.freeze({
  */
 export function mergeEditorTheme(
   base: EditorTheme,
-  partial: Partial<{ [K in keyof EditorTheme]: EditorTheme[K] | null }>,
+  partial: { [K in keyof EditorTheme]?: EditorTheme[K] | null | undefined },
 ): EditorTheme {
   const next: EditorTheme = { ...base };
   for (const key of Object.keys(partial) as Array<keyof EditorTheme>) {

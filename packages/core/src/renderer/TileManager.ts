@@ -667,6 +667,7 @@ export class TileManager {
     // this tile yet, leaving its glyphs missing from the charMap.
     if (!sel.empty) this.editor.ensurePagePopulated(pageNum);
 
+    const overlayTheme = this.editor.getResolvedTheme();
     if (!sel.empty && !isNodeSel) {
       const lines = this.editor.charMap
         .linesInRange(sel.from, sel.to)
@@ -674,7 +675,7 @@ export class TileManager {
       const glyphs = this.editor.charMap
         .glyphsInRange(sel.from, sel.to)
         .filter((g) => g.page === pageNum);
-      renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to, this.editor.getResolvedTheme().selectionFill);
+      renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to, overlayTheme.selectionFill);
     }
 
     // ── Cursor (suppressed when a surface is active — chrome bands own their cursor) ──
@@ -685,7 +686,7 @@ export class TileManager {
       !surfaceActive
     ) {
       const coords = this.editor.charMap.coordsAtPos(sel.head, pageNum);
-      if (coords) renderCursor(overlayCtx, coords, this.editor.getResolvedTheme().cursor);
+      if (coords) renderCursor(overlayCtx, coords, overlayTheme.cursor);
     }
 
     // ── Image selection handles ───────────────────────────────────────────
