@@ -10,3 +10,4 @@ apps/server/data/
 .env
 *.code-workspace
 *MS-OE376*.docx
+.gstack/
