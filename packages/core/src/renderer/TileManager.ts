@@ -430,6 +430,7 @@ export class TileManager {
     if (this.editor.isPageless) {
       this.paintContentPageless(tile, layout);
     } else {
+      this.applyPagedWrapperTheme(tile);
       this.paintContentPaged(tile, layout, pageNumber);
     }
 
@@ -444,6 +445,23 @@ export class TileManager {
         "scrivr:first-paint-end",
       );
       this._firstPaintDone = true;
+    }
+  }
+
+  /**
+   * Apply theme-driven wrapper styles (shadow + background) to a paged-mode
+   * tile. User-provided `pageStyle` overrides win — `pageStyle.boxShadow` /
+   * `pageStyle.background` short-circuit the theme tokens. Re-runs on every
+   * paint so setTheme() flows through to wrappers without a remount.
+   */
+  private applyPagedWrapperTheme(tile: TileEntry): void {
+    const theme = this.editor.getResolvedTheme();
+    const wrapper = tile.wrapper;
+    if (this.pageStyle.boxShadow === undefined) {
+      wrapper.style.boxShadow = theme.pageShadow;
+    }
+    if (this.pageStyle.background === undefined) {
+      wrapper.style.background = theme.pageBg;
     }
   }
 
@@ -710,7 +728,7 @@ export class TileManager {
             pending.width,
             pending.height,
           );
-          renderHandles(overlayCtx, g.x, g.y, g.width, g.height, this.editor.getResolvedTheme().resizeHandle);
+          renderHandles(overlayCtx, g.x, g.y, g.width, g.height, overlayTheme.resizeHandle);
         } else {
           renderHandles(
             overlayCtx,
@@ -718,7 +736,7 @@ export class TileManager {
             objRect.y,
             objRect.width,
             objRect.height,
-            this.editor.getResolvedTheme().resizeHandle,
+            overlayTheme.resizeHandle,
           );
         }
       }
@@ -794,13 +812,9 @@ export class TileManager {
       display: "none", // hidden until assigned by update()
       cursor: "text",
       userSelect: "none",
-      // Paged mode defaults — overridden by pageStyle option
-      ...(!this.editor.isPageless
-        ? {
-            boxShadow: "0 4px 32px rgba(0,0,0,0.12)",
-            background: "#fff",
-          }
-        : {}),
+      // Paged-mode boxShadow + background are theme-driven and applied per
+      // paint in applyPagedWrapperTheme. Only the user's pageStyle overrides
+      // are baked in at construction so they survive every paint cycle.
       ...(!this.editor.isPageless ? this.pageStyle : {}),
     });
 

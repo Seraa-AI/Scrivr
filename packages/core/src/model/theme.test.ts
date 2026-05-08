@@ -45,6 +45,16 @@ describe("theme — defaults", () => {
     expect(Object.isFrozen(defaultEditorTheme)).toBe(true);
     expect(Object.isFrozen(defaultPdfTheme)).toBe(true);
   });
+
+  // Regression guards — these values must not drift silently. Matching the
+  // pre-theming hardcoded paint colors is the contract that keeps "no theme
+  // option = no visual change" true.
+  it("defaultEditorTheme.link is blue-600 (matches pre-theming LINK_COLOR)", () => {
+    expect(defaultEditorTheme.link).toBe("#2563eb");
+  });
+  it("defaultEditorTheme.defaultText is slate-800 (matches pre-theming fillColor)", () => {
+    expect(defaultEditorTheme.defaultText).toBe("#1e293b");
+  });
 });
 
 describe("mergeEditorTheme", () => {

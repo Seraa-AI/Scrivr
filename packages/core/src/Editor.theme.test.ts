@@ -114,4 +114,21 @@ describe("Editor — destroy", () => {
     const probesAfter = document.documentElement.querySelectorAll("[data-scrivr-theme-probe]");
     expect(probesAfter.length).toBeLessThanOrEqual(probesBefore.length);
   });
+
+  // Mount-time probe handoff: constructor resolves against documentElement,
+  // mount() switches to the container. Without disposal the documentElement
+  // probe would persist after destroy().
+  it("does not leak a probe to documentElement when mount() switches themeRoot to a container", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = new Editor({ theme: { pageBg: "#1e1e1e" } });
+    // resolveTheme ran in the constructor against documentElement.
+    editor.mount(container);
+    editor.destroy();
+    expect(
+      document.documentElement.querySelectorAll(":scope > [data-scrivr-theme-probe]").length,
+    ).toBe(0);
+    expect(container.querySelectorAll("[data-scrivr-theme-probe]").length).toBe(0);
+    container.remove();
+  });
 });

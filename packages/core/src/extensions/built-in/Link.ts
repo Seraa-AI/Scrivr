@@ -1,8 +1,6 @@
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
 
-const LINK_COLOR = "#2563eb"; // blue-600
-
 /**
  * Link — inline hyperlink via the `link` mark.
  *

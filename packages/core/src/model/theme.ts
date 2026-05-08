@@ -98,7 +98,7 @@ export interface ResolvedTheme {
  * - pageBg: white page background — canvas.ts clearCanvas
  * - pageShadow: subtle wrapper shadow — TileManager wrapper
  * - defaultText: slate-800 — TextBlockStrategy default fillColor
- * - link: indigo-600 — Link.ts LINK_COLOR
+ * - link: blue-600 — was Link.ts LINK_COLOR before tokens existed
  * - cursor: slate-800 — OverlayRenderer cursor fill
  * - selectionFill: blue-500 @ 25% — OverlayRenderer selection rect
  * - imagePlaceholderBg / Border / Text: slate-100 / 300 / 500 — Image.ts
@@ -110,7 +110,7 @@ export const defaultEditorTheme: ResolvedTheme = Object.freeze({
   pageBg: "#ffffff",
   pageShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
   defaultText: "#1e293b",
-  link: "#4f46e5",
+  link: "#2563eb",
   cursor: "#1e293b",
   selectionFill: "rgba(59, 130, 246, 0.25)",
   imagePlaceholderBg: "#f1f5f9",

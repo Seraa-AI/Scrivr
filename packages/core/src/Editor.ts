@@ -203,8 +203,8 @@ export class Editor extends BaseEditor implements IEditor {
   private readonly _explicitThemeRoot: boolean;
   /** MutationObserver watching themeRoot for class/style/data-theme flips. */
   private _themeObserver: MutationObserver | null = null;
-  /** rAF token for coalesced theme refresh. */
-  private _themeRefreshScheduled = false;
+  /** rAF id for the coalesced theme refresh — tracked so destroy/unmount can cancel it. */
+  private _themeRefreshRafId: number | null = null;
 
   /** Page dimensions and margins — passed to LayoutCoordinator and read by renderers. */
   readonly pageConfig: PageConfig;
@@ -668,7 +668,12 @@ export class Editor extends BaseEditor implements IEditor {
     this.overlayRenderHandlers.clear();
     this.cursorManager.stop();
     this.unmount();
-    if (this._themeRoot) disposeProbe(this._themeRoot);
+    if (this._themeRoot) {
+      disposeProbe(this._themeRoot);
+      // Null the root so any stray rAF/observer that fires post-destroy
+      // bails on the `!_themeRoot` guard instead of recreating the probe.
+      this._themeRoot = null;
+    }
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -859,6 +864,13 @@ export class Editor extends BaseEditor implements IEditor {
   mount(container: HTMLElement): void {
     this.ib.mount(container);
     if (!this._explicitThemeRoot) {
+      // Constructor may have created a probe at document.documentElement to
+      // resolve the initial theme; dispose it before switching roots so the
+      // probe doesn't leak when the editor is later destroyed.
+      const previousRoot = this._themeRoot;
+      if (previousRoot && previousRoot !== container) {
+        disposeProbe(previousRoot);
+      }
       this._themeRoot = container;
       this._resolvedTheme = resolveTheme(this._theme, container);
     }
@@ -871,6 +883,11 @@ export class Editor extends BaseEditor implements IEditor {
    */
   unmount(): void {
     this._uninstallThemeObserver();
+    // When themeRoot was implicitly bound to the mount container, drop the
+    // probe so a subsequent mount() onto a different container doesn't leak.
+    if (!this._explicitThemeRoot && this._themeRoot) {
+      disposeProbe(this._themeRoot);
+    }
     this.ib.unmount();
   }
 
@@ -925,17 +942,27 @@ export class Editor extends BaseEditor implements IEditor {
       this._themeObserver.disconnect();
       this._themeObserver = null;
     }
+    if (this._themeRefreshRafId !== null) {
+      if (typeof cancelAnimationFrame !== "undefined") {
+        cancelAnimationFrame(this._themeRefreshRafId);
+      } else {
+        clearTimeout(this._themeRefreshRafId);
+      }
+      this._themeRefreshRafId = null;
+    }
   }
 
   private _scheduleThemeRefresh(): void {
-    if (this._themeRefreshScheduled) return;
-    this._themeRefreshScheduled = true;
-    const raf =
+    if (this._themeRefreshRafId !== null) return;
+    const schedule =
       typeof requestAnimationFrame !== "undefined"
         ? requestAnimationFrame
         : (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16) as unknown as number;
-    raf(() => {
-      this._themeRefreshScheduled = false;
+    this._themeRefreshRafId = schedule(() => {
+      this._themeRefreshRafId = null;
+      // Guard against post-destroy fire: unmount + destroy null _themeRoot
+      // and disposeProbe; without this, the rAF body would recreate a probe
+      // via ensureProbe and call redraw() on a torn-down editor.
       if (!this._themeRoot) return;
       this._resolvedTheme = resolveTheme(this._theme, this._themeRoot);
       this.redraw();

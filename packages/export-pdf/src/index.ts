@@ -156,6 +156,16 @@ export async function buildPdf(
     ctx.page = currentPage;
     ctx.layoutPage = layoutPage;
 
+    // Page background — pdf-lib's default is white, so themed exports must
+    // explicitly paint pageBg or a dark `theme.pageBg` would be invisible.
+    currentPage.drawRectangle({
+      x: 0,
+      y: 0,
+      width: pageWidthPt,
+      height: pageHeightPt,
+      color: parseCssColor(resolvedTheme.pageBg),
+    });
+
     // Anchored objects behind blocks
     const pageObjects = (layout.anchoredObjects ?? [])
       .filter((o) => o.page === pageNumber)

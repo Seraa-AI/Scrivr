@@ -118,6 +118,16 @@ describe("buildPdf — theme override", () => {
     );
     expect(bytes.length).toBeGreaterThan(0);
   });
+
+  // Functional regression guard: the pageBg token must actually reach paint.
+  // Two exports that differ ONLY in pageBg should produce different bytes —
+  // earlier the bg rect was never drawn so this would have passed equality.
+  it("pageBg-only override changes the PDF output (proves the token reaches paint)", async () => {
+    const layout = buildLayout([paragraphBlock([textLine("Hi")])]);
+    const a = await buildPdf(layout, { theme: { pageBg: "#1e1e1e" } });
+    const b = await buildPdf(layout, { theme: { pageBg: "#abc123" } });
+    expect(byteEquals(a, b)).toBe(false);
+  });
 });
 
 describe("ServerEditor — theme + var() warning", () => {
@@ -146,5 +156,18 @@ describe("ServerEditor — theme + var() warning", () => {
     expect(defaultPdfTheme).toBeDefined();
     expect(defaultPdfTheme.pageBg).toBe("#ffffff");
     expect(defaultPdfTheme.defaultText).toBe("#000000");
+  });
+
+  it("getResolvedTheme returns defaults merged with literal overrides (var() entries dropped)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const editor = new ServerEditor({
+      extensions: [StarterKit],
+      theme: { pageBg: "#1e1e1e", defaultText: "var(--scrivr-text)" },
+    });
+    const resolved = editor.getResolvedTheme();
+    expect(resolved.pageBg).toBe("#1e1e1e");
+    // var() entry was dropped; default fills in.
+    expect(resolved.defaultText).toBe("#1e293b");
+    warn.mockRestore();
   });
 });

@@ -32,9 +32,13 @@ export const Underline = Extension.create({
 
   addMarkDecorators() {
     const decorator: MarkDecorator = {
-      decoratePost(ctx, rect, _theme, effectiveTextColor) {
+      // Underline follows the theme's default text color, not the per-span
+      // color mark — preserves Word/Docs convention where colored text gets
+      // the same underline color as plain text. Theme switching (e.g. dark
+      // mode) updates underline color via theme.defaultText.
+      decoratePost(ctx, rect, theme, _effectiveTextColor) {
         ctx.save();
-        ctx.strokeStyle = effectiveTextColor;
+        ctx.strokeStyle = theme.defaultText;
         ctx.lineWidth = 1;
         ctx.beginPath();
         const underlineY = rect.y + Math.ceil(rect.descent * 0.6);

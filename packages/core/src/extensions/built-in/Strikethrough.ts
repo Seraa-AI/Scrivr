@@ -33,9 +33,11 @@ export const Strikethrough = Extension.create({
 
   addMarkDecorators() {
     const decorator: MarkDecorator = {
-      decoratePost(ctx, rect, _theme, effectiveTextColor) {
+      // Follows theme.defaultText, not the per-span color mark — Word/Docs
+      // convention: colored text gets the same strike color as plain text.
+      decoratePost(ctx, rect, theme, _effectiveTextColor) {
         ctx.save();
-        ctx.strokeStyle = effectiveTextColor;
+        ctx.strokeStyle = theme.defaultText;
         ctx.lineWidth = 1;
         ctx.beginPath();
         const strikeY = rect.y - rect.ascent * 0.35;
