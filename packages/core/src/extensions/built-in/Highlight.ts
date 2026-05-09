@@ -84,7 +84,7 @@ export const Highlight = Extension.create<HighlightOptions>({
        * Using pre (not post) so the text sits on top of the highlight.
        * If we used post, the highlight would cover the text.
        */
-      decoratePre(ctx: CanvasRenderingContext2D, rect: SpanRect) {
+      decoratePre(ctx, rect, _theme, _effectiveTextColor) {
         const color = multicolor
           ? (rect.markAttrs.color as string | undefined) ?? defaultColor
           : defaultColor;

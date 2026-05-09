@@ -306,8 +306,8 @@ export function TrackChangesPanel({ editor }: TrackChangesPanelProps) {
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",
-        background: "#fff",
-        borderLeft: "1px solid #e8eaed",
+        background: "var(--app-surface, #fff)",
+        borderLeft: "1px solid var(--app-border, #e8eaed)",
         overflow: "hidden",
       }}
     >
@@ -318,7 +318,7 @@ export function TrackChangesPanel({ editor }: TrackChangesPanelProps) {
           alignItems: "center",
           height: 44,
           padding: "0 14px",
-          borderBottom: "1px solid #e8eaed",
+          borderBottom: "1px solid var(--app-border, #e8eaed)",
           gap: 8,
           flexShrink: 0,
         }}
@@ -327,7 +327,7 @@ export function TrackChangesPanel({ editor }: TrackChangesPanelProps) {
           style={{
             fontSize: 13,
             fontWeight: 600,
-            color: "#111827",
+            color: "var(--app-text, #111827)",
             letterSpacing: "-0.01em",
           }}
         >
@@ -384,7 +384,7 @@ export function TrackChangesPanel({ editor }: TrackChangesPanelProps) {
             <span
               style={{
                 fontSize: 13,
-                color: "#9ca3af",
+                color: "var(--app-text-faint, #9ca3af)",
                 textAlign: "center",
                 lineHeight: 1.5,
               }}
@@ -534,7 +534,7 @@ function ChangeRow({
     <div
       style={{
         padding: "8px 14px",
-        borderBottom: "1px solid #f1f5f9",
+        borderBottom: "1px solid var(--app-border, #f1f5f9)",
         display: "flex",
         flexDirection: "column",
         gap: 5,
@@ -563,7 +563,7 @@ function ChangeRow({
         <span
           style={{
             fontSize: 11,
-            color: "#6b7280",
+            color: "var(--app-text-muted, #6b7280)",
             flex: 1,
             overflow: "hidden",
             textOverflow: "ellipsis",

@@ -36,13 +36,18 @@ export function ModeSwitcher({ editor }: ModeSwitcherProps) {
   return (
     <div className="relative inline-block">
       <button
-        className="flex items-center gap-1.5 h-[28px] px-2.5 border border-[#e8eaed] rounded-md bg-white text-[12px] text-gray-700 font-medium cursor-pointer select-none tracking-tight"
+        className="flex items-center gap-1.5 h-[28px] px-2.5 border rounded-md text-[12px] font-medium cursor-pointer select-none tracking-tight"
+        style={{
+          background: "var(--app-surface)",
+          borderColor: "var(--app-border)",
+          color: "var(--app-text)",
+        }}
         onMouseDown={(e) => {
           e.preventDefault();
           setOpen((o) => !o);
         }}
       >
-        <span className="text-[11px] text-indigo-500 leading-none">
+        <span className="text-[11px] leading-none" style={{ color: "var(--app-accent)" }}>
           {current.icon}
         </span>
         <span className="min-w-[62px] text-left">{current.label}</span>
@@ -52,32 +57,57 @@ export function ModeSwitcher({ editor }: ModeSwitcherProps) {
       {open && (
         <>
           <div className="fixed inset-0 z-99" onClick={() => setOpen(false)} />
-          <div className="absolute top-[calc(100%+5px)] right-0 z-100 bg-white border border-[#e8eaed] rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.08),0_1px_4px_rgba(0,0,0,0.04)] min-w-[148px] overflow-hidden p-1">
-            {MODES.map((m) => (
-              <button
-                key={m.value}
-                className={[
-                  "w-full flex items-center gap-2 px-2.5 py-[7px] border-none rounded-md text-[13px] font-medium cursor-pointer text-left tracking-tight transition-colors",
-                  m.value === mode
-                    ? "bg-indigo-50 text-indigo-700"
-                    : "bg-transparent text-gray-700 hover:bg-gray-100",
-                ].join(" ")}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  handleSelect(m.value);
-                }}
-              >
-                <span
-                  className={[
-                    "text-[11px] leading-none w-[14px] text-center",
-                    m.value === mode ? "text-indigo-500" : "text-gray-400",
-                  ].join(" ")}
+          <div
+            className="absolute top-[calc(100%+5px)] right-0 z-100 border rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.18),0_1px_4px_rgba(0,0,0,0.08)] min-w-[148px] overflow-hidden p-1"
+            style={{
+              background: "var(--app-surface)",
+              borderColor: "var(--app-border)",
+            }}
+          >
+            {MODES.map((m) => {
+              const selected = m.value === mode;
+              return (
+                <button
+                  key={m.value}
+                  className="w-full flex items-center gap-2 px-2.5 py-[7px] border-none rounded-md text-[13px] font-medium cursor-pointer text-left tracking-tight transition-colors"
+                  style={
+                    selected
+                      ? {
+                          background: "var(--app-accent-soft-bg)",
+                          color: "var(--app-accent-soft-fg)",
+                        }
+                      : {
+                          background: "transparent",
+                          color: "var(--app-text)",
+                        }
+                  }
+                  onMouseEnter={(e) => {
+                    if (selected) return;
+                    e.currentTarget.style.background = "var(--app-surface-hover)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (selected) return;
+                    e.currentTarget.style.background = "transparent";
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleSelect(m.value);
+                  }}
                 >
-                  {m.icon}
-                </span>
-                <span>{m.label}</span>
-              </button>
-            ))}
+                  <span
+                    className="text-[11px] leading-none w-[14px] text-center"
+                    style={{
+                      color: selected
+                        ? "var(--app-accent)"
+                        : "var(--app-text-faint)",
+                    }}
+                  >
+                    {m.icon}
+                  </span>
+                  <span>{m.label}</span>
+                </button>
+              );
+            })}
           </div>
         </>
       )}

@@ -28,6 +28,7 @@ import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { SurfaceRegistry } from "../surfaces/SurfaceRegistry";
 import type { ExportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
+import type { ResolvedTheme } from "../model/theme";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ export type OverlayRenderHandler = (
   pageNumber: number,
   pageConfig: PageConfig,
   charMap: CharacterMap,
+  theme: ResolvedTheme,
 ) => void;
 
 // ── Editor interfaces (avoids circular import Editor ↔ extensions) ────────────
@@ -341,15 +343,37 @@ export interface SpanRect {
  * doesn't need a decorator at all — StyleResolver handles those via font string.
  */
 export interface MarkDecorator {
-  decoratePre?(ctx: CanvasRenderingContext2D, rect: SpanRect): void;
+  /**
+   * Decorations painted before the text. Receives the resolved theme and the
+   * effective text color for this span (color mark wins, theme.defaultText
+   * falls through). Use `effectiveTextColor` for decorations that should
+   * follow the underlying text color (underline, strikethrough); use
+   * specific `theme.*` tokens for decorations that have their own colors
+   * (highlight, link).
+   */
+  decoratePre?(
+    ctx: CanvasRenderingContext2D,
+    rect: SpanRect,
+    theme: ResolvedTheme,
+    effectiveTextColor: string,
+  ): void;
   /**
    * Returns a CSS color string to use as fillStyle when drawing this span's text,
-   * or undefined to keep the default. Called after decoratePre, before fillText.
-   * Multiple marks on the same span may implement this; the last non-undefined
-   * value wins.
+   * or undefined to keep the default. Called before decoratePre, so the
+   * effectiveTextColor passed to decoratePre/decoratePost reflects this
+   * decorator's choice. Multiple marks on the same span may implement this;
+   * the last non-undefined value wins.
+   *
+   * Receives `theme` so decorators that map to a theme token (Link → theme.link)
+   * can resolve at paint time without capturing the editor instance.
    */
-  decorateFill?(rect: SpanRect): string | undefined;
-  decoratePost?(ctx: CanvasRenderingContext2D, rect: SpanRect): void;
+  decorateFill?(rect: SpanRect, theme: ResolvedTheme): string | undefined;
+  decoratePost?(
+    ctx: CanvasRenderingContext2D,
+    rect: SpanRect,
+    theme: ResolvedTheme,
+    effectiveTextColor: string,
+  ): void;
 }
 
 // ── Input handler ─────────────────────────────────────────────────────────────

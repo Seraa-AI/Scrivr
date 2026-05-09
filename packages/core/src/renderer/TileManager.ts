@@ -430,6 +430,7 @@ export class TileManager {
     if (this.editor.isPageless) {
       this.paintContentPageless(tile, layout);
     } else {
+      this.applyPagedWrapperTheme(tile);
       this.paintContentPaged(tile, layout, pageNumber);
     }
 
@@ -444,6 +445,23 @@ export class TileManager {
         "scrivr:first-paint-end",
       );
       this._firstPaintDone = true;
+    }
+  }
+
+  /**
+   * Apply theme-driven wrapper styles (shadow + background) to a paged-mode
+   * tile. User-provided `pageStyle` overrides win — `pageStyle.boxShadow` /
+   * `pageStyle.background` short-circuit the theme tokens. Re-runs on every
+   * paint so setTheme() flows through to wrappers without a remount.
+   */
+  private applyPagedWrapperTheme(tile: TileEntry): void {
+    const theme = this.editor.getResolvedTheme();
+    const wrapper = tile.wrapper;
+    if (this.pageStyle.boxShadow === undefined) {
+      wrapper.style.boxShadow = theme.pageShadow;
+    }
+    if (this.pageStyle.background === undefined) {
+      wrapper.style.background = theme.pageBg;
     }
   }
 
@@ -479,6 +497,7 @@ export class TileManager {
       map: this.editor.charMap,
       markDecorators: this.editor.markDecorators,
       showMarginGuides: this.showMarginGuides,
+      theme: this.editor.getResolvedTheme(),
       ...(this.editor.blockRegistry
         ? { blockRegistry: this.editor.blockRegistry }
         : {}),
@@ -523,7 +542,8 @@ export class TileManager {
     tile.overlayCanvas.style.height = `${h}px`;
 
     const ctx = tile.contentCanvas.getContext("2d", { alpha: false })!;
-    clearCanvas(ctx, w, h, dpr);
+    const theme = this.editor.getResolvedTheme();
+    clearCanvas(ctx, w, h, dpr, theme.pageBg);
     // After clearCanvas: transform = scale(dpr). Translate so block.y coords work naturally.
     ctx.save();
     ctx.translate(0, -tileTop);
@@ -544,6 +564,7 @@ export class TileManager {
             lineIndexOffset,
             dpr,
             measurer: this.editor.measurer,
+            theme,
             ...(this.editor.markDecorators
               ? { markDecorators: this.editor.markDecorators }
               : {}),
@@ -561,6 +582,7 @@ export class TileManager {
           this.editor.charMap,
           1,
           lineIndexOffset,
+          theme,
           this.editor.markDecorators,
         );
       }
@@ -663,6 +685,7 @@ export class TileManager {
     // this tile yet, leaving its glyphs missing from the charMap.
     if (!sel.empty) this.editor.ensurePagePopulated(pageNum);
 
+    const overlayTheme = this.editor.getResolvedTheme();
     if (!sel.empty && !isNodeSel) {
       const lines = this.editor.charMap
         .linesInRange(sel.from, sel.to)
@@ -670,7 +693,7 @@ export class TileManager {
       const glyphs = this.editor.charMap
         .glyphsInRange(sel.from, sel.to)
         .filter((g) => g.page === pageNum);
-      renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to);
+      renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to, overlayTheme.selectionFill);
     }
 
     // ── Cursor (suppressed when a surface is active — chrome bands own their cursor) ──
@@ -681,7 +704,7 @@ export class TileManager {
       !surfaceActive
     ) {
       const coords = this.editor.charMap.coordsAtPos(sel.head, pageNum);
-      if (coords) renderCursor(overlayCtx, coords);
+      if (coords) renderCursor(overlayCtx, coords, overlayTheme.cursor);
     }
 
     // ── Image selection handles ───────────────────────────────────────────
@@ -705,7 +728,7 @@ export class TileManager {
             pending.width,
             pending.height,
           );
-          renderHandles(overlayCtx, g.x, g.y, g.width, g.height);
+          renderHandles(overlayCtx, g.x, g.y, g.width, g.height, overlayTheme.resizeHandle);
         } else {
           renderHandles(
             overlayCtx,
@@ -713,6 +736,7 @@ export class TileManager {
             objRect.y,
             objRect.width,
             objRect.height,
+            overlayTheme.resizeHandle,
           );
         }
       }
@@ -788,13 +812,9 @@ export class TileManager {
       display: "none", // hidden until assigned by update()
       cursor: "text",
       userSelect: "none",
-      // Paged mode defaults — overridden by pageStyle option
-      ...(!this.editor.isPageless
-        ? {
-            boxShadow: "0 4px 32px rgba(0,0,0,0.12)",
-            background: "#fff",
-          }
-        : {}),
+      // Paged-mode boxShadow + background are theme-driven and applied per
+      // paint in applyPagedWrapperTheme. Only the user's pageStyle overrides
+      // are baked in at construction so they survive every paint cycle.
       ...(!this.editor.isPageless ? this.pageStyle : {}),
     });
 

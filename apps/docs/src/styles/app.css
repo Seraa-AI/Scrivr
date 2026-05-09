@@ -4,4 +4,80 @@
 
 :root {
 	--fd-layout-width: 100%;
+
+	/* ── Scrivr canvas theme tokens ────────────────────────────────────────
+	 * These drive both DOM chrome and canvas paint. The Editor's
+	 * MutationObserver auto-refreshes the canvas when the `dark` class flips
+	 * on <html> (set by next-themes via fumadocs RootProvider). Toggling the
+	 * theme button repaints every page without an explicit setTheme call.
+	 * ───────────────────────────────────────────────────────────────────── */
+	--scrivr-page-bg: #ffffff;
+	--scrivr-page-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+	--scrivr-text: #1e293b;            /* slate-800 */
+	--scrivr-link: #2563eb;            /* blue-600 */
+	--scrivr-cursor: #1e293b;
+	--scrivr-selection: rgba(59, 130, 246, 0.25);
+	--scrivr-img-placeholder-bg: #f1f5f9;
+	--scrivr-img-placeholder-border: #cbd5e1;
+	--scrivr-img-placeholder-text: #64748b;
+	--scrivr-list-marker: #1e293b;
+	--scrivr-hr: #cbd5e1;
+	--scrivr-resize-handle: #3b82f6;
+
+	/* App-shell tokens (header, toolbar, sidebar, panels)
+	 * Two-surface model: --app-surface for primary chrome (header, sidebar
+	 * panels), --app-surface-2 for nested surfaces (inputs, code blocks,
+	 * AI assistant message bubbles). */
+	--app-bg: #f7f8fa;
+	--app-surface: #ffffff;
+	--app-surface-2: #f9fafb;       /* gray-50 — nested cards / inputs */
+	--app-surface-hover: #f3f4f6;   /* gray-100 — button hover */
+	--app-border: #e8eaed;
+	--app-border-strong: #d1d5db;
+	--app-text: #111827;             /* gray-900 */
+	--app-text-muted: #4b5563;       /* gray-600 */
+	--app-text-faint: #9ca3af;       /* gray-400 — placeholder, dim labels */
+
+	/* Accent (indigo) — used for active states, links, AI chat pill, send btn. */
+	--app-accent: #6366f1;            /* indigo-500 */
+	--app-accent-hover: #4f46e5;      /* indigo-600 */
+	--app-accent-fg: #ffffff;          /* text on solid accent */
+	--app-accent-soft-bg: #eef2ff;     /* indigo-50 — soft active bg */
+	--app-accent-soft-fg: #4338ca;     /* indigo-700 — text on soft */
+	--app-accent-soft-border: #c7d2fe; /* indigo-200 */
+}
+
+.dark {
+	/* Canvas tokens — dark variant */
+	--scrivr-page-bg: #1f1f1f;
+	--scrivr-page-shadow: 0 4px 32px rgba(0, 0, 0, 0.6);
+	--scrivr-text: #e5e7eb;            /* gray-200 */
+	--scrivr-link: #60a5fa;            /* blue-400 — readable on dark */
+	--scrivr-cursor: #e5e7eb;
+	--scrivr-selection: rgba(96, 165, 250, 0.35);
+	--scrivr-img-placeholder-bg: #2a2a2a;
+	--scrivr-img-placeholder-border: #3f3f46;
+	--scrivr-img-placeholder-text: #9ca3af;
+	--scrivr-list-marker: #e5e7eb;
+	--scrivr-hr: #3f3f46;
+	--scrivr-resize-handle: #60a5fa;
+
+	/* App-shell tokens — dark */
+	--app-bg: #0f0f10;
+	--app-surface: #18181b;             /* zinc-900 */
+	--app-surface-2: #27272a;           /* zinc-800 */
+	--app-surface-hover: #3f3f46;       /* zinc-700 */
+	--app-border: #2a2a2e;
+	--app-border-strong: #3f3f46;
+	--app-text: #e5e7eb;                /* gray-200 */
+	--app-text-muted: #a1a1aa;          /* zinc-400 */
+	--app-text-faint: #71717a;          /* zinc-500 */
+
+	/* Accent — slightly lighter indigo for dark contrast */
+	--app-accent: #818cf8;               /* indigo-400 */
+	--app-accent-hover: #a5b4fc;         /* indigo-300 */
+	--app-accent-fg: #0f0f10;             /* dark text on bright accent */
+	--app-accent-soft-bg: rgba(129, 140, 248, 0.16);
+	--app-accent-soft-fg: #c7d2fe;        /* indigo-200 */
+	--app-accent-soft-border: rgba(129, 140, 248, 0.4);
 }

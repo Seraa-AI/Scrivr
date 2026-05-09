@@ -147,11 +147,29 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
   }
 
   return (
-    <aside className={`w-full flex-1 flex flex-col bg-white overflow-hidden${hideBorder ? "" : " border-l border-[#e8eaed]"}`}>
+    <aside
+      className="w-full flex-1 flex flex-col overflow-hidden"
+      style={{
+        background: "var(--app-surface)",
+        ...(hideBorder ? {} : { borderLeft: "1px solid var(--app-border)" }),
+      }}
+    >
       {/* Header */}
-      <div className="flex items-center h-11 px-3.5 bg-white border-b border-[#e8eaed] shrink-0 gap-2">
-        <span className="text-[13px] font-semibold text-gray-900 tracking-tight">AI Assistant</span>
-        <span className="ml-auto text-[11px] font-medium bg-indigo-50 text-indigo-500 border border-indigo-200 rounded-full px-2 py-px tracking-wide">
+      <div
+        className="flex items-center h-11 px-3.5 border-b shrink-0 gap-2"
+        style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
+      >
+        <span className="text-[13px] font-semibold tracking-tight" style={{ color: "var(--app-text)" }}>
+          AI Assistant
+        </span>
+        <span
+          className="ml-auto text-[11px] font-medium border rounded-full px-2 py-px tracking-wide"
+          style={{
+            background: "var(--app-accent-soft-bg)",
+            borderColor: "var(--app-accent-soft-border)",
+            color: "var(--app-accent-soft-fg)",
+          }}
+        >
           Claude
         </span>
       </div>
@@ -159,7 +177,10 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-3 pt-3.5 pb-1.5 flex flex-col gap-2.5">
         {messages.length === 0 && (
-          <p className="text-[12px] text-gray-400 text-center mt-8 leading-relaxed px-2">
+          <p
+            className="text-[12px] text-center mt-8 leading-relaxed px-2"
+            style={{ color: "var(--app-text-faint)" }}
+          >
             Ask anything — Claude has your document context and can edit text directly.
           </p>
         )}
@@ -169,8 +190,13 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
         ))}
 
         {isLoading && (
-          <div className="self-start bg-gray-50 border border-[#e8eaed] rounded-[12px_12px_12px_3px] px-3 py-2 max-w-[92%] text-[13px] leading-relaxed">
-            <span className="text-[12px] text-gray-400 italic">Thinking…</span>
+          <div
+            className="self-start border rounded-[12px_12px_12px_3px] px-3 py-2 max-w-[92%] text-[13px] leading-relaxed"
+            style={{ background: "var(--app-surface-2)", borderColor: "var(--app-border)" }}
+          >
+            <span className="text-[12px] italic" style={{ color: "var(--app-text-faint)" }}>
+              Thinking…
+            </span>
           </div>
         )}
 
@@ -178,20 +204,40 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
       </div>
 
       {/* Input area */}
-      <div className="px-3 py-2.5 border-t border-[#e8eaed] flex flex-col gap-1.5 shrink-0 bg-white">
+      <div
+        className="px-3 py-2.5 border-t flex flex-col gap-1.5 shrink-0"
+        style={{ borderColor: "var(--app-border)", background: "var(--app-surface)" }}
+      >
         {selectionPreview && (
-          <div className="flex items-start gap-1.5 bg-indigo-50 border border-indigo-200 rounded-md px-2 py-1.5 text-[11px] leading-snug">
-            <span className="font-bold text-indigo-500 uppercase tracking-wider shrink-0 text-[10px] pt-px">
+          <div
+            className="flex items-start gap-1.5 border rounded-md px-2 py-1.5 text-[11px] leading-snug"
+            style={{
+              background: "var(--app-accent-soft-bg)",
+              borderColor: "var(--app-accent-soft-border)",
+            }}
+          >
+            <span
+              className="font-bold uppercase tracking-wider shrink-0 text-[10px] pt-px"
+              style={{ color: "var(--app-accent)" }}
+            >
               Selection
             </span>
-            <span className="text-indigo-700 italic overflow-hidden text-ellipsis whitespace-nowrap">
+            <span
+              className="italic overflow-hidden text-ellipsis whitespace-nowrap"
+              style={{ color: "var(--app-accent-soft-fg)" }}
+            >
               {selectionPreview}
             </span>
           </div>
         )}
         <textarea
           ref={inputRef}
-          className="w-full resize-none border border-[#e8eaed] rounded-lg px-2.5 py-2 text-[13px] font-[inherit] outline-none leading-relaxed box-border bg-gray-50 text-gray-900 placeholder:text-gray-400 disabled:opacity-50"
+          className="w-full resize-none border rounded-lg px-2.5 py-2 text-[13px] font-[inherit] outline-none leading-relaxed box-border disabled:opacity-50"
+          style={{
+            borderColor: "var(--app-border)",
+            background: "var(--app-surface-2)",
+            color: "var(--app-text)",
+          }}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={onKeyDown}
@@ -200,7 +246,14 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
           disabled={isLoading}
         />
         <button
-          className="self-end bg-indigo-500 hover:bg-indigo-600 text-white border-none rounded-lg px-4 py-1.5 text-[13px] font-semibold cursor-pointer tracking-tight transition-colors disabled:opacity-40"
+          className="self-end border-none rounded-lg px-4 py-1.5 text-[13px] font-semibold cursor-pointer tracking-tight transition-colors disabled:opacity-40"
+          style={{ background: "var(--app-accent)", color: "var(--app-accent-fg)" }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "var(--app-accent-hover)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "var(--app-accent)";
+          }}
           onClick={submit}
           disabled={isLoading || !inputValue.trim()}
         >
@@ -214,7 +267,10 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
 function MessageRow({ msg }: { msg: UIMessage }) {
   if (msg.role === "user") {
     return (
-      <div className="self-end bg-indigo-500 text-white rounded-[12px_12px_3px_12px] px-3 py-2 max-w-[85%] text-[13px] leading-relaxed ml-auto">
+      <div
+        className="self-end rounded-[12px_12px_3px_12px] px-3 py-2 max-w-[85%] text-[13px] leading-relaxed ml-auto"
+        style={{ background: "var(--app-accent)", color: "var(--app-accent-fg)" }}
+      >
         {msg.parts.map((part, i) =>
           part.type === "text" ? (
             <div key={i} className="whitespace-pre-wrap wrap-break-word">{part.text}</div>
@@ -225,10 +281,21 @@ function MessageRow({ msg }: { msg: UIMessage }) {
   }
 
   return (
-    <div className="self-start bg-gray-50 border border-[#e8eaed] rounded-[12px_12px_12px_3px] px-3 py-2 max-w-[92%] text-[13px] leading-relaxed flex flex-col gap-2">
+    <div
+      className="self-start border rounded-[12px_12px_12px_3px] px-3 py-2 max-w-[92%] text-[13px] leading-relaxed flex flex-col gap-2"
+      style={{ background: "var(--app-surface-2)", borderColor: "var(--app-border)" }}
+    >
       {msg.parts.map((part, i) => {
         if (part.type === "text") {
-          return <div key={i} className="whitespace-pre-wrap wrap-break-word text-gray-800">{part.text}</div>;
+          return (
+            <div
+              key={i}
+              className="whitespace-pre-wrap wrap-break-word"
+              style={{ color: "var(--app-text)" }}
+            >
+              {part.text}
+            </div>
+          );
         }
 
         if (part.type === "tool-edit_paragraph") {
@@ -271,20 +338,47 @@ function SuggestionCard({ label, text }: { label: string; text: string }) {
   if (!text) {
     return (
       <div className="flex items-center gap-2 py-0.5">
-        <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wider">{label}</span>
-        <span className="text-[12px] text-gray-400 italic">Generating…</span>
+        <span
+          className="text-[10px] font-semibold uppercase tracking-wider"
+          style={{ color: "var(--app-accent)" }}
+        >
+          {label}
+        </span>
+        <span className="text-[12px] italic" style={{ color: "var(--app-text-faint)" }}>
+          Generating…
+        </span>
       </div>
     );
   }
   return (
-    <div className="bg-white border border-emerald-200 rounded-lg px-2.5 py-2 flex flex-col gap-1.5">
+    <div
+      className="border rounded-lg px-2.5 py-2 flex flex-col gap-1.5"
+      style={{
+        background: "var(--app-surface)",
+        borderColor: "var(--app-accent-soft-border)",
+      }}
+    >
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wider">{label}</span>
-        <span className="text-[10px] font-semibold bg-violet-100 text-violet-700 rounded-full px-2 py-px tracking-wide">
+        <span
+          className="text-[10px] font-semibold uppercase tracking-wider"
+          style={{ color: "var(--app-accent)" }}
+        >
+          {label}
+        </span>
+        <span
+          className="text-[10px] font-semibold rounded-full px-2 py-px tracking-wide"
+          style={{
+            background: "var(--app-accent-soft-bg)",
+            color: "var(--app-accent-soft-fg)",
+          }}
+        >
           Review in editor
         </span>
       </div>
-      <pre className="m-0 text-[12px] leading-relaxed text-gray-700 whitespace-pre-wrap wrap-break-word bg-gray-50 rounded px-2 py-1.5 max-h-[120px] overflow-y-auto font-[inherit]">
+      <pre
+        className="m-0 text-[12px] leading-relaxed whitespace-pre-wrap wrap-break-word rounded px-2 py-1.5 max-h-[120px] overflow-y-auto font-[inherit]"
+        style={{ background: "var(--app-surface-2)", color: "var(--app-text-muted)" }}
+      >
         {text}
       </pre>
     </div>

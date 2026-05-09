@@ -10,6 +10,7 @@ import { clearCanvas } from "./canvas";
 import type { MarkDecorator } from "../extensions/types";
 import type { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { PageChromeContribution, PageMetrics } from "../layout/PageMetrics";
+import { defaultEditorTheme, type ResolvedTheme } from "../model/theme";
 
 export interface RenderPageOptions {
   ctx: CanvasRenderingContext2D;
@@ -43,6 +44,8 @@ export interface RenderPageOptions {
   pageMetrics?: PageMetrics;
   /** Total page count — passed to chrome render context for token substitution. */
   totalPages?: number;
+  /** Resolved theme — every paint site reads colors from here. Defaults if absent. */
+  theme?: ResolvedTheme;
 }
 
 /**
@@ -76,6 +79,7 @@ export function renderPage(options: RenderPageOptions): void {
     chromePayloads,
     pageMetrics,
     totalPages,
+    theme = defaultEditorTheme,
   } = options;
 
   const { pageWidth, pageHeight, margins } = pageConfig;
@@ -84,7 +88,7 @@ export function renderPage(options: RenderPageOptions): void {
   if (renderVersion !== currentVersion()) return;
 
   // ── Clear + background ────────────────────────────────────────────────────
-  clearCanvas(ctx, pageWidth, pageHeight, dpr);
+  clearCanvas(ctx, pageWidth, pageHeight, dpr, theme.pageBg);
 
   // ── Margin guides (dev mode) ──────────────────────────────────────────────
   if (showMarginGuides) {
@@ -113,7 +117,7 @@ export function renderPage(options: RenderPageOptions): void {
 
   // ── Draw 'behind' floats BEFORE blocks ────────────────────────────────────
   for (const float of behindFloats) {
-    drawFloat(ctx, float, map, inlineRegistry);
+    drawFloat(ctx, float, map, theme, inlineRegistry);
   }
 
   // ── Draw blocks ───────────────────────────────────────────────────────────
@@ -132,19 +136,20 @@ export function renderPage(options: RenderPageOptions): void {
           lineIndexOffset,
           dpr,
           measurer,
+          theme,
           ...(markDecorators ? { markDecorators } : {}),
           ...(inlineRegistry ? { inlineRegistry } : {}),
         },
         map,
       );
     } else {
-      lineIndexOffset = drawBlock(ctx, block, measurer, map, page.pageNumber, lineIndexOffset, markDecorators);
+      lineIndexOffset = drawBlock(ctx, block, measurer, map, page.pageNumber, lineIndexOffset, theme, markDecorators);
     }
   }
 
   // ── Draw front/square floats AFTER blocks ─────────────────────────────────
   for (const float of frontFloats) {
-    drawFloat(ctx, float, map, inlineRegistry);
+    drawFloat(ctx, float, map, theme, inlineRegistry);
   }
 
   // ── Re-stamp float objectRects with real dimensions ────────────────────────
@@ -177,6 +182,7 @@ export function renderPage(options: RenderPageOptions): void {
         pageConfig,
         payload,
         measurer,
+        theme,
         ...(markDecorators ? { markDecorators } : {}),
         ...(blockRegistry ? { blockRegistry } : {}),
         ...(inlineRegistry ? { inlineRegistry } : {}),
@@ -193,6 +199,7 @@ function drawFloat(
   ctx: CanvasRenderingContext2D,
   float: AnchoredObjectPlacement,
   map: CharacterMap,
+  theme: ResolvedTheme,
   inlineRegistry?: InlineRegistry,
 ): void {
   const { x, y, width, height, node, docPos, page } = float;
@@ -218,13 +225,13 @@ function drawFloat(
   // Use inline strategy if available.
   const strategy = inlineRegistry?.get(node.type.name);
   if (strategy) {
-    strategy.render(ctx, x, y, width, height, node);
+    strategy.render(ctx, x, y, width, height, node, theme);
     return;
   }
 
-  // Fallback: draw a placeholder rect.
+  // Fallback: draw a placeholder rect using the image-placeholder border token.
   ctx.save();
-  ctx.strokeStyle = "#e2e8f0";
+  ctx.strokeStyle = theme.imagePlaceholderBorder;
   ctx.lineWidth = 1;
   ctx.strokeRect(x, y, width, height);
   ctx.restore();
@@ -246,6 +253,7 @@ export function drawBlock(
   map: CharacterMap,
   pageNumber: number,
   lineIndexOffset: number,
+  theme: ResolvedTheme,
   markDecorators?: Map<string, MarkDecorator>
 ): number {
   const contentWidth = block.availableWidth;
@@ -320,35 +328,51 @@ export function drawBlock(
         markAttrs: {} as Record<string, unknown>,
       };
 
-      // decoratePre for all marks
-      if (markDecorators && span.marks) {
-        for (const markInfo of span.marks) {
-          const dec = markDecorators.get(markInfo.name);
-          if (dec?.decoratePre) dec.decoratePre(ctx, { ...spanRect, markAttrs: markInfo.attrs });
-        }
-      }
-
-      ctx.font = span.font;
-
-      // Allow marks to override text fill color (e.g. Color extension).
-      let fillColor = "#1e293b";
+      // Resolve the effective text color first — color marks win, theme
+      // default falls through. Decorators that paint along the text
+      // (underline, strikethrough) read this so they follow the actual ink.
+      let effectiveTextColor = theme.defaultText;
       if (markDecorators && span.marks) {
         for (const markInfo of span.marks) {
           const dec = markDecorators.get(markInfo.name);
           if (dec?.decorateFill) {
-            const override = dec.decorateFill({ ...spanRect, markAttrs: markInfo.attrs });
-            if (override !== undefined) fillColor = override;
+            const override = dec.decorateFill({ ...spanRect, markAttrs: markInfo.attrs }, theme);
+            if (override !== undefined) effectiveTextColor = override;
           }
         }
       }
-      ctx.fillStyle = fillColor;
+
+      // decoratePre for all marks
+      if (markDecorators && span.marks) {
+        for (const markInfo of span.marks) {
+          const dec = markDecorators.get(markInfo.name);
+          if (dec?.decoratePre) {
+            dec.decoratePre(
+              ctx,
+              { ...spanRect, markAttrs: markInfo.attrs },
+              theme,
+              effectiveTextColor,
+            );
+          }
+        }
+      }
+
+      ctx.font = span.font;
+      ctx.fillStyle = effectiveTextColor;
       ctx.fillText(span.text, spanX, baseline);
 
       // decoratePost for all marks
       if (markDecorators && span.marks) {
         for (const markInfo of span.marks) {
           const dec = markDecorators.get(markInfo.name);
-          if (dec?.decoratePost) dec.decoratePost(ctx, { ...spanRect, markAttrs: markInfo.attrs });
+          if (dec?.decoratePost) {
+            dec.decoratePost(
+              ctx,
+              { ...spanRect, markAttrs: markInfo.attrs },
+              theme,
+              effectiveTextColor,
+            );
+          }
         }
       }
 

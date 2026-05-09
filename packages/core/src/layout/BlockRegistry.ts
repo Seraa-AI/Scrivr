@@ -3,6 +3,7 @@ import type { CharacterMap } from "./CharacterMap";
 import type { TextMeasurer } from "./TextMeasurer";
 import type { LayoutBlock } from "./BlockLayout";
 import type { MarkDecorator } from "../extensions/types";
+import type { ResolvedTheme } from "../model/theme";
 
 // ── InlineStrategy ────────────────────────────────────────────────────────────
 
@@ -37,8 +38,13 @@ export interface InlineStrategy {
     width: number,
     height: number,
     node: Node,
+    theme: ResolvedTheme,
   ): void;
 }
+
+// ── Inline render context ─────────────────────────────────────────────────────
+// (Inline strategies receive theme as their last positional arg — see render
+// signature above. Block strategies receive theme via BlockRenderContext.)
 
 // ── InlineRegistry ────────────────────────────────────────────────────────────
 
@@ -87,6 +93,11 @@ export interface BlockRenderContext {
   markDecorators?: Map<string, MarkDecorator>;
   /** Registry for inline objects (images, widgets) drawn inside line boxes. */
   inlineRegistry?: InlineRegistry;
+  /**
+   * Resolved theme — every paint site reads colors from here. Defaults if
+   * the editor has no `theme` option, so existing behaviour is preserved.
+   */
+  theme: ResolvedTheme;
 }
 
 /**

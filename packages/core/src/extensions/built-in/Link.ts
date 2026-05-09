@@ -1,8 +1,6 @@
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
 
-const LINK_COLOR = "#2563eb"; // blue-600
-
 /**
  * Link — inline hyperlink via the `link` mark.
  *
@@ -90,12 +88,12 @@ export const Link = Extension.create({
 
   addMarkDecorators() {
     const decorator: MarkDecorator = {
-      decorateFill(_rect: SpanRect): string {
-        return LINK_COLOR;
+      decorateFill(_rect, theme) {
+        return theme.link;
       },
-      decoratePost(ctx: CanvasRenderingContext2D, rect: SpanRect) {
+      decoratePost(ctx, rect, theme, _effectiveTextColor) {
         ctx.save();
-        ctx.strokeStyle = LINK_COLOR;
+        ctx.strokeStyle = theme.link;
         ctx.lineWidth = 1;
         ctx.beginPath();
         const underlineY = rect.y + Math.ceil(rect.descent * 0.6);

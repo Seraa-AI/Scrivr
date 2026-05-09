@@ -7,16 +7,15 @@ import type { LayoutBlock } from "../../layout/BlockLayout";
 
 // ── HorizontalRule rendering strategy ────────────────────────────────────────
 
-const HR_COLOR = "#cbd5e1";
 const HR_THICKNESS = 1.5;
 
 const HorizontalRuleStrategy: BlockStrategy = {
   render(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
-    const { ctx, lineIndexOffset } = renderCtx;
+    const { ctx, lineIndexOffset, theme } = renderCtx;
     const midY = block.y + block.height / 2;
 
     ctx.save();
-    ctx.strokeStyle = HR_COLOR;
+    ctx.strokeStyle = theme.hrColor;
     ctx.lineWidth = HR_THICKNESS;
     ctx.beginPath();
     ctx.moveTo(block.x, midY);

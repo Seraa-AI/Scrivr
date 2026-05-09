@@ -11,7 +11,7 @@ import { TextBlockStrategy } from "./TextBlockStrategy";
  */
 export const ListItemStrategy: BlockStrategy = {
   render(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
-    const { ctx } = renderCtx;
+    const { ctx, theme } = renderCtx;
 
     // Draw the marker (bullet or number) aligned to the first line's baseline.
     if (block.listMarker !== undefined && block.listMarkerX !== undefined) {
@@ -20,7 +20,7 @@ export const ListItemStrategy: BlockStrategy = {
         const baseline = block.y + firstLine.ascent;
         const firstSpan = firstLine.spans[0];
         ctx.font = (firstSpan?.kind === "text" ? firstSpan.font : undefined) ?? "14px Arial, sans-serif";
-        ctx.fillStyle = "#1e293b";
+        ctx.fillStyle = theme.listMarker;
         ctx.textAlign = "right";
         ctx.fillText(block.listMarker, block.listMarkerX, baseline);
         ctx.textAlign = "left";

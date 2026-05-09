@@ -30,4 +30,11 @@ export type { UseEditorStateOptions, EditorStateContext } from "./useScrivrState
 export type { Editor, SelectionSnapshot } from "@scrivr/core";
 export { StarterKit, Pagination, defaultPageConfig, DEFAULT_FONT_FAMILY, FontFamily, Link } from "@scrivr/core";
 export type { PageConfig, DocumentLayout, Extension } from "@scrivr/core";
+export {
+  defaultEditorTheme,
+  defaultPdfTheme,
+  mergeEditorTheme,
+  themeContainsCssVars,
+} from "@scrivr/core";
+export type { EditorTheme, ResolvedTheme } from "@scrivr/core";
 export { Collaboration, CollaborationCursor } from "@scrivr/plugins";
