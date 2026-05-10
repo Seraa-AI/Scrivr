@@ -1,0 +1,535 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { Table } from "./Table";
+import { DefaultContent } from "./DefaultContent";
+import { Editor } from "../../Editor";
+import { ServerEditor } from "../../ServerEditor";
+import { StarterKit } from "../StarterKit";
+import { buildStarterKitContext, mockCanvas } from "../../test-utils";
+import type { Node } from "prosemirror-model";
+import type { LayoutBlock } from "../../layout/BlockLayout";
+
+const { schema: fullSchema } = buildStarterKitContext();
+const resolvedWithSchema = Table.resolve(fullSchema);
+
+// ── addNodes ──────────────────────────────────────────────────────────────────
+
+describe("Table — addNodes", () => {
+  const resolved = Table.resolve();
+
+  it("registers exactly four nodes: table, tableRow, tableCell, tableHeader", () => {
+    expect(Object.keys(resolved.nodes).sort()).toEqual([
+      "table",
+      "tableCell",
+      "tableHeader",
+      "tableRow",
+    ]);
+  });
+
+  it("table is in the block group", () => {
+    expect(resolved.nodes["table"]!.group).toContain("block");
+  });
+
+  it("table content is tableRow+", () => {
+    expect(resolved.nodes["table"]!.content).toBe("tableRow+");
+  });
+
+  it("table is isolating so cursor cannot escape into table internals via doc edits", () => {
+    expect(resolved.nodes["table"]!.isolating).toBe(true);
+  });
+
+  it("table.attrs.layout defaults to 'fixed'", () => {
+    const layoutAttr = resolved.nodes["table"]!.attrs?.["layout"];
+    expect(layoutAttr?.default).toBe("fixed");
+  });
+
+  it("table.attrs.grid defaults to an empty number array (replaced on insert)", () => {
+    const gridAttr = resolved.nodes["table"]!.attrs?.["grid"];
+    expect(Array.isArray(gridAttr?.default)).toBe(true);
+  });
+
+  it("tableRow content allows tableCell or tableHeader children", () => {
+    expect(resolved.nodes["tableRow"]!.content).toBe("(tableCell | tableHeader)+");
+  });
+
+  it("tableRow has repeatHeader and allowBreakAcrossPages attrs (Word-shaped)", () => {
+    const attrs = resolved.nodes["tableRow"]!.attrs;
+    expect(attrs?.["repeatHeader"]).toBeDefined();
+    expect(attrs?.["allowBreakAcrossPages"]).toBeDefined();
+    expect(attrs?.["repeatHeader"]?.default).toBe(false);
+    expect(attrs?.["allowBreakAcrossPages"]?.default).toBe(false);
+  });
+
+  it("tableCell content is block+ (cells host any block content)", () => {
+    expect(resolved.nodes["tableCell"]!.content).toBe("block+");
+  });
+
+  it("tableCell is isolating so Backspace at cell boundary cannot delete the cell", () => {
+    expect(resolved.nodes["tableCell"]!.isolating).toBe(true);
+  });
+
+  it("tableHeader is isolating", () => {
+    expect(resolved.nodes["tableHeader"]!.isolating).toBe(true);
+  });
+
+  it("tableCell carries Word-shaped attrs (gridSpan, vMerge, hAlign, vAlign)", () => {
+    const attrs = resolved.nodes["tableCell"]!.attrs;
+    expect(attrs?.["gridSpan"]?.default).toBe(1);
+    expect(attrs?.["vMerge"]?.default).toBe("none");
+    expect(attrs?.["hAlign"]?.default).toBeDefined();
+    expect(attrs?.["vAlign"]?.default).toBeDefined();
+  });
+
+  it("tableCell parses from <td> tag", () => {
+    const rule = resolved.nodes["tableCell"]!.parseDOM?.[0];
+    expect((rule as { tag: string }).tag).toBe("td");
+  });
+
+  it("tableHeader parses from <th> tag", () => {
+    const rule = resolved.nodes["tableHeader"]!.parseDOM?.[0];
+    expect((rule as { tag: string }).tag).toBe("th");
+  });
+});
+
+// ── addLayoutHandlers ─────────────────────────────────────────────────────────
+
+describe("Table — addLayoutHandlers", () => {
+  it("registers a layout handler keyed tableRow (rows are the rendered unit)", () => {
+    expect(Table.resolve().layoutHandlers["tableRow"]).toBeDefined();
+  });
+});
+
+// ── addCommands ───────────────────────────────────────────────────────────────
+
+describe("Table — addCommands", () => {
+  it("exposes insertTable command (requires schema)", () => {
+    expect(resolvedWithSchema.commands["insertTable"]).toBeDefined();
+  });
+
+  it("exposes deleteTable command (requires schema)", () => {
+    expect(resolvedWithSchema.commands["deleteTable"]).toBeDefined();
+  });
+});
+
+// ── Schema integration ────────────────────────────────────────────────────────
+
+describe("Table — schema integration", () => {
+  it("the starter-kit schema includes all four table nodes", () => {
+    expect(fullSchema.nodes["table"]).toBeDefined();
+    expect(fullSchema.nodes["tableRow"]).toBeDefined();
+    expect(fullSchema.nodes["tableCell"]).toBeDefined();
+    expect(fullSchema.nodes["tableHeader"]).toBeDefined();
+  });
+
+  it("a 2x2 table round-trips structurally through schema.nodeFromJSON", () => {
+    const cell = (text: string): unknown => ({
+      type: "tableCell",
+      content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+    });
+    const json = {
+      type: "table",
+      attrs: { layout: "fixed", grid: [100, 100] },
+      content: [
+        { type: "tableRow", content: [cell("a1"), cell("b1")] },
+        { type: "tableRow", content: [cell("a2"), cell("b2")] },
+      ],
+    };
+    const node = fullSchema.nodeFromJSON(json);
+    expect(node.type.name).toBe("table");
+    expect(node.attrs["layout"]).toBe("fixed");
+    expect(node.attrs["grid"]).toEqual([100, 100]);
+    expect(node.childCount).toBe(2);
+    expect(node.firstChild?.type.name).toBe("tableRow");
+    expect(node.firstChild?.childCount).toBe(2);
+    // Spot-check the corner cell's text content survived the round trip.
+    expect(node.lastChild?.lastChild?.textContent).toBe("b2");
+  });
+});
+
+// ── End-to-end via Editor ─────────────────────────────────────────────────────
+
+describe("Table — insertTable / deleteTable / undo-redo", () => {
+  beforeEach(() => mockCanvas());
+
+  function makeEditor(): { editor: Editor; type: (s: string) => void; cleanup: () => void } {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = new Editor({ extensions: [StarterKit] });
+    editor.mount(container);
+    const type = (s: string): void => {
+      const ta = container.querySelector("textarea");
+      if (!ta) return;
+      ta.value = s;
+      ta.dispatchEvent(new Event("input"));
+    };
+    return {
+      editor,
+      type,
+      cleanup: () => {
+        editor.destroy();
+        container.remove();
+      },
+    };
+  }
+
+  function findTable(doc: Node): Node | null {
+    let found: Node | null = null;
+    doc.descendants((node) => {
+      if (found) return false;
+      if (node.type.name === "table") {
+        found = node;
+        return false;
+      }
+      return true;
+    });
+    return found;
+  }
+
+  it("insertTable({rows: 3, cols: 2}) places a 3x2 table at the cursor", () => {
+    const { editor, cleanup } = makeEditor();
+    editor.commands["insertTable"]?.({ rows: 3, cols: 2 });
+    const table = findTable(editor.getState().doc);
+    expect(table).not.toBeNull();
+    expect(table!.childCount).toBe(3); // 3 rows
+    expect(table!.firstChild!.childCount).toBe(2); // 2 cols
+    cleanup();
+  });
+
+  it("insertTable initialises grid with `cols` numeric column widths", () => {
+    const { editor, cleanup } = makeEditor();
+    editor.commands["insertTable"]?.({ rows: 2, cols: 3 });
+    const table = findTable(editor.getState().doc);
+    expect(table).not.toBeNull();
+    const grid = table!.attrs["grid"];
+    expect(Array.isArray(grid)).toBe(true);
+    expect((grid as number[]).length).toBe(3);
+    expect((grid as number[]).every((w) => w > 0)).toBe(true);
+    cleanup();
+  });
+
+  it("each cell of a fresh table contains an empty paragraph (cursor target)", () => {
+    const { editor, cleanup } = makeEditor();
+    editor.commands["insertTable"]?.({ rows: 1, cols: 1 });
+    const table = findTable(editor.getState().doc);
+    const cell = table!.firstChild!.firstChild!;
+    expect(cell.type.name).toBe("tableCell");
+    expect(cell.firstChild?.type.name).toBe("paragraph");
+    expect(cell.firstChild?.textContent).toBe("");
+    cleanup();
+  });
+
+  it("deleteTable() removes a surrounding table when the selection is inside it", () => {
+    const { editor, cleanup } = makeEditor();
+    editor.commands["insertTable"]?.({ rows: 2, cols: 2 });
+    // Move cursor inside the first cell.
+    const tablePos = (() => {
+      let p = -1;
+      editor.getState().doc.descendants((node, pos) => {
+        if (p >= 0) return false;
+        if (node.type.name === "table") { p = pos; return false; }
+        return true;
+      });
+      return p;
+    })();
+    expect(tablePos).toBeGreaterThanOrEqual(0);
+    // Place cursor inside the first paragraph of the first cell.
+    editor.selection.moveCursorTo(tablePos + 4);
+    editor.commands["deleteTable"]?.();
+    expect(findTable(editor.getState().doc)).toBeNull();
+    cleanup();
+  });
+
+  it("undo restores the doc after insertTable; redo re-inserts it", () => {
+    const { editor, cleanup } = makeEditor();
+    const before = editor.getState().doc.toJSON();
+    editor.commands["insertTable"]?.({ rows: 2, cols: 2 });
+    expect(findTable(editor.getState().doc)).not.toBeNull();
+    editor.commands["undo"]?.();
+    expect(editor.getState().doc.toJSON()).toEqual(before);
+    expect(findTable(editor.getState().doc)).toBeNull();
+    editor.commands["redo"]?.();
+    expect(findTable(editor.getState().doc)).not.toBeNull();
+    cleanup();
+  });
+});
+
+// ── Markdown export ───────────────────────────────────────────────────────────
+// StarterKit enables Table by default, so getMarkdown() must not throw on docs
+// containing a table. Phase 1 emits a GFM pipe table (cells flattened to text).
+
+describe("Table — markdown export", () => {
+  // Uses ServerEditor (no DOM, accepts `content` directly) to exercise the
+  // same markdown serializer path as the browser Editor's getMarkdown().
+
+  it("getMarkdown() does not throw on a doc containing an inserted table", () => {
+    // Path 1: insertTable via the browser Editor (matches the reviewer's
+    // exact scenario — StarterKit-default toolbar usage).
+    mockCanvas();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = new Editor({ extensions: [StarterKit] });
+    editor.mount(container);
+    editor.commands["insertTable"]?.({ rows: 2, cols: 2 });
+    expect(() => editor.getMarkdown()).not.toThrow();
+    editor.destroy();
+    container.remove();
+  });
+
+  it("emits a GFM-style pipe table with a header separator row", () => {
+    const content = {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { layout: "fixed", grid: [100, 100] },
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "Name" }] }] },
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "Role" }] }] },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "Ada" }] }] },
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "Eng" }] }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const editor = new ServerEditor({ extensions: [StarterKit], content });
+    const md = editor.getMarkdown();
+    expect(md).toContain("| Name | Role |");
+    expect(md).toContain("| --- | --- |");
+    expect(md).toContain("| Ada | Eng |");
+  });
+
+  it("escapes pipe characters and collapses newlines inside cell text", () => {
+    const content = {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { layout: "fixed", grid: [100] },
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "a|b" }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const editor = new ServerEditor({ extensions: [StarterKit], content });
+    const md = editor.getMarkdown();
+    expect(md).toContain("a\\|b");
+  });
+});
+
+// ── Browser Editor: content option round-trips a table ────────────────────────
+// Locks in the contract that `new Editor({ content })` lands the JSON in the
+// doc with the proper table structure — not silently dropped.
+
+describe("Table — browser Editor parses initial content with a table", () => {
+  beforeEach(() => mockCanvas());
+
+  it("hydrates a 2x2 table from the constructor's content option", () => {
+    const content = {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { layout: "fixed", grid: [120, 80] },
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableHeader", content: [{ type: "paragraph", content: [{ type: "text", text: "H1" }] }] },
+                { type: "tableHeader", content: [{ type: "paragraph", content: [{ type: "text", text: "H2" }] }] },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "v1" }] }] },
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "v2" }] }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = new Editor({ extensions: [StarterKit], content });
+    editor.mount(container);
+
+    const doc = editor.getState().doc;
+    let table: Node | null = null;
+    doc.descendants((node) => {
+      if (table) return false;
+      if (node.type.name === "table") { table = node; return false; }
+      return true;
+    });
+
+    expect(table).not.toBeNull();
+    expect(table!.attrs["layout"]).toBe("fixed");
+    expect(table!.attrs["grid"]).toEqual([120, 80]);
+    expect(table!.childCount).toBe(2);
+
+    // First row uses tableHeader cells; second uses tableCell.
+    const firstRow = table!.firstChild!;
+    expect(firstRow.firstChild?.type.name).toBe("tableHeader");
+    expect(firstRow.firstChild?.textContent).toBe("H1");
+    expect(firstRow.lastChild?.textContent).toBe("H2");
+
+    const secondRow = table!.lastChild!;
+    expect(secondRow.firstChild?.type.name).toBe("tableCell");
+    expect(secondRow.firstChild?.textContent).toBe("v1");
+    expect(secondRow.lastChild?.textContent).toBe("v2");
+
+    editor.destroy();
+    container.remove();
+  });
+});
+
+// ── DefaultContent + Table: integration ───────────────────────────────────────
+// Verifies that a JSON document containing a table, seeded via the
+// DefaultContent extension, renders properly in the browser Editor:
+//   - the doc contains the parsed table structure,
+//   - mounting + layout doesn't crash on tableRow blocks,
+//   - the layout pipeline emits one `kind: "tableRow"` LayoutBlock per row.
+
+describe("Table — DefaultContent + browser Editor integration", () => {
+  beforeEach(() => mockCanvas());
+
+  function tableJsonDoc(rows: number, cols: number): Record<string, unknown> {
+    const buildCell = (r: number, c: number): unknown => ({
+      type: "tableCell",
+      content: [{ type: "paragraph", content: [{ type: "text", text: `r${r}c${c}` }] }],
+    });
+    const buildRow = (r: number): unknown => ({
+      type: "tableRow",
+      content: Array.from({ length: cols }, (_, c) => buildCell(r, c)),
+    });
+    return {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { layout: "fixed", grid: Array.from({ length: cols }, () => 100) },
+          content: Array.from({ length: rows }, (_, r) => buildRow(r)),
+        },
+      ],
+    };
+  }
+
+  function findRowBlocks(editor: Editor): LayoutBlock[] {
+    const rows: LayoutBlock[] = [];
+    for (const page of editor.layout.pages) {
+      for (const block of page.blocks) {
+        if (block.kind === "tableRow") rows.push(block);
+      }
+    }
+    return rows;
+  }
+
+  it("seeds a table via DefaultContent.configure({ json }) and lands it in the doc", () => {
+    const json = tableJsonDoc(2, 3);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = new Editor({
+      extensions: [StarterKit, DefaultContent.configure({ json })],
+    });
+    editor.mount(container);
+
+    let table: Node | null = null;
+    editor.getState().doc.descendants((node) => {
+      if (table) return false;
+      if (node.type.name === "table") { table = node; return false; }
+      return true;
+    });
+
+    expect(table).not.toBeNull();
+    expect(table!.attrs["grid"]).toEqual([100, 100, 100]);
+    expect(table!.childCount).toBe(2);
+    expect(table!.firstChild!.childCount).toBe(3);
+    expect(table!.firstChild!.firstChild!.textContent).toBe("r0c0");
+
+    editor.destroy();
+    container.remove();
+  });
+
+  it("renders the seeded table — layout pipeline emits one kind:\"tableRow\" block per row", () => {
+    const json = tableJsonDoc(3, 2);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = new Editor({
+      extensions: [StarterKit, DefaultContent.configure({ json })],
+    });
+    // Mount + force layout. Errors during paint surface as exceptions here.
+    editor.mount(container);
+    expect(() => editor.layout).not.toThrow();
+
+    const rowBlocks = findRowBlocks(editor);
+    expect(rowBlocks.length).toBe(3);
+    for (const block of rowBlocks) {
+      expect(block.kind).toBe("tableRow");
+      expect(block.lines).toEqual([]);
+      expect(block.cells).toEqual([]);   // Phase 1 stub: cells filled in Phase 4
+      expect(block.height).toBeGreaterThan(0);
+      expect(block.availableWidth).toBeGreaterThan(0);
+    }
+
+    editor.destroy();
+    container.remove();
+  });
+
+  it("rejects misconfiguration when DefaultContent receives both markdown and json", () => {
+    expect(() => {
+      const editor = new Editor({
+        extensions: [
+          StarterKit,
+          DefaultContent.configure({ markdown: "# x", json: tableJsonDoc(1, 1) }),
+        ],
+      });
+      // Some setups may defer extension resolution until first access.
+      void editor.getState().doc;
+    }).toThrow(/exactly one of/i);
+  });
+
+  it("EditorOptions.content overrides DefaultContent's json (per-instance precedence)", () => {
+    const seeded = tableJsonDoc(2, 2);
+    const override = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "override" }] }],
+    };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = new Editor({
+      extensions: [StarterKit, DefaultContent.configure({ json: seeded })],
+      content: override,
+    });
+    editor.mount(container);
+
+    let foundTable = false;
+    editor.getState().doc.descendants((node) => {
+      if (node.type.name === "table") foundTable = true;
+      return !foundTable;
+    });
+    expect(foundTable).toBe(false);
+    expect(editor.getState().doc.textContent).toBe("override");
+
+    editor.destroy();
+    container.remove();
+  });
+});

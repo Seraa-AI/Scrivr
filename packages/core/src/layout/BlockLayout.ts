@@ -72,15 +72,37 @@ export function resolveLeafBlockDimensions(
  *   - `"leaf"`     — block has no inline content and contributes no lines
  *                    (image, horizontalRule, pageBreak, and inline-atom
  *                    sub-blocks dispatched by the PDF exporter). `lines` is `[]`.
- *   - `"tableRow"` — reserved for the upcoming Table extension; carries
- *                    per-cell sub-blocks instead of `lines`. Not produced by
- *                    any current code path.
+ *   - `"tableRow"` — produced by the Table extension; carries per-cell
+ *                    sub-blocks (`cells`) instead of `lines`. `lines` is `[]`.
+ *                    In Phase 1 the row is a fixed-height placeholder with
+ *                    `cells: []`; Phase 4 fills `cells` with sandboxed cell
+ *                    layouts.
  *
  * Consumers branch on `kind` instead of probing `lines.length === 0`, so the
  * shape of the discriminator is the single source of truth for renderer,
  * pagination, hit-testing, and export dispatch.
  */
 export type LayoutBlockKind = "text" | "leaf" | "tableRow";
+
+/**
+ * One cell laid out inside a `kind: "tableRow"` LayoutBlock. Phase 1 always
+ * carries an empty `cells` array; Phase 4 populates this with cell bounds and
+ * the cell's child block layouts.
+ */
+export interface CellSubBlock {
+  /** ProseMirror position of the tableCell or tableHeader node. */
+  cellPos: number;
+  /** Absolute x position of the cell in CSS pixels. */
+  x: number;
+  /** Absolute y position of the cell in CSS pixels. */
+  y: number;
+  /** Cell width including padding. */
+  width: number;
+  /** Cell height including padding. */
+  height: number;
+  /** Layout for the cell's child blocks. Empty array in Phase 1. */
+  blocks: LayoutBlock[];
+}
 
 export interface LayoutBlock {
   /** Discriminator — see LayoutBlockKind for the invariants per variant. */
@@ -136,6 +158,11 @@ export interface LayoutBlock {
    * Same as nodePos for the first part; allows grouping all parts of a split back to their origin.
    */
   sourceNodePos?: number;
+  /**
+   * Sub-cell layouts for `kind: "tableRow"` blocks. Empty in Phase 1; Phase 4
+   * fills this with the cell rectangles and their child block layouts.
+   */
+  cells?: CellSubBlock[];
 }
 
 export function isHiddenAnchorLine(line: LayoutLine): boolean {
@@ -207,6 +234,12 @@ export interface BlockLayoutOptions {
 // ── Constants ───────────────────────────────────────────────────────────────────
 const IMAGE_DEFAULT_HEIGHT = 200;
 const IMAGE_SPACE = 8;
+/**
+ * Phase 1 placeholder height for a `tableRow` block. The Phase 4 layout
+ * engine replaces this with content-driven row heights derived from the
+ * tallest cell.
+ */
+const TABLE_ROW_STUB_HEIGHT = 32;
 
 
 /**
@@ -286,6 +319,40 @@ export function layoutLeafBlock(
 
 
 /**
+ * Phase 1 stub layout for `tableRow` nodes. Returns a fixed-height block with
+ * `kind: "tableRow"`, `lines: []`, and an empty `cells` array. Pagination
+ * treats this like a leaf block (whole row moves to next page on overflow);
+ * `TableRowStrategy` paints a placeholder rectangle.
+ *
+ * Phase 4 replaces this with the real `TableLayoutEngine` that builds cell
+ * sub-blocks via the sandboxed `lineIndexOffset` contract.
+ */
+export function layoutTableRow(
+  node: Node,
+  options: BlockLayoutOptions,
+): LayoutBlock {
+  const { nodePos, x, y, availableWidth } = options;
+
+  return {
+    kind: "tableRow",
+    node,
+    nodePos,
+    x,
+    y,
+    width: availableWidth,
+    height: TABLE_ROW_STUB_HEIGHT,
+    lines: [],
+    cells: [],
+    spaceBefore: 0,
+    spaceAfter: 0,
+    blockType: "tableRow",
+    align: "left",
+    availableWidth,
+  };
+}
+
+
+/**
  * BlockLayout — positions a single ProseMirror block node.
  *
  * Responsibilities:
@@ -304,6 +371,8 @@ export function layoutBlock(
   node: Node,
   options: BlockLayoutOptions,
 ): LayoutBlock {
+  // Table rows are atomic units in v1: dispatch to the stub row engine.
+  if (node.type.name === "tableRow") return layoutTableRow(node, options);
   // Leaf block nodes (no inline content): use fixed-height path.
   // TODO: Add isInline to extensions and use it here instead of isTextblock
   if (!node.childCount && !node.isTextblock)
