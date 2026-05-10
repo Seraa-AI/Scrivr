@@ -4,11 +4,15 @@ import { DefaultContent } from "./DefaultContent";
 import { Editor } from "../../Editor";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { buildStarterKitContext, mockCanvas } from "../../test-utils";
+import { ExtensionManager } from "../ExtensionManager";
+import { mockCanvas } from "../../test-utils";
 import type { Node } from "prosemirror-model";
 import type { LayoutBlock } from "../../layout/BlockLayout";
 
-const { schema: fullSchema } = buildStarterKitContext();
+// Table ships behind an opt-in flag (see `chore/tables-default-off`); build a
+// local context that enables it so the schema-integration assertions below
+// see the table nodes.
+const fullSchema = new ExtensionManager([StarterKit.configure({ table: true })]).schema;
 const resolvedWithSchema = Table.resolve(fullSchema);
 
 // ── addNodes ──────────────────────────────────────────────────────────────────
@@ -112,8 +116,8 @@ describe("Table — addCommands", () => {
 
 // ── Schema integration ────────────────────────────────────────────────────────
 
-describe("Table — schema integration", () => {
-  it("the starter-kit schema includes all four table nodes", () => {
+describe("Table — schema integration (with StarterKit.configure({ table: true }))", () => {
+  it("the opted-in starter-kit schema includes all four table nodes", () => {
     expect(fullSchema.nodes["table"]).toBeDefined();
     expect(fullSchema.nodes["tableRow"]).toBeDefined();
     expect(fullSchema.nodes["tableCell"]).toBeDefined();
@@ -153,7 +157,7 @@ describe("Table — insertTable / deleteTable / undo-redo", () => {
   function makeEditor(): { editor: Editor; type: (s: string) => void; cleanup: () => void } {
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({ extensions: [StarterKit] });
+    const editor = new Editor({ extensions: [StarterKit.configure({ table: true })] });
     editor.mount(container);
     const type = (s: string): void => {
       const ta = container.querySelector("textarea");
@@ -253,8 +257,9 @@ describe("Table — insertTable / deleteTable / undo-redo", () => {
 });
 
 // ── Markdown export ───────────────────────────────────────────────────────────
-// StarterKit enables Table by default, so getMarkdown() must not throw on docs
-// containing a table. Phase 1 emits a GFM pipe table (cells flattened to text).
+// Whenever Table is opted in (StarterKit.configure({ table: true })),
+// getMarkdown() must not throw on docs containing a table. Phase 1 emits a
+// GFM pipe table (cells flattened to text).
 
 describe("Table — markdown export", () => {
   // Uses ServerEditor (no DOM, accepts `content` directly) to exercise the
@@ -262,11 +267,11 @@ describe("Table — markdown export", () => {
 
   it("getMarkdown() does not throw on a doc containing an inserted table", () => {
     // Path 1: insertTable via the browser Editor (matches the reviewer's
-    // exact scenario — StarterKit-default toolbar usage).
+    // exact scenario when Table is opted in).
     mockCanvas();
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({ extensions: [StarterKit] });
+    const editor = new Editor({ extensions: [StarterKit.configure({ table: true })] });
     editor.mount(container);
     editor.commands["insertTable"]?.({ rows: 2, cols: 2 });
     expect(() => editor.getMarkdown()).not.toThrow();
@@ -300,7 +305,7 @@ describe("Table — markdown export", () => {
         },
       ],
     };
-    const editor = new ServerEditor({ extensions: [StarterKit], content });
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })], content });
     const md = editor.getMarkdown();
     expect(md).toContain("| Name | Role |");
     expect(md).toContain("| --- | --- |");
@@ -328,7 +333,7 @@ describe("Table — markdown export", () => {
         },
       ],
     };
-    const editor = new ServerEditor({ extensions: [StarterKit], content });
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })], content });
     const md = editor.getMarkdown();
     expect(md).toContain("a\\|b");
   });
@@ -370,7 +375,7 @@ describe("Table — browser Editor parses initial content with a table", () => {
 
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({ extensions: [StarterKit], content });
+    const editor = new Editor({ extensions: [StarterKit.configure({ table: true })], content });
     editor.mount(container);
 
     const doc = editor.getState().doc;
@@ -448,7 +453,7 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const editor = new Editor({
-      extensions: [StarterKit, DefaultContent.configure({ json })],
+      extensions: [StarterKit.configure({ table: true }), DefaultContent.configure({ json })],
     });
     editor.mount(container);
 
@@ -474,7 +479,7 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const editor = new Editor({
-      extensions: [StarterKit, DefaultContent.configure({ json })],
+      extensions: [StarterKit.configure({ table: true }), DefaultContent.configure({ json })],
     });
     // Mount + force layout. Errors during paint surface as exceptions here.
     editor.mount(container);
@@ -498,7 +503,7 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     expect(() => {
       const editor = new Editor({
         extensions: [
-          StarterKit,
+          StarterKit.configure({ table: true }),
           DefaultContent.configure({ markdown: "# x", json: tableJsonDoc(1, 1) }),
         ],
       });
@@ -516,7 +521,7 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const editor = new Editor({
-      extensions: [StarterKit, DefaultContent.configure({ json: seeded })],
+      extensions: [StarterKit.configure({ table: true }), DefaultContent.configure({ json: seeded })],
       content: override,
     });
     editor.mount(container);
@@ -531,5 +536,36 @@ describe("Table — DefaultContent + browser Editor integration", () => {
 
     editor.destroy();
     container.remove();
+  });
+});
+
+// ── Feature flag: default StarterKit does NOT register Table ──────────────────
+// Locks in the contract that Phase 1 ships behind an opt-in flag while the
+// layout/render pipeline is filled in (Phases 2–4 of docs/tables.md).
+
+describe("Table — StarterKit default-off feature flag", () => {
+  it("default StarterKit does not include the table node in the schema", () => {
+    const { schema } = (() => {
+      const editor = new ServerEditor({ extensions: [StarterKit] });
+      return { schema: editor.schema };
+    })();
+    expect(schema.nodes["table"]).toBeUndefined();
+    expect(schema.nodes["tableRow"]).toBeUndefined();
+    expect(schema.nodes["tableCell"]).toBeUndefined();
+    expect(schema.nodes["tableHeader"]).toBeUndefined();
+  });
+
+  it("default StarterKit does not expose insertTable / deleteTable commands", () => {
+    const editor = new ServerEditor({ extensions: [StarterKit] });
+    expect(editor.commands["insertTable"]).toBeUndefined();
+    expect(editor.commands["deleteTable"]).toBeUndefined();
+  });
+
+  it("StarterKit.configure({ table: true }) registers the table schema", () => {
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    expect(editor.schema.nodes["table"]).toBeDefined();
+    expect(editor.schema.nodes["tableRow"]).toBeDefined();
+    expect(editor.schema.nodes["tableCell"]).toBeDefined();
+    expect(editor.schema.nodes["tableHeader"]).toBeDefined();
   });
 });

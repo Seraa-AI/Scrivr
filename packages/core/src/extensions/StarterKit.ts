@@ -57,7 +57,15 @@ interface StarterKitOptions {
   horizontalRule?: false;
   pageBreak?: false;
   image?: false;
-  table?: false;
+  /**
+   * Tables are an opt-in preview while the layout/render/export pipeline
+   * is filled in (Phases 2–4 of `docs/tables.md`). Default is `false` —
+   * pass `true` to register the Table schema/commands/placeholder render.
+   *
+   * @example
+   * StarterKit.configure({ table: true })
+   */
+  table?: true;
   typography?: false;
   trailingNode?: false;
   clearFormatting?: false;
@@ -106,7 +114,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.image !== false) {
       Object.assign(nodes, Image.resolve().nodes);
     }
-    if (opts.table !== false) {
+    if (opts.table === true) {
       Object.assign(nodes, Table.resolve().nodes);
     }
 
@@ -305,7 +313,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.image !== false) {
       Object.assign(cmds, Image.resolve(this.schema).commands);
     }
-    if (opts.table !== false) {
+    if (opts.table === true) {
       Object.assign(cmds, Table.resolve(this.schema).commands);
     }
     if (opts.clearFormatting !== false) {
@@ -386,7 +394,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       Object.assign(handlers, HorizontalRule.resolve().layoutHandlers);
     }
     // Image is now an inline node — it registers an InlineStrategy, not a BlockStrategy.
-    if (opts.table !== false) {
+    if (opts.table === true) {
       Object.assign(handlers, Table.resolve().layoutHandlers);
     }
     return handlers;
@@ -484,7 +492,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.image !== false) {
       items.push(...Image.resolve().toolbarItems);
     }
-    if (opts.table !== false) {
+    if (opts.table === true) {
       items.push(...Table.resolve().toolbarItems);
     }
     if (opts.clearFormatting !== false) {
@@ -596,7 +604,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.codeBlock !== false) merge(CodeBlock.resolve().markdownSerializerRules);
     if (opts.horizontalRule !== false) merge(HorizontalRule.resolve().markdownSerializerRules);
     if (opts.image !== false) merge(Image.resolve().markdownSerializerRules);
-    if (opts.table !== false) merge(Table.resolve().markdownSerializerRules);
+    if (opts.table === true) merge(Table.resolve().markdownSerializerRules);
 
     return { nodes, marks };
   },
