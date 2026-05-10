@@ -423,6 +423,19 @@ export interface ExtensionContext<Options = object> extends Phase1Context<Option
   readonly schema: Schema;
 }
 
+/**
+ * Context passed as `this` to `addInitialDoc()`. Runs after every extension has
+ * fully resolved, so the merged markdown parser tokens are available — letting
+ * extensions seed the document from markdown without an editor instance.
+ */
+export interface InitialDocContext<Options = object> extends ExtensionContext<Options> {
+  /**
+   * Parse a markdown string into a ProseMirror document using the merged token
+   * map from all registered extensions. Same algorithm as `editor.parseMarkdown()`.
+   */
+  parseMarkdown(text: string): Node;
+}
+
 // ── Extension config (what you pass to Extension.create) ─────────────────────
 
 export interface ExtensionConfig<Options = object> {
@@ -498,12 +511,12 @@ export interface ExtensionConfig<Options = object> {
 
   /**
    * Return an initial ProseMirror document to seed EditorState.create().
-   * Called after addProseMirrorPlugins — use this when a plugin (e.g. ySyncPlugin)
-   * needs the EditorState to start with a specific doc instance that matches
-   * its internal mapping (e.g. the doc returned by initProseMirrorDoc).
-   * Return null to use the schema default.
+   * Called after every extension is fully resolved — `this.parseMarkdown(text)`
+   * is available, useful when seeding from markdown. Used by ySyncPlugin to
+   * match its internal doc mapping, and by `DefaultContent` for app-supplied
+   * initial content. Return null to use the schema default.
    */
-  addInitialDoc?(this: ExtensionContext<Options>): Node | null;
+  addInitialDoc?(this: InitialDocContext<Options>): Node | null;
 
   /**
    * Keymap bindings. Keys are platform-agnostic shortcuts: "Mod-b", "Shift-Enter".
@@ -688,6 +701,14 @@ export interface ResolvedExtension {
   markdownSerializerRules: MarkdownSerializerRules;
   /** Runtime lifecycle callback — undefined when extension has no onEditorReady. */
   editorReadyCallback?: (editor: IBaseEditor) => (() => void) | void;
-  /** Optional initial ProseMirror document — provided by addInitialDoc(). */
-  initialDoc?: Node;
+  /**
+   * Lazy initial-doc factory — undefined when the extension has no
+   * addInitialDoc(). The manager invokes this after every extension has
+   * resolved, passing the schema + a shared parseMarkdown helper. The factory
+   * closure injects the extension's own name/options before calling user code.
+   */
+  initialDocFactory?: (env: {
+    schema: Schema;
+    parseMarkdown(text: string): Node;
+  }) => Node | null;
 }

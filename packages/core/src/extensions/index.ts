@@ -25,10 +25,12 @@ export { CodeBlock } from "./built-in/CodeBlock";
 export { HorizontalRule } from "./built-in/HorizontalRule";
 export { PageBreak } from "./built-in/PageBreak";
 export { ClearFormatting } from "./built-in/ClearFormatting";
+export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultContent";
 
 export type {
   ExtensionConfig,
   ExtensionContext,
+  InitialDocContext,
   IBaseEditor,
   IEditor,
   ResolvedExtension,

@@ -2,6 +2,7 @@ import type { Schema } from "prosemirror-model";
 import type {
   ExtensionConfig,
   ExtensionContext,
+  InitialDocContext,
   Phase1Context,
   ResolvedExtension,
   IBaseEditor,
@@ -86,7 +87,12 @@ export class Extension<Options extends object = object> {
       // Phase 2: only when schema is available
       plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
       ...(schema && config.addInitialDoc
-        ? (() => { const d = config.addInitialDoc.call(p2); return d != null ? { initialDoc: d } : {}; })()
+        ? {
+            initialDocFactory: (env): ReturnType<NonNullable<typeof config.addInitialDoc>> => {
+              const ctx: InitialDocContext<Options> = { name, options, ...env };
+              return config.addInitialDoc!.call(ctx);
+            },
+          }
         : {}),
       keymap:  schema ? (config.addKeymap?.call(p2) ?? {}) : {},
       commands: schema ? (config.addCommands?.call(p2) ?? {}) : {},

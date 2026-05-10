@@ -1,4 +1,4 @@
-import { Extension } from "@scrivr/core";
+import { DefaultContent } from "@scrivr/core";
 
 /**
  * Initial document loaded in the playground.
@@ -652,9 +652,4 @@ const DEMO_DOC = {
  * DemoContent — seeds the editor with the playground demo document.
  * Drop this extension to start with an empty document instead.
  */
-export const DemoContent = Extension.create({
-  name: "demoContent",
-  addInitialDoc() {
-    return this.schema.nodeFromJSON(DEMO_DOC);
-  },
-});
+export const DemoContent = DefaultContent.configure({ json: DEMO_DOC });

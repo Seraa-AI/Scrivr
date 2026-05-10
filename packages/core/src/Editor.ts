@@ -93,6 +93,13 @@ export interface EditorOptions {
    */
   extensions?: Extension[];
   /**
+   * Optional initial document. Strings are parsed as markdown using the
+   * merged token map from all extensions; objects are parsed as ProseMirror
+   * JSON. If omitted, falls back to extensions' `addInitialDoc` (e.g.
+   * `DefaultContent`).
+   */
+  content?: string | Record<string, unknown>;
+  /**
    * Page dimensions and margins. Defaults to A4 with 1-inch margins.
    * The editor owns layout — it needs page geometry to run layoutDocument.
    */
@@ -305,6 +312,7 @@ export class Editor extends BaseEditor implements IEditor {
 
   constructor({
     extensions = [StarterKit],
+    content,
     pageConfig,
     onChange,
     onFocusChange,
@@ -316,7 +324,7 @@ export class Editor extends BaseEditor implements IEditor {
     themeRoot,
   }: EditorOptions) {
     // BaseEditor handles: manager, state, commands, storage, event emitter
-    super({ extensions });
+    super({ extensions, ...(content !== undefined ? { content } : {}) });
 
     // ── Theme ──────────────────────────────────────────────────────────────
     // Initialise before any paint-related setup so renderers can read it.
