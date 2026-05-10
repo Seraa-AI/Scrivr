@@ -20,6 +20,7 @@ import { CodeBlock, insertCodeIndent } from "./built-in/CodeBlock";
 import { HorizontalRule } from "./built-in/HorizontalRule";
 import { PageBreak } from "./built-in/PageBreak";
 import { Image } from "./built-in/Image";
+import { Table } from "./built-in/Table";
 import { Typography } from "./built-in/Typography";
 import { Pagination } from "./built-in/Pagination";
 import { TrailingNode } from "./built-in/TrailingNode";
@@ -56,6 +57,7 @@ interface StarterKitOptions {
   horizontalRule?: false;
   pageBreak?: false;
   image?: false;
+  table?: false;
   typography?: false;
   trailingNode?: false;
   clearFormatting?: false;
@@ -103,6 +105,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.image !== false) {
       Object.assign(nodes, Image.resolve().nodes);
+    }
+    if (opts.table !== false) {
+      Object.assign(nodes, Table.resolve().nodes);
     }
 
     return nodes;
@@ -300,6 +305,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.image !== false) {
       Object.assign(cmds, Image.resolve(this.schema).commands);
     }
+    if (opts.table !== false) {
+      Object.assign(cmds, Table.resolve(this.schema).commands);
+    }
     if (opts.clearFormatting !== false) {
       Object.assign(cmds, ClearFormatting.resolve(this.schema).commands);
     }
@@ -378,6 +386,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       Object.assign(handlers, HorizontalRule.resolve().layoutHandlers);
     }
     // Image is now an inline node — it registers an InlineStrategy, not a BlockStrategy.
+    if (opts.table !== false) {
+      Object.assign(handlers, Table.resolve().layoutHandlers);
+    }
     return handlers;
   },
 
@@ -472,6 +483,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.image !== false) {
       items.push(...Image.resolve().toolbarItems);
+    }
+    if (opts.table !== false) {
+      items.push(...Table.resolve().toolbarItems);
     }
     if (opts.clearFormatting !== false) {
       items.push(...ClearFormatting.resolve().toolbarItems);
@@ -582,6 +596,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.codeBlock !== false) merge(CodeBlock.resolve().markdownSerializerRules);
     if (opts.horizontalRule !== false) merge(HorizontalRule.resolve().markdownSerializerRules);
     if (opts.image !== false) merge(Image.resolve().markdownSerializerRules);
+    if (opts.table !== false) merge(Table.resolve().markdownSerializerRules);
 
     return { nodes, marks };
   },

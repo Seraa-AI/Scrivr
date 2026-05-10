@@ -711,9 +711,10 @@ function reflowFlowsAgainstExclusions(
     const flow = flows[idx]!;
     const flowY = flow.globalY ?? 0;
     if (flowY >= zoneBottom) break;
-    // Skip leaf flows (image/HR/pageBreak) — exclusion reflow only narrows
-    // text flow lines, leaves can never be re-broken around a wrap zone.
-    if (flow.kind === "leaf" || flowY + flow.height <= zoneTop) continue;
+    // Skip atomic flows (image/HR/pageBreak/tableRow) — exclusion reflow only
+    // narrows text flow lines; atomic blocks can never be re-broken around a
+    // wrap zone.
+    if (flow.kind === "leaf" || flow.kind === "tableRow" || flowY + flow.height <= zoneTop) continue;
 
     const wrappedFlow: FlowBlock = {
       ...flow,
@@ -1234,6 +1235,9 @@ export function paginateFlow(
     const blockWidth = flow.availableWidth;
 
     // Build a positioned LayoutBlock from the FlowBlock measurements.
+    // `cells: []` is attached for tableRow blocks so the LayoutBlock invariant
+    // ("kind === tableRow → cells present") holds in Phase 1; Phase 4 replaces
+    // the empty array with real cell sub-blocks.
     const buildBlock = (x: number, bY: number): LayoutBlock => ({
       kind: flow.kind,
       node,
@@ -1248,6 +1252,7 @@ export function paginateFlow(
       blockType: flow.blockType,
       align: flow.align,
       availableWidth: blockWidth,
+      ...(flow.kind === "tableRow" ? { cells: [] } : {}),
     });
 
     const block = normalizeWrappedBlockForPage(
@@ -1274,9 +1279,11 @@ export function paginateFlow(
     const blockBottom = targetY + block.height;
     const pageBottom = currentMetrics.contentBottom;
     const contentHeight = currentMetrics.contentHeight;
-    // Text blocks can always be split; leaf blocks need the !isFirstOnPage guard
-    // to avoid infinite empty-page loops when the block exceeds contentHeight.
-    const overflows = !pageless && blockBottom > pageBottom && (!isFirstOnPage || flow.kind !== "leaf");
+    // Text blocks can always be split; leaf and tableRow blocks need the
+    // !isFirstOnPage guard to avoid infinite empty-page loops when the block
+    // exceeds contentHeight (the "pathological row policy" — clip on next page).
+    const isAtomicBlock = flow.kind === "leaf" || flow.kind === "tableRow";
+    const overflows = !pageless && blockBottom > pageBottom && (!isFirstOnPage || !isAtomicBlock);
 
     // ── Layout debug log ──────────────────────────────────────────────────────
     if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
@@ -1298,7 +1305,7 @@ export function paginateFlow(
       currentPage.blocks.push(block);
       y = targetY + block.height;
       prevSpaceAfter = flow.spaceAfter;
-    } else if (flow.kind === "leaf") {
+    } else if (isAtomicBlock) {
       // ── Leaf block (image, HR): move whole block to next page ──────────────
       const tooTallForAnyPage = flow.height > contentHeight;
       if (tooTallForAnyPage) {
@@ -1851,6 +1858,18 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
         });
 
         itemIndex++;
+      });
+      return;
+    }
+
+    if (node.type.name === "table") {
+      // Tables expand into one item per row. Each row lays out as an atomic
+      // (leaf-like) block in v1 — whole row moves to the next page on
+      // overflow, no line-splitting across cells. Phase 4 replaces the
+      // stub row layout with sandboxed per-cell layout.
+      node.forEach((rowNode, rowOffset) => {
+        const rowNodePos = offset + 1 + rowOffset;
+        items.push({ node: rowNode, nodePos: rowNodePos, indentLeft: 0 });
       });
       return;
     }

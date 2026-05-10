@@ -24,6 +24,7 @@ export { Image } from "./built-in/Image";
 export { CodeBlock } from "./built-in/CodeBlock";
 export { HorizontalRule } from "./built-in/HorizontalRule";
 export { PageBreak } from "./built-in/PageBreak";
+export { Table } from "./built-in/Table";
 export { ClearFormatting } from "./built-in/ClearFormatting";
 export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultContent";
 
