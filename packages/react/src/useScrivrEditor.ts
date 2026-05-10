@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Editor, StarterKit } from "@scrivr/core";
-import type { Extension, PageConfig } from "@scrivr/core";
+import type { Extension, PageConfig, EditorTheme } from "@scrivr/core";
 
 export interface UseCanvasEditorOptions {
   /** Extensions to load. Defaults to [StarterKit]. */
@@ -9,6 +9,21 @@ export interface UseCanvasEditorOptions {
   pageConfig?: PageConfig;
   /** When true, the editor blocks all mutations. Default: false. */
   readOnly?: boolean;
+  /**
+   * Initial canvas theme. Each token accepts any CSS color string, including
+   * `var(--token)` references that resolve against `themeRoot`. The Editor
+   * auto-installs a MutationObserver when any value contains `var(`, so
+   * toggling a class on `themeRoot` (e.g. Tailwind `dark`) repaints the
+   * canvas without an explicit `setTheme` call.
+   */
+  theme?: EditorTheme;
+  /**
+   * Element whose computed CSS variables drive `var(--...)` lookups in the
+   * theme. Defaults to the mounted container. For class-strategy dark modes
+   * where the `dark` class lives on `<html>`, set this to
+   * `document.documentElement` so toggles are seen.
+   */
+  themeRoot?: HTMLElement;
   /**
    * Called on every document or selection change.
    * Mirrors TipTap's onUpdate.
@@ -57,6 +72,8 @@ export function useScrivrEditor(
       extensions: opts.extensions ?? [StarterKit],
       ...(opts.pageConfig ? { pageConfig: opts.pageConfig } : {}),
       readOnly: opts.readOnly ?? false,
+      ...(opts.theme ? { theme: opts.theme } : {}),
+      ...(opts.themeRoot ? { themeRoot: opts.themeRoot } : {}),
       onChange: (state) => {
         opts.onUpdate?.({ editor: instance });
         opts.onSelectionUpdate?.({ editor: instance });

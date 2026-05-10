@@ -103,11 +103,14 @@ export function Toolbar({
   }
 
   return (
-    <div className="flex items-center flex-nowrap md:flex-wrap gap-0.5 px-2.5 py-1 bg-white min-h-[40px] flex-1">
+    <div
+      className="flex items-center flex-nowrap md:flex-wrap gap-0.5 px-2.5 py-1 min-h-[40px] flex-1"
+      style={{ background: "var(--app-surface)" }}
+    >
       {groupOrder.map((group, gi) => (
         <div key={group} className="flex items-center gap-0.5">
           {gi > 0 && (
-            <div className="w-px h-[18px] bg-gray-200 mx-1.5 shrink-0" />
+            <div className="w-px h-[18px] mx-1.5 shrink-0" style={{ background: "var(--app-border)" }} />
           )}
 
           {group === "size" ? (
@@ -162,15 +165,33 @@ function ToolbarButton({
 }) {
   return (
     <button
-      className={[
-        "inline-flex items-center justify-center min-w-[28px] h-[28px] px-1.5 rounded-md border text-sm cursor-pointer select-none transition-colors duration-100",
+      className="inline-flex items-center justify-center min-w-[28px] h-[28px] px-1.5 rounded-md border text-sm cursor-pointer select-none transition-colors duration-100"
+      style={
         active
-          ? "bg-indigo-50 border-indigo-200 text-indigo-600"
-          : "bg-transparent border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-800",
-      ].join(" ")}
+          ? {
+              background: "var(--app-accent-soft-bg)",
+              borderColor: "var(--app-accent-soft-border)",
+              color: "var(--app-accent-soft-fg)",
+            }
+          : {
+              background: "transparent",
+              borderColor: "transparent",
+              color: "var(--app-text-muted)",
+            }
+      }
       onMouseDown={(e) => {
         e.preventDefault();
         onCommand(item.command, item.args);
+      }}
+      onMouseEnter={(e) => {
+        if (active) return;
+        e.currentTarget.style.background = "var(--app-surface-hover)";
+        e.currentTarget.style.color = "var(--app-text)";
+      }}
+      onMouseLeave={(e) => {
+        if (active) return;
+        e.currentTarget.style.background = "transparent";
+        e.currentTarget.style.color = "var(--app-text-muted)";
       }}
       title={item.title}
       aria-pressed={active}
@@ -229,7 +250,12 @@ function SizeSelect({
 
   return (
     <select
-      className="h-[28px] w-[60px] px-1.5 border border-gray-200 rounded-md bg-white text-xs text-gray-700 cursor-pointer outline-none appearance-none"
+      className="h-[28px] w-[60px] px-1.5 border rounded-md text-xs cursor-pointer outline-none appearance-none"
+      style={{
+        background: "var(--app-surface)",
+        borderColor: "var(--app-border)",
+        color: "var(--app-text)",
+      }}
       value={value}
       onChange={(e) => {
         const item = items.find((i) => String(i.args?.[0]) === e.target.value);
@@ -274,8 +300,13 @@ function FamilySelect({
 
   return (
     <select
-      className="h-[28px] w-[130px] px-1.5 border border-gray-200 rounded-md bg-white text-xs text-gray-700 cursor-pointer outline-none appearance-none"
-      style={{ fontFamily: value }}
+      className="h-[28px] w-[130px] px-1.5 border rounded-md text-xs cursor-pointer outline-none appearance-none"
+      style={{
+        fontFamily: value,
+        background: "var(--app-surface)",
+        borderColor: "var(--app-border)",
+        color: "var(--app-text)",
+      }}
       value={value}
       onChange={(e) => {
         const item = items.find((i) => i.args?.[0] === e.target.value);

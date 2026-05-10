@@ -4,14 +4,13 @@ import {
   useEditorState,
   StarterKit,
   defaultPageConfig,
-  DEFAULT_FONT_FAMILY,
   LinkPopover,
   SlashMenu,
   ImageMenu,
   HeaderFooterRibbon,
 } from "@scrivr/react";
-import { useState } from "react";
-import type { EditorStateContext } from "@scrivr/react";
+import { useEffect, useState } from "react";
+import type { EditorStateContext, EditorTheme } from "@scrivr/react";
 import { PdfExport } from "@scrivr/export-pdf";
 import {
   Collaboration,
@@ -59,6 +58,48 @@ const USE_COLLAB = env.get("VITE_COLLAB") === "true";
 // See docs/guides/ai-features.mdx for the full rationale and setup walkthrough.
 const AI_ENABLED =
   import.meta.env.DEV || import.meta.env.VITE_AI_ENABLED === "true";
+
+// Canvas theme — every token is a CSS variable so the MutationObserver in the
+// Editor auto-repaints when the `dark` class flips on <html>. The variables
+// are defined in styles/app.css under `:root` (light) and `.dark` (dark).
+const PLAYGROUND_THEME: EditorTheme = {
+  pageBg: "var(--scrivr-page-bg)",
+  pageShadow: "var(--scrivr-page-shadow)",
+  defaultText: "var(--scrivr-text)",
+  link: "var(--scrivr-link)",
+  cursor: "var(--scrivr-cursor)",
+  selectionFill: "var(--scrivr-selection)",
+  imagePlaceholderBg: "var(--scrivr-img-placeholder-bg)",
+  imagePlaceholderBorder: "var(--scrivr-img-placeholder-border)",
+  imagePlaceholderText: "var(--scrivr-img-placeholder-text)",
+  listMarker: "var(--scrivr-list-marker)",
+  hrColor: "var(--scrivr-hr)",
+  resizeHandle: "var(--scrivr-resize-handle)",
+};
+
+/**
+ * Tracks whether <html> has the `dark` class. Reads on mount, syncs via
+ * MutationObserver, and toggles the class on demand. Avoids adding next-themes
+ * as a direct dep — fumadocs's RootProvider also drives the same class.
+ */
+function useDarkMode(): { isDark: boolean; toggle: () => void } {
+  const [isDark, setIsDark] = useState(false);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    setIsDark(root.classList.contains("dark"));
+    const obs = new MutationObserver(() => {
+      setIsDark(root.classList.contains("dark"));
+    });
+    obs.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+  const toggle = () => {
+    if (typeof document === "undefined") return;
+    document.documentElement.classList.toggle("dark");
+  };
+  return { isDark, toggle };
+}
 
 const COLORS = [
   "#ef4444",
@@ -144,9 +185,16 @@ export function Playground() {
     AI_ENABLED ? "ai" : "changes",
   );
 
+  const { isDark, toggle: toggleDark } = useDarkMode();
+
   const editor = useScrivrEditor({
     extensions: EXTENSIONS,
     pageConfig: defaultPageConfig,
+    theme: PLAYGROUND_THEME,
+    // Resolve var(--scrivr-...) against <html> so the existing fumadocs
+    // dark-class strategy drives canvas paint without a second toggle.
+    themeRoot:
+      typeof document !== "undefined" ? document.documentElement : undefined,
   });
 
   // Debug helper — call window.inspectDoc() in the browser console to print
@@ -181,13 +229,25 @@ export function Playground() {
   });
 
   return (
-    <div className="flex flex-col h-screen bg-[#f7f8fa] font-sans">
+    <div className="flex flex-col h-screen font-sans" style={{ background: "var(--app-bg)", color: "var(--app-text)" }}>
       {/* ── Header ── */}
-      <header className="flex items-center justify-between h-11 px-2 md:px-4 bg-white border-b border-[#e8eaed] shrink-0 gap-2 md:gap-3">
+      <header
+        className="flex items-center justify-between h-11 px-2 md:px-4 border-b shrink-0 gap-2 md:gap-3"
+        style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
+      >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <a
             href="/"
-            className="flex items-center gap-1 text-[13px] text-gray-500 no-underline px-1.5 py-0.5 rounded-md hover:bg-gray-100 hover:text-gray-700 transition-colors shrink-0"
+            className="flex items-center gap-1 text-[13px] no-underline px-1.5 py-0.5 rounded-md transition-colors shrink-0"
+            style={{ color: "var(--app-text-muted)" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--app-surface-hover)";
+              e.currentTarget.style.color = "var(--app-text)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "var(--app-text-muted)";
+            }}
           >
             <svg
               width="14"
@@ -206,17 +266,32 @@ export function Playground() {
             </svg>
             <span className="hidden sm:inline">Docs</span>
           </a>
-          <div className="w-px h-4 bg-gray-200 hidden sm:block" />
-          <span className="text-[14px] font-semibold text-gray-900 tracking-tight shrink-0">
+          <div className="w-px h-4 hidden sm:block" style={{ background: "var(--app-border)" }} />
+          <span
+            className="text-[14px] font-semibold tracking-tight shrink-0"
+            style={{ color: "var(--app-text)" }}
+          >
             scrivr
           </span>
-          <span className="text-[11px] font-medium text-indigo-500 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-px tracking-wide hidden sm:inline">
+          <span
+            className="text-[11px] font-medium border rounded-full px-2 py-px tracking-wide hidden sm:inline"
+            style={{
+              color: "var(--app-accent-soft-fg)",
+              background: "var(--app-accent-soft-bg)",
+              borderColor: "var(--app-accent-soft-border)",
+            }}
+          >
             playground
           </span>
           {!AI_ENABLED && (
             <a
               href="/docs/guides/ai-features"
-              className="text-[11px] font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-full px-2 py-px tracking-wide no-underline hover:bg-gray-100 hover:text-gray-700 transition-colors hidden md:inline"
+              className="text-[11px] font-medium border rounded-full px-2 py-px tracking-wide no-underline transition-colors hidden md:inline"
+              style={{
+                color: "var(--app-text-muted)",
+                background: "var(--app-surface-2)",
+                borderColor: "var(--app-border)",
+              }}
               title="AI features are available when running the docs app locally"
             >
               AI · local dev
@@ -225,30 +300,67 @@ export function Playground() {
         </div>
 
         <div className="flex items-center justify-center shrink-0">
-          <span className="text-[12px] text-gray-400 tabular-nums tracking-wide">
+          <span
+            className="text-[12px] tabular-nums tracking-wide"
+            style={{ color: "var(--app-text-muted)" }}
+          >
             {pageInfo.current} / {pageInfo.total}
           </span>
         </div>
 
         <div className="flex items-center gap-1.5 flex-1 justify-end min-w-0 hidden md:flex">
+          <button
+            type="button"
+            onClick={toggleDark}
+            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label="Toggle theme"
+            className="flex items-center justify-center w-7 h-7 rounded-md border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] hover:opacity-80 transition-opacity shrink-0"
+          >
+            {/* Inline SVG so we don't pull in an icon library. The crescent
+                shows in light mode (toggle target = dark); the sun shows in
+                dark mode. */}
+            {isDark ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            )}
+          </button>
           {USE_COLLAB && identity && (
             <>
               <span
                 className="w-[7px] h-[7px] rounded-full shrink-0"
                 style={{ background: identity.userColor }}
               />
-              <span className="text-[12px] font-medium text-gray-700 truncate">
+              <span
+                className="text-[12px] font-medium truncate"
+                style={{ color: "var(--app-text)" }}
+              >
                 {identity.userName}
               </span>
-              <span className="text-[12px] text-gray-300">·</span>
-              <span className="text-[12px] text-gray-400 truncate">{identity.room}</span>
+              <span className="text-[12px]" style={{ color: "var(--app-text-faint)" }}>
+                ·
+              </span>
+              <span
+                className="text-[12px] truncate"
+                style={{ color: "var(--app-text-muted)" }}
+              >
+                {identity.room}
+              </span>
             </>
           )}
         </div>
       </header>
 
       {/* ── Toolbar ── */}
-      <div className="flex items-stretch shrink-0 bg-white border-b border-[#e8eaed]">
+      <div
+        className="flex items-stretch shrink-0 border-b"
+        style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
+      >
         <div className="flex-1 overflow-x-auto">
           <Toolbar
             items={editor?.toolbarItems ?? []}
@@ -259,7 +371,7 @@ export function Playground() {
             editor={editor}
           />
         </div>
-        <div className="flex items-center px-3 border-l border-[#e8eaed] shrink-0">
+        <div className="flex items-center px-3 border-l shrink-0" style={{ borderColor: "var(--app-border)" }}>
           <ModeSwitcher editor={editor} />
         </div>
       </div>
@@ -271,7 +383,7 @@ export function Playground() {
             <div style={{ position: "relative" }}>
               <Scrivr
                 editor={editor}
-                pageStyle={{ boxShadow: "none", border: "1px solid #e8eaed" }}
+                pageStyle={{ border: "1px solid var(--app-border)" }}
               />
               <HeaderFooterRibbon editor={editor} />
             </div>
@@ -289,8 +401,8 @@ export function Playground() {
             width: 300,
             flexShrink: 0,
             overflow: "hidden",
-            borderLeft: "1px solid #e8eaed",
-            background: "#fff",
+            borderLeft: "1px solid var(--app-border)",
+            background: "var(--app-surface)",
           }}
         >
           {AI_ENABLED ? (
@@ -300,24 +412,30 @@ export function Playground() {
               <div
                 style={{
                   display: "flex",
-                  borderBottom: "1px solid #e8eaed",
+                  borderBottom: "1px solid var(--app-border)",
                   flexShrink: 0,
                 }}
               >
-                {(["ai", "changes"] as SidebarTab[]).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setSidebarTab(tab)}
-                    style={{ letterSpacing: "-0.01em" }}
-                    className={`flex-1 h-9 border-none bg-transparent cursor-pointer text-xs border-b-2 transition-[color,border-color] duration-150 ${
-                      sidebarTab === tab
-                        ? "font-semibold text-indigo-500 border-indigo-500"
-                        : "font-normal text-gray-500 border-transparent"
-                    }`}
-                  >
-                    {tab === "ai" ? "AI Assistant" : "Track Changes"}
-                  </button>
-                ))}
+                {(["ai", "changes"] as SidebarTab[]).map((tab) => {
+                  const selected = sidebarTab === tab;
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => setSidebarTab(tab)}
+                      style={{
+                        letterSpacing: "-0.01em",
+                        color: selected ? "var(--app-accent)" : "var(--app-text-muted)",
+                        borderBottom: selected
+                          ? "2px solid var(--app-accent)"
+                          : "2px solid transparent",
+                        fontWeight: selected ? 600 : 400,
+                      }}
+                      className="flex-1 h-9 border-none bg-transparent cursor-pointer text-xs transition-[color,border-color] duration-150"
+                    >
+                      {tab === "ai" ? "AI Assistant" : "Track Changes"}
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Panel content — both mounted, only one visible */}
@@ -351,11 +469,12 @@ export function Playground() {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  borderBottom: "1px solid #e8eaed",
+                  borderBottom: "1px solid var(--app-border)",
                   flexShrink: 0,
                   letterSpacing: "-0.01em",
+                  color: "var(--app-accent)",
                 }}
-                className="text-xs font-semibold text-indigo-500"
+                className="text-xs font-semibold"
               >
                 Track Changes
               </div>
@@ -374,10 +493,22 @@ export function Playground() {
         </div>
 
         {USE_COLLAB && loadingState === "syncing" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[rgba(247,248,250,0.85)] backdrop-blur-sm z-10">
-            <div className="flex items-center gap-2.5 bg-white border border-[#e8eaed] rounded-xl px-5 py-3 shadow-lg">
+          <div
+            className="absolute inset-0 flex items-center justify-center backdrop-blur-sm z-10"
+            style={{ background: "color-mix(in srgb, var(--app-bg) 85%, transparent)" }}
+          >
+            <div
+              className="flex items-center gap-2.5 border rounded-xl px-5 py-3 shadow-lg"
+              style={{
+                background: "var(--app-surface)",
+                borderColor: "var(--app-border)",
+              }}
+            >
               <LoadingSpinner />
-              <span className="text-[13px] font-medium text-gray-700">
+              <span
+                className="text-[13px] font-medium"
+                style={{ color: "var(--app-text)" }}
+              >
                 Connecting…
               </span>
             </div>
@@ -408,13 +539,13 @@ function LoadingSpinner() {
         cy="9"
         r="7"
         fill="none"
-        stroke="#e2e8f0"
+        stroke="var(--app-border-strong)"
         strokeWidth="2"
       />
       <path
         d="M9 2a7 7 0 0 1 7 7"
         fill="none"
-        stroke="#6366f1"
+        stroke="var(--app-accent)"
         strokeWidth="2"
         strokeLinecap="round"
       />

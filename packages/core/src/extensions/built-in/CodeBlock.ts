@@ -7,39 +7,65 @@ import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegist
 import type { CharacterMap } from "../../layout/CharacterMap";
 import type { LayoutBlock } from "../../layout/BlockLayout";
 
-// ── CodeBlock rendering strategy ─────────────────────────────────────────────
+// ── Theme tokens — overridable via CodeBlock.configure({ theme: {...} }) ─────
 
-const CODE_BG = "#f1f5f9";
-const CODE_BORDER = "#e2e8f0";
+interface CodeBlockTheme {
+  /** Background fill behind the code block. */
+  bg?: string;
+  /** Border stroke around the code block. */
+  border?: string;
+}
+
+interface CodeBlockOptions {
+  /**
+   * Per-extension theme overrides. Defaults to slate-100 / slate-200 to match
+   * the canvas's light defaults; pass a `{ bg, border }` pair when configuring
+   * to swap for a dark-mode palette. Values are literal CSS color strings
+   * (the canvas resolver does not run on per-extension themes).
+   *
+   * @example
+   * CodeBlock.configure({ theme: { bg: "#1e293b", border: "#334155" } })
+   */
+  theme?: CodeBlockTheme;
+}
+
+const DEFAULT_CODE_BG = "#f1f5f9";
+const DEFAULT_CODE_BORDER = "#e2e8f0";
 const CODE_PAD = 8;
 
-const CodeBlockStrategy: BlockStrategy = {
-  render(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
-    const { ctx } = renderCtx;
+function createCodeBlockStrategy(theme: CodeBlockTheme): BlockStrategy {
+  const bg = theme.bg ?? DEFAULT_CODE_BG;
+  const border = theme.border ?? DEFAULT_CODE_BORDER;
+  return {
+    render(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
+      const { ctx } = renderCtx;
 
-    // Background + border
-    ctx.save();
-    ctx.fillStyle = CODE_BG;
-    ctx.fillRect(
-      block.x - CODE_PAD,
-      block.y - CODE_PAD,
-      block.availableWidth + CODE_PAD * 2,
-      block.height + CODE_PAD * 2,
-    );
-    ctx.strokeStyle = CODE_BORDER;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(
-      block.x - CODE_PAD,
-      block.y - CODE_PAD,
-      block.availableWidth + CODE_PAD * 2,
-      block.height + CODE_PAD * 2,
-    );
-    ctx.restore();
+      // Background + border
+      ctx.save();
+      ctx.fillStyle = bg;
+      ctx.fillRect(
+        block.x - CODE_PAD,
+        block.y - CODE_PAD,
+        block.availableWidth + CODE_PAD * 2,
+        block.height + CODE_PAD * 2,
+      );
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(
+        block.x - CODE_PAD,
+        block.y - CODE_PAD,
+        block.availableWidth + CODE_PAD * 2,
+        block.height + CODE_PAD * 2,
+      );
+      ctx.restore();
 
-    // Delegate text rendering (handles charmap, marks, etc.)
-    return TextBlockStrategy.render(block, renderCtx, map);
-  },
-};
+      // Delegate text rendering (handles charmap, marks, etc.)
+      return TextBlockStrategy.render(block, renderCtx, map);
+    },
+  };
+}
+
+const CodeBlockStrategy: BlockStrategy = createCodeBlockStrategy({});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -72,8 +98,12 @@ function makeToggleCodeBlock(): Command {
 
 // ── Extension ─────────────────────────────────────────────────────────────────
 
-export const CodeBlock = Extension.create({
+export const CodeBlock = Extension.create<CodeBlockOptions>({
   name: "codeBlock",
+
+  defaultOptions: {
+    theme: {},
+  },
 
   addNodes() {
     return {
@@ -128,7 +158,7 @@ export const CodeBlock = Extension.create({
   },
 
   addLayoutHandlers() {
-    return { codeBlock: CodeBlockStrategy };
+    return { codeBlock: createCodeBlockStrategy(this.options.theme ?? {}) };
   },
 
   addToolbarItems() {
@@ -173,7 +203,8 @@ export const CodeBlock = Extension.create({
 });
 
 // Re-export strategy for use in tests / custom renderers
-export { CodeBlockStrategy };
+export { CodeBlockStrategy, createCodeBlockStrategy };
+export type { CodeBlockOptions, CodeBlockTheme };
 // Re-export Tab command for StarterKit chaining
 export { insertCodeIndent };
 

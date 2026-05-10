@@ -457,6 +457,7 @@ export function clearOverlay(
 export function renderCursor(
   ctx: CanvasRenderingContext2D,
   coords: CoordsResult,
+  cursorColor: string,
 ): void {
   if (coords.height <= 0) return;
 
@@ -464,7 +465,7 @@ export function renderCursor(
   const x = Math.round(coords.x) + 0.5;
 
   ctx.save();
-  ctx.strokeStyle = "#1e293b";
+  ctx.strokeStyle = cursorColor;
   ctx.lineWidth = 1.5;
   ctx.lineCap = "round";
   ctx.beginPath();
@@ -495,11 +496,12 @@ export function renderSelection(
   glyphs: GlyphEntry[],
   from: number,
   to: number,
+  selectionFill: string,
 ): void {
   if (lines.length === 0 && glyphs.length === 0) return;
 
   ctx.save();
-  ctx.fillStyle = "rgba(59, 130, 246, 0.25)"; // blue-500 @ 25% opacity
+  ctx.fillStyle = selectionFill;
 
   // Pass 1 — glyph-based highlights (snapped to pixel grid to eliminate seams)
   for (const glyph of glyphs) {

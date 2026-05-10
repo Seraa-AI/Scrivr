@@ -15,12 +15,23 @@
  *   });
  */
 import { Extension } from "@scrivr/core";
-import type { IEditor } from "@scrivr/core";
+import type { IEditor, ResolvedTheme } from "@scrivr/core";
 import { exportToPdf } from "./index";
 
 interface PdfExportOptions {
   /** Downloaded file name (without .pdf). Default: "document" */
   filename?: string;
+}
+
+/** Per-call options accepted by `editor.commands.exportPdf({...})`. */
+interface ExportPdfCallOptions {
+  filename?: string;
+  /**
+   * Theme override. Shallow-merged over the print-ready `defaultPdfTheme`.
+   * Literal CSS colors only — `var(...)` is not supported on this path.
+   * Omit for a print-ready PDF regardless of canvas theme.
+   */
+  theme?: Partial<ResolvedTheme>;
 }
 
 /** Per-instance state — populated in onEditorReady, read in addCommands. */
@@ -44,23 +55,24 @@ export const PdfExport = Extension.create<PdfExportOptions>({
 
   addCommands() {
     return {
-      exportPdf: () => (_state, dispatch) => {
+      exportPdf: (callOptions?: ExportPdfCallOptions) => (_state, dispatch) => {
         const inst = instanceState.get(this.options);
         if (!inst?.editor) return false;
         if (dispatch) {
           const { editor } = inst;
-          const filename = this.options.filename ?? "document";
-          exportToPdf(editor).then((bytes) => {
-            const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
-            const url  = URL.createObjectURL(blob);
-            const a    = document.createElement("a");
-            a.href     = url;
-            a.download = `${filename}.pdf`;
-            a.click();
-            URL.revokeObjectURL(url);
-          }).catch((err: unknown) => {
-            console.error("[PdfExport] export failed:", err);
-          });
+          const filename = callOptions?.filename ?? this.options.filename ?? "document";
+          exportToPdf(editor, callOptions?.theme ? { theme: callOptions.theme } : undefined)
+            .then((bytes) => {
+              const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
+              const url  = URL.createObjectURL(blob);
+              const a    = document.createElement("a");
+              a.href     = url;
+              a.download = `${filename}.pdf`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }).catch((err: unknown) => {
+              console.error("[PdfExport] export failed:", err);
+            });
         }
         return true;
       },
@@ -92,8 +104,12 @@ export const PdfExport = Extension.create<PdfExportOptions>({
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
     pdfExport: {
-      /** Export the current document as a PDF and trigger a browser download. */
-      exportPdf: () => ReturnType;
+      /**
+       * Export the current document as a PDF and trigger a browser download.
+       * Accepts an optional `theme` (literal CSS colors, shallow-merged over
+       * the print-ready `defaultPdfTheme`) and an optional per-call `filename`.
+       */
+      exportPdf: (options?: ExportPdfCallOptions) => ReturnType;
     };
   }
 }

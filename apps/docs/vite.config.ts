@@ -8,7 +8,7 @@ import { resolve } from 'path';
 
 export default defineConfig({
   server: {
-    port: 3000,
+    port: 8000,
   },
   plugins: [
     mdx(await import('./source.config')),

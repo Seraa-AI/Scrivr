@@ -135,16 +135,16 @@ export function renderHandles(
   y: number,
   w: number,
   h: number,
+  handleColor: string = HANDLE_COLOR,
 ): void {
   ctx.save();
 
-  // Blue selection border
-  ctx.strokeStyle = HANDLE_COLOR;
+  // Selection border + handles in theme color (defaults to legacy blue)
+  ctx.strokeStyle = handleColor;
   ctx.lineWidth = 1.5;
   ctx.strokeRect(x, y, w, h);
 
-  // 8 square handles
-  ctx.fillStyle = HANDLE_COLOR;
+  ctx.fillStyle = handleColor;
   for (const { hx, hy } of getHandles(x, y, w, h)) {
     ctx.fillRect(hx - HANDLE_HALF, hy - HANDLE_HALF, HANDLE_SIZE, HANDLE_SIZE);
   }

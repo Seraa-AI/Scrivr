@@ -17,7 +17,7 @@ import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
  */
 export const TextBlockStrategy: BlockStrategy = {
   render(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
-    const { ctx, pageNumber, lineIndexOffset, measurer, markDecorators, inlineRegistry } = renderCtx;
+    const { ctx, pageNumber, lineIndexOffset, measurer, markDecorators, inlineRegistry, theme } = renderCtx;
     const { lines, x, availableWidth, align } = block;
 
     for (let li = 0; li < lines.length; li++) {
@@ -55,7 +55,7 @@ export const TextBlockStrategy: BlockStrategy = {
           const objY = computeObjectRenderY(lineY, line, span);
           const strategy = inlineRegistry?.get(span.node.type.name);
           if (strategy) {
-            strategy.render(ctx, spanX, objY, span.width, span.height, span.node);
+            strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme);
           }
           // Store the full visual rect so the overlay can draw resize handles.
           map.registerObjectRect({ docPos: span.docPos, x: spanX, y: objY, width: span.width, height: span.height, page: pageNumber });
@@ -121,31 +121,48 @@ export const TextBlockStrategy: BlockStrategy = {
           markAttrs: {} as Record<string, unknown>,
         };
 
-        if (markDecorators && span.marks) {
-          for (const markInfo of span.marks) {
-            const dec = markDecorators.get(markInfo.name);
-            if (dec?.decoratePre) dec.decoratePre(ctx, { ...spanRect, markAttrs: markInfo.attrs });
-          }
-        }
-
-        ctx.font = span.font;
-
-        let fillColor = "#1e293b";
+        // Resolve effective text color first (color marks win, theme default
+        // falls through). Decorators painting along text (underline,
+        // strikethrough) read this so they follow the actual ink color.
+        let effectiveTextColor = theme.defaultText;
         if (markDecorators && span.marks) {
           for (const markInfo of span.marks) {
             const dec = markDecorators.get(markInfo.name);
             if (dec?.decorateFill) {
-              const override = dec.decorateFill({ ...spanRect, markAttrs: markInfo.attrs });
-              if (override !== undefined) fillColor = override;
+              const override = dec.decorateFill({ ...spanRect, markAttrs: markInfo.attrs }, theme);
+              if (override !== undefined) effectiveTextColor = override;
             }
           }
         }
-        drawSpan(fillColor);
 
         if (markDecorators && span.marks) {
           for (const markInfo of span.marks) {
             const dec = markDecorators.get(markInfo.name);
-            if (dec?.decoratePost) dec.decoratePost(ctx, { ...spanRect, markAttrs: markInfo.attrs });
+            if (dec?.decoratePre) {
+              dec.decoratePre(
+                ctx,
+                { ...spanRect, markAttrs: markInfo.attrs },
+                theme,
+                effectiveTextColor,
+              );
+            }
+          }
+        }
+
+        ctx.font = span.font;
+        drawSpan(effectiveTextColor);
+
+        if (markDecorators && span.marks) {
+          for (const markInfo of span.marks) {
+            const dec = markDecorators.get(markInfo.name);
+            if (dec?.decoratePost) {
+              dec.decoratePost(
+                ctx,
+                { ...spanRect, markAttrs: markInfo.attrs },
+                theme,
+                effectiveTextColor,
+              );
+            }
           }
         }
 

@@ -9,6 +9,7 @@ import { TextBlockStrategy } from "./TextBlockStrategy";
 import { CharacterMap } from "./CharacterMap";
 import type { InlineStrategy } from "./BlockRegistry";
 import { InlineRegistry } from "./BlockRegistry";
+import { defaultEditorTheme } from "../model/theme";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import type { FontConfig } from "./FontConfig";
 import { schema } from "../model/schema";
@@ -1407,6 +1408,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
         lineIndexOffset: 0,
         dpr: 1,
         measurer: createMeasurer(),
+        theme: defaultEditorTheme,
         inlineRegistry,
       },
       new CharacterMap(),
@@ -1455,6 +1457,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
           lineIndexOffset: 0,
           dpr: 1,
           measurer: createMeasurer(),
+          theme: defaultEditorTheme,
         },
         new CharacterMap(),
       );
@@ -1496,6 +1499,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
         lineIndexOffset: 0,
         dpr: 1,
         measurer: createMeasurer(),
+        theme: defaultEditorTheme,
         inlineRegistry,
       },
       new CharacterMap(),

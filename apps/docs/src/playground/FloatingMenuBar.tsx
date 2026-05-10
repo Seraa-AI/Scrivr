@@ -60,7 +60,14 @@ export function FloatingMenuBar({ editor }: FloatingMenuBarProps) {
 
   return (
     <FloatingMenu editor={editor}>
-      <div className="flex items-center gap-1 rounded-lg bg-gray-50 border border-gray-200 border-l-2 border-l-indigo-400 px-1.5 py-1 shadow-sm">
+      <div
+        className="flex items-center gap-1 rounded-lg border border-l-2 px-1.5 py-1 shadow-sm"
+        style={{
+          background: "var(--app-surface-2)",
+          borderColor: "var(--app-border)",
+          borderLeftColor: "var(--app-accent)",
+        }}
+      >
         {items.map((item) => (
           <button
             key={item.title}
@@ -69,7 +76,16 @@ export function FloatingMenuBar({ editor }: FloatingMenuBarProps) {
               e.preventDefault();
               if (editor) item.action(editor);
             }}
-            className="px-2 py-0.5 text-[13px] font-medium text-gray-600 rounded hover:bg-gray-200 hover:text-gray-900 transition-colors cursor-pointer bg-transparent border-none"
+            className="px-2 py-0.5 text-[13px] font-medium rounded transition-colors cursor-pointer bg-transparent border-none"
+            style={{ color: "var(--app-text-muted)" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--app-surface-hover)";
+              e.currentTarget.style.color = "var(--app-text)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "var(--app-text-muted)";
+            }}
           >
             {item.label}
           </button>

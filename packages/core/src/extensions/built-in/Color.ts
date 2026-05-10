@@ -78,6 +78,8 @@ export const Color = Extension.create<ColorOptions>({
         return rect.markAttrs["color"] as string | undefined;
       },
     };
+    // The user-applied color mark wins over theme.defaultText. The second
+    // arg (theme) is unused here — we keep the signature compatible.
     return { color: decorator };
   },
 

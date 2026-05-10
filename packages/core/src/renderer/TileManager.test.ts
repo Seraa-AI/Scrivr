@@ -130,6 +130,20 @@ function makeMockEditor(
     markDecorators: undefined,
     surfaces: { activeSurface },
     pageChromeContributions: [],
+    getResolvedTheme: vi.fn(() => ({
+      pageBg: "#ffffff",
+      pageShadow: "0 1px 3px rgba(0,0,0,0.1)",
+      defaultText: "#1e293b",
+      link: "#4f46e5",
+      cursor: "#1e293b",
+      selectionFill: "rgba(59, 130, 246, 0.25)",
+      imagePlaceholderBg: "#f1f5f9",
+      imagePlaceholderBorder: "#cbd5e1",
+      imagePlaceholderText: "#64748b",
+      listMarker: "#1e293b",
+      hrColor: "#cbd5e1",
+      resizeHandle: "#3b82f6",
+    })),
   } as unknown as Editor;
 
   return { editor, layoutRef };

@@ -3,6 +3,7 @@ import type { Command } from "prosemirror-state";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { IEditor } from "../types";
 import type { Node as PmNode } from "prosemirror-model";
+import type { ResolvedTheme } from "../../model/theme";
 
 // ── Image cache ───────────────────────────────────────────────────────────────
 
@@ -38,10 +39,6 @@ const instanceState = new WeakMap<object, InstanceState>();
 
 // ── Inline image strategy ─────────────────────────────────────────────────────
 
-const PLACEHOLDER_BG = "#f1f5f9";
-const PLACEHOLDER_BORDER = "#e2e8f0";
-const PLACEHOLDER_TEXT = "#94a3b8";
-
 function createInlineImageStrategy(): InlineStrategy {
   return {
     verticalAlign: "baseline" as const,
@@ -52,6 +49,7 @@ function createInlineImageStrategy(): InlineStrategy {
       width: number,
       height: number,
       node: PmNode,
+      theme: ResolvedTheme,
     ): void {
       // Zero-size anchor spans for floating images — nothing to draw.
       if (width <= 0 || height <= 0) return;
@@ -70,13 +68,13 @@ function createInlineImageStrategy(): InlineStrategy {
           // width for break mode), so the image fills the full area.
           ctx.drawImage(img, x, y, width, height);
         } else {
-          drawPlaceholder(ctx, x, y, width, height, alt || "Loading…");
+          drawPlaceholder(ctx, x, y, width, height, alt || "Loading…", theme);
         }
       } else {
-        drawPlaceholder(ctx, x, y, width, height, "Image");
+        drawPlaceholder(ctx, x, y, width, height, "Image", theme);
       }
 
-      ctx.strokeStyle = PLACEHOLDER_BORDER;
+      ctx.strokeStyle = theme.imagePlaceholderBorder;
       ctx.lineWidth = 1;
       ctx.strokeRect(x, y, width, height);
 
@@ -92,14 +90,15 @@ function drawPlaceholder(
   w: number,
   h: number,
   label: string,
+  theme: ResolvedTheme,
 ): void {
-  ctx.fillStyle = PLACEHOLDER_BG;
+  ctx.fillStyle = theme.imagePlaceholderBg;
   ctx.fillRect(x, y, w, h);
 
   const cx = x + w / 2;
   const cy = y + h / 2 - 10;
   const r = Math.min(20, h / 6);
-  ctx.fillStyle = PLACEHOLDER_TEXT;
+  ctx.fillStyle = theme.imagePlaceholderText;
   ctx.beginPath();
   ctx.arc(cx - r * 0.4, cy - r * 0.3, r * 0.4, 0, Math.PI * 2);
   ctx.fill();
