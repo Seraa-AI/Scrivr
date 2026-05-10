@@ -1,5 +1,104 @@
 # @scrivr/core
 
+## 1.0.8
+
+### Patch Changes
+
+- bc1652d: Two new ways to seed initial editor content: a `DefaultContent` extension that takes either markdown or JSON, and a widened `content` constructor option that accepts strings (markdown) alongside the existing JSON object. Both surfaces share a single parser implementation; the constructor option overrides any extension contribution. Server users typically reach for `new ServerEditor({ content: "# md" })`, kit-builders compose `DefaultContent.configure({ markdown })` into an extensions list — either path lands the same document.
+
+  **@scrivr/core**
+
+  - New `DefaultContent` extension at `extensions/built-in/DefaultContent.ts`. Takes `{ markdown?: string } | { json?: object }` (mutually exclusive — throws on both or neither). Use via `DefaultContent.configure({ markdown: "# Hello" })` or `DefaultContent.configure({ json: docJson })`.
+  - `BaseEditorOptions.content`, `EditorOptions.content`, and `ServerEditorOptions.content` widened from `Record<string, unknown>` to `string | Record<string, unknown>`. Strings are parsed as markdown via the merged extension token map; objects keep the existing JSON path. Passing `content` on the constructor overrides any `DefaultContent` (or other `addInitialDoc`) contribution from the extensions list.
+  - `addInitialDoc` lifecycle now runs _after_ every extension has fully resolved (previously it ran inside each extension's `resolve()`, before others were known). The hook's `this` context is the new `InitialDocContext` — `ExtensionContext` plus a `parseMarkdown(text)` helper that uses the merged token map. This is what lets the extension seed from markdown without an editor instance. Existing extensions that only used `this.schema` keep working unchanged.
+  - New `parseMarkdownToDoc(schema, tokens, text)` helper in `model/parseMarkdown.ts` — the shared core used by `BaseEditor.parseMarkdown`, the constructor `content` option, and `InitialDocContext.parseMarkdown`. `BaseEditor.parseMarkdown` is now a one-line wrapper.
+  - New `InitialDocContext` type exported from `extensions/index.ts` for consumers writing custom content-seeding extensions.
+
+  **@scrivr/react**, **@scrivr/plugins**, **@scrivr/export-pdf**, **@scrivr/export-markdown**
+
+  - No code changes. Patch bump only, lockstep versioning.
+
+- 40be274: Tables ship behind an opt-in flag. Phase 1's placeholder render is intentionally not in default `StarterKit` while the layout/render/export pipeline is filled in (Phases 2–4 of `docs/tables.md`). Apps consuming the released packages get unchanged behavior; tables are silent until explicitly enabled.
+
+  **Breaking-ish for early adopters:**
+
+  ```ts
+  // Before — default-on:
+  new Editor({ extensions: [StarterKit] });
+
+  // After — opt-in:
+  new Editor({ extensions: [StarterKit.configure({ table: true })] });
+  ```
+
+  **@scrivr/core**
+
+  - `StarterKitOptions.table` flips from `false?` (default-on, opt-out) to `true?` (default-off, opt-in). All five `if (opts.table !== false)` gates in `StarterKit` flip to `if (opts.table === true)` (nodes, commands, layout handlers, toolbar items, markdown serializer rules).
+  - `Table` extension and its types (`CellSubBlock`, `LayoutBlockKind === "tableRow"`) remain exported. Power users can continue composing `Table` directly without StarterKit:
+
+    ```ts
+    new Editor({ extensions: [StarterKit, Table] });
+    ```
+
+  - 3 new regression tests in `Table.test.ts` lock in the contract:
+    - default `StarterKit` does not include `table` / `tableRow` / `tableCell` / `tableHeader` in the schema,
+    - default `StarterKit` does not expose `insertTable` / `deleteTable` commands,
+    - `StarterKit.configure({ table: true })` registers the full schema.
+
+  **@scrivr/react / @scrivr/plugins / @scrivr/export-pdf / @scrivr/export-markdown**
+
+  - Lockstep version bump only — no API changes.
+
+- dad19d0: Tables Phase 1 — schema + insert/delete + placeholder render. Tables can now be inserted, removed, serialised to JSON, and survive page boundaries with a one-bordered-box-per-row placeholder. Real cell layout, cell text rendering, and PDF parity land in Phase 4 (see `docs/tables.md`).
+
+  **@scrivr/core**
+
+  - New `Table` extension with four Word-shaped node specs: `table` (`grid: number[]`, `layout: "fixed"`, `isolating`), `tableRow` (`repeatHeader`, `allowBreakAcrossPages`), `tableCell` and `tableHeader` (`gridSpan`, `vMerge`, `hMerge`, `hAlign`, `vAlign`, `background`, `margins`, `borders`, all `isolating`).
+  - New commands `insertTable({ rows, cols })` and `deleteTable()`. Insert places the table after the current top-level block with uniform 100px columns, an empty paragraph in each cell, and parks the cursor in the first cell. Delete walks up to the surrounding `table` ancestor.
+  - New `LayoutBlock.cells?: CellSubBlock[]` field and `CellSubBlock` interface (Phase 1: always `[]`; Phase 4 fills it).
+  - New `layoutTableRow()` in `BlockLayout.ts` — stub that returns a fixed-height (32px) `kind: "tableRow"` block per row.
+  - New `TableLayoutEngine` re-export module (placeholder for Phase 4's full engine) and `TableRowStrategy` placeholder renderer that paints a single 1px gray bordered rectangle per row.
+  - `PageLayout.collectLayoutItems()` now expands `table` nodes into one `LayoutItem` per row. Pagination treats `tableRow` as atomic alongside `leaf` blocks: whole rows move to the next page on overflow, and a row taller than the content area clips on the next page (Word's `cantSplit` policy).
+  - `StarterKit` accepts `table?: false` and registers Table by default.
+  - New `insertTable` toolbar item (▦ icon) inserts a 3×3 table.
+  - New markdown serializer rules for `table` / `tableRow` / `tableCell` / `tableHeader`. Phase 1 emits GFM-style pipe tables: first row becomes the header, cells flatten to pipe-escaped single-line text. Block content, marks, and merged cells collapse to plain text (full markdown serializer with merged-cell skip lands in Phase 8). Without this, `getMarkdown()` would throw on any document containing an inserted table since StarterKit enables Table by default.
+  - Regression test: `new Editor({ content: { ...table... } })` hydrates the table into the proper `tableHeader` / `tableCell` / `tableRow` / `table` structure. Locks in compatibility with `EditorOptions.content` (added by the DefaultContent extension PR) and confirms the schema round-trips through the constructor's content path.
+
+  **@scrivr/react / @scrivr/plugins / @scrivr/export-pdf / @scrivr/export-markdown**
+
+  - Lockstep version bump only — no API changes. PDF export ignores tables for now (canvas placeholder only); Phase 4 adds the PDF table handler in lockstep with real cell rendering, per the parity rule.
+
+- bf33e14: Theming: 12 canvas tokens + per-extension theme + PDF override path. Tailwind dark mode (or any CSS-variable-driven theme system) can drive both DOM chrome and canvas paint from a single source of truth. PDF export defaults to a print-ready palette that ignores the canvas theme; callers opt into themed PDF via `exportPdf({ theme })`.
+
+  **Note:** This bumps `MarkDecorator`, `InlineStrategy.render`, `OverlayRenderHandler`, `BlockRenderContext`, and `PageChromePaintContext` signatures with new theme/effective-color parameters. Third-party extensions that hook these will pick up TypeScript errors and need to update their signatures (most can ignore the new args; underline/strikethrough-style decorators read `effectiveTextColor`).
+
+  **@scrivr/core**
+
+  - New `EditorTheme` (input — accepts CSS color strings including `var(--token)` references) and `ResolvedTheme` (output — literal colors only, what render contexts consume). Both exported from `@scrivr/core`. 12 tokens cover cross-cutting paint surfaces: pageBg, pageShadow, defaultText, link, cursor, selectionFill, imagePlaceholderBg/Border/Text, listMarker, hrColor, resizeHandle.
+  - New constants: `defaultEditorTheme` (matches every hardcoded color used today — zero visual regression for apps that don't pass `theme`) and `defaultPdfTheme` (print-ready palette: white bg, black text, blue link, light placeholders).
+  - New `EditorOptions.theme` and `EditorOptions.themeRoot`. `themeRoot` defaults to the mounted container, falling back to `document.documentElement` for unmounted instances. `var(--token)` strings resolve against `themeRoot` via a hidden `<div>` probe + `getComputedStyle` (the browser handles every CSS color form for free — `var()`, `var()` with fallback, `color-mix()`, `oklch()`, `calc()`).
+  - New `editor.setTheme(partial)` API. Partial merge with explicit semantics: `null` resets a token to its default, `undefined` leaves the token alone, any other value overrides. Calling with `{}` is a pure refresh (re-resolves and bumps `renderGeneration`).
+  - New `editor.getTheme()` and `editor.getResolvedTheme()` accessors.
+  - Auto-installed `MutationObserver` on `themeRoot` (watching `class`, `style`, `data-theme`) when any theme value contains `var(`. rAF-coalesced — burst mutations produce one re-resolve per frame. Toggling the Tailwind `dark` class triggers a single canvas repaint without explicit calls.
+  - Theme threaded into every paint surface today: `canvas.ts` clearCanvas (pageBg), `TextBlockStrategy` default text fill (defaultText), `Underline`/`Strikethrough` decorations (theme.defaultText — color marks do NOT bleed into decoration color, matching Word/Docs convention), `Link` decorator (theme.link), `Image` placeholders (3 tokens), `HorizontalRule` (hrColor), `ListItemStrategy` markers (listMarker), `ResizeController` handles (resizeHandle), `OverlayRenderer` cursor + selection (cursor, selectionFill), `TileManager` page wrapper (pageBg + pageShadow).
+  - `BlockRenderContext`, `PageChromePaintContext`, `MarkDecorator.decoratePre`/`decoratePost`/`decorateFill`, `InlineStrategy.render`, and `OverlayRenderHandler` now carry/receive a resolved theme (and `effectiveTextColor` for mark decorators) so third-party extensions get dark mode automatically without forking the paint contract.
+  - `CodeBlock` extension now accepts a `theme: { bg, border }` option for per-extension palette overrides. Other built-ins read from the cross-cutting `ResolvedTheme` directly.
+  - `ServerEditor` accepts `theme` and exposes `getTheme()` + `getResolvedTheme()`. Server-side any `var(...)` entries are dropped (warned at construct via `console.warn`) and the rest are merged over `defaultEditorTheme`. PDF callers can pass `editor.getResolvedTheme()` directly into `exportPdf({ theme })` without re-specifying colors.
+  - Probe element lifecycle is leak-free across construct → mount → unmount → remount → destroy. The probe is disposed when `_themeRoot` switches (constructor's documentElement → mount's container) and again on destroy. The MutationObserver-driven rAF refresh is tracked + cancelled on unmount/destroy so stray callbacks can't recreate a probe on a torn-down editor.
+  - Header/footer surfaces inherit the body's resolved theme via `PageChromePaintContext.theme` — they never store a copy, so `setTheme()` on the body propagates without surface-side refresh.
+  - `TileManager` paged-mode page wrapper now reads `pageShadow` and `pageBg` from the active resolved theme on every paint. User-supplied `pageStyle.boxShadow` / `pageStyle.background` overrides still win.
+
+  **@scrivr/export-pdf**
+
+  - New `PdfExportOptions.theme` — `Partial<ResolvedTheme>` (literal CSS colors only). Shallow-merged over `defaultPdfTheme`. PDF default is independent of `editor.theme` so a dark canvas still produces a print-ready PDF unless the caller explicitly opts in.
+  - The PDF per-page loop now paints `theme.pageBg` as the first draw call so themed exports actually have the requested background color (pdf-lib's default white was previously visible regardless of theme).
+  - `editor.commands.exportPdf({ theme, filename })` accepts the same theme override at the command level. Type-safe via the augmented `Commands` interface.
+  - New `parseCssColor` helper supports `#hex`, `#rgb`, `rgb(...)`, and `rgba(...)` formats — used internally to parse theme tokens into pdf-lib `rgb()` colors.
+  - `PdfContext.theme` field carries the resolved theme to every PDF handler. Built-in handlers (paragraph/heading/image/hr/codeblock/listItem/underline/strikethrough/link) read from `ctx.theme`; extension-contributed PDF handlers via `addExports().pdf` get the same context shape.
+
+  **@scrivr/react**, **@scrivr/plugins**, **@scrivr/export-markdown**
+
+  - No code changes. Patch bump only, lockstep versioning. Plugins' header-footer chrome paint reads `paintCtx.theme` to render header/footer body content with the same theme as the page body — surface theme parity with no surface-side state.
+
 ## 1.0.7
 
 ### Patch Changes

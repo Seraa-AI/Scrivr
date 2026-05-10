@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/export-pdf",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "PDF export for Scrivr documents — same layout pipeline as the canvas renderer",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
