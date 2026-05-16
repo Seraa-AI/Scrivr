@@ -7,7 +7,7 @@ import { YBinding } from "./YBinding";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 //
 // Tests drive a real `ServerEditor` (BaseEditor) — its `getState`, `subscribe`,
-// and `_applyTransaction` are the same surface YBinding consumes in production.
+// and `applyTransaction` are the same surface YBinding consumes in production.
 // No `as unknown as IEditor` fake editor shape.
 
 function makeEditor(text: string, cursorPos?: number): ServerEditor {

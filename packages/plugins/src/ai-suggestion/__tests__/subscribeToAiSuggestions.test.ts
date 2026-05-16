@@ -99,7 +99,7 @@ describe("subscribeToAiSuggestions — identity optimization", () => {
     const callsBefore = cb.mock.calls.length;
 
     // A plain text insert has no AI meta — plugin state reference unchanged
-    editor._applyTransaction(editor.getState().tr.insertText("!"));
+    editor.applyTransaction(editor.getState().tr.insertText("!"));
 
     expect(cb.mock.calls.length).toBe(callsBefore);
   });
@@ -215,7 +215,7 @@ describe("subscribeToAiSuggestions — isActive", () => {
     const cb = vi.fn();
     subscribeToAiSuggestions(editor, cb);
 
-    editor._applyTransaction(
+    editor.applyTransaction(
       editor.getState().tr.setMeta(AI_SUGGESTION_SET_ACTIVE, "n1"),
     );
 
@@ -234,7 +234,7 @@ describe("subscribeToAiSuggestions — onFocus / onBlur", () => {
     const onFocus = vi.fn();
     subscribeToAiSuggestions(editor, vi.fn(), { onFocus });
 
-    editor._applyTransaction(
+    editor.applyTransaction(
       editor.getState().tr.setMeta(AI_SUGGESTION_SET_ACTIVE, "n1"),
     );
 
@@ -250,11 +250,11 @@ describe("subscribeToAiSuggestions — onFocus / onBlur", () => {
     subscribeToAiSuggestions(editor, vi.fn(), { onBlur });
 
     // Activate
-    editor._applyTransaction(
+    editor.applyTransaction(
       editor.getState().tr.setMeta(AI_SUGGESTION_SET_ACTIVE, "n1"),
     );
     // Deactivate
-    editor._applyTransaction(
+    editor.applyTransaction(
       editor.getState().tr.setMeta(AI_SUGGESTION_SET_ACTIVE, null),
     );
 
@@ -283,11 +283,11 @@ describe("subscribeToAiSuggestions — onFocus / onBlur", () => {
     const onBlur  = vi.fn();
     subscribeToAiSuggestions(editor, vi.fn(), { onFocus, onBlur });
 
-    editor._applyTransaction(
+    editor.applyTransaction(
       editor.getState().tr.setMeta(AI_SUGGESTION_SET_ACTIVE, "n1"),
     );
     // Transition directly from n1 → n2
-    editor._applyTransaction(
+    editor.applyTransaction(
       editor.getState().tr.setMeta(AI_SUGGESTION_SET_ACTIVE, "n2"),
     );
 
@@ -303,7 +303,7 @@ describe("subscribeToAiSuggestions — onFocus / onBlur", () => {
     const onBlur  = vi.fn();
     subscribeToAiSuggestions(editor, vi.fn(), { onFocus, onBlur });
 
-    editor._applyTransaction(editor.getState().tr.insertText("!"));
+    editor.applyTransaction(editor.getState().tr.insertText("!"));
 
     expect(onFocus).not.toHaveBeenCalled();
     expect(onBlur).not.toHaveBeenCalled();

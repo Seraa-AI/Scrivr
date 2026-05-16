@@ -4,7 +4,7 @@
  * after iteration 1 with convergence:"stable". Exhaustion accepts the last
  * iteration's layout and flags convergence:"exhausted" for debugging.
  *
- * The loop deliberately does NOT bump `_runPipelineDepth` — that guard
+ * The loop deliberately does NOT bump `runPipelineDepth` — that guard
  * protects against re-entrant runPipeline calls, not internal iteration.
  * Contributors that need to measure mini-documents must use runMiniPipeline.
  */

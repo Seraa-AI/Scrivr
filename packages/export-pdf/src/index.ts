@@ -196,7 +196,7 @@ export async function buildPdf(
 
     // Chrome handlers (headers, footers, etc.)
     for (const [chromeName, chromeHandler] of Object.entries(chromeHandlers)) {
-      const payload = layout._chromePayloads?.[chromeName];
+      const payload = layout.chromePayloads?.[chromeName];
       chromeHandler(layoutPage, payload, ctx);
     }
   }
@@ -302,8 +302,8 @@ async function embedImages(
   }
 
   // Chrome payloads (header/footer mini-layouts may contain inline images)
-  if (layout._chromePayloads) {
-    for (const payload of Object.values(layout._chromePayloads)) {
+  if (layout.chromePayloads) {
+    for (const payload of Object.values(layout.chromePayloads)) {
       if (typeof payload === "object" && payload !== null && "slots" in payload) {
         const slots = (payload as { slots: Record<string, { layout?: { pages?: Array<{ blocks: DocumentLayout["pages"][0]["blocks"] }> } }> }).slots;
         for (const slot of Object.values(slots)) {

@@ -376,7 +376,7 @@ export class Editor extends BaseEditor implements IEditor {
     // ── Surface registry — plugins register their own surfaces lazily.
     this.surfaces = new SurfaceRegistry();
     const owners = this.manager.getSurfaceOwners();
-    this.surfaces._setOwnerMediator({
+    this.surfaces.setOwnerMediator({
       commit: (s) => {
         const reg = owners.get(s.owner);
         if (reg?.onCommit) {
@@ -504,7 +504,7 @@ export class Editor extends BaseEditor implements IEditor {
    * This ensures external transaction sources (Y.js, AI suggestions) also
    * trigger layout + paint updates.
    */
-  override _applyTransaction(tr: Transaction): void {
+  override applyTransaction(tr: Transaction): void {
     this.viewDispatch(tr);
   }
 
@@ -1118,7 +1118,7 @@ export class Editor extends BaseEditor implements IEditor {
    * All transaction paths in Editor (commands, input, external) converge here.
    */
   private viewDispatch(tr: Transaction): void {
-    // _applyState is in BaseEditor: applies tr, emits "update", notifyListeners
+    // applyState is in BaseEditor: applies tr, emits "update", notifyListeners
     this.applyState(tr);
     this.lc.invalidate();
     // resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).

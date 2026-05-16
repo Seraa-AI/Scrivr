@@ -31,7 +31,7 @@ vi.mock("@scrivr/core", async (importOriginal) => {
       runId: 0,
       convergence: "stable" as const,
       iterationCount: 1,
-      _chromePayloads: {},
+      chromePayloads: {},
     })),
   };
 });
@@ -84,7 +84,7 @@ describe("HeaderFooter extension", () => {
 
       const state = editor.getState();
       const tr = state.tr.setDocAttribute("headerFooter", policy);
-      editor._applyTransaction(tr);
+      editor.applyTransaction(tr);
 
       expect(editor.getState().doc.attrs["headerFooter"]).toEqual(policy);
     });
@@ -100,7 +100,7 @@ describe("HeaderFooter extension", () => {
 
       // Set initial
       let tr = editor.getState().tr.setDocAttribute("headerFooter", policy);
-      editor._applyTransaction(tr);
+      editor.applyTransaction(tr);
 
       // Update partial
       const updated = {
@@ -109,7 +109,7 @@ describe("HeaderFooter extension", () => {
         firstPageHeader: makeDef("First Page"),
       };
       tr = editor.getState().tr.setDocAttribute("headerFooter", updated);
-      editor._applyTransaction(tr);
+      editor.applyTransaction(tr);
 
       const result = editor.getState().doc.attrs[
         "headerFooter"
@@ -129,11 +129,11 @@ describe("HeaderFooter extension", () => {
       };
 
       let tr = editor.getState().tr.setDocAttribute("headerFooter", policy);
-      editor._applyTransaction(tr);
+      editor.applyTransaction(tr);
       expect(editor.getState().doc.attrs["headerFooter"]).not.toBeNull();
 
       tr = editor.getState().tr.setDocAttribute("headerFooter", null);
-      editor._applyTransaction(tr);
+      editor.applyTransaction(tr);
       expect(editor.getState().doc.attrs["headerFooter"]).toBeNull();
     });
   });

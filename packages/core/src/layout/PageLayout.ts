@@ -165,7 +165,7 @@ export interface DocumentLayout {
    * writes an object (possibly empty); absent only on test fixtures that
    * bypass runPipeline. Seeds the next run's previousRunPayload.
    */
-  _chromePayloads?: Record<string, unknown>;
+  chromePayloads?: Record<string, unknown>;
 }
 
 /**
@@ -872,11 +872,11 @@ export const defaultPagelessConfig: PageConfig = {
  */
 // Recursion guard — throws if runPipeline is called while already on the stack.
 // Chrome contributors must use runMiniPipeline() instead.
-let _runPipelineDepth = 0;
+let runPipelineDepth = 0;
 
 /** Test-only: set the recursion depth counter to simulate re-entry. */
 export function __setRunPipelineDepthForTest(n: number): void {
-  _runPipelineDepth = n;
+  runPipelineDepth = n;
 }
 
 export function runPipeline(
@@ -884,7 +884,7 @@ export function runPipeline(
   options: PageLayoutOptions,
 ): DocumentLayout {
   // Recursion guard — use runMiniPipeline() from chrome contributor hooks.
-  if (_runPipelineDepth > 0) {
+  if (runPipelineDepth > 0) {
     throw new Error(
       "[runPipeline] recursive call detected. Chrome contributors must call " +
       "runMiniPipeline() from their measure() hook, not runPipeline(). " +
@@ -892,11 +892,11 @@ export function runPipeline(
       "contributor and infinite-loop.",
     );
   }
-  _runPipelineDepth++;
+  runPipelineDepth++;
   try {
-    return _runPipelineBody(doc, options);
+    return runPipelineBody(doc, options);
   } finally {
-    _runPipelineDepth--;
+    runPipelineDepth--;
   }
 }
 
@@ -1070,7 +1070,7 @@ export function runFlowPipeline(
   return { layout, isPartial: false, ...context, y: pr.y, anchoredObjects: mergedPlacements };
 }
 
-function _runPipelineBody(
+function runPipelineBody(
   doc: Node,
   options: PageLayoutOptions,
 ): DocumentLayout {
@@ -1094,7 +1094,7 @@ function _runPipelineBody(
   };
 
   const contributions = options.pageChromeContributions ?? [];
-  const prevRunPayloads = previousLayout?._chromePayloads ?? {};
+  const prevRunPayloads = previousLayout?.chromePayloads ?? {};
   const prevRunFlowLayout = previousLayout ?? null;
 
   // Stages 1 + 2 — measure + paginate, wrapped in the chrome aggregator loop.
@@ -1111,7 +1111,7 @@ function _runPipelineBody(
     ...fp.layout,
     convergence: chromeResult.convergence,
     iterationCount: chromeResult.iterationCount,
-    _chromePayloads: chromeResult.chromePayloads,
+    chromePayloads: chromeResult.chromePayloads,
   };
 
   if (fp.isPartial) return layoutWithChrome;

@@ -3,7 +3,7 @@
  *
  * The registry is deliberately pure: it has no coupling to ExtensionManager,
  * Editor, or any layout/render system. Editor injects an owner mediator via
- * `_setOwnerMediator()` that the registry calls during activation transitions.
+ * `setOwnerMediator()` that the registry calls during activation transitions.
  * This keeps the registry unit-testable without an Editor instance.
  *
  * Activation lifecycle (inside `activate(nextId)`):
@@ -221,11 +221,11 @@ export class SurfaceRegistry {
 
     if (prev !== null) {
       if (prev.isDirty) {
-        prev._committing = true;
+        prev.committing = true;
         try {
           this.mediator.commit(prev);
         } finally {
-          prev._committing = false;
+          prev.committing = false;
         }
         // Any throw from mediator.commit propagates here — activation aborts.
       }
@@ -293,7 +293,7 @@ export class SurfaceRegistry {
    * Install the owner lifecycle mediator. Called once by Editor in its
    * constructor, before any plugin can call activate().
    */
-  _setOwnerMediator(mediator: SurfaceOwnerMediator): void {
+  setOwnerMediator(mediator: SurfaceOwnerMediator): void {
     this.mediator = mediator;
   }
 }

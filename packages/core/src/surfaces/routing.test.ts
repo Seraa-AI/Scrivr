@@ -123,20 +123,20 @@ describe("routing — Invariant 5 (editor.getState() is root-bound)", () => {
 
     // Mutate root via a dispatched tr bypassing surface routing.
     const tr = editor.getState().tr.insertText("!", 1);
-    editor._applyTransaction(tr);
+    editor.applyTransaction(tr);
     expect(editor.getState().doc.textContent).toBe("!body content");
     expect(surface.state.doc.textContent).toBe(""); // untouched
     cleanup();
   });
 
-  it("external _applyTransaction always hits root state, never active surface", () => {
+  it("external applyTransaction always hits root state, never active surface", () => {
     const { editor, cleanup } = mountEditor();
     const surface = makeSurface(editor, "test:1", "test");
     editor.surfaces.register(surface);
     editor.surfaces.activate("test:1");
 
     const tr = editor.getState().tr.insertText("external");
-    editor._applyTransaction(tr);
+    editor.applyTransaction(tr);
 
     expect(editor.getState().doc.textContent).toBe("external");
     expect(surface.state.doc.textContent).toBe("");

@@ -380,11 +380,11 @@ export function renderAnchoredDragCaret(
  * Updated by clearOverlay (called every frame) so all draw calls in the same
  * paint cycle use the correct value without threading dpr through every API.
  */
-let _activeDpr = 1;
+let activeDpr = 1;
 
 /** @internal Set the active DPR for testing snapRect without calling clearOverlay. */
-export function _setActiveDpr(dpr: number): void {
-  _activeDpr = dpr;
+export function setActiveDpr(dpr: number): void {
+  activeDpr = dpr;
 }
 
 /**
@@ -398,7 +398,7 @@ export function snapRect(
   w: number,
   h: number,
 ): { x: number; y: number; w: number; h: number } {
-  const dpr = _activeDpr;
+  const dpr = activeDpr;
   const sx = Math.round(x * dpr) / dpr;
   const sy = Math.round(y * dpr) / dpr;
   const sw = Math.round((x + w) * dpr) / dpr - sx;
@@ -441,7 +441,7 @@ export function clearOverlay(
   height: number,
   dpr: number,
 ): void {
-  _activeDpr = dpr;
+  activeDpr = dpr;
   ctx.resetTransform();
   ctx.clearRect(0, 0, width * dpr, height * dpr);
   ctx.scale(dpr, dpr);

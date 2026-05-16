@@ -514,8 +514,8 @@ export class TileManager {
       ...(this.editor.pageChromeContributions?.length
         ? { pageChromeContributions: this.editor.pageChromeContributions }
         : {}),
-      ...(layout._chromePayloads
-        ? { chromePayloads: layout._chromePayloads }
+      ...(layout.chromePayloads
+        ? { chromePayloads: layout.chromePayloads }
         : {}),
       ...(layout.metrics?.[tile.tileIndex]
         ? { pageMetrics: layout.metrics[tile.tileIndex] }
