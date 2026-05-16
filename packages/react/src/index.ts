@@ -1,23 +1,34 @@
 // React adapter for @scrivr/core
 
 export { useScrivrEditor } from "./useScrivrEditor";
-export { BubbleMenu } from "./BubbleMenu";
-export { FloatingMenu } from "./FloatingMenu";
-export { LinkPopover } from "./LinkPopover";
-export { ImageMenu } from "./ImageMenu";
-export { SlashMenu } from "./SlashMenu";
+export { BubbleMenu, useBubbleMenu } from "./BubbleMenu";
+export { FloatingMenu, useFloatingMenu } from "./FloatingMenu";
+export { LinkPopover, useLinkPopover } from "./LinkPopover";
+export { ImageMenu, useImageMenu } from "./ImageMenu";
+export { SlashMenu, useSlashMenu } from "./SlashMenu";
 export { AiSuggestionCardsPanel, useAiSuggestionCards } from "./AiSuggestionCards";
-export type { SlashMenuItem } from "./SlashMenu";
-export { TrackChangesPopover } from "./TrackChangesPopover";
-export { AiSuggestionPopover } from "./AiSuggestionPopover";
+export type { SlashMenuItem, SlashMenuProps, UseSlashMenuOptions } from "./SlashMenu";
+export { TrackChangesPopover, useTrackChangesPopover } from "./TrackChangesPopover";
+export { AiSuggestionPopover, useAiSuggestionPopover } from "./AiSuggestionPopover";
+export type { BubbleMenuProps } from "./BubbleMenu";
+export type { FloatingMenuProps } from "./FloatingMenu";
+export type { LinkPopoverProps } from "./LinkPopover";
+export type { ImageMenuProps } from "./ImageMenu";
+export type { ImageVerticalAlign, ImageWrappingMode } from "./ImageMenu";
+export type { TrackChangesPopoverProps } from "./TrackChangesPopover";
+export type { AiSuggestionPopoverProps, UseAiSuggestionPopoverOptions } from "./AiSuggestionPopover";
 export type {
   AiSuggestionCardsPanelProps,
   AiSuggestionCardClassNames,
   AiSuggestionCardStyles,
 } from "./AiSuggestionCards";
-export { TrackChangesPanel } from "./TrackChangesPanel";
-export { HeaderFooterRibbon } from "./HeaderFooterRibbon";
-export type { HeaderFooterRibbonProps } from "./HeaderFooterRibbon";
+export { TrackChangesPanel, useTrackChangesPanel } from "./TrackChangesPanel";
+export type { TrackChangesPanelProps } from "./TrackChangesPanel";
+export { HeaderFooterRibbon, useHeaderFooterRibbon } from "./HeaderFooterRibbon";
+export type {
+  HeaderFooterRibbonItem,
+  HeaderFooterRibbonProps,
+} from "./HeaderFooterRibbon";
 export type { UseCanvasEditorOptions } from "./useScrivrEditor";
 
 export { Scrivr } from "./Scrivr";

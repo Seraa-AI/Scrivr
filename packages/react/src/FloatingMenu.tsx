@@ -9,64 +9,58 @@
  *     <button onMouseDown={(e) => { e.preventDefault(); editor.commands.setHeading(1); }}>H1</button>
  *   </FloatingMenu>
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import { createFloatingMenu } from "@scrivr/core";
 import type { FloatingMenuOptions } from "@scrivr/core";
 import type { Editor } from "@scrivr/core";
+import { useFloatingPosition } from "./useFloatingPosition";
 
-interface FloatingMenuProps {
+export interface FloatingMenuProps {
   editor: Editor | null;
   children: ReactNode;
-  shouldShow?: FloatingMenuOptions["shouldShow"];
-  className?: string;
+  shouldShow?: FloatingMenuOptions["shouldShow"] | undefined;
+  className?: string | undefined;
 }
 
-export function FloatingMenu({ editor, children, shouldShow, className }: FloatingMenuProps) {
-  const menuRef = useRef<HTMLDivElement>(null);
+export function useFloatingMenu(
+  editor: Editor | null,
+  options: { shouldShow?: FloatingMenuOptions["shouldShow"] | undefined } = {},
+) {
   const [rect, setRect] = useState<DOMRect | null>(null);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const { ref, position } = useFloatingPosition<HTMLDivElement>(rect, [], {
+    placement: "left",
+  });
 
   useEffect(() => {
     if (!editor) return;
     const opts: FloatingMenuOptions = {
       onShow: setRect,
       onMove: setRect,
-      onHide: () => { setRect(null); setPos(null); },
+      onHide: () => { setRect(null); },
     };
-    if (shouldShow) opts.shouldShow = shouldShow;
+    if (options.shouldShow) opts.shouldShow = options.shouldShow;
     return createFloatingMenu(editor, opts);
-  }, [editor, shouldShow]);
+  }, [editor, options.shouldShow]);
 
-  useEffect(() => {
-    if (!rect || !menuRef.current) return;
+  return { visible: !!rect, rect, position, rootRef: ref };
+}
 
-    const virtualEl = {
-      getBoundingClientRect: () => rect,
-      getClientRects:        () => [rect] as unknown as DOMRectList,
-    };
+export function FloatingMenu({ editor, children, shouldShow, className }: FloatingMenuProps) {
+  const menu = useFloatingMenu(editor, { shouldShow });
 
-    let cancelled = false;
-    computePosition(virtualEl, menuRef.current, {
-      placement: "left",
-      middleware: [offset(8), flip(), shift({ padding: 8 })],
-    }).then(({ x, y }) => { if (!cancelled) setPos({ x, y }); });
-    return () => { cancelled = true; };
-  }, [rect]);
-
-  if (!rect) return null;
+  if (!menu.visible) return null;
 
   return createPortal(
     <div
-      ref={menuRef}
+      ref={menu.rootRef}
       className={className}
       style={{
         position:   "fixed",
-        left:       pos?.x ?? 0,
-        top:        pos?.y ?? 0,
-        zIndex:     50,
-        visibility: pos ? "visible" : "hidden",
+        left:       menu.position?.x ?? 0,
+        top:        menu.position?.y ?? 0,
+        zIndex:     "var(--scrivr-react-floating-z, 50)",
+        visibility: menu.position ? "visible" : "hidden",
       }}
     >
       {children}

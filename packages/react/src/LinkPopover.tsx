@@ -8,24 +8,32 @@
  * @example
  *   <LinkPopover editor={editor} />
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import { createLinkPopover } from "@scrivr/core";
 import type { LinkPopoverInfo } from "@scrivr/core";
 import type { Editor } from "@scrivr/core";
+import { cx } from "./classNames";
+import { useFloatingPosition } from "./useFloatingPosition";
 
-interface LinkPopoverProps {
+export interface LinkPopoverProps {
   editor: Editor | null;
+  className?: string | undefined;
+  itemClassName?: string | undefined;
+  iconClassName?: string | undefined;
+  titleClassName?: string | undefined;
 }
 
-export function LinkPopover({ editor }: LinkPopoverProps) {
-  const menuRef = useRef<HTMLDivElement>(null);
+export function useLinkPopover(editor: Editor | null) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [info, setInfo] = useState<LinkPopoverInfo | null>(null);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const { ref, position } = useFloatingPosition<HTMLDivElement>(
+    rect,
+    [editing],
+    { offset: 6 },
+  );
 
   useEffect(() => {
     if (!editor) return;
@@ -42,113 +50,128 @@ export function LinkPopover({ editor }: LinkPopoverProps) {
       onHide: () => {
         setRect(null);
         setInfo(null);
-        setPos(null);
         setEditing(false);
       },
     });
   }, [editor]);
 
-  useEffect(() => {
-    if (!rect || !menuRef.current) return;
-    const virtualEl = {
-      getBoundingClientRect: () => rect,
-      getClientRects: () => [rect] as unknown as DOMRectList,
-    };
-    let cancelled = false;
-    computePosition(virtualEl, menuRef.current, {
-      placement: "bottom-start",
-      middleware: [offset(6), flip(), shift({ padding: 8 })],
-    }).then(({ x, y }) => {
-      if (!cancelled) setPos({ x, y });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [rect, editing]);
-
-  if (!rect || !info) return null;
-
-  const display = info.href.replace(/^https?:\/\//, "").slice(0, 40);
-
-  function handleEdit() {
-    setEditValue(info!.href);
+  function startEdit() {
+    if (!info) return;
+    setEditValue(info.href);
     setEditing(true);
   }
 
-  function handleSave() {
-    if (editor && editValue.trim()) {
-      editor.commands.setLinkHref(info!.from, info!.to, editValue.trim());
+  function save() {
+    if (editor && info && editValue.trim()) {
+      editor.commands.setLinkHref(info.from, info.to, editValue.trim());
     }
     setEditing(false);
   }
 
-  function handleRemove() {
+  function cancelEdit() {
+    setEditing(false);
+  }
+
+  function remove() {
     editor?.commands.unsetLink();
     setRect(null);
   }
 
+  function dismiss() {
+    setRect(null);
+    setInfo(null);
+    setEditing(false);
+  }
+
+  return {
+    visible: !!rect && !!info,
+    rect,
+    info,
+    position,
+    rootRef: ref,
+    editing,
+    editValue,
+    setEditValue,
+    startEdit,
+    save,
+    cancelEdit,
+    remove,
+    dismiss,
+  };
+}
+
+export function LinkPopover({
+  editor,
+  className,
+  itemClassName,
+  iconClassName,
+  titleClassName,
+}: LinkPopoverProps) {
+  const popover = useLinkPopover(editor);
+
+  if (!popover.visible || !popover.info) return null;
+
+  const display = popover.info.href.replace(/^https?:\/\//, "").slice(0, 40);
+
   return createPortal(
     <div
-      ref={menuRef}
+      ref={popover.rootRef}
+      className={cx("scrivr-menu scrivr-link-popover", className)}
       onMouseDown={(e) => e.preventDefault()}
       style={{
         position: "fixed",
-        left: pos?.x ?? 0,
-        top: pos?.y ?? 0,
-        zIndex: 60,
-        visibility: pos ? "visible" : "hidden",
-        background: "#fff",
-        border: "1px solid #e2e8f0",
-        borderRadius: 8,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-        padding: "6px 10px",
+        left: popover.position?.x ?? 0,
+        top: popover.position?.y ?? 0,
+        zIndex: "var(--scrivr-react-popover-z, 60)",
+        visibility: popover.position ? "visible" : "hidden",
         display: "flex",
         alignItems: "center",
         gap: 8,
-        fontSize: 13,
         whiteSpace: "nowrap",
         minWidth: 200,
       }}
     >
-      {editing ? (
+      {popover.editing ? (
         <>
           <input
             autoFocus
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
+            value={popover.editValue}
+            onChange={(e) => popover.setEditValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") handleSave();
-              if (e.key === "Escape") setEditing(false);
+              if (e.key === "Enter") popover.save();
+              if (e.key === "Escape") popover.cancelEdit();
             }}
             style={{
               flex: 1,
-              border: "1px solid #cbd5e1",
-              borderRadius: 4,
-              padding: "2px 6px",
-              fontSize: 13,
-              outline: "none",
             }}
           />
-          <button onClick={handleSave} style={btnStyle("#2563eb", "#fff")}>
+          <button
+            className={cx("scrivr-menu-item", itemClassName)}
+            onClick={popover.save}
+            style={btnStyle}
+          >
             Save
           </button>
           <button
-            onClick={() => setEditing(false)}
-            style={btnStyle("#f1f5f9", "#374151")}
+            className={cx("scrivr-menu-item", itemClassName)}
+            onClick={popover.cancelEdit}
+            style={btnStyle}
           >
             Cancel
           </button>
         </>
       ) : (
         <>
-          <span style={{ color: "#2563eb" }}>🔗</span>
+          <span className={cx("scrivr-menu-icon", iconClassName)} data-part="icon">
+            link
+          </span>
           <a
-            href={info.href}
+            className={cx("scrivr-menu-title", titleClassName)}
+            data-part="title"
+            href={popover.info.href}
             target="_blank"
             rel="noreferrer"
             style={{
-              color: "#2563eb",
-              textDecoration: "none",
               flex: 1,
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -157,15 +180,17 @@ export function LinkPopover({ editor }: LinkPopoverProps) {
             {display}
           </a>
           <button
-            onClick={handleEdit}
-            style={btnStyle("#f1f5f9", "#374151")}
+            className={cx("scrivr-menu-item", itemClassName)}
+            onClick={popover.startEdit}
+            style={btnStyle}
             title="Edit link"
           >
             Edit
           </button>
           <button
-            onClick={handleRemove}
-            style={btnStyle("#f1f5f9", "#374151")}
+            className={cx("scrivr-menu-item", itemClassName)}
+            onClick={popover.remove}
+            style={btnStyle}
             title="Remove link"
           >
             Unlink
@@ -177,15 +202,7 @@ export function LinkPopover({ editor }: LinkPopoverProps) {
   );
 }
 
-function btnStyle(bg: string, color: string) {
-  return {
-    background: bg,
-    color,
-    border: "none",
-    borderRadius: 4,
-    padding: "3px 8px",
-    cursor: "pointer",
-    fontSize: 12,
-    fontWeight: 500,
-  } as const;
-}
+const btnStyle = {
+  border: "none",
+  cursor: "pointer",
+} as const;

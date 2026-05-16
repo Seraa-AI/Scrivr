@@ -21,14 +21,11 @@ import type {
   AiSuggestionSubscribeOptions,
   AiOp,
 } from "@scrivr/plugins";
+import { cx } from "./classNames";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const CARD_WIDTH = 260;
-const COLOR_BRAND = "#4f46e5"; // indigo-600
-const COLOR_DELETE = "#dc2626"; // red-600
-const COLOR_INSERT = "#16a34a"; // green-600
-const COLOR_STALE = "#f59e0b"; // amber-500
 /** Keep runs longer than this are trimmed in the inline diff */
 const KEEP_TRIM = 40;
 
@@ -84,7 +81,7 @@ function InlineDiff({ ops }: { ops: AiOp[] }) {
           ? op.text.slice(0, 18) + " … " + op.text.slice(-12)
           : op.text;
       parts.push(
-        <span key={i} style={{ color: "#374151" }}>
+        <span key={i}>
           {text}
         </span>,
       );
@@ -92,10 +89,10 @@ function InlineDiff({ ops }: { ops: AiOp[] }) {
       parts.push(
         <span
           key={i}
+          data-part="description"
+          data-change-kind="delete"
           style={{
-            color: "rgba(185, 28, 28, 0.8)",
             textDecoration: "line-through",
-            textDecorationColor: "rgba(185, 28, 28, 0.5)",
           }}
         >
           {op.text}
@@ -105,9 +102,8 @@ function InlineDiff({ ops }: { ops: AiOp[] }) {
       parts.push(
         <span
           key={i}
-          style={{
-            color: "rgba(21, 128, 61, 0.9)",
-          }}
+          data-part="description"
+          data-change-kind="insert"
         >
           {op.text}
         </span>,
@@ -118,12 +114,9 @@ function InlineDiff({ ops }: { ops: AiOp[] }) {
   return (
     <div
       style={{
-        fontSize: 12,
         lineHeight: 1.8,
-        fontFamily: "system-ui, -apple-system, sans-serif",
         wordBreak: "break-word",
         whiteSpace: "pre-wrap",
-        color: "#374151",
       }}
     >
       {parts}
@@ -170,6 +163,11 @@ export interface AiSuggestionCardStyles {
 export interface AiSuggestionCardsPanelProps {
   editor: Editor | null;
   mode?: "direct" | "tracked";
+  className?: string | undefined;
+  itemClassName?: string | undefined;
+  iconClassName?: string | undefined;
+  titleClassName?: string | undefined;
+  descriptionClassName?: string | undefined;
   /** Per-slot class name overrides — works with Tailwind, CSS modules, etc. */
   classNames?: AiSuggestionCardClassNames;
   /** Per-slot inline style overrides — merged over the built-in styles. */
@@ -181,6 +179,11 @@ export interface AiSuggestionCardsPanelProps {
 export function AiSuggestionCardsPanel({
   editor,
   mode = "direct",
+  className,
+  itemClassName,
+  iconClassName,
+  titleClassName,
+  descriptionClassName,
   classNames: cn = {},
   styles: sx = {},
 }: AiSuggestionCardsPanelProps) {
@@ -196,7 +199,7 @@ export function AiSuggestionCardsPanel({
 
   return (
     <div
-      className={cn.panel}
+      className={cx("scrivr-ai-cards", cn.panel, className)}
       style={{
         width: CARD_WIDTH,
         flexShrink: 0,
@@ -212,6 +215,7 @@ export function AiSuggestionCardsPanel({
       {/* Accept All / Reject All */}
       <div style={{ display: "flex", gap: 8 }}>
         <button
+          className={cx("scrivr-menu-item", itemClassName)}
           style={acceptAllBtnStyle}
           onMouseDown={(e) => {
             e.preventDefault();
@@ -221,6 +225,7 @@ export function AiSuggestionCardsPanel({
           ✓ Accept All
         </button>
         <button
+          className={cx("scrivr-menu-item", itemClassName)}
           style={rejectAllBtnStyle}
           onMouseDown={(e) => {
             e.preventDefault();
@@ -239,20 +244,12 @@ export function AiSuggestionCardsPanel({
         return (
           <div
             key={card.blockId}
-            className={cn.card}
+            className={cx("scrivr-ai-card", cn.card)}
+            data-active={isHighlighted ? "" : undefined}
+            data-disabled={card.isStale ? "" : undefined}
             style={{
-              background: "#ffffff",
-              borderRadius: 8,
-              border: isHighlighted
-                ? `2px solid ${COLOR_BRAND}`
-                : "1.5px solid #e5e7eb",
-              boxShadow: isHighlighted
-                ? "0 2px 12px rgba(79,70,229,0.10)"
-                : "0 1px 3px rgba(0,0,0,0.06)",
-              fontFamily: "system-ui, -apple-system, sans-serif",
               overflow: "hidden",
               opacity: card.isStale ? 0.65 : 1,
-              transition: "border-color 0.15s, box-shadow 0.15s",
               cursor: "default",
               ...sx.card,
             }}
@@ -261,7 +258,7 @@ export function AiSuggestionCardsPanel({
           >
             {/* Header */}
             <div
-              className={cn.header}
+              className={cx("scrivr-ai-card-header", cn.header)}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -280,28 +277,26 @@ export function AiSuggestionCardsPanel({
               }}
             >
               <span
-                className={cn.badge}
+                className={cx("scrivr-menu-icon", cn.badge, iconClassName)}
+                data-part="icon"
                 style={{ ...aiBadgeStyle, ...sx.badge }}
               >
-                ✦ AI
+                AI
               </span>
               <span
+                className={cx("scrivr-menu-title", titleClassName)}
+                data-part="title"
                 style={{
                   flex: 1,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
-                  color: "#111827",
-                  fontWeight: 500,
-                  fontSize: 12,
                 }}
               >
                 {card.label}
               </span>
               <span
                 style={{
-                  color: "#9ca3af",
-                  fontSize: 12,
                   userSelect: "none",
                   flexShrink: 0,
                 }}
@@ -312,13 +307,12 @@ export function AiSuggestionCardsPanel({
 
             {card.isStale && (
               <div
+                className={cx("scrivr-menu-description", descriptionClassName)}
+                data-part="description"
                 style={{
-                  padding: "0 10px 6px",
-                  color: COLOR_STALE,
-                  fontSize: 11,
                 }}
               >
-                ⚠ Document changed
+                Document changed
               </div>
             )}
 
@@ -326,8 +320,6 @@ export function AiSuggestionCardsPanel({
             {isExpanded && (
               <div
                 style={{
-                  borderTop: "1px solid #f3f4f6",
-                  padding: "8px 10px 10px",
                 }}
               >
                 <div className={cn.diff} style={sx.diff}>
@@ -338,6 +330,8 @@ export function AiSuggestionCardsPanel({
                 <div className={cn.actions} style={{ ...sx.actions }}>
                   <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                     <button
+                      className={cx("scrivr-menu-item", itemClassName)}
+                      data-disabled={card.isStale ? "" : undefined}
                       style={{
                         ...acceptBtnStyle,
                         opacity: card.isStale ? 0.4 : 1,
@@ -349,19 +343,22 @@ export function AiSuggestionCardsPanel({
                         if (!card.isStale) actions.accept(card.blockId, mode);
                       }}
                     >
-                      ✓ Accept
+                      Accept
                     </button>
                     <button
+                      className={cx("scrivr-menu-item", itemClassName)}
                       style={rejectBtnStyle}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         actions.reject(card.blockId);
                       }}
                     >
-                      ✕ Reject
+                      Reject
                     </button>
                   </div>
                   <button
+                    className={cx("scrivr-menu-item", itemClassName)}
+                    data-disabled={card.isStale ? "" : undefined}
                     style={{
                       ...acceptAsEditBtnStyle,
                       opacity: card.isStale ? 0.4 : 1,
@@ -374,7 +371,7 @@ export function AiSuggestionCardsPanel({
                       if (!card.isStale) actions.accept(card.blockId, "direct");
                     }}
                   >
-                    ✎ Edit first
+                    Edit first
                   </button>
                 </div>
               </div>
@@ -389,73 +386,33 @@ export function AiSuggestionCardsPanel({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const aiBadgeStyle: React.CSSProperties = {
-  background: COLOR_BRAND,
-  color: "#fff",
-  borderRadius: 4,
-  padding: "2px 6px",
-  fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: "0.03em",
   flexShrink: 0,
   lineHeight: 1.4,
 };
 
 const acceptBtnStyle: React.CSSProperties = {
   flex: 1,
-  padding: "5px 0",
-  background: COLOR_BRAND,
-  color: "#fff",
   border: "none",
-  borderRadius: 5,
-  fontSize: 12,
-  fontWeight: 600,
   cursor: "pointer",
 };
 
 const rejectBtnStyle: React.CSSProperties = {
   flex: 1,
-  padding: "5px 0",
-  background: "#ffffff",
-  color: "#6b7280",
-  border: "1.5px solid #e5e7eb",
-  borderRadius: 5,
-  fontSize: 12,
-  fontWeight: 500,
   cursor: "pointer",
 };
 
 const acceptAsEditBtnStyle: React.CSSProperties = {
   width: "100%",
-  padding: "4px 0",
-  background: "#ffffff",
-  color: "#6b7280",
-  border: "1.5px solid #e5e7eb",
-  borderRadius: 5,
-  fontSize: 11,
-  fontWeight: 500,
   cursor: "pointer",
 };
 
 const acceptAllBtnStyle: React.CSSProperties = {
   flex: 1,
-  padding: "5px 0",
-  background: COLOR_BRAND,
-  color: "#fff",
   border: "none",
-  borderRadius: 5,
-  fontSize: 12,
-  fontWeight: 600,
   cursor: "pointer",
 };
 
 const rejectAllBtnStyle: React.CSSProperties = {
   flex: 1,
-  padding: "5px 0",
-  background: "#ffffff",
-  color: "#6b7280",
-  border: "1.5px solid #e5e7eb",
-  borderRadius: 5,
-  fontSize: 12,
-  fontWeight: 500,
   cursor: "pointer",
 };
