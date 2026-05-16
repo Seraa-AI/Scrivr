@@ -10,7 +10,7 @@
  * AI-deleted text back to plain text in the affected blocks.
  */
 
-import type { IEditor } from "@scrivr/core";
+import type { IBaseEditor } from "@scrivr/core";
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import type { AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
 import {
@@ -32,7 +32,7 @@ import { acceptedRangeToDocRange } from "../track-changes/lib/acceptedTextMap";
  * Set the active AI suggestion. Dispatches AI_SUGGESTION_SET meta.
  * Pass null to clear the current suggestion.
  */
-export function showAiSuggestion(editor: IEditor, suggestion: AiSuggestion | null): void {
+export function showAiSuggestion(editor: IBaseEditor, suggestion: AiSuggestion | null): void {
   const state = editor.getState();
   editor.applyTransaction(
     state.tr
@@ -51,7 +51,7 @@ export function showAiSuggestion(editor: IEditor, suggestion: AiSuggestion | nul
  * If `groupId` is provided, only ops matching that groupId are applied.
  */
 export function applyAiSuggestion(
-  editor: IEditor,
+  editor: IBaseEditor,
   { groupId, blockId, mode }: ApplyAiSuggestionOptions,
 ): void {
   const state = editor.getState();
@@ -80,7 +80,7 @@ export function applyAiSuggestion(
 
 /** Apply by directly writing the proposed text into the doc (no tracking marks). */
 function _applyDirect(
-  editor: IEditor,
+  editor: IBaseEditor,
   blocks: AiSuggestionBlock[],
   groupId?: string,
 ): void {
@@ -140,7 +140,7 @@ function _applyDirect(
 
 /** Apply by recording changes as tracked insert/delete marks. */
 function _applyTracked(
-  editor: IEditor,
+  editor: IBaseEditor,
   blocks: AiSuggestionBlock[],
   groupId?: string,
 ): void {
@@ -218,7 +218,7 @@ function _applyTracked(
  * If `groupId` is provided, only ops matching that groupId are reversed.
  */
 export function rejectAiSuggestion(
-  editor: IEditor,
+  editor: IBaseEditor,
   options?: RejectAiSuggestionOptions,
 ): void {
   const state = editor.getState();

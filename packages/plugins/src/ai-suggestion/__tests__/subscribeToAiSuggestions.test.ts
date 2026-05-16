@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { TestAiEditor, doc, p } from "./helpers";
+import { AiTestEditor, doc, p } from "./helpers";
 import { subscribeToAiSuggestions } from "../subscribeToAiSuggestions";
 import { AI_SUGGESTION_SET_ACTIVE } from "../AiSuggestionPlugin";
 import type { AiSuggestion } from "../types";
@@ -63,7 +63,7 @@ function deleteOnlySuggestion(nodeId: string): AiSuggestion {
 
 describe("subscribeToAiSuggestions — initial call", () => {
   it("fires callback immediately with empty cards when no suggestion is set", () => {
-    const editor = new TestAiEditor(doc(p("hello", "n1")));
+    const editor = new AiTestEditor(doc(p("hello", "n1")));
     const cb = vi.fn();
 
     subscribeToAiSuggestions(editor, cb);
@@ -74,7 +74,7 @@ describe("subscribeToAiSuggestions — initial call", () => {
   });
 
   it("fires callback immediately with current cards when suggestion is already set", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     const cb = vi.fn();
@@ -91,7 +91,7 @@ describe("subscribeToAiSuggestions — initial call", () => {
 
 describe("subscribeToAiSuggestions — identity optimization", () => {
   it("does NOT re-call callback when unrelated transaction fires", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     const cb = vi.fn();
@@ -105,7 +105,7 @@ describe("subscribeToAiSuggestions — identity optimization", () => {
   });
 
   it("re-calls callback when suggestion changes", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     const cb = vi.fn();
     subscribeToAiSuggestions(editor, cb);
     const callsBefore = cb.mock.calls.length;
@@ -120,7 +120,7 @@ describe("subscribeToAiSuggestions — identity optimization", () => {
 
 describe("subscribeToAiSuggestions — card.kind", () => {
   it("kind is 'rewrite' when block has both delete and insert", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     const cb = vi.fn();
@@ -131,7 +131,7 @@ describe("subscribeToAiSuggestions — card.kind", () => {
   });
 
   it("kind is 'insert' when block has only inserts", () => {
-    const editor = new TestAiEditor(doc(p("Hello", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello", "n1")));
     editor.showSuggestion(insertOnlySuggestion("n1"));
 
     const cb = vi.fn();
@@ -142,7 +142,7 @@ describe("subscribeToAiSuggestions — card.kind", () => {
   });
 
   it("kind is 'delete' when block has only deletes", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(deleteOnlySuggestion("n1"));
 
     const cb = vi.fn();
@@ -157,7 +157,7 @@ describe("subscribeToAiSuggestions — card.kind", () => {
 
 describe("subscribeToAiSuggestions — card.label and card.summary", () => {
   it("uses summary as label when block.summary is set", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion({
       blocks: [
         {
@@ -181,7 +181,7 @@ describe("subscribeToAiSuggestions — card.label and card.summary", () => {
   });
 
   it("falls back to auto-derived label when no summary", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     const cb = vi.fn();
@@ -198,7 +198,7 @@ describe("subscribeToAiSuggestions — card.label and card.summary", () => {
 
 describe("subscribeToAiSuggestions — isActive", () => {
   it("card.isActive is false initially", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     const cb = vi.fn();
@@ -209,7 +209,7 @@ describe("subscribeToAiSuggestions — isActive", () => {
   });
 
   it("card.isActive becomes true when activeBlockId is set to that block", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     const cb = vi.fn();
@@ -228,7 +228,7 @@ describe("subscribeToAiSuggestions — isActive", () => {
 
 describe("subscribeToAiSuggestions — onFocus / onBlur", () => {
   it("calls onFocus when activeBlockId transitions from null to a block id", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     const onFocus = vi.fn();
@@ -243,7 +243,7 @@ describe("subscribeToAiSuggestions — onFocus / onBlur", () => {
   });
 
   it("calls onBlur when activeBlockId transitions from a block id to null", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     const onBlur = vi.fn();
@@ -263,7 +263,7 @@ describe("subscribeToAiSuggestions — onFocus / onBlur", () => {
   });
 
   it("calls onBlur for old block and onFocus for new block on direct transition", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1"), p("Foo", "n2")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1"), p("Foo", "n2")));
     editor.showSuggestion({
       blocks: [
         {
@@ -296,7 +296,7 @@ describe("subscribeToAiSuggestions — onFocus / onBlur", () => {
   });
 
   it("does NOT call onFocus or onBlur for unrelated transactions", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     const onFocus = vi.fn();
@@ -314,7 +314,7 @@ describe("subscribeToAiSuggestions — onFocus / onBlur", () => {
 
 describe("subscribeToAiSuggestions — unsubscribe", () => {
   it("stops calling callback after unsubscribe", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     const cb = vi.fn();
 
     const unsub = subscribeToAiSuggestions(editor, cb);
@@ -331,7 +331,7 @@ describe("subscribeToAiSuggestions — unsubscribe", () => {
 
 describe("subscribeToAiSuggestions — actions", () => {
   it("actions.accept removes the block from plugin state", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     let capturedActions: ReturnType<typeof subscribeToAiSuggestions> extends never ? never : unknown;
@@ -346,7 +346,7 @@ describe("subscribeToAiSuggestions — actions", () => {
   });
 
   it("actions.reject removes the block from plugin state", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     let capturedActions: ReturnType<typeof subscribeToAiSuggestions> extends never ? never : unknown;
