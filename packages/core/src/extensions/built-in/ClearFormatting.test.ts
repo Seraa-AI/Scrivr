@@ -12,13 +12,13 @@ function makeEditor() {
 function type(editor: Editor, text: string) {
   const state = editor.getState();
   const tr = state.tr.insertText(text);
-  editor["_viewDispatch"](tr);
+  editor.applyTransaction(tr);
 }
 
 /** Select all content */
 function selectAll(editor: Editor) {
   const state = editor.getState();
-  editor["_viewDispatch"](state.tr.setSelection(new AllSelection(state.doc)));
+  editor.applyTransaction(state.tr.setSelection(new AllSelection(state.doc)));
 }
 
 /** Apply a command by name */
@@ -136,7 +136,7 @@ describe("ClearFormatting", () => {
     // Collapse cursor to middle of word
     const state = editor.getState();
     const mid = state.doc.resolve(3);
-    editor["_viewDispatch"](state.tr.setSelection(TextSelection.create(state.doc, mid.pos)));
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, mid.pos)));
 
     run(editor, "clearFormatting");
 
