@@ -2,59 +2,64 @@
  * Shared test utilities for @scrivr/core tests.
  *
  * Centralises:
- *   - Canvas mock setup (consistent char width / ascent / descent across all layout tests)
- *   - TextMeasurer factory
- *   - Common ProseMirror node builders (paragraph, heading, doc, etc.)
- *   - StarterKit context builder (full schema + fontConfig)
+ *   - `createMeasurer()` / `createTestEditor()` — Skia-backed real canvas
+ *     via `@napi-rs/canvas`, no DOM patching.
+ *   - Common ProseMirror node builders (paragraph, heading, doc, etc.).
+ *   - StarterKit context builder (full schema + fontConfig).
+ *
+ * Measurement is a real engine dependency: tests inject a real context, never
+ * a fake. See `feedback_no_canvas_mocking.md` for the rationale.
  */
 
-import { vi } from "vitest";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import { TextMeasurer } from "./layout/TextMeasurer";
+import { Editor, type EditorOptions } from "./Editor";
 import { schema } from "./model/schema";
+import { createNapiCanvasContext } from "./test/createNapiCanvasContext";
 import type { Node } from "prosemirror-model";
 import type { Schema } from "prosemirror-model";
 import type { FontConfig } from "./layout/FontConfig";
-  
-/** Fixed character width used by the canvas mock — 8px per character. */
-export const MOCK_CHAR_WIDTH = 8;
-/** Fixed font ascent used by the canvas mock. */
-export const MOCK_ASCENT = 12;
-/** Fixed font descent used by the canvas mock. */
-export const MOCK_DESCENT = 3;
-/**
- * Line height produced by the default measurer (lineHeightMultiplier: 1.2):
- * (MOCK_ASCENT + MOCK_DESCENT) * 1.2 = 18
- */
-export const MOCK_LINE_HEIGHT = (MOCK_ASCENT + MOCK_DESCENT) * 1.2;
 
 /**
- * Mocks HTMLCanvasElement.getContext so TextMeasurer returns deterministic values.
- * Call inside a beforeEach so each test gets a fresh spy.
- *
- * @example
- * beforeEach(() => mockCanvas());
+ * Default text style used by `measureTextWidth()`. Mirrors the engine's
+ * default body font; override only when a test specifically exercises
+ * a different style.
  */
-export function mockCanvas(): void {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    measureText: vi.fn((text: string) => ({
-      width: text.length * MOCK_CHAR_WIDTH,
-      actualBoundingBoxAscent: MOCK_ASCENT,
-      actualBoundingBoxDescent: MOCK_DESCENT,
-      fontBoundingBoxAscent: MOCK_ASCENT,
-      fontBoundingBoxDescent: MOCK_DESCENT,
-    })),
-    font: "",
-  } as unknown as CanvasRenderingContext2D);
+export const DEFAULT_TEST_FONT = "16px sans-serif";
+
+/**
+ * Creates a TextMeasurer backed by a real `@napi-rs/canvas` context — the
+ * one and only way layout tests should measure text. Calling this is the
+ * test-side equivalent of how `Editor` constructs its production measurer.
+ */
+export function createMeasurer(): TextMeasurer {
+  return new TextMeasurer({
+    lineHeightMultiplier: 1.2,
+    context: createNapiCanvasContext(),
+  });
 }
 
 /**
- * Creates a TextMeasurer with the standard lineHeightMultiplier used in tests (1.2).
- * Requires mockCanvas() to have been called first.
+ * Construct a real `Editor` wired to a Skia-backed `TextMeasurer`. Use this
+ * — never `new Editor()` directly — in any test that depends on layout,
+ * text width, cursor geometry, pagination, tile bounds, or page projection.
  */
-export function createMeasurer(): TextMeasurer {
-  return new TextMeasurer({ lineHeightMultiplier: 1.2 });
+export function createTestEditor(options: Partial<EditorOptions> = {}): Editor {
+  return new Editor({
+    ...options,
+    textMeasurer: options.textMeasurer ?? createMeasurer(),
+  });
+}
+
+/**
+ * Measure a string with the same backend the engine uses in tests. Use this
+ * to drive `toBeCloseTo` assertions instead of hardcoding pixel constants.
+ */
+export function measureTextWidth(text: string, font = DEFAULT_TEST_FONT): number {
+  const ctx = createNapiCanvasContext();
+  ctx.font = font;
+  return ctx.measureText(text).width;
 }
 
 /** Empty or text paragraph node. */

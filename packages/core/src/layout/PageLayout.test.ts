@@ -12,9 +12,19 @@ import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
 import { computePageMetrics, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
 import type { LayoutBlock } from "./BlockLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
-import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, MOCK_LINE_HEIGHT } from "../test-utils";
+import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak } from "../test-utils";
 
-// lineHeight = 18, contentHeight = 1123 - 72 - 72 = 979
+/**
+ * Default-paragraph line height as the real Skia-backed measurer reports it.
+ * Pagination tests build `pageHeight` from this so the "3 lines per page"
+ * contract holds regardless of the actual font metrics.
+ *
+ * `applyPageFont` injects the family into every BlockStyle's font at runtime;
+ * we mirror that here so the measurement matches what the pipeline sees.
+ */
+const DEFAULT_PARAGRAPH_LINE_HEIGHT = createMeasurer().getFontMetrics(
+  applyPageFont(defaultFontConfig, "Arial, sans-serif").paragraph!.font,
+).lineHeight;
 
 
 function h1(text: string) {
@@ -584,11 +594,11 @@ describe("applyPageFont", () => {
 //   → part 1 (1 line) on page 1; remaining lines carried to subsequent pages
 //
 describe("runPipeline — line splitting", () => {
-  const LH = MOCK_LINE_HEIGHT; // 18px
+  const LH = DEFAULT_PARAGRAPH_LINE_HEIGHT;
 
   const splitPage = {
     pageWidth:  120,
-    pageHeight: Math.round(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
+    pageHeight: Math.ceil(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
     margins: { top: 10, right: 10, bottom: 10, left: 10 },
   };
 
@@ -716,11 +726,11 @@ describe("runPipeline — line splitting", () => {
 //
 // Same splitPage geometry as the suite above (3 lines per page).
 describe("runPipeline — line splitting (first on page)", () => {
-  const LH = MOCK_LINE_HEIGHT; // 18px
+  const LH = DEFAULT_PARAGRAPH_LINE_HEIGHT;
 
   const splitPage = {
     pageWidth:  120,
-    pageHeight: Math.round(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
+    pageHeight: Math.ceil(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
     margins: { top: 10, right: 10, bottom: 10, left: 10 },
   };
 
@@ -839,11 +849,11 @@ describe("runPipeline — line splitting (first on page)", () => {
 // for linesFit=0. But y must be <= pageBottom - lineHeight = 46 for the
 // gap-suppression fix to kick in.
 describe("runPipeline — gap suppression at page boundary", () => {
-  const LH = MOCK_LINE_HEIGHT; // 18px
+  const LH = DEFAULT_PARAGRAPH_LINE_HEIGHT;
 
   const splitPage = {
     pageWidth:  120,
-    pageHeight: Math.round(10 + 3 * LH + 10), // 74px
+    pageHeight: Math.ceil(10 + 3 * LH + 10), // 74px
     margins: { top: 10, right: 10, bottom: 10, left: 10 },
   };
 
@@ -877,16 +887,17 @@ describe("runPipeline — gap suppression at page boundary", () => {
   });
 
   it("block starts at y (gap suppressed), not at targetY", () => {
-    // Block must visually start directly after the previous block — no gap wasted.
+    // Block 2 must visually start directly after block 1 — the gap that
+    // would normally be inserted gets suppressed when there's no room for
+    // the next block's first line in the leftover space.
     const layout = runPipeline(doc(p(twoLineIntro), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
 
-    const introY = splitPage.margins.top; // 10
-    const introHeight = 2 * LH; // 36
-    const expectedY = introY + introHeight; // 46 = y (not targetY = 56)
-    expect(layout.pages[0]!.blocks[1]!.y).toBe(expectedY);
+    const intro = layout.pages[0]!.blocks[0]!;
+    const expectedY = intro.y + intro.height;
+    expect(layout.pages[0]!.blocks[1]!.y).toBeCloseTo(expectedY, 4);
   });
 
   it("all lines are conserved when gap suppression applies", () => {
@@ -901,13 +912,23 @@ describe("runPipeline — gap suppression at page boundary", () => {
   });
 
   it("gap suppression applies when spaceBefore (not prevSpaceAfter) causes the dead zone", () => {
-    // One-line intro → y = 28. heading_1 spaceBefore = 24.
-    // gap = max(10, 24) = 24 → targetY = 52 → pageAvailable = 12 < LH.
-    // pageBottom - y = 36 >= LH → fix: heading starts at y=28, 2 lines on p1.
+    // The test isolates spaceBefore as the gap source: heading_1 has a
+    // 24px spaceBefore that exceeds the paragraph's 10px spaceAfter, which
+    // is what creates the dead zone. Use a custom fontConfig that matches
+    // heading_1's font to paragraph's so both blocks share the same line
+    // height — the only varying signal is spaceBefore.
+    const fontConfig: typeof defaultFontConfig = {
+      ...defaultFontConfig,
+      heading_1: {
+        ...defaultFontConfig.heading_1!,
+        font: defaultFontConfig.paragraph!.font,
+      },
+    };
     const oneLineIntro = "aaaaaaaaa";
     const layout = runPipeline(doc(p(oneLineIntro), heading(1, fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
+      fontConfig,
     });
 
     expect(layout.pages).toHaveLength(2);
@@ -2070,11 +2091,11 @@ describe("runPipeline — anchor-only image paragraphs", () => {
 // ── buildFragments — Stage 4 ─────────────────────────────────────────────────
 
 describe("buildFragments — Stage 4", () => {
-  const LH = MOCK_LINE_HEIGHT; // 18px
+  const LH = DEFAULT_PARAGRAPH_LINE_HEIGHT;
 
   const splitPage = {
     pageWidth:  120,
-    pageHeight: Math.round(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
+    pageHeight: Math.ceil(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
     margins: { top: 10, right: 10, bottom: 10, left: 10 },
   };
 

@@ -9,7 +9,7 @@
  * for the zero-width anchor span. The fix re-stamps all float rects at the
  * very end of renderPage so the final CharacterMap always has real dims.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { renderPage } from "./PageRenderer";
 import { CharacterMap } from "../layout/CharacterMap";
 import { runPipeline, defaultPageConfig } from "../layout/PageLayout";
@@ -18,10 +18,7 @@ import { TextBlockStrategy } from "../layout/TextBlockStrategy";
 import {
   buildStarterKitContext,
   createMeasurer,
-  mockCanvas,
 } from "../test-utils";
-
-// ── Canvas mock ───────────────────────────────────────────────────────────────
 
 /** Minimal CanvasRenderingContext2D mock — all drawing ops are no-ops. */
 function makeCtx(): CanvasRenderingContext2D {
@@ -113,8 +110,6 @@ function renderWithStrategy(
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
-
-beforeEach(() => mockCanvas());
 
 describe("renderPage — anchored objectRect correctness", () => {
   it("'behind' anchoredObject: objectRect has real dimensions after renderPage", () => {

@@ -53,6 +53,7 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^1.0.0",
     "@types/markdown-it": "^14.1.2",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"

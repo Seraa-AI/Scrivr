@@ -1,29 +1,23 @@
 import { describe, it, expect } from "vitest";
 import { LineBreaker } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
-import { createMeasurer, MOCK_CHAR_WIDTH, MOCK_ASCENT } from "../test-utils";
+import { createMeasurer } from "../test-utils";
 
 /**
- * LineBreaker tests.
- *
- * TextMeasurer is created with a mocked canvas so measurements are predictable:
- *   - Every character is MOCK_CHAR_WIDTH (8px) wide
- *   - Font ascent: MOCK_ASCENT (12px), descent: 3px, lineHeight: (12+3) * 1.2 = 18px
- *
- * This lets tests reason about exact pixel values without real font loading.
+ * LineBreaker tests. Widths and font metrics come from a real
+ * `@napi-rs/canvas`-backed `TextMeasurer` (see `createMeasurer`). Assertions
+ * use the same measurer instance — testing that the line breaker agrees with
+ * the measurement model, not that the model returns specific pixels.
  */
 
 function makeMeasurer() {
   return createMeasurer();
 }
 
-// "Hello " = 6 chars × 8px = 48px
-// "world"  = 5 chars × 8px = 40px
-// "Hello world" = 11 chars × 8px = 88px
-
 describe("LineBreaker — basic wrapping", () => {
   it("puts everything on one line when it fits", () => {
-    const lb = new LineBreaker(makeMeasurer());
+    const measurer = makeMeasurer();
+    const lb = new LineBreaker(measurer);
     const lines = lb.breakIntoLines(
       [
         {
@@ -37,12 +31,22 @@ describe("LineBreaker — basic wrapping", () => {
       { defaultFontFamily: "serif", defaultFontSize: 14 },
     );
     expect(lines).toHaveLength(1);
-    expect(lines[0]?.width).toBe(11 * MOCK_CHAR_WIDTH); // 88px
+    // The single line's width agrees with the measurer's own measurement
+    // of the full string — line breaker and measurer share one source of truth.
+    expect(lines[0]?.width).toBeCloseTo(
+      measurer.measureWidth("Hello world", "14px serif"),
+      2,
+    );
   });
 
   it("wraps onto a new line when text exceeds maxWidth", () => {
-    const lb = new LineBreaker(makeMeasurer());
-    // maxWidth=80: "Hello " (48px) fits, "world" (40px) pushes to 88px → wrap
+    const measurer = makeMeasurer();
+    const lb = new LineBreaker(measurer);
+    // Pick a maxWidth that fits "Hello " but not the full string, so the
+    // wrap is forced regardless of exact font widths.
+    const helloSpaceWidth = measurer.measureWidth("Hello ", "14px serif");
+    const fullWidth = measurer.measureWidth("Hello world", "14px serif");
+    const maxWidth = (helloSpaceWidth + fullWidth) / 2;
     const lines = lb.breakIntoLines(
       [
         {
@@ -52,7 +56,7 @@ describe("LineBreaker — basic wrapping", () => {
           docPos: 1,
         },
       ],
-      80,
+      maxWidth,
       { defaultFontFamily: "serif", defaultFontSize: 14 },
     );
     expect(lines).toHaveLength(2);
@@ -160,20 +164,23 @@ describe("LineBreaker — multi-span (mixed fonts)", () => {
 
 describe("LineBreaker — vertical metrics", () => {
   it("line height is taken from font metrics × multiplier", () => {
-    const lb = new LineBreaker(makeMeasurer());
+    const measurer = makeMeasurer();
+    const lb = new LineBreaker(measurer);
     const lines = lb.breakIntoLines(
       [{ kind: "text" as const, text: "Hello", font: "14px serif", docPos: 1 }],
       200,
       { defaultFontFamily: "serif", defaultFontSize: 14 },
     );
-    // (12 + 3) * 1.2 = 18
-    expect(lines[0]?.lineHeight).toBeCloseTo(18);
+    // The line height matches `(ascent + descent) * lineHeightMultiplier`
+    // for the font in use — line breaker reads the metric from the measurer
+    // rather than computing its own.
+    const m = measurer.getFontMetrics("14px serif");
+    expect(lines[0]?.lineHeight).toBeCloseTo(m.lineHeight, 2);
   });
 
   it("uses the tallest font when spans have different metrics", () => {
-    // Both fonts return same mock metrics in this test, but the logic
-    // takes the max — verify it doesn't just use the first span's font
-    const lb = new LineBreaker(makeMeasurer());
+    const measurer = makeMeasurer();
+    const lb = new LineBreaker(measurer);
     const lines = lb.breakIntoLines(
       [
         {
@@ -187,7 +194,10 @@ describe("LineBreaker — vertical metrics", () => {
       200,
       { defaultFontFamily: "serif", defaultFontSize: 14 },
     );
-    expect(lines[0]?.ascent).toBe(MOCK_ASCENT);
+    // The larger 24px span dominates — the line's ascent matches the bigger
+    // font, not the first span's font.
+    const bigAscent = measurer.getFontMetrics("24px serif").ascent;
+    expect(lines[0]?.ascent).toBeCloseTo(bigAscent, 2);
   });
 });
 
@@ -500,7 +510,8 @@ describe("LineBreaker — hardBreak", () => {
   });
 
   it("break glyph is registered at terminalBreakDocPos in the CharacterMap", () => {
-    const lb = new LineBreaker(makeMeasurer());
+    const measurer = makeMeasurer();
+    const lb = new LineBreaker(measurer);
     const map = new CharacterMap();
     lb.breakIntoLines(
       [
@@ -516,11 +527,11 @@ describe("LineBreaker — hardBreak", () => {
         pageContext: { page: 1, lineIndexOffset: 0, lineY: 0 },
       },
     );
-    // Break position must be reachable via coordsAtPos
+    // Break position must be reachable via coordsAtPos, sitting at the
+    // right edge of "Hello".
     const breakCoords = map.coordsAtPos(6);
     expect(breakCoords).not.toBeNull();
-    // It sits at the right edge of "Hello" (5 chars × 8px = 40px), zero width
-    expect(breakCoords?.x).toBe(5 * MOCK_CHAR_WIDTH);
+    expect(breakCoords?.x).toBeCloseTo(measurer.measureWidth("Hello", "14px serif"), 2);
   });
 
   it("each line has normal text line height — no inflation", () => {

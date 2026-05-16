@@ -15,48 +15,6 @@ import type {
   PageConfig,
 } from "../layout/PageLayout";
 
-/**
- * Returns a full CanvasRenderingContext2D stub. All drawing ops are no-ops;
- * measureText returns deterministic widths (8px/char). Must be called before
- * any code that touches getContext("2d").
- */
-function stubCanvas(): void {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    measureText: vi.fn((text: string) => ({
-      width: text.length * 8,
-      actualBoundingBoxAscent: 12,
-      actualBoundingBoxDescent: 3,
-      fontBoundingBoxAscent: 12,
-      fontBoundingBoxDescent: 3,
-    })),
-    scale: vi.fn(),
-    save: vi.fn(),
-    restore: vi.fn(),
-    translate: vi.fn(),
-    clearRect: vi.fn(),
-    fillRect: vi.fn(),
-    strokeRect: vi.fn(),
-    fillText: vi.fn(),
-    resetTransform: vi.fn(),
-    beginPath: vi.fn(),
-    moveTo: vi.fn(),
-    lineTo: vi.fn(),
-    closePath: vi.fn(),
-    stroke: vi.fn(),
-    fill: vi.fn(),
-    arc: vi.fn(),
-    setLineDash: vi.fn(),
-    drawImage: vi.fn(),
-    font: "",
-    fillStyle: "",
-    strokeStyle: "",
-    lineWidth: 1,
-    textBaseline: "alphabetic" as CanvasTextBaseline,
-    textAlign: "left" as CanvasTextAlign,
-    imageSmoothingEnabled: true,
-    imageSmoothingQuality: "high" as ImageSmoothingQuality,
-  } as unknown as CanvasRenderingContext2D);
-}
 
 function frag(y: number, height: number): LayoutFragment {
   return { y, height } as LayoutFragment;
@@ -262,7 +220,6 @@ describe("TileManager — construction", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
-    stubCanvas();
     container = document.createElement("div");
     document.body.appendChild(container);
     vi.useFakeTimers();
@@ -327,7 +284,6 @@ describe("TileManager — tile positioning (paged)", () => {
   let scrollParent: HTMLDivElement;
 
   beforeEach(() => {
-    stubCanvas();
     scrollParent = document.createElement("div");
     scrollParent.style.overflowY = "scroll";
     Object.defineProperty(scrollParent, "clientHeight", {
@@ -444,7 +400,6 @@ describe("TileManager — dynamic pool sizing", () => {
   let scrollParent: HTMLDivElement;
 
   beforeEach(() => {
-    stubCanvas();
     scrollParent = document.createElement("div");
     scrollParent.style.overflowY = "scroll";
     Object.defineProperty(scrollParent, "clientHeight", {
@@ -521,7 +476,6 @@ describe("TileManager — destroy", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
-    stubCanvas();
     container = document.createElement("div");
     document.body.appendChild(container);
     vi.useFakeTimers();
@@ -570,7 +524,6 @@ describe("TileManager — overlay repaint with active surface", () => {
   let scrollParent: HTMLDivElement;
 
   beforeEach(() => {
-    stubCanvas();
     scrollParent = document.createElement("div");
     scrollParent.style.overflowY = "scroll";
     Object.defineProperty(scrollParent, "clientHeight", {
@@ -656,7 +609,6 @@ describe("TileManager — body click deactivates surface", () => {
   let scrollParent: HTMLDivElement;
 
   beforeEach(() => {
-    stubCanvas();
     scrollParent = document.createElement("div");
     scrollParent.style.overflowY = "scroll";
     Object.defineProperty(scrollParent, "clientHeight", {

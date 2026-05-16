@@ -168,6 +168,14 @@ export interface EditorOptions {
    * `<html>`, set this to `document.documentElement` so toggles are seen.
    */
   themeRoot?: HTMLElement;
+  /**
+   * Inject a pre-built text measurer. Production code leaves this undefined
+   * and gets the DOM-canvas-backed default. Tests pass a measurer wired to a
+   * real `@napi-rs/canvas` context (see `test/createNapiCanvasContext.ts`)
+   * so layout math uses real font metrics — measurement is an engine
+   * dependency, not a hidden global.
+   */
+  textMeasurer?: TextMeasurer;
 }
 
 /**
@@ -322,6 +330,7 @@ export class Editor extends BaseEditor implements IEditor {
     debug = {},
     theme,
     themeRoot,
+    textMeasurer,
   }: EditorOptions) {
     // BaseEditor handles: manager, state, commands, storage, event emitter
     super({ extensions, ...(content !== undefined ? { content } : {}) });
@@ -348,7 +357,7 @@ export class Editor extends BaseEditor implements IEditor {
       : builtConfig ?? pageConfig ?? defaultPageConfig;
 
     this.fontConfig    = this._manager.buildBlockStyles();
-    this.measurer      = new TextMeasurer({ lineHeightMultiplier: 1.2 });
+    this.measurer      = textMeasurer ?? new TextMeasurer({ lineHeightMultiplier: 1.2 });
     this.fontModifiers = this._manager.buildFontModifiers();
     this.markDecorators = this._manager.buildMarkDecorators();
     this.toolbarItems  = this._manager.buildToolbarItems();
