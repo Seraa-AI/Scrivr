@@ -6,6 +6,7 @@ import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { ExtensionManager } from "../ExtensionManager";
 import { mockCanvas } from "../../test-utils";
+import { DOMParser as PMDOMParser } from "prosemirror-model";
 import type { Node } from "prosemirror-model";
 import type { LayoutBlock } from "../../layout/BlockLayout";
 
@@ -567,5 +568,79 @@ describe("Table — StarterKit default-off feature flag", () => {
     expect(editor.schema.nodes["tableRow"]).toBeDefined();
     expect(editor.schema.nodes["tableCell"]).toBeDefined();
     expect(editor.schema.nodes["tableHeader"]).toBeDefined();
+  });
+});
+
+// ── HTML parse: schema parseDOM ───────────────────────────────────────────────
+// Phase 2 scope per docs/tables.md: basic schema mapping from <table>/<tr>/
+// <td>/<th>. Full paste cleanup (colspan→gridSpan, rowspan→vMerge,
+// Word/GDocs noise stripping) lands in Phase 7.
+
+describe("Table — HTML parse via schema parseDOM", () => {
+  function parseHtml(html: string): Node {
+    const div = document.createElement("div");
+    div.innerHTML = html;
+    return PMDOMParser.fromSchema(fullSchema).parse(div);
+  }
+
+  function findFirst(doc: Node, typeName: string): Node | null {
+    let found: Node | null = null;
+    doc.descendants((node) => {
+      if (found) return false;
+      if (node.type.name === typeName) { found = node; return false; }
+      return true;
+    });
+    return found;
+  }
+
+  it("parses <table><tr><td>x</td></tr></table> into the table node tree", () => {
+    const doc = parseHtml("<table><tr><td>cell text</td></tr></table>");
+    const table = findFirst(doc, "table");
+    expect(table).not.toBeNull();
+    expect(table!.firstChild?.type.name).toBe("tableRow");
+    expect(table!.firstChild!.firstChild!.type.name).toBe("tableCell");
+    expect(table!.firstChild!.firstChild!.textContent).toBe("cell text");
+  });
+
+  it("parses <th> into a tableHeader node", () => {
+    const doc = parseHtml("<table><tr><th>Header</th></tr></table>");
+    const th = findFirst(doc, "tableHeader");
+    expect(th).not.toBeNull();
+    expect(th!.textContent).toBe("Header");
+  });
+
+  it("parses a 2x2 mixed header + data table", () => {
+    const html = `
+      <table>
+        <tr><th>Name</th><th>Role</th></tr>
+        <tr><td>Ada</td><td>Eng</td></tr>
+      </table>
+    `;
+    const doc = parseHtml(html);
+    const table = findFirst(doc, "table")!;
+    expect(table.childCount).toBe(2);
+    // Header row
+    expect(table.firstChild!.firstChild!.type.name).toBe("tableHeader");
+    expect(table.firstChild!.firstChild!.textContent).toBe("Name");
+    expect(table.firstChild!.lastChild!.textContent).toBe("Role");
+    // Data row
+    expect(table.lastChild!.firstChild!.type.name).toBe("tableCell");
+    expect(table.lastChild!.firstChild!.textContent).toBe("Ada");
+    expect(table.lastChild!.lastChild!.textContent).toBe("Eng");
+  });
+
+  it("parses cell content as block+ — paragraphs are produced for cell text", () => {
+    const doc = parseHtml("<table><tr><td>plain</td></tr></table>");
+    const cell = findFirst(doc, "tableCell")!;
+    expect(cell.firstChild?.type.name).toBe("paragraph");
+    expect(cell.firstChild?.textContent).toBe("plain");
+  });
+
+  it("parses a <tbody> wrapper transparently (HTML-default insertion)", () => {
+    const doc = parseHtml("<table><tbody><tr><td>x</td></tr></tbody></table>");
+    const table = findFirst(doc, "table");
+    expect(table).not.toBeNull();
+    expect(table!.firstChild?.type.name).toBe("tableRow");
+    expect(table!.firstChild!.firstChild!.textContent).toBe("x");
   });
 });
