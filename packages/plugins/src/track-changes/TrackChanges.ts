@@ -1,16 +1,5 @@
 import { Extension, renderTrackedInsert, renderTrackedDelete, renderTrackedConflict, renderTrackedAttrChange } from "@scrivr/core";
-import type { GlyphEntry, IBaseEditor, IEditor, LineEntry, OverlayRenderHandler } from "@scrivr/core";
-
-/**
- * `addOverlayRenderHandler` lives on the view-side `IEditor`. Headless
- * `ServerEditor` doesn't paint, so we no-op the overlay registration on it.
- * Type predicate narrows without an `as` cast.
- */
-function hasOverlayApi(
-  editor: IBaseEditor,
-): editor is IBaseEditor & Pick<IEditor, "addOverlayRenderHandler"> {
-  return "addOverlayRenderHandler" in editor;
-}
+import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler } from "@scrivr/core";
 import type { EditorState, Transaction } from "prosemirror-state";
 
 import { setAction, skipTracking, TrackChangesAction } from "./actions";
@@ -269,11 +258,9 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
     };
   },
 
-  onEditorReady(editor: IBaseEditor) {
-    // Headless editors (ServerEditor) have nothing to paint overlays on —
-    // tracked-changes data still lives in plugin state for accept/reject /
-    // export consumers, just without the visual layer.
-    if (!hasOverlayApi(editor)) return;
+  onViewReady(editor: IEditor) {
+    // Paint-only — tracked-changes data lives in plugin state regardless
+    // of view. Headless editors never reach this hook.
     const handler: OverlayRenderHandler = (ctx, pageNumber, _pageConfig, charMap) => {
       const state = editor.getState();
       const pluginState = trackChangesPluginKey.getState(state);

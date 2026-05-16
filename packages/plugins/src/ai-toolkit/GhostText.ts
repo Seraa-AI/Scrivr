@@ -78,7 +78,7 @@ export const GhostText = Extension.create({
     };
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
     const handler: OverlayRenderHandler = (ctx, pageNumber, _pageConfig, charMap) => {
       const pluginState = ghostTextPluginKey.getState(editor.getState());
       if (!pluginState?.nodeId || !pluginState.content) return;

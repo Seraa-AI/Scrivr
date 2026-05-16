@@ -216,7 +216,9 @@ export const Image = Extension.create({
     return { image: createInlineImageStrategy() };
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
+    // View-only: when an `<img>` load fires, request a repaint so the
+    // image swaps in. Headless editors don't run this hook at all.
     const cb = () => editor.redraw();
     redrawCallbacks.add(cb);
     const state: InstanceState = { cleanup: () => redrawCallbacks.delete(cb) };

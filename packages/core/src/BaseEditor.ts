@@ -83,7 +83,12 @@ export class BaseEditor implements IBaseEditor {
     Set<(payload: EditorEvents[keyof EditorEvents]) => void>
   >();
 
-  protected editorReadyCleanup: Array<() => void> = [];
+  /**
+   * Cleanup functions registered by `onEditorReady` and (in `Editor`)
+   * `onViewReady`. Run in registration order on `destroy()`. Subclasses
+   * push into this array when they fire their own lifecycle hooks.
+   */
+  protected runtimeCleanup: Array<() => void> = [];
 
   constructor({ extensions = [StarterKit], content }: BaseEditorOptions = {}) {
     this.manager = new ExtensionManager(extensions);
@@ -337,8 +342,8 @@ export class BaseEditor implements IBaseEditor {
 
   destroy(): void {
     this.emit("destroy", undefined as EditorEvents["destroy"]);
-    for (const cleanup of this.editorReadyCleanup) cleanup();
-    this.editorReadyCleanup = [];
+    for (const cleanup of this.runtimeCleanup) cleanup();
+    this.runtimeCleanup = [];
     this.eventHandlers.clear();
     this.listeners.clear();
   }
@@ -360,15 +365,19 @@ export class BaseEditor implements IBaseEditor {
   }
 
   /**
-   * Invoke all `onEditorReady` callbacks from extensions.
-   * Subclasses call this at the END of their own constructor, after all
-   * infrastructure (including view infrastructure) is initialised.
+   * Invoke all `onEditorReady` callbacks from extensions and accumulate
+   * their cleanup fns into `runtimeCleanup`. Engine-only — fires in both
+   * `Editor` and `ServerEditor`. Subclasses call this from their
+   * constructor after the engine is initialised. The browser `Editor`
+   * additionally fires `onViewReady` after view infrastructure exists;
+   * both cleanups land in the same array.
    */
   protected fireEditorReady(): void {
     const callbacks = this.manager.buildEditorReadyCallbacks();
-    this.editorReadyCleanup = callbacks
-      .map((cb) => cb(this))
-      .filter((fn): fn is () => void => typeof fn === "function");
+    for (const cb of callbacks) {
+      const cleanup = cb(this);
+      if (typeof cleanup === "function") this.runtimeCleanup.push(cleanup);
+    }
   }
 
   /**

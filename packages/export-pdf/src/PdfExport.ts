@@ -60,17 +60,24 @@ export const PdfExport = Extension.create<PdfExportOptions>({
         if (!inst?.editor) return false;
         if (dispatch) {
           const { editor } = inst;
-          const filename = callOptions?.filename ?? this.options.filename ?? "document";
-          exportToPdf(editor, callOptions?.theme ? { theme: callOptions.theme } : undefined)
+          const filename =
+            callOptions?.filename ?? this.options.filename ?? "document";
+          exportToPdf(
+            editor,
+            callOptions?.theme ? { theme: callOptions.theme } : undefined,
+          )
             .then((bytes) => {
-              const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
-              const url  = URL.createObjectURL(blob);
-              const a    = document.createElement("a");
-              a.href     = url;
+              const blob = new Blob([bytes.buffer as ArrayBuffer], {
+                type: "application/pdf",
+              });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
               a.download = `${filename}.pdf`;
               a.click();
               URL.revokeObjectURL(url);
-            }).catch((err: unknown) => {
+            })
+            .catch((err: unknown) => {
               console.error("[PdfExport] export failed:", err);
             });
         }
@@ -91,7 +98,12 @@ export const PdfExport = Extension.create<PdfExportOptions>({
     ];
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
+    // PDF export reads `editor.layout` + `editor.measurer` from the
+    // browser editor's live layout pipeline, so the registration that
+    // wires the `exportPdf` command to a concrete editor instance lives
+    // here. A headless PDF export path would need its own document →
+    // layout → PDF pipeline and is out of scope for this hook.
     const inst = instanceState.get(this.options);
     if (inst) inst.editor = editor;
     return () => {

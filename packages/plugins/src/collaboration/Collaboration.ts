@@ -97,7 +97,12 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     };
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
+    // Today Collaboration's runtime depends on `setReady(false/true)` to
+    // suppress layout/paint during Y.js initial sync — that's view-only.
+    // The Y binding itself is engine-state work and could move to
+    // `onEditorReady`; splitting the two is a follow-up so headless
+    // ServerEditor collaboration becomes a first-class case.
     const inst = instanceState.get(this.options);
     if (!inst) return;
 

@@ -636,23 +636,50 @@ export interface ExtensionConfig<Options = object> {
   addMarkdownSerializerRules?(this: Phase1Context<Options>): MarkdownSerializerRules;
 
   /**
-   * Runtime lifecycle hook — called once after the Editor is fully initialised
-   * (EditorState created, initial layout done, all plugins active).
+   * Engine lifecycle hook — called once after the editor's document engine
+   * is fully initialised (EditorState created, all ProseMirror plugins
+   * active). Runs in **both** browser `Editor` and headless `ServerEditor`.
    *
-   * Use this for setup that requires the live editor instance: connecting
-   * collaboration providers, registering overlay render handlers, subscribing
-   * to state changes, initialising plugin views without a ProseMirror EditorView.
+   * Use this for setup that operates on the document / commands / events /
+   * plugin state — anything that doesn't need a view. Connect collaboration
+   * providers, subscribe to state changes, register engine-side listeners.
    *
-   * Return a cleanup function that will be called when editor.destroy() runs.
+   * The editor parameter is `IBaseEditor` — the view-side APIs (overlays,
+   * layout, redraw, selection, surfaces) are NOT available here. If your
+   * extension also needs those, declare an `onViewReady` hook alongside this
+   * one; the editor will call it after view infrastructure exists.
+   *
+   * Return a cleanup function that will be called when `editor.destroy()`
+   * runs. Cleanup is collected in registration order and invoked in reverse.
    *
    * @example
    * onEditorReady(editor) {
-   *   const unsub = editor.subscribe(() => broadcastCursor());
-   *   const unreg = editor.addOverlayRenderHandler(drawRemoteCursors);
-   *   return () => { unsub(); unreg(); };
+   *   const unsub = editor.subscribe(() => syncDocToServer(editor.getState()));
+   *   return unsub;
    * }
    */
   onEditorReady?(this: Phase1Context<Options>, editor: IBaseEditor): (() => void) | void;
+
+  /**
+   * View lifecycle hook — called once after the browser `Editor`'s view
+   * infrastructure (layout, input bridge, surface registry, overlay layer)
+   * is ready. **Never called on `ServerEditor`.**
+   *
+   * Use this for setup that touches view-only surface: `addOverlayRenderHandler`,
+   * `redraw`, `selection`, `layout`, `surfaces`, `getViewportRect`,
+   * `setReady`. The editor parameter is `IEditor` so all of those are
+   * type-safe — no cast, no runtime guard.
+   *
+   * Fires after `onEditorReady`. Return a cleanup function; both hooks'
+   * cleanups run together on `editor.destroy()`.
+   *
+   * @example
+   * onViewReady(editor) {
+   *   const unregister = editor.addOverlayRenderHandler(paintAiCaret);
+   *   return unregister;
+   * }
+   */
+  onViewReady?(this: Phase1Context<Options>, editor: IEditor): (() => void) | void;
 
   /**
    * Editor-level input handlers — for keys that need access to the editor
@@ -700,8 +727,10 @@ export interface ResolvedExtension {
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
   markdownSerializerRules: MarkdownSerializerRules;
-  /** Runtime lifecycle callback — undefined when extension has no onEditorReady. */
+  /** Engine lifecycle callback — undefined when extension has no `onEditorReady`. */
   editorReadyCallback?: (editor: IBaseEditor) => (() => void) | void;
+  /** View lifecycle callback — undefined when extension has no `onViewReady`. */
+  viewReadyCallback?: (editor: IEditor) => (() => void) | void;
   /**
    * Lazy initial-doc factory — undefined when the extension has no
    * addInitialDoc(). The manager invokes this after every extension has
