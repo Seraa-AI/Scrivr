@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import type { ChromeContribution, LayoutIterationContext } from "@scrivr/core";
+import type { LayoutIterationContext } from "@scrivr/core";
 
-// Mock runMiniPipeline before importing resolveChrome
+// runMiniPipeline returns a stub layout shape so the unit test stays isolated
+// from the real layout pipeline. resolveChrome's wiring (slot presence,
+// per-page selection) is the contract under test.
 vi.mock("@scrivr/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@scrivr/core")>();
   return {
@@ -39,16 +41,14 @@ vi.mock("@scrivr/core", async (importOriginal) => {
 
 import { resolveChrome } from "../resolveChrome";
 import type { HeaderFooterPolicy } from "../types";
-import type { Node } from "prosemirror-model";
+import { realSchema } from "../../test-utils";
+
+// Real PM doc node — gives resolveChrome a real `doc.type.schema.nodeFromJSON`
+// so it can deserialize each slot's content against the production schema.
+const { doc: realDoc } = realSchema();
 
 const mockInput = {
-  doc: {
-    type: {
-      schema: {
-        nodeFromJSON: vi.fn(() => ({ type: { name: "doc" } })),
-      },
-    },
-  } as unknown as Node,
+  doc: realDoc,
   pageConfig: {
     pageWidth: 816,
     pageHeight: 1056,
