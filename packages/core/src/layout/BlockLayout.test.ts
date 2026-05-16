@@ -1439,29 +1439,14 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
 describe("TextBlockStrategy — inline image rendering", () => {
   const { schema: skSchema, fontConfig } = buildStarterKitContext();
 
-  function makeMockCtx(): CanvasRenderingContext2D {
-    return {
-      save: vi.fn(),
-      restore: vi.fn(),
-      fillText: vi.fn(),
-      strokeRect: vi.fn(),
-      fillRect: vi.fn(),
-      measureText: vi.fn(() => ({ width: 8 })),
-      beginPath: vi.fn(),
-      moveTo: vi.fn(),
-      lineTo: vi.fn(),
-      stroke: vi.fn(),
-      fill: vi.fn(),
-      arc: vi.fn(),
-      closePath: vi.fn(),
-      font: "",
-      fillStyle: "",
-      strokeStyle: "",
-      lineWidth: 1,
-      textAlign: "left",
-      textBaseline: "alphabetic",
-      drawImage: vi.fn(),
-    } as unknown as CanvasRenderingContext2D;
+  /**
+   * Real canvas context — happy-dom's `getContext("2d")` is wired in
+   * `vitest.setup.ts` to return the `@napi-rs/canvas` (Skia) backend.
+   * Tests can `vi.spyOn(ctx, "fillText")` etc. to observe paint calls
+   * without faking the whole context shape.
+   */
+  function makeRealCtx(): CanvasRenderingContext2D {
+    return document.createElement("canvas").getContext("2d")!;
   }
 
   it("calls InlineStrategy.render() for each inline image span", () => {
@@ -1487,7 +1472,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
     const inlineRegistry = new InlineRegistry();
     inlineRegistry.register("image", inlineStrategy);
 
-    const ctx = makeMockCtx();
+    const ctx = makeRealCtx();
     TextBlockStrategy.render(
       block,
       {
@@ -1534,7 +1519,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
       fontConfig,
     });
 
-    const ctx = makeMockCtx();
+    const ctx = makeRealCtx();
     // No inlineRegistry — should not throw, just silently skip drawing
     expect(() => {
       TextBlockStrategy.render(
@@ -1578,7 +1563,8 @@ describe("TextBlockStrategy — inline image rendering", () => {
     const inlineRegistry = new InlineRegistry();
     inlineRegistry.register("image", { render: renderFn });
 
-    const ctx = makeMockCtx();
+    const ctx = makeRealCtx();
+    const fillTextSpy = vi.spyOn(ctx, "fillText");
     TextBlockStrategy.render(
       block,
       {
@@ -1594,7 +1580,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
     );
 
     // Text was drawn (fillText called for "Hello" and "World" chars)
-    expect(ctx.fillText).toHaveBeenCalled();
+    expect(fillTextSpy).toHaveBeenCalled();
     // Image strategy was also called
     expect(renderFn).toHaveBeenCalledOnce();
   });

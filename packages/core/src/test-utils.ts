@@ -298,6 +298,23 @@ export interface PointerControllerSetup {
   cleanup: () => void;
 }
 
+/**
+ * Replace fields on the editor's `layout` getter result. Single localized
+ * seam for tests that need specific `anchoredObjects` or `pages` shapes
+ * which real layout would only produce via painful doc construction. Calls
+ * compose — re-invoking the helper merges new fields on top.
+ */
+export function overrideLayout(
+  editor: Editor,
+  partial: Record<string, unknown>,
+): void {
+  const real = editor.layout;
+  Object.defineProperty(editor, "layout", {
+    get: () => ({ ...real, ...partial }),
+    configurable: true,
+  });
+}
+
 export function makePointerControllerSetup(
   opts: PointerControllerSetupOptions = {},
 ): PointerControllerSetup {

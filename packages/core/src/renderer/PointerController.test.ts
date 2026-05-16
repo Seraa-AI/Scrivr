@@ -203,11 +203,12 @@ describe("PointerController — image click routing", () => {
     width: 80,
     height: 60,
     wrapMode: "square",
-    node: {
-      nodeSize: 1,
-      type: { create: vi.fn() },
-      attrs: { width: 80, height: 60, wrappingMode: "square-left" },
-    } as unknown as AnchoredObjectPlacement["node"],
+    node: setup.editor.schema.nodes["image"]!.create({
+      src: "x",
+      width: 80,
+      height: 60,
+      wrapMode: "square",
+    }),
     anchorGlobalY: 50,
     anchorPage: 1,
     globalY: 50,
