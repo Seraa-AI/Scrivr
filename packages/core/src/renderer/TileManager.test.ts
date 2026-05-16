@@ -517,158 +517,80 @@ describe("TileManager — body click deactivates surface", () => {
 });
 
 describe("TileManager — margin click activation (no policy)", () => {
-  let container: HTMLDivElement;
-  let scrollParent: HTMLDivElement;
-
   beforeEach(() => {
-    stubCanvas();
-    scrollParent = document.createElement("div");
-    scrollParent.style.overflowY = "scroll";
-    Object.defineProperty(scrollParent, "clientHeight", { value: 800, configurable: true });
-    Object.defineProperty(scrollParent, "scrollTop", { value: 0, configurable: true, writable: true });
-    container = document.createElement("div");
-    scrollParent.appendChild(container);
-    document.body.appendChild(scrollParent);
     vi.useFakeTimers();
   });
 
   afterEach(() => {
-    scrollParent.remove();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  type OnPageClick = (page: number, x: number, y: number, clickCount: number) => boolean;
-  type EmitFn = ReturnType<typeof vi.fn>;
-
-  /**
-   * The TileManager wires its pointer's onPageClick callback to private
-   * state. Tests need to invoke that callback directly to assert the chrome
-   * vs body branch. One cast at this seam, named so call sites stay clean.
-   */
-  function getOnPageClick(tm: TileManager): OnPageClick {
-    const internals = tm as unknown as { pointer: { deps: { onPageClick: OnPageClick } } };
-    return internals.pointer.deps.onPageClick;
-  }
-
-  /**
-   * Attach an emit spy + a surfaces stub to a mock editor. Returned object
-   * is the same editor instance, but with the view-bits exposed as a typed
-   * intersection so call sites don't need to re-narrow.
-   */
-  function attachEmitAndSurfaces(editor: Editor): Editor & {
-    emit: EmitFn;
-    surfaces: { activeSurface: unknown; activate: ReturnType<typeof vi.fn> };
-  } {
-    const emit: EmitFn = vi.fn();
-    const surfaces = { activeSurface: null, activate: vi.fn() };
-    Object.assign(editor, { emit, surfaces });
-    return editor as Editor & { emit: EmitFn; surfaces: typeof surfaces };
-  }
-
-  // Fresh-doc metrics: header/footer bands collapsed to zero because no
-  // headerFooter policy exists yet. contentTop / footerTop sit exactly at
-  // the page's layout margins.
-  const collapsedMetrics = {
-    contentTop: DEFAULT_PAGE_CONFIG.margins.top,
-    contentBottom: DEFAULT_PAGE_CONFIG.pageHeight - DEFAULT_PAGE_CONFIG.margins.bottom,
-    contentHeight: DEFAULT_PAGE_CONFIG.pageHeight - DEFAULT_PAGE_CONFIG.margins.top - DEFAULT_PAGE_CONFIG.margins.bottom,
-    contentWidth: DEFAULT_PAGE_CONFIG.pageWidth - DEFAULT_PAGE_CONFIG.margins.left - DEFAULT_PAGE_CONFIG.margins.right,
-    headerTop: DEFAULT_PAGE_CONFIG.margins.top,
-    footerTop: DEFAULT_PAGE_CONFIG.pageHeight - DEFAULT_PAGE_CONFIG.margins.bottom,
-    headerHeight: 0,
-    footerHeight: 0,
-  };
-
-  function makeFreshDocEditor() {
-    const { editor, layoutRef } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, null);
-    layoutRef.current = {
-      ...makeLayout(2, DEFAULT_PAGE_CONFIG),
-      metrics: [
-        { pageNumber: 1, ...collapsedMetrics },
-        { pageNumber: 2, ...collapsedMetrics },
-      ],
-    } as DocumentLayout;
-    return attachEmitAndSurfaces(editor);
-  }
-
   it("emits chromeClick on double-click in the top margin even when band heights are 0", () => {
-    const editor = makeFreshDocEditor();
-    const tm = new TileManager(editor, container);
-    tm.update();
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
 
-    // y=40 is inside margins.top (72) — i.e. the potential header strip.
-    const consumed = getOnPageClick(tm)(1, 400, 40, 2);
+    // y=40 is inside margins.top (72) — the potential header strip. With no
+    // headerFooter policy, headerHeight=0, but the widened hit-test still
+    // treats the margin strip as the header band.
+    const consumed = routePageClick(setup.editor, 1, 400, 40, 2);
     expect(consumed).toBe(true);
-    expect(editor.emit).toHaveBeenCalledWith(
+    expect(emitSpy).toHaveBeenCalledWith(
       "chromeClick",
       expect.objectContaining({ page: 1, band: "header", clickCount: 2 }),
     );
 
-    tm.destroy();
+    setup.cleanup();
   });
 
   it("emits chromeClick on double-click in the bottom margin even when band heights are 0", () => {
-    const editor = makeFreshDocEditor();
-    const tm = new TileManager(editor, container);
-    tm.update();
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
+    const pageConfig = setup.editor.layout.pageConfig;
 
-    const footerY = DEFAULT_PAGE_CONFIG.pageHeight - DEFAULT_PAGE_CONFIG.margins.bottom + 20;
-    const consumed = getOnPageClick(tm)(1, 400, footerY, 2);
+    const footerY = pageConfig.pageHeight - pageConfig.margins.bottom + 20;
+    const consumed = routePageClick(setup.editor, 1, 400, footerY, 2);
     expect(consumed).toBe(true);
-    expect(editor.emit).toHaveBeenCalledWith(
+    expect(emitSpy).toHaveBeenCalledWith(
       "chromeClick",
       expect.objectContaining({ page: 1, band: "footer", clickCount: 2 }),
     );
 
-    tm.destroy();
+    setup.cleanup();
   });
 
   it("does not emit chromeClick on body double-click (between margins)", () => {
-    const editor = makeFreshDocEditor();
-    const tm = new TileManager(editor, container);
-    tm.update();
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
 
     // y=400 is well inside the body (between margins.top=72 and footer strip).
-    const consumed = getOnPageClick(tm)(1, 400, 400, 2);
+    const consumed = routePageClick(setup.editor, 1, 400, 400, 2);
     expect(consumed).toBe(false);
-    expect(editor.emit).not.toHaveBeenCalledWith("chromeClick", expect.anything());
+    expect(emitSpy).not.toHaveBeenCalledWith("chromeClick", expect.anything());
 
-    tm.destroy();
+    setup.cleanup();
   });
 
   it("respects explicit band bounds when policy exists (no regression on demo path)", () => {
     // Policy-enabled doc: bands have non-zero heights. The widened fallback
     // must defer to metrics.contentTop / metrics.footerTop, not the raw
-    // pageConfig margins.
-    const { editor: base, layoutRef } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, null);
-    layoutRef.current = {
-      ...makeLayout(1, DEFAULT_PAGE_CONFIG),
-      metrics: [{
-        pageNumber: 1,
-        contentTop: 132,        // larger than margins.top (72) — band reserves extra space
-        contentBottom: 991,
-        contentHeight: 859,
-        contentWidth: 650,
-        headerTop: 72,
-        footerTop: 991,
-        headerHeight: 60,
-        footerHeight: 60,
-      }],
-    } as DocumentLayout;
-    const editor = attachEmitAndSurfaces(base);
-
-    const tm = new TileManager(editor, container);
-    tm.update();
+    // pageConfig margins. Driving this via fixedChromeBandsExtension(60, 60)
+    // contributes a 60px header reserve → contentTop = margins.top(72) + 60 = 132.
+    const setup = makeRendererTestSetup({
+      scrollParent: true,
+      pageCount: 1,
+      extraExtensions: [fixedChromeBandsExtension(60, 60)],
+    });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
 
     // y=100 sits between margins.top (72) and the band-resolved contentTop (132).
     // With bands present, that's still inside the header — must emit chromeClick.
-    expect(getOnPageClick(tm)(1, 400, 100, 2)).toBe(true);
-    expect(editor.emit).toHaveBeenCalledWith(
+    expect(routePageClick(setup.editor, 1, 400, 100, 2)).toBe(true);
+    expect(emitSpy).toHaveBeenCalledWith(
       "chromeClick",
       expect.objectContaining({ band: "header" }),
     );
 
-    tm.destroy();
+    setup.cleanup();
   });
 });

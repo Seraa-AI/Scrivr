@@ -28,6 +28,7 @@ import {
 import { pageNumberStrategy, totalPagesStrategy, dateStrategy } from "./tokenStrategies";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import type { SlotKey } from "./surfaces";
+import { ensurePolicy } from "./HeaderFooterController";
 
 interface CursorManagerLike { isVisible: boolean; resetSilent(): void }
 
@@ -94,6 +95,21 @@ function isResolvedHeaderFooter(value: unknown): value is ResolvedHeaderFooter {
   if (typeof value !== "object" || value === null) return false;
   return "policy" in value && "slots" in value;
 }
+
+/**
+ * Placeholder policy used to reserve a clickable strip at the top + bottom
+ * of every page when the extension is loaded but no real policy has been
+ * written to the doc yet. Mirrors Word/Docs: the band is visibly empty but
+ * present, so the user can see where to double-click. The first margin
+ * double-click upgrades this ghost into a real policy via ensurePolicy().
+ */
+const GHOST_POLICY: HeaderFooterPolicy = {
+  enabled: true,
+  differentFirstPage: false,
+  differentOddEven: false,
+  defaultHeader: { content: { type: "doc", content: [{ type: "paragraph" }] } },
+  defaultFooter: { content: { type: "doc", content: [{ type: "paragraph" }] } },
+};
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
@@ -198,14 +214,20 @@ export const HeaderFooter = Extension.create({
       name: "headerFooter",
 
       measure(input, ctx) {
-        const policy = getHeaderFooterPolicy(input.doc);
-        if (!policy?.enabled || input.pageConfig.pageless) {
+        if (input.pageConfig.pageless) {
           return { topForPage: () => 0, bottomForPage: () => 0, stable: true };
         }
-        // If a surface is active, build a policy with the live content so
-        // the reserved height grows as the user types.
-        const livePolicy = policyWithLiveSurface(policy);
-        return resolveChrome(livePolicy, input, ctx);
+        const policy = getHeaderFooterPolicy(input.doc);
+        if (policy?.enabled) {
+          // If a surface is active, build a policy with the live content so
+          // the reserved height grows as the user types.
+          const livePolicy = policyWithLiveSurface(policy);
+          return resolveChrome(livePolicy, input, ctx);
+        }
+        // No real policy yet — reserve a default empty-slot band so the
+        // affordance is visible and clickable. The first margin double-click
+        // upgrades this ghost into a real policy via ensurePolicy().
+        return resolveChrome(GHOST_POLICY, input, ctx);
       },
 
       render(ctx) {
@@ -328,8 +350,32 @@ export const HeaderFooter = Extension.create({
 
     // Listen for clicks in chrome bands to activate header/footer editing
     const unsubChromeClick = editor.on("chromeClick", ({ band, page, x, y, clickCount }) => {
-      const policy = getHeaderFooterPolicy(editor.getState().doc);
-      if (!policy?.enabled) return;
+      // Only double-click activates. Single clicks in an active surface fall
+      // through to PointerController's normal click/drag logic, which routes
+      // through editor.charMap and editor.selection (both surface-aware).
+      // Single clicks in the margin with no surface active are also a no-op —
+      // we don't want to spawn a band on accidental single clicks.
+      if (clickCount !== 2) return;
+
+      // Bootstrap a policy on first margin double-click (Word/Docs UX). When
+      // the doc has no policy yet, TileManager widens the hit test to fall
+      // back to the page's layout margins so this event still fires.
+      const existing = getHeaderFooterPolicy(editor.getState().doc);
+      let policy: HeaderFooterPolicy;
+      if (existing?.enabled) {
+        policy = existing;
+      } else {
+        // ensurePolicy returns the existing policy unchanged when present, so
+        // force enabled: true if a disabled policy is lingering on the doc.
+        const ensured = ensurePolicy(editor);
+        if (!ensured.enabled) {
+          policy = { ...ensured, enabled: true };
+          const tr = editor.getState().tr.setDocAttribute("headerFooter", policy);
+          editor.applyTransaction(tr);
+        } else {
+          policy = ensured;
+        }
+      }
 
       const isFirstPage = page === 1 && policy.differentFirstPage;
       let slotKey: SlotKey;
@@ -339,13 +385,16 @@ export const HeaderFooter = Extension.create({
         slotKey = isFirstPage ? "firstPageFooter" : "defaultFooter";
       }
 
-      const def = policy[slotKey];
-      if (!def) return;
-
-      // Only double-click activates. Single clicks in an active surface fall
-      // through to PointerController's normal click/drag logic, which routes
-      // through editor.charMap and editor.selection (both surface-aware).
-      if (clickCount !== 2) return;
+      let def = policy[slotKey];
+      if (!def) {
+        // First-page slot wasn't pre-seeded — create a default empty doc and
+        // write it back so the surface cache + activation flow has something
+        // to anchor to.
+        def = { content: { type: "doc", content: [{ type: "paragraph" }] } };
+        policy = { ...policy, [slotKey]: def };
+        const tr = editor.getState().tr.setDocAttribute("headerFooter", policy);
+        editor.applyTransaction(tr);
+      }
 
       const isNew = !cache.get(slotKey);
       const surface = cache.getOrCreate(slotKey, def);
