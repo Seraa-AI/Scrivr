@@ -12,9 +12,19 @@ import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
 import { computePageMetrics, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
 import type { LayoutBlock } from "./BlockLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
-import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, MOCK_LINE_HEIGHT } from "../test-utils";
+import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak } from "../test-utils";
 
-// lineHeight = 18, contentHeight = 1123 - 72 - 72 = 979
+/**
+ * Default-paragraph line height as the real Skia-backed measurer reports it.
+ * Pagination tests build `pageHeight` from this so the "3 lines per page"
+ * contract holds regardless of the actual font metrics.
+ *
+ * `applyPageFont` injects the family into every BlockStyle's font at runtime;
+ * we mirror that here so the measurement matches what the pipeline sees.
+ */
+const DEFAULT_PARAGRAPH_LINE_HEIGHT = createMeasurer().getFontMetrics(
+  applyPageFont(defaultFontConfig, "Arial, sans-serif").paragraph!.font,
+).lineHeight;
 
 
 function h1(text: string) {
@@ -129,8 +139,7 @@ describe("runPipeline — overflow", () => {
       margins: { top: 10, right: 10, bottom: 10, left: 10 },
     };
 
-    // Each paragraph = 1 line = 18px. 180px / 18px = 10 paragraphs per page.
-    // Create 12 paragraphs — should overflow to 2 pages.
+    // Create enough one-line paragraphs to overflow the tiny page.
     const blocks = Array.from({ length: 12 }, (_, i) => p(`Paragraph ${i + 1}`));
     const layout = runPipeline(doc(...blocks), {
       pageConfig: tinyPage,
@@ -571,24 +580,24 @@ describe("applyPageFont", () => {
 //
 // Page geometry used throughout this section:
 //   pageWidth  = 120   → contentWidth  = 100px (120 − 2×10 margins)
-//   pageHeight = 74    → contentHeight = 54px  (74 − 2×10 margins) = 3 × MOCK_LINE_HEIGHT
-//   pageBottom = margins.top + contentHeight   = 10 + 54 = 64px
+//   pageHeight is derived from the real test line height so content fits
+//   exactly 3 paragraph lines.
 //
-// Text wrapping: at contentWidth=100px and MOCK_CHAR_WIDTH=8px, a 9-char word
-// (72px) fits alone but never alongside another (144px > 100px). So
+// Text wrapping: at contentWidth=100px, each 9-char word fits alone but
+// never alongside another. So
 // "aaaaaaaaa bbbbbbbbb ..." reliably produces one line per word.
 //
 // Block layout with a 1-line "intro" paragraph before the tall block:
-//   intro y=10, height=18, spaceAfter=10
-//   tall block: gap=10, targetY=38, spaceAvailable=64-38=26px → 1 line fits (18px)
+//   intro y=10, height=LH, spaceAfter=10
+//   tall block: gap=10, targetY=10+LH+10, and 1 line fits
 //   → part 1 (1 line) on page 1; remaining lines carried to subsequent pages
 //
 describe("runPipeline — line splitting", () => {
-  const LH = MOCK_LINE_HEIGHT; // 18px
+  const LH = DEFAULT_PARAGRAPH_LINE_HEIGHT;
 
   const splitPage = {
     pageWidth:  120,
-    pageHeight: Math.round(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
+    pageHeight: Math.ceil(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
     margins: { top: 10, right: 10, bottom: 10, left: 10 },
   };
 
@@ -716,11 +725,11 @@ describe("runPipeline — line splitting", () => {
 //
 // Same splitPage geometry as the suite above (3 lines per page).
 describe("runPipeline — line splitting (first on page)", () => {
-  const LH = MOCK_LINE_HEIGHT; // 18px
+  const LH = DEFAULT_PARAGRAPH_LINE_HEIGHT;
 
   const splitPage = {
     pageWidth:  120,
-    pageHeight: Math.round(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
+    pageHeight: Math.ceil(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
     margins: { top: 10, right: 10, bottom: 10, left: 10 },
   };
 
@@ -728,8 +737,8 @@ describe("runPipeline — line splitting (first on page)", () => {
   const nineLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff ggggggggg hhhhhhhhh iiiiiiiii";
 
   it("splits a paragraph that is the first and only block on page 1 across two pages", () => {
-    // No preceding block — isFirstOnPage is true. The paragraph (6 lines × 18px = 108px)
-    // overflows contentHeight (54px) and must split: 3 lines on page 1, 3 on page 2.
+    // No preceding block — isFirstOnPage is true. The paragraph has 6
+    // measured lines and must split: 3 lines on page 1, 3 on page 2.
     const layout = runPipeline(doc(p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
@@ -839,11 +848,11 @@ describe("runPipeline — line splitting (first on page)", () => {
 // for linesFit=0. But y must be <= pageBottom - lineHeight = 46 for the
 // gap-suppression fix to kick in.
 describe("runPipeline — gap suppression at page boundary", () => {
-  const LH = MOCK_LINE_HEIGHT; // 18px
+  const LH = DEFAULT_PARAGRAPH_LINE_HEIGHT;
 
   const splitPage = {
     pageWidth:  120,
-    pageHeight: Math.round(10 + 3 * LH + 10), // 74px
+    pageHeight: Math.ceil(10 + 3 * LH + 10), // 74px
     margins: { top: 10, right: 10, bottom: 10, left: 10 },
   };
 
@@ -877,16 +886,17 @@ describe("runPipeline — gap suppression at page boundary", () => {
   });
 
   it("block starts at y (gap suppressed), not at targetY", () => {
-    // Block must visually start directly after the previous block — no gap wasted.
+    // Block 2 must visually start directly after block 1 — the gap that
+    // would normally be inserted gets suppressed when there's no room for
+    // the next block's first line in the leftover space.
     const layout = runPipeline(doc(p(twoLineIntro), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
 
-    const introY = splitPage.margins.top; // 10
-    const introHeight = 2 * LH; // 36
-    const expectedY = introY + introHeight; // 46 = y (not targetY = 56)
-    expect(layout.pages[0]!.blocks[1]!.y).toBe(expectedY);
+    const intro = layout.pages[0]!.blocks[0]!;
+    const expectedY = intro.y + intro.height;
+    expect(layout.pages[0]!.blocks[1]!.y).toBeCloseTo(expectedY, 4);
   });
 
   it("all lines are conserved when gap suppression applies", () => {
@@ -901,13 +911,23 @@ describe("runPipeline — gap suppression at page boundary", () => {
   });
 
   it("gap suppression applies when spaceBefore (not prevSpaceAfter) causes the dead zone", () => {
-    // One-line intro → y = 28. heading_1 spaceBefore = 24.
-    // gap = max(10, 24) = 24 → targetY = 52 → pageAvailable = 12 < LH.
-    // pageBottom - y = 36 >= LH → fix: heading starts at y=28, 2 lines on p1.
+    // The test isolates spaceBefore as the gap source: heading_1 has a
+    // 24px spaceBefore that exceeds the paragraph's 10px spaceAfter, which
+    // is what creates the dead zone. Use a custom fontConfig that matches
+    // heading_1's font to paragraph's so both blocks share the same line
+    // height — the only varying signal is spaceBefore.
+    const fontConfig: typeof defaultFontConfig = {
+      ...defaultFontConfig,
+      heading_1: {
+        ...defaultFontConfig.heading_1!,
+        font: defaultFontConfig.paragraph!.font,
+      },
+    };
     const oneLineIntro = "aaaaaaaaa";
     const layout = runPipeline(doc(p(oneLineIntro), heading(1, fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
+      fontConfig,
     });
 
     expect(layout.pages).toHaveLength(2);
@@ -1008,7 +1028,7 @@ describe("runPipeline — pageConfig.fontFamily", () => {
 // ── Float layout (wrapping mode) ───────────────────────────────────────────────
 
 describe("runPipeline — float image wrapping", () => {
-  // Long text to force several wrapped lines (each ≈ 55 chars at 8px/char, 442px constrained width)
+  // Long text to force several wrapped lines in the constrained content width.
   const longText = "word ".repeat(60).trim(); // 60 words × 5 chars = ~300 chars, ~6+ lines
 
   it("square-left: produces floats array with the float image", () => {
@@ -1754,7 +1774,7 @@ describe("runPipeline — page-level square exclusions (Phase 4)", () => {
 //
 // defaultPageConfig: pageWidth=794, margins=72 all sides
 //   contentX = 72, contentRight = 722, contentWidth = 650
-//   FLOAT_MARGIN = 8, MOCK_LINE_HEIGHT = 18
+//   FLOAT_MARGIN = 8
 //
 // For a 200×200 image in break mode:
 //   floatX = 72 (content left edge, honours attrs.width)
@@ -2070,11 +2090,11 @@ describe("runPipeline — anchor-only image paragraphs", () => {
 // ── buildFragments — Stage 4 ─────────────────────────────────────────────────
 
 describe("buildFragments — Stage 4", () => {
-  const LH = MOCK_LINE_HEIGHT; // 18px
+  const LH = DEFAULT_PARAGRAPH_LINE_HEIGHT;
 
   const splitPage = {
     pageWidth:  120,
-    pageHeight: Math.round(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
+    pageHeight: Math.ceil(10 + 3 * LH + 10), // 74px: 3 lines + 10px margins each side
     margins: { top: 10, right: 10, bottom: 10, left: 10 },
   };
 
@@ -2337,8 +2357,8 @@ describe("paginateFlow — Stage 2", () => {
 
   it("metrics contract: normal completion — length == pages.length + 1, pageNumbers match", () => {
     // A doc that paginates cleanly across >1 page (need enough blocks to overflow).
-    // Each mock line = 18px, content height = 979 → ~54 lines per page.
-    // 70 paragraphs @ 1 line each → spills onto page 2.
+    // 70 one-line paragraphs is enough to spill onto page 2 with the real
+    // test measurer.
     const blocks = Array.from({ length: 70 }, (_, i) => p(`Paragraph ${i + 1}`));
     const testDoc = doc(...blocks);
     const measurer = createMeasurer();

@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { ChangeSet } from "../ChangeSet";
 import { CHANGE_OPERATION, CHANGE_STATUS, NodeChange, TextChange } from "../types";
+import { realSchema } from "../../test-utils";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const { paragraphType, paragraphNode } = realSchema();
 
 function makeTextChange(id: string, authorID = "user:Alice", from = 1, to = 5): TextChange {
   return {
@@ -11,7 +14,7 @@ function makeTextChange(id: string, authorID = "user:Alice", from = 1, to = 5): 
     from,
     to,
     text: "hello",
-    nodeType: {} as any,
+    nodeType: paragraphType,
     dataTracked: {
       id,
       authorID,
@@ -31,7 +34,7 @@ function makeNodeChange(id: string, from: number, to: number, authorID: string):
     type: "node-change",
     from,
     to,
-    node: {} as any,
+    node: paragraphNode,
     attrs: {},
     children: [],
     dataTracked: {

@@ -1,6 +1,6 @@
 import { Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
-import { TextMeasurer } from "./TextMeasurer";
+import type { TextMeasurerLike } from "./TextMeasurer";
 import type { InlineRegistry } from "./BlockRegistry";
 import { normalizeImageAttrs } from "./AnchoredObjects";
 import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
@@ -209,7 +209,7 @@ export interface BlockLayoutOptions {
   /** Which page this block sits on — passed to CharacterMap */
   page: number;
   fontConfig?: FontConfig;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   /** Optional — populate if you want hit-testing on this block */
   map?: CharacterMap;
   /**
@@ -670,7 +670,7 @@ function extractSpans(
   baseFont: string,
   _fontConfig: FontConfig,
   fontModifiers?: Map<string, FontModifier>,
-  measurer?: TextMeasurer,
+  measurer?: TextMeasurerLike,
   inlineRegistry?: InlineRegistry,
 ): InputSpan[] {
   const spans: InputSpan[] = [];
@@ -837,7 +837,7 @@ export function populateCharMap(
   map: CharacterMap,
   page: number,
   lineIndexOffset: number,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
 ): void {
   // Leaf block (HR, image, etc.) — no lines, just before/after cursor positions.
   // One line covers the full block height. Two side-by-side half-width glyphs

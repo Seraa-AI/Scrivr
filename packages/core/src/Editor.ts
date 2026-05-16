@@ -12,7 +12,7 @@ import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import { CursorManager } from "./renderer/CursorManager";
-import { TextMeasurer } from "./layout/TextMeasurer";
+import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
 import type { FontConfig } from "./layout/FontConfig";
@@ -168,6 +168,16 @@ export interface EditorOptions {
    * `<html>`, set this to `document.documentElement` so toggles are seen.
    */
   themeRoot?: HTMLElement;
+  /**
+   * Advanced measurement injection point. If omitted, the editor creates the
+   * DOM-canvas-backed `TextMeasurer` default. Tests and custom runtimes may
+   * provide any implementation that satisfies the `TextMeasurerLike` API.
+   *
+   * This is not required for normal app usage; use it when text measurement
+   * must be supplied by a specific backend such as a server-side canvas,
+   * deterministic test canvas, or platform-native measurement service.
+   */
+  textMeasurer?: TextMeasurerLike;
 }
 
 /**
@@ -217,7 +227,7 @@ export class Editor extends BaseEditor implements IEditor {
   readonly pageConfig: PageConfig;
 
   /** The text measurer — created once; its internal caches are reused across layouts. */
-  readonly measurer: TextMeasurer;
+  readonly measurer: TextMeasurerLike;
 
   // ── Layout coordinator ────────────────────────────────────────────────────
 
@@ -322,6 +332,7 @@ export class Editor extends BaseEditor implements IEditor {
     debug = {},
     theme,
     themeRoot,
+    textMeasurer,
   }: EditorOptions) {
     // BaseEditor handles: manager, state, commands, storage, event emitter
     super({ extensions, ...(content !== undefined ? { content } : {}) });
@@ -348,7 +359,7 @@ export class Editor extends BaseEditor implements IEditor {
       : builtConfig ?? pageConfig ?? defaultPageConfig;
 
     this.fontConfig    = this._manager.buildBlockStyles();
-    this.measurer      = new TextMeasurer({ lineHeightMultiplier: 1.2 });
+    this.measurer      = textMeasurer ?? new TextMeasurer({ lineHeightMultiplier: 1.2 });
     this.fontModifiers = this._manager.buildFontModifiers();
     this.markDecorators = this._manager.buildMarkDecorators();
     this.toolbarItems  = this._manager.buildToolbarItems();

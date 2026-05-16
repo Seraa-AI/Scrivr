@@ -5,7 +5,7 @@ import { Editor } from "../../Editor";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { ExtensionManager } from "../ExtensionManager";
-import { mockCanvas } from "../../test-utils";
+import { createTestEditor } from "../../test-utils";
 import type { Node } from "prosemirror-model";
 import type { LayoutBlock } from "../../layout/BlockLayout";
 
@@ -152,12 +152,10 @@ describe("Table — schema integration (with StarterKit.configure({ table: true 
 // ── End-to-end via Editor ─────────────────────────────────────────────────────
 
 describe("Table — insertTable / deleteTable / undo-redo", () => {
-  beforeEach(() => mockCanvas());
-
   function makeEditor(): { editor: Editor; type: (s: string) => void; cleanup: () => void } {
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({ extensions: [StarterKit.configure({ table: true })] });
+    const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })] });
     editor.mount(container);
     const type = (s: string): void => {
       const ta = container.querySelector("textarea");
@@ -268,10 +266,9 @@ describe("Table — markdown export", () => {
   it("getMarkdown() does not throw on a doc containing an inserted table", () => {
     // Path 1: insertTable via the browser Editor (matches the reviewer's
     // exact scenario when Table is opted in).
-    mockCanvas();
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({ extensions: [StarterKit.configure({ table: true })] });
+    const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })] });
     editor.mount(container);
     editor.commands["insertTable"]?.({ rows: 2, cols: 2 });
     expect(() => editor.getMarkdown()).not.toThrow();
@@ -344,8 +341,6 @@ describe("Table — markdown export", () => {
 // doc with the proper table structure — not silently dropped.
 
 describe("Table — browser Editor parses initial content with a table", () => {
-  beforeEach(() => mockCanvas());
-
   it("hydrates a 2x2 table from the constructor's content option", () => {
     const content = {
       type: "doc",
@@ -375,7 +370,7 @@ describe("Table — browser Editor parses initial content with a table", () => {
 
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({ extensions: [StarterKit.configure({ table: true })], content });
+    const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })], content });
     editor.mount(container);
 
     const doc = editor.getState().doc;
@@ -415,8 +410,6 @@ describe("Table — browser Editor parses initial content with a table", () => {
 //   - the layout pipeline emits one `kind: "tableRow"` LayoutBlock per row.
 
 describe("Table — DefaultContent + browser Editor integration", () => {
-  beforeEach(() => mockCanvas());
-
   function tableJsonDoc(rows: number, cols: number): Record<string, unknown> {
     const buildCell = (r: number, c: number): unknown => ({
       type: "tableCell",
@@ -452,7 +445,7 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     const json = tableJsonDoc(2, 3);
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({
+    const editor = createTestEditor({
       extensions: [StarterKit.configure({ table: true }), DefaultContent.configure({ json })],
     });
     editor.mount(container);
@@ -478,7 +471,7 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     const json = tableJsonDoc(3, 2);
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({
+    const editor = createTestEditor({
       extensions: [StarterKit.configure({ table: true }), DefaultContent.configure({ json })],
     });
     // Mount + force layout. Errors during paint surface as exceptions here.
@@ -501,7 +494,7 @@ describe("Table — DefaultContent + browser Editor integration", () => {
 
   it("rejects misconfiguration when DefaultContent receives both markdown and json", () => {
     expect(() => {
-      const editor = new Editor({
+      const editor = createTestEditor({
         extensions: [
           StarterKit.configure({ table: true }),
           DefaultContent.configure({ markdown: "# x", json: tableJsonDoc(1, 1) }),
@@ -520,7 +513,7 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     };
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({
+    const editor = createTestEditor({
       extensions: [StarterKit.configure({ table: true }), DefaultContent.configure({ json: seeded })],
       content: override,
     });

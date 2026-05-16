@@ -16,7 +16,6 @@ import { schema } from "../model/schema";
 import {
   createMeasurer,
   buildStarterKitContext,
-  MOCK_LINE_HEIGHT,
   paragraph,
   boldParagraph,
   underlineParagraph,
@@ -24,6 +23,11 @@ import {
   mixedParagraph,
   heading,
 } from "../test-utils";
+
+/** Sum of every line's measured height — the invariant `block.height` should equal. */
+function sumLineHeights(block: { lines: ReadonlyArray<{ lineHeight: number }> }): number {
+  return block.lines.reduce((acc, line) => acc + line.lineHeight, 0);
+}
 
 // StarterKit schema has the fontFamily attr on paragraph and heading nodes.
 const { schema: skSchema } = buildStarterKitContext();
@@ -69,8 +73,8 @@ describe("layoutBlock — basic", () => {
       page: 1,
       measurer: createMeasurer(),
     });
-    // "Hello" fits on one line, lineHeight ≈ 18
-    expect(block.height).toBeCloseTo(18);
+    expect(block.lines).toHaveLength(1);
+    expect(block.height).toBeCloseTo(sumLineHeights(block));
   });
 
   it("exports spaceBefore and spaceAfter from FontConfig", () => {
@@ -88,17 +92,21 @@ describe("layoutBlock — basic", () => {
   });
 
   it("wraps into multiple lines when text exceeds availableWidth", () => {
-    // availableWidth=80, "Hello world" = 88px → 2 lines
+    // Pick an availableWidth that fits "Hello " but not "Hello world",
+    // forcing a wrap regardless of exact font widths.
+    const measurer = createMeasurer();
+    const partial = measurer.measureWidth("Hello ", "16px sans-serif");
+    const full = measurer.measureWidth("Hello world", "16px sans-serif");
     const block = layoutBlock(paragraph("Hello world"), {
       nodePos: 0,
       x: 72,
       y: 0,
-      availableWidth: 80,
+      availableWidth: (partial + full) / 2,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
     });
     expect(block.lines.length).toBeGreaterThan(1);
-    expect(block.height).toBeCloseTo(18 * block.lines.length);
+    expect(block.height).toBeCloseTo(sumLineHeights(block));
   });
 
   it("uses heading font for heading nodes", () => {
@@ -259,14 +267,18 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
   });
 
   it("marks survive word-wrap: multi-word underlined text passes marks to all spans", () => {
-    // "Hello world" with underline, narrow width forces a line break
+    // Pick an availableWidth that fits "Hello " but not the full string, so
+    // the wrap is forced regardless of exact font widths.
+    const measurer = createMeasurer();
+    const partial = measurer.measureWidth("Hello ", "16px sans-serif");
+    const full = measurer.measureWidth("Hello world", "16px sans-serif");
     const block = layoutBlock(underlineParagraph("Hello world"), {
       nodePos: 0,
       x: 72,
       y: 0,
-      availableWidth: 80,
+      availableWidth: (partial + full) / 2,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
     });
     expect(block.lines.length).toBeGreaterThan(1);
     for (const line of block.lines) {
@@ -331,21 +343,25 @@ describe("layoutBlock — CharacterMap", () => {
       },
     };
 
+    const measurer = createMeasurer();
+    const availableWidth = 400;
     layoutBlock(node, {
       nodePos: 0,
       x: 0,
       y: 60,
-      availableWidth: 400,
+      availableWidth,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
       map,
       lineIndexOffset: 0,
       fontConfig: config,
     });
 
-    // "Hi" = 2 chars × 8px = 16px. center offset = (400 - 16) / 2 = 192
+    // Center offset = (availableWidth − measured line width) / 2.
+    const lineWidth = measurer.measureWidth("Hi", config.paragraph!.font);
+    const expectedX = (availableWidth - lineWidth) / 2;
     const coords = map.coordsAtPos(1);
-    expect(coords?.x).toBeCloseTo(192);
+    expect(coords?.x).toBeCloseTo(expectedX, 2);
   });
 });
 
@@ -406,18 +422,22 @@ describe("layoutBlock — node attr alignment", () => {
       { align: "center" },
       schema.text("Hi"),
     );
+    const measurer = createMeasurer();
+    const availableWidth = 400;
     layoutBlock(node, {
       nodePos: 0,
       x: 0,
       y: 0,
-      availableWidth: 400,
+      availableWidth,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
       map,
     });
-    // "Hi" = 2 chars × 8px = 16px wide. Center offset = (400 - 16) / 2 = 192
+    // Default paragraph style font; center offset = (availableWidth − line width) / 2.
+    const lineWidth = measurer.measureWidth("Hi", defaultFontConfig.paragraph!.font);
+    const expectedX = (availableWidth - lineWidth) / 2;
     const coords = map.coordsAtPos(1);
-    expect(coords?.x).toBeCloseTo(192);
+    expect(coords?.x).toBeCloseTo(expectedX, 2);
   });
 
   it("ignores invalid align attr values and falls back to FontConfig", () => {
@@ -724,21 +744,23 @@ describe("layoutBlock — end-of-line caret sentinel (via layoutBlock map)", () 
 
   it("sentinel x equals right edge of last character", () => {
     const map = new CharacterMap();
+    const measurer = createMeasurer();
     layoutBlock(paragraph("Hi"), {
       nodePos: 0,
       x: 72,
       y: 0,
       availableWidth: 400,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
       map,
       lineIndexOffset: 0,
     });
-    // 'i' is at docPos 2, sentinel at docPos 3
+    // 'i' is at docPos 2, sentinel at docPos 3. The sentinel sits at the
+    // right edge of 'i' — its x equals the glyph's x plus the glyph's width.
     const iCoords = map.coordsAtPos(2);
+    const iGlyph = map.glyphsInRange(2, 3)[0];
     const sentCoords = map.coordsAtPos(3);
-    // sentinel.x = iCoords.x + iCoords.width (8px per char in mock)
-    expect(sentCoords?.x).toBeCloseTo(iCoords!.x + 8);
+    expect(sentCoords?.x).toBeCloseTo(iCoords!.x + (iGlyph?.width ?? 0), 2);
   });
 
   it("sentinel width is 0 (it has no visual extent)", () => {
@@ -777,7 +799,8 @@ describe("layoutBlock — end-of-line caret sentinel (via layoutBlock map)", () 
 
   it("sentinel is only on the last line — intermediate lines are not corrupted", () => {
     const map = new CharacterMap();
-    // "Hello world" wraps to 2 lines at width=80 (11 chars × 8px = 88 > 80)
+    // This width is narrow enough for "Hello world" to wrap under the real
+    // test measurer.
     layoutBlock(paragraph("Hello world"), {
       nodePos: 0,
       x: 0,
@@ -877,18 +900,23 @@ describe("populateCharMap — end-of-line caret sentinel", () => {
   });
 
   it("sentinel is only on the last line of a wrapped paragraph", () => {
+    // Pick an availableWidth that fits "Hello " but not the full string,
+    // forcing a wrap regardless of exact font widths.
+    const measurer = createMeasurer();
+    const partial = measurer.measureWidth("Hello ", "16px sans-serif");
+    const full = measurer.measureWidth("Hello world", "16px sans-serif");
     const block = layoutBlock(paragraph("Hello world"), {
       nodePos: 0,
       x: 0,
       y: 0,
-      availableWidth: 80,
+      availableWidth: (partial + full) / 2,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
     });
     expect(block.lines).toHaveLength(2);
     const map = new CharacterMap();
     populateCharMap(block, map, 1, 0, createMeasurer());
-    // 11 chars + 1 sentinel (last line only) = 12 total glyphs
+    // 11 chars + 1 sentinel on the last line only = 12 total glyphs.
     expect(map.glyphsInRange(0, 20)).toHaveLength(12);
   });
 });
@@ -1026,6 +1054,21 @@ describe("extractSpans — inline node handling", () => {
   it("hardBreak does NOT inflate line height — both lines stay at text line height", () => {
     const hb = skSchema.nodes["hardBreak"]?.create();
     if (!hb) return;
+    // Control: a single-line paragraph with the same text content but no break.
+    const control = layoutBlock(
+      skSchema.node("paragraph", null, [skSchema.text("A")]),
+      {
+        nodePos: 0,
+        x: 0,
+        y: 0,
+        availableWidth: 400,
+        page: 1,
+        measurer: createMeasurer(),
+        fontConfig,
+      },
+    );
+    const baselineLineHeight = control.lines[0]!.lineHeight;
+
     const para = skSchema.node("paragraph", null, [
       skSchema.text("A"),
       hb,
@@ -1042,14 +1085,27 @@ describe("extractSpans — inline node handling", () => {
     });
     expect(block.lines).toHaveLength(2);
     for (const line of block.lines) {
-      expect(line.lineHeight).toBeLessThan(100);
-      expect(line.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+      expect(line.lineHeight).toBeCloseTo(baselineLineHeight);
     }
   });
 
   it("paragraph containing only a hardBreak falls back to ZWS — normal line height", () => {
-    // A paragraph with ONLY a hardBreak has no renderable content after the
-    // break, so it uses the ZWS fallback (same as an empty paragraph).
+    // Control: empty paragraph (also uses the ZWS fallback). The hardBreak-only
+    // paragraph must produce the same line height — no inflation.
+    const empty = layoutBlock(
+      skSchema.node("paragraph", null, []),
+      {
+        nodePos: 0,
+        x: 0,
+        y: 0,
+        availableWidth: 400,
+        page: 1,
+        measurer: createMeasurer(),
+        fontConfig,
+      },
+    );
+    const baseline = empty.lines[0]!.lineHeight;
+
     const hb = skSchema.nodes["hardBreak"]?.create();
     if (!hb) return;
     const para = skSchema.node("paragraph", null, [hb]);
@@ -1063,7 +1119,7 @@ describe("extractSpans — inline node handling", () => {
       fontConfig,
     });
     expect(block.lines).toHaveLength(1);
-    expect(block.lines[0]?.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    expect(block.lines[0]?.lineHeight).toBeCloseTo(baseline);
     const spans = block.lines[0]?.spans ?? [];
     expect(spans.every((s) => s.kind === "text")).toBe(true);
   });
@@ -1082,10 +1138,11 @@ describe("extractSpans — inline node handling", () => {
       fontConfig,
     });
     expect(block.lines).toHaveLength(2);
-    // Line 0 ends with the break; line 1 is the phantom ZWS cursor line.
+    // Line 0 ends with the break; line 1 is the phantom ZWS cursor line and
+    // must keep the same height as the text line above it (no inflation).
     expect(block.lines[0]!.terminalBreakDocPos).toBeDefined();
     expect(block.lines[1]!.spans).toHaveLength(1);
-    expect(block.lines[1]!.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    expect(block.lines[1]!.lineHeight).toBeCloseTo(block.lines[0]!.lineHeight);
   });
 
   // ── inline image IS an object span ───────────────────────────────────────
@@ -1138,7 +1195,22 @@ describe("extractSpans — inline node handling", () => {
   });
 
   it("line height is max(text, image) — small image alongside text keeps text height", () => {
-    // Image (8px) is shorter than text (~18px) — line height must not shrink.
+    // Image (8px) is shorter than text — line height must not shrink below
+    // the text-only baseline. Control: same paragraph without the image.
+    const control = layoutBlock(
+      skSchema.node("paragraph", null, [skSchema.text("Hi")]),
+      {
+        nodePos: 0,
+        x: 0,
+        y: 0,
+        availableWidth: 400,
+        page: 1,
+        measurer: createMeasurer(),
+        fontConfig,
+      },
+    );
+    const textOnlyHeight = control.lines[0]!.lineHeight;
+
     const img = skSchema.nodes["image"]?.create({
       src: "i.png",
       width: 8,
@@ -1155,7 +1227,7 @@ describe("extractSpans — inline node handling", () => {
       measurer: createMeasurer(),
       fontConfig,
     });
-    expect(block.lines[0]?.lineHeight).toBeGreaterThanOrEqual(MOCK_LINE_HEIGHT);
+    expect(block.lines[0]?.lineHeight).toBeGreaterThanOrEqual(textOnlyHeight);
   });
 
   it("inline image registers a glyph in the CharacterMap at its docPos", () => {
@@ -1296,6 +1368,24 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
   });
 
   it("text + non-inline image: line height is text height (image contributes nothing)", () => {
+    // Control: same paragraph without the anchored image — line height
+    // matches text. The non-inline image must not inflate it.
+    const control = layoutBlock(
+      skSchema.node("paragraph", null, [
+        skSchema.text("text alongside an anchored image"),
+      ]),
+      {
+        nodePos: 0,
+        x: 0,
+        y: 0,
+        availableWidth: 600,
+        page: 1,
+        measurer: createMeasurer(),
+        fontConfig,
+      },
+    );
+    const textOnlyHeight = control.lines[0]!.lineHeight;
+
     const img = skSchema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
@@ -1315,8 +1405,7 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
       measurer: createMeasurer(),
       fontConfig,
     });
-    // First line height matches text — image's 200px height is excluded.
-    expect(block.lines[0]!.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    expect(block.lines[0]!.lineHeight).toBeCloseTo(textOnlyHeight);
     expect(block.lines[0]!.lineHeight).toBeLessThan(200);
   });
 
@@ -1351,29 +1440,14 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
 describe("TextBlockStrategy — inline image rendering", () => {
   const { schema: skSchema, fontConfig } = buildStarterKitContext();
 
-  function makeMockCtx(): CanvasRenderingContext2D {
-    return {
-      save: vi.fn(),
-      restore: vi.fn(),
-      fillText: vi.fn(),
-      strokeRect: vi.fn(),
-      fillRect: vi.fn(),
-      measureText: vi.fn(() => ({ width: 8 })),
-      beginPath: vi.fn(),
-      moveTo: vi.fn(),
-      lineTo: vi.fn(),
-      stroke: vi.fn(),
-      fill: vi.fn(),
-      arc: vi.fn(),
-      closePath: vi.fn(),
-      font: "",
-      fillStyle: "",
-      strokeStyle: "",
-      lineWidth: 1,
-      textAlign: "left",
-      textBaseline: "alphabetic",
-      drawImage: vi.fn(),
-    } as unknown as CanvasRenderingContext2D;
+  /**
+   * Real canvas context — happy-dom's `getContext("2d")` is wired in
+   * `vitest.setup.ts` to return the `@napi-rs/canvas` (Skia) backend.
+   * Tests can `vi.spyOn(ctx, "fillText")` etc. to observe paint calls
+   * without faking the whole context shape.
+   */
+  function makeRealCtx(): CanvasRenderingContext2D {
+    return document.createElement("canvas").getContext("2d")!;
   }
 
   it("calls InlineStrategy.render() for each inline image span", () => {
@@ -1399,7 +1473,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
     const inlineRegistry = new InlineRegistry();
     inlineRegistry.register("image", inlineStrategy);
 
-    const ctx = makeMockCtx();
+    const ctx = makeRealCtx();
     TextBlockStrategy.render(
       block,
       {
@@ -1446,7 +1520,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
       fontConfig,
     });
 
-    const ctx = makeMockCtx();
+    const ctx = makeRealCtx();
     // No inlineRegistry — should not throw, just silently skip drawing
     expect(() => {
       TextBlockStrategy.render(
@@ -1490,7 +1564,8 @@ describe("TextBlockStrategy — inline image rendering", () => {
     const inlineRegistry = new InlineRegistry();
     inlineRegistry.register("image", { render: renderFn });
 
-    const ctx = makeMockCtx();
+    const ctx = makeRealCtx();
+    const fillTextSpy = vi.spyOn(ctx, "fillText");
     TextBlockStrategy.render(
       block,
       {
@@ -1506,7 +1581,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
     );
 
     // Text was drawn (fillText called for "Hello" and "World" chars)
-    expect(ctx.fillText).toHaveBeenCalled();
+    expect(fillTextSpy).toHaveBeenCalled();
     // Image strategy was also called
     expect(renderFn).toHaveBeenCalledOnce();
   });

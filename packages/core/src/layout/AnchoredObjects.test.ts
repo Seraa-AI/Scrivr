@@ -15,9 +15,10 @@ import {
   compareAnchoredObjectPaintOrder,
   compareAnchoredObjectHitOrder,
 } from "./AnchoredObjects";
+import { buildStarterKitContext } from "../test-utils";
 import type { Node } from "prosemirror-model";
 
-interface FakeAttrs {
+interface ImageAttrs {
   width?: number;
   height?: number;
   wrapMode?: string;
@@ -30,8 +31,15 @@ interface FakeAttrs {
   floatOffset?: unknown;
 }
 
-function makeImageNode(attrs: FakeAttrs): Node {
-  return { attrs } as unknown as Node;
+const { schema: skSchema } = buildStarterKitContext();
+
+/**
+ * Build a real PM `image` node — `normalizeImageAttrs` reads attrs from the
+ * raw node, so schema defaults for unset fields exactly match the production
+ * read-path. Equivalent attrs in/out compared to the previous fake.
+ */
+function makeImageNode(attrs: ImageAttrs): Node {
+  return skSchema.nodes["image"]!.create(attrs);
 }
 
 describe("normalizeImageAttrs — legacy → new model", () => {

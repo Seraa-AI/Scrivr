@@ -39,11 +39,8 @@ describe("runMiniPipeline", () => {
     });
 
     it("natural height scales with the number of blocks", () => {
-      // The mock measurer returns a constant lineHeight regardless of font
-      // size, so heading-vs-paragraph comparisons don't show size differences
-      // in tests. Instead we verify that adding more blocks increases the
-      // natural height proportionally — which is the load-bearing property
-      // for chrome-band height computation (more content → taller band).
+      // The load-bearing property for chrome-band height computation is that
+      // more content produces a taller measured band.
       const oneBlock = runMiniPipeline(doc(p("Single")), {
         pageConfig: defaultPageConfig,
         measurer: createMeasurer(),
@@ -53,9 +50,7 @@ describe("runMiniPipeline", () => {
         measurer: createMeasurer(),
       });
       expect(threeBlocks.totalContentHeight).toBeGreaterThan(oneBlock.totalContentHeight);
-      // Also exercise heading() so the import stays warm — heading renders
-      // via the same flow path as paragraph, we just can't assert on the
-      // height difference with the mock measurer.
+      // Also exercise heading() through the same flow path as paragraph.
       const withHeading = runMiniPipeline(doc(heading(1, "Title"), p("Body")), {
         pageConfig: defaultPageConfig,
         measurer: createMeasurer(),

@@ -7,7 +7,7 @@
 
 import type { Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
-import type { TextMeasurer } from "./TextMeasurer";
+import type { TextMeasurerLike } from "./TextMeasurer";
 import {
   type PageConfig,
   type DocumentLayout,
@@ -20,7 +20,7 @@ import type { FontConfig } from "./FontConfig";
 export interface MiniPipelineOptions {
   /** PageConfig for the mini-doc. `pageless` is forced to true internally. */
   pageConfig: PageConfig;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   fontConfig?: FontConfig;
   fontModifiers?: Map<string, FontModifier>;
 }

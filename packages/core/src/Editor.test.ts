@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Editor } from "./Editor";
 import { StarterKit } from "./extensions/StarterKit";
+import { Extension } from "./extensions/Extension";
 import { NodeSelection } from "prosemirror-state";
 import type { EditorState } from "prosemirror-state";
+import { createTestEditor } from "./test-utils";
 
 /**
  * Editor tests — cursor movement, selection, and edge case safety.
@@ -12,28 +14,17 @@ import type { EditorState } from "prosemirror-state";
  *
  * All assertions go through editor.getState().selection so we stay
  * framework-agnostic and don't depend on the canvas or layout engine.
+ *
+ * Canvas measurement comes from the real `@napi-rs/canvas` (Skia) backend
+ * wired in `vitest.setup.ts` — no fake measureText.
  */
-
-// Mock canvas so Editor's imports (CharacterMap, etc.) don't blow up
-beforeEach(() => {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    measureText: vi.fn((text: string) => ({
-      width: text.length * 8,
-      actualBoundingBoxAscent: 12,
-      actualBoundingBoxDescent: 3,
-      fontBoundingBoxAscent: 12,
-      fontBoundingBoxDescent: 3,
-    })),
-    font: "",
-  } as unknown as CanvasRenderingContext2D);
-});
 
 function makeEditor() {
   const container = document.createElement("div");
   document.body.appendChild(container);
 
   let latestState: EditorState | null = null;
-  const editor = new Editor({
+  const editor = createTestEditor({
     onChange: (s) => { latestState = s; },
   });
   editor.mount(container);
@@ -52,6 +43,7 @@ function makeEditor() {
 
   return {
     editor,
+    container,
     type,
     cleanup,
     getState: () => latestState ?? editor.getState(),
@@ -458,16 +450,14 @@ describe("Editor — paste", () => {
   }
 
   it("inserts pasted plain text at the cursor", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     paste(container, "Hello");
     expect(editor.getState().doc.textContent).toBe("Hello");
     cleanup();
   });
 
   it("replaces the active selection with pasted text", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
     editor.selection.setSelection(1, 4); // select "Hel"
     paste(container, "X");
@@ -476,8 +466,7 @@ describe("Editor — paste", () => {
   });
 
   it("does nothing when paste data is empty", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
     const before = editor.getState().doc.textContent;
     paste(container, "");
@@ -502,8 +491,7 @@ describe("Editor — HTML paste", () => {
   }
 
   it("pastes bold text from HTML", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     pasteHtml(container, "<b>Hello</b>");
     expect(editor.getState().doc.textContent).toBe("Hello");
     let hasBold = false;
@@ -515,8 +503,7 @@ describe("Editor — HTML paste", () => {
   });
 
   it("pastes a heading from HTML", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     pasteHtml(container, "<h2>My Heading</h2>");
     expect(editor.getState().doc.textContent).toBe("My Heading");
     let foundHeading = false;
@@ -528,8 +515,7 @@ describe("Editor — HTML paste", () => {
   });
 
   it("pastes a bullet list from HTML", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     pasteHtml(container, "<ul><li>Alpha</li><li>Beta</li></ul>");
     expect(editor.getState().doc.textContent).toBe("AlphaBeta");
     let foundList = false;
@@ -541,16 +527,14 @@ describe("Editor — HTML paste", () => {
   });
 
   it("strips unsupported tags and preserves text", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     pasteHtml(container, "<meta charset='utf-8'><p>Clean text</p>");
     expect(editor.getState().doc.textContent).toBe("Clean text");
     cleanup();
   });
 
   it("HTML takes priority over plain text", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     pasteHtml(container, "<b>Rich</b>", "plain fallback");
     // Should use HTML path — bold mark present
     let hasBold = false;
@@ -577,8 +561,7 @@ describe("Editor — Markdown paste", () => {
   }
 
   it("pastes a markdown heading as a heading node", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     paste(container, "# Hello World");
     expect(editor.getState().doc.textContent).toBe("Hello World");
     let foundHeading = false;
@@ -590,8 +573,7 @@ describe("Editor — Markdown paste", () => {
   });
 
   it("pastes markdown h2 correctly", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     paste(container, "## Subtitle");
     let level = 0;
     editor.getState().doc.descendants((node) => {
@@ -602,8 +584,7 @@ describe("Editor — Markdown paste", () => {
   });
 
   it("pastes **bold** as bold mark", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     paste(container, "- **bold item**");
     let hasBold = false;
     editor.getState().doc.descendants((node) => {
@@ -614,8 +595,7 @@ describe("Editor — Markdown paste", () => {
   });
 
   it("pastes a bullet list as bulletList node", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     paste(container, "- Alpha\n- Beta\n- Gamma");
     expect(editor.getState().doc.textContent).toBe("AlphaBetaGamma");
     let listItemCount = 0;
@@ -627,8 +607,7 @@ describe("Editor — Markdown paste", () => {
   });
 
   it("pastes an ordered list as orderedList node", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     paste(container, "1. First\n2. Second");
     let foundOrderedList = false;
     editor.getState().doc.descendants((node) => {
@@ -639,8 +618,7 @@ describe("Editor — Markdown paste", () => {
   });
 
   it("does NOT parse plain text without markdown patterns as markdown", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     paste(container, "This is a normal sentence with no markdown.");
     expect(editor.getState().doc.textContent).toBe("This is a normal sentence with no markdown.");
     // No heading or list nodes — just a paragraph
@@ -653,8 +631,7 @@ describe("Editor — Markdown paste", () => {
   });
 
   it("mid-sentence asterisks are NOT treated as markdown", () => {
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, container, cleanup } = makeEditor();
     paste(container, "Section 4* applies here. See also clause 2*.");
     // No bold marks created
     let hasBold = false;
@@ -1000,8 +977,7 @@ describe("Editor — keyboard event handling", () => {
   }
 
   it("Enter inside a list calls splitListItem and prevents default", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
 
     editor.commands["toggleBulletList"]?.();
     type("Hello");
@@ -1019,8 +995,7 @@ describe("Editor — keyboard event handling", () => {
   });
 
   it("Enter outside a list prevents default and does not insert newline text", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
 
     const event = pressKey(container, "Enter");
@@ -1033,8 +1008,7 @@ describe("Editor — keyboard event handling", () => {
   });
 
   it("Tab is always prevented regardless of context (never shifts browser focus)", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
 
     const event = pressKey(container, "Tab");
@@ -1043,8 +1017,7 @@ describe("Editor — keyboard event handling", () => {
   });
 
   it("Tab outside a list is prevented and inserts no text", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
 
     pressKey(container, "Tab");
@@ -1054,8 +1027,7 @@ describe("Editor — keyboard event handling", () => {
   });
 
   it("Tab inside a list is prevented and inserts no text", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
 
     editor.commands["toggleBulletList"]?.();
     type("Item 1");
@@ -1070,8 +1042,7 @@ describe("Editor — keyboard event handling", () => {
   });
 
   it("Shift-Tab is always prevented", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
 
     const event = pressKey(container, "Tab", { shiftKey: true });
@@ -1080,19 +1051,29 @@ describe("Editor — keyboard event handling", () => {
   });
 
   it("Space key resolves to 'Space' in keymap lookup (not ' ')", () => {
-    // Register a command under the ProseMirror-convention key "Space"
-    // and verify that pressing the space bar dispatches it.
-    const { editor, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    // Register a command under the ProseMirror-convention key "Space" via a
+    // tiny extension and verify that pressing the space bar dispatches it.
     let called = false;
-    // Inject a one-off "Space" binding directly into the private keymap
-    (editor["ib"]["opts"]["keymap"] as Record<string, unknown>)["Space"] = () => {
-      called = true;
-      return true;
-    };
+    const spaceExt = Extension.create({
+      name: "test_space_binding",
+      addKeymap: () => ({
+        Space: () => {
+          called = true;
+          return true;
+        },
+      }),
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({ extensions: [StarterKit, spaceExt] });
+    editor.mount(container);
+
     pressKey(container, " ");
     expect(called).toBe(true);
-    cleanup();
+
+    editor.destroy();
+    container.remove();
   });
 });
 
@@ -1152,101 +1133,87 @@ describe("Editor — cursorPage", () => {
     // Regression: _blockIndex used nodePos ranges which overlap for split-paragraph
     // blocks (kept part on page 1 and continuation on page 2 share the same nodePos
     // and nodeSize). Binary search always returned page 1, so cursorPage was stuck
-    // at 1 even when the cursor was visually on page 2. This caused the cursor to
-    // never be drawn on page 2 even after the user clicked there.
+    // at 1 even when the cursor was visually on page 2.
     //
-    // Setup: MOCK_LINE_HEIGHT=18, pageHeight=200, margins=20 → pageBottom=180,
-    // contentHeight=160. Lines per page = floor(160/18) = 8.
-    // "hello" = 5 chars × 8px = 40px. With contentWidth=200-20-20=160px,
-    // words per line = floor(160/40) but "hello hello " = 2 × (40+8) = 96px,
-    // "hello hello hello " = 3 × 48 = 144px < 160px → 3 words per line,
-    // "hello hello hello hello " = 4 × 48 = 192px > 160px → 3 words per line.
-    // 20 words → ceil(20/3)=7 lines → page 1 has 8 lines = all, no split?
-    // Use 30 words → ceil(30/3)=10 lines → page 1: 8, page 2: 2 ✓
+    // Setup: tiny pages so any reasonable amount of text overflows. Word count
+    // is generous (real Skia widths vary by font/glyph, so don't hand-compute
+    // line counts — just produce enough text to guarantee a split).
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({
+    const editor = createTestEditor({
       extensions: [StarterKit.configure({ pagination: { pageWidth: 200, pageHeight: 200, margins: { top: 20, bottom: 20, left: 20, right: 20 } } })],
     });
     editor.mount(container);
 
-    // Insert 30 space-separated words → ~10 lines → 8 on page 1, 2 on page 2
     const ta = container.querySelector("textarea")!;
-    ta.value = "hello ".repeat(30).trim(); // "hello hello ... hello" (30 words)
+    ta.value = "hello ".repeat(60).trim();
     ta.dispatchEvent(new Event("input"));
-
-    // ensureLayout() runs in a rAF in production; call it synchronously in tests.
     editor.ensureLayout();
-
-    // Populate page 2 so charMap has glyph entries for it
+    expect(editor.layout.pages.length).toBeGreaterThanOrEqual(2);
     editor.ensurePagePopulated(2);
 
-    // Move cursor to the very end of the paragraph (last char on page 2).
-    // para is the first child of doc at nodePos=0. Content size = 30*5 + 29 = 179 chars.
-    // End cursor position within doc = para.nodePos + 1 + para.content.size = 1 + 179 = 180.
-    const doc = editor.getState().doc;
-    const para = doc.child(0)!;
-    const endCursorPos = 1 + para.content.size; // position after last char of para
+    // End-of-paragraph cursor must resolve to the last page (>= 2).
+    const para = editor.getState().doc.child(0)!;
+    const endCursorPos = 1 + para.content.size;
     editor.selection.moveCursorTo(endCursorPos);
-
-    // ensureLayout again so _cursorPage reflects the new cursor position
     editor.ensureLayout();
-
-    // cursorPage must be 2, not 1
-    expect(editor.cursorPage).toBe(2);
+    expect(editor.cursorPage).toBe(editor.layout.pages.length);
+    expect(editor.cursorPage).toBeGreaterThanOrEqual(2);
 
     editor.destroy();
     container.remove();
   });
 
   it("cursorPage resolves correctly for all three parts of a 3-page paragraph split", () => {
-    // Geometry: pageWidth=200 pageHeight=200 margins=20 → contentWidth=160 contentHeight=160
-    // MOCK_LINE_HEIGHT=18 → 8 lines per page (8×18=144 ≤ 160; 9×18=162 > 160)
-    // MOCK_CHAR_WIDTH=8, "hello"=40px, 3 words/line (3×48=144 ≤ 160; 4×48=192 > 160)
-    // 60 words → 20 lines: 8 on page 1, 8 on page 2, 4 on page 3.
+    // Geometry: pageWidth=200 pageHeight=200 margins=20. Generate enough text
+    // for at least three pages, then derive cursor positions from the layout
+    // (real Skia widths preclude hand-computed offsets).
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({
+    const editor = createTestEditor({
       extensions: [StarterKit.configure({ pagination: { pageWidth: 200, pageHeight: 200, margins: { top: 20, bottom: 20, left: 20, right: 20 } } })],
     });
     editor.mount(container);
 
     const ta = container.querySelector("textarea")!;
-    ta.value = "hello ".repeat(60).trim(); // 60 words → 20 lines
+    ta.value = "hello ".repeat(120).trim();
     ta.dispatchEvent(new Event("input"));
     editor.ensureLayout();
+    expect(editor.layout.pages.length).toBeGreaterThanOrEqual(3);
     editor.ensurePagePopulated(1);
     editor.ensurePagePopulated(2);
     editor.ensurePagePopulated(3);
 
-    const state = editor.getState();
-    const para  = state.doc.child(0)!;
-    // Total content size = 60 words × 5 chars + 59 spaces = 359 chars.
-    // nodePos of para = 1 (first child of doc). End of para content = 1 + 359 = 360.
+    const para = editor.getState().doc.child(0)!;
 
-    // --- Part 1: cursor at the very start of the paragraph (page 1) ---
-    editor.selection.moveCursorTo(2); // first character
+    /** First doc position rendered on `page` — read from the first span of
+     * page's first block's first line. */
+    function firstDocPosOnPage(page: number): number {
+      const block = editor.layout.pages[page - 1]!.blocks[0]!;
+      const span = block.lines[0]!.spans[0]!;
+      return span.docPos;
+    }
+
+    // Part 1: cursor at very start of paragraph → page 1.
+    editor.selection.moveCursorTo(firstDocPosOnPage(1));
     editor.ensureLayout();
     expect(editor.cursorPage).toBe(1);
 
-    // --- Part 2: cursor in the middle lines (page 2) ---
-    // Page 1 has 8 lines = 8 × 3 words = 24 words. First word on page 2 = word 25.
-    // docPos of first char of word 25 = 1 + (24 words × 6 chars each) = 1 + 144 = 145.
-    editor.selection.moveCursorTo(145);
+    // Part 2: cursor at first char of page 2 → page 2.
+    editor.selection.moveCursorTo(firstDocPosOnPage(2));
     editor.ensureLayout();
     expect(editor.cursorPage).toBe(2);
 
-    // --- Part 3: cursor in the last lines (page 3) ---
-    // Page 2 has 8 lines = 24 more words (words 25–48). First word on page 3 = word 49.
-    // docPos of first char of word 49 = 1 + (48 words × 6 chars each) = 1 + 288 = 289.
-    editor.selection.moveCursorTo(289);
+    // Part 3: cursor at first char of page 3 → page 3.
+    editor.selection.moveCursorTo(firstDocPosOnPage(3));
     editor.ensureLayout();
     expect(editor.cursorPage).toBe(3);
 
-    // --- End of paragraph: still page 3 ---
+    // End of paragraph: stays on the last page.
+    const lastPage = editor.layout.pages.length;
     editor.selection.moveCursorTo(1 + para.content.size);
     editor.ensureLayout();
-    expect(editor.cursorPage).toBe(3);
+    expect(editor.cursorPage).toBe(lastPage);
 
     editor.destroy();
     container.remove();
@@ -1273,8 +1240,7 @@ describe("Editor — copy and cut", () => {
   }
 
   it("copy writes text/plain of the selected text", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
     editor.selection.setSelection(1, 6);
     const dt = dispatchClipboard(container, "copy");
@@ -1283,8 +1249,7 @@ describe("Editor — copy and cut", () => {
   });
 
   it("copy writes text/html containing the selected text", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
     editor.selection.setSelection(1, 6);
     const dt = dispatchClipboard(container, "copy");
@@ -1294,8 +1259,7 @@ describe("Editor — copy and cut", () => {
   });
 
   it("copy with an empty selection writes nothing to clipboard", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
     editor.selection.moveCursorTo(3); // collapsed cursor
     const dt = dispatchClipboard(container, "copy");
@@ -1304,8 +1268,7 @@ describe("Editor — copy and cut", () => {
   });
 
   it("cut writes text/plain of the selected text", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
     editor.selection.setSelection(1, 6);
     const dt = dispatchClipboard(container, "cut");
@@ -1314,8 +1277,7 @@ describe("Editor — copy and cut", () => {
   });
 
   it("cut removes the selected text from the document", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello World");
     // Select "Hello " (positions 1–7)
     editor.selection.setSelection(1, 7);
@@ -1325,8 +1287,7 @@ describe("Editor — copy and cut", () => {
   });
 
   it("cut writes text/html of the selected content", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
     editor.selection.setSelection(1, 6);
     const dt = dispatchClipboard(container, "cut");
@@ -1336,8 +1297,7 @@ describe("Editor — copy and cut", () => {
   });
 
   it("cut with an empty selection leaves the document unchanged", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Hello");
     editor.selection.moveCursorTo(3); // collapsed cursor
     dispatchClipboard(container, "cut");
@@ -1346,8 +1306,7 @@ describe("Editor — copy and cut", () => {
   });
 
   it("copy of bold text serializes <strong> in the HTML", () => {
-    const { editor, type, cleanup } = makeEditor();
-    const container = editor["ib"].container as HTMLElement;
+    const { editor, type, container, cleanup } = makeEditor();
     type("Bold");
     editor.selection.setSelection(1, 5);
     editor.commands["toggleBold"]?.();
@@ -1432,9 +1391,8 @@ describe("Editor — read-only mode", () => {
   });
 
   it("blocks paste when read-only", () => {
-    const { editor, cleanup } = makeEditor();
+    const { editor, container, cleanup } = makeEditor();
     editor.setReadOnly(true);
-    const container = editor["ib"].container as HTMLElement;
     dispatchPaste(container, "pasted text");
     expect(editor.getState().doc.textContent).toBe("");
     cleanup();
@@ -1452,10 +1410,9 @@ describe("Editor — read-only mode", () => {
   });
 
   it("allows copy in read-only mode (does not throw)", () => {
-    const { editor, type, cleanup } = makeEditor();
+    const { editor, type, container, cleanup } = makeEditor();
     type("copy me");
     editor.setReadOnly(true);
-    const container = editor["ib"].container as HTMLElement;
     const ta = container.querySelector("textarea")!;
     // Selecting all text so copy has something to work with
     const event = new ClipboardEvent("copy", {
@@ -1468,12 +1425,11 @@ describe("Editor — read-only mode", () => {
   });
 
   it("blocks cut mutation in read-only mode (content unchanged)", () => {
-    const { editor, type, cleanup } = makeEditor();
+    const { editor, type, container, cleanup } = makeEditor();
     type("do not cut");
     editor.selection.setSelection(1, 11);
     const before = editor.getState().doc.textContent;
     editor.setReadOnly(true);
-    const container = editor["ib"].container as HTMLElement;
     const ta = container.querySelector("textarea")!;
     const event = new ClipboardEvent("cut", {
       bubbles: true,

@@ -1,52 +1,15 @@
 /**
- * Editor theme wiring — integration tests against a real Editor instance.
- *
- * Mocks canvas getContext but uses the real Editor + StarterKit so the
- * theme/setTheme/observer/redraw paths run end-to-end.
+ * Editor theme wiring — integration tests against a real Editor instance
+ * with a Skia-backed measurer (`createTestEditor`) so the theme / setTheme /
+ * observer / redraw paths run end-to-end without DOM canvas patching.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { Editor } from "./Editor";
+import { describe, it, expect } from "vitest";
 import { defaultEditorTheme } from "./model/theme";
-
-function stubCanvas(): void {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    measureText: vi.fn(() => ({ width: 8, actualBoundingBoxAscent: 12, actualBoundingBoxDescent: 3, fontBoundingBoxAscent: 12, fontBoundingBoxDescent: 3 })),
-    scale: vi.fn(),
-    save: vi.fn(),
-    restore: vi.fn(),
-    translate: vi.fn(),
-    clearRect: vi.fn(),
-    fillRect: vi.fn(),
-    strokeRect: vi.fn(),
-    fillText: vi.fn(),
-    resetTransform: vi.fn(),
-    beginPath: vi.fn(),
-    moveTo: vi.fn(),
-    lineTo: vi.fn(),
-    closePath: vi.fn(),
-    stroke: vi.fn(),
-    fill: vi.fn(),
-    arc: vi.fn(),
-    setLineDash: vi.fn(),
-    drawImage: vi.fn(),
-    font: "",
-    fillStyle: "",
-    strokeStyle: "",
-    lineWidth: 1,
-    textBaseline: "alphabetic",
-    textAlign: "left",
-    imageSmoothingEnabled: true,
-    imageSmoothingQuality: "high",
-  } as unknown as CanvasRenderingContext2D);
-}
-
-beforeEach(() => {
-  stubCanvas();
-});
+import { createTestEditor } from "./test-utils";
 
 describe("Editor — theme defaults", () => {
   it("returns defaultEditorTheme when no theme option is passed", () => {
-    const editor = new Editor({});
+    const editor = createTestEditor({});
     const resolved = editor.getResolvedTheme();
     // pageBg/defaultText should match defaults (literal or browser-resolved
     // form — both branches are valid; the user's value was undefined).
@@ -56,7 +19,7 @@ describe("Editor — theme defaults", () => {
   });
 
   it("getTheme() returns the user-provided input shape", () => {
-    const editor = new Editor({ theme: { pageBg: "#1e1e1e" } });
+    const editor = createTestEditor({ theme: { pageBg: "#1e1e1e" } });
     expect(editor.getTheme().pageBg).toBe("#1e1e1e");
     editor.destroy();
   });
@@ -64,7 +27,7 @@ describe("Editor — theme defaults", () => {
 
 describe("Editor — setTheme", () => {
   it("merges partial overrides", () => {
-    const editor = new Editor({ theme: { pageBg: "#fff", defaultText: "#000" } });
+    const editor = createTestEditor({ theme: { pageBg: "#fff", defaultText: "#000" } });
     editor.setTheme({ pageBg: "#1e1e1e" });
     expect(editor.getTheme().pageBg).toBe("#1e1e1e");
     expect(editor.getTheme().defaultText).toBe("#000");
@@ -72,21 +35,21 @@ describe("Editor — setTheme", () => {
   });
 
   it("null resets a token to default", () => {
-    const editor = new Editor({ theme: { pageBg: "#1e1e1e" } });
+    const editor = createTestEditor({ theme: { pageBg: "#1e1e1e" } });
     editor.setTheme({ pageBg: null });
     expect(editor.getTheme().pageBg).toBe(defaultEditorTheme.pageBg);
     editor.destroy();
   });
 
   it("undefined leaves the token alone", () => {
-    const editor = new Editor({ theme: { pageBg: "#1e1e1e" } });
+    const editor = createTestEditor({ theme: { pageBg: "#1e1e1e" } });
     editor.setTheme({ pageBg: undefined });
     expect(editor.getTheme().pageBg).toBe("#1e1e1e");
     editor.destroy();
   });
 
   it("bumps renderGeneration to invalidate paint caches", () => {
-    const editor = new Editor({});
+    const editor = createTestEditor({});
     const before = editor.renderGeneration;
     editor.setTheme({ pageBg: "#1e1e1e" });
     expect(editor.renderGeneration).toBeGreaterThan(before);
@@ -94,7 +57,7 @@ describe("Editor — setTheme", () => {
   });
 
   it("empty arg = pure refresh (no merge, still bumps generation)", () => {
-    const editor = new Editor({});
+    const editor = createTestEditor({});
     const before = editor.renderGeneration;
     editor.setTheme({});
     expect(editor.renderGeneration).toBeGreaterThan(before);
@@ -104,7 +67,7 @@ describe("Editor — setTheme", () => {
 
 describe("Editor — destroy", () => {
   it("removes theme probe element from themeRoot", () => {
-    const editor = new Editor({ theme: { pageBg: "#1e1e1e" } });
+    const editor = createTestEditor({ theme: { pageBg: "#1e1e1e" } });
     // Call something that creates the probe.
     editor.getResolvedTheme();
     editor.setTheme({ pageBg: "#fafafa" });
@@ -121,7 +84,7 @@ describe("Editor — destroy", () => {
   it("does not leak a probe to documentElement when mount() switches themeRoot to a container", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({ theme: { pageBg: "#1e1e1e" } });
+    const editor = createTestEditor({ theme: { pageBg: "#1e1e1e" } });
     // resolveTheme ran in the constructor against documentElement.
     editor.mount(container);
     editor.destroy();

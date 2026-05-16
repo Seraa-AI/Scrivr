@@ -5,58 +5,54 @@
  * doesn't change state, so their anchor rect went stale and they froze at
  * their last paint position. subscribeViewUpdates bridges the "viewport"
  * event that TileManager emits on scroll/resize so callbacks fire on both.
+ *
+ * Drives a real `Editor` so `on`/`emit` go through the real event emitter —
+ * no fake editor shape, no `as unknown as IEditor`.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
-import type { IEditor } from "../extensions/types";
-import type { EditorEvents } from "../types/augmentation";
+import { createTestEditor } from "../test-utils";
+import type { Editor } from "../Editor";
 
-function makeFakeEditor() {
-  const handlers = new Map<keyof EditorEvents, Set<() => void>>();
-  const editor = {
-    on: vi.fn((event: keyof EditorEvents, fn: () => void) => {
-      if (!handlers.has(event)) handlers.set(event, new Set());
-      handlers.get(event)!.add(fn);
-      return () => handlers.get(event)!.delete(fn);
-    }),
-    emit: (event: keyof EditorEvents) => {
-      handlers.get(event)?.forEach((fn) => fn());
-    },
-  } as unknown as IEditor & { emit: (event: keyof EditorEvents) => void };
-  return { editor, handlers };
-}
+let editor: Editor | null = null;
+
+afterEach(() => {
+  editor?.destroy();
+  editor = null;
+});
 
 describe("subscribeViewUpdates", () => {
   it("fires the callback on both 'update' and 'viewport' events", () => {
-    const { editor } = makeFakeEditor();
+    editor = createTestEditor();
     const cb = vi.fn();
     subscribeViewUpdates(editor, cb);
 
-    editor.emit("update");
+    editor.emit("update", { docChanged: false });
     expect(cb).toHaveBeenCalledTimes(1);
 
-    editor.emit("viewport");
+    editor.emit("viewport", undefined);
     expect(cb).toHaveBeenCalledTimes(2);
   });
 
   it("unsubscribes from both events", () => {
-    const { editor } = makeFakeEditor();
+    editor = createTestEditor();
     const cb = vi.fn();
     const off = subscribeViewUpdates(editor, cb);
 
     off();
-    editor.emit("update");
-    editor.emit("viewport");
+    editor.emit("update", { docChanged: false });
+    editor.emit("viewport", undefined);
     expect(cb).not.toHaveBeenCalled();
   });
 
   it("registers exactly one handler per event", () => {
-    const { editor } = makeFakeEditor();
+    editor = createTestEditor();
+    const onSpy = vi.spyOn(editor, "on");
     const cb = vi.fn();
     subscribeViewUpdates(editor, cb);
 
-    expect(editor.on).toHaveBeenCalledWith("update", cb);
-    expect(editor.on).toHaveBeenCalledWith("viewport", cb);
-    expect(editor.on).toHaveBeenCalledTimes(2);
+    expect(onSpy).toHaveBeenCalledWith("update", cb);
+    expect(onSpy).toHaveBeenCalledWith("viewport", cb);
+    expect(onSpy).toHaveBeenCalledTimes(2);
   });
 });

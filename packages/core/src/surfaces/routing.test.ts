@@ -1,24 +1,14 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Editor } from "../Editor";
 import { Extension } from "../extensions/Extension";
 import { StarterKit } from "../extensions/StarterKit";
 import { EditorSurface } from "./EditorSurface";
+import { createTestEditor } from "../test-utils";
 import type { SurfaceOwnerRegistration } from "./types";
 
 // ── Test harness ──────────────────────────────────────────────────────────────
-
-beforeEach(() => {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    measureText: vi.fn((text: string) => ({
-      width: text.length * 8,
-      actualBoundingBoxAscent: 12,
-      actualBoundingBoxDescent: 3,
-      fontBoundingBoxAscent: 12,
-      fontBoundingBoxDescent: 3,
-    })),
-    font: "",
-  } as unknown as CanvasRenderingContext2D);
-});
+// Canvas measurement comes from the real `@napi-rs/canvas` (Skia) backend
+// wired in `vitest.setup.ts` — no fake measureText.
 
 function mountEditor(extraExtensions: Extension[] = []): {
   editor: Editor;
@@ -30,7 +20,7 @@ function mountEditor(extraExtensions: Extension[] = []): {
   document.body.appendChild(container);
   // Always bundle StarterKit so the schema is buildable — tests only add
   // their own extensions on top for lifecycle / lane coverage.
-  const editor = new Editor({ extensions: [StarterKit, ...extraExtensions] });
+  const editor = createTestEditor({ extensions: [StarterKit, ...extraExtensions] });
   editor.mount(container);
   const type = (text: string): void => {
     const ta = container.querySelector("textarea")!;

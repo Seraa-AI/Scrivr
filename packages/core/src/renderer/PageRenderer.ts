@@ -5,7 +5,7 @@ import {
 } from "../layout/AnchoredObjects";
 import { LayoutBlock, computeAlignmentOffset, isHiddenAnchorLine } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
-import { TextMeasurer } from "../layout/TextMeasurer";
+import type { TextMeasurerLike } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
 import type { MarkDecorator } from "../extensions/types";
 import type { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
@@ -24,7 +24,7 @@ export interface RenderPageOptions {
   renderVersion: number;
   currentVersion: () => number;
   dpr: number;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   map: CharacterMap;
   /** Draw margin guides — useful during development */
   showMarginGuides?: boolean;
@@ -249,7 +249,7 @@ function drawFloat(
 export function drawBlock(
   ctx: CanvasRenderingContext2D,
   block: LayoutBlock,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
   map: CharacterMap,
   pageNumber: number,
   lineIndexOffset: number,
@@ -278,7 +278,7 @@ export function drawBlock(
 
     // Tracks the last text span + its measurement within this line.
     // Reused by the end-of-line sentinel to avoid a second measureRun call.
-    let lastTextRun: { span: typeof line.spans[0] & { kind: "text" }; run: ReturnType<TextMeasurer["measureRun"]> } | null = null;
+    let lastTextRun: { span: typeof line.spans[0] & { kind: "text" }; run: ReturnType<TextMeasurerLike["measureRun"]> } | null = null;
 
     for (const span of line.spans) {
       if (span.kind === "object") {

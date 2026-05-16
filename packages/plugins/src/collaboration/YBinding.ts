@@ -17,7 +17,7 @@ import * as Y from "yjs";
 import { yXmlFragmentToProseMirrorRootNode, prosemirrorToYXmlFragment } from "y-prosemirror";
 import type { Node } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
-import type { IEditor } from "@scrivr/core";
+import type { IBaseEditor } from "@scrivr/core";
 
 // ── Inline mutex (from lib0/mutex — avoids an unlisted direct dep) ────────────
 
@@ -75,7 +75,7 @@ export class YBinding {
   private unbindEditor: (() => void) | null = null;
 
   constructor(
-    private readonly editor: IEditor,
+    private readonly editor: IBaseEditor,
     private readonly ydoc: Y.Doc,
     private readonly type: Y.XmlFragment,
   ) {
