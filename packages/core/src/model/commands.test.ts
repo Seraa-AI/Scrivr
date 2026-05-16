@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { EditorState } from "prosemirror-state";
-import { schema } from "./schema";
 import {
   insertText,
   deleteSelection,
   deleteBackward,
   deleteForward,
 } from "./commands";
+import { buildStarterKitContext } from "../test-utils";
 
+const { schema } = buildStarterKitContext();
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeState(text = ""): EditorState {
@@ -18,7 +19,11 @@ function makeState(text = ""): EditorState {
   return state.apply(tr);
 }
 
-function stateWithSelection(text: string, from: number, to: number): EditorState {
+function stateWithSelection(
+  text: string,
+  from: number,
+  to: number,
+): EditorState {
   const base = makeState(text);
   const $from = base.doc.resolve(from);
   const $to = base.doc.resolve(to);
@@ -69,7 +74,9 @@ describe("deleteSelection", () => {
 
 function applyBackward(state: EditorState): EditorState | null {
   let dispatched: ReturnType<typeof state.apply> | null = null;
-  const handled = deleteBackward(state, (tr) => { dispatched = state.apply(tr); });
+  const handled = deleteBackward(state, (tr) => {
+    dispatched = state.apply(tr);
+  });
   return handled ? dispatched : null;
 }
 
@@ -100,7 +107,9 @@ describe("deleteBackward", () => {
     // cursor is after "World" — move it to the start of the second paragraph
     const { TextSelection } = require("prosemirror-state");
     // <p>Hello</p> occupies positions 0-6 (nodeSize=7); second <p> opens at 7, inside at 8
-    const s4 = s3.apply(s3.tr.setSelection(TextSelection.near(s3.doc.resolve(8))));
+    const s4 = s3.apply(
+      s3.tr.setSelection(TextSelection.near(s3.doc.resolve(8))),
+    );
 
     const next = applyBackward(s4);
     expect(next?.doc.textContent).toBe("HelloWorld");
@@ -122,7 +131,9 @@ describe("deleteBackward", () => {
 
 function applyForward(state: EditorState): EditorState | null {
   let dispatched: ReturnType<typeof state.apply> | null = null;
-  const handled = deleteForward(state, (tr) => { dispatched = state.apply(tr); });
+  const handled = deleteForward(state, (tr) => {
+    dispatched = state.apply(tr);
+  });
   return handled ? dispatched : null;
 }
 
@@ -137,7 +148,9 @@ describe("deleteForward", () => {
     // Move cursor to after the paragraph open token (position 1)
     const { TextSelection } = require("prosemirror-state");
     const $pos = state.doc.resolve(1);
-    const withCursor = state.apply(state.tr.setSelection(TextSelection.near($pos)));
+    const withCursor = state.apply(
+      state.tr.setSelection(TextSelection.near($pos)),
+    );
     const next = applyForward(withCursor);
     expect(next?.doc.textContent).toBe("bc");
   });
@@ -156,11 +169,12 @@ describe("deleteForward", () => {
 
     // Move cursor to the end of the first paragraph: position 6
     const { TextSelection } = require("prosemirror-state");
-    const s4 = s3.apply(s3.tr.setSelection(TextSelection.near(s3.doc.resolve(6))));
+    const s4 = s3.apply(
+      s3.tr.setSelection(TextSelection.near(s3.doc.resolve(6))),
+    );
 
     const next = applyForward(s4);
     expect(next?.doc.textContent).toBe("HelloWorld");
     expect(next?.doc.childCount).toBe(1);
   });
 });
-

@@ -1,5 +1,3 @@
-export { schema } from "./schema";
-export type { NodeTypeName, MarkTypeName } from "./schema";
 export type { EditorState } from "prosemirror-state";
 export * from "./commands";
 export {
