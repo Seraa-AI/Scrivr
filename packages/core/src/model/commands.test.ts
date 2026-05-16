@@ -6,17 +6,12 @@ import {
   deleteSelection,
   deleteBackward,
   deleteForward,
-  splitBlock,
-  applyUndo,
-  applyRedo,
 } from "./commands";
-import { history } from "prosemirror-history";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeState(text = ""): EditorState {
-  const plugins = [history()];
-  const state = EditorState.create({ schema, plugins });
+  const state = EditorState.create({ schema });
   if (!text) return state;
   // Insert text at the start
   const tr = insertText(state, text)!;
@@ -99,7 +94,7 @@ describe("deleteBackward", () => {
   it("joins two paragraphs when cursor is at the start of the second one", () => {
     // Build: <p>Hello</p><p>World</p>, cursor at start of "World"
     const s1 = makeState("Hello");
-    const s2 = s1.apply(splitBlock(s1)!);
+    const s2 = s1.apply(s1.tr.split(s1.selection.from));
     const s3 = s2.apply(insertText(s2, "World")!);
 
     // cursor is after "World" — move it to the start of the second paragraph
@@ -115,7 +110,7 @@ describe("deleteBackward", () => {
   it("joins an empty paragraph into the preceding one", () => {
     // <p>Hello</p><p></p>, cursor at start of empty paragraph
     const s1 = makeState("Hello");
-    const s2 = s1.apply(splitBlock(s1)!);
+    const s2 = s1.apply(s1.tr.split(s1.selection.from));
     // cursor is already inside the new empty paragraph
     const next = applyBackward(s2);
     expect(next?.doc.childCount).toBe(1);
@@ -156,7 +151,7 @@ describe("deleteForward", () => {
   it("joins two paragraphs when cursor is at the end of the first one", () => {
     // Build: <p>Hello</p><p>World</p>, cursor at end of "Hello"
     const s1 = makeState("Hello");
-    const s2 = s1.apply(splitBlock(s1)!);
+    const s2 = s1.apply(s1.tr.split(s1.selection.from));
     const s3 = s2.apply(insertText(s2, "World")!);
 
     // Move cursor to the end of the first paragraph: position 6
@@ -169,53 +164,3 @@ describe("deleteForward", () => {
   });
 });
 
-// ── splitBlock ────────────────────────────────────────────────────────────────
-
-describe("splitBlock", () => {
-  it("splits the current paragraph into two", () => {
-    const state = makeState("hello");
-    // Move cursor to middle of "hello" — after "he" = position 3
-    const { TextSelection } = require("prosemirror-state");
-    const $pos = state.doc.resolve(3);
-    const withCursor = state.apply(state.tr.setSelection(TextSelection.near($pos)));
-    const tr = splitBlock(withCursor);
-    expect(tr).not.toBeNull();
-    const next = withCursor.apply(tr!);
-    expect(next.doc.childCount).toBe(2);
-    expect(next.doc.child(0).textContent).toBe("he");
-    expect(next.doc.child(1).textContent).toBe("llo");
-  });
-});
-
-// ── applyUndo / applyRedo ─────────────────────────────────────────────────────
-
-describe("applyUndo", () => {
-  it("returns null when there is nothing to undo", () => {
-    const state = makeState();
-    expect(applyUndo(state)).toBeNull();
-  });
-
-  it("undoes the last change", () => {
-    const state = makeState("hello");
-    const undoTr = applyUndo(state);
-    expect(undoTr).not.toBeNull();
-    const undone = state.apply(undoTr!);
-    expect(undone.doc.textContent).toBe("");
-  });
-});
-
-describe("applyRedo", () => {
-  it("returns null when there is nothing to redo", () => {
-    const state = makeState("hello");
-    expect(applyRedo(state)).toBeNull();
-  });
-
-  it("redoes after an undo", () => {
-    const state = makeState("hello");
-    const undone = state.apply(applyUndo(state)!);
-    const redoTr = applyRedo(undone);
-    expect(redoTr).not.toBeNull();
-    const redone = undone.apply(redoTr!);
-    expect(redone.doc.textContent).toBe("hello");
-  });
-});
