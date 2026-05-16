@@ -60,6 +60,29 @@ describe("extension lifecycle — onEditorReady + onViewReady", () => {
     container.remove();
   });
 
+  it("destroy() runs cleanups in reverse of setup order (view before engine)", () => {
+    const order: string[] = [];
+    const ext = Extension.create({
+      name: "lifecycle_cleanup_order_test",
+      onEditorReady() {
+        return () => order.push("editor");
+      },
+      onViewReady() {
+        return () => order.push("view");
+      },
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = new Editor({ extensions: [StarterKit, ext] });
+    editor.mount(container);
+
+    editor.destroy();
+
+    expect(order).toEqual(["view", "editor"]);
+    container.remove();
+  });
+
   it("cleanup fns from both hooks run on destroy()", () => {
     const editorReadyCleanup = vi.fn();
     const viewReadyCleanup = vi.fn();

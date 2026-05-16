@@ -91,9 +91,10 @@ export class ServerEditor extends BaseEditor {
       }
     }
     this.resolvedTheme = Object.freeze({ ...defaultEditorTheme, ...literalOverrides });
-    // Fire onEditorReady after all state is initialised.
-    // View-only extensions (CollaborationCursor etc.) that cast to IEditor
-    // inside onEditorReady will get a runtime error if called — this is by design.
+    // Engine-phase only — view-only extensions declare `onViewReady`, which
+    // the engine only fires in browser `Editor`. ServerEditor silently skips
+    // that phase, so view APIs (overlays, layout, redraw, selection,
+    // surfaces) never get touched headlessly.
     this.fireEditorReady();
   }
 

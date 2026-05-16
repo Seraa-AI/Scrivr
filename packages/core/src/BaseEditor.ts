@@ -342,7 +342,13 @@ export class BaseEditor implements IBaseEditor {
 
   destroy(): void {
     this.emit("destroy", undefined as EditorEvents["destroy"]);
-    for (const cleanup of this.runtimeCleanup) cleanup();
+    // Tear down in reverse of setup so view cleanup (which may read engine
+    // state — Y.Doc bindings, plugin state, subscriptions) runs before the
+    // engine layer it depends on is released. Matches the docs in
+    // `ExtensionConfig.onEditorReady` / `onViewReady` ("invoked in reverse").
+    for (let i = this.runtimeCleanup.length - 1; i >= 0; i--) {
+      this.runtimeCleanup[i]!();
+    }
     this.runtimeCleanup = [];
     this.eventHandlers.clear();
     this.listeners.clear();

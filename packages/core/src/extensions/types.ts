@@ -58,11 +58,12 @@ export type OverlayRenderHandler = (
  * Implemented by both `Editor` (browser) and `ServerEditor` (Node.js).
  *
  * Use this type in extensions that need to work in both environments:
- * `onEditorReady(editor: IBaseEditor)`.
+ * `onEditorReady(editor: IBaseEditor)` — fires in both `Editor` and
+ * `ServerEditor`.
  *
- * Extensions that require canvas overlays or DOM access should cast to `IEditor`
- * inside `onEditorReady`:
- *   `(editor as IEditor).addOverlayRenderHandler(...)`
+ * Extensions that require canvas overlays, layout, redraw, selection, or
+ * surfaces should declare `onViewReady(editor: IEditor)` instead — the engine
+ * only fires it in browser `Editor`, so no runtime guard or cast is needed.
  */
 export interface IBaseEditor {
   /** Subscribe to all editor notifications (state change, focus, cursor tick). */
@@ -106,8 +107,9 @@ export interface IBaseEditor {
  * The full view editor interface — adds canvas overlay and DOM methods.
  * Implemented only by `Editor` (browser).
  *
- * Extensions receive this in `onEditorReady` when cast from `IBaseEditor`:
- *   `const viewEditor = editor as IEditor;`
+ * Extensions receive this in `onViewReady(editor: IEditor)`, which the engine
+ * only fires in browser `Editor`. Never reach for view APIs from
+ * `onEditorReady`; declare `onViewReady` instead.
  */
 export interface IEditor extends IBaseEditor {
   /** Surface registry — plugins register and activate surfaces for multi-surface editing. */

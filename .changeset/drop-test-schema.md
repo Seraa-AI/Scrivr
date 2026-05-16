@@ -17,13 +17,24 @@ dynamically from extensions (`StarterKit` adds `paragraph.dataTracked`,
 `trackedInsert` / `trackedDelete` marks) and the static schema couldn't
 keep up.
 
+**Stability note (beta `0.x`):** the removed surfaces below were technically
+reachable through `@scrivr/core` but were never part of the documented public
+API — `Editor` / `ServerEditor` / `StarterKit` (the documented entry points)
+do not consume them, and they had drifted out of sync with the runtime
+schema. They are removed as internal cleanup. Per the project's beta
+versioning rule (`feedback_changeset_patch_only`) the lockstep bump stays
+`patch`; any external consumer reaching past the documented surface should
+migrate as described below.
+
 Migration story:
 
 - The `schema` runtime value, `NodeTypeName` type, `MarkTypeName` type,
   `createEditorState`, `createEditorStateFromJSON`, and the
   `model/schema.ts` + `model/state.ts` modules themselves are removed from
   the package. The `EditorState` type re-export now comes from
-  `prosemirror-state` directly.
+  `prosemirror-state` directly. Build a live schema with
+  `getSchema([StarterKit, …])` (or `buildStarterKitContext()` in tests) —
+  that's what the production editor uses.
 - `model/commands.ts` had ~110 LOC of schema-using helpers (`toggleBold`,
   `toggleItalic`, `toggleUnderline`, `toggleStrikethrough`, `setFontSize`,
   `setFontFamily`, `setColor`, `applyUndo`, `applyRedo`, `splitBlock`,
