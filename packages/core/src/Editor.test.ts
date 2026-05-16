@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Editor } from "./Editor";
 import { StarterKit } from "./extensions/StarterKit";
 import { NodeSelection } from "prosemirror-state";
 import type { EditorState } from "prosemirror-state";
+import { createTestEditor } from "./test-utils";
 
 /**
  * Editor tests — cursor movement, selection, and edge case safety.
@@ -12,28 +13,17 @@ import type { EditorState } from "prosemirror-state";
  *
  * All assertions go through editor.getState().selection so we stay
  * framework-agnostic and don't depend on the canvas or layout engine.
+ *
+ * Canvas measurement comes from the real `@napi-rs/canvas` (Skia) backend
+ * wired in `vitest.setup.ts` — no fake measureText.
  */
-
-// Mock canvas so Editor's imports (CharacterMap, etc.) don't blow up
-beforeEach(() => {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    measureText: vi.fn((text: string) => ({
-      width: text.length * 8,
-      actualBoundingBoxAscent: 12,
-      actualBoundingBoxDescent: 3,
-      fontBoundingBoxAscent: 12,
-      fontBoundingBoxDescent: 3,
-    })),
-    font: "",
-  } as unknown as CanvasRenderingContext2D);
-});
 
 function makeEditor() {
   const container = document.createElement("div");
   document.body.appendChild(container);
 
   let latestState: EditorState | null = null;
-  const editor = new Editor({
+  const editor = createTestEditor({
     onChange: (s) => { latestState = s; },
   });
   editor.mount(container);
@@ -1152,101 +1142,87 @@ describe("Editor — cursorPage", () => {
     // Regression: _blockIndex used nodePos ranges which overlap for split-paragraph
     // blocks (kept part on page 1 and continuation on page 2 share the same nodePos
     // and nodeSize). Binary search always returned page 1, so cursorPage was stuck
-    // at 1 even when the cursor was visually on page 2. This caused the cursor to
-    // never be drawn on page 2 even after the user clicked there.
+    // at 1 even when the cursor was visually on page 2.
     //
-    // Setup: MOCK_LINE_HEIGHT=18, pageHeight=200, margins=20 → pageBottom=180,
-    // contentHeight=160. Lines per page = floor(160/18) = 8.
-    // "hello" = 5 chars × 8px = 40px. With contentWidth=200-20-20=160px,
-    // words per line = floor(160/40) but "hello hello " = 2 × (40+8) = 96px,
-    // "hello hello hello " = 3 × 48 = 144px < 160px → 3 words per line,
-    // "hello hello hello hello " = 4 × 48 = 192px > 160px → 3 words per line.
-    // 20 words → ceil(20/3)=7 lines → page 1 has 8 lines = all, no split?
-    // Use 30 words → ceil(30/3)=10 lines → page 1: 8, page 2: 2 ✓
+    // Setup: tiny pages so any reasonable amount of text overflows. Word count
+    // is generous (real Skia widths vary by font/glyph, so don't hand-compute
+    // line counts — just produce enough text to guarantee a split).
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({
+    const editor = createTestEditor({
       extensions: [StarterKit.configure({ pagination: { pageWidth: 200, pageHeight: 200, margins: { top: 20, bottom: 20, left: 20, right: 20 } } })],
     });
     editor.mount(container);
 
-    // Insert 30 space-separated words → ~10 lines → 8 on page 1, 2 on page 2
     const ta = container.querySelector("textarea")!;
-    ta.value = "hello ".repeat(30).trim(); // "hello hello ... hello" (30 words)
+    ta.value = "hello ".repeat(60).trim();
     ta.dispatchEvent(new Event("input"));
-
-    // ensureLayout() runs in a rAF in production; call it synchronously in tests.
     editor.ensureLayout();
-
-    // Populate page 2 so charMap has glyph entries for it
+    expect(editor.layout.pages.length).toBeGreaterThanOrEqual(2);
     editor.ensurePagePopulated(2);
 
-    // Move cursor to the very end of the paragraph (last char on page 2).
-    // para is the first child of doc at nodePos=0. Content size = 30*5 + 29 = 179 chars.
-    // End cursor position within doc = para.nodePos + 1 + para.content.size = 1 + 179 = 180.
-    const doc = editor.getState().doc;
-    const para = doc.child(0)!;
-    const endCursorPos = 1 + para.content.size; // position after last char of para
+    // End-of-paragraph cursor must resolve to the last page (>= 2).
+    const para = editor.getState().doc.child(0)!;
+    const endCursorPos = 1 + para.content.size;
     editor.selection.moveCursorTo(endCursorPos);
-
-    // ensureLayout again so _cursorPage reflects the new cursor position
     editor.ensureLayout();
-
-    // cursorPage must be 2, not 1
-    expect(editor.cursorPage).toBe(2);
+    expect(editor.cursorPage).toBe(editor.layout.pages.length);
+    expect(editor.cursorPage).toBeGreaterThanOrEqual(2);
 
     editor.destroy();
     container.remove();
   });
 
   it("cursorPage resolves correctly for all three parts of a 3-page paragraph split", () => {
-    // Geometry: pageWidth=200 pageHeight=200 margins=20 → contentWidth=160 contentHeight=160
-    // MOCK_LINE_HEIGHT=18 → 8 lines per page (8×18=144 ≤ 160; 9×18=162 > 160)
-    // MOCK_CHAR_WIDTH=8, "hello"=40px, 3 words/line (3×48=144 ≤ 160; 4×48=192 > 160)
-    // 60 words → 20 lines: 8 on page 1, 8 on page 2, 4 on page 3.
+    // Geometry: pageWidth=200 pageHeight=200 margins=20. Generate enough text
+    // for at least three pages, then derive cursor positions from the layout
+    // (real Skia widths preclude hand-computed offsets).
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = new Editor({
+    const editor = createTestEditor({
       extensions: [StarterKit.configure({ pagination: { pageWidth: 200, pageHeight: 200, margins: { top: 20, bottom: 20, left: 20, right: 20 } } })],
     });
     editor.mount(container);
 
     const ta = container.querySelector("textarea")!;
-    ta.value = "hello ".repeat(60).trim(); // 60 words → 20 lines
+    ta.value = "hello ".repeat(120).trim();
     ta.dispatchEvent(new Event("input"));
     editor.ensureLayout();
+    expect(editor.layout.pages.length).toBeGreaterThanOrEqual(3);
     editor.ensurePagePopulated(1);
     editor.ensurePagePopulated(2);
     editor.ensurePagePopulated(3);
 
-    const state = editor.getState();
-    const para  = state.doc.child(0)!;
-    // Total content size = 60 words × 5 chars + 59 spaces = 359 chars.
-    // nodePos of para = 1 (first child of doc). End of para content = 1 + 359 = 360.
+    const para = editor.getState().doc.child(0)!;
 
-    // --- Part 1: cursor at the very start of the paragraph (page 1) ---
-    editor.selection.moveCursorTo(2); // first character
+    /** First doc position rendered on `page` — read from the first span of
+     * page's first block's first line. */
+    function firstDocPosOnPage(page: number): number {
+      const block = editor.layout.pages[page - 1]!.blocks[0]!;
+      const span = block.lines[0]!.spans[0]!;
+      return span.docPos;
+    }
+
+    // Part 1: cursor at very start of paragraph → page 1.
+    editor.selection.moveCursorTo(firstDocPosOnPage(1));
     editor.ensureLayout();
     expect(editor.cursorPage).toBe(1);
 
-    // --- Part 2: cursor in the middle lines (page 2) ---
-    // Page 1 has 8 lines = 8 × 3 words = 24 words. First word on page 2 = word 25.
-    // docPos of first char of word 25 = 1 + (24 words × 6 chars each) = 1 + 144 = 145.
-    editor.selection.moveCursorTo(145);
+    // Part 2: cursor at first char of page 2 → page 2.
+    editor.selection.moveCursorTo(firstDocPosOnPage(2));
     editor.ensureLayout();
     expect(editor.cursorPage).toBe(2);
 
-    // --- Part 3: cursor in the last lines (page 3) ---
-    // Page 2 has 8 lines = 24 more words (words 25–48). First word on page 3 = word 49.
-    // docPos of first char of word 49 = 1 + (48 words × 6 chars each) = 1 + 288 = 289.
-    editor.selection.moveCursorTo(289);
+    // Part 3: cursor at first char of page 3 → page 3.
+    editor.selection.moveCursorTo(firstDocPosOnPage(3));
     editor.ensureLayout();
     expect(editor.cursorPage).toBe(3);
 
-    // --- End of paragraph: still page 3 ---
+    // End of paragraph: stays on the last page.
+    const lastPage = editor.layout.pages.length;
     editor.selection.moveCursorTo(1 + para.content.size);
     editor.ensureLayout();
-    expect(editor.cursorPage).toBe(3);
+    expect(editor.cursorPage).toBe(lastPage);
 
     editor.destroy();
     container.remove();

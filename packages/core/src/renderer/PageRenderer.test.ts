@@ -20,34 +20,13 @@ import {
   createMeasurer,
 } from "../test-utils";
 
-/** Minimal CanvasRenderingContext2D mock — all drawing ops are no-ops. */
+/**
+ * Real canvas context — happy-dom's `getContext("2d")` is wired in
+ * `vitest.setup.ts` to return the `@napi-rs/canvas` (Skia) backend.
+ * Tests here don't observe ctx calls, so a real ctx is the simplest plumbing.
+ */
 function makeCtx(): CanvasRenderingContext2D {
-  return {
-    resetTransform: vi.fn(),
-    fillRect: vi.fn(),
-    strokeRect: vi.fn(),
-    fillText: vi.fn(),
-    scale: vi.fn(),
-    save: vi.fn(),
-    restore: vi.fn(),
-    setLineDash: vi.fn(),
-    beginPath: vi.fn(),
-    arc: vi.fn(),
-    fill: vi.fn(),
-    moveTo: vi.fn(),
-    lineTo: vi.fn(),
-    closePath: vi.fn(),
-    drawImage: vi.fn(),
-    // Settable properties
-    fillStyle: "",
-    strokeStyle: "",
-    font: "",
-    lineWidth: 1,
-    textBaseline: "alphabetic" as CanvasTextBaseline,
-    textAlign: "left" as CanvasTextAlign,
-    imageSmoothingEnabled: true,
-    imageSmoothingQuality: "high" as ImageSmoothingQuality,
-  } as unknown as CanvasRenderingContext2D;
+  return document.createElement("canvas").getContext("2d")!;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
