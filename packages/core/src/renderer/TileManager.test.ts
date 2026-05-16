@@ -5,7 +5,12 @@
  * destroy cleanup, overlay repaint, chrome-band click routing).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { TileManager, fragmentsInTile, findScrollParent } from "./TileManager";
+import {
+  TileManager,
+  fragmentsInTile,
+  findScrollParent,
+  routePageClick,
+} from "./TileManager";
 import type { TileManagerOptions } from "./TileManager";
 import {
   makeRendererTestSetup,
@@ -18,16 +23,6 @@ function frag(y: number, height: number): LayoutFragment {
   return { y, height } as LayoutFragment;
 }
 
-/**
- * Reach into TileManager's PointerController to invoke onPageClick directly.
- * One localized cast in this helper; call sites stay clean. TileManager-
- * specific — not hoisted to test-utils.
- */
-type OnPageClick = (page: number, x: number, y: number, clickCount: number) => boolean;
-function getOnPageClick(tm: TileManager): OnPageClick {
-  const internals = tm as unknown as { pointer: { deps: { onPageClick: OnPageClick } } };
-  return internals.pointer.deps.onPageClick;
-}
 
 describe("fragmentsInTile", () => {
   it("returns empty array for empty fragments list", () => {
@@ -488,7 +483,7 @@ describe("TileManager — body click deactivates surface", () => {
     tm.update();
 
     // y=500 is well below contentTop (~132) — body area, not chrome.
-    const consumed = getOnPageClick(tm)(1, 400, 500, 1);
+    const consumed = routePageClick(setup.editor, 1, 400, 500, 1);
     expect(consumed).toBe(false);
     expect(activateSpy).toHaveBeenCalledWith(null);
 
@@ -511,10 +506,9 @@ describe("TileManager — body click deactivates surface", () => {
     // y=90 is inside the header band (margins.top=72 + headerHeight=60 → contentTop=132).
     // All click counts in the chrome band with an active surface fall through —
     // they don't deactivate.
-    const click = getOnPageClick(tm);
-    expect(click(1, 400, 90, 1)).toBe(false);
-    expect(click(1, 400, 90, 2)).toBe(false);
-    expect(click(1, 400, 90, 3)).toBe(false);
+    expect(routePageClick(setup.editor, 1, 400, 90, 1)).toBe(false);
+    expect(routePageClick(setup.editor, 1, 400, 90, 2)).toBe(false);
+    expect(routePageClick(setup.editor, 1, 400, 90, 3)).toBe(false);
     expect(activateSpy).not.toHaveBeenCalledWith(null);
 
     tm.destroy();

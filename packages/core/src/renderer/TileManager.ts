@@ -106,6 +106,48 @@ export function fragmentsInTile(
   return result;
 }
 
+/**
+ * Decide what to do with a single page click in page-local coords.
+ * Header / footer bands route through `editor.emit("chromeClick", …)`;
+ * body clicks deactivate any active surface.
+ *
+ * Returns `true` when the click was consumed (no further pointer handling
+ * needed), `false` when PointerController should keep processing it.
+ *
+ * Module-scope so unit tests can drive the routing decision against a real
+ * `Editor` without exposing a test-only method on `TileManager`.
+ */
+export function routePageClick(
+  editor: Editor,
+  page: number,
+  docX: number,
+  docY: number,
+  clickCount: number,
+): boolean {
+  const metrics = editor.layout.metrics?.[page - 1];
+  if (!metrics) return false;
+  const inHeader = metrics.headerHeight > 0 && docY < metrics.contentTop;
+  const inFooter = metrics.footerHeight > 0 && docY > metrics.footerTop;
+
+  if (!inHeader && !inFooter) {
+    // Click in the body while a surface is active — deactivate first.
+    if (editor.surfaces?.activeSurface) {
+      editor.surfaces.activate(null);
+    }
+    return false;
+  }
+
+  // Surface already active — let chrome-band clicks fall through to
+  // PointerController's normal logic so the surface's own routing handles
+  // single/double/triple-click and drag selection.
+  if (editor.surfaces?.activeSurface !== null) return false;
+
+  // No surface active — emit chromeClick for activation (double-click).
+  const band = inHeader ? "header" : "footer";
+  editor.emit("chromeClick", { page, x: docX, y: docY, band, clickCount });
+  return true;
+}
+
 /** TileManager */
 
 /**
@@ -173,44 +215,8 @@ export class TileManager {
       isPageless: () => this.editor.isPageless,
       visualYToDocY: (y) => this.visualYToDocY(y),
       scheduleUpdate: () => this.scheduleUpdate(),
-      onPageClick: (page, docX, docY, clickCount) => {
-        const layout = this.editor.layout;
-        const metrics = layout.metrics?.[page - 1];
-        if (!metrics) return false;
-        const inHeader = metrics.headerHeight > 0 && docY < metrics.contentTop;
-        const inFooter = metrics.footerHeight > 0 && docY > metrics.footerTop;
-
-        if (!inHeader && !inFooter) {
-          // Click in the body while a surface is active — deactivate first
-          if (this.editor.surfaces?.activeSurface) {
-            this.editor.surfaces.activate(null);
-          }
-          return false;
-        }
-
-        const surfaceActive = this.editor.surfaces?.activeSurface !== null;
-
-        if (surfaceActive) {
-          // Surface is already active — let ALL clicks fall through to
-          // PointerController's normal logic. Since editor.charMap,
-          // editor.selection, and editor.commands all route through the
-          // active surface, single click, double-click word select,
-          // triple-click block select, shift+click extend, and drag
-          // selection all work automatically.
-          return false;
-        }
-
-        // No surface active — emit chromeClick for activation (double-click).
-        const band = inHeader ? "header" : "footer";
-        this.editor.emit("chromeClick", {
-          page,
-          x: docX,
-          y: docY,
-          band,
-          clickCount,
-        });
-        return true;
-      },
+      onPageClick: (page, docX, docY, clickCount) =>
+        routePageClick(this.editor, page, docX, docY, clickCount),
     });
     this.pointer.attach();
 
