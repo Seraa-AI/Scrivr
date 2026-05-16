@@ -138,29 +138,27 @@ export class BaseEditor implements IBaseEditor {
   setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void {
     const node = this.editorState.doc.nodeAt(docPos);
     if (!node) return;
-    this._applyTransaction(
+    this.applyTransaction(
       this.editorState.tr.setNodeMarkup(docPos, undefined, { ...node.attrs, ...attrs }),
     );
-  }
-
-  _applyTransaction(tr: Transaction): void {
-    this.applyState(tr);
   }
 
   /**
    * Apply a ProseMirror transaction through the full dispatch pipeline.
    *
    * Use this for any state mutation not covered by commands — e.g. plugin
-   * metadata via `tr.setMeta()`, programmatic `deleteSelection`, or custom
-   * transforms. The transaction goes through the same path as command-
-   * dispatched transactions: plugin appendTransaction hooks run, layout is
-   * invalidated, subscribers are notified, and a render flush is scheduled.
+   * metadata via `tr.setMeta()`, programmatic `deleteSelection`, custom
+   * transforms, or external sources (Y.js remote sync, AI suggestions).
+   * The transaction goes through the same path as command-dispatched
+   * transactions: plugin appendTransaction hooks run, layout is invalidated,
+   * subscribers are notified, and (in `Editor`) a render flush is scheduled.
    *
-   * In `Editor` (browser) this routes through the view-aware dispatch.
-   * In `ServerEditor` it delegates to the base `_applyState` pipeline.
+   * Subclasses override this to layer view side-effects on top (Editor's
+   * override routes through the view-aware dispatch). `BaseEditor`'s
+   * implementation runs the headless apply pipeline only.
    */
   applyTransaction(tr: Transaction): void {
-    this._applyTransaction(tr);
+    this.applyState(tr);
   }
 
   getMarkdown(): string {
@@ -349,7 +347,7 @@ export class BaseEditor implements IBaseEditor {
 
   /**
    * Apply a transaction to state, emit "update", and notify subscribers.
-   * Called by `_applyTransaction` (base) and `dispatch` (in Editor).
+   * Called by `applyTransaction` (base) and `dispatch` (in Editor).
    */
   protected applyState(tr: Transaction): void {
     this.editorState = this.editorState.apply(tr);
@@ -375,11 +373,11 @@ export class BaseEditor implements IBaseEditor {
 
   /**
    * The dispatch function used by the command builder.
-   * `BaseEditor` routes through `_applyTransaction` (no view side-effects).
+   * `BaseEditor` routes through `applyTransaction` (no view side-effects).
    * `Editor` overrides this to route through `dispatch()` (full view updates).
    */
   protected dispatchToActive(tr: Transaction): void {
-    this._applyTransaction(tr);
+    this.applyTransaction(tr);
   }
 
   // ── Private ──────────────────────────────────────────────────────────────────

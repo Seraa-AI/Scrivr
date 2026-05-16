@@ -80,13 +80,14 @@ export interface IBaseEditor {
    * No-op if there is no node at that position.
    */
   setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void;
-  /** Apply a transaction from an external source (e.g. Y.js remote sync). */
-  _applyTransaction(tr: Transaction): void;
   /**
    * Apply a ProseMirror transaction through the full dispatch pipeline.
-   * Use for state mutations not covered by commands (e.g. tr.setMeta,
-   * deleteSelection, custom transforms). Routes through the same path
-   * as command-dispatched transactions.
+   * Use for state mutations not covered by commands (e.g. `tr.setMeta`,
+   * `deleteSelection`, custom transforms, external sources like Y.js
+   * remote sync or AI suggestions). Routes through the same path as
+   * command-dispatched transactions: plugin appendTransaction hooks run,
+   * layout is invalidated, subscribers are notified, and (in `Editor`) a
+   * render flush is scheduled.
    */
   applyTransaction(tr: Transaction): void;
   /** The merged ProseMirror Schema built from all extensions. */

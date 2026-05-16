@@ -104,7 +104,7 @@ describe("SurfaceRegistry — activation", () => {
   it("activate(currentId) is a no-op (no callbacks fire)", () => {
     const r = new SurfaceRegistry();
     const { mediator, calls } = makeMediator();
-    r._setOwnerMediator(mediator);
+    r.setOwnerMediator(mediator);
     r.register(makeSurface("a"));
     r.activate("a");
     calls.length = 0;
@@ -124,7 +124,7 @@ describe("SurfaceRegistry — owner lifecycle", () => {
   it("activate(id) from null fires only activate(next)", () => {
     const r = new SurfaceRegistry();
     const { mediator, calls } = makeMediator();
-    r._setOwnerMediator(mediator);
+    r.setOwnerMediator(mediator);
     r.register(makeSurface("a"));
     r.activate("a");
     expect(calls).toEqual([{ type: "activate", id: "a" }]);
@@ -133,7 +133,7 @@ describe("SurfaceRegistry — owner lifecycle", () => {
   it("activate(null) from id fires deactivate(prev) only (no commit if clean)", () => {
     const r = new SurfaceRegistry();
     const { mediator, calls } = makeMediator();
-    r._setOwnerMediator(mediator);
+    r.setOwnerMediator(mediator);
     r.register(makeSurface("a"));
     r.activate("a");
     calls.length = 0;
@@ -144,7 +144,7 @@ describe("SurfaceRegistry — owner lifecycle", () => {
   it("activate(null) from dirty id fires commit then deactivate (in order)", () => {
     const r = new SurfaceRegistry();
     const { mediator, calls } = makeMediator();
-    r._setOwnerMediator(mediator);
+    r.setOwnerMediator(mediator);
     const s = makeSurface("a");
     r.register(s);
     r.activate("a");
@@ -160,7 +160,7 @@ describe("SurfaceRegistry — owner lifecycle", () => {
   it("activate(b) from dirty a fires commit(a) → deactivate(a) → activate(b)", () => {
     const r = new SurfaceRegistry();
     const { mediator, calls } = makeMediator();
-    r._setOwnerMediator(mediator);
+    r.setOwnerMediator(mediator);
     const a = makeSurface("a");
     r.register(a);
     r.register(makeSurface("b"));
@@ -179,7 +179,7 @@ describe("SurfaceRegistry — owner lifecycle", () => {
     const r = new SurfaceRegistry();
     const s = makeSurface("a");
     r.register(s);
-    r._setOwnerMediator({
+    r.setOwnerMediator({
       commit: () => { throw new Error("persist failed"); },
       deactivate: () => {},
       activate: () => {},
@@ -196,7 +196,7 @@ describe("SurfaceRegistry — owner lifecycle", () => {
     const r = new SurfaceRegistry();
     r.register(makeSurface("a"));
     r.register(makeSurface("b"));
-    r._setOwnerMediator({
+    r.setOwnerMediator({
       commit: () => {},
       deactivate: () => { throw new Error("boom"); },
       activate: () => {},
@@ -212,7 +212,7 @@ describe("SurfaceRegistry — owner lifecycle", () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const r = new SurfaceRegistry();
     r.register(makeSurface("a"));
-    r._setOwnerMediator({
+    r.setOwnerMediator({
       commit: () => {},
       deactivate: () => {},
       activate: () => { throw new Error("boom"); },
@@ -223,11 +223,11 @@ describe("SurfaceRegistry — owner lifecycle", () => {
     errSpy.mockRestore();
   });
 
-  it("commit clears _committing even when it throws", () => {
+  it("commit clears committing even when it throws", () => {
     const r = new SurfaceRegistry();
     const s = makeSurface("a");
     r.register(s);
-    r._setOwnerMediator({
+    r.setOwnerMediator({
       commit: () => { throw new Error("fail"); },
       deactivate: () => {},
       activate: () => {},
@@ -235,7 +235,7 @@ describe("SurfaceRegistry — owner lifecycle", () => {
     r.activate("a");
     s.dispatch(s.state.tr.insertText("x"));
     expect(() => r.activate(null)).toThrow();
-    expect(s._committing).toBe(false);
+    expect(s.committing).toBe(false);
   });
 });
 
@@ -246,7 +246,7 @@ describe("SurfaceRegistry — re-entrancy", () => {
     const r = new SurfaceRegistry();
     r.register(makeSurface("a"));
     r.register(makeSurface("b"));
-    r._setOwnerMediator({
+    r.setOwnerMediator({
       commit: () => {},
       deactivate: () => {},
       activate: (s) => {
@@ -338,7 +338,7 @@ describe("SurfaceRegistry — unregister while active", () => {
     const r = new SurfaceRegistry();
     const s = makeSurface("a");
     r.register(s);
-    r._setOwnerMediator({
+    r.setOwnerMediator({
       commit: () => { throw new Error("persist failed"); },
       deactivate: () => {},
       activate: () => {},
@@ -360,7 +360,7 @@ describe("SurfaceRegistry — destroy", () => {
   it("clears all surfaces, listeners, and resets mediator to noop", () => {
     const r = new SurfaceRegistry();
     const { mediator, calls } = makeMediator();
-    r._setOwnerMediator(mediator);
+    r.setOwnerMediator(mediator);
     r.register(makeSurface("a"));
     r.register(makeSurface("b"));
     r.activate("a");
@@ -391,7 +391,7 @@ describe("SurfaceRegistry — destroy", () => {
     const r = new SurfaceRegistry();
     const s = makeSurface("a");
     r.register(s);
-    r._setOwnerMediator({
+    r.setOwnerMediator({
       commit: () => { throw new Error("persist failed"); },
       deactivate: () => {},
       activate: () => {},
@@ -415,7 +415,7 @@ describe("SurfaceRegistry — nested activation listener ordering", () => {
     const r = new SurfaceRegistry();
     r.register(makeSurface("a"));
     r.register(makeSurface("b"));
-    r._setOwnerMediator({
+    r.setOwnerMediator({
       commit: () => {},
       deactivate: () => {},
       activate: (s) => {
@@ -444,7 +444,7 @@ describe("SurfaceRegistry — nested activation listener ordering", () => {
     const { mediator, calls } = makeMediator();
     // Override activate to recursively call activate("a") — the inner call
     // hits the no-op guard because _activeId was already flipped.
-    r._setOwnerMediator({
+    r.setOwnerMediator({
       ...mediator,
       activate: (s) => {
         calls.push({ type: "activate", id: s.id });
@@ -466,7 +466,7 @@ describe("SurfaceRegistry — activation loops", () => {
   it("A → B → A fires full lifecycle on each transition", () => {
     const r = new SurfaceRegistry();
     const { mediator, calls } = makeMediator();
-    r._setOwnerMediator(mediator);
+    r.setOwnerMediator(mediator);
     r.register(makeSurface("a"));
     r.register(makeSurface("b"));
     r.activate("a");

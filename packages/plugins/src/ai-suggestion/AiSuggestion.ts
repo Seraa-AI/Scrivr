@@ -167,7 +167,7 @@ export const AiSuggestion = Extension.create<AiSuggestionOptions>({
       }
 
       if (ps.activeBlockId !== newActive) {
-        editor._applyTransaction(
+        editor.applyTransaction(
           state.tr
             .setMeta(AI_SUGGESTION_SET_ACTIVE, newActive)
             .setMeta("addToHistory", false),

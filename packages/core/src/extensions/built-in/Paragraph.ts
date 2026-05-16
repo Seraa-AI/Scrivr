@@ -12,7 +12,7 @@ import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
  * heading — same as the ProseMirror default — but the heading's fontFamily
  * is still carried forward.
  */
-const _split = splitBlockAs((parent, _atEnd, $from) => {
+const splitParagraph = splitBlockAs((parent, _atEnd, $from) => {
   const paraType = $from.node(0).type.schema.nodes["paragraph"]!;
   // Defining blocks (headings) split into a paragraph; others keep their type.
   const newType = parent.type.spec.defining ? paraType : parent.type;
@@ -42,7 +42,7 @@ const _split = splitBlockAs((parent, _atEnd, $from) => {
 });
 
 export const splitBlockInheritAttrs: Command = (state, dispatch) => {
-  return _split(
+  return splitParagraph(
     state,
     dispatch &&
       ((tr) => {

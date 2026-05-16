@@ -297,7 +297,7 @@ export const HeaderFooter = Extension.create({
           };
 
           const tr = entry.editor.getState().tr.setDocAttribute("headerFooter", updatedPolicy);
-          entry.editor._applyTransaction(tr);
+          entry.editor.applyTransaction(tr);
           surface.markClean();
           return;
         }

@@ -247,7 +247,7 @@ export class ExtensionManager {
    * Surface owner registrations keyed by `owner`. Throws if two extensions
    * claim the same owner namespace — the SurfaceRegistry needs a single
    * lifecycle mediator per owner or callbacks would collide silently.
-   * Installed onto SurfaceRegistry via `_setOwnerMediator()` during Editor
+   * Installed onto SurfaceRegistry via `setOwnerMediator()` during Editor
    * construction.
    */
   getSurfaceOwners(): Map<string, SurfaceOwnerRegistration> {

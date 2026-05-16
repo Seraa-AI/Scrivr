@@ -290,7 +290,7 @@ export class AiToolkitAPI {
     const found = findNodeById(editor.getState().doc, nodeId);
     if (found) {
       const endPos = found.pos + found.node.nodeSize;
-      editor._applyTransaction(
+      editor.applyTransaction(
         editor.getState().tr
           .setMeta(aiCaretPluginKey, { position: endPos })
           .setMeta("addToHistory", false),
@@ -302,7 +302,7 @@ export class AiToolkitAPI {
 
     const flush = () => {
       pendingDispatch = false;
-      editor._applyTransaction(
+      editor.applyTransaction(
         editor.getState().tr
           .setMeta(ghostTextPluginKey, { nodeId, content: accumulated })
           .setMeta("addToHistory", false),
@@ -337,7 +337,7 @@ export class AiToolkitAPI {
 
   /** Clear the ghost text decoration immediately. */
   clearGhostText(): void {
-    this.editor._applyTransaction(
+    this.editor.applyTransaction(
       this.editor.getState().tr
         .setMeta(ghostTextPluginKey, { nodeId: null, content: "" })
         .setMeta("addToHistory", false),
@@ -346,7 +346,7 @@ export class AiToolkitAPI {
 
   /** Clear the AI caret decoration immediately. */
   clearAiCaret(): void {
-    this.editor._applyTransaction(
+    this.editor.applyTransaction(
       this.editor.getState().tr
         .setMeta(aiCaretPluginKey, { position: null })
         .setMeta("addToHistory", false),
@@ -406,7 +406,7 @@ export class AiToolkitAPI {
       .setMeta("track-author", authorId)  // TrackChanges (Phase 4) reads this
       .scrollIntoView();
 
-    this.editor._applyTransaction(tr);
+    this.editor.applyTransaction(tr);
   }
 }
 

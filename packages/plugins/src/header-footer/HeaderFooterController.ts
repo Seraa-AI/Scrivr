@@ -111,13 +111,13 @@ function ensurePolicy(editor: IBaseEditor): HeaderFooterPolicy {
 
   const policy = { ...DEFAULT_POLICY };
   const tr = editor.getState().tr.setDocAttribute("headerFooter", policy);
-  editor._applyTransaction(tr);
+  editor.applyTransaction(tr);
   return policy;
 }
 
 function applyPolicy(editor: IBaseEditor, policy: HeaderFooterPolicy): void {
   const tr = editor.getState().tr.setDocAttribute("headerFooter", policy);
-  editor._applyTransaction(tr);
+  editor.applyTransaction(tr);
 }
 
 function updatePolicy(editor: IBaseEditor, updater: (current: HeaderFooterPolicy) => HeaderFooterPolicy): void {

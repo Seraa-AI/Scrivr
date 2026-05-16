@@ -77,22 +77,22 @@ describe("EditorSurface — dispatch", () => {
   });
 });
 
-// ── _committing re-entry guard ────────────────────────────────────────────────
+// ── committing re-entry guard ────────────────────────────────────────────────
 
 describe("EditorSurface — commit guard", () => {
-  it("dispatch throws when _committing is set", () => {
+  it("dispatch throws when committing is set", () => {
     const s = makeSurface();
-    s._committing = true;
+    s.committing = true;
     expect(() => s.dispatch(s.state.tr.insertText("x"))).toThrow(
       /dispatch\(\) called on "test:1" during its own onCommit/,
     );
   });
 
-  it("dispatch works again once _committing is cleared", () => {
+  it("dispatch works again once committing is cleared", () => {
     const s = makeSurface();
-    s._committing = true;
+    s.committing = true;
     expect(() => s.dispatch(s.state.tr.insertText("x"))).toThrow();
-    s._committing = false;
+    s.committing = false;
     expect(() => s.dispatch(s.state.tr.insertText("y"))).not.toThrow();
   });
 });

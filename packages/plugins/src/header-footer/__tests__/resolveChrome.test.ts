@@ -34,7 +34,7 @@ vi.mock("@scrivr/core", async (importOriginal) => {
       runId: 0,
       convergence: "stable" as const,
       iterationCount: 1,
-      _chromePayloads: {},
+      chromePayloads: {},
     })),
   };
 });

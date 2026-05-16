@@ -171,7 +171,7 @@ export function subscribeToAiSuggestions(
       rejectAiSuggestion(editor);
     },
     hover(blockId) {
-      editor._applyTransaction(
+      editor.applyTransaction(
         editor
           .getState()
           .tr.setMeta(AI_SUGGESTION_SET_HOVER, blockId)

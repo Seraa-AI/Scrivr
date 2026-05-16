@@ -34,7 +34,7 @@ import { acceptedRangeToDocRange } from "../track-changes/lib/acceptedTextMap";
  */
 export function showAiSuggestion(editor: IEditor, suggestion: AiSuggestion | null): void {
   const state = editor.getState();
-  editor._applyTransaction(
+  editor.applyTransaction(
     state.tr
       .setMeta(AI_SUGGESTION_SET, { payload: suggestion })
       .setMeta("addToHistory", false),
@@ -135,7 +135,7 @@ function _applyDirect(
   }
 
   skipTracking(tr);
-  editor._applyTransaction(tr);
+  editor.applyTransaction(tr);
 }
 
 /** Apply by recording changes as tracked insert/delete marks. */
@@ -205,7 +205,7 @@ function _applyTracked(
 
   skipTracking(tr);
   setAction(tr, TrackChangesAction.refreshChanges, true);
-  editor._applyTransaction(tr);
+  editor.applyTransaction(tr);
 }
 
 /**
@@ -297,7 +297,7 @@ export function rejectAiSuggestion(
 
   skipTracking(tr);
   setAction(tr, TrackChangesAction.refreshChanges, true);
-  editor._applyTransaction(tr);
+  editor.applyTransaction(tr);
 
   // Remove rejected block(s) from the suggestion; clear when none remain
   if (!groupId) {

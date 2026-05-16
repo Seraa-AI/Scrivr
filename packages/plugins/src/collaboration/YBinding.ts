@@ -119,7 +119,7 @@ export class YBinding {
       );
 
       this.prevDoc = tr.doc;
-      this.editor._applyTransaction(tr);
+      this.editor.applyTransaction(tr);
     });
   };
 

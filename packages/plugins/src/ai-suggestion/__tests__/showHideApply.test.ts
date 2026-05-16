@@ -222,7 +222,7 @@ describe("showHideApply — state consistency", () => {
     editor.showSuggestion(s);
 
     // Manually mark a block stale via transaction
-    editor._applyTransaction(
+    editor.applyTransaction(
       editor.getState().tr.setMeta(AI_SUGGESTION_SET_STALE, new Set(["n1"])),
     );
     expect(editor.suggestionState!.staleBlockIds.size).toBe(1);

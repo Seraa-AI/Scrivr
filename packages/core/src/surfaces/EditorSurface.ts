@@ -60,7 +60,7 @@ export class EditorSurface {
    * Set by SurfaceRegistry during `onCommit()`. While true, `dispatch()`
    * throws — turns silent commit recursion into a loud error.
    */
-  _committing = false;
+  committing = false;
 
   constructor(init: EditorSurfaceInit) {
     this.id = init.id;
@@ -104,10 +104,10 @@ export class EditorSurface {
    *   - onCommit: **forbidden**. Owners dispatch against the flow doc during
    *     commit (persisting via DocAttrStep) — dispatching against the surface
    *     would re-dirty it and spin the commit loop. This is guarded by
-   *     `_committing` and throws a clear error.
+   *     `committing` and throws a clear error.
    */
   dispatch(tr: Transaction): void {
-    if (this._committing) {
+    if (this.committing) {
       throw new Error(
         `[EditorSurface] dispatch() called on "${this.id}" during its own ` +
         `onCommit() — owners must dispatch against the root editor document, not ` +

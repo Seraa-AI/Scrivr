@@ -205,7 +205,7 @@ export function SlashMenu({
     const state = editor.getState();
     const cursor = state.selection.from;
     if (cursor > slashFrom) {
-      editor._applyTransaction(state.tr.delete(slashFrom, cursor));
+      editor.applyTransaction(state.tr.delete(slashFrom, cursor));
     }
     item.action();
     controllerRef.current?.dismissMenu();
