@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { computePosition, offset, flip, shift } from "@floating-ui/dom";
+import type { Placement } from "@floating-ui/dom";
 import type { Editor } from "@scrivr/core";
 import {
   createChangePopover,
@@ -8,16 +8,26 @@ import {
   CHANGE_STATUS,
 } from "@scrivr/plugins";
 import type { ChangePopoverInfo } from "@scrivr/plugins";
+import { cx } from "./classNames";
+import { useFloatingPosition } from "./useFloatingPosition";
 
-interface TrackChangesPopoverProps {
+const TRACK_POPOVER_FALLBACK_PLACEMENTS: Placement[] = ["top-start"];
+
+export interface TrackChangesPopoverProps {
   editor: Editor | null;
+  className?: string | undefined;
+  itemClassName?: string | undefined;
+  iconClassName?: string | undefined;
+  titleClassName?: string | undefined;
+  descriptionClassName?: string | undefined;
 }
 
-export function TrackChangesPopover({ editor }: TrackChangesPopoverProps) {
-  const menuRef = useRef<HTMLDivElement>(null);
+export function useTrackChangesPopover(editor: Editor | null) {
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [info, setInfo] = useState<ChangePopoverInfo | null>(null);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const { ref, position } = useFloatingPosition<HTMLDivElement>(rect, [info], {
+    fallbackPlacements: TRACK_POPOVER_FALLBACK_PLACEMENTS,
+  });
 
   useEffect(() => {
     if (!editor) return;
@@ -33,71 +43,75 @@ export function TrackChangesPopover({ editor }: TrackChangesPopoverProps) {
       onHide: () => {
         setRect(null);
         setInfo(null);
-        setPos(null);
       },
     });
   }, [editor]);
 
-  useEffect(() => {
-    if (!rect || !menuRef.current) return;
-    const virtualEl = {
-      getBoundingClientRect: () => rect,
-      getClientRects: () => [rect] as unknown as DOMRectList,
-    };
-    let cancelled = false;
-    computePosition(virtualEl, menuRef.current, {
-      placement: "bottom-start",
-      middleware: [
-        offset(8),
-        flip({ fallbackPlacements: ["top-start"] }),
-        shift({ padding: 8 }),
-      ],
-    }).then(({ x, y }) => {
-      if (!cancelled) setPos({ x, y });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [rect, info]);
+  function dismiss() {
+    setRect(null);
+    setInfo(null);
+  }
 
-  if (!rect || !info) return null;
+  return {
+    visible: !!rect && !!info,
+    rect,
+    info,
+    position,
+    rootRef: ref,
+    dismiss,
+  };
+}
+
+export function TrackChangesPopover({
+  editor,
+  className,
+  itemClassName,
+  iconClassName,
+  titleClassName,
+  descriptionClassName,
+}: TrackChangesPopoverProps) {
+  const popover = useTrackChangesPopover(editor);
+
+  if (!popover.visible || !popover.info) return null;
 
   return createPortal(
     <div
-      ref={menuRef}
+      ref={popover.rootRef}
+      className={cx("scrivr-menu scrivr-track-popover", className)}
       onMouseDown={(e) => e.preventDefault()}
+      data-active={popover.info.isConflict ? "" : undefined}
       style={{
         position: "fixed",
-        left: pos?.x ?? 0,
-        top: pos?.y ?? 0,
-        zIndex: 60,
-        visibility: pos ? "visible" : "hidden",
-        background: "#fff",
-        border: `1.5px solid ${info.isConflict ? "#f59e0b" : "#e2e8f0"}`,
-        borderRadius: 10,
-        boxShadow: info.isConflict
-          ? "0 6px 24px rgba(245,158,11,0.18)"
-          : "0 4px 16px rgba(0,0,0,0.12)",
-        padding: info.isConflict ? "12px 14px" : "8px 10px",
+        left: popover.position?.x ?? 0,
+        top: popover.position?.y ?? 0,
+        zIndex: "var(--scrivr-react-popover-z, 60)",
+        visibility: popover.position ? "visible" : "hidden",
         display: "flex",
         flexDirection: "column",
-        gap: info.isConflict ? 10 : 8,
-        fontSize: 13,
-        minWidth: info.isConflict ? 320 : 220,
+        gap: popover.info.isConflict ? 10 : 8,
+        minWidth: popover.info.isConflict ? 320 : 220,
         maxWidth: 420,
       }}
     >
-      {info.isConflict ? (
+      {popover.info.isConflict ? (
         <ConflictPopover
-          info={info}
+          info={popover.info}
           editor={editor}
-          onClose={() => setRect(null)}
+          onClose={popover.dismiss}
+          itemClassName={itemClassName}
+          iconClassName={iconClassName}
+          titleClassName={titleClassName}
+          descriptionClassName={descriptionClassName}
         />
       ) : (
         <SingleChangePopover
-          info={info}
+          info={popover.info}
           editor={editor}
-          onClose={() => setRect(null)}
+          onClose={popover.dismiss}
+          itemClassName={itemClassName}
+          iconClassName={iconClassName}
+          titleClassName={titleClassName}
+          descriptionClassName={descriptionClassName}
         />
       )}
     </div>,
@@ -131,53 +145,57 @@ const MARK_LABELS: Record<string, string> = {
   link: "Link",
 };
 
-/** Derive badge label, icon, bg, and text color from ChangePopoverInfo. */
+/** Derive badge label and icon from ChangePopoverInfo. */
 function badgeMeta(info: ChangePopoverInfo): {
   icon: string;
   label: string;
-  bg: string;
-  color: string;
 } {
   const isDelete = info.operation === CHANGE_OPERATION.delete;
 
   if (info.replacedText && info.insertedText) {
-    return { icon: "↔", label: "Replacement", bg: "#ede9fe", color: "#6d28d9" };
+    return { icon: "↔", label: "Replacement" };
   }
   if (info.changeKind === "mark" && info.markName) {
     const name = MARK_LABELS[info.markName] ?? info.markName;
     const icon = MARK_ICONS[info.markName] ?? "M";
     const label = isDelete ? `${name} removed` : `${name} added`;
-    return { icon, label, bg: "#ede9fe", color: "#6d28d9" };
+    return { icon, label };
   }
   if (info.changeKind === "node-attr") {
     return {
       icon: "≡",
       label: "Style changed",
-      bg: "#e0f2fe",
-      color: "#0369a1",
     };
   }
   if (info.changeKind === "node") {
     return isDelete
-      ? { icon: "□−", label: "Block removed", bg: "#fee2e2", color: "#b91c1c" }
-      : { icon: "□+", label: "Block added", bg: "#dcfce7", color: "#15803d" };
+      ? { icon: "□−", label: "Block removed" }
+      : { icon: "□+", label: "Block added" };
   }
   if (info.operation === CHANGE_OPERATION.move) {
-    return { icon: "⇄", label: "Moved", bg: "#fef3c7", color: "#92400e" };
+    return { icon: "⇄", label: "Moved" };
   }
   return isDelete
-    ? { icon: "−", label: "Deletion", bg: "#fee2e2", color: "#b91c1c" }
-    : { icon: "+", label: "Insertion", bg: "#dcfce7", color: "#15803d" };
+    ? { icon: "−", label: "Deletion" }
+    : { icon: "+", label: "Insertion" };
 }
 
 function SingleChangePopover({
   info,
   editor,
   onClose,
+  itemClassName,
+  iconClassName,
+  titleClassName,
+  descriptionClassName,
 }: {
   info: ChangePopoverInfo;
   editor: Editor | null;
   onClose: () => void;
+  itemClassName?: string | undefined;
+  iconClassName?: string | undefined;
+  titleClassName?: string | undefined;
+  descriptionClassName?: string | undefined;
 }) {
   const bm = badgeMeta(info);
   const author = shortName(info.authorID);
@@ -190,10 +208,10 @@ function SingleChangePopover({
   if (info.replacedText && info.insertedText) {
     preview = (
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <div style={textPreview("#fee2e2", "#b91c1c")}>
+        <div className={cx("scrivr-menu-description", descriptionClassName)} data-part="description" style={textPreview}>
           Removing: <em>"{info.replacedText}"</em>
         </div>
-        <div style={textPreview("#f0fdf4", "#15803d")}>
+        <div className={cx("scrivr-menu-description", descriptionClassName)} data-part="description" style={textPreview}>
           Adding: <em>"{info.insertedText}"</em>
         </div>
       </div>
@@ -202,14 +220,14 @@ function SingleChangePopover({
     // text is already the attr diff string ("Heading level: 1 → 2")
     if (info.text) {
       preview = (
-        <div style={textPreview("#e0f2fe", "#0369a1")}>{info.text}</div>
+        <div className={cx("scrivr-menu-description", descriptionClassName)} data-part="description" style={textPreview}>{info.text}</div>
       );
     }
   } else if (info.changeKind === "mark") {
     // Show the affected text without "Adding:" prefix — the badge already says what mark changed.
     if (info.text) {
       preview = (
-        <div style={textPreview("#ede9fe", "#6d28d9")}>
+        <div className={cx("scrivr-menu-description", descriptionClassName)} data-part="description" style={textPreview}>
           <em>"{info.text}"</em>
         </div>
       );
@@ -217,10 +235,9 @@ function SingleChangePopover({
   } else if (info.text) {
     preview = (
       <div
-        style={textPreview(
-          isDelete ? "#fee2e2" : "#f0fdf4",
-          isDelete ? "#b91c1c" : "#15803d",
-        )}
+        className={cx("scrivr-menu-description", descriptionClassName)}
+        data-part="description"
+        style={textPreview}
       >
         {isDelete ? "Removing: " : "Adding: "}
         <em>"{info.text}"</em>
@@ -231,29 +248,34 @@ function SingleChangePopover({
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ ...badge, background: bm.bg, color: bm.color }}>
-          {bm.icon} {bm.label}
+        <span className={cx("scrivr-menu-icon", iconClassName)} data-part="icon" style={badge}>
+          {bm.icon}
         </span>
-        <span style={{ color: "#64748b", fontSize: 12, flex: 1 }}>
+        <span className={cx("scrivr-menu-title", titleClassName)} data-part="title">
+          {bm.label}
+        </span>
+        <span className={cx("scrivr-menu-description", descriptionClassName)} data-part="description" style={{ flex: 1 }}>
           {author}
         </span>
         <button
+          className={cx("scrivr-menu-item", itemClassName)}
           onClick={() => {
             editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, ids);
             onClose();
           }}
-          style={btnStyle("#15803d", "#fff")}
+          style={btnStyle}
         >
-          ✓ Accept
+          Accept
         </button>
         <button
+          className={cx("scrivr-menu-item", itemClassName)}
           onClick={() => {
             editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, ids);
             onClose();
           }}
-          style={btnStyle("#b91c1c", "#fff")}
+          style={btnStyle}
         >
-          ✗ Reject
+          Reject
         </button>
       </div>
       {preview}
@@ -267,10 +289,18 @@ function ConflictPopover({
   info,
   editor,
   onClose,
+  itemClassName,
+  iconClassName,
+  titleClassName,
+  descriptionClassName,
 }: {
   info: ChangePopoverInfo;
   editor: Editor | null;
   onClose: () => void;
+  itemClassName?: string | undefined;
+  iconClassName?: string | undefined;
+  titleClassName?: string | undefined;
+  descriptionClassName?: string | undefined;
 }) {
   const changes =
     info.conflictChanges.length > 0 ? info.conflictChanges : [info];
@@ -295,17 +325,10 @@ function ConflictPopover({
     <>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span
-          style={{
-            ...badge,
-            background: "#fef3c7",
-            color: "#92400e",
-            fontSize: 12,
-          }}
-        >
-          ⚡ Conflict
+        <span className={cx("scrivr-menu-icon", iconClassName)} data-part="icon" style={badge}>
+          Conflict
         </span>
-        <span style={{ fontSize: 12, color: "#78350f", fontWeight: 500 }}>
+        <span className={cx("scrivr-menu-title", titleClassName)} data-part="title">
           {changes.length} conflicting changes — choose how to resolve
         </span>
       </div>
@@ -315,18 +338,11 @@ function ConflictPopover({
         const isDelete = c.operation === CHANGE_OPERATION.delete;
         const author = shortName(c.authorID);
         const actionLabel = isDelete ? "wants to remove" : "wants to add";
-        const accentColor = isDelete ? "#b91c1c" : "#15803d";
-        const bgColor = isDelete ? "#fff5f5" : "#f0fdf4";
-        const borderColor = isDelete ? "#fecaca" : "#bbf7d0";
 
         return (
           <div
             key={c.id}
             style={{
-              border: `1px solid ${borderColor}`,
-              borderRadius: 8,
-              background: bgColor,
-              padding: "8px 10px",
               display: "flex",
               flexDirection: "column",
               gap: 6,
@@ -335,18 +351,16 @@ function ConflictPopover({
             {/* Author + action label */}
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span
-                style={{
-                  ...badge,
-                  background: isDelete ? "#fee2e2" : "#dcfce7",
-                  color: accentColor,
-                }}
+                className={cx("scrivr-menu-icon", iconClassName)}
+                data-part="icon"
+                style={badge}
               >
                 {badgeMeta(c).icon} {badgeMeta(c).label}
               </span>
-              <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 12 }}>
+              <span className={cx("scrivr-menu-title", titleClassName)} data-part="title">
                 {author}
               </span>
-              <span style={{ color: "#64748b", fontSize: 11 }}>
+              <span className={cx("scrivr-menu-description", descriptionClassName)} data-part="description">
                 {actionLabel}
               </span>
             </div>
@@ -354,16 +368,16 @@ function ConflictPopover({
             {/* Text preview */}
             {c.text ? (
               <div
-                style={textPreview(
-                  isDelete ? "#fee2e2" : "#dcfce7",
-                  accentColor,
-                )}
+                className={cx("scrivr-menu-description", descriptionClassName)}
+                data-part="description"
+                style={textPreview}
               >
                 "{c.text}"
               </div>
             ) : (
               <div
-                style={{ fontSize: 11, color: "#94a3b8", fontStyle: "italic" }}
+                className={cx("scrivr-menu-description", descriptionClassName)}
+                data-part="description"
               >
                 {isDelete ? "(paragraph / node deletion)" : "(new content)"}
               </div>
@@ -375,7 +389,8 @@ function ConflictPopover({
             >
               <button
                 onClick={() => acceptOne(c.id)}
-                style={btnStyle(accentColor, "#fff")}
+                className={cx("scrivr-menu-item", itemClassName)}
+                style={btnStyle}
                 title={`Accept ${author}'s ${isDelete ? "deletion" : "insertion"}, reject others`}
               >
                 {isDelete ? "Keep deletion" : "Keep insertion"}
@@ -387,7 +402,8 @@ function ConflictPopover({
                   ]);
                   onClose();
                 }}
-                style={btnStyle("#94a3b8", "#fff")}
+                className={cx("scrivr-menu-item", itemClassName)}
+                style={btnStyle}
                 title={`Reject only ${author}'s change`}
               >
                 Ignore
@@ -406,10 +422,10 @@ function ConflictPopover({
           paddingTop: 2,
         }}
       >
-        <span style={{ fontSize: 11, color: "#94a3b8" }}>
+        <span className={cx("scrivr-menu-description", descriptionClassName)} data-part="description">
           Or reject all changes in this range
         </span>
-        <button onClick={rejectAll} style={btnStyle("#b91c1c", "#fff")}>
+        <button className={cx("scrivr-menu-item", itemClassName)} onClick={rejectAll} style={btnStyle}>
           Reject All
         </button>
       </div>
@@ -429,38 +445,18 @@ const badge = {
   display: "inline-flex",
   alignItems: "center",
   gap: 3,
-  padding: "2px 7px",
-  borderRadius: 99,
-  fontSize: 11,
-  fontWeight: 600,
   flexShrink: 0,
 } as const;
 
-function textPreview(bg: string, color: string) {
-  return {
-    background: bg,
-    color,
-    borderRadius: 4,
-    padding: "4px 8px",
-    fontSize: 12,
-    lineHeight: 1.4,
-    fontFamily: "Georgia, serif",
-    wordBreak: "break-word" as const,
-    maxHeight: 60,
-    overflowY: "auto" as const,
-  };
-}
+const textPreview = {
+  lineHeight: 1.4,
+  wordBreak: "break-word" as const,
+  maxHeight: 60,
+  overflowY: "auto" as const,
+};
 
-function btnStyle(bg: string, color: string) {
-  return {
-    background: bg,
-    color,
-    border: "none",
-    borderRadius: 5,
-    padding: "4px 10px",
-    cursor: "pointer",
-    fontSize: 12,
-    fontWeight: 600,
-    flexShrink: 0,
-  } as const;
-}
+const btnStyle = {
+  border: "none",
+  cursor: "pointer",
+  flexShrink: 0,
+} as const;

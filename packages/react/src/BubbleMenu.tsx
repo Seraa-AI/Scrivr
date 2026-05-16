@@ -10,70 +10,59 @@
  *     <button onMouseDown={(e) => { e.preventDefault(); editor.commands.toggleItalic(); }}>I</button>
  *   </BubbleMenu>
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import { createBubbleMenu } from "@scrivr/core";
 import type { BubbleMenuOptions } from "@scrivr/core";
 import type { Editor } from "@scrivr/core";
+import { useFloatingPosition } from "./useFloatingPosition";
 
-interface BubbleMenuProps {
+export interface BubbleMenuProps {
   editor: Editor | null;
   children: ReactNode;
   /** Override the default shouldShow logic. */
-  shouldShow?: BubbleMenuOptions["shouldShow"];
-  className?: string;
+  shouldShow?: BubbleMenuOptions["shouldShow"] | undefined;
+  className?: string | undefined;
 }
 
-export function BubbleMenu({ editor, children, shouldShow, className }: BubbleMenuProps) {
+export function useBubbleMenu(
+  editor: Editor | null,
+  options: { shouldShow?: BubbleMenuOptions["shouldShow"] | undefined } = {},
+) {
   const [rect, setRect] = useState<DOMRect | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const { ref, position } = useFloatingPosition<HTMLDivElement>(rect, [], {
+    placement: "top",
+  });
 
   useEffect(() => {
     if (!editor) return;
     const opts: BubbleMenuOptions = {
       onShow: setRect,
       onMove: setRect,
-      onHide: () => { setRect(null); setPos(null); },
+      onHide: () => { setRect(null); },
     };
-    if (shouldShow) opts.shouldShow = shouldShow;
+    if (options.shouldShow) opts.shouldShow = options.shouldShow;
     return createBubbleMenu(editor, opts);
-  }, [editor, shouldShow]);
+  }, [editor, options.shouldShow]);
 
-  // Re-position via floating-ui whenever rect changes.
-  // cancelled flag prevents stale promises from overwriting a newer position.
-  useEffect(() => {
-    if (!rect || !menuRef.current) return;
-    let cancelled = false;
+  return { visible: !!rect, rect, position, rootRef: ref };
+}
 
-    const virtualEl = {
-      getBoundingClientRect: () => rect,
-      getClientRects:        () => [rect] as unknown as DOMRectList,
-    };
+export function BubbleMenu({ editor, children, shouldShow, className }: BubbleMenuProps) {
+  const menu = useBubbleMenu(editor, { shouldShow });
 
-    computePosition(virtualEl, menuRef.current, {
-      placement: "top",
-      middleware: [offset(8), flip(), shift({ padding: 8 })],
-    }).then(({ x, y }) => {
-      if (!cancelled) setPos({ x, y });
-    });
-
-    return () => { cancelled = true; };
-  }, [rect]);
-
-  if (!rect) return null;
+  if (!menu.visible) return null;
 
   return createPortal(
     <div
-      ref={menuRef}
+      ref={menu.rootRef}
       className={className}
       style={{
         position: "fixed",
-        left:     pos?.x ?? 0,
-        top:      pos?.y ?? 0,
-        zIndex:   50,
-        visibility: pos ? "visible" : "hidden",
+        left:     menu.position?.x ?? 0,
+        top:      menu.position?.y ?? 0,
+        zIndex:   "var(--scrivr-react-floating-z, 50)",
+        visibility: menu.position ? "visible" : "hidden",
       }}
     >
       {children}

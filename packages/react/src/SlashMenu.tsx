@@ -15,9 +15,10 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import { createSlashMenu } from "@scrivr/core";
 import type { Editor } from "@scrivr/core";
+import { cx } from "./classNames";
+import { useFloatingPosition } from "./useFloatingPosition";
 
 export interface SlashMenuItem {
   /** Short icon label shown in the menu (e.g. "H1", "•"). */
@@ -30,18 +31,27 @@ export interface SlashMenuItem {
   action: () => void;
 }
 
-interface SlashMenuProps {
+export interface SlashMenuProps {
   editor: Editor | null;
   /** Override the default block items. If omitted, a typed default list is built from editor.commands. */
   items?: SlashMenuItem[];
-  className?: string;
+  className?: string | undefined;
+  itemClassName?: string | undefined;
+  iconClassName?: string | undefined;
+  titleClassName?: string | undefined;
+  descriptionClassName?: string | undefined;
+  emptyClassName?: string | undefined;
 }
 
-export function SlashMenu({
-  editor,
-  items: itemsProp,
-  className,
-}: SlashMenuProps) {
+export interface UseSlashMenuOptions {
+  items?: SlashMenuItem[] | undefined;
+}
+
+export function useSlashMenu(
+  editor: Editor | null,
+  options: UseSlashMenuOptions = {},
+) {
+  const itemsProp = options.items;
   const defaultItems = useMemo((): SlashMenuItem[] => {
     if (!editor) return [];
     const c = editor.commands;
@@ -103,25 +113,24 @@ export function SlashMenu({
   const [slashFrom, setSlashFrom] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-
-  const menuRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<ReturnType<typeof createSlashMenu> | null>(null);
-
-  const filtered = query
+  const filteredItems = query
     ? items.filter(
         (it) =>
           it.title.toLowerCase().includes(query.toLowerCase()) ||
           it.description.toLowerCase().includes(query.toLowerCase()),
       )
     : items;
+  const { ref, position } = useFloatingPosition<HTMLDivElement>(
+    rect,
+    [filteredItems.length],
+    { offset: 6 },
+  );
 
-  // Clamp activeIndex when filtered list shrinks
   useEffect(() => {
-    setActiveIndex((i) => Math.min(i, Math.max(0, filtered.length - 1)));
-  }, [filtered.length]);
+    setActiveIndex((i) => Math.min(i, Math.max(0, filteredItems.length - 1)));
+  }, [filteredItems.length]);
 
-  // Mount the controller
   useEffect(() => {
     if (!editor) return;
     const ctrl = createSlashMenu(editor, {
@@ -139,66 +148,16 @@ export function SlashMenu({
       },
       onHide: () => {
         setVisible(false);
-        setPos(null);
+        setRect(null);
       },
     });
     controllerRef.current = ctrl;
     return () => ctrl.cleanup();
   }, [editor]);
 
-  // Reposition via floating-ui whenever rect changes
-  useEffect(() => {
-    if (!rect || !menuRef.current) return;
-    const virtualEl = {
-      getBoundingClientRect: () => rect,
-      getClientRects: () => [rect] as unknown as DOMRectList,
-    };
-    let cancelled = false;
-    computePosition(virtualEl, menuRef.current, {
-      placement: "bottom-start",
-      middleware: [offset(6), flip(), shift({ padding: 8 })],
-    })
-      .then(({ x, y }) => {
-        if (!cancelled) setPos({ x, y });
-      })
-      .catch((err) =>
-        console.error("[SlashMenu] computePosition failed:", err),
-      );
-    return () => {
-      cancelled = true;
-    };
-  }, [rect, filtered.length]);
-
-  // Keyboard navigation — capture phase intercepts before ProseMirror
-  useEffect(() => {
-    if (!visible) return;
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        e.stopPropagation();
-        setActiveIndex((i) => (i + 1) % filtered.length);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        e.stopPropagation();
-        setActiveIndex((i) => (i - 1 + filtered.length) % filtered.length);
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        e.stopPropagation();
-        selectItem(filtered[activeIndex]);
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        controllerRef.current?.dismissMenu();
-      }
-    }
-
-    window.addEventListener("keydown", onKeyDown, { capture: true });
-    return () =>
-      window.removeEventListener("keydown", onKeyDown, { capture: true });
-    // filtered / activeIndex captured via closure — re-attach whenever they change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, activeIndex, filtered]);
+  function dismiss() {
+    controllerRef.current?.dismissMenu();
+  }
 
   function selectItem(item: SlashMenuItem | undefined) {
     if (!item || !editor) return;
@@ -208,69 +167,124 @@ export function SlashMenu({
       editor.applyTransaction(state.tr.delete(slashFrom, cursor));
     }
     item.action();
-    controllerRef.current?.dismissMenu();
+    dismiss();
   }
 
-  if (!visible) return null;
+  useEffect(() => {
+    if (!visible) return;
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (filteredItems.length === 0) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          dismiss();
+        }
+        return;
+      }
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopPropagation();
+        setActiveIndex((i) => (i + 1) % filteredItems.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        setActiveIndex(
+          (i) => (i - 1 + filteredItems.length) % filteredItems.length,
+        );
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        selectItem(filteredItems[activeIndex]);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        dismiss();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", onKeyDown, { capture: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, activeIndex, filteredItems]);
+
+  return {
+    visible,
+    rect,
+    position,
+    query,
+    items: filteredItems,
+    activeIndex,
+    setActiveIndex,
+    rootRef: ref,
+    selectItem,
+    dismiss,
+  };
+}
+
+export function SlashMenu({
+  editor,
+  items: itemsProp,
+  className,
+  itemClassName,
+  iconClassName,
+  titleClassName,
+  descriptionClassName,
+  emptyClassName,
+}: SlashMenuProps) {
+  const menu = useSlashMenu(editor, { items: itemsProp });
+
+  if (!menu.visible) return null;
 
   return createPortal(
     <div
-      ref={menuRef}
-      className={className}
+      ref={menu.rootRef}
+      className={cx("scrivr-menu scrivr-slash-menu", className)}
       style={{
         position: "fixed",
-        left: pos?.x ?? 0,
-        top: pos?.y ?? 0,
-        zIndex: 200,
-        visibility: pos ? "visible" : "hidden",
-        background: "#fff",
-        border: "1px solid #e2e8f0",
-        borderRadius: 10,
-        padding: "6px",
+        left: menu.position?.x ?? 0,
+        top: menu.position?.y ?? 0,
+        zIndex: "var(--scrivr-react-menu-z, 200)",
+        visibility: menu.position ? "visible" : "hidden",
         minWidth: 220,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.14)",
       }}
     >
-      {filtered.length === 0 ? (
-        <div style={{ padding: "8px 12px", color: "#94a3b8", fontSize: 13 }}>
+      {menu.items.length === 0 ? (
+        <div className={cx("scrivr-menu-empty", emptyClassName)} data-empty>
           No matching blocks
         </div>
       ) : (
-        filtered.map((item, i) => (
+        menu.items.map((item, i) => (
           <button
             key={item.title}
+            className={cx("scrivr-menu-item", itemClassName)}
+            data-active={i === menu.activeIndex ? "" : undefined}
             onMouseDown={(e) => {
               e.preventDefault();
-              selectItem(item);
+              menu.selectItem(item);
             }}
-            onMouseEnter={() => setActiveIndex(i)}
+            onMouseEnter={() => menu.setActiveIndex(i)}
             style={{
               display: "flex",
               alignItems: "center",
               gap: 10,
               width: "100%",
-              background: i === activeIndex ? "#f1f5f9" : "transparent",
               border: "none",
-              borderRadius: 6,
-              padding: "6px 8px",
               cursor: "pointer",
               textAlign: "left",
-              transition: "background 0.08s",
             }}
           >
             <span
+              className={cx("scrivr-menu-icon", iconClassName)}
+              data-part="icon"
               style={{
                 width: 28,
                 height: 28,
-                background: "#f8fafc",
-                border: "1px solid #e2e8f0",
-                borderRadius: 5,
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: 11,
-                fontFamily: "monospace",
-                color: "#475569",
                 flexShrink: 0,
               }}
             >
@@ -278,16 +292,19 @@ export function SlashMenu({
             </span>
             <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
               <span
+                className={cx("scrivr-menu-title", titleClassName)}
+                data-part="title"
                 style={{
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: "#1e293b",
                   lineHeight: 1.3,
                 }}
               >
                 {item.title}
               </span>
-              <span style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.3 }}>
+              <span
+                className={cx("scrivr-menu-description", descriptionClassName)}
+                data-part="description"
+                style={{ lineHeight: 1.3 }}
+              >
                 {item.description}
               </span>
             </span>

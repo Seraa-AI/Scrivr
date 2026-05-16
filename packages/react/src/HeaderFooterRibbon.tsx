@@ -20,6 +20,7 @@ import {
   type HeaderFooterController,
   type HeaderFooterState,
 } from "@scrivr/plugins";
+import { cx } from "./classNames";
 
 export interface HeaderFooterRibbonProps {
   editor: Editor | null;
@@ -29,10 +30,21 @@ export interface HeaderFooterRibbonProps {
    * Default: 24 (matches Scrivr's default).
    */
   gap?: number;
-  className?: string;
+  className?: string | undefined;
+  itemClassName?: string | undefined;
+  titleClassName?: string | undefined;
+  descriptionClassName?: string | undefined;
 }
 
-export function HeaderFooterRibbon({ editor, gap = 24, className }: HeaderFooterRibbonProps) {
+export interface HeaderFooterRibbonItem {
+  pageNum: number;
+  label: string;
+  top: number;
+  width: number;
+  isFirstPage: boolean;
+}
+
+export function useHeaderFooterRibbon(editor: Editor | null, gap = 24) {
   const controllerRef = useRef<HeaderFooterController | null>(null);
   const [state, setState] = useState<HeaderFooterState | null>(null);
   const [optionsOpen, setOptionsOpen] = useState<number | null>(null); // page number or null
@@ -83,79 +95,114 @@ export function HeaderFooterRibbon({ editor, gap = 24, className }: HeaderFooter
     setOptionsOpen(null);
   }, []);
 
-  if (!editor || !state?.isSurfaceActive || !state.activeBand) return null;
+  const visible = !!editor && !!state?.isSurfaceActive && !!state.activeBand;
+  const isHeader = state?.activeBand === "header";
+  const differentFirstPage = state?.policy?.differentFirstPage ?? false;
+  const ribbons: HeaderFooterRibbonItem[] = [];
 
-  const layout = editor.layout;
-  const isHeader = state.activeBand === "header";
-  const differentFirstPage = state.policy?.differentFirstPage ?? false;
-  const pageConfig = layout.pageConfig;
-  const pageCount = layout.pages.length;
+  if (editor && visible) {
+    const layout = editor.layout;
+    const pageConfig = layout.pageConfig;
+    const pageCount = layout.pages.length;
+
+    for (let i = 0; i < pageCount; i += 1) {
+      const pageNum = i + 1;
+      const metrics = layout.metrics?.[i];
+      if (!metrics) continue;
+
+      const isFirstPage = pageNum === 1 && differentFirstPage;
+      const label = isHeader
+        ? (isFirstPage ? "First Page Header" : "Header")
+        : (isFirstPage ? "First Page Footer" : "Footer");
+
+      const bandHeight = isHeader ? metrics.headerHeight : metrics.footerHeight;
+      if (bandHeight <= 0) continue;
+
+      const pageOffsetY = i * (pageConfig.pageHeight + gap);
+      const top = isHeader
+        ? pageOffsetY + metrics.contentTop - 28
+        : pageOffsetY + metrics.footerTop - 28;
+
+      ribbons.push({
+        pageNum,
+        label,
+        top,
+        width: pageConfig.pageWidth,
+        isFirstPage,
+      });
+    }
+  }
+
+  return {
+    visible,
+    state,
+    controller: controllerRef.current,
+    isHeader,
+    differentFirstPage,
+    ribbons,
+    optionsOpen,
+    setOptionsOpen,
+    optionsRef,
+    toggleFirstPage: handleToggleFirstPage,
+    removeHeader: handleRemoveHeader,
+    removeFooter: handleRemoveFooter,
+  };
+}
+
+export function HeaderFooterRibbon({
+  editor,
+  gap = 24,
+  className,
+  itemClassName,
+  titleClassName,
+  descriptionClassName,
+}: HeaderFooterRibbonProps) {
+  const ribbon = useHeaderFooterRibbon(editor, gap);
+
+  if (!editor || !ribbon.visible || !ribbon.state) return null;
+  const state = ribbon.state;
 
   return (
     <>
-      {Array.from({ length: pageCount }, (_, i) => {
-        const pageNum = i + 1;
-        const metrics = layout.metrics?.[i];
-        if (!metrics) return null;
-
-        const isFirstPage = pageNum === 1 && differentFirstPage;
-        const label = isHeader
-          ? (isFirstPage ? "First Page Header" : "Header")
-          : (isFirstPage ? "First Page Footer" : "Footer");
-
-        const bandHeight = isHeader ? metrics.headerHeight : metrics.footerHeight;
-        if (bandHeight <= 0) return null;
-
-        const pageOffsetY = i * (pageConfig.pageHeight + gap);
-        // Header ribbon: sits in the margin gap just above body contentTop.
-        // Footer ribbon: sits just above the footer band (at footerTop - ribbon height).
-        const ribbonY = isHeader
-          ? pageOffsetY + metrics.contentTop - 28
-          : pageOffsetY + metrics.footerTop - 28;
-
+      {ribbon.ribbons.map((item) => {
         return (
           <div
-            key={pageNum}
-            className={className}
+            key={item.pageNum}
+            className={cx("scrivr-header-footer-ribbon", className)}
             style={{
               position: "absolute",
-              top: ribbonY,
+              top: item.top,
               left: 0,
-              width: pageConfig.pageWidth,
+              width: item.width,
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
               height: 28,
-              borderTop: "1px solid #e2e8f0",
-              borderBottom: "1px solid #e2e8f0",
-              padding: "0 12px",
-              fontSize: 12,
-              fontFamily: "system-ui, -apple-system, sans-serif",
-              color: "#374151",
-              background: "rgba(255,255,255,0.95)",
               userSelect: "none",
-              zIndex: 10,
+              zIndex: "var(--scrivr-react-ribbon-z, 10)",
               boxSizing: "border-box",
               pointerEvents: "auto",
             }}
             onMouseDown={(e) => e.preventDefault()}
           >
-            <span style={{ fontWeight: 500 }}>{label}</span>
+            <span className={cx("scrivr-menu-title", titleClassName)} data-part="title">
+              {item.label}
+            </span>
 
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
               <label
+                className={cx("scrivr-menu-description", descriptionClassName)}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
                   cursor: "pointer",
-                  fontSize: 12,
                 }}
               >
                 <input
                   type="checkbox"
-                  checked={differentFirstPage}
-                  onChange={handleToggleFirstPage}
+                  checked={ribbon.differentFirstPage}
+                  onChange={ribbon.toggleFirstPage}
                   style={{ margin: 0, cursor: "pointer" }}
                 />
                 Different first page
@@ -164,32 +211,34 @@ export function HeaderFooterRibbon({ editor, gap = 24, className }: HeaderFooter
               {/* Ref only attaches to the page with the open dropdown —
                   click-outside detection via optionsRef.contains() needs
                   exactly one DOM node, not one per page. */}
-              <div ref={optionsOpen === pageNum ? optionsRef : undefined} style={{ position: "relative" }}>
+              <div ref={ribbon.optionsOpen === item.pageNum ? ribbon.optionsRef : undefined} style={{ position: "relative" }}>
                 <button
-                  onClick={() => setOptionsOpen(optionsOpen === pageNum ? null : pageNum)}
+                  className={cx("scrivr-menu-item", itemClassName)}
+                  onClick={() =>
+                    ribbon.setOptionsOpen(
+                      ribbon.optionsOpen === item.pageNum ? null : item.pageNum,
+                    )
+                  }
                   style={{
-                    background: "none",
                     border: "none",
-                    color: "#2563eb",
-                    fontSize: 12,
-                    fontWeight: 500,
                     cursor: "pointer",
-                    padding: "2px 4px",
-                    borderRadius: 4,
                   }}
                 >
                   Options ▾
                 </button>
 
-                {optionsOpen === pageNum && (
+                {ribbon.optionsOpen === item.pageNum && (
                   <OptionsDropdown
-                    isHeader={isHeader}
-                    controller={controllerRef.current}
+                    isHeader={ribbon.isHeader}
+                    controller={ribbon.controller}
                     policy={state.policy}
                     editor={editor}
-                    onClose={() => setOptionsOpen(null)}
-                    onRemoveHeader={handleRemoveHeader}
-                    onRemoveFooter={handleRemoveFooter}
+                    onClose={() => ribbon.setOptionsOpen(null)}
+                    onRemoveHeader={ribbon.removeHeader}
+                    onRemoveFooter={ribbon.removeFooter}
+                    itemClassName={itemClassName}
+                    titleClassName={titleClassName}
+                    descriptionClassName={descriptionClassName}
                   />
                 )}
               </div>
@@ -209,6 +258,9 @@ interface OptionsDropdownProps {
   onClose: () => void;
   onRemoveHeader: () => void;
   onRemoveFooter: () => void;
+  itemClassName?: string | undefined;
+  titleClassName?: string | undefined;
+  descriptionClassName?: string | undefined;
 }
 
 function OptionsDropdown({
@@ -219,6 +271,9 @@ function OptionsDropdown({
   onClose,
   onRemoveHeader,
   onRemoveFooter,
+  itemClassName,
+  titleClassName,
+  descriptionClassName,
 }: OptionsDropdownProps) {
   const slot = isHeader ? policy?.defaultHeader : policy?.defaultFooter;
   const marginTop = slot?.marginTop;
@@ -237,22 +292,17 @@ function OptionsDropdown({
 
   return (
     <div
+      className="scrivr-header-footer-dropdown"
       style={{
         position: "absolute",
         top: "100%",
         right: 0,
         marginTop: 4,
-        background: "#fff",
-        border: "1px solid #e2e8f0",
-        borderRadius: 8,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-        padding: 12,
         minWidth: 200,
-        zIndex: 50,
-        fontSize: 12,
+        zIndex: "var(--scrivr-react-dropdown-z, 50)",
       }}
     >
-      <div style={{ fontWeight: 600, marginBottom: 8, color: "#111827" }}>
+      <div className={cx("scrivr-menu-title", titleClassName)} data-part="title">
         {isHeader ? "Header" : "Footer"} options
       </div>
 
@@ -262,6 +312,7 @@ function OptionsDropdown({
           value={marginTop}
           placeholder="default"
           onChange={(v) => handleMarginChange("marginTop", v)}
+          descriptionClassName={descriptionClassName}
         />
       )}
 
@@ -271,6 +322,7 @@ function OptionsDropdown({
           value={marginBottom}
           placeholder="default"
           onChange={(v) => handleMarginChange("marginBottom", v)}
+          descriptionClassName={descriptionClassName}
         />
       )}
 
@@ -279,25 +331,23 @@ function OptionsDropdown({
         value={margin}
         placeholder="12"
         onChange={(v) => handleMarginChange("margin", v)}
+        descriptionClassName={descriptionClassName}
       />
 
-      <div style={{ borderTop: "1px solid #f1f5f9", marginTop: 8, paddingTop: 8 }}>
-        <div style={{ fontWeight: 600, marginBottom: 6, color: "#111827" }}>Insert</div>
-        <InsertButton label="Page number" onClick={() => { editor.commands.insertPageNumber(); onClose(); }} />
-        <InsertButton label="Total pages" onClick={() => { editor.commands.insertTotalPages(); onClose(); }} />
-        <InsertButton label="Date" onClick={() => { editor.commands.insertDate(); onClose(); }} />
+      <div className="scrivr-header-footer-section">
+        <div className={cx("scrivr-menu-title", titleClassName)} data-part="title">Insert</div>
+        <InsertButton label="Page number" className={itemClassName} onClick={() => { editor.commands.insertPageNumber(); onClose(); }} />
+        <InsertButton label="Total pages" className={itemClassName} onClick={() => { editor.commands.insertTotalPages(); onClose(); }} />
+        <InsertButton label="Date" className={itemClassName} onClick={() => { editor.commands.insertDate(); onClose(); }} />
       </div>
 
-      <div style={{ borderTop: "1px solid #f1f5f9", marginTop: 8, paddingTop: 8 }}>
+      <div className="scrivr-header-footer-section">
         <button
+          className={cx("scrivr-menu-item", itemClassName)}
           onClick={isHeader ? onRemoveHeader : onRemoveFooter}
           style={{
-            background: "none",
             border: "none",
-            color: "#dc2626",
-            fontSize: 12,
             cursor: "pointer",
-            padding: "4px 0",
             width: "100%",
             textAlign: "left",
           }}
@@ -309,21 +359,26 @@ function OptionsDropdown({
   );
 }
 
-function InsertButton({ label, onClick }: { label: string; onClick: () => void }) {
+function InsertButton({
+  label,
+  className,
+  onClick,
+}: {
+  label: string;
+  className?: string | undefined;
+  onClick: () => void;
+}) {
   return (
     <button
+      className={cx("scrivr-menu-item", className)}
       onClick={onClick}
       onMouseDown={(e) => e.preventDefault()}
       style={{
         display: "block",
         width: "100%",
         textAlign: "left",
-        background: "none",
         border: "none",
-        fontSize: 12,
-        color: "#374151",
         cursor: "pointer",
-        padding: "4px 0",
       }}
     >
       {label}
@@ -336,12 +391,21 @@ interface MarginInputProps {
   value: number | undefined;
   placeholder: string;
   onChange: (value: string) => void;
+  descriptionClassName?: string | undefined;
 }
 
-function MarginInput({ label, value, placeholder, onChange }: MarginInputProps) {
+function MarginInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+  descriptionClassName,
+}: MarginInputProps) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-      <span style={{ color: "#6b7280" }}>{label}</span>
+      <span className={cx("scrivr-menu-description", descriptionClassName)} data-part="description">
+        {label}
+      </span>
       <input
         type="number"
         min={0}
@@ -350,10 +414,6 @@ function MarginInput({ label, value, placeholder, onChange }: MarginInputProps) 
         onChange={(e) => onChange(e.target.value)}
         style={{
           width: 60,
-          padding: "3px 6px",
-          border: "1px solid #d1d5db",
-          borderRadius: 4,
-          fontSize: 12,
           textAlign: "right",
         }}
       />

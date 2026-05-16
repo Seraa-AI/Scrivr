@@ -8,32 +8,37 @@
  * @example
  *   <ImageMenu editor={editor} />
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import { createImageMenu } from "@scrivr/core";
 import type { ImageMenuInfo } from "@scrivr/core";
 import type { Editor } from "@scrivr/core";
+import { cx } from "./classNames";
+import { useFloatingPosition } from "./useFloatingPosition";
 
-interface ImageMenuProps {
+export interface ImageMenuProps {
   editor: Editor | null;
+  className?: string | undefined;
+  itemClassName?: string | undefined;
+  titleClassName?: string | undefined;
+  descriptionClassName?: string | undefined;
 }
 
-type VerticalAlign =
+export type ImageVerticalAlign =
   | "baseline"
   | "middle"
   | "top"
   | "bottom"
   | "text-top"
   | "text-bottom";
-type WrappingMode =
+export type ImageWrappingMode =
   | "inline"
   | "square"
   | "top-bottom"
   | "behind"
   | "front";
 
-const ALIGN_OPTIONS: { value: VerticalAlign; label: string; title: string }[] =
+const ALIGN_OPTIONS: { value: ImageVerticalAlign; label: string; title: string }[] =
   [
     {
       value: "baseline",
@@ -63,7 +68,7 @@ const ALIGN_OPTIONS: { value: VerticalAlign; label: string; title: string }[] =
     },
   ];
 
-const WRAP_OPTIONS: { value: WrappingMode; label: string; title: string }[] = [
+const WRAP_OPTIONS: { value: ImageWrappingMode; label: string; title: string }[] = [
   { value: "inline", label: "In line", title: "Image sits inline with text" },
   {
     value: "square",
@@ -79,14 +84,14 @@ const WRAP_OPTIONS: { value: WrappingMode; label: string; title: string }[] = [
   { value: "front", label: "Front", title: "Image floats in front of text" },
 ];
 
-export function ImageMenu({ editor }: ImageMenuProps) {
+export function useImageMenu(editor: Editor | null) {
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [info, setInfo] = useState<ImageMenuInfo | null>(null);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const [width, setWidth] = useState("");
   const [height, setHeight] = useState("");
-  const [wrappingMode, setWrappingMode] = useState<WrappingMode>("inline");
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [wrappingMode, setWrappingMode] =
+    useState<ImageWrappingMode>("inline");
+  const { ref, position } = useFloatingPosition<HTMLDivElement>(rect);
 
   useEffect(() => {
     if (!editor) return;
@@ -106,101 +111,107 @@ export function ImageMenu({ editor }: ImageMenuProps) {
       onHide: () => {
         setRect(null);
         setInfo(null);
-        setPos(null);
       },
     });
   }, [editor]);
 
-  // Reposition the popover whenever rect or menu size changes.
-  // The `cancelled` flag prevents stale computePosition promises (from a
-  // previous rect) from overwriting the position after a newer rect arrives.
-  useEffect(() => {
-    if (!rect || !menuRef.current) return;
-    let cancelled = false;
-    const virtualEl = {
-      getBoundingClientRect: () => rect,
-      getClientRects: () => [rect] as unknown as DOMRectList,
-    };
-    computePosition(virtualEl, menuRef.current, {
-      placement: "bottom-start",
-      middleware: [offset(8), flip(), shift({ padding: 8 })],
-    }).then(({ x, y }) => {
-      if (!cancelled) setPos({ x, y });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [rect]);
-
-  if (!rect || !info) return null;
-
   const currentAlign =
-    (info.node.attrs["verticalAlign"] as VerticalAlign) ?? "baseline";
-  const isFloat = wrappingMode !== "inline";
+    (info?.node.attrs["verticalAlign"] as ImageVerticalAlign | undefined) ??
+    "baseline";
 
   function applyAttr(attrs: Record<string, unknown>) {
     if (!editor || !info) return;
     editor.setNodeAttrs(info.docPos, attrs);
   }
 
-  function handleWidthBlur() {
+  function commitDimensions() {
     const w = parseInt(width, 10);
     const h = parseInt(height, 10);
     if (w > 0 && h > 0) applyAttr({ width: w, height: h });
   }
 
-  function handleAlignChange(align: VerticalAlign) {
+  function setAlign(align: ImageVerticalAlign) {
     applyAttr({ verticalAlign: align });
   }
 
-  function handleWrapChange(mode: WrappingMode) {
+  function setWrapMode(mode: ImageWrappingMode) {
     setWrappingMode(mode);
     if (mode === "inline" && wrappingMode !== "inline") {
-      editor?.convertImageToInlineAtVisualPosition(info!.docPos);
+      if (info) editor?.convertImageToInlineAtVisualPosition(info.docPos);
       return;
     }
     applyAttr({ wrapMode: mode, wrappingMode: "inline" });
   }
 
+  return {
+    visible: !!rect && !!info,
+    rect,
+    info,
+    position,
+    rootRef: ref,
+    width,
+    height,
+    setWidth,
+    setHeight,
+    wrappingMode,
+    currentAlign,
+    isFloat: wrappingMode !== "inline",
+    alignOptions: ALIGN_OPTIONS,
+    wrapOptions: WRAP_OPTIONS,
+    commitDimensions,
+    setAlign,
+    setWrapMode,
+  };
+}
+
+export function ImageMenu({
+  editor,
+  className,
+  itemClassName,
+  titleClassName,
+  descriptionClassName,
+}: ImageMenuProps) {
+  const menu = useImageMenu(editor);
+
+  if (!menu.visible) return null;
+
   return createPortal(
     <div
-      ref={menuRef}
+      ref={menu.rootRef}
+      className={cx("scrivr-menu scrivr-image-menu", className)}
       onMouseDown={(e) => e.preventDefault()}
       style={{
         position: "fixed",
-        left: pos?.x ?? 0,
-        top: pos?.y ?? 0,
-        zIndex: 60,
-        visibility: pos ? "visible" : "hidden",
-        background: "#fff",
-        border: "1px solid #e2e8f0",
-        borderRadius: 10,
-        boxShadow: "0 4px 20px rgba(0,0,0,0.13)",
-        padding: "8px 10px",
+        left: menu.position?.x ?? 0,
+        top: menu.position?.y ?? 0,
+        zIndex: "var(--scrivr-react-popover-z, 60)",
+        visibility: menu.position ? "visible" : "hidden",
         display: "flex",
         flexDirection: "column",
         alignItems: "stretch",
         gap: 6,
-        fontSize: 13,
         whiteSpace: "nowrap",
         userSelect: "none",
       }}
     >
       {/* Layout / wrapping mode */}
       <div style={styles.group}>
-        <span style={styles.label}>Layout</span>
+        <span className={cx("scrivr-menu-title", titleClassName)} data-part="title" style={styles.label}>
+          Layout
+        </span>
         <div style={styles.segmented}>
-          {WRAP_OPTIONS.map(({ value, label, title }) => (
+          {menu.wrapOptions.map(({ value, label, title }) => (
             <button
               key={value}
+              className={cx("scrivr-menu-item", itemClassName)}
+              data-selected={menu.wrappingMode === value ? "" : undefined}
               title={title}
               onMouseDown={(e) => {
                 e.preventDefault();
-                handleWrapChange(value);
+                menu.setWrapMode(value);
               }}
               style={{
                 ...styles.segBtn,
-                ...(wrappingMode === value ? styles.segBtnActive : {}),
               }}
             >
               {label}
@@ -210,23 +221,26 @@ export function ImageMenu({ editor }: ImageMenuProps) {
       </div>
 
       {/* Vertical alignment — only shown when image is inline */}
-      {!isFloat && (
+      {!menu.isFloat && (
         <>
           <div style={styles.divider} />
           <div style={styles.group}>
-            <span style={styles.label}>Align</span>
+            <span className={cx("scrivr-menu-title", titleClassName)} data-part="title" style={styles.label}>
+              Align
+            </span>
             <div style={styles.segmented}>
-              {ALIGN_OPTIONS.map(({ value, label, title }) => (
+              {menu.alignOptions.map(({ value, label, title }) => (
                 <button
                   key={value}
+                  className={cx("scrivr-menu-item", itemClassName)}
+                  data-selected={menu.currentAlign === value ? "" : undefined}
                   title={title}
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    handleAlignChange(value);
+                    menu.setAlign(value);
                   }}
                   style={{
                     ...styles.segBtn,
-                    ...(currentAlign === value ? styles.segBtnActive : {}),
                   }}
                 >
                   {label}
@@ -241,35 +255,43 @@ export function ImageMenu({ editor }: ImageMenuProps) {
 
       {/* Dimensions */}
       <div style={styles.group}>
-        <span style={styles.label}>W</span>
+        <span className={cx("scrivr-menu-title", titleClassName)} data-part="title" style={styles.label}>
+          W
+        </span>
         <input
-          value={width}
-          onChange={(e) => setWidth(e.target.value)}
-          onBlur={handleWidthBlur}
+          value={menu.width}
+          onChange={(e) => menu.setWidth(e.target.value)}
+          onBlur={menu.commitDimensions}
           onKeyDown={(e) => {
-            if (e.key === "Enter") handleWidthBlur();
+            if (e.key === "Enter") menu.commitDimensions();
           }}
           style={styles.dimInput}
         />
-        <span style={{ color: "#94a3b8" }}>×</span>
-        <span style={styles.label}>H</span>
+        <span className={cx("scrivr-menu-description", descriptionClassName)} data-part="description">
+          x
+        </span>
+        <span className={cx("scrivr-menu-title", titleClassName)} data-part="title" style={styles.label}>
+          H
+        </span>
         <input
-          value={height}
-          onChange={(e) => setHeight(e.target.value)}
-          onBlur={handleWidthBlur}
+          value={menu.height}
+          onChange={(e) => menu.setHeight(e.target.value)}
+          onBlur={menu.commitDimensions}
           onKeyDown={(e) => {
-            if (e.key === "Enter") handleWidthBlur();
+            if (e.key === "Enter") menu.commitDimensions();
           }}
           style={styles.dimInput}
         />
-        <span style={{ color: "#94a3b8", fontSize: 11 }}>px</span>
+        <span className={cx("scrivr-menu-description", descriptionClassName)} data-part="description">
+          px
+        </span>
       </div>
     </div>,
     document.body,
   );
 }
 
-function resolveWrappingMode(attrs: Record<string, unknown>): WrappingMode {
+function resolveWrappingMode(attrs: Record<string, unknown>): ImageWrappingMode {
   const wrapMode = attrs["wrapMode"];
   if (
     wrapMode === "square" ||
@@ -301,43 +323,22 @@ const styles = {
     gap: 4,
   },
   label: {
-    fontSize: 11,
-    color: "#64748b",
-    fontWeight: 500,
   },
   segmented: {
     display: "flex",
-    border: "1px solid #e2e8f0",
-    borderRadius: 6,
     overflow: "hidden",
   },
   segBtn: {
-    background: "transparent",
     border: "none",
-    borderRight: "1px solid #e2e8f0",
-    padding: "3px 8px",
     cursor: "pointer",
-    fontSize: 12,
-    color: "#374151",
     lineHeight: 1.4,
-  },
-  segBtnActive: {
-    background: "#1a73e8",
-    color: "#fff",
   },
   divider: {
     width: "100%",
     height: 1,
-    background: "#e2e8f0",
   },
   dimInput: {
     width: 44,
-    border: "1px solid #e2e8f0",
-    borderRadius: 4,
-    padding: "2px 5px",
-    fontSize: 12,
     textAlign: "center" as const,
-    outline: "none",
-    color: "#1e293b",
   },
 } as const;
