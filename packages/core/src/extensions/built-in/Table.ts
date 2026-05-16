@@ -3,9 +3,10 @@ import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
 import { TableRowStrategy } from "../../layout/TableRowStrategy";
+import { tableIntegrityPlugin } from "../../table/normalize";
 
 /**
- * Table extension — Phase 1 scope.
+ * Table extension.
  *
  * What lands now:
  *   - Word-shaped schema for `table` / `tableRow` / `tableCell` / `tableHeader`.
@@ -13,14 +14,16 @@ import { TableRowStrategy } from "../../layout/TableRowStrategy";
  *   - Placeholder canvas rendering via `TableRowStrategy` (one bordered box
  *     per row).
  *   - PageLayout dispatches each row as an atomic block (whole-row pagination).
+ *   - `tableIntegrityPlugin()` — document-validity normalization on every
+ *     doc-changing transaction (grid/gridSpan/vMerge repair, row padding).
  *
  * What is intentionally deferred:
- *   - TableMap, normalization plugin, editing-guards plugin (Phase 2 / 5).
- *   - Add/delete row/column commands, merge/split, header toggle (Phase 3 / 6).
- *   - Real cell layout, cell content rendering, PDF parity (Phase 4).
- *   - HTML paste round-trip, DOCX export (Phase 7 / 8).
- *
- * See `docs/tables.md` for the full plan.
+ *   - Editing-UX guards plugin (cross-cell selection promotion, Tab/Backspace
+ *     semantics) — lands in a separate plugin so the two concerns stay
+ *     testable in isolation.
+ *   - Add/delete row/column commands, merge/split, header toggle.
+ *   - Real cell layout, cell content rendering, PDF parity.
+ *   - HTML paste round-trip, DOCX export.
  */
 
 const DEFAULT_COLUMN_WIDTH = 100; // CSS px — uniform default; resizing arrives in Phase 9.
@@ -200,6 +203,10 @@ export const Table = Extension.create({
       insertTable: (args: unknown) => insertTableCommand(args),
       deleteTable: () => deleteTableCommand(),
     };
+  },
+
+  addProseMirrorPlugins() {
+    return [tableIntegrityPlugin()];
   },
 
   addLayoutHandlers() {
