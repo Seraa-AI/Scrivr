@@ -49,22 +49,22 @@ export interface BaseEditorOptions {
  * once all infrastructure (including view infrastructure for `Editor`) is set up.
  */
 export class BaseEditor implements IBaseEditor {
-  protected readonly _manager: ExtensionManager;
+  protected readonly manager: ExtensionManager;
   /**
-   * The flow document's state.
+   * The root editor's state.
    *
-   * Flow-is-identity invariant (load-bearing): this field MUST always
-   * reference the flow document. Never reassign it to an active
+   * Root-is-identity invariant (load-bearing): this field MUST always
+   * reference the root editor document. Never reassign it to an active
    * EditorSurface's state. Input routing is re-targeted at the Editor level
    * via wrapped `getState` callbacks; document identity lives here and must
    * not move. Save hooks, commands, subscribers, and collaborative adapters
    * all read through this — if it ever points at a surface they silently
    * target the wrong document.
    */
-  protected _state: EditorState;
+  protected editorState: EditorState;
 
-  private _readOnly = false;
-  private readonly _listeners = new Set<() => void>();
+  private readOnlyValue = false;
+  private readonly listeners = new Set<() => void>();
 
   /**
    * Bound command map. Type is `SafeFlatCommands` — augment
@@ -78,48 +78,48 @@ export class BaseEditor implements IBaseEditor {
    */
   readonly storage: ExtensionStorage = {} as ExtensionStorage;
 
-  private readonly _eventHandlers = new Map<
+  private readonly eventHandlers = new Map<
     keyof EditorEvents,
     Set<(payload: EditorEvents[keyof EditorEvents]) => void>
   >();
 
-  protected _editorReadyCleanup: Array<() => void> = [];
+  protected editorReadyCleanup: Array<() => void> = [];
 
   constructor({ extensions = [StarterKit], content }: BaseEditorOptions = {}) {
-    this._manager = new ExtensionManager(extensions);
+    this.manager = new ExtensionManager(extensions);
 
     const initialDoc =
       typeof content === "string"
         ? parseMarkdownToDoc(
-            this._manager.schema,
-            this._manager.buildMarkdownParserTokens(),
+            this.manager.schema,
+            this.manager.buildMarkdownParserTokens(),
             content,
           )
         : content != null
-          ? this._manager.schema.nodeFromJSON(content)
-          : this._manager.buildInitialDoc();
+          ? this.manager.schema.nodeFromJSON(content)
+          : this.manager.buildInitialDoc();
 
-    this._state = EditorState.create({
-      schema: this._manager.schema,
-      plugins: this._manager.buildPlugins(),
+    this.editorState = EditorState.create({
+      schema: this.manager.schema,
+      plugins: this.manager.buildPlugins(),
       ...(initialDoc ? { doc: initialDoc } : {}),
     });
 
-    this.commands = this._buildCommands();
+    this.commands = this.buildCommands();
   }
 
   /** The merged ProseMirror Schema built from all extensions. */
   get schema(): Schema {
-    return this._manager.schema;
+    return this.manager.schema;
   }
 
   getState(): EditorState {
-    return this._state;
+    return this.editorState;
   }
 
   /** True when the editor is in read-only / view mode. */
   get readOnly(): boolean {
-    return this._readOnly;
+    return this.readOnlyValue;
   }
 
   /**
@@ -129,22 +129,22 @@ export class BaseEditor implements IBaseEditor {
    * Subclasses (Editor) override this to also gate InputBridge + CursorManager.
    */
   setReadOnly(value: boolean): void {
-    if (this._readOnly === value) return;
-    this._readOnly = value;
-    this._notifyListeners();
+    if (this.readOnlyValue === value) return;
+    this.readOnlyValue = value;
+    this.notifyListeners();
   }
 
   /** Merge attrs into the node at docPos. No-op if no node exists there. */
   setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void {
-    const node = this._state.doc.nodeAt(docPos);
+    const node = this.editorState.doc.nodeAt(docPos);
     if (!node) return;
     this._applyTransaction(
-      this._state.tr.setNodeMarkup(docPos, undefined, { ...node.attrs, ...attrs }),
+      this.editorState.tr.setNodeMarkup(docPos, undefined, { ...node.attrs, ...attrs }),
     );
   }
 
   _applyTransaction(tr: Transaction): void {
-    this._applyState(tr);
+    this.applyState(tr);
   }
 
   /**
@@ -164,12 +164,12 @@ export class BaseEditor implements IBaseEditor {
   }
 
   getMarkdown(): string {
-    return this.getMarkdownSerializer().serialize(this._state.doc);
+    return this.getMarkdownSerializer().serialize(this.editorState.doc);
   }
 
   subscribe(listener: () => void): () => void {
-    this._listeners.add(listener);
-    return () => this._listeners.delete(listener);
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   /**
@@ -182,10 +182,10 @@ export class BaseEditor implements IBaseEditor {
     event: K,
     handler: (payload: EditorEvents[K]) => void,
   ): () => void {
-    if (!this._eventHandlers.has(event)) {
-      this._eventHandlers.set(event, new Set());
+    if (!this.eventHandlers.has(event)) {
+      this.eventHandlers.set(event, new Set());
     }
-    const handlers = this._eventHandlers.get(event)!;
+    const handlers = this.eventHandlers.get(event)!;
     handlers.add(handler as (p: EditorEvents[keyof EditorEvents]) => void);
     return () => this.off(event, handler);
   }
@@ -195,28 +195,28 @@ export class BaseEditor implements IBaseEditor {
     event: K,
     handler: (payload: EditorEvents[K]) => void,
   ): void {
-    this._eventHandlers
+    this.eventHandlers
       .get(event)
       ?.delete(handler as (p: EditorEvents[keyof EditorEvents]) => void);
   }
 
   /** Emit a typed editor event. Called internally — extensions may also call this. */
   emit<K extends keyof EditorEvents>(event: K, payload: EditorEvents[K]): void {
-    this._eventHandlers.get(event)?.forEach((h) => h(payload));
+    this.eventHandlers.get(event)?.forEach((h) => h(payload));
   }
 
   getExportContributions(): ExportContributionMap[] {
-    return this._manager.getExportContributions();
+    return this.manager.getExportContributions();
   }
 
   getMarkdownSerializer(): MarkdownSerializer {
-    const { nodes, marks } = this._manager.buildMarkdownSerializerRules();
+    const { nodes, marks } = this.manager.buildMarkdownSerializerRules();
     return new MarkdownSerializer(nodes, marks);
   }
 
   /** Returns the merged markdown parser token map from all extensions. */
   getMarkdownParserTokens(): Record<string, import("./extensions/types").MarkdownParserTokenSpec> {
-    return this._manager.buildMarkdownParserTokens();
+    return this.manager.buildMarkdownParserTokens();
   }
 
   /**
@@ -232,12 +232,12 @@ export class BaseEditor implements IBaseEditor {
 
   /** Plain text content of the document. */
   getText(): string {
-    return this._state.doc.textContent;
+    return this.editorState.doc.textContent;
   }
 
   /** Serialize the document to ProseMirror JSON. */
   toJSON(): Record<string, unknown> {
-    return this._state.doc.toJSON() as Record<string, unknown>;
+    return this.editorState.doc.toJSON() as Record<string, unknown>;
   }
 
   /**
@@ -247,7 +247,7 @@ export class BaseEditor implements IBaseEditor {
    * - Range selection: a mark is active only if it spans every text node in the range.
    */
   getActiveMarks(): string[] {
-    const state = this._getActiveState();
+    const state = this.getActiveState();
     const { selection, storedMarks } = state;
     const { from, to, empty } = selection;
 
@@ -275,7 +275,7 @@ export class BaseEditor implements IBaseEditor {
    * For a range selection, only marks active across the entire range are included.
    */
   getActiveMarkAttrs(): Record<string, Record<string, unknown>> {
-    const state = this._getActiveState();
+    const state = this.getActiveState();
     const { selection, storedMarks } = state;
     const { from, to, empty } = selection;
     const result: Record<string, Record<string, unknown>> = {};
@@ -301,7 +301,7 @@ export class BaseEditor implements IBaseEditor {
   }
 
   getBlockInfo(): { blockType: string; blockAttrs: Record<string, unknown> } {
-    const { $from } = this._getActiveState().selection;
+    const { $from } = this.getActiveState().selection;
     for (let d = 1; d <= $from.depth; d++) {
       const node = $from.node(d);
       if (node.isBlock && d === 1) {
@@ -339,10 +339,10 @@ export class BaseEditor implements IBaseEditor {
 
   destroy(): void {
     this.emit("destroy", undefined as EditorEvents["destroy"]);
-    for (const cleanup of this._editorReadyCleanup) cleanup();
-    this._editorReadyCleanup = [];
-    this._eventHandlers.clear();
-    this._listeners.clear();
+    for (const cleanup of this.editorReadyCleanup) cleanup();
+    this.editorReadyCleanup = [];
+    this.eventHandlers.clear();
+    this.listeners.clear();
   }
 
   // ── Protected helpers ────────────────────────────────────────────────────────
@@ -351,14 +351,14 @@ export class BaseEditor implements IBaseEditor {
    * Apply a transaction to state, emit "update", and notify subscribers.
    * Called by `_applyTransaction` (base) and `dispatch` (in Editor).
    */
-  protected _applyState(tr: Transaction): void {
-    this._state = this._state.apply(tr);
+  protected applyState(tr: Transaction): void {
+    this.editorState = this.editorState.apply(tr);
     this.emit("update", { docChanged: tr.docChanged });
-    this._notifyListeners();
+    this.notifyListeners();
   }
 
-  protected _notifyListeners(): void {
-    this._listeners.forEach((l) => l());
+  protected notifyListeners(): void {
+    this.listeners.forEach((l) => l());
   }
 
   /**
@@ -366,9 +366,9 @@ export class BaseEditor implements IBaseEditor {
    * Subclasses call this at the END of their own constructor, after all
    * infrastructure (including view infrastructure) is initialised.
    */
-  protected _fireEditorReady(): void {
-    const callbacks = this._manager.buildEditorReadyCallbacks();
-    this._editorReadyCleanup = callbacks
+  protected fireEditorReady(): void {
+    const callbacks = this.manager.buildEditorReadyCallbacks();
+    this.editorReadyCleanup = callbacks
       .map((cb) => cb(this))
       .filter((fn): fn is () => void => typeof fn === "function");
   }
@@ -378,25 +378,25 @@ export class BaseEditor implements IBaseEditor {
    * `BaseEditor` routes through `_applyTransaction` (no view side-effects).
    * `Editor` overrides this to route through `dispatch()` (full view updates).
    */
-  protected _dispatchToActive(tr: Transaction): void {
+  protected dispatchToActive(tr: Transaction): void {
     this._applyTransaction(tr);
   }
 
   // ── Private ──────────────────────────────────────────────────────────────────
 
   /** State for the active editing target — body or surface. Editor overrides to route. */
-  protected _getActiveState(): EditorState {
-    return this._state;
+  protected getActiveState(): EditorState {
+    return this.editorState;
   }
 
-  private _buildCommands(): SafeFlatCommands {
-    const rawCommands = this._manager.buildCommands();
+  private buildCommands(): SafeFlatCommands {
+    const rawCommands = this.manager.buildCommands();
     const bound: Record<string, (...args: unknown[]) => void> = {};
     for (const [name, factory] of Object.entries(rawCommands)) {
       bound[name] = (...args: unknown[]) => {
-        if (this._readOnly) return;
+        if (this.readOnlyValue) return;
         const cmd = factory(...args);
-        cmd(this._getActiveState(), (tr) => this._dispatchToActive(tr));
+        cmd(this.getActiveState(), (tr) => this.dispatchToActive(tr));
       };
     }
     return bound as SafeFlatCommands;

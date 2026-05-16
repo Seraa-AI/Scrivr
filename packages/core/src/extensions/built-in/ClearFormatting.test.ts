@@ -147,7 +147,7 @@ describe("ClearFormatting", () => {
 
   it("Mod-\\ shortcut is registered", () => {
     const editor = makeEditor();
-    const keymap = editor["_manager"].buildKeymap();
+    const keymap = editor["manager"].buildKeymap();
     expect("Mod-\\" in keymap).toBe(true);
   });
 

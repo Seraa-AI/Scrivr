@@ -177,8 +177,8 @@ export class TileManager {
   private readonly smallTileHeight: number;
   private readonly pageStyle: Partial<CSSStyleDeclaration>;
   private resizeObserver: ResizeObserver | null = null;
-  private _firstPaintDone = false;
-  private _unwatchDpr: (() => void) | null = null;
+  private firstPaintDone = false;
+  private unwatchDpr: (() => void) | null = null;
   private readonly pointer: PointerController;
 
   constructor(
@@ -242,7 +242,7 @@ export class TileManager {
     this.unsubscribe = editor.subscribe(() => this.scheduleUpdate());
 
     // ── DPR change detection (browser zoom, display switch, pinch-to-zoom) ──
-    this._unwatchDpr = watchDpr(() => {
+    this.unwatchDpr = watchDpr(() => {
       // Force full repaint of all tiles at the new DPR
       for (const tile of this.pool) {
         tile.lastPaintedVersion = -1;
@@ -429,7 +429,7 @@ export class TileManager {
     const pageNumber = tile.tileIndex + 1; // 1-based
     this.editor.ensurePagePopulated(pageNumber);
 
-    if (!this._firstPaintDone) {
+    if (!this.firstPaintDone) {
       performance.mark("scrivr:first-paint-start");
     }
 
@@ -443,14 +443,14 @@ export class TileManager {
     tile.lastPaintedVersion = version;
     tile.lastRenderGeneration = renderGen;
 
-    if (!this._firstPaintDone) {
+    if (!this.firstPaintDone) {
       performance.mark("scrivr:first-paint-end");
       performance.measure(
         "scrivr:first-paint (tile manager)",
         "scrivr:first-paint-start",
         "scrivr:first-paint-end",
       );
-      this._firstPaintDone = true;
+      this.firstPaintDone = true;
     }
   }
 
@@ -879,7 +879,7 @@ export class TileManager {
   destroy(): void {
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
     this.unsubscribe?.();
-    this._unwatchDpr?.();
+    this.unwatchDpr?.();
     this.scrollParent?.removeEventListener("scroll", this.handleScroll);
     this.resizeObserver?.disconnect();
     this.pointer.detach();

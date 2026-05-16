@@ -96,32 +96,32 @@ describe("routing — surface-active", () => {
   });
 });
 
-// ── Invariant 5: editor.state always returns flow state ──────────────────────
+// ── Invariant 5: editor.getState() always returns root editor state ─────────
 
-describe("routing — Invariant 5 (editor.state is flow-bound)", () => {
-  it("editor.getState() returns flow state while a surface is active", () => {
+describe("routing — Invariant 5 (editor.getState() is root-bound)", () => {
+  it("editor.getState() returns root editor state while a surface is active", () => {
     const { editor, type, cleanup } = mountEditor();
-    type("flow content");
-    const flowState = editor.getState();
+    type("root content");
+    const rootState = editor.getState();
 
     const surface = makeSurface(editor, "test:1", "test");
     editor.surfaces.register(surface);
     editor.surfaces.activate("test:1");
 
-    // editor.getState() should return the flow state unchanged.
-    expect(editor.getState()).toBe(flowState);
-    expect(editor.getState().doc.textContent).toBe("flow content");
+    // editor.getState() should return the root state unchanged.
+    expect(editor.getState()).toBe(rootState);
+    expect(editor.getState().doc.textContent).toBe("root content");
     cleanup();
   });
 
-  it("commands via editor.commands target the flow doc even when a surface is active", () => {
+  it("commands via editor.commands target the root doc even when a surface is active", () => {
     const { editor, type, cleanup } = mountEditor();
     type("body content");
     const surface = makeSurface(editor, "test:1", "test");
     editor.surfaces.register(surface);
     editor.surfaces.activate("test:1");
 
-    // Mutate flow via a dispatched tr bypassing surface routing.
+    // Mutate root via a dispatched tr bypassing surface routing.
     const tr = editor.getState().tr.insertText("!", 1);
     editor._applyTransaction(tr);
     expect(editor.getState().doc.textContent).toBe("!body content");
@@ -129,7 +129,7 @@ describe("routing — Invariant 5 (editor.state is flow-bound)", () => {
     cleanup();
   });
 
-  it("external _applyTransaction always hits flow state, never active surface", () => {
+  it("external _applyTransaction always hits root state, never active surface", () => {
     const { editor, cleanup } = mountEditor();
     const surface = makeSurface(editor, "test:1", "test");
     editor.surfaces.register(surface);
