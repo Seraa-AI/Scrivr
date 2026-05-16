@@ -9,41 +9,17 @@
  *     <button onMouseDown={(e) => { e.preventDefault(); editor.commands.setHeading(1); }}>H1</button>
  *   </FloatingMenu>
  */
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { createFloatingMenu } from "@scrivr/core";
 import type { FloatingMenuOptions } from "@scrivr/core";
 import type { Editor } from "@scrivr/core";
-import { useFloatingPosition } from "./useFloatingPosition";
+import { useFloatingMenu } from "../hooks/useFloatingMenu";
 
 export interface FloatingMenuProps {
   editor: Editor | null;
   children: ReactNode;
   shouldShow?: FloatingMenuOptions["shouldShow"] | undefined;
   className?: string | undefined;
-}
-
-export function useFloatingMenu(
-  editor: Editor | null,
-  options: { shouldShow?: FloatingMenuOptions["shouldShow"] | undefined } = {},
-) {
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const { ref, position } = useFloatingPosition<HTMLDivElement>(rect, [], {
-    placement: "left",
-  });
-
-  useEffect(() => {
-    if (!editor) return;
-    const opts: FloatingMenuOptions = {
-      onShow: setRect,
-      onMove: setRect,
-      onHide: () => { setRect(null); },
-    };
-    if (options.shouldShow) opts.shouldShow = options.shouldShow;
-    return createFloatingMenu(editor, opts);
-  }, [editor, options.shouldShow]);
-
-  return { visible: !!rect, rect, position, rootRef: ref };
 }
 
 export function FloatingMenu({ editor, children, shouldShow, className }: FloatingMenuProps) {
