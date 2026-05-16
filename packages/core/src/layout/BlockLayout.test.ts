@@ -358,7 +358,7 @@ describe("layoutBlock — CharacterMap", () => {
     });
 
     // Center offset = (availableWidth − measured line width) / 2.
-    const lineWidth = measurer.measureWidth("Hi", config.paragraph.font);
+    const lineWidth = measurer.measureWidth("Hi", config.paragraph!.font);
     const expectedX = (availableWidth - lineWidth) / 2;
     const coords = map.coordsAtPos(1);
     expect(coords?.x).toBeCloseTo(expectedX, 2);
@@ -434,7 +434,7 @@ describe("layoutBlock — node attr alignment", () => {
       map,
     });
     // Default paragraph style font; center offset = (availableWidth − line width) / 2.
-    const lineWidth = measurer.measureWidth("Hi", defaultFontConfig.paragraph.font);
+    const lineWidth = measurer.measureWidth("Hi", defaultFontConfig.paragraph!.font);
     const expectedX = (availableWidth - lineWidth) / 2;
     const coords = map.coordsAtPos(1);
     expect(coords?.x).toBeCloseTo(expectedX, 2);

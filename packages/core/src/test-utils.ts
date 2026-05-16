@@ -11,6 +11,7 @@
  * a fake. See `feedback_no_canvas_mocking.md` for the rationale.
  */
 
+import { vi } from "vitest";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import { TextMeasurer } from "./layout/TextMeasurer";
@@ -269,4 +270,79 @@ export function registerActiveSurface(
   editor.surfaces.register(surface);
   editor.surfaces.activate(surface.id);
   return surface;
+}
+
+// ── PointerController test setup ─────────────────────────────────────────────
+//
+// Drives a real `PointerController` against a real `Editor`. Tests stay
+// behavioural — assert which Editor methods got called when, while keeping
+// the dependency surface honest (no editor mocks).
+
+import { PointerController, type PointerControllerDeps } from "./renderer/PointerController";
+
+export interface PointerControllerSetupOptions {
+  isPageless?: boolean;
+  tileHeight?: number;
+  slotHeight?: number;
+  pageConfig?: PageConfig;
+}
+
+export interface PointerControllerSetup {
+  editor: Editor;
+  controller: PointerController;
+  /**
+   * The element PointerController listens on. Positioned at viewport
+   * (0, 0) so client coords equal doc coords for simpler test math.
+   */
+  container: HTMLDivElement;
+  cleanup: () => void;
+}
+
+export function makePointerControllerSetup(
+  opts: PointerControllerSetupOptions = {},
+): PointerControllerSetup {
+  const tileHeight = opts.tileHeight ?? 1200;
+  const slotHeight = opts.slotHeight ?? tileHeight + 24;
+  const isPageless = opts.isPageless ?? false;
+  const pageConfig = opts.pageConfig ?? defaultPageConfig;
+
+  const editor = createTestEditor({
+    pageConfig,
+    content: makeNPageDoc(1),
+  });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  // Pin the container's bounding rect so `clientX/clientY` map 1:1 to doc
+  // coords. jsdom layout is non-functional; without this stub
+  // `getBoundingClientRect()` returns zeros and click math breaks.
+  vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+    x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 1200,
+    width: 800, height: 1200, toJSON: () => ({}),
+  });
+
+  const deps: PointerControllerDeps = {
+    editor,
+    tilesContainer: container,
+    pool: [],
+    slotHeight: () => slotHeight,
+    tileHeight: () => tileHeight,
+    isPageless: () => isPageless,
+    visualYToDocY: (y) => {
+      if (isPageless) return { page: 1, docY: y };
+      const tileIndex = Math.floor(y / slotHeight);
+      return { page: tileIndex + 1, docY: y - tileIndex * slotHeight };
+    },
+    scheduleUpdate: () => {},
+  };
+  const controller = new PointerController(deps);
+  controller.attach();
+
+  function cleanup(): void {
+    controller.detach();
+    container.remove();
+    editor.destroy();
+  }
+
+  return { editor, controller, container, cleanup };
 }
