@@ -12,7 +12,7 @@ import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import { CursorManager } from "./renderer/CursorManager";
-import { TextMeasurer } from "./layout/TextMeasurer";
+import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
 import type { FontConfig } from "./layout/FontConfig";
@@ -169,13 +169,15 @@ export interface EditorOptions {
    */
   themeRoot?: HTMLElement;
   /**
-   * Inject a pre-built text measurer. Production code leaves this undefined
-   * and gets the DOM-canvas-backed default. Tests pass a measurer wired to a
-   * real `@napi-rs/canvas` context (see `test/createNapiCanvasContext.ts`)
-   * so layout math uses real font metrics — measurement is an engine
-   * dependency, not a hidden global.
+   * Advanced measurement injection point. If omitted, the editor creates the
+   * DOM-canvas-backed `TextMeasurer` default. Tests and custom runtimes may
+   * provide any implementation that satisfies the `TextMeasurerLike` API.
+   *
+   * This is not required for normal app usage; use it when text measurement
+   * must be supplied by a specific backend such as a server-side canvas,
+   * deterministic test canvas, or platform-native measurement service.
    */
-  textMeasurer?: TextMeasurer;
+  textMeasurer?: TextMeasurerLike;
 }
 
 /**
@@ -225,7 +227,7 @@ export class Editor extends BaseEditor implements IEditor {
   readonly pageConfig: PageConfig;
 
   /** The text measurer — created once; its internal caches are reused across layouts. */
-  readonly measurer: TextMeasurer;
+  readonly measurer: TextMeasurerLike;
 
   // ── Layout coordinator ────────────────────────────────────────────────────
 

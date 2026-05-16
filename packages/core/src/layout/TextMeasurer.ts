@@ -47,6 +47,20 @@ export interface RunMetrics {
 }
 
 /**
+ * Contract used by the layout and rendering pipeline for text measurement.
+ *
+ * `TextMeasurer` is the default browser implementation, but callers may
+ * inject any implementation that satisfies this API. This is useful for
+ * advanced runtimes and tests that provide their own measurement backend.
+ */
+export interface TextMeasurerLike {
+  measureWidth(text: string, font: string): number;
+  getFontMetrics(font: string): FontMetrics;
+  measureRun(text: string, font: string): RunMetrics;
+  invalidate(font?: string): void;
+}
+
+/**
  * Minimal LRU cache backed by a Map.
  * JavaScript Maps maintain insertion order — deleting and re-inserting on
  * access keeps the most-recently-used entry at the end and the least-recently-
@@ -112,7 +126,7 @@ export interface TextMeasurerOptions {
   context?: TextMeasureContext;
 }
 
-export class TextMeasurer {
+export class TextMeasurer implements TextMeasurerLike {
   private ctx: TextMeasureContext;
 
   /** font → text → width */

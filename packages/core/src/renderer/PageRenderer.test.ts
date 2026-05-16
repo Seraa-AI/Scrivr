@@ -9,12 +9,14 @@
  * for the zero-width anchor span. The fix re-stamps all float rects at the
  * very end of renderPage so the final CharacterMap always has real dims.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { renderPage } from "./PageRenderer";
 import { CharacterMap } from "../layout/CharacterMap";
 import { runPipeline, defaultPageConfig } from "../layout/PageLayout";
-import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
+import { BlockRegistry } from "../layout/BlockRegistry";
 import { TextBlockStrategy } from "../layout/TextBlockStrategy";
+import { ExtensionManager } from "../extensions/ExtensionManager";
+import { StarterKit } from "../extensions/StarterKit";
 import {
   buildStarterKitContext,
   createMeasurer,
@@ -66,11 +68,6 @@ function renderWithStrategy(
     TextBlockStrategy,
   );
 
-  // InlineRegistry with a no-op image strategy (image rendering not the focus here)
-  const inlineRegistry = new InlineRegistry().register("image", {
-    render: vi.fn(),
-  });
-
   renderPage({
     ctx: makeCtx(),
     page,
@@ -81,7 +78,6 @@ function renderWithStrategy(
     measurer: createMeasurer(),
     map,
     blockRegistry,
-    inlineRegistry,
     anchoredObjects: floats,
   });
 
@@ -165,10 +161,9 @@ describe("renderPage — image strategy zero-size guard", () => {
       wrappingMode: "behind",
     });
 
-    // Build a minimal InlineRegistry with the REAL image strategy from Image extension
-    // (we want to verify the guard in the actual production code).
-    // Since we can't easily instantiate Image extension here, we verify the guard
-    // indirectly: renderWithStrategy with a zero-size float must not throw.
+    const manager = new ExtensionManager([StarterKit]);
+    const inlineRegistry = manager.buildInlineRegistry();
+
     const doc = schema.node("doc", null, [
       schema.node("paragraph", null, [img, schema.text("text")]),
     ]);
@@ -186,13 +181,6 @@ describe("renderPage — image strategy zero-size guard", () => {
         "paragraph",
         TextBlockStrategy,
       );
-      const inlineRegistry = new InlineRegistry().register("image", {
-        render(_ctx, _x, _y, w, h) {
-          if (w <= 0 || h <= 0) return; // simulate the guard
-          // If guard is absent, this path would be reached for zero-size spans
-          throw new Error("should not reach here for zero-size spans");
-        },
-      });
       renderPage({
         ctx: makeCtx(),
         page: layout.pages[0]!,

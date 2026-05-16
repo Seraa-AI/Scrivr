@@ -139,8 +139,7 @@ describe("runPipeline — overflow", () => {
       margins: { top: 10, right: 10, bottom: 10, left: 10 },
     };
 
-    // Each paragraph = 1 line = 18px. 180px / 18px = 10 paragraphs per page.
-    // Create 12 paragraphs — should overflow to 2 pages.
+    // Create enough one-line paragraphs to overflow the tiny page.
     const blocks = Array.from({ length: 12 }, (_, i) => p(`Paragraph ${i + 1}`));
     const layout = runPipeline(doc(...blocks), {
       pageConfig: tinyPage,
@@ -581,16 +580,16 @@ describe("applyPageFont", () => {
 //
 // Page geometry used throughout this section:
 //   pageWidth  = 120   → contentWidth  = 100px (120 − 2×10 margins)
-//   pageHeight = 74    → contentHeight = 54px  (74 − 2×10 margins) = 3 × MOCK_LINE_HEIGHT
-//   pageBottom = margins.top + contentHeight   = 10 + 54 = 64px
+//   pageHeight is derived from the real test line height so content fits
+//   exactly 3 paragraph lines.
 //
-// Text wrapping: at contentWidth=100px and MOCK_CHAR_WIDTH=8px, a 9-char word
-// (72px) fits alone but never alongside another (144px > 100px). So
+// Text wrapping: at contentWidth=100px, each 9-char word fits alone but
+// never alongside another. So
 // "aaaaaaaaa bbbbbbbbb ..." reliably produces one line per word.
 //
 // Block layout with a 1-line "intro" paragraph before the tall block:
-//   intro y=10, height=18, spaceAfter=10
-//   tall block: gap=10, targetY=38, spaceAvailable=64-38=26px → 1 line fits (18px)
+//   intro y=10, height=LH, spaceAfter=10
+//   tall block: gap=10, targetY=10+LH+10, and 1 line fits
 //   → part 1 (1 line) on page 1; remaining lines carried to subsequent pages
 //
 describe("runPipeline — line splitting", () => {
@@ -738,8 +737,8 @@ describe("runPipeline — line splitting (first on page)", () => {
   const nineLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee fffffffff ggggggggg hhhhhhhhh iiiiiiiii";
 
   it("splits a paragraph that is the first and only block on page 1 across two pages", () => {
-    // No preceding block — isFirstOnPage is true. The paragraph (6 lines × 18px = 108px)
-    // overflows contentHeight (54px) and must split: 3 lines on page 1, 3 on page 2.
+    // No preceding block — isFirstOnPage is true. The paragraph has 6
+    // measured lines and must split: 3 lines on page 1, 3 on page 2.
     const layout = runPipeline(doc(p(sixLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
@@ -1029,7 +1028,7 @@ describe("runPipeline — pageConfig.fontFamily", () => {
 // ── Float layout (wrapping mode) ───────────────────────────────────────────────
 
 describe("runPipeline — float image wrapping", () => {
-  // Long text to force several wrapped lines (each ≈ 55 chars at 8px/char, 442px constrained width)
+  // Long text to force several wrapped lines in the constrained content width.
   const longText = "word ".repeat(60).trim(); // 60 words × 5 chars = ~300 chars, ~6+ lines
 
   it("square-left: produces floats array with the float image", () => {
@@ -1775,7 +1774,7 @@ describe("runPipeline — page-level square exclusions (Phase 4)", () => {
 //
 // defaultPageConfig: pageWidth=794, margins=72 all sides
 //   contentX = 72, contentRight = 722, contentWidth = 650
-//   FLOAT_MARGIN = 8, MOCK_LINE_HEIGHT = 18
+//   FLOAT_MARGIN = 8
 //
 // For a 200×200 image in break mode:
 //   floatX = 72 (content left edge, honours attrs.width)
@@ -2358,8 +2357,8 @@ describe("paginateFlow — Stage 2", () => {
 
   it("metrics contract: normal completion — length == pages.length + 1, pageNumbers match", () => {
     // A doc that paginates cleanly across >1 page (need enough blocks to overflow).
-    // Each mock line = 18px, content height = 979 → ~54 lines per page.
-    // 70 paragraphs @ 1 line each → spills onto page 2.
+    // 70 one-line paragraphs is enough to spill onto page 2 with the real
+    // test measurer.
     const blocks = Array.from({ length: 70 }, (_, i) => p(`Paragraph ${i + 1}`));
     const testDoc = doc(...blocks);
     const measurer = createMeasurer();

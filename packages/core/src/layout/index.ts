@@ -3,7 +3,7 @@ export { ExclusionManager } from "./ExclusionManager";
 export type { AvailableSegment, ExclusionRect, LineSpace } from "./ExclusionManager";
 export type { GlyphEntry, LineEntry, CoordsResult } from "./CharacterMap";
 export { TextMeasurer } from "./TextMeasurer";
-export type { FontMetrics, RunMetrics } from "./TextMeasurer";
+export type { FontMetrics, RunMetrics, TextMeasurerLike } from "./TextMeasurer";
 export { LineBreaker } from "./LineBreaker";
 export type { InputSpan, LayoutSpan, LayoutLine, LineSpaceProvider } from "./LineBreaker";
 export { layoutBlock, resolveLeafBlockDimensions, computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";

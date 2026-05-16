@@ -1,6 +1,6 @@
 import { Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
-import { TextMeasurer } from "./TextMeasurer";
+import { TextMeasurer, type TextMeasurerLike } from "./TextMeasurer";
 import {
   FontConfig,
   defaultFontConfig,
@@ -437,7 +437,7 @@ function resolveAnchoredObjects(
   inputFlows: FlowBlock[],
   pageConfig: PageConfig,
   metricsFor: (pageNumber: number) => PageMetrics,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
   inlineRegistry?: InlineRegistry,
@@ -698,7 +698,7 @@ function reflowFlowsAgainstExclusions(
     contentX: number;
     contentWidth: number;
   },
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
   inlineRegistry?: InlineRegistry,
@@ -792,7 +792,7 @@ function reflowFlowsAgainstExclusions(
 
 export interface PageLayoutOptions {
   pageConfig: PageConfig;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   fontConfig?: FontConfig;
   /**
    * Pass the previous version so callers can increment it.
@@ -916,7 +916,7 @@ export interface FlowPipelineResult {
   contentWidth: number;
   fontConfig: FontConfig;
   fontModifiers: Map<string, FontModifier> | undefined;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   /** Y cursor at end of pagination — used for pageless totalContentHeight. */
   y: number;
   /** Anchored objects resolved before pagination. */
@@ -1128,7 +1128,7 @@ function _runPipelineBody(
 export interface PaginateFlowOptions {
   previousLayout?: DocumentLayout | undefined;
   measureCache?: WeakMap<Node, MeasureCacheEntry> | undefined;
-  measurer?: TextMeasurer | undefined;
+  measurer?: TextMeasurerLike | undefined;
   pageless?: boolean | undefined;
   /** Initial page cursor. Fresh run: pages=[], page=empty page 1. Resumption: from prior chunk. */
   init: {
@@ -1591,7 +1591,7 @@ export function buildBlockFlow(
   startIndex: number,
   config: FlowConfig,
   fontConfig: FontConfig,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
   fontModifiers: Map<string, FontModifier> | undefined,
   measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
   maxBlocks?: number,
@@ -1737,7 +1737,7 @@ function shiftBlock(
 function rebreakWrappedLinesWithoutExclusions(
   lines: LayoutLine[],
   availableWidth: number,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
 ): LayoutLine[] {
   const spans: InputSpan[] = [];
 
@@ -1790,7 +1790,7 @@ function normalizeWrappedBlockForPage(
   block: LayoutBlock,
   flow: Pick<FlowBlock, "overlapsWrapZone" | "wrapZonePage">,
   pageNumber: number,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
 ): LayoutBlock {
   if (!shouldNormalizeWrappedLines(flow, pageNumber, false)) return block;
 
@@ -1901,7 +1901,7 @@ function resolveBlockEntry(
   targetY: number,
   blockWidth: number,
   pageNumber: number,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
   measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,

@@ -11,7 +11,7 @@
  * ensuring stable layout that doesn't thrash when page numbers change.
  */
 
-import type { InlineStrategy, TextMeasurer } from "@scrivr/core";
+import type { InlineStrategy, TextMeasurerLike } from "@scrivr/core";
 import type { Node } from "prosemirror-model";
 
 /** Current page context — set before rendering, read by token strategies. */
@@ -32,7 +32,7 @@ export function getCurrentTotalPages(): number { return currentTotalPages; }
  * Returns a stable width that doesn't change when "1" becomes "2" — only
  * when the digit count changes (e.g. page 9 → page 10).
  */
-function measureDigitWidth(digitCount: number, font: string, measurer: TextMeasurer): number {
+function measureDigitWidth(digitCount: number, font: string, measurer: TextMeasurerLike): number {
   let widest = 0;
   for (let d = 0; d <= 9; d++) {
     const run = measurer.measureRun(String(d), font);
@@ -41,7 +41,7 @@ function measureDigitWidth(digitCount: number, font: string, measurer: TextMeasu
   return widest * digitCount;
 }
 
-function measureTextWidth(text: string, font: string, measurer: TextMeasurer): number {
+function measureTextWidth(text: string, font: string, measurer: TextMeasurerLike): number {
   return measurer.measureRun(text, font).totalWidth;
 }
 

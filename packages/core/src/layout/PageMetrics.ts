@@ -6,7 +6,7 @@
 import type { Node } from "prosemirror-model";
 import type { DocumentLayout, PageConfig } from "./PageLayout";
 import type { FontConfig } from "./FontConfig";
-import type { TextMeasurer } from "./TextMeasurer";
+import type { TextMeasurerLike } from "./TextMeasurer";
 import type { MarkDecorator } from "../extensions/types";
 import type { BlockRegistry, InlineRegistry } from "./BlockRegistry";
 import type { ResolvedTheme } from "../model/theme";
@@ -192,7 +192,7 @@ function computeBandStart(
 export interface PageChromeMeasureInput {
   doc: Node;
   pageConfig: PageConfig;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   fontConfig: FontConfig;
 }
 
@@ -228,7 +228,7 @@ export interface PageChromePaintContext {
   /** This contributor's payload from the final measure() call of the last run. */
   payload: unknown;
   /** Text measurer — for rendering mini-layout blocks in chrome bands. */
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   /** Mark decorators from extensions — for rendering styled text in chrome bands. */
   markDecorators?: Map<string, MarkDecorator>;
   /** Block registry — dispatches block rendering to the correct strategy. */

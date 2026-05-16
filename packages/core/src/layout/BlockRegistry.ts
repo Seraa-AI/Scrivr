@@ -1,6 +1,6 @@
 import type { Node } from "prosemirror-model";
 import type { CharacterMap } from "./CharacterMap";
-import type { TextMeasurer } from "./TextMeasurer";
+import type { TextMeasurerLike } from "./TextMeasurer";
 import type { LayoutBlock } from "./BlockLayout";
 import type { MarkDecorator } from "../extensions/types";
 import type { ResolvedTheme } from "../model/theme";
@@ -29,7 +29,7 @@ export interface InlineStrategy {
    * node's width/height attrs. This lets tokens (page number, date) size
    * themselves based on the current font instead of using fixed placeholders.
    */
-  measure?(node: Node, font: string, measurer: TextMeasurer): { width: number; height: number };
+  measure?(node: Node, font: string, measurer: TextMeasurerLike): { width: number; height: number };
 
   render(
     ctx: CanvasRenderingContext2D,
@@ -89,7 +89,7 @@ export interface BlockRenderContext {
    */
   lineIndexOffset: number;
   dpr: number;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   markDecorators?: Map<string, MarkDecorator>;
   /** Registry for inline objects (images, widgets) drawn inside line boxes. */
   inlineRegistry?: InlineRegistry;

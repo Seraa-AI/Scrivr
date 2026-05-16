@@ -1,5 +1,5 @@
 import type { Node } from "prosemirror-model";
-import { TextMeasurer } from "./TextMeasurer";
+import type { TextMeasurerLike } from "./TextMeasurer";
 import type { CharacterMap } from "./CharacterMap";
 import { normalizeFont } from "./StyleResolver";
 import type { AvailableSegment, LineSpace } from "./ExclusionManager";
@@ -225,7 +225,7 @@ export type LineSpaceProvider = (
  * word in the document, not the longest paragraph.
  */
 export class LineBreaker {
-  constructor(private measurer: TextMeasurer) {}
+  constructor(private measurer: TextMeasurerLike) {}
 
   /**
    * Break a paragraph's spans into lines that fit within maxWidth.
@@ -790,7 +790,7 @@ function tokenise(spans: InputSpan[]): Token[] {
 /** Fallback cursor height for lines that contain only inline objects (no text). */
 const DEFAULT_CURSOR_HEIGHT = 16;
 
-function buildLine(spans: LayoutSpan[], measurer: TextMeasurer): LayoutLine {
+function buildLine(spans: LayoutSpan[], measurer: TextMeasurerLike): LayoutLine {
   // Pass 1: collect text-only metrics.
   let textAscent = 0;
   let textDescent = 0;

@@ -204,8 +204,8 @@ describe("LineBreaker — vertical metrics", () => {
 describe("LineBreaker — overflow / wide words (regression)", () => {
   it("breaks a word wider than maxWidth at the character level (splitWideWord)", () => {
     const lb = new LineBreaker(makeMeasurer());
-    // "ABCDEFGHIJ" = 10 chars × 8px = 80px, but maxWidth is 40px (5 chars)
-    // Expected: each line is ≤ 40px wide
+    // Expected: each emitted line respects maxWidth even when the input has
+    // no natural break points.
     const lines = lb.breakIntoLines(
       [
         {
@@ -245,7 +245,7 @@ describe("LineBreaker — overflow / wide words (regression)", () => {
   it("does not overflow the page when a long unbreakable string is typed", () => {
     const lb = new LineBreaker(makeMeasurer());
     // Simulates a long URL or identifier with no spaces
-    const text = "a".repeat(50); // 50 chars × 8px = 400px, maxWidth = 100px
+    const text = "a".repeat(50);
     const lines = lb.breakIntoLines(
       [{ kind: "text" as const, text, font: "14px serif", docPos: 1 }],
       100,
@@ -289,7 +289,7 @@ describe("LineBreaker — overflow / wide words (regression)", () => {
 describe("LineBreaker — skipToY (top-bottom float)", () => {
   it("skips cumulativeLineY past the exclusion zone when skipToY is returned", () => {
     const lb = new LineBreaker(makeMeasurer());
-    // Float exclusion spans absoluteY 20–60 (40px gap) — lineHeight = 18px.
+    // Float exclusion spans absoluteY 20–60.
     // startY = 0, so absoluteLineY = cumulativeLineY.
     // First word lands at y=0 (no constraint) → line 1 produced.
     // Second word lands at y=18 which is inside [20, 60) → skipToY=60 jumps cumulativeLineY to 60.

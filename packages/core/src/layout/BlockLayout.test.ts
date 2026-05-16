@@ -799,7 +799,8 @@ describe("layoutBlock — end-of-line caret sentinel (via layoutBlock map)", () 
 
   it("sentinel is only on the last line — intermediate lines are not corrupted", () => {
     const map = new CharacterMap();
-    // "Hello world" wraps to 2 lines at width=80 (11 chars × 8px = 88 > 80)
+    // This width is narrow enough for "Hello world" to wrap under the real
+    // test measurer.
     layoutBlock(paragraph("Hello world"), {
       nodePos: 0,
       x: 0,

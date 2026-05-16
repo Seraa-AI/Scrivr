@@ -11,7 +11,7 @@ import type {
 } from "./PageLayout";
 import type { FontConfig } from "./FontConfig";
 import type { InlineRegistry } from "./BlockRegistry";
-import type { TextMeasurer } from "./TextMeasurer";
+import type { TextMeasurerLike } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
 import type { PageChromeContribution } from "./PageMetrics";
 import { populateCharMap } from "./BlockLayout";
@@ -26,7 +26,7 @@ interface FragmentIndexEntry {
 export interface LayoutCoordinatorOptions {
   pageConfig: PageConfig;
   fontConfig: FontConfig;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   fontModifiers: Map<string, FontModifier>;
   /** Returns the current ProseMirror document — read at layout time so the
    *  coordinator always operates on the latest doc without needing per-call args. */

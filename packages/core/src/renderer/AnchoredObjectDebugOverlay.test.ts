@@ -8,9 +8,9 @@
  *
  * Setup: drive a real `Editor` via `makeRendererTestSetup`, swap in fixture
  * placements through `overrideLayout`, and capture the registered overlay
- * handler by spying on `addOverlayRenderHandler`. The ctx is a vi.fn-spied
- * partial — the test cares about *which* canvas calls fire, not their
- * pixel-level effect.
+ * handler by spying on `addOverlayRenderHandler`. Paint assertions use a real
+ * canvas context with method spies; the test cares about *which* canvas calls
+ * fire, not their pixel-level effect.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { installAnchoredObjectDebugOverlay } from "./AnchoredObjectDebugOverlay";
@@ -71,51 +71,32 @@ function makeOverlaySetup(opts: {
   };
 }
 
-interface SpyCtx {
+interface SpiedContext {
+  ctx: CanvasRenderingContext2D;
   fillRect: ReturnType<typeof vi.fn>;
   strokeRect: ReturnType<typeof vi.fn>;
   fillText: ReturnType<typeof vi.fn>;
-  measureText: ReturnType<typeof vi.fn>;
-  setLineDash: ReturnType<typeof vi.fn>;
   save: ReturnType<typeof vi.fn>;
-  restore: ReturnType<typeof vi.fn>;
-  fillStyle: string;
-  strokeStyle: string;
-  lineWidth: number;
-  font: string;
-  textBaseline: CanvasTextBaseline;
 }
 
-/**
- * A spy-only ctx that records the canvas calls the overlay makes. Typed as
- * `SpyCtx` so the tests get full intellisense on `fillRect.mock.calls` etc;
- * cast to `CanvasRenderingContext2D` only at the call site that hands it to
- * the overlay handler.
- */
-function makeSpyCtx(): SpyCtx {
+function makeSpiedContext(): SpiedContext {
+  const ctx = document.createElement("canvas").getContext("2d")!;
   return {
-    save: vi.fn(),
-    restore: vi.fn(),
-    fillRect: vi.fn(),
-    strokeRect: vi.fn(),
-    fillText: vi.fn(),
-    measureText: vi.fn(() => ({ width: 30 })),
-    setLineDash: vi.fn(),
-    fillStyle: "",
-    strokeStyle: "",
-    lineWidth: 0,
-    font: "",
-    textBaseline: "alphabetic",
+    ctx,
+    fillRect: vi.spyOn(ctx, "fillRect") as ReturnType<typeof vi.fn>,
+    strokeRect: vi.spyOn(ctx, "strokeRect") as ReturnType<typeof vi.fn>,
+    fillText: vi.spyOn(ctx, "fillText") as ReturnType<typeof vi.fn>,
+    save: vi.spyOn(ctx, "save") as ReturnType<typeof vi.fn>,
   };
 }
 
-function paint(setup: OverlaySetup, ctx: SpyCtx, page = 1): void {
+function paint(setup: OverlaySetup, spied: SpiedContext, page = 1): void {
   // OverlayRenderHandler's real signature has 5 args (ctx, page, pageConfig,
   // charMap, theme). The overlay under test only reads ctx + page + pageConfig,
   // so empty stand-ins are fine for charMap + theme.
   const handler = setup.getHandler();
   handler(
-    ctx as unknown as CanvasRenderingContext2D,
+    spied.ctx,
     page,
     PAGE_CONFIG,
     {} as CharacterMap,
@@ -183,51 +164,51 @@ describe("installAnchoredObjectDebugOverlay", () => {
   it("no-op when editor.debug.anchoredObjects is false", () => {
     const s = setup({ flag: false, build: (s) => [squareObj(s)] });
     installAnchoredObjectDebugOverlay(s.editor);
-    const ctx = makeSpyCtx();
-    paint(s, ctx);
-    expect(ctx.fillRect).not.toHaveBeenCalled();
-    expect(ctx.strokeRect).not.toHaveBeenCalled();
-    expect(ctx.save).not.toHaveBeenCalled();
+    const spied = makeSpiedContext();
+    paint(s, spied);
+    expect(spied.fillRect).not.toHaveBeenCalled();
+    expect(spied.strokeRect).not.toHaveBeenCalled();
+    expect(spied.save).not.toHaveBeenCalled();
   });
 
   it("paints wrap-zone fill + label when flag is true (square)", () => {
     const s = setup({ flag: true, build: (s) => [squareObj(s)] });
     installAnchoredObjectDebugOverlay(s.editor);
-    const ctx = makeSpyCtx();
-    paint(s, ctx);
+    const spied = makeSpiedContext();
+    paint(s, spied);
     // Wrap-zone fill (1) + label background (1) = 2 fillRect calls.
-    expect(ctx.fillRect).toHaveBeenCalledTimes(2);
+    expect(spied.fillRect).toHaveBeenCalledTimes(2);
     // Wrap-zone stroke = 1 strokeRect call (no clamp on this fixture).
-    expect(ctx.strokeRect).toHaveBeenCalledTimes(1);
+    expect(spied.strokeRect).toHaveBeenCalledTimes(1);
     // Label text rendered.
-    expect(ctx.fillText).toHaveBeenCalledTimes(1);
-    expect(ctx.fillText.mock.calls[0]![0]).toBe("square z=0");
+    expect(spied.fillText).toHaveBeenCalledTimes(1);
+    expect(spied.fillText.mock.calls[0]![0]).toBe("square z=0");
   });
 
   it("adds clamp outline when placement.clamped is true", () => {
     const s = setup({ flag: true, build: (s) => [squareObj(s, { clamped: true })] });
     installAnchoredObjectDebugOverlay(s.editor);
-    const ctx = makeSpyCtx();
-    paint(s, ctx);
+    const spied = makeSpiedContext();
+    paint(s, spied);
     // Wrap-zone stroke + clamp outline = 2 strokeRect calls.
-    expect(ctx.strokeRect).toHaveBeenCalledTimes(2);
+    expect(spied.strokeRect).toHaveBeenCalledTimes(2);
   });
 
   it("skips placements on other pages", () => {
     const s = setup({ flag: true, build: (s) => [squareObj(s, { page: 2 })] });
     installAnchoredObjectDebugOverlay(s.editor);
-    const ctx = makeSpyCtx();
-    paint(s, ctx);
-    expect(ctx.fillRect).not.toHaveBeenCalled();
+    const spied = makeSpiedContext();
+    paint(s, spied);
+    expect(spied.fillRect).not.toHaveBeenCalled();
   });
 
   it("paints a full-width band for top-bottom wrap", () => {
     const s = setup({ flag: true, build: (s) => [squareObj(s, { wrapMode: "top-bottom" })] });
     installAnchoredObjectDebugOverlay(s.editor);
-    const ctx = makeSpyCtx();
-    paint(s, ctx);
+    const spied = makeSpiedContext();
+    paint(s, spied);
     // First fillRect is the band, spanning full pageWidth.
-    const bandCall = ctx.fillRect.mock.calls[0]!;
+    const bandCall = spied.fillRect.mock.calls[0]!;
     expect(bandCall[0]).toBe(0);
     expect(bandCall[2]).toBe(PAGE_CONFIG.pageWidth);
   });
@@ -235,11 +216,11 @@ describe("installAnchoredObjectDebugOverlay", () => {
   it("renders nothing for behind/front (no wrap zone)", () => {
     const s = setup({ flag: true, build: (s) => [squareObj(s, { wrapMode: "behind" })] });
     installAnchoredObjectDebugOverlay(s.editor);
-    const ctx = makeSpyCtx();
-    paint(s, ctx);
+    const spied = makeSpiedContext();
+    paint(s, spied);
     // No wrap-zone fill/stroke. Only the label fillRect + fillText fire.
-    expect(ctx.fillRect).toHaveBeenCalledTimes(1); // label background only
-    expect(ctx.strokeRect).not.toHaveBeenCalled();
-    expect(ctx.fillText).toHaveBeenCalledTimes(1);
+    expect(spied.fillRect).toHaveBeenCalledTimes(1); // label background only
+    expect(spied.strokeRect).not.toHaveBeenCalled();
+    expect(spied.fillText).toHaveBeenCalledTimes(1);
   });
 });
