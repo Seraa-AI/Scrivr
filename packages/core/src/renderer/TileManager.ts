@@ -177,8 +177,20 @@ export class TileManager {
         const layout = this.editor.layout;
         const metrics = layout.metrics?.[page - 1];
         if (!metrics) return false;
-        const inHeader = metrics.headerHeight > 0 && docY < metrics.contentTop;
-        const inFooter = metrics.footerHeight > 0 && docY > metrics.footerTop;
+        // Fall back to the page's layout margins when no header/footer policy
+        // exists yet (band heights collapse to 0). Word/Docs treat the margin
+        // strip as the hit target for "double-click to create a header"; this
+        // keeps that affordance live before a policy is written. When bands
+        // ARE rendered, the resolved band bounds take precedence.
+        const { pageConfig } = layout;
+        const headerLowerBound = metrics.headerHeight > 0
+          ? metrics.contentTop
+          : pageConfig.margins.top;
+        const footerUpperBound = metrics.footerHeight > 0
+          ? metrics.footerTop
+          : pageConfig.pageHeight - pageConfig.margins.bottom;
+        const inHeader = docY >= 0 && docY < headerLowerBound;
+        const inFooter = docY > footerUpperBound && docY <= pageConfig.pageHeight;
 
         if (!inHeader && !inFooter) {
           // Click in the body while a surface is active — deactivate first
