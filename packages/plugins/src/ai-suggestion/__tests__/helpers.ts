@@ -98,7 +98,7 @@ export function doc(...nodes: PmNode[]) {
  */
 export class TestAiEditor implements IEditor {
   state: EditorState;
-  private _subscribers: Array<() => void> = [];
+  private subscribers: Array<() => void> = [];
 
   constructor(
     initialDoc: PmNode,
@@ -127,7 +127,7 @@ export class TestAiEditor implements IEditor {
 
   _applyTransaction(tr: Transaction): void {
     this.state = this.state.apply(tr);
-    for (const cb of this._subscribers) cb();
+    for (const cb of this.subscribers) cb();
   }
 
   applyTransaction(tr: Transaction): void {
@@ -135,9 +135,9 @@ export class TestAiEditor implements IEditor {
   }
 
   subscribe(cb: () => void): () => void {
-    this._subscribers.push(cb);
+    this.subscribers.push(cb);
     return () => {
-      this._subscribers = this._subscribers.filter((s) => s !== cb);
+      this.subscribers = this.subscribers.filter((s) => s !== cb);
     };
   }
 

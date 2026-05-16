@@ -64,13 +64,13 @@ export interface ServerEditorOptions {
  */
 export class ServerEditor extends BaseEditor {
   /** The user-provided input theme (literal-only on the server path). */
-  private readonly _theme: EditorTheme;
+  private readonly theme: EditorTheme;
   /**
    * Resolved theme — defaults merged with the user's literal overrides. Any
    * `var(...)` entries are dropped (warned at construct) since there is no
    * DOM resolver server-side.
    */
-  private readonly _resolvedTheme: ResolvedTheme;
+  private readonly resolvedTheme: ResolvedTheme;
 
   constructor({ extensions = [StarterKit], content, theme }: ServerEditorOptions = {}) {
     super({ extensions, ...(content ? { content } : {}) });
@@ -81,25 +81,25 @@ export class ServerEditor extends BaseEditor {
           "`editor.commands.exportPdf({ theme: { ... } })` for PDF export.",
       );
     }
-    this._theme = mergeEditorTheme({}, theme ?? {});
+    this.theme = mergeEditorTheme({}, theme ?? {});
     // Strip var() entries — they can't be resolved without a DOM probe.
     const literalOverrides: Partial<ResolvedTheme> = {};
-    for (const key of Object.keys(this._theme) as Array<keyof EditorTheme>) {
-      const value = this._theme[key];
+    for (const key of Object.keys(this.theme) as Array<keyof EditorTheme>) {
+      const value = this.theme[key];
       if (typeof value === "string" && !value.includes("var(")) {
         literalOverrides[key] = value;
       }
     }
-    this._resolvedTheme = Object.freeze({ ...defaultEditorTheme, ...literalOverrides });
+    this.resolvedTheme = Object.freeze({ ...defaultEditorTheme, ...literalOverrides });
     // Fire onEditorReady after all state is initialised.
     // View-only extensions (CollaborationCursor etc.) that cast to IEditor
     // inside onEditorReady will get a runtime error if called — this is by design.
-    this._fireEditorReady();
+    this.fireEditorReady();
   }
 
   /** The current input theme (may contain literal colors only on the server). */
   getTheme(): EditorTheme {
-    return this._theme;
+    return this.theme;
   }
 
   /**
@@ -108,7 +108,7 @@ export class ServerEditor extends BaseEditor {
    * themed PDF without re-specifying colors.
    */
   getResolvedTheme(): ResolvedTheme {
-    return this._resolvedTheme;
+    return this.resolvedTheme;
   }
 
   /**
@@ -119,10 +119,10 @@ export class ServerEditor extends BaseEditor {
    * loading a fresh document. Call `subscribe` callbacks manually if needed.
    */
   setContent(json: Record<string, unknown>): void {
-    const doc = this._manager.schema.nodeFromJSON(json);
-    this._state = EditorState.create({
-      schema: this._manager.schema,
-      plugins: this._manager.buildPlugins(),
+    const doc = this.manager.schema.nodeFromJSON(json);
+    this.editorState = EditorState.create({
+      schema: this.manager.schema,
+      plugins: this.manager.buildPlugins(),
       doc,
     });
   }

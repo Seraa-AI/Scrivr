@@ -18,15 +18,16 @@
  *      - Throws are logged and swallowed.
  *   6. Fire onSurfaceChange(prevId, nextId) listeners synchronously.
  *
- * ## Flow-is-identity invariant (load-bearing)
+ * ## Root-is-identity invariant (load-bearing)
  *
- * `editor.state` always refers to the flow document, never an active
- * surface. This registry changes input routing; document identity (commands,
- * external transactions like Y.js, subscribers that diff `editor.state.doc`)
- * continues to target flow regardless of activation. If this ever breaks,
- * save hooks silently target the wrong state — the exact class of bug the
- * registry exists to prevent. Enforced by integration tests that assert
- * `editor.getState()` remains flow-bound while a surface is active.
+ * `editor.getState()` always refers to the root editor state, never an
+ * active surface. This registry changes input routing; document identity
+ * (commands, external transactions like Y.js, subscribers that diff
+ * `editor.getState().doc`) continues to target the root document regardless
+ * of activation. If this ever breaks, save hooks silently target the wrong
+ * state — the exact class of bug the registry exists to prevent. Enforced
+ * by integration tests that assert `editor.getState()` remains root-bound
+ * while a surface is active.
  *
  * ## Lazy-surface pattern (for plugin authors)
  *
@@ -83,22 +84,22 @@ const noopMediator: SurfaceOwnerMediator = {
 };
 
 export class SurfaceRegistry {
-  private readonly _surfaces = new Map<SurfaceId, EditorSurface>();
-  private _activeId: SurfaceId | null = null;
+  private readonly surfaces = new Map<SurfaceId, EditorSurface>();
+  private activeIdValue: SurfaceId | null = null;
   /** Cached to avoid re-looking up on every hot-path getState/dispatch call. */
-  private _activeSurface: EditorSurface | null = null;
-  private readonly _changeListeners = new Set<SurfaceChangeHandler>();
-  private _mediator: SurfaceOwnerMediator = noopMediator;
+  private activeSurfaceValue: EditorSurface | null = null;
+  private readonly changeListeners = new Set<SurfaceChangeHandler>();
+  private mediator: SurfaceOwnerMediator = noopMediator;
 
   /** Register a surface. Throws if `surface.id` is already registered. */
   register(surface: EditorSurface): void {
-    if (this._surfaces.has(surface.id)) {
+    if (this.surfaces.has(surface.id)) {
       throw new Error(
         `[SurfaceRegistry] surface id "${surface.id}" is already registered. ` +
         `Call unregister() first or use a distinct id.`,
       );
     }
-    this._surfaces.set(surface.id, surface);
+    this.surfaces.set(surface.id, surface);
   }
 
   /**
@@ -114,9 +115,9 @@ export class SurfaceRegistry {
    * then `unregister()`.
    */
   unregister(id: SurfaceId): void {
-    const surface = this._surfaces.get(id);
+    const surface = this.surfaces.get(id);
     if (!surface) return;
-    if (this._activeId === id) {
+    if (this.activeIdValue === id) {
       try {
         this.activate(null);
       } catch (err) {
@@ -128,12 +129,12 @@ export class SurfaceRegistry {
           err,
         );
         // Force the active state to null since the commit aborted activation.
-        this._activeId = null;
-        this._activeSurface = null;
-        this._changeListeners.forEach((h) => h(id, null));
+        this.activeIdValue = null;
+        this.activeSurfaceValue = null;
+        this.changeListeners.forEach((h) => h(id, null));
       }
     }
-    this._surfaces.delete(id);
+    this.surfaces.delete(id);
   }
 
   /**
@@ -146,38 +147,38 @@ export class SurfaceRegistry {
    * reused — but accidental calls on a destroyed registry are safe no-ops.
    */
   destroy(): void {
-    if (this._activeId !== null) {
+    if (this.activeIdValue !== null) {
       try {
         this.activate(null);
       } catch {
         // Same rationale as unregister — teardown cannot abort.
-        this._activeId = null;
-        this._activeSurface = null;
+        this.activeIdValue = null;
+        this.activeSurfaceValue = null;
       }
     }
-    this._surfaces.clear();
-    this._changeListeners.clear();
-    this._mediator = noopMediator;
+    this.surfaces.clear();
+    this.changeListeners.clear();
+    this.mediator = noopMediator;
   }
 
   get(id: SurfaceId): EditorSurface | null {
-    return this._surfaces.get(id) ?? null;
+    return this.surfaces.get(id) ?? null;
   }
 
   getByOwner(owner: string): EditorSurface[] {
     const result: EditorSurface[] = [];
-    for (const surface of this._surfaces.values()) {
+    for (const surface of this.surfaces.values()) {
       if (surface.owner === owner) result.push(surface);
     }
     return result;
   }
 
   get activeId(): SurfaceId | null {
-    return this._activeId;
+    return this.activeIdValue;
   }
 
   get activeSurface(): EditorSurface | null {
-    return this._activeSurface;
+    return this.activeSurfaceValue;
   }
 
   /**
@@ -194,24 +195,24 @@ export class SurfaceRegistry {
    * without any stale `(prev, next)` pairs.
    */
   activate(nextId: SurfaceId | null): void {
-    if (nextId === this._activeId) return;
+    if (nextId === this.activeIdValue) return;
 
-    if (nextId !== null && !this._surfaces.has(nextId)) {
+    if (nextId !== null && !this.surfaces.has(nextId)) {
       throw new Error(
         `[SurfaceRegistry] activate("${nextId}") — no such surface registered. ` +
         `Call register() before activate().`,
       );
     }
 
-    const prevId = this._activeId;
-    const prev = this._activeSurface;
+    const prevId = this.activeIdValue;
+    const prev = this.activeSurfaceValue;
 
     if (globalThis.__SURFACE_DEBUG__) {
       const dirtyPart = prev && prev.isDirty ? " [dirty]" : "";
       const ownerPart =
         nextId === null
           ? "body"
-          : `${this._surfaces.get(nextId)!.owner}:${nextId}`;
+          : `${this.surfaces.get(nextId)!.owner}:${nextId}`;
       // eslint-disable-next-line no-console
       console.log(
         `[SurfaceRegistry] activate: ${prevId ?? "body"}${dirtyPart} → ${ownerPart}`,
@@ -222,29 +223,29 @@ export class SurfaceRegistry {
       if (prev.isDirty) {
         prev._committing = true;
         try {
-          this._mediator.commit(prev);
+          this.mediator.commit(prev);
         } finally {
           prev._committing = false;
         }
         // Any throw from mediator.commit propagates here — activation aborts.
       }
       try {
-        this._mediator.deactivate(prev);
+        this.mediator.deactivate(prev);
       } catch (err) {
         console.error(`[SurfaceRegistry] onDeactivate("${prev.id}") threw:`, err);
       }
     }
 
-    this._activeId = nextId;
-    this._activeSurface = nextId === null ? null : this._surfaces.get(nextId)!;
+    this.activeIdValue = nextId;
+    this.activeSurfaceValue = nextId === null ? null : this.surfaces.get(nextId)!;
 
     if (nextId !== null) {
-      // `this._activeSurface` is non-null on this branch by construction;
+      // `this.activeSurfaceValue` is non-null on this branch by construction;
       // re-read it fresh so a nested activate() inside mediator.activate()
       // sees the post-flip reference.
-      const next = this._activeSurface!;
+      const next = this.activeSurfaceValue!;
       try {
-        this._mediator.activate(next);
+        this.mediator.activate(next);
       } catch (err) {
         console.error(`[SurfaceRegistry] onActivate("${nextId}") threw:`, err);
       }
@@ -255,9 +256,9 @@ export class SurfaceRegistry {
     // listener fire here with (prevId, nextId) would misrepresent state
     // the user never observed. The nested call already fired the correct
     // listeners for the actual path taken — skip ours.
-    if (this._activeId !== nextId) return;
+    if (this.activeIdValue !== nextId) return;
 
-    this._changeListeners.forEach((h) => h(prevId, nextId));
+    this.changeListeners.forEach((h) => h(prevId, nextId));
   }
 
   /**
@@ -269,10 +270,10 @@ export class SurfaceRegistry {
     surfaces: Array<{ id: SurfaceId; owner: string; isDirty: boolean }>;
   } {
     const surfaces: Array<{ id: SurfaceId; owner: string; isDirty: boolean }> = [];
-    for (const s of this._surfaces.values()) {
+    for (const s of this.surfaces.values()) {
       surfaces.push({ id: s.id, owner: s.owner, isDirty: s.isDirty });
     }
-    return { activeId: this._activeId, surfaces };
+    return { activeId: this.activeIdValue, surfaces };
   }
 
   /**
@@ -281,9 +282,9 @@ export class SurfaceRegistry {
    * after owner lifecycle callbacks have fired.
    */
   onSurfaceChange(handler: SurfaceChangeHandler): Unsubscribe {
-    this._changeListeners.add(handler);
+    this.changeListeners.add(handler);
     return () => {
-      this._changeListeners.delete(handler);
+      this.changeListeners.delete(handler);
     };
   }
 
@@ -293,6 +294,6 @@ export class SurfaceRegistry {
    * constructor, before any plugin can call activate().
    */
   _setOwnerMediator(mediator: SurfaceOwnerMediator): void {
-    this._mediator = mediator;
+    this.mediator = mediator;
   }
 }

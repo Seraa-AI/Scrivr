@@ -1,6 +1,6 @@
 /**
  * EditorSurface — an independent edit region owned by a plugin. Holds its own
- * `EditorState` and `CharacterMap`; the body/flow document is NOT a surface.
+ * `EditorState` and `CharacterMap`; the root editor document is NOT a surface.
  * Plugins instantiate these, register with `SurfaceRegistry`, and dispatch
  * transactions against them while their surface is active.
  *
@@ -51,9 +51,9 @@ export class EditorSurface {
   readonly schema: Schema;
   readonly charMap: CharacterMap;
 
-  private _state: EditorState;
-  private _isDirty = false;
-  private readonly _listeners = new Set<(update: SurfaceUpdate) => void>();
+  private editorState: EditorState;
+  private dirty = false;
+  private readonly listeners = new Set<(update: SurfaceUpdate) => void>();
 
   /**
    * @internal
@@ -69,7 +69,7 @@ export class EditorSurface {
     this.charMap = new CharacterMap();
 
     const doc = Node.fromJSON(init.schema, init.initialDocJSON);
-    this._state = EditorState.create({
+    this.editorState = EditorState.create({
       schema: init.schema,
       doc,
       ...(init.plugins ? { plugins: init.plugins } : {}),
@@ -78,7 +78,7 @@ export class EditorSurface {
 
   /** Current state. Always reflects the most recent dispatch. */
   get state(): EditorState {
-    return this._state;
+    return this.editorState;
   }
 
   /**
@@ -87,7 +87,7 @@ export class EditorSurface {
    * `markClean()` after persisting via `onCommit()`.
    */
   get isDirty(): boolean {
-    return this._isDirty;
+    return this.dirty;
   }
 
   /**
@@ -110,28 +110,28 @@ export class EditorSurface {
     if (this._committing) {
       throw new Error(
         `[EditorSurface] dispatch() called on "${this.id}" during its own ` +
-        `onCommit() — owners must dispatch against the flow document, not ` +
+        `onCommit() — owners must dispatch against the root editor document, not ` +
         `the surface they are committing.`,
       );
     }
-    this._state = this._state.apply(tr);
+    this.editorState = this.editorState.apply(tr);
     const docChanged = tr.docChanged;
     if (docChanged) {
-      this._isDirty = true;
+      this.dirty = true;
       this.charMap.clear();
     }
-    const update: SurfaceUpdate = { state: this._state, tr, docChanged };
-    this._listeners.forEach((h) => h(update));
+    const update: SurfaceUpdate = { state: this.editorState, tr, docChanged };
+    this.listeners.forEach((h) => h(update));
   }
 
   /** Clear the dirty flag. Owners call this after a successful commit. */
   markClean(): void {
-    this._isDirty = false;
+    this.dirty = false;
   }
 
   /** Serialize current doc to PM JSON for persistence. */
   toDocJSON(): Record<string, unknown> {
-    return this._state.doc.toJSON() as Record<string, unknown>;
+    return this.editorState.doc.toJSON() as Record<string, unknown>;
   }
 
   /**
@@ -141,9 +141,9 @@ export class EditorSurface {
    * synchronously inside `dispatch`; uncaught exceptions propagate.
    */
   onUpdate(handler: (update: SurfaceUpdate) => void): Unsubscribe {
-    this._listeners.add(handler);
+    this.listeners.add(handler);
     return () => {
-      this._listeners.delete(handler);
+      this.listeners.delete(handler);
     };
   }
 }

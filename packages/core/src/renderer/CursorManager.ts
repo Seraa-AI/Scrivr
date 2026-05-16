@@ -21,7 +21,7 @@
  *   cursor.stop();
  */
 export class CursorManager {
-  private _isVisible = true;
+  private visible = true;
   private timerId: ReturnType<typeof setInterval> | null = null;
   private readonly onTick: () => void;
 
@@ -34,9 +34,9 @@ export class CursorManager {
   /** Start blinking. Safe to call multiple times — clears any existing timer. */
   start(): void {
     this.stop();
-    this._isVisible = true;
+    this.visible = true;
     this.timerId = setInterval(() => {
-      this._isVisible = !this._isVisible;
+      this.visible = !this.visible;
       this.onTick();
     }, CursorManager.BLINK_INTERVAL_MS);
   }
@@ -47,7 +47,7 @@ export class CursorManager {
       clearInterval(this.timerId);
       this.timerId = null;
     }
-    this._isVisible = false;
+    this.visible = false;
     this.onTick();
   }
 
@@ -59,7 +59,7 @@ export class CursorManager {
    * timer restarts from this moment.
    */
   reset(): void {
-    this._isVisible = true;
+    this.visible = true;
     this.start();
     this.onTick();
   }
@@ -71,12 +71,12 @@ export class CursorManager {
    * notifyListeners will be called separately — avoids a double repaint.
    */
   resetSilent(): void {
-    this._isVisible = true;
+    this.visible = true;
     this.start();
   }
 
   /** Whether the cursor should be drawn on the current tick. */
   get isVisible(): boolean {
-    return this._isVisible;
+    return this.visible;
   }
 }

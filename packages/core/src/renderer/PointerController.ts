@@ -137,12 +137,12 @@ export class PointerController {
   } | null = null;
 
   /** Click-count tracking for double/triple-click. */
-  private _clickCount = 0;
-  private _lastClickTime = 0;
-  private _lastClickX = 0;
-  private _lastClickY = 0;
+  private clickCount = 0;
+  private lastClickTime = 0;
+  private lastClickX = 0;
+  private lastClickY = 0;
   /** Word boundaries from double-click — used for word-granularity drag. */
-  private _wordAnchor: { from: number; to: number } | null = null;
+  private wordAnchor: { from: number; to: number } | null = null;
 
   constructor(private readonly deps: PointerControllerDeps) {}
 
@@ -399,40 +399,40 @@ export class PointerController {
     const CLICK_TIMEOUT = 500;
     const CLICK_RADIUS = 5;
     if (
-      now - this._lastClickTime < CLICK_TIMEOUT &&
-      Math.abs(e.clientX - this._lastClickX) < CLICK_RADIUS &&
-      Math.abs(e.clientY - this._lastClickY) < CLICK_RADIUS
+      now - this.lastClickTime < CLICK_TIMEOUT &&
+      Math.abs(e.clientX - this.lastClickX) < CLICK_RADIUS &&
+      Math.abs(e.clientY - this.lastClickY) < CLICK_RADIUS
     ) {
-      this._clickCount++;
+      this.clickCount++;
     } else {
-      this._clickCount = 1;
+      this.clickCount = 1;
     }
-    this._lastClickTime = now;
-    this._lastClickX = e.clientX;
-    this._lastClickY = e.clientY;
+    this.lastClickTime = now;
+    this.lastClickX = e.clientX;
+    this.lastClickY = e.clientY;
 
     // Chrome band click — consumed for both activation (double-click) and
     // cursor positioning (single click when surface is already active).
-    if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this._clickCount)) return;
+    if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this.clickCount)) return;
 
     this.isDragging = true;
     const pos = editor.charMap.posAtCoords(docX, docY, page);
 
     // Triple-click → select entire block
-    if (this._clickCount >= 3) {
-      this._wordAnchor = null;
+    if (this.clickCount >= 3) {
+      this.wordAnchor = null;
       editor.selection.selectBlockAt(pos);
       return;
     }
 
     // Double-click → select word (and enable word-granularity drag)
-    if (this._clickCount === 2) {
+    if (this.clickCount === 2) {
       const bounds = editor.selection.selectWordAt(pos);
-      this._wordAnchor = bounds;
+      this.wordAnchor = bounds;
       return;
     }
 
-    this._wordAnchor = null;
+    this.wordAnchor = null;
 
     if (!e.shiftKey) {
       // Click physically inside an inline image's rect → select the image.
@@ -538,8 +538,8 @@ export class PointerController {
     const pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
 
     // Word-granularity drag (after double-click)
-    if (this._wordAnchor) {
-      const { from: wFrom, to: wTo } = this._wordAnchor;
+    if (this.wordAnchor) {
+      const { from: wFrom, to: wTo } = this.wordAnchor;
       if (pos < wFrom) {
         const wordStart = editor.selection.wordBoundary(pos, -1);
         editor.selection.setSelection(wTo, wordStart);
