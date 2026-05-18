@@ -515,3 +515,82 @@ describe("TileManager — body click deactivates surface", () => {
     setup.cleanup();
   });
 });
+
+describe("TileManager — margin click activation (no policy)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("emits chromeClick on double-click in the top margin even when band heights are 0", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
+
+    // y=40 is inside margins.top (72) — the potential header strip. With no
+    // headerFooter policy, headerHeight=0, but the widened hit-test still
+    // treats the margin strip as the header band.
+    const consumed = routePageClick(setup.editor, 1, 400, 40, 2);
+    expect(consumed).toBe(true);
+    expect(emitSpy).toHaveBeenCalledWith(
+      "chromeClick",
+      expect.objectContaining({ page: 1, band: "header", clickCount: 2 }),
+    );
+
+    setup.cleanup();
+  });
+
+  it("emits chromeClick on double-click in the bottom margin even when band heights are 0", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
+    const pageConfig = setup.editor.layout.pageConfig;
+
+    const footerY = pageConfig.pageHeight - pageConfig.margins.bottom + 20;
+    const consumed = routePageClick(setup.editor, 1, 400, footerY, 2);
+    expect(consumed).toBe(true);
+    expect(emitSpy).toHaveBeenCalledWith(
+      "chromeClick",
+      expect.objectContaining({ page: 1, band: "footer", clickCount: 2 }),
+    );
+
+    setup.cleanup();
+  });
+
+  it("does not emit chromeClick on body double-click (between margins)", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
+
+    // y=400 is well inside the body (between margins.top=72 and footer strip).
+    const consumed = routePageClick(setup.editor, 1, 400, 400, 2);
+    expect(consumed).toBe(false);
+    expect(emitSpy).not.toHaveBeenCalledWith("chromeClick", expect.anything());
+
+    setup.cleanup();
+  });
+
+  it("respects explicit band bounds when policy exists (no regression on demo path)", () => {
+    // Policy-enabled doc: bands have non-zero heights. The widened fallback
+    // must defer to metrics.contentTop / metrics.footerTop, not the raw
+    // pageConfig margins. Driving this via fixedChromeBandsExtension(60, 60)
+    // contributes a 60px header reserve → contentTop = margins.top(72) + 60 = 132.
+    const setup = makeRendererTestSetup({
+      scrollParent: true,
+      pageCount: 1,
+      extraExtensions: [fixedChromeBandsExtension(60, 60)],
+    });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
+
+    // y=100 sits between margins.top (72) and the band-resolved contentTop (132).
+    // With bands present, that's still inside the header — must emit chromeClick.
+    expect(routePageClick(setup.editor, 1, 400, 100, 2)).toBe(true);
+    expect(emitSpy).toHaveBeenCalledWith(
+      "chromeClick",
+      expect.objectContaining({ band: "header" }),
+    );
+
+    setup.cleanup();
+  });
+});
