@@ -175,6 +175,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       plugins.push(...TrailingNode.resolve(this.schema).plugins);
     }
 
+    if (opts.table === true) {
+      plugins.push(...Table.resolve(this.schema).plugins);
+    }
+
     return plugins;
   },
 
