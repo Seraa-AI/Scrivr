@@ -258,7 +258,9 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
     };
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
+    // Paint-only — tracked-changes data lives in plugin state regardless
+    // of view. Headless editors never reach this hook.
     const handler: OverlayRenderHandler = (ctx, pageNumber, _pageConfig, charMap) => {
       const state = editor.getState();
       const pluginState = trackChangesPluginKey.getState(state);

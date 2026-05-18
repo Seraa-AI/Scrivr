@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
-import { schema } from "../model/schema";
 import { defaultFloatingMenuShouldShow } from "./createFloatingMenu";
+import { buildStarterKitContext } from "../test-utils";
 
-function stateWithDoc(doc: ReturnType<typeof schema.node>, cursorPos: number): EditorState {
+const { schema } = buildStarterKitContext();
+
+function stateWithDoc(
+  doc: ReturnType<typeof schema.node>,
+  cursorPos: number,
+): EditorState {
   return EditorState.create({
     schema,
     doc,
@@ -13,9 +18,7 @@ function stateWithDoc(doc: ReturnType<typeof schema.node>, cursorPos: number): E
 
 describe("defaultFloatingMenuShouldShow", () => {
   it("shows for a structurally empty root text block", () => {
-    const doc = schema.node("doc", null, [
-      schema.node("paragraph", null, []),
-    ]);
+    const doc = schema.node("doc", null, [schema.node("paragraph", null, [])]);
 
     expect(defaultFloatingMenuShouldShow(stateWithDoc(doc, 1))).toBe(true);
   });

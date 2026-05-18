@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";// used inside describes that build schema-typed locals
 import {
   layoutBlock,
   isHiddenAnchorLine,
@@ -12,7 +12,6 @@ import { InlineRegistry } from "./BlockRegistry";
 import { defaultEditorTheme } from "../model/theme";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import type { FontConfig } from "./FontConfig";
-import { schema } from "../model/schema";
 import {
   createMeasurer,
   buildStarterKitContext,
@@ -30,20 +29,20 @@ function sumLineHeights(block: { lines: ReadonlyArray<{ lineHeight: number }> })
 }
 
 // StarterKit schema has the fontFamily attr on paragraph and heading nodes.
-const { schema: skSchema } = buildStarterKitContext();
+const { schema } = buildStarterKitContext();
 
 // Helper: paragraph node with a fontFamily attr set
 function paragraphWithFamily(text: string, fontFamily: string) {
-  return skSchema.node(
+  return schema.node(
     "paragraph",
     { fontFamily },
-    text ? [skSchema.text(text)] : [],
+    text ? [schema.text(text)] : [],
   );
 }
 
 // Helper: heading node with a fontFamily attr set
 function headingWithFamily(level: number, text: string, fontFamily: string) {
-  return skSchema.node("heading", { level, fontFamily }, [skSchema.text(text)]);
+  return schema.node("heading", { level, fontFamily }, [schema.text(text)]);
 }
 
 // lineHeight = (12+3) * 1.2 = 18
@@ -460,14 +459,14 @@ describe("layoutBlock — node attr alignment", () => {
 // ── Leaf block nodes ──────────────────────────────────────────────────────────
 
 describe("layoutBlock — leaf blocks (HR and Image)", () => {
-  const { schema: fullSchema } = buildStarterKitContext();
+  const { schema } = buildStarterKitContext();
 
   function hr() {
-    return fullSchema.nodes["horizontalRule"]!.create();
+    return schema.nodes["horizontalRule"]!.create();
   }
 
   function image(height: number | null = 200) {
-    return fullSchema.nodes["image"]!.create({
+    return schema.nodes["image"]!.create({
       src: "http://x.com/img.png",
       height,
     });
@@ -631,12 +630,12 @@ describe("layoutBlock — leaf blocks (HR and Image)", () => {
 // ── resolveLeafBlockDimensions (unit) ─────────────────────────────────────────
 
 describe("resolveLeafBlockDimensions", () => {
-  const { schema: fullSchema } = buildStarterKitContext();
+  const { schema } = buildStarterKitContext();
   const IMAGE_DEFAULT = 200;
   const IMAGE_SPACE = 8;
 
   it("uses node height attr when positive — ignores font", () => {
-    const node = fullSchema.nodes["image"]!.create({ height: 350 });
+    const node = schema.nodes["image"]!.create({ height: 350 });
     const cfg: FontConfig = {
       image: {
         font: "16px sans-serif",
@@ -655,7 +654,7 @@ describe("resolveLeafBlockDimensions", () => {
   });
 
   it("falls through to font size when height attr is absent", () => {
-    const node = fullSchema.nodes["horizontalRule"]!.create();
+    const node = schema.nodes["horizontalRule"]!.create();
     const cfg: FontConfig = {
       horizontalRule: {
         font: "8px Georgia, serif",
@@ -674,7 +673,7 @@ describe("resolveLeafBlockDimensions", () => {
   });
 
   it("uses IMAGE_DEFAULT_HEIGHT when fontConfig is undefined", () => {
-    const node = fullSchema.nodes["horizontalRule"]!.create();
+    const node = schema.nodes["horizontalRule"]!.create();
     const { height } = resolveLeafBlockDimensions(
       node,
       undefined,
@@ -685,7 +684,7 @@ describe("resolveLeafBlockDimensions", () => {
   });
 
   it("spaceBefore and spaceAfter come from block style when available", () => {
-    const node = fullSchema.nodes["horizontalRule"]!.create();
+    const node = schema.nodes["horizontalRule"]!.create();
     const cfg: FontConfig = {
       horizontalRule: {
         font: "8px Georgia, serif",
@@ -705,7 +704,7 @@ describe("resolveLeafBlockDimensions", () => {
   });
 
   it("spaceBefore and spaceAfter fall back to IMAGE_SPACE when no fontConfig", () => {
-    const node = fullSchema.nodes["horizontalRule"]!.create();
+    const node = schema.nodes["horizontalRule"]!.create();
     const { spaceBefore, spaceAfter } = resolveLeafBlockDimensions(
       node,
       undefined,
@@ -1020,17 +1019,17 @@ describe("layoutBlock — node fontFamily attr", () => {
 // inline images inside paragraphs.
 
 describe("extractSpans — inline node handling", () => {
-  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+  const { schema, fontConfig } = buildStarterKitContext();
 
   // ── hardBreak: Shift-Enter creates two lines ─────────────────────────────
 
   it("hardBreak inside a paragraph splits into two lines", () => {
-    const hb = skSchema.nodes["hardBreak"]?.create();
+    const hb = schema.nodes["hardBreak"]?.create();
     if (!hb) return;
-    const para = skSchema.node("paragraph", null, [
-      skSchema.text("Hello"),
+    const para = schema.node("paragraph", null, [
+      schema.text("Hello"),
       hb,
-      skSchema.text("World"),
+      schema.text("World"),
     ]);
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1052,11 +1051,11 @@ describe("extractSpans — inline node handling", () => {
   });
 
   it("hardBreak does NOT inflate line height — both lines stay at text line height", () => {
-    const hb = skSchema.nodes["hardBreak"]?.create();
+    const hb = schema.nodes["hardBreak"]?.create();
     if (!hb) return;
     // Control: a single-line paragraph with the same text content but no break.
     const control = layoutBlock(
-      skSchema.node("paragraph", null, [skSchema.text("A")]),
+      schema.node("paragraph", null, [schema.text("A")]),
       {
         nodePos: 0,
         x: 0,
@@ -1069,10 +1068,10 @@ describe("extractSpans — inline node handling", () => {
     );
     const baselineLineHeight = control.lines[0]!.lineHeight;
 
-    const para = skSchema.node("paragraph", null, [
-      skSchema.text("A"),
+    const para = schema.node("paragraph", null, [
+      schema.text("A"),
       hb,
-      skSchema.text("B"),
+      schema.text("B"),
     ]);
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1093,7 +1092,7 @@ describe("extractSpans — inline node handling", () => {
     // Control: empty paragraph (also uses the ZWS fallback). The hardBreak-only
     // paragraph must produce the same line height — no inflation.
     const empty = layoutBlock(
-      skSchema.node("paragraph", null, []),
+      schema.node("paragraph", null, []),
       {
         nodePos: 0,
         x: 0,
@@ -1106,9 +1105,9 @@ describe("extractSpans — inline node handling", () => {
     );
     const baseline = empty.lines[0]!.lineHeight;
 
-    const hb = skSchema.nodes["hardBreak"]?.create();
+    const hb = schema.nodes["hardBreak"]?.create();
     if (!hb) return;
-    const para = skSchema.node("paragraph", null, [hb]);
+    const para = schema.node("paragraph", null, [hb]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1125,9 +1124,9 @@ describe("extractSpans — inline node handling", () => {
   });
 
   it("trailing hardBreak emits a phantom second line for the cursor after the break", () => {
-    const hb = skSchema.nodes["hardBreak"]?.create();
+    const hb = schema.nodes["hardBreak"]?.create();
     if (!hb) return;
-    const para = skSchema.node("paragraph", null, [skSchema.text("Hello"), hb]);
+    const para = schema.node("paragraph", null, [schema.text("Hello"), hb]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1148,16 +1147,16 @@ describe("extractSpans — inline node handling", () => {
   // ── inline image IS an object span ───────────────────────────────────────
 
   it("inline image with width+height attrs produces exactly one object span", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 100,
       height: 80,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [
-      skSchema.text("Before"),
+    const para = schema.node("paragraph", null, [
+      schema.text("Before"),
       img,
-      skSchema.text("After"),
+      schema.text("After"),
     ]);
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1174,13 +1173,13 @@ describe("extractSpans — inline node handling", () => {
   });
 
   it("line containing an inline image is as tall as the image when it exceeds text height", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 200,
       height: 150,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1198,7 +1197,7 @@ describe("extractSpans — inline node handling", () => {
     // Image (8px) is shorter than text — line height must not shrink below
     // the text-only baseline. Control: same paragraph without the image.
     const control = layoutBlock(
-      skSchema.node("paragraph", null, [skSchema.text("Hi")]),
+      schema.node("paragraph", null, [schema.text("Hi")]),
       {
         nodePos: 0,
         x: 0,
@@ -1211,13 +1210,13 @@ describe("extractSpans — inline node handling", () => {
     );
     const textOnlyHeight = control.lines[0]!.lineHeight;
 
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "i.png",
       width: 8,
       height: 8,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const para = schema.node("paragraph", null, [schema.text("Hi"), img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1231,7 +1230,7 @@ describe("extractSpans — inline node handling", () => {
   });
 
   it("inline image registers a glyph in the CharacterMap at its docPos", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 50,
       height: 50,
@@ -1239,7 +1238,7 @@ describe("extractSpans — inline node handling", () => {
     if (!img) return;
     // doc structure: doc(para(text"Hi", img)) — image is at docPos 4
     // nodePos=0 → para opens at 0, text "Hi" at 1,2, img at 3
-    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const para = schema.node("paragraph", null, [schema.text("Hi"), img]);
     const map = new CharacterMap();
     layoutBlock(para, {
       nodePos: 0,
@@ -1260,16 +1259,16 @@ describe("extractSpans — inline node handling", () => {
 // ── Phase 3: anchored-image sentinel does not inflate paragraph height ───────
 
 describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
-  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+  const { schema, fontConfig } = buildStarterKitContext();
 
   it("paragraph with only a non-inline image is an invisible zero-height anchor flow", () => {
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 200,
       wrapMode: "square",
     });
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1292,13 +1291,13 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
 
   it("anchor-only paragraph does not register cursor glyphs", () => {
     const map = new CharacterMap();
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 200,
       wrapMode: "square",
     });
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
 
     layoutBlock(para, {
       nodePos: 0,
@@ -1317,13 +1316,13 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
   });
 
   it("anchor-only paragraph stays zero-height even when it overlaps its own exclusion zone", () => {
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 200,
       wrapMode: "top-bottom",
     });
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
 
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1344,13 +1343,13 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
   });
 
   it("anchored-image sentinel is preserved on the line so getAnchoredObjectAnchors finds it", () => {
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 200,
       wrapMode: "square",
     });
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1371,8 +1370,8 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
     // Control: same paragraph without the anchored image — line height
     // matches text. The non-inline image must not inflate it.
     const control = layoutBlock(
-      skSchema.node("paragraph", null, [
-        skSchema.text("text alongside an anchored image"),
+      schema.node("paragraph", null, [
+        schema.text("text alongside an anchored image"),
       ]),
       {
         nodePos: 0,
@@ -1386,15 +1385,15 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
     );
     const textOnlyHeight = control.lines[0]!.lineHeight;
 
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 200,
       wrapMode: "square",
     });
-    const para = skSchema.node("paragraph", null, [
+    const para = schema.node("paragraph", null, [
       img,
-      skSchema.text("text alongside an anchored image"),
+      schema.text("text alongside an anchored image"),
     ]);
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1410,13 +1409,13 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
   });
 
   it("inline image (wrapMode:inline) still inflates line height as before — Phase 3 only changes non-inline", () => {
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 150,
       wrapMode: "inline",
     });
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1438,7 +1437,7 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
 // inlineHandlers — images appeared as blank cursors.
 
 describe("TextBlockStrategy — inline image rendering", () => {
-  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+  const { schema, fontConfig } = buildStarterKitContext();
 
   /**
    * Real canvas context — happy-dom's `getContext("2d")` is wired in
@@ -1451,13 +1450,13 @@ describe("TextBlockStrategy — inline image rendering", () => {
   }
 
   it("calls InlineStrategy.render() for each inline image span", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 80,
       height: 60,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const para = schema.node("paragraph", null, [schema.text("Hi"), img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1503,13 +1502,13 @@ describe("TextBlockStrategy — inline image rendering", () => {
   });
 
   it("does NOT call InlineStrategy.render() when inlineRegistry is absent", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 80,
       height: 60,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1539,16 +1538,16 @@ describe("TextBlockStrategy — inline image rendering", () => {
   });
 
   it("still renders surrounding text when paragraph contains a mix of text and image", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 50,
       height: 50,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [
-      skSchema.text("Hello"),
+    const para = schema.node("paragraph", null, [
+      schema.text("Hello"),
       img,
-      skSchema.text("World"),
+      schema.text("World"),
     ]);
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1588,13 +1587,13 @@ describe("TextBlockStrategy — inline image rendering", () => {
 
   it("InlineStrategy.measure() overrides node width/height attrs during layout", () => {
     // Create an inline image node with small placeholder dimensions
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 10,
       height: 10,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const para = schema.node("paragraph", null, [schema.text("Hi"), img]);
 
     // Strategy with measure() that returns larger dimensions
     const measureFn = vi.fn(() => ({ width: 50, height: 30 }));
@@ -1625,13 +1624,13 @@ describe("TextBlockStrategy — inline image rendering", () => {
   });
 
   it("falls back to node attrs when InlineStrategy has no measure()", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 100,
       height: 80,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
 
     // Strategy WITHOUT measure()
     const strategy: InlineStrategy = { render: vi.fn() };
@@ -1656,13 +1655,13 @@ describe("TextBlockStrategy — inline image rendering", () => {
   });
 
   it("falls back to node attrs when no inlineRegistry is provided", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 100,
       height: 80,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
 
     const block = layoutBlock(para, {
       nodePos: 0,

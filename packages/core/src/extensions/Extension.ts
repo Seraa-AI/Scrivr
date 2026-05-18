@@ -6,6 +6,7 @@ import type {
   Phase1Context,
   ResolvedExtension,
   IBaseEditor,
+  IEditor,
 } from "./types";
 
 /**
@@ -110,6 +111,9 @@ export class Extension<Options extends object = object> {
       markdownSerializerRules: config.addMarkdownSerializerRules?.call(p1) ?? {},
       ...(config.onEditorReady
         ? { editorReadyCallback: (editor: IBaseEditor) => config.onEditorReady!.call(p1, editor) }
+        : {}),
+      ...(config.onViewReady
+        ? { viewReadyCallback: (editor: IEditor) => config.onViewReady!.call(p1, editor) }
         : {}),
     };
   }

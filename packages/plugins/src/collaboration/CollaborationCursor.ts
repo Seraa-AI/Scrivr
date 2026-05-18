@@ -24,7 +24,8 @@ export const CollaborationCursor = Extension.create<CollaborationCursorOptions>(
     user: { name: "Anonymous", color: "#3b82f6" },
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
+    // Remote cursor rendering is paint-only.
     const collab = collaborationRegistry.get(editor);
     if (!collab) {
       console.warn(

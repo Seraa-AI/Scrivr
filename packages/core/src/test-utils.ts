@@ -12,14 +12,18 @@
  */
 
 import { vi } from "vitest";
-import { ExtensionManager } from "./extensions/ExtensionManager";
+import { ExtensionManager, getSchema } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import { TextMeasurer } from "./layout/TextMeasurer";
 import { Editor, type EditorOptions } from "./Editor";
 import { Extension } from "./extensions/Extension";
 import { EditorSurface } from "./surfaces/EditorSurface";
-import { schema } from "./model/schema";
 import { defaultPageConfig } from "./layout/PageLayout";
+
+// Test-side schema source of truth — same `getSchema([StarterKit])` shape
+// the production editor builds at construction time. Module-load only; no
+// production code path runs this.
+const schema = getSchema([StarterKit]);
 import { createNapiCanvasContext } from "./test/createNapiCanvasContext";
 import type { Node } from "prosemirror-model";
 import type { Schema } from "prosemirror-model";

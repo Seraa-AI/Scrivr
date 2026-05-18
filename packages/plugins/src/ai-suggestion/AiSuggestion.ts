@@ -61,7 +61,7 @@ export const AiSuggestion = Extension.create<AiSuggestionOptions>({
     return [aiSuggestionPlugin];
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
     const cleanups: Array<() => void> = [];
 
     const { renderMode } = this.options;

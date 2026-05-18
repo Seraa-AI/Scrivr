@@ -559,14 +559,16 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     return tokens;
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
+    // Aggregate view-only lifecycle from sub-extensions. Image is the
+    // only one today (its `redraw` request when an `<img>` finishes
+    // loading is paint-only).
     const cleanups: Array<() => void> = [];
     const opts = this.options;
 
-    // Aggregate onEditorReady from sub-extensions that need runtime setup.
     if (opts.image !== false) {
       const resolved = Image.resolve();
-      const cleanup = resolved.editorReadyCallback?.(editor);
+      const cleanup = resolved.viewReadyCallback?.(editor);
       if (cleanup) cleanups.push(cleanup);
     }
 

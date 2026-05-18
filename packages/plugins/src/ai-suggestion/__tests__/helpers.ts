@@ -1,18 +1,22 @@
 /**
  * Shared test helpers for ai-suggestion integration tests.
  *
- * Provides a minimal ProseMirror schema (paragraph + heading + text +
- * trackedInsert/trackedDelete marks, all with nodeId attrs) and an
- * `AiTestEditor` that extends the real headless `ServerEditor` with a
- * pinch of test sugar (`showSuggestion`, `apply`, `reject`, `text`,
- * `suggestionState`). No hand-rolled `IEditor` stub — the test driver is
- * a real editor.
+ * Drives a real headless `ServerEditor` wired with the production
+ * `StarterKit` + `TrackChanges` extensions (so the schema, paragraph
+ * attrs, and tracked marks match production) plus a tiny in-test
+ * extension that contributes the `aiSuggestionPlugin`. No custom test
+ * schema, no hand-rolled `IEditor` stub — the test driver is the
+ * production schema with production plugins.
  */
 
-import { Schema } from "prosemirror-model";
-import type { NodeSpec, MarkSpec } from "prosemirror-model";
-import { history } from "prosemirror-history";
-import { trackChangesPlugin } from "../../track-changes/engine/trackChangesPlugin";
+import {
+  ServerEditor,
+  Extension,
+  StarterKit,
+  getSchema,
+} from "@scrivr/core";
+import type { Node as PmNode } from "prosemirror-model";
+import { TrackChanges } from "../../track-changes/TrackChanges";
 import { TrackChangesStatus } from "../../track-changes/types";
 import {
   aiSuggestionPlugin,
@@ -23,58 +27,22 @@ import {
   applyAiSuggestion,
   rejectAiSuggestion,
 } from "../showHideApply";
-import { ServerEditor, Extension } from "@scrivr/core";
-import type { Node as PmNode } from "prosemirror-model";
 import type { AiSuggestion } from "../types";
 import type {
   ApplyAiSuggestionOptions,
   RejectAiSuggestionOptions,
 } from "../types";
 
-// ── Schema specs (single source of truth) ────────────────────────────────────
+// ── Real schema (shared across builders + editor instances) ──────────────────
 //
-// The `schema` constant below and the `TestSchemaExtension`'s addNodes /
-// addMarks both consume these specs, so the local builders (p, h, doc) and
-// the editor's runtime schema stay byte-equivalent — JSON round-trips
-// through ServerEditor without surprises.
+// Built once at module load from the production `StarterKit` + `TrackChanges`
+// extensions. The `p`/`h`/`doc` builders below use this schema to construct
+// PM Nodes, and `AiTestEditor` constructs a `ServerEditor` with the same
+// extensions — so what the builders produce and what the editor accepts are
+// the same Schema instance (well, structurally identical: ServerEditor
+// rebuilds its own copy via the same extension list).
 
-const nodeSpecs: Record<string, NodeSpec> = {
-  doc: { content: "block+" },
-  paragraph: {
-    group: "block",
-    content: "inline*",
-    attrs: {
-      dataTracked: { default: null },
-      nodeId: { default: null },
-      align: { default: null },
-    },
-  },
-  heading: {
-    group: "block",
-    content: "inline*",
-    attrs: {
-      level: { default: 1 },
-      dataTracked: { default: null },
-      nodeId: { default: null },
-      align: { default: null },
-    },
-  },
-  text: { group: "inline" },
-};
-
-const markSpecs: Record<string, MarkSpec> = {
-  trackedInsert: {
-    excludes: "",
-    attrs: { dataTracked: { default: {} } },
-  },
-  trackedDelete: {
-    excludes: "",
-    attrs: { dataTracked: { default: {} } },
-  },
-};
-
-/** Local schema — used by the `p`/`h`/`doc` node builders below. */
-export const schema = new Schema({ nodes: nodeSpecs, marks: markSpecs });
+export const schema = getSchema([StarterKit, TrackChanges]);
 
 // ── Node builders ────────────────────────────────────────────────────────────
 
@@ -98,45 +66,33 @@ export function doc(...nodes: PmNode[]) {
   return schema.node("doc", null, nodes);
 }
 
-// ── Test fixture extension ───────────────────────────────────────────────────
-//
-// Contributes the minimal schema + the plugins under test. Configured per
-// AiTestEditor instance with the author id used by trackChangesPlugin.
+// ── In-test extension: contributes only the ai suggestion plugin ─────────────
 
-interface TestSchemaOptions {
-  authorID: string;
-}
-
-const TestSchemaExtension = Extension.create<TestSchemaOptions>({
-  name: "ai_test_schema",
-  defaultOptions: { authorID: "user1" },
-  addNodes: () => nodeSpecs,
-  addMarks: () => markSpecs,
-  addProseMirrorPlugins() {
-    return [
-      history(),
-      trackChangesPlugin({
-        userID: this.options.authorID,
-        initialStatus: TrackChangesStatus.enabled,
-      }),
-      aiSuggestionPlugin,
-    ];
-  },
+const AiSuggestionTestExtension = Extension.create({
+  name: "ai_suggestion_test_plugin",
+  addProseMirrorPlugins: () => [aiSuggestionPlugin],
 });
 
 // ── AiTestEditor ─────────────────────────────────────────────────────────────
 
 /**
  * Real headless editor (extends `ServerEditor`) with a pinch of test sugar
- * for ai-suggestion suites: pass a built-in-builders doc, get back an
- * editor whose `showSuggestion` / `apply` / `reject` methods route to the
- * real `showAiSuggestion` / `applyAiSuggestion` / `rejectAiSuggestion`
- * functions against this editor instance.
+ * for ai-suggestion suites. Same extensions a production editor would use
+ * for track-changes work: `StarterKit` + `TrackChanges` (configured per
+ * author) + the ai-suggestion plugin. Sugar methods route to the real
+ * `showAiSuggestion` / `applyAiSuggestion` / `rejectAiSuggestion`.
  */
 export class AiTestEditor extends ServerEditor {
   constructor(initialDoc: PmNode, authorID = "user1") {
     super({
-      extensions: [TestSchemaExtension.configure({ authorID })],
+      extensions: [
+        StarterKit,
+        TrackChanges.configure({
+          userID: authorID,
+          initialStatus: TrackChangesStatus.enabled,
+        }),
+        AiSuggestionTestExtension,
+      ],
       content: initialDoc.toJSON() as Record<string, unknown>,
     });
   }

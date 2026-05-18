@@ -493,8 +493,27 @@ export class Editor extends BaseEditor implements IEditor {
     this.disposeDragDebug = installDragDebugOverlay(this);
     this.disposeAnchoredDebug = installAnchoredObjectDebugOverlay(this);
 
-    // Fire onEditorReady after ALL infrastructure (including view) is set up.
+    // Lifecycle: engine-side hooks first (`onEditorReady`), then view-side
+    // hooks (`onViewReady`). Both run with all infrastructure available;
+    // the split is so view-only extensions can declare `onViewReady` and
+    // skip headless contexts without crashing on `addOverlayRenderHandler`
+    // / `redraw` / `selection`.
     this.fireEditorReady();
+    this.fireViewReady();
+  }
+
+  /**
+   * Invoke all `onViewReady` callbacks from extensions. View-only — never
+   * called in `ServerEditor`. Cleanup fns land in the shared
+   * `runtimeCleanup` array so `destroy()` releases both lifecycles in one
+   * sweep.
+   */
+  protected fireViewReady(): void {
+    const callbacks = this.manager.buildViewReadyCallbacks();
+    for (const cb of callbacks) {
+      const cleanup = cb(this);
+      if (typeof cleanup === "function") this.runtimeCleanup.push(cleanup);
+    }
   }
 
   // ── BaseEditor overrides ─────────────────────────────────────────────────

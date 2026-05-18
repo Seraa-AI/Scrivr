@@ -475,24 +475,29 @@ export const AiToolkit = Extension.create<AiToolkitOptions>({
     return cmds;
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
+    // The sub-extensions (GhostText / AiCaret / AiSuggestion) are all
+    // view-only — they paint overlays. Compose their `viewReadyCallback`s
+    // here so the consumer registers them transitively without having to
+    // list each in the extensions array. The AiToolkitAPI itself only
+    // needs `IBaseEditor` methods (getState, applyTransaction, getMarkdown)
+    // but the registry is keyed on `IEditor` because that's the natural
+    // host of an active toolkit instance.
     const cleanups: Array<() => void> = [];
 
-    // Register sub-extension overlay handlers
     if (this.options.ghostText !== false) {
-      const cleanup = GhostText.resolve().editorReadyCallback?.(editor);
+      const cleanup = GhostText.resolve().viewReadyCallback?.(editor);
       if (cleanup) cleanups.push(cleanup);
     }
     if (this.options.aiCaret !== false) {
-      const cleanup = AiCaret.resolve().editorReadyCallback?.(editor);
+      const cleanup = AiCaret.resolve().viewReadyCallback?.(editor);
       if (cleanup) cleanups.push(cleanup);
     }
     if (this.options.aiSuggestion !== false) {
-      const cleanup = AiSuggestionExtension.resolve().editorReadyCallback?.(editor);
+      const cleanup = AiSuggestionExtension.resolve().viewReadyCallback?.(editor);
       if (cleanup) cleanups.push(cleanup);
     }
 
-    // Create and register the AiToolkitAPI instance
     const hasSuggestion = this.options.aiSuggestion !== false;
     const api = new AiToolkitAPI(editor, hasSuggestion);
     aiToolkitRegistry.set(editor, api);

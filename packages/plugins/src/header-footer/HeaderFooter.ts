@@ -11,7 +11,7 @@
  */
 
 import { Extension } from "@scrivr/core";
-import type { IEditor, IBaseEditor, EditorSurface } from "@scrivr/core";
+import type { IBaseEditor, IEditor, EditorSurface } from "@scrivr/core";
 import { TextSelection } from "prosemirror-state";
 import type { HeaderFooterPolicy } from "./types";
 import { getHeaderFooterPolicy } from "./getPolicy";
@@ -28,11 +28,6 @@ import {
 import { pageNumberStrategy, totalPagesStrategy, dateStrategy } from "./tokenStrategies";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import type { SlotKey } from "./surfaces";
-
-/** Runtime check: does this editor have surfaces + layout (view Editor, not ServerEditor)? */
-function isViewEditor(editor: IBaseEditor): editor is IEditor {
-  return "surfaces" in editor && "layout" in editor;
-}
 
 interface CursorManagerLike { isVisible: boolean; resetSilent(): void }
 
@@ -305,9 +300,9 @@ export const HeaderFooter = Extension.create({
     };
   },
 
-  onEditorReady(baseEditor) {
-    if (!isViewEditor(baseEditor)) return;
-    const editor = baseEditor;
+  onViewReady(editor: IEditor) {
+    // Header/footer surface activation needs overlay rendering + the
+    // surface registry + chrome-band click routing — all view-only.
     const cache = new HeaderFooterSurfaceCache(editor.schema);
     editorEntries.set(editor, { editor, cache, activePage: 0 });
 

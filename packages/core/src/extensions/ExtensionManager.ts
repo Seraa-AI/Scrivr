@@ -17,7 +17,7 @@ import type {
   MarkdownNodeSerializer,
   MarkdownMarkSerializer,
 } from "./types";
-import type { IBaseEditor } from "./types";
+import type { IBaseEditor, IEditor } from "./types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
 import { defaultPageConfig } from "../layout/PageLayout";
@@ -399,9 +399,10 @@ export class ExtensionManager {
   }
 
   /**
-   * Returns the onEditorReady callbacks from all extensions that define one.
-   * Called by Editor at the end of construction to let extensions do runtime
-   * setup (collaboration providers, overlay handlers, etc.).
+   * Returns the `onEditorReady` callbacks from all extensions that define
+   * one. Fires in both `Editor` (browser) and `ServerEditor` (headless) —
+   * engine-only setup belongs here (collaboration document binding,
+   * subscribers, plugin-state bootstrap).
    */
   buildEditorReadyCallbacks(): Array<
     (editor: IBaseEditor) => (() => void) | void
@@ -409,6 +410,21 @@ export class ExtensionManager {
     return this.resolved
       .filter((ext) => ext.editorReadyCallback !== undefined)
       .map((ext) => ext.editorReadyCallback!);
+  }
+
+  /**
+   * Returns the `onViewReady` callbacks from all extensions that define
+   * one. Fires **only** in browser `Editor`, after view infrastructure
+   * (layout / input bridge / surfaces / overlay layer) is initialised.
+   * View-only setup belongs here (overlay handlers, redraw triggers,
+   * selection wiring, layout reads).
+   */
+  buildViewReadyCallbacks(): Array<
+    (editor: IEditor) => (() => void) | void
+  > {
+    return this.resolved
+      .filter((ext) => ext.viewReadyCallback !== undefined)
+      .map((ext) => ext.viewReadyCallback!);
   }
 
   /**
