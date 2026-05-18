@@ -8,97 +8,19 @@
  * Each row has Accept / Reject buttons. Header has Accept All / Reject All.
  */
 
-import { useEffect, useState } from "react";
 import type { Editor } from "@scrivr/core";
 import {
-  trackChangesPluginKey,
   CHANGE_OPERATION,
   CHANGE_STATUS,
 } from "@scrivr/plugins";
 import type {
   TrackedChange,
-  TextChange,
   MarkChange,
   NodeAttrChange,
 } from "@scrivr/plugins";
-
-/**
- * A display-ready item — either a paired replacement or a single change.
- */
-type DisplayItem =
-  | {
-      kind: "replacement";
-      deleteChange: TextChange;
-      insertChange: TextChange;
-      ids: string[];
-      authorID: string;
-    }
-  | {
-      kind: "single";
-      change: TrackedChange;
-    };
-
-/** Group text changes that share a groupId into replacement pairs. */
-function buildDisplayItems(changes: TrackedChange[]): DisplayItem[] {
-  const byGroupId = new Map<string, TrackedChange[]>();
-  const ungrouped: TrackedChange[] = [];
-
-  for (const c of changes) {
-    const gid = (c.dataTracked as Record<string, unknown>).groupId as
-      | string
-      | undefined;
-    if (gid) {
-      if (!byGroupId.has(gid)) byGroupId.set(gid, []);
-      byGroupId.get(gid)!.push(c);
-    } else {
-      ungrouped.push(c);
-    }
-  }
-
-  const items: DisplayItem[] = [];
-
-  for (const group of byGroupId.values()) {
-    const del = group.find(
-      (c) =>
-        c.type === "text-change" &&
-        c.dataTracked.operation === CHANGE_OPERATION.delete,
-    ) as TextChange | undefined;
-    const ins = group.find(
-      (c) =>
-        c.type === "text-change" &&
-        c.dataTracked.operation === CHANGE_OPERATION.insert,
-    ) as TextChange | undefined;
-
-    if (del && ins) {
-      items.push({
-        kind: "replacement",
-        deleteChange: del,
-        insertChange: ins,
-        ids: group.map((c) => c.id),
-        authorID: del.dataTracked.authorID,
-      });
-    } else {
-      group.forEach((c) => items.push({ kind: "single", change: c }));
-    }
-  }
-
-  ungrouped.forEach((c) => items.push({ kind: "single", change: c }));
-
-  // Sort by earliest document position
-  items.sort((a, b) => {
-    const af =
-      a.kind === "replacement"
-        ? Math.min(a.deleteChange.from, a.insertChange.from)
-        : a.change.from;
-    const bf =
-      b.kind === "replacement"
-        ? Math.min(b.deleteChange.from, b.insertChange.from)
-        : b.change.from;
-    return af - bf;
-  });
-
-  return items;
-}
+import { cx } from "../utils/classNames";
+import { useTrackChangesPanel } from "../hooks/useTrackChangesPanel";
+import type { TrackChangesDisplayItem } from "../hooks/useTrackChangesPanel";
 
 function shortName(authorID: string): string {
   const name = authorID.split(":").pop() ?? authorID;
@@ -112,8 +34,6 @@ function truncate(text: string, max = 60): string {
 interface ChangeMeta {
   icon: string;
   label: string;
-  color: string;
-  bgColor: string;
 }
 
 const MARK_ICONS: Record<string, string> = {
@@ -156,14 +76,10 @@ function getChangeMeta(change: TrackedChange): ChangeMeta {
       return {
         icon: "+",
         label: "Insertion",
-        color: "#15803d",
-        bgColor: "#dcfce7",
       };
     return {
       icon: "−",
       label: "Deletion",
-      color: "#b91c1c",
-      bgColor: "#fee2e2",
     };
   }
 
@@ -174,8 +90,6 @@ function getChangeMeta(change: TrackedChange): ChangeMeta {
     return {
       icon: MARK_ICONS[name] ?? "M",
       label: `${MARK_LABELS[name] ?? name} ${isRemoval ? "removed" : "added"}`,
-      color: "#6d28d9",
-      bgColor: "#ede9fe",
     };
   }
 
@@ -183,8 +97,6 @@ function getChangeMeta(change: TrackedChange): ChangeMeta {
     return {
       icon: "≡",
       label: "Style changed",
-      color: "#0369a1",
-      bgColor: "#e0f2fe",
     };
   }
 
@@ -192,8 +104,6 @@ function getChangeMeta(change: TrackedChange): ChangeMeta {
     return {
       icon: "⊞",
       label: "Structure",
-      color: "#92400e",
-      bgColor: "#fef3c7",
     };
   }
 
@@ -202,21 +112,15 @@ function getChangeMeta(change: TrackedChange): ChangeMeta {
       return {
         icon: "□+",
         label: "Block added",
-        color: "#15803d",
-        bgColor: "#dcfce7",
       };
     if (op === CHANGE_OPERATION.delete)
       return {
         icon: "□−",
         label: "Block removed",
-        color: "#b91c1c",
-        bgColor: "#fee2e2",
       };
     return {
       icon: "□",
       label: "Block changed",
-      color: "#64748b",
-      bgColor: "#f1f5f9",
     };
   }
 
@@ -224,16 +128,12 @@ function getChangeMeta(change: TrackedChange): ChangeMeta {
     return {
       icon: "↗",
       label: "Reference",
-      color: "#0369a1",
-      bgColor: "#e0f2fe",
     };
   }
 
   return {
     icon: "?",
     label: op ?? "Change",
-    color: "#64748b",
-    bgColor: "#f1f5f9",
   };
 }
 
@@ -268,46 +168,35 @@ function describeMarkChange(change: MarkChange): string {
 }
 
 
-interface TrackChangesPanelProps {
+export interface TrackChangesPanelProps {
   editor: Editor | null;
+  className?: string | undefined;
+  itemClassName?: string | undefined;
+  iconClassName?: string | undefined;
+  titleClassName?: string | undefined;
+  descriptionClassName?: string | undefined;
+  emptyClassName?: string | undefined;
 }
 
-export function TrackChangesPanel({ editor }: TrackChangesPanelProps) {
-  const [changes, setChanges] = useState<TrackedChange[]>([]);
-
-  useEffect(() => {
-    if (!editor) return;
-    const update = () => {
-      const pluginState = trackChangesPluginKey.getState(editor.getState());
-      const all = pluginState?.changeSet?.changes ?? [];
-      setChanges(
-        all.filter((c) => c.dataTracked.status === CHANGE_STATUS.pending),
-      );
-    };
-    update();
-    return editor.subscribe(update);
-  }, [editor]);
-
-  const items = buildDisplayItems(changes);
-  const allIds = changes.map((c) => c.id);
-  const isEmpty = items.length === 0;
-
-  function acceptAll() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, allIds);
-  }
-  function rejectAll() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, allIds);
-  }
+export function TrackChangesPanel({
+  editor,
+  className,
+  itemClassName,
+  iconClassName,
+  titleClassName,
+  descriptionClassName,
+  emptyClassName,
+}: TrackChangesPanelProps) {
+  const panel = useTrackChangesPanel(editor);
 
   return (
     <aside
+      className={cx("scrivr-track-panel", className)}
       style={{
         width: 300,
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",
-        background: "var(--app-surface, #fff)",
-        borderLeft: "1px solid var(--app-border, #e8eaed)",
         overflow: "hidden",
       }}
     >
@@ -317,43 +206,35 @@ export function TrackChangesPanel({ editor }: TrackChangesPanelProps) {
           display: "flex",
           alignItems: "center",
           height: 44,
-          padding: "0 14px",
-          borderBottom: "1px solid var(--app-border, #e8eaed)",
           gap: 8,
           flexShrink: 0,
         }}
       >
         <span
+          className={cx("scrivr-menu-title", titleClassName)}
+          data-part="title"
           style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--app-text, #111827)",
-            letterSpacing: "-0.01em",
           }}
         >
           Track Changes
         </span>
-        {changes.length > 0 && (
+        {panel.changes.length > 0 && (
           <span
+            className={cx("scrivr-menu-icon", iconClassName)}
+            data-part="icon"
             style={{
-              fontSize: 11,
-              fontWeight: 600,
-              background: "#6366f1",
-              color: "#fff",
-              borderRadius: 99,
-              padding: "1px 7px",
             }}
           >
-            {changes.length}
+            {panel.changes.length}
           </span>
         )}
 
-        {!isEmpty && (
+        {!panel.isEmpty && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
-            <button onClick={rejectAll} style={actionBtn("#f1f5f9", "#64748b")}>
+            <button className={cx("scrivr-menu-item", itemClassName)} onClick={panel.rejectAll} style={actionBtn}>
               Reject all
             </button>
-            <button onClick={acceptAll} style={actionBtn("#dcfce7", "#15803d")}>
+            <button className={cx("scrivr-menu-item", itemClassName)} onClick={panel.acceptAll} style={actionBtn}>
               Accept all
             </button>
           </div>
@@ -365,11 +246,13 @@ export function TrackChangesPanel({ editor }: TrackChangesPanelProps) {
         style={{
           flex: 1,
           overflowY: "auto",
-          padding: isEmpty ? 0 : "6px 0",
+          padding: panel.isEmpty ? 0 : "6px 0",
         }}
       >
-        {isEmpty ? (
+        {panel.isEmpty ? (
           <div
+            className={cx("scrivr-menu-empty", emptyClassName)}
+            data-empty
             style={{
               display: "flex",
               flexDirection: "column",
@@ -377,14 +260,13 @@ export function TrackChangesPanel({ editor }: TrackChangesPanelProps) {
               justifyContent: "center",
               height: "100%",
               gap: 8,
-              padding: 24,
             }}
           >
-            <span style={{ fontSize: 28 }}>✓</span>
+            <span className={cx("scrivr-menu-icon", iconClassName)} data-part="icon">Done</span>
             <span
+              className={cx("scrivr-menu-description", descriptionClassName)}
+              data-part="description"
               style={{
-                fontSize: 13,
-                color: "var(--app-text-faint, #9ca3af)",
                 textAlign: "center",
                 lineHeight: 1.5,
               }}
@@ -393,7 +275,7 @@ export function TrackChangesPanel({ editor }: TrackChangesPanelProps) {
             </span>
           </div>
         ) : (
-          items.map((item, i) =>
+          panel.items.map((item, i) =>
             item.kind === "replacement" ? (
               <ReplacementRow key={i} item={item} editor={editor} />
             ) : (
@@ -410,7 +292,7 @@ function ReplacementRow({
   item,
   editor,
 }: {
-  item: Extract<DisplayItem, { kind: "replacement" }>;
+  item: Extract<TrackChangesDisplayItem, { kind: "replacement" }>;
   editor: Editor | null;
 }) {
   const { deleteChange: del, insertChange: ins, ids, authorID } = item;
@@ -420,8 +302,6 @@ function ReplacementRow({
       meta={{
         icon: "↔",
         label: "Replacement",
-        color: "#6d28d9",
-        bgColor: "#ede9fe",
       }}
       authorID={authorID}
       onAccept={() =>
@@ -431,11 +311,11 @@ function ReplacementRow({
         editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, ids)
       }
     >
-      <div style={previewLine("#fee2e2", "#b91c1c")}>
+      <div style={previewLine}>
         <span style={prefixLabel}>Removing</span>
         <em style={{ fontStyle: "italic" }}>"{truncate(del.text)}"</em>
       </div>
-      <div style={previewLine("#f0fdf4", "#15803d")}>
+      <div style={previewLine}>
         <span style={prefixLabel}>Adding</span>
         <em style={{ fontStyle: "italic" }}>"{truncate(ins.text)}"</em>
       </div>
@@ -467,10 +347,7 @@ function SingleRow({
     const isDelete = tc.dataTracked.operation === CHANGE_OPERATION.delete;
     preview = (
       <div
-        style={previewLine(
-          isDelete ? "#fee2e2" : "#f0fdf4",
-          isDelete ? "#b91c1c" : "#15803d",
-        )}
+        style={previewLine}
       >
         <span style={prefixLabel}>{isDelete ? "Removing" : "Adding"}</span>
         <em>"{truncate(tc.text)}"</em>
@@ -479,15 +356,15 @@ function SingleRow({
   } else if (change.type === "mark-change") {
     const desc = describeMarkChange(change);
     if (desc) {
-      preview = <div style={previewLine("#ede9fe", "#6d28d9")}>{desc}</div>;
+      preview = <div style={previewLine}>{desc}</div>;
     }
   } else if (change.type === "node-attr-change") {
     const desc = describeAttrChange(change);
-    preview = <div style={previewLine("#e0f2fe", "#0369a1")}>{desc}</div>;
+    preview = <div style={previewLine}>{desc}</div>;
   } else if (change.type === "wrap-change") {
     const wc = change
     preview = (
-      <div style={previewLine("#fef3c7", "#92400e")}>
+      <div style={previewLine}>
         Wrapped in <em>{wc.wrapperNode}</em>
       </div>
     );
@@ -495,10 +372,7 @@ function SingleRow({
     const nc = change
     preview = (
       <div
-        style={previewLine(
-          meta.color === "#15803d" ? "#f0fdf4" : "#fee2e2",
-          meta.color,
-        )}
+        style={previewLine}
       >
         {nc.node.type.name}
       </div>
@@ -533,8 +407,6 @@ function ChangeRow({
   return (
     <div
       style={{
-        padding: "8px 14px",
-        borderBottom: "1px solid var(--app-border, #f1f5f9)",
         display: "flex",
         flexDirection: "column",
         gap: 5,
@@ -547,23 +419,13 @@ function ChangeRow({
             display: "inline-flex",
             alignItems: "center",
             gap: 3,
-            padding: "2px 6px",
-            borderRadius: 99,
-            fontSize: 10,
-            fontWeight: 700,
-            color: meta.color,
-            background: meta.bgColor,
             flexShrink: 0,
-            letterSpacing: "0.02em",
-            textTransform: "uppercase",
           }}
         >
           {meta.icon} {meta.label}
         </span>
         <span
           style={{
-            fontSize: 11,
-            color: "var(--app-text-muted, #6b7280)",
             flex: 1,
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -575,14 +437,14 @@ function ChangeRow({
         <button
           onClick={onReject}
           title="Reject"
-          style={iconBtn("#fee2e2", "#b91c1c")}
+          style={iconBtn}
         >
           ✗
         </button>
         <button
           onClick={onAccept}
           title="Accept"
-          style={iconBtn("#dcfce7", "#15803d")}
+          style={iconBtn}
         >
           ✓
         </button>
@@ -594,60 +456,33 @@ function ChangeRow({
   );
 }
 
-function previewLine(bg: string, color: string): React.CSSProperties {
-  return {
-    background: bg,
-    color,
-    borderRadius: 4,
-    padding: "3px 7px",
-    fontSize: 11,
-    lineHeight: 1.5,
-    fontFamily: "Georgia, 'Times New Roman', serif",
-    wordBreak: "break-word",
-    display: "flex",
-    gap: 5,
-    alignItems: "baseline",
-  };
-}
-
-const prefixLabel: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 600,
-  textTransform: "uppercase",
-  letterSpacing: "0.04em",
-  flexShrink: 0,
-  fontFamily: "system-ui, sans-serif",
+const previewLine: React.CSSProperties = {
+  lineHeight: 1.5,
+  wordBreak: "break-word",
+  display: "flex",
+  gap: 5,
+  alignItems: "baseline",
 };
 
-function iconBtn(bg: string, color: string): React.CSSProperties {
-  return {
-    background: bg,
-    color,
-    border: "none",
-    borderRadius: 4,
-    width: 22,
-    height: 22,
-    cursor: "pointer",
-    fontSize: 12,
-    fontWeight: 700,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    padding: 0,
-  };
-}
+const prefixLabel: React.CSSProperties = {
+  textTransform: "uppercase",
+  flexShrink: 0,
+};
 
-function actionBtn(bg: string, color: string): React.CSSProperties {
-  return {
-    background: bg,
-    color,
-    border: "none",
-    borderRadius: 5,
-    padding: "3px 9px",
-    cursor: "pointer",
-    fontSize: 11,
-    fontWeight: 600,
-    flexShrink: 0,
-  };
-}
+const iconBtn: React.CSSProperties = {
+  border: "none",
+  width: 22,
+  height: 22,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+  padding: 0,
+};
+
+const actionBtn: React.CSSProperties = {
+  border: "none",
+  cursor: "pointer",
+  flexShrink: 0,
+};

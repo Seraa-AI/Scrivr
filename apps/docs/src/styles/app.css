@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
+@import "@scrivr/react/styles.css";
 
 :root {
 	--fd-layout-width: 100%;
@@ -45,6 +46,17 @@
 	--app-accent-soft-bg: #eef2ff;     /* indigo-50 — soft active bg */
 	--app-accent-soft-fg: #4338ca;     /* indigo-700 — text on soft */
 	--app-accent-soft-border: #c7d2fe; /* indigo-200 */
+
+	--scrivr-react-surface: var(--app-surface);
+	--scrivr-react-surface-translucent: color-mix(in srgb, var(--app-surface) 95%, transparent);
+	--scrivr-react-surface-2: var(--app-surface-2);
+	--scrivr-react-surface-hover: var(--app-surface-hover);
+	--scrivr-react-border: var(--app-border);
+	--scrivr-react-text: var(--app-text);
+	--scrivr-react-text-muted: var(--app-text-muted);
+	--scrivr-react-text-faint: var(--app-text-faint);
+	--scrivr-react-accent: var(--app-accent);
+	--scrivr-react-accent-fg: var(--app-accent-fg);
 }
 
 .dark {

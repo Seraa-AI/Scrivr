@@ -1,0 +1,114 @@
+:where(.scrivr-menu) {
+  background: var(--scrivr-react-surface, #ffffff);
+  border: 1px solid var(--scrivr-react-border, #e2e8f0);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  color: var(--scrivr-react-text, #111827);
+  font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 6px;
+}
+
+:where(.scrivr-image-menu, .scrivr-link-popover, .scrivr-track-popover, .scrivr-ai-popover) {
+  padding: 8px 10px;
+}
+
+:where(.scrivr-menu-item) {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--scrivr-react-text-muted, #4b5563);
+  cursor: pointer;
+  font: inherit;
+  padding: 5px 8px;
+}
+
+:where(.scrivr-menu-item:hover, .scrivr-menu-item[data-active], .scrivr-menu-item[data-selected]) {
+  background: var(--scrivr-react-surface-hover, #f3f4f6);
+  color: var(--scrivr-react-text, #111827);
+}
+
+:where(.scrivr-menu-item[data-selected]) {
+  background: var(--scrivr-react-accent, #6366f1);
+  color: var(--scrivr-react-accent-fg, #ffffff);
+}
+
+:where(.scrivr-menu-item[data-disabled], .scrivr-menu-item:disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+:where(.scrivr-menu-icon) {
+  background: var(--scrivr-react-surface-2, #f9fafb);
+  border: 1px solid var(--scrivr-react-border, #e2e8f0);
+  border-radius: 5px;
+  color: var(--scrivr-react-text-muted, #4b5563);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+}
+
+:where(.scrivr-menu-title) {
+  color: var(--scrivr-react-text, #111827);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+:where(.scrivr-menu-description) {
+  color: var(--scrivr-react-text-faint, #9ca3af);
+  font-size: 11px;
+}
+
+:where(.scrivr-menu-empty) {
+  color: var(--scrivr-react-text-faint, #9ca3af);
+  font-size: 13px;
+  padding: 12px;
+}
+
+:where(.scrivr-track-panel) {
+  background: var(--scrivr-react-surface, #ffffff);
+  border-left: 1px solid var(--scrivr-react-border, #e2e8f0);
+  color: var(--scrivr-react-text, #111827);
+  font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:where(.scrivr-ai-cards) {
+  color: var(--scrivr-react-text, #111827);
+  font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:where(.scrivr-ai-card) {
+  background: var(--scrivr-react-surface, #ffffff);
+  border: 1px solid var(--scrivr-react-border, #e2e8f0);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+:where(.scrivr-ai-card[data-active]) {
+  border-color: var(--scrivr-react-accent, #6366f1);
+  box-shadow: 0 2px 12px rgba(99, 102, 241, 0.12);
+}
+
+:where(.scrivr-header-footer-ribbon) {
+  background: var(--scrivr-react-surface-translucent, rgba(255, 255, 255, 0.95));
+  border-bottom: 1px solid var(--scrivr-react-border, #e2e8f0);
+  border-top: 1px solid var(--scrivr-react-border, #e2e8f0);
+  color: var(--scrivr-react-text-muted, #4b5563);
+  font: 12px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 0 12px;
+}
+
+:where(.scrivr-header-footer-dropdown) {
+  background: var(--scrivr-react-surface, #ffffff);
+  border: 1px solid var(--scrivr-react-border, #e2e8f0);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+  color: var(--scrivr-react-text, #111827);
+  font: 12px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 12px;
+}
+
+:where(.scrivr-header-footer-section) {
+  border-top: 1px solid var(--scrivr-react-border, #e2e8f0);
+  margin-top: 8px;
+  padding-top: 8px;
+}
