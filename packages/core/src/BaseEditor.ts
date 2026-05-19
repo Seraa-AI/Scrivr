@@ -212,6 +212,10 @@ export class BaseEditor implements IBaseEditor {
     return this.manager.getExportContributions();
   }
 
+  getDocAttrNames(): string[] {
+    return this.manager.getDocAttrNames();
+  }
+
   getMarkdownSerializer(): MarkdownSerializer {
     const { nodes, marks } = this.manager.buildMarkdownSerializerRules();
     return new MarkdownSerializer(nodes, marks);

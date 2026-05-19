@@ -19,6 +19,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Extension } from "@scrivr/core";
 import type { IEditor } from "@scrivr/core";
 import { YBinding } from "./YBinding";
+import type { DocAttrEnvelope } from "./YBinding";
 import { collaborationRegistry } from "./collaborationState";
 
 interface CollaborationOptions {
@@ -108,6 +109,10 @@ export const Collaboration = Extension.create<CollaborationOptions>({
 
     const ydoc = new Y.Doc();
     const type = ydoc.getXmlFragment("prosemirror");
+    // Sibling map for doc-level attrs (e.g. headerFooter policy). Lives next
+    // to the content fragment on the same Y.Doc so a single update batch can
+    // carry both content and attr changes atomically.
+    const attrsMap = ydoc.getMap<DocAttrEnvelope>("prose_doc_attrs");
     const { url = "ws://localhost:1234", name = "default" } = this.options;
 
     // Suppress all layout/paint flushes while Y.js syncs the document.
@@ -116,7 +121,7 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     // setReady(true) in onSynced does one fast chunked layout of the final doc.
     editor.setReady(false);
 
-    const binding = new YBinding(editor, ydoc, type);
+    const binding = new YBinding(editor, ydoc, type, attrsMap);
     inst.binding = binding;
     binding.bind();
 
@@ -141,6 +146,7 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     return () => {
       binding.destroy();
       provider.destroy();
+      ydoc.destroy();
       inst.binding = null;
     };
   },
