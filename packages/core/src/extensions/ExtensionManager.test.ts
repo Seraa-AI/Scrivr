@@ -837,7 +837,7 @@ describe("ExtensionManager", () => {
       warnSpy.mockRestore();
     });
 
-    it("warns when more than one extension provides an initial doc", () => {
+    it("warns when more than one extension registers an initial doc", () => {
       const A = Extension.create({
         name: "extA",
         addInitialDoc() {
@@ -882,6 +882,33 @@ describe("ExtensionManager", () => {
         String(c[0] ?? "").match(/Multiple/i),
       );
       expect(collisions).toHaveLength(0);
+    });
+
+    it("does not execute later factories once an earlier one produced a doc", () => {
+      // Side-effect regression guard: a later provider that throws on invalid
+      // config (e.g. DefaultContent) must not run when an earlier provider
+      // already returned a non-null doc. Behavior must match the original
+      // short-circuit semantics.
+      let laterRan = false;
+      const First = Extension.create({
+        name: "first",
+        addInitialDoc() {
+          return this.schema.nodes["doc"]!.create(
+            null,
+            this.schema.nodes["paragraph"]!.create(),
+          );
+        },
+      });
+      const Later = Extension.create({
+        name: "later",
+        addInitialDoc() {
+          laterRan = true;
+          throw new Error("Later factory must not be invoked");
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, First, Later]);
+      expect(() => manager.buildInitialDoc()).not.toThrow();
+      expect(laterRan).toBe(false);
     });
   });
 

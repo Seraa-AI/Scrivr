@@ -313,23 +313,29 @@ export class ExtensionManager {
       schema: this.schema,
       parseMarkdown: (text: string) => parseMarkdownToDoc(this.schema, tokens, text),
     };
-    // Collect all non-null providers so we can warn on collision. This matters
-    // for collab + DefaultContent stacking — both can legitimately want to
-    // seed the initial doc, and silently picking the first wins by accident.
-    const providers: Array<{ owner: string; doc: ProseMirrorNode }> = [];
-    for (const ext of this.resolved) {
-      if (!ext.initialDocFactory) continue;
-      const doc = ext.initialDocFactory(env);
-      if (doc != null) providers.push({ owner: ext.name, doc });
-    }
-    if (providers.length > 1) {
+
+    // Inspect registrations without executing them. Executing every factory
+    // just to count "winners" would fire side effects on extensions whose
+    // result was about to be ignored — e.g. DefaultContent's `addInitialDoc`
+    // throws on invalid config and used to be skipped silently when an
+    // earlier provider supplied a doc. The warning here surfaces multi-
+    // provider registrations regardless of runtime outcome; the loop below
+    // preserves the original short-circuit semantics.
+    const registered = this.resolved.filter((ext) => ext.initialDocFactory);
+    if (registered.length > 1) {
       console.warn(
         `[ExtensionManager] Multiple extensions contributed initial docs: ` +
-          `${providers.map((p) => p.owner).join(", ")}. Using "${providers[0]!.owner}". ` +
-          `Disable initial doc on the others or reorder so the intended provider runs first.`,
+          `${registered.map((ext) => ext.name).join(", ")}. ` +
+          `The first non-null provider wins; the rest are ignored. ` +
+          `Disable addInitialDoc() on the others or reorder so the intended provider runs first.`,
       );
     }
-    return providers[0]?.doc;
+
+    for (const ext of registered) {
+      const doc = ext.initialDocFactory!(env);
+      if (doc != null) return doc;
+    }
+    return undefined;
   }
 
   /**
