@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { ExtensionManager, getSchema } from "./ExtensionManager";
 import { Extension } from "./Extension";
 import { StarterKit } from "./StarterKit";
@@ -562,6 +562,343 @@ describe("ExtensionManager", () => {
     it("ServerEditor.getDocAttrNames() is empty when no extension contributes", () => {
       const editor = new ServerEditor({ extensions: [StarterKit] });
       expect(editor.getDocAttrNames()).toEqual([]);
+    });
+  });
+
+  describe("collision warnings", () => {
+    // Nodes / marks / keymap collisions silently override (later wins) — this is
+    // intentional to allow StarterKit-style customization, but a typo can shadow
+    // a built-in with no warning. Spy on console.warn so we can assert the
+    // warning fires for every collision kind.
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    const makeNodeContributor = (extName: string, nodeName: string) =>
+      Extension.create({
+        name: extName,
+        addNodes() {
+          return {
+            [nodeName]: { group: "block", content: "inline*" },
+          };
+        },
+      });
+
+    const makeMarkContributor = (extName: string, markName: string) =>
+      Extension.create({
+        name: extName,
+        addMarks() {
+          return {
+            [markName]: { parseDOM: [{ tag: markName }], toDOM: () => [markName, 0] },
+          };
+        },
+      });
+
+    const makeKeymapContributor = (extName: string, binding: string) =>
+      Extension.create({
+        name: extName,
+        addKeymap() {
+          return { [binding]: () => true };
+        },
+      });
+
+    it("does not warn when no keys collide across extensions", () => {
+      new ExtensionManager([StarterKit]);
+      // StarterKit's built-ins must not collide with each other.
+      const collisionWarnings = warnSpy.mock.calls.filter((args) =>
+        String(args[0] ?? "").includes("silently overrides"),
+      );
+      expect(collisionWarnings).toHaveLength(0);
+    });
+
+    it("warns when two extensions contribute the same node name", () => {
+      const A = makeNodeContributor("extA", "myBlock");
+      const B = makeNodeContributor("extB", "myBlock");
+      new ExtensionManager([Document, Paragraph, A, B]);
+
+      expect(warnSpy).toHaveBeenCalled();
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Node "myBlock"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+      expect(message).toMatch(/silently overrides/);
+    });
+
+    it("warns when two extensions contribute the same mark name", () => {
+      const A = makeMarkContributor("extA", "myMark");
+      const B = makeMarkContributor("extB", "myMark");
+      new ExtensionManager([Document, Paragraph, A, B]);
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Mark "myMark"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+    });
+
+    it("warns when two extensions bind the same keymap shortcut", () => {
+      const A = makeKeymapContributor("extA", "Mod-x");
+      const B = makeKeymapContributor("extB", "Mod-x");
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      // Keymap merge happens lazily in buildKeymap — invoke it to trigger.
+      manager.buildKeymap();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Keymap "Mod-x"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+    });
+
+    it("names the overridden owner — not just the new contributor", () => {
+      // When B overrides A's "thing", the warning must mention BOTH so the
+      // user knows which extension to rename.
+      const A = makeNodeContributor("extA", "thing");
+      const B = makeNodeContributor("extB", "thing");
+      new ExtensionManager([Document, Paragraph, A, B]);
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/"extA"/); // previous owner
+      expect(message).toMatch(/"extB"/); // new owner
+    });
+
+    it("warns once per colliding key, not once per subsequent extension", () => {
+      // If three extensions contribute the same key, the warnings should still
+      // identify which extension supplanted which — one warning per override.
+      const A = makeNodeContributor("extA", "thing");
+      const B = makeNodeContributor("extB", "thing");
+      const C = makeNodeContributor("extC", "thing");
+      new ExtensionManager([Document, Paragraph, A, B, C]);
+
+      const collisions = warnSpy.mock.calls.filter((c) =>
+        String(c[0] ?? "").includes(`Node "thing"`),
+      );
+      // A is the first contributor (no warning), B overrides A (1 warning),
+      // C overrides B (1 warning). Total: 2.
+      expect(collisions).toHaveLength(2);
+    });
+
+    it("warns when two extensions contribute the same command name", () => {
+      const A = Extension.create({
+        name: "extA",
+        addCommands() {
+          return { mything: () => () => true };
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addCommands() {
+          return { mything: () => () => true };
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      manager.buildCommands();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Command "mything"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+    });
+
+    it("warns when two extensions contribute the same input handler", () => {
+      const A = Extension.create({
+        name: "extA",
+        addInputHandlers() {
+          return { drop: () => false };
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addInputHandlers() {
+          return { drop: () => false };
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      manager.buildInputHandlers();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/InputHandler "drop"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+    });
+
+    it("warns when two extensions contribute the same markdown parser token", () => {
+      const A = Extension.create({
+        name: "extA",
+        addMarkdownParserTokens() {
+          return { custom: { node: "paragraph" } };
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addMarkdownParserTokens() {
+          return { custom: { node: "paragraph" } };
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      manager.buildMarkdownParserTokens();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/MarkdownParserToken "custom"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+    });
+
+    it("warns when two extensions contribute the same markdown serializer rule", () => {
+      // Serializer rules have two lanes (nodes + marks). Both should detect.
+      const A = Extension.create({
+        name: "extA",
+        addMarkdownSerializerRules() {
+          return {
+            nodes: { custom: () => {} },
+            marks: { customMark: { open: "*", close: "*" } },
+          };
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addMarkdownSerializerRules() {
+          return {
+            nodes: { custom: () => {} },
+            marks: { customMark: { open: "_", close: "_" } },
+          };
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      manager.buildMarkdownSerializerRules();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/MarkdownSerializerNode "custom"/);
+      expect(message).toMatch(/MarkdownSerializerMark "customMark"/);
+    });
+
+    it("warns when an extension overrides the ProseMirror baseline doc node", () => {
+      const Overrider = Extension.create({
+        name: "docOverrider",
+        addNodes() {
+          return {
+            doc: { content: "block+" },
+          };
+        },
+      });
+      new ExtensionManager([Document, Paragraph, Overrider]);
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Node "doc"/);
+      expect(message).toMatch(/docOverrider/);
+      // Hints toward the supported path
+      expect(message).toMatch(/addDocAttrs/);
+      // Does NOT mention an internal "<baseline>" sentinel
+      expect(message).not.toMatch(/<baseline>/);
+    });
+
+    it("warns when an extension overrides the ProseMirror baseline text node", () => {
+      const Overrider = Extension.create({
+        name: "textOverrider",
+        addNodes() {
+          return {
+            text: { group: "inline" },
+          };
+        },
+      });
+      new ExtensionManager([Document, Paragraph, Overrider]);
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Node "text"/);
+      expect(message).toMatch(/textOverrider/);
+      expect(message).not.toMatch(/<baseline>/);
+    });
+
+    it("doc-attr collision still throws (not warn) — distinct policy preserved", () => {
+      // Confirms refactor of the merger to take a policy enum didn't downgrade
+      // doc-attrs from throw to warn.
+      const A = Extension.create({
+        name: "extA",
+        addDocAttrs() { return { shared: { default: null } }; },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addDocAttrs() { return { shared: { default: null } }; },
+      });
+      expect(() => new ExtensionManager([A, B])).toThrow(/shared/);
+    });
+  });
+
+  describe("multiple initial-doc providers", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it("warns when more than one extension provides an initial doc", () => {
+      const A = Extension.create({
+        name: "extA",
+        addInitialDoc() {
+          return this.schema.nodes["doc"]!.create(
+            null,
+            this.schema.nodes["paragraph"]!.create(),
+          );
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addInitialDoc() {
+          return this.schema.nodes["doc"]!.create(
+            null,
+            this.schema.nodes["paragraph"]!.create(),
+          );
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      manager.buildInitialDoc();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Multiple/i);
+      expect(message).toMatch(/extA/);
+      expect(message).toMatch(/extB/);
+    });
+
+    it("does not warn when only one extension provides an initial doc", () => {
+      const A = Extension.create({
+        name: "extA",
+        addInitialDoc() {
+          return this.schema.nodes["doc"]!.create(
+            null,
+            this.schema.nodes["paragraph"]!.create(),
+          );
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A]);
+      manager.buildInitialDoc();
+
+      const collisions = warnSpy.mock.calls.filter((c) =>
+        String(c[0] ?? "").match(/Multiple/i),
+      );
+      expect(collisions).toHaveLength(0);
+    });
+  });
+
+  describe("buildSchemaFromPhase1 does not mutate its input", () => {
+    it("preserves the contributions object across repeated builds", () => {
+      // Regression: previously mutated contribs.nodes["doc"] in place,
+      // which would corrupt a contributions snapshot if reused.
+      const HeaderFooter = Extension.create({
+        name: "headerFooter",
+        addDocAttrs() { return { headerFooter: { default: null } }; },
+      });
+      const manager = new ExtensionManager([StarterKit, HeaderFooter]);
+      // Touching the schema once should not poison subsequent reads
+      const docAttrs1 = manager.schema.nodes["doc"]!.spec.attrs;
+      const docAttrs2 = manager.schema.nodes["doc"]!.spec.attrs;
+      expect(docAttrs1).toEqual(docAttrs2);
+      expect(docAttrs1!["headerFooter"]).toBeDefined();
     });
   });
 });
