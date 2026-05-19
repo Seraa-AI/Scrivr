@@ -20,7 +20,6 @@ import type {
 import type { IBaseEditor, IEditor } from "./types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
-import { defaultPageConfig } from "../layout/PageLayout";
 import type { PageConfig } from "../layout/PageLayout";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
@@ -101,43 +100,6 @@ function specsOf<T>(target: Map<string, Contribution<T>>): Record<string, T> {
   const out: Record<string, T> = {};
   for (const [key, { spec }] of target) out[key] = spec;
   return out;
-}
-
-/**
- * Runtime predicate for the shape of a Pagination extension's options bag.
- * `Extension.options` is generic at the Extension level and surfaces as
- * `unknown` when the manager looks an extension up by name; narrowing here
- * means the call site reads `pagination.options` without a cast.
- */
-function isPageConfig(value: unknown): value is PageConfig {
-  if (typeof value !== "object" || value === null) return false;
-  if (!("pageWidth" in value) || typeof value.pageWidth !== "number") return false;
-  if (!("pageHeight" in value) || typeof value.pageHeight !== "number") return false;
-  if (!("margins" in value)) return false;
-  const margins = value.margins;
-  if (typeof margins !== "object" || margins === null) return false;
-  return (
-    "top" in margins && typeof margins.top === "number" &&
-    "right" in margins && typeof margins.right === "number" &&
-    "bottom" in margins && typeof margins.bottom === "number" &&
-    "left" in margins && typeof margins.left === "number"
-  );
-}
-
-/**
- * Extract StarterKit's `pagination` field with shape narrowing. Returns
- * `false` (explicit disable), `undefined` (unset), or a partial PageConfig.
- */
-function readStarterKitPagination(
-  options: unknown,
-): false | Partial<PageConfig> | undefined {
-  if (typeof options !== "object" || options === null) return undefined;
-  if (!("pagination" in options)) return undefined;
-  const value = options.pagination;
-  if (value === false) return false;
-  if (value === undefined) return undefined;
-  if (typeof value === "object" && value !== null) return value;
-  return undefined;
 }
 
 /**
@@ -339,39 +301,35 @@ export class ExtensionManager {
   }
 
   /**
-   * Returns the PageConfig from a "pagination" extension if one is present,
-   * otherwise returns undefined (Editor falls back to EditorOptions.pageConfig).
+   * Resolve the PageConfig contributed by extensions through the `addPageConfig`
+   * lane. Returns undefined when no extension contributes a value, in which
+   * case Editor falls back to `EditorOptions.pageConfig`, then to
+   * `defaultPageConfig`.
    *
-   * The Pagination extension's options ARE the PageConfig — no extra hook needed.
-   */
-  /**
-   * Returns the PageConfig from the extension list.
-   *
-   * Resolution order:
-   *   1. A standalone "pagination" extension (Pagination.configure({...}))
-   *   2. StarterKit's `pagination` option (StarterKit.configure({ pagination: {...} }))
-   *   3. undefined → Editor falls back to EditorOptions.pageConfig → defaultPageConfig
+   * Resolution: the first extension in registration order whose
+   * `addPageConfig()` returns a non-undefined value wins. StarterKit holds
+   * no opinion unless its `pagination` option is set, so the common
+   * `[StarterKit, Pagination.configure(...)]` pattern resolves to the
+   * standalone Pagination contribution without ambiguity. When two
+   * extensions both contribute explicit configs, the first wins and a
+   * warning surfaces the conflict.
    */
   buildPageConfig(): PageConfig | undefined {
-    const pagination = this.extensions.find((e) => e.name === "pagination");
-    if (pagination && isPageConfig(pagination.options)) {
-      return pagination.options;
+    // Count contributors by actual return value, not by hook presence — an
+    // extension whose `addPageConfig` returned undefined chose not to
+    // contribute and shouldn't appear in the warning. Safe to inspect the
+    // cached `pageConfig` here (resolved once at construction) because
+    // addPageConfig is Phase 1 / side-effect-free; no re-execution.
+    const contributors = this.resolved.filter((ext) => ext.pageConfig !== undefined);
+    if (contributors.length > 1) {
+      console.warn(
+        `[ExtensionManager] Multiple extensions contributed page configs: ` +
+          `${contributors.map((ext) => ext.name).join(", ")}. ` +
+          `The first contribution wins; the rest are ignored. ` +
+          `Disable addPageConfig() on the others or reorder so the intended provider runs first.`,
+      );
     }
-
-    const starterKit = this.extensions.find((e) => e.name === "starterKit");
-    if (starterKit) {
-      const pkOpt = readStarterKitPagination(starterKit.options);
-      if (pkOpt !== false && pkOpt !== undefined) {
-        const merged: PageConfig = { ...defaultPageConfig, ...pkOpt };
-        return merged;
-      }
-      // pagination not explicitly set → StarterKit default includes Pagination with defaultPageConfig
-      if (pkOpt === undefined) {
-        return defaultPageConfig;
-      }
-    }
-
-    return undefined;
+    return contributors[0]?.pageConfig;
   }
 
   /**

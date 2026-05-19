@@ -492,6 +492,27 @@ export interface ExtensionConfig<Options = object> {
   addPageChrome?(this: Phase1Context<Options>): PageChromeContribution;
 
   /**
+   * Contribute the page-level layout config (size, margins, pageless toggle).
+   * Phase 1 — runs before schema is built; read `this.options` to derive the
+   * config. Return `undefined` when this extension shouldn't contribute (e.g.
+   * StarterKit when `pagination: false` is set).
+   *
+   * Resolution: first non-undefined contribution wins. Multiple registered
+   * extensions trigger a console warning naming all candidates.
+   *
+   * Future: when page config moves to `doc.attrs.pageSettings` (see
+   * `project_page_config_to_docattrs` memory), this hook becomes the bridge —
+   * an extension closes over the editor and returns `state.doc.attrs.pageSettings`
+   * from a runtime variant of this lane. For now, it's static per editor build.
+   *
+   * Example:
+   *   addPageConfig() {
+   *     return { pageWidth: 816, pageHeight: 1056, margins: { top: 72, right: 72, bottom: 72, left: 72 } };
+   *   }
+   */
+  addPageConfig?(this: Phase1Context<Options>): PageConfig | undefined;
+
+  /**
    * Register the plugin as owner of one or more EditorSurfaces (headers,
    * footnote bodies, etc.). `owner` must be unique across extensions; the
    * ExtensionManager throws on collisions. Surfaces themselves are created
@@ -715,6 +736,15 @@ export interface ResolvedExtension {
   docAttrs: Record<string, AttributeSpec>;
   /** Page chrome contribution (header/footer/etc.) or null when absent. */
   pageChrome: PageChromeContribution | null;
+  /**
+   * Page-level layout config contribution (size, margins, pageless). `undefined`
+   * when the extension chose not to contribute — either it didn't define
+   * `addPageConfig`, or the hook returned `undefined`. The manager counts
+   * actual non-undefined values for both the resolution and the multi-provider
+   * warning, so an extension that opts out (e.g. `StarterKit.configure({
+   * pagination: false })`) doesn't show up as a phantom provider.
+   */
+  pageConfig: PageConfig | undefined;
   /** Surface owner registration (plugin-owned edit regions) or null when absent. */
   surfaceOwner: SurfaceOwnerRegistration | null;
   /** Format-specific export handler contributions. Empty map when absent. */

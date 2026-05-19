@@ -22,7 +22,7 @@ import { PageBreak } from "./built-in/PageBreak";
 import { Image } from "./built-in/Image";
 import { Table } from "./built-in/Table";
 import { Typography } from "./built-in/Typography";
-import { Pagination } from "./built-in/Pagination";
+import { defaultPageConfig } from "../layout/PageLayout";
 import { TrailingNode } from "./built-in/TrailingNode";
 import { ClearFormatting } from "./built-in/ClearFormatting";
 import { chainCommands } from "prosemirror-commands";
@@ -82,6 +82,22 @@ interface StarterKitOptions {
  */
 export const StarterKit = Extension.create<StarterKitOptions>({
   name: "starterKit",
+
+  addPageConfig() {
+    // Resolve StarterKit's nested `pagination` option into a PageConfig the
+    // manager can hand to layout. Three states:
+    //   undefined  — unset; StarterKit holds no opinion, let a downstream
+    //                extension (or Editor's defaultPageConfig fallback) win
+    //   false      — explicit opt-out; contribute nothing
+    //   object     — explicit override; merge over defaults
+    //
+    // Returning undefined for the unset case is what lets the common
+    // `[StarterKit, Pagination.configure(usLetter)]` pattern resolve to
+    // usLetter — StarterKit doesn't claim the slot it never opted into.
+    const opt = this.options.pagination;
+    if (opt === false || opt === undefined) return undefined;
+    return { ...defaultPageConfig, ...opt };
+  },
 
   addNodes() {
     const nodes: Record<string, NodeSpec> = {};
