@@ -3,6 +3,7 @@ import * as Y from "yjs";
 import { TextSelection } from "prosemirror-state";
 import { ServerEditor } from "@scrivr/core";
 import { YBinding } from "./YBinding";
+import type { DocAttrEnvelope } from "./YBinding";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 //
@@ -37,9 +38,10 @@ describe("YBinding — markSynced cursor placement", () => {
     const editor = makeEditor("Hello world from the server", 2);
     expect(editor.getState().selection.head).toBe(2);
 
-    const ydoc    = new Y.Doc();
-    const type    = ydoc.getXmlFragment("prosemirror");
-    const binding = new YBinding(editor, ydoc, type);
+    const ydoc      = new Y.Doc();
+    const type      = ydoc.getXmlFragment("prosemirror");
+    const attrsMap  = ydoc.getMap<DocAttrEnvelope>("prose_doc_attrs");
+    const binding   = new YBinding(editor, ydoc, type, attrsMap);
     binding.bind();
 
     binding.markSynced();
@@ -53,9 +55,10 @@ describe("YBinding — markSynced cursor placement", () => {
   it("preserves cursor position across reconnects", () => {
     const editor = makeEditor("Hello world", 2);
 
-    const ydoc    = new Y.Doc();
-    const type    = ydoc.getXmlFragment("prosemirror");
-    const binding = new YBinding(editor, ydoc, type);
+    const ydoc      = new Y.Doc();
+    const type      = ydoc.getXmlFragment("prosemirror");
+    const attrsMap  = ydoc.getMap<DocAttrEnvelope>("prose_doc_attrs");
+    const binding   = new YBinding(editor, ydoc, type, attrsMap);
     binding.bind();
 
     binding.markSynced();
@@ -78,9 +81,10 @@ describe("YBinding — markSynced cursor placement", () => {
   it("cursor remains within document bounds after sync", () => {
     const editor = makeEditor("Some text here", 2);
 
-    const ydoc    = new Y.Doc();
-    const type    = ydoc.getXmlFragment("prosemirror");
-    const binding = new YBinding(editor, ydoc, type);
+    const ydoc      = new Y.Doc();
+    const type      = ydoc.getXmlFragment("prosemirror");
+    const attrsMap  = ydoc.getMap<DocAttrEnvelope>("prose_doc_attrs");
+    const binding   = new YBinding(editor, ydoc, type, attrsMap);
     binding.bind();
     binding.markSynced();
 
