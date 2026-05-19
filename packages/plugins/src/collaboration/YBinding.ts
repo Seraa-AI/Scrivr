@@ -330,7 +330,7 @@ function isDocAttrEnvelope(value: unknown): value is DocAttrEnvelope {
   // localSeq must be a real number. NaN, Infinity, undefined, or a string
   // would have leaked through the looser check and confused future dedup
   // schemes that inspect the counter.
-  const seq = (value as { localSeq: unknown }).localSeq;
+  const seq = value.localSeq;
   return typeof seq === "number" && Number.isFinite(seq);
 }
 
