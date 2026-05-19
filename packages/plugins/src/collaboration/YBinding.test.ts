@@ -364,6 +364,62 @@ describe("YBinding — whitelist defense", () => {
 
     binding.destroy();
   });
+
+  it("envelopes with non-finite localSeq are rejected", () => {
+    // A peer running a buggy write path might emit NaN/Infinity. Reject so
+    // future dedup logic that inspects the counter sees only real numbers.
+    const HeaderFooter = makeDocAttrContributor("headerFooter", { headerFooter: null });
+    const { editor, ydoc, attrsMap, binding } = makePeer({
+      extensions: [StarterKit, HeaderFooter],
+    });
+
+    ydoc.transact(() => {
+      attrsMap.set("headerFooter", { localSeq: NaN, value: { v: 1 } });
+    });
+    binding.markSynced();
+    expect(editor.getState().doc.attrs.headerFooter).toBeNull();
+
+    ydoc.transact(() => {
+      attrsMap.set("headerFooter", {
+        localSeq: "1" as unknown as number,
+        value: { v: 1 },
+      });
+    });
+    expect(editor.getState().doc.attrs.headerFooter).toBeNull();
+
+    binding.destroy();
+  });
+});
+
+// ── Batch apply ──────────────────────────────────────────────────────────────
+
+describe("YBinding — batch apply of multiple attrs", () => {
+  it("applies all whitelisted attrs in a single transaction", () => {
+    // Two declared attrs, both present in the Y.Map at sync time. Each step
+    // must read tr.doc from the accumulated transaction, not a stale snapshot.
+    const TwoAttrs = makeDocAttrContributor("multi", {
+      headerFooter: null,
+      footnotes: null,
+    });
+    const { editor, ydoc, attrsMap, binding } = makePeer({
+      extensions: [StarterKit, TwoAttrs],
+    });
+
+    const policy = { enabled: true };
+    const footnotesValue = { list: ["a", "b"] };
+    ydoc.transact(() => {
+      attrsMap.set("headerFooter", { localSeq: 1, value: policy });
+      attrsMap.set("footnotes", { localSeq: 1, value: footnotesValue });
+    });
+
+    binding.markSynced();
+
+    const attrs = editor.getState().doc.attrs;
+    expect(attrs.headerFooter).toEqual(policy);
+    expect(attrs.footnotes).toEqual(footnotesValue);
+
+    binding.destroy();
+  });
 });
 
 // ── Two-peer sync ────────────────────────────────────────────────────────────

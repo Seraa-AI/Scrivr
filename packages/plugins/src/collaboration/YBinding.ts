@@ -191,6 +191,13 @@ export class YBinding {
     const state = this.editor.getState();
     const docSpecAttrs = state.schema.nodes["doc"]?.spec.attrs ?? {};
 
+    // Accumulate every attr change onto one transaction so each step reads
+    // from the prior step's tr.doc.attrs, not a stale snapshot. Dispatching
+    // inside the loop would feed the next iteration's comparison stale
+    // attrs and risk re-applying values that the previous step already set.
+    let tr = state.tr;
+    let touched = false;
+
     for (const key of this.editor.getDocAttrNames()) {
       const envelope = this.attrsMap.get(key);
 
@@ -199,10 +206,9 @@ export class YBinding {
       // must clear the attr on peer B too.
       if (envelope === undefined) {
         const defaultValue = docSpecAttrs[key]?.default ?? null;
-        if (!structuralEqual(state.doc.attrs[key], defaultValue)) {
-          this.editor.applyTransaction(
-            state.tr.setDocAttribute(key, defaultValue),
-          );
+        if (!structuralEqual(tr.doc.attrs[key], defaultValue)) {
+          tr = tr.setDocAttribute(key, defaultValue);
+          touched = true;
         }
         this.lastWrittenValue[key] = defaultValue;
         continue;
@@ -211,14 +217,16 @@ export class YBinding {
       // Defensive: malformed envelope from an old peer or hand-written write.
       if (!isDocAttrEnvelope(envelope)) continue;
 
-      const current = state.doc.attrs[key];
-      if (!structuralEqual(current, envelope.value)) {
-        this.editor.applyTransaction(state.tr.setDocAttribute(key, envelope.value));
+      if (!structuralEqual(tr.doc.attrs[key], envelope.value)) {
+        tr = tr.setDocAttribute(key, envelope.value);
+        touched = true;
       }
       // Mark this value as known so the subsequent targetObserver pass
       // doesn't echo it back to the Y.Map under our own LOCAL_ORIGIN.
       this.lastWrittenValue[key] = envelope.value;
     }
+
+    if (touched) this.editor.applyTransaction(tr);
   }
 
   // ── PM → Y.js ───────────────────────────────────────────────────────────────
@@ -238,7 +246,10 @@ export class YBinding {
 
     this.mux(() => {
       const currentDoc = this.editor.getState().doc;
-      const contentChanged = currentDoc !== this.prevDoc;
+      // `.eq()` walks the PM node tree comparing structure + attrs + marks,
+      // so a transaction that produces a structurally identical doc (e.g. a
+      // selection-only edit or a no-op replace) doesn't fire prosemirrorToY.
+      const contentChanged = !this.prevDoc || !this.prevDoc.eq(currentDoc);
       const attrsToWrite = this.collectChangedAttrs(currentDoc);
 
       if (!contentChanged && attrsToWrite.length === 0) return;
@@ -315,15 +326,30 @@ export class YBinding {
 
 function isDocAttrEnvelope(value: unknown): value is DocAttrEnvelope {
   if (value === null || typeof value !== "object") return false;
-  return "value" in value && "localSeq" in value;
+  if (!("value" in value) || !("localSeq" in value)) return false;
+  // localSeq must be a real number. NaN, Infinity, undefined, or a string
+  // would have leaked through the looser check and confused future dedup
+  // schemes that inspect the counter.
+  const seq = (value as { localSeq: unknown }).localSeq;
+  return typeof seq === "number" && Number.isFinite(seq);
 }
 
 /**
  * Structural equality for doc-attr POJOs. Wraps JSON.stringify so the dedup
  * paths read clearly — see the `lastWrittenValue` field comment for the
  * known limitation.
+ *
+ * Returns false on serialization failure (cyclic refs, BigInt, etc.). That
+ * conservatively forces a re-write rather than crashing the binding — a peer
+ * that puts something unserializable into an attr is already misusing the
+ * declared schema, and a wasted write is cheaper than a thrown error inside
+ * an observer callback.
  */
 function structuralEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
-  return JSON.stringify(a) === JSON.stringify(b);
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
 }
