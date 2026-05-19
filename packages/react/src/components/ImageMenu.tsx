@@ -35,6 +35,7 @@ export function ImageMenu({
   return createPortal(
     <div
       ref={menu.rootRef}
+      data-scrivr-popover="image-menu"
       className={cx("scrivr-menu scrivr-image-menu", className)}
       onMouseDown={(e) => e.preventDefault()}
       style={{

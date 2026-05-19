@@ -35,6 +35,7 @@ export function useAiSuggestionPopover(
         setRect(null);
         setInfo(null);
       },
+      getPopoverElement: () => ref.current,
     });
   }, [editor]);
 

@@ -47,6 +47,7 @@ export function SlashMenu({
   return createPortal(
     <div
       ref={menu.rootRef}
+      data-scrivr-popover="slash-menu"
       className={cx("scrivr-menu scrivr-slash-menu", className)}
       style={{
         position: "fixed",

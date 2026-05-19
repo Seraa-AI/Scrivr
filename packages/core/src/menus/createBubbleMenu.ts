@@ -16,6 +16,7 @@
 import type { IEditor } from "../extensions/types";
 import type { EditorState } from "prosemirror-state";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
+import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
 
 export interface BubbleMenuCallbacks {
@@ -38,6 +39,13 @@ export interface BubbleMenuOptions extends BubbleMenuCallbacks {
    * rapidly (e.g. during drag-select). Default: 80.
    */
   debounce?: number;
+  /**
+   * Accessor returning the popover's root DOM element (or null if unmounted).
+   * Used by the focus-outside check so clicks INTO the popover (e.g. a button
+   * inside the bubble menu) don't trigger an immediate hide. Without this,
+   * the helper falls back to the `[data-scrivr-popover]` marker attribute.
+   */
+  getPopoverElement?: () => HTMLElement | null;
 }
 
 export function createBubbleMenu(editor: IEditor, options: BubbleMenuOptions): () => void {
@@ -78,10 +86,22 @@ export function createBubbleMenu(editor: IEditor, options: BubbleMenuOptions): (
   }
 
   const unsubscribe = subscribeViewUpdates(editor, scheduleUpdate);
+  // Editor blur (user clicked outside the editor entirely) doesn't change
+  // PM state, so subscribeViewUpdates wouldn't catch it. This forces a hide
+  // unless focus moved into a [data-scrivr-popover] element.
+  const offFocusOutside = subscribeEditorFocusOutside(
+    editor,
+    () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (visible) { visible = false; onHide(); }
+    },
+    options.getPopoverElement ? { getPopoverElement: options.getPopoverElement } : {},
+  );
 
   return () => {
     if (timer) clearTimeout(timer);
     unsubscribe();
+    offFocusOutside();
     if (visible) { visible = false; onHide(); }
   };
 }

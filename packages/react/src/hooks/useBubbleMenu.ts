@@ -20,6 +20,10 @@ export function useBubbleMenu(
       onHide: () => {
         setRect(null);
       },
+      // Lets the focus-outside check verify clicks landed inside this popover
+      // (via the actual DOM ref) rather than relying on a marker attribute
+      // the consumer might forget to add.
+      getPopoverElement: () => ref.current,
     };
     if (options.shouldShow) opts.shouldShow = options.shouldShow;
     return createBubbleMenu(editor, opts);

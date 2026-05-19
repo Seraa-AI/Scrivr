@@ -29,6 +29,7 @@ export function useTrackChangesPopover(editor: Editor | null) {
         setRect(null);
         setInfo(null);
       },
+      getPopoverElement: () => ref.current,
     });
   }, [editor]);
 

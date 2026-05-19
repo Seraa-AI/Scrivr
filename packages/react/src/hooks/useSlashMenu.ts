@@ -121,6 +121,7 @@ export function useSlashMenu(
         setVisible(false);
         setRect(null);
       },
+      getPopoverElement: () => ref.current,
     });
     controllerRef.current = ctrl;
     return () => ctrl.cleanup();

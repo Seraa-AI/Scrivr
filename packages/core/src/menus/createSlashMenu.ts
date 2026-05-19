@@ -18,6 +18,7 @@
 import type { IEditor } from "../extensions/types";
 import type { EditorState } from "prosemirror-state";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
+import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
 
 export interface SlashMenuCallbacks {
@@ -29,7 +30,13 @@ export interface SlashMenuCallbacks {
   onHide: () => void;
 }
 
-export interface SlashMenuOptions extends SlashMenuCallbacks {}
+export interface SlashMenuOptions extends SlashMenuCallbacks {
+  /**
+   * Accessor returning the popover's root DOM element (or null if unmounted).
+   * Threaded into the focus-outside check; see createBubbleMenu for context.
+   */
+  getPopoverElement?: () => HTMLElement | null;
+}
 
 export interface SlashMenuController {
   /** Stop listening and hide the menu. */
@@ -80,9 +87,18 @@ export function createSlashMenu(
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => { rafId = null; update(); });
   });
+  const offFocusOutside = subscribeEditorFocusOutside(
+    editor,
+    () => {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      dismissMenu();
+    },
+    options.getPopoverElement ? { getPopoverElement: options.getPopoverElement } : {},
+  );
 
   function cleanup() {
     unsubscribe();
+    offFocusOutside();
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     dismissMenu();
   }
