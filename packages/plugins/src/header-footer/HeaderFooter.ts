@@ -11,9 +11,10 @@
  */
 
 import { Extension } from "@scrivr/core";
+import { renderCursor } from "@scrivr/core";
 import type { IBaseEditor, IEditor, EditorSurface } from "@scrivr/core";
 import { TextSelection } from "prosemirror-state";
-import type { HeaderFooterPolicy } from "./types";
+import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { getHeaderFooterPolicy } from "./getPolicy";
 import { resolveChrome } from "./resolveChrome";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
@@ -59,6 +60,9 @@ let liveSurface: { slotKey: SlotKey; surface: EditorSurface } | null = null;
 
 const RIBBON_HEIGHT = 28;
 const DEFAULT_BODY_GAP = 12;
+const EMPTY_SLOT: HeaderFooterDefinition = {
+  content: { type: "doc", content: [{ type: "paragraph" }] },
+};
 
 function updateLiveSurfaceCache(): void {
   for (const entry of editorEntries.values()) {
@@ -95,6 +99,41 @@ function policyWithLiveSurface(policy: HeaderFooterPolicy): HeaderFooterPolicy {
       margin: Math.max(currentSlot.margin ?? DEFAULT_BODY_GAP, RIBBON_HEIGHT),
     },
   };
+}
+
+function slotBand(slotKey: SlotKey): "header" | "footer" {
+  return slotKey.includes("Header") ? "header" : "footer";
+}
+
+function slotForPage(
+  policy: HeaderFooterPolicy,
+  page: number,
+  band: "header" | "footer",
+): SlotKey {
+  const useFirstPage = page === 1 && policy.differentFirstPage;
+  if (band === "header") return useFirstPage ? "firstPageHeader" : "defaultHeader";
+  return useFirstPage ? "firstPageFooter" : "defaultFooter";
+}
+
+function sameContent(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function surfaceContent(surface: EditorSurface): HeaderFooterDefinition["content"] {
+  return surface.toDocJSON() as unknown as HeaderFooterDefinition["content"];
+}
+
+function syncSurfaceContent(
+  surface: EditorSurface,
+  content: HeaderFooterDefinition["content"],
+): void {
+  if (sameContent(surface.toDocJSON(), content)) return;
+
+  const nextDoc = surface.schema.nodeFromJSON(content);
+  surface.dispatch(
+    surface.state.tr.replaceWith(0, surface.state.doc.content.size, nextDoc.content),
+  );
+  surface.markClean();
 }
 
 function isResolvedHeaderFooter(value: unknown): value is ResolvedHeaderFooter {
@@ -334,10 +373,69 @@ export const HeaderFooter = Extension.create({
     const cache = new HeaderFooterSurfaceCache(editor.schema);
     editorEntries.set(editor, { editor, cache, activePage: 0 });
 
+    const registerSurfaceIfNeeded = (slotKey: SlotKey, def: HeaderFooterDefinition): EditorSurface => {
+      const existing = cache.get(slotKey);
+      if (existing) return existing;
+
+      const surface = cache.getOrCreate(slotKey, def);
+      surface.onUpdate(({ docChanged }) => {
+        getCursorManager(editor)?.resetSilent();
+        updateLiveSurfaceCache();
+        if (docChanged) {
+          editor.invalidateLayout();
+        } else {
+          editor.redraw();
+        }
+      });
+      editor.surfaces.register(surface);
+      return surface;
+    };
+
+    let reconcilingSurface = false;
+    const reconcileActiveSurface = (): void => {
+      if (reconcilingSurface) return;
+
+      const active = editor.surfaces.activeSurface;
+      if (!active || active.owner !== "headerFooter") return;
+
+      const entry = editorEntries.get(editor);
+      const activeSlot = HeaderFooterSurfaceCache.slotKeyFromId(active.id);
+      const policy = getHeaderFooterPolicy(editor.getState().doc);
+      if (!entry || !activeSlot || !policy?.enabled) return;
+
+      const desiredSlot = slotForPage(policy, entry.activePage, slotBand(activeSlot));
+      if (desiredSlot === activeSlot) return;
+
+      reconcilingSurface = true;
+      try {
+        const liveContent = surfaceContent(active);
+        const currentDef = policy[desiredSlot] ?? EMPTY_SLOT;
+        let desiredDef = currentDef;
+
+        if (!sameContent(currentDef.content, liveContent)) {
+          desiredDef = { ...currentDef, content: liveContent };
+          editor.applyTransaction(
+            editor.getState().tr.setDocAttribute("headerFooter", {
+              ...policy,
+              [desiredSlot]: desiredDef,
+            }),
+          );
+        }
+
+        const nextSurface = registerSurfaceIfNeeded(desiredSlot, desiredDef);
+        syncSurfaceContent(nextSurface, desiredDef.content);
+        editor.surfaces.activate(nextSurface.id);
+        updateLiveSurfaceCache();
+        editor.invalidateLayout();
+      } finally {
+        reconcilingSurface = false;
+      }
+    };
+
     // Overlay handler — draws the blinking cursor in the active header/footer band.
     // Runs on the overlay canvas which repaints on blink ticks, so the cursor blinks.
     // CharMap coords are in page space (same as body) — no offset needed.
-    const unsubOverlay = editor.addOverlayRenderHandler((ctx, pageNumber) => {
+    const unsubOverlay = editor.addOverlayRenderHandler((ctx, pageNumber, _pageConfig, _charMap, theme) => {
       const active = editor.surfaces.activeSurface;
       if (!active || active.owner !== "headerFooter") return;
 
@@ -350,8 +448,7 @@ export const HeaderFooter = Extension.create({
       const coords = active.charMap.coordsAtPos(head, pageNumber);
       if (!coords) return;
 
-      ctx.fillStyle = "#1e293b";
-      ctx.fillRect(coords.x, coords.y, 1.5, coords.height);
+      renderCursor(ctx, coords, theme.cursor);
     });
 
     // Listen for clicks in chrome bands to activate header/footer editing
@@ -383,40 +480,20 @@ export const HeaderFooter = Extension.create({
         }
       }
 
-      const isFirstPage = page === 1 && policy.differentFirstPage;
-      let slotKey: SlotKey;
-      if (band === "header") {
-        slotKey = isFirstPage ? "firstPageHeader" : "defaultHeader";
-      } else {
-        slotKey = isFirstPage ? "firstPageFooter" : "defaultFooter";
-      }
+      const slotKey = slotForPage(policy, page, band);
 
       let def = policy[slotKey];
       if (!def) {
         // First-page slot wasn't pre-seeded — create a default empty doc and
         // write it back so the surface cache + activation flow has something
         // to anchor to.
-        def = { content: { type: "doc", content: [{ type: "paragraph" }] } };
+        def = EMPTY_SLOT;
         policy = { ...policy, [slotKey]: def };
         const tr = editor.getState().tr.setDocAttribute("headerFooter", policy);
         editor.applyTransaction(tr);
       }
 
-      const isNew = !cache.get(slotKey);
-      const surface = cache.getOrCreate(slotKey, def);
-
-      if (isNew) {
-        surface.onUpdate(({ docChanged }) => {
-          getCursorManager(editor)?.resetSilent();
-          updateLiveSurfaceCache();
-          if (docChanged) {
-            editor.invalidateLayout();
-          } else {
-            editor.redraw();
-          }
-        });
-        editor.surfaces.register(surface);
-      }
+      const surface = registerSurfaceIfNeeded(slotKey, def);
 
       editor.surfaces.activate(surface.id);
       const entry = editorEntries.get(editor);
@@ -435,11 +512,13 @@ export const HeaderFooter = Extension.create({
       updateLiveSurfaceCache();
       editor.invalidateLayout();
     });
+    const unsubEditor = editor.subscribe(reconcileActiveSurface);
 
     return () => {
       unsubOverlay();
       unsubChromeClick();
       unsubSurfaceChange();
+      unsubEditor();
       for (const surface of cache.all()) {
         editor.surfaces.unregister(surface.id);
       }
