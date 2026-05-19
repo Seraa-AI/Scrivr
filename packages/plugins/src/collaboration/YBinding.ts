@@ -188,21 +188,33 @@ export class YBinding {
   };
 
   private applyAttrsFromMap(): void {
-    const whitelist = new Set(this.editor.getDocAttrNames());
-    for (const key of whitelist) {
-      const envelope = this.attrsMap.get(key);
-      if (!isDocAttrEnvelope(envelope)) continue;
+    const state = this.editor.getState();
+    const docSpecAttrs = state.schema.nodes["doc"]?.spec.attrs ?? {};
 
-      const state = this.editor.getState();
-      const current = state.doc.attrs[key];
-      if (structuralEqual(current, envelope.value)) {
-        // Already matches — still update lastWrittenValue so PM→Y dedup
-        // recognises this as a value we're aware of.
-        this.lastWrittenValue[key] = envelope.value;
+    for (const key of this.editor.getDocAttrNames()) {
+      const envelope = this.attrsMap.get(key);
+
+      // Key absent in Y.Map → reset PM to the schema default. This is the
+      // delete-side of the wire: an undo that removed the key on peer A
+      // must clear the attr on peer B too.
+      if (envelope === undefined) {
+        const defaultValue = docSpecAttrs[key]?.default ?? null;
+        if (!structuralEqual(state.doc.attrs[key], defaultValue)) {
+          this.editor.applyTransaction(
+            state.tr.setDocAttribute(key, defaultValue),
+          );
+        }
+        this.lastWrittenValue[key] = defaultValue;
         continue;
       }
 
-      this.editor.applyTransaction(state.tr.setDocAttribute(key, envelope.value));
+      // Defensive: malformed envelope from an old peer or hand-written write.
+      if (!isDocAttrEnvelope(envelope)) continue;
+
+      const current = state.doc.attrs[key];
+      if (!structuralEqual(current, envelope.value)) {
+        this.editor.applyTransaction(state.tr.setDocAttribute(key, envelope.value));
+      }
       // Mark this value as known so the subsequent targetObserver pass
       // doesn't echo it back to the Y.Map under our own LOCAL_ORIGIN.
       this.lastWrittenValue[key] = envelope.value;
@@ -271,7 +283,10 @@ export class YBinding {
   markSynced(): void {
     // synced is still false here — applyAttrsFromMap() can dispatch
     // transactions safely; targetObserver early-returns on !synced so we
-    // won't bounce anything back to the wire.
+    // won't bounce anything back to the wire. applyAttrsFromMap seeds
+    // lastWrittenValue for every whitelist key (including absent ones,
+    // which it reads from the schema default), so the first PM->Y pass
+    // doesn't emit a wasted default envelope on every fresh peer.
     this.mux(() => {
       this.applyAttrsFromMap();
     });
