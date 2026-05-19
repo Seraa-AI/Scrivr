@@ -146,6 +146,7 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     return () => {
       binding.destroy();
       provider.destroy();
+      ydoc.destroy();
       inst.binding = null;
     };
   },
