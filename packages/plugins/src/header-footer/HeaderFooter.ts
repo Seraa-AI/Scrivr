@@ -57,6 +57,9 @@ function isCursorVisible(editor: IBaseEditor): boolean {
  */
 let liveSurface: { slotKey: SlotKey; surface: EditorSurface } | null = null;
 
+const RIBBON_HEIGHT = 28;
+const DEFAULT_BODY_GAP = 12;
+
 function updateLiveSurfaceCache(): void {
   for (const entry of editorEntries.values()) {
     const surface = entry.editor.surfaces.activeSurface;
@@ -87,6 +90,9 @@ function policyWithLiveSurface(policy: HeaderFooterPolicy): HeaderFooterPolicy {
     [liveSurface.slotKey]: {
       ...currentSlot,
       content: liveSurface.surface.state.doc.toJSON(),
+      // The React editing ribbon occupies this gap while a surface is active.
+      // Keep the live layout from placing header/footer content underneath it.
+      margin: Math.max(currentSlot.margin ?? DEFAULT_BODY_GAP, RIBBON_HEIGHT),
     },
   };
 }
@@ -421,9 +427,19 @@ export const HeaderFooter = Extension.create({
       placeCursorAfterPaint(surface, x, y, page);
     });
 
+    const unsubSurfaceChange = editor.surfaces.onSurfaceChange((prevId, nextId) => {
+      const touchedHeaderFooter =
+        (prevId !== null && HeaderFooterSurfaceCache.slotKeyFromId(prevId) !== null) ||
+        (nextId !== null && HeaderFooterSurfaceCache.slotKeyFromId(nextId) !== null);
+      if (!touchedHeaderFooter) return;
+      updateLiveSurfaceCache();
+      editor.invalidateLayout();
+    });
+
     return () => {
       unsubOverlay();
       unsubChromeClick();
+      unsubSurfaceChange();
       for (const surface of cache.all()) {
         editor.surfaces.unregister(surface.id);
       }

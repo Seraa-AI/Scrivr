@@ -10,12 +10,17 @@ import { useScrivrState as useEditorState } from "./useScrivrState";
 export interface HeaderFooterRibbonItem {
   pageNum: number;
   label: string;
+  left: number;
   top: number;
   width: number;
   isFirstPage: boolean;
 }
 
-export function useHeaderFooterRibbon(editor: Editor | null, gap = 24) {
+export function useHeaderFooterRibbon(
+  editor: Editor | null,
+  gap = 24,
+  overlayRect: DOMRect | null = null,
+) {
   const controllerRef = useRef<HeaderFooterController | null>(null);
   const [state, setState] = useState<HeaderFooterState | null>(null);
   const [optionsOpen, setOptionsOpen] = useState<number | null>(null);
@@ -88,14 +93,20 @@ export function useHeaderFooterRibbon(editor: Editor | null, gap = 24) {
       const bandHeight = isHeader ? metrics.headerHeight : metrics.footerHeight;
       if (bandHeight <= 0) continue;
 
+      const pageScreen = overlayRect ? editor.getPageScreenPosition(pageNum) : null;
       const pageOffsetY = i * (pageConfig.pageHeight + gap);
+      const pageLeft = pageScreen && overlayRect ? pageScreen.screenLeft - overlayRect.left : 0;
+      const pageTop = pageScreen && overlayRect
+        ? pageScreen.screenTop - overlayRect.top
+        : pageOffsetY;
       const top = isHeader
-        ? pageOffsetY + metrics.contentTop - 28
-        : pageOffsetY + metrics.footerTop - 28;
+        ? pageTop + metrics.contentTop - 28
+        : pageTop + metrics.footerTop - 28;
 
       ribbons.push({
         pageNum,
         label,
+        left: pageLeft,
         top,
         width: pageConfig.pageWidth,
         isFirstPage,

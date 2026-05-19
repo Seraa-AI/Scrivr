@@ -13,6 +13,7 @@
  */
 
 import type { Editor } from "@scrivr/core";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
   type HeaderFooterController,
   type HeaderFooterState,
@@ -42,13 +43,41 @@ export function HeaderFooterRibbon({
   titleClassName,
   descriptionClassName,
 }: HeaderFooterRibbonProps) {
-  const ribbon = useHeaderFooterRibbon(editor, gap);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const [overlayRect, setOverlayRect] = useState<DOMRect | null>(null);
+  const measureOverlay = useCallback(() => {
+    setOverlayRect(overlayRef.current?.getBoundingClientRect() ?? null);
+  }, []);
+  const ribbon = useHeaderFooterRibbon(editor, gap, overlayRect);
+
+  useLayoutEffect(() => {
+    measureOverlay();
+    const node = overlayRef.current;
+    const ro = typeof ResizeObserver !== "undefined" && node
+      ? new ResizeObserver(measureOverlay)
+      : null;
+    ro?.observe(node!);
+    window.addEventListener("resize", measureOverlay);
+    window.addEventListener("scroll", measureOverlay, true);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", measureOverlay);
+      window.removeEventListener("scroll", measureOverlay, true);
+    };
+  }, [measureOverlay, ribbon.visible]);
 
   if (!editor || !ribbon.visible || !ribbon.state) return null;
   const state = ribbon.state;
 
   return (
-    <>
+    <div
+      ref={overlayRef}
+      style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+      }}
+    >
       {ribbon.ribbons.map((item) => {
         return (
           <div
@@ -57,7 +86,7 @@ export function HeaderFooterRibbon({
             style={{
               position: "absolute",
               top: item.top,
-              left: 0,
+              left: item.left,
               width: item.width,
               display: "flex",
               alignItems: "center",
@@ -131,7 +160,7 @@ export function HeaderFooterRibbon({
           </div>
         );
       })}
-    </>
+    </div>
   );
 }
 
