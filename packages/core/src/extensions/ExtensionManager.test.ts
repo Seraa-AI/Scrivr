@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { ExtensionManager, getSchema } from "./ExtensionManager";
 import { Extension } from "./Extension";
 import { StarterKit } from "./StarterKit";
+import { Pagination } from "./built-in/Pagination";
+import { defaultPageConfig } from "../layout/PageLayout";
+import type { PageConfig } from "../layout/PageLayout";
 import { Bold } from "./built-in/Bold";
 import { Italic } from "./built-in/Italic";
 import { Paragraph } from "./built-in/Paragraph";
@@ -909,6 +912,170 @@ describe("ExtensionManager", () => {
       const manager = new ExtensionManager([StarterKit, First, Later]);
       expect(() => manager.buildInitialDoc()).not.toThrow();
       expect(laterRan).toBe(false);
+    });
+  });
+
+  describe("addPageConfig lane", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    const usLetter: PageConfig = {
+      pageWidth: 816,
+      pageHeight: 1056,
+      margins: { top: 72, right: 72, bottom: 72, left: 72 },
+    };
+
+    it("returns undefined when no extension contributes a page config", () => {
+      // Even Document + Paragraph alone shouldn't conjure a config from nowhere.
+      const manager = new ExtensionManager([Document, Paragraph]);
+      expect(manager.buildPageConfig()).toBeUndefined();
+    });
+
+    it("returns the contribution from a standalone extension via addPageConfig()", () => {
+      const PageOverride = Extension.create({
+        name: "myPageSettings",
+        addPageConfig() {
+          return usLetter;
+        },
+      });
+      const manager = new ExtensionManager([Document, Paragraph, PageOverride]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+    });
+
+    it("reads the standalone Pagination extension through the lane", () => {
+      // Pagination's options ARE the PageConfig — the addPageConfig hook on the
+      // extension itself must surface them without manager-side name matching.
+      const manager = new ExtensionManager([
+        Document,
+        Paragraph,
+        Pagination.configure(usLetter),
+      ]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+    });
+
+    it("reads StarterKit's nested pagination option through the lane", () => {
+      const manager = new ExtensionManager([
+        StarterKit.configure({ pagination: usLetter }),
+      ]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+    });
+
+    it("respects StarterKit pagination: false (no config contributed)", () => {
+      const manager = new ExtensionManager([
+        StarterKit.configure({ pagination: false }),
+      ]);
+      expect(manager.buildPageConfig()).toBeUndefined();
+    });
+
+    it("returns undefined when StarterKit is loaded without an explicit pagination option", () => {
+      // StarterKit holds no opinion unless the user opted in. Editor's
+      // constructor applies `defaultPageConfig` as the final fallback —
+      // verified separately in Editor's wiring at the `?? defaultPageConfig`
+      // site. Tested here at the manager level: undefined surfaces as the
+      // "no contribution" signal a downstream Pagination can override.
+      const manager = new ExtensionManager([StarterKit]);
+      expect(manager.buildPageConfig()).toBeUndefined();
+    });
+
+    it("merges partial StarterKit pagination override with the default config", () => {
+      const partial: Partial<PageConfig> = { pageWidth: 600 };
+      const manager = new ExtensionManager([
+        StarterKit.configure({ pagination: partial }),
+      ]);
+      const result = manager.buildPageConfig();
+      expect(result?.pageWidth).toBe(600);
+      // Untouched fields fall through to defaults.
+      expect(result?.pageHeight).toBe(defaultPageConfig.pageHeight);
+      expect(result?.margins).toEqual(defaultPageConfig.margins);
+    });
+
+    it("does not require an extension named 'pagination' or 'starterKit'", () => {
+      // Manager must not match by name. Any extension that contributes via the
+      // addPageConfig lane should be honored.
+      const Custom = Extension.create({
+        name: "totallyDifferentName",
+        addPageConfig() {
+          return usLetter;
+        },
+      });
+      const manager = new ExtensionManager([Document, Paragraph, Custom]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+    });
+
+    it("warns when more than one extension contributes via addPageConfig", () => {
+      const A = Extension.create({
+        name: "extA",
+        addPageConfig() {
+          return usLetter;
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addPageConfig() {
+          return defaultPageConfig;
+        },
+      });
+      const manager = new ExtensionManager([Document, Paragraph, A, B]);
+      manager.buildPageConfig();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Multiple/i);
+      expect(message).toMatch(/extA/);
+      expect(message).toMatch(/extB/);
+    });
+
+    it("first contributor wins on multi-provider collision", () => {
+      const A = Extension.create({
+        name: "extA",
+        addPageConfig() {
+          return usLetter;
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addPageConfig() {
+          return defaultPageConfig;
+        },
+      });
+      const manager = new ExtensionManager([Document, Paragraph, A, B]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+    });
+
+    it("[StarterKit, Pagination.configure(...)] resolves to the standalone config without warning", () => {
+      // Regression: StarterKit previously returned defaultPageConfig when its
+      // pagination option was unset, which then claimed the slot ahead of
+      // an explicit standalone Pagination. Now StarterKit returns undefined
+      // when unset, so the standalone wins cleanly.
+      const manager = new ExtensionManager([
+        StarterKit,
+        Pagination.configure(usLetter),
+      ]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+      const collisions = warnSpy.mock.calls.filter((c) =>
+        String(c[0] ?? "").includes("Multiple extensions contributed page configs"),
+      );
+      expect(collisions).toHaveLength(0);
+    });
+
+    it("StarterKit.configure({ pagination: false }) does not show up as a phantom provider", () => {
+      // Regression: warning was previously triggered by hook presence, so
+      // StarterKit (which defines addPageConfig) was listed even when its
+      // hook returned undefined. The pagination: false escape hatch must
+      // be silent.
+      const manager = new ExtensionManager([
+        StarterKit.configure({ pagination: false }),
+        Pagination.configure(usLetter),
+      ]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+      const collisions = warnSpy.mock.calls.filter((c) =>
+        String(c[0] ?? "").includes("Multiple extensions contributed page configs"),
+      );
+      expect(collisions).toHaveLength(0);
     });
   });
 
