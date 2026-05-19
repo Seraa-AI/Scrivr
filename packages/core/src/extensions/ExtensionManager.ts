@@ -27,27 +27,38 @@ import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { ExportContributionMap } from "./export";
 import { parseMarkdownToDoc } from "../model/parseMarkdown";
 
-/**
- * Walk extensions and merge their `addDocAttrs()` contributions, detecting
- * collisions. Returns both the merged attr spec map and the owner map (which
- * extension contributed each attr name).
- *
- * Owners are used by the collab binding's whitelist — `YBinding` only syncs
- * attrs that an extension actually declared, so private fields and stale
- * peer attrs never cross the wire.
- */
-function collectDocAttrs(extensions: Extension[]): {
+interface Phase1SchemaContributions {
+  nodes: Record<string, object>;
+  marks: Record<string, object>;
   docAttrs: Record<string, AttributeSpec>;
-  owners: Record<string, string>;
-} {
+  docAttrOwners: Record<string, string>;
+}
+
+/**
+ * Walk extensions once for Phase 1 schema contributions. This keeps
+ * addNodes/addMarks/addDocAttrs in the same resolution pass and avoids
+ * re-running phase-1 extension hooks just to expose doc-attr ownership.
+ */
+function collectPhase1SchemaContributions(extensions: Extension[]): Phase1SchemaContributions {
+  // doc and text are always required by ProseMirror — provide them as baseline
+  const nodes: Record<string, object> = {
+    doc: { content: "block+" },
+    text: { group: "inline" },
+  };
+  const marks: Record<string, object> = {};
   const docAttrs: Record<string, AttributeSpec> = {};
-  const owners: Record<string, string> = {};
+  const docAttrOwners: Record<string, string> = {};
 
   for (const ext of extensions) {
     const partial = ext.resolve(); // Phase 1 only — no schema yet
+    // Note: addNodes({ doc: ... }) can overwrite the doc spec and bypass
+    // collision detection. Use addDocAttrs() for doc-level attributes.
+    Object.assign(nodes, partial.nodes);
+    Object.assign(marks, partial.marks);
+
     for (const [attrName, spec] of Object.entries(partial.docAttrs)) {
       if (attrName in docAttrs) {
-        const prevOwner = owners[attrName]!;
+        const prevOwner = docAttrOwners[attrName]!;
         throw new Error(
           `[getSchema] Doc attribute "${attrName}" is contributed by ` +
             `both "${prevOwner}" and "${partial.name}". Doc attributes must be ` +
@@ -56,11 +67,26 @@ function collectDocAttrs(extensions: Extension[]): {
         );
       }
       docAttrs[attrName] = spec;
-      owners[attrName] = partial.name;
+      docAttrOwners[attrName] = partial.name;
     }
   }
 
-  return { docAttrs, owners };
+  return { nodes, marks, docAttrs, docAttrOwners };
+}
+
+function buildSchemaFromPhase1(contribs: Phase1SchemaContributions): Schema {
+  const { nodes, marks, docAttrs } = contribs;
+
+  // Merge doc attrs into the doc node spec additively.
+  if (Object.keys(docAttrs).length > 0) {
+    const baseDoc = nodes["doc"] as Record<string, unknown>;
+    nodes["doc"] = {
+      ...baseDoc,
+      attrs: { ...(baseDoc.attrs as object | undefined), ...docAttrs },
+    };
+  }
+
+  return new Schema({ nodes, marks });
 }
 
 /**
@@ -75,33 +101,7 @@ function collectDocAttrs(extensions: Extension[]): {
  *   const schema = getSchema([StarterKit]);
  */
 export function getSchema(extensions: Extension[]): Schema {
-  // doc and text are always required by ProseMirror — provide them as baseline
-  const nodes: Record<string, object> = {
-    doc: { content: "block+" },
-    text: { group: "inline" },
-  };
-  const marks: Record<string, object> = {};
-
-  for (const ext of extensions) {
-    const partial = ext.resolve(); // no schema — Phase 1 only
-    // Note: addNodes({ doc: ... }) can overwrite the doc spec and bypass
-    // collision detection. Use addDocAttrs() for doc-level attributes.
-    Object.assign(nodes, partial.nodes);
-    Object.assign(marks, partial.marks);
-  }
-
-  const { docAttrs } = collectDocAttrs(extensions);
-
-  // Merge doc attrs into the doc node spec additively.
-  if (Object.keys(docAttrs).length > 0) {
-    const baseDoc = nodes["doc"] as Record<string, unknown>;
-    nodes["doc"] = {
-      ...baseDoc,
-      attrs: { ...(baseDoc.attrs as object | undefined), ...docAttrs },
-    };
-  }
-
-  return new Schema({ nodes, marks });
+  return buildSchemaFromPhase1(collectPhase1SchemaContributions(extensions));
 }
 
 /**
@@ -131,13 +131,10 @@ export class ExtensionManager {
   constructor(extensions: Extension[]) {
     this.extensions = extensions;
 
-    // Phase 1: build schema (no schema context yet — addNodes/addMarks only)
-    this.schema = getSchema(extensions);
-
-    // Phase 1: capture doc-attr ownership. getSchema already validated
-    // collisions, so this re-merge is guaranteed to throw the same error
-    // (i.e. never reach here) if the extension list is invalid.
-    this.docAttrOwners = collectDocAttrs(extensions).owners;
+    // Phase 1: build schema and capture doc-attr ownership in one pass.
+    const phase1 = collectPhase1SchemaContributions(extensions);
+    this.schema = buildSchemaFromPhase1(phase1);
+    this.docAttrOwners = phase1.docAttrOwners;
 
     // Phase 2+: resolve everything else with the built schema in context
     this.resolved = extensions.map((ext) => ext.resolve(this.schema));
