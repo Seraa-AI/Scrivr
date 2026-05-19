@@ -28,6 +28,42 @@ import type { ExportContributionMap } from "./export";
 import { parseMarkdownToDoc } from "../model/parseMarkdown";
 
 /**
+ * Walk extensions and merge their `addDocAttrs()` contributions, detecting
+ * collisions. Returns both the merged attr spec map and the owner map (which
+ * extension contributed each attr name).
+ *
+ * Owners are used by the collab binding's whitelist — `YBinding` only syncs
+ * attrs that an extension actually declared, so private fields and stale
+ * peer attrs never cross the wire.
+ */
+function collectDocAttrs(extensions: Extension[]): {
+  docAttrs: Record<string, AttributeSpec>;
+  owners: Record<string, string>;
+} {
+  const docAttrs: Record<string, AttributeSpec> = {};
+  const owners: Record<string, string> = {};
+
+  for (const ext of extensions) {
+    const partial = ext.resolve(); // Phase 1 only — no schema yet
+    for (const [attrName, spec] of Object.entries(partial.docAttrs)) {
+      if (attrName in docAttrs) {
+        const prevOwner = owners[attrName]!;
+        throw new Error(
+          `[getSchema] Doc attribute "${attrName}" is contributed by ` +
+            `both "${prevOwner}" and "${partial.name}". Doc attributes must be ` +
+            `unique across all extensions. Rename one (e.g. ` +
+            `"${partial.name}_${attrName}") or remove the duplicate extension.`,
+        );
+      }
+      docAttrs[attrName] = spec;
+      owners[attrName] = partial.name;
+    }
+  }
+
+  return { docAttrs, owners };
+}
+
+/**
  * Build a ProseMirror Schema from an array of extensions.
  *
  * This is the standalone equivalent of TipTap's `getSchema()` — it runs only
@@ -46,32 +82,15 @@ export function getSchema(extensions: Extension[]): Schema {
   };
   const marks: Record<string, object> = {};
 
-  // Doc attr contributions — collision detection throws naming both owners.
-  const docAttrs: Record<string, AttributeSpec> = {};
-  const docAttrOwners: Record<string, string> = {};
-
   for (const ext of extensions) {
     const partial = ext.resolve(); // no schema — Phase 1 only
     // Note: addNodes({ doc: ... }) can overwrite the doc spec and bypass
     // collision detection. Use addDocAttrs() for doc-level attributes.
     Object.assign(nodes, partial.nodes);
     Object.assign(marks, partial.marks);
-
-    // Merge docAttrs contributions with collision detection.
-    for (const [attrName, spec] of Object.entries(partial.docAttrs)) {
-      if (attrName in docAttrs) {
-        const prevOwner = docAttrOwners[attrName]!;
-        throw new Error(
-          `[getSchema] Doc attribute "${attrName}" is contributed by ` +
-            `both "${prevOwner}" and "${partial.name}". Doc attributes must be ` +
-            `unique across all extensions. Rename one (e.g. ` +
-            `"${partial.name}_${attrName}") or remove the duplicate extension.`,
-        );
-      }
-      docAttrs[attrName] = spec;
-      docAttrOwners[attrName] = partial.name;
-    }
   }
+
+  const { docAttrs } = collectDocAttrs(extensions);
 
   // Merge doc attrs into the doc node spec additively.
   if (Object.keys(docAttrs).length > 0) {
@@ -102,6 +121,12 @@ export class ExtensionManager {
   readonly schema: Schema;
   private resolved: ResolvedExtension[];
   private readonly extensions: Extension[];
+  /**
+   * Map of doc-attr name → owning extension name, populated during schema
+   * build. Used by collab bindings to whitelist syncable attrs and by future
+   * error messages that need to attribute a problem to its owner.
+   */
+  private readonly docAttrOwners: Record<string, string>;
 
   constructor(extensions: Extension[]) {
     this.extensions = extensions;
@@ -109,8 +134,33 @@ export class ExtensionManager {
     // Phase 1: build schema (no schema context yet — addNodes/addMarks only)
     this.schema = getSchema(extensions);
 
+    // Phase 1: capture doc-attr ownership. getSchema already validated
+    // collisions, so this re-merge is guaranteed to throw the same error
+    // (i.e. never reach here) if the extension list is invalid.
+    this.docAttrOwners = collectDocAttrs(extensions).owners;
+
     // Phase 2+: resolve everything else with the built schema in context
     this.resolved = extensions.map((ext) => ext.resolve(this.schema));
+  }
+
+  /**
+   * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
+   * Returned as a fresh array — callers may mutate the result.
+   *
+   * Consumed by collab bindings as the whitelist of attrs that may be synced
+   * across peers; attrs not in this list are private to the local editor.
+   */
+  getDocAttrNames(): string[] {
+    return Object.keys(this.docAttrOwners);
+  }
+
+  /**
+   * Map of doc-attr name → owning extension name. Returned as a fresh object —
+   * callers may mutate the result. Useful for error messages that need to
+   * attribute a problem to the extension that contributed an attr.
+   */
+  getDocAttrOwners(): Record<string, string> {
+    return { ...this.docAttrOwners };
   }
 
   /**

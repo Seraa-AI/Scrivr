@@ -101,6 +101,14 @@ export interface IBaseEditor {
   parseMarkdown(text: string): Node;
   /** Export contributions from all extensions, in registration order. */
   getExportContributions(): ExportContributionMap[];
+  /**
+   * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
+   *
+   * Used by collab bindings as a whitelist of syncable attrs — attrs not in
+   * this list are private to the local editor and must not cross the wire.
+   * Returned as a fresh array; callers may mutate the result.
+   */
+  getDocAttrNames(): string[];
 }
 
 /**

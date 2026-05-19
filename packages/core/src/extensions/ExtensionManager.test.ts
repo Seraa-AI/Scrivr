@@ -13,6 +13,7 @@ import { FontSize } from "./built-in/FontSize";
 import { Underline } from "./built-in/Underline";
 import { Heading } from "./built-in/Heading";
 import { Link } from "./built-in/Link";
+import { ServerEditor } from "../ServerEditor";
 
 describe("getSchema", () => {
   it("returns a ProseMirror Schema from StarterKit", () => {
@@ -479,6 +480,88 @@ describe("ExtensionManager", () => {
       const undoTr = nextState.tr.step(tr.steps[0]!.invert(tr.docs[0]!));
       const undoneState = nextState.apply(undoTr);
       expect(undoneState.doc.attrs.headerFooter).toBeNull();
+    });
+  });
+
+  describe("getDocAttrOwners / getDocAttrNames", () => {
+    // Reused contributor factory — same shape as the addDocAttrs tests above.
+    const makeDocAttrContributor = (name: string, attrName: string, defaultValue: unknown) =>
+      Extension.create({
+        name,
+        addDocAttrs() {
+          return { [attrName]: { default: defaultValue } };
+        },
+      });
+
+    it("returns an empty list when no extension contributes doc attrs", () => {
+      const manager = new ExtensionManager([Document, Paragraph, Bold]);
+      expect(manager.getDocAttrNames()).toEqual([]);
+      expect(manager.getDocAttrOwners()).toEqual({});
+    });
+
+    it("returns the attr name and owner when one extension contributes", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
+      const manager = new ExtensionManager([StarterKit, HeaderFooter]);
+      expect(manager.getDocAttrNames()).toEqual(["headerFooter"]);
+      expect(manager.getDocAttrOwners()).toEqual({ headerFooter: "headerFooter" });
+    });
+
+    it("returns every contributed attr across extensions", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
+      const Footnotes = makeDocAttrContributor("footnotes", "footnotes", []);
+      const TrackChanges = makeDocAttrContributor("trackChanges", "trackChanges", { enabled: false });
+      const manager = new ExtensionManager([StarterKit, HeaderFooter, Footnotes, TrackChanges]);
+
+      expect(manager.getDocAttrNames().sort()).toEqual(
+        ["footnotes", "headerFooter", "trackChanges"].sort(),
+      );
+      expect(manager.getDocAttrOwners()).toEqual({
+        headerFooter: "headerFooter",
+        footnotes: "footnotes",
+        trackChanges: "trackChanges",
+      });
+    });
+
+    it("decouples attr name from owning extension name", () => {
+      // An extension can name its attrs anything — the owner map must reflect
+      // the extension that actually contributed, not the attr name.
+      const Headered = makeDocAttrContributor("myHeaderPlugin", "headerFooter", null);
+      const manager = new ExtensionManager([StarterKit, Headered]);
+      expect(manager.getDocAttrOwners()).toEqual({ headerFooter: "myHeaderPlugin" });
+    });
+
+    it("returns a defensive copy — mutating the result does not affect the manager", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
+      const manager = new ExtensionManager([StarterKit, HeaderFooter]);
+
+      const owners = manager.getDocAttrOwners();
+      owners["intruder"] = "evil";
+      expect(manager.getDocAttrOwners()).not.toHaveProperty("intruder");
+
+      const names = manager.getDocAttrNames();
+      names.push("intruder");
+      expect(manager.getDocAttrNames()).not.toContain("intruder");
+    });
+  });
+
+  describe("IBaseEditor.getDocAttrNames delegation", () => {
+    const makeDocAttrContributor = (name: string, attrName: string, defaultValue: unknown) =>
+      Extension.create({
+        name,
+        addDocAttrs() {
+          return { [attrName]: { default: defaultValue } };
+        },
+      });
+
+    it("ServerEditor.getDocAttrNames() returns names declared by extensions", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
+      const editor = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+      expect(editor.getDocAttrNames()).toEqual(["headerFooter"]);
+    });
+
+    it("ServerEditor.getDocAttrNames() is empty when no extension contributes", () => {
+      const editor = new ServerEditor({ extensions: [StarterKit] });
+      expect(editor.getDocAttrNames()).toEqual([]);
     });
   });
 });
