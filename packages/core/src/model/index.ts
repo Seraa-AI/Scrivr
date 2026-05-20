@@ -8,3 +8,6 @@ export {
 } from "./theme";
 export type { EditorTheme, ResolvedTheme } from "./theme";
 export { resolveTheme, resolveThemeColor, disposeProbe } from "./resolveTheme";
+export { safeUrl } from "./safeUrl";
+export { sanitizeDocUrls } from "./sanitizeDocUrls";
+export { getNodeAttrs, getMarkAttrs } from "./getNodeAttrs";
