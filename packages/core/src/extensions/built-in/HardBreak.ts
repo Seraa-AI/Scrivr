@@ -32,10 +32,9 @@ function insertHardBreak(): Command {
  * (`text\` + newline) only when followed by non-hardBreak content, so a
  * trailing break doesn't leak a stray escape into the output.
  *
- * Previously bundled inside the `Document` extension. Extracted so it
- * matches the rest of the built-ins (Bold, Heading, HorizontalRule, etc.)
- * — individually importable, individually toggleable from StarterKit, and
- * owns its own keymap binding instead of leaving it parked in BaseEditing.
+ * Owns its node spec, command, keymap, and markdown roundtrip — same
+ * shape as Bold / Heading / HorizontalRule. Individually importable
+ * and individually toggleable from StarterKit.
  *
  * @example
  *   new Editor({ extensions: [Document, Paragraph, HardBreak] });
