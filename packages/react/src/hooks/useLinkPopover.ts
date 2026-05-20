@@ -31,6 +31,7 @@ export function useLinkPopover(editor: Editor | null) {
         setInfo(null);
         setEditing(false);
       },
+      getPopoverElement: () => ref.current,
     });
   }, [editor]);
 

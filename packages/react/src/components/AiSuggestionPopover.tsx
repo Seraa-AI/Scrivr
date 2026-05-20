@@ -41,6 +41,7 @@ export function AiSuggestionPopover({
   return createPortal(
     <div
       ref={popover.rootRef}
+      data-scrivr-popover="ai-suggestion-popover"
       className={cx("scrivr-menu scrivr-ai-popover", className)}
       onMouseDown={(e) => e.preventDefault()}
       data-disabled={popover.info.isStale ? "" : undefined}

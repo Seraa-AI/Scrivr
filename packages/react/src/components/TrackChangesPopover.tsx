@@ -32,6 +32,7 @@ export function TrackChangesPopover({
   return createPortal(
     <div
       ref={popover.rootRef}
+      data-scrivr-popover="track-changes-popover"
       className={cx("scrivr-menu scrivr-track-popover", className)}
       onMouseDown={(e) => e.preventDefault()}
       data-active={popover.info.isConflict ? "" : undefined}

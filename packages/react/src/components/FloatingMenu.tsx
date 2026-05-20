@@ -30,6 +30,7 @@ export function FloatingMenu({ editor, children, shouldShow, className }: Floati
   return createPortal(
     <div
       ref={menu.rootRef}
+      data-scrivr-popover="floating-menu"
       className={className}
       style={{
         position:   "fixed",

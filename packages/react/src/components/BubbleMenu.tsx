@@ -32,6 +32,7 @@ export function BubbleMenu({ editor, children, shouldShow, className }: BubbleMe
   return createPortal(
     <div
       ref={menu.rootRef}
+      data-scrivr-popover="bubble-menu"
       className={className}
       style={{
         position: "fixed",

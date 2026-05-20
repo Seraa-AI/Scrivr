@@ -37,6 +37,7 @@ export function LinkPopover({
   return createPortal(
     <div
       ref={popover.rootRef}
+      data-scrivr-popover="link-popover"
       className={cx("scrivr-menu scrivr-link-popover", className)}
       onMouseDown={(e) => e.preventDefault()}
       style={{

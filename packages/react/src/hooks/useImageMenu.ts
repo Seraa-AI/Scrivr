@@ -63,6 +63,7 @@ export function useImageMenu(editor: Editor | null) {
         setRect(null);
         setInfo(null);
       },
+      getPopoverElement: () => ref.current,
     });
   }, [editor]);
 

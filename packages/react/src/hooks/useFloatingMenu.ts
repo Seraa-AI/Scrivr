@@ -20,6 +20,7 @@ export function useFloatingMenu(
       onHide: () => {
         setRect(null);
       },
+      getPopoverElement: () => ref.current,
     };
     if (options.shouldShow) opts.shouldShow = options.shouldShow;
     return createFloatingMenu(editor, opts);
