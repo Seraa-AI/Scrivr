@@ -4,6 +4,7 @@ export { StarterKit } from "./StarterKit";
 
 // Built-in extensions — individually importable
 export { Document } from "./built-in/Document";
+export { HardBreak } from "./built-in/HardBreak";
 export { Paragraph } from "./built-in/Paragraph";
 export { Heading } from "./built-in/Heading";
 export { Bold } from "./built-in/Bold";
