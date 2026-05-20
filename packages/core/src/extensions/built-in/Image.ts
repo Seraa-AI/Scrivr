@@ -4,6 +4,8 @@ import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { IEditor } from "../types";
 import type { Node as PmNode } from "prosemirror-model";
 import type { ResolvedTheme } from "../../model/theme";
+import { safeUrl } from "../../model/safeUrl";
+import { getNodeAttrs } from "../../model/getNodeAttrs";
 
 // ── Image cache ───────────────────────────────────────────────────────────────
 
@@ -123,8 +125,12 @@ function insertImage(): Command {
     if (!imageType) return false;
     if (!dispatch) return true;
 
-    const src = window.prompt("Image URL:", "https://");
-    if (!src) return false;
+    const raw = window.prompt("Image URL:", "https://");
+    // Ingestion-time URL validation — see model/safeUrl.ts. Rejects
+    // javascript:, data:, vbscript:, file:, and any non-allowlisted
+    // scheme before the node lands in the document.
+    const src = safeUrl(raw);
+    if (src === null) return false;
 
     // Insert inline at the current cursor position (inside the paragraph)
     const node = imageType.create({ src, alt: "" });
@@ -178,27 +184,31 @@ export const Image = Extension.create({
           {
             tag: "img[src]",
             getAttrs(dom) {
-              const el = dom as HTMLImageElement;
+              // dom is typed as `Node | string` from ProseMirror; narrow via
+              // `instanceof Element` so we can call getAttribute without a cast.
+              if (!(dom instanceof Element)) return false;
+              // Ingestion-time URL validation — see model/safeUrl.ts.
+              // Reject the entire image node on unsafe src (returning false
+              // from getAttrs drops the matched element) rather than store
+              // a node that paints nothing or, worse, navigates somewhere
+              // dangerous when a future DOM mirror renders it.
+              const src = safeUrl(dom.getAttribute("src"));
+              if (src === null) return false;
               return {
-                src: el.getAttribute("src") ?? "",
-                alt: el.getAttribute("alt") ?? "",
-                width: el.getAttribute("width")
-                  ? parseInt(el.getAttribute("width")!)
+                src,
+                alt: dom.getAttribute("alt") ?? "",
+                width: dom.getAttribute("width")
+                  ? parseInt(dom.getAttribute("width")!)
                   : 200,
-                height: el.getAttribute("height")
-                  ? parseInt(el.getAttribute("height")!)
+                height: dom.getAttribute("height")
+                  ? parseInt(dom.getAttribute("height")!)
                   : 200,
               };
             },
           },
         ],
         toDOM(node) {
-          const { src, alt, width, height } = node.attrs as {
-            src: string;
-            alt: string;
-            width: number;
-            height: number;
-          };
+          const { src, alt, width, height } = getNodeAttrs(node, "image");
           return [
             "img",
             { src, alt, width: String(width), height: String(height) },
@@ -246,7 +256,7 @@ export const Image = Extension.create({
     return {
       nodes: {
         image(state, node) {
-          const { src, alt } = node.attrs as { src: string; alt: string };
+          const { src, alt } = getNodeAttrs(node, "image");
           state.write(`![${alt ?? ""}](${src})`);
           state.closeBlock(node);
         },
@@ -260,6 +270,27 @@ declare module "@scrivr/core" {
     image: {
       /** Open the system file picker and insert an image at the cursor. */
       insertImage: () => ReturnType;
+    };
+  }
+  interface NodeAttributes {
+    image: {
+      src: string;
+      alt: string;
+      width: number;
+      height: number;
+      nodeId: string | null;
+      verticalAlign: string;
+      wrapMode: string;
+      positionMode: string;
+      xAlign: string;
+      x: number | null;
+      yOffset: number;
+      zIndex: number;
+      margin: number;
+      /** @deprecated read-side compat — mapped by normalizeImageAttrs */
+      wrappingMode: string;
+      /** @deprecated read-side compat — mapped by normalizeImageAttrs */
+      floatOffset: { x: number; y: number };
     };
   }
 }

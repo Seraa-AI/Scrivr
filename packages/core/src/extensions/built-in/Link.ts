@@ -1,5 +1,7 @@
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
+import { safeUrl } from "../../model/safeUrl";
+import { getMarkAttrs } from "../../model/getNodeAttrs";
 
 /**
  * Link — inline hyperlink via the `link` mark.
@@ -26,16 +28,24 @@ export const Link = Extension.create({
           {
             tag: "a[href]",
             getAttrs: (dom) => {
-              const el = dom as HTMLAnchorElement;
-              return { href: el.getAttribute("href"), title: el.getAttribute("title") };
+              // dom is typed as `Node | string` from ProseMirror; narrow via
+              // `instanceof Element` so we can call getAttribute without a cast.
+              if (!(dom instanceof Element)) return false;
+              // Reject the mark entirely when the href fails the ingestion
+              // allow-list. Returning false from getAttrs drops only the
+              // mark — the link text remains as plain text rather than
+              // disappearing, which preserves user content while killing
+              // the dangerous href. See model/safeUrl.ts.
+              const href = safeUrl(dom.getAttribute("href"));
+              if (href === null) return false;
+              return { href, title: dom.getAttribute("title") };
             },
           },
         ],
-        toDOM: (mark) => [
-          "a",
-          { href: mark.attrs["href"] as string, title: mark.attrs["title"] as string | null },
-          0,
-        ],
+        toDOM: (mark) => {
+          const { href, title } = getMarkAttrs(mark, "link");
+          return ["a", { href, title: title ?? null }, 0];
+        },
       },
     };
   },
@@ -53,10 +63,10 @@ export const Link = Extension.create({
             // Prompt is intentionally simple — consumers can override with a
             // custom dialog by registering their own setLink command before
             // this extension resolves.
-            const href = window.prompt("Enter URL:", "https://");
-            if (href) {
-              dispatch(state.tr.addMark(from, to, markType.create({ href: href.trim() })));
-            }
+            const raw = window.prompt("Enter URL:", "https://");
+            const href = safeUrl(raw);
+            if (href === null) return true; // user cancelled or unsafe — no-op
+            dispatch(state.tr.addMark(from, to, markType.create({ href })));
           }
           return true;
         },
@@ -65,9 +75,19 @@ export const Link = Extension.create({
         (state, dispatch) => {
           const markType = this.schema.marks["link"];
           if (!markType) return false;
+          // Runtime narrowing on the unknown args — Commands<R> declares
+          // the signature as `unknown` so the manager doesn't need each
+          // command's parameter shape, but we still want to bail on
+          // misuse rather than coerce silently with `as`.
+          if (typeof from !== "number" || typeof to !== "number") return false;
+          // Validate the inbound href before storing it. Returns false on
+          // reject so callers (toolbar, AI accept, collab apply) can detect
+          // the rejection rather than silently storing nothing.
+          const safe = safeUrl(href);
+          if (safe === null) return false;
           if (dispatch) {
-            const tr = state.tr.removeMark(from as number, to as number, markType);
-            tr.addMark(from as number, to as number, markType.create({ href }));
+            const tr = state.tr.removeMark(from, to, markType);
+            tr.addMark(from, to, markType.create({ href: safe }));
             dispatch(tr);
           }
           return true;

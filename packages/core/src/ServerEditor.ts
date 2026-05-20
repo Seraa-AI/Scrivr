@@ -9,6 +9,7 @@ import {
   type EditorTheme,
   type ResolvedTheme,
 } from "./model/theme";
+import { sanitizeDocUrls } from "./model/sanitizeDocUrls";
 
 export interface ServerEditorOptions {
   /**
@@ -120,7 +121,12 @@ export class ServerEditor extends BaseEditor {
    * loading a fresh document. Call `subscribe` callbacks manually if needed.
    */
   setContent(json: Record<string, unknown>): void {
-    const doc = this.manager.schema.nodeFromJSON(json);
+    // URL allow-list sweep — separate ingestion path from the constructor,
+    // same threat. See model/sanitizeDocUrls.ts.
+    const doc = sanitizeDocUrls(
+      this.manager.schema.nodeFromJSON(json),
+      this.manager.schema,
+    );
     this.editorState = EditorState.create({
       schema: this.manager.schema,
       plugins: this.manager.buildPlugins(),

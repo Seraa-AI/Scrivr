@@ -9,6 +9,7 @@ import type { IBaseEditor } from "./extensions/types";
 import type { ExportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
+import { sanitizeDocUrls } from "./model/sanitizeDocUrls";
 
 export interface BaseEditorOptions {
   /**
@@ -93,7 +94,7 @@ export class BaseEditor implements IBaseEditor {
   constructor({ extensions = [StarterKit], content }: BaseEditorOptions = {}) {
     this.manager = new ExtensionManager(extensions);
 
-    const initialDoc =
+    const rawInitialDoc =
       typeof content === "string"
         ? parseMarkdownToDoc(
             this.manager.schema,
@@ -103,6 +104,14 @@ export class BaseEditor implements IBaseEditor {
         : content != null
           ? this.manager.schema.nodeFromJSON(content)
           : this.manager.buildInitialDoc();
+
+    // URL allow-list sweep on any constructed doc — covers JSON load,
+    // markdown parse, and extension-supplied initial docs in one place.
+    // The parseDOM gate covers HTML paste; this covers everything
+    // structured. See model/sanitizeDocUrls.ts for the full reasoning.
+    const initialDoc = rawInitialDoc
+      ? sanitizeDocUrls(rawInitialDoc, this.manager.schema)
+      : rawInitialDoc;
 
     this.editorState = EditorState.create({
       schema: this.manager.schema,
