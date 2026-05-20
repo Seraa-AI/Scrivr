@@ -1,40 +1,26 @@
 import { Extension } from "../Extension";
 
 /**
- * Document — contributes the top-level `doc` and `hardBreak` nodes.
+ * Document — root-of-doc extension. Today its only contribution is the
+ * baseline `text` markdown serializer rule (every doc has text nodes;
+ * `prosemirror-markdown` needs an explicit serializer for them).
  *
- * Every editor needs this. StarterKit includes it automatically.
- * `doc` and `text` are always added by ExtensionManager as a baseline,
- * but hardBreak must be registered explicitly.
+ * The `doc` and `text` node specs are seeded by `ExtensionManager` as a
+ * baseline so an editor with no extensions still parses. `hardBreak`
+ * lives in its own `HardBreak` extension as of the extraction PR.
+ *
+ * Kept as a separate extension (rather than folded into the baseline)
+ * so apps that want a custom doc shape can disable it via
+ * `StarterKit.configure({ document: false })` and supply their own.
  */
 export const Document = Extension.create({
   name: "document",
-
-  addNodes() {
-    return {
-      hardBreak: {
-        group: "inline",
-        inline: true,
-        selectable: false,
-        parseDOM: [{ tag: "br" }],
-        toDOM: () => ["br"],
-      },
-    };
-  },
 
   addMarkdownSerializerRules() {
     return {
       nodes: {
         text(state, node) {
           state.text(node.text!);
-        },
-        hardBreak(state, node, parent, index) {
-          for (let i = index + 1; i < parent.childCount; i++) {
-            if (parent.child(i).type !== node.type) {
-              state.write("\\\n");
-              return;
-            }
-          }
         },
       },
     };

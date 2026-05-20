@@ -1,5 +1,6 @@
 import { Extension } from "./Extension";
 import { Document } from "./built-in/Document";
+import { HardBreak } from "./built-in/HardBreak";
 import { Paragraph } from "./built-in/Paragraph";
 import { Heading, type HeadingLevel } from "./built-in/Heading";
 import { Bold } from "./built-in/Bold";
@@ -39,6 +40,13 @@ interface StarterKitOptions {
   pagination?: false | Partial<PageConfig>;
   /** Pass false to exclude this extension entirely */
   document?: false;
+  /**
+   * The `hardBreak` inline node (Shift-Enter line breaks inside a block).
+   * Pass `false` to drop the node entirely, or `{ shortcut: false }` to
+   * keep the node + insertHardBreak command but remove the Shift-Enter
+   * binding (useful when a different extension wants to own that key).
+   */
+  hardBreak?: false | { shortcut?: boolean };
   paragraph?: false;
   heading?: false | { levels?: HeadingLevel[] };
   bold?: false | { shortcut?: boolean };
@@ -105,6 +113,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
 
     if (opts.document !== false) {
       Object.assign(nodes, Document.resolve().nodes);
+    }
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      Object.assign(nodes, ext.resolve().nodes);
     }
     if (opts.paragraph !== false) {
       Object.assign(nodes, Paragraph.resolve().nodes);
@@ -205,6 +217,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     // BaseEditing is always included — Backspace + Delete are not optional
     Object.assign(km, BaseEditing.resolve(this.schema).keymap);
 
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      Object.assign(km, ext.resolve(this.schema).keymap);
+    }
     if (opts.paragraph !== false) {
       Object.assign(km, Paragraph.resolve(this.schema).keymap);
     }
@@ -273,6 +289,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     const cmds: Record<string, (...args: unknown[]) => Command> = {};
     const opts = this.options;
 
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      Object.assign(cmds, ext.resolve(this.schema).commands);
+    }
     if (opts.bold !== false) {
       const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
       Object.assign(cmds, ext.resolve(this.schema).commands);
@@ -560,6 +580,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
   addMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec> {
     const tokens: Record<string, MarkdownParserTokenSpec> = {};
     const opts = this.options;
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      Object.assign(tokens, ext.resolve().markdownParserTokens);
+    }
     if (opts.paragraph !== false) Object.assign(tokens, Paragraph.resolve().markdownParserTokens);
     if (opts.heading !== false) {
       const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
@@ -606,6 +630,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     };
 
     if (opts.document !== false) merge(Document.resolve().markdownSerializerRules);
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      merge(ext.resolve().markdownSerializerRules);
+    }
     if (opts.paragraph !== false) merge(Paragraph.resolve().markdownSerializerRules);
     if (opts.heading !== false) {
       const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
