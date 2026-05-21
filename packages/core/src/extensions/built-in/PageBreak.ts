@@ -1,6 +1,10 @@
 import { Extension } from "../Extension";
 import type { Command } from "prosemirror-state";
-import { xml, type DocxNodeHandler } from "../../exports/docx";
+import {
+  xml,
+  type DocxNodeHandler,
+  type DocxBlockTransform,
+} from "../../exports/docx";
 
 function insertPageBreak(): Command {
   return (state, dispatch) => {
@@ -52,6 +56,14 @@ export const PageBreak = Extension.create({
         xml("w:r", undefined, [xml("w:br", { "w:type": "page" })]),
       ]);
     return { docx: { nodes: { pageBreak: handler } } };
+  },
+
+  addImports() {
+    const importer: DocxBlockTransform = (_block, _content, ctx) => {
+      const t = ctx.schema.nodes["pageBreak"];
+      return t ? t.create() : null;
+    };
+    return { docx: { blocks: { pageBreak: importer } } };
   },
 
   addToolbarItems() {

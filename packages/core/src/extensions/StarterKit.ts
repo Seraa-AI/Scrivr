@@ -39,11 +39,17 @@ import type { PageConfig } from "../layout/PageLayout";
 // ── Export contribution aggregation (used by addExports below) ──────────────
 
 interface MinimalContribBundle {
+  // Export side — DocxHandlers / PdfHandlers
   nodes?: Record<string, unknown>;
   marks?: Record<string, unknown>;
   onBeforeExport?: (ctx: unknown) => void | Promise<void>;
   onBuildTreeComplete?: (ctx: unknown) => void | Promise<void>;
   onFinalize?: (ctx: unknown) => unknown;
+  // Import side — DocxImports
+  blocks?: Record<string, unknown>;
+  paragraphStyles?: Record<string, unknown>;
+  onBeforeImport?: (ctx: unknown) => void | Promise<void>;
+  onImportComplete?: (doc: unknown, ctx: unknown) => unknown;
 }
 
 function isMinimalContribBundle(v: unknown): v is MinimalContribBundle {
@@ -65,6 +71,7 @@ function mergeContribBundles(
   incoming: MinimalContribBundle,
 ): MinimalContribBundle {
   const out: MinimalContribBundle = { ...existing };
+  // Export lanes
   if (incoming.nodes) out.nodes = { ...out.nodes, ...incoming.nodes };
   if (incoming.marks) out.marks = { ...out.marks, ...incoming.marks };
   if (incoming.onBeforeExport) {
@@ -80,6 +87,23 @@ function mergeContribBundles(
   // Last-writer-wins for onFinalize — overriding the whole packager is
   // unusual; silent composition would mask the override.
   if (incoming.onFinalize) out.onFinalize = incoming.onFinalize;
+  // Import lanes
+  if (incoming.blocks) out.blocks = { ...out.blocks, ...incoming.blocks };
+  if (incoming.paragraphStyles) {
+    out.paragraphStyles = { ...out.paragraphStyles, ...incoming.paragraphStyles };
+  }
+  if (incoming.onBeforeImport) {
+    out.onBeforeImport = out.onBeforeImport
+      ? chainHooks(out.onBeforeImport, incoming.onBeforeImport)
+      : incoming.onBeforeImport;
+  }
+  if (incoming.onImportComplete) {
+    const prev = out.onImportComplete;
+    const next = incoming.onImportComplete;
+    out.onImportComplete = prev
+      ? async (doc, ctx) => next(await prev(doc, ctx), ctx)
+      : next;
+  }
   return out;
 }
 

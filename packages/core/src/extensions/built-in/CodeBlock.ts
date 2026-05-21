@@ -6,7 +6,11 @@ import type { Command } from "prosemirror-state";
 import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
 import type { CharacterMap } from "../../layout/CharacterMap";
 import type { LayoutBlock } from "../../layout/BlockLayout";
-import { xml, type DocxNodeHandler } from "../../exports/docx";
+import {
+  xml,
+  type DocxNodeHandler,
+  type DocxParagraphStyleTransform,
+} from "../../exports/docx";
 
 // ── Theme tokens — overridable via CodeBlock.configure({ theme: {...} }) ─────
 
@@ -174,6 +178,29 @@ export const CodeBlock = Extension.create<CodeBlockOptions>({
       ]);
     };
     return { docx: { nodes: { codeBlock: handler } } };
+  },
+
+  addImports() {
+    // Exporter writes the "Code Block" paragraph style (sanitized to
+    // "CodeBlock"). Import flips that back: paragraph with that pStyle →
+    // codeBlock node. CodeBlock's schema is content="text*" with marks="",
+    // so we flatten any marked text children to a single text run and
+    // turn hard breaks into literal newlines.
+    const importer: DocxParagraphStyleTransform = (_block, content, ctx) => {
+      const t = ctx.schema.nodes["codeBlock"];
+      if (!t) return null;
+      const pieces: string[] = [];
+      for (const child of content) {
+        if (child.isText) {
+          pieces.push(child.text ?? "");
+        } else if (child.type.name === "hardBreak") {
+          pieces.push("\n");
+        }
+      }
+      const text = pieces.join("");
+      return text.length > 0 ? t.create(null, ctx.schema.text(text)) : t.create();
+    };
+    return { docx: { paragraphStyles: { CodeBlock: importer } } };
   },
 
   addToolbarItems() {

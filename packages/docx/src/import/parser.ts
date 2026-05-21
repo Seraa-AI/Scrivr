@@ -29,6 +29,13 @@ export function parseDocumentBody(documentRoot: OoxmlElement): DocxImportModel {
   for (const child of body.children) {
     if (typeof child === "string") continue;
     if (child.name === "w:p") {
+      // Word's hard page break: `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`.
+      // Detect at the parser layer so the Stage-2 dispatcher gets a real
+      // `pageBreak` block, not a paragraph with a hardBreak inside.
+      if (isPageBreakParagraph(child)) {
+        blocks.push({ type: "pageBreak" });
+        continue;
+      }
       blocks.push(parseParagraph(child));
     } else if (child.name === "w:sectPr") {
       // Section properties — page size, margins, etc. Not modeled yet.
@@ -37,6 +44,36 @@ export function parseDocumentBody(documentRoot: OoxmlElement): DocxImportModel {
     // Tables, sdt, etc. — future commits.
   }
   return { blocks };
+}
+
+/**
+ * True when a `<w:p>` is structurally a Word page break — at least one
+ * `<w:r><w:br w:type="page"/></w:r>`, no other text content.
+ */
+function isPageBreakParagraph(el: OoxmlElement): boolean {
+  let foundPageBreak = false;
+  for (const child of el.children) {
+    if (typeof child === "string") {
+      if (child.trim().length > 0) return false;
+      continue;
+    }
+    if (child.name === "w:pPr") continue;
+    if (child.name !== "w:r") return false;
+    for (const inner of child.children) {
+      if (typeof inner === "string") {
+        if (inner.trim().length > 0) return false;
+        continue;
+      }
+      if (inner.name === "w:rPr") continue;
+      if (inner.name === "w:br" && attr(inner, "w:type") === "page") {
+        foundPageBreak = true;
+        continue;
+      }
+      // Any other content (text, tab, normal break) — not a page break.
+      return false;
+    }
+  }
+  return foundPageBreak;
 }
 
 function parseParagraph(el: OoxmlElement): DocxBlock {

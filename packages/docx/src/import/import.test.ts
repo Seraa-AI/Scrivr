@@ -206,6 +206,56 @@ describe("importDocx — built-in mark round-trips via StarterKit", () => {
   });
 });
 
+describe("importDocx — structural block round-trips", () => {
+  async function roundTrip(content: Array<Record<string, unknown>>): Promise<PmNode> {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content });
+    const bytes = await exportDocxBytes(editor);
+    const importer = new ServerEditor();
+    const { doc } = await importDocx(importer, bytes);
+    return doc;
+  }
+
+  it("headings round-trip with their level", async () => {
+    const doc = await roundTrip([
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Big" }] },
+      { type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: "Smaller" }] },
+      { type: "paragraph", content: [{ type: "text", text: "Body" }] },
+    ]);
+    const types = [doc.child(0), doc.child(1), doc.child(2)].map((c) => ({
+      type: c.type.name,
+      level: c.attrs["level"],
+    }));
+    expect(types[0]?.type).toBe("heading");
+    expect(types[0]?.level).toBe(1);
+    expect(types[1]?.type).toBe("heading");
+    expect(types[1]?.level).toBe(3);
+    expect(types[2]?.type).toBe("paragraph");
+  });
+
+  it("code blocks round-trip as codeBlock nodes with text content", async () => {
+    const doc = await roundTrip([
+      {
+        type: "codeBlock",
+        content: [{ type: "text", text: "const x = 1;\nconst y = 2;" }],
+      },
+    ]);
+    const cb = doc.child(0);
+    expect(cb.type.name).toBe("codeBlock");
+    expect(cb.textContent).toBe("const x = 1;\nconst y = 2;");
+  });
+
+  it("page breaks round-trip", async () => {
+    const doc = await roundTrip([
+      { type: "paragraph", content: [{ type: "text", text: "before" }] },
+      { type: "pageBreak" },
+      { type: "paragraph", content: [{ type: "text", text: "after" }] },
+    ]);
+    const types = [doc.child(0), doc.child(1), doc.child(2)].map((c) => c.type.name);
+    expect(types).toEqual(["paragraph", "pageBreak", "paragraph"]);
+  });
+});
+
 describe("importDocx — extension dispatch", () => {
   it("invokes the editor's getImportContributions for marks", async () => {
     // Round-trip with bold — without a Bold extension's addImports, the
