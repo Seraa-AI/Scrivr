@@ -1,6 +1,10 @@
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect, ToolbarItemSpec } from "../types";
-import { cssColorToDocxHex, type DocxMarkHandler } from "../../exports/docx";
+import {
+  cssColorToDocxHex,
+  type DocxMarkHandler,
+  type DocxMarkTransform,
+} from "../../exports/docx";
 
 interface ColorOptions {
   /** Preset color swatches shown in the toolbar (CSS color strings). */
@@ -96,6 +100,21 @@ export const Color = Extension.create<ColorOptions>({
         markType: "color",
       });
       return props;
+    };
+    return { docx: { marks: { color: handler } } };
+  },
+
+  addImports() {
+    // OOXML `<w:color w:val="FF0000"/>` — uppercase 6-char hex without `#`.
+    // `w:val="auto"` means "default text color" — drop, schema's default wins.
+    const handler: DocxMarkTransform = (mark, ctx) => {
+      const val = mark.attrs?.["val"];
+      if (typeof val !== "string" || val.length === 0 || val === "auto") {
+        return null;
+      }
+      const t = ctx.schema.marks["color"];
+      if (!t) return null;
+      return t.create({ color: `#${val}` });
     };
     return { docx: { marks: { color: handler } } };
   },

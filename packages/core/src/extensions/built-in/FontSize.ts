@@ -1,7 +1,7 @@
 import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
-import type { DocxMarkHandler } from "../../exports/docx";
+import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
 
 interface FontSizeOptions {
   /** Font size presets shown as toolbar buttons (px values). */
@@ -103,6 +103,21 @@ export const FontSize = Extension.create<FontSizeOptions>({
       return typeof v === "number" ? { ...props, fontSize: v } : props;
     };
     return { docx: { marks: { fontSize: handler } } };
+  },
+
+  addImports() {
+    // OOXML `<w:sz w:val="HALFPOINTS"/>`. Inverse of the exporter:
+    // half-points ÷ 1.5 = px (exporter does px × 1.5).
+    const handler: DocxMarkTransform = (mark, ctx) => {
+      const raw = mark.attrs?.["val"];
+      if (typeof raw !== "string" || raw.length === 0) return null;
+      const halfPoints = Number(raw);
+      if (!Number.isFinite(halfPoints) || halfPoints <= 0) return null;
+      const t = ctx.schema.marks["fontSize"];
+      if (!t) return null;
+      return t.create({ size: Math.round(halfPoints / 1.5) });
+    };
+    return { docx: { marks: { sz: handler } } };
   },
 
   addToolbarItems() {

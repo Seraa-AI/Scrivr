@@ -132,6 +132,80 @@ describe("importDocx — MVP (paragraph + text)", () => {
   });
 });
 
+describe("importDocx — built-in mark round-trips via StarterKit", () => {
+  /**
+   * Round-trip a doc with the given marks through exportDocx → importDocx
+   * and return the imported run's mark type names.
+   */
+  async function roundTripMarks(
+    text: string,
+    markSpecs: Array<{ type: string; attrs?: Record<string, unknown> }>,
+  ): Promise<{ types: string[]; attrs: Record<string, Record<string, unknown>> }> {
+    const editor = new ServerEditor();
+    editor.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text, marks: markSpecs }],
+        },
+      ],
+    });
+    const bytes = await exportDocxBytes(editor);
+    const importer = new ServerEditor();
+    const { doc } = await importDocx(importer, bytes);
+    const run = doc.child(0).child(0);
+    const attrs: Record<string, Record<string, unknown>> = {};
+    for (const m of run.marks) attrs[m.type.name] = m.attrs;
+    return { types: run.marks.map((m) => m.type.name), attrs };
+  }
+
+  it("bold round-trips", async () => {
+    const r = await roundTripMarks("x", [{ type: "bold" }]);
+    expect(r.types).toContain("bold");
+  });
+
+  it("italic round-trips", async () => {
+    const r = await roundTripMarks("x", [{ type: "italic" }]);
+    expect(r.types).toContain("italic");
+  });
+
+  it("underline round-trips", async () => {
+    const r = await roundTripMarks("x", [{ type: "underline" }]);
+    expect(r.types).toContain("underline");
+  });
+
+  it("strikethrough round-trips", async () => {
+    const r = await roundTripMarks("x", [{ type: "strikethrough" }]);
+    expect(r.types).toContain("strikethrough");
+  });
+
+  it("color round-trips as #RRGGBB", async () => {
+    const r = await roundTripMarks("x", [
+      { type: "color", attrs: { color: "#ff0000" } },
+    ]);
+    expect(r.types).toContain("color");
+    expect(r.attrs["color"]?.["color"]).toBe("#FF0000");
+  });
+
+  it("fontSize round-trips through half-points conversion", async () => {
+    // 18px → 27 half-points → back to 18px.
+    const r = await roundTripMarks("x", [
+      { type: "fontSize", attrs: { size: 18 } },
+    ]);
+    expect(r.types).toContain("fontSize");
+    expect(r.attrs["fontSize"]?.["size"]).toBe(18);
+  });
+
+  it("fontFamily round-trips", async () => {
+    const r = await roundTripMarks("x", [
+      { type: "fontFamily", attrs: { family: "Georgia" } },
+    ]);
+    expect(r.types).toContain("fontFamily");
+    expect(r.attrs["fontFamily"]?.["family"]).toBe("Georgia");
+  });
+});
+
 describe("importDocx — extension dispatch", () => {
   it("invokes the editor's getImportContributions for marks", async () => {
     // Round-trip with bold — without a Bold extension's addImports, the

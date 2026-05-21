@@ -5,6 +5,7 @@ import {
   cssColorToDocxHex,
   docxHighlightName,
   type DocxMarkHandler,
+  type DocxMarkTransform,
 } from "../../exports/docx";
 
 interface HighlightOptions {
@@ -130,6 +131,34 @@ export const Highlight = Extension.create<HighlightOptions>({
       return { ...props, highlight: "yellow" };
     };
     return { docx: { marks: { highlight: handler } } };
+  },
+
+  addImports() {
+    // OOXML exposes highlights as either `<w:highlight w:val="yellow"/>`
+    // (named — only the 17 spec colors) or `<w:shd w:fill="HEX"/>`
+    // (arbitrary background fill). Claim both kinds so the round-trip is
+    // exact regardless of which form the source used.
+    const multicolor = this.options.multicolor;
+
+    const fromHighlight: DocxMarkTransform = (mark, ctx) => {
+      const t = ctx.schema.marks["highlight"];
+      if (!t) return null;
+      const name = mark.attrs?.["val"];
+      if (typeof name !== "string" || name === "none") return null;
+      if (multicolor) return t.create({ color: name });
+      return t.create();
+    };
+
+    const fromShading: DocxMarkTransform = (mark, ctx) => {
+      const t = ctx.schema.marks["highlight"];
+      if (!t) return null;
+      const fill = mark.attrs?.["fill"];
+      if (typeof fill !== "string" || fill === "auto") return null;
+      if (multicolor) return t.create({ color: `#${fill}` });
+      return t.create();
+    };
+
+    return { docx: { marks: { highlight: fromHighlight, shd: fromShading } } };
   },
 
   addToolbarItems() {

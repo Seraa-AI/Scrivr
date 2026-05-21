@@ -31,7 +31,7 @@ import type { InputRule } from "prosemirror-inputrules";
 import type { Command } from "prosemirror-state";
 import type { NodeSpec, MarkSpec } from "prosemirror-model";
 import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules, IEditor } from "./types";
-import type { ExportContributionMap } from "./export";
+import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { PageConfig } from "../layout/PageLayout";
@@ -696,6 +696,74 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
 
     return result as ExportContributionMap;
+  },
+
+  addImports(): ImportContributionMap {
+    // Mirror of addExports — forward each sub-extension's addImports().
+    // Same loose-typing approach so different format bundles (DocxImports,
+    // future MarkdownImports …) can coexist without StarterKit knowing
+    // about their specific shapes.
+    const result: Record<string, MinimalContribBundle> = {};
+
+    const mergeFrom = (contrib: ImportContributionMap) => {
+      const asRecord = contrib as Record<string, unknown>;
+      for (const key of Object.keys(asRecord)) {
+        const incoming = asRecord[key];
+        if (!isMinimalContribBundle(incoming)) continue;
+        result[key] = mergeContribBundles(result[key], incoming);
+      }
+    };
+
+    const opts = this.options;
+
+    // Nodes
+    if (opts.paragraph !== false) mergeFrom(Paragraph.resolve().imports);
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.heading !== false) {
+      const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.codeBlock !== false) {
+      const ext = typeof opts.codeBlock === "object" ? CodeBlock.configure(opts.codeBlock) : CodeBlock;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.horizontalRule !== false) mergeFrom(HorizontalRule.resolve().imports);
+    if (opts.pageBreak !== false) mergeFrom(PageBreak.resolve().imports);
+    if (opts.list !== false) mergeFrom(List.resolve().imports);
+    if (opts.image !== false) mergeFrom(Image.resolve().imports);
+
+    // Marks
+    if (opts.bold !== false) {
+      const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.italic !== false) {
+      const ext = typeof opts.italic === "object" ? Italic.configure(opts.italic) : Italic;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.underline !== false) mergeFrom(Underline.resolve().imports);
+    if (opts.strikethrough !== false) mergeFrom(Strikethrough.resolve().imports);
+    if (opts.highlight !== false) {
+      const ext = typeof opts.highlight === "object" ? Highlight.configure(opts.highlight) : Highlight;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.color !== false) {
+      const ext = typeof opts.color === "object" ? Color.configure(opts.color) : Color;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.fontSize !== false) {
+      const ext = typeof opts.fontSize === "object" ? FontSize.configure(opts.fontSize) : FontSize;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.fontFamily !== false) {
+      const ext = typeof opts.fontFamily === "object" ? FontFamily.configure(opts.fontFamily) : FontFamily;
+      mergeFrom(ext.resolve().imports);
+    }
+
+    return result as ImportContributionMap;
   },
 
   addMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec> {

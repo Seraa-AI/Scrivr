@@ -1,7 +1,7 @@
 import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
-import type { DocxMarkHandler } from "../../exports/docx";
+import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
 
 export const Underline = Extension.create({
   name: "underline",
@@ -65,6 +65,18 @@ export const Underline = Extension.create({
   addExports() {
     const handler: DocxMarkHandler = (props) => ({ ...props, underline: true });
     return { docx: { marks: { underline: handler } } };
+  },
+
+  addImports() {
+    // `<w:u w:val="none"/>` explicitly turns underline off. Anything else
+    // (single / double / dotted / wavyDouble / …) collapses to the single
+    // Scrivr `underline` mark — style variants aren't modeled.
+    const handler: DocxMarkTransform = (mark, ctx) => {
+      if (mark.attrs?.["val"] === "none") return null;
+      const t = ctx.schema.marks["underline"];
+      return t ? t.create() : null;
+    };
+    return { docx: { marks: { u: handler } } };
   },
 
   // No standard markdown syntax for underline — serialize as HTML <u> tag
