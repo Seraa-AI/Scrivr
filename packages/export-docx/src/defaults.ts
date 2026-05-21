@@ -245,13 +245,30 @@ function buildNumberingRoot(entries: NumberingEntry[]): XmlNode {
 }
 
 function buildAbstractNum(abstractId: number, entry: NumberingEntry): XmlNode {
-  const levels = entry.config.levels.map((lvl) =>
-    xml("w:lvl", { "w:ilvl": String(lvl.level) }, [
+  // Word's stock list-numbering defaults: each level gets `w:start="1"`
+  // (otherwise ordered lists begin at 0), and `w:pPr/w:ind` so the paragraph
+  // is actually indented — without it the bullet/number sits flush at the
+  // page margin. Spacing follows Word's own preset: 720 twips per nesting
+  // level (1/2 inch) with a 360-twip hanging indent so wrapped text aligns
+  // under the first content character, not under the bullet.
+  const HANGING_TWIPS = 360;
+  const LEVEL_INDENT_TWIPS = 720;
+
+  const levels = entry.config.levels.map((lvl) => {
+    const left = (lvl.level + 1) * LEVEL_INDENT_TWIPS;
+    return xml("w:lvl", { "w:ilvl": String(lvl.level) }, [
+      xml("w:start", { "w:val": "1" }),
       xml("w:numFmt", { "w:val": lvl.format }),
       xml("w:lvlText", { "w:val": lvl.text }),
       xml("w:lvlJc", { "w:val": "left" }),
-    ]),
-  );
+      xml("w:pPr", undefined, [
+        xml("w:ind", {
+          "w:left": String(left),
+          "w:hanging": String(HANGING_TWIPS),
+        }),
+      ]),
+    ]);
+  });
   return xml("w:abstractNum", { "w:abstractNumId": String(abstractId) }, levels);
 }
 

@@ -94,6 +94,24 @@ describe("buildDocxPackage", () => {
     expect(styles).toContain('w:styleId="AB2"');
   });
 
+  it("each numbering level emits w:start=1 + w:ind so Word indents lists and starts ordered at 1", () => {
+    const { ctx, state } = createDocxContext({ editor: new ServerEditor() });
+    ctx.numbering.getOrCreate({
+      type: "ordered",
+      levels: [
+        { level: 0, format: "decimal", text: "%1." },
+        { level: 1, format: "decimal", text: "%2." },
+      ],
+    });
+    const files = readZip(zipDocxPackage(buildDocxPackage(buildDocumentRoot([]), state)));
+    const numbering = files["word/numbering.xml"]!;
+    // Two levels each carry their own w:start=1 — ordered lists begin at 1, not 0.
+    expect(numbering.match(/<w:start w:val="1"\/>/g)?.length).toBe(2);
+    // Level 0: 720 twips left, level 1: 1440 twips left, both with 360 hanging.
+    expect(numbering).toContain('<w:ind w:hanging="360" w:left="720"/>');
+    expect(numbering).toContain('<w:ind w:hanging="360" w:left="1440"/>');
+  });
+
   it("emits abstractNum + num pairs for registered numbering defs", () => {
     const { ctx, state } = createDocxContext({ editor: new ServerEditor() });
     ctx.numbering.getOrCreate({
