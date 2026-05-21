@@ -74,9 +74,47 @@ function transformBlock(
     return fallbackParagraph(block, content, ctx);
   }
 
+  // List construction is structural — package-handled, not extension-
+  // dispatched. The List extension owns the export side (numPr precompute
+  // + numbering def registration) but on import the work is just
+  // bulletList/orderedList/listItem schema construction, which doesn't
+  // benefit from per-extension customization.
+  if (block.type === "list") {
+    return buildListNode(block, ctx, handlers);
+  }
+
   const blockHandler = handlers.blocks[block.type];
   if (blockHandler) return blockHandler(block, [], ctx);
   return fallbackBlock(block, ctx);
+}
+
+function buildListNode(
+  block: DocxBlock & { type: "list" },
+  ctx: DocxImportContext,
+  handlers: ResolvedImportHandlers,
+): PmNode | null {
+  const listTypeName = block.listType === "bullet" ? "bulletList" : "orderedList";
+  const listType = ctx.schema.nodes[listTypeName];
+  const listItemType = ctx.schema.nodes["listItem"];
+  if (!listType || !listItemType) {
+    ctx.diagnostics.warn({
+      code: "schema-missing-list",
+      message: `Schema has no \`${listTypeName}\` / \`listItem\` — list dropped`,
+    });
+    return null;
+  }
+  const itemNodes: PmNode[] = [];
+  for (const item of block.items) {
+    const itemChildren: PmNode[] = [];
+    for (const child of item.content) {
+      const node = transformBlock(child, ctx, handlers);
+      if (node) itemChildren.push(node);
+    }
+    if (itemChildren.length === 0) continue;
+    itemNodes.push(listItemType.create(null, itemChildren));
+  }
+  if (itemNodes.length === 0) return null;
+  return listType.create(null, itemNodes);
 }
 
 function transformInlines(

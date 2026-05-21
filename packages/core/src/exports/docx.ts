@@ -356,10 +356,22 @@ export interface DocxParagraphAttrs {
   pageBreakBefore?: boolean;
 }
 
+/**
+ * A reconstructed list item. Produced by the importer's list reconstruction
+ * pass — DOCX lists are flat paragraphs with `numPr` metadata; the
+ * reconstruction groups them by `numId` and nests by `ilvl`. Each item's
+ * content is a `DocxBlock[]` because list items can contain a paragraph
+ * plus nested lists.
+ */
+export interface DocxListItem {
+  content: DocxBlock[];
+}
+
 export type DocxBlock =
   | { type: "paragraph"; attrs: DocxParagraphAttrs; content: DocxInline[] }
   | { type: "horizontalRule" }
-  | { type: "pageBreak" };
+  | { type: "pageBreak" }
+  | { type: "list"; listType: "bullet" | "ordered"; items: DocxListItem[] };
 
 export interface DocxImportModel {
   blocks: DocxBlock[];

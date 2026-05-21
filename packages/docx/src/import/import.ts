@@ -28,6 +28,8 @@ import type {
 import { readDocxPackage } from "./opc";
 import { parseOoxml } from "./xml";
 import { parseDocumentBody } from "./parser";
+import { readNumberingMap } from "./numbering";
+import { reconstructLists } from "./lists";
 import {
   transformToProseMirror,
   type ResolvedImportHandlers,
@@ -89,7 +91,9 @@ export async function importDocx(
       await hook(ctx);
     }
 
-    const model = parseDocumentBody(root);
+    const numbering = readNumberingMap(pkg.readText("word/numbering.xml"));
+    const rawModel = parseDocumentBody(root);
+    const model = reconstructLists(rawModel, numbering);
     let doc = transformToProseMirror(model, ctx, handlers);
 
     for (const hook of lifecycleHooks.onImportComplete) {

@@ -256,6 +256,104 @@ describe("importDocx — structural block round-trips", () => {
   });
 });
 
+describe("importDocx — lists", () => {
+  async function roundTripDoc(content: Array<Record<string, unknown>>): Promise<PmNode> {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content });
+    const bytes = await exportDocxBytes(editor);
+    const importer = new ServerEditor();
+    const { doc } = await importDocx(importer, bytes);
+    return doc;
+  }
+
+  it("bullet lists reconstruct into bulletList > listItem > paragraph", async () => {
+    const doc = await roundTripDoc([
+      {
+        type: "bulletList",
+        content: [
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "alpha" }] }] },
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "beta" }] }] },
+        ],
+      },
+    ]);
+    expect(doc.childCount).toBe(1);
+    const list = doc.child(0);
+    expect(list.type.name).toBe("bulletList");
+    expect(list.childCount).toBe(2);
+    expect(list.child(0).type.name).toBe("listItem");
+    expect(list.child(0).child(0).type.name).toBe("paragraph");
+    expect(list.child(0).textContent).toBe("alpha");
+    expect(list.child(1).textContent).toBe("beta");
+  });
+
+  it("ordered lists reconstruct into orderedList", async () => {
+    const doc = await roundTripDoc([
+      {
+        type: "orderedList",
+        content: [
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "one" }] }] },
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "two" }] }] },
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "three" }] }] },
+        ],
+      },
+    ]);
+    const list = doc.child(0);
+    expect(list.type.name).toBe("orderedList");
+    expect(list.childCount).toBe(3);
+    const texts: string[] = [];
+    list.forEach((item) => texts.push(item.textContent));
+    expect(texts).toEqual(["one", "two", "three"]);
+  });
+
+  it("nested lists reconstruct under their parent item", async () => {
+    const doc = await roundTripDoc([
+      {
+        type: "bulletList",
+        content: [
+          {
+            type: "listItem",
+            content: [
+              { type: "paragraph", content: [{ type: "text", text: "outer" }] },
+              {
+                type: "bulletList",
+                content: [
+                  { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "inner" }] }] },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    const list = doc.child(0);
+    expect(list.type.name).toBe("bulletList");
+    const firstItem = list.child(0);
+    expect(firstItem.type.name).toBe("listItem");
+    // listItem should now contain a paragraph + a nested bulletList
+    expect(firstItem.childCount).toBe(2);
+    expect(firstItem.child(0).type.name).toBe("paragraph");
+    expect(firstItem.child(0).textContent).toBe("outer");
+    expect(firstItem.child(1).type.name).toBe("bulletList");
+    expect(firstItem.child(1).child(0).textContent).toBe("inner");
+  });
+
+  it("list ends cleanly when followed by non-list paragraphs", async () => {
+    const doc = await roundTripDoc([
+      {
+        type: "bulletList",
+        content: [
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "x" }] }] },
+        ],
+      },
+      { type: "paragraph", content: [{ type: "text", text: "after" }] },
+    ]);
+    expect(doc.childCount).toBe(2);
+    expect(doc.child(0).type.name).toBe("bulletList");
+    expect(doc.child(1).type.name).toBe("paragraph");
+    expect(doc.child(1).textContent).toBe("after");
+  });
+});
+
 describe("importDocx — extension dispatch", () => {
   it("invokes the editor's getImportContributions for marks", async () => {
     // Round-trip with bold — without a Bold extension's addImports, the
