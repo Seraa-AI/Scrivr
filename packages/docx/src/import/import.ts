@@ -86,6 +86,10 @@ export async function importDocx(
       options.media ?? "data-url",
       ctx.diagnostics,
     );
+    ctx.rels.resolveHyperlink = (relId: string) => {
+      const entry = rels.get(relId);
+      return entry?.type === "hyperlink" ? entry.target : undefined;
+    };
     const documentXml = pkg.readText("word/document.xml");
     if (documentXml === undefined) {
       throw new DocxImportError(
@@ -106,7 +110,7 @@ export async function importDocx(
     }
 
     const numbering = readNumberingMap(pkg.readText("word/numbering.xml"));
-    const rawModel = parseDocumentBody(root);
+    const rawModel = parseDocumentBody(root, ctx.diagnostics);
     const model = reconstructLists(rawModel, numbering);
     let doc = transformToProseMirror(model, ctx, handlers);
 

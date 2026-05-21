@@ -364,6 +364,16 @@ export interface DocxImageInline {
   x?: number;
   /** Vertical offset from anchor (px). */
   yOffset?: number;
+  /**
+   * OOXML `relativeFrom` on `wp:positionH` — `"margin" | "page" | "column"
+   * | "character" | "leftMargin" | …`. Preserved verbatim so Stage 2
+   * handlers (or future fidelity work) can choose how to map; current
+   * Image extension treats anything non-column as a soft hint and falls
+   * back to the column-relative offset.
+   */
+  xRelativeFrom?: string;
+  /** OOXML `relativeFrom` on `wp:positionV` — `"paragraph"` is typical. */
+  yRelativeFrom?: string;
   /** Marks applied to the run wrapping this drawing (rare). */
   marks: DocxMark[];
 }
@@ -430,13 +440,22 @@ export interface DocxImportContext {
     list(): DocxDiagnostic[];
   };
   /**
-   * Resolve OPC relationships and materialize binary parts. The factory
-   * builds the map from `word/_rels/document.xml.rels` + `word/media/`
-   * before Stage 2 runs.
+   * Materialize binary parts (images) per `options.media`. Split from
+   * `rels` because images run through MIME-sniff + base64 / object-URL
+   * conversion, whereas non-binary rels are just lookups.
    */
   media: {
     /** Return the materialized `src` for an image relId, or `undefined`. */
     resolveImage(relId: string): string | undefined;
+  };
+  /**
+   * Non-binary OPC relationship lookups (hyperlinks, future external
+   * refs). Mirrors the export-side `ctx.rels` shape with `resolve*` in
+   * place of `add*`.
+   */
+  rels: {
+    /** Hyperlink target URL (or in-document anchor name). */
+    resolveHyperlink(relId: string): string | undefined;
   };
   shared: {
     getOrInit<T>(key: string, init: () => T): T;

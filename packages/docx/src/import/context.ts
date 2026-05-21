@@ -32,6 +32,8 @@ export interface CreateDocxImportContextInput extends DocxImportOptions {
   schema: Schema;
   /** Materialized-src lookup for image rels. Built by `buildImageResolver`. */
   resolveImage?: (relId: string) => string | undefined;
+  /** Hyperlink target lookup. */
+  resolveHyperlink?: (relId: string) => string | undefined;
 }
 
 export function createDocxImportContext(
@@ -45,6 +47,7 @@ export function createDocxImportContext(
   const diagnostics: DocxDiagnostic[] = [];
   const sharedStore = new Map<string, unknown>();
   const resolveImage = input.resolveImage ?? (() => undefined);
+  const resolveHyperlink = input.resolveHyperlink ?? (() => undefined);
   return {
     options,
     schema: input.schema,
@@ -55,6 +58,9 @@ export function createDocxImportContext(
     },
     media: {
       resolveImage,
+    },
+    rels: {
+      resolveHyperlink,
     },
     shared: {
       // Contained generic cast — Map stores unknown, caller owns the type.
