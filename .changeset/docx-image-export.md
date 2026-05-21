@@ -4,7 +4,7 @@
 "@scrivr/plugins": patch
 "@scrivr/export": patch
 "@scrivr/export-pdf": patch
-"@scrivr/export-docx": patch
+"@scrivr/docx": patch
 "@scrivr/export-markdown": patch
 ---
 
@@ -15,8 +15,8 @@ as binary parts under `word/media/`, referenced by document-level rels.
 **Where it lives**
 - `packages/core/src/extensions/built-in/Image.docx.ts` — the extension owns
   its DOCX export shape. Uses LOCAL structural type stand-ins (no runtime
-  imports of `@scrivr/export-docx`) so the dependency direction stays
-  one-way (export-docx → core). The integration test in `@scrivr/export-docx`
+  imports of `@scrivr/docx`) so the dependency direction stays
+  one-way (docx → core). The integration test in `@scrivr/docx`
   asserts the local types stay structurally compatible with `DocxContext`.
 - Image extension's `addExports()` returns `{ docx: imageDocxContribution }`.
   StarterKit got a new `addExports()` that aggregates sub-extension

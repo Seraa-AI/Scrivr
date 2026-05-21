@@ -4,11 +4,11 @@
 "@scrivr/plugins": patch
 "@scrivr/export": patch
 "@scrivr/export-pdf": patch
-"@scrivr/export-docx": patch
+"@scrivr/docx": patch
 "@scrivr/export-markdown": patch
 ---
 
-`@scrivr/export-docx` — lock the DOCX export base contract AND ship the
+`@scrivr/docx` — lock the DOCX export base contract AND ship the
 semantic-core default handlers. Replaces the type-only skeleton with a
 real, deterministic pipeline that produces a Word-openable `.docx` out of
 the box. Built so feature PRs (lists, tables, images, hyperlinks,
