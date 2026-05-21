@@ -2,7 +2,7 @@
   "name": "@scrivr/export-docx",
   "private": true,
   "version": "0.0.6",
-  "description": "DOCX export for Scrivr documents — type-only skeleton, no implementation yet",
+  "description": "DOCX export for Scrivr documents — semantic export to WordprocessingML",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -26,8 +26,13 @@
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2"
   },
   "peerDependencies": {
     "@scrivr/core": "workspace:*"
@@ -36,6 +41,7 @@
     "@scrivr/core": "workspace:*",
     "prosemirror-model": "^1.25.4",
     "tsup": "^8.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
   }
 }

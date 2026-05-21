@@ -1,5 +1,6 @@
 import { Extension } from "../Extension";
 import type { Command } from "prosemirror-state";
+import { xml, type DocxNodeHandler } from "../../exports/docx";
 
 function insertPageBreak(): Command {
   return (state, dispatch) => {
@@ -43,6 +44,14 @@ export const PageBreak = Extension.create({
     return {
       "Mod-Enter": insertPageBreak(),
     };
+  },
+
+  addExports() {
+    const handler: DocxNodeHandler = () =>
+      xml("w:p", undefined, [
+        xml("w:r", undefined, [xml("w:br", { "w:type": "page" })]),
+      ]);
+    return { docx: { nodes: { pageBreak: handler } } };
   },
 
   addToolbarItems() {

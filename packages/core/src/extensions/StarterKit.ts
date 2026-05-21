@@ -31,9 +31,57 @@ import type { InputRule } from "prosemirror-inputrules";
 import type { Command } from "prosemirror-state";
 import type { NodeSpec, MarkSpec } from "prosemirror-model";
 import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules, IEditor } from "./types";
+import type { ExportContributionMap } from "./export";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { PageConfig } from "../layout/PageLayout";
+
+// ── Export contribution aggregation (used by addExports below) ──────────────
+
+interface MinimalContribBundle {
+  nodes?: Record<string, unknown>;
+  marks?: Record<string, unknown>;
+  onBeforeExport?: (ctx: unknown) => void | Promise<void>;
+  onBuildTreeComplete?: (ctx: unknown) => void | Promise<void>;
+  onFinalize?: (ctx: unknown) => unknown;
+}
+
+function isMinimalContribBundle(v: unknown): v is MinimalContribBundle {
+  return typeof v === "object" && v !== null;
+}
+
+function chainHooks(
+  a: (ctx: unknown) => void | Promise<void>,
+  b: (ctx: unknown) => void | Promise<void>,
+): (ctx: unknown) => Promise<void> {
+  return async (ctx) => {
+    await a(ctx);
+    await b(ctx);
+  };
+}
+
+function mergeContribBundles(
+  existing: MinimalContribBundle | undefined,
+  incoming: MinimalContribBundle,
+): MinimalContribBundle {
+  const out: MinimalContribBundle = { ...existing };
+  if (incoming.nodes) out.nodes = { ...out.nodes, ...incoming.nodes };
+  if (incoming.marks) out.marks = { ...out.marks, ...incoming.marks };
+  if (incoming.onBeforeExport) {
+    out.onBeforeExport = out.onBeforeExport
+      ? chainHooks(out.onBeforeExport, incoming.onBeforeExport)
+      : incoming.onBeforeExport;
+  }
+  if (incoming.onBuildTreeComplete) {
+    out.onBuildTreeComplete = out.onBuildTreeComplete
+      ? chainHooks(out.onBuildTreeComplete, incoming.onBuildTreeComplete)
+      : incoming.onBuildTreeComplete;
+  }
+  // Last-writer-wins for onFinalize — overriding the whole packager is
+  // unusual; silent composition would mask the override.
+  if (incoming.onFinalize) out.onFinalize = incoming.onFinalize;
+  return out;
+}
 
 interface StarterKitOptions {
   /** Page dimensions and margins. Pass false to exclude the Pagination extension entirely. Defaults to A4 with 1-inch margins. */
@@ -575,6 +623,79 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       rules.push(...Typography.resolve(this.schema).inputRules);
     }
     return rules;
+  },
+
+  addExports(): ExportContributionMap {
+    // Forward sub-extensions' addExports() contributions. Format-aware merge:
+    // `nodes` and `marks` Object.assign together; lifecycle hooks chain
+    // (a then b). `onFinalize` is last-writer-wins — overriding the whole
+    // packager is rare and shouldn't silently compose.
+    //
+    // Loose typing because each format's bundle shape lives in its own
+    // package (DocxHandlers in @scrivr/export-docx, PdfHandlers in
+    // @scrivr/export-pdf). The runtime-checked `MinimalContribBundle` is
+    // a structural subset that covers all known format shapes today.
+    const result: Record<string, MinimalContribBundle> = {};
+
+    const mergeFrom = (contrib: ExportContributionMap) => {
+      const asRecord = contrib as Record<string, unknown>;
+      for (const key of Object.keys(asRecord)) {
+        const incoming = asRecord[key];
+        if (!isMinimalContribBundle(incoming)) continue;
+        result[key] = mergeContribBundles(result[key], incoming);
+      }
+    };
+
+    const opts = this.options;
+
+    // Nodes
+    if (opts.paragraph !== false) mergeFrom(Paragraph.resolve().exports);
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.heading !== false) {
+      const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.codeBlock !== false) {
+      const ext = typeof opts.codeBlock === "object" ? CodeBlock.configure(opts.codeBlock) : CodeBlock;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.horizontalRule !== false) mergeFrom(HorizontalRule.resolve().exports);
+    if (opts.pageBreak !== false) mergeFrom(PageBreak.resolve().exports);
+    if (opts.list !== false) mergeFrom(List.resolve().exports);
+    if (opts.image !== false) mergeFrom(Image.resolve().exports);
+
+    // Marks
+    if (opts.bold !== false) {
+      const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.italic !== false) {
+      const ext = typeof opts.italic === "object" ? Italic.configure(opts.italic) : Italic;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.underline !== false) mergeFrom(Underline.resolve().exports);
+    if (opts.strikethrough !== false) mergeFrom(Strikethrough.resolve().exports);
+    if (opts.highlight !== false) {
+      const ext = typeof opts.highlight === "object" ? Highlight.configure(opts.highlight) : Highlight;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.color !== false) {
+      const ext = typeof opts.color === "object" ? Color.configure(opts.color) : Color;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.fontSize !== false) {
+      const ext = typeof opts.fontSize === "object" ? FontSize.configure(opts.fontSize) : FontSize;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.fontFamily !== false) {
+      const ext = typeof opts.fontFamily === "object" ? FontFamily.configure(opts.fontFamily) : FontFamily;
+      mergeFrom(ext.resolve().exports);
+    }
+
+    return result as ExportContributionMap;
   },
 
   addMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec> {

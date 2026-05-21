@@ -4,6 +4,7 @@ import { InputRule } from "prosemirror-inputrules";
 import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
 import type { CharacterMap } from "../../layout/CharacterMap";
 import type { LayoutBlock } from "../../layout/BlockLayout";
+import { xml, type DocxNodeHandler } from "../../exports/docx";
 
 // ── HorizontalRule rendering strategy ────────────────────────────────────────
 
@@ -80,6 +81,24 @@ export const HorizontalRule = Extension.create({
 
   addLayoutHandlers() {
     return { horizontalRule: HorizontalRuleStrategy };
+  },
+
+  addExports() {
+    // Word convention: empty paragraph with a single bottom border.
+    const handler: DocxNodeHandler = () =>
+      xml("w:p", undefined, [
+        xml("w:pPr", undefined, [
+          xml("w:pBdr", undefined, [
+            xml("w:bottom", {
+              "w:val": "single",
+              "w:sz": "6",
+              "w:space": "1",
+              "w:color": "auto",
+            }),
+          ]),
+        ]),
+      ]);
+    return { docx: { nodes: { horizontalRule: handler } } };
   },
 
   addToolbarItems() {

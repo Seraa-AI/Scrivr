@@ -1,6 +1,11 @@
 import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
+import {
+  cssColorToDocxHex,
+  docxHighlightName,
+  type DocxMarkHandler,
+} from "../../exports/docx";
 
 interface HighlightOptions {
   /** Default highlight color. Default: "rgba(255, 220, 0, 0.4)" */
@@ -104,6 +109,27 @@ export const Highlight = Extension.create<HighlightOptions>({
     return {
       highlight: decorator,
     };
+  },
+
+  addExports() {
+    // OOXML's `<w:highlight>` only accepts a fixed set of named values per
+    // the spec. Anything else (hex, rgb(), rgba()) has to use
+    // `<w:shd w:val="clear" w:fill="HEX">` instead — Word's run-shading
+    // accepts arbitrary fills and renders identically. The mark handler
+    // decides which DocxRunProps field to populate; the walker emits both
+    // as plain data with no parsing.
+    const fallback = this.options.color;
+    const handler: DocxMarkHandler = (props, mark) => {
+      const raw = mark.attrs["color"];
+      const value = typeof raw === "string" && raw.length > 0 ? raw : fallback;
+      const named = docxHighlightName(value);
+      if (named) return { ...props, highlight: named };
+      const hex = cssColorToDocxHex(value);
+      if (hex) return { ...props, shadingFill: hex };
+      // Unparseable — fall back to the canonical yellow so something paints.
+      return { ...props, highlight: "yellow" };
+    };
+    return { docx: { marks: { highlight: handler } } };
   },
 
   addToolbarItems() {
