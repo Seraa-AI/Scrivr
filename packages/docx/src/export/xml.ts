@@ -14,7 +14,7 @@
 import type { XmlNode, XmlAttrs, XmlChild } from "@scrivr/core";
 
 // Re-export the builder + types from core for backward compat — existing
-// callers using `import { xml } from "@scrivr/export-docx"` still resolve.
+// callers using `import { xml } from "@scrivr/docx"` still resolve.
 export { xml } from "@scrivr/core";
 export type { XmlAttrs, XmlChild } from "@scrivr/core";
 

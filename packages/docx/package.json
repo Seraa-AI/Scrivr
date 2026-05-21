@@ -1,8 +1,8 @@
 {
-  "name": "@scrivr/export-docx",
+  "name": "@scrivr/docx",
   "private": true,
   "version": "0.0.6",
-  "description": "DOCX export for Scrivr documents — semantic export to WordprocessingML",
+  "description": "DOCX import + export for Scrivr documents — semantic round-trip to WordprocessingML",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -32,6 +32,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "fast-xml-parser": "^4.5.0",
     "fflate": "^0.8.2"
   },
   "peerDependencies": {

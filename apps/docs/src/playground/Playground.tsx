@@ -12,7 +12,7 @@ import {
 import { useEffect, useState } from "react";
 import type { EditorStateContext, EditorTheme } from "@scrivr/react";
 import { PdfExport } from "@scrivr/export-pdf";
-import { DocxExport } from "@scrivr/export-docx";
+import { DocxExport, DocxImport } from "@scrivr/docx";
 import {
   Collaboration,
   CollaborationCursor,
@@ -138,6 +138,7 @@ const EXTENSIONS =
         HeaderFooter,
         PdfExport.configure({ filename: identity.room }),
         DocxExport.configure({ filename: identity.room }),
+        DocxImport,
         TrackChanges.configure({
           userID: identity.userName,
           canAcceptReject: true,
@@ -150,6 +151,7 @@ const EXTENSIONS =
         HeaderFooter,
         PdfExport.configure({ filename: "scrivr-demo" }),
         DocxExport.configure({ filename: "scrivr-demo" }),
+        DocxImport,
         TrackChanges.configure({ userID: "demo-user", canAcceptReject: true }),
         ...(AI_ENABLED ? [AiToolkit] : []),
         DemoContent,

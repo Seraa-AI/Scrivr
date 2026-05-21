@@ -1,5 +1,5 @@
 /**
- * No built-in handlers live in `@scrivr/export-docx`.
+ * No built-in handlers live in `@scrivr/docx`.
  *
  * Every node + mark contributes its DOCX export shape via the owning
  * extension's `addExports().docx`. The export pipeline aggregates from

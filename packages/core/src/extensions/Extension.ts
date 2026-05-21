@@ -89,6 +89,9 @@ export class Extension<Options extends object = object> {
       // Phase 1 — format-specific export contributions collected by format
       // packages at export time (e.g. exportPdf walks addExports().pdf contributions).
       exports: config.addExports?.call(p1) ?? {},
+      // Phase 1 — format-specific import contributions collected by format
+      // packages at import time (e.g. importDocx walks addImports().docx contributions).
+      imports: config.addImports?.call(p1) ?? {},
       // Phase 2: only when schema is available
       plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
       ...(schema && config.addInitialDoc

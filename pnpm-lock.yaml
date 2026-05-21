@@ -47,9 +47,9 @@ importers:
       '@scrivr/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@scrivr/export-docx':
+      '@scrivr/docx':
         specifier: workspace:*
-        version: link:../../packages/export-docx
+        version: link:../../packages/docx
       '@scrivr/export-pdf':
         specifier: workspace:*
         version: link:../../packages/export-pdf
@@ -195,6 +195,31 @@ importers:
         specifier: ^5.4.0
         version: 5.9.3
 
+  packages/docx:
+    dependencies:
+      fast-xml-parser:
+        specifier: ^4.5.0
+        version: 4.5.6
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.2
+    devDependencies:
+      '@scrivr/core':
+        specifier: workspace:*
+        version: link:../core
+      prosemirror-model:
+        specifier: ^1.25.4
+        version: 1.25.4
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@25.5.0)(@vitest/ui@2.1.9)(happy-dom@20.8.4)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.46.1)
+
   packages/export:
     dependencies:
       '@scrivr/core':
@@ -207,28 +232,6 @@ importers:
         specifier: workspace:*
         version: link:../export-pdf
     devDependencies:
-      tsup:
-        specifier: ^8.0.0
-        version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.4.0
-        version: 5.9.3
-      vitest:
-        specifier: ^2.1.9
-        version: 2.1.9(@types/node@25.5.0)(@vitest/ui@2.1.9)(happy-dom@20.8.4)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.46.1)
-
-  packages/export-docx:
-    dependencies:
-      fflate:
-        specifier: ^0.8.2
-        version: 0.8.2
-    devDependencies:
-      '@scrivr/core':
-        specifier: workspace:*
-        version: link:../core
-      prosemirror-model:
-        specifier: ^1.25.4
-        version: 1.25.4
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
@@ -2648,6 +2651,10 @@ packages:
     resolution: {integrity: sha512-7MptL8U0cqcFdzIzwOTHoilX9x5BrNqye7Z/LuC7kCMRio1EMSyqRK3BEAUD7sXRq4iT4AzTVuZdhgQ2TCvYLg==}
     engines: {node: '>=8.6.0'}
 
+  fast-xml-parser@4.5.6:
+    resolution: {integrity: sha512-Yd4vkROfJf8AuJrDIVMVmYfULKmIJszVsMv7Vo71aocsKgFxpdlpSHXSaInvyYfgw2PRuObQSW2GFpVMUjxu9A==}
+    hasBin: true
+
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
 
@@ -3981,6 +3988,9 @@ packages:
   strip-bom@3.0.0:
     resolution: {integrity: sha512-vavAMRXOgBVNF6nyEEmL3DBK19iRpDcoIwW+swQ+CbGiu7lju6t+JklA1MHweoWtadgt4ISVUsXLyDq34ddcwA==}
     engines: {node: '>=4'}
+
+  strnum@1.1.2:
+    resolution: {integrity: sha512-vrN+B7DBIoTTZjnPNewwhx6cBA/H+IS7rfW68n7XxC1y7uoiGQBxaKzqucGUgavX15dJgiGztLJ8vxuEzwqBdA==}
 
   style-to-js@1.1.21:
     resolution: {integrity: sha512-RjQetxJrrUJLQPHbLku6U/ocGtzyjbJMP9lCNK7Ag0CNh690nSH8woqWH9u16nMjYBAok+i7JO1NP2pOy8IsPQ==}
@@ -6792,6 +6802,10 @@ snapshots:
       merge2: 1.4.1
       micromatch: 4.0.8
 
+  fast-xml-parser@4.5.6:
+    dependencies:
+      strnum: 1.1.2
+
   fastq@1.20.1:
     dependencies:
       reusify: 1.1.0
@@ -8518,6 +8532,8 @@ snapshots:
       ansi-regex: 6.2.2
 
   strip-bom@3.0.0: {}
+
+  strnum@1.1.2: {}
 
   style-to-js@1.1.21:
     dependencies:

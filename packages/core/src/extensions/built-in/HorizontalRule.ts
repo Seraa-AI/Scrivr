@@ -4,7 +4,11 @@ import { InputRule } from "prosemirror-inputrules";
 import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
 import type { CharacterMap } from "../../layout/CharacterMap";
 import type { LayoutBlock } from "../../layout/BlockLayout";
-import { xml, type DocxNodeHandler } from "../../exports/docx";
+import {
+  xml,
+  type DocxNodeHandler,
+  type DocxBlockTransform,
+} from "../../exports/docx";
 
 // ── HorizontalRule rendering strategy ────────────────────────────────────────
 
@@ -99,6 +103,18 @@ export const HorizontalRule = Extension.create({
         ]),
       ]);
     return { docx: { nodes: { horizontalRule: handler } } };
+  },
+
+  addImports() {
+    // Stage 1 currently emits `DocxBlock { type: "horizontalRule" }` only
+    // for explicit overrides; Word's typical HR (empty paragraph with
+    // bottom border) is parsed as a paragraph. Detection from pBdr lands
+    // with the structural-fidelity milestone.
+    const importer: DocxBlockTransform = (_block, _content, ctx) => {
+      const t = ctx.schema.nodes["horizontalRule"];
+      return t ? t.create() : null;
+    };
+    return { docx: { blocks: { horizontalRule: importer } } };
   },
 
   addToolbarItems() {

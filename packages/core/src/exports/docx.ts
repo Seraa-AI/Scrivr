@@ -2,15 +2,15 @@
  * Public DOCX export contract — types + a few unit helpers.
  *
  * Lives in `@scrivr/core` so both built-in extensions (which contribute
- * handlers via `addExports().docx`) and `@scrivr/export-docx` (which runs
- * the pipeline) can import the same canonical definitions. Keeping the
- * dependency direction one-way (export-docx → core) means no runtime cycle.
+ * handlers via `addExports().docx`) and `@scrivr/docx` (which runs the
+ * pipeline) can import the same canonical definitions. Keeping the
+ * dependency direction one-way (docx → core) means no runtime cycle.
  *
- * `@scrivr/export-docx` re-exports these for convenience, so callers using
- * `import { DocxContext } from "@scrivr/export-docx"` still resolve.
+ * `@scrivr/docx` re-exports these for convenience, so callers using
+ * `import { DocxContext } from "@scrivr/docx"` still resolve.
  */
 
-import type { Node as PmNode, Mark as PmMark } from "prosemirror-model";
+import type { Node as PmNode, Mark as PmMark, Schema } from "prosemirror-model";
 import type { IBaseEditor } from "../extensions/types";
 
 // ── XML ─────────────────────────────────────────────────────────────────────
@@ -292,7 +292,7 @@ export interface DocxHandlers {
   onFinalize?(ctx: DocxContext): DocxPackage | Promise<DocxPackage>;
 }
 
-// ── Unit conversion (px → OOXML units) ──────────────────────────────────────
+// ── Unit conversion (px ↔ OOXML units) ──────────────────────────────────────
 
 /** 1 inch @ 96 DPI = 96 px = 1440 twips → 15 twips per px. */
 export const TWIPS_PER_PX = 15;
@@ -305,4 +305,234 @@ export function pxToTwips(px: number): number {
 
 export function pxToEmu(px: number): number {
   return Math.round(px * EMU_PER_PX);
+}
+
+export function twipsToPx(twips: number): number {
+  return twips / TWIPS_PER_PX;
+}
+
+export function emuToPx(emu: number): number {
+  return emu / EMU_PER_PX;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Import side
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Mirror of the export contract for the reverse direction. The intermediate
+// model (`DocxBlock` / `DocxInline` / `DocxMark`) is the normalized DOCX
+// intent that sits between OOXML parsing (Stage 1, owned by `@scrivr/docx`)
+// and ProseMirror JSON (Stage 2, dispatched via `addImports().docx`).
+//
+// Lives in core so every extension can author its parse handler against
+// the same types its serializer uses. Same single-source-of-truth pattern.
+
+// ── Intermediate model ─────────────────────────────────────────────────────
+
+/**
+ * A normalized OOXML mark. `kind` is the raw element local name with the
+ * namespace prefix stripped (`<w:b/>` → `"b"`, `<w:color w:val="ff0000"/>` →
+ * `"color"` with `attrs.val = "ff0000"`). Each mark extension claims its
+ * `kind` and produces a `PmMarkJson` in Stage 2.
+ */
+export interface DocxMark {
+  kind: string;
+  attrs?: Record<string, unknown>;
+}
+
+/**
+ * Image inline parsed from `<w:drawing>` inside a run. `relId` references
+ * `word/_rels/document.xml.rels` — Stage 2 resolves it to a materialized
+ * `src` via `ctx.media.resolveImage`. Dimensions are in pixels (Stage 1
+ * converts EMU → px). `wrapMode` mirrors the export side's five-mode
+ * vocabulary so the round-trip is exact.
+ */
+export interface DocxImageInline {
+  type: "image";
+  /** OPC relationship ID — resolves to a media part via ctx.media. */
+  relId?: string;
+  /** Already-materialized src (data URL or object URL). */
+  src?: string;
+  /** Pixel dimensions converted from EMU. */
+  width?: number;
+  height?: number;
+  /** `"inline" | "square" | "top-bottom" | "behind" | "front"`. */
+  wrapMode?: "inline" | "square" | "top-bottom" | "behind" | "front";
+  /** Anchor horizontal alignment for floating images. */
+  xAlign?: "left" | "center" | "right" | "custom";
+  /** Literal X position (px, content-area-relative) when xAlign === "custom". */
+  x?: number;
+  /** Vertical offset from anchor (px). */
+  yOffset?: number;
+  /**
+   * OOXML `relativeFrom` on `wp:positionH` — `"margin" | "page" | "column"
+   * | "character" | "leftMargin" | …`. Preserved verbatim so Stage 2
+   * handlers (or future fidelity work) can choose how to map; current
+   * Image extension treats anything non-column as a soft hint and falls
+   * back to the column-relative offset.
+   */
+  xRelativeFrom?: string;
+  /** OOXML `relativeFrom` on `wp:positionV` — `"paragraph"` is typical. */
+  yRelativeFrom?: string;
+  /** Marks applied to the run wrapping this drawing (rare). */
+  marks: DocxMark[];
+}
+
+export type DocxInline =
+  | { type: "text"; text: string; marks: DocxMark[] }
+  | { type: "hardBreak"; marks: DocxMark[] }
+  | DocxImageInline;
+
+export interface DocxParagraphAttrs {
+  /** Paragraph style ID (`Heading1`, `Normal`, …) — resolved from `styles.xml`. */
+  styleId?: string;
+  /** From `<w:pPr><w:jc w:val="…"/>`. */
+  align?: "left" | "center" | "right" | "justify";
+  /** From `<w:pPr><w:numPr>` — paragraph belongs to a list. */
+  numbering?: { numId: number; ilvl: number };
+  /** Word's `<w:pageBreakBefore/>` hint. */
+  pageBreakBefore?: boolean;
+}
+
+/**
+ * A reconstructed list item. Produced by the importer's list reconstruction
+ * pass — DOCX lists are flat paragraphs with `numPr` metadata; the
+ * reconstruction groups them by `numId` and nests by `ilvl`. Each item's
+ * content is a `DocxBlock[]` because list items can contain a paragraph
+ * plus nested lists.
+ */
+export interface DocxListItem {
+  content: DocxBlock[];
+}
+
+export type DocxBlock =
+  | { type: "paragraph"; attrs: DocxParagraphAttrs; content: DocxInline[] }
+  | { type: "horizontalRule" }
+  | { type: "pageBreak" }
+  | { type: "list"; listType: "bullet" | "ordered"; items: DocxListItem[] };
+
+export interface DocxImportModel {
+  blocks: DocxBlock[];
+}
+
+// ── Import options + context ───────────────────────────────────────────────
+
+export type DocxMediaSink = "data-url" | "object-url" | "drop";
+
+export interface DocxImportResolvedOptions extends DocxResolvedOptions {
+  media: DocxMediaSink;
+}
+
+/**
+ * Import context — readers (inverse of `DocxContext` registry writers).
+ * Resolves cross-part references so handlers don't have to touch the OPC.
+ * Handlers construct ProseMirror nodes against `ctx.schema`; MVP exposes
+ * diagnostics + shared storage. Styles/numbering/relationships/media
+ * readers fill in as the corresponding milestones land.
+ */
+export interface DocxImportContext {
+  readonly options: DocxImportResolvedOptions;
+  /** The editor's schema — handlers construct `Node` / `Mark` against this. */
+  readonly schema: Schema;
+  diagnostics: {
+    warn(d: Omit<DocxDiagnostic, "level">): void;
+    error(d: Omit<DocxDiagnostic, "level">): void;
+    list(): DocxDiagnostic[];
+  };
+  /**
+   * Materialize binary parts (images) per `options.media`. Split from
+   * `rels` because images run through MIME-sniff + base64 / object-URL
+   * conversion, whereas non-binary rels are just lookups.
+   */
+  media: {
+    /** Return the materialized `src` for an image relId, or `undefined`. */
+    resolveImage(relId: string): string | undefined;
+  };
+  /**
+   * Non-binary OPC relationship lookups (hyperlinks, future external
+   * refs). Mirrors the export-side `ctx.rels` shape with `resolve*` in
+   * place of `add*`.
+   */
+  rels: {
+    /** Hyperlink target URL (or in-document anchor name). */
+    resolveHyperlink(relId: string): string | undefined;
+  };
+  shared: {
+    getOrInit<T>(key: string, init: () => T): T;
+    get<T>(key: string): T | undefined;
+  };
+}
+
+// ── Import handlers ─────────────────────────────────────────────────────────
+//
+// Handlers return real `Node` / `Mark` instances constructed against
+// `ctx.schema`. No invented JSON shape — alignment with ProseMirror is
+// load-bearing here, since serializer + parser must agree on what a node
+// looks like and any drift bites in both directions.
+
+/**
+ * Stage 2 transformer for an intermediate `DocxBlock`. Receives the block,
+ * its already-transformed inline children, and the context. Returns the
+ * final `Node` (or `null` to drop with a diagnostic).
+ */
+export type DocxBlockTransform = (
+  block: DocxBlock,
+  content: PmNode[],
+  ctx: DocxImportContext,
+) => PmNode | null;
+
+/**
+ * Paragraph-style override — wins over the default `paragraph` block
+ * transform when `block.attrs.styleId` matches the key. Heading extension
+ * registers `paragraphStyles: { Heading1: ..., Heading2: ..., ... }`.
+ */
+export type DocxParagraphStyleTransform = (
+  block: DocxBlock & { type: "paragraph" },
+  content: PmNode[],
+  ctx: DocxImportContext,
+) => PmNode | null;
+
+/**
+ * Mark transformer — receives a normalized `DocxMark` (`kind` keyed on
+ * the OOXML element local name) and returns a ProseMirror `Mark` or
+ * `null` to drop.
+ */
+export type DocxMarkTransform = (
+  mark: DocxMark,
+  ctx: DocxImportContext,
+) => PmMark | null;
+
+/**
+ * Inline transformer — claims a `DocxInline` kind (`image`, `hardBreak`,
+ * future widgets). Receives the inline plus the marks merged in from the
+ * surrounding run, returns the resulting ProseMirror `Node` (or `null`
+ * to drop).
+ */
+export type DocxInlineTransform = (
+  inline: DocxInline,
+  marks: PmMark[],
+  ctx: DocxImportContext,
+) => PmNode | null;
+
+/**
+ * The handler bundle contributed by extensions for DOCX import. Format
+ * packages augment `FormatImportHandlers.docx` to point at this.
+ */
+export interface DocxImports {
+  /** Stage 2 block transform — dispatched by `DocxBlock.type`. */
+  blocks?: Record<string, DocxBlockTransform>;
+  /** Paragraph-style override — dispatched by `pStyle` value. */
+  paragraphStyles?: Record<string, DocxParagraphStyleTransform>;
+  /** Stage 2 mark transform — dispatched by `DocxMark.kind`. */
+  marks?: Record<string, DocxMarkTransform>;
+  /** Stage 2 inline transform — dispatched by `DocxInline.type`. */
+  inlines?: Record<string, DocxInlineTransform>;
+
+  /** Runs before Stage 1 parsing. Precompute lookup tables, etc. */
+  onBeforeImport?(ctx: DocxImportContext): void | Promise<void>;
+  /** Runs after Stage 2. Post-process the final doc (cross-refs, repair, …). */
+  onImportComplete?(
+    doc: PmNode,
+    ctx: DocxImportContext,
+  ): PmNode | Promise<PmNode>;
 }

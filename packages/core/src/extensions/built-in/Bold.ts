@@ -2,7 +2,7 @@ import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { FontModifier } from "../types";
-import type { DocxMarkHandler } from "../../exports/docx";
+import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
 
 interface BoldOptions {
   /** Set to false to disable Mod-b shortcut. Default: true */
@@ -69,6 +69,20 @@ export const Bold = Extension.create<BoldOptions>({
   addExports() {
     const handler: DocxMarkHandler = (props) => ({ ...props, bold: true });
     return { docx: { marks: { bold: handler } } };
+  },
+
+  addImports() {
+    // OOXML `<w:b/>` (optionally `w:val="false"` to disable). Same
+    // single-source-of-truth pattern as addExports — Bold owns its
+    // mapping in both directions.
+    const handler: DocxMarkTransform = (mark, ctx) => {
+      if (mark.attrs?.["val"] === "false" || mark.attrs?.["val"] === "0") {
+        return null;
+      }
+      const t = ctx.schema.marks["bold"];
+      return t ? t.create() : null;
+    };
+    return { docx: { marks: { b: handler } } };
   },
 
   addMarkdownParserTokens() {

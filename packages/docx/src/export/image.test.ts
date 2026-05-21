@@ -3,7 +3,7 @@
  *
  * The image extension lives in @scrivr/core and contributes its DOCX
  * handlers via `addExports().docx` using locally-declared types (no
- * runtime import of @scrivr/export-docx, by design — see Image.docx.ts).
+ * runtime import of @scrivr/docx, by design — see Image.docx.ts).
  * This test is what guarantees the local types and the real DocxContext
  * shape stay structurally compatible: it drives a real ServerEditor +
  * StarterKit through `exportDocx` and asserts the produced bytes contain

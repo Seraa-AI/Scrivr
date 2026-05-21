@@ -6,7 +6,7 @@ import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import type { IBaseEditor } from "./extensions/types";
-import type { ExportContributionMap } from "./extensions/export";
+import type { ExportContributionMap, ImportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
 import { sanitizeDocUrls } from "./model/sanitizeDocUrls";
@@ -219,6 +219,10 @@ export class BaseEditor implements IBaseEditor {
 
   getExportContributions(): ExportContributionMap[] {
     return this.manager.getExportContributions();
+  }
+
+  getImportContributions(): ImportContributionMap[] {
+    return this.manager.getImportContributions();
   }
 
   getDocAttrNames(): string[] {

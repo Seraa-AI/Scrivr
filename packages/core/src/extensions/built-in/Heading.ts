@@ -8,6 +8,7 @@ import {
   xml,
   pxToTwips,
   type DocxNodeHandler,
+  type DocxParagraphStyleTransform,
 } from "../../exports/docx";
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
@@ -174,6 +175,33 @@ export const Heading = Extension.create<HeadingOptions>({
       ]);
     };
     return { docx: { nodes: { heading: headingHandler } } };
+  },
+
+  addImports() {
+    // OOXML emits `<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>` (sanitized
+    // form of "Heading 1"). The paragraphStyle dispatch in the import
+    // pipeline runs BEFORE the default paragraph handler, so this catches
+    // every paragraph carrying a heading style and produces a heading
+    // node with the right level. Single source of truth: same
+    // `Heading ${level}` style name the exporter emits.
+    const levels = this.options.levels;
+    const handlers: Record<string, DocxParagraphStyleTransform> = {};
+    for (const level of levels) {
+      // Match both `Heading1` (sanitized — what we emit) and `Heading ${level}`
+      // (Word's friendly name) just in case the source authored both forms.
+      const make: DocxParagraphStyleTransform = (block, content, ctx) => {
+        const t = ctx.schema.nodes["heading"];
+        if (!t) return null;
+        const attrs: Record<string, unknown> = { level };
+        if (block.attrs.align && block.attrs.align !== "left") {
+          attrs.align = block.attrs.align;
+        }
+        return t.create(attrs, content);
+      };
+      handlers[`Heading${level}`] = make;
+      handlers[`heading${level}`] = make;
+    }
+    return { docx: { paragraphStyles: handlers } };
   },
 
   addMarkdownParserTokens() {
