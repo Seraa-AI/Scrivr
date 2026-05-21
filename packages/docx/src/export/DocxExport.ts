@@ -3,7 +3,7 @@
  * `exportDocx` command to any Scrivr editor instance.
  *
  * Usage:
- *   import { DocxExport } from "@scrivr/export-docx";
+ *   import { DocxExport } from "@scrivr/docx";
  *
  *   new Editor({
  *     extensions: [

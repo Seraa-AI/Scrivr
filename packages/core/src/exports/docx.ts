@@ -2,12 +2,12 @@
  * Public DOCX export contract — types + a few unit helpers.
  *
  * Lives in `@scrivr/core` so both built-in extensions (which contribute
- * handlers via `addExports().docx`) and `@scrivr/export-docx` (which runs
- * the pipeline) can import the same canonical definitions. Keeping the
- * dependency direction one-way (export-docx → core) means no runtime cycle.
+ * handlers via `addExports().docx`) and `@scrivr/docx` (which runs the
+ * pipeline) can import the same canonical definitions. Keeping the
+ * dependency direction one-way (docx → core) means no runtime cycle.
  *
- * `@scrivr/export-docx` re-exports these for convenience, so callers using
- * `import { DocxContext } from "@scrivr/export-docx"` still resolve.
+ * `@scrivr/docx` re-exports these for convenience, so callers using
+ * `import { DocxContext } from "@scrivr/docx"` still resolve.
  */
 
 import type { Node as PmNode, Mark as PmMark } from "prosemirror-model";

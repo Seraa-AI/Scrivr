@@ -632,7 +632,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     // packager is rare and shouldn't silently compose.
     //
     // Loose typing because each format's bundle shape lives in its own
-    // package (DocxHandlers in @scrivr/export-docx, PdfHandlers in
+    // package (DocxHandlers in @scrivr/docx, PdfHandlers in
     // @scrivr/export-pdf). The runtime-checked `MinimalContribBundle` is
     // a structural subset that covers all known format shapes today.
     const result: Record<string, MinimalContribBundle> = {};

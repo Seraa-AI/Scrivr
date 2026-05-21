@@ -1,4 +1,4 @@
-# @scrivr/export-docx
+# @scrivr/docx
 
 DOCX export for Scrivr documents — type-only skeleton, no implementation yet.
 

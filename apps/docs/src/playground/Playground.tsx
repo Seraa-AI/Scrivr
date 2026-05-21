@@ -12,7 +12,7 @@ import {
 import { useEffect, useState } from "react";
 import type { EditorStateContext, EditorTheme } from "@scrivr/react";
 import { PdfExport } from "@scrivr/export-pdf";
-import { DocxExport } from "@scrivr/export-docx";
+import { DocxExport } from "@scrivr/docx";
 import {
   Collaboration,
   CollaborationCursor,
