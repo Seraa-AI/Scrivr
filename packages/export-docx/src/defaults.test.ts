@@ -1,0 +1,120 @@
+import { describe, it, expect } from "vitest";
+import { unzipSync, strFromU8 } from "fflate";
+import { buildDocxPackage } from "./defaults";
+import { zipDocxPackage } from "./package";
+import { xml } from "./xml";
+import { createDocxContext } from "./createContext";
+
+function readZip(bytes: Uint8Array): Record<string, string> {
+  const entries = unzipSync(bytes);
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(entries)) {
+    out[k] = strFromU8(v);
+  }
+  return out;
+}
+
+describe("buildDocxPackage", () => {
+  it("produces all required OPC parts for an empty body", () => {
+    const { state } = createDocxContext();
+    const pkg = buildDocxPackage([], state);
+    const bytes = zipDocxPackage(pkg);
+    const files = readZip(bytes);
+
+    const required = [
+      "[Content_Types].xml",
+      "_rels/.rels",
+      "word/document.xml",
+      "word/_rels/document.xml.rels",
+      "word/styles.xml",
+      "word/numbering.xml",
+      "word/settings.xml",
+    ];
+    for (const path of required) {
+      expect(files[path], `missing part ${path}`).toBeTruthy();
+    }
+  });
+
+  it("wraps body content in w:document/w:body and appends sectPr", () => {
+    const { state } = createDocxContext();
+    const body = [xml("w:p", undefined, [xml("w:r", undefined, [xml("w:t", undefined, ["hi"])])])];
+    const pkg = buildDocxPackage(body, state);
+    const files = readZip(zipDocxPackage(pkg));
+
+    const doc = files["word/document.xml"]!;
+    expect(doc).toContain("<w:body>");
+    expect(doc).toContain("<w:t>hi</w:t>");
+    expect(doc).toContain("<w:sectPr>");
+    expect(doc).toContain('<w:pgSz w:h="15840" w:w="12240"/>');
+  });
+
+  it("registers content-type overrides for the core OOXML parts", () => {
+    const { state } = createDocxContext();
+    const files = readZip(zipDocxPackage(buildDocxPackage([], state)));
+    const ct = files["[Content_Types].xml"]!;
+    expect(ct).toContain('PartName="/word/document.xml"');
+    expect(ct).toContain('PartName="/word/styles.xml"');
+    expect(ct).toContain('PartName="/word/numbering.xml"');
+    expect(ct).toContain('PartName="/word/settings.xml"');
+  });
+
+  it("emits the named internal document rels (rIdStyles/Numbering/Settings)", () => {
+    const { state } = createDocxContext();
+    const files = readZip(zipDocxPackage(buildDocxPackage([], state)));
+    const rels = files["word/_rels/document.xml.rels"]!;
+    expect(rels).toContain('Id="rIdStyles"');
+    expect(rels).toContain('Id="rIdNumbering"');
+    expect(rels).toContain('Id="rIdSettings"');
+  });
+
+  it("appends user-registered styles to styles.xml", () => {
+    const { ctx, state } = createDocxContext();
+    const id = ctx.styles.paragraph.getOrCreate("Heading 1", { bold: true, size: 18 });
+    expect(id).toBe("Heading1");
+    const files = readZip(zipDocxPackage(buildDocxPackage([], state)));
+    const styles = files["word/styles.xml"]!;
+    expect(styles).toContain('w:styleId="Heading1"');
+    expect(styles).toContain('<w:name w:val="Heading 1"/>');
+    expect(styles).toContain("<w:b/>");
+    expect(styles).toContain('<w:sz w:val="27"/>'); // 18 × 1.5
+  });
+
+  it("emits abstractNum + num pairs for registered numbering defs", () => {
+    const { ctx, state } = createDocxContext();
+    ctx.numbering.getOrCreate({
+      type: "bullet",
+      levels: [{ level: 0, format: "bullet", text: "•" }],
+    });
+    const files = readZip(zipDocxPackage(buildDocxPackage([], state)));
+    const numbering = files["word/numbering.xml"]!;
+    expect(numbering).toContain('<w:abstractNum w:abstractNumId="1">');
+    expect(numbering).toContain('<w:num w:numId="1">');
+    expect(numbering).toContain('<w:numFmt w:val="bullet"/>');
+  });
+
+  it("registers media + adds Default content-type entry per unique extension", () => {
+    const { ctx, state } = createDocxContext();
+    const filename = ctx.media.add({
+      data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      contentType: "image/png",
+      ext: "png",
+    });
+    expect(filename).toBe("image1.png");
+    const files = readZip(zipDocxPackage(buildDocxPackage([], state)));
+    expect(files["word/media/image1.png"]).toBeDefined();
+    const ct = files["[Content_Types].xml"]!;
+    expect(ct).toContain('Extension="png"');
+    expect(ct).toContain('ContentType="image/png"');
+  });
+
+  it("emits user-registered rels with their Type + TargetMode", () => {
+    const { ctx, state } = createDocxContext();
+    ctx.rels.addImage("image1.png");
+    ctx.rels.addHyperlink("https://example.com");
+    const files = readZip(zipDocxPackage(buildDocxPackage([], state)));
+    const rels = files["word/_rels/document.xml.rels"]!;
+    expect(rels).toContain('Target="media/image1.png"');
+    expect(rels).toContain('Target="https://example.com"');
+    expect(rels).toContain('TargetMode="External"');
+  });
+});
