@@ -40,3 +40,33 @@ export interface FormatHandlers {}
 export type ExportContributionMap = {
   [F in keyof FormatHandlers]?: FormatHandlers[F];
 };
+
+// ── Imports (the reverse direction) ─────────────────────────────────────────
+
+/**
+ * Augmented by format packages — empty in core. Parallel to `FormatHandlers`
+ * but for the inverse direction: each format describes how its source bytes
+ * become editor content.
+ *
+ * When `@scrivr/docx` is loaded, `FormatImportHandlers.docx` becomes the
+ * `DocxImports` shape (block / paragraphStyle / runProperty / mark / hook
+ * lanes).
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface FormatImportHandlers {}
+
+/**
+ * Map of format → import-handler bundle. Extensions return this from
+ * `addImports()`. Each key matches a `FormatImportHandlers` augmentation
+ * (e.g. `"docx"`).
+ *
+ * @example
+ * addImports() {
+ *   return {
+ *     docx: { runProperties: { "w:b": (_el, marks) => [...marks, { kind: "b" }] } },
+ *   };
+ * }
+ */
+export type ImportContributionMap = {
+  [F in keyof FormatImportHandlers]?: FormatImportHandlers[F];
+};

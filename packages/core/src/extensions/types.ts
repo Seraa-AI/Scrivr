@@ -26,7 +26,7 @@ import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { SurfaceRegistry } from "../surfaces/SurfaceRegistry";
-import type { ExportContributionMap } from "./export";
+import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
 import type { ResolvedTheme } from "../model/theme";
 
@@ -101,6 +101,8 @@ export interface IBaseEditor {
   parseMarkdown(text: string): Node;
   /** Export contributions from all extensions, in registration order. */
   getExportContributions(): ExportContributionMap[];
+  /** Import contributions from all extensions, in registration order. */
+  getImportContributions(): ImportContributionMap[];
   /**
    * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
    *
@@ -535,6 +537,16 @@ export interface ExtensionConfig<Options = object> {
    */
   addExports?(this: Phase1Context<Options>): ExportContributionMap;
 
+  /**
+   * Contribute format-specific import handlers as a format-keyed map. Same
+   * shape as `addExports` but for the inverse direction — `@scrivr/docx`
+   * walks each loaded extension's `addImports().docx` when reading bytes
+   * back into ProseMirror content. Keeping import and export on the same
+   * extension means a single source of truth for what e.g. "Heading 1"
+   * means in both directions.
+   */
+  addImports?(this: Phase1Context<Options>): ImportContributionMap;
+
   // ── Phase 2: Behaviour ──────────────────────────────────────────────────────
   // Called with `this = ExtensionContext` — the built schema is available.
 
@@ -749,6 +761,8 @@ export interface ResolvedExtension {
   surfaceOwner: SurfaceOwnerRegistration | null;
   /** Format-specific export handler contributions. Empty map when absent. */
   exports: ExportContributionMap;
+  /** Format-specific import handler contributions. Empty map when absent. */
+  imports: ImportContributionMap;
   plugins: Plugin[];
   keymap: Record<string, Command>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,45 +1,73 @@
 /**
- * DOCX import entry point — reads an OPC package and returns ProseMirror
- * JSON conforming to the consumer's schema.
+ * DOCX import entry point — reads an OPC package and returns a ProseMirror
+ * `Node` constructed against the editor's schema.
  *
  * Pipeline:
- *   1. Unzip OPC bytes (`readDocxPackage`).
- *   2. Parse `word/document.xml` (`parseOoxml`).
- *   3. Walk into the normalized intermediate model (`parseDocumentBody`).
- *   4. Transform to ProseMirror JSON (`transformToProseMirror`).
+ *   1. Collect handlers via `editor.getImportContributions()` + overrides.
+ *   2. Create `DocxImportContext` with the editor's schema.
+ *   3. Unzip OPC bytes, parse `word/document.xml`.
+ *   4. Stage 1: walk into the normalized intermediate model.
+ *   5. Run `onBeforeImport` hooks.
+ *   6. Stage 2: dispatch via extension handlers → ProseMirror `Node`.
+ *   7. Run `onImportComplete` hooks.
  *
- * Returns `{ doc, diagnostics }` so consumers can surface fidelity warnings
- * ("imported with 3 warnings: unsupported field code dropped, ..."). Fatal
- * failures throw `DocxImportError` with the same diagnostics attached.
+ * Returns `{ doc, diagnostics }` — DOCX import is inherently lossy.
+ * Fatal failures throw `DocxImportError` with the same diagnostics.
  *
- * MVP scope: paragraph + text. Marks/headings/lists/images each ship in
- * subsequent commits per the milestone plan.
+ * The editor is required because nodes/marks are constructed against its
+ * schema. Use `new ServerEditor()` for server-side imports — no view, no
+ * layout, just the schema + extensions.
  */
 
+import type { Node as PmNode } from "prosemirror-model";
+import type {
+  DocxImports,
+  IBaseEditor,
+  DocxDiagnostic,
+} from "@scrivr/core";
 import { readDocxPackage } from "./opc";
 import { parseOoxml } from "./xml";
 import { parseDocumentBody } from "./parser";
 import {
   transformToProseMirror,
-  type PmDocJson,
+  type ResolvedImportHandlers,
 } from "./transform";
 import {
   createDocxImportContext,
   type DocxImportOptions,
 } from "./context";
 import { DocxImportError } from "./error";
-import type { DocxDiagnostic } from "@scrivr/core";
 
 export interface DocxImportResult {
-  doc: PmDocJson;
+  doc: PmNode;
   diagnostics: DocxDiagnostic[];
 }
 
+export interface DocxImportCallOptions extends DocxImportOptions {
+  /** Override or supplement extension-contributed import handlers. */
+  overrides?: DocxImports;
+}
+
+/**
+ * Import a `.docx` file using the editor's schema + extension parsers.
+ *
+ * @example
+ *   const editor = new ServerEditor();
+ *   const { doc, diagnostics } = await importDocx(editor, bytes);
+ *   editor.setContent(doc.toJSON());
+ */
 export async function importDocx(
+  editor: IBaseEditor,
   bytes: Uint8Array,
-  options: DocxImportOptions = {},
+  options: DocxImportCallOptions = {},
 ): Promise<DocxImportResult> {
-  const ctx = createDocxImportContext(options);
+  const ctx = createDocxImportContext({
+    schema: editor.schema,
+    ...options,
+  });
+  const handlers = collectHandlers(editor, options.overrides);
+  const lifecycleHooks = collectLifecycleHooks(editor, options.overrides);
+
   try {
     const pkg = readDocxPackage(bytes);
     const documentXml = pkg.readText("word/document.xml");
@@ -56,8 +84,18 @@ export async function importDocx(
         ctx.diagnostics.list(),
       );
     }
+
+    for (const hook of lifecycleHooks.onBeforeImport) {
+      await hook(ctx);
+    }
+
     const model = parseDocumentBody(root);
-    const doc = transformToProseMirror(model);
+    let doc = transformToProseMirror(model, ctx, handlers);
+
+    for (const hook of lifecycleHooks.onImportComplete) {
+      doc = await hook(doc, ctx);
+    }
+
     return { doc, diagnostics: ctx.diagnostics.list() };
   } catch (err) {
     if (err instanceof DocxImportError) throw err;
@@ -66,5 +104,55 @@ export async function importDocx(
   }
 }
 
+// ── Handler collection ──────────────────────────────────────────────────────
+
+function collectHandlers(
+  editor: IBaseEditor,
+  overrides?: DocxImports,
+): ResolvedImportHandlers {
+  const blocks: ResolvedImportHandlers["blocks"] = {};
+  const paragraphStyles: ResolvedImportHandlers["paragraphStyles"] = {};
+  const marks: ResolvedImportHandlers["marks"] = {};
+
+  for (const contrib of editor.getImportContributions()) {
+    const docx = contrib.docx;
+    if (!docx) continue;
+    if (docx.blocks) Object.assign(blocks, docx.blocks);
+    if (docx.paragraphStyles) Object.assign(paragraphStyles, docx.paragraphStyles);
+    if (docx.marks) Object.assign(marks, docx.marks);
+  }
+
+  if (overrides) {
+    if (overrides.blocks) Object.assign(blocks, overrides.blocks);
+    if (overrides.paragraphStyles)
+      Object.assign(paragraphStyles, overrides.paragraphStyles);
+    if (overrides.marks) Object.assign(marks, overrides.marks);
+  }
+
+  return { blocks, paragraphStyles, marks };
+}
+
+interface LifecycleHooks {
+  onBeforeImport: Array<NonNullable<DocxImports["onBeforeImport"]>>;
+  onImportComplete: Array<NonNullable<DocxImports["onImportComplete"]>>;
+}
+
+function collectLifecycleHooks(
+  editor: IBaseEditor,
+  overrides?: DocxImports,
+): LifecycleHooks {
+  const hooks: LifecycleHooks = { onBeforeImport: [], onImportComplete: [] };
+  for (const contrib of editor.getImportContributions()) {
+    const docx = contrib.docx;
+    if (!docx) continue;
+    if (docx.onBeforeImport) hooks.onBeforeImport.push(docx.onBeforeImport);
+    if (docx.onImportComplete) hooks.onImportComplete.push(docx.onImportComplete);
+  }
+  if (overrides) {
+    if (overrides.onBeforeImport) hooks.onBeforeImport.push(overrides.onBeforeImport);
+    if (overrides.onImportComplete) hooks.onImportComplete.push(overrides.onImportComplete);
+  }
+  return hooks;
+}
+
 export type { DocxImportOptions };
-export type { PmDocJson } from "./transform";

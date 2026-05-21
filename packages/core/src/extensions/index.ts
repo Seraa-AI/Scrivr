@@ -42,4 +42,9 @@ export type {
   ToolbarItemSpec,
   OverlayRenderHandler,
 } from "./types";
-export type { FormatHandlers, ExportContributionMap } from "./export";
+export type {
+  FormatHandlers,
+  ExportContributionMap,
+  FormatImportHandlers,
+  ImportContributionMap,
+} from "./export";

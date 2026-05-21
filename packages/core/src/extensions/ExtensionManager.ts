@@ -23,7 +23,7 @@ import type { FontConfig } from "../layout/FontConfig";
 import type { PageConfig } from "../layout/PageLayout";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
-import type { ExportContributionMap } from "./export";
+import type { ExportContributionMap, ImportContributionMap } from "./export";
 import { parseMarkdownToDoc } from "../model/parseMarkdown";
 
 interface Phase1SchemaContributions {
@@ -424,6 +424,14 @@ export class ExtensionManager {
    */
   getExportContributions(): ExportContributionMap[] {
     return this.resolved.map((ext) => ext.exports);
+  }
+
+  /**
+   * Import contributions from all extensions, in registration order.
+   * Format packages call this at import time to collect parse handlers.
+   */
+  getImportContributions(): ImportContributionMap[] {
+    return this.resolved.map((ext) => ext.imports);
   }
 
   /**
