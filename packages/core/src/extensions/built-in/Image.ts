@@ -10,6 +10,8 @@ import {
   xml,
   pxToEmu,
   type DocxContext,
+  type DocxImageInline,
+  type DocxInlineTransform,
   type DocxNodeHandler,
   type XmlNode,
 } from "../../exports/docx";
@@ -567,6 +569,50 @@ export const Image = Extension.create({
         nodes: { image: imageDocxHandler },
       },
     };
+  },
+
+  addImports() {
+    // Inverse of the export: parser produces `DocxInline.image` with the
+    // five wrap modes + EMU-converted dims; we resolve the rels-referenced
+    // src and construct an image node with the same attrs the exporter
+    // started from. Single source of truth for what "anchored square" means.
+    const importer: DocxInlineTransform = (inline, _marks, ctx) => {
+      if (inline.type !== "image") return null;
+      const t = ctx.schema.nodes["image"];
+      if (!t) return null;
+
+      // Prefer the typed image inline so we can read OOXML-specific attrs.
+      const i: DocxImageInline = inline;
+
+      let src = i.src;
+      if (!src && i.relId) src = ctx.media.resolveImage(i.relId);
+      if (!src) {
+        ctx.diagnostics.warn({
+          code: "image-unresolved",
+          message: i.relId
+            ? `Image relationship "${i.relId}" did not resolve to a src`
+            : "Image inline had neither src nor relId",
+          nodeType: "image",
+        });
+        return null;
+      }
+
+      const attrs: Record<string, unknown> = {
+        src,
+        alt: "",
+      };
+      if (i.width !== undefined) attrs["width"] = i.width;
+      if (i.height !== undefined) attrs["height"] = i.height;
+      const wrapMode = i.wrapMode ?? "inline";
+      attrs["wrapMode"] = wrapMode;
+      if (wrapMode !== "inline") {
+        if (i.xAlign) attrs["xAlign"] = i.xAlign;
+        if (i.x !== undefined) attrs["x"] = i.x;
+        if (i.yOffset !== undefined) attrs["yOffset"] = i.yOffset;
+      }
+      return t.create(attrs);
+    };
+    return { docx: { inlines: { image: importer } } };
   },
 
   addMarkdownSerializerRules() {

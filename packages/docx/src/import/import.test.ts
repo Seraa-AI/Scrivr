@@ -354,6 +354,142 @@ describe("importDocx — lists", () => {
   });
 });
 
+describe("importDocx — images", () => {
+  /**
+   * Minimal real PNG bytes used end-to-end so the data-url survives the
+   * exporter's ZIP write + importer's read + base64 encode.
+   */
+  const TINY_PNG_BYTES = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+    0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+    0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+    0x42, 0x60, 0x82,
+  ]);
+
+  /**
+   * Round-trip a doc with one image of the given wrapMode through
+   * exportDocx → importDocx and return the resulting image node.
+   */
+  async function roundTripImage(
+    attrs: Record<string, unknown>,
+  ): Promise<PmNode | null> {
+    const fetchOriginal = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(new Uint8Array(TINY_PNG_BYTES).buffer, {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        }),
+      )) as typeof fetch;
+
+    try {
+      const editor = new ServerEditor();
+      editor.setContent({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "image",
+                attrs: {
+                  src: "https://example.com/img.png",
+                  width: 80,
+                  height: 60,
+                  ...attrs,
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const bytes = await exportDocxBytes(editor);
+      const importer = new ServerEditor();
+      const { doc } = await importDocx(importer, bytes);
+      const para = doc.child(0);
+      if (para.childCount === 0) return null;
+      return para.child(0);
+    } finally {
+      globalThis.fetch = fetchOriginal;
+    }
+  }
+
+  it("inline image round-trips with width / height + data: src", async () => {
+    const img = await roundTripImage({ wrapMode: "inline" });
+    expect(img?.type.name).toBe("image");
+    expect(img?.attrs["wrapMode"]).toBe("inline");
+    expect(img?.attrs["width"]).toBe(80);
+    expect(img?.attrs["height"]).toBe(60);
+    const src = img?.attrs["src"];
+    expect(typeof src).toBe("string");
+    expect(src as string).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it("square anchored image round-trips with wrapMode + xAlign", async () => {
+    const img = await roundTripImage({ wrapMode: "square", xAlign: "right" });
+    expect(img?.attrs["wrapMode"]).toBe("square");
+    expect(img?.attrs["xAlign"]).toBe("right");
+  });
+
+  it("top-bottom wrap round-trips", async () => {
+    const img = await roundTripImage({ wrapMode: "top-bottom" });
+    expect(img?.attrs["wrapMode"]).toBe("top-bottom");
+  });
+
+  it("behind wrap round-trips with the right behindDoc state", async () => {
+    const img = await roundTripImage({ wrapMode: "behind" });
+    expect(img?.attrs["wrapMode"]).toBe("behind");
+  });
+
+  it("front wrap round-trips", async () => {
+    const img = await roundTripImage({ wrapMode: "front" });
+    expect(img?.attrs["wrapMode"]).toBe("front");
+  });
+
+  it("media: 'drop' returns no image and records a diagnostic", async () => {
+    const fetchOriginal = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(new Uint8Array(TINY_PNG_BYTES).buffer, {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        }),
+      )) as typeof fetch;
+    try {
+      const editor = new ServerEditor();
+      editor.setContent({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "image",
+                attrs: { src: "https://example.com/x.png", width: 50, height: 50, wrapMode: "inline" },
+              },
+            ],
+          },
+        ],
+      });
+      const bytes = await exportDocxBytes(editor);
+      const importer = new ServerEditor();
+      const { doc, diagnostics } = await importDocx(importer, bytes, { media: "drop" });
+      const para = doc.child(0);
+      expect(para.childCount).toBe(0); // image dropped
+      expect(
+        diagnostics.some((d) => d.code === "image-dropped" || d.code === "image-unresolved"),
+      ).toBe(true);
+    } finally {
+      globalThis.fetch = fetchOriginal;
+    }
+  });
+});
+
 describe("importDocx — extension dispatch", () => {
   it("invokes the editor's getImportContributions for marks", async () => {
     // Round-trip with bold — without a Bold extension's addImports, the

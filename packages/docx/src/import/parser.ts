@@ -19,7 +19,9 @@ import type {
   DocxInline,
   DocxMark,
   DocxParagraphAttrs,
-} from "./types";
+  DocxImageInline,
+} from "@scrivr/core";
+import { emuToPx } from "@scrivr/core";
 
 export function parseDocumentBody(documentRoot: OoxmlElement): DocxImportModel {
   const body = findChild(documentRoot, "w:body");
@@ -132,15 +134,109 @@ function parseRun(el: OoxmlElement): DocxInline[] {
       const text = readWordText(child);
       if (text.length > 0) out.push({ type: "text", text, marks });
     } else if (child.name === "w:br") {
-      const breakType = attr(child, "w:type");
-      if (breakType === "page") {
-        out.push({ type: "hardBreak", marks });
-      } else {
-        out.push({ type: "hardBreak", marks });
-      }
+      // `w:type="page"` would be detected as a pageBreak block at the
+      // paragraph level (see `isPageBreakParagraph`); inside a run we
+      // treat it as a regular hard break.
+      out.push({ type: "hardBreak", marks });
     } else if (child.name === "w:tab") {
       out.push({ type: "text", text: "\t", marks });
+    } else if (child.name === "w:drawing") {
+      const image = parseDrawing(child, marks);
+      if (image) out.push(image);
     }
+  }
+  return out;
+}
+
+/**
+ * Parse a `<w:drawing>` into a `DocxImageInline`. Handles both
+ * `<wp:inline>` and `<wp:anchor>` wrappers. Reads:
+ *   - `<a:blip r:embed="rId5"/>` → relId
+ *   - `<wp:extent cx cy/>` → width / height (EMU → px)
+ *   - anchor's wrap element → wrapMode (square/top-bottom/behind/front)
+ *   - `<wp:positionH>` → xAlign / x
+ *   - `<wp:positionV>` → yOffset
+ */
+function parseDrawing(el: OoxmlElement, marks: DocxMark[]): DocxImageInline | null {
+  // Find either wp:inline or wp:anchor.
+  const wrapper =
+    findChild(el, "wp:inline") ?? findChild(el, "wp:anchor");
+  if (!wrapper) return null;
+
+  // Resolve r:embed via the deeply-nested <a:blip>. The graphic chain is:
+  // wp:* > a:graphic > a:graphicData > pic:pic > pic:blipFill > a:blip.
+  const graphic = findChild(wrapper, "a:graphic");
+  const graphicData = graphic && findChild(graphic, "a:graphicData");
+  const pic = graphicData && findChild(graphicData, "pic:pic");
+  const blipFill = pic && findChild(pic, "pic:blipFill");
+  const blip = blipFill && findChild(blipFill, "a:blip");
+  const relId = blip && attr(blip, "r:embed");
+  if (!relId) return null;
+
+  const extent = findChild(wrapper, "wp:extent");
+  const cx = extent ? Number(attr(extent, "cx") ?? "0") : NaN;
+  const cy = extent ? Number(attr(extent, "cy") ?? "0") : NaN;
+  const width = Number.isFinite(cx) && cx > 0 ? Math.round(emuToPx(cx)) : undefined;
+  const height = Number.isFinite(cy) && cy > 0 ? Math.round(emuToPx(cy)) : undefined;
+
+  if (wrapper.name === "wp:inline") {
+    const image: DocxImageInline = { type: "image", relId, marks, wrapMode: "inline" };
+    if (width !== undefined) image.width = width;
+    if (height !== undefined) image.height = height;
+    return image;
+  }
+
+  // Anchored — five-mode mapping mirrors the export side.
+  const behindDoc = attr(wrapper, "behindDoc") === "1";
+  let wrapMode: DocxImageInline["wrapMode"] = "square";
+  if (findChild(wrapper, "wp:wrapSquare")) wrapMode = "square";
+  else if (findChild(wrapper, "wp:wrapTopAndBottom")) wrapMode = "top-bottom";
+  else if (findChild(wrapper, "wp:wrapTight")) wrapMode = "square"; // tight → square fallback
+  else if (findChild(wrapper, "wp:wrapNone")) wrapMode = behindDoc ? "behind" : "front";
+
+  let xAlign: DocxImageInline["xAlign"] | undefined;
+  let xValue: number | undefined;
+  const positionH = findChild(wrapper, "wp:positionH");
+  if (positionH) {
+    const align = findChild(positionH, "wp:align");
+    const posOffset = findChild(positionH, "wp:posOffset");
+    if (align) {
+      const alignTxt = readTextChildren(align).trim();
+      if (alignTxt === "center" || alignTxt === "right" || alignTxt === "left") {
+        xAlign = alignTxt;
+      }
+    } else if (posOffset) {
+      const emu = Number(readTextChildren(posOffset).trim());
+      if (Number.isFinite(emu)) {
+        xAlign = "custom";
+        xValue = Math.round(emuToPx(emu));
+      }
+    }
+  }
+
+  let yOffset: number | undefined;
+  const positionV = findChild(wrapper, "wp:positionV");
+  if (positionV) {
+    const posOffset = findChild(positionV, "wp:posOffset");
+    if (posOffset) {
+      const emu = Number(readTextChildren(posOffset).trim());
+      if (Number.isFinite(emu)) yOffset = Math.round(emuToPx(emu));
+    }
+  }
+
+  const image: DocxImageInline = { type: "image", relId, marks, wrapMode };
+  if (width !== undefined) image.width = width;
+  if (height !== undefined) image.height = height;
+  if (xAlign) image.xAlign = xAlign;
+  if (xValue !== undefined) image.x = xValue;
+  if (yOffset !== undefined) image.yOffset = yOffset;
+  return image;
+}
+
+function readTextChildren(el: OoxmlElement): string {
+  let out = "";
+  for (const c of el.children) {
+    if (typeof c === "string") out += c;
   }
   return out;
 }

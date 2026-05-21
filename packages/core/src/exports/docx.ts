@@ -340,10 +340,38 @@ export interface DocxMark {
   attrs?: Record<string, unknown>;
 }
 
+/**
+ * Image inline parsed from `<w:drawing>` inside a run. `relId` references
+ * `word/_rels/document.xml.rels` — Stage 2 resolves it to a materialized
+ * `src` via `ctx.media.resolveImage`. Dimensions are in pixels (Stage 1
+ * converts EMU → px). `wrapMode` mirrors the export side's five-mode
+ * vocabulary so the round-trip is exact.
+ */
+export interface DocxImageInline {
+  type: "image";
+  /** OPC relationship ID — resolves to a media part via ctx.media. */
+  relId?: string;
+  /** Already-materialized src (data URL or object URL). */
+  src?: string;
+  /** Pixel dimensions converted from EMU. */
+  width?: number;
+  height?: number;
+  /** `"inline" | "square" | "top-bottom" | "behind" | "front"`. */
+  wrapMode?: "inline" | "square" | "top-bottom" | "behind" | "front";
+  /** Anchor horizontal alignment for floating images. */
+  xAlign?: "left" | "center" | "right" | "custom";
+  /** Literal X position (px, content-area-relative) when xAlign === "custom". */
+  x?: number;
+  /** Vertical offset from anchor (px). */
+  yOffset?: number;
+  /** Marks applied to the run wrapping this drawing (rare). */
+  marks: DocxMark[];
+}
+
 export type DocxInline =
   | { type: "text"; text: string; marks: DocxMark[] }
   | { type: "hardBreak"; marks: DocxMark[] }
-  | { type: "image"; src: string; width?: number; height?: number; marks: DocxMark[] };
+  | DocxImageInline;
 
 export interface DocxParagraphAttrs {
   /** Paragraph style ID (`Heading1`, `Normal`, …) — resolved from `styles.xml`. */
@@ -401,6 +429,15 @@ export interface DocxImportContext {
     error(d: Omit<DocxDiagnostic, "level">): void;
     list(): DocxDiagnostic[];
   };
+  /**
+   * Resolve OPC relationships and materialize binary parts. The factory
+   * builds the map from `word/_rels/document.xml.rels` + `word/media/`
+   * before Stage 2 runs.
+   */
+  media: {
+    /** Return the materialized `src` for an image relId, or `undefined`. */
+    resolveImage(relId: string): string | undefined;
+  };
   shared: {
     getOrInit<T>(key: string, init: () => T): T;
     get<T>(key: string): T | undefined;
@@ -447,6 +484,18 @@ export type DocxMarkTransform = (
 ) => PmMark | null;
 
 /**
+ * Inline transformer — claims a `DocxInline` kind (`image`, `hardBreak`,
+ * future widgets). Receives the inline plus the marks merged in from the
+ * surrounding run, returns the resulting ProseMirror `Node` (or `null`
+ * to drop).
+ */
+export type DocxInlineTransform = (
+  inline: DocxInline,
+  marks: PmMark[],
+  ctx: DocxImportContext,
+) => PmNode | null;
+
+/**
  * The handler bundle contributed by extensions for DOCX import. Format
  * packages augment `FormatImportHandlers.docx` to point at this.
  */
@@ -457,6 +506,8 @@ export interface DocxImports {
   paragraphStyles?: Record<string, DocxParagraphStyleTransform>;
   /** Stage 2 mark transform — dispatched by `DocxMark.kind`. */
   marks?: Record<string, DocxMarkTransform>;
+  /** Stage 2 inline transform — dispatched by `DocxInline.type`. */
+  inlines?: Record<string, DocxInlineTransform>;
 
   /** Runs before Stage 1 parsing. Precompute lookup tables, etc. */
   onBeforeImport?(ctx: DocxImportContext): void | Promise<void>;

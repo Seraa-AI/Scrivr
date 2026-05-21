@@ -48,6 +48,7 @@ interface MinimalContribBundle {
   // Import side — DocxImports
   blocks?: Record<string, unknown>;
   paragraphStyles?: Record<string, unknown>;
+  inlines?: Record<string, unknown>;
   onBeforeImport?: (ctx: unknown) => void | Promise<void>;
   onImportComplete?: (doc: unknown, ctx: unknown) => unknown;
 }
@@ -92,6 +93,7 @@ function mergeContribBundles(
   if (incoming.paragraphStyles) {
     out.paragraphStyles = { ...out.paragraphStyles, ...incoming.paragraphStyles };
   }
+  if (incoming.inlines) out.inlines = { ...out.inlines, ...incoming.inlines };
   if (incoming.onBeforeImport) {
     out.onBeforeImport = out.onBeforeImport
       ? chainHooks(out.onBeforeImport, incoming.onBeforeImport)

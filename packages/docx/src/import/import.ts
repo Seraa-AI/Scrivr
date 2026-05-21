@@ -30,6 +30,8 @@ import { parseOoxml } from "./xml";
 import { parseDocumentBody } from "./parser";
 import { readNumberingMap } from "./numbering";
 import { reconstructLists } from "./lists";
+import { readRelationshipMap } from "./relationships";
+import { buildImageResolver } from "./media";
 import {
   transformToProseMirror,
   type ResolvedImportHandlers,
@@ -63,15 +65,27 @@ export async function importDocx(
   bytes: Uint8Array,
   options: DocxImportCallOptions = {},
 ): Promise<DocxImportResult> {
+  const handlers = collectHandlers(editor, options.overrides);
+  const lifecycleHooks = collectLifecycleHooks(editor, options.overrides);
+
+  // Build ctx first; the image resolver needs ctx.diagnostics to route
+  // warnings (missing parts, drop policy, etc.) into the same list the
+  // caller reads. ZIP-decoding sits inside the try block so malformed
+  // bytes surface as DocxImportError instead of raw fflate errors.
   const ctx = createDocxImportContext({
     schema: editor.schema,
     ...options,
   });
-  const handlers = collectHandlers(editor, options.overrides);
-  const lifecycleHooks = collectLifecycleHooks(editor, options.overrides);
 
   try {
     const pkg = readDocxPackage(bytes);
+    const rels = readRelationshipMap(pkg.readText("word/_rels/document.xml.rels"));
+    ctx.media.resolveImage = buildImageResolver(
+      rels,
+      pkg,
+      options.media ?? "data-url",
+      ctx.diagnostics,
+    );
     const documentXml = pkg.readText("word/document.xml");
     if (documentXml === undefined) {
       throw new DocxImportError(
@@ -117,6 +131,7 @@ function collectHandlers(
   const blocks: ResolvedImportHandlers["blocks"] = {};
   const paragraphStyles: ResolvedImportHandlers["paragraphStyles"] = {};
   const marks: ResolvedImportHandlers["marks"] = {};
+  const inlines: ResolvedImportHandlers["inlines"] = {};
 
   for (const contrib of editor.getImportContributions()) {
     const docx = contrib.docx;
@@ -124,6 +139,7 @@ function collectHandlers(
     if (docx.blocks) Object.assign(blocks, docx.blocks);
     if (docx.paragraphStyles) Object.assign(paragraphStyles, docx.paragraphStyles);
     if (docx.marks) Object.assign(marks, docx.marks);
+    if (docx.inlines) Object.assign(inlines, docx.inlines);
   }
 
   if (overrides) {
@@ -131,9 +147,10 @@ function collectHandlers(
     if (overrides.paragraphStyles)
       Object.assign(paragraphStyles, overrides.paragraphStyles);
     if (overrides.marks) Object.assign(marks, overrides.marks);
+    if (overrides.inlines) Object.assign(inlines, overrides.inlines);
   }
 
-  return { blocks, paragraphStyles, marks };
+  return { blocks, paragraphStyles, marks, inlines };
 }
 
 interface LifecycleHooks {

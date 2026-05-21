@@ -35,6 +35,7 @@ export interface ResolvedImportHandlers {
     NonNullable<DocxImports["paragraphStyles"]>[string]
   >;
   marks: Record<string, NonNullable<DocxImports["marks"]>[string]>;
+  inlines: Record<string, NonNullable<DocxImports["inlines"]>[string]>;
 }
 
 export function transformToProseMirror(
@@ -140,12 +141,18 @@ function transformInlines(
         });
       }
     } else if (item.type === "image") {
-      // Image extension claims via blocks dispatch in the image milestone.
-      ctx.diagnostics.warn({
-        code: "image-import-pending",
-        message: "Inline image import lands with the image milestone",
-        nodeType: "image",
-      });
+      const marks = transformMarks(item.marks, ctx, handlers);
+      const handler = handlers.inlines["image"];
+      if (handler) {
+        const node = handler(item, marks, ctx);
+        if (node) out.push(node);
+      } else {
+        ctx.diagnostics.warn({
+          code: "image-no-handler",
+          message: "No image import handler registered — image dropped",
+          nodeType: "image",
+        });
+      }
     }
   }
   return out;
