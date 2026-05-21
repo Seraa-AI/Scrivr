@@ -11,6 +11,7 @@
  * never mutate package internals directly.
  */
 
+import type { IBaseEditor } from "@scrivr/core";
 import type { DocxDiagnostic } from "./handlers";
 
 /** Minimal XML node — input to the deterministic serializer in `xml.ts`. */
@@ -97,6 +98,9 @@ export interface DocxResolvedOptions {
  *   - `ctx.shared` uses `getOrInit` (collaborative append) not `set` (overwrite).
  */
 export interface DocxContext {
+  /** The editor whose state is being exported. Read-only inside handlers. */
+  readonly editor: IBaseEditor;
+
   /** Resolved export options — never undefined inside a handler. */
   readonly options: DocxResolvedOptions;
 

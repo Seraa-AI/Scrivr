@@ -52,9 +52,10 @@ function buildDocFrom(editor: ServerEditor, build: (s: import("prosemirror-model
 function walkBody(
   doc: Node,
   handlers: MinimalHandlers,
-  opts: Parameters<typeof createDocxContext>[0] = {},
+  opts: Partial<Omit<Parameters<typeof createDocxContext>[0], "editor">> = {},
+  editor: ServerEditor = new ServerEditor(),
 ): { body: string; diagnostics: ReturnType<ReturnType<typeof createDocxContext>["ctx"]["diagnostics"]["list"]> } {
-  const { ctx } = createDocxContext(opts);
+  const { ctx } = createDocxContext({ editor, ...opts });
   const out = walkDocument(doc, ctx, handlers);
   return {
     body: serializeXml(xml("w:body", undefined, out)),

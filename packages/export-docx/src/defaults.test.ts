@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { unzipSync, strFromU8 } from "fflate";
+import { ServerEditor } from "@scrivr/core";
 import { buildDocxPackage } from "./defaults";
 import { zipDocxPackage } from "./package";
 import { xml } from "./xml";
@@ -16,7 +17,7 @@ function readZip(bytes: Uint8Array): Record<string, string> {
 
 describe("buildDocxPackage", () => {
   it("produces all required OPC parts for an empty body", () => {
-    const { state } = createDocxContext();
+    const { state } = createDocxContext({ editor: new ServerEditor() });
     const pkg = buildDocxPackage([], state);
     const bytes = zipDocxPackage(pkg);
     const files = readZip(bytes);
@@ -36,7 +37,7 @@ describe("buildDocxPackage", () => {
   });
 
   it("wraps body content in w:document/w:body and appends sectPr", () => {
-    const { state } = createDocxContext();
+    const { state } = createDocxContext({ editor: new ServerEditor() });
     const body = [xml("w:p", undefined, [xml("w:r", undefined, [xml("w:t", undefined, ["hi"])])])];
     const pkg = buildDocxPackage(body, state);
     const files = readZip(zipDocxPackage(pkg));
@@ -49,7 +50,7 @@ describe("buildDocxPackage", () => {
   });
 
   it("registers content-type overrides for the core OOXML parts", () => {
-    const { state } = createDocxContext();
+    const { state } = createDocxContext({ editor: new ServerEditor() });
     const files = readZip(zipDocxPackage(buildDocxPackage([], state)));
     const ct = files["[Content_Types].xml"]!;
     expect(ct).toContain('PartName="/word/document.xml"');
@@ -59,7 +60,7 @@ describe("buildDocxPackage", () => {
   });
 
   it("emits the named internal document rels (rIdStyles/Numbering/Settings)", () => {
-    const { state } = createDocxContext();
+    const { state } = createDocxContext({ editor: new ServerEditor() });
     const files = readZip(zipDocxPackage(buildDocxPackage([], state)));
     const rels = files["word/_rels/document.xml.rels"]!;
     expect(rels).toContain('Id="rIdStyles"');
@@ -68,7 +69,7 @@ describe("buildDocxPackage", () => {
   });
 
   it("appends user-registered styles to styles.xml", () => {
-    const { ctx, state } = createDocxContext();
+    const { ctx, state } = createDocxContext({ editor: new ServerEditor() });
     const id = ctx.styles.paragraph.getOrCreate("Heading 1", { bold: true, size: 18 });
     expect(id).toBe("Heading1");
     const files = readZip(zipDocxPackage(buildDocxPackage([], state)));
@@ -80,7 +81,7 @@ describe("buildDocxPackage", () => {
   });
 
   it("emits abstractNum + num pairs for registered numbering defs", () => {
-    const { ctx, state } = createDocxContext();
+    const { ctx, state } = createDocxContext({ editor: new ServerEditor() });
     ctx.numbering.getOrCreate({
       type: "bullet",
       levels: [{ level: 0, format: "bullet", text: "•" }],
@@ -93,7 +94,7 @@ describe("buildDocxPackage", () => {
   });
 
   it("registers media + adds Default content-type entry per unique extension", () => {
-    const { ctx, state } = createDocxContext();
+    const { ctx, state } = createDocxContext({ editor: new ServerEditor() });
     const filename = ctx.media.add({
       data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
       contentType: "image/png",
@@ -108,7 +109,7 @@ describe("buildDocxPackage", () => {
   });
 
   it("emits user-registered rels with their Type + TargetMode", () => {
-    const { ctx, state } = createDocxContext();
+    const { ctx, state } = createDocxContext({ editor: new ServerEditor() });
     ctx.rels.addImage("image1.png");
     ctx.rels.addHyperlink("https://example.com");
     const files = readZip(zipDocxPackage(buildDocxPackage([], state)));

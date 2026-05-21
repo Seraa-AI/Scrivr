@@ -81,11 +81,13 @@ describe("exportDocx", () => {
     expect(documentXml).toContain('<w:pStyle w:val="Custom"/>');
   });
 
-  it("emits unsupported-node warnings for nodes without a default handler (image)", async () => {
+  it("emits unsupported-node warnings for nodes without a default handler (bulletList)", async () => {
     const editor = new ServerEditor();
     const doc = editor.schema.node("doc", null, [
-      editor.schema.node("paragraph", null, [
-        editor.schema.node("image", { src: "https://example.com/x.png" }),
+      editor.schema.node("bulletList", null, [
+        editor.schema.node("listItem", null, [
+          editor.schema.node("paragraph", null, [editor.schema.text("item")]),
+        ]),
       ]),
     ]);
     editor.setContent(doc.toJSON());
@@ -93,7 +95,7 @@ describe("exportDocx", () => {
     const { diagnostics } = await exportDocx(editor);
     expect(
       diagnostics.some(
-        (d) => d.code === "unsupported-node" && d.nodeType === "image",
+        (d) => d.code === "unsupported-node" && d.nodeType === "bulletList",
       ),
     ).toBe(true);
   });
@@ -101,8 +103,10 @@ describe("exportDocx", () => {
   it("upgrades unsupported nodes to a DocxExportError when policy is 'throw'", async () => {
     const editor = new ServerEditor();
     const doc = editor.schema.node("doc", null, [
-      editor.schema.node("paragraph", null, [
-        editor.schema.node("image", { src: "https://example.com/x.png" }),
+      editor.schema.node("bulletList", null, [
+        editor.schema.node("listItem", null, [
+          editor.schema.node("paragraph", null, [editor.schema.text("item")]),
+        ]),
       ]),
     ]);
     editor.setContent(doc.toJSON());
@@ -115,8 +119,10 @@ describe("exportDocx", () => {
   it("preserves diagnostics on a thrown DocxExportError", async () => {
     const editor = new ServerEditor();
     const doc = editor.schema.node("doc", null, [
-      editor.schema.node("paragraph", null, [
-        editor.schema.node("image", { src: "https://example.com/x.png" }),
+      editor.schema.node("bulletList", null, [
+        editor.schema.node("listItem", null, [
+          editor.schema.node("paragraph", null, [editor.schema.text("item")]),
+        ]),
       ]),
     ]);
     editor.setContent(doc.toJSON());

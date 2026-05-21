@@ -67,7 +67,7 @@ export async function exportDocx(
 ): Promise<DocxExportResult> {
   const handlers = collectHandlers(editor, options.overrides);
 
-  const contextInit: Parameters<typeof createDocxContext>[0] = {};
+  const contextInit: Parameters<typeof createDocxContext>[0] = { editor };
   if (options.unsupported !== undefined) {
     contextInit.unsupported = options.unsupported;
   }

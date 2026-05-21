@@ -6,6 +6,7 @@
  * is the backing store the OPC builder walks when assembling the ZIP parts.
  */
 
+import type { IBaseEditor } from "@scrivr/core";
 import { xml } from "./xml";
 import type {
   DocxContext,
@@ -19,6 +20,7 @@ import type {
 import type { DocxDiagnostic } from "./handlers";
 
 export interface CreateContextOptions {
+  editor: IBaseEditor;
   unsupported?: DocxUnsupportedPolicy;
   fidelity?: DocxFidelity;
 }
@@ -59,7 +61,7 @@ export interface CreateContextResult {
 }
 
 export function createDocxContext(
-  opts: CreateContextOptions = {},
+  opts: CreateContextOptions,
 ): CreateContextResult {
   const options: DocxResolvedOptions = {
     unsupported: opts.unsupported ?? "drop",
@@ -91,6 +93,7 @@ export function createDocxContext(
   };
 
   const ctx: DocxContext = {
+    editor: opts.editor,
     options,
     styles: {
       paragraph: { getOrCreate: (n, s) => getOrCreateStyle("paragraph", n, s) },

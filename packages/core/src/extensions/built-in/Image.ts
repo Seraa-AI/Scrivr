@@ -6,6 +6,7 @@ import type { Node as PmNode } from "prosemirror-model";
 import type { ResolvedTheme } from "../../model/theme";
 import { safeUrl } from "../../model/safeUrl";
 import { getNodeAttrs } from "../../model/getNodeAttrs";
+import { imageDocxContribution } from "./Image.docx";
 
 // ── Image cache ───────────────────────────────────────────────────────────────
 
@@ -250,6 +251,12 @@ export const Image = Extension.create({
         isActive: () => false,
       },
     ];
+  },
+
+  addExports() {
+    // DOCX contribution lives next to the extension — see Image.docx.ts.
+    // Other formats register their handlers here too as they come online.
+    return { docx: imageDocxContribution };
   },
 
   addMarkdownSerializerRules() {
