@@ -2,7 +2,7 @@ import { Extension } from "../Extension";
 import type { Command } from "prosemirror-state";
 import { splitBlockAs } from "prosemirror-commands";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
-import { el, type DocxNodeHandlerShape } from "./exports/docx-shared";
+import { xml, type DocxNodeHandler } from "../../exports/docx";
 
 /**
  * Splits the current block and carries `fontFamily` and `align` from the
@@ -142,8 +142,8 @@ export const Paragraph = Extension.create({
   },
 
   addExports() {
-    const handler: DocxNodeHandlerShape = (_node, children) =>
-      el("w:p", undefined, children);
+    const handler: DocxNodeHandler = (_node, children) =>
+      xml("w:p", undefined, children);
     return { docx: { nodes: { paragraph: handler } } };
   },
 

@@ -6,7 +6,7 @@ import type { Command } from "prosemirror-state";
 import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
 import type { CharacterMap } from "../../layout/CharacterMap";
 import type { LayoutBlock } from "../../layout/BlockLayout";
-import { el, type DocxNodeHandlerShape } from "./exports/docx-shared";
+import { xml, type DocxNodeHandler } from "../../exports/docx";
 
 // ── Theme tokens — overridable via CodeBlock.configure({ theme: {...} }) ─────
 
@@ -163,13 +163,13 @@ export const CodeBlock = Extension.create<CodeBlockOptions>({
   },
 
   addExports() {
-    const handler: DocxNodeHandlerShape = (_node, children, ctx) => {
+    const handler: DocxNodeHandler = (_node, children, ctx) => {
       const styleId = ctx.styles.paragraph.getOrCreate("Code Block", {
         font: "Courier New",
         size: 13,
       });
-      return el("w:p", undefined, [
-        el("w:pPr", undefined, [el("w:pStyle", { "w:val": styleId })]),
+      return xml("w:p", undefined, [
+        xml("w:pPr", undefined, [xml("w:pStyle", { "w:val": styleId })]),
         ...children,
       ]);
     };

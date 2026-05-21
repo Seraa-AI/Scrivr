@@ -1,7 +1,7 @@
 import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
-import type { DocxMarkHandlerShape } from "./exports/docx-shared";
+import type { DocxMarkHandler } from "../../exports/docx";
 
 export const Strikethrough = Extension.create({
   name: "strikethrough",
@@ -62,7 +62,7 @@ export const Strikethrough = Extension.create({
   },
 
   addExports() {
-    const handler: DocxMarkHandlerShape = (props) => ({ ...props, strike: true });
+    const handler: DocxMarkHandler = (props) => ({ ...props, strike: true });
     return { docx: { marks: { strikethrough: handler } } };
   },
 

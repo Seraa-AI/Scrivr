@@ -5,10 +5,10 @@ import type { ToolbarItemSpec } from "../types";
 import type { BlockStyle } from "../../layout/FontConfig";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import {
-  el,
+  xml,
   pxToTwips,
-  type DocxNodeHandlerShape,
-} from "./exports/docx-shared";
+  type DocxNodeHandler,
+} from "../../exports/docx";
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -159,7 +159,7 @@ export const Heading = Extension.create<HeadingOptions>({
       }
       return levels[0] ?? 1;
     };
-    const headingHandler: DocxNodeHandlerShape = (node, children, ctx) => {
+    const headingHandler: DocxNodeHandler = (node, children, ctx) => {
       const level = readLevel(node.attrs["level"]);
       const spec = HEADING_LEVEL_SPEC[level];
       const styleId = ctx.styles.paragraph.getOrCreate(`Heading ${level}`, {
@@ -168,8 +168,8 @@ export const Heading = Extension.create<HeadingOptions>({
         spacingBefore: spec ? pxToTwips(spec.spaceBefore) : 0,
         spacingAfter: spec ? pxToTwips(spec.spaceAfter) : 0,
       });
-      return el("w:p", undefined, [
-        el("w:pPr", undefined, [el("w:pStyle", { "w:val": styleId })]),
+      return xml("w:p", undefined, [
+        xml("w:pPr", undefined, [xml("w:pStyle", { "w:val": styleId })]),
         ...children,
       ]);
     };

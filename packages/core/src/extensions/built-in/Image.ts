@@ -7,12 +7,12 @@ import type { ResolvedTheme } from "../../model/theme";
 import { safeUrl } from "../../model/safeUrl";
 import { getNodeAttrs } from "../../model/getNodeAttrs";
 import {
-  el,
+  xml,
   pxToEmu,
-  type DocxContextShape,
-  type DocxNodeHandlerShape,
+  type DocxContext,
+  type DocxNodeHandler,
   type XmlNode,
-} from "./exports/docx-shared";
+} from "../../exports/docx";
 
 // ── Image cache ───────────────────────────────────────────────────────────────
 
@@ -241,7 +241,7 @@ function collectImageSrcs(doc: PmNode): string[] {
   return Array.from(seen);
 }
 
-async function imageOnBeforeDocxExport(ctx: DocxContextShape): Promise<void> {
+async function imageOnBeforeDocxExport(ctx: DocxContext): Promise<void> {
   const doc = ctx.editor.getState().doc;
   const srcs = collectImageSrcs(doc);
   if (srcs.length === 0) return;
@@ -284,23 +284,23 @@ function buildPicGraphic(
 ): XmlNode {
   const cx = String(pxToEmu(widthPx));
   const cy = String(pxToEmu(heightPx));
-  return el("a:graphic", { "xmlns:a": NS_A }, [
-    el("a:graphicData", { uri: NS_PIC }, [
-      el("pic:pic", { "xmlns:pic": NS_PIC }, [
-        el("pic:nvPicPr", undefined, [
-          el("pic:cNvPr", { id: "0", name: filename }),
-          el("pic:cNvPicPr"),
+  return xml("a:graphic", { "xmlns:a": NS_A }, [
+    xml("a:graphicData", { uri: NS_PIC }, [
+      xml("pic:pic", { "xmlns:pic": NS_PIC }, [
+        xml("pic:nvPicPr", undefined, [
+          xml("pic:cNvPr", { id: "0", name: filename }),
+          xml("pic:cNvPicPr"),
         ]),
-        el("pic:blipFill", undefined, [
-          el("a:blip", { "r:embed": relId }),
-          el("a:stretch", undefined, [el("a:fillRect")]),
+        xml("pic:blipFill", undefined, [
+          xml("a:blip", { "r:embed": relId }),
+          xml("a:stretch", undefined, [xml("a:fillRect")]),
         ]),
-        el("pic:spPr", undefined, [
-          el("a:xfrm", undefined, [
-            el("a:off", { x: "0", y: "0" }),
-            el("a:ext", { cx, cy }),
+        xml("pic:spPr", undefined, [
+          xml("a:xfrm", undefined, [
+            xml("a:off", { x: "0", y: "0" }),
+            xml("a:ext", { cx, cy }),
           ]),
-          el("a:prstGeom", { prst: "rect" }, [el("a:avLst")]),
+          xml("a:prstGeom", { prst: "rect" }, [xml("a:avLst")]),
         ]),
       ]),
     ]),
@@ -313,13 +313,13 @@ function buildInlineDrawing(
   const cx = String(pxToEmu(widthPx));
   const cy = String(pxToEmu(heightPx));
   const id = nextDocxPicId();
-  return el("w:drawing", undefined, [
-    el("wp:inline", { "xmlns:wp": NS_WP, distT: "0", distB: "0", distL: "0", distR: "0" }, [
-      el("wp:extent", { cx, cy }),
-      el("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" }),
-      el("wp:docPr", { id, name: `Picture ${id}` }),
-      el("wp:cNvGraphicFramePr", undefined, [
-        el("a:graphicFrameLocks", { "xmlns:a": NS_A, noChangeAspect: "1" }),
+  return xml("w:drawing", undefined, [
+    xml("wp:inline", { "xmlns:wp": NS_WP, distT: "0", distB: "0", distL: "0", distR: "0" }, [
+      xml("wp:extent", { cx, cy }),
+      xml("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" }),
+      xml("wp:docPr", { id, name: `Picture ${id}` }),
+      xml("wp:cNvGraphicFramePr", undefined, [
+        xml("a:graphicFrameLocks", { "xmlns:a": NS_A, noChangeAspect: "1" }),
       ]),
       buildPicGraphic(filename, relId, widthPx, heightPx),
     ]),
@@ -345,31 +345,31 @@ function buildAnchoredDrawing(
 
   const positionH = ((): XmlNode => {
     if (typeof anchor.xCustom === "number") {
-      return el("wp:positionH", { relativeFrom: "column" }, [
-        el("wp:posOffset", undefined, [String(pxToEmu(anchor.xCustom))]),
+      return xml("wp:positionH", { relativeFrom: "column" }, [
+        xml("wp:posOffset", undefined, [String(pxToEmu(anchor.xCustom))]),
       ]);
     }
     const align =
       anchor.xAlign === "center" ? "center" :
       anchor.xAlign === "right"  ? "right"  :
       "left";
-    return el("wp:positionH", { relativeFrom: "column" }, [
-      el("wp:align", undefined, [align]),
+    return xml("wp:positionH", { relativeFrom: "column" }, [
+      xml("wp:align", undefined, [align]),
     ]);
   })();
 
-  const positionV = el("wp:positionV", { relativeFrom: "paragraph" }, [
-    el("wp:posOffset", undefined, [String(pxToEmu(anchor.yOffset))]),
+  const positionV = xml("wp:positionV", { relativeFrom: "paragraph" }, [
+    xml("wp:posOffset", undefined, [String(pxToEmu(anchor.yOffset))]),
   ]);
 
   const wrapEl = ((): XmlNode => {
-    if (anchor.wrapMode === "square") return el("wp:wrapSquare", { wrapText: "bothSides" });
-    if (anchor.wrapMode === "top-bottom") return el("wp:wrapTopAndBottom");
-    return el("wp:wrapNone");
+    if (anchor.wrapMode === "square") return xml("wp:wrapSquare", { wrapText: "bothSides" });
+    if (anchor.wrapMode === "top-bottom") return xml("wp:wrapTopAndBottom");
+    return xml("wp:wrapNone");
   })();
 
-  return el("w:drawing", undefined, [
-    el(
+  return xml("w:drawing", undefined, [
+    xml(
       "wp:anchor",
       {
         "xmlns:wp": NS_WP,
@@ -378,15 +378,15 @@ function buildAnchoredDrawing(
         locked: "0", layoutInCell: "1", allowOverlap: "1",
       },
       [
-        el("wp:simplePos", { x: "0", y: "0" }),
+        xml("wp:simplePos", { x: "0", y: "0" }),
         positionH,
         positionV,
-        el("wp:extent", { cx, cy }),
-        el("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" }),
+        xml("wp:extent", { cx, cy }),
+        xml("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" }),
         wrapEl,
-        el("wp:docPr", { id, name: `Picture ${id}` }),
-        el("wp:cNvGraphicFramePr", undefined, [
-          el("a:graphicFrameLocks", { "xmlns:a": NS_A, noChangeAspect: "1" }),
+        xml("wp:docPr", { id, name: `Picture ${id}` }),
+        xml("wp:cNvGraphicFramePr", undefined, [
+          xml("a:graphicFrameLocks", { "xmlns:a": NS_A, noChangeAspect: "1" }),
         ]),
         buildPicGraphic(filename, relId, widthPx, heightPx),
       ],
@@ -394,7 +394,7 @@ function buildAnchoredDrawing(
   ]);
 }
 
-const imageDocxHandler: DocxNodeHandlerShape = (node, _children, ctx) => {
+const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
   const src = readString(node.attrs["src"]);
   if (!src) {
     ctx.diagnostics.warn({
@@ -414,7 +414,7 @@ const imageDocxHandler: DocxNodeHandlerShape = (node, _children, ctx) => {
   const wrapMode = readString(node.attrs["wrapMode"]) ?? "inline";
 
   if (wrapMode === "inline") {
-    return el("w:r", undefined, [
+    return xml("w:r", undefined, [
       buildInlineDrawing(record.filename, record.relId, width, height),
     ]);
   }
@@ -427,7 +427,7 @@ const imageDocxHandler: DocxNodeHandlerShape = (node, _children, ctx) => {
   };
   if (typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
 
-  return el("w:r", undefined, [
+  return xml("w:r", undefined, [
     buildAnchoredDrawing(record.filename, record.relId, width, height, anchor),
   ]);
 };

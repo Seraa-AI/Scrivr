@@ -2,7 +2,7 @@ import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { FontModifier } from "../types";
-import type { DocxMarkHandlerShape } from "./exports/docx-shared";
+import type { DocxMarkHandler } from "../../exports/docx";
 
 interface BoldOptions {
   /** Set to false to disable Mod-b shortcut. Default: true */
@@ -67,7 +67,7 @@ export const Bold = Extension.create<BoldOptions>({
   },
 
   addExports() {
-    const handler: DocxMarkHandlerShape = (props) => ({ ...props, bold: true });
+    const handler: DocxMarkHandler = (props) => ({ ...props, bold: true });
     return { docx: { marks: { bold: handler } } };
   },
 

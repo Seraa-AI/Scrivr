@@ -2,7 +2,7 @@ import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { FontModifier } from "../types";
-import type { DocxMarkHandlerShape } from "./exports/docx-shared";
+import type { DocxMarkHandler } from "../../exports/docx";
 
 interface ItalicOptions {
   shortcut: boolean;
@@ -59,7 +59,7 @@ export const Italic = Extension.create<ItalicOptions>({
   },
 
   addExports() {
-    const handler: DocxMarkHandlerShape = (props) => ({ ...props, italic: true });
+    const handler: DocxMarkHandler = (props) => ({ ...props, italic: true });
     return { docx: { marks: { italic: handler } } };
   },
 

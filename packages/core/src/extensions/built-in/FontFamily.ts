@@ -2,7 +2,7 @@ import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
-import type { DocxMarkHandlerShape } from "./exports/docx-shared";
+import type { DocxMarkHandler } from "../../exports/docx";
 
 interface FontFamilyOptions {
   /** Font family presets shown in the toolbar. */
@@ -137,7 +137,7 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
   },
 
   addExports() {
-    const handler: DocxMarkHandlerShape = (props, mark) => {
+    const handler: DocxMarkHandler = (props, mark) => {
       const f = mark.attrs["family"];
       return typeof f === "string" && f.length > 0
         ? { ...props, fontFamily: f }

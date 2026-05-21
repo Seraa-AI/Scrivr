@@ -1,34 +1,22 @@
 /**
- * Minimal XML builder + serializer for DOCX export.
+ * XML serializer for DOCX export.
+ *
+ * The `xml()` builder + `XmlNode`/`XmlAttrs`/`XmlChild` types live in
+ * `@scrivr/core` so built-in extensions can construct nodes without a
+ * runtime dependency on this package. The serializer (and its escape
+ * helpers) live here because only the export pipeline emits actual XML.
  *
  * Determinism is load-bearing: golden-test diffs against produced
- * `document.xml` must be stable, so attributes are emitted in
- * alphabetical order regardless of insertion order.
+ * `document.xml` must be stable, so attributes are emitted in alphabetical
+ * order regardless of insertion order.
  */
 
-import type { XmlNode } from "./context";
+import type { XmlNode, XmlAttrs, XmlChild } from "@scrivr/core";
 
-export type XmlAttrs = Record<string, string>;
-export type XmlChild = XmlNode | string;
-
-/**
- * Construct an `XmlNode`. Empty `attrs` and `children` are omitted so the
- * resulting object compares cleanly in tests.
- */
-export function xml(
-  name: string,
-  attrs?: XmlAttrs,
-  children?: XmlChild[],
-): XmlNode {
-  const node: XmlNode = { name };
-  if (attrs && Object.keys(attrs).length > 0) {
-    node.attributes = attrs;
-  }
-  if (children && children.length > 0) {
-    node.children = children;
-  }
-  return node;
-}
+// Re-export the builder + types from core for backward compat — existing
+// callers using `import { xml } from "@scrivr/export-docx"` still resolve.
+export { xml } from "@scrivr/core";
+export type { XmlAttrs, XmlChild } from "@scrivr/core";
 
 export interface SerializeOptions {
   /** Prefix output with `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`. */
