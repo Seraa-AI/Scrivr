@@ -1,5 +1,374 @@
 # @scrivr/export-docx
 
+## 0.0.6
+
+### Patch Changes
+
+- 6d6f642: `@scrivr/core` — new `addPageConfig?(): PageConfig | undefined` extension
+  lane. Extensions can now contribute page dimensions, margins, and the
+  pageless toggle through the same first-class hook pattern used for nodes,
+  marks, page chrome, etc. `ExtensionManager.buildPageConfig()` resolves the
+  config by iterating the lane rather than looking extensions up by name —
+  the manager no longer hardcodes `"pagination"` or `"starterKit"`.
+
+  Behavior changes:
+
+  - `Pagination` extension now implements `addPageConfig()` returning its
+    configured `PageConfig` options.
+  - `StarterKit` implements `addPageConfig()` reading its nested
+    `pagination` option. Returns `undefined` when unset (so a downstream
+    `Pagination.configure(...)` wins cleanly), the partial-merged config
+    when set to an object, and `undefined` again when set to `false`.
+  - Multi-provider warning fires when two extensions contribute non-undefined
+    page configs — same pattern as the initial-doc lane.
+  - The two `Extension.options` runtime predicates (`isPageConfig`,
+    `readStarterKitPagination`) that existed to dodge `as` casts on
+    `unknown` option lookups are gone — the typed lane removes the need.
+
+  The `[StarterKit, Pagination.configure(usLetter)]` user pattern continues
+  to resolve to `usLetter`. Bare `[StarterKit]` continues to render at
+  `defaultPageConfig` via Editor's existing fallback chain.
+
+  Future: when page config moves to `doc.attrs.pageSettings` (see
+  `project_page_config_to_docattrs` memory — collaborative page settings,
+  ruler-driven margin drags), the same `addPageConfig` lane stays in place
+  and the extension just sources from `state.doc.attrs.pageSettings`
+  instead of `this.options`. No manager-side rewiring needed.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 1db8abc: `@scrivr/core` — extension authors now get a `console.warn` whenever one
+  extension silently overrides another's node, mark, keymap binding, command,
+  input handler, markdown parser token, or markdown serializer rule (per kind
+  or lane). Each warning names the previous and new contributor so accidental
+  typos that shadow built-ins surface immediately. Doc attrs and surface owners
+  remain `throw` on collision; the new warn lane covers everything else where
+  override is sometimes intentional but always worth knowing about.
+
+  Additionally:
+
+  - New baseline warning when an extension overrides ProseMirror's required
+    `doc` or `text` node — points at `addDocAttrs()` as the supported path for
+    doc-level data.
+  - New warning when more than one extension provides an initial document
+    (e.g. `Collaboration` + `DefaultContent` stacking).
+  - `buildSchemaFromPhase1` no longer mutates its input contributions object.
+  - `Phase1SchemaContributions` now types `nodes` / `marks` as `NodeSpec` /
+    `MarkSpec` instead of `object`, removing two `as` casts from the schema
+    merge step.
+  - `buildPageConfig` reads `Extension.options` via runtime predicates
+    (`isPageConfig`, `readStarterKitPagination`) instead of unchecked `as`
+    casts.
+
+  Internal refactor: nodes, marks, keymap, commands, input handlers, markdown
+  parser tokens, markdown serializer rules, and doc-attrs all share one
+  `mergeContributions<T>()` helper with a `"warn"` / `"throw"` policy.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 2f74d3e: `@scrivr/core` — new first-class `HardBreak` extension, individually
+  importable as `import { HardBreak } from "@scrivr/core"` and matching
+  the shape of the other built-ins (Bold, Heading, HorizontalRule, etc.).
+
+  Previously the `hardBreak` node lived bundled inside the `Document`
+  extension and the `Shift-Enter` keymap was hardcoded in `BaseEditing`.
+  That made it impossible to opt out cleanly, to swap in a different
+  implementation, or to disable just the shortcut while keeping the node.
+
+  The new extension owns:
+
+  - The `hardBreak` inline-leaf node spec
+  - The `Shift-Enter` keymap (gated by `shortcut: boolean` option)
+  - The `insertHardBreak()` command (`editor.commands.insertHardBreak()`)
+  - The markdown serializer rule (with trailing-break suppression — a
+    trailing hardBreak no longer leaks a stray `\\\n` into the output)
+  - The markdown PARSER token mapping (new — closes a long-standing
+    asymmetry where the old `Document` extension serialized hard breaks
+    but couldn't parse them back in, throwing `Token type "hardbreak"
+not supported` on any markdown input containing one)
+
+  `Document` shrinks to contributing only the baseline `text` markdown
+  serializer rule (kept here because every doc has text nodes and
+  prosemirror-markdown needs an explicit serializer for them).
+  `BaseEditing` drops its Shift-Enter binding entirely — Backspace,
+  Delete, Mod-a, and arrow navigation are still owned there.
+
+  `StarterKit` gains a new option:
+
+  ```ts
+  StarterKit.configure({
+    hardBreak: false, // drop entirely
+  });
+
+  StarterKit.configure({
+    hardBreak: { shortcut: false }, // keep node + command, drop Shift-Enter
+  });
+  ```
+
+  Default behavior is unchanged: `StarterKit` includes `HardBreak` with
+  the Shift-Enter shortcut bound, so existing apps see no observable
+  difference except that `ServerEditor({ content: "alpha\\\nbeta" })`
+  now parses correctly instead of throwing.
+
+  19 tests cover the extension surface (node shape, keymap presence /
+  opt-out, command behaviour against a real `ServerEditor`, markdown
+  parse + serialize + full roundtrip including the trailing-break edge
+  case), regression guards proving `Document` and `BaseEditing` no
+  longer own this responsibility, and `StarterKit` integration through
+  all three option shapes (`undefined`, `false`, `{ shortcut: false }`).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 6c1945a: Collaborative headers & footers (Phase 5 of the header-footer plan).
+
+  **`@scrivr/core`** — `ExtensionManager` exposes `getDocAttrNames()` and
+  `getDocAttrOwners()`, sourced from the doc-attr ownership map already built
+  during schema construction. `IBaseEditor` grows `getDocAttrNames(): string[]`
+  so headless consumers (collab bindings, future audit tooling) can read the
+  declared-attr whitelist without touching schema internals. `BaseEditor`
+  implements the delegation, inherited by `Editor` and `ServerEditor`. Pure
+  additive surface.
+
+  **`@scrivr/plugins`** — `YBinding` now syncs `doc.attrs` across peers via a
+  sibling `Y.Map("prose_doc_attrs")` keyed by attr name with `DocAttrEnvelope`
+  values (`{ localSeq, value }`). Header/footer policy edits propagate between
+  peers, late joiners adopt the room's current policy on `markSynced`, and
+  the `Y.UndoManager` scope grows to cover the attrs map so Cmd-Z reverses a
+  policy change like any other document edit. The whitelist comes from
+  `editor.getDocAttrNames()` so only declared attrs cross the wire; undeclared
+  keys and malformed envelopes are silently dropped. Yjs remains authoritative
+  for conflict resolution — `localSeq` is a local dedup hint, not a tiebreaker.
+
+  `HeaderFooterRibbon` placement fix (it now sits above the header band rather
+  than overlapping the painted header content).
+
+  **`@scrivr/react`** — `HeaderFooterRibbon` + `useHeaderFooterRibbon` updated
+  to match the new ribbon-placement contract.
+
+  **`@scrivr/export`, `@scrivr/export-pdf`, `@scrivr/export-docx`,
+  `@scrivr/export-markdown`** — lockstep version bump only; no behavior change.
+
+- 4c2dd5e: `@scrivr/core` — regression coverage for `PasteTransformer` and the
+  markdown ingestion path against real-world hostile inputs. No
+  functional changes; documents what the existing pipeline already does.
+
+  `PasteTransformer.test.ts` gains five new describe-blocks asserting
+  the cleaning contract on every output doc:
+
+  - **drops script and style elements** — `<script>`, `<style>`, nested
+    scripts inside divs
+  - **strips event-handler attributes** — `onerror`, `onclick`,
+    `onmouseover`, body-level `onload`
+  - **rejects forbidden URL schemes** — `javascript:`, `data:text/html`,
+    `vbscript:`, `file:`, plus obfuscation variants (mixed case,
+    whitespace prefix, HTML-entity-encoded scheme)
+  - **ignores embedded objects** — `iframe`, `object`, `embed`, `form`
+  - **SVG content model** — `<svg><script>`, `<svg onload>`
+
+  Plus a deeply-nested-wrappers case proving the cleaning walks through
+  any depth.
+
+  `parseMarkdown.test.ts` (new file) covers the markdown ingestion path
+  the constructor uses when given `content: "..."`. With
+  `MarkdownIt({ html: false })` raw HTML in markdown source survives as
+  literal text — safe in every render target the framework supports
+  (canvas paints glyphs, exports use textContent / structured writers,
+  DOM renderers are required to use textContent per the security model).
+  The structural and URL invariants are asserted; the literal-text
+  behavior is documented as intentional.
+
+  Each describe-block reads as a normal regression test for how the
+  component behaves under hostile input — not as a labelled "security
+  suite" that would advertise the threat surface or frame defenses as
+  separable from the features they protect.
+
+  Comment cleanup along the way: removed temporal references from
+  `Document.ts` ("hardBreak lives in its own HardBreak extension as of
+  the extraction PR") and `HardBreak.ts` ("Previously bundled inside
+  the Document extension. Extracted so it...") that coupled the code
+  to specific PR work.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- fcd166b: **Popover UX — close on editor focus loss.** Floating menus (bubble menu,
+  slash menu, link popover, image menu, floating block menu, AI suggestion
+  popover, track-changes popover) now hide when the editor loses DOM focus
+  to something that isn't the popover itself. Previously they stayed
+  anchored to invisible selection state when the user clicked into a sidebar,
+  the browser address bar, or another window — the classic "feels weird"
+  artifact of subscribing only to PM state changes (DOM blur leaves the
+  selection untouched).
+
+  New `subscribeEditorFocusOutside(editor, onHide, { getPopoverElement? })`
+  helper in `@scrivr/core/menus` is the shared signal source. Defers the
+  hide one microtask so a click _into_ a popover (which blurs the editor
+  then focuses an input inside) settles before the check runs.
+
+  Popover detection, in priority:
+
+  1. `getPopoverElement()` — accessor returning the popover's root DOM node.
+     Each `createXMenu` controller now accepts this, and each React hook
+     threads its `rootRef.current` through. Bulletproof for internal
+     popovers — no marker attribute required.
+  2. `[data-scrivr-popover="<menu-name>"]` ancestor — fallback for vanilla
+     / third-party popovers that don't have a ref accessor. The seven React
+     components ship with a named marker (`bubble-menu`, `link-popover`,
+     etc.) as defense in depth and to keep DOM inspection self-documenting.
+
+  Header/footer surfaces are intentionally excluded — they're a persistent
+  editing mode, not a popover.
+
+  **`cx` utility upgrade.** The class-name combiner in `@scrivr/react/utils`
+  now accepts strings, numbers, falsy values, nested arrays, and conditional
+  dictionaries in addition to the previous string-only positional form. The
+  eight existing callers continue to work unchanged (they pass positional
+  strings, which the new shape handles identically). New shapes available:
+
+  ```ts
+  cx("btn", isActive && "btn-active"); // already worked
+  cx("btn", { "btn-active": isActive }); // NEW — conditional dict
+  cx(["base", flagged && "flag"]); // NEW — nested arrays
+  cx("col-", count); // NEW — numbers
+  ```
+
+  Return contract preserved: `string | undefined`. Tailwind utility-class
+  conflicts are NOT auto-merged (pull in `tailwind-merge` for that).
+
+  **React test runner bootstrap.** `@scrivr/react`'s `"test": "true"`
+  placeholder is replaced with real vitest + a node-environment config.
+  First occupant: 15 tests for the upgraded `cx` covering positional
+  strings, conditional dicts, nested arrays, numbers, dedup order, and the
+  documented Tailwind non-merge limitation. Removes one item from the
+  stable-1.x roadmap's "React adapter has no regression tests" gap.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- b61e408: `@scrivr/core` — central URL allow-list at the document boundary. PR 2
+  of the pre-1.x security baseline (`SECURITY.md` shipped in PR 1).
+
+  Adds `safeUrl(value)` in `@scrivr/core/model`. Returns the trimmed input
+  when the value is safe to store, `null` when it isn't. Allow-list:
+  `http`, `https`, `mailto`, `tel`, fragment-only (`#anchor`), and
+  relative URLs. Everything else — `javascript:`, `data:`, `vbscript:`,
+  `file:`, unknown custom schemes — returns `null`. Strips ASCII control
+  characters before validating so the classic `"java\x00script:"`
+  obfuscation can't slip past a naive prefix check. Trims whitespace.
+  Case-insensitive scheme match per RFC 3986. Defensive against non-string
+  input so callers reading from `unknown`-typed sources (collab apply,
+  parseDOM attribute getters) can pass values through without their own
+  type guard.
+
+  Wired at every URL ingestion point in `Link` and `Image`:
+
+  - `Link` parseDOM — `<a href="javascript:...">click</a>` → mark dropped,
+    text preserved (returning `false` from `getAttrs` is the canonical
+    "drop this match" signal)
+  - `Link.setLink` command — prompt validated; unsafe input is a no-op
+  - `Link.setLinkHref` command — returns `false` on unsafe href; safe
+    href stored normalised
+  - `Image` parseDOM — `<img src="javascript:...">` → node dropped entirely
+  - `Image.insertImage` command — prompt validated; unsafe input is a no-op
+
+  **JSON-load gate** — addresses the codex-flagged gap that parseDOM-only
+  validation leaves: `schema.nodeFromJSON` bypasses parseDOM entirely, so
+  a saved doc on disk with `link.attrs.href = "javascript:..."` would
+  round-trip unchanged.
+
+  New `sanitizeDocUrls(doc, schema)` walks a constructed PM doc and
+  applies the same allow-list to URL-bearing attrs. Image with unsafe
+  `src` → node dropped. Link mark with unsafe `href` → mark stripped,
+  text and co-occurring marks preserved. Cheap idempotent fast-path: a
+  clean doc returns the same `Node` reference, no allocation.
+
+  Wired at both raw-JSON ingestion sites:
+
+  - `BaseEditor` constructor — covers `content: json`, `content: "markdown"`,
+    and extension-supplied `addInitialDoc()` (like `DefaultContent`) in
+    one place
+  - `ServerEditor.setContent(json)` — runtime doc replacement
+
+  **Out of scope** (deliberate, separate PRs):
+
+  - **Collab Y→PM apply** — `yXmlFragmentToProseMirrorRootNode` bypasses
+    both parseDOM and constructor init. Adversarial-peer trust is already
+    documented in `SECURITY.md` as an app-layer concern (auth, validation,
+    potentially E2EE). A post-apply walker is a separate design.
+  - **Hand-rolled raw-node transactions** (`editor.applyTransaction(tr.replaceWith(0, 5, rawNode))`)
+    — covered if the node came through commands, not if hand-rolled. A
+    doc-wide transaction filter would catch it but trades for per-keystroke
+    overhead. Defer.
+
+  **Bonus cleanup** (the user's no-`as` rule extends here):
+
+  - New `getNodeAttrs<K>` / `getMarkAttrs<K>` typed accessors in
+    `@scrivr/core/model`. Look up `NodeAttributes[K]` / `MarkAttributes[K]`
+    augmentations to give extension authors typed `attrs.src` /
+    `attrs.href` access. Single `as` lives inside the helper behind a
+    runtime kind check — no scattered casts at usage sites.
+  - Augmented `NodeAttributes.image` (existing `MarkAttributes.link` was
+    already in place from a prior PR).
+  - Removed 4 scattered `as` casts from `Link.ts` and `Image.ts`. Zero
+    type assertions remain in either file.
+
+  **Tests** (43 new):
+
+  - 25 fuzz tests on `safeUrl` covering all the agreed obfuscation
+    scenarios from the security baseline plan
+  - 11 tests on `sanitizeDocUrls` covering helper behaviour + ServerEditor
+    constructor + setContent integration
+  - 7 integration tests on `Link` covering parseDOM rejection and command
+    rejection
+
+  All 12 monorepo typecheck tasks pass. All 11 test tasks pass.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 6d49fe0: **Repo:** add `SECURITY.md` — first PR of the pre-1.x security baseline.
+
+  Establishes the disclosure surface and the trust model so external
+  researchers know how to report vulnerabilities responsibly and app
+  authors know where the framework's defended surface ends.
+
+  Disclosure channel is GitHub Security Advisories (private, encrypted,
+  CVE-integrated). Coordinated-disclosure window is 90 days. Acknowledge
+  within 3 business days, substantive response within 10.
+
+  Explicitly out-of-scope (so reporters don't burn time and app authors
+  know to handle these at their layer):
+
+  - **Extensions are trusted code** — same model as TipTap / ProseMirror /
+    CodeMirror / Slate. No sandbox. Audit extensions like dependencies.
+  - **Collaborative peers can mutate the document** — Scrivr enforces
+    schema invariants but not authorisation. Adversarial-peer scenarios
+    need app-level permissioning, validation, and potentially E2EE.
+  - **AI prompt injection** — defended at the prompt layer + accept-time
+    UX, not the suggestion overlay primitive.
+  - **DoS via pathological input** — documented as recommended app-level
+    limits today; hard guards in core planned for 1.1+.
+
+  States the load-bearing invariant: **storage-safe forever**. Anything
+  that enters the ProseMirror JSON document must be safe to render
+  through any future surface (DOM a11y mirror, PDF, DOCX, exports).
+  Validation happens at ingestion time, not render time.
+
+  No code changes — lockstep patch bump only so the policy is visible
+  in every published package's release notes.
+
+  **Action required by the repo owner before this policy is real:** enable
+  "Private vulnerability reporting" in repo Settings → Security → Code
+  security and analysis. Without it the disclosure URL 404s for non-
+  maintainers.
+
+- Updated dependencies [6d6f642]
+- Updated dependencies [1db8abc]
+- Updated dependencies [2f74d3e]
+- Updated dependencies [6c1945a]
+- Updated dependencies [4c2dd5e]
+- Updated dependencies [fcd166b]
+- Updated dependencies [b61e408]
+- Updated dependencies [6d49fe0]
+  - @scrivr/core@1.0.10
+
 ## 0.0.5
 
 ### Patch Changes
