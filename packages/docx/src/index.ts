@@ -50,6 +50,8 @@ export { buildDocxPackage } from "./export/defaults";
 export { importDocx } from "./import/import";
 export type { DocxImportResult, DocxImportOptions } from "./import/import";
 
+export { DocxImport } from "./import/DocxImport";
+
 export { DocxImportError } from "./import/error";
 
 export { createDocxImportContext } from "./import/context";
