@@ -46,7 +46,35 @@ export { createDocxContext } from "./export/createContext";
 export { buildDocxPackage } from "./export/defaults";
 
 // ── Import side ─────────────────────────────────────────────────────────────
-//
-// Coming online module-by-module — see src/import/. Public surface
-// (`importDocx`, `DocxImportError`, `DocxImports`, ...) lands as each
-// milestone ships.
+
+export { importDocx } from "./import/import";
+export type { DocxImportResult, DocxImportOptions } from "./import/import";
+
+export { DocxImportError } from "./import/error";
+
+export { createDocxImportContext } from "./import/context";
+export type {
+  DocxImportContext,
+  DocxImportResolvedOptions,
+  DocxMediaSink,
+} from "./import/context";
+
+export type {
+  DocxBlock,
+  DocxInline,
+  DocxMark,
+  DocxParagraphAttrs,
+  DocxImportModel,
+} from "./import/types";
+
+// Lower-level building blocks — exported for tests and extension parsers.
+export { readDocxPackage } from "./import/opc";
+export type { DocxPackageReader } from "./import/opc";
+export {
+  parseOoxml,
+  findChild,
+  findChildren,
+  attr,
+  textContent,
+} from "./import/xml";
+export type { OoxmlElement, OoxmlChild } from "./import/xml";

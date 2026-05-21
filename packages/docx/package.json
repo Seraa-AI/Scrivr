@@ -32,6 +32,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "fast-xml-parser": "^4.5.0",
     "fflate": "^0.8.2"
   },
   "peerDependencies": {
