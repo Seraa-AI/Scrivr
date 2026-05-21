@@ -194,7 +194,14 @@ function applyUnsupportedPolicy(
         nodeType: node.type.name,
       });
       // Drop the wrapper but keep children — preserves inline text inside
-      // an unsupported block (custom callouts, etc.).
+      // an unsupported block (custom callouts, etc.). When the dropped
+      // node was a textblock (paragraph-like — held inline content), wrap
+      // the bubbled children in <w:p>; otherwise bare runs would sit as
+      // direct children of <w:body>, which is invalid OOXML and Word
+      // refuses to open the file.
+      if (node.isTextblock && children.length > 0) {
+        return [xml("w:p", undefined, children)];
+      }
       return children;
     }
   }

@@ -103,10 +103,19 @@ export function buildDocxPackage(
 }
 
 function buildDocumentRoot(body: XmlNode[]): XmlNode {
+  // Word rejects `<w:body><w:sectPr/></w:body>` — every body must contain
+  // at least one paragraph. Inject an empty `<w:p/>` if the walk produced
+  // nothing so the file remains openable.
+  const bodyChildren = body.length > 0 ? body : [xml("w:p")];
   return xml(
     "w:document",
     { "xmlns:w": W_NS, "xmlns:r": R_NS },
-    [xml("w:body", undefined, [...body, defaultSectionProperties()])],
+    [
+      xml("w:body", undefined, [
+        ...bodyChildren,
+        defaultSectionProperties(),
+      ]),
+    ],
   );
 }
 

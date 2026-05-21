@@ -23,6 +23,10 @@ import type { IBaseEditor } from "@scrivr/core";
 import { walkDocument, type WalkerHandlers } from "./walker";
 import { createDocxContext } from "./createContext";
 import { buildDocxPackage } from "./defaults";
+import {
+  defaultDocxNodeHandlers,
+  defaultDocxMarkHandlers,
+} from "./defaultHandlers";
 import { zipDocxPackage } from "./package";
 import { DocxExportError } from "./error";
 import type {
@@ -132,8 +136,11 @@ function collectHandlers(
   editor: IBaseEditor,
   overrides?: DocxHandlers,
 ): ResolvedHandlers {
-  const nodes: Record<string, DocxNodeHandler> = {};
-  const marks: Record<string, DocxMarkHandler> = {};
+  // Layering: defaults → extension contributions → per-call overrides.
+  // Built-in defaults cover the StarterKit semantic primitives so an
+  // unconfigured editor still produces a valid, Word-openable document.
+  const nodes: Record<string, DocxNodeHandler> = { ...defaultDocxNodeHandlers };
+  const marks: Record<string, DocxMarkHandler> = { ...defaultDocxMarkHandlers };
 
   for (const contrib of editor.getExportContributions()) {
     const docx = contrib.docx;

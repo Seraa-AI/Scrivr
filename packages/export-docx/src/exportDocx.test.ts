@@ -52,49 +52,98 @@ describe("exportDocx", () => {
     }
   });
 
-  it("walks the document and applies registered overrides", async () => {
-    const editor = new ServerEditor({ content: "hello world" });
-    const overrides: DocxHandlers = {
-      nodes: {
-        paragraph: (_n, children) => xml("w:p", undefined, children),
-      },
-    };
-    const { bytes, diagnostics } = await exportDocx(editor, { overrides });
+  it("applies default handlers — plain text exports without warnings", async () => {
+    const editor = new ServerEditor({ content: "hello **world**" });
+    const { bytes, diagnostics } = await exportDocx(editor);
     const files = readZip(bytes);
     const documentXml = files["word/document.xml"]!;
 
-    expect(documentXml).toContain("<w:t>hello world</w:t>");
-    expect(diagnostics.filter((d) => d.code === "unsupported-node")).toEqual([]);
+    expect(diagnostics).toEqual([]);
+    expect(documentXml).toContain('<w:t xml:space="preserve">hello </w:t>');
+    expect(documentXml).toContain("<w:t>world</w:t>");
+    expect(documentXml).toContain("<w:b/>");
+    expect(documentXml).toMatch(/<w:p>/);
   });
 
-  it("emits unsupported-node warnings when no paragraph handler is registered", async () => {
-    const editor = new ServerEditor({ content: "hello" });
+  it("per-call overrides supersede defaults", async () => {
+    const editor = new ServerEditor({ content: "hi" });
+    const overrides: DocxHandlers = {
+      nodes: {
+        paragraph: (_n, children) =>
+          xml("w:p", undefined, [
+            xml("w:pPr", undefined, [xml("w:pStyle", { "w:val": "Custom" })]),
+            ...children,
+          ]),
+      },
+    };
+    const { bytes } = await exportDocx(editor, { overrides });
+    const documentXml = readZip(bytes)["word/document.xml"]!;
+    expect(documentXml).toContain('<w:pStyle w:val="Custom"/>');
+  });
+
+  it("emits unsupported-node warnings for nodes without a default handler (image)", async () => {
+    const editor = new ServerEditor();
+    const doc = editor.schema.node("doc", null, [
+      editor.schema.node("paragraph", null, [
+        editor.schema.node("image", { src: "https://example.com/x.png" }),
+      ]),
+    ]);
+    editor.setContent(doc.toJSON());
+
     const { diagnostics } = await exportDocx(editor);
     expect(
       diagnostics.some(
-        (d) => d.code === "unsupported-node" && d.nodeType === "paragraph",
+        (d) => d.code === "unsupported-node" && d.nodeType === "image",
       ),
     ).toBe(true);
   });
 
   it("upgrades unsupported nodes to a DocxExportError when policy is 'throw'", async () => {
-    const editor = new ServerEditor({ content: "hello" });
+    const editor = new ServerEditor();
+    const doc = editor.schema.node("doc", null, [
+      editor.schema.node("paragraph", null, [
+        editor.schema.node("image", { src: "https://example.com/x.png" }),
+      ]),
+    ]);
+    editor.setContent(doc.toJSON());
+
     await expect(exportDocx(editor, { unsupported: "throw" })).rejects.toThrow(
       DocxExportError,
     );
   });
 
   it("preserves diagnostics on a thrown DocxExportError", async () => {
-    const editor = new ServerEditor({ content: "hello" });
+    const editor = new ServerEditor();
+    const doc = editor.schema.node("doc", null, [
+      editor.schema.node("paragraph", null, [
+        editor.schema.node("image", { src: "https://example.com/x.png" }),
+      ]),
+    ]);
+    editor.setContent(doc.toJSON());
+
     try {
       await exportDocx(editor, { unsupported: "throw" });
       throw new Error("expected DocxExportError");
     } catch (err) {
       expect(err).toBeInstanceOf(DocxExportError);
-      const diags = (err as DocxExportError).diagnostics;
-      expect(diags.length).toBeGreaterThan(0);
-      expect(diags.some((d) => d.level === "error")).toBe(true);
+      if (!(err instanceof DocxExportError)) throw err;
+      expect(err.diagnostics.length).toBeGreaterThan(0);
+      expect(err.diagnostics.some((d) => d.level === "error")).toBe(true);
     }
+  });
+
+  it("always emits a non-empty w:body (Word rejects empty bodies)", async () => {
+    // Even with a fully unhandled doc, the body must contain at least
+    // one paragraph or Word refuses to open the file.
+    const editor = new ServerEditor();
+    const doc = editor.schema.node("doc", null, [
+      editor.schema.node("paragraph"),
+    ]);
+    editor.setContent(doc.toJSON());
+
+    const { bytes } = await exportDocx(editor);
+    const documentXml = readZip(bytes)["word/document.xml"]!;
+    expect(documentXml).toMatch(/<w:body>.*<w:p\/?>/s);
   });
 
   it("runs onBeforeExport, onBuildTreeComplete, and onFinalize hooks in order", async () => {

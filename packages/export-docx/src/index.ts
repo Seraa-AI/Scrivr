@@ -4,6 +4,8 @@ import "./augmentation";
 export { exportDocx, exportDocxBytes } from "./export";
 export type { DocxExportOptions, DocxExportResult } from "./export";
 
+export { DocxExport } from "./DocxExport";
+
 export { DocxExportError } from "./error";
 
 export type {

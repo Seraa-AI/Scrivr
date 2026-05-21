@@ -8,10 +8,21 @@
 "@scrivr/export-markdown": patch
 ---
 
-`@scrivr/export-docx` — lock the DOCX export base contract. Replaces the
-type-only skeleton with a real, deterministic pipeline that ships an
-openable `.docx`. Built so feature PRs (paragraph/heading/list/table/image)
-can add handlers without renegotiating the contract.
+`@scrivr/export-docx` — lock the DOCX export base contract AND ship the
+semantic-core default handlers. Replaces the type-only skeleton with a
+real, deterministic pipeline that produces a Word-openable `.docx` out of
+the box. Built so feature PRs (lists, tables, images, hyperlinks,
+track-changes) can add handlers without renegotiating the contract.
+
+The default handlers cover the StarterKit semantic primitives — paragraph,
+heading (with auto-registered Heading1-6 paragraph styles), hardBreak,
+pageBreak, horizontalRule, codeBlock, and the basic marks (bold, italic,
+underline, strikethrough, code, color, highlight, fontSize, fontFamily).
+Without them an unconfigured editor would export an empty body that Word
+rejects, so they're part of the base, not deferred.
+
+A new `DocxExport` extension contributes `editor.commands.exportDocx()` +
+an "⬇ DOCX" toolbar button, mirroring the `PdfExport` pattern.
 
 The base PR ships the pieces that are expensive to change later:
 
@@ -39,6 +50,8 @@ The base PR ships the pieces that are expensive to change later:
 **Pipeline**
 - `collect → createContext → onBeforeExport → walk → onBuildTreeComplete
   → finalize / default packager → zip`.
+- Handler layering: built-in defaults → extension `addExports().docx`
+  contributions → per-call `options.overrides`.
 - `walkDocument` skips the implicit root, returns body XML; default
   packager wraps it in `<w:document>/<w:body>` plus a US-Letter sectPr.
 - `createDocxContext` exposes producer registries (`styles.getOrCreate`,
@@ -73,8 +86,15 @@ The base PR ships the pieces that are expensive to change later:
 - `mtime` pinned to the ZIP epoch so identical input produces identical
   bytes (deterministic for content-addressable storage and golden tests).
 
+**Word compatibility**
+- The walker's "drop" policy now wraps orphan inline children of a
+  dropped textblock in `<w:p>` — bare `<w:r>` as a direct child of
+  `<w:body>` is invalid OOXML and Word refuses to open the file.
+- `buildDocumentRoot` injects an empty `<w:p/>` when the walked body
+  is empty (same reason — Word rejects empty bodies).
+
 **Tests**
-- 49 unit tests across `xml`, `walker`, `package`, `defaults`,
+- 51 unit tests across `xml`, `walker`, `package`, `defaults`,
   `exportDocx`. Walker tests drive a real `ServerEditor` + StarterKit
   schema (no fake nodes / fixtures) — exercises text emission,
   whitespace preservation, mark merging into a single run, missing-mark
