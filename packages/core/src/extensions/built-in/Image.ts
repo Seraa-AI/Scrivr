@@ -6,7 +6,13 @@ import type { Node as PmNode } from "prosemirror-model";
 import type { ResolvedTheme } from "../../model/theme";
 import { safeUrl } from "../../model/safeUrl";
 import { getNodeAttrs } from "../../model/getNodeAttrs";
-import { imageDocxContribution } from "./Image.docx";
+import {
+  el,
+  pxToEmu,
+  type DocxContextShape,
+  type DocxNodeHandlerShape,
+  type XmlNode,
+} from "./exports/docx-shared";
 
 // ── Image cache ───────────────────────────────────────────────────────────────
 
@@ -141,6 +147,291 @@ function insertImage(): Command {
   };
 }
 
+// ── DOCX export ───────────────────────────────────────────────────────────────
+//
+// Pipeline:
+//   onBeforeExport — async — walks the doc, fetches unique image srcs,
+//     registers media + rels via ctx, stores Map<src, ImageRecord> under
+//     `ctx.shared["docx:images"]`.
+//   nodes.image — sync — reads the record and emits <w:drawing> with
+//     <wp:inline> (inline mode) or <wp:anchor> (the four float modes).
+//
+// Wrap-mode mapping (Scrivr → OOXML):
+//   inline      → <wp:inline> (atom inside <w:r>)
+//   square      → <wp:anchor> + <wp:wrapSquare wrapText="bothSides"/>
+//   top-bottom  → <wp:anchor> + <wp:wrapTopAndBottom/>
+//   behind      → <wp:anchor behindDoc="1"> + <wp:wrapNone/>
+//   front       → <wp:anchor behindDoc="0"> + <wp:wrapNone/>
+
+interface SniffedFormat {
+  contentType: string;
+  ext: string;
+}
+
+function sniffImageContentType(bytes: Uint8Array): SniffedFormat {
+  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50) {
+    return { contentType: "image/png", ext: "png" };
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return { contentType: "image/jpeg", ext: "jpg" };
+  }
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+    return { contentType: "image/gif", ext: "gif" };
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return { contentType: "image/webp", ext: "webp" };
+  }
+  return { contentType: "image/png", ext: "png" };
+}
+
+async function fetchImageBytes(src: string): Promise<Uint8Array | null> {
+  try {
+    if (src.startsWith("data:")) {
+      const idx = src.indexOf(",");
+      if (idx < 0) return null;
+      const meta = src.slice(0, idx);
+      const payload = src.slice(idx + 1);
+      if (meta.endsWith(";base64")) {
+        const binary = atob(payload);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return bytes;
+      }
+      return new TextEncoder().encode(decodeURIComponent(payload));
+    }
+    const res = await fetch(src);
+    if (!res.ok) return null;
+    return new Uint8Array(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+interface DocxImageRecord {
+  src: string;
+  relId: string;
+  filename: string;
+  width: number;
+  height: number;
+}
+
+type DocxImageMap = Map<string, DocxImageRecord>;
+const DOCX_IMAGES_KEY = "docx:images";
+
+function readPositiveInt(raw: unknown, fallback: number): number {
+  return typeof raw === "number" && raw > 0 ? Math.round(raw) : fallback;
+}
+
+function readString(raw: unknown): string | undefined {
+  return typeof raw === "string" && raw.length > 0 ? raw : undefined;
+}
+
+function collectImageSrcs(doc: PmNode): string[] {
+  const seen = new Set<string>();
+  doc.descendants((node) => {
+    if (node.type.name === "image") {
+      const src = readString(node.attrs["src"]);
+      if (src) seen.add(src);
+    }
+  });
+  return Array.from(seen);
+}
+
+async function imageOnBeforeDocxExport(ctx: DocxContextShape): Promise<void> {
+  const doc = ctx.editor.getState().doc;
+  const srcs = collectImageSrcs(doc);
+  if (srcs.length === 0) return;
+
+  const map = ctx.shared.getOrInit<DocxImageMap>(DOCX_IMAGES_KEY, () => new Map());
+  const DEFAULT_WIDTH = 200;
+  const DEFAULT_HEIGHT = 200;
+
+  await Promise.all(
+    srcs.map(async (src) => {
+      if (map.has(src)) return;
+      const bytes = await fetchImageBytes(src);
+      if (!bytes) {
+        ctx.diagnostics.warn({
+          code: "image-fetch-failed",
+          message: `Could not fetch image: ${src}`,
+          nodeType: "image",
+        });
+        return;
+      }
+      const { contentType, ext } = sniffImageContentType(bytes);
+      const filename = ctx.media.add({ data: bytes, contentType, ext });
+      const relId = ctx.rels.addImage(filename);
+      map.set(src, { src, relId, filename, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+    }),
+  );
+}
+
+const NS_WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
+const NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const NS_PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture";
+
+let nextDocPrId = 1;
+function nextDocxPicId(): string {
+  return String(nextDocPrId++);
+}
+
+function buildPicGraphic(
+  filename: string, relId: string, widthPx: number, heightPx: number,
+): XmlNode {
+  const cx = String(pxToEmu(widthPx));
+  const cy = String(pxToEmu(heightPx));
+  return el("a:graphic", { "xmlns:a": NS_A }, [
+    el("a:graphicData", { uri: NS_PIC }, [
+      el("pic:pic", { "xmlns:pic": NS_PIC }, [
+        el("pic:nvPicPr", undefined, [
+          el("pic:cNvPr", { id: "0", name: filename }),
+          el("pic:cNvPicPr"),
+        ]),
+        el("pic:blipFill", undefined, [
+          el("a:blip", { "r:embed": relId }),
+          el("a:stretch", undefined, [el("a:fillRect")]),
+        ]),
+        el("pic:spPr", undefined, [
+          el("a:xfrm", undefined, [
+            el("a:off", { x: "0", y: "0" }),
+            el("a:ext", { cx, cy }),
+          ]),
+          el("a:prstGeom", { prst: "rect" }, [el("a:avLst")]),
+        ]),
+      ]),
+    ]),
+  ]);
+}
+
+function buildInlineDrawing(
+  filename: string, relId: string, widthPx: number, heightPx: number,
+): XmlNode {
+  const cx = String(pxToEmu(widthPx));
+  const cy = String(pxToEmu(heightPx));
+  const id = nextDocxPicId();
+  return el("w:drawing", undefined, [
+    el("wp:inline", { "xmlns:wp": NS_WP, distT: "0", distB: "0", distL: "0", distR: "0" }, [
+      el("wp:extent", { cx, cy }),
+      el("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" }),
+      el("wp:docPr", { id, name: `Picture ${id}` }),
+      el("wp:cNvGraphicFramePr", undefined, [
+        el("a:graphicFrameLocks", { "xmlns:a": NS_A, noChangeAspect: "1" }),
+      ]),
+      buildPicGraphic(filename, relId, widthPx, heightPx),
+    ]),
+  ]);
+}
+
+interface AnchorAttrs {
+  wrapMode: string;
+  xAlign: string;
+  xCustom?: number;
+  yOffset: number;
+  marginPx: number;
+}
+
+function buildAnchoredDrawing(
+  filename: string, relId: string, widthPx: number, heightPx: number, anchor: AnchorAttrs,
+): XmlNode {
+  const cx = String(pxToEmu(widthPx));
+  const cy = String(pxToEmu(heightPx));
+  const id = nextDocxPicId();
+  const marginEmu = String(pxToEmu(anchor.marginPx));
+  const behindDoc = anchor.wrapMode === "behind" ? "1" : "0";
+
+  const positionH = ((): XmlNode => {
+    if (typeof anchor.xCustom === "number") {
+      return el("wp:positionH", { relativeFrom: "column" }, [
+        el("wp:posOffset", undefined, [String(pxToEmu(anchor.xCustom))]),
+      ]);
+    }
+    const align =
+      anchor.xAlign === "center" ? "center" :
+      anchor.xAlign === "right"  ? "right"  :
+      "left";
+    return el("wp:positionH", { relativeFrom: "column" }, [
+      el("wp:align", undefined, [align]),
+    ]);
+  })();
+
+  const positionV = el("wp:positionV", { relativeFrom: "paragraph" }, [
+    el("wp:posOffset", undefined, [String(pxToEmu(anchor.yOffset))]),
+  ]);
+
+  const wrapEl = ((): XmlNode => {
+    if (anchor.wrapMode === "square") return el("wp:wrapSquare", { wrapText: "bothSides" });
+    if (anchor.wrapMode === "top-bottom") return el("wp:wrapTopAndBottom");
+    return el("wp:wrapNone");
+  })();
+
+  return el("w:drawing", undefined, [
+    el(
+      "wp:anchor",
+      {
+        "xmlns:wp": NS_WP,
+        distT: marginEmu, distB: marginEmu, distL: marginEmu, distR: marginEmu,
+        simplePos: "0", relativeHeight: "0", behindDoc,
+        locked: "0", layoutInCell: "1", allowOverlap: "1",
+      },
+      [
+        el("wp:simplePos", { x: "0", y: "0" }),
+        positionH,
+        positionV,
+        el("wp:extent", { cx, cy }),
+        el("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" }),
+        wrapEl,
+        el("wp:docPr", { id, name: `Picture ${id}` }),
+        el("wp:cNvGraphicFramePr", undefined, [
+          el("a:graphicFrameLocks", { "xmlns:a": NS_A, noChangeAspect: "1" }),
+        ]),
+        buildPicGraphic(filename, relId, widthPx, heightPx),
+      ],
+    ),
+  ]);
+}
+
+const imageDocxHandler: DocxNodeHandlerShape = (node, _children, ctx) => {
+  const src = readString(node.attrs["src"]);
+  if (!src) {
+    ctx.diagnostics.warn({
+      code: "image-no-src",
+      message: "Image node has no src — dropping",
+      nodeType: "image",
+    });
+    return [];
+  }
+
+  const map = ctx.shared.get<DocxImageMap>(DOCX_IMAGES_KEY);
+  const record = map?.get(src);
+  if (!record) return []; // fetch already recorded its own diagnostic
+
+  const width = readPositiveInt(node.attrs["width"], record.width);
+  const height = readPositiveInt(node.attrs["height"], record.height);
+  const wrapMode = readString(node.attrs["wrapMode"]) ?? "inline";
+
+  if (wrapMode === "inline") {
+    return el("w:r", undefined, [
+      buildInlineDrawing(record.filename, record.relId, width, height),
+    ]);
+  }
+
+  const anchor: AnchorAttrs = {
+    wrapMode,
+    xAlign: readString(node.attrs["xAlign"]) ?? "left",
+    yOffset: typeof node.attrs["yOffset"] === "number" ? node.attrs["yOffset"] : 0,
+    marginPx: typeof node.attrs["margin"] === "number" ? node.attrs["margin"] : 12,
+  };
+  if (typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
+
+  return el("w:r", undefined, [
+    buildAnchoredDrawing(record.filename, record.relId, width, height, anchor),
+  ]);
+};
+
 // ── Extension ─────────────────────────────────────────────────────────────────
 
 export const Image = Extension.create({
@@ -254,9 +545,12 @@ export const Image = Extension.create({
   },
 
   addExports() {
-    // DOCX contribution lives next to the extension — see Image.docx.ts.
-    // Other formats register their handlers here too as they come online.
-    return { docx: imageDocxContribution };
+    return {
+      docx: {
+        onBeforeExport: imageOnBeforeDocxExport,
+        nodes: { image: imageDocxHandler },
+      },
+    };
   },
 
   addMarkdownSerializerRules() {

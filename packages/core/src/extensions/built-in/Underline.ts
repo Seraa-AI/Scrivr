@@ -1,6 +1,7 @@
 import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
+import type { DocxMarkHandlerShape } from "./exports/docx-shared";
 
 export const Underline = Extension.create({
   name: "underline",
@@ -59,6 +60,11 @@ export const Underline = Extension.create({
       group: "format",
       isActive: (marks: string[]) => marks.includes("underline"),
     }];
+  },
+
+  addExports() {
+    const handler: DocxMarkHandlerShape = (props) => ({ ...props, underline: true });
+    return { docx: { marks: { underline: handler } } };
   },
 
   // No standard markdown syntax for underline — serialize as HTML <u> tag

@@ -647,11 +647,37 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     };
 
     const opts = this.options;
+
+    // Nodes
+    if (opts.paragraph !== false) mergeFrom(Paragraph.resolve().exports);
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      mergeFrom(ext.resolve().exports);
+    }
     if (opts.heading !== false) {
       const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
       mergeFrom(ext.resolve().exports);
     }
+    if (opts.codeBlock !== false) mergeFrom(CodeBlock.resolve().exports);
+    if (opts.horizontalRule !== false) mergeFrom(HorizontalRule.resolve().exports);
+    if (opts.pageBreak !== false) mergeFrom(PageBreak.resolve().exports);
     if (opts.image !== false) mergeFrom(Image.resolve().exports);
+
+    // Marks
+    if (opts.bold !== false) {
+      const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.italic !== false) {
+      const ext = typeof opts.italic === "object" ? Italic.configure(opts.italic) : Italic;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.underline !== false) mergeFrom(Underline.resolve().exports);
+    if (opts.strikethrough !== false) mergeFrom(Strikethrough.resolve().exports);
+    if (opts.highlight !== false) mergeFrom(Highlight.resolve().exports);
+    if (opts.color !== false) mergeFrom(Color.resolve().exports);
+    if (opts.fontSize !== false) mergeFrom(FontSize.resolve().exports);
+    if (opts.fontFamily !== false) mergeFrom(FontFamily.resolve().exports);
 
     return result as ExportContributionMap;
   },

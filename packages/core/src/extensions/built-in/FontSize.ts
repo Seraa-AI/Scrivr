@@ -1,6 +1,7 @@
 import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
+import type { DocxMarkHandlerShape } from "./exports/docx-shared";
 
 interface FontSizeOptions {
   /** Font size presets shown as toolbar buttons (px values). */
@@ -94,6 +95,14 @@ export const FontSize = Extension.create<FontSizeOptions>({
         },
       ],
     ]);
+  },
+
+  addExports() {
+    const handler: DocxMarkHandlerShape = (props, mark) => {
+      const v = mark.attrs["size"];
+      return typeof v === "number" ? { ...props, fontSize: v } : props;
+    };
+    return { docx: { marks: { fontSize: handler } } };
   },
 
   addToolbarItems() {

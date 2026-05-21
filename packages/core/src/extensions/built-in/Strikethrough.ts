@@ -1,6 +1,7 @@
 import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
+import type { DocxMarkHandlerShape } from "./exports/docx-shared";
 
 export const Strikethrough = Extension.create({
   name: "strikethrough",
@@ -58,6 +59,11 @@ export const Strikethrough = Extension.create({
       group: "format",
       isActive: (marks: string[]) => marks.includes("strikethrough"),
     }];
+  },
+
+  addExports() {
+    const handler: DocxMarkHandlerShape = (props) => ({ ...props, strike: true });
+    return { docx: { marks: { strikethrough: handler } } };
   },
 
   // GFM strikethrough (~~text~~) — parser token requires markdown-it-strikethrough plugin,

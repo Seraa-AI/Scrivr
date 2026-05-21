@@ -1,6 +1,7 @@
 import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
+import type { DocxMarkHandlerShape } from "./exports/docx-shared";
 
 interface HighlightOptions {
   /** Default highlight color. Default: "rgba(255, 220, 0, 0.4)" */
@@ -104,6 +105,16 @@ export const Highlight = Extension.create<HighlightOptions>({
     return {
       highlight: decorator,
     };
+  },
+
+  addExports() {
+    const fallback = this.options.color;
+    const handler: DocxMarkHandlerShape = (props, mark) => {
+      const c = mark.attrs["color"];
+      const value = typeof c === "string" && c.length > 0 ? c : fallback;
+      return { ...props, highlight: value };
+    };
+    return { docx: { marks: { highlight: handler } } };
   },
 
   addToolbarItems() {

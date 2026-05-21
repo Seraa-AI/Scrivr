@@ -1,5 +1,6 @@
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect, ToolbarItemSpec } from "../types";
+import type { DocxMarkHandlerShape } from "./exports/docx-shared";
 
 interface ColorOptions {
   /** Preset color swatches shown in the toolbar (CSS color strings). */
@@ -81,6 +82,16 @@ export const Color = Extension.create<ColorOptions>({
     // The user-applied color mark wins over theme.defaultText. The second
     // arg (theme) is unused here — we keep the signature compatible.
     return { color: decorator };
+  },
+
+  addExports() {
+    const handler: DocxMarkHandlerShape = (props, mark) => {
+      const v = mark.attrs["color"];
+      return typeof v === "string" && v.length > 0
+        ? { ...props, color: v }
+        : props;
+    };
+    return { docx: { marks: { color: handler } } };
   },
 
   addToolbarItems() {

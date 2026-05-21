@@ -1,5 +1,6 @@
 import { Extension } from "../Extension";
 import type { Command } from "prosemirror-state";
+import { el, type DocxNodeHandlerShape } from "./exports/docx-shared";
 
 interface HardBreakOptions {
   /** Set to false to disable the Shift-Enter shortcut. Default: true */
@@ -75,6 +76,12 @@ export const HardBreak = Extension.create<HardBreakOptions>({
     return {
       insertHardBreak: () => insertHardBreak(),
     };
+  },
+
+  addExports() {
+    const handler: DocxNodeHandlerShape = () =>
+      el("w:r", undefined, [el("w:br")]);
+    return { docx: { nodes: { hardBreak: handler } } };
   },
 
   addMarkdownParserTokens() {
