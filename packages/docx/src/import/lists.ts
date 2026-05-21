@@ -36,7 +36,7 @@ export function reconstructLists(
       // separate list blocks instead of merging.
       const startIlvl = b.attrs.numbering.ilvl;
       const startNumId = b.attrs.numbering.numId;
-      const endIdx = findListEnd(blocks, i, startNumId);
+      const endIdx = findListEnd(blocks, i, startNumId, startIlvl);
       const slice = blocks.slice(i, endIdx);
       const list = buildList(slice, startIlvl, numbering);
       if (list) out.push(list);
@@ -63,16 +63,33 @@ function isListParagraph(b: DocxBlock): b is ListParagraph {
   return b.type === "paragraph" && b.attrs.numbering !== undefined;
 }
 
-function findListEnd(blocks: DocxBlock[], start: number, numId: number): number {
+function findListEnd(
+  blocks: DocxBlock[],
+  start: number,
+  startNumId: number,
+  startIlvl: number,
+): number {
   let i = start;
   while (i < blocks.length) {
     const b = blocks[i]!;
     if (!isListParagraph(b)) break;
-    // Same list run only if numId matches. Nested levels share numId in
-    // Word's output for a single logical list; switching numId means a
-    // new list starts here.
-    if (b.attrs.numbering.numId !== numId) break;
-    i++;
+    const { numId, ilvl } = b.attrs.numbering;
+    if (numId === startNumId) {
+      // Same logical list — continue regardless of depth.
+      i++;
+      continue;
+    }
+    // Different numId. If we're deeper than the run's starting ilvl, this
+    // is a nested sublist with its own numbering definition (e.g. a bullet
+    // list nested inside an ordered list, where each list level has a
+    // distinct numId per Word's `<w:num>` table). Stay in the run so
+    // buildList can attach it to the previous outer item.
+    if (ilvl > startIlvl) {
+      i++;
+      continue;
+    }
+    // Different numId at the run's starting depth — a new top-level list.
+    break;
   }
   return i;
 }

@@ -254,6 +254,16 @@ describe("importDocx — structural block round-trips", () => {
     const types = [doc.child(0), doc.child(1), doc.child(2)].map((c) => c.type.name);
     expect(types).toEqual(["paragraph", "pageBreak", "paragraph"]);
   });
+
+  it("horizontalRule round-trips (empty paragraph + bottom border ⇒ horizontalRule)", async () => {
+    const doc = await roundTrip([
+      { type: "paragraph", content: [{ type: "text", text: "before" }] },
+      { type: "horizontalRule" },
+      { type: "paragraph", content: [{ type: "text", text: "after" }] },
+    ]);
+    const types = [doc.child(0), doc.child(1), doc.child(2)].map((c) => c.type.name);
+    expect(types).toEqual(["paragraph", "horizontalRule", "paragraph"]);
+  });
 });
 
 describe("importDocx — lists", () => {
@@ -335,6 +345,48 @@ describe("importDocx — lists", () => {
     expect(firstItem.child(0).textContent).toBe("outer");
     expect(firstItem.child(1).type.name).toBe("bulletList");
     expect(firstItem.child(1).child(0).textContent).toBe("inner");
+  });
+
+  it("mixed nested lists (bullet outer, ordered inner) preserve nesting", async () => {
+    const doc = await roundTripDoc([
+      {
+        type: "bulletList",
+        content: [
+          {
+            type: "listItem",
+            content: [
+              { type: "paragraph", content: [{ type: "text", text: "outer-a" }] },
+              {
+                type: "orderedList",
+                content: [
+                  { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "inner-1" }] }] },
+                  { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "inner-2" }] }] },
+                ],
+              },
+            ],
+          },
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "outer-b" }] }] },
+        ],
+      },
+    ]);
+    // Should stay as a single top-level bulletList with the orderedList
+    // nested inside the first item — not split into three top-level lists.
+    expect(doc.childCount).toBe(1);
+    const outer = doc.child(0);
+    expect(outer.type.name).toBe("bulletList");
+    expect(outer.childCount).toBe(2);
+
+    const firstItem = outer.child(0);
+    expect(firstItem.type.name).toBe("listItem");
+    expect(firstItem.childCount).toBe(2);
+    expect(firstItem.child(0).textContent).toBe("outer-a");
+    const inner = firstItem.child(1);
+    expect(inner.type.name).toBe("orderedList");
+    expect(inner.childCount).toBe(2);
+    expect(inner.child(0).textContent).toBe("inner-1");
+    expect(inner.child(1).textContent).toBe("inner-2");
+
+    expect(outer.child(1).textContent).toBe("outer-b");
   });
 
   it("list ends cleanly when followed by non-list paragraphs", async () => {
@@ -487,6 +539,47 @@ describe("importDocx — images", () => {
     } finally {
       globalThis.fetch = fetchOriginal;
     }
+  });
+});
+
+describe("importDocx — unsupported policy", () => {
+  // Build a real exported DOCX, then surgically swap its document.xml to
+  // include an element parser doesn't model (here: <w:tbl>). The rest of
+  // the package (Content_Types, rels, styles, numbering) stays valid so
+  // the only unusual thing is the body content.
+  async function buildDocWithUnsupportedTable(): Promise<Uint8Array> {
+    const editor = new ServerEditor({ content: "anchor" });
+    const bytes = await exportDocxBytes(editor);
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const entries = unzipSync(bytes);
+    const original = strFromU8(entries["word/document.xml"]!);
+    const tableXml =
+      '<w:tbl><w:tblPr/><w:tblGrid/><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';
+    const swapped = original.replace("<w:sectPr", tableXml + "<w:sectPr");
+    const rebuilt: Record<string, Uint8Array> = {};
+    for (const [path, data] of Object.entries(entries)) {
+      rebuilt[path] = path === "word/document.xml" ? strToU8(swapped) : data;
+    }
+    return zipSync(rebuilt);
+  }
+
+  it("emits a diagnostic for unsupported top-level blocks (default 'drop')", async () => {
+    const bytes = await buildDocWithUnsupportedTable();
+    const importer = new ServerEditor();
+    const { diagnostics } = await importDocx(importer, bytes);
+    const unsupportedTbl = diagnostics.find(
+      (d) => d.code === "unsupported-docx-element" && d.nodeType === "w:tbl",
+    );
+    expect(unsupportedTbl).toBeDefined();
+    expect(unsupportedTbl?.level).toBe("warning");
+  });
+
+  it("throws DocxImportError when policy is 'throw'", async () => {
+    const bytes = await buildDocWithUnsupportedTable();
+    const importer = new ServerEditor();
+    await expect(
+      importDocx(importer, bytes, { unsupported: "throw" }),
+    ).rejects.toThrow(DocxImportError);
   });
 });
 

@@ -118,12 +118,39 @@ export async function importDocx(
       doc = await hook(doc, ctx);
     }
 
-    return { doc, diagnostics: ctx.diagnostics.list() };
+    const finalDiagnostics = ctx.diagnostics.list();
+    if (ctx.options.unsupported === "throw") {
+      // Mirrors export-side semantics: any content the importer couldn't
+      // model is a fatal error under `throw`. Drops are silent under
+      // `drop`/`placeholder` — the diagnostic still lands in the result.
+      const fatal = finalDiagnostics.find((d) => isUnsupportedCode(d.code));
+      if (fatal) {
+        throw new DocxImportError(fatal.message, finalDiagnostics);
+      }
+    }
+    return { doc, diagnostics: finalDiagnostics };
   } catch (err) {
     if (err instanceof DocxImportError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     throw new DocxImportError(message, ctx.diagnostics.list());
   }
+}
+
+/**
+ * Diagnostic codes that signal content loss the importer couldn't recover.
+ * Under `unsupported: "throw"`, any of these escalates to DocxImportError.
+ * Listed explicitly rather than prefix-matched so non-loss codes (e.g.
+ * `image-no-handler`, a deployment-side wiring bug) don't drag the
+ * pipeline down.
+ */
+const UNSUPPORTED_CODES = new Set([
+  "unsupported-docx-element",
+  "unsupported-block",
+  "unsupported-mark",
+]);
+
+function isUnsupportedCode(code: string): boolean {
+  return UNSUPPORTED_CODES.has(code);
 }
 
 // ── Handler collection ──────────────────────────────────────────────────────

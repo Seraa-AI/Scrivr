@@ -60,6 +60,10 @@ export function parseDocumentBody(
         blocks.push({ type: "pageBreak" });
         continue;
       }
+      if (isHorizontalRuleParagraph(child)) {
+        blocks.push({ type: "horizontalRule" });
+        continue;
+      }
       // A paragraph with mid-text `<w:br w:type="page"/>` splits into:
       // {paragraph-before, pageBreak, paragraph-after}. parseParagraph
       // returns an array so the structural break survives Stage 2 as a
@@ -68,11 +72,34 @@ export function parseDocumentBody(
     } else if (child.name === "w:sectPr") {
       // Section properties — page size, margins, etc. Not modeled yet.
       continue;
+    } else if (IGNORABLE_BODY_CHILDREN.has(child.name)) {
+      continue;
+    } else {
+      diagnostics.warn({
+        code: "unsupported-docx-element",
+        message: `No parser for top-level body element <${child.name}> — dropped`,
+        nodeType: child.name,
+      });
     }
-    // Tables, sdt, etc. — future commits.
   }
   return { blocks };
 }
+
+/**
+ * Body-level elements Word may emit that don't represent content: revision
+ * markers and proof errors mostly. Anything outside this set that we don't
+ * model produces an `unsupported-docx-element` diagnostic instead of a
+ * silent drop.
+ */
+const IGNORABLE_BODY_CHILDREN = new Set([
+  "w:bookmarkStart",
+  "w:bookmarkEnd",
+  "w:proofErr",
+  "w:permStart",
+  "w:permEnd",
+  "w:commentRangeStart",
+  "w:commentRangeEnd",
+]);
 
 // ── Page-break detection ────────────────────────────────────────────────────
 
@@ -107,6 +134,49 @@ const IGNORABLE_RUN_CHILDREN = new Set([
   "w:commentReference",
   "w:annotationRef",
 ]);
+
+/**
+ * Detect Word's "horizontal rule" convention — an otherwise empty
+ * paragraph whose pPr carries a bottom border. Scrivr's HR exporter
+ * emits exactly this shape; round-tripping needs the inverse.
+ *
+ * Only matches when the paragraph has no actual run content, so a real
+ * paragraph that happens to have a bottom border (a styled callout, say)
+ * stays a paragraph instead of collapsing to an HR.
+ */
+function isHorizontalRuleParagraph(el: OoxmlElement): boolean {
+  const pPr = findChild(el, "w:pPr");
+  if (!pPr) return false;
+  const pBdr = findChild(pPr, "w:pBdr");
+  if (!pBdr) return false;
+  if (!findChild(pBdr, "w:bottom")) return false;
+  return isEffectivelyEmpty(el);
+}
+
+/**
+ * True when the paragraph carries no text/break/drawing content — only
+ * pPr and metadata children. Shared between the page-break and HR
+ * detectors; both need to look past the same set of Word interleavings.
+ */
+function isEffectivelyEmpty(el: OoxmlElement): boolean {
+  for (const child of el.children) {
+    if (typeof child === "string") {
+      if (child.trim().length > 0) return false;
+      continue;
+    }
+    if (IGNORABLE_PARAGRAPH_CHILDREN.has(child.name)) continue;
+    if (child.name !== "w:r") return false;
+    for (const inner of child.children) {
+      if (typeof inner === "string") {
+        if (inner.trim().length > 0) return false;
+        continue;
+      }
+      if (IGNORABLE_RUN_CHILDREN.has(inner.name)) continue;
+      return false; // any non-ignorable run child counts as content
+    }
+  }
+  return true;
+}
 
 function isPageBreakParagraph(el: OoxmlElement): boolean {
   let foundPageBreak = false;
