@@ -647,6 +647,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     };
 
     const opts = this.options;
+    if (opts.heading !== false) {
+      const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
+      mergeFrom(ext.resolve().exports);
+    }
     if (opts.image !== false) mergeFrom(Image.resolve().exports);
 
     return result as ExportContributionMap;

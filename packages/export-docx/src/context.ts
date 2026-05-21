@@ -47,6 +47,19 @@ export interface DocxStyleSpec {
   italic?: boolean;
   underline?: boolean;
   color?: string;
+  /**
+   * Space before the paragraph in twips (1/20 pt). 1px @ 96 DPI = 15 twips.
+   * Maps to Word's `<w:spacing w:before="...">`.
+   */
+  spacingBefore?: number;
+  /** Space after the paragraph in twips. Maps to `<w:spacing w:after="...">`. */
+  spacingAfter?: number;
+  /**
+   * Line height in twips. `240` = single (1.0x), `276` ≈ 1.15x, `360` ≈ 1.5x.
+   * Emitted with `lineRule="auto"` so the value is a multiplier of the
+   * paragraph's font line height.
+   */
+  lineHeight?: number;
 }
 
 export interface DocxNumberingLevel {

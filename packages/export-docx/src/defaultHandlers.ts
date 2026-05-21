@@ -19,32 +19,6 @@ import type {
   DocxRunProps,
 } from "./handlers";
 
-const headingHandler: DocxNodeHandler = (node, children, ctx) => {
-  const level = readLevel(node.attrs["level"]);
-  const spec: { bold: boolean; size?: number } = { bold: true };
-  const size = HEADING_SIZES[level];
-  if (size !== undefined) spec.size = size;
-  const styleId = ctx.styles.paragraph.getOrCreate(`Heading ${level}`, spec);
-  return xml("w:p", undefined, [
-    xml("w:pPr", undefined, [xml("w:pStyle", { "w:val": styleId })]),
-    ...children,
-  ]);
-};
-
-const HEADING_SIZES: Record<number, number> = {
-  1: 28,
-  2: 24,
-  3: 20,
-  4: 18,
-  5: 16,
-  6: 14,
-};
-
-function readLevel(raw: unknown): number {
-  if (typeof raw === "number" && raw >= 1 && raw <= 6) return raw;
-  return 1;
-}
-
 const paragraphHandler: DocxNodeHandler = (_node, children) =>
   xml("w:p", undefined, children);
 
@@ -86,7 +60,6 @@ const codeBlockHandler: DocxNodeHandler = (_node, children, ctx) => {
 
 export const defaultDocxNodeHandlers: Record<string, DocxNodeHandler> = {
   paragraph: paragraphHandler,
-  heading: headingHandler,
   hardBreak: hardBreakHandler,
   pageBreak: pageBreakHandler,
   horizontalRule: horizontalRuleHandler,

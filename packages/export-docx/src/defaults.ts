@@ -136,10 +136,22 @@ function defaultSectionProperties(): XmlNode {
 }
 
 function buildStylesRoot(styles: StyleEntry[]): XmlNode {
+  // Document-wide paragraph defaults — Word reads these when a paragraph
+  // doesn't set its own pPr.spacing. 150 twips after = 10px after × 15 twips/px,
+  // mirroring Paragraph.ts's `addBlockStyles().paragraph.spaceAfter = 10`
+  // (the canvas convention). 276 line ≈ 1.15x line height (Word default).
   const children: XmlNode[] = [
     xml("w:docDefaults", undefined, [
       xml("w:rPrDefault", undefined, [xml("w:rPr")]),
-      xml("w:pPrDefault", undefined, [xml("w:pPr")]),
+      xml("w:pPrDefault", undefined, [
+        xml("w:pPr", undefined, [
+          xml("w:spacing", {
+            "w:after": "150",
+            "w:line": "276",
+            "w:lineRule": "auto",
+          }),
+        ]),
+      ]),
     ]),
     xml(
       "w:style",
@@ -173,7 +185,32 @@ function buildStyleElement(entry: StyleEntry): XmlNode {
     rPrChildren.push(xml("w:sz", { "w:val": String(halfPoints) }));
   }
 
+  // Paragraph properties — currently spacing only. Headings get this via the
+  // default handler; users may set it on their own styles too.
+  const pPrChildren: XmlNode[] = [];
+  if (
+    entry.spec.spacingBefore !== undefined ||
+    entry.spec.spacingAfter !== undefined ||
+    entry.spec.lineHeight !== undefined
+  ) {
+    const attrs: Record<string, string> = {};
+    if (entry.spec.spacingBefore !== undefined) {
+      attrs["w:before"] = String(entry.spec.spacingBefore);
+    }
+    if (entry.spec.spacingAfter !== undefined) {
+      attrs["w:after"] = String(entry.spec.spacingAfter);
+    }
+    if (entry.spec.lineHeight !== undefined) {
+      attrs["w:line"] = String(entry.spec.lineHeight);
+      attrs["w:lineRule"] = "auto";
+    }
+    pPrChildren.push(xml("w:spacing", attrs));
+  }
+
   const children: XmlNode[] = [xml("w:name", { "w:val": entry.name })];
+  if (pPrChildren.length > 0) {
+    children.push(xml("w:pPr", undefined, pPrChildren));
+  }
   if (rPrChildren.length > 0) {
     children.push(xml("w:rPr", undefined, rPrChildren));
   }

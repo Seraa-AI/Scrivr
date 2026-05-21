@@ -4,12 +4,41 @@ import { Extension } from "../Extension";
 import type { ToolbarItemSpec } from "../types";
 import type { BlockStyle } from "../../layout/FontConfig";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
+import { headingDocxContribution } from "./Heading.docx";
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 interface HeadingOptions {
   levels: HeadingLevel[];
 }
+
+/**
+ * Canonical per-level heading spec — single source of truth.
+ *
+ * `addBlockStyles()` derives canvas `BlockStyle`s from this (px values used
+ * directly), and `Heading.docx.ts` reads the same record to emit DOCX
+ * paragraph styles with the same intent (px values converted to twips at
+ * the format boundary, not duplicated here).
+ *
+ * All values in pixels; the docx layer converts (1px @ 96 DPI = 15 twips).
+ */
+export interface HeadingLevelSpec {
+  /** Font size in px. */
+  size: number;
+  /** Space before the paragraph in px. */
+  spaceBefore: number;
+  /** Space after the paragraph in px. */
+  spaceAfter: number;
+}
+
+export const HEADING_LEVEL_SPEC: Record<number, HeadingLevelSpec> = {
+  1: { size: 28, spaceBefore: 24, spaceAfter: 12 },
+  2: { size: 22, spaceBefore: 20, spaceAfter: 10 },
+  3: { size: 18, spaceBefore: 16, spaceAfter: 8 },
+  4: { size: 16, spaceBefore: 14, spaceAfter: 6 },
+  5: { size: 14, spaceBefore: 12, spaceAfter: 4 },
+  6: { size: 12, spaceBefore: 10, spaceAfter: 2 },
+};
 
 export const Heading = Extension.create<HeadingOptions>({
   name: "heading",
@@ -91,19 +120,24 @@ export const Heading = Extension.create<HeadingOptions>({
   },
 
   addBlockStyles() {
-    const levelStyles: Record<number, BlockStyle> = {
-      1: { font: "bold 28px", spaceBefore: 24, spaceAfter: 12, align: "left" as const },
-      2: { font: "bold 22px", spaceBefore: 20, spaceAfter: 10, align: "left" as const },
-      3: { font: "bold 18px", spaceBefore: 16, spaceAfter: 8,  align: "left" as const },
-      4: { font: "bold 16px", spaceBefore: 14, spaceAfter: 6,  align: "left" as const },
-      5: { font: "bold 14px", spaceBefore: 12, spaceAfter: 4,  align: "left" as const },
-      6: { font: "bold 12px", spaceBefore: 10, spaceAfter: 2,  align: "left" as const },
-    };
     const styles: Record<string, BlockStyle> = {};
     for (const level of this.options.levels) {
-      styles[`heading_${level}`] = levelStyles[level]!;
+      const spec = HEADING_LEVEL_SPEC[level]!;
+      styles[`heading_${level}`] = {
+        font: `bold ${spec.size}px`,
+        spaceBefore: spec.spaceBefore,
+        spaceAfter: spec.spaceAfter,
+        align: "left" as const,
+      };
     }
     return styles;
+  },
+
+  addExports() {
+    // DOCX contribution lives next to the extension — see Heading.docx.ts.
+    // Reads HEADING_LEVEL_SPEC so canvas and DOCX render with the same
+    // intent; the docx layer converts px → twips at its boundary.
+    return { docx: headingDocxContribution(this.options.levels) };
   },
 
   addMarkdownParserTokens() {
