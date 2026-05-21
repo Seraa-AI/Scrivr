@@ -2,11 +2,54 @@ import { wrapInList, splitListItem, liftListItem, sinkListItem } from "prosemirr
 import { chainCommands, liftEmptyBlock } from "prosemirror-commands";
 import { splitBlockInheritAttrs } from "./Paragraph";
 import { wrappingInputRule } from "prosemirror-inputrules";
-import type { NodeType } from "prosemirror-model";
+import type { Node as PmNode, NodeType } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
 import { ListItemStrategy } from "../../layout/ListItemStrategy";
 import type { ToolbarItemSpec } from "../types";
+import {
+  xml,
+  type DocxContext,
+  type DocxNodeHandler,
+  type XmlNode,
+} from "../../exports/docx";
+
+// ── DOCX export internals ───────────────────────────────────────────────────
+
+interface ListItemDocxInfo {
+  numId: number;
+  ilvl: number;
+}
+
+const LIST_ITEMS_KEY = "docx:listItems";
+
+/**
+ * Add `<w:numPr>` (with `w:ilvl` + `w:numId`) into the paragraph's pPr.
+ * Returns the same XmlNode if it's not a `<w:p>` so non-paragraph children
+ * (nested lists' own paragraphs etc.) pass through untouched.
+ */
+function addNumPrToParagraph(p: XmlNode, numId: number, ilvl: number): XmlNode {
+  if (p.name !== "w:p") return p;
+  const numPr = xml("w:numPr", undefined, [
+    xml("w:ilvl", { "w:val": String(ilvl) }),
+    xml("w:numId", { "w:val": String(numId) }),
+  ]);
+  const existingChildren = p.children ?? [];
+  const pPrIdx = existingChildren.findIndex(
+    (c) => typeof c !== "string" && c.name === "w:pPr",
+  );
+  const pPr = pPrIdx >= 0 ? existingChildren[pPrIdx] : undefined;
+  if (pPr !== undefined && typeof pPr !== "string") {
+    const newPPr = xml("w:pPr", pPr.attributes, [...(pPr.children ?? []), numPr]);
+    const newChildren = [...existingChildren];
+    newChildren[pPrIdx] = newPPr;
+    return xml(p.name, p.attributes, newChildren);
+  }
+  return xml(p.name, p.attributes, [
+    xml("w:pPr", undefined, [numPr]),
+    ...existingChildren,
+  ]);
+}
 
 /**
  * Toggle a list type — mirrors Google Docs behaviour:
@@ -170,6 +213,91 @@ export const List = Extension.create({
         isActive: (_marks, blockType) => blockType === "orderedList",
       },
     ];
+  },
+
+  addExports() {
+    // Lists need numbering.xml entries + per-paragraph <w:numPr>. The
+    // walker visits children before the parent handler runs, so the
+    // bulletList/orderedList type isn't visible when each listItem is
+    // walked. Pre-compute the per-listItem (numId, ilvl) in
+    // onBeforeExport by walking the doc with a list-type stack, then
+    // the listItem handler reads from that map and patches its first
+    // <w:p> child with <w:numPr>.
+    const onBeforeExport = (ctx: DocxContext) => {
+      const itemMap = ctx.shared.getOrInit<Map<PmNode, ListItemDocxInfo>>(
+        LIST_ITEMS_KEY,
+        () => new Map(),
+      );
+
+      let bulletNumId: number | null = null;
+      let orderedNumId: number | null = null;
+      const getBulletNumId = () => {
+        if (bulletNumId === null) {
+          bulletNumId = ctx.numbering.getOrCreate({
+            type: "bullet",
+            levels: [
+              { level: 0, format: "bullet", text: "•" },
+              { level: 1, format: "bullet", text: "◦" },
+              { level: 2, format: "bullet", text: "▪" },
+            ],
+          }).numId;
+        }
+        return bulletNumId;
+      };
+      const getOrderedNumId = () => {
+        if (orderedNumId === null) {
+          orderedNumId = ctx.numbering.getOrCreate({
+            type: "ordered",
+            levels: [
+              { level: 0, format: "decimal", text: "%1." },
+              { level: 1, format: "decimal", text: "%2." },
+              { level: 2, format: "decimal", text: "%3." },
+            ],
+          }).numId;
+        }
+        return orderedNumId;
+      };
+
+      const walk = (node: PmNode, stack: ("bullet" | "ordered")[]) => {
+        let next = stack;
+        const name = node.type.name;
+        if (name === "bulletList") next = [...stack, "bullet"];
+        else if (name === "orderedList") next = [...stack, "ordered"];
+        else if (name === "listItem" && stack.length > 0) {
+          const ilvl = Math.min(stack.length - 1, 2);
+          const enclosing = stack[stack.length - 1]!;
+          const numId = enclosing === "bullet" ? getBulletNumId() : getOrderedNumId();
+          itemMap.set(node, { numId, ilvl });
+        }
+        node.forEach((child) => walk(child, next));
+      };
+      walk(ctx.editor.getState().doc, []);
+    };
+
+    // bulletList / orderedList don't emit their own element — Word lists are
+    // a flat sequence of <w:p> elements that reference the same numId. The
+    // wrapper handlers pass children through; listItem patches the first
+    // child <w:p> with <w:numPr>.
+    const listPassthrough: DocxNodeHandler = (_node, children) => children;
+
+    const listItemHandler: DocxNodeHandler = (node, children, ctx) => {
+      const info = ctx.shared.get<Map<PmNode, ListItemDocxInfo>>(LIST_ITEMS_KEY)?.get(node);
+      if (!info || children.length === 0) return children;
+      return children.map((child, i) =>
+        i === 0 ? addNumPrToParagraph(child, info.numId, info.ilvl) : child,
+      );
+    };
+
+    return {
+      docx: {
+        onBeforeExport,
+        nodes: {
+          bulletList: listPassthrough,
+          orderedList: listPassthrough,
+          listItem: listItemHandler,
+        },
+      },
+    };
   },
 
   addInputRules() {

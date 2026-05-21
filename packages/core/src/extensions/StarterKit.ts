@@ -661,6 +661,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.codeBlock !== false) mergeFrom(CodeBlock.resolve().exports);
     if (opts.horizontalRule !== false) mergeFrom(HorizontalRule.resolve().exports);
     if (opts.pageBreak !== false) mergeFrom(PageBreak.resolve().exports);
+    if (opts.list !== false) mergeFrom(List.resolve().exports);
     if (opts.image !== false) mergeFrom(Image.resolve().exports);
 
     // Marks

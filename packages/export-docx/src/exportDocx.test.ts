@@ -8,11 +8,36 @@
 
 import { describe, it, expect } from "vitest";
 import { unzipSync, strFromU8 } from "fflate";
-import { ServerEditor } from "@scrivr/core";
+import { ServerEditor, Extension, StarterKit } from "@scrivr/core";
 import { exportDocx, exportDocxBytes } from "./export";
 import { DocxExportError } from "./error";
 import { xml } from "./xml";
 import type { DocxHandlers } from "./handlers";
+
+// Minimal extension used to exercise the unsupported-node policy — adds a
+// node type that no extension contributes a docx handler for.
+const UnhandledNode = Extension.create({
+  name: "unhandledNode",
+  addNodes() {
+    return {
+      unhandledNode: {
+        group: "block",
+        content: "inline*",
+        toDOM: () => ["div"],
+        parseDOM: [{ tag: "div.unhandled" }],
+      },
+    };
+  },
+});
+
+function editorWithUnhandled(): ServerEditor {
+  const editor = new ServerEditor({ extensions: [StarterKit, UnhandledNode] });
+  const doc = editor.schema.node("doc", null, [
+    editor.schema.node("unhandledNode", null, [editor.schema.text("x")]),
+  ]);
+  editor.setContent(doc.toJSON());
+  return editor;
+}
 
 function readZip(bytes: Uint8Array): Record<string, string> {
   const entries = unzipSync(bytes);
@@ -81,52 +106,25 @@ describe("exportDocx", () => {
     expect(documentXml).toContain('<w:pStyle w:val="Custom"/>');
   });
 
-  it("emits unsupported-node warnings for nodes without a default handler (bulletList)", async () => {
-    const editor = new ServerEditor();
-    const doc = editor.schema.node("doc", null, [
-      editor.schema.node("bulletList", null, [
-        editor.schema.node("listItem", null, [
-          editor.schema.node("paragraph", null, [editor.schema.text("item")]),
-        ]),
-      ]),
-    ]);
-    editor.setContent(doc.toJSON());
-
+  it("emits unsupported-node warnings for node types no extension contributes", async () => {
+    const editor = editorWithUnhandled();
     const { diagnostics } = await exportDocx(editor);
     expect(
       diagnostics.some(
-        (d) => d.code === "unsupported-node" && d.nodeType === "bulletList",
+        (d) => d.code === "unsupported-node" && d.nodeType === "unhandledNode",
       ),
     ).toBe(true);
   });
 
   it("upgrades unsupported nodes to a DocxExportError when policy is 'throw'", async () => {
-    const editor = new ServerEditor();
-    const doc = editor.schema.node("doc", null, [
-      editor.schema.node("bulletList", null, [
-        editor.schema.node("listItem", null, [
-          editor.schema.node("paragraph", null, [editor.schema.text("item")]),
-        ]),
-      ]),
-    ]);
-    editor.setContent(doc.toJSON());
-
+    const editor = editorWithUnhandled();
     await expect(exportDocx(editor, { unsupported: "throw" })).rejects.toThrow(
       DocxExportError,
     );
   });
 
   it("preserves diagnostics on a thrown DocxExportError", async () => {
-    const editor = new ServerEditor();
-    const doc = editor.schema.node("doc", null, [
-      editor.schema.node("bulletList", null, [
-        editor.schema.node("listItem", null, [
-          editor.schema.node("paragraph", null, [editor.schema.text("item")]),
-        ]),
-      ]),
-    ]);
-    editor.setContent(doc.toJSON());
-
+    const editor = editorWithUnhandled();
     try {
       await exportDocx(editor, { unsupported: "throw" });
       throw new Error("expected DocxExportError");
@@ -136,6 +134,34 @@ describe("exportDocx", () => {
       expect(err.diagnostics.length).toBeGreaterThan(0);
       expect(err.diagnostics.some((d) => d.level === "error")).toBe(true);
     }
+  });
+
+  it("exports bullet lists with numPr referencing a bullet numbering def", async () => {
+    const editor = new ServerEditor({ content: "* first\n* second" });
+    const { bytes, diagnostics } = await exportDocx(editor);
+    const files = readZip(bytes);
+    const documentXml = files["word/document.xml"]!;
+    const numberingXml = files["word/numbering.xml"]!;
+
+    expect(diagnostics.filter((d) => d.code === "unsupported-node")).toEqual([]);
+    // Two listItems → two <w:p> with numPr.
+    expect(documentXml.match(/<w:numPr>/g)?.length).toBe(2);
+    expect(documentXml).toContain('<w:ilvl w:val="0"/>');
+    expect(documentXml).toContain('<w:t>first</w:t>');
+    expect(documentXml).toContain('<w:t>second</w:t>');
+    // numbering.xml has the bullet def.
+    expect(numberingXml).toContain('<w:numFmt w:val="bullet"/>');
+  });
+
+  it("exports ordered lists with a decimal numbering def", async () => {
+    const editor = new ServerEditor({ content: "1. one\n2. two" });
+    const { bytes } = await exportDocx(editor);
+    const files = readZip(bytes);
+    const documentXml = files["word/document.xml"]!;
+    const numberingXml = files["word/numbering.xml"]!;
+
+    expect(documentXml.match(/<w:numPr>/g)?.length).toBe(2);
+    expect(numberingXml).toContain('<w:numFmt w:val="decimal"/>');
   });
 
   it("always emits a non-empty w:body (Word rejects empty bodies)", async () => {
