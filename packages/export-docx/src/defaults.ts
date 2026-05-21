@@ -57,14 +57,12 @@ const CONTENT_TYPE = {
   xml: "application/xml",
 } as const;
 
-/** Assemble a complete `DocxPackage` from walked body content + build state. */
+/** Assemble a complete `DocxPackage` from the document root + build state. */
 export function buildDocxPackage(
-  bodyContent: XmlNode[],
+  documentRoot: XmlNode,
   state: DocxBuildState,
 ): DocxPackage {
-  const documentXml = serializeXml(buildDocumentRoot(bodyContent), {
-    declaration: true,
-  });
+  const documentXml = serializeXml(documentRoot, { declaration: true });
   const stylesXml = serializeXml(buildStylesRoot(state.styles), {
     declaration: true,
   });
@@ -102,7 +100,12 @@ export function buildDocxPackage(
   };
 }
 
-function buildDocumentRoot(body: XmlNode[]): XmlNode {
+/**
+ * Wrap walked body content in `<w:document><w:body>...<w:sectPr/></w:body></w:document>`.
+ * Exported so the pipeline can populate `ctx.document` before
+ * `onBuildTreeComplete` fires.
+ */
+export function buildDocumentRoot(body: XmlNode[]): XmlNode {
   // Word rejects `<w:body><w:sectPr/></w:body>` — every body must contain
   // at least one paragraph. Inject an empty `<w:p/>` if the walk produced
   // nothing so the file remains openable.

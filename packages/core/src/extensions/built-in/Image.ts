@@ -274,9 +274,25 @@ const NS_WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDr
 const NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const NS_PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture";
 
-let nextDocPrId = 1;
-function nextDocxPicId(): string {
-  return String(nextDocPrId++);
+const DOCX_NEXT_PIC_ID_KEY = "docx:nextPicId";
+
+interface DocxPicIdBox {
+  n: number;
+}
+
+/**
+ * Per-export monotonic counter for `<wp:docPr id="...">`. Lives on
+ * `ctx.shared` so each export starts at 1 — a module-level counter would
+ * leak state across exports in the same process and break determinism.
+ */
+function nextDocxPicId(ctx: DocxContext): string {
+  const box = ctx.shared.getOrInit<DocxPicIdBox>(
+    DOCX_NEXT_PIC_ID_KEY,
+    () => ({ n: 1 }),
+  );
+  const id = box.n;
+  box.n++;
+  return String(id);
 }
 
 function buildPicGraphic(
@@ -308,11 +324,11 @@ function buildPicGraphic(
 }
 
 function buildInlineDrawing(
-  filename: string, relId: string, widthPx: number, heightPx: number,
+  ctx: DocxContext, filename: string, relId: string, widthPx: number, heightPx: number,
 ): XmlNode {
   const cx = String(pxToEmu(widthPx));
   const cy = String(pxToEmu(heightPx));
-  const id = nextDocxPicId();
+  const id = nextDocxPicId(ctx);
   return xml("w:drawing", undefined, [
     xml("wp:inline", { "xmlns:wp": NS_WP, distT: "0", distB: "0", distL: "0", distR: "0" }, [
       xml("wp:extent", { cx, cy }),
@@ -335,11 +351,11 @@ interface AnchorAttrs {
 }
 
 function buildAnchoredDrawing(
-  filename: string, relId: string, widthPx: number, heightPx: number, anchor: AnchorAttrs,
+  ctx: DocxContext, filename: string, relId: string, widthPx: number, heightPx: number, anchor: AnchorAttrs,
 ): XmlNode {
   const cx = String(pxToEmu(widthPx));
   const cy = String(pxToEmu(heightPx));
-  const id = nextDocxPicId();
+  const id = nextDocxPicId(ctx);
   const marginEmu = String(pxToEmu(anchor.marginPx));
   const behindDoc = anchor.wrapMode === "behind" ? "1" : "0";
 
@@ -415,7 +431,7 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
 
   if (wrapMode === "inline") {
     return xml("w:r", undefined, [
-      buildInlineDrawing(record.filename, record.relId, width, height),
+      buildInlineDrawing(ctx, record.filename, record.relId, width, height),
     ]);
   }
 
@@ -428,7 +444,7 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
   if (typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
 
   return xml("w:r", undefined, [
-    buildAnchoredDrawing(record.filename, record.relId, width, height, anchor),
+    buildAnchoredDrawing(ctx, record.filename, record.relId, width, height, anchor),
   ]);
 };
 

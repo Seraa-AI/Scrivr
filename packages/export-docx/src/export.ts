@@ -22,7 +22,7 @@
 import type { IBaseEditor } from "@scrivr/core";
 import { walkDocument, type WalkerHandlers } from "./walker";
 import { createDocxContext } from "./createContext";
-import { buildDocxPackage } from "./defaults";
+import { buildDocxPackage, buildDocumentRoot } from "./defaults";
 import { zipDocxPackage } from "./package";
 import { DocxExportError } from "./error";
 import type {
@@ -85,13 +85,17 @@ export async function exportDocx(
     };
     const body = walkDocument(editor.getState().doc, ctx, walkerHandlers);
 
+    // Publish the assembled document tree so onBuildTreeComplete + onFinalize
+    // hooks can read or mutate it (bookmarks, cross-refs, custom packagers).
+    ctx.document = buildDocumentRoot(body);
+
     for (const hook of lifecycleHooks.onBuildTreeComplete) {
       await hook(ctx);
     }
 
     const pkg = lifecycleHooks.onFinalize
       ? await lifecycleHooks.onFinalize(ctx)
-      : buildDocxPackage(body, state);
+      : buildDocxPackage(ctx.document, state);
 
     return {
       bytes: zipDocxPackage(pkg),

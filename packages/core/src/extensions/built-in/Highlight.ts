@@ -3,6 +3,52 @@ import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
 import type { DocxMarkHandler } from "../../exports/docx";
 
+// ── OOXML highlight name lookup + CSS → hex (used by addExports) ───────────
+
+const OOXML_HIGHLIGHT_NAMES = [
+  "black", "blue", "cyan", "darkBlue", "darkCyan", "darkGray", "darkGreen",
+  "darkMagenta", "darkRed", "darkYellow", "green", "lightGray", "magenta",
+  "none", "red", "white", "yellow",
+] as const;
+
+const HIGHLIGHT_BY_LOWER: Record<string, string> = (() => {
+  const out: Record<string, string> = {};
+  for (const n of OOXML_HIGHLIGHT_NAMES) out[n.toLowerCase()] = n;
+  return out;
+})();
+
+function canonicalHighlightName(value: string): string | null {
+  return HIGHLIGHT_BY_LOWER[value.trim().toLowerCase()] ?? null;
+}
+
+function cssColorToHex(value: string): string | null {
+  const v = value.trim();
+  const six = /^#([0-9a-f]{6})$/i.exec(v);
+  if (six && six[1]) return six[1].toUpperCase();
+  const three = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(v);
+  if (three) {
+    return (
+      three[1]! + three[1]! + three[2]! + three[2]! + three[3]! + three[3]!
+    ).toUpperCase();
+  }
+  const rgb = /^rgba?\(([^)]+)\)$/i.exec(v);
+  if (rgb && rgb[1]) {
+    const parts = rgb[1].split(",").map((s) => s.trim());
+    if (parts.length < 3) return null;
+    const channels = parts.slice(0, 3).map((s) => Number(s));
+    if (channels.some((n) => !Number.isFinite(n))) return null;
+    return channels
+      .map((n) =>
+        Math.max(0, Math.min(255, Math.round(n)))
+          .toString(16)
+          .padStart(2, "0")
+          .toUpperCase(),
+      )
+      .join("");
+  }
+  return null;
+}
+
 interface HighlightOptions {
   /** Default highlight color. Default: "rgba(255, 220, 0, 0.4)" */
   color: string;
@@ -108,11 +154,22 @@ export const Highlight = Extension.create<HighlightOptions>({
   },
 
   addExports() {
+    // OOXML's `<w:highlight>` only accepts a fixed set of named values per
+    // the spec. Anything else (hex, rgb(), rgba()) has to use
+    // `<w:shd w:val="clear" w:fill="HEX">` instead — Word's run-shading
+    // accepts arbitrary fills and renders identically. The mark handler
+    // decides which DocxRunProps field to populate; the walker emits both
+    // as plain data with no parsing.
     const fallback = this.options.color;
     const handler: DocxMarkHandler = (props, mark) => {
-      const c = mark.attrs["color"];
-      const value = typeof c === "string" && c.length > 0 ? c : fallback;
-      return { ...props, highlight: value };
+      const raw = mark.attrs["color"];
+      const value = typeof raw === "string" && raw.length > 0 ? raw : fallback;
+      const named = canonicalHighlightName(value);
+      if (named) return { ...props, highlight: named };
+      const hex = cssColorToHex(value);
+      if (hex) return { ...props, shadingFill: hex };
+      // Unparseable — fall back to the canonical yellow so something paints.
+      return { ...props, highlight: "yellow" };
     };
     return { docx: { marks: { highlight: handler } } };
   },

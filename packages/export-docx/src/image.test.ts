@@ -197,6 +197,14 @@ describe("image DOCX export", () => {
     expect((documentXml.match(/r:embed="rId1"/g) ?? []).length).toBe(2);
   });
 
+  it("two exports of the same image doc produce identical bytes (picId determinism)", async () => {
+    const editor = new ServerEditor();
+    setImageDoc(editor, { wrapMode: "inline" });
+    const a = await exportDocx(editor);
+    const b = await exportDocx(editor);
+    expect(a.bytes).toEqual(b.bytes);
+  });
+
   it("records a fetch-failed diagnostic when an http URL is unreachable", async () => {
     const editor = new ServerEditor();
     setImageDoc(editor, {}, FAIL_URL);

@@ -658,7 +658,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
       mergeFrom(ext.resolve().exports);
     }
-    if (opts.codeBlock !== false) mergeFrom(CodeBlock.resolve().exports);
+    if (opts.codeBlock !== false) {
+      const ext = typeof opts.codeBlock === "object" ? CodeBlock.configure(opts.codeBlock) : CodeBlock;
+      mergeFrom(ext.resolve().exports);
+    }
     if (opts.horizontalRule !== false) mergeFrom(HorizontalRule.resolve().exports);
     if (opts.pageBreak !== false) mergeFrom(PageBreak.resolve().exports);
     if (opts.list !== false) mergeFrom(List.resolve().exports);
@@ -675,10 +678,22 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.underline !== false) mergeFrom(Underline.resolve().exports);
     if (opts.strikethrough !== false) mergeFrom(Strikethrough.resolve().exports);
-    if (opts.highlight !== false) mergeFrom(Highlight.resolve().exports);
-    if (opts.color !== false) mergeFrom(Color.resolve().exports);
-    if (opts.fontSize !== false) mergeFrom(FontSize.resolve().exports);
-    if (opts.fontFamily !== false) mergeFrom(FontFamily.resolve().exports);
+    if (opts.highlight !== false) {
+      const ext = typeof opts.highlight === "object" ? Highlight.configure(opts.highlight) : Highlight;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.color !== false) {
+      const ext = typeof opts.color === "object" ? Color.configure(opts.color) : Color;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.fontSize !== false) {
+      const ext = typeof opts.fontSize === "object" ? FontSize.configure(opts.fontSize) : FontSize;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.fontFamily !== false) {
+      const ext = typeof opts.fontFamily === "object" ? FontFamily.configure(opts.fontFamily) : FontFamily;
+      mergeFrom(ext.resolve().exports);
+    }
 
     return result as ExportContributionMap;
   },

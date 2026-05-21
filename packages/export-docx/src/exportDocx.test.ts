@@ -14,6 +14,30 @@ import { DocxExportError } from "./error";
 import { xml } from "./xml";
 import type { DocxHandlers } from "./handlers";
 
+function highlightedDoc(
+  editor: ServerEditor,
+  text: string,
+  color?: string,
+): void {
+  editor.setContent({
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text,
+            ...(color
+              ? { marks: [{ type: "highlight", attrs: { color } }] }
+              : { marks: [{ type: "highlight" }] }),
+          },
+        ],
+      },
+    ],
+  });
+}
+
 // Minimal extension used to exercise the unsupported-node policy — adds a
 // node type that no extension contributes a docx handler for.
 const UnhandledNode = Extension.create({
@@ -162,6 +186,81 @@ describe("exportDocx", () => {
 
     expect(documentXml.match(/<w:numPr>/g)?.length).toBe(2);
     expect(numberingXml).toContain('<w:numFmt w:val="decimal"/>');
+  });
+
+  it("emits w:highlight for OOXML-named highlight colors", async () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit.configure({ highlight: { color: "yellow", multicolor: true } })],
+    });
+    highlightedDoc(editor, "marked", "yellow");
+    const { bytes } = await exportDocx(editor);
+    const documentXml = readZip(bytes)["word/document.xml"]!;
+    expect(documentXml).toContain('<w:highlight w:val="yellow"/>');
+    expect(documentXml).not.toContain("<w:shd");
+  });
+
+  it("emits w:shd with hex fill for arbitrary CSS highlight colors", async () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit.configure({ highlight: { color: "#ffdc00", multicolor: true } })],
+    });
+    highlightedDoc(editor, "marked", "#ffdc00");
+    const { bytes } = await exportDocx(editor);
+    const documentXml = readZip(bytes)["word/document.xml"]!;
+    expect(documentXml).toContain('<w:shd w:color="auto" w:fill="FFDC00" w:val="clear"/>');
+    expect(documentXml).not.toContain("<w:highlight");
+  });
+
+  it("converts rgba() to hex w:shd fill", async () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit.configure({ highlight: { color: "rgba(255, 220, 0, 0.4)", multicolor: true } })],
+    });
+    highlightedDoc(editor, "marked", "rgba(255, 220, 0, 0.4)");
+    const { bytes } = await exportDocx(editor);
+    const documentXml = readZip(bytes)["word/document.xml"]!;
+    expect(documentXml).toContain('w:fill="FFDC00"');
+  });
+
+  it("StarterKit propagates configured Highlight.color to the docx handler", async () => {
+    // No color attr on the mark — handler falls back to the configured color.
+    const editor = new ServerEditor({
+      extensions: [StarterKit.configure({ highlight: { color: "#aabbcc" } })],
+    });
+    highlightedDoc(editor, "marked");
+    const { bytes } = await exportDocx(editor);
+    const documentXml = readZip(bytes)["word/document.xml"]!;
+    expect(documentXml).toContain('w:fill="AABBCC"');
+  });
+
+  it("splits literal \\n in text into multiple w:t separated by w:br", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "codeBlock",
+          content: [{ type: "text", text: "line1\nline2\nline3" }],
+        },
+      ],
+    });
+    const { bytes } = await exportDocx(editor);
+    const documentXml = readZip(bytes)["word/document.xml"]!;
+    expect(documentXml).toContain("<w:t>line1</w:t>");
+    expect(documentXml).toContain("<w:t>line2</w:t>");
+    expect(documentXml).toContain("<w:t>line3</w:t>");
+    // Two breaks between three segments.
+    expect(documentXml.match(/<w:br\/>/g)?.length).toBe(2);
+  });
+
+  it("populates ctx.document before onBuildTreeComplete fires", async () => {
+    let observed: string | null = null;
+    const editor = new ServerEditor({ content: "hello" });
+    const overrides: DocxHandlers = {
+      onBuildTreeComplete: (ctx) => {
+        observed = ctx.document.name;
+      },
+    };
+    await exportDocx(editor, { overrides });
+    expect(observed).toBe("w:document");
   });
 
   it("always emits a non-empty w:body (Word rejects empty bodies)", async () => {

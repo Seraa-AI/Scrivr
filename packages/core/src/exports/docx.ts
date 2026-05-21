@@ -60,8 +60,19 @@ export interface DocxRunProps {
   code?: boolean;
   /** Foreground color as `#RRGGBB`. Renderer strips `#` at serialize. */
   color?: string;
-  /** Highlight color name per OOXML (`yellow`, `green`, ...) or `#RRGGBB`. */
+  /**
+   * Highlight color — must be one of OOXML's named values (`yellow`, `green`,
+   * ...). For arbitrary CSS colors that don't map to a named value, use
+   * `shadingFill` instead. The Highlight extension's mark handler decides
+   * which to populate.
+   */
   highlight?: string;
+  /**
+   * Arbitrary background color as a 6-char uppercase hex (no `#`). Emitted
+   * as `<w:shd w:val="clear" w:color="auto" w:fill="HEX"/>`. Use when the
+   * source color isn't a named OOXML highlight.
+   */
+  shadingFill?: string;
   /** Font size in pixels. Renderer converts to half-points (×1.5). */
   fontSize?: number;
   fontFamily?: string;

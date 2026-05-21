@@ -95,9 +95,19 @@ function mergeMarks(
 
 function renderRun(text: string, props: DocxRunProps): XmlNode {
   const rPr = buildRunProperties(props);
-  const tAttrs = needsPreserveSpace(text) ? { "xml:space": "preserve" } : undefined;
-  const t = xml("w:t", tAttrs, [text]);
-  return xml("w:r", undefined, rPr ? [rPr, t] : [t]);
+  // Text nodes can carry literal `\n` (e.g. multi-line `codeBlock` content)
+  // — `<w:t>` is single-line, so split on newlines and intersperse `<w:br/>`
+  // within the same `<w:r>` so run properties stay consistent across the
+  // wrapped lines.
+  const segments = text.split("\n");
+  const body: XmlNode[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i] ?? "";
+    const tAttrs = needsPreserveSpace(seg) ? { "xml:space": "preserve" } : undefined;
+    body.push(xml("w:t", tAttrs, seg.length > 0 ? [seg] : undefined));
+    if (i < segments.length - 1) body.push(xml("w:br"));
+  }
+  return xml("w:r", undefined, rPr ? [rPr, ...body] : body);
 }
 
 /**
@@ -141,6 +151,15 @@ function buildRunProperties(props: DocxRunProps): XmlNode | null {
   }
   if (props.highlight) {
     children.push(xml("w:highlight", { "w:val": props.highlight }));
+  }
+  if (props.shadingFill) {
+    children.push(
+      xml("w:shd", {
+        "w:val": "clear",
+        "w:color": "auto",
+        "w:fill": props.shadingFill,
+      }),
+    );
   }
   if (props.underline) children.push(xml("w:u", { "w:val": "single" }));
 
