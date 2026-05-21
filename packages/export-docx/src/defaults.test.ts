@@ -80,6 +80,20 @@ describe("buildDocxPackage", () => {
     expect(styles).toContain('<w:sz w:val="27"/>'); // 18 × 1.5
   });
 
+  it("keeps generated style IDs unique when sanitized names collide", () => {
+    const { ctx, state } = createDocxContext({ editor: new ServerEditor() });
+    const first = ctx.styles.paragraph.getOrCreate("A B", { bold: true });
+    const second = ctx.styles.character.getOrCreate("AB", { italic: true });
+
+    expect(first).toBe("AB");
+    expect(second).toBe("AB2");
+
+    const files = readZip(zipDocxPackage(buildDocxPackage(buildDocumentRoot([]), state)));
+    const styles = files["word/styles.xml"]!;
+    expect(styles).toContain('w:styleId="AB"');
+    expect(styles).toContain('w:styleId="AB2"');
+  });
+
   it("emits abstractNum + num pairs for registered numbering defs", () => {
     const { ctx, state } = createDocxContext({ editor: new ServerEditor() });
     ctx.numbering.getOrCreate({
@@ -91,6 +105,23 @@ describe("buildDocxPackage", () => {
     expect(numbering).toContain('<w:abstractNum w:abstractNumId="1">');
     expect(numbering).toContain('<w:num w:numId="1">');
     expect(numbering).toContain('<w:numFmt w:val="bullet"/>');
+  });
+
+  it("dedupes identical numbering configs through getOrCreate", () => {
+    const { ctx, state } = createDocxContext({ editor: new ServerEditor() });
+    const config = {
+      type: "bullet" as const,
+      levels: [{ level: 0, format: "bullet" as const, text: "•" }],
+    };
+    const first = ctx.numbering.getOrCreate(config);
+    const second = ctx.numbering.getOrCreate(config);
+
+    expect(second.numId).toBe(first.numId);
+
+    const files = readZip(zipDocxPackage(buildDocxPackage(buildDocumentRoot([]), state)));
+    const numbering = files["word/numbering.xml"]!;
+    expect(numbering.match(/<w:abstractNum /g)?.length).toBe(1);
+    expect(numbering.match(/<w:num /g)?.length).toBe(1);
   });
 
   it("registers media + adds Default content-type entry per unique extension", () => {

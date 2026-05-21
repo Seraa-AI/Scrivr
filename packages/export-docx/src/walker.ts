@@ -17,6 +17,7 @@
  */
 
 import type { Node, Mark } from "prosemirror-model";
+import { cssColorToDocxHex } from "@scrivr/core";
 import { xml } from "./xml";
 import type { XmlNode, DocxContext } from "./context";
 import type {
@@ -142,7 +143,8 @@ function buildRunProperties(props: DocxRunProps): XmlNode | null {
   if (props.italic) children.push(xml("w:i"));
   if (props.strike) children.push(xml("w:strike"));
   if (props.color) {
-    children.push(xml("w:color", { "w:val": props.color.replace(/^#/, "") }));
+    const color = cssColorToDocxHex(props.color);
+    if (color) children.push(xml("w:color", { "w:val": color }));
   }
   if (props.fontSize !== undefined) {
     // px → pt = ×0.75; half-points = pt × 2; net factor = ×1.5.

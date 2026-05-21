@@ -220,6 +220,31 @@ describe("exportDocx", () => {
     expect(documentXml).toContain('w:fill="FFDC00"');
   });
 
+  it("converts CSS rgb() text color marks to DOCX hex colors", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "red",
+              marks: [{ type: "color", attrs: { color: "rgb(220, 38, 38)" } }],
+            },
+          ],
+        },
+      ],
+    });
+
+    const { bytes, diagnostics } = await exportDocx(editor);
+    const documentXml = readZip(bytes)["word/document.xml"]!;
+    expect(diagnostics.filter((d) => d.code === "unsupported-color")).toEqual([]);
+    expect(documentXml).toContain('<w:color w:val="DC2626"/>');
+    expect(documentXml).not.toContain("rgb(220, 38, 38)");
+  });
+
   it("StarterKit propagates configured Highlight.color to the docx handler", async () => {
     // No color attr on the mark — handler falls back to the configured color.
     const editor = new ServerEditor({

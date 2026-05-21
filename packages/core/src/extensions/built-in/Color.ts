@@ -1,6 +1,6 @@
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect, ToolbarItemSpec } from "../types";
-import type { DocxMarkHandler } from "../../exports/docx";
+import { cssColorToDocxHex, type DocxMarkHandler } from "../../exports/docx";
 
 interface ColorOptions {
   /** Preset color swatches shown in the toolbar (CSS color strings). */
@@ -85,11 +85,17 @@ export const Color = Extension.create<ColorOptions>({
   },
 
   addExports() {
-    const handler: DocxMarkHandler = (props, mark) => {
+    const handler: DocxMarkHandler = (props, mark, ctx) => {
       const v = mark.attrs["color"];
-      return typeof v === "string" && v.length > 0
-        ? { ...props, color: v }
-        : props;
+      if (typeof v !== "string" || v.length === 0) return props;
+      const hex = cssColorToDocxHex(v);
+      if (hex) return { ...props, color: hex };
+      ctx.diagnostics.warn({
+        code: "unsupported-color",
+        message: `Could not convert text color "${v}" to a DOCX hex color`,
+        markType: "color",
+      });
+      return props;
     };
     return { docx: { marks: { color: handler } } };
   },

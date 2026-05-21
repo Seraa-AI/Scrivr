@@ -41,6 +41,71 @@ export function xml(
   return node;
 }
 
+// ── OOXML color helpers ────────────────────────────────────────────────────
+
+const OOXML_HIGHLIGHT_NAMES = [
+  "black",
+  "blue",
+  "cyan",
+  "darkBlue",
+  "darkCyan",
+  "darkGray",
+  "darkGreen",
+  "darkMagenta",
+  "darkRed",
+  "darkYellow",
+  "green",
+  "lightGray",
+  "magenta",
+  "none",
+  "red",
+  "white",
+  "yellow",
+] as const;
+
+const HIGHLIGHT_BY_LOWER = new Map(
+  OOXML_HIGHLIGHT_NAMES.map((name) => [name.toLowerCase(), name]),
+);
+
+/** Return a canonical OOXML highlight name, or null for arbitrary CSS colors. */
+export function docxHighlightName(value: string): string | null {
+  return HIGHLIGHT_BY_LOWER.get(value.trim().toLowerCase()) ?? null;
+}
+
+/** Convert common CSS color strings to DOCX's 6-char uppercase hex form. */
+export function cssColorToDocxHex(value: string): string | null {
+  const v = value.trim();
+  const six = /^#?([0-9a-f]{6})$/i.exec(v);
+  if (six?.[1]) return six[1].toUpperCase();
+
+  const three = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(v);
+  if (three) {
+    return (
+      three[1]! + three[1]! + three[2]! + three[2]! + three[3]! + three[3]!
+    ).toUpperCase();
+  }
+
+  const rgb = /^rgba?\(([^)]+)\)$/i.exec(v);
+  if (!rgb?.[1]) return null;
+
+  const channels = rgb[1]
+    .split(",")
+    .slice(0, 3)
+    .map((s) => Number(s.trim()));
+  if (channels.length !== 3 || channels.some((n) => !Number.isFinite(n))) {
+    return null;
+  }
+
+  return channels
+    .map((n) =>
+      Math.max(0, Math.min(255, Math.round(n)))
+        .toString(16)
+        .padStart(2, "0")
+        .toUpperCase(),
+    )
+    .join("");
+}
+
 // ── Run / paragraph property bags ───────────────────────────────────────────
 
 /**
@@ -58,7 +123,7 @@ export interface DocxRunProps {
   underline?: boolean;
   strike?: boolean;
   code?: boolean;
-  /** Foreground color as `#RRGGBB`. Renderer strips `#` at serialize. */
+  /** Foreground color as common CSS hex/rgb syntax; renderer emits DOCX hex. */
   color?: string;
   /**
    * Highlight color — must be one of OOXML's named values (`yellow`, `green`,

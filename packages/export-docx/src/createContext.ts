@@ -87,7 +87,7 @@ export function createDocxContext(
       (s) => s.type === type && s.name === name,
     );
     if (existing) return existing.id;
-    const id = sanitizeStyleId(name);
+    const id = uniqueStyleId(sanitizeStyleId(name), state.styles);
     state.styles.push({ id, type, name, spec });
     return id;
   };
@@ -102,6 +102,11 @@ export function createDocxContext(
     },
     numbering: {
       getOrCreate(config) {
+        const key = numberingKey(config);
+        const existing = state.numbering.find((entry) =>
+          numberingKey(entry.config) === key
+        );
+        if (existing) return { numId: existing.numId };
         const numId = state.numbering.length + 1;
         state.numbering.push({ numId, config });
         return { numId };
@@ -164,7 +169,24 @@ function sanitizeStyleId(name: string): string {
   return name.replace(/[^A-Za-z0-9]/g, "") || "Style";
 }
 
-/** Read-only handle returned to callers — the diagnostics list, frozen. */
-export function snapshotDiagnostics(state: DocxBuildState): DocxDiagnostic[] {
-  return state.diagnostics.slice();
+function uniqueStyleId(
+  base: string,
+  styles: StyleEntry[],
+): string {
+  const used = new Set(styles.map((s) => s.id));
+  if (!used.has(base)) return base;
+  let i = 2;
+  while (used.has(`${base}${i}`)) i++;
+  return `${base}${i}`;
+}
+
+function numberingKey(config: NumberingEntry["config"]): string {
+  return JSON.stringify({
+    type: config.type,
+    levels: config.levels.map((level) => ({
+      level: level.level,
+      format: level.format,
+      text: level.text,
+    })),
+  });
 }
