@@ -282,3 +282,258 @@ describe("Google Docs HTML paste (integration)", () => {
     expect(doc.child(2).attrs["align"]).toBe("left");
   });
 });
+
+// ── Paste rejects hostile content ─────────────────────────────────────────────
+//
+// The HTML paste pipeline is the primary ingestion path for untrusted
+// markup. The DOM parser, the schema's parseDOM allow-list, and the
+// `safeUrl` gate together produce a doc that holds only content the
+// editor knows how to render. These tests exercise that contract against
+// the inputs an attacker would actually try.
+
+const FORBIDDEN_SCHEMES = ["javascript:", "data:", "vbscript:", "file:"];
+const FORBIDDEN_NODE_TYPES = [
+  "script", "style", "iframe", "object", "embed", "form",
+];
+const URL_ATTR_KEYS = ["href", "src", "url", "action", "formaction"];
+
+function startsWithForbiddenScheme(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const lower = value.toLowerCase().trimStart();
+  return FORBIDDEN_SCHEMES.some((s) => lower.startsWith(s));
+}
+
+function assertCleanedDoc(
+  doc: ReturnType<typeof parseHtml>,
+  label: string,
+): void {
+  doc.descendants((node) => {
+    // 1. Schema must not declare forbidden node types.
+    if (FORBIDDEN_NODE_TYPES.includes(node.type.name)) {
+      throw new Error(
+        `[${label}] Schema accepted a "${node.type.name}" node — it should not be declared.`,
+      );
+    }
+    // 2. No URL-bearing attr carries a dangerous scheme.
+    for (const key of URL_ATTR_KEYS) {
+      if (startsWithForbiddenScheme(node.attrs[key])) {
+        throw new Error(
+          `[${label}] Node "${node.type.name}" kept dangerous URL attr ${key}="${node.attrs[key]}".`,
+        );
+      }
+    }
+    // 3. No event-handler attribute survived on the node.
+    for (const key of Object.keys(node.attrs)) {
+      if (key.toLowerCase().startsWith("on")) {
+        throw new Error(
+          `[${label}] Node "${node.type.name}" carries event-handler attr "${key}".`,
+        );
+      }
+    }
+    // 4. Same three checks again for marks attached to this node.
+    for (const mark of node.marks) {
+      for (const key of URL_ATTR_KEYS) {
+        if (startsWithForbiddenScheme(mark.attrs[key])) {
+          throw new Error(
+            `[${label}] Mark "${mark.type.name}" kept dangerous URL attr ${key}="${mark.attrs[key]}".`,
+          );
+        }
+      }
+      for (const key of Object.keys(mark.attrs)) {
+        if (key.toLowerCase().startsWith("on")) {
+          throw new Error(
+            `[${label}] Mark "${mark.type.name}" carries event-handler attr "${key}".`,
+          );
+        }
+      }
+    }
+  });
+  // 5. textContent must not contain literal tag source for a forbidden
+  //    element — the DOM parser drops those elements entirely, so finding
+  //    their source string in text means a parser regression.
+  const text = doc.textContent.toLowerCase();
+  for (const tag of FORBIDDEN_NODE_TYPES) {
+    if (text.includes(`<${tag}`)) {
+      throw new Error(
+        `[${label}] textContent contains literal "<${tag}" — the parser preserved tag source as text.`,
+      );
+    }
+  }
+}
+
+interface HostileFixture {
+  label: string;
+  html: string;
+  /**
+   * Surrounding safe text the cleaning should preserve. Omit when the
+   * fixture's content model (e.g. inline SVG) makes the browser's HTML
+   * parser nest siblings unpredictably — only the structural invariants
+   * matter in those cases.
+   */
+  survivingText?: string;
+}
+
+function runHostileGroup(label: string, fixtures: HostileFixture[]): void {
+  describe(label, () => {
+    for (const fixture of fixtures) {
+      it(fixture.label, () => {
+        const { schema } = makeContext();
+        let doc!: ReturnType<typeof parseHtml>;
+        // Pipeline must never throw on hostile input — that would be a
+        // denial-of-service vector on its own.
+        expect(() => { doc = parseHtml(fixture.html, schema); }).not.toThrow();
+        assertCleanedDoc(doc, fixture.label);
+        if (fixture.survivingText !== undefined) {
+          const normalised = doc.textContent.replace(/\s+/g, " ").trim();
+          expect(normalised).toBe(fixture.survivingText);
+        }
+      });
+    }
+  });
+}
+
+runHostileGroup("PasteTransformer — drops script and style elements", [
+  {
+    label: "inline script tag",
+    html: `<p>before<script>alert(1)</script>after</p>`,
+    survivingText: "beforeafter",
+  },
+  {
+    label: "external script tag",
+    html: `<p>safe<script src="https://evil.example.com/x.js"></script>text</p>`,
+    survivingText: "safetext",
+  },
+  {
+    label: "style tag with javascript URL",
+    html: `<p>x</p><style>body{background:url("javascript:alert(1)")}</style><p>y</p>`,
+    survivingText: "xy",
+  },
+  {
+    label: "nested script inside div",
+    html: `<div><p>visible</p><div><script>alert(1)</script></div></div>`,
+    survivingText: "visible",
+  },
+]);
+
+runHostileGroup("PasteTransformer — strips event-handler attributes", [
+  {
+    label: "img with onerror",
+    html: `<p>before <img src="https://example.com/x.png" onerror="alert(1)"> after</p>`,
+    // The img node survives (its src is safe); the onerror attr is what
+    // gets stripped. textContent is just "before  after" with the image
+    // contributing no text; normaliser collapses to a single space.
+    survivingText: "before after",
+  },
+  {
+    label: "anchor with onclick",
+    html: `<p><a href="https://example.com" onclick="alert(1)">click</a></p>`,
+    survivingText: "click",
+  },
+  {
+    label: "div with onmouseover",
+    html: `<div onmouseover="alert(1)">hover me</div>`,
+    survivingText: "hover me",
+  },
+  {
+    label: "body-level onload",
+    html: `<body onload="alert(1)"><p>content</p></body>`,
+    survivingText: "content",
+  },
+]);
+
+runHostileGroup("PasteTransformer — rejects forbidden URL schemes", [
+  {
+    label: "anchor with javascript: href",
+    html: `<p>before <a href="javascript:alert(1)">click</a> after</p>`,
+    survivingText: "before click after",
+  },
+  {
+    label: "anchor with mixed-case JAVASCRIPT: href",
+    html: `<p><a href="JAVASCRIPT:alert(1)">x</a></p>`,
+    survivingText: "x",
+  },
+  {
+    label: "anchor with whitespace-prefixed javascript:",
+    html: `<p><a href="  javascript:alert(1)">x</a></p>`,
+    survivingText: "x",
+  },
+  {
+    label: "anchor with HTML-entity-encoded javascript",
+    // Browser DOMParser decodes &#106; → 'j' before our pipeline sees it,
+    // so the safeUrl gate sees the raw "javascript:" form.
+    html: `<p><a href="&#106;avascript:alert(1)">x</a></p>`,
+    survivingText: "x",
+  },
+  {
+    label: "anchor with vbscript: href",
+    html: `<p><a href="vbscript:msgbox(1)">x</a></p>`,
+    survivingText: "x",
+  },
+  {
+    label: "anchor with file: href",
+    html: `<p><a href="file:///etc/passwd">x</a></p>`,
+    survivingText: "x",
+  },
+  {
+    label: "image with javascript: src",
+    html: `<p>before<img src="javascript:alert(1)" alt="x">after</p>`,
+    survivingText: "beforeafter",
+  },
+  {
+    label: "image with data:text/html src",
+    html: `<p>before<img src="data:text/html,<script>alert(1)</script>" alt="x">after</p>`,
+    survivingText: "beforeafter",
+  },
+]);
+
+runHostileGroup("PasteTransformer — ignores embedded objects", [
+  {
+    label: "iframe",
+    html: `<p>before</p><iframe src="https://evil.example.com"></iframe><p>after</p>`,
+    survivingText: "beforeafter",
+  },
+  {
+    label: "object",
+    html: `<p>x</p><object data="https://evil.example.com"></object><p>y</p>`,
+    survivingText: "xy",
+  },
+  {
+    label: "embed",
+    html: `<p>x</p><embed src="https://evil.example.com"><p>y</p>`,
+    survivingText: "xy",
+  },
+  {
+    label: "form with action",
+    html: `<form action="https://evil.example.com"><input name="csrf"></form><p>x</p>`,
+    survivingText: "x",
+  },
+]);
+
+runHostileGroup("PasteTransformer — SVG content model", [
+  // SVG sits in a different content model from regular HTML; the
+  // browser's parser nests sibling elements unpredictably when SVG is
+  // interleaved with block-level HTML. Surrounding text loss is not a
+  // signal — only the structural and URL invariants matter.
+  {
+    label: "svg with embedded script",
+    html: `<p>before</p><svg><script>alert(1)</script></svg><p>after</p>`,
+  },
+  {
+    label: "svg with onload",
+    html: `<p>before</p><svg onload="alert(1)"><circle r="5"/></svg><p>after</p>`,
+  },
+]);
+
+describe("PasteTransformer — deeply nested wrappers", () => {
+  it("rejects a javascript: link buried under many wrapper divs", () => {
+    const { schema } = makeContext();
+    const html = `<div><div><div><div><div><div><div><div>
+      <p><a href="javascript:alert(1)">deep</a></p>
+    </div></div></div></div></div></div></div></div>`;
+    let doc!: ReturnType<typeof parseHtml>;
+    expect(() => { doc = parseHtml(html, schema); }).not.toThrow();
+    assertCleanedDoc(doc, "deeply nested");
+    const normalised = doc.textContent.replace(/\s+/g, " ").trim();
+    expect(normalised).toBe("deep");
+  });
+});
