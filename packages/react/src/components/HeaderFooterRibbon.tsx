@@ -91,13 +91,11 @@ export function HeaderFooterRibbon({
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              // Must match `HeaderFooter.configure({ activeEditingGap })`
-              // (default 28). The extension reserves this many pixels in
-              // the layout for the ribbon to overlay; if the ribbon is
-              // taller than the reserved gap, it visually overlaps body
-              // or header content. `useHeaderFooterRibbon`'s top-offset
-              // also reads as -28 — change all three together.
-              height: 28,
+              // Sized from `HeaderFooter.options.activeEditingGap` via
+              // the hook — matches the gap the extension reserved at
+              // layout time. Change the extension config and the
+              // ribbon's height + the body's gap both follow.
+              height: ribbon.ribbonHeight,
               userSelect: "none",
               zIndex: "var(--scrivr-react-ribbon-z, 10)",
               boxSizing: "border-box",

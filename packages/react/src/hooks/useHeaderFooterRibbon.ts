@@ -3,9 +3,32 @@ import type { Editor } from "@scrivr/core";
 import {
   createHeaderFooterController,
   type HeaderFooterController,
+  type HeaderFooterOptions,
   type HeaderFooterState,
 } from "@scrivr/plugins";
 import { useScrivrState as useEditorState } from "./useScrivrState";
+
+/**
+ * Last-resort ribbon height used when the editor has no `HeaderFooter`
+ * extension registered (so `findExtension` returns null). Matches the
+ * extension's own default so the visual remains consistent when the
+ * fallback kicks in. The live value comes from
+ * `HeaderFooter.options.activeEditingGap` — see `readActiveEditingGap`.
+ */
+const FALLBACK_RIBBON_HEIGHT = 28;
+
+function readActiveEditingGap(editor: Editor | null): number {
+  if (!editor) return FALLBACK_RIBBON_HEIGHT;
+  const ext = editor.findExtension("headerFooter");
+  if (!ext) return FALLBACK_RIBBON_HEIGHT;
+  // The extension's options are typed at declaration site as
+  // HeaderFooterOptions but the manager's findExtension widens to
+  // `object`. Narrow with a runtime check on the field we read.
+  const opts = ext.options as Partial<HeaderFooterOptions>;
+  return typeof opts.activeEditingGap === "number"
+    ? opts.activeEditingGap
+    : FALLBACK_RIBBON_HEIGHT;
+}
 
 export interface HeaderFooterRibbonItem {
   pageNum: number;
@@ -73,6 +96,11 @@ export function useHeaderFooterRibbon(
   const visible = !!editor && !!state?.isSurfaceActive && !!state.activeBand;
   const isHeader = state?.activeBand === "header";
   const differentFirstPage = state?.policy?.differentFirstPage ?? false;
+  // Read the extension's configured gap so the ribbon paints at the
+  // exact size of the space the layout reserved. Single source of
+  // truth — change `HeaderFooter.configure({ activeEditingGap })` and
+  // both the layout's reservation and the ribbon's height move together.
+  const ribbonHeight = readActiveEditingGap(editor);
   const ribbons: HeaderFooterRibbonItem[] = [];
 
   if (editor && visible) {
@@ -99,15 +127,13 @@ export function useHeaderFooterRibbon(
       const pageTop = pageScreen && overlayRect
         ? pageScreen.screenTop - overlayRect.top
         : pageOffsetY;
-      // -28 positions the ribbon's bottom edge at the body's contentTop
-      // (header band) or above the footer's footerTop. Must match the
-      // ribbon's own `height: 28` in HeaderFooterRibbon.tsx and the
-      // default `HeaderFooter.configure({ activeEditingGap: 28 })`.
-      // If you ship a custom ribbon at a different height, update all
-      // three locations together.
+      // Position the ribbon's bottom edge at the body's contentTop
+      // (header band) or above the footer's footerTop. `ribbonHeight`
+      // matches the gap the extension reserved at layout time, so the
+      // ribbon fits exactly without overlapping content above or below.
       const top = isHeader
-        ? pageTop + metrics.contentTop - 28
-        : pageTop + metrics.footerTop - 28;
+        ? pageTop + metrics.contentTop - ribbonHeight
+        : pageTop + metrics.footerTop - ribbonHeight;
 
       ribbons.push({
         pageNum,
@@ -127,6 +153,12 @@ export function useHeaderFooterRibbon(
     isHeader,
     differentFirstPage,
     ribbons,
+    /**
+     * Pixel height of each ribbon, read from
+     * `HeaderFooter.options.activeEditingGap`. Falls back to 28 (the
+     * extension default) when no `HeaderFooter` extension is registered.
+     */
+    ribbonHeight,
     optionsOpen,
     setOptionsOpen,
     optionsRef,

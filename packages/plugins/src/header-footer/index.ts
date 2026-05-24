@@ -1,4 +1,5 @@
 export { HeaderFooter } from "./HeaderFooter";
+export type { HeaderFooterOptions } from "./HeaderFooter";
 export type {
   HeaderFooterPolicy,
   HeaderFooterDefinition,

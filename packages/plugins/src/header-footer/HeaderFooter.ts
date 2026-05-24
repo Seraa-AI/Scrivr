@@ -224,10 +224,14 @@ export interface HeaderFooterOptions {
    * separate `ServerEditor` constructed with `activeEditingGap: 0`,
    * sharing the same doc JSON.
    *
-   * Coordination: the `@scrivr/react` `HeaderFooterRibbon` hardcodes
-   * `height: 28` and `useHeaderFooterRibbon` offsets the ribbon by
-   * `-28`. Both must match this value. If you ship a custom ribbon
-   * at a different height, pass the matching number here.
+   * **Single source of truth.** The `@scrivr/react` `HeaderFooterRibbon`
+   * sizes itself from this value (via `useHeaderFooterRibbon`, which
+   * calls `editor.findExtension("headerFooter")` and reads
+   * `options.activeEditingGap`). Change the option and the ribbon's
+   * `height` + the body's reserved gap move together — no separate
+   * hardcoded constant to keep in sync. A custom React ribbon
+   * consumer that wants a different height passes it here; the React
+   * hook propagates it.
    */
   activeEditingGap: number;
 }

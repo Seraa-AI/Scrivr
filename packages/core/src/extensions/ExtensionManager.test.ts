@@ -1095,4 +1095,49 @@ describe("ExtensionManager", () => {
       expect(docAttrs1!["headerFooter"]).toBeDefined();
     });
   });
+
+  describe("findExtension", () => {
+    it("returns the extension instance when registered", () => {
+      const manager = new ExtensionManager([StarterKit, Bold, Italic]);
+      const bold = manager.findExtension("bold");
+      expect(bold).not.toBeNull();
+      expect(bold!.name).toBe("bold");
+    });
+
+    it("returns null when the extension is not registered", () => {
+      const manager = new ExtensionManager([StarterKit]);
+      expect(manager.findExtension("nonexistent-extension")).toBeNull();
+    });
+
+    it("exposes the extension's configured options", () => {
+      // Heading.configure({ levels: [1, 2] }) keeps the option on the
+      // returned instance — findExtension returns that same instance so
+      // consumers can read configured values (this is the load-bearing
+      // contract the React HeaderFooterRibbon hook depends on).
+      const configured = Heading.configure({ levels: [1, 2] });
+      const manager = new ExtensionManager([Document, Paragraph, configured]);
+      const found = manager.findExtension("heading");
+      expect(found).not.toBeNull();
+      const opts = found!.options as { levels?: unknown };
+      expect(opts.levels).toEqual([1, 2]);
+    });
+  });
+
+  describe("findExtension on BaseEditor", () => {
+    it("delegates to the manager and returns the configured extension", () => {
+      const editor = new ServerEditor({
+        extensions: [StarterKit, Heading.configure({ levels: [1] })],
+      });
+      const found = editor.findExtension("heading");
+      expect(found).not.toBeNull();
+      expect(found!.name).toBe("heading");
+      const opts = found!.options as { levels?: unknown };
+      expect(opts.levels).toEqual([1]);
+    });
+
+    it("returns null for an unregistered name", () => {
+      const editor = new ServerEditor({ extensions: [StarterKit] });
+      expect(editor.findExtension("not-real")).toBeNull();
+    });
+  });
 });

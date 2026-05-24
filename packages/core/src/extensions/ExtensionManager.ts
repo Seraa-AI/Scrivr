@@ -238,6 +238,25 @@ export class ExtensionManager {
   }
 
   /**
+   * Look up a registered extension by `name`. Returns `null` when no
+   * extension with that name is in the manager — useful for cross-package
+   * code that wants to read another extension's options (e.g. the React
+   * `HeaderFooterRibbon` hook reading `HeaderFooter.options.activeEditingGap`
+   * to size itself) without coupling to its presence.
+   *
+   * The return type is the un-parameterised `Extension` (options widen to
+   * `object`); callers that need typed options should narrow with a runtime
+   * guard, since the manager has no compile-time link from `name` → option
+   * shape.
+   */
+  findExtension(name: string): Extension | null {
+    for (const ext of this.extensions) {
+      if (ext.name === name) return ext;
+    }
+    return null;
+  }
+
+  /**
    * Map of doc-attr name → owning extension name. Returned as a fresh object —
    * callers may mutate the result. Useful for error messages that need to
    * attribute a problem to the extension that contributed an attr.
