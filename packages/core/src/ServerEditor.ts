@@ -9,7 +9,7 @@ import {
   type EditorTheme,
   type ResolvedTheme,
 } from "./model/theme";
-import { sanitizeDocUrls } from "./model/sanitizeDocUrls";
+import { normalizeDocument } from "./model/normalizeDocument";
 
 export interface ServerEditorOptions {
   /**
@@ -121,16 +121,16 @@ export class ServerEditor extends BaseEditor {
    * loading a fresh document. Call `subscribe` callbacks manually if needed.
    */
   setContent(json: Record<string, unknown>): void {
-    // URL allow-list sweep — separate ingestion path from the constructor,
-    // same threat. See model/sanitizeDocUrls.ts.
-    const doc = sanitizeDocUrls(
-      this.manager.schema.nodeFromJSON(json),
-      this.manager.schema,
-    );
+    // Ingestion-time normalization — URL allow-list, table repair,
+    // block-ID assignment, fingerprint, warnings. Same pipeline as the
+    // base constructor; `lastNormalizeResult` (inherited from BaseEditor)
+    // is refreshed so consumers can inspect what was repaired.
+    const result = normalizeDocument(json, { schema: this.manager.schema });
+    this.lastNormalizeResultValue = result;
     this.editorState = EditorState.create({
       schema: this.manager.schema,
       plugins: this.manager.buildPlugins(),
-      doc,
+      doc: result.doc,
     });
   }
 

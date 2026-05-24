@@ -9,7 +9,10 @@ import type { IBaseEditor } from "./extensions/types";
 import type { ExportContributionMap, ImportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
-import { sanitizeDocUrls } from "./model/sanitizeDocUrls";
+import {
+  normalizeDocument,
+  type NormalizeResult,
+} from "./model/normalizeDocument";
 
 export interface BaseEditorOptions {
   /**
@@ -66,6 +69,16 @@ export class BaseEditor implements IBaseEditor {
 
   private readOnlyValue = false;
   private readonly listeners = new Set<() => void>();
+  /**
+   * Outcome of the most recent ingestion-time normalization — either
+   * from the constructor's initial doc or from a subclass-specific
+   * `setContent`. `null` when no doc was ever supplied (the editor was
+   * created with no `content` and no extension's `addInitialDoc`).
+   *
+   * AI consumers inspect this to decide whether to accept a document
+   * (e.g. reject when `warnings` contains `urls-sanitized`).
+   */
+  protected lastNormalizeResultValue: NormalizeResult | null = null;
 
   /**
    * Bound command map. Type is `SafeFlatCommands` — augment
@@ -105,13 +118,19 @@ export class BaseEditor implements IBaseEditor {
           ? this.manager.schema.nodeFromJSON(content)
           : this.manager.buildInitialDoc();
 
-    // URL allow-list sweep on any constructed doc — covers JSON load,
-    // markdown parse, and extension-supplied initial docs in one place.
-    // The parseDOM gate covers HTML paste; this covers everything
-    // structured. See model/sanitizeDocUrls.ts for the full reasoning.
-    const initialDoc = rawInitialDoc
-      ? sanitizeDocUrls(rawInitialDoc, this.manager.schema)
-      : rawInitialDoc;
+    // Single ingestion-time normalization for every entry path —
+    // JSON load, markdown parse, and extension-supplied initial docs.
+    // The parseDOM gate still covers HTML paste; this covers everything
+    // structured. See model/normalizeDocument.ts for the full pipeline
+    // (URL allow-list, table repair, block-ID assignment, fingerprint).
+    let initialDoc: Node | undefined = rawInitialDoc;
+    if (rawInitialDoc) {
+      const result = normalizeDocument(rawInitialDoc, {
+        schema: this.manager.schema,
+      });
+      this.lastNormalizeResultValue = result;
+      initialDoc = result.doc;
+    }
 
     this.editorState = EditorState.create({
       schema: this.manager.schema,
@@ -125,6 +144,16 @@ export class BaseEditor implements IBaseEditor {
   /** The merged ProseMirror Schema built from all extensions. */
   get schema(): Schema {
     return this.manager.schema;
+  }
+
+  /**
+   * The result of the most recent ingestion-time normalization. Set when
+   * the constructor receives `content` (or an extension contributes an
+   * initial doc) and refreshed by subclass-specific `setContent`
+   * methods. `null` only when the editor was created with no doc at all.
+   */
+  get lastNormalizeResult(): NormalizeResult | null {
+    return this.lastNormalizeResultValue;
   }
 
   getState(): EditorState {
