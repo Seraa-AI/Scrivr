@@ -41,7 +41,10 @@ export const GhostText = Extension.create({
         state: {
           init: () => ({ nodeId: null, content: "" }),
           apply(tr, val) {
-            const meta = tr.getMeta(ghostTextPluginKey) as GhostTextState | undefined;
+            // `PluginKey<GhostTextState>.getMeta` is already typed —
+            // the value comes back as `GhostTextState | undefined` with
+            // no cast needed.
+            const meta = tr.getMeta(ghostTextPluginKey);
             return meta !== undefined ? meta : val;
           },
         },
