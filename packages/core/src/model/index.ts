@@ -15,4 +15,12 @@ export type {
   AssignBlockIdsOptions,
   BlockIdAssignment,
 } from "./assignBlockIds";
+export { normalizeDocument } from "./normalizeDocument";
+export type {
+  NormalizeDocumentOptions,
+  NormalizeMode,
+  NormalizeResult,
+  NormalizeWarning,
+  NormalizeWarningCode,
+} from "./normalizeDocument";
 export { getNodeAttrs, getMarkAttrs } from "./getNodeAttrs";

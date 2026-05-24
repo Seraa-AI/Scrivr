@@ -9,7 +9,10 @@ import {
   type EditorTheme,
   type ResolvedTheme,
 } from "./model/theme";
-import { sanitizeDocUrls } from "./model/sanitizeDocUrls";
+import {
+  normalizeDocument,
+  type NormalizeResult,
+} from "./model/normalizeDocument";
 
 export interface ServerEditorOptions {
   /**
@@ -72,6 +75,14 @@ export class ServerEditor extends BaseEditor {
    * DOM resolver server-side.
    */
   private readonly resolvedTheme: ResolvedTheme;
+  /**
+   * The outcome of the most recent `setContent` call — warnings,
+   * fingerprint, changed flag. `null` until `setContent` runs.
+   * AI server-side consumers inspect this to decide whether to accept
+   * a model's output (e.g. reject when `warnings` contains
+   * `urls-sanitized`).
+   */
+  private _lastNormalizeResult: NormalizeResult | null = null;
 
   constructor({ extensions = [StarterKit], content, theme }: ServerEditorOptions = {}) {
     super({ extensions, ...(content ? { content } : {}) });
@@ -121,17 +132,26 @@ export class ServerEditor extends BaseEditor {
    * loading a fresh document. Call `subscribe` callbacks manually if needed.
    */
   setContent(json: Record<string, unknown>): void {
-    // URL allow-list sweep — separate ingestion path from the constructor,
-    // same threat. See model/sanitizeDocUrls.ts.
-    const doc = sanitizeDocUrls(
-      this.manager.schema.nodeFromJSON(json),
-      this.manager.schema,
-    );
+    // Ingestion-time normalization — URL allow-list, table repair,
+    // block-ID assignment, fingerprint, warnings. See
+    // model/normalizeDocument.ts. Inspect `lastNormalizeResult` to see
+    // what was repaired.
+    const result = normalizeDocument(json, { schema: this.manager.schema });
+    this._lastNormalizeResult = result;
     this.editorState = EditorState.create({
       schema: this.manager.schema,
       plugins: this.manager.buildPlugins(),
-      doc,
+      doc: result.doc,
     });
+  }
+
+  /**
+   * The result of the most recent `setContent` call, or `null` if
+   * `setContent` has not been called. Use the `warnings` array to
+   * decide whether to accept an AI-produced document.
+   */
+  get lastNormalizeResult(): NormalizeResult | null {
+    return this._lastNormalizeResult;
   }
 
   /**
