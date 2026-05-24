@@ -9,10 +9,7 @@ import {
   type EditorTheme,
   type ResolvedTheme,
 } from "./model/theme";
-import {
-  normalizeDocument,
-  type NormalizeResult,
-} from "./model/normalizeDocument";
+import { normalizeDocument } from "./model/normalizeDocument";
 
 export interface ServerEditorOptions {
   /**
@@ -75,14 +72,6 @@ export class ServerEditor extends BaseEditor {
    * DOM resolver server-side.
    */
   private readonly resolvedTheme: ResolvedTheme;
-  /**
-   * The outcome of the most recent `setContent` call — warnings,
-   * fingerprint, changed flag. `null` until `setContent` runs.
-   * AI server-side consumers inspect this to decide whether to accept
-   * a model's output (e.g. reject when `warnings` contains
-   * `urls-sanitized`).
-   */
-  private _lastNormalizeResult: NormalizeResult | null = null;
 
   constructor({ extensions = [StarterKit], content, theme }: ServerEditorOptions = {}) {
     super({ extensions, ...(content ? { content } : {}) });
@@ -133,9 +122,9 @@ export class ServerEditor extends BaseEditor {
    */
   setContent(json: Record<string, unknown>): void {
     // Ingestion-time normalization — URL allow-list, table repair,
-    // block-ID assignment, fingerprint, warnings. See
-    // model/normalizeDocument.ts. Inspect `lastNormalizeResult` to see
-    // what was repaired.
+    // block-ID assignment, fingerprint, warnings. Same pipeline as the
+    // base constructor; `lastNormalizeResult` (inherited from BaseEditor)
+    // is refreshed so consumers can inspect what was repaired.
     const result = normalizeDocument(json, { schema: this.manager.schema });
     this._lastNormalizeResult = result;
     this.editorState = EditorState.create({
@@ -143,15 +132,6 @@ export class ServerEditor extends BaseEditor {
       plugins: this.manager.buildPlugins(),
       doc: result.doc,
     });
-  }
-
-  /**
-   * The result of the most recent `setContent` call, or `null` if
-   * `setContent` has not been called. Use the `warnings` array to
-   * decide whether to accept an AI-produced document.
-   */
-  get lastNormalizeResult(): NormalizeResult | null {
-    return this._lastNormalizeResult;
   }
 
   /**

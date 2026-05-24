@@ -31,7 +31,7 @@
  *   }
  *   await db.save(result.doc.toJSON());
  */
-import type { Node, Schema } from "prosemirror-model";
+import { Node, type Schema } from "prosemirror-model";
 import { sanitizeDocUrls } from "./sanitizeDocUrls";
 import {
   assignBlockIds,
@@ -81,7 +81,7 @@ export interface NormalizeResult {
 }
 
 export function normalizeDocument(
-  input: Record<string, unknown>,
+  input: Record<string, unknown> | Node,
   options: NormalizeDocumentOptions,
 ): NormalizeResult {
   const { schema } = options;
@@ -89,11 +89,13 @@ export function normalizeDocument(
   const assignIds = options.assignIds ?? true;
   const warnings: NormalizeWarning[] = [];
 
-  // 1. Parse. ProseMirror enforces schema validity here — required attrs,
-  //    content expressions, mark allowance. A malformed JSON throws
-  //    `RangeError` regardless of mode; "repair" cannot invent missing
-  //    structure.
-  const parsed = schema.nodeFromJSON(input);
+  // 1. Parse if needed. Callers already holding a Node (e.g. BaseEditor's
+  //    constructor after parsing markdown or building the extension default)
+  //    skip the JSON round-trip. JSON input goes through `nodeFromJSON`,
+  //    which enforces schema validity here — required attrs, content
+  //    expressions, mark allowance. Malformed JSON throws regardless of mode;
+  //    "repair" cannot invent missing structure.
+  const parsed = input instanceof Node ? input : schema.nodeFromJSON(input);
 
   // 2. Bounds. Cheap walk — count once, compare to both limits.
   const bounds = measureBounds(parsed);

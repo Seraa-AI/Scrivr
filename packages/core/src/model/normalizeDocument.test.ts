@@ -207,6 +207,27 @@ describe("normalizeDocument — ServerEditor wire-up", () => {
   });
 });
 
+describe("normalizeDocument — Node input", () => {
+  it("accepts a parsed Node and returns the same shape as JSON input", () => {
+    const json = doc(para("hi"));
+    const fromJson = normalizeDocument(json, { schema, assignIds: false });
+    const node = schema.nodeFromJSON(json);
+    const fromNode = normalizeDocument(node, { schema, assignIds: false });
+    expect(fromNode.fingerprint).toBe(fromJson.fingerprint);
+  });
+
+  it("skips nodeFromJSON when already given a Node", () => {
+    // If the Node path went through nodeFromJSON again, an unknown node
+    // type would throw. Building a Node directly proves we used it as-is.
+    const direct = schema.nodes["doc"]!.create(
+      null,
+      schema.nodes["paragraph"]!.create(null, schema.text("direct")),
+    );
+    const result = normalizeDocument(direct, { schema });
+    expect(result.doc.firstChild!.firstChild!.text).toBe("direct");
+  });
+});
+
 describe("normalizeDocument — bounds", () => {
   it("throws in strict mode when maxNodes is exceeded", () => {
     const many = Array.from({ length: 50 }, () => para("x"));
