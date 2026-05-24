@@ -31,7 +31,6 @@ import { chromeFontConfig } from "./chromeFontConfig";
  * dependency edge between `@scrivr/plugins` and `@scrivr/react`.
  */
 const RIBBON_HEIGHT = 28;
-const DEFAULT_BODY_GAP = 12;
 
 /** Measured layout + reserved height for one header/footer slot. */
 export interface SlotLayout {
@@ -72,7 +71,11 @@ function measureSlot(
   });
 
   const natural = layout.totalContentHeight ?? 0;
-  const margin = Math.max(def.margin ?? DEFAULT_BODY_GAP, RIBBON_HEIGHT);
+  // Single invariant: the gap below header content is at least
+  // RIBBON_HEIGHT. Use it as both the unset default and the floor on
+  // an explicit value — no second constant that could quietly fall
+  // below the ribbon and re-introduce the body-shift bug.
+  const margin = Math.max(def.margin ?? RIBBON_HEIGHT, RIBBON_HEIGHT);
   const reservedHeight = Math.max(natural + margin, def.minHeight ?? 0);
   return { doc: miniDoc, layout, reservedHeight };
 }
