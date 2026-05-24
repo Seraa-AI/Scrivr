@@ -2,9 +2,11 @@ import type { Schema } from "prosemirror-model";
 import type {
   ExtensionConfig,
   ExtensionContext,
+  InitialDocContext,
   Phase1Context,
   ResolvedExtension,
   IBaseEditor,
+  IEditor,
 } from "./types";
 
 /**
@@ -77,16 +79,28 @@ export class Extension<Options extends object = object> {
       docAttrs: config.addDocAttrs?.call(p1) ?? {},
       // Phase 1 — chrome contribution consumed by the layout aggregator.
       pageChrome: config.addPageChrome?.call(p1) ?? null,
+      // Phase 1 — page-config contribution (size/margins/pageless). Manager
+      // picks the first non-undefined contribution and warns when more than
+      // one extension actually contributes a value.
+      pageConfig: config.addPageConfig?.call(p1),
       // Phase 1 — surface owner registration consumed by Editor via
       // ExtensionManager.getSurfaceOwners() and installed on SurfaceRegistry.
       surfaceOwner: config.addSurfaceOwner?.call(p1) ?? null,
       // Phase 1 — format-specific export contributions collected by format
       // packages at export time (e.g. exportPdf walks addExports().pdf contributions).
       exports: config.addExports?.call(p1) ?? {},
+      // Phase 1 — format-specific import contributions collected by format
+      // packages at import time (e.g. importDocx walks addImports().docx contributions).
+      imports: config.addImports?.call(p1) ?? {},
       // Phase 2: only when schema is available
       plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
       ...(schema && config.addInitialDoc
-        ? (() => { const d = config.addInitialDoc.call(p2); return d != null ? { initialDoc: d } : {}; })()
+        ? {
+            initialDocFactory: (env): ReturnType<NonNullable<typeof config.addInitialDoc>> => {
+              const ctx: InitialDocContext<Options> = { name, options, ...env };
+              return config.addInitialDoc!.call(ctx);
+            },
+          }
         : {}),
       keymap:  schema ? (config.addKeymap?.call(p2) ?? {}) : {},
       commands: schema ? (config.addCommands?.call(p2) ?? {}) : {},
@@ -104,6 +118,9 @@ export class Extension<Options extends object = object> {
       markdownSerializerRules: config.addMarkdownSerializerRules?.call(p1) ?? {},
       ...(config.onEditorReady
         ? { editorReadyCallback: (editor: IBaseEditor) => config.onEditorReady!.call(p1, editor) }
+        : {}),
+      ...(config.onViewReady
+        ? { viewReadyCallback: (editor: IEditor) => config.onViewReady!.call(p1, editor) }
         : {}),
     };
   }

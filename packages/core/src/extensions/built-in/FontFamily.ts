@@ -2,10 +2,15 @@ import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
+import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
 
 interface FontFamilyOptions {
   /** Font family presets shown in the toolbar. */
   families: string[];
+}
+
+function readFontFamilyAttr(raw: unknown): string | undefined {
+  return typeof raw === "string" && raw.length > 0 ? raw : undefined;
 }
 
 const DEFAULT_FAMILIES = [
@@ -133,6 +138,33 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
         },
       ],
     ]);
+  },
+
+  addExports() {
+    const handler: DocxMarkHandler = (props, mark) => {
+      const f = mark.attrs["family"];
+      return typeof f === "string" && f.length > 0
+        ? { ...props, fontFamily: f }
+        : props;
+    };
+    return { docx: { marks: { fontFamily: handler } } };
+  },
+
+  addImports() {
+    // OOXML `<w:rFonts w:ascii="Georgia" w:hAnsi="Georgia" .../>`. Prefer
+    // `w:ascii`; fall back to `w:hAnsi` then `w:cs`.
+    const handler: DocxMarkTransform = (mark, ctx) => {
+      const attrs = mark.attrs ?? {};
+      const family =
+        readFontFamilyAttr(attrs["ascii"]) ??
+        readFontFamilyAttr(attrs["hAnsi"]) ??
+        readFontFamilyAttr(attrs["cs"]);
+      if (!family) return null;
+      const t = ctx.schema.marks["fontFamily"];
+      if (!t) return null;
+      return t.create({ family });
+    };
+    return { docx: { marks: { rFonts: handler } } };
   },
 
   addToolbarItems() {

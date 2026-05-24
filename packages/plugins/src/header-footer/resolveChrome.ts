@@ -44,6 +44,7 @@ export interface ResolvedHeaderFooter {
 function measureSlot(
   def: HeaderFooterDefinition | undefined,
   input: PageChromeMeasureInput,
+  activeEditingGap: number,
 ): SlotLayout | undefined {
   if (!def) return undefined;
 
@@ -57,32 +58,64 @@ function measureSlot(
   });
 
   const natural = layout.totalContentHeight ?? 0;
-  const margin = def.margin ?? 12;
+  // Floor + default in one expression:
+  //   def.margin === undefined → margin = activeEditingGap
+  //   def.margin >= activeEditingGap → margin = def.margin
+  //   def.margin <  activeEditingGap → margin = activeEditingGap
+  //
+  // One number expresses "the editing affordance is N px tall,
+  // reserve N below header content," so the body never shifts when
+  // a surface activates. Headless callers pass 0 to honor slot.margin
+  // verbatim (no whitespace reserved for a UI that isn't drawn).
+  //
+  // This is the single place the floor is applied. The value becomes
+  // part of `reservedHeight` below, which the chrome aggregator folds
+  // into `metrics.contentTop`. Every downstream consumer (canvas
+  // paint, PDF chrome render) reads those metrics unchanged — there
+  // is no per-render override of the gap.
+  const margin = Math.max(def.margin ?? activeEditingGap, activeEditingGap);
   const reservedHeight = Math.max(natural + margin, def.minHeight ?? 0);
   return { doc: miniDoc, layout, reservedHeight };
 }
 
 /**
  * Resolve all header/footer slots and return a ChromeContribution.
- * Heights vary by page (differentFirstPage) via topForPage/bottomForPage closures.
+ * Heights vary by page (`differentFirstPage`) via the `topForPage` /
+ * `bottomForPage` closures.
+ *
+ * `activeEditingGap` — minimum pixels reserved between header content
+ * and body. The React `HeaderFooterRibbon` overlays this gap while a
+ * surface is active, so the default React wiring passes 28 (the
+ * ribbon's height). Headless callers (PDF-only `ServerEditor`,
+ * non-React renders) pass 0 to honor each slot's `margin` as-is
+ * without reserving whitespace for a UI that isn't drawn.
+ *
+ * The value is plumbed in from `HeaderFooter.configure({
+ * activeEditingGap })` via `addPageChrome().measure`, applied in
+ * `measureSlot`, and baked into `slot.reservedHeight`. The layout
+ * aggregator folds that into `metrics.contentTop`; both canvas paint
+ * and PDF chrome render read those metrics unchanged. Decided once
+ * per layout run, no later override — see the `HeaderFooterOptions`
+ * docstring for the dual-use editor caveat.
  */
 export function resolveChrome(
   policy: HeaderFooterPolicy,
   input: PageChromeMeasureInput,
   _ctx: LayoutIterationContext,
+  activeEditingGap: number,
 ): ChromeContribution {
   const resolved: ResolvedHeaderFooter = {
     policy,
     defaultMarginTop: input.pageConfig.margins.top,
     defaultMarginBottom: input.pageConfig.margins.bottom,
     slots: {
-      defaultHeader: measureSlot(policy.defaultHeader, input),
-      defaultFooter: measureSlot(policy.defaultFooter, input),
+      defaultHeader: measureSlot(policy.defaultHeader, input, activeEditingGap),
+      defaultFooter: measureSlot(policy.defaultFooter, input, activeEditingGap),
       firstPageHeader: policy.differentFirstPage
-        ? measureSlot(policy.firstPageHeader, input)
+        ? measureSlot(policy.firstPageHeader, input, activeEditingGap)
         : undefined,
       firstPageFooter: policy.differentFirstPage
-        ? measureSlot(policy.firstPageFooter, input)
+        ? measureSlot(policy.firstPageFooter, input, activeEditingGap)
         : undefined,
     },
   };

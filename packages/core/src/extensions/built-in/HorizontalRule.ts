@@ -4,19 +4,23 @@ import { InputRule } from "prosemirror-inputrules";
 import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
 import type { CharacterMap } from "../../layout/CharacterMap";
 import type { LayoutBlock } from "../../layout/BlockLayout";
+import {
+  xml,
+  type DocxNodeHandler,
+  type DocxBlockTransform,
+} from "../../exports/docx";
 
 // ── HorizontalRule rendering strategy ────────────────────────────────────────
 
-const HR_COLOR = "#cbd5e1";
 const HR_THICKNESS = 1.5;
 
 const HorizontalRuleStrategy: BlockStrategy = {
   render(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
-    const { ctx, lineIndexOffset } = renderCtx;
+    const { ctx, lineIndexOffset, theme } = renderCtx;
     const midY = block.y + block.height / 2;
 
     ctx.save();
-    ctx.strokeStyle = HR_COLOR;
+    ctx.strokeStyle = theme.hrColor;
     ctx.lineWidth = HR_THICKNESS;
     ctx.beginPath();
     ctx.moveTo(block.x, midY);
@@ -81,6 +85,36 @@ export const HorizontalRule = Extension.create({
 
   addLayoutHandlers() {
     return { horizontalRule: HorizontalRuleStrategy };
+  },
+
+  addExports() {
+    // Word convention: empty paragraph with a single bottom border.
+    const handler: DocxNodeHandler = () =>
+      xml("w:p", undefined, [
+        xml("w:pPr", undefined, [
+          xml("w:pBdr", undefined, [
+            xml("w:bottom", {
+              "w:val": "single",
+              "w:sz": "6",
+              "w:space": "1",
+              "w:color": "auto",
+            }),
+          ]),
+        ]),
+      ]);
+    return { docx: { nodes: { horizontalRule: handler } } };
+  },
+
+  addImports() {
+    // Stage 1 currently emits `DocxBlock { type: "horizontalRule" }` only
+    // for explicit overrides; Word's typical HR (empty paragraph with
+    // bottom border) is parsed as a paragraph. Detection from pBdr lands
+    // with the structural-fidelity milestone.
+    const importer: DocxBlockTransform = (_block, _content, ctx) => {
+      const t = ctx.schema.nodes["horizontalRule"];
+      return t ? t.create() : null;
+    };
+    return { docx: { blocks: { horizontalRule: importer } } };
   },
 
   addToolbarItems() {

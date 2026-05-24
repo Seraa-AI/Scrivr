@@ -1,6 +1,6 @@
 import { Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
-import { TextMeasurer } from "./TextMeasurer";
+import { TextMeasurer, type TextMeasurerLike } from "./TextMeasurer";
 import {
   FontConfig,
   defaultFontConfig,
@@ -165,7 +165,7 @@ export interface DocumentLayout {
    * writes an object (possibly empty); absent only on test fixtures that
    * bypass runPipeline. Seeds the next run's previousRunPayload.
    */
-  _chromePayloads?: Record<string, unknown>;
+  chromePayloads?: Record<string, unknown>;
 }
 
 /**
@@ -437,7 +437,7 @@ function resolveAnchoredObjects(
   inputFlows: FlowBlock[],
   pageConfig: PageConfig,
   metricsFor: (pageNumber: number) => PageMetrics,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
   inlineRegistry?: InlineRegistry,
@@ -698,7 +698,7 @@ function reflowFlowsAgainstExclusions(
     contentX: number;
     contentWidth: number;
   },
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
   inlineRegistry?: InlineRegistry,
@@ -711,9 +711,10 @@ function reflowFlowsAgainstExclusions(
     const flow = flows[idx]!;
     const flowY = flow.globalY ?? 0;
     if (flowY >= zoneBottom) break;
-    // Skip leaf flows (image/HR/pageBreak) — exclusion reflow only narrows
-    // text flow lines, leaves can never be re-broken around a wrap zone.
-    if (flow.kind === "leaf" || flowY + flow.height <= zoneTop) continue;
+    // Skip atomic flows (image/HR/pageBreak/tableRow) — exclusion reflow only
+    // narrows text flow lines; atomic blocks can never be re-broken around a
+    // wrap zone.
+    if (flow.kind === "leaf" || flow.kind === "tableRow" || flowY + flow.height <= zoneTop) continue;
 
     const wrappedFlow: FlowBlock = {
       ...flow,
@@ -791,7 +792,7 @@ function reflowFlowsAgainstExclusions(
 
 export interface PageLayoutOptions {
   pageConfig: PageConfig;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   fontConfig?: FontConfig;
   /**
    * Pass the previous version so callers can increment it.
@@ -871,11 +872,11 @@ export const defaultPagelessConfig: PageConfig = {
  */
 // Recursion guard — throws if runPipeline is called while already on the stack.
 // Chrome contributors must use runMiniPipeline() instead.
-let _runPipelineDepth = 0;
+let runPipelineDepth = 0;
 
 /** Test-only: set the recursion depth counter to simulate re-entry. */
 export function __setRunPipelineDepthForTest(n: number): void {
-  _runPipelineDepth = n;
+  runPipelineDepth = n;
 }
 
 export function runPipeline(
@@ -883,7 +884,7 @@ export function runPipeline(
   options: PageLayoutOptions,
 ): DocumentLayout {
   // Recursion guard — use runMiniPipeline() from chrome contributor hooks.
-  if (_runPipelineDepth > 0) {
+  if (runPipelineDepth > 0) {
     throw new Error(
       "[runPipeline] recursive call detected. Chrome contributors must call " +
       "runMiniPipeline() from their measure() hook, not runPipeline(). " +
@@ -891,11 +892,11 @@ export function runPipeline(
       "contributor and infinite-loop.",
     );
   }
-  _runPipelineDepth++;
+  runPipelineDepth++;
   try {
-    return _runPipelineBody(doc, options);
+    return runPipelineBody(doc, options);
   } finally {
-    _runPipelineDepth--;
+    runPipelineDepth--;
   }
 }
 
@@ -915,7 +916,7 @@ export interface FlowPipelineResult {
   contentWidth: number;
   fontConfig: FontConfig;
   fontModifiers: Map<string, FontModifier> | undefined;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   /** Y cursor at end of pagination — used for pageless totalContentHeight. */
   y: number;
   /** Anchored objects resolved before pagination. */
@@ -1069,7 +1070,7 @@ export function runFlowPipeline(
   return { layout, isPartial: false, ...context, y: pr.y, anchoredObjects: mergedPlacements };
 }
 
-function _runPipelineBody(
+function runPipelineBody(
   doc: Node,
   options: PageLayoutOptions,
 ): DocumentLayout {
@@ -1093,7 +1094,7 @@ function _runPipelineBody(
   };
 
   const contributions = options.pageChromeContributions ?? [];
-  const prevRunPayloads = previousLayout?._chromePayloads ?? {};
+  const prevRunPayloads = previousLayout?.chromePayloads ?? {};
   const prevRunFlowLayout = previousLayout ?? null;
 
   // Stages 1 + 2 — measure + paginate, wrapped in the chrome aggregator loop.
@@ -1110,7 +1111,7 @@ function _runPipelineBody(
     ...fp.layout,
     convergence: chromeResult.convergence,
     iterationCount: chromeResult.iterationCount,
-    _chromePayloads: chromeResult.chromePayloads,
+    chromePayloads: chromeResult.chromePayloads,
   };
 
   if (fp.isPartial) return layoutWithChrome;
@@ -1127,7 +1128,7 @@ function _runPipelineBody(
 export interface PaginateFlowOptions {
   previousLayout?: DocumentLayout | undefined;
   measureCache?: WeakMap<Node, MeasureCacheEntry> | undefined;
-  measurer?: TextMeasurer | undefined;
+  measurer?: TextMeasurerLike | undefined;
   pageless?: boolean | undefined;
   /** Initial page cursor. Fresh run: pages=[], page=empty page 1. Resumption: from prior chunk. */
   init: {
@@ -1234,6 +1235,9 @@ export function paginateFlow(
     const blockWidth = flow.availableWidth;
 
     // Build a positioned LayoutBlock from the FlowBlock measurements.
+    // `cells: []` is attached for tableRow blocks so the LayoutBlock invariant
+    // ("kind === tableRow → cells present") holds in Phase 1; Phase 4 replaces
+    // the empty array with real cell sub-blocks.
     const buildBlock = (x: number, bY: number): LayoutBlock => ({
       kind: flow.kind,
       node,
@@ -1248,6 +1252,7 @@ export function paginateFlow(
       blockType: flow.blockType,
       align: flow.align,
       availableWidth: blockWidth,
+      ...(flow.kind === "tableRow" ? { cells: [] } : {}),
     });
 
     const block = normalizeWrappedBlockForPage(
@@ -1274,9 +1279,11 @@ export function paginateFlow(
     const blockBottom = targetY + block.height;
     const pageBottom = currentMetrics.contentBottom;
     const contentHeight = currentMetrics.contentHeight;
-    // Text blocks can always be split; leaf blocks need the !isFirstOnPage guard
-    // to avoid infinite empty-page loops when the block exceeds contentHeight.
-    const overflows = !pageless && blockBottom > pageBottom && (!isFirstOnPage || flow.kind !== "leaf");
+    // Text blocks can always be split; leaf and tableRow blocks need the
+    // !isFirstOnPage guard to avoid infinite empty-page loops when the block
+    // exceeds contentHeight (the "pathological row policy" — clip on next page).
+    const isAtomicBlock = flow.kind === "leaf" || flow.kind === "tableRow";
+    const overflows = !pageless && blockBottom > pageBottom && (!isFirstOnPage || !isAtomicBlock);
 
     // ── Layout debug log ──────────────────────────────────────────────────────
     if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
@@ -1298,7 +1305,7 @@ export function paginateFlow(
       currentPage.blocks.push(block);
       y = targetY + block.height;
       prevSpaceAfter = flow.spaceAfter;
-    } else if (flow.kind === "leaf") {
+    } else if (isAtomicBlock) {
       // ── Leaf block (image, HR): move whole block to next page ──────────────
       const tooTallForAnyPage = flow.height > contentHeight;
       if (tooTallForAnyPage) {
@@ -1584,7 +1591,7 @@ export function buildBlockFlow(
   startIndex: number,
   config: FlowConfig,
   fontConfig: FontConfig,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
   fontModifiers: Map<string, FontModifier> | undefined,
   measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
   maxBlocks?: number,
@@ -1730,7 +1737,7 @@ function shiftBlock(
 function rebreakWrappedLinesWithoutExclusions(
   lines: LayoutLine[],
   availableWidth: number,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
 ): LayoutLine[] {
   const spans: InputSpan[] = [];
 
@@ -1783,7 +1790,7 @@ function normalizeWrappedBlockForPage(
   block: LayoutBlock,
   flow: Pick<FlowBlock, "overlapsWrapZone" | "wrapZonePage">,
   pageNumber: number,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
 ): LayoutBlock {
   if (!shouldNormalizeWrappedLines(flow, pageNumber, false)) return block;
 
@@ -1855,6 +1862,18 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
       return;
     }
 
+    if (node.type.name === "table") {
+      // Tables expand into one item per row. Each row lays out as an atomic
+      // (leaf-like) block in v1 — whole row moves to the next page on
+      // overflow, no line-splitting across cells. Phase 4 replaces the
+      // stub row layout with sandboxed per-cell layout.
+      node.forEach((rowNode, rowOffset) => {
+        const rowNodePos = offset + 1 + rowOffset;
+        items.push({ node: rowNode, nodePos: rowNodePos, indentLeft: 0 });
+      });
+      return;
+    }
+
     const blockIndent = (node.attrs["indent"] as number) ?? 0;
     items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
   });
@@ -1882,7 +1901,7 @@ function resolveBlockEntry(
   targetY: number,
   blockWidth: number,
   pageNumber: number,
-  measurer: TextMeasurer,
+  measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
   measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,

@@ -11,7 +11,7 @@ import type {
 } from "./PageLayout";
 import type { FontConfig } from "./FontConfig";
 import type { InlineRegistry } from "./BlockRegistry";
-import type { TextMeasurer } from "./TextMeasurer";
+import type { TextMeasurerLike } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
 import type { PageChromeContribution } from "./PageMetrics";
 import { populateCharMap } from "./BlockLayout";
@@ -26,7 +26,7 @@ interface FragmentIndexEntry {
 export interface LayoutCoordinatorOptions {
   pageConfig: PageConfig;
   fontConfig: FontConfig;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   fontModifiers: Map<string, FontModifier>;
   /** Returns the current ProseMirror document — read at layout time so the
    *  coordinator always operates on the latest doc without needing per-call args. */
@@ -66,31 +66,31 @@ export class LayoutCoordinator {
 
   private readonly opts: LayoutCoordinatorOptions;
 
-  private _layout: DocumentLayout;
-  private _dirty = false;
-  private _layoutIsPartial = false;
-  private _layoutResumption: LayoutResumption | null = null;
-  private _partialLayoutBlocks = 0;
-  private _idleLayoutId: number | null = null;
-  private _ready = true;
-  private _cursorPage = 1;
+  private layout: DocumentLayout;
+  private dirty = false;
+  private layoutIsPartial = false;
+  private layoutResumption: LayoutResumption | null = null;
+  private partialLayoutBlocks = 0;
+  private idleLayoutId: number | null = null;
+  private ready = true;
+  private cursorPageValue = 1;
 
-  private readonly _populatedPages = new Set<number>();
-  private readonly _measureCache = new WeakMap<Node, MeasureCacheEntry>();
+  private readonly populatedPages = new Set<number>();
+  private readonly measureCache = new WeakMap<Node, MeasureCacheEntry>();
 
   /**
    * O(1) page lookup by page number.
-   * Rebuilt by _indexLayout() after every layout assignment.
+   * Rebuilt by indexLayout() after every layout assignment.
    */
-  private _pageMap = new Map<number, LayoutPage>();
+  private pageMap = new Map<number, LayoutPage>();
 
   /**
-   * Flat sorted index used by _cursorPageFromLayout().
+   * Flat sorted index used by cursorPageFromLayout().
    * Each entry covers one rendered line — one entry per line per page.
    * Kept sorted by start so binary search is O(log N).
-   * Rebuilt by _indexLayout() after every layout assignment.
+   * Rebuilt by indexLayout() after every layout assignment.
    */
-  private _fragmentIndex: FragmentIndexEntry[] = [];
+  private fragmentIndex: FragmentIndexEntry[] = [];
 
   /** The glyph-position map — populated lazily per page, cleared on each layout pass. */
   readonly charMap = new CharacterMap();
@@ -99,7 +99,7 @@ export class LayoutCoordinator {
     this.opts = opts;
 
     performance.mark("scrivr:layout-initial-start");
-    this._layout = this._runLayout({
+    this.layout = this.runLayout({
       previousVersion: 0,
       maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
     });
@@ -110,33 +110,33 @@ export class LayoutCoordinator {
       "scrivr:layout-initial-end",
     );
 
-    this._layoutIsPartial = this._layout.isPartial ?? false;
-    this._layoutResumption = this._layout.resumption ?? null;
-    this._indexLayout();
+    this.layoutIsPartial = this.layout.isPartial ?? false;
+    this.layoutResumption = this.layout.resumption ?? null;
+    this.indexLayout();
     // Page 1 is always visible on first paint.
     this.ensurePagePopulated(1);
 
-    if (this._layoutIsPartial) {
-      this._partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
-      this._scheduleIdleLayout();
+    if (this.layoutIsPartial) {
+      this.partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
+      this.scheduleIdleLayout();
     }
   }
 
   // ── Public getters ──────────────────────────────────────────────────────────
 
   get current(): DocumentLayout {
-    return this._layout;
+    return this.layout;
   }
   get cursorPage(): number {
-    return this._cursorPage;
+    return this.cursorPageValue;
   }
   get isReady(): boolean {
-    return this._ready;
+    return this.ready;
   }
 
   get loadingState(): "syncing" | "rendering" | "ready" {
-    if (!this._ready) return "syncing";
-    if (this._layoutIsPartial) return "rendering";
+    if (!this.ready) return "syncing";
+    if (this.layoutIsPartial) return "rendering";
     return "ready";
   }
 
@@ -148,7 +148,7 @@ export class LayoutCoordinator {
    * the next ensureLayout() call — usually from Editor's RAF flush.
    */
   invalidate(): void {
-    this._dirty = true;
+    this.dirty = true;
   }
 
   /**
@@ -159,23 +159,23 @@ export class LayoutCoordinator {
    * so selection / cursor drawing works immediately.
    */
   ensureLayout(): void {
-    if (!this._dirty) return;
-    this._dirty = false;
+    if (!this.dirty) return;
+    this.dirty = false;
     // A synchronous user action supersedes any in-progress idle pass.
-    this._layoutIsPartial = false;
-    this._layoutResumption = null;
+    this.layoutIsPartial = false;
+    this.layoutResumption = null;
     this.charMap.clear();
-    this._populatedPages.clear();
-    const prev = this._layout;
-    this._layout = this._runLayout({
+    this.populatedPages.clear();
+    const prev = this.layout;
+    this.layout = this.runLayout({
       previousVersion: prev.version,
       previousLayout: prev,
     });
-    this._indexLayout();
-    this._cursorPage = this._cursorPageFromLayout();
-    this.ensurePagePopulated(this._cursorPage);
-    this.ensurePagePopulated(this._cursorPage - 1); // no-op when page < 1
-    this.ensurePagePopulated(this._cursorPage + 1); // no-op when page doesn't exist
+    this.indexLayout();
+    this.cursorPageValue = this.cursorPageFromLayout();
+    this.ensurePagePopulated(this.cursorPageValue);
+    this.ensurePagePopulated(this.cursorPageValue - 1); // no-op when page < 1
+    this.ensurePagePopulated(this.cursorPageValue + 1); // no-op when page doesn't exist
   }
 
   /**
@@ -187,10 +187,10 @@ export class LayoutCoordinator {
    */
   ensurePagePopulated(pageNumber: number): void {
     if (pageNumber < 1) return;
-    if (this._populatedPages.has(pageNumber)) return;
-    const page = this._pageMap.get(pageNumber);
+    if (this.populatedPages.has(pageNumber)) return;
+    const page = this.pageMap.get(pageNumber);
     if (!page) return; // don't mark as populated — layout may grow later
-    this._populatedPages.add(pageNumber);
+    this.populatedPages.add(pageNumber);
     const doc = this.opts.getDoc();
     let lineOffset = 0;
     for (const block of page.blocks) {
@@ -257,7 +257,7 @@ export class LayoutCoordinator {
 
     // Stamp anchored-object rects so getNodeViewportRect returns the rendered
     // object bounds immediately, before the tile paint pass re-stamps them.
-    for (const object of this._layout.anchoredObjects ?? []) {
+    for (const object of this.layout.anchoredObjects ?? []) {
       if (object.page !== pageNumber) continue;
       this.charMap.registerObjectRect({
         docPos: object.docPos,
@@ -279,58 +279,58 @@ export class LayoutCoordinator {
    *            cancels the pending RAF when going false.
    */
   setReady(ready: boolean): void {
-    this._ready = ready;
+    this.ready = ready;
 
     if (ready) {
-      this._cancelIdleLayout();
-      this._partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
-      this._dirty = false;
+      this.cancelIdleLayout();
+      this.partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
+      this.dirty = false;
       this.charMap.clear();
-      this._populatedPages.clear();
-      this._layout = this._runLayout({
-        previousVersion: this._layout.version,
+      this.populatedPages.clear();
+      this.layout = this.runLayout({
+        previousVersion: this.layout.version,
         maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
       });
-      this._layoutIsPartial = this._layout.isPartial ?? false;
-      this._layoutResumption = this._layout.resumption ?? null;
-      this._indexLayout();
-      this._cursorPage = this._cursorPageFromLayout();
-      this.ensurePagePopulated(this._cursorPage);
-      this.ensurePagePopulated(this._cursorPage - 1);
-      this.ensurePagePopulated(this._cursorPage + 1);
+      this.layoutIsPartial = this.layout.isPartial ?? false;
+      this.layoutResumption = this.layout.resumption ?? null;
+      this.indexLayout();
+      this.cursorPageValue = this.cursorPageFromLayout();
+      this.ensurePagePopulated(this.cursorPageValue);
+      this.ensurePagePopulated(this.cursorPageValue - 1);
+      this.ensurePagePopulated(this.cursorPageValue + 1);
       this.opts.onUpdate(); // paint first pages immediately
 
-      if (this._layoutIsPartial) {
-        this._scheduleIdleLayout();
+      if (this.layoutIsPartial) {
+        this.scheduleIdleLayout();
       }
     } else {
-      this._cancelIdleLayout();
-      this._layoutIsPartial = false;
+      this.cancelIdleLayout();
+      this.layoutIsPartial = false;
     }
   }
 
   /** Cancel all pending async work. Call from Editor.destroy(). */
   destroy(): void {
-    this._cancelIdleLayout();
+    this.cancelIdleLayout();
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
 
   /**
    * Rebuild the O(1) page map and O(log N) block index from the current layout.
-   * Called immediately after every `this._layout` assignment.
+   * Called immediately after every `this.layout` assignment.
    */
-  private _indexLayout(): void {
-    this._pageMap.clear();
-    this._fragmentIndex = [];
+  private indexLayout(): void {
+    this.pageMap.clear();
+    this.fragmentIndex = [];
 
-    for (const page of this._layout.pages) {
-      this._pageMap.set(page.pageNumber, page);
+    for (const page of this.layout.pages) {
+      this.pageMap.set(page.pageNumber, page);
 
       for (const block of page.blocks) {
         if (block.kind === "leaf") {
           // Leaf block (image, HR): single entry covering the full node range.
-          this._fragmentIndex.push({
+          this.fragmentIndex.push({
             start: block.nodePos,
             end: block.nodePos + block.node.nodeSize,
             page: page.pageNumber,
@@ -361,7 +361,7 @@ export class LayoutCoordinator {
             lineEnd = Math.max(lineEnd, block.nodePos + block.node.nodeSize);
           }
 
-          this._fragmentIndex.push({
+          this.fragmentIndex.push({
             start: lineStart,
             end: lineEnd,
             page: page.pageNumber,
@@ -381,13 +381,13 @@ export class LayoutCoordinator {
    * Find the page number of the cursor using a binary search over _blockIndex.
    * O(log N) vs the previous O(pages × blocks) nested loop.
    */
-  private _cursorPageFromLayout(): number {
+  private cursorPageFromLayout(): number {
     const head = this.opts.getHead();
     let lo = 0;
-    let hi = this._fragmentIndex.length - 1;
+    let hi = this.fragmentIndex.length - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >>> 1;
-      const { start, end, page } = this._fragmentIndex[mid]!;
+      const { start, end, page } = this.fragmentIndex[mid]!;
       if (head < start) {
         hi = mid - 1;
       } else if (head >= end) {
@@ -397,11 +397,11 @@ export class LayoutCoordinator {
       }
     }
     // Binary search miss: fall back to linear scan by node range.
-    return this._findPageLinear(head);
+    return this.findPageLinear(head);
   }
 
-  private _findPageLinear(docPos: number): number {
-    for (const page of this._layout.pages) {
+  private findPageLinear(docPos: number): number {
+    for (const page of this.layout.pages) {
       for (const block of page.blocks) {
         if (
           docPos >= block.nodePos &&
@@ -411,7 +411,7 @@ export class LayoutCoordinator {
         }
       }
     }
-    return this._layout.pages.at(-1)?.pageNumber ?? 1;
+    return this.layout.pages.at(-1)?.pageNumber ?? 1;
   }
 
   /**
@@ -419,7 +419,7 @@ export class LayoutCoordinator {
    * All orchestration logic lives in runPipeline (PageLayout.ts); the coordinator
    * owns only the call-site wiring and state management.
    */
-  private _runLayout(opts: {
+  private runLayout(opts: {
     previousVersion?: number;
     maxBlocks?: number;
     previousLayout?: DocumentLayout;
@@ -431,7 +431,7 @@ export class LayoutCoordinator {
       fontConfig: this.opts.fontConfig,
       measurer: this.opts.measurer,
       fontModifiers: this.opts.fontModifiers,
-      measureCache: this._measureCache,
+      measureCache: this.measureCache,
       ...(contribs.length > 0 ? { pageChromeContributions: contribs } : {}),
       ...(opts.previousVersion !== undefined
         ? { previousVersion: opts.previousVersion }
@@ -443,23 +443,23 @@ export class LayoutCoordinator {
     });
   }
 
-  private _scheduleIdleLayout(): void {
-    const run = (deadline?: IdleDeadline) => this._completeIdleLayout(deadline);
+  private scheduleIdleLayout(): void {
+    const run = (deadline?: IdleDeadline) => this.completeIdleLayout(deadline);
     if (typeof requestIdleCallback !== "undefined") {
-      this._idleLayoutId = requestIdleCallback(run);
+      this.idleLayoutId = requestIdleCallback(run);
     } else {
-      this._idleLayoutId = setTimeout(() => run(), 16) as unknown as number;
+      this.idleLayoutId = setTimeout(() => run(), 16) as unknown as number;
     }
   }
 
-  private _cancelIdleLayout(): void {
-    if (this._idleLayoutId === null) return;
+  private cancelIdleLayout(): void {
+    if (this.idleLayoutId === null) return;
     if (typeof cancelIdleCallback !== "undefined") {
-      cancelIdleCallback(this._idleLayoutId);
+      cancelIdleCallback(this.idleLayoutId);
     } else {
-      clearTimeout(this._idleLayoutId as unknown as number);
+      clearTimeout(this.idleLayoutId as unknown as number);
     }
-    this._idleLayoutId = null;
+    this.idleLayoutId = null;
   }
 
   /**
@@ -467,43 +467,43 @@ export class LayoutCoordinator {
    * If the user typed between chunks, `ensureLayout()` will have cleared
    * `_layoutIsPartial` and this becomes a cheap no-op.
    */
-  private _completeIdleLayout(deadline?: IdleDeadline): void {
-    this._idleLayoutId = null;
-    if (!this._layoutIsPartial) return;
+  private completeIdleLayout(deadline?: IdleDeadline): void {
+    this.idleLayoutId = null;
+    if (!this.layoutIsPartial) return;
 
     let chunkSize = LayoutCoordinator.LAYOUT_CHUNK_SIZE;
     if (deadline && deadline.timeRemaining() > 8) {
       // ~3 blocks/ms heuristic — process more when the browser has budget.
       chunkSize = Math.min(120, Math.floor(deadline.timeRemaining() * 2));
     }
-    this._partialLayoutBlocks += chunkSize;
+    this.partialLayoutBlocks += chunkSize;
 
     this.charMap.clear();
-    this._populatedPages.clear();
+    this.populatedPages.clear();
     performance.mark("scrivr:layout-chunk-start");
     // Pass resumption so layout continues from the next unprocessed block
     // rather than restarting from block 0 — O(N) total vs O(N²).
-    this._layout = this._runLayout({
-      resumption: this._layoutResumption,
+    this.layout = this.runLayout({
+      resumption: this.layoutResumption,
       maxBlocks: chunkSize,
     });
     performance.mark("scrivr:layout-chunk-end");
     performance.measure(
-      `scrivr:layout-chunk (next ${chunkSize} blocks, total ${this._partialLayoutBlocks} of ${this.opts.getDoc().childCount})`,
+      `scrivr:layout-chunk (next ${chunkSize} blocks, total ${this.partialLayoutBlocks} of ${this.opts.getDoc().childCount})`,
       "scrivr:layout-chunk-start",
       "scrivr:layout-chunk-end",
     );
-    this._layoutIsPartial = this._layout.isPartial ?? false;
-    this._layoutResumption = this._layout.resumption ?? null;
-    this._indexLayout();
-    this._cursorPage = this._cursorPageFromLayout();
-    this.ensurePagePopulated(this._cursorPage);
-    this.ensurePagePopulated(this._cursorPage - 1);
-    this.ensurePagePopulated(this._cursorPage + 1);
+    this.layoutIsPartial = this.layout.isPartial ?? false;
+    this.layoutResumption = this.layout.resumption ?? null;
+    this.indexLayout();
+    this.cursorPageValue = this.cursorPageFromLayout();
+    this.ensurePagePopulated(this.cursorPageValue);
+    this.ensurePagePopulated(this.cursorPageValue - 1);
+    this.ensurePagePopulated(this.cursorPageValue + 1);
     this.opts.onUpdate();
 
-    if (this._layoutIsPartial) {
-      this._scheduleIdleLayout();
+    if (this.layoutIsPartial) {
+      this.scheduleIdleLayout();
     }
   }
 }

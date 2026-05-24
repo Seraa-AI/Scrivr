@@ -1,5 +1,6 @@
 import { Extension } from "./Extension";
 import { Document } from "./built-in/Document";
+import { HardBreak } from "./built-in/HardBreak";
 import { Paragraph } from "./built-in/Paragraph";
 import { Heading, type HeadingLevel } from "./built-in/Heading";
 import { Bold } from "./built-in/Bold";
@@ -20,8 +21,9 @@ import { CodeBlock, insertCodeIndent } from "./built-in/CodeBlock";
 import { HorizontalRule } from "./built-in/HorizontalRule";
 import { PageBreak } from "./built-in/PageBreak";
 import { Image } from "./built-in/Image";
+import { Table } from "./built-in/Table";
 import { Typography } from "./built-in/Typography";
-import { Pagination } from "./built-in/Pagination";
+import { defaultPageConfig } from "../layout/PageLayout";
 import { TrailingNode } from "./built-in/TrailingNode";
 import { ClearFormatting } from "./built-in/ClearFormatting";
 import { chainCommands } from "prosemirror-commands";
@@ -29,15 +31,96 @@ import type { InputRule } from "prosemirror-inputrules";
 import type { Command } from "prosemirror-state";
 import type { NodeSpec, MarkSpec } from "prosemirror-model";
 import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules, IEditor } from "./types";
+import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { PageConfig } from "../layout/PageLayout";
+
+// ── Export contribution aggregation (used by addExports below) ──────────────
+
+interface MinimalContribBundle {
+  // Export side — DocxHandlers / PdfHandlers
+  nodes?: Record<string, unknown>;
+  marks?: Record<string, unknown>;
+  onBeforeExport?: (ctx: unknown) => void | Promise<void>;
+  onBuildTreeComplete?: (ctx: unknown) => void | Promise<void>;
+  onFinalize?: (ctx: unknown) => unknown;
+  // Import side — DocxImports
+  blocks?: Record<string, unknown>;
+  paragraphStyles?: Record<string, unknown>;
+  inlines?: Record<string, unknown>;
+  onBeforeImport?: (ctx: unknown) => void | Promise<void>;
+  onImportComplete?: (doc: unknown, ctx: unknown) => unknown;
+}
+
+function isMinimalContribBundle(v: unknown): v is MinimalContribBundle {
+  return typeof v === "object" && v !== null;
+}
+
+function chainHooks(
+  a: (ctx: unknown) => void | Promise<void>,
+  b: (ctx: unknown) => void | Promise<void>,
+): (ctx: unknown) => Promise<void> {
+  return async (ctx) => {
+    await a(ctx);
+    await b(ctx);
+  };
+}
+
+function mergeContribBundles(
+  existing: MinimalContribBundle | undefined,
+  incoming: MinimalContribBundle,
+): MinimalContribBundle {
+  const out: MinimalContribBundle = { ...existing };
+  // Export lanes
+  if (incoming.nodes) out.nodes = { ...out.nodes, ...incoming.nodes };
+  if (incoming.marks) out.marks = { ...out.marks, ...incoming.marks };
+  if (incoming.onBeforeExport) {
+    out.onBeforeExport = out.onBeforeExport
+      ? chainHooks(out.onBeforeExport, incoming.onBeforeExport)
+      : incoming.onBeforeExport;
+  }
+  if (incoming.onBuildTreeComplete) {
+    out.onBuildTreeComplete = out.onBuildTreeComplete
+      ? chainHooks(out.onBuildTreeComplete, incoming.onBuildTreeComplete)
+      : incoming.onBuildTreeComplete;
+  }
+  // Last-writer-wins for onFinalize — overriding the whole packager is
+  // unusual; silent composition would mask the override.
+  if (incoming.onFinalize) out.onFinalize = incoming.onFinalize;
+  // Import lanes
+  if (incoming.blocks) out.blocks = { ...out.blocks, ...incoming.blocks };
+  if (incoming.paragraphStyles) {
+    out.paragraphStyles = { ...out.paragraphStyles, ...incoming.paragraphStyles };
+  }
+  if (incoming.inlines) out.inlines = { ...out.inlines, ...incoming.inlines };
+  if (incoming.onBeforeImport) {
+    out.onBeforeImport = out.onBeforeImport
+      ? chainHooks(out.onBeforeImport, incoming.onBeforeImport)
+      : incoming.onBeforeImport;
+  }
+  if (incoming.onImportComplete) {
+    const prev = out.onImportComplete;
+    const next = incoming.onImportComplete;
+    out.onImportComplete = prev
+      ? async (doc, ctx) => next(await prev(doc, ctx), ctx)
+      : next;
+  }
+  return out;
+}
 
 interface StarterKitOptions {
   /** Page dimensions and margins. Pass false to exclude the Pagination extension entirely. Defaults to A4 with 1-inch margins. */
   pagination?: false | Partial<PageConfig>;
   /** Pass false to exclude this extension entirely */
   document?: false;
+  /**
+   * The `hardBreak` inline node (Shift-Enter line breaks inside a block).
+   * Pass `false` to drop the node entirely, or `{ shortcut: false }` to
+   * keep the node + insertHardBreak command but remove the Shift-Enter
+   * binding (useful when a different extension wants to own that key).
+   */
+  hardBreak?: false | { shortcut?: boolean };
   paragraph?: false;
   heading?: false | { levels?: HeadingLevel[] };
   bold?: false | { shortcut?: boolean };
@@ -56,6 +139,15 @@ interface StarterKitOptions {
   horizontalRule?: false;
   pageBreak?: false;
   image?: false;
+  /**
+   * Tables are an opt-in preview while the layout/render/export pipeline
+   * is filled in (Phases 2–4 of `docs/tables.md`). Default is `false` —
+   * pass `true` to register the Table schema/commands/placeholder render.
+   *
+   * @example
+   * StarterKit.configure({ table: true })
+   */
+  table?: true;
   typography?: false;
   trailingNode?: false;
   clearFormatting?: false;
@@ -73,12 +165,32 @@ interface StarterKitOptions {
 export const StarterKit = Extension.create<StarterKitOptions>({
   name: "starterKit",
 
+  addPageConfig() {
+    // Resolve StarterKit's nested `pagination` option into a PageConfig the
+    // manager can hand to layout. Three states:
+    //   undefined  — unset; StarterKit holds no opinion, let a downstream
+    //                extension (or Editor's defaultPageConfig fallback) win
+    //   false      — explicit opt-out; contribute nothing
+    //   object     — explicit override; merge over defaults
+    //
+    // Returning undefined for the unset case is what lets the common
+    // `[StarterKit, Pagination.configure(usLetter)]` pattern resolve to
+    // usLetter — StarterKit doesn't claim the slot it never opted into.
+    const opt = this.options.pagination;
+    if (opt === false || opt === undefined) return undefined;
+    return { ...defaultPageConfig, ...opt };
+  },
+
   addNodes() {
     const nodes: Record<string, NodeSpec> = {};
     const opts = this.options;
 
     if (opts.document !== false) {
       Object.assign(nodes, Document.resolve().nodes);
+    }
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      Object.assign(nodes, ext.resolve().nodes);
     }
     if (opts.paragraph !== false) {
       Object.assign(nodes, Paragraph.resolve().nodes);
@@ -103,6 +215,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.image !== false) {
       Object.assign(nodes, Image.resolve().nodes);
+    }
+    if (opts.table === true) {
+      Object.assign(nodes, Table.resolve().nodes);
     }
 
     return nodes;
@@ -162,6 +277,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       plugins.push(...TrailingNode.resolve(this.schema).plugins);
     }
 
+    if (opts.table === true) {
+      plugins.push(...Table.resolve(this.schema).plugins);
+    }
+
     return plugins;
   },
 
@@ -172,6 +291,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     // BaseEditing is always included — Backspace + Delete are not optional
     Object.assign(km, BaseEditing.resolve(this.schema).keymap);
 
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      Object.assign(km, ext.resolve(this.schema).keymap);
+    }
     if (opts.paragraph !== false) {
       Object.assign(km, Paragraph.resolve(this.schema).keymap);
     }
@@ -240,6 +363,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     const cmds: Record<string, (...args: unknown[]) => Command> = {};
     const opts = this.options;
 
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      Object.assign(cmds, ext.resolve(this.schema).commands);
+    }
     if (opts.bold !== false) {
       const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
       Object.assign(cmds, ext.resolve(this.schema).commands);
@@ -299,6 +426,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.image !== false) {
       Object.assign(cmds, Image.resolve(this.schema).commands);
+    }
+    if (opts.table === true) {
+      Object.assign(cmds, Table.resolve(this.schema).commands);
     }
     if (opts.clearFormatting !== false) {
       Object.assign(cmds, ClearFormatting.resolve(this.schema).commands);
@@ -378,6 +508,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       Object.assign(handlers, HorizontalRule.resolve().layoutHandlers);
     }
     // Image is now an inline node — it registers an InlineStrategy, not a BlockStrategy.
+    if (opts.table === true) {
+      Object.assign(handlers, Table.resolve().layoutHandlers);
+    }
     return handlers;
   },
 
@@ -473,6 +606,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.image !== false) {
       items.push(...Image.resolve().toolbarItems);
     }
+    if (opts.table === true) {
+      items.push(...Table.resolve().toolbarItems);
+    }
     if (opts.clearFormatting !== false) {
       items.push(...ClearFormatting.resolve().toolbarItems);
     }
@@ -515,9 +651,154 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     return rules;
   },
 
+  addExports(): ExportContributionMap {
+    // Forward sub-extensions' addExports() contributions. Format-aware merge:
+    // `nodes` and `marks` Object.assign together; lifecycle hooks chain
+    // (a then b). `onFinalize` is last-writer-wins — overriding the whole
+    // packager is rare and shouldn't silently compose.
+    //
+    // Loose typing because each format's bundle shape lives in its own
+    // package (DocxHandlers in @scrivr/docx, PdfHandlers in
+    // @scrivr/export-pdf). The runtime-checked `MinimalContribBundle` is
+    // a structural subset that covers all known format shapes today.
+    const result: Record<string, MinimalContribBundle> = {};
+
+    const mergeFrom = (contrib: ExportContributionMap) => {
+      const asRecord = contrib as Record<string, unknown>;
+      for (const key of Object.keys(asRecord)) {
+        const incoming = asRecord[key];
+        if (!isMinimalContribBundle(incoming)) continue;
+        result[key] = mergeContribBundles(result[key], incoming);
+      }
+    };
+
+    const opts = this.options;
+
+    // Nodes
+    if (opts.paragraph !== false) mergeFrom(Paragraph.resolve().exports);
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.heading !== false) {
+      const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.codeBlock !== false) {
+      const ext = typeof opts.codeBlock === "object" ? CodeBlock.configure(opts.codeBlock) : CodeBlock;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.horizontalRule !== false) mergeFrom(HorizontalRule.resolve().exports);
+    if (opts.pageBreak !== false) mergeFrom(PageBreak.resolve().exports);
+    if (opts.list !== false) mergeFrom(List.resolve().exports);
+    if (opts.image !== false) mergeFrom(Image.resolve().exports);
+
+    // Marks
+    if (opts.bold !== false) {
+      const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.italic !== false) {
+      const ext = typeof opts.italic === "object" ? Italic.configure(opts.italic) : Italic;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.underline !== false) mergeFrom(Underline.resolve().exports);
+    if (opts.strikethrough !== false) mergeFrom(Strikethrough.resolve().exports);
+    if (opts.highlight !== false) {
+      const ext = typeof opts.highlight === "object" ? Highlight.configure(opts.highlight) : Highlight;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.color !== false) {
+      const ext = typeof opts.color === "object" ? Color.configure(opts.color) : Color;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.fontSize !== false) {
+      const ext = typeof opts.fontSize === "object" ? FontSize.configure(opts.fontSize) : FontSize;
+      mergeFrom(ext.resolve().exports);
+    }
+    if (opts.fontFamily !== false) {
+      const ext = typeof opts.fontFamily === "object" ? FontFamily.configure(opts.fontFamily) : FontFamily;
+      mergeFrom(ext.resolve().exports);
+    }
+
+    return result as ExportContributionMap;
+  },
+
+  addImports(): ImportContributionMap {
+    // Mirror of addExports — forward each sub-extension's addImports().
+    // Same loose-typing approach so different format bundles (DocxImports,
+    // future MarkdownImports …) can coexist without StarterKit knowing
+    // about their specific shapes.
+    const result: Record<string, MinimalContribBundle> = {};
+
+    const mergeFrom = (contrib: ImportContributionMap) => {
+      const asRecord = contrib as Record<string, unknown>;
+      for (const key of Object.keys(asRecord)) {
+        const incoming = asRecord[key];
+        if (!isMinimalContribBundle(incoming)) continue;
+        result[key] = mergeContribBundles(result[key], incoming);
+      }
+    };
+
+    const opts = this.options;
+
+    // Nodes
+    if (opts.paragraph !== false) mergeFrom(Paragraph.resolve().imports);
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.heading !== false) {
+      const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.codeBlock !== false) {
+      const ext = typeof opts.codeBlock === "object" ? CodeBlock.configure(opts.codeBlock) : CodeBlock;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.horizontalRule !== false) mergeFrom(HorizontalRule.resolve().imports);
+    if (opts.pageBreak !== false) mergeFrom(PageBreak.resolve().imports);
+    if (opts.list !== false) mergeFrom(List.resolve().imports);
+    if (opts.image !== false) mergeFrom(Image.resolve().imports);
+
+    // Marks
+    if (opts.bold !== false) {
+      const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.italic !== false) {
+      const ext = typeof opts.italic === "object" ? Italic.configure(opts.italic) : Italic;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.underline !== false) mergeFrom(Underline.resolve().imports);
+    if (opts.strikethrough !== false) mergeFrom(Strikethrough.resolve().imports);
+    if (opts.highlight !== false) {
+      const ext = typeof opts.highlight === "object" ? Highlight.configure(opts.highlight) : Highlight;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.color !== false) {
+      const ext = typeof opts.color === "object" ? Color.configure(opts.color) : Color;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.fontSize !== false) {
+      const ext = typeof opts.fontSize === "object" ? FontSize.configure(opts.fontSize) : FontSize;
+      mergeFrom(ext.resolve().imports);
+    }
+    if (opts.fontFamily !== false) {
+      const ext = typeof opts.fontFamily === "object" ? FontFamily.configure(opts.fontFamily) : FontFamily;
+      mergeFrom(ext.resolve().imports);
+    }
+
+    return result as ImportContributionMap;
+  },
+
   addMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec> {
     const tokens: Record<string, MarkdownParserTokenSpec> = {};
     const opts = this.options;
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      Object.assign(tokens, ext.resolve().markdownParserTokens);
+    }
     if (opts.paragraph !== false) Object.assign(tokens, Paragraph.resolve().markdownParserTokens);
     if (opts.heading !== false) {
       const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
@@ -537,14 +818,16 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     return tokens;
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
+    // Aggregate view-only lifecycle from sub-extensions. Image is the
+    // only one today (its `redraw` request when an `<img>` finishes
+    // loading is paint-only).
     const cleanups: Array<() => void> = [];
     const opts = this.options;
 
-    // Aggregate onEditorReady from sub-extensions that need runtime setup.
     if (opts.image !== false) {
       const resolved = Image.resolve();
-      const cleanup = resolved.editorReadyCallback?.(editor);
+      const cleanup = resolved.viewReadyCallback?.(editor);
       if (cleanup) cleanups.push(cleanup);
     }
 
@@ -562,6 +845,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     };
 
     if (opts.document !== false) merge(Document.resolve().markdownSerializerRules);
+    if (opts.hardBreak !== false) {
+      const ext = typeof opts.hardBreak === "object" ? HardBreak.configure(opts.hardBreak) : HardBreak;
+      merge(ext.resolve().markdownSerializerRules);
+    }
     if (opts.paragraph !== false) merge(Paragraph.resolve().markdownSerializerRules);
     if (opts.heading !== false) {
       const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
@@ -582,6 +869,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.codeBlock !== false) merge(CodeBlock.resolve().markdownSerializerRules);
     if (opts.horizontalRule !== false) merge(HorizontalRule.resolve().markdownSerializerRules);
     if (opts.image !== false) merge(Image.resolve().markdownSerializerRules);
+    if (opts.table === true) merge(Table.resolve().markdownSerializerRules);
 
     return { nodes, marks };
   },

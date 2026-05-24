@@ -14,4 +14,5 @@ export { createImageMenu } from "./createImageMenu";
 export type { ImageMenuOptions, ImageMenuCallbacks, ImageMenuInfo } from "./createImageMenu";
 
 export { subscribeViewUpdates } from "./subscribeViewUpdates";
+export { subscribeEditorFocusOutside, POPOVER_MARKER } from "./subscribeEditorFocusOutside";
 export { isAnchorInsideContainer } from "./anchorVisibility";

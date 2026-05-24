@@ -102,22 +102,27 @@ function getPolicy(editor: IBaseEditor): HeaderFooterPolicy | null {
 }
 
 /**
- * Ensure a policy exists on the doc. Creates a default policy if none exists.
- * All setters go through this so the API never silently no-ops.
+ * Ensure a policy exists on the doc. Creates DEFAULT_POLICY if none exists.
+ * Returns the existing policy unchanged when one is present (including when
+ * `enabled: false`) — callers that need to force-enable should set
+ * `enabled: true` themselves after this returns.
+ *
+ * Exported so the chrome-click handler can bootstrap a policy on
+ * double-click-in-margin (Word/Docs UX).
  */
-function ensurePolicy(editor: IBaseEditor): HeaderFooterPolicy {
+export function ensurePolicy(editor: IBaseEditor): HeaderFooterPolicy {
   const existing = getPolicy(editor);
   if (existing) return existing;
 
   const policy = { ...DEFAULT_POLICY };
   const tr = editor.getState().tr.setDocAttribute("headerFooter", policy);
-  editor._applyTransaction(tr);
+  editor.applyTransaction(tr);
   return policy;
 }
 
 function applyPolicy(editor: IBaseEditor, policy: HeaderFooterPolicy): void {
   const tr = editor.getState().tr.setDocAttribute("headerFooter", policy);
-  editor._applyTransaction(tr);
+  editor.applyTransaction(tr);
 }
 
 function updatePolicy(editor: IBaseEditor, updater: (current: HeaderFooterPolicy) => HeaderFooterPolicy): void {

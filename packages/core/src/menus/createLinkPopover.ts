@@ -17,6 +17,7 @@
 import type { Node, MarkType } from "prosemirror-model";
 import type { IEditor } from "../extensions/types";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
+import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
 
 export interface LinkPopoverInfo {
@@ -34,7 +35,13 @@ export interface LinkPopoverCallbacks {
   onMove: (rect: DOMRect, info: LinkPopoverInfo) => void;
 }
 
-export type LinkPopoverOptions = LinkPopoverCallbacks;
+export interface LinkPopoverOptions extends LinkPopoverCallbacks {
+  /**
+   * Accessor returning the popover's root DOM element (or null if unmounted).
+   * Threaded into the focus-outside check; see createBubbleMenu for context.
+   */
+  getPopoverElement?: () => HTMLElement | null;
+}
 
 export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions): () => void {
   const { onShow, onHide, onMove } = options;
@@ -86,9 +93,18 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => { rafId = null; update(); });
   });
+  const offFocusOutside = subscribeEditorFocusOutside(
+    editor,
+    () => {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      if (visible) { visible = false; onHide(); }
+    },
+    options.getPopoverElement ? { getPopoverElement: options.getPopoverElement } : {},
+  );
 
   return () => {
     unsubscribe();
+    offFocusOutside();
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     if (visible) { visible = false; onHide(); }
   };

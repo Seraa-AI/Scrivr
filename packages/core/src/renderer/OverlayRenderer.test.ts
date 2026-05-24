@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { snapRect, _setActiveDpr } from "./OverlayRenderer";
+import { snapRect, setActiveDpr } from "./OverlayRenderer";
 
 describe("snapRect — pixel-grid snapping", () => {
   beforeEach(() => {
-    _setActiveDpr(2); // simulate a 2x retina display
+    setActiveDpr(2); // simulate a 2x retina display
   });
 
   it("snaps fractional coordinates to whole device pixels", () => {
@@ -32,7 +32,7 @@ describe("snapRect — pixel-grid snapping", () => {
   });
 
   it("works with dpr=1 (no sub-pixel snapping needed)", () => {
-    _setActiveDpr(1);
+    setActiveDpr(1);
     const r = snapRect(10.3, 20.7, 50.1, 25.3);
     expect(r.x).toBe(10);
     expect(r.y).toBe(21);
@@ -41,7 +41,7 @@ describe("snapRect — pixel-grid snapping", () => {
   });
 
   it("works with dpr=3 (3x displays)", () => {
-    _setActiveDpr(3);
+    setActiveDpr(3);
     const r = snapRect(10.1, 20.2, 50.3, 25.4);
     // All edges should be multiples of 1/3
     const eps = 1e-10;

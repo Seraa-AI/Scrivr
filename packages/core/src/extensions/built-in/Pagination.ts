@@ -28,4 +28,7 @@ import type { PageConfig } from "../../layout/PageLayout";
 export const Pagination = Extension.create<PageConfig>({
   name: "pagination",
   defaultOptions: defaultPageConfig,
+  addPageConfig() {
+    return this.options;
+  },
 });

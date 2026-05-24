@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/core",
-  "version": "1.0.6",
+  "version": "1.0.10",
   "description": "High-performance canvas-based document editor engine",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -53,6 +53,7 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^1.0.0",
     "@types/markdown-it": "^14.1.2",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"

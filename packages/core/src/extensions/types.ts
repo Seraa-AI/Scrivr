@@ -26,8 +26,9 @@ import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { SurfaceRegistry } from "../surfaces/SurfaceRegistry";
-import type { ExportContributionMap } from "./export";
+import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
+import type { ResolvedTheme } from "../model/theme";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ export type OverlayRenderHandler = (
   pageNumber: number,
   pageConfig: PageConfig,
   charMap: CharacterMap,
+  theme: ResolvedTheme,
 ) => void;
 
 // ── Editor interfaces (avoids circular import Editor ↔ extensions) ────────────
@@ -56,11 +58,12 @@ export type OverlayRenderHandler = (
  * Implemented by both `Editor` (browser) and `ServerEditor` (Node.js).
  *
  * Use this type in extensions that need to work in both environments:
- * `onEditorReady(editor: IBaseEditor)`.
+ * `onEditorReady(editor: IBaseEditor)` — fires in both `Editor` and
+ * `ServerEditor`.
  *
- * Extensions that require canvas overlays or DOM access should cast to `IEditor`
- * inside `onEditorReady`:
- *   `(editor as IEditor).addOverlayRenderHandler(...)`
+ * Extensions that require canvas overlays, layout, redraw, selection, or
+ * surfaces should declare `onViewReady(editor: IEditor)` instead — the engine
+ * only fires it in browser `Editor`, so no runtime guard or cast is needed.
  */
 export interface IBaseEditor {
   /** Subscribe to all editor notifications (state change, focus, cursor tick). */
@@ -78,13 +81,14 @@ export interface IBaseEditor {
    * No-op if there is no node at that position.
    */
   setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void;
-  /** Apply a transaction from an external source (e.g. Y.js remote sync). */
-  _applyTransaction(tr: Transaction): void;
   /**
    * Apply a ProseMirror transaction through the full dispatch pipeline.
-   * Use for state mutations not covered by commands (e.g. tr.setMeta,
-   * deleteSelection, custom transforms). Routes through the same path
-   * as command-dispatched transactions.
+   * Use for state mutations not covered by commands (e.g. `tr.setMeta`,
+   * `deleteSelection`, custom transforms, external sources like Y.js
+   * remote sync or AI suggestions). Routes through the same path as
+   * command-dispatched transactions: plugin appendTransaction hooks run,
+   * layout is invalidated, subscribers are notified, and (in `Editor`) a
+   * render flush is scheduled.
    */
   applyTransaction(tr: Transaction): void;
   /** The merged ProseMirror Schema built from all extensions. */
@@ -97,14 +101,33 @@ export interface IBaseEditor {
   parseMarkdown(text: string): Node;
   /** Export contributions from all extensions, in registration order. */
   getExportContributions(): ExportContributionMap[];
+  /** Import contributions from all extensions, in registration order. */
+  getImportContributions(): ImportContributionMap[];
+  /**
+   * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
+   *
+   * Used by collab bindings as a whitelist of syncable attrs — attrs not in
+   * this list are private to the local editor and must not cross the wire.
+   * Returned as a fresh array; callers may mutate the result.
+   */
+  getDocAttrNames(): string[];
+  /**
+   * Look up a registered extension by name. Returns `null` when the
+   * extension is not present. Callers that need typed options should narrow
+   * with a runtime guard — the return type widens to the un-parameterised
+   * `Extension` because the manager has no compile-time link from `name`
+   * to option shape.
+   */
+  findExtension(name: string): import("./Extension").Extension | null;
 }
 
 /**
  * The full view editor interface — adds canvas overlay and DOM methods.
  * Implemented only by `Editor` (browser).
  *
- * Extensions receive this in `onEditorReady` when cast from `IBaseEditor`:
- *   `const viewEditor = editor as IEditor;`
+ * Extensions receive this in `onViewReady(editor: IEditor)`, which the engine
+ * only fires in browser `Editor`. Never reach for view APIs from
+ * `onEditorReady`; declare `onViewReady` instead.
  */
 export interface IEditor extends IBaseEditor {
   /** Surface registry — plugins register and activate surfaces for multi-surface editing. */
@@ -341,15 +364,37 @@ export interface SpanRect {
  * doesn't need a decorator at all — StyleResolver handles those via font string.
  */
 export interface MarkDecorator {
-  decoratePre?(ctx: CanvasRenderingContext2D, rect: SpanRect): void;
+  /**
+   * Decorations painted before the text. Receives the resolved theme and the
+   * effective text color for this span (color mark wins, theme.defaultText
+   * falls through). Use `effectiveTextColor` for decorations that should
+   * follow the underlying text color (underline, strikethrough); use
+   * specific `theme.*` tokens for decorations that have their own colors
+   * (highlight, link).
+   */
+  decoratePre?(
+    ctx: CanvasRenderingContext2D,
+    rect: SpanRect,
+    theme: ResolvedTheme,
+    effectiveTextColor: string,
+  ): void;
   /**
    * Returns a CSS color string to use as fillStyle when drawing this span's text,
-   * or undefined to keep the default. Called after decoratePre, before fillText.
-   * Multiple marks on the same span may implement this; the last non-undefined
-   * value wins.
+   * or undefined to keep the default. Called before decoratePre, so the
+   * effectiveTextColor passed to decoratePre/decoratePost reflects this
+   * decorator's choice. Multiple marks on the same span may implement this;
+   * the last non-undefined value wins.
+   *
+   * Receives `theme` so decorators that map to a theme token (Link → theme.link)
+   * can resolve at paint time without capturing the editor instance.
    */
-  decorateFill?(rect: SpanRect): string | undefined;
-  decoratePost?(ctx: CanvasRenderingContext2D, rect: SpanRect): void;
+  decorateFill?(rect: SpanRect, theme: ResolvedTheme): string | undefined;
+  decoratePost?(
+    ctx: CanvasRenderingContext2D,
+    rect: SpanRect,
+    theme: ResolvedTheme,
+    effectiveTextColor: string,
+  ): void;
 }
 
 // ── Input handler ─────────────────────────────────────────────────────────────
@@ -399,6 +444,19 @@ export interface ExtensionContext<Options = object> extends Phase1Context<Option
   readonly schema: Schema;
 }
 
+/**
+ * Context passed as `this` to `addInitialDoc()`. Runs after every extension has
+ * fully resolved, so the merged markdown parser tokens are available — letting
+ * extensions seed the document from markdown without an editor instance.
+ */
+export interface InitialDocContext<Options = object> extends ExtensionContext<Options> {
+  /**
+   * Parse a markdown string into a ProseMirror document using the merged token
+   * map from all registered extensions. Same algorithm as `editor.parseMarkdown()`.
+   */
+  parseMarkdown(text: string): Node;
+}
+
 // ── Extension config (what you pass to Extension.create) ─────────────────────
 
 export interface ExtensionConfig<Options = object> {
@@ -444,6 +502,27 @@ export interface ExtensionConfig<Options = object> {
   addPageChrome?(this: Phase1Context<Options>): PageChromeContribution;
 
   /**
+   * Contribute the page-level layout config (size, margins, pageless toggle).
+   * Phase 1 — runs before schema is built; read `this.options` to derive the
+   * config. Return `undefined` when this extension shouldn't contribute (e.g.
+   * StarterKit when `pagination: false` is set).
+   *
+   * Resolution: first non-undefined contribution wins. Multiple registered
+   * extensions trigger a console warning naming all candidates.
+   *
+   * Future: when page config moves to `doc.attrs.pageSettings` (see
+   * `project_page_config_to_docattrs` memory), this hook becomes the bridge —
+   * an extension closes over the editor and returns `state.doc.attrs.pageSettings`
+   * from a runtime variant of this lane. For now, it's static per editor build.
+   *
+   * Example:
+   *   addPageConfig() {
+   *     return { pageWidth: 816, pageHeight: 1056, margins: { top: 72, right: 72, bottom: 72, left: 72 } };
+   *   }
+   */
+  addPageConfig?(this: Phase1Context<Options>): PageConfig | undefined;
+
+  /**
    * Register the plugin as owner of one or more EditorSurfaces (headers,
    * footnote bodies, etc.). `owner` must be unique across extensions; the
    * ExtensionManager throws on collisions. Surfaces themselves are created
@@ -466,6 +545,16 @@ export interface ExtensionConfig<Options = object> {
    */
   addExports?(this: Phase1Context<Options>): ExportContributionMap;
 
+  /**
+   * Contribute format-specific import handlers as a format-keyed map. Same
+   * shape as `addExports` but for the inverse direction — `@scrivr/docx`
+   * walks each loaded extension's `addImports().docx` when reading bytes
+   * back into ProseMirror content. Keeping import and export on the same
+   * extension means a single source of truth for what e.g. "Heading 1"
+   * means in both directions.
+   */
+  addImports?(this: Phase1Context<Options>): ImportContributionMap;
+
   // ── Phase 2: Behaviour ──────────────────────────────────────────────────────
   // Called with `this = ExtensionContext` — the built schema is available.
 
@@ -474,12 +563,12 @@ export interface ExtensionConfig<Options = object> {
 
   /**
    * Return an initial ProseMirror document to seed EditorState.create().
-   * Called after addProseMirrorPlugins — use this when a plugin (e.g. ySyncPlugin)
-   * needs the EditorState to start with a specific doc instance that matches
-   * its internal mapping (e.g. the doc returned by initProseMirrorDoc).
-   * Return null to use the schema default.
+   * Called after every extension is fully resolved — `this.parseMarkdown(text)`
+   * is available, useful when seeding from markdown. Used by ySyncPlugin to
+   * match its internal doc mapping, and by `DefaultContent` for app-supplied
+   * initial content. Return null to use the schema default.
    */
-  addInitialDoc?(this: ExtensionContext<Options>): Node | null;
+  addInitialDoc?(this: InitialDocContext<Options>): Node | null;
 
   /**
    * Keymap bindings. Keys are platform-agnostic shortcuts: "Mod-b", "Shift-Enter".
@@ -598,23 +687,50 @@ export interface ExtensionConfig<Options = object> {
   addMarkdownSerializerRules?(this: Phase1Context<Options>): MarkdownSerializerRules;
 
   /**
-   * Runtime lifecycle hook — called once after the Editor is fully initialised
-   * (EditorState created, initial layout done, all plugins active).
+   * Engine lifecycle hook — called once after the editor's document engine
+   * is fully initialised (EditorState created, all ProseMirror plugins
+   * active). Runs in **both** browser `Editor` and headless `ServerEditor`.
    *
-   * Use this for setup that requires the live editor instance: connecting
-   * collaboration providers, registering overlay render handlers, subscribing
-   * to state changes, initialising plugin views without a ProseMirror EditorView.
+   * Use this for setup that operates on the document / commands / events /
+   * plugin state — anything that doesn't need a view. Connect collaboration
+   * providers, subscribe to state changes, register engine-side listeners.
    *
-   * Return a cleanup function that will be called when editor.destroy() runs.
+   * The editor parameter is `IBaseEditor` — the view-side APIs (overlays,
+   * layout, redraw, selection, surfaces) are NOT available here. If your
+   * extension also needs those, declare an `onViewReady` hook alongside this
+   * one; the editor will call it after view infrastructure exists.
+   *
+   * Return a cleanup function that will be called when `editor.destroy()`
+   * runs. Cleanup is collected in registration order and invoked in reverse.
    *
    * @example
    * onEditorReady(editor) {
-   *   const unsub = editor.subscribe(() => broadcastCursor());
-   *   const unreg = editor.addOverlayRenderHandler(drawRemoteCursors);
-   *   return () => { unsub(); unreg(); };
+   *   const unsub = editor.subscribe(() => syncDocToServer(editor.getState()));
+   *   return unsub;
    * }
    */
   onEditorReady?(this: Phase1Context<Options>, editor: IBaseEditor): (() => void) | void;
+
+  /**
+   * View lifecycle hook — called once after the browser `Editor`'s view
+   * infrastructure (layout, input bridge, surface registry, overlay layer)
+   * is ready. **Never called on `ServerEditor`.**
+   *
+   * Use this for setup that touches view-only surface: `addOverlayRenderHandler`,
+   * `redraw`, `selection`, `layout`, `surfaces`, `getViewportRect`,
+   * `setReady`. The editor parameter is `IEditor` so all of those are
+   * type-safe — no cast, no runtime guard.
+   *
+   * Fires after `onEditorReady`. Return a cleanup function; both hooks'
+   * cleanups run together on `editor.destroy()`.
+   *
+   * @example
+   * onViewReady(editor) {
+   *   const unregister = editor.addOverlayRenderHandler(paintAiCaret);
+   *   return unregister;
+   * }
+   */
+  onViewReady?(this: Phase1Context<Options>, editor: IEditor): (() => void) | void;
 
   /**
    * Editor-level input handlers — for keys that need access to the editor
@@ -640,10 +756,21 @@ export interface ResolvedExtension {
   docAttrs: Record<string, AttributeSpec>;
   /** Page chrome contribution (header/footer/etc.) or null when absent. */
   pageChrome: PageChromeContribution | null;
+  /**
+   * Page-level layout config contribution (size, margins, pageless). `undefined`
+   * when the extension chose not to contribute — either it didn't define
+   * `addPageConfig`, or the hook returned `undefined`. The manager counts
+   * actual non-undefined values for both the resolution and the multi-provider
+   * warning, so an extension that opts out (e.g. `StarterKit.configure({
+   * pagination: false })`) doesn't show up as a phantom provider.
+   */
+  pageConfig: PageConfig | undefined;
   /** Surface owner registration (plugin-owned edit regions) or null when absent. */
   surfaceOwner: SurfaceOwnerRegistration | null;
   /** Format-specific export handler contributions. Empty map when absent. */
   exports: ExportContributionMap;
+  /** Format-specific import handler contributions. Empty map when absent. */
+  imports: ImportContributionMap;
   plugins: Plugin[];
   keymap: Record<string, Command>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -662,8 +789,18 @@ export interface ResolvedExtension {
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
   markdownSerializerRules: MarkdownSerializerRules;
-  /** Runtime lifecycle callback — undefined when extension has no onEditorReady. */
+  /** Engine lifecycle callback — undefined when extension has no `onEditorReady`. */
   editorReadyCallback?: (editor: IBaseEditor) => (() => void) | void;
-  /** Optional initial ProseMirror document — provided by addInitialDoc(). */
-  initialDoc?: Node;
+  /** View lifecycle callback — undefined when extension has no `onViewReady`. */
+  viewReadyCallback?: (editor: IEditor) => (() => void) | void;
+  /**
+   * Lazy initial-doc factory — undefined when the extension has no
+   * addInitialDoc(). The manager invokes this after every extension has
+   * resolved, passing the schema + a shared parseMarkdown helper. The factory
+   * closure injects the extension's own name/options before calling user code.
+   */
+  initialDocFactory?: (env: {
+    schema: Schema;
+    parseMarkdown(text: string): Node;
+  }) => Node | null;
 }

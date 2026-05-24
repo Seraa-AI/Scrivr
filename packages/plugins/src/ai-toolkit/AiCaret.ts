@@ -80,7 +80,7 @@ export const AiCaret = Extension.create({
     };
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
     // Blink state — toggles every 530 ms, same cadence as the user cursor
     let blinkVisible = true;
     let blinkTimer: ReturnType<typeof setInterval> | null = null;

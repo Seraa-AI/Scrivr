@@ -1,5 +1,10 @@
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect, ToolbarItemSpec } from "../types";
+import {
+  cssColorToDocxHex,
+  type DocxMarkHandler,
+  type DocxMarkTransform,
+} from "../../exports/docx";
 
 interface ColorOptions {
   /** Preset color swatches shown in the toolbar (CSS color strings). */
@@ -78,7 +83,40 @@ export const Color = Extension.create<ColorOptions>({
         return rect.markAttrs["color"] as string | undefined;
       },
     };
+    // The user-applied color mark wins over theme.defaultText. The second
+    // arg (theme) is unused here — we keep the signature compatible.
     return { color: decorator };
+  },
+
+  addExports() {
+    const handler: DocxMarkHandler = (props, mark, ctx) => {
+      const v = mark.attrs["color"];
+      if (typeof v !== "string" || v.length === 0) return props;
+      const hex = cssColorToDocxHex(v);
+      if (hex) return { ...props, color: hex };
+      ctx.diagnostics.warn({
+        code: "unsupported-color",
+        message: `Could not convert text color "${v}" to a DOCX hex color`,
+        markType: "color",
+      });
+      return props;
+    };
+    return { docx: { marks: { color: handler } } };
+  },
+
+  addImports() {
+    // OOXML `<w:color w:val="FF0000"/>` — uppercase 6-char hex without `#`.
+    // `w:val="auto"` means "default text color" — drop, schema's default wins.
+    const handler: DocxMarkTransform = (mark, ctx) => {
+      const val = mark.attrs?.["val"];
+      if (typeof val !== "string" || val.length === 0 || val === "auto") {
+        return null;
+      }
+      const t = ctx.schema.marks["color"];
+      if (!t) return null;
+      return t.create({ color: `#${val}` });
+    };
+    return { docx: { marks: { color: handler } } };
   },
 
   addToolbarItems() {

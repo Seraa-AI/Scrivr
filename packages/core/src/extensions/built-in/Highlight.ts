@@ -1,6 +1,12 @@
 import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
+import {
+  cssColorToDocxHex,
+  docxHighlightName,
+  type DocxMarkHandler,
+  type DocxMarkTransform,
+} from "../../exports/docx";
 
 interface HighlightOptions {
   /** Default highlight color. Default: "rgba(255, 220, 0, 0.4)" */
@@ -84,7 +90,7 @@ export const Highlight = Extension.create<HighlightOptions>({
        * Using pre (not post) so the text sits on top of the highlight.
        * If we used post, the highlight would cover the text.
        */
-      decoratePre(ctx: CanvasRenderingContext2D, rect: SpanRect) {
+      decoratePre(ctx, rect, _theme, _effectiveTextColor) {
         const color = multicolor
           ? (rect.markAttrs.color as string | undefined) ?? defaultColor
           : defaultColor;
@@ -104,6 +110,55 @@ export const Highlight = Extension.create<HighlightOptions>({
     return {
       highlight: decorator,
     };
+  },
+
+  addExports() {
+    // OOXML's `<w:highlight>` only accepts a fixed set of named values per
+    // the spec. Anything else (hex, rgb(), rgba()) has to use
+    // `<w:shd w:val="clear" w:fill="HEX">` instead — Word's run-shading
+    // accepts arbitrary fills and renders identically. The mark handler
+    // decides which DocxRunProps field to populate; the walker emits both
+    // as plain data with no parsing.
+    const fallback = this.options.color;
+    const handler: DocxMarkHandler = (props, mark) => {
+      const raw = mark.attrs["color"];
+      const value = typeof raw === "string" && raw.length > 0 ? raw : fallback;
+      const named = docxHighlightName(value);
+      if (named) return { ...props, highlight: named };
+      const hex = cssColorToDocxHex(value);
+      if (hex) return { ...props, shadingFill: hex };
+      // Unparseable — fall back to the canonical yellow so something paints.
+      return { ...props, highlight: "yellow" };
+    };
+    return { docx: { marks: { highlight: handler } } };
+  },
+
+  addImports() {
+    // OOXML exposes highlights as either `<w:highlight w:val="yellow"/>`
+    // (named — only the 17 spec colors) or `<w:shd w:fill="HEX"/>`
+    // (arbitrary background fill). Claim both kinds so the round-trip is
+    // exact regardless of which form the source used.
+    const multicolor = this.options.multicolor;
+
+    const fromHighlight: DocxMarkTransform = (mark, ctx) => {
+      const t = ctx.schema.marks["highlight"];
+      if (!t) return null;
+      const name = mark.attrs?.["val"];
+      if (typeof name !== "string" || name === "none") return null;
+      if (multicolor) return t.create({ color: name });
+      return t.create();
+    };
+
+    const fromShading: DocxMarkTransform = (mark, ctx) => {
+      const t = ctx.schema.marks["highlight"];
+      if (!t) return null;
+      const fill = mark.attrs?.["fill"];
+      if (typeof fill !== "string" || fill === "auto") return null;
+      if (multicolor) return t.create({ color: `#${fill}` });
+      return t.create();
+    };
+
+    return { docx: { marks: { highlight: fromHighlight, shd: fromShading } } };
   },
 
   addToolbarItems() {

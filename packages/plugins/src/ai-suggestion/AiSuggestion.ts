@@ -61,7 +61,7 @@ export const AiSuggestion = Extension.create<AiSuggestionOptions>({
     return [aiSuggestionPlugin];
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
     const cleanups: Array<() => void> = [];
 
     const { renderMode } = this.options;
@@ -167,7 +167,7 @@ export const AiSuggestion = Extension.create<AiSuggestionOptions>({
       }
 
       if (ps.activeBlockId !== newActive) {
-        editor._applyTransaction(
+        editor.applyTransaction(
           state.tr
             .setMeta(AI_SUGGESTION_SET_ACTIVE, newActive)
             .setMeta("addToHistory", false),

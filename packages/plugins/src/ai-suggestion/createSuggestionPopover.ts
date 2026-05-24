@@ -11,7 +11,7 @@
  */
 
 import type { IEditor } from "@scrivr/core";
-import { subscribeViewUpdates, isAnchorInsideContainer } from "@scrivr/core";
+import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContainer } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { buildAcceptedTextMap, acceptedRangeToDocRange } from "../track-changes/lib/acceptedTextMap";
@@ -41,6 +41,12 @@ export interface SuggestionPopoverCallbacks {
   onShow: (rect: DOMRect, info: SuggestionGroupInfo) => void;
   onMove: (rect: DOMRect, info: SuggestionGroupInfo) => void;
   onHide: () => void;
+  /**
+   * Accessor returning the popover's root DOM element (or null if unmounted).
+   * Used by the focus-outside check so clicks INTO the popover (e.g. Accept
+   * / Reject buttons) don't trigger an immediate hide.
+   */
+  getPopoverElement?: () => HTMLElement | null;
 }
 
 /**
@@ -141,7 +147,7 @@ export function createSuggestionPopover(
   editor: IEditor,
   callbacks: SuggestionPopoverCallbacks,
 ): () => void {
-  const { onShow, onMove, onHide } = callbacks;
+  const { onShow, onMove, onHide, getPopoverElement } = callbacks;
   let visible  = false;
   let lastKey: string | null = null;
 
@@ -237,10 +243,21 @@ export function createSuggestionPopover(
   // catches scroll / resize so the popover follows its anchor.
   const offState = editor.subscribe(update);
   const offView = subscribeViewUpdates(editor, update);
+  // Editor blur (click outside the editor entirely) doesn't change state,
+  // so the two subscriptions above miss it. Forces hide unless focus moved
+  // into the popover's own DOM.
+  const offFocusOutside = subscribeEditorFocusOutside(
+    editor,
+    () => {
+      if (visible) { visible = false; lastKey = null; onHide(); }
+    },
+    getPopoverElement ? { getPopoverElement } : {},
+  );
 
   return () => {
     offState();
     offView();
+    offFocusOutside();
     if (visible) { visible = false; lastKey = null; onHide(); }
   };
 }

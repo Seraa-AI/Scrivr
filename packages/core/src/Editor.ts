@@ -12,7 +12,7 @@ import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import { CursorManager } from "./renderer/CursorManager";
-import { TextMeasurer } from "./layout/TextMeasurer";
+import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
 import type { FontConfig } from "./layout/FontConfig";
@@ -26,6 +26,14 @@ import { SurfaceRegistry } from "./surfaces/SurfaceRegistry";
 import type { PageChromeContribution } from "./layout/PageMetrics";
 import { installDragDebugOverlay, type DragDebugConfig } from "./renderer/DragDebugOverlay";
 import { installAnchoredObjectDebugOverlay } from "./renderer/AnchoredObjectDebugOverlay";
+import {
+  defaultEditorTheme,
+  mergeEditorTheme,
+  themeContainsCssVars,
+  type EditorTheme,
+  type ResolvedTheme,
+} from "./model/theme";
+import { resolveTheme, disposeProbe } from "./model/resolveTheme";
 
 export type EditorChangeHandler = (state: EditorState) => void;
 
@@ -85,6 +93,13 @@ export interface EditorOptions {
    */
   extensions?: Extension[];
   /**
+   * Optional initial document. Strings are parsed as markdown using the
+   * merged token map from all extensions; objects are parsed as ProseMirror
+   * JSON. If omitted, falls back to extensions' `addInitialDoc` (e.g.
+   * `DefaultContent`).
+   */
+  content?: string | Record<string, unknown>;
+  /**
    * Page dimensions and margins. Defaults to A4 with 1-inch margins.
    * The editor owns layout — it needs page geometry to run layoutDocument.
    */
@@ -136,6 +151,33 @@ export interface EditorOptions {
    * call `editor.redraw()` after toggling to repaint overlays.
    */
   debug?: DragDebugConfig;
+  /**
+   * Canvas paint colors. Each token accepts any CSS color string, including
+   * `var(--token)` references that resolve against `themeRoot`. Defaults
+   * match the historical hardcoded values, so apps that don't pass `theme`
+   * see zero visual change.
+   *
+   * Toggle dark mode by changing CSS variables on `themeRoot` (the editor
+   * auto-repaints) or by calling `editor.setTheme({...})` with new literals.
+   */
+  theme?: EditorTheme;
+  /**
+   * Element whose computed CSS variables drive `var(--...)` lookups in the
+   * theme. Defaults to the mounted container (set in `mount()`). For
+   * Tailwind `darkMode: 'class'` setups where the `dark` class is on
+   * `<html>`, set this to `document.documentElement` so toggles are seen.
+   */
+  themeRoot?: HTMLElement;
+  /**
+   * Advanced measurement injection point. If omitted, the editor creates the
+   * DOM-canvas-backed `TextMeasurer` default. Tests and custom runtimes may
+   * provide any implementation that satisfies the `TextMeasurerLike` API.
+   *
+   * This is not required for normal app usage; use it when text measurement
+   * must be supplied by a specific backend such as a server-side canvas,
+   * deterministic test canvas, or platform-native measurement service.
+   */
+  textMeasurer?: TextMeasurerLike;
 }
 
 /**
@@ -152,20 +194,40 @@ export interface EditorOptions {
  *   editor.commands.undo()
  */
 export class Editor extends BaseEditor implements IEditor {
-  private readonly _onChange: EditorChangeHandler | undefined;
-  private readonly _onFocusChange: ((focused: boolean) => void) | undefined;
+  private readonly onChangeHandler: EditorChangeHandler | undefined;
+  private readonly onFocusChangeHandler: ((focused: boolean) => void) | undefined;
 
   /**
-   * Incremented by redraw() to signal asset-only repaints (e.g. image load).
-   * TileManager compares against this to bypass the layout-version paint guard.
+   * Incremented by redraw() and setTheme() to signal asset-only or
+   * theme-only repaints. TileManager compares against this to bypass the
+   * layout-version paint guard.
    */
   renderGeneration = 0;
+
+  // ── Theme ─────────────────────────────────────────────────────────────────
+
+  /** User-provided theme (may contain `var(--token)` strings). */
+  private theme: EditorTheme;
+  /** Resolved theme — literal colors only. Replaced atomically on setTheme. */
+  private resolvedTheme: ResolvedTheme;
+  /**
+   * Element used as the CSS-variable resolution root. Set lazily — at
+   * construct if user provided `themeRoot`, else at `mount()` to the mounted
+   * container, else falls back to `document.documentElement`.
+   */
+  private themeRoot: HTMLElement | null;
+  /** True when the user explicitly passed `themeRoot` — don't override on mount. */
+  private readonly explicitThemeRoot: boolean;
+  /** MutationObserver watching themeRoot for class/style/data-theme flips. */
+  private themeObserver: MutationObserver | null = null;
+  /** rAF id for the coalesced theme refresh — tracked so destroy/unmount can cancel it. */
+  private themeRefreshRafId: number | null = null;
 
   /** Page dimensions and margins — passed to LayoutCoordinator and read by renderers. */
   readonly pageConfig: PageConfig;
 
   /** The text measurer — created once; its internal caches are reused across layouts. */
-  readonly measurer: TextMeasurer;
+  readonly measurer: TextMeasurerLike;
 
   // ── Layout coordinator ────────────────────────────────────────────────────
 
@@ -178,7 +240,7 @@ export class Editor extends BaseEditor implements IEditor {
    * Multiple dispatch() calls within the same frame share a single flush,
    * collapsing e.g. hundreds of Y.js sync operations into one layout + one paint.
    */
-  private _rafId: number | null = null;
+  private rafId: number | null = null;
 
   // ── Input bridge ──────────────────────────────────────────────────────────
 
@@ -193,9 +255,10 @@ export class Editor extends BaseEditor implements IEditor {
 
   /**
    * Multi-surface registry — tracks plugin-owned edit regions (headers,
-   * footnote bodies, etc.). The body/flow document is the implicit default
-   * (activeId === null). `editor.state` always returns flow state regardless
-   * of activation: surfaces re-route input, never document identity.
+   * footnote bodies, etc.). The root editor document is the implicit default
+   * (activeId === null). `editor.getState()` always returns the root editor
+   * state regardless of activation: surfaces re-route input, never document
+   * identity.
    */
   readonly surfaces: SurfaceRegistry;
 
@@ -254,12 +317,13 @@ export class Editor extends BaseEditor implements IEditor {
   debug: DragDebugConfig;
 
   /** Dispose handle for the always-installed drag debug overlay handler. */
-  private readonly _disposeDragDebug: () => void;
+  private readonly disposeDragDebug: () => void;
   /** Dispose handle for the always-installed anchored-object debug overlay. */
-  private readonly _disposeAnchoredDebug: () => void;
+  private readonly disposeAnchoredDebug: () => void;
 
   constructor({
     extensions = [StarterKit],
+    content,
     pageConfig,
     onChange,
     onFocusChange,
@@ -267,38 +331,52 @@ export class Editor extends BaseEditor implements IEditor {
     startReady = true,
     readOnly = false,
     debug = {},
+    theme,
+    themeRoot,
+    textMeasurer,
   }: EditorOptions) {
     // BaseEditor handles: manager, state, commands, storage, event emitter
-    super({ extensions });
+    super({ extensions, ...(content !== undefined ? { content } : {}) });
 
-    this._onChange = onChange;
-    this._onFocusChange = onFocusChange;
+    // ── Theme ──────────────────────────────────────────────────────────────
+    // Initialise before any paint-related setup so renderers can read it.
+    this.theme = mergeEditorTheme({}, theme ?? {});
+    this.explicitThemeRoot = themeRoot != null;
+    this.themeRoot =
+      themeRoot ??
+      (typeof document !== "undefined" ? document.documentElement : null);
+    this.resolvedTheme = this.themeRoot
+      ? resolveTheme(this.theme, this.themeRoot)
+      : Object.freeze({ ...defaultEditorTheme });
 
-    const builtConfig = this._manager.buildPageConfig();
+    this.onChangeHandler = onChange;
+    this.onFocusChangeHandler = onFocusChange;
+
+    const builtConfig = this.manager.buildPageConfig();
     // User-supplied pageConfig overrides extension-built config so that
     // top-level options like fontFamily are always respected.
     this.pageConfig = builtConfig && pageConfig
       ? { ...builtConfig, ...pageConfig }
       : builtConfig ?? pageConfig ?? defaultPageConfig;
 
-    this.fontConfig    = this._manager.buildBlockStyles();
-    this.measurer      = new TextMeasurer({ lineHeightMultiplier: 1.2 });
-    this.fontModifiers = this._manager.buildFontModifiers();
-    this.markDecorators = this._manager.buildMarkDecorators();
-    this.toolbarItems  = this._manager.buildToolbarItems();
-    this.blockRegistry = this._manager.buildBlockRegistry();
-    this.inlineRegistry = this._manager.buildInlineRegistry();
-    this.pageChromeContributions = this._manager.getPageChromeContributions();
+    this.fontConfig    = this.manager.buildBlockStyles();
+    this.measurer      = textMeasurer ?? new TextMeasurer({ lineHeightMultiplier: 1.2 });
+    this.fontModifiers = this.manager.buildFontModifiers();
+    this.markDecorators = this.manager.buildMarkDecorators();
+    this.toolbarItems  = this.manager.buildToolbarItems();
+    this.blockRegistry = this.manager.buildBlockRegistry();
+    this.inlineRegistry = this.manager.buildInlineRegistry();
+    this.pageChromeContributions = this.manager.getPageChromeContributions();
 
     this.cursorManager = new CursorManager(() => {
       onCursorTick?.(this.cursorManager.isVisible);
-      this._notifyListeners();
+      this.notifyListeners();
     });
 
     // ── Surface registry — plugins register their own surfaces lazily.
     this.surfaces = new SurfaceRegistry();
-    const owners = this._manager.getSurfaceOwners();
-    this.surfaces._setOwnerMediator({
+    const owners = this.manager.getSurfaceOwners();
+    this.surfaces.setOwnerMediator({
       commit: (s) => {
         const reg = owners.get(s.owner);
         if (reg?.onCommit) {
@@ -326,17 +404,18 @@ export class Editor extends BaseEditor implements IEditor {
     });
 
     // Routing helpers — InputBridge + SelectionController read/write via the
-    // active surface when one is set, else the flow document. editor.state
-    // continues to return flow state (Invariant 5); only input routes flip.
+    // active surface when one is set, else the root editor document.
+    // editor.getState() always refers to the root editor state, never an
+    // active surface (Invariant 5); only input routes flip.
     const getRoutedState = (): EditorState =>
-      this.surfaces.activeSurface?.state ?? this._state;
+      this.surfaces.activeSurface?.state ?? this.editorState;
     const getRoutedCharMap = (): CharacterMap =>
       this.surfaces.activeSurface?.charMap ?? this.lc.charMap;
     const routedDispatch = (tr: Transaction | null): void => {
       if (tr === null) return;
       const active = this.surfaces.activeSurface;
       if (active) active.dispatch(tr);
-      else this._viewDispatch(tr);
+      else this.viewDispatch(tr);
     };
 
     this.lc = new LayoutCoordinator({
@@ -344,10 +423,10 @@ export class Editor extends BaseEditor implements IEditor {
       fontConfig: this.fontConfig,
       measurer: this.measurer,
       fontModifiers: this.fontModifiers,
-      getDoc: () => this._state.doc,
-      getHead: () => this._state.selection.head,
-      onUpdate: () => this._notifyListeners(),
-      getPageChromeContributions: () => this._manager.getPageChromeContributions(),
+      getDoc: () => this.editorState.doc,
+      getHead: () => this.editorState.selection.head,
+      onUpdate: () => this.notifyListeners(),
+      getPageChromeContributions: () => this.manager.getPageChromeContributions(),
       inlineRegistry: this.inlineRegistry,
     });
 
@@ -366,15 +445,15 @@ export class Editor extends BaseEditor implements IEditor {
     });
 
     const pasteTransformer = new PasteTransformer(
-      this._manager.schema,
-      this._manager.buildMarkdownRules(),
-      this._manager.buildMarkdownParserTokens(),
+      this.manager.schema,
+      this.manager.buildMarkdownRules(),
+      this.manager.buildMarkdownParserTokens(),
     );
 
     this.ib = new InputBridge({
       getState: getRoutedState,
       dispatch: routedDispatch,
-      getSchema: () => this._manager.schema,
+      getSchema: () => this.manager.schema,
       getViewportRect: (from, to) => this.getViewportRect(from, to),
       // TODO(pr7): getViewportRect still resolves positions against the flow
       // layout. When a surface is active, `from`/`to` are surface-doc positions
@@ -386,20 +465,20 @@ export class Editor extends BaseEditor implements IEditor {
         if (!f) return null;
         return { page: f.page, y: f.y, height: f.height };
       },
-      keymap: this._manager.buildKeymap(),
-      inputHandlers: this._manager.buildInputHandlers(),
+      keymap: this.manager.buildKeymap(),
+      inputHandlers: this.manager.buildInputHandlers(),
       navigator: this.selection,
       pasteTransformer,
       onFocus: () => {
         this.cursorManager.start();
-        this._notifyListeners();
-        this._onFocusChange?.(true);
+        this.notifyListeners();
+        this.onFocusChangeHandler?.(true);
         this.emit("focus", undefined as EditorEvents["focus"]);
       },
       onBlur: () => {
         this.cursorManager.stop();
-        this._notifyListeners();
-        this._onFocusChange?.(false);
+        this.notifyListeners();
+        this.onFocusChangeHandler?.(false);
         this.emit("blur", undefined as EditorEvents["blur"]);
       },
     });
@@ -411,11 +490,30 @@ export class Editor extends BaseEditor implements IEditor {
     // `this.debug.<flag>` at paint time so toggling at runtime requires no
     // re-registration.
     this.debug = debug;
-    this._disposeDragDebug = installDragDebugOverlay(this);
-    this._disposeAnchoredDebug = installAnchoredObjectDebugOverlay(this);
+    this.disposeDragDebug = installDragDebugOverlay(this);
+    this.disposeAnchoredDebug = installAnchoredObjectDebugOverlay(this);
 
-    // Fire onEditorReady after ALL infrastructure (including view) is set up.
-    this._fireEditorReady();
+    // Lifecycle: engine-side hooks first (`onEditorReady`), then view-side
+    // hooks (`onViewReady`). Both run with all infrastructure available;
+    // the split is so view-only extensions can declare `onViewReady` and
+    // skip headless contexts without crashing on `addOverlayRenderHandler`
+    // / `redraw` / `selection`.
+    this.fireEditorReady();
+    this.fireViewReady();
+  }
+
+  /**
+   * Invoke all `onViewReady` callbacks from extensions. View-only — never
+   * called in `ServerEditor`. Cleanup fns land in the shared
+   * `runtimeCleanup` array so `destroy()` releases both lifecycles in one
+   * sweep.
+   */
+  protected fireViewReady(): void {
+    const callbacks = this.manager.buildViewReadyCallbacks();
+    for (const cb of callbacks) {
+      const cleanup = cb(this);
+      if (typeof cleanup === "function") this.runtimeCleanup.push(cleanup);
+    }
   }
 
   // ── BaseEditor overrides ─────────────────────────────────────────────────
@@ -425,24 +523,24 @@ export class Editor extends BaseEditor implements IEditor {
    * This ensures external transaction sources (Y.js, AI suggestions) also
    * trigger layout + paint updates.
    */
-  override _applyTransaction(tr: Transaction): void {
-    this._viewDispatch(tr);
+  override applyTransaction(tr: Transaction): void {
+    this.viewDispatch(tr);
   }
 
   /**
    * Override: commands also go through the view-aware dispatch so every
    * command triggers layout + paint.
    */
-  protected override _getActiveState(): EditorState {
-    return this.surfaces.activeSurface?.state ?? this._state;
+  protected override getActiveState(): EditorState {
+    return this.surfaces.activeSurface?.state ?? this.editorState;
   }
 
-  protected override _dispatchToActive(tr: Transaction): void {
+  protected override dispatchToActive(tr: Transaction): void {
     const active = this.surfaces.activeSurface;
     if (active) {
       active.dispatch(tr);
     } else {
-      this._viewDispatch(tr);
+      this.viewDispatch(tr);
     }
   }
 
@@ -463,16 +561,16 @@ export class Editor extends BaseEditor implements IEditor {
 
   /** Override to route through active surface when one is set. */
   override setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void {
-    const state = this._getActiveState();
+    const state = this.getActiveState();
     const node = state.doc.nodeAt(docPos);
     if (!node) return;
-    this._dispatchToActive(
+    this.dispatchToActive(
       state.tr.setNodeMarkup(docPos, undefined, { ...node.attrs, ...attrs }),
     );
   }
 
   moveNode(docPos: number, targetPos: number): boolean {
-    const state = this._getActiveState();
+    const state = this.getActiveState();
     const node = state.doc.nodeAt(docPos);
     if (!node) return false;
 
@@ -487,7 +585,7 @@ export class Editor extends BaseEditor implements IEditor {
       const finalInsertPos = Math.max(0, Math.min(tr.mapping.map(targetPos, -1), tr.doc.content.size));
       tr = tr.insert(finalInsertPos, node);
       tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
-      this._dispatchToActive(tr);
+      this.dispatchToActive(tr);
       return true;
     } catch {
       return false;
@@ -509,7 +607,7 @@ export class Editor extends BaseEditor implements IEditor {
     targetPos: number,
     attrs: Record<string, unknown>,
   ): boolean {
-    const state = this._getActiveState();
+    const state = this.getActiveState();
     const node = state.doc.nodeAt(docPos);
     if (!node) return false;
 
@@ -532,7 +630,7 @@ export class Editor extends BaseEditor implements IEditor {
       const finalInsertPos = Math.max(0, Math.min(tr.mapping.map(targetPos, -1), tr.doc.content.size));
       tr = tr.insert(finalInsertPos, updated);
       tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
-      this._dispatchToActive(tr);
+      this.dispatchToActive(tr);
       return true;
     } catch {
       return false;
@@ -546,7 +644,7 @@ export class Editor extends BaseEditor implements IEditor {
    * resolved back to a document insertion point.
    */
   convertImageToInlineAtVisualPosition(docPos: number): boolean {
-    const state = this._getActiveState();
+    const state = this.getActiveState();
     const node = state.doc.nodeAt(docPos);
     if (!node || node.type.name !== "image") return false;
 
@@ -595,9 +693,9 @@ export class Editor extends BaseEditor implements IEditor {
   }
 
   override destroy(): void {
-    if (this._rafId !== null) {
-      cancelAnimationFrame(this._rafId);
-      this._rafId = null;
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
     }
     super.destroy(); // emits "destroy", fires cleanup callbacks
     // Run owner onDeactivate via implicit activate(null), unregister every
@@ -605,11 +703,17 @@ export class Editor extends BaseEditor implements IEditor {
     // post-destroy callers can't re-invoke plugin callbacks.
     this.surfaces.destroy();
     this.lc.destroy();
-    this._disposeDragDebug();
-    this._disposeAnchoredDebug();
+    this.disposeDragDebug();
+    this.disposeAnchoredDebug();
     this.overlayRenderHandlers.clear();
     this.cursorManager.stop();
     this.unmount();
+    if (this.themeRoot) {
+      disposeProbe(this.themeRoot);
+      // Null the root so any stray rAF/observer that fires post-destroy
+      // bails on the `!_themeRoot` guard instead of recreating the probe.
+      this.themeRoot = null;
+    }
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -625,16 +729,16 @@ export class Editor extends BaseEditor implements IEditor {
    * do a single full layout + paint of the complete document.
    */
   setReady(ready: boolean): void {
-    if (!ready && this._rafId !== null) {
-      cancelAnimationFrame(this._rafId);
-      this._rafId = null;
+    if (!ready && this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
     }
     this.lc.setReady(ready);
   }
 
   /** The merged ProseMirror Schema built from all extensions. */
   override get schema(): Schema {
-    return this._manager.schema;
+    return this.manager.schema;
   }
 
   /**
@@ -749,9 +853,9 @@ export class Editor extends BaseEditor implements IEditor {
    */
   selectNode(docPos: number): void {
     try {
-      const state = this._getActiveState();
+      const state = this.getActiveState();
       const sel = NodeSelection.create(state.doc, docPos);
-      this._dispatchToActive(state.tr.setSelection(sel));
+      this.dispatchToActive(state.tr.setSelection(sel));
       this.focus();
     } catch {
       this.selection.moveCursorTo(docPos);
@@ -777,7 +881,7 @@ export class Editor extends BaseEditor implements IEditor {
    */
   getSelectionSnapshot(): SelectionSnapshot {
     this.lc.ensureLayout();
-    const state = this.surfaces.activeSurface?.state ?? this._state;
+    const state = this.surfaces.activeSurface?.state ?? this.editorState;
     const { selection } = state;
     const blockInfo = this.getBlockInfo();
     return {
@@ -799,6 +903,18 @@ export class Editor extends BaseEditor implements IEditor {
    */
   mount(container: HTMLElement): void {
     this.ib.mount(container);
+    if (!this.explicitThemeRoot) {
+      // Constructor may have created a probe at document.documentElement to
+      // resolve the initial theme; dispose it before switching roots so the
+      // probe doesn't leak when the editor is later destroyed.
+      const previousRoot = this.themeRoot;
+      if (previousRoot && previousRoot !== container) {
+        disposeProbe(previousRoot);
+      }
+      this.themeRoot = container;
+      this.resolvedTheme = resolveTheme(this.theme, container);
+    }
+    this.installThemeObserver();
   }
 
   /**
@@ -806,7 +922,91 @@ export class Editor extends BaseEditor implements IEditor {
    * destroying the Editor itself. Safe to call multiple times.
    */
   unmount(): void {
+    this.uninstallThemeObserver();
+    // When themeRoot was implicitly bound to the mount container, drop the
+    // probe so a subsequent mount() onto a different container doesn't leak.
+    if (!this.explicitThemeRoot && this.themeRoot) {
+      disposeProbe(this.themeRoot);
+    }
     this.ib.unmount();
+  }
+
+  // ── Theme API ──────────────────────────────────────────────────────────────
+
+  /** The current input theme (may contain `var(--token)` strings). */
+  getTheme(): EditorTheme {
+    return this.theme;
+  }
+
+  /** The resolved theme (literal colors only) used by every paint site. */
+  getResolvedTheme(): ResolvedTheme {
+    return this.resolvedTheme;
+  }
+
+  /**
+   * Update the theme. Pass an object with one or more tokens; tokens not
+   * mentioned are left alone. Pass `null` for a token to reset it to the
+   * default. Triggers re-resolution and a redraw.
+   *
+   * @example
+   * editor.setTheme({ pageBg: "#1e1e1e", defaultText: "#e0e0e0" });
+   * editor.setTheme({ pageBg: null });  // reset pageBg to default
+   * editor.setTheme({});                // pure refresh — re-resolve current
+   *
+   * Per-instance precedence: this overrides any extension's theme contribution.
+   */
+  setTheme(partial: { [K in keyof EditorTheme]?: EditorTheme[K] | null | undefined }): void {
+    this.theme = mergeEditorTheme(this.theme, partial);
+    if (this.themeRoot) {
+      this.resolvedTheme = resolveTheme(this.theme, this.themeRoot);
+    }
+    this.installThemeObserver();
+    this.redraw();
+  }
+
+  private installThemeObserver(): void {
+    this.uninstallThemeObserver();
+    if (!this.themeRoot) return;
+    if (!themeContainsCssVars(this.theme)) return;
+    if (typeof MutationObserver === "undefined") return;
+    const observer = new MutationObserver(() => this.scheduleThemeRefresh());
+    observer.observe(this.themeRoot, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme"],
+    });
+    this.themeObserver = observer;
+  }
+
+  private uninstallThemeObserver(): void {
+    if (this.themeObserver) {
+      this.themeObserver.disconnect();
+      this.themeObserver = null;
+    }
+    if (this.themeRefreshRafId !== null) {
+      if (typeof cancelAnimationFrame !== "undefined") {
+        cancelAnimationFrame(this.themeRefreshRafId);
+      } else {
+        clearTimeout(this.themeRefreshRafId);
+      }
+      this.themeRefreshRafId = null;
+    }
+  }
+
+  private scheduleThemeRefresh(): void {
+    if (this.themeRefreshRafId !== null) return;
+    const schedule =
+      typeof requestAnimationFrame !== "undefined"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16) as unknown as number;
+    this.themeRefreshRafId = schedule(() => {
+      this.themeRefreshRafId = null;
+      // Guard against post-destroy fire: unmount + destroy null _themeRoot
+      // and disposeProbe; without this, the rAF body would recreate a probe
+      // via ensureProbe and call redraw() on a torn-down editor.
+      if (!this.themeRoot) return;
+      this.resolvedTheme = resolveTheme(this.theme, this.themeRoot);
+      this.redraw();
+    });
   }
 
   focus(): void {
@@ -833,7 +1033,7 @@ export class Editor extends BaseEditor implements IEditor {
     pageConfig: PageConfig,
   ): void {
     for (const handler of this.overlayRenderHandlers) {
-      handler(ctx, pageNumber, pageConfig, this.lc.charMap);
+      handler(ctx, pageNumber, pageConfig, this.lc.charMap, this.resolvedTheme);
     }
   }
 
@@ -844,7 +1044,7 @@ export class Editor extends BaseEditor implements IEditor {
    */
   redraw(): void {
     this.renderGeneration++;
-    this._notifyListeners();
+    this.notifyListeners();
   }
 
   /**
@@ -876,7 +1076,7 @@ export class Editor extends BaseEditor implements IEditor {
     this.ib.setPageScreenRectLookup(fn);
   }
 
-  private _scrollContainerLookup: (() => DOMRect | null) | null = null;
+  private scrollContainerLookup: (() => DOMRect | null) | null = null;
 
   /**
    * Register a function that returns the current DOMRect of the scrollable
@@ -886,7 +1086,7 @@ export class Editor extends BaseEditor implements IEditor {
    * as the user scrolls past it. TileManager wires this on construction.
    */
   setScrollContainerLookup(fn: (() => DOMRect | null) | null): void {
-    this._scrollContainerLookup = fn;
+    this.scrollContainerLookup = fn;
   }
 
   /**
@@ -894,7 +1094,7 @@ export class Editor extends BaseEditor implements IEditor {
    * is registered (SSR, ServerEditor, or editor not yet mounted).
    */
   getScrollContainerRect(): DOMRect | null {
-    return this._scrollContainerLookup?.() ?? null;
+    return this.scrollContainerLookup?.() ?? null;
   }
 
   /**
@@ -925,7 +1125,7 @@ export class Editor extends BaseEditor implements IEditor {
    * Used as the getSnapshot function for useSyncExternalStore.
    */
   getSnapshot(): EditorState {
-    return this._state;
+    return this.editorState;
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
@@ -936,31 +1136,31 @@ export class Editor extends BaseEditor implements IEditor {
    *
    * All transaction paths in Editor (commands, input, external) converge here.
    */
-  private _viewDispatch(tr: Transaction): void {
-    // _applyState is in BaseEditor: applies tr, emits "update", notifyListeners
-    this._applyState(tr);
+  private viewDispatch(tr: Transaction): void {
+    // applyState is in BaseEditor: applies tr, emits "update", notifyListeners
+    this.applyState(tr);
     this.lc.invalidate();
     // resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
     // Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.
     this.cursorManager.resetSilent();
-    this._onChange?.(this._state);
-    this._scheduleFlush();
+    this.onChangeHandler?.(this.editorState);
+    this.scheduleFlush();
   }
 
   /**
    * Schedules a layout + render flush for the next animation frame.
    * Idempotent — calling it multiple times before the frame fires is free.
    */
-  private _scheduleFlush(): void {
+  private scheduleFlush(): void {
     if (!this.lc.isReady) return; // suppress during collaborative sync
-    if (this._rafId !== null) return;
-    this._rafId = requestAnimationFrame(() => {
-      this._rafId = null;
+    if (this.rafId !== null) return;
+    this.rafId = requestAnimationFrame(() => {
+      this.rafId = null;
       this.lc.ensureLayout();
       // Scroll first so the viewport is settled, then notify subscribers.
       this.scrollCursorIntoView();
       this.syncInputBridge();
-      this._notifyListeners();
+      this.notifyListeners();
     });
   }
 }

@@ -1,139 +1,28 @@
 /**
- * TileManager tests.
- *
- * Covers the pure helper functions (fragmentsInTile, findScrollParent) and the
+ * TileManager tests — real `Editor` + real canvas via `@napi-rs/canvas`.
+ * Covers pure helpers (`fragmentsInTile`, `findScrollParent`) plus the
  * DOM-observable behaviour of TileManager (pool sizing, tile positioning,
- * destroy cleanup) using happy-dom + a full canvas 2D context mock.
+ * destroy cleanup, overlay repaint, chrome-band click routing).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { TileManager, fragmentsInTile, findScrollParent } from "./TileManager";
+import {
+  TileManager,
+  fragmentsInTile,
+  findScrollParent,
+  routePageClick,
+} from "./TileManager";
 import type { TileManagerOptions } from "./TileManager";
-import type { Editor } from "../Editor";
-import type {
-  DocumentLayout,
-  LayoutFragment,
-  PageConfig,
-} from "../layout/PageLayout";
-
-/**
- * Returns a full CanvasRenderingContext2D stub. All drawing ops are no-ops;
- * measureText returns deterministic widths (8px/char). Must be called before
- * any code that touches getContext("2d").
- */
-function stubCanvas(): void {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    measureText: vi.fn((text: string) => ({
-      width: text.length * 8,
-      actualBoundingBoxAscent: 12,
-      actualBoundingBoxDescent: 3,
-      fontBoundingBoxAscent: 12,
-      fontBoundingBoxDescent: 3,
-    })),
-    scale: vi.fn(),
-    save: vi.fn(),
-    restore: vi.fn(),
-    translate: vi.fn(),
-    clearRect: vi.fn(),
-    fillRect: vi.fn(),
-    strokeRect: vi.fn(),
-    fillText: vi.fn(),
-    resetTransform: vi.fn(),
-    beginPath: vi.fn(),
-    moveTo: vi.fn(),
-    lineTo: vi.fn(),
-    closePath: vi.fn(),
-    stroke: vi.fn(),
-    fill: vi.fn(),
-    arc: vi.fn(),
-    setLineDash: vi.fn(),
-    drawImage: vi.fn(),
-    font: "",
-    fillStyle: "",
-    strokeStyle: "",
-    lineWidth: 1,
-    textBaseline: "alphabetic" as CanvasTextBaseline,
-    textAlign: "left" as CanvasTextAlign,
-    imageSmoothingEnabled: true,
-    imageSmoothingQuality: "high" as ImageSmoothingQuality,
-  } as unknown as CanvasRenderingContext2D);
-}
+import {
+  makeRendererTestSetup,
+  fixedChromeBandsExtension,
+  registerActiveSurface,
+} from "../test-utils";
+import type { LayoutFragment } from "../layout/PageLayout";
 
 function frag(y: number, height: number): LayoutFragment {
   return { y, height } as LayoutFragment;
 }
 
-const DEFAULT_PAGE_CONFIG: PageConfig = {
-  pageWidth: 794,
-  pageHeight: 1123,
-  margins: { top: 72, right: 72, bottom: 72, left: 72 },
-};
-
-function makeLayout(
-  pageCount: number,
-  pageConfig = DEFAULT_PAGE_CONFIG,
-): DocumentLayout {
-  return {
-    pages: Array.from({ length: pageCount }, (_, i) => ({
-      pageNumber: i + 1,
-      blocks: [],
-      lines: [],
-    })) as DocumentLayout["pages"],
-    pageConfig,
-    version: 1,
-    totalContentHeight: pageCount * pageConfig.pageHeight,
-    fragments: [],
-  } as unknown as DocumentLayout;
-}
-
-function makeMockEditor(
-  isPageless = false,
-  pageConfig = DEFAULT_PAGE_CONFIG,
-  activeSurface: unknown = null,
-) {
-  const layoutRef = { current: makeLayout(10, pageConfig) };
-
-  const editor = {
-    get isPageless() {
-      return isPageless;
-    },
-    get pageConfig() {
-      return pageConfig;
-    },
-    get layout() {
-      return layoutRef.current;
-    },
-    setPageTopLookup: vi.fn(),
-    setScrollContainerLookup: vi.fn(),
-    subscribe: vi.fn(() => vi.fn()),
-    ensurePagePopulated: vi.fn(),
-    charMap: {
-      coordsAtPos: vi.fn(() => null),
-      linesInRange: vi.fn(() => []),
-      glyphsInRange: vi.fn(() => []),
-    },
-    cursorPage: 1,
-    isFocused: false,
-    cursorManager: { isVisible: false },
-    getSelectionSnapshot: vi.fn(() => ({
-      head: 0,
-      from: 0,
-      to: 0,
-      empty: true,
-    })),
-    getState: vi.fn(() => ({
-      selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true },
-    })),
-    runOverlayHandlers: vi.fn(),
-    measurer: { measureRun: vi.fn(() => ({ runs: [], totalWidth: 0 })) },
-    blockRegistry: undefined,
-    inlineRegistry: undefined,
-    markDecorators: undefined,
-    surfaces: { activeSurface },
-    pageChromeContributions: [],
-  } as unknown as Editor;
-
-  return { editor, layoutRef };
-}
 
 describe("fragmentsInTile", () => {
   it("returns empty array for empty fragments list", () => {
@@ -245,55 +134,52 @@ describe("findScrollParent", () => {
 });
 
 describe("TileManager — construction", () => {
-  let container: HTMLDivElement;
-
   beforeEach(() => {
-    stubCanvas();
-    container = document.createElement("div");
-    document.body.appendChild(container);
     vi.useFakeTimers();
   });
 
   afterEach(() => {
-    container.remove();
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   it("appends exactly one tilesContainer child to the container", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
-    expect(container.children).toHaveLength(1);
+    const setup = makeRendererTestSetup();
+    const tm = new TileManager(setup.editor, setup.container);
+    expect(setup.container.children).toHaveLength(1);
     tm.destroy();
+    setup.cleanup();
   });
 
   it("pool starts with exactly 1 tile wrapper (display:none) before first update", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
-    const tilesContainer = container.children[0] as HTMLDivElement;
+    const setup = makeRendererTestSetup();
+    const tm = new TileManager(setup.editor, setup.container);
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
     expect(tilesContainer.children).toHaveLength(1);
-    expect((tilesContainer.children[0] as HTMLElement).style.display).toBe(
-      "none",
-    );
+    expect((tilesContainer.children[0] as HTMLElement).style.display).toBe("none");
     tm.destroy();
+    setup.cleanup();
   });
 
   it("calls editor.setPageTopLookup with a function", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
-    expect(editor.setPageTopLookup).toHaveBeenCalledWith(expect.any(Function));
+    const setup = makeRendererTestSetup();
+    const spy = vi.spyOn(setup.editor, "setPageTopLookup");
+    const tm = new TileManager(setup.editor, setup.container);
+    expect(spy).toHaveBeenCalledWith(expect.any(Function));
     tm.destroy();
+    setup.cleanup();
   });
 
   it("calls editor.subscribe to listen for state changes", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
-    expect(editor.subscribe).toHaveBeenCalledWith(expect.any(Function));
+    const setup = makeRendererTestSetup();
+    const spy = vi.spyOn(setup.editor, "subscribe");
+    const tm = new TileManager(setup.editor, setup.container);
+    expect(spy).toHaveBeenCalledWith(expect.any(Function));
     tm.destroy();
+    setup.cleanup();
   });
 
   it("accepts all options without throwing", () => {
-    const { editor } = makeMockEditor();
+    const setup = makeRendererTestSetup();
     const opts: TileManagerOptions = {
       gap: 32,
       overscan: 2,
@@ -302,47 +188,28 @@ describe("TileManager — construction", () => {
       pageStyle: { boxShadow: "none" },
     };
     expect(() => {
-      const tm = new TileManager(editor, container, opts);
+      const tm = new TileManager(setup.editor, setup.container, opts);
       tm.destroy();
     }).not.toThrow();
+    setup.cleanup();
   });
 });
 
 describe("TileManager — tile positioning (paged)", () => {
-  let container: HTMLDivElement;
-  let scrollParent: HTMLDivElement;
-
   beforeEach(() => {
-    stubCanvas();
-    scrollParent = document.createElement("div");
-    scrollParent.style.overflowY = "scroll";
-    Object.defineProperty(scrollParent, "clientHeight", {
-      value: 800,
-      configurable: true,
-    });
-    Object.defineProperty(scrollParent, "scrollTop", {
-      value: 0,
-      configurable: true,
-      writable: true,
-    });
-    container = document.createElement("div");
-    scrollParent.appendChild(container);
-    document.body.appendChild(scrollParent);
     vi.useFakeTimers();
   });
 
   afterEach(() => {
-    scrollParent.remove();
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   it("first visible tile gets top:0 and display:block after update()", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
     tm.update();
 
-    const tilesContainer = container.children[0] as HTMLDivElement;
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
     const firstVisible = Array.from(tilesContainer.children).find(
       (el) => (el as HTMLElement).style.display === "block",
     ) as HTMLElement | undefined;
@@ -350,416 +217,380 @@ describe("TileManager — tile positioning (paged)", () => {
     expect(firstVisible).toBeDefined();
     expect(firstVisible!.style.top).toBe("0px");
     tm.destroy();
+    setup.cleanup();
   });
 
   it("second visible tile top equals pageHeight + gap", () => {
     const gap = 24;
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container, { gap });
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container, { gap });
     tm.update();
 
-    const tilesContainer = container.children[0] as HTMLDivElement;
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
     const visible = Array.from(tilesContainer.children).filter(
       (el) => (el as HTMLElement).style.display === "block",
     ) as HTMLElement[];
 
     expect(visible.length).toBeGreaterThanOrEqual(2);
     expect(visible[1]!.style.top).toBe(
-      `${DEFAULT_PAGE_CONFIG.pageHeight + gap}px`,
+      `${setup.pageConfig.pageHeight + gap}px`,
     );
     tm.destroy();
+    setup.cleanup();
   });
 
   it("tile height equals pageHeight", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
     tm.update();
 
-    const tilesContainer = container.children[0] as HTMLDivElement;
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
     const firstVisible = Array.from(tilesContainer.children).find(
       (el) => (el as HTMLElement).style.display === "block",
     ) as HTMLElement | undefined;
 
-    expect(firstVisible!.style.height).toBe(
-      `${DEFAULT_PAGE_CONFIG.pageHeight}px`,
-    );
+    expect(firstVisible!.style.height).toBe(`${setup.pageConfig.pageHeight}px`);
     tm.destroy();
+    setup.cleanup();
   });
 
   it("tilesContainer width equals pageConfig.pageWidth", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
     tm.update();
 
-    const tilesContainer = container.children[0] as HTMLDivElement;
-    expect(tilesContainer.style.width).toBe(
-      `${DEFAULT_PAGE_CONFIG.pageWidth}px`,
-    );
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
+    expect(tilesContainer.style.width).toBe(`${setup.pageConfig.pageWidth}px`);
     tm.destroy();
+    setup.cleanup();
   });
 
   it("tilesContainer height equals pageCount * pageHeight + (pageCount-1) * gap", () => {
     const gap = 24;
-    const pageCount = 10;
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container, { gap });
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container, { gap });
     tm.update();
 
-    const tilesContainer = container.children[0] as HTMLDivElement;
-    const expected =
-      pageCount * DEFAULT_PAGE_CONFIG.pageHeight + (pageCount - 1) * gap;
+    const pageCount = setup.editor.layout.pages.length;
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
+    const expected = pageCount * setup.pageConfig.pageHeight + (pageCount - 1) * gap;
     expect(tilesContainer.style.height).toBe(`${expected}px`);
     tm.destroy();
+    setup.cleanup();
   });
 
   it("each tile wrapper contains exactly 2 canvas elements (content + overlay)", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
     tm.update();
 
-    const tilesContainer = container.children[0] as HTMLDivElement;
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
     for (const wrapper of Array.from(tilesContainer.children)) {
       expect(wrapper.querySelectorAll("canvas")).toHaveLength(2);
     }
     tm.destroy();
+    setup.cleanup();
   });
 });
 
 describe("TileManager — dynamic pool sizing", () => {
-  let container: HTMLDivElement;
-  let scrollParent: HTMLDivElement;
-
   beforeEach(() => {
-    stubCanvas();
-    scrollParent = document.createElement("div");
-    scrollParent.style.overflowY = "scroll";
-    Object.defineProperty(scrollParent, "clientHeight", {
-      value: 800,
-      configurable: true,
-    });
-    Object.defineProperty(scrollParent, "scrollTop", {
-      value: 0,
-      configurable: true,
-      writable: true,
-    });
-    container = document.createElement("div");
-    scrollParent.appendChild(container);
-    document.body.appendChild(scrollParent);
     vi.useFakeTimers();
   });
 
   afterEach(() => {
-    scrollParent.remove();
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   it("pool grows beyond 1 after update() to cover the viewport", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
 
-    const tilesContainer = container.children[0] as HTMLDivElement;
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
     expect(tilesContainer.children).toHaveLength(1); // starts at 1
 
     tm.update();
     expect(tilesContainer.children.length).toBeGreaterThan(1);
     tm.destroy();
+    setup.cleanup();
   });
 
   it("pool size covers viewport: ceil(viewportH / tileH) + overscan tiles visible", () => {
     // viewport=800, pageHeight=1123 → ceil(800/1123)=1, overscan=1 → firstVisible=0, lastVisible=1
     // needed = lastVisible - firstVisible + 1 = 2
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container, { overscan: 1 });
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container, { overscan: 1 });
     tm.update();
 
-    const tilesContainer = container.children[0] as HTMLDivElement;
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
     const visibleCount = Array.from(tilesContainer.children).filter(
       (el) => (el as HTMLElement).style.display === "block",
     ).length;
 
-    // With a 800px viewport and 1123px pages, at most 2 tiles should be visible
     expect(visibleCount).toBeGreaterThanOrEqual(1);
     expect(visibleCount).toBeLessThanOrEqual(3); // 1 + 2 * overscan
     tm.destroy();
+    setup.cleanup();
   });
 
   it("tiles outside the visible range are hidden (display:none)", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
     tm.update();
 
-    const tilesContainer = container.children[0] as HTMLDivElement;
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
     const hiddenTiles = Array.from(tilesContainer.children).filter(
       (el) => (el as HTMLElement).style.display === "none",
     );
     // Pool may have grown but some tiles should still be hidden (unassigned ones)
     // For a small viewport, pool size === visible range, so all tiles are visible.
-    // Just verify none of the hidden tiles have an explicit top that conflicts.
     for (const tile of hiddenTiles) {
       expect((tile as HTMLElement).style.display).toBe("none");
     }
     tm.destroy();
+    setup.cleanup();
   });
 });
 
 describe("TileManager — destroy", () => {
-  let container: HTMLDivElement;
-
   beforeEach(() => {
-    stubCanvas();
-    container = document.createElement("div");
-    document.body.appendChild(container);
     vi.useFakeTimers();
   });
 
   afterEach(() => {
-    container.remove();
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   it("removes the tilesContainer from the DOM", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
-    expect(container.children).toHaveLength(1);
+    const setup = makeRendererTestSetup();
+    const tm = new TileManager(setup.editor, setup.container);
+    expect(setup.container.children).toHaveLength(1);
     tm.destroy();
-    expect(container.children).toHaveLength(0);
+    expect(setup.container.children).toHaveLength(0);
+    setup.cleanup();
   });
 
   it("calls setPageTopLookup(null) to deregister the lookup", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
+    const setup = makeRendererTestSetup();
+    const spy = vi.spyOn(setup.editor, "setPageTopLookup");
+    const tm = new TileManager(setup.editor, setup.container);
     tm.destroy();
-    expect(editor.setPageTopLookup).toHaveBeenLastCalledWith(null);
+    expect(spy).toHaveBeenLastCalledWith(null);
+    setup.cleanup();
   });
 
   it("calls the unsubscribe function returned by editor.subscribe", () => {
-    const unsubscribe = vi.fn();
-    const { editor } = makeMockEditor();
-    vi.mocked(editor.subscribe).mockReturnValue(unsubscribe);
-    const tm = new TileManager(editor, container);
+    const setup = makeRendererTestSetup();
+    // Wrap subscribe's returned unsubscribe in a spy. The subscription itself
+    // is real — we only intercept the return value so we can assert
+    // TileManager.destroy() invokes it.
+    const wrappedUnsubscribe = vi.fn();
+    const originalSubscribe = setup.editor.subscribe.bind(setup.editor);
+    vi.spyOn(setup.editor, "subscribe").mockImplementation((cb) => {
+      const realUnsub = originalSubscribe(cb);
+      return () => { wrappedUnsubscribe(); realUnsub(); };
+    });
+
+    const tm = new TileManager(setup.editor, setup.container);
     tm.destroy();
-    expect(unsubscribe).toHaveBeenCalled();
+    expect(wrappedUnsubscribe).toHaveBeenCalled();
+    setup.cleanup();
   });
 
   it("is safe to call destroy twice (no throw)", () => {
-    const { editor } = makeMockEditor();
-    const tm = new TileManager(editor, container);
+    const setup = makeRendererTestSetup();
+    const tm = new TileManager(setup.editor, setup.container);
     tm.destroy();
     expect(() => tm.destroy()).not.toThrow();
+    setup.cleanup();
   });
 });
 
 describe("TileManager — overlay repaint with active surface", () => {
-  let container: HTMLDivElement;
-  let scrollParent: HTMLDivElement;
-
   beforeEach(() => {
-    stubCanvas();
-    scrollParent = document.createElement("div");
-    scrollParent.style.overflowY = "scroll";
-    Object.defineProperty(scrollParent, "clientHeight", {
-      value: 800,
-      configurable: true,
-    });
-    Object.defineProperty(scrollParent, "scrollTop", {
-      value: 0,
-      configurable: true,
-      writable: true,
-    });
-    container = document.createElement("div");
-    scrollParent.appendChild(container);
-    document.body.appendChild(scrollParent);
     vi.useFakeTimers();
   });
 
   afterEach(() => {
-    scrollParent.remove();
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   it("overlay repaints on every update cycle when a surface is active", () => {
-    const { editor } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, {
-      id: "headerFooter:defaultHeader",
-      owner: "headerFooter",
-      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
-    });
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    registerActiveSurface(setup.editor);
+    const spy = vi.spyOn(setup.editor, "runOverlayHandlers");
 
-    const tm = new TileManager(editor, container);
+    const tm = new TileManager(setup.editor, setup.container);
     tm.update(); // first paint
+    expect(spy).toHaveBeenCalled();
 
-    // The overlay handler should have been called
-    expect(editor.runOverlayHandlers).toHaveBeenCalled();
-
-    const callCountAfterFirst = vi.mocked(editor.runOverlayHandlers).mock.calls.length;
-
-    // Update again without changing any body state — overlay should STILL repaint
-    // because a surface is active (surfaceStateDirty = true).
+    const callCountAfterFirst = spy.mock.calls.length;
+    // Second update with no state change still repaints overlay because a
+    // surface is active (surfaceStateDirty stays true).
     tm.update();
-
-    expect(vi.mocked(editor.runOverlayHandlers).mock.calls.length).toBeGreaterThan(
-      callCountAfterFirst,
-    );
+    expect(spy.mock.calls.length).toBeGreaterThan(callCountAfterFirst);
 
     tm.destroy();
+    setup.cleanup();
   });
 
   it("overlay call count grows faster with active surface than without", () => {
-    // With surface active — every update repaints overlay
-    const { editor: editorWithSurface } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, {
-      id: "headerFooter:defaultHeader",
-      owner: "headerFooter",
-      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
-    });
-    const tm1 = new TileManager(editorWithSurface, container);
+    const withSurfaceSetup = makeRendererTestSetup({ scrollParent: true });
+    registerActiveSurface(withSurfaceSetup.editor);
+    const withSurfaceSpy = vi.spyOn(withSurfaceSetup.editor, "runOverlayHandlers");
+    const tm1 = new TileManager(withSurfaceSetup.editor, withSurfaceSetup.container);
     tm1.update();
     tm1.update();
     tm1.update();
-    const withSurface = vi.mocked(editorWithSurface.runOverlayHandlers).mock.calls.length;
+    const withSurface = withSurfaceSpy.mock.calls.length;
     tm1.destroy();
+    withSurfaceSetup.cleanup();
 
-    // Without surface — overlay may skip some repaints after stabilizing
-    const container2 = document.createElement("div");
-    scrollParent.appendChild(container2);
-    const { editor: editorNoSurface } = makeMockEditor();
-    const tm2 = new TileManager(editorNoSurface, container2);
+    const noSurfaceSetup = makeRendererTestSetup({ scrollParent: true });
+    const noSurfaceSpy = vi.spyOn(noSurfaceSetup.editor, "runOverlayHandlers");
+    const tm2 = new TileManager(noSurfaceSetup.editor, noSurfaceSetup.container);
     tm2.update();
     tm2.update();
     tm2.update();
-    const withoutSurface = vi.mocked(editorNoSurface.runOverlayHandlers).mock.calls.length;
+    const withoutSurface = noSurfaceSpy.mock.calls.length;
     tm2.destroy();
-    container2.remove();
+    noSurfaceSetup.cleanup();
 
-    // Active surface should cause at least as many overlay repaints
     expect(withSurface).toBeGreaterThanOrEqual(withoutSurface);
   });
 });
 
 describe("TileManager — body click deactivates surface", () => {
-  let container: HTMLDivElement;
-  let scrollParent: HTMLDivElement;
-
   beforeEach(() => {
-    stubCanvas();
-    scrollParent = document.createElement("div");
-    scrollParent.style.overflowY = "scroll";
-    Object.defineProperty(scrollParent, "clientHeight", {
-      value: 800,
-      configurable: true,
-    });
-    Object.defineProperty(scrollParent, "scrollTop", {
-      value: 0,
-      configurable: true,
-      writable: true,
-    });
-    container = document.createElement("div");
-    scrollParent.appendChild(container);
-    document.body.appendChild(scrollParent);
     vi.useFakeTimers();
   });
 
   afterEach(() => {
-    scrollParent.remove();
+    vi.useRealTimers();
+  });
+
+  it("clicking in the body deactivates an active surface", () => {
+    // Real chrome bands via an inline extension that contributes 60px header
+    // + 60px footer on every page. Real SurfaceRegistry, real Editor.
+    const setup = makeRendererTestSetup({
+      scrollParent: true,
+      extraExtensions: [fixedChromeBandsExtension(60, 60)],
+    });
+    registerActiveSurface(setup.editor);
+    const activateSpy = vi.spyOn(setup.editor.surfaces, "activate");
+
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    // y=500 is well below contentTop (~132) — body area, not chrome.
+    const consumed = routePageClick(setup.editor, 1, 400, 500, 1);
+    expect(consumed).toBe(false);
+    expect(activateSpy).toHaveBeenCalledWith(null);
+
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("clicking in a chrome band does NOT deactivate the surface", () => {
+    const setup = makeRendererTestSetup({
+      scrollParent: true,
+      pageCount: 1,
+      extraExtensions: [fixedChromeBandsExtension(60, 60)],
+    });
+    registerActiveSurface(setup.editor);
+    const activateSpy = vi.spyOn(setup.editor.surfaces, "activate");
+
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    // y=90 is inside the header band (margins.top=72 + headerHeight=60 → contentTop=132).
+    // All click counts in the chrome band with an active surface fall through —
+    // they don't deactivate.
+    expect(routePageClick(setup.editor, 1, 400, 90, 1)).toBe(false);
+    expect(routePageClick(setup.editor, 1, 400, 90, 2)).toBe(false);
+    expect(routePageClick(setup.editor, 1, 400, 90, 3)).toBe(false);
+    expect(activateSpy).not.toHaveBeenCalledWith(null);
+
+    tm.destroy();
+    setup.cleanup();
+  });
+});
+
+describe("TileManager — margin click activation (no policy)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it("clicking in the body deactivates an active surface", () => {
-    const activateFn = vi.fn();
-    const mockSurface = {
-      id: "headerFooter:defaultHeader",
-      owner: "headerFooter",
-      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
-    };
-    const { editor, layoutRef } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, mockSurface);
+  it("emits chromeClick on double-click in the top margin even when band heights are 0", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
 
-    const chromeMetrics = {
-      contentTop: 132,
-      contentBottom: 991,
-      contentHeight: 859,
-      contentWidth: 650,
-      headerTop: 72,
-      footerTop: 991,
-      headerHeight: 60,
-      footerHeight: 60,
-    };
-    const layoutWithMetrics = {
-      ...makeLayout(2, DEFAULT_PAGE_CONFIG),
-      metrics: [
-        { pageNumber: 1, ...chromeMetrics },
-        { pageNumber: 2, ...chromeMetrics },
-      ],
-    };
+    // y=40 is inside margins.top (72) — the potential header strip. With no
+    // headerFooter policy, headerHeight=0, but the widened hit-test still
+    // treats the margin strip as the header band.
+    const consumed = routePageClick(setup.editor, 1, 400, 40, 2);
+    expect(consumed).toBe(true);
+    expect(emitSpy).toHaveBeenCalledWith(
+      "chromeClick",
+      expect.objectContaining({ page: 1, band: "header", clickCount: 2 }),
+    );
 
-    layoutRef.current = layoutWithMetrics;
-    (editor as unknown as { surfaces: { activeSurface: unknown; activate: typeof activateFn } }).surfaces = {
-      activeSurface: mockSurface,
-      activate: activateFn,
-    };
-    (editor as unknown as { emit: ReturnType<typeof vi.fn> }).emit = vi.fn();
-
-    const tm = new TileManager(editor, container);
-    tm.update();
-
-    // Simulate onPageClick with coords in the body area (y=500, well below contentTop=132)
-    // Access the pointer's onPageClick through the deps
-    const pointerDeps = (tm as unknown as { pointer: { deps: { onPageClick: (p: number, x: number, y: number, c: number) => boolean } } }).pointer.deps;
-    const consumed = pointerDeps.onPageClick(1, 400, 500, 1);
-
-    // Click should NOT be consumed (returns false so body handles it)
-    expect(consumed).toBe(false);
-    // But the surface should have been deactivated first
-    expect(activateFn).toHaveBeenCalledWith(null);
-
-    tm.destroy();
+    setup.cleanup();
   });
 
-  it("clicking in a chrome band does NOT deactivate the surface", () => {
-    const activateFn = vi.fn();
-    const mockSurface = {
-      id: "headerFooter:defaultHeader",
-      owner: "headerFooter",
-      state: { selection: { head: 0, anchor: 0, from: 0, to: 0, empty: true } },
-    };
-    const { editor, layoutRef } = makeMockEditor(false, DEFAULT_PAGE_CONFIG, mockSurface);
+  it("emits chromeClick on double-click in the bottom margin even when band heights are 0", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
+    const pageConfig = setup.editor.layout.pageConfig;
 
-    const layoutWithMetrics = {
-      ...makeLayout(1, DEFAULT_PAGE_CONFIG),
-      metrics: [{
-        pageNumber: 1,
-        contentTop: 132,
-        contentBottom: 991,
-        contentHeight: 859,
-        contentWidth: 650,
-        headerTop: 72,
-        footerTop: 991,
-        headerHeight: 60,
-        footerHeight: 60,
-      }],
-    };
+    const footerY = pageConfig.pageHeight - pageConfig.margins.bottom + 20;
+    const consumed = routePageClick(setup.editor, 1, 400, footerY, 2);
+    expect(consumed).toBe(true);
+    expect(emitSpy).toHaveBeenCalledWith(
+      "chromeClick",
+      expect.objectContaining({ page: 1, band: "footer", clickCount: 2 }),
+    );
 
-    layoutRef.current = layoutWithMetrics;
-    (editor as unknown as { surfaces: { activeSurface: unknown; activate: typeof activateFn } }).surfaces = {
-      activeSurface: mockSurface,
-      activate: activateFn,
-    };
-    (editor as unknown as { emit: ReturnType<typeof vi.fn> }).emit = vi.fn();
+    setup.cleanup();
+  });
 
-    const tm = new TileManager(editor, container);
-    tm.update();
+  it("does not emit chromeClick on body double-click (between margins)", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
 
-    const pointerDeps = (tm as unknown as { pointer: { deps: { onPageClick: (p: number, x: number, y: number, c: number) => boolean } } }).pointer.deps;
+    // y=400 is well inside the body (between margins.top=72 and footer strip).
+    const consumed = routePageClick(setup.editor, 1, 400, 400, 2);
+    expect(consumed).toBe(false);
+    expect(emitSpy).not.toHaveBeenCalledWith("chromeClick", expect.anything());
 
-    // All clicks in chrome band with active surface fall through to
-    // PointerController's normal logic — single, double, triple click
-    // all work via the routed charMap/selection/commands.
-    expect(pointerDeps.onPageClick(1, 400, 90, 1)).toBe(false);
-    expect(pointerDeps.onPageClick(1, 400, 90, 2)).toBe(false);
-    expect(pointerDeps.onPageClick(1, 400, 90, 3)).toBe(false);
-    expect(activateFn).not.toHaveBeenCalledWith(null);
+    setup.cleanup();
+  });
 
-    tm.destroy();
+  it("respects explicit band bounds when policy exists (no regression on demo path)", () => {
+    // Policy-enabled doc: bands have non-zero heights. The widened fallback
+    // must defer to metrics.contentTop / metrics.footerTop, not the raw
+    // pageConfig margins. Driving this via fixedChromeBandsExtension(60, 60)
+    // contributes a 60px header reserve → contentTop = margins.top(72) + 60 = 132.
+    const setup = makeRendererTestSetup({
+      scrollParent: true,
+      pageCount: 1,
+      extraExtensions: [fixedChromeBandsExtension(60, 60)],
+    });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
+
+    // y=100 sits between margins.top (72) and the band-resolved contentTop (132).
+    // With bands present, that's still inside the header — must emit chromeClick.
+    expect(routePageClick(setup.editor, 1, 400, 100, 2)).toBe(true);
+    expect(emitSpy).toHaveBeenCalledWith(
+      "chromeClick",
+      expect.objectContaining({ band: "header" }),
+    );
+
+    setup.cleanup();
   });
 });

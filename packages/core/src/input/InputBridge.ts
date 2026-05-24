@@ -93,12 +93,12 @@ export class InputBridge {
   private readonly opts: InputBridgeOptions;
 
   private textarea: HTMLTextAreaElement | null = null;
-  private _container: HTMLElement | null = null;
+  private containerEl: HTMLElement | null = null;
   private pageScreenRectLookup:
     | ((page: number) => { screenLeft: number; screenTop: number } | null)
     | null = null;
-  private _isFocused = false;
-  private _readOnly = false;
+  private focused = false;
+  private readOnly = false;
 
   constructor(opts: InputBridgeOptions) {
     this.opts = opts;
@@ -108,17 +108,17 @@ export class InputBridge {
 
   /** True when the textarea currently has DOM focus. */
   get isFocused(): boolean {
-    return this._isFocused;
+    return this.focused;
   }
 
   /** Block or unblock all document mutations. */
   setReadOnly(value: boolean): void {
-    this._readOnly = value;
+    this.readOnly = value;
   }
 
   /** The container element passed to mount(). Null when unmounted. */
   get container(): HTMLElement | null {
-    return this._container;
+    return this.containerEl;
   }
 
   /** Resolve a 1-based page number to its screen-space top-left corner. */
@@ -133,10 +133,10 @@ export class InputBridge {
    * Safe to call only once — unmount() before re-mounting.
    */
   mount(container: HTMLElement): void {
-    this._container = container;
-    this.textarea = this._createTextarea();
-    this._container.appendChild(this.textarea);
-    this._attachListeners();
+    this.containerEl = container;
+    this.textarea = this.createTextarea();
+    this.containerEl.appendChild(this.textarea);
+    this.attachListeners();
     // preventScroll: guards against browsers scrolling a position:fixed element
     // on focus (rare but observed in some browser versions).
     this.textarea.focus({ preventScroll: true });
@@ -148,11 +148,11 @@ export class InputBridge {
    */
   unmount(): void {
     if (this.textarea) {
-      this._detachListeners();
+      this.detachListeners();
       this.textarea.remove();
       this.textarea = null;
     }
-    this._container = null;
+    this.containerEl = null;
     this.pageScreenRectLookup = null;
   }
 
@@ -204,7 +204,7 @@ export class InputBridge {
    * Called after every state change and after React renders new pages.
    */
   scrollCursorIntoView(): void {
-    if (!this._container || !this.pageScreenRectLookup) return;
+    if (!this.containerEl || !this.pageScreenRectLookup) return;
     const sel = this.opts.getState().selection;
     const { head } = sel;
 
@@ -220,7 +220,7 @@ export class InputBridge {
       : this.opts.getCharMap().coordsAtPos(head);
     if (!coords) return;
 
-    const scrollParent = findScrollParent(this._container);
+    const scrollParent = findScrollParent(this.containerEl);
     if (!scrollParent) return;
 
     // Convert screen-space page top to absolute Y within the scroll container.
@@ -246,7 +246,7 @@ export class InputBridge {
 
   /** Private — textarea creation */
 
-  private _createTextarea(): HTMLTextAreaElement {
+  private createTextarea(): HTMLTextAreaElement {
     const ta = document.createElement("textarea");
     Object.assign(ta.style, {
       position: "fixed",
@@ -278,44 +278,44 @@ export class InputBridge {
 
   /** Private — event wiring */
 
-  private _attachListeners(): void {
+  private attachListeners(): void {
     const ta = this.textarea!;
-    ta.addEventListener("keydown", this._handleKeydown);
-    ta.addEventListener("input", this._handleInput);
-    ta.addEventListener("compositionend", this._handleCompositionEnd);
-    ta.addEventListener("paste", this._handlePaste);
-    ta.addEventListener("copy", this._handleCopy);
-    ta.addEventListener("cut", this._handleCut);
-    ta.addEventListener("focus", this._handleFocus);
-    ta.addEventListener("blur", this._handleBlur);
+    ta.addEventListener("keydown", this.handleKeydown);
+    ta.addEventListener("input", this.handleInput);
+    ta.addEventListener("compositionend", this.handleCompositionEnd);
+    ta.addEventListener("paste", this.handlePaste);
+    ta.addEventListener("copy", this.handleCopy);
+    ta.addEventListener("cut", this.handleCut);
+    ta.addEventListener("focus", this.handleFocus);
+    ta.addEventListener("blur", this.handleBlur);
   }
 
-  private _detachListeners(): void {
+  private detachListeners(): void {
     const ta = this.textarea!;
-    ta.removeEventListener("keydown", this._handleKeydown);
-    ta.removeEventListener("input", this._handleInput);
-    ta.removeEventListener("compositionend", this._handleCompositionEnd);
-    ta.removeEventListener("paste", this._handlePaste);
-    ta.removeEventListener("copy", this._handleCopy);
-    ta.removeEventListener("cut", this._handleCut);
-    ta.removeEventListener("focus", this._handleFocus);
-    ta.removeEventListener("blur", this._handleBlur);
+    ta.removeEventListener("keydown", this.handleKeydown);
+    ta.removeEventListener("input", this.handleInput);
+    ta.removeEventListener("compositionend", this.handleCompositionEnd);
+    ta.removeEventListener("paste", this.handlePaste);
+    ta.removeEventListener("copy", this.handleCopy);
+    ta.removeEventListener("cut", this.handleCut);
+    ta.removeEventListener("focus", this.handleFocus);
+    ta.removeEventListener("blur", this.handleBlur);
   }
 
   /** Private — event handlers */
 
-  private _handleFocus = (): void => {
-    this._isFocused = true;
+  private handleFocus = (): void => {
+    this.focused = true;
     this.opts.onFocus();
   };
 
-  private _handleBlur = (): void => {
-    this._isFocused = false;
+  private handleBlur = (): void => {
+    this.focused = false;
     this.opts.onBlur();
   };
 
-  private _handleKeydown = (e: KeyboardEvent): void => {
-    if (this._readOnly) {
+  private handleKeydown = (e: KeyboardEvent): void => {
+    if (this.readOnly) {
       // Allow arrow-key navigation and selection-only shortcuts; block all mutations.
       const keyStr = keyEventToString(e);
       // Escape collapses the current selection without moving the cursor.
@@ -326,52 +326,52 @@ export class InputBridge {
         e.preventDefault();
         return;
       }
-      if (this._tryInputHandler(e)) {
+      if (this.tryInputHandler(e)) {
         e.preventDefault();
         return;
       }
       // Mod-a (select all) and Mod-c (copy, also handled by clipboard event)
-      if ((keyStr === "Mod-a" || keyStr === "Mod-c") && this._tryKeymapCommand(e)) {
+      if ((keyStr === "Mod-a" || keyStr === "Mod-c") && this.tryKeymapCommand(e)) {
         e.preventDefault();
-        this._clearTextarea();
+        this.clearTextarea();
       }
       return;
     }
     // Input handlers first — editor-level actions (navigation, etc.)
     // declared by extensions via addInputHandlers().
-    if (this._tryInputHandler(e)) {
+    if (this.tryInputHandler(e)) {
       e.preventDefault();
       return;
     }
     // Tab must always be captured so the browser never shifts focus away.
     if (e.key === "Tab") e.preventDefault();
     // Then document-level commands declared by extensions via addKeymap().
-    if (this._tryKeymapCommand(e)) {
+    if (this.tryKeymapCommand(e)) {
       e.preventDefault();
-      this._clearTextarea();
+      this.clearTextarea();
     }
   };
 
-  private _handleInput = (e: Event): void => {
-    if (this._readOnly) return;
+  private handleInput = (e: Event): void => {
+    if (this.readOnly) return;
     if ((e as InputEvent).isComposing) return;
     const text = this.textarea!.value;
     if (!text) return;
     this.opts.dispatch(insertText(this.opts.getState(), text));
-    this._clearTextarea();
+    this.clearTextarea();
   };
 
-  private _handleCompositionEnd = (e: CompositionEvent): void => {
-    if (this._readOnly) return;
+  private handleCompositionEnd = (e: CompositionEvent): void => {
+    if (this.readOnly) return;
     const text = e.data;
     if (!text) return;
     // Clear BEFORE dispatching: Chrome/Edge fires `input` with isComposing=false
     // immediately after compositionend. Clearing first prevents double-insert.
-    this._clearTextarea();
+    this.clearTextarea();
     this.opts.dispatch(insertText(this.opts.getState(), text));
   };
 
-  private _handleCopy = (e: ClipboardEvent): void => {
+  private handleCopy = (e: ClipboardEvent): void => {
     const state = this.opts.getState();
     const { from, to, empty } = state.selection;
     if (empty || !e.clipboardData) return;
@@ -384,7 +384,7 @@ export class InputBridge {
     if (html) e.clipboardData.setData("text/html", html);
   };
 
-  private _handleCut = (e: ClipboardEvent): void => {
+  private handleCut = (e: ClipboardEvent): void => {
     const state = this.opts.getState();
     const { from, to, empty } = state.selection;
     if (empty || !e.clipboardData) return;
@@ -396,13 +396,13 @@ export class InputBridge {
     const html = serializeSelectionToHtml(state, this.opts.getSchema());
     if (html) e.clipboardData.setData("text/html", html);
     // In read-only mode, honour copy but skip the delete.
-    if (this._readOnly) return;
+    if (this.readOnly) return;
     const tr = deleteSelection(state);
     if (tr) this.opts.dispatch(tr);
   };
 
-  private _handlePaste = (e: ClipboardEvent): void => {
-    if (this._readOnly) return;
+  private handlePaste = (e: ClipboardEvent): void => {
+    if (this.readOnly) return;
     e.preventDefault();
     if (!e.clipboardData) return;
     const tr = this.opts.pasteTransformer.transform(
@@ -414,7 +414,7 @@ export class InputBridge {
 
   /** Private — helpers */
 
-  private _tryInputHandler(e: KeyboardEvent): boolean {
+  private tryInputHandler(e: KeyboardEvent): boolean {
     // Try the fully-qualified key first (e.g. "Alt-ArrowLeft" for word-jump),
     // then fall back to the bare key so that handlers which read modifier state
     // directly (like BaseEditing's arrow handlers) still fire.
@@ -425,7 +425,7 @@ export class InputBridge {
     return handler(this.opts.navigator, e);
   }
 
-  private _tryKeymapCommand(e: KeyboardEvent): boolean {
+  private tryKeymapCommand(e: KeyboardEvent): boolean {
     const keyStr = keyEventToString(e);
     const cmd = this.opts.keymap[keyStr];
     if (!cmd) return false;
@@ -435,7 +435,7 @@ export class InputBridge {
     });
   }
 
-  private _clearTextarea(): void {
+  private clearTextarea(): void {
     if (this.textarea) this.textarea.value = "";
   }
 }

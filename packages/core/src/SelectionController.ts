@@ -40,7 +40,7 @@ export class SelectionController implements EditorNavigator {
 
   /** Collapse the cursor to a specific doc position. */
   moveCursorTo(docPos: number): void {
-    this._applyMovement(docPos, false);
+    this.applyMovement(docPos, false);
     this.deps.focus();
   }
 
@@ -60,15 +60,15 @@ export class SelectionController implements EditorNavigator {
 
   /** Move left one position. Pass extend=true to grow the selection (Shift+←). */
   moveLeft(extend = false): void {
-    this._moveHorizontally(-1, extend);
+    this.moveHorizontally(-1, extend);
   }
 
   /** Move right one position. Pass extend=true to grow the selection (Shift+→). */
   moveRight(extend = false): void {
-    this._moveHorizontally(1, extend);
+    this.moveHorizontally(1, extend);
   }
 
-  private _moveHorizontally(dir: -1 | 1, extend: boolean): void {
+  private moveHorizontally(dir: -1 | 1, extend: boolean): void {
     this.deps.ensureLayout();
     const state = this.deps.getState();
     const doc = state.doc;
@@ -84,7 +84,7 @@ export class SelectionController implements EditorNavigator {
       const hiddenAnchorPos = hiddenAnchorImagePosAt(doc, sel.head, dir);
       if (hiddenAnchorPos !== null) {
         if (!extend) {
-          this._applyNodeSelection(hiddenAnchorPos);
+          this.applyNodeSelection(hiddenAnchorPos);
           return;
         }
         head = dir > 0 ? hiddenAnchorPos + 1 : hiddenAnchorPos;
@@ -92,7 +92,7 @@ export class SelectionController implements EditorNavigator {
       }
 
       if (this.deps.getCharMap().coordsAtPos(sel.head)) {
-        this._applyMovement(sel.head, extend);
+        this.applyMovement(sel.head, extend);
         return;
       }
 
@@ -107,7 +107,7 @@ export class SelectionController implements EditorNavigator {
     const coords = this.deps.getCharMap().coordsAtPos(head);
     if (!coords) return;
     const pos = this.deps.getCharMap().posAbove(head, coords.x);
-    if (pos !== null) this._applyMovement(pos, extend);
+    if (pos !== null) this.applyMovement(pos, extend);
   }
 
   /** Move down one line preserving x. Pass extend=true for Shift+↓. */
@@ -117,21 +117,21 @@ export class SelectionController implements EditorNavigator {
     const coords = this.deps.getCharMap().coordsAtPos(head);
     if (!coords) return;
     const pos = this.deps.getCharMap().posBelow(head, coords.x);
-    if (pos !== null) this._applyMovement(pos, extend);
+    if (pos !== null) this.applyMovement(pos, extend);
   }
 
   /** Move cursor to the previous word boundary. */
   moveWordLeft(extend = false): void {
     const head = this.deps.getState().selection.head;
-    const pos = this._findWordBoundary(head, -1);
-    if (pos !== head) this._applyMovement(pos, extend);
+    const pos = this.findWordBoundary(head, -1);
+    if (pos !== head) this.applyMovement(pos, extend);
   }
 
   /** Move cursor to the next word boundary. */
   moveWordRight(extend = false): void {
     const head = this.deps.getState().selection.head;
-    const pos = this._findWordBoundary(head, 1);
-    if (pos !== head) this._applyMovement(pos, extend);
+    const pos = this.findWordBoundary(head, 1);
+    if (pos !== head) this.applyMovement(pos, extend);
   }
 
   /** Move to start of the current visual line. */
@@ -139,7 +139,7 @@ export class SelectionController implements EditorNavigator {
     this.deps.ensureLayout();
     const head = this.deps.getState().selection.head;
     const pos = this.deps.getCharMap().lineStartPos(head);
-    if (pos !== null) this._applyMovement(pos, extend);
+    if (pos !== null) this.applyMovement(pos, extend);
   }
 
   /** Move to end of the current visual line. */
@@ -147,14 +147,14 @@ export class SelectionController implements EditorNavigator {
     this.deps.ensureLayout();
     const head = this.deps.getState().selection.head;
     const pos = this.deps.getCharMap().lineEndPos(head);
-    if (pos !== null) this._applyMovement(pos, extend);
+    if (pos !== null) this.applyMovement(pos, extend);
   }
 
   /** Move to start of document. */
   moveToDocStart(extend = false): void {
     const $pos = this.deps.getState().doc.resolve(0);
     const sel = TextSelection.findFrom($pos, 1);
-    if (sel) this._applyMovement(sel.head, extend);
+    if (sel) this.applyMovement(sel.head, extend);
   }
 
   /** Move to end of document. */
@@ -162,7 +162,7 @@ export class SelectionController implements EditorNavigator {
     const size = this.deps.getState().doc.content.size;
     const $pos = this.deps.getState().doc.resolve(size);
     const sel = TextSelection.findFrom($pos, -1);
-    if (sel) this._applyMovement(sel.head, extend);
+    if (sel) this.applyMovement(sel.head, extend);
   }
 
   // ── Selection by unit ───────────────────────────────────────────────────────
@@ -172,8 +172,8 @@ export class SelectionController implements EditorNavigator {
    * Returns { from, to } of the word boundaries.
    */
   selectWordAt(pos: number): { from: number; to: number } {
-    const from = this._findWordBoundary(pos, -1);
-    const to = this._findWordBoundary(pos, 1);
+    const from = this.findWordBoundary(pos, -1);
+    const to = this.findWordBoundary(pos, 1);
     this.setSelection(from, to);
     return { from, to };
   }
@@ -191,7 +191,7 @@ export class SelectionController implements EditorNavigator {
    * for word-granularity drag selection after double-click.
    */
   wordBoundary(pos: number, dir: -1 | 1): number {
-    return this._findWordBoundary(pos, dir);
+    return this.findWordBoundary(pos, dir);
   }
 
   // ── Deletion by unit ────────────────────────────────────────────────────────
@@ -204,7 +204,7 @@ export class SelectionController implements EditorNavigator {
       this.deps.dispatch(state.tr.deleteSelection());
       return;
     }
-    const wordStart = this._findWordBoundary(head, -1);
+    const wordStart = this.findWordBoundary(head, -1);
     if (wordStart < head) {
       this.deps.dispatch(state.tr.delete(wordStart, head));
     }
@@ -218,7 +218,7 @@ export class SelectionController implements EditorNavigator {
       this.deps.dispatch(state.tr.deleteSelection());
       return;
     }
-    const wordEnd = this._findWordBoundary(head, 1);
+    const wordEnd = this.findWordBoundary(head, 1);
     if (wordEnd > head) {
       this.deps.dispatch(state.tr.delete(head, wordEnd));
     }
@@ -231,7 +231,7 @@ export class SelectionController implements EditorNavigator {
    * extend=false → collapsed cursor at newHead
    * extend=true  → selection from current anchor to newHead (Shift+arrow)
    */
-  private _applyMovement(newHead: number, extend: boolean): void {
+  private applyMovement(newHead: number, extend: boolean): void {
     const state = this.deps.getState();
     const size = state.doc.content.size;
     const h = Math.max(0, Math.min(newHead, size));
@@ -241,7 +241,7 @@ export class SelectionController implements EditorNavigator {
     this.deps.dispatch(state.tr.setSelection(TextSelection.between($a, $h)));
   }
 
-  private _applyNodeSelection(docPos: number): void {
+  private applyNodeSelection(docPos: number): void {
     const state = this.deps.getState();
     this.deps.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, docPos)));
   }
@@ -251,7 +251,7 @@ export class SelectionController implements EditorNavigator {
    * Matches native text editor behaviour: skip whitespace, then skip word chars
    * (or vice versa depending on what's under the cursor).
    */
-  private _findWordBoundary(pos: number, dir: -1 | 1): number {
+  private findWordBoundary(pos: number, dir: -1 | 1): number {
     const doc = this.deps.getState().doc;
     const size = doc.content.size;
 

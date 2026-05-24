@@ -41,7 +41,10 @@ export const GhostText = Extension.create({
         state: {
           init: () => ({ nodeId: null, content: "" }),
           apply(tr, val) {
-            const meta = tr.getMeta(ghostTextPluginKey) as GhostTextState | undefined;
+            // `PluginKey<GhostTextState>.getMeta` is already typed —
+            // the value comes back as `GhostTextState | undefined` with
+            // no cast needed.
+            const meta = tr.getMeta(ghostTextPluginKey);
             return meta !== undefined ? meta : val;
           },
         },
@@ -78,7 +81,7 @@ export const GhostText = Extension.create({
     };
   },
 
-  onEditorReady(editor: IEditor) {
+  onViewReady(editor: IEditor) {
     const handler: OverlayRenderHandler = (ctx, pageNumber, _pageConfig, charMap) => {
       const pluginState = ghostTextPluginKey.getState(editor.getState());
       if (!pluginState?.nodeId || !pluginState.content) return;

@@ -2,6 +2,14 @@ import { EditorState } from "prosemirror-state";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import { BaseEditor } from "./BaseEditor";
+import {
+  defaultEditorTheme,
+  mergeEditorTheme,
+  themeContainsCssVars,
+  type EditorTheme,
+  type ResolvedTheme,
+} from "./model/theme";
+import { normalizeDocument } from "./model/normalizeDocument";
 
 export interface ServerEditorOptions {
   /**
@@ -11,10 +19,21 @@ export interface ServerEditorOptions {
    */
   extensions?: Extension[];
   /**
-   * Optional initial document as a ProseMirror JSON object.
-   * If omitted the editor starts with an empty document.
+   * Optional initial document. Strings are parsed as markdown using the
+   * merged token map from all extensions; objects are parsed as ProseMirror
+   * JSON. If omitted, falls back to extensions' `addInitialDoc` (e.g.
+   * `DefaultContent`).
    */
-  content?: Record<string, unknown>;
+  content?: string | Record<string, unknown>;
+  /**
+   * Theme accepted for type parity with the browser `Editor`. ServerEditor
+   * never paints, so theme is stored but unused. Values containing `var(...)`
+   * cannot be resolved without a DOM — the constructor warns on those once.
+   *
+   * For PDF export from the server, pass literal colors via
+   * `editor.commands.exportPdf({ theme: { ... } })` (typed `Partial<ResolvedTheme>`).
+   */
+  theme?: EditorTheme;
 }
 
 /**
@@ -45,12 +64,53 @@ export interface ServerEditorOptions {
  *   const updatedDoc = editor.toJSON();
  */
 export class ServerEditor extends BaseEditor {
-  constructor({ extensions = [StarterKit], content }: ServerEditorOptions = {}) {
+  /** The user-provided input theme (literal-only on the server path). */
+  private readonly theme: EditorTheme;
+  /**
+   * Resolved theme — defaults merged with the user's literal overrides. Any
+   * `var(...)` entries are dropped (warned at construct) since there is no
+   * DOM resolver server-side.
+   */
+  private readonly resolvedTheme: ResolvedTheme;
+
+  constructor({ extensions = [StarterKit], content, theme }: ServerEditorOptions = {}) {
     super({ extensions, ...(content ? { content } : {}) });
-    // Fire onEditorReady after all state is initialised.
-    // View-only extensions (CollaborationCursor etc.) that cast to IEditor
-    // inside onEditorReady will get a runtime error if called — this is by design.
-    this._fireEditorReady();
+    if (theme && themeContainsCssVars(theme)) {
+      console.warn(
+        "[ServerEditor] theme contains var(--...) values that cannot be resolved without a DOM. " +
+          "Use literal colors for server-side themes, or pass theme via " +
+          "`editor.commands.exportPdf({ theme: { ... } })` for PDF export.",
+      );
+    }
+    this.theme = mergeEditorTheme({}, theme ?? {});
+    // Strip var() entries — they can't be resolved without a DOM probe.
+    const literalOverrides: Partial<ResolvedTheme> = {};
+    for (const key of Object.keys(this.theme) as Array<keyof EditorTheme>) {
+      const value = this.theme[key];
+      if (typeof value === "string" && !value.includes("var(")) {
+        literalOverrides[key] = value;
+      }
+    }
+    this.resolvedTheme = Object.freeze({ ...defaultEditorTheme, ...literalOverrides });
+    // Engine-phase only — view-only extensions declare `onViewReady`, which
+    // the engine only fires in browser `Editor`. ServerEditor silently skips
+    // that phase, so view APIs (overlays, layout, redraw, selection,
+    // surfaces) never get touched headlessly.
+    this.fireEditorReady();
+  }
+
+  /** The current input theme (may contain literal colors only on the server). */
+  getTheme(): EditorTheme {
+    return this.theme;
+  }
+
+  /**
+   * The resolved theme — defaults merged with the user's literal overrides.
+   * Pass to `exportPdf({ theme: editor.getResolvedTheme() })` to opt into a
+   * themed PDF without re-specifying colors.
+   */
+  getResolvedTheme(): ResolvedTheme {
+    return this.resolvedTheme;
   }
 
   /**
@@ -61,11 +121,16 @@ export class ServerEditor extends BaseEditor {
    * loading a fresh document. Call `subscribe` callbacks manually if needed.
    */
   setContent(json: Record<string, unknown>): void {
-    const doc = this._manager.schema.nodeFromJSON(json);
-    this._state = EditorState.create({
-      schema: this._manager.schema,
-      plugins: this._manager.buildPlugins(),
-      doc,
+    // Ingestion-time normalization — URL allow-list, table repair,
+    // block-ID assignment, fingerprint, warnings. Same pipeline as the
+    // base constructor; `lastNormalizeResult` (inherited from BaseEditor)
+    // is refreshed so consumers can inspect what was repaired.
+    const result = normalizeDocument(json, { schema: this.manager.schema });
+    this.lastNormalizeResultValue = result;
+    this.editorState = EditorState.create({
+      schema: this.manager.schema,
+      plugins: this.manager.buildPlugins(),
+      doc: result.doc,
     });
   }
 

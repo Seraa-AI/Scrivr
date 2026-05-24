@@ -1,12 +1,12 @@
 /**
  * showHideApply integration tests.
  *
- * Tests apply and reject at the doc-mutation level using TestAiEditor.
+ * Tests apply and reject at the doc-mutation level using AiTestEditor.
  * Covers: direct mode, tracked mode, per-block scoping, state cleanup.
  */
 
 import { describe, it, expect } from "vitest";
-import { TestAiEditor, doc, p } from "./helpers";
+import { AiTestEditor, doc, p } from "./helpers";
 import type { AiSuggestion } from "../types";
 import { AI_SUGGESTION_SET_STALE } from "../AiSuggestionPlugin";
 
@@ -59,7 +59,7 @@ function multiBlockSuggestion(n1: string, n2: string): AiSuggestion {
 
 describe("showAiSuggestion", () => {
   it("sets suggestion in plugin state", () => {
-    const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
+    const editor = new AiTestEditor(doc(p("The quick fox", "n1")));
     const suggestion = rewriteSuggestion("n1");
 
     editor.showSuggestion(suggestion);
@@ -68,7 +68,7 @@ describe("showAiSuggestion", () => {
   });
 
   it("clears suggestion when null is passed", () => {
-    const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
+    const editor = new AiTestEditor(doc(p("The quick fox", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
     editor.showSuggestion(null);
 
@@ -80,7 +80,7 @@ describe("showAiSuggestion", () => {
 
 describe("applyAiSuggestion — direct mode", () => {
   it("writes proposed text directly into the doc", () => {
-    const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
+    const editor = new AiTestEditor(doc(p("The quick fox", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     editor.apply({ blockId: "n1", mode: "direct" });
@@ -89,7 +89,7 @@ describe("applyAiSuggestion — direct mode", () => {
   });
 
   it("removes the accepted block from plugin state after apply", () => {
-    const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
+    const editor = new AiTestEditor(doc(p("The quick fox", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     editor.apply({ blockId: "n1", mode: "direct" });
@@ -98,7 +98,7 @@ describe("applyAiSuggestion — direct mode", () => {
   });
 
   it("removes only the accepted block when multiple blocks exist", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1"), p("Foo bar", "n2")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1"), p("Foo bar", "n2")));
     editor.showSuggestion(multiBlockSuggestion("n1", "n2"));
 
     editor.apply({ blockId: "n1", mode: "direct" });
@@ -109,7 +109,7 @@ describe("applyAiSuggestion — direct mode", () => {
   });
 
   it("accepts all blocks when no blockId is provided", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1"), p("Foo bar", "n2")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1"), p("Foo bar", "n2")));
     editor.showSuggestion(multiBlockSuggestion("n1", "n2"));
 
     editor.apply({ mode: "direct" });
@@ -123,7 +123,7 @@ describe("applyAiSuggestion — direct mode", () => {
 
 describe("applyAiSuggestion — tracked mode", () => {
   it("records deletes as trackedDelete marks (text still present)", () => {
-    const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
+    const editor = new AiTestEditor(doc(p("The quick fox", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     editor.apply({ blockId: "n1", mode: "tracked" });
@@ -140,7 +140,7 @@ describe("applyAiSuggestion — tracked mode", () => {
   });
 
   it("records inserts as trackedInsert marks", () => {
-    const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
+    const editor = new AiTestEditor(doc(p("The quick fox", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     editor.apply({ blockId: "n1", mode: "tracked" });
@@ -156,7 +156,7 @@ describe("applyAiSuggestion — tracked mode", () => {
   });
 
   it("removes block from plugin state after tracked apply", () => {
-    const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
+    const editor = new AiTestEditor(doc(p("The quick fox", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     editor.apply({ blockId: "n1", mode: "tracked" });
@@ -169,7 +169,7 @@ describe("applyAiSuggestion — tracked mode", () => {
 
 describe("rejectAiSuggestion", () => {
   it("removes block from plugin state after reject", () => {
-    const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
+    const editor = new AiTestEditor(doc(p("The quick fox", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     editor.reject({ blockId: "n1" });
@@ -178,7 +178,7 @@ describe("rejectAiSuggestion", () => {
   });
 
   it("removes only the rejected block when multiple blocks exist", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1"), p("Foo bar", "n2")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1"), p("Foo bar", "n2")));
     editor.showSuggestion(multiBlockSuggestion("n1", "n2"));
 
     editor.reject({ blockId: "n1" });
@@ -189,7 +189,7 @@ describe("rejectAiSuggestion", () => {
   });
 
   it("clears all blocks when no blockId is provided", () => {
-    const editor = new TestAiEditor(doc(p("Hello world", "n1"), p("Foo bar", "n2")));
+    const editor = new AiTestEditor(doc(p("Hello world", "n1"), p("Foo bar", "n2")));
     editor.showSuggestion(multiBlockSuggestion("n1", "n2"));
 
     editor.reject();
@@ -198,7 +198,7 @@ describe("rejectAiSuggestion", () => {
   });
 
   it("does not mutate doc text when rejecting a suggestion that has not been applied", () => {
-    const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
+    const editor = new AiTestEditor(doc(p("The quick fox", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
     editor.reject({ blockId: "n1" });
@@ -212,17 +212,17 @@ describe("rejectAiSuggestion", () => {
 
 describe("showHideApply — state consistency", () => {
   it("plugin state is null when no suggestion is active", () => {
-    const editor = new TestAiEditor(doc(p("hello", "n1")));
+    const editor = new AiTestEditor(doc(p("hello", "n1")));
     expect(editor.suggestionState!.suggestion).toBeNull();
   });
 
   it("setting a new suggestion resets staleBlockIds", () => {
-    const editor = new TestAiEditor(doc(p("The quick fox", "n1")));
+    const editor = new AiTestEditor(doc(p("The quick fox", "n1")));
     const s = rewriteSuggestion("n1");
     editor.showSuggestion(s);
 
     // Manually mark a block stale via transaction
-    editor._applyTransaction(
+    editor.applyTransaction(
       editor.getState().tr.setMeta(AI_SUGGESTION_SET_STALE, new Set(["n1"])),
     );
     expect(editor.suggestionState!.staleBlockIds.size).toBe(1);

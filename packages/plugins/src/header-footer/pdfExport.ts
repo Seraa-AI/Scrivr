@@ -1,9 +1,21 @@
 /**
- * PDF export handler for header/footer chrome bands.
+ * PDF export handler for header/footer chrome bands. Pure render —
+ * no layout decisions made here.
  *
  * Draws headers and footers onto each PDF page using the pre-computed
- * mini-layouts from resolveChrome. No re-layout needed — block positions
- * are offset from the stored margins.top to the actual band Y position.
+ * mini-layouts that `resolveChrome` produced during the editor's
+ * layout pass. Block positions are offset from the stored
+ * `margins.top` to the actual band Y on the PDF page; no re-measure.
+ *
+ * The editing-gap reservation (`HeaderFooter.configure({
+ * activeEditingGap })`) is applied once at layout time inside
+ * `measureSlot` and lives in `slot.reservedHeight` + the layout's
+ * `metrics.contentTop`. This file reads those values verbatim — it
+ * has no knob of its own to change the gap. To change it for PDF
+ * output you change the extension option at editor construction and
+ * re-layout (e.g. by running the PDF export against a separate
+ * `ServerEditor` configured with the desired gap, sharing the same
+ * doc JSON).
  */
 
 import type { LayoutBlock } from "@scrivr/core";

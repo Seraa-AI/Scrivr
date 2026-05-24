@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/react",
-  "version": "1.0.6",
+  "version": "1.0.10",
   "description": "React bindings for the Scrivr canvas document editor",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -36,10 +36,12 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
-    }
+    },
+    "./styles.css": "./src/styles.css"
   },
   "files": [
-    "dist"
+    "dist",
+    "src/styles.css"
   ],
   "publishConfig": {
     "access": "public",
@@ -48,7 +50,8 @@
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
-    "test": "true",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

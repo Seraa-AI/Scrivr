@@ -14,7 +14,7 @@
  *   unsub(); // stop listening
  */
 
-import type { IEditor } from "@scrivr/core";
+import type { IBaseEditor, IEditor } from "@scrivr/core";
 import {
   aiSuggestionPluginKey,
   AI_SUGGESTION_SET_HOVER,
@@ -84,6 +84,17 @@ export interface AiSuggestionSubscribeOptions {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * `selection` lives on the view-side `IEditor` but not on `IBaseEditor`.
+ * Type predicate: when the editor has the field, narrow it so the call site
+ * can reach `selection.moveCursorTo` without an `as` cast.
+ */
+function hasSelectionApi(
+  editor: IBaseEditor,
+): editor is IBaseEditor & Pick<IEditor, "selection"> {
+  return "selection" in editor;
+}
+
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
@@ -148,7 +159,7 @@ function deriveCard(
  * @returns        Unsubscribe function.
  */
 export function subscribeToAiSuggestions(
-  editor: IEditor,
+  editor: IBaseEditor,
   callback: (
     cards: AiSuggestionCardData[],
     actions: AiSuggestionCardActions,
@@ -171,7 +182,7 @@ export function subscribeToAiSuggestions(
       rejectAiSuggestion(editor);
     },
     hover(blockId) {
-      editor._applyTransaction(
+      editor.applyTransaction(
         editor
           .getState()
           .tr.setMeta(AI_SUGGESTION_SET_HOVER, blockId)
@@ -180,7 +191,13 @@ export function subscribeToAiSuggestions(
     },
     activate(blockId) {
       const found = findNodeById(editor.getState().doc, blockId);
-      if (found) editor.selection.moveCursorTo(found.pos + 1);
+      if (!found) return;
+      // `selection` only lives on the view-side `IEditor`. Headless callers
+      // (e.g. ServerEditor in tests) skip the cursor move — they have no
+      // view to position.
+      if (hasSelectionApi(editor)) {
+        editor.selection.moveCursorTo(found.pos + 1);
+      }
     },
   };
 

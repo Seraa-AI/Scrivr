@@ -3,7 +3,7 @@ import { EditorState } from "prosemirror-state";
 import { keymap } from "prosemirror-keymap";
 import { inputRules } from "prosemirror-inputrules";
 import type { Plugin, Command } from "prosemirror-state";
-import type { Node as ProseMirrorNode, AttributeSpec } from "prosemirror-model";
+import type { Node as ProseMirrorNode, AttributeSpec, NodeSpec, MarkSpec } from "prosemirror-model";
 import type { Extension } from "./Extension";
 import type {
   MarkDecorator,
@@ -17,14 +17,163 @@ import type {
   MarkdownNodeSerializer,
   MarkdownMarkSerializer,
 } from "./types";
-import type { IBaseEditor } from "./types";
+import type { IBaseEditor, IEditor } from "./types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
-import { defaultPageConfig } from "../layout/PageLayout";
 import type { PageConfig } from "../layout/PageLayout";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
-import type { ExportContributionMap } from "./export";
+import type { ExportContributionMap, ImportContributionMap } from "./export";
+import { parseMarkdownToDoc } from "../model/parseMarkdown";
+
+interface Phase1SchemaContributions {
+  nodes: Record<string, NodeSpec>;
+  marks: Record<string, MarkSpec>;
+  docAttrs: Record<string, AttributeSpec>;
+  docAttrOwners: Record<string, string>;
+}
+
+/**
+ * One key contributed by one extension. Bundles spec + owner so they stay in
+ * lockstep — there's no way to update the spec without also setting the owner.
+ */
+interface Contribution<T> {
+  spec: T;
+  owner: string;
+}
+
+/**
+ * Collision policy applied to each merger:
+ *   `"warn"`  — later contribution overrides earlier, console.warn names both
+ *               extensions. Used for nodes, marks, keymaps, commands, input
+ *               handlers, markdown serializer rules, etc. — anywhere
+ *               customization is legitimate but accidents need surfacing.
+ *   `"throw"` — collision is a configuration error. Used for doc attrs and
+ *               surface owners, where two extensions interpreting the same
+ *               key would corrupt state silently.
+ */
+type CollisionPolicy = "warn" | "throw";
+
+/**
+ * Fold an extension's contributions into the accumulating map. On collision,
+ * applies the chosen policy: warn-and-override (later wins) or throw with a
+ * rename hint.
+ *
+ * Used everywhere the manager merges per-extension Record<string, T>
+ * contributions — schema (nodes/marks/doc-attrs), runtime (commands/input
+ * handlers/keymap), markdown (parser tokens/serializer rules). One merge
+ * pattern, one diagnostic surface, one place to evolve.
+ */
+function mergeContributions<T>(
+  target: Map<string, Contribution<T>>,
+  incoming: Record<string, T>,
+  newOwner: string,
+  kind: string,
+  policy: CollisionPolicy = "warn",
+): void {
+  for (const [key, spec] of Object.entries(incoming)) {
+    const prev = target.get(key);
+    if (prev) {
+      if (policy === "throw") {
+        throw new Error(
+          `[ExtensionManager] ${kind} "${key}" is contributed by both ` +
+            `"${prev.owner}" and "${newOwner}". ${kind}s must be unique across ` +
+            `all extensions. Rename one (e.g. "${newOwner}_${key}") or remove ` +
+            `the duplicate extension.`,
+        );
+      }
+      console.warn(
+        `[ExtensionManager] ${kind} "${key}" from extension "${newOwner}" silently overrides previous contribution from "${prev.owner}". ` +
+          `If intentional, ignore this warning. If accidental, rename one or remove the duplicate.`,
+      );
+    }
+    target.set(key, { spec, owner: newOwner });
+  }
+}
+
+/**
+ * Pluck specs out of a contribution map into a plain Record for downstream
+ * consumers (ProseMirror Schema, MarkdownSerializer, etc.) that take plain
+ * objects, not contribution wrappers.
+ */
+function specsOf<T>(target: Map<string, Contribution<T>>): Record<string, T> {
+  const out: Record<string, T> = {};
+  for (const [key, { spec }] of target) out[key] = spec;
+  return out;
+}
+
+/**
+ * Walk extensions once for Phase 1 schema contributions. This keeps
+ * addNodes/addMarks/addDocAttrs in the same resolution pass and avoids
+ * re-running phase-1 extension hooks just to expose doc-attr ownership.
+ */
+function collectPhase1SchemaContributions(extensions: Extension[]): Phase1SchemaContributions {
+  // Track contributions with their owner. Baselines (`doc`, `text`) live at
+  // output time, not in ownership state, so the warning message never has to
+  // reference a synthetic "<baseline>" owner.
+  const nodes = new Map<string, Contribution<NodeSpec>>();
+  const marks = new Map<string, Contribution<MarkSpec>>();
+  const docAttrs = new Map<string, Contribution<AttributeSpec>>();
+
+  for (const ext of extensions) {
+    const partial = ext.resolve(); // Phase 1 only — no schema yet
+    mergeContributions(nodes, partial.nodes, partial.name, "Node", "warn");
+    mergeContributions(marks, partial.marks, partial.name, "Mark", "warn");
+    mergeContributions(docAttrs, partial.docAttrs, partial.name, "Doc attribute", "throw");
+  }
+
+  // Baseline override: an extension that contributes `doc` or `text` directly
+  // bypasses the `addDocAttrs()` lane. The override is allowed (some plugins
+  // genuinely need a custom doc shape), but it surfaces as a distinct warning
+  // pointing at the supported path. We never overwrite ownership with the
+  // baseline placeholder, so collisions between two real extensions still
+  // attribute correctly.
+  for (const baseline of ["doc", "text"] as const) {
+    const contributor = nodes.get(baseline);
+    if (contributor) {
+      console.warn(
+        `[ExtensionManager] Node "${baseline}" from extension "${contributor.owner}" overrides the ProseMirror baseline. ` +
+          `If you wanted to add doc-level data, use addDocAttrs() — that's the supported path and it sync-checks across extensions.`,
+      );
+    }
+  }
+
+  // Project the contribution maps onto plain spec maps for Schema construction,
+  // overlaying ProseMirror's required baselines.
+  const nodeSpecs: Record<string, NodeSpec> = {
+    doc: { content: "block+" },
+    text: { group: "inline" },
+    ...specsOf(nodes),
+  };
+  const markSpecs: Record<string, MarkSpec> = specsOf(marks);
+
+  const docAttrSpecs: Record<string, AttributeSpec> = specsOf(docAttrs);
+  const docAttrOwners: Record<string, string> = {};
+  for (const [key, { owner }] of docAttrs) docAttrOwners[key] = owner;
+
+  return { nodes: nodeSpecs, marks: markSpecs, docAttrs: docAttrSpecs, docAttrOwners };
+}
+
+function buildSchemaFromPhase1(contribs: Phase1SchemaContributions): Schema {
+  // Defensive copy: callers (e.g. tests, or `getSchema` reading the snapshot
+  // returned by `collectPhase1SchemaContributions`) shouldn't observe their
+  // input mutated when the Schema is constructed.
+  const nodes: Record<string, NodeSpec> = { ...contribs.nodes };
+  const marks: Record<string, MarkSpec> = { ...contribs.marks };
+
+  // Merge doc attrs into the doc node spec additively. The baseline `doc`
+  // is always seeded by collectPhase1SchemaContributions, so `?? {}` is a
+  // defensive fallback that satisfies noUncheckedIndexedAccess without a cast.
+  if (Object.keys(contribs.docAttrs).length > 0) {
+    const baseDoc: NodeSpec = nodes["doc"] ?? {};
+    nodes["doc"] = {
+      ...baseDoc,
+      attrs: { ...(baseDoc.attrs ?? {}), ...contribs.docAttrs },
+    };
+  }
+
+  return new Schema({ nodes, marks });
+}
 
 /**
  * Build a ProseMirror Schema from an array of extensions.
@@ -38,50 +187,7 @@ import type { ExportContributionMap } from "./export";
  *   const schema = getSchema([StarterKit]);
  */
 export function getSchema(extensions: Extension[]): Schema {
-  // doc and text are always required by ProseMirror — provide them as baseline
-  const nodes: Record<string, object> = {
-    doc: { content: "block+" },
-    text: { group: "inline" },
-  };
-  const marks: Record<string, object> = {};
-
-  // Doc attr contributions — collision detection throws naming both owners.
-  const docAttrs: Record<string, AttributeSpec> = {};
-  const docAttrOwners: Record<string, string> = {};
-
-  for (const ext of extensions) {
-    const partial = ext.resolve(); // no schema — Phase 1 only
-    // Note: addNodes({ doc: ... }) can overwrite the doc spec and bypass
-    // collision detection. Use addDocAttrs() for doc-level attributes.
-    Object.assign(nodes, partial.nodes);
-    Object.assign(marks, partial.marks);
-
-    // Merge docAttrs contributions with collision detection.
-    for (const [attrName, spec] of Object.entries(partial.docAttrs)) {
-      if (attrName in docAttrs) {
-        const prevOwner = docAttrOwners[attrName]!;
-        throw new Error(
-          `[getSchema] Doc attribute "${attrName}" is contributed by ` +
-            `both "${prevOwner}" and "${partial.name}". Doc attributes must be ` +
-            `unique across all extensions. Rename one (e.g. ` +
-            `"${partial.name}_${attrName}") or remove the duplicate extension.`,
-        );
-      }
-      docAttrs[attrName] = spec;
-      docAttrOwners[attrName] = partial.name;
-    }
-  }
-
-  // Merge doc attrs into the doc node spec additively.
-  if (Object.keys(docAttrs).length > 0) {
-    const baseDoc = nodes["doc"] as Record<string, unknown>;
-    nodes["doc"] = {
-      ...baseDoc,
-      attrs: { ...(baseDoc.attrs as object | undefined), ...docAttrs },
-    };
-  }
-
-  return new Schema({ nodes, marks });
+  return buildSchemaFromPhase1(collectPhase1SchemaContributions(extensions));
 }
 
 /**
@@ -101,15 +207,62 @@ export class ExtensionManager {
   readonly schema: Schema;
   private resolved: ResolvedExtension[];
   private readonly extensions: Extension[];
+  /**
+   * Map of doc-attr name → owning extension name, populated during schema
+   * build. Used by collab bindings to whitelist syncable attrs and by future
+   * error messages that need to attribute a problem to its owner.
+   */
+  private readonly docAttrOwners: Record<string, string>;
 
   constructor(extensions: Extension[]) {
     this.extensions = extensions;
 
-    // Phase 1: build schema (no schema context yet — addNodes/addMarks only)
-    this.schema = getSchema(extensions);
+    // Phase 1: build schema and capture doc-attr ownership in one pass.
+    const phase1 = collectPhase1SchemaContributions(extensions);
+    this.schema = buildSchemaFromPhase1(phase1);
+    this.docAttrOwners = phase1.docAttrOwners;
 
     // Phase 2+: resolve everything else with the built schema in context
     this.resolved = extensions.map((ext) => ext.resolve(this.schema));
+  }
+
+  /**
+   * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
+   * Returned as a fresh array — callers may mutate the result.
+   *
+   * Consumed by collab bindings as the whitelist of attrs that may be synced
+   * across peers; attrs not in this list are private to the local editor.
+   */
+  getDocAttrNames(): string[] {
+    return Object.keys(this.docAttrOwners);
+  }
+
+  /**
+   * Look up a registered extension by `name`. Returns `null` when no
+   * extension with that name is in the manager — useful for cross-package
+   * code that wants to read another extension's options (e.g. the React
+   * `HeaderFooterRibbon` hook reading `HeaderFooter.options.activeEditingGap`
+   * to size itself) without coupling to its presence.
+   *
+   * The return type is the un-parameterised `Extension` (options widen to
+   * `object`); callers that need typed options should narrow with a runtime
+   * guard, since the manager has no compile-time link from `name` → option
+   * shape.
+   */
+  findExtension(name: string): Extension | null {
+    for (const ext of this.extensions) {
+      if (ext.name === name) return ext;
+    }
+    return null;
+  }
+
+  /**
+   * Map of doc-attr name → owning extension name. Returned as a fresh object —
+   * callers may mutate the result. Useful for error messages that need to
+   * attribute a problem to the extension that contributed an attr.
+   */
+  getDocAttrOwners(): Record<string, string> {
+    return { ...this.docAttrOwners };
   }
 
   /**
@@ -129,48 +282,73 @@ export class ExtensionManager {
   /**
    * Returns the first non-null initial doc contributed by any extension.
    * Used by Editor to seed EditorState.create() with a doc that matches
-   * a plugin's internal mapping (e.g. initProseMirrorDoc for ySyncPlugin).
+   * a plugin's internal mapping (e.g. initProseMirrorDoc for ySyncPlugin)
+   * or app-supplied content (e.g. DefaultContent).
+   *
+   * Factories are invoked here — *after* every extension has resolved — so
+   * the merged markdown parser tokens are available via `env.parseMarkdown`.
    */
   buildInitialDoc(): ProseMirrorNode | undefined {
-    for (const ext of this.resolved) {
-      if (ext.initialDoc) return ext.initialDoc;
+    const tokens = this.buildMarkdownParserTokens();
+    const env = {
+      schema: this.schema,
+      parseMarkdown: (text: string) => parseMarkdownToDoc(this.schema, tokens, text),
+    };
+
+    // Inspect registrations without executing them. Executing every factory
+    // just to count "winners" would fire side effects on extensions whose
+    // result was about to be ignored — e.g. DefaultContent's `addInitialDoc`
+    // throws on invalid config and used to be skipped silently when an
+    // earlier provider supplied a doc. The warning here surfaces multi-
+    // provider registrations regardless of runtime outcome; the loop below
+    // preserves the original short-circuit semantics.
+    const registered = this.resolved.filter((ext) => ext.initialDocFactory);
+    if (registered.length > 1) {
+      console.warn(
+        `[ExtensionManager] Multiple extensions contributed initial docs: ` +
+          `${registered.map((ext) => ext.name).join(", ")}. ` +
+          `The first non-null provider wins; the rest are ignored. ` +
+          `Disable addInitialDoc() on the others or reorder so the intended provider runs first.`,
+      );
+    }
+
+    for (const ext of registered) {
+      const doc = ext.initialDocFactory!(env);
+      if (doc != null) return doc;
     }
     return undefined;
   }
 
   /**
-   * Returns the PageConfig from a "pagination" extension if one is present,
-   * otherwise returns undefined (Editor falls back to EditorOptions.pageConfig).
+   * Resolve the PageConfig contributed by extensions through the `addPageConfig`
+   * lane. Returns undefined when no extension contributes a value, in which
+   * case Editor falls back to `EditorOptions.pageConfig`, then to
+   * `defaultPageConfig`.
    *
-   * The Pagination extension's options ARE the PageConfig — no extra hook needed.
-   */
-  /**
-   * Returns the PageConfig from the extension list.
-   *
-   * Resolution order:
-   *   1. A standalone "pagination" extension (Pagination.configure({...}))
-   *   2. StarterKit's `pagination` option (StarterKit.configure({ pagination: {...} }))
-   *   3. undefined → Editor falls back to EditorOptions.pageConfig → defaultPageConfig
+   * Resolution: the first extension in registration order whose
+   * `addPageConfig()` returns a non-undefined value wins. StarterKit holds
+   * no opinion unless its `pagination` option is set, so the common
+   * `[StarterKit, Pagination.configure(...)]` pattern resolves to the
+   * standalone Pagination contribution without ambiguity. When two
+   * extensions both contribute explicit configs, the first wins and a
+   * warning surfaces the conflict.
    */
   buildPageConfig(): PageConfig | undefined {
-    const pagination = this.extensions.find((e) => e.name === "pagination");
-    if (pagination) return pagination.options as PageConfig;
-
-    const starterKit = this.extensions.find((e) => e.name === "starterKit");
-    if (starterKit) {
-      const { pagination: pkOpt } = starterKit.options as {
-        pagination?: false | Partial<PageConfig>;
-      };
-      if (pkOpt !== false && pkOpt !== undefined) {
-        return { ...defaultPageConfig, ...pkOpt } as PageConfig;
-      }
-      // pagination not explicitly set → StarterKit default includes Pagination with defaultPageConfig
-      if (pkOpt === undefined) {
-        return defaultPageConfig;
-      }
+    // Count contributors by actual return value, not by hook presence — an
+    // extension whose `addPageConfig` returned undefined chose not to
+    // contribute and shouldn't appear in the warning. Safe to inspect the
+    // cached `pageConfig` here (resolved once at construction) because
+    // addPageConfig is Phase 1 / side-effect-free; no re-execution.
+    const contributors = this.resolved.filter((ext) => ext.pageConfig !== undefined);
+    if (contributors.length > 1) {
+      console.warn(
+        `[ExtensionManager] Multiple extensions contributed page configs: ` +
+          `${contributors.map((ext) => ext.name).join(", ")}. ` +
+          `The first contribution wins; the rest are ignored. ` +
+          `Disable addPageConfig() on the others or reorder so the intended provider runs first.`,
+      );
     }
-
-    return undefined;
+    return contributors[0]?.pageConfig;
   }
 
   /**
@@ -198,11 +376,11 @@ export class ExtensionManager {
    * Used by the Editor to dispatch key events without a ProseMirror EditorView.
    */
   buildKeymap(): Record<string, Command> {
-    const merged: Record<string, Command> = {};
+    const bindings = new Map<string, Contribution<Command>>();
     for (const ext of this.resolved) {
-      Object.assign(merged, ext.keymap);
+      mergeContributions(bindings, ext.keymap, ext.name, "Keymap", "warn");
     }
-    return merged;
+    return specsOf(bindings);
   }
 
   /**
@@ -212,11 +390,11 @@ export class ExtensionManager {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   buildCommands(): Record<string, (...args: any[]) => Command> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const commands: Record<string, (...args: any[]) => Command> = {};
+    const merged = new Map<string, Contribution<(...args: any[]) => Command>>();
     for (const ext of this.resolved) {
-      Object.assign(commands, ext.commands);
+      mergeContributions(merged, ext.commands, ext.name, "Command", "warn");
     }
-    return commands;
+    return specsOf(merged);
   }
 
   /**
@@ -235,7 +413,7 @@ export class ExtensionManager {
    * Surface owner registrations keyed by `owner`. Throws if two extensions
    * claim the same owner namespace — the SurfaceRegistry needs a single
    * lifecycle mediator per owner or callbacks would collide silently.
-   * Installed onto SurfaceRegistry via `_setOwnerMediator()` during Editor
+   * Installed onto SurfaceRegistry via `setOwnerMediator()` during Editor
    * construction.
    */
   getSurfaceOwners(): Map<string, SurfaceOwnerRegistration> {
@@ -265,6 +443,14 @@ export class ExtensionManager {
    */
   getExportContributions(): ExportContributionMap[] {
     return this.resolved.map((ext) => ext.exports);
+  }
+
+  /**
+   * Import contributions from all extensions, in registration order.
+   * Format packages call this at import time to collect parse handlers.
+   */
+  getImportContributions(): ImportContributionMap[] {
+    return this.resolved.map((ext) => ext.imports);
   }
 
   /**
@@ -351,11 +537,11 @@ export class ExtensionManager {
    * Later extensions override earlier ones on key conflicts.
    */
   buildInputHandlers(): Record<string, InputHandler> {
-    const merged: Record<string, InputHandler> = {};
+    const merged = new Map<string, Contribution<InputHandler>>();
     for (const ext of this.resolved) {
-      Object.assign(merged, ext.inputHandlers);
+      mergeContributions(merged, ext.inputHandlers, ext.name, "InputHandler", "warn");
     }
-    return merged;
+    return specsOf(merged);
   }
 
   /**
@@ -379,17 +565,24 @@ export class ExtensionManager {
    * Passed to PasteTransformer to build a prosemirror-markdown MarkdownParser.
    */
   buildMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec> {
-    const merged: Record<string, MarkdownParserTokenSpec> = {};
+    const merged = new Map<string, Contribution<MarkdownParserTokenSpec>>();
     for (const ext of this.resolved) {
-      Object.assign(merged, ext.markdownParserTokens);
+      mergeContributions(
+        merged,
+        ext.markdownParserTokens,
+        ext.name,
+        "MarkdownParserToken",
+        "warn",
+      );
     }
-    return merged;
+    return specsOf(merged);
   }
 
   /**
-   * Returns the onEditorReady callbacks from all extensions that define one.
-   * Called by Editor at the end of construction to let extensions do runtime
-   * setup (collaboration providers, overlay handlers, etc.).
+   * Returns the `onEditorReady` callbacks from all extensions that define
+   * one. Fires in both `Editor` (browser) and `ServerEditor` (headless) —
+   * engine-only setup belongs here (collaboration document binding,
+   * subscribers, plugin-state bootstrap).
    */
   buildEditorReadyCallbacks(): Array<
     (editor: IBaseEditor) => (() => void) | void
@@ -400,16 +593,43 @@ export class ExtensionManager {
   }
 
   /**
+   * Returns the `onViewReady` callbacks from all extensions that define
+   * one. Fires **only** in browser `Editor`, after view infrastructure
+   * (layout / input bridge / surfaces / overlay layer) is initialised.
+   * View-only setup belongs here (overlay handlers, redraw triggers,
+   * selection wiring, layout reads).
+   */
+  buildViewReadyCallbacks(): Array<
+    (editor: IEditor) => (() => void) | void
+  > {
+    return this.resolved
+      .filter((ext) => ext.viewReadyCallback !== undefined)
+      .map((ext) => ext.viewReadyCallback!);
+  }
+
+  /**
    * Merged markdown serializer rules from all extensions.
    * Used by Editor.getMarkdownSerializer() to build a MarkdownSerializer.
    */
   buildMarkdownSerializerRules(): Required<MarkdownSerializerRules> {
-    const nodes: Record<string, MarkdownNodeSerializer> = {};
-    const marks: Record<string, MarkdownMarkSerializer> = {};
+    const nodes = new Map<string, Contribution<MarkdownNodeSerializer>>();
+    const marks = new Map<string, Contribution<MarkdownMarkSerializer>>();
     for (const ext of this.resolved) {
-      Object.assign(nodes, ext.markdownSerializerRules.nodes ?? {});
-      Object.assign(marks, ext.markdownSerializerRules.marks ?? {});
+      mergeContributions(
+        nodes,
+        ext.markdownSerializerRules.nodes ?? {},
+        ext.name,
+        "MarkdownSerializerNode",
+        "warn",
+      );
+      mergeContributions(
+        marks,
+        ext.markdownSerializerRules.marks ?? {},
+        ext.name,
+        "MarkdownSerializerMark",
+        "warn",
+      );
     }
-    return { nodes, marks };
+    return { nodes: specsOf(nodes), marks: specsOf(marks) };
   }
 }

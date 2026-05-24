@@ -106,6 +106,61 @@ export function fragmentsInTile(
   return result;
 }
 
+/**
+ * Decide what to do with a single page click in page-local coords.
+ * Header / footer bands route through `editor.emit("chromeClick", …)`;
+ * body clicks deactivate any active surface.
+ *
+ * Returns `true` when the click was consumed (no further pointer handling
+ * needed), `false` when PointerController should keep processing it.
+ *
+ * Module-scope so unit tests can drive the routing decision against a real
+ * `Editor` without exposing a test-only method on `TileManager`.
+ */
+export function routePageClick(
+  editor: Editor,
+  page: number,
+  docX: number,
+  docY: number,
+  clickCount: number,
+): boolean {
+  const layout = editor.layout;
+  const metrics = layout.metrics?.[page - 1];
+  if (!metrics) return false;
+  // Fall back to the page's layout margins when no header/footer policy
+  // exists yet (band heights collapse to 0). Word/Docs treat the margin
+  // strip as the hit target for "double-click to create a header"; this
+  // keeps that affordance live before a policy is written. When bands
+  // are rendered, the resolved band bounds take precedence.
+  const { pageConfig } = layout;
+  const headerLowerBound =
+    metrics.headerHeight > 0 ? metrics.contentTop : pageConfig.margins.top;
+  const footerUpperBound =
+    metrics.footerHeight > 0
+      ? metrics.footerTop
+      : pageConfig.pageHeight - pageConfig.margins.bottom;
+  const inHeader = docY >= 0 && docY < headerLowerBound;
+  const inFooter = docY > footerUpperBound && docY <= pageConfig.pageHeight;
+
+  if (!inHeader && !inFooter) {
+    // Click in the body while a surface is active — deactivate first.
+    if (editor.surfaces?.activeSurface) {
+      editor.surfaces.activate(null);
+    }
+    return false;
+  }
+
+  // Surface already active — let chrome-band clicks fall through to
+  // PointerController's normal logic so the surface's own routing handles
+  // single/double/triple-click and drag selection.
+  if (editor.surfaces?.activeSurface !== null) return false;
+
+  // No surface active — emit chromeClick for activation (double-click).
+  const band = inHeader ? "header" : "footer";
+  editor.emit("chromeClick", { page, x: docX, y: docY, band, clickCount });
+  return true;
+}
+
 /** TileManager */
 
 /**
@@ -135,8 +190,8 @@ export class TileManager {
   private readonly smallTileHeight: number;
   private readonly pageStyle: Partial<CSSStyleDeclaration>;
   private resizeObserver: ResizeObserver | null = null;
-  private _firstPaintDone = false;
-  private _unwatchDpr: (() => void) | null = null;
+  private firstPaintDone = false;
+  private unwatchDpr: (() => void) | null = null;
   private readonly pointer: PointerController;
 
   constructor(
@@ -173,44 +228,8 @@ export class TileManager {
       isPageless: () => this.editor.isPageless,
       visualYToDocY: (y) => this.visualYToDocY(y),
       scheduleUpdate: () => this.scheduleUpdate(),
-      onPageClick: (page, docX, docY, clickCount) => {
-        const layout = this.editor.layout;
-        const metrics = layout.metrics?.[page - 1];
-        if (!metrics) return false;
-        const inHeader = metrics.headerHeight > 0 && docY < metrics.contentTop;
-        const inFooter = metrics.footerHeight > 0 && docY > metrics.footerTop;
-
-        if (!inHeader && !inFooter) {
-          // Click in the body while a surface is active — deactivate first
-          if (this.editor.surfaces?.activeSurface) {
-            this.editor.surfaces.activate(null);
-          }
-          return false;
-        }
-
-        const surfaceActive = this.editor.surfaces?.activeSurface !== null;
-
-        if (surfaceActive) {
-          // Surface is already active — let ALL clicks fall through to
-          // PointerController's normal logic. Since editor.charMap,
-          // editor.selection, and editor.commands all route through the
-          // active surface, single click, double-click word select,
-          // triple-click block select, shift+click extend, and drag
-          // selection all work automatically.
-          return false;
-        }
-
-        // No surface active — emit chromeClick for activation (double-click).
-        const band = inHeader ? "header" : "footer";
-        this.editor.emit("chromeClick", {
-          page,
-          x: docX,
-          y: docY,
-          band,
-          clickCount,
-        });
-        return true;
-      },
+      onPageClick: (page, docX, docY, clickCount) =>
+        routePageClick(this.editor, page, docX, docY, clickCount),
     });
     this.pointer.attach();
 
@@ -236,7 +255,7 @@ export class TileManager {
     this.unsubscribe = editor.subscribe(() => this.scheduleUpdate());
 
     // ── DPR change detection (browser zoom, display switch, pinch-to-zoom) ──
-    this._unwatchDpr = watchDpr(() => {
+    this.unwatchDpr = watchDpr(() => {
       // Force full repaint of all tiles at the new DPR
       for (const tile of this.pool) {
         tile.lastPaintedVersion = -1;
@@ -423,27 +442,45 @@ export class TileManager {
     const pageNumber = tile.tileIndex + 1; // 1-based
     this.editor.ensurePagePopulated(pageNumber);
 
-    if (!this._firstPaintDone) {
+    if (!this.firstPaintDone) {
       performance.mark("scrivr:first-paint-start");
     }
 
     if (this.editor.isPageless) {
       this.paintContentPageless(tile, layout);
     } else {
+      this.applyPagedWrapperTheme(tile);
       this.paintContentPaged(tile, layout, pageNumber);
     }
 
     tile.lastPaintedVersion = version;
     tile.lastRenderGeneration = renderGen;
 
-    if (!this._firstPaintDone) {
+    if (!this.firstPaintDone) {
       performance.mark("scrivr:first-paint-end");
       performance.measure(
         "scrivr:first-paint (tile manager)",
         "scrivr:first-paint-start",
         "scrivr:first-paint-end",
       );
-      this._firstPaintDone = true;
+      this.firstPaintDone = true;
+    }
+  }
+
+  /**
+   * Apply theme-driven wrapper styles (shadow + background) to a paged-mode
+   * tile. User-provided `pageStyle` overrides win — `pageStyle.boxShadow` /
+   * `pageStyle.background` short-circuit the theme tokens. Re-runs on every
+   * paint so setTheme() flows through to wrappers without a remount.
+   */
+  private applyPagedWrapperTheme(tile: TileEntry): void {
+    const theme = this.editor.getResolvedTheme();
+    const wrapper = tile.wrapper;
+    if (this.pageStyle.boxShadow === undefined) {
+      wrapper.style.boxShadow = theme.pageShadow;
+    }
+    if (this.pageStyle.background === undefined) {
+      wrapper.style.background = theme.pageBg;
     }
   }
 
@@ -479,6 +516,7 @@ export class TileManager {
       map: this.editor.charMap,
       markDecorators: this.editor.markDecorators,
       showMarginGuides: this.showMarginGuides,
+      theme: this.editor.getResolvedTheme(),
       ...(this.editor.blockRegistry
         ? { blockRegistry: this.editor.blockRegistry }
         : {}),
@@ -489,8 +527,8 @@ export class TileManager {
       ...(this.editor.pageChromeContributions?.length
         ? { pageChromeContributions: this.editor.pageChromeContributions }
         : {}),
-      ...(layout._chromePayloads
-        ? { chromePayloads: layout._chromePayloads }
+      ...(layout.chromePayloads
+        ? { chromePayloads: layout.chromePayloads }
         : {}),
       ...(layout.metrics?.[tile.tileIndex]
         ? { pageMetrics: layout.metrics[tile.tileIndex] }
@@ -523,7 +561,8 @@ export class TileManager {
     tile.overlayCanvas.style.height = `${h}px`;
 
     const ctx = tile.contentCanvas.getContext("2d", { alpha: false })!;
-    clearCanvas(ctx, w, h, dpr);
+    const theme = this.editor.getResolvedTheme();
+    clearCanvas(ctx, w, h, dpr, theme.pageBg);
     // After clearCanvas: transform = scale(dpr). Translate so block.y coords work naturally.
     ctx.save();
     ctx.translate(0, -tileTop);
@@ -544,6 +583,7 @@ export class TileManager {
             lineIndexOffset,
             dpr,
             measurer: this.editor.measurer,
+            theme,
             ...(this.editor.markDecorators
               ? { markDecorators: this.editor.markDecorators }
               : {}),
@@ -561,6 +601,7 @@ export class TileManager {
           this.editor.charMap,
           1,
           lineIndexOffset,
+          theme,
           this.editor.markDecorators,
         );
       }
@@ -663,6 +704,7 @@ export class TileManager {
     // this tile yet, leaving its glyphs missing from the charMap.
     if (!sel.empty) this.editor.ensurePagePopulated(pageNum);
 
+    const overlayTheme = this.editor.getResolvedTheme();
     if (!sel.empty && !isNodeSel) {
       const lines = this.editor.charMap
         .linesInRange(sel.from, sel.to)
@@ -670,7 +712,7 @@ export class TileManager {
       const glyphs = this.editor.charMap
         .glyphsInRange(sel.from, sel.to)
         .filter((g) => g.page === pageNum);
-      renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to);
+      renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to, overlayTheme.selectionFill);
     }
 
     // ── Cursor (suppressed when a surface is active — chrome bands own their cursor) ──
@@ -681,7 +723,7 @@ export class TileManager {
       !surfaceActive
     ) {
       const coords = this.editor.charMap.coordsAtPos(sel.head, pageNum);
-      if (coords) renderCursor(overlayCtx, coords);
+      if (coords) renderCursor(overlayCtx, coords, overlayTheme.cursor);
     }
 
     // ── Image selection handles ───────────────────────────────────────────
@@ -705,7 +747,7 @@ export class TileManager {
             pending.width,
             pending.height,
           );
-          renderHandles(overlayCtx, g.x, g.y, g.width, g.height);
+          renderHandles(overlayCtx, g.x, g.y, g.width, g.height, overlayTheme.resizeHandle);
         } else {
           renderHandles(
             overlayCtx,
@@ -713,6 +755,7 @@ export class TileManager {
             objRect.y,
             objRect.width,
             objRect.height,
+            overlayTheme.resizeHandle,
           );
         }
       }
@@ -788,13 +831,9 @@ export class TileManager {
       display: "none", // hidden until assigned by update()
       cursor: "text",
       userSelect: "none",
-      // Paged mode defaults — overridden by pageStyle option
-      ...(!this.editor.isPageless
-        ? {
-            boxShadow: "0 4px 32px rgba(0,0,0,0.12)",
-            background: "#fff",
-          }
-        : {}),
+      // Paged-mode boxShadow + background are theme-driven and applied per
+      // paint in applyPagedWrapperTheme. Only the user's pageStyle overrides
+      // are baked in at construction so they survive every paint cycle.
       ...(!this.editor.isPageless ? this.pageStyle : {}),
     });
 
@@ -853,7 +892,7 @@ export class TileManager {
   destroy(): void {
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
     this.unsubscribe?.();
-    this._unwatchDpr?.();
+    this.unwatchDpr?.();
     this.scrollParent?.removeEventListener("scroll", this.handleScroll);
     this.resizeObserver?.disconnect();
     this.pointer.detach();

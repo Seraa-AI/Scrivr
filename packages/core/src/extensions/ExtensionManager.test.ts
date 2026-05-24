@@ -1,7 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { ExtensionManager, getSchema } from "./ExtensionManager";
 import { Extension } from "./Extension";
 import { StarterKit } from "./StarterKit";
+import { Pagination } from "./built-in/Pagination";
+import { defaultPageConfig } from "../layout/PageLayout";
+import type { PageConfig } from "../layout/PageLayout";
 import { Bold } from "./built-in/Bold";
 import { Italic } from "./built-in/Italic";
 import { Paragraph } from "./built-in/Paragraph";
@@ -13,6 +16,7 @@ import { FontSize } from "./built-in/FontSize";
 import { Underline } from "./built-in/Underline";
 import { Heading } from "./built-in/Heading";
 import { Link } from "./built-in/Link";
+import { ServerEditor } from "../ServerEditor";
 
 describe("getSchema", () => {
   it("returns a ProseMirror Schema from StarterKit", () => {
@@ -479,6 +483,661 @@ describe("ExtensionManager", () => {
       const undoTr = nextState.tr.step(tr.steps[0]!.invert(tr.docs[0]!));
       const undoneState = nextState.apply(undoTr);
       expect(undoneState.doc.attrs.headerFooter).toBeNull();
+    });
+  });
+
+  describe("getDocAttrOwners / getDocAttrNames", () => {
+    // Reused contributor factory — same shape as the addDocAttrs tests above.
+    const makeDocAttrContributor = (name: string, attrName: string, defaultValue: unknown) =>
+      Extension.create({
+        name,
+        addDocAttrs() {
+          return { [attrName]: { default: defaultValue } };
+        },
+      });
+
+    it("returns an empty list when no extension contributes doc attrs", () => {
+      const manager = new ExtensionManager([Document, Paragraph, Bold]);
+      expect(manager.getDocAttrNames()).toEqual([]);
+      expect(manager.getDocAttrOwners()).toEqual({});
+    });
+
+    it("returns the attr name and owner when one extension contributes", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
+      const manager = new ExtensionManager([StarterKit, HeaderFooter]);
+      expect(manager.getDocAttrNames()).toEqual(["headerFooter"]);
+      expect(manager.getDocAttrOwners()).toEqual({ headerFooter: "headerFooter" });
+    });
+
+    it("returns every contributed attr across extensions", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
+      const Footnotes = makeDocAttrContributor("footnotes", "footnotes", []);
+      const TrackChanges = makeDocAttrContributor("trackChanges", "trackChanges", { enabled: false });
+      const manager = new ExtensionManager([StarterKit, HeaderFooter, Footnotes, TrackChanges]);
+
+      expect(manager.getDocAttrNames().sort()).toEqual(
+        ["footnotes", "headerFooter", "trackChanges"].sort(),
+      );
+      expect(manager.getDocAttrOwners()).toEqual({
+        headerFooter: "headerFooter",
+        footnotes: "footnotes",
+        trackChanges: "trackChanges",
+      });
+    });
+
+    it("decouples attr name from owning extension name", () => {
+      // An extension can name its attrs anything — the owner map must reflect
+      // the extension that actually contributed, not the attr name.
+      const Headered = makeDocAttrContributor("myHeaderPlugin", "headerFooter", null);
+      const manager = new ExtensionManager([StarterKit, Headered]);
+      expect(manager.getDocAttrOwners()).toEqual({ headerFooter: "myHeaderPlugin" });
+    });
+
+    it("returns a defensive copy — mutating the result does not affect the manager", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
+      const manager = new ExtensionManager([StarterKit, HeaderFooter]);
+
+      const owners = manager.getDocAttrOwners();
+      owners["intruder"] = "evil";
+      expect(manager.getDocAttrOwners()).not.toHaveProperty("intruder");
+
+      const names = manager.getDocAttrNames();
+      names.push("intruder");
+      expect(manager.getDocAttrNames()).not.toContain("intruder");
+    });
+  });
+
+  describe("IBaseEditor.getDocAttrNames delegation", () => {
+    const makeDocAttrContributor = (name: string, attrName: string, defaultValue: unknown) =>
+      Extension.create({
+        name,
+        addDocAttrs() {
+          return { [attrName]: { default: defaultValue } };
+        },
+      });
+
+    it("ServerEditor.getDocAttrNames() returns names declared by extensions", () => {
+      const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
+      const editor = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+      expect(editor.getDocAttrNames()).toEqual(["headerFooter"]);
+    });
+
+    it("ServerEditor.getDocAttrNames() is empty when no extension contributes", () => {
+      const editor = new ServerEditor({ extensions: [StarterKit] });
+      expect(editor.getDocAttrNames()).toEqual([]);
+    });
+  });
+
+  describe("collision warnings", () => {
+    // Nodes / marks / keymap collisions silently override (later wins) — this is
+    // intentional to allow StarterKit-style customization, but a typo can shadow
+    // a built-in with no warning. Spy on console.warn so we can assert the
+    // warning fires for every collision kind.
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    const makeNodeContributor = (extName: string, nodeName: string) =>
+      Extension.create({
+        name: extName,
+        addNodes() {
+          return {
+            [nodeName]: { group: "block", content: "inline*" },
+          };
+        },
+      });
+
+    const makeMarkContributor = (extName: string, markName: string) =>
+      Extension.create({
+        name: extName,
+        addMarks() {
+          return {
+            [markName]: { parseDOM: [{ tag: markName }], toDOM: () => [markName, 0] },
+          };
+        },
+      });
+
+    const makeKeymapContributor = (extName: string, binding: string) =>
+      Extension.create({
+        name: extName,
+        addKeymap() {
+          return { [binding]: () => true };
+        },
+      });
+
+    it("does not warn when no keys collide across extensions", () => {
+      new ExtensionManager([StarterKit]);
+      // StarterKit's built-ins must not collide with each other.
+      const collisionWarnings = warnSpy.mock.calls.filter((args) =>
+        String(args[0] ?? "").includes("silently overrides"),
+      );
+      expect(collisionWarnings).toHaveLength(0);
+    });
+
+    it("warns when two extensions contribute the same node name", () => {
+      const A = makeNodeContributor("extA", "myBlock");
+      const B = makeNodeContributor("extB", "myBlock");
+      new ExtensionManager([Document, Paragraph, A, B]);
+
+      expect(warnSpy).toHaveBeenCalled();
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Node "myBlock"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+      expect(message).toMatch(/silently overrides/);
+    });
+
+    it("warns when two extensions contribute the same mark name", () => {
+      const A = makeMarkContributor("extA", "myMark");
+      const B = makeMarkContributor("extB", "myMark");
+      new ExtensionManager([Document, Paragraph, A, B]);
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Mark "myMark"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+    });
+
+    it("warns when two extensions bind the same keymap shortcut", () => {
+      const A = makeKeymapContributor("extA", "Mod-x");
+      const B = makeKeymapContributor("extB", "Mod-x");
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      // Keymap merge happens lazily in buildKeymap — invoke it to trigger.
+      manager.buildKeymap();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Keymap "Mod-x"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+    });
+
+    it("names the overridden owner — not just the new contributor", () => {
+      // When B overrides A's "thing", the warning must mention BOTH so the
+      // user knows which extension to rename.
+      const A = makeNodeContributor("extA", "thing");
+      const B = makeNodeContributor("extB", "thing");
+      new ExtensionManager([Document, Paragraph, A, B]);
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/"extA"/); // previous owner
+      expect(message).toMatch(/"extB"/); // new owner
+    });
+
+    it("warns once per colliding key, not once per subsequent extension", () => {
+      // If three extensions contribute the same key, the warnings should still
+      // identify which extension supplanted which — one warning per override.
+      const A = makeNodeContributor("extA", "thing");
+      const B = makeNodeContributor("extB", "thing");
+      const C = makeNodeContributor("extC", "thing");
+      new ExtensionManager([Document, Paragraph, A, B, C]);
+
+      const collisions = warnSpy.mock.calls.filter((c) =>
+        String(c[0] ?? "").includes(`Node "thing"`),
+      );
+      // A is the first contributor (no warning), B overrides A (1 warning),
+      // C overrides B (1 warning). Total: 2.
+      expect(collisions).toHaveLength(2);
+    });
+
+    it("warns when two extensions contribute the same command name", () => {
+      const A = Extension.create({
+        name: "extA",
+        addCommands() {
+          return { mything: () => () => true };
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addCommands() {
+          return { mything: () => () => true };
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      manager.buildCommands();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Command "mything"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+    });
+
+    it("warns when two extensions contribute the same input handler", () => {
+      const A = Extension.create({
+        name: "extA",
+        addInputHandlers() {
+          return { drop: () => false };
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addInputHandlers() {
+          return { drop: () => false };
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      manager.buildInputHandlers();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/InputHandler "drop"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+    });
+
+    it("warns when two extensions contribute the same markdown parser token", () => {
+      const A = Extension.create({
+        name: "extA",
+        addMarkdownParserTokens() {
+          return { custom: { node: "paragraph" } };
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addMarkdownParserTokens() {
+          return { custom: { node: "paragraph" } };
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      manager.buildMarkdownParserTokens();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/MarkdownParserToken "custom"/);
+      expect(message).toMatch(/"extA"/);
+      expect(message).toMatch(/"extB"/);
+    });
+
+    it("warns when two extensions contribute the same markdown serializer rule", () => {
+      // Serializer rules have two lanes (nodes + marks). Both should detect.
+      const A = Extension.create({
+        name: "extA",
+        addMarkdownSerializerRules() {
+          return {
+            nodes: { custom: () => {} },
+            marks: { customMark: { open: "*", close: "*" } },
+          };
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addMarkdownSerializerRules() {
+          return {
+            nodes: { custom: () => {} },
+            marks: { customMark: { open: "_", close: "_" } },
+          };
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      manager.buildMarkdownSerializerRules();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/MarkdownSerializerNode "custom"/);
+      expect(message).toMatch(/MarkdownSerializerMark "customMark"/);
+    });
+
+    it("warns when an extension overrides the ProseMirror baseline doc node", () => {
+      const Overrider = Extension.create({
+        name: "docOverrider",
+        addNodes() {
+          return {
+            doc: { content: "block+" },
+          };
+        },
+      });
+      new ExtensionManager([Document, Paragraph, Overrider]);
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Node "doc"/);
+      expect(message).toMatch(/docOverrider/);
+      // Hints toward the supported path
+      expect(message).toMatch(/addDocAttrs/);
+      // Does NOT mention an internal "<baseline>" sentinel
+      expect(message).not.toMatch(/<baseline>/);
+    });
+
+    it("warns when an extension overrides the ProseMirror baseline text node", () => {
+      const Overrider = Extension.create({
+        name: "textOverrider",
+        addNodes() {
+          return {
+            text: { group: "inline" },
+          };
+        },
+      });
+      new ExtensionManager([Document, Paragraph, Overrider]);
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Node "text"/);
+      expect(message).toMatch(/textOverrider/);
+      expect(message).not.toMatch(/<baseline>/);
+    });
+
+    it("doc-attr collision still throws (not warn) — distinct policy preserved", () => {
+      // Confirms refactor of the merger to take a policy enum didn't downgrade
+      // doc-attrs from throw to warn.
+      const A = Extension.create({
+        name: "extA",
+        addDocAttrs() { return { shared: { default: null } }; },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addDocAttrs() { return { shared: { default: null } }; },
+      });
+      expect(() => new ExtensionManager([A, B])).toThrow(/shared/);
+    });
+  });
+
+  describe("multiple initial-doc providers", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it("warns when more than one extension registers an initial doc", () => {
+      const A = Extension.create({
+        name: "extA",
+        addInitialDoc() {
+          return this.schema.nodes["doc"]!.create(
+            null,
+            this.schema.nodes["paragraph"]!.create(),
+          );
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addInitialDoc() {
+          return this.schema.nodes["doc"]!.create(
+            null,
+            this.schema.nodes["paragraph"]!.create(),
+          );
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      manager.buildInitialDoc();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Multiple/i);
+      expect(message).toMatch(/extA/);
+      expect(message).toMatch(/extB/);
+    });
+
+    it("does not warn when only one extension provides an initial doc", () => {
+      const A = Extension.create({
+        name: "extA",
+        addInitialDoc() {
+          return this.schema.nodes["doc"]!.create(
+            null,
+            this.schema.nodes["paragraph"]!.create(),
+          );
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, A]);
+      manager.buildInitialDoc();
+
+      const collisions = warnSpy.mock.calls.filter((c) =>
+        String(c[0] ?? "").match(/Multiple/i),
+      );
+      expect(collisions).toHaveLength(0);
+    });
+
+    it("does not execute later factories once an earlier one produced a doc", () => {
+      // Side-effect regression guard: a later provider that throws on invalid
+      // config (e.g. DefaultContent) must not run when an earlier provider
+      // already returned a non-null doc. Behavior must match the original
+      // short-circuit semantics.
+      let laterRan = false;
+      const First = Extension.create({
+        name: "first",
+        addInitialDoc() {
+          return this.schema.nodes["doc"]!.create(
+            null,
+            this.schema.nodes["paragraph"]!.create(),
+          );
+        },
+      });
+      const Later = Extension.create({
+        name: "later",
+        addInitialDoc() {
+          laterRan = true;
+          throw new Error("Later factory must not be invoked");
+        },
+      });
+      const manager = new ExtensionManager([StarterKit, First, Later]);
+      expect(() => manager.buildInitialDoc()).not.toThrow();
+      expect(laterRan).toBe(false);
+    });
+  });
+
+  describe("addPageConfig lane", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    const usLetter: PageConfig = {
+      pageWidth: 816,
+      pageHeight: 1056,
+      margins: { top: 72, right: 72, bottom: 72, left: 72 },
+    };
+
+    it("returns undefined when no extension contributes a page config", () => {
+      // Even Document + Paragraph alone shouldn't conjure a config from nowhere.
+      const manager = new ExtensionManager([Document, Paragraph]);
+      expect(manager.buildPageConfig()).toBeUndefined();
+    });
+
+    it("returns the contribution from a standalone extension via addPageConfig()", () => {
+      const PageOverride = Extension.create({
+        name: "myPageSettings",
+        addPageConfig() {
+          return usLetter;
+        },
+      });
+      const manager = new ExtensionManager([Document, Paragraph, PageOverride]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+    });
+
+    it("reads the standalone Pagination extension through the lane", () => {
+      // Pagination's options ARE the PageConfig — the addPageConfig hook on the
+      // extension itself must surface them without manager-side name matching.
+      const manager = new ExtensionManager([
+        Document,
+        Paragraph,
+        Pagination.configure(usLetter),
+      ]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+    });
+
+    it("reads StarterKit's nested pagination option through the lane", () => {
+      const manager = new ExtensionManager([
+        StarterKit.configure({ pagination: usLetter }),
+      ]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+    });
+
+    it("respects StarterKit pagination: false (no config contributed)", () => {
+      const manager = new ExtensionManager([
+        StarterKit.configure({ pagination: false }),
+      ]);
+      expect(manager.buildPageConfig()).toBeUndefined();
+    });
+
+    it("returns undefined when StarterKit is loaded without an explicit pagination option", () => {
+      // StarterKit holds no opinion unless the user opted in. Editor's
+      // constructor applies `defaultPageConfig` as the final fallback —
+      // verified separately in Editor's wiring at the `?? defaultPageConfig`
+      // site. Tested here at the manager level: undefined surfaces as the
+      // "no contribution" signal a downstream Pagination can override.
+      const manager = new ExtensionManager([StarterKit]);
+      expect(manager.buildPageConfig()).toBeUndefined();
+    });
+
+    it("merges partial StarterKit pagination override with the default config", () => {
+      const partial: Partial<PageConfig> = { pageWidth: 600 };
+      const manager = new ExtensionManager([
+        StarterKit.configure({ pagination: partial }),
+      ]);
+      const result = manager.buildPageConfig();
+      expect(result?.pageWidth).toBe(600);
+      // Untouched fields fall through to defaults.
+      expect(result?.pageHeight).toBe(defaultPageConfig.pageHeight);
+      expect(result?.margins).toEqual(defaultPageConfig.margins);
+    });
+
+    it("does not require an extension named 'pagination' or 'starterKit'", () => {
+      // Manager must not match by name. Any extension that contributes via the
+      // addPageConfig lane should be honored.
+      const Custom = Extension.create({
+        name: "totallyDifferentName",
+        addPageConfig() {
+          return usLetter;
+        },
+      });
+      const manager = new ExtensionManager([Document, Paragraph, Custom]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+    });
+
+    it("warns when more than one extension contributes via addPageConfig", () => {
+      const A = Extension.create({
+        name: "extA",
+        addPageConfig() {
+          return usLetter;
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addPageConfig() {
+          return defaultPageConfig;
+        },
+      });
+      const manager = new ExtensionManager([Document, Paragraph, A, B]);
+      manager.buildPageConfig();
+
+      const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(message).toMatch(/Multiple/i);
+      expect(message).toMatch(/extA/);
+      expect(message).toMatch(/extB/);
+    });
+
+    it("first contributor wins on multi-provider collision", () => {
+      const A = Extension.create({
+        name: "extA",
+        addPageConfig() {
+          return usLetter;
+        },
+      });
+      const B = Extension.create({
+        name: "extB",
+        addPageConfig() {
+          return defaultPageConfig;
+        },
+      });
+      const manager = new ExtensionManager([Document, Paragraph, A, B]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+    });
+
+    it("[StarterKit, Pagination.configure(...)] resolves to the standalone config without warning", () => {
+      // Regression: StarterKit previously returned defaultPageConfig when its
+      // pagination option was unset, which then claimed the slot ahead of
+      // an explicit standalone Pagination. Now StarterKit returns undefined
+      // when unset, so the standalone wins cleanly.
+      const manager = new ExtensionManager([
+        StarterKit,
+        Pagination.configure(usLetter),
+      ]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+      const collisions = warnSpy.mock.calls.filter((c) =>
+        String(c[0] ?? "").includes("Multiple extensions contributed page configs"),
+      );
+      expect(collisions).toHaveLength(0);
+    });
+
+    it("StarterKit.configure({ pagination: false }) does not show up as a phantom provider", () => {
+      // Regression: warning was previously triggered by hook presence, so
+      // StarterKit (which defines addPageConfig) was listed even when its
+      // hook returned undefined. The pagination: false escape hatch must
+      // be silent.
+      const manager = new ExtensionManager([
+        StarterKit.configure({ pagination: false }),
+        Pagination.configure(usLetter),
+      ]);
+      expect(manager.buildPageConfig()).toEqual(usLetter);
+      const collisions = warnSpy.mock.calls.filter((c) =>
+        String(c[0] ?? "").includes("Multiple extensions contributed page configs"),
+      );
+      expect(collisions).toHaveLength(0);
+    });
+  });
+
+  describe("buildSchemaFromPhase1 does not mutate its input", () => {
+    it("preserves the contributions object across repeated builds", () => {
+      // Regression: previously mutated contribs.nodes["doc"] in place,
+      // which would corrupt a contributions snapshot if reused.
+      const HeaderFooter = Extension.create({
+        name: "headerFooter",
+        addDocAttrs() { return { headerFooter: { default: null } }; },
+      });
+      const manager = new ExtensionManager([StarterKit, HeaderFooter]);
+      // Touching the schema once should not poison subsequent reads
+      const docAttrs1 = manager.schema.nodes["doc"]!.spec.attrs;
+      const docAttrs2 = manager.schema.nodes["doc"]!.spec.attrs;
+      expect(docAttrs1).toEqual(docAttrs2);
+      expect(docAttrs1!["headerFooter"]).toBeDefined();
+    });
+  });
+
+  describe("findExtension", () => {
+    it("returns the extension instance when registered", () => {
+      const manager = new ExtensionManager([StarterKit, Bold, Italic]);
+      const bold = manager.findExtension("bold");
+      expect(bold).not.toBeNull();
+      expect(bold!.name).toBe("bold");
+    });
+
+    it("returns null when the extension is not registered", () => {
+      const manager = new ExtensionManager([StarterKit]);
+      expect(manager.findExtension("nonexistent-extension")).toBeNull();
+    });
+
+    it("exposes the extension's configured options", () => {
+      // Heading.configure({ levels: [1, 2] }) keeps the option on the
+      // returned instance — findExtension returns that same instance so
+      // consumers can read configured values (this is the load-bearing
+      // contract the React HeaderFooterRibbon hook depends on).
+      const configured = Heading.configure({ levels: [1, 2] });
+      const manager = new ExtensionManager([Document, Paragraph, configured]);
+      const found = manager.findExtension("heading");
+      expect(found).not.toBeNull();
+      const opts = found!.options as { levels?: unknown };
+      expect(opts.levels).toEqual([1, 2]);
+    });
+  });
+
+  describe("findExtension on BaseEditor", () => {
+    it("delegates to the manager and returns the configured extension", () => {
+      const editor = new ServerEditor({
+        extensions: [StarterKit, Heading.configure({ levels: [1] })],
+      });
+      const found = editor.findExtension("heading");
+      expect(found).not.toBeNull();
+      expect(found!.name).toBe("heading");
+      const opts = found!.options as { levels?: unknown };
+      expect(opts.levels).toEqual([1]);
+    });
+
+    it("returns null for an unregistered name", () => {
+      const editor = new ServerEditor({ extensions: [StarterKit] });
+      expect(editor.findExtension("not-real")).toBeNull();
     });
   });
 });

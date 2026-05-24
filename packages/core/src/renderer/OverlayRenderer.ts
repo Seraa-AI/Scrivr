@@ -380,11 +380,11 @@ export function renderAnchoredDragCaret(
  * Updated by clearOverlay (called every frame) so all draw calls in the same
  * paint cycle use the correct value without threading dpr through every API.
  */
-let _activeDpr = 1;
+let activeDpr = 1;
 
 /** @internal Set the active DPR for testing snapRect without calling clearOverlay. */
-export function _setActiveDpr(dpr: number): void {
-  _activeDpr = dpr;
+export function setActiveDpr(dpr: number): void {
+  activeDpr = dpr;
 }
 
 /**
@@ -398,7 +398,7 @@ export function snapRect(
   w: number,
   h: number,
 ): { x: number; y: number; w: number; h: number } {
-  const dpr = _activeDpr;
+  const dpr = activeDpr;
   const sx = Math.round(x * dpr) / dpr;
   const sy = Math.round(y * dpr) / dpr;
   const sw = Math.round((x + w) * dpr) / dpr - sx;
@@ -441,7 +441,7 @@ export function clearOverlay(
   height: number,
   dpr: number,
 ): void {
-  _activeDpr = dpr;
+  activeDpr = dpr;
   ctx.resetTransform();
   ctx.clearRect(0, 0, width * dpr, height * dpr);
   ctx.scale(dpr, dpr);
@@ -457,6 +457,7 @@ export function clearOverlay(
 export function renderCursor(
   ctx: CanvasRenderingContext2D,
   coords: CoordsResult,
+  cursorColor: string,
 ): void {
   if (coords.height <= 0) return;
 
@@ -464,7 +465,7 @@ export function renderCursor(
   const x = Math.round(coords.x) + 0.5;
 
   ctx.save();
-  ctx.strokeStyle = "#1e293b";
+  ctx.strokeStyle = cursorColor;
   ctx.lineWidth = 1.5;
   ctx.lineCap = "round";
   ctx.beginPath();
@@ -495,11 +496,12 @@ export function renderSelection(
   glyphs: GlyphEntry[],
   from: number,
   to: number,
+  selectionFill: string,
 ): void {
   if (lines.length === 0 && glyphs.length === 0) return;
 
   ctx.save();
-  ctx.fillStyle = "rgba(59, 130, 246, 0.25)"; // blue-500 @ 25% opacity
+  ctx.fillStyle = selectionFill;
 
   // Pass 1 — glyph-based highlights (snapped to pixel grid to eliminate seams)
   for (const glyph of glyphs) {

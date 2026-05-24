@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import type { ChromeContribution, LayoutIterationContext } from "@scrivr/core";
+import type { LayoutIterationContext } from "@scrivr/core";
 
-// Mock runMiniPipeline before importing resolveChrome
+// runMiniPipeline returns a stub layout shape so the unit test stays isolated
+// from the real layout pipeline. resolveChrome's wiring (slot presence,
+// per-page selection) is the contract under test.
 vi.mock("@scrivr/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@scrivr/core")>();
   return {
@@ -32,23 +34,21 @@ vi.mock("@scrivr/core", async (importOriginal) => {
       runId: 0,
       convergence: "stable" as const,
       iterationCount: 1,
-      _chromePayloads: {},
+      chromePayloads: {},
     })),
   };
 });
 
 import { resolveChrome } from "../resolveChrome";
 import type { HeaderFooterPolicy } from "../types";
-import type { Node } from "prosemirror-model";
+import { realSchema } from "../../test-utils";
+
+// Real PM doc node — gives resolveChrome a real `doc.type.schema.nodeFromJSON`
+// so it can deserialize each slot's content against the production schema.
+const { doc: realDoc } = realSchema();
 
 const mockInput = {
-  doc: {
-    type: {
-      schema: {
-        nodeFromJSON: vi.fn(() => ({ type: { name: "doc" } })),
-      },
-    },
-  } as unknown as Node,
+  doc: realDoc,
   pageConfig: {
     pageWidth: 816,
     pageHeight: 1056,
@@ -85,7 +85,7 @@ describe("resolveChrome", () => {
       defaultHeader: makeDef("header"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.topForPage(1)).toBeGreaterThan(0);
     expect(contrib.topForPage(5)).toBeGreaterThan(0);
   });
@@ -98,7 +98,7 @@ describe("resolveChrome", () => {
       defaultFooter: makeDef("footer"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.bottomForPage(1)).toBeGreaterThan(0);
     expect(contrib.bottomForPage(3)).toBeGreaterThan(0);
   });
@@ -110,7 +110,7 @@ describe("resolveChrome", () => {
       differentOddEven: false,
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.topForPage(1)).toBe(0);
     expect(contrib.bottomForPage(1)).toBe(0);
   });
@@ -124,7 +124,7 @@ describe("resolveChrome", () => {
       firstPageHeader: makeDef("first-header"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     // Both should be non-zero (both slots have content)
     expect(contrib.topForPage(1)).toBeGreaterThan(0);
     expect(contrib.topForPage(2)).toBeGreaterThan(0);
@@ -139,7 +139,7 @@ describe("resolveChrome", () => {
       // no firstPageHeader
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.topForPage(1)).toBe(0); // no first-page slot
     expect(contrib.topForPage(2)).toBeGreaterThan(0); // default slot
   });
@@ -152,8 +152,96 @@ describe("resolveChrome", () => {
       defaultHeader: makeDef("header"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.stable).toBe(true);
+  });
+
+  it("reserves at least activeEditingGap between header content and body, regardless of slot.margin", () => {
+    // The editing affordance (e.g. React `HeaderFooterRibbon`, default
+    // 28px) overlays the gap between the header band's content bottom
+    // and the body's contentTop. Activating the surface used to widen
+    // the gap from slot.margin to the ribbon height at active-only
+    // measure time, which pushed body content down on click. The fix:
+    // reserve activeEditingGap unconditionally so the gap is stable.
+    //
+    // Mocked runMiniPipeline returns totalContentHeight: 36,
+    // marginTop: 96. With activeEditingGap=28 and no explicit
+    // slot.margin: top = 96 + (36 + 28) = 160.
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: makeDef("header"),
+    };
+
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 28);
+  });
+
+  it("does not shrink the gap below activeEditingGap when the slot sets a smaller margin", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: { ...makeDef("header"), margin: 4 },
+    };
+
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
+    // 96 (marginTop) + 36 (content) + max(4, 28) = 160
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 28);
+  });
+
+  it("respects a larger user-set margin (no upper clamp)", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: { ...makeDef("header"), margin: 60 },
+    };
+
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
+    // 96 + 36 + max(60, 28) = 192
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 60);
+  });
+
+  it("honors a custom activeEditingGap (custom ribbon height)", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: makeDef("header"),
+    };
+
+    // 96 (marginTop) + 36 (content) + max(undefined ?? 40, 40) = 172
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 40);
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 40);
+  });
+
+  it("activeEditingGap=0 disables the floor — slot.margin honored as-is (headless / PDF mode)", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: { ...makeDef("header"), margin: 4 },
+    };
+
+    // 96 + 36 + max(4, 0) = 136 — no whitespace reserved for a UI that
+    // isn't being drawn, slot's tight margin survives the measure step.
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 0);
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 4);
+  });
+
+  it("activeEditingGap=0 with unset slot.margin defaults to 0 (no gap at all)", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: makeDef("header"),
+    };
+
+    // 96 + 36 + max(undefined ?? 0, 0) = 132
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 0);
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 0);
   });
 
   it("attaches a ResolvedHeaderFooter payload", () => {
@@ -164,7 +252,7 @@ describe("resolveChrome", () => {
       defaultHeader: makeDef("header"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.payload).toBeDefined();
     const resolved = contrib.payload as {
       policy: HeaderFooterPolicy;

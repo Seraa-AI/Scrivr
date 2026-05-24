@@ -25,6 +25,7 @@ import { NodeSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import type { IEditor } from "../extensions/types";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
+import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
 
 export interface ImageMenuInfo {
@@ -43,7 +44,13 @@ export interface ImageMenuCallbacks {
   onMove(rect: DOMRect, info: ImageMenuInfo): void;
 }
 
-export type ImageMenuOptions = ImageMenuCallbacks;
+export interface ImageMenuOptions extends ImageMenuCallbacks {
+  /**
+   * Accessor returning the popover's root DOM element (or null if unmounted).
+   * Threaded into the focus-outside check; see createBubbleMenu for context.
+   */
+  getPopoverElement?: () => HTMLElement | null;
+}
 
 export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () => void {
   const { onShow, onHide, onMove } = options;
@@ -84,9 +91,18 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => { rafId = null; update(); });
   });
+  const offFocusOutside = subscribeEditorFocusOutside(
+    editor,
+    () => {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      if (visible) { visible = false; lastDocPos = -1; onHide(); }
+    },
+    options.getPopoverElement ? { getPopoverElement: options.getPopoverElement } : {},
+  );
 
   return () => {
     unsubscribe();
+    offFocusOutside();
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     if (visible) { visible = false; lastDocPos = -1; onHide(); }
   };

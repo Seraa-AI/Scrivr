@@ -4,12 +4,46 @@ import { Extension } from "../Extension";
 import type { ToolbarItemSpec } from "../types";
 import type { BlockStyle } from "../../layout/FontConfig";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
+import {
+  xml,
+  pxToTwips,
+  type DocxNodeHandler,
+  type DocxParagraphStyleTransform,
+} from "../../exports/docx";
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 interface HeadingOptions {
   levels: HeadingLevel[];
 }
+
+/**
+ * Canonical per-level heading spec — single source of truth.
+ *
+ * `addBlockStyles()` derives canvas `BlockStyle`s from this (px values used
+ * directly), and `addExports()` reads the same record to emit DOCX paragraph
+ * styles with the same intent (px values converted to twips at the format
+ * boundary, not duplicated here).
+ *
+ * All values in pixels; the docx layer converts (1px @ 96 DPI = 15 twips).
+ */
+export interface HeadingLevelSpec {
+  /** Font size in px. */
+  size: number;
+  /** Space before the paragraph in px. */
+  spaceBefore: number;
+  /** Space after the paragraph in px. */
+  spaceAfter: number;
+}
+
+export const HEADING_LEVEL_SPEC: Record<number, HeadingLevelSpec> = {
+  1: { size: 28, spaceBefore: 24, spaceAfter: 12 },
+  2: { size: 22, spaceBefore: 20, spaceAfter: 10 },
+  3: { size: 18, spaceBefore: 16, spaceAfter: 8 },
+  4: { size: 16, spaceBefore: 14, spaceAfter: 6 },
+  5: { size: 14, spaceBefore: 12, spaceAfter: 4 },
+  6: { size: 12, spaceBefore: 10, spaceAfter: 2 },
+};
 
 export const Heading = Extension.create<HeadingOptions>({
   name: "heading",
@@ -24,12 +58,12 @@ export const Heading = Extension.create<HeadingOptions>({
         group: "block",
         content: "inline*",
         attrs: {
-          level:       { default: 1 },
-          align:       { default: "left" },
-          indent:      { default: 0 },
-          textIndent:  { default: 0 },
-          fontFamily:  { default: null },
-          nodeId:      { default: null },
+          level: { default: 1 },
+          align: { default: "left" },
+          indent: { default: 0 },
+          textIndent: { default: 0 },
+          fontFamily: { default: null },
+          nodeId: { default: null },
           dataTracked: { default: [] },
         },
         defining: true,
@@ -39,29 +73,35 @@ export const Heading = Extension.create<HeadingOptions>({
             const el = dom as HTMLElement;
             const rawFamily = el.style.fontFamily;
             const fontFamily = rawFamily
-              ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() || null
+              ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() ||
+                null
               : null;
             const rawMarginLeft = parseFloat(el.style.marginLeft) || 0;
             const rawTextIndent = parseFloat(el.style.textIndent) || 0;
             return {
               level,
-              align:      el.style.textAlign || "left",
-              indent:     rawMarginLeft > 0 ? Math.round(rawMarginLeft / 24) : 0,
+              align: el.style.textAlign || "left",
+              indent: rawMarginLeft > 0 ? Math.round(rawMarginLeft / 24) : 0,
               textIndent: rawTextIndent > 0 ? rawTextIndent : 0,
               fontFamily: fontFamily,
-              nodeId:     el.getAttribute("data-node-id") ?? null,
+              nodeId: el.getAttribute("data-node-id") ?? null,
             };
           },
         })),
         toDOM: (node) => {
           const styles: string[] = [];
-          if (node.attrs.align && node.attrs.align !== "left") styles.push(`text-align:${node.attrs.align as string}`);
-          if (node.attrs.indent) styles.push(`margin-left:${(node.attrs.indent as number) * 24}px`);
-          if (node.attrs.textIndent) styles.push(`text-indent:${node.attrs.textIndent as number}px`);
-          if (node.attrs.fontFamily) styles.push(`font-family:${node.attrs.fontFamily as string}`);
+          if (node.attrs.align && node.attrs.align !== "left")
+            styles.push(`text-align:${node.attrs.align as string}`);
+          if (node.attrs.indent)
+            styles.push(`margin-left:${(node.attrs.indent as number) * 24}px`);
+          if (node.attrs.textIndent)
+            styles.push(`text-indent:${node.attrs.textIndent as number}px`);
+          if (node.attrs.fontFamily)
+            styles.push(`font-family:${node.attrs.fontFamily as string}`);
           const attrs: Record<string, string> = {};
           if (styles.length) attrs["style"] = styles.join(";");
-          if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+          if (node.attrs.nodeId)
+            attrs["data-node-id"] = node.attrs.nodeId as string;
           return [`h${node.attrs.level as number}`, attrs, 0];
         },
       },
@@ -71,7 +111,9 @@ export const Heading = Extension.create<HeadingOptions>({
   addKeymap() {
     const km: Record<string, ReturnType<typeof setBlockType>> = {};
     for (const level of this.options.levels) {
-      km[`Mod-Alt-${level}`] = setBlockType(this.schema.nodes["heading"]!, { level });
+      km[`Mod-Alt-${level}`] = setBlockType(this.schema.nodes["heading"]!, {
+        level,
+      });
     }
     km["Mod-Alt-0"] = setBlockType(this.schema.nodes["paragraph"]!);
     return km;
@@ -80,7 +122,8 @@ export const Heading = Extension.create<HeadingOptions>({
   addCommands() {
     const cmds: Record<string, () => ReturnType<typeof setBlockType>> = {};
     for (const level of this.options.levels) {
-      cmds[`setHeading${level}`] = () => setBlockType(this.schema.nodes["heading"]!, { level });
+      cmds[`setHeading${level}`] = () =>
+        setBlockType(this.schema.nodes["heading"]!, { level });
     }
     cmds["setParagraph"] = () => setBlockType(this.schema.nodes["paragraph"]!);
     return cmds;
@@ -91,19 +134,74 @@ export const Heading = Extension.create<HeadingOptions>({
   },
 
   addBlockStyles() {
-    const levelStyles: Record<number, BlockStyle> = {
-      1: { font: "bold 28px", spaceBefore: 24, spaceAfter: 12, align: "left" as const },
-      2: { font: "bold 22px", spaceBefore: 20, spaceAfter: 10, align: "left" as const },
-      3: { font: "bold 18px", spaceBefore: 16, spaceAfter: 8,  align: "left" as const },
-      4: { font: "bold 16px", spaceBefore: 14, spaceAfter: 6,  align: "left" as const },
-      5: { font: "bold 14px", spaceBefore: 12, spaceAfter: 4,  align: "left" as const },
-      6: { font: "bold 12px", spaceBefore: 10, spaceAfter: 2,  align: "left" as const },
-    };
     const styles: Record<string, BlockStyle> = {};
     for (const level of this.options.levels) {
-      styles[`heading_${level}`] = levelStyles[level]!;
+      const spec = HEADING_LEVEL_SPEC[level]!;
+      styles[`heading_${level}`] = {
+        font: `bold ${spec.size}px`,
+        spaceBefore: spec.spaceBefore,
+        spaceAfter: spec.spaceAfter,
+        align: "left" as const,
+      };
     }
     return styles;
+  },
+
+  addExports() {
+    // Reads HEADING_LEVEL_SPEC so canvas + DOCX render with the same intent
+    // — px values converted to twips here at the format boundary, never
+    // duplicated. The walker calls this handler per heading node; the
+    // style is registered once per level via getOrCreate.
+    const levels = this.options.levels;
+    const readLevel = (raw: unknown): HeadingLevel => {
+      if (typeof raw === "number") {
+        const lvl = raw as HeadingLevel;
+        if (levels.includes(lvl)) return lvl;
+      }
+      return levels[0] ?? 1;
+    };
+    const headingHandler: DocxNodeHandler = (node, children, ctx) => {
+      const level = readLevel(node.attrs["level"]);
+      const spec = HEADING_LEVEL_SPEC[level];
+      const styleId = ctx.styles.paragraph.getOrCreate(`Heading ${level}`, {
+        bold: true,
+        size: spec?.size ?? 14,
+        spacingBefore: spec ? pxToTwips(spec.spaceBefore) : 0,
+        spacingAfter: spec ? pxToTwips(spec.spaceAfter) : 0,
+      });
+      return xml("w:p", undefined, [
+        xml("w:pPr", undefined, [xml("w:pStyle", { "w:val": styleId })]),
+        ...children,
+      ]);
+    };
+    return { docx: { nodes: { heading: headingHandler } } };
+  },
+
+  addImports() {
+    // OOXML emits `<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>` (sanitized
+    // form of "Heading 1"). The paragraphStyle dispatch in the import
+    // pipeline runs BEFORE the default paragraph handler, so this catches
+    // every paragraph carrying a heading style and produces a heading
+    // node with the right level. Single source of truth: same
+    // `Heading ${level}` style name the exporter emits.
+    const levels = this.options.levels;
+    const handlers: Record<string, DocxParagraphStyleTransform> = {};
+    for (const level of levels) {
+      // Match both `Heading1` (sanitized — what we emit) and `Heading ${level}`
+      // (Word's friendly name) just in case the source authored both forms.
+      const make: DocxParagraphStyleTransform = (block, content, ctx) => {
+        const t = ctx.schema.nodes["heading"];
+        if (!t) return null;
+        const attrs: Record<string, unknown> = { level };
+        if (block.attrs.align && block.attrs.align !== "left") {
+          attrs.align = block.attrs.align;
+        }
+        return t.create(attrs, content);
+      };
+      handlers[`Heading${level}`] = make;
+      handlers[`heading${level}`] = make;
+    }
+    return { docx: { paragraphStyles: handlers } };
   },
 
   addMarkdownParserTokens() {
@@ -141,11 +239,9 @@ export const Heading = Extension.create<HeadingOptions>({
     if (!heading) return [];
 
     const rules = this.options.levels.map((level) =>
-      textblockTypeInputRule(
-        new RegExp(`^(#{${level}})\\s$`),
-        heading,
-        { level },
-      )
+      textblockTypeInputRule(new RegExp(`^(#{${level}})\\s$`), heading, {
+        level,
+      }),
     );
 
     // "# " with too many hashes (beyond configured levels) — ignore
@@ -161,20 +257,26 @@ export const Heading = Extension.create<HeadingOptions>({
   },
 
   addToolbarItems(): ToolbarItemSpec[] {
-    const items: ToolbarItemSpec[] = this.options.levels.slice(0, 3).map((level) => ({
-      command: `setHeading${level}`,
-      label: `H${level}`,
-      title: `Heading ${level} (⌘⌥${level})`,
-      group: "heading",
-      isActive: (_marks: string[], blockType: string, blockAttrs: Record<string, unknown>) =>
-        blockType === "heading" && blockAttrs["level"] === level,
-    }));
+    const items: ToolbarItemSpec[] = this.options.levels
+      .slice(0, 3)
+      .map((level) => ({
+        command: `setHeading${level}`,
+        label: `H${level}`,
+        title: `Heading ${level} (⌘⌥${level})`,
+        group: "heading",
+        isActive: (
+          _marks: string[],
+          blockType: string,
+          blockAttrs: Record<string, unknown>,
+        ) => blockType === "heading" && blockAttrs["level"] === level,
+      }));
     items.push({
       command: "setParagraph",
       label: "¶",
       title: "Paragraph (⌘⌥0)",
       group: "heading",
-      isActive: (_marks: string[], blockType: string) => blockType === "paragraph",
+      isActive: (_marks: string[], blockType: string) =>
+        blockType === "paragraph",
     });
     return items;
   },

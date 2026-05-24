@@ -47,6 +47,20 @@ export interface RunMetrics {
 }
 
 /**
+ * Contract used by the layout and rendering pipeline for text measurement.
+ *
+ * `TextMeasurer` is the default browser implementation, but callers may
+ * inject any implementation that satisfies this API. This is useful for
+ * advanced runtimes and tests that provide their own measurement backend.
+ */
+export interface TextMeasurerLike {
+  measureWidth(text: string, font: string): number;
+  getFontMetrics(font: string): FontMetrics;
+  measureRun(text: string, font: string): RunMetrics;
+  invalidate(font?: string): void;
+}
+
+/**
  * Minimal LRU cache backed by a Map.
  * JavaScript Maps maintain insertion order — deleting and re-inserting on
  * access keeps the most-recently-used entry at the end and the least-recently-
@@ -90,8 +104,30 @@ class LRUCache<V> {
   }
 }
 
-export class TextMeasurer {
-  private ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+/**
+ * Subset of CanvasRenderingContext2D that TextMeasurer actually uses.
+ * Exposed so tests can inject a real canvas backend (e.g. `@napi-rs/canvas`)
+ * without depending on the DOM — measurement becomes a real engine
+ * dependency instead of a hidden global.
+ */
+export type TextMeasureContext = Pick<
+  CanvasRenderingContext2D,
+  "font" | "measureText"
+>;
+
+export interface TextMeasurerOptions {
+  /** How much to multiply (ascent + descent) for final line height. Default: 1.2. */
+  lineHeightMultiplier?: number;
+  /**
+   * Inject a measurement context. Production code leaves this undefined and
+   * gets the DOM canvas path. Tests pass a real `@napi-rs/canvas` context so
+   * widths and font metrics come from Skia, not a fake.
+   */
+  context?: TextMeasureContext;
+}
+
+export class TextMeasurer implements TextMeasurerLike {
+  private ctx: TextMeasureContext;
 
   /** font → text → width */
   private widthCache = new Map<string, Map<string, number>>();
@@ -110,9 +146,9 @@ export class TextMeasurer {
   /** How much to multiply (ascent + descent) for final line height */
   private lineHeightMultiplier: number;
 
-  constructor({ lineHeightMultiplier = 1.2 }: { lineHeightMultiplier?: number } = {}) {
+  constructor({ lineHeightMultiplier = 1.2, context }: TextMeasurerOptions = {}) {
     this.lineHeightMultiplier = lineHeightMultiplier;
-    this.ctx = this.createContext();
+    this.ctx = context ?? this.createContext();
   }
 
   /**
@@ -244,12 +280,12 @@ export class TextMeasurer {
 
   // ── Private ────────────────────────────────────────────────────────────────
 
-  private createContext(): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D {
+  private createContext(): TextMeasureContext {
     // OffscreenCanvas is preferred: no DOM required, works in Web Workers
     if (typeof OffscreenCanvas !== "undefined") {
       return new OffscreenCanvas(1, 1).getContext("2d")!;
     }
-    // Fallback for environments without OffscreenCanvas (older Safari, jsdom, happy-dom)
+    // Fallback for environments without OffscreenCanvas (older Safari, jsdom)
     const canvas = document.createElement("canvas");
     canvas.width = 1;
     canvas.height = 1;

@@ -2,6 +2,11 @@ import { Extension } from "../Extension";
 import type { Command } from "prosemirror-state";
 import { splitBlockAs } from "prosemirror-commands";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
+import {
+  xml,
+  type DocxNodeHandler,
+  type DocxBlockTransform,
+} from "../../exports/docx";
 
 /**
  * Splits the current block and carries `fontFamily` and `align` from the
@@ -12,7 +17,7 @@ import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
  * heading — same as the ProseMirror default — but the heading's fontFamily
  * is still carried forward.
  */
-const _split = splitBlockAs((parent, _atEnd, $from) => {
+const splitParagraph = splitBlockAs((parent, _atEnd, $from) => {
   const paraType = $from.node(0).type.schema.nodes["paragraph"]!;
   // Defining blocks (headings) split into a paragraph; others keep their type.
   const newType = parent.type.spec.defining ? paraType : parent.type;
@@ -42,7 +47,7 @@ const _split = splitBlockAs((parent, _atEnd, $from) => {
 });
 
 export const splitBlockInheritAttrs: Command = (state, dispatch) => {
-  return _split(
+  return splitParagraph(
     state,
     dispatch &&
       ((tr) => {
@@ -138,6 +143,29 @@ export const Paragraph = Extension.create({
         align: "left" as const,
       },
     };
+  },
+
+  addExports() {
+    const handler: DocxNodeHandler = (_node, children) =>
+      xml("w:p", undefined, children);
+    return { docx: { nodes: { paragraph: handler } } };
+  },
+
+  addImports() {
+    // Paragraph claims `DocxBlock.type === "paragraph"`. Heading / CodeBlock
+    // / other paragraphStyle overrides fire first, so this only handles
+    // plain paragraphs.
+    const importer: DocxBlockTransform = (block, content, ctx) => {
+      if (block.type !== "paragraph") return null;
+      const t = ctx.schema.nodes["paragraph"];
+      if (!t) return null;
+      const attrs: Record<string, unknown> = {};
+      if (block.attrs.align && block.attrs.align !== "left") {
+        attrs.align = block.attrs.align;
+      }
+      return t.create(Object.keys(attrs).length > 0 ? attrs : null, content);
+    };
+    return { docx: { blocks: { paragraph: importer } } };
   },
 
   addMarkdownParserTokens() {

@@ -113,7 +113,7 @@ function drawBlocksWithOffset(
   blocks: DocumentLayout["pages"][0]["blocks"],
   offsetY: number,
 ): void {
-  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber } = paintCtx;
+  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber, theme } = paintCtx;
 
   ctx.save();
   ctx.translate(0, offsetY);
@@ -130,6 +130,7 @@ function drawBlocksWithOffset(
           lineIndexOffset,
           dpr: 1,
           measurer,
+          theme,
           ...(markDecorators ? { markDecorators } : {}),
           ...(inlineRegistry ? { inlineRegistry } : {}),
         },
@@ -138,7 +139,7 @@ function drawBlocksWithOffset(
     } else {
       lineIndexOffset = drawBlock(
         ctx, block, measurer, THROWAWAY_CHARMAP,
-        pageNumber, lineIndexOffset, markDecorators,
+        pageNumber, lineIndexOffset, theme, markDecorators,
       );
     }
   }
@@ -152,7 +153,7 @@ function drawBlocks(
   layout: DocumentLayout,
   charMap: CharacterMap,
 ): void {
-  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber } = paintCtx;
+  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber, theme } = paintCtx;
   const page = layout.pages[0];
   if (!page) return;
 
@@ -170,6 +171,7 @@ function drawBlocks(
           lineIndexOffset,
           dpr: 1,
           measurer,
+          theme,
           ...(markDecorators ? { markDecorators } : {}),
           ...(inlineRegistry ? { inlineRegistry } : {}),
         },
@@ -178,7 +180,7 @@ function drawBlocks(
     } else {
       lineIndexOffset = drawBlock(
         ctx, block, measurer, charMap,
-        pageNumber, lineIndexOffset, markDecorators,
+        pageNumber, lineIndexOffset, theme, markDecorators,
       );
     }
   }

@@ -1,10 +1,10 @@
 /**
  * Multi-surface types. A surface is an independent document region the user
  * can edit (headers, footnote bodies, comment threads, margin notes). The
- * body/flow document is the implicit default surface, represented by a null
+ * root editor document is the implicit default surface, represented by a null
  * active id rather than a dedicated surface object — this keeps the
- * flow-is-identity invariant trivially true (editor.state never points at
- * a surface, only at the flow document).
+ * root-is-identity invariant trivially true (editor.getState() never points
+ * at a surface, only at the root editor document).
  */
 
 import type { EditorSurface } from "./EditorSurface";

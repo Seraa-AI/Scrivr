@@ -1,6 +1,7 @@
 import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
+import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
 
 export const Strikethrough = Extension.create({
   name: "strikethrough",
@@ -33,9 +34,11 @@ export const Strikethrough = Extension.create({
 
   addMarkDecorators() {
     const decorator: MarkDecorator = {
-      decoratePost(ctx: CanvasRenderingContext2D, rect: SpanRect) {
+      // Follows theme.defaultText, not the per-span color mark — Word/Docs
+      // convention: colored text gets the same strike color as plain text.
+      decoratePost(ctx, rect, theme, _effectiveTextColor) {
         ctx.save();
-        ctx.strokeStyle = "#1e293b";
+        ctx.strokeStyle = theme.defaultText;
         ctx.lineWidth = 1;
         ctx.beginPath();
         const strikeY = rect.y - rect.ascent * 0.35;
@@ -56,6 +59,22 @@ export const Strikethrough = Extension.create({
       group: "format",
       isActive: (marks: string[]) => marks.includes("strikethrough"),
     }];
+  },
+
+  addExports() {
+    const handler: DocxMarkHandler = (props) => ({ ...props, strike: true });
+    return { docx: { marks: { strikethrough: handler } } };
+  },
+
+  addImports() {
+    const handler: DocxMarkTransform = (mark, ctx) => {
+      if (mark.attrs?.["val"] === "false" || mark.attrs?.["val"] === "0") {
+        return null;
+      }
+      const t = ctx.schema.marks["strikethrough"];
+      return t ? t.create() : null;
+    };
+    return { docx: { marks: { strike: handler } } };
   },
 
   // GFM strikethrough (~~text~~) — parser token requires markdown-it-strikethrough plugin,

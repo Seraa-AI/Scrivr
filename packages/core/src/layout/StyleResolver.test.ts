@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { resolveFont, substituteFamily, normalizeFont } from "./StyleResolver";
-import { schema } from "../model/schema";
+import { buildStarterKitContext } from "../test-utils";
 
+const { schema } = buildStarterKitContext();
 // Helper — create a ProseMirror mark by name
 function mark(name: string, attrs?: Record<string, unknown>) {
   return schema.marks[name]!.create(attrs);
@@ -21,23 +22,31 @@ describe("resolveFont — no marks", () => {
   });
 
   it("handles multi-word font family", () => {
-    expect(resolveFont("14px Times New Roman", [])).toBe("14px Times New Roman");
+    expect(resolveFont("14px Times New Roman", [])).toBe(
+      "14px Times New Roman",
+    );
   });
 });
 
 describe("resolveFont — bold mark", () => {
   it("adds bold to a normal weight font", () => {
-    expect(resolveFont("14px Georgia", [mark("bold")])).toBe("bold 14px Georgia");
+    expect(resolveFont("14px Georgia", [mark("bold")])).toBe(
+      "bold 14px Georgia",
+    );
   });
 
   it("bold on already-bold base font stays bold", () => {
-    expect(resolveFont("bold 28px Georgia", [mark("bold")])).toBe("bold 28px Georgia");
+    expect(resolveFont("bold 28px Georgia", [mark("bold")])).toBe(
+      "bold 28px Georgia",
+    );
   });
 });
 
 describe("resolveFont — italic mark", () => {
   it("adds italic to a normal style font", () => {
-    expect(resolveFont("14px Georgia", [mark("italic")])).toBe("italic 14px Georgia");
+    expect(resolveFont("14px Georgia", [mark("italic")])).toBe(
+      "italic 14px Georgia",
+    );
   });
 });
 
@@ -53,7 +62,10 @@ describe("resolveFont — combined marks", () => {
   });
 
   it("never duplicates bold", () => {
-    const result = resolveFont("bold 14px Georgia", [mark("bold"), mark("italic")]);
+    const result = resolveFont("bold 14px Georgia", [
+      mark("bold"),
+      mark("italic"),
+    ]);
     expect(result).toBe("italic bold 14px Georgia");
     expect(result.match(/bold/g)).toHaveLength(1);
   });
@@ -61,18 +73,24 @@ describe("resolveFont — combined marks", () => {
 
 describe("resolveFont — fontSize mark", () => {
   it("overrides the base font size", () => {
-    expect(resolveFont("14px Georgia", [mark("fontSize", { size: 18 })])).toBe("18px Georgia");
+    expect(resolveFont("14px Georgia", [mark("fontSize", { size: 18 })])).toBe(
+      "18px Georgia",
+    );
   });
 });
 
 describe("resolveFont — fontFamily mark", () => {
   it("overrides the base font family", () => {
-    expect(resolveFont("14px Georgia", [mark("fontFamily", { family: "Arial" })])).toBe("14px Arial");
+    expect(
+      resolveFont("14px Georgia", [mark("fontFamily", { family: "Arial" })]),
+    ).toBe("14px Arial");
   });
 
   it("handles multi-word override family", () => {
     expect(
-      resolveFont("14px Georgia", [mark("fontFamily", { family: "Times New Roman" })])
+      resolveFont("14px Georgia", [
+        mark("fontFamily", { family: "Times New Roman" }),
+      ]),
     ).toBe("14px Times New Roman");
   });
 });
@@ -83,23 +101,33 @@ describe("substituteFamily", () => {
   });
 
   it("replaces the family, preserves bold weight", () => {
-    expect(substituteFamily("bold 28px Georgia, serif", "Inter")).toBe("bold 28px Inter");
+    expect(substituteFamily("bold 28px Georgia, serif", "Inter")).toBe(
+      "bold 28px Inter",
+    );
   });
 
   it("replaces the family, preserves italic style", () => {
-    expect(substituteFamily("italic 14px Georgia", "Verdana")).toBe("italic 14px Verdana");
+    expect(substituteFamily("italic 14px Georgia", "Verdana")).toBe(
+      "italic 14px Verdana",
+    );
   });
 
   it("replaces the family, preserves bold+italic", () => {
-    expect(substituteFamily("italic bold 14px Georgia", "Courier New")).toBe("italic bold 14px Courier New");
+    expect(substituteFamily("italic bold 14px Georgia", "Courier New")).toBe(
+      "italic bold 14px Courier New",
+    );
   });
 
   it("handles multi-word family in input", () => {
-    expect(substituteFamily("14px Times New Roman", "Arial")).toBe("14px Arial");
+    expect(substituteFamily("14px Times New Roman", "Arial")).toBe(
+      "14px Arial",
+    );
   });
 
   it("handles multi-word family in replacement", () => {
-    expect(substituteFamily("14px Georgia", "Times New Roman")).toBe("14px Times New Roman");
+    expect(substituteFamily("14px Georgia", "Times New Roman")).toBe(
+      "14px Times New Roman",
+    );
   });
 });
 
@@ -113,7 +141,9 @@ describe("normalizeFont", () => {
   });
 
   it("strips bold+italic", () => {
-    expect(normalizeFont("italic bold 28px Georgia, serif")).toBe("28px Georgia, serif");
+    expect(normalizeFont("italic bold 28px Georgia, serif")).toBe(
+      "28px Georgia, serif",
+    );
   });
 
   it("leaves normal-weight font unchanged", () => {

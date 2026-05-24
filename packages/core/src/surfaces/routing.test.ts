@@ -1,24 +1,14 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Editor } from "../Editor";
 import { Extension } from "../extensions/Extension";
 import { StarterKit } from "../extensions/StarterKit";
 import { EditorSurface } from "./EditorSurface";
+import { createTestEditor } from "../test-utils";
 import type { SurfaceOwnerRegistration } from "./types";
 
 // ── Test harness ──────────────────────────────────────────────────────────────
-
-beforeEach(() => {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    measureText: vi.fn((text: string) => ({
-      width: text.length * 8,
-      actualBoundingBoxAscent: 12,
-      actualBoundingBoxDescent: 3,
-      fontBoundingBoxAscent: 12,
-      fontBoundingBoxDescent: 3,
-    })),
-    font: "",
-  } as unknown as CanvasRenderingContext2D);
-});
+// Canvas measurement comes from the real `@napi-rs/canvas` (Skia) backend
+// wired in `vitest.setup.ts` — no fake measureText.
 
 function mountEditor(extraExtensions: Extension[] = []): {
   editor: Editor;
@@ -30,7 +20,7 @@ function mountEditor(extraExtensions: Extension[] = []): {
   document.body.appendChild(container);
   // Always bundle StarterKit so the schema is buildable — tests only add
   // their own extensions on top for lifecycle / lane coverage.
-  const editor = new Editor({ extensions: [StarterKit, ...extraExtensions] });
+  const editor = createTestEditor({ extensions: [StarterKit, ...extraExtensions] });
   editor.mount(container);
   const type = (text: string): void => {
     const ta = container.querySelector("textarea")!;
@@ -106,47 +96,47 @@ describe("routing — surface-active", () => {
   });
 });
 
-// ── Invariant 5: editor.state always returns flow state ──────────────────────
+// ── Invariant 5: editor.getState() always returns root editor state ─────────
 
-describe("routing — Invariant 5 (editor.state is flow-bound)", () => {
-  it("editor.getState() returns flow state while a surface is active", () => {
+describe("routing — Invariant 5 (editor.getState() is root-bound)", () => {
+  it("editor.getState() returns root editor state while a surface is active", () => {
     const { editor, type, cleanup } = mountEditor();
-    type("flow content");
-    const flowState = editor.getState();
+    type("root content");
+    const rootState = editor.getState();
 
     const surface = makeSurface(editor, "test:1", "test");
     editor.surfaces.register(surface);
     editor.surfaces.activate("test:1");
 
-    // editor.getState() should return the flow state unchanged.
-    expect(editor.getState()).toBe(flowState);
-    expect(editor.getState().doc.textContent).toBe("flow content");
+    // editor.getState() should return the root state unchanged.
+    expect(editor.getState()).toBe(rootState);
+    expect(editor.getState().doc.textContent).toBe("root content");
     cleanup();
   });
 
-  it("commands via editor.commands target the flow doc even when a surface is active", () => {
+  it("commands via editor.commands target the root doc even when a surface is active", () => {
     const { editor, type, cleanup } = mountEditor();
     type("body content");
     const surface = makeSurface(editor, "test:1", "test");
     editor.surfaces.register(surface);
     editor.surfaces.activate("test:1");
 
-    // Mutate flow via a dispatched tr bypassing surface routing.
+    // Mutate root via a dispatched tr bypassing surface routing.
     const tr = editor.getState().tr.insertText("!", 1);
-    editor._applyTransaction(tr);
+    editor.applyTransaction(tr);
     expect(editor.getState().doc.textContent).toBe("!body content");
     expect(surface.state.doc.textContent).toBe(""); // untouched
     cleanup();
   });
 
-  it("external _applyTransaction always hits flow state, never active surface", () => {
+  it("external applyTransaction always hits root state, never active surface", () => {
     const { editor, cleanup } = mountEditor();
     const surface = makeSurface(editor, "test:1", "test");
     editor.surfaces.register(surface);
     editor.surfaces.activate("test:1");
 
     const tr = editor.getState().tr.insertText("external");
-    editor._applyTransaction(tr);
+    editor.applyTransaction(tr);
 
     expect(editor.getState().doc.textContent).toBe("external");
     expect(surface.state.doc.textContent).toBe("");

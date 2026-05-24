@@ -4,6 +4,7 @@ export { StarterKit } from "./StarterKit";
 
 // Built-in extensions — individually importable
 export { Document } from "./built-in/Document";
+export { HardBreak } from "./built-in/HardBreak";
 export { Paragraph } from "./built-in/Paragraph";
 export { Heading } from "./built-in/Heading";
 export { Bold } from "./built-in/Bold";
@@ -24,11 +25,14 @@ export { Image } from "./built-in/Image";
 export { CodeBlock } from "./built-in/CodeBlock";
 export { HorizontalRule } from "./built-in/HorizontalRule";
 export { PageBreak } from "./built-in/PageBreak";
+export { Table } from "./built-in/Table";
 export { ClearFormatting } from "./built-in/ClearFormatting";
+export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultContent";
 
 export type {
   ExtensionConfig,
   ExtensionContext,
+  InitialDocContext,
   IBaseEditor,
   IEditor,
   ResolvedExtension,
@@ -38,4 +42,9 @@ export type {
   ToolbarItemSpec,
   OverlayRenderHandler,
 } from "./types";
-export type { FormatHandlers, ExportContributionMap } from "./export";
+export type {
+  FormatHandlers,
+  ExportContributionMap,
+  FormatImportHandlers,
+  ImportContributionMap,
+} from "./export";

@@ -6,9 +6,10 @@
 import type { Node } from "prosemirror-model";
 import type { DocumentLayout, PageConfig } from "./PageLayout";
 import type { FontConfig } from "./FontConfig";
-import type { TextMeasurer } from "./TextMeasurer";
+import type { TextMeasurerLike } from "./TextMeasurer";
 import type { MarkDecorator } from "../extensions/types";
 import type { BlockRegistry, InlineRegistry } from "./BlockRegistry";
+import type { ResolvedTheme } from "../model/theme";
 
 /** Geometry for a single page, derived from PageConfig + chrome reservations. */
 export interface PageMetrics {
@@ -191,7 +192,7 @@ function computeBandStart(
 export interface PageChromeMeasureInput {
   doc: Node;
   pageConfig: PageConfig;
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   fontConfig: FontConfig;
 }
 
@@ -227,13 +228,19 @@ export interface PageChromePaintContext {
   /** This contributor's payload from the final measure() call of the last run. */
   payload: unknown;
   /** Text measurer — for rendering mini-layout blocks in chrome bands. */
-  measurer: TextMeasurer;
+  measurer: TextMeasurerLike;
   /** Mark decorators from extensions — for rendering styled text in chrome bands. */
   markDecorators?: Map<string, MarkDecorator>;
   /** Block registry — dispatches block rendering to the correct strategy. */
   blockRegistry?: BlockRegistry;
   /** Inline object registry — renders inline images, widgets, etc. */
   inlineRegistry?: InlineRegistry;
+  /**
+   * Resolved theme shared with the body — surfaces never store their own
+   * theme; they read through the editor's resolved theme so dark-mode toggles
+   * apply uniformly to body and chrome bands without surface-side refresh.
+   */
+  theme: ResolvedTheme;
 }
 
 /** Plugin-facing contributor registered via Extension.addPageChrome(). */

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";// used inside describes that build schema-typed locals
 import {
   layoutBlock,
   isHiddenAnchorLine,
@@ -9,13 +9,12 @@ import { TextBlockStrategy } from "./TextBlockStrategy";
 import { CharacterMap } from "./CharacterMap";
 import type { InlineStrategy } from "./BlockRegistry";
 import { InlineRegistry } from "./BlockRegistry";
+import { defaultEditorTheme } from "../model/theme";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import type { FontConfig } from "./FontConfig";
-import { schema } from "../model/schema";
 import {
   createMeasurer,
   buildStarterKitContext,
-  MOCK_LINE_HEIGHT,
   paragraph,
   boldParagraph,
   underlineParagraph,
@@ -24,21 +23,26 @@ import {
   heading,
 } from "../test-utils";
 
+/** Sum of every line's measured height — the invariant `block.height` should equal. */
+function sumLineHeights(block: { lines: ReadonlyArray<{ lineHeight: number }> }): number {
+  return block.lines.reduce((acc, line) => acc + line.lineHeight, 0);
+}
+
 // StarterKit schema has the fontFamily attr on paragraph and heading nodes.
-const { schema: skSchema } = buildStarterKitContext();
+const { schema } = buildStarterKitContext();
 
 // Helper: paragraph node with a fontFamily attr set
 function paragraphWithFamily(text: string, fontFamily: string) {
-  return skSchema.node(
+  return schema.node(
     "paragraph",
     { fontFamily },
-    text ? [skSchema.text(text)] : [],
+    text ? [schema.text(text)] : [],
   );
 }
 
 // Helper: heading node with a fontFamily attr set
 function headingWithFamily(level: number, text: string, fontFamily: string) {
-  return skSchema.node("heading", { level, fontFamily }, [skSchema.text(text)]);
+  return schema.node("heading", { level, fontFamily }, [schema.text(text)]);
 }
 
 // lineHeight = (12+3) * 1.2 = 18
@@ -68,8 +72,8 @@ describe("layoutBlock — basic", () => {
       page: 1,
       measurer: createMeasurer(),
     });
-    // "Hello" fits on one line, lineHeight ≈ 18
-    expect(block.height).toBeCloseTo(18);
+    expect(block.lines).toHaveLength(1);
+    expect(block.height).toBeCloseTo(sumLineHeights(block));
   });
 
   it("exports spaceBefore and spaceAfter from FontConfig", () => {
@@ -87,17 +91,21 @@ describe("layoutBlock — basic", () => {
   });
 
   it("wraps into multiple lines when text exceeds availableWidth", () => {
-    // availableWidth=80, "Hello world" = 88px → 2 lines
+    // Pick an availableWidth that fits "Hello " but not "Hello world",
+    // forcing a wrap regardless of exact font widths.
+    const measurer = createMeasurer();
+    const partial = measurer.measureWidth("Hello ", "16px sans-serif");
+    const full = measurer.measureWidth("Hello world", "16px sans-serif");
     const block = layoutBlock(paragraph("Hello world"), {
       nodePos: 0,
       x: 72,
       y: 0,
-      availableWidth: 80,
+      availableWidth: (partial + full) / 2,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
     });
     expect(block.lines.length).toBeGreaterThan(1);
-    expect(block.height).toBeCloseTo(18 * block.lines.length);
+    expect(block.height).toBeCloseTo(sumLineHeights(block));
   });
 
   it("uses heading font for heading nodes", () => {
@@ -258,14 +266,18 @@ describe("layoutBlock — mark propagation to LayoutSpan", () => {
   });
 
   it("marks survive word-wrap: multi-word underlined text passes marks to all spans", () => {
-    // "Hello world" with underline, narrow width forces a line break
+    // Pick an availableWidth that fits "Hello " but not the full string, so
+    // the wrap is forced regardless of exact font widths.
+    const measurer = createMeasurer();
+    const partial = measurer.measureWidth("Hello ", "16px sans-serif");
+    const full = measurer.measureWidth("Hello world", "16px sans-serif");
     const block = layoutBlock(underlineParagraph("Hello world"), {
       nodePos: 0,
       x: 72,
       y: 0,
-      availableWidth: 80,
+      availableWidth: (partial + full) / 2,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
     });
     expect(block.lines.length).toBeGreaterThan(1);
     for (const line of block.lines) {
@@ -330,21 +342,25 @@ describe("layoutBlock — CharacterMap", () => {
       },
     };
 
+    const measurer = createMeasurer();
+    const availableWidth = 400;
     layoutBlock(node, {
       nodePos: 0,
       x: 0,
       y: 60,
-      availableWidth: 400,
+      availableWidth,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
       map,
       lineIndexOffset: 0,
       fontConfig: config,
     });
 
-    // "Hi" = 2 chars × 8px = 16px. center offset = (400 - 16) / 2 = 192
+    // Center offset = (availableWidth − measured line width) / 2.
+    const lineWidth = measurer.measureWidth("Hi", config.paragraph!.font);
+    const expectedX = (availableWidth - lineWidth) / 2;
     const coords = map.coordsAtPos(1);
-    expect(coords?.x).toBeCloseTo(192);
+    expect(coords?.x).toBeCloseTo(expectedX, 2);
   });
 });
 
@@ -405,18 +421,22 @@ describe("layoutBlock — node attr alignment", () => {
       { align: "center" },
       schema.text("Hi"),
     );
+    const measurer = createMeasurer();
+    const availableWidth = 400;
     layoutBlock(node, {
       nodePos: 0,
       x: 0,
       y: 0,
-      availableWidth: 400,
+      availableWidth,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
       map,
     });
-    // "Hi" = 2 chars × 8px = 16px wide. Center offset = (400 - 16) / 2 = 192
+    // Default paragraph style font; center offset = (availableWidth − line width) / 2.
+    const lineWidth = measurer.measureWidth("Hi", defaultFontConfig.paragraph!.font);
+    const expectedX = (availableWidth - lineWidth) / 2;
     const coords = map.coordsAtPos(1);
-    expect(coords?.x).toBeCloseTo(192);
+    expect(coords?.x).toBeCloseTo(expectedX, 2);
   });
 
   it("ignores invalid align attr values and falls back to FontConfig", () => {
@@ -439,14 +459,14 @@ describe("layoutBlock — node attr alignment", () => {
 // ── Leaf block nodes ──────────────────────────────────────────────────────────
 
 describe("layoutBlock — leaf blocks (HR and Image)", () => {
-  const { schema: fullSchema } = buildStarterKitContext();
+  const { schema } = buildStarterKitContext();
 
   function hr() {
-    return fullSchema.nodes["horizontalRule"]!.create();
+    return schema.nodes["horizontalRule"]!.create();
   }
 
   function image(height: number | null = 200) {
-    return fullSchema.nodes["image"]!.create({
+    return schema.nodes["image"]!.create({
       src: "http://x.com/img.png",
       height,
     });
@@ -610,12 +630,12 @@ describe("layoutBlock — leaf blocks (HR and Image)", () => {
 // ── resolveLeafBlockDimensions (unit) ─────────────────────────────────────────
 
 describe("resolveLeafBlockDimensions", () => {
-  const { schema: fullSchema } = buildStarterKitContext();
+  const { schema } = buildStarterKitContext();
   const IMAGE_DEFAULT = 200;
   const IMAGE_SPACE = 8;
 
   it("uses node height attr when positive — ignores font", () => {
-    const node = fullSchema.nodes["image"]!.create({ height: 350 });
+    const node = schema.nodes["image"]!.create({ height: 350 });
     const cfg: FontConfig = {
       image: {
         font: "16px sans-serif",
@@ -634,7 +654,7 @@ describe("resolveLeafBlockDimensions", () => {
   });
 
   it("falls through to font size when height attr is absent", () => {
-    const node = fullSchema.nodes["horizontalRule"]!.create();
+    const node = schema.nodes["horizontalRule"]!.create();
     const cfg: FontConfig = {
       horizontalRule: {
         font: "8px Georgia, serif",
@@ -653,7 +673,7 @@ describe("resolveLeafBlockDimensions", () => {
   });
 
   it("uses IMAGE_DEFAULT_HEIGHT when fontConfig is undefined", () => {
-    const node = fullSchema.nodes["horizontalRule"]!.create();
+    const node = schema.nodes["horizontalRule"]!.create();
     const { height } = resolveLeafBlockDimensions(
       node,
       undefined,
@@ -664,7 +684,7 @@ describe("resolveLeafBlockDimensions", () => {
   });
 
   it("spaceBefore and spaceAfter come from block style when available", () => {
-    const node = fullSchema.nodes["horizontalRule"]!.create();
+    const node = schema.nodes["horizontalRule"]!.create();
     const cfg: FontConfig = {
       horizontalRule: {
         font: "8px Georgia, serif",
@@ -684,7 +704,7 @@ describe("resolveLeafBlockDimensions", () => {
   });
 
   it("spaceBefore and spaceAfter fall back to IMAGE_SPACE when no fontConfig", () => {
-    const node = fullSchema.nodes["horizontalRule"]!.create();
+    const node = schema.nodes["horizontalRule"]!.create();
     const { spaceBefore, spaceAfter } = resolveLeafBlockDimensions(
       node,
       undefined,
@@ -723,21 +743,23 @@ describe("layoutBlock — end-of-line caret sentinel (via layoutBlock map)", () 
 
   it("sentinel x equals right edge of last character", () => {
     const map = new CharacterMap();
+    const measurer = createMeasurer();
     layoutBlock(paragraph("Hi"), {
       nodePos: 0,
       x: 72,
       y: 0,
       availableWidth: 400,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
       map,
       lineIndexOffset: 0,
     });
-    // 'i' is at docPos 2, sentinel at docPos 3
+    // 'i' is at docPos 2, sentinel at docPos 3. The sentinel sits at the
+    // right edge of 'i' — its x equals the glyph's x plus the glyph's width.
     const iCoords = map.coordsAtPos(2);
+    const iGlyph = map.glyphsInRange(2, 3)[0];
     const sentCoords = map.coordsAtPos(3);
-    // sentinel.x = iCoords.x + iCoords.width (8px per char in mock)
-    expect(sentCoords?.x).toBeCloseTo(iCoords!.x + 8);
+    expect(sentCoords?.x).toBeCloseTo(iCoords!.x + (iGlyph?.width ?? 0), 2);
   });
 
   it("sentinel width is 0 (it has no visual extent)", () => {
@@ -776,7 +798,8 @@ describe("layoutBlock — end-of-line caret sentinel (via layoutBlock map)", () 
 
   it("sentinel is only on the last line — intermediate lines are not corrupted", () => {
     const map = new CharacterMap();
-    // "Hello world" wraps to 2 lines at width=80 (11 chars × 8px = 88 > 80)
+    // This width is narrow enough for "Hello world" to wrap under the real
+    // test measurer.
     layoutBlock(paragraph("Hello world"), {
       nodePos: 0,
       x: 0,
@@ -876,18 +899,23 @@ describe("populateCharMap — end-of-line caret sentinel", () => {
   });
 
   it("sentinel is only on the last line of a wrapped paragraph", () => {
+    // Pick an availableWidth that fits "Hello " but not the full string,
+    // forcing a wrap regardless of exact font widths.
+    const measurer = createMeasurer();
+    const partial = measurer.measureWidth("Hello ", "16px sans-serif");
+    const full = measurer.measureWidth("Hello world", "16px sans-serif");
     const block = layoutBlock(paragraph("Hello world"), {
       nodePos: 0,
       x: 0,
       y: 0,
-      availableWidth: 80,
+      availableWidth: (partial + full) / 2,
       page: 1,
-      measurer: createMeasurer(),
+      measurer,
     });
     expect(block.lines).toHaveLength(2);
     const map = new CharacterMap();
     populateCharMap(block, map, 1, 0, createMeasurer());
-    // 11 chars + 1 sentinel (last line only) = 12 total glyphs
+    // 11 chars + 1 sentinel on the last line only = 12 total glyphs.
     expect(map.glyphsInRange(0, 20)).toHaveLength(12);
   });
 });
@@ -991,17 +1019,17 @@ describe("layoutBlock — node fontFamily attr", () => {
 // inline images inside paragraphs.
 
 describe("extractSpans — inline node handling", () => {
-  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+  const { schema, fontConfig } = buildStarterKitContext();
 
   // ── hardBreak: Shift-Enter creates two lines ─────────────────────────────
 
   it("hardBreak inside a paragraph splits into two lines", () => {
-    const hb = skSchema.nodes["hardBreak"]?.create();
+    const hb = schema.nodes["hardBreak"]?.create();
     if (!hb) return;
-    const para = skSchema.node("paragraph", null, [
-      skSchema.text("Hello"),
+    const para = schema.node("paragraph", null, [
+      schema.text("Hello"),
       hb,
-      skSchema.text("World"),
+      schema.text("World"),
     ]);
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1023,12 +1051,27 @@ describe("extractSpans — inline node handling", () => {
   });
 
   it("hardBreak does NOT inflate line height — both lines stay at text line height", () => {
-    const hb = skSchema.nodes["hardBreak"]?.create();
+    const hb = schema.nodes["hardBreak"]?.create();
     if (!hb) return;
-    const para = skSchema.node("paragraph", null, [
-      skSchema.text("A"),
+    // Control: a single-line paragraph with the same text content but no break.
+    const control = layoutBlock(
+      schema.node("paragraph", null, [schema.text("A")]),
+      {
+        nodePos: 0,
+        x: 0,
+        y: 0,
+        availableWidth: 400,
+        page: 1,
+        measurer: createMeasurer(),
+        fontConfig,
+      },
+    );
+    const baselineLineHeight = control.lines[0]!.lineHeight;
+
+    const para = schema.node("paragraph", null, [
+      schema.text("A"),
       hb,
-      skSchema.text("B"),
+      schema.text("B"),
     ]);
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1041,17 +1084,30 @@ describe("extractSpans — inline node handling", () => {
     });
     expect(block.lines).toHaveLength(2);
     for (const line of block.lines) {
-      expect(line.lineHeight).toBeLessThan(100);
-      expect(line.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+      expect(line.lineHeight).toBeCloseTo(baselineLineHeight);
     }
   });
 
   it("paragraph containing only a hardBreak falls back to ZWS — normal line height", () => {
-    // A paragraph with ONLY a hardBreak has no renderable content after the
-    // break, so it uses the ZWS fallback (same as an empty paragraph).
-    const hb = skSchema.nodes["hardBreak"]?.create();
+    // Control: empty paragraph (also uses the ZWS fallback). The hardBreak-only
+    // paragraph must produce the same line height — no inflation.
+    const empty = layoutBlock(
+      schema.node("paragraph", null, []),
+      {
+        nodePos: 0,
+        x: 0,
+        y: 0,
+        availableWidth: 400,
+        page: 1,
+        measurer: createMeasurer(),
+        fontConfig,
+      },
+    );
+    const baseline = empty.lines[0]!.lineHeight;
+
+    const hb = schema.nodes["hardBreak"]?.create();
     if (!hb) return;
-    const para = skSchema.node("paragraph", null, [hb]);
+    const para = schema.node("paragraph", null, [hb]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1062,15 +1118,15 @@ describe("extractSpans — inline node handling", () => {
       fontConfig,
     });
     expect(block.lines).toHaveLength(1);
-    expect(block.lines[0]?.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    expect(block.lines[0]?.lineHeight).toBeCloseTo(baseline);
     const spans = block.lines[0]?.spans ?? [];
     expect(spans.every((s) => s.kind === "text")).toBe(true);
   });
 
   it("trailing hardBreak emits a phantom second line for the cursor after the break", () => {
-    const hb = skSchema.nodes["hardBreak"]?.create();
+    const hb = schema.nodes["hardBreak"]?.create();
     if (!hb) return;
-    const para = skSchema.node("paragraph", null, [skSchema.text("Hello"), hb]);
+    const para = schema.node("paragraph", null, [schema.text("Hello"), hb]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1081,25 +1137,26 @@ describe("extractSpans — inline node handling", () => {
       fontConfig,
     });
     expect(block.lines).toHaveLength(2);
-    // Line 0 ends with the break; line 1 is the phantom ZWS cursor line.
+    // Line 0 ends with the break; line 1 is the phantom ZWS cursor line and
+    // must keep the same height as the text line above it (no inflation).
     expect(block.lines[0]!.terminalBreakDocPos).toBeDefined();
     expect(block.lines[1]!.spans).toHaveLength(1);
-    expect(block.lines[1]!.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    expect(block.lines[1]!.lineHeight).toBeCloseTo(block.lines[0]!.lineHeight);
   });
 
   // ── inline image IS an object span ───────────────────────────────────────
 
   it("inline image with width+height attrs produces exactly one object span", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 100,
       height: 80,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [
-      skSchema.text("Before"),
+    const para = schema.node("paragraph", null, [
+      schema.text("Before"),
       img,
-      skSchema.text("After"),
+      schema.text("After"),
     ]);
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1116,13 +1173,13 @@ describe("extractSpans — inline node handling", () => {
   });
 
   it("line containing an inline image is as tall as the image when it exceeds text height", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 200,
       height: 150,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1137,14 +1194,29 @@ describe("extractSpans — inline node handling", () => {
   });
 
   it("line height is max(text, image) — small image alongside text keeps text height", () => {
-    // Image (8px) is shorter than text (~18px) — line height must not shrink.
-    const img = skSchema.nodes["image"]?.create({
+    // Image (8px) is shorter than text — line height must not shrink below
+    // the text-only baseline. Control: same paragraph without the image.
+    const control = layoutBlock(
+      schema.node("paragraph", null, [schema.text("Hi")]),
+      {
+        nodePos: 0,
+        x: 0,
+        y: 0,
+        availableWidth: 400,
+        page: 1,
+        measurer: createMeasurer(),
+        fontConfig,
+      },
+    );
+    const textOnlyHeight = control.lines[0]!.lineHeight;
+
+    const img = schema.nodes["image"]?.create({
       src: "i.png",
       width: 8,
       height: 8,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const para = schema.node("paragraph", null, [schema.text("Hi"), img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1154,11 +1226,11 @@ describe("extractSpans — inline node handling", () => {
       measurer: createMeasurer(),
       fontConfig,
     });
-    expect(block.lines[0]?.lineHeight).toBeGreaterThanOrEqual(MOCK_LINE_HEIGHT);
+    expect(block.lines[0]?.lineHeight).toBeGreaterThanOrEqual(textOnlyHeight);
   });
 
   it("inline image registers a glyph in the CharacterMap at its docPos", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 50,
       height: 50,
@@ -1166,7 +1238,7 @@ describe("extractSpans — inline node handling", () => {
     if (!img) return;
     // doc structure: doc(para(text"Hi", img)) — image is at docPos 4
     // nodePos=0 → para opens at 0, text "Hi" at 1,2, img at 3
-    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const para = schema.node("paragraph", null, [schema.text("Hi"), img]);
     const map = new CharacterMap();
     layoutBlock(para, {
       nodePos: 0,
@@ -1187,16 +1259,16 @@ describe("extractSpans — inline node handling", () => {
 // ── Phase 3: anchored-image sentinel does not inflate paragraph height ───────
 
 describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
-  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+  const { schema, fontConfig } = buildStarterKitContext();
 
   it("paragraph with only a non-inline image is an invisible zero-height anchor flow", () => {
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 200,
       wrapMode: "square",
     });
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1219,13 +1291,13 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
 
   it("anchor-only paragraph does not register cursor glyphs", () => {
     const map = new CharacterMap();
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 200,
       wrapMode: "square",
     });
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
 
     layoutBlock(para, {
       nodePos: 0,
@@ -1244,13 +1316,13 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
   });
 
   it("anchor-only paragraph stays zero-height even when it overlaps its own exclusion zone", () => {
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 200,
       wrapMode: "top-bottom",
     });
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
 
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1271,13 +1343,13 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
   });
 
   it("anchored-image sentinel is preserved on the line so getAnchoredObjectAnchors finds it", () => {
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 200,
       wrapMode: "square",
     });
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1295,15 +1367,33 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
   });
 
   it("text + non-inline image: line height is text height (image contributes nothing)", () => {
-    const img = skSchema.nodes["image"]!.create({
+    // Control: same paragraph without the anchored image — line height
+    // matches text. The non-inline image must not inflate it.
+    const control = layoutBlock(
+      schema.node("paragraph", null, [
+        schema.text("text alongside an anchored image"),
+      ]),
+      {
+        nodePos: 0,
+        x: 0,
+        y: 0,
+        availableWidth: 600,
+        page: 1,
+        measurer: createMeasurer(),
+        fontConfig,
+      },
+    );
+    const textOnlyHeight = control.lines[0]!.lineHeight;
+
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 200,
       wrapMode: "square",
     });
-    const para = skSchema.node("paragraph", null, [
+    const para = schema.node("paragraph", null, [
       img,
-      skSchema.text("text alongside an anchored image"),
+      schema.text("text alongside an anchored image"),
     ]);
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1314,19 +1404,18 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
       measurer: createMeasurer(),
       fontConfig,
     });
-    // First line height matches text — image's 200px height is excluded.
-    expect(block.lines[0]!.lineHeight).toBeCloseTo(MOCK_LINE_HEIGHT);
+    expect(block.lines[0]!.lineHeight).toBeCloseTo(textOnlyHeight);
     expect(block.lines[0]!.lineHeight).toBeLessThan(200);
   });
 
   it("inline image (wrapMode:inline) still inflates line height as before — Phase 3 only changes non-inline", () => {
-    const img = skSchema.nodes["image"]!.create({
+    const img = schema.nodes["image"]!.create({
       src: "a.png",
       width: 200,
       height: 150,
       wrapMode: "inline",
     });
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1348,41 +1437,26 @@ describe("layoutBlock — anchored image sentinel (Phase 3)", () => {
 // inlineHandlers — images appeared as blank cursors.
 
 describe("TextBlockStrategy — inline image rendering", () => {
-  const { schema: skSchema, fontConfig } = buildStarterKitContext();
+  const { schema, fontConfig } = buildStarterKitContext();
 
-  function makeMockCtx(): CanvasRenderingContext2D {
-    return {
-      save: vi.fn(),
-      restore: vi.fn(),
-      fillText: vi.fn(),
-      strokeRect: vi.fn(),
-      fillRect: vi.fn(),
-      measureText: vi.fn(() => ({ width: 8 })),
-      beginPath: vi.fn(),
-      moveTo: vi.fn(),
-      lineTo: vi.fn(),
-      stroke: vi.fn(),
-      fill: vi.fn(),
-      arc: vi.fn(),
-      closePath: vi.fn(),
-      font: "",
-      fillStyle: "",
-      strokeStyle: "",
-      lineWidth: 1,
-      textAlign: "left",
-      textBaseline: "alphabetic",
-      drawImage: vi.fn(),
-    } as unknown as CanvasRenderingContext2D;
+  /**
+   * Real canvas context — happy-dom's `getContext("2d")` is wired in
+   * `vitest.setup.ts` to return the `@napi-rs/canvas` (Skia) backend.
+   * Tests can `vi.spyOn(ctx, "fillText")` etc. to observe paint calls
+   * without faking the whole context shape.
+   */
+  function makeRealCtx(): CanvasRenderingContext2D {
+    return document.createElement("canvas").getContext("2d")!;
   }
 
   it("calls InlineStrategy.render() for each inline image span", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 80,
       height: 60,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const para = schema.node("paragraph", null, [schema.text("Hi"), img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1398,7 +1472,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
     const inlineRegistry = new InlineRegistry();
     inlineRegistry.register("image", inlineStrategy);
 
-    const ctx = makeMockCtx();
+    const ctx = makeRealCtx();
     TextBlockStrategy.render(
       block,
       {
@@ -1407,6 +1481,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
         lineIndexOffset: 0,
         dpr: 1,
         measurer: createMeasurer(),
+        theme: defaultEditorTheme,
         inlineRegistry,
       },
       new CharacterMap(),
@@ -1427,13 +1502,13 @@ describe("TextBlockStrategy — inline image rendering", () => {
   });
 
   it("does NOT call InlineStrategy.render() when inlineRegistry is absent", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 80,
       height: 60,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
     const block = layoutBlock(para, {
       nodePos: 0,
       x: 0,
@@ -1444,7 +1519,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
       fontConfig,
     });
 
-    const ctx = makeMockCtx();
+    const ctx = makeRealCtx();
     // No inlineRegistry — should not throw, just silently skip drawing
     expect(() => {
       TextBlockStrategy.render(
@@ -1455,6 +1530,7 @@ describe("TextBlockStrategy — inline image rendering", () => {
           lineIndexOffset: 0,
           dpr: 1,
           measurer: createMeasurer(),
+          theme: defaultEditorTheme,
         },
         new CharacterMap(),
       );
@@ -1462,16 +1538,16 @@ describe("TextBlockStrategy — inline image rendering", () => {
   });
 
   it("still renders surrounding text when paragraph contains a mix of text and image", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 50,
       height: 50,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [
-      skSchema.text("Hello"),
+    const para = schema.node("paragraph", null, [
+      schema.text("Hello"),
       img,
-      skSchema.text("World"),
+      schema.text("World"),
     ]);
     const block = layoutBlock(para, {
       nodePos: 0,
@@ -1487,7 +1563,8 @@ describe("TextBlockStrategy — inline image rendering", () => {
     const inlineRegistry = new InlineRegistry();
     inlineRegistry.register("image", { render: renderFn });
 
-    const ctx = makeMockCtx();
+    const ctx = makeRealCtx();
+    const fillTextSpy = vi.spyOn(ctx, "fillText");
     TextBlockStrategy.render(
       block,
       {
@@ -1496,26 +1573,27 @@ describe("TextBlockStrategy — inline image rendering", () => {
         lineIndexOffset: 0,
         dpr: 1,
         measurer: createMeasurer(),
+        theme: defaultEditorTheme,
         inlineRegistry,
       },
       new CharacterMap(),
     );
 
     // Text was drawn (fillText called for "Hello" and "World" chars)
-    expect(ctx.fillText).toHaveBeenCalled();
+    expect(fillTextSpy).toHaveBeenCalled();
     // Image strategy was also called
     expect(renderFn).toHaveBeenCalledOnce();
   });
 
   it("InlineStrategy.measure() overrides node width/height attrs during layout", () => {
     // Create an inline image node with small placeholder dimensions
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 10,
       height: 10,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [skSchema.text("Hi"), img]);
+    const para = schema.node("paragraph", null, [schema.text("Hi"), img]);
 
     // Strategy with measure() that returns larger dimensions
     const measureFn = vi.fn(() => ({ width: 50, height: 30 }));
@@ -1546,13 +1624,13 @@ describe("TextBlockStrategy — inline image rendering", () => {
   });
 
   it("falls back to node attrs when InlineStrategy has no measure()", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 100,
       height: 80,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
 
     // Strategy WITHOUT measure()
     const strategy: InlineStrategy = { render: vi.fn() };
@@ -1577,13 +1655,13 @@ describe("TextBlockStrategy — inline image rendering", () => {
   });
 
   it("falls back to node attrs when no inlineRegistry is provided", () => {
-    const img = skSchema.nodes["image"]?.create({
+    const img = schema.nodes["image"]?.create({
       src: "a.png",
       width: 100,
       height: 80,
     });
     if (!img) return;
-    const para = skSchema.node("paragraph", null, [img]);
+    const para = schema.node("paragraph", null, [img]);
 
     const block = layoutBlock(para, {
       nodePos: 0,
