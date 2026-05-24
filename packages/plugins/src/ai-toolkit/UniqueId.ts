@@ -1,10 +1,6 @@
 import { Plugin } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
-import { Extension } from "@scrivr/core";
-
-function generateNodeId(): string {
-  return crypto.randomUUID();
-}
+import { Extension, planBlockIdAssignments } from "@scrivr/core";
 
 /**
  * Find a block node in the document by its stable nodeId attribute.
@@ -32,8 +28,9 @@ export function findNodeById(
  * that survives position shifts from concurrent insertions and deletions —
  * the foundation for AI suggestions, track changes, and diffs.
  *
- * Requires that block node specs declare `nodeId: { default: null }` in their
- * attrs. Paragraph, Heading, ListItem, CodeBlock, and Image all include this.
+ * The assignment rule lives in `@scrivr/core`'s `planBlockIdAssignments` so
+ * server-side normalization and AI ingestion paths apply identical semantics
+ * without going through a live editor.
  */
 export const UniqueId = Extension.create({
   name: "uniqueId",
@@ -44,25 +41,14 @@ export const UniqueId = Extension.create({
           // Skip if no document change occurred
           if (!transactions.some((tr) => tr.docChanged)) return null;
 
+          const assignments = planBlockIdAssignments(newState.doc);
+          if (assignments.length === 0) return null;
+
           const tr = newState.tr;
-          let modified = false;
-
-          newState.doc.descendants((node, pos) => {
-            // Only stamp block nodes that declare nodeId but haven't been assigned one
-            if (
-              node.isBlock &&
-              "nodeId" in (node.type.spec.attrs ?? {}) &&
-              node.attrs["nodeId"] === null
-            ) {
-              tr.setNodeMarkup(pos, undefined, {
-                ...node.attrs,
-                nodeId: generateNodeId(),
-              });
-              modified = true;
-            }
-          });
-
-          return modified ? tr : null;
+          for (const { pos, attrs } of assignments) {
+            tr.setNodeMarkup(pos, undefined, attrs);
+          }
+          return tr;
         },
       }),
     ];

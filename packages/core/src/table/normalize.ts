@@ -1,5 +1,5 @@
-import { Plugin, type EditorState, type Transaction } from "prosemirror-state";
-import type { Node, NodeType } from "prosemirror-model";
+import { EditorState, Plugin, type Transaction } from "prosemirror-state";
+import type { Node, NodeType, Schema } from "prosemirror-model";
 
 /**
  * Document-validity normalisation for tables. Run from
@@ -23,6 +23,24 @@ import type { Node, NodeType } from "prosemirror-model";
  */
 const MAX_ITERATIONS = 8;
 const DEFAULT_COLUMN_WIDTH = 100;
+
+/**
+ * Doc-level wrapper around `normalizeTables`. Returns the same Node
+ * reference when no repair was needed (fast path), so callers can detect
+ * a no-op cheaply — matches the shape of `sanitizeDocUrls` and
+ * `assignBlockIds`, the other ingestion-time helpers.
+ *
+ * Used by `normalizeDocument` to fold table repair into a single pass
+ * without materialising an external `EditorState`. Inside a live editor,
+ * prefer `tableIntegrityPlugin()` instead — its incremental
+ * `setNodeMarkup` ops cooperate better with history and collab than a
+ * whole-doc replacement.
+ */
+export function normalizeTablesDoc(doc: Node, schema: Schema): Node {
+  const state = EditorState.create({ schema, doc });
+  const tr = normalizeTables(state);
+  return tr ? tr.doc : doc;
+}
 
 export function normalizeTables(state: EditorState): Transaction | null {
   let tr = state.tr;

@@ -4,7 +4,7 @@ import type { Node, Schema } from "prosemirror-model";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
 import { ServerEditor } from "../ServerEditor";
-import { normalizeTables } from "./normalize";
+import { normalizeTables, normalizeTablesDoc } from "./normalize";
 
 const schema = new ExtensionManager([StarterKit.configure({ table: true })]).schema;
 
@@ -210,6 +210,38 @@ describe("normalizeTables — termination guard", () => {
       }
       return true;
     });
+  });
+});
+
+// ── normalizeTablesDoc — pure doc-level wrapper ──────────────────────────────
+
+describe("normalizeTablesDoc — pure wrapper", () => {
+  it("returns the same Node reference when the doc is healthy", () => {
+    const input = docWithTable(schema, table(
+      schema, [100, 100],
+      [row(schema, [cell(schema, { text: "a" }), cell(schema, { text: "b" })])],
+    ));
+    expect(normalizeTablesDoc(input, schema)).toBe(input);
+  });
+
+  it("returns a repaired doc when a cell has gridSpan < 1", () => {
+    const badCell = schema.nodes["tableCell"]!.create(
+      { gridSpan: 0, vMerge: "none" },
+      schema.nodes["paragraph"]!.create(),
+    );
+    const input = docWithTable(schema, table(schema, [100], [row(schema, [badCell])]));
+    const output = normalizeTablesDoc(input, schema);
+    expect(output).not.toBe(input);
+    const c = findTable(output)!.firstChild!.firstChild!;
+    expect(c.attrs["gridSpan"]).toBe(1);
+  });
+
+  it("leaves a doc with no tables untouched", () => {
+    const input = schema.nodes["doc"]!.create(
+      null,
+      [schema.nodes["paragraph"]!.create(null, schema.text("hello"))],
+    );
+    expect(normalizeTablesDoc(input, schema)).toBe(input);
   });
 });
 
