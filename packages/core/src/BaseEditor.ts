@@ -78,7 +78,7 @@ export class BaseEditor implements IBaseEditor {
    * AI consumers inspect this to decide whether to accept a document
    * (e.g. reject when `warnings` contains `urls-sanitized`).
    */
-  protected _lastNormalizeResult: NormalizeResult | null = null;
+  protected lastNormalizeResultValue: NormalizeResult | null = null;
 
   /**
    * Bound command map. Type is `SafeFlatCommands` — augment
@@ -128,7 +128,7 @@ export class BaseEditor implements IBaseEditor {
       const result = normalizeDocument(rawInitialDoc, {
         schema: this.manager.schema,
       });
-      this._lastNormalizeResult = result;
+      this.lastNormalizeResultValue = result;
       initialDoc = result.doc;
     }
 
@@ -153,7 +153,7 @@ export class BaseEditor implements IBaseEditor {
    * methods. `null` only when the editor was created with no doc at all.
    */
   get lastNormalizeResult(): NormalizeResult | null {
-    return this._lastNormalizeResult;
+    return this.lastNormalizeResultValue;
   }
 
   getState(): EditorState {

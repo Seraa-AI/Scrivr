@@ -126,7 +126,7 @@ export class ServerEditor extends BaseEditor {
     // base constructor; `lastNormalizeResult` (inherited from BaseEditor)
     // is refreshed so consumers can inspect what was repaired.
     const result = normalizeDocument(json, { schema: this.manager.schema });
-    this._lastNormalizeResult = result;
+    this.lastNormalizeResultValue = result;
     this.editorState = EditorState.create({
       schema: this.manager.schema,
       plugins: this.manager.buildPlugins(),
