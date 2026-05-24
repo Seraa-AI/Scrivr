@@ -147,6 +147,19 @@ export class BaseEditor implements IBaseEditor {
   }
 
   /**
+   * Look up a registered extension by name. Returns `null` when the
+   * extension is not present — useful for cross-package consumers (e.g.
+   * React adapter hooks) that want to read another extension's options
+   * without coupling to its presence.
+   *
+   * The return type is the un-parameterised `Extension`; callers that
+   * need typed options should narrow with a runtime guard.
+   */
+  findExtension(name: string): Extension | null {
+    return this.manager.findExtension(name);
+  }
+
+  /**
    * The result of the most recent ingestion-time normalization. Set when
    * the constructor receives `content` (or an extension contributes an
    * initial doc) and refreshed by subclass-specific `setContent`

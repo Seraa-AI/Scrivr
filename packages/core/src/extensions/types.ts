@@ -111,6 +111,14 @@ export interface IBaseEditor {
    * Returned as a fresh array; callers may mutate the result.
    */
   getDocAttrNames(): string[];
+  /**
+   * Look up a registered extension by name. Returns `null` when the
+   * extension is not present. Callers that need typed options should narrow
+   * with a runtime guard — the return type widens to the un-parameterised
+   * `Extension` because the manager has no compile-time link from `name`
+   * to option shape.
+   */
+  findExtension(name: string): import("./Extension").Extension | null;
 }
 
 /**

@@ -39,7 +39,11 @@ vi.mock("@scrivr/core", async (importOriginal) => {
 });
 
 import { ServerEditor, StarterKit, type IBaseEditor } from "@scrivr/core";
-import { HeaderFooter } from "../HeaderFooter";
+import {
+  DEFAULT_ACTIVE_EDITING_GAP,
+  HeaderFooter,
+  isHeaderFooterOptions,
+} from "../HeaderFooter";
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "../types";
 
 function makeDef(text = "test"): HeaderFooterDefinition {
@@ -90,6 +94,56 @@ describe("HeaderFooter extension", () => {
     expect(editor.schema.nodes["pageNumber"]).toBeDefined();
     expect(editor.schema.nodes["totalPages"]).toBeDefined();
     expect(editor.schema.nodes["date"]).toBeDefined();
+  });
+
+  describe("DEFAULT_ACTIVE_EDITING_GAP", () => {
+    it("matches the value HeaderFooter applies when no explicit option is set", () => {
+      // Layout consumers (React ribbon, future affordances) use this
+      // constant as their fallback — it must match what the extension
+      // actually defaults to, otherwise a fallback render produces a
+      // different visual than a normally-configured one.
+      const editor = createEditor();
+      const ext = editor.findExtension("headerFooter");
+      expect(ext).not.toBeNull();
+      expect(isHeaderFooterOptions(ext!.options)).toBe(true);
+      if (!isHeaderFooterOptions(ext!.options)) return;
+      expect(ext!.options.activeEditingGap).toBe(DEFAULT_ACTIVE_EDITING_GAP);
+    });
+  });
+
+  describe("isHeaderFooterOptions", () => {
+    it("narrows a valid options object", () => {
+      const value: unknown = { activeEditingGap: 40 };
+      expect(isHeaderFooterOptions(value)).toBe(true);
+      if (isHeaderFooterOptions(value)) {
+        // Type-narrowed within the guard — no cast at the call site.
+        expect(value.activeEditingGap).toBe(40);
+      }
+    });
+
+    it("rejects null, primitives, and arrays", () => {
+      expect(isHeaderFooterOptions(null)).toBe(false);
+      expect(isHeaderFooterOptions(undefined)).toBe(false);
+      expect(isHeaderFooterOptions(28)).toBe(false);
+      expect(isHeaderFooterOptions("activeEditingGap")).toBe(false);
+      // Arrays are objects in JS — the predicate only requires the field
+      // to be a number, so an array of one number passes structurally.
+      // The predicate is "are these *options shaped*?", not "is this
+      // exactly HeaderFooterOptions and nothing else". This is the same
+      // permissiveness the existing isResolvedHeaderFooter / isPdfContext
+      // guards use elsewhere in this file.
+    });
+
+    it("rejects objects missing activeEditingGap", () => {
+      expect(isHeaderFooterOptions({})).toBe(false);
+      expect(isHeaderFooterOptions({ otherField: 28 })).toBe(false);
+    });
+
+    it("rejects activeEditingGap of the wrong type", () => {
+      expect(isHeaderFooterOptions({ activeEditingGap: "28" })).toBe(false);
+      expect(isHeaderFooterOptions({ activeEditingGap: null })).toBe(false);
+      expect(isHeaderFooterOptions({ activeEditingGap: true })).toBe(false);
+    });
   });
 
   describe("commands", () => {
