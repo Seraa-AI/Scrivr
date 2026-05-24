@@ -1,4 +1,8 @@
-export { HeaderFooter } from "./HeaderFooter";
+export {
+  HeaderFooter,
+  DEFAULT_ACTIVE_EDITING_GAP,
+  isHeaderFooterOptions,
+} from "./HeaderFooter";
 export type { HeaderFooterOptions } from "./HeaderFooter";
 export type {
   HeaderFooterPolicy,

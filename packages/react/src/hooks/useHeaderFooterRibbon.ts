@@ -2,32 +2,27 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Editor } from "@scrivr/core";
 import {
   createHeaderFooterController,
+  DEFAULT_ACTIVE_EDITING_GAP,
+  isHeaderFooterOptions,
   type HeaderFooterController,
-  type HeaderFooterOptions,
   type HeaderFooterState,
 } from "@scrivr/plugins";
 import { useScrivrState as useEditorState } from "./useScrivrState";
 
 /**
- * Last-resort ribbon height used when the editor has no `HeaderFooter`
- * extension registered (so `findExtension` returns null). Matches the
- * extension's own default so the visual remains consistent when the
- * fallback kicks in. The live value comes from
- * `HeaderFooter.options.activeEditingGap` — see `readActiveEditingGap`.
+ * Read the configured ribbon height from the editor's `HeaderFooter`
+ * extension. Falls back to the extension's own default
+ * (`DEFAULT_ACTIVE_EDITING_GAP`) when the editor has no `HeaderFooter`
+ * registered — defensive only; the ribbon is invisible in that case
+ * because the controller never reports an active surface.
  */
-const FALLBACK_RIBBON_HEIGHT = 28;
-
 function readActiveEditingGap(editor: Editor | null): number {
-  if (!editor) return FALLBACK_RIBBON_HEIGHT;
+  if (!editor) return DEFAULT_ACTIVE_EDITING_GAP;
   const ext = editor.findExtension("headerFooter");
-  if (!ext) return FALLBACK_RIBBON_HEIGHT;
-  // The extension's options are typed at declaration site as
-  // HeaderFooterOptions but the manager's findExtension widens to
-  // `object`. Narrow with a runtime check on the field we read.
-  const opts = ext.options as Partial<HeaderFooterOptions>;
-  return typeof opts.activeEditingGap === "number"
-    ? opts.activeEditingGap
-    : FALLBACK_RIBBON_HEIGHT;
+  if (!ext || !isHeaderFooterOptions(ext.options)) {
+    return DEFAULT_ACTIVE_EDITING_GAP;
+  }
+  return ext.options.activeEditingGap;
 }
 
 export interface HeaderFooterRibbonItem {

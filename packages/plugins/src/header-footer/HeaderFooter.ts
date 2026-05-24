@@ -236,7 +236,36 @@ export interface HeaderFooterOptions {
   activeEditingGap: number;
 }
 
-const DEFAULT_ACTIVE_EDITING_GAP = 28;
+/**
+ * Default value for `HeaderFooterOptions.activeEditingGap` — matches
+ * the React `HeaderFooterRibbon`'s natural height. Exported so the
+ * React adapter can use the same value as its fallback when the
+ * `HeaderFooter` extension is not registered on a given editor.
+ */
+export const DEFAULT_ACTIVE_EDITING_GAP = 28;
+
+/**
+ * Runtime predicate for `HeaderFooterOptions`. Use to narrow the
+ * un-parameterised `Extension.options` returned by
+ * `editor.findExtension("headerFooter")` without an `as` cast at the
+ * call site:
+ *
+ * @example
+ *   const ext = editor.findExtension("headerFooter");
+ *   if (ext && isHeaderFooterOptions(ext.options)) {
+ *     useGap(ext.options.activeEditingGap); // narrowed
+ *   }
+ *
+ * Checks the one field the consumer cares about (`activeEditingGap:
+ * number`) — sufficient for a "are these the options I configured?"
+ * check without claiming exhaustive structural equality.
+ */
+export function isHeaderFooterOptions(
+  value: unknown,
+): value is HeaderFooterOptions {
+  if (typeof value !== "object" || value === null) return false;
+  return typeof (value as { activeEditingGap?: unknown }).activeEditingGap === "number";
+}
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
