@@ -18,6 +18,21 @@ import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { resolveSlot } from "./resolveSlot";
 import { chromeFontConfig } from "./chromeFontConfig";
 
+/**
+ * Height of the React editing ribbon that overlays the gap between a
+ * header/footer band and body content while a surface is active. The
+ * layout always reserves at least this much for the gap so that
+ * activating a band does not push body content down — the ribbon
+ * simply appears in space that was already there.
+ *
+ * Must stay in sync with the literal `height: 28` in
+ * `packages/react/src/components/HeaderFooterRibbon.tsx`. If the React
+ * ribbon ever changes height, update both — there is no shared
+ * dependency edge between `@scrivr/plugins` and `@scrivr/react`.
+ */
+const RIBBON_HEIGHT = 28;
+const DEFAULT_BODY_GAP = 12;
+
 /** Measured layout + reserved height for one header/footer slot. */
 export interface SlotLayout {
   /** The parsed PM doc node — kept for re-layout at different Y positions during rendering. */
@@ -57,7 +72,7 @@ function measureSlot(
   });
 
   const natural = layout.totalContentHeight ?? 0;
-  const margin = def.margin ?? 12;
+  const margin = Math.max(def.margin ?? DEFAULT_BODY_GAP, RIBBON_HEIGHT);
   const reservedHeight = Math.max(natural + margin, def.minHeight ?? 0);
   return { doc: miniDoc, layout, reservedHeight };
 }

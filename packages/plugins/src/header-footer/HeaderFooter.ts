@@ -57,8 +57,6 @@ function isCursorVisible(editor: IBaseEditor): boolean {
  */
 type LiveSurface = { slotKey: SlotKey; surface: EditorSurface };
 
-const RIBBON_HEIGHT = 28;
-const DEFAULT_BODY_GAP = 12;
 function createEmptySlot(): HeaderFooterDefinition {
   return {
     content: { type: "doc", content: [{ type: "paragraph" }] },
@@ -90,6 +88,10 @@ function liveSurfaceForDoc(doc: unknown): LiveSurface | null {
  * If a header/footer surface is active, replace its slot's content in the
  * policy with the live surface doc. This makes measure() compute the correct
  * height as the user types — the band grows instead of clipping.
+ *
+ * Ribbon-height gap reservation lives in `resolveChrome.measureSlot` so the
+ * body sits at the same position whether or not a surface is active —
+ * activating the band no longer pushes content down.
  */
 function policyWithLiveSurface(policy: HeaderFooterPolicy, doc: unknown): HeaderFooterPolicy {
   const liveSurface = liveSurfaceForDoc(doc);
@@ -103,9 +105,6 @@ function policyWithLiveSurface(policy: HeaderFooterPolicy, doc: unknown): Header
     [liveSurface.slotKey]: {
       ...currentSlot,
       content: liveSurface.surface.state.doc.toJSON(),
-      // The React editing ribbon occupies this gap while a surface is active.
-      // Keep the live layout from placing header/footer content underneath it.
-      margin: Math.max(currentSlot.margin ?? DEFAULT_BODY_GAP, RIBBON_HEIGHT),
     },
   };
 }

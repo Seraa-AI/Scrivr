@@ -156,6 +156,53 @@ describe("resolveChrome", () => {
     expect(contrib.stable).toBe(true);
   });
 
+  it("reserves at least ribbon-height (28px) between header content and body, regardless of slot.margin", () => {
+    // The React ribbon is 28px tall and lives in the gap between the
+    // header band's content bottom and the body's contentTop. Activating
+    // the surface used to widen the gap from the slot's margin to 28,
+    // which pushed body content down on click. The fix: always reserve
+    // ribbon-height at measure time so the gap doesn't shift.
+    //
+    // mocked runMiniPipeline returns totalContentHeight: 36, marginTop: 96.
+    // Default slot.margin is 12. Pre-fix:  top = 96 + (36 + 12) = 144.
+    // Post-fix:                              top = 96 + (36 + max(12,28)) = 160.
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: makeDef("header"),
+    };
+
+    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 28);
+  });
+
+  it("does not shrink the gap below ribbon-height when the slot sets a smaller margin", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: { ...makeDef("header"), margin: 4 },
+    };
+
+    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    // 96 (marginTop) + 36 (content) + max(4, 28) = 160
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 28);
+  });
+
+  it("respects a larger user-set margin (no upper clamp)", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: { ...makeDef("header"), margin: 60 },
+    };
+
+    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    // 96 + 36 + max(60, 28) = 192
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 60);
+  });
+
   it("attaches a ResolvedHeaderFooter payload", () => {
     const policy: HeaderFooterPolicy = {
       enabled: true,
