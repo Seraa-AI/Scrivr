@@ -156,16 +156,17 @@ describe("resolveChrome", () => {
     expect(contrib.stable).toBe(true);
   });
 
-  it("reserves at least ribbon-height (28px) between header content and body, regardless of slot.margin", () => {
-    // The React ribbon is 28px tall and lives in the gap between the
-    // header band's content bottom and the body's contentTop. Activating
-    // the surface used to widen the gap from the slot's margin to 28,
-    // which pushed body content down on click. The fix: always reserve
-    // ribbon-height at measure time so the gap doesn't shift.
+  it("reserves at least activeEditingGap between header content and body, regardless of slot.margin", () => {
+    // The editing affordance (e.g. React `HeaderFooterRibbon`, default
+    // 28px) overlays the gap between the header band's content bottom
+    // and the body's contentTop. Activating the surface used to widen
+    // the gap from slot.margin to the ribbon height at active-only
+    // measure time, which pushed body content down on click. The fix:
+    // reserve activeEditingGap unconditionally so the gap is stable.
     //
-    // mocked runMiniPipeline returns totalContentHeight: 36, marginTop: 96.
-    // Default slot.margin is 12. Pre-fix:  top = 96 + (36 + 12) = 144.
-    // Post-fix:                              top = 96 + (36 + max(12,28)) = 160.
+    // Mocked runMiniPipeline returns totalContentHeight: 36,
+    // marginTop: 96. With activeEditingGap=28 and no explicit
+    // slot.margin: top = 96 + (36 + 28) = 160.
     const policy: HeaderFooterPolicy = {
       enabled: true,
       differentFirstPage: false,
@@ -177,7 +178,7 @@ describe("resolveChrome", () => {
     expect(contrib.topForPage(1)).toBe(96 + 36 + 28);
   });
 
-  it("does not shrink the gap below ribbon-height when the slot sets a smaller margin", () => {
+  it("does not shrink the gap below activeEditingGap when the slot sets a smaller margin", () => {
     const policy: HeaderFooterPolicy = {
       enabled: true,
       differentFirstPage: false,

@@ -194,18 +194,40 @@ export interface HeaderFooterOptions {
    * Pixels reserved between header/footer content and body for an
    * editing affordance (e.g. the React `HeaderFooterRibbon`).
    *
-   * The gap is the floor — `slot.margin` values smaller than this are
-   * clamped at measure time so activating a surface does not push body
-   * content down. Slot margins larger than the gap are honored as-is.
+   * **Applied once at layout time, not at render time.** The value
+   * flows through `resolveChrome.measureSlot` and is baked into
+   * `slot.reservedHeight` + `metrics.contentTop` when the layout is
+   * built. Every downstream consumer — canvas paint, PDF chrome
+   * render, anything reading `editor.layout` — sees the same baked
+   * value. There is no per-render override: to change the gap you
+   * change this option and re-layout (which happens automatically
+   * when an extension is reconfigured at editor construction).
    *
-   * Set this to the height of your editing affordance:
-   * - React consumers using the default `HeaderFooterRibbon`: 28 (default)
-   * - React consumers with a custom ribbon: its height
-   * - Headless / PDF / server-side rendering: 0 — no UI to reserve for
+   * Acts as a floor on `slot.margin`. Slot margins smaller than this
+   * are clamped up at measure time so activating a surface does not
+   * push body content down. Margins larger than the gap are honored
+   * as-is.
    *
-   * The `@scrivr/react` `HeaderFooterRibbon` hardcodes 28; if you
-   * change this option you should change the ribbon too (or supply
-   * your own ribbon component at the matching height).
+   * Pick the value at editor construction:
+   *
+   *   React, default `HeaderFooterRibbon`   → 28 (default)
+   *   React, custom ribbon                  → ribbon height
+   *   Headless `ServerEditor` for PDF /     → 0 (no UI to reserve for,
+   *     non-React render                      no whitespace in print)
+   *
+   * **Dual-use editor caveat.** A single browser `Editor` used for
+   * both interactive editing *and* PDF export can only carry one
+   * value — the same layout drives both. Configure for the editing
+   * case (so the ribbon doesn't push content) and accept the same
+   * gap in the exported PDF. Consumers that need a ribbon-friendly
+   * editor *and* a tight printed PDF should run PDF export against a
+   * separate `ServerEditor` constructed with `activeEditingGap: 0`,
+   * sharing the same doc JSON.
+   *
+   * Coordination: the `@scrivr/react` `HeaderFooterRibbon` hardcodes
+   * `height: 28` and `useHeaderFooterRibbon` offsets the ribbon by
+   * `-28`. Both must match this value. If you ship a custom ribbon
+   * at a different height, pass the matching number here.
    */
   activeEditingGap: number;
 }

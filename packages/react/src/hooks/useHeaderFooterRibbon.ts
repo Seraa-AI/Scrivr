@@ -99,6 +99,12 @@ export function useHeaderFooterRibbon(
       const pageTop = pageScreen && overlayRect
         ? pageScreen.screenTop - overlayRect.top
         : pageOffsetY;
+      // -28 positions the ribbon's bottom edge at the body's contentTop
+      // (header band) or above the footer's footerTop. Must match the
+      // ribbon's own `height: 28` in HeaderFooterRibbon.tsx and the
+      // default `HeaderFooter.configure({ activeEditingGap: 28 })`.
+      // If you ship a custom ribbon at a different height, update all
+      // three locations together.
       const top = isHeader
         ? pageTop + metrics.contentTop - 28
         : pageTop + metrics.footerTop - 28;
