@@ -85,7 +85,7 @@ describe("resolveChrome", () => {
       defaultHeader: makeDef("header"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.topForPage(1)).toBeGreaterThan(0);
     expect(contrib.topForPage(5)).toBeGreaterThan(0);
   });
@@ -98,7 +98,7 @@ describe("resolveChrome", () => {
       defaultFooter: makeDef("footer"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.bottomForPage(1)).toBeGreaterThan(0);
     expect(contrib.bottomForPage(3)).toBeGreaterThan(0);
   });
@@ -110,7 +110,7 @@ describe("resolveChrome", () => {
       differentOddEven: false,
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.topForPage(1)).toBe(0);
     expect(contrib.bottomForPage(1)).toBe(0);
   });
@@ -124,7 +124,7 @@ describe("resolveChrome", () => {
       firstPageHeader: makeDef("first-header"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     // Both should be non-zero (both slots have content)
     expect(contrib.topForPage(1)).toBeGreaterThan(0);
     expect(contrib.topForPage(2)).toBeGreaterThan(0);
@@ -139,7 +139,7 @@ describe("resolveChrome", () => {
       // no firstPageHeader
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.topForPage(1)).toBe(0); // no first-page slot
     expect(contrib.topForPage(2)).toBeGreaterThan(0); // default slot
   });
@@ -152,7 +152,7 @@ describe("resolveChrome", () => {
       defaultHeader: makeDef("header"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.stable).toBe(true);
   });
 
@@ -173,7 +173,7 @@ describe("resolveChrome", () => {
       defaultHeader: makeDef("header"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.topForPage(1)).toBe(96 + 36 + 28);
   });
 
@@ -185,7 +185,7 @@ describe("resolveChrome", () => {
       defaultHeader: { ...makeDef("header"), margin: 4 },
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     // 96 (marginTop) + 36 (content) + max(4, 28) = 160
     expect(contrib.topForPage(1)).toBe(96 + 36 + 28);
   });
@@ -198,9 +198,49 @@ describe("resolveChrome", () => {
       defaultHeader: { ...makeDef("header"), margin: 60 },
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     // 96 + 36 + max(60, 28) = 192
     expect(contrib.topForPage(1)).toBe(96 + 36 + 60);
+  });
+
+  it("honors a custom activeEditingGap (custom ribbon height)", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: makeDef("header"),
+    };
+
+    // 96 (marginTop) + 36 (content) + max(undefined ?? 40, 40) = 172
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 40);
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 40);
+  });
+
+  it("activeEditingGap=0 disables the floor — slot.margin honored as-is (headless / PDF mode)", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: { ...makeDef("header"), margin: 4 },
+    };
+
+    // 96 + 36 + max(4, 0) = 136 — no whitespace reserved for a UI that
+    // isn't being drawn, slot's tight margin survives the measure step.
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 0);
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 4);
+  });
+
+  it("activeEditingGap=0 with unset slot.margin defaults to 0 (no gap at all)", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: false,
+      defaultHeader: makeDef("header"),
+    };
+
+    // 96 + 36 + max(undefined ?? 0, 0) = 132
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 0);
+    expect(contrib.topForPage(1)).toBe(96 + 36 + 0);
   });
 
   it("attaches a ResolvedHeaderFooter payload", () => {
@@ -211,7 +251,7 @@ describe("resolveChrome", () => {
       defaultHeader: makeDef("header"),
     };
 
-    const contrib = resolveChrome(policy, mockInput, mockCtx);
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 28);
     expect(contrib.payload).toBeDefined();
     const resolved = contrib.payload as {
       policy: HeaderFooterPolicy;

@@ -18,20 +18,6 @@ import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { resolveSlot } from "./resolveSlot";
 import { chromeFontConfig } from "./chromeFontConfig";
 
-/**
- * Height of the React editing ribbon that overlays the gap between a
- * header/footer band and body content while a surface is active. The
- * layout always reserves at least this much for the gap so that
- * activating a band does not push body content down — the ribbon
- * simply appears in space that was already there.
- *
- * Must stay in sync with the literal `height: 28` in
- * `packages/react/src/components/HeaderFooterRibbon.tsx`. If the React
- * ribbon ever changes height, update both — there is no shared
- * dependency edge between `@scrivr/plugins` and `@scrivr/react`.
- */
-const RIBBON_HEIGHT = 28;
-
 /** Measured layout + reserved height for one header/footer slot. */
 export interface SlotLayout {
   /** The parsed PM doc node — kept for re-layout at different Y positions during rendering. */
@@ -58,6 +44,7 @@ export interface ResolvedHeaderFooter {
 function measureSlot(
   def: HeaderFooterDefinition | undefined,
   input: PageChromeMeasureInput,
+  activeEditingGap: number,
 ): SlotLayout | undefined {
   if (!def) return undefined;
 
@@ -72,10 +59,12 @@ function measureSlot(
 
   const natural = layout.totalContentHeight ?? 0;
   // Single invariant: the gap below header content is at least
-  // RIBBON_HEIGHT. Use it as both the unset default and the floor on
-  // an explicit value — no second constant that could quietly fall
-  // below the ribbon and re-introduce the body-shift bug.
-  const margin = Math.max(def.margin ?? RIBBON_HEIGHT, RIBBON_HEIGHT);
+  // `activeEditingGap`. Use it as both the unset default and the
+  // floor on an explicit value — one number expresses "the editing
+  // affordance is N px tall, reserve N", so the body never shifts
+  // when a surface activates. Headless callers pass 0 to honor
+  // slot.margin as-is (no whitespace reserved for a non-existent UI).
+  const margin = Math.max(def.margin ?? activeEditingGap, activeEditingGap);
   const reservedHeight = Math.max(natural + margin, def.minHeight ?? 0);
   return { doc: miniDoc, layout, reservedHeight };
 }
@@ -83,24 +72,32 @@ function measureSlot(
 /**
  * Resolve all header/footer slots and return a ChromeContribution.
  * Heights vary by page (differentFirstPage) via topForPage/bottomForPage closures.
+ *
+ * `activeEditingGap` — minimum pixels reserved between header content
+ * and body. The React `HeaderFooterRibbon` overlays this gap while a
+ * surface is active, so the default React-side wiring passes 28 (the
+ * ribbon's height). Server/PDF/headless callers pass 0 to honor each
+ * slot's `margin` as-is without reserving whitespace for a UI that
+ * isn't being drawn. See `HeaderFooter.configure({ activeEditingGap })`.
  */
 export function resolveChrome(
   policy: HeaderFooterPolicy,
   input: PageChromeMeasureInput,
   _ctx: LayoutIterationContext,
+  activeEditingGap: number,
 ): ChromeContribution {
   const resolved: ResolvedHeaderFooter = {
     policy,
     defaultMarginTop: input.pageConfig.margins.top,
     defaultMarginBottom: input.pageConfig.margins.bottom,
     slots: {
-      defaultHeader: measureSlot(policy.defaultHeader, input),
-      defaultFooter: measureSlot(policy.defaultFooter, input),
+      defaultHeader: measureSlot(policy.defaultHeader, input, activeEditingGap),
+      defaultFooter: measureSlot(policy.defaultFooter, input, activeEditingGap),
       firstPageHeader: policy.differentFirstPage
-        ? measureSlot(policy.firstPageHeader, input)
+        ? measureSlot(policy.firstPageHeader, input, activeEditingGap)
         : undefined,
       firstPageFooter: policy.differentFirstPage
-        ? measureSlot(policy.firstPageFooter, input)
+        ? measureSlot(policy.firstPageFooter, input, activeEditingGap)
         : undefined,
     },
   };

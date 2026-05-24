@@ -189,6 +189,29 @@ const GHOST_POLICY: HeaderFooterPolicy = {
   defaultFooter: { content: { type: "doc", content: [{ type: "paragraph" }] } },
 };
 
+export interface HeaderFooterOptions {
+  /**
+   * Pixels reserved between header/footer content and body for an
+   * editing affordance (e.g. the React `HeaderFooterRibbon`).
+   *
+   * The gap is the floor — `slot.margin` values smaller than this are
+   * clamped at measure time so activating a surface does not push body
+   * content down. Slot margins larger than the gap are honored as-is.
+   *
+   * Set this to the height of your editing affordance:
+   * - React consumers using the default `HeaderFooterRibbon`: 28 (default)
+   * - React consumers with a custom ribbon: its height
+   * - Headless / PDF / server-side rendering: 0 — no UI to reserve for
+   *
+   * The `@scrivr/react` `HeaderFooterRibbon` hardcodes 28; if you
+   * change this option you should change the ribbon too (or supply
+   * your own ribbon component at the matching height).
+   */
+  activeEditingGap: number;
+}
+
+const DEFAULT_ACTIVE_EDITING_GAP = 28;
+
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
     headerFooter: {
@@ -259,8 +282,12 @@ interface EditorEntry {
 const editorEntries = new Map<IEditor, EditorEntry>();
 
 
-export const HeaderFooter = Extension.create({
+export const HeaderFooter = Extension.create<HeaderFooterOptions>({
   name: "headerFooter",
+
+  defaultOptions: {
+    activeEditingGap: DEFAULT_ACTIVE_EDITING_GAP,
+  },
 
   addDocAttrs() {
     return {
@@ -300,6 +327,9 @@ export const HeaderFooter = Extension.create({
   },
 
   addPageChrome() {
+    // Capture in the closure — `measure` is a sub-method whose `this`
+    // is the returned chrome object, not the extension context.
+    const { activeEditingGap } = this.options;
     return {
       name: "headerFooter",
 
@@ -312,12 +342,12 @@ export const HeaderFooter = Extension.create({
           // If a surface is active, build a policy with the live content so
           // the reserved height grows as the user types.
           const livePolicy = policyWithLiveSurface(policy, input.doc);
-          return resolveChrome(livePolicy, input, ctx);
+          return resolveChrome(livePolicy, input, ctx, activeEditingGap);
         }
         // No real policy yet — reserve a default empty-slot band so the
         // affordance is visible and clickable. The first margin double-click
         // upgrades this ghost into a real policy via ensurePolicy().
-        return resolveChrome(GHOST_POLICY, input, ctx);
+        return resolveChrome(GHOST_POLICY, input, ctx, activeEditingGap);
       },
 
       render(ctx) {
