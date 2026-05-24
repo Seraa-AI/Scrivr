@@ -14,11 +14,13 @@ Production-grade word processor feature plan for Scrivr. Organised into three la
 
 #### Google Docs Paste Fix
 
-**Status:** Planned
+**Status:** ✅ Done — `cleanPastedHtml` in `packages/core/src/input/PasteTransformer.ts:328` strips Google-specific attributes, removes empty `<b>` wrappers, collapses span chains, drops layout-only styles. Paragraph/FontFamily `parseDOM` read alignment + family. Hostile-input snapshot coverage shipped via PR #91.
+
+The original plan below is preserved for reference.
 
 GDocs emits deeply nested `<span>` tags with inline styles. Raw PM DOMParser produces garbled output — extra spacing, lost fonts, alignment ignored.
 
-**Plan:**
+**Plan (now implemented):**
 
 1. **`cleanPastedHtml(html: string): string`** — add to `PasteTransformer`, called at the top of `fromHtml()` before `div.innerHTML = html`:
    - Strip Google-specific attributes: `data-docs-*`, `id="docs-internal-*"`, `google-revisions-*`
@@ -150,17 +152,26 @@ editor.subscribe(() => {
 
 ---
 
+### Markdown Ingestion
+
+**Status:** Partial — 26 of 43 common markdown features supported today. Full diagnostic + 3-round implementation plan lives in **`docs/markdown-support-plan.md`**.
+
+The stress test (`packages/core/src/model/parseMarkdown.stress.test.ts`) categorises the gaps:
+
+- **Throws (12):** inline code, links (inline / reference / autolink), images (3 forms), strikethrough, blockquote (+ nested), table, footnote — markdown-it tokenises these but no extension wires the parser-token mapping
+- **Lossy (5):** raw URL autolink (markdown-it needs linkify on), underline (no md syntax — paste-side fix), definition list, math inline, math block
+
+Round 1 (1–2 days, all schema already exists): wire `addMarkdownParserTokens()` on Link, Image, Strikethrough; new `Code` mark for inline; enable `markdown-it` linkify. Takes coverage 60% → 84%.
+
+Round 2 (per-feature PRs): new `Blockquote` extension + node, table markdown bridge, underline paste support. Takes coverage 84% → 93%.
+
+Round 3 (deferred): footnotes, definition lists, math, task-list checkbox semantics.
+
 ### Text Formatting
 
 #### Clear Formatting
 
-**Status:** Not implemented
-
-- Remove all marks from selection
-- Command: `clearFormatting()` → `state.tr.removeMark(from, to)` for every mark type in schema
-- Keyboard: Ctrl+\\ (standard in Google Docs / Word)
-
-*Ship this early — the paste → clear formatting → reformat workflow is the first thing users try after pasting from GDocs.*
+**Status:** ✅ Done — `ClearFormatting` extension at `packages/core/src/extensions/built-in/ClearFormatting.ts`. Command `clearFormatting()`, keymap `Mod-\`, toolbar item registered. Strips every mark + resets block attrs to defaults across the selection.
 
 #### Format Painter
 
@@ -444,15 +455,18 @@ The horizontal ruler is a DOM overlay (not canvas) above the page — it shows:
 
 ### Headers and Footers
 
-**Status:** Not implemented
+**Status:** ✅ Done — `HeaderFooter` extension in `@scrivr/plugins` ships:
 
-Repeating content drawn at the top/bottom of every page.
+- Document-level `headerFooter` policy stored on `doc.attrs`, mutated via `DocAttrStep` (collab-safe)
+- `pageNumber` / `totalPages` / `date` inline atom tokens
+- `addPageChrome` lane: `PageLayout` reserves measured-natural header/footer heights, `PageRenderer` paints chrome bands
+- Surface-based live editing via `EditorSurface` primitive — independent `EditorState` + `CharacterMap` per band
+- "Different first page" + reserved "different odd/even" slots
+- Collaborative doc-attr sync (PR #83 — header/footer collab phase 5)
+- Configurable React editing ribbon with stable layout reservation (PR #96 — `HeaderFooter.configure({ activeEditingGap })`)
+- PDF chrome export handler — `renderHeaderFooterPdf` reads the stored mini-layouts
 
-- Add a `header` and `footer` PM node (document-level, not part of the flow content)
-- `PageLayout` reserves `headerHeight` / `footerHeight` from page margins
-- `PageRenderer` draws header/footer on every page using a separate layout pass
-- Headers/footers can contain: text, page number fields `{PAGE}`, `{PAGES}`, images, alignment
-- "Different first page" and "different odd/even" options
+**Next evolution:** sections — see `docs/sections-roadmap.md` for the multi-section model (per-section margins/orientation/numbering, "link to previous" inheritance).
 
 ---
 
@@ -699,7 +713,9 @@ Auto-generated from heading nodes.
 
 #### PDF — Searchable Text Layer
 
-**Status:** Shell exists (`@scrivr/export`)
+**Status:** ✅ Done — `@scrivr/export-pdf` walks `DocumentLayout` and emits real pdf-lib text operations. `exportToPdf(editor, options)` + `buildPdf(layout, options, editor)` public API. Searchable, selectable, court-submittable. Themed export, anchored object painting, chrome dispatch all functional.
+
+The plan below is preserved for reference on the original decision.
 
 Do not use the canvas raster path (`toDataURL → embed as image`) — that produces PDFs where text is baked into pixels: not selectable, not searchable, not court-submittable. Use pdf-lib's text API instead.
 
@@ -735,7 +751,7 @@ Marks via pdf-lib drawing primitives:
 
 #### PDF Custom Font Embedding
 
-**Status:** Not implemented (canvas rasterizes glyphs — embedded fonts need separate pipeline)
+**Status:** ✅ Done — `fontResolver?: (family, weight, style) => Promise<ArrayBuffer | null>` option on `exportToPdf` (`packages/export-pdf/src/index.ts:34`). Called once per unique combination, cached per export; returning `null` falls back to the nearest standard font.
 
 When the document uses a custom font (firm letterhead typeface, specific contract serif), the PDF must embed that font's outlines so text reflows identically when printed or opened on a machine without the font installed.
 
@@ -781,11 +797,16 @@ The `fontResolver` is called once per unique `(family, weight, style)` combinati
 
 #### DOCX
 
-**Status:** Stub
+**Status:** ✅ Done — `@scrivr/docx` ships full round-trip:
 
-- Use `docx` npm package (pure JS, no server)
-- Walk PM doc → emit DOCX XML nodes
-- Handles: paragraphs, headings, bold/italic/underline, lists, images, tables (once implemented)
+- **Export** (PR #92): walker dispatches via `addExports().docx` lane. Built-in handlers cover paragraph, heading (auto-registered Heading1-6 styles), hardBreak, pageBreak, horizontalRule, codeBlock, basic marks, images (5 wrap modes + binary embed).
+- **Import** (PR #94): two-stage pipeline. Stage 1 OOXML-pure parser produces `DocxImportModel`; Stage 2 dispatches via `addImports().docx` extension handlers to real PM `Node`/`Mark` values. `DocxImport` extension wires toolbar + file picker.
+- **Architecture:** contract types live in `@scrivr/core/exports/docx.ts`. Extensions own both directions per `feedback_pdf_parity` — round-trip is the de facto correctness contract.
+- **Publish prep** (PR #97): version parity with the `@scrivr/*` lockstep group, `private: false`, metadata aligned.
+
+**Not yet imported/exported:** tables, comments, footnotes, anchored objects with complex wrap. Same status both directions — handlers ship paired.
+
+Reference: `packages/docx/src/import/` and `packages/docx/src/export/`; memory `project_docx_import_round_trip.md`.
 
 #### Markdown
 
