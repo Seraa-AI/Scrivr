@@ -9,7 +9,8 @@ import {
   ImageMenu,
   HeaderFooterRibbon,
 } from "@scrivr/react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useTheme } from "next-themes";
 import type { EditorStateContext, EditorTheme } from "@scrivr/react";
 import { PdfExport } from "@scrivr/export-pdf";
 import { DocxExport, DocxImport } from "@scrivr/docx";
@@ -27,11 +28,22 @@ import { ModeSwitcher } from "./ModeSwitcher";
 import {
   TrackChangesPopover,
   TrackChangesPanel,
-  AiSuggestionCardsPanel,
+  useTrackChangesPanel,
 } from "@scrivr/react";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent } from "./demoContent";
 import { env } from "../lib/env";
+import {
+  ChevronLeft,
+  FileText,
+  History,
+  MessageSquareText,
+  Moon,
+  PanelRightClose,
+  PanelRightOpen,
+  Sparkles,
+  Sun,
+} from "lucide-react";
 
 // Runtime env vars go through the validated env module (see lib/env.ts).
 // These are read from the cached Zod-parsed object at app boot.
@@ -65,7 +77,7 @@ const AI_ENABLED =
 // are defined in styles/app.css under `:root` (light) and `.dark` (dark).
 const PLAYGROUND_THEME: EditorTheme = {
   pageBg: "var(--scrivr-page-bg)",
-  pageShadow: "var(--scrivr-page-shadow)",
+  pageShadow: "none",
   defaultText: "var(--scrivr-text)",
   link: "var(--scrivr-link)",
   cursor: "var(--scrivr-cursor)",
@@ -78,26 +90,15 @@ const PLAYGROUND_THEME: EditorTheme = {
   resizeHandle: "var(--scrivr-resize-handle)",
 };
 
-/**
- * Tracks whether <html> has the `dark` class. Reads on mount, syncs via
- * MutationObserver, and toggles the class on demand. Avoids adding next-themes
- * as a direct dep — fumadocs's RootProvider also drives the same class.
- */
 function useDarkMode(): { isDark: boolean; toggle: () => void } {
-  const [isDark, setIsDark] = useState(false);
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
   useEffect(() => {
-    if (typeof document === "undefined") return;
-    const root = document.documentElement;
-    setIsDark(root.classList.contains("dark"));
-    const obs = new MutationObserver(() => {
-      setIsDark(root.classList.contains("dark"));
-    });
-    obs.observe(root, { attributes: true, attributeFilter: ["class"] });
-    return () => obs.disconnect();
+    setMounted(true);
   }, []);
+  const isDark = mounted && resolvedTheme === "dark";
   const toggle = () => {
-    if (typeof document === "undefined") return;
-    document.documentElement.classList.toggle("dark");
+    setTheme(isDark ? "light" : "dark");
   };
   return { isDark, toggle };
 }
@@ -189,6 +190,7 @@ export function Playground() {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>(
     AI_ENABLED ? "ai" : "changes",
   );
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const { isDark, toggle: toggleDark } = useDarkMode();
 
@@ -223,150 +225,106 @@ export function Playground() {
     selector: (ctx) => ({
       current: ctx.editor.cursorPage,
       total: ctx.editor.layout.pages.length,
+      pageWidth: ctx.editor.layout.pageConfig.pageWidth,
     }),
-    equalityFn: (a, b) => a.current === b.current && a.total === b.total,
-  }) ?? { current: 1, total: 1 };
+    equalityFn: (a, b) =>
+      a.current === b.current &&
+      a.total === b.total &&
+      a.pageWidth === b.pageWidth,
+  }) ?? { current: 1, total: 1, pageWidth: defaultPageConfig.pageWidth };
 
   const loadingState = useEditorState({
     editor,
     selector: (ctx) => ctx.editor.loadingState,
     equalityFn: Object.is,
   });
+  const trackPanel = useTrackChangesPanel(editor);
 
   return (
-    <div className="flex flex-col h-screen font-sans" style={{ background: "var(--app-bg)", color: "var(--app-text)" }}>
-      {/* ── Header ── */}
+    <div className="flex h-screen flex-col overflow-hidden font-sans" style={{ background: "var(--app-bg)", color: "var(--app-text)" }}>
       <header
-        className="flex items-center justify-between h-11 px-2 md:px-4 border-b shrink-0 gap-2 md:gap-3"
+        className="flex h-12 shrink-0 items-center gap-2 border-b px-2 md:px-3"
         style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
       >
-        <div className="flex items-center gap-2 flex-1 min-w-0">
+        <div className="flex min-w-0 flex-[1.3] items-center gap-2">
           <a
             href="/"
-            className="flex items-center gap-1 text-[13px] no-underline px-1.5 py-0.5 rounded-md transition-colors shrink-0"
-            style={{ color: "var(--app-text-muted)" }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--app-surface-hover)";
-              e.currentTarget.style.color = "var(--app-text)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "var(--app-text-muted)";
-            }}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              className="block"
-            >
-              <path
-                d="M9 2L4 7l5 5"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span className="hidden sm:inline">Docs</span>
-          </a>
-          <div className="w-px h-4 hidden sm:block" style={{ background: "var(--app-border)" }} />
-          <span
-            className="text-[14px] font-semibold tracking-tight shrink-0"
-            style={{ color: "var(--app-text)" }}
-          >
-            scrivr
-          </span>
-          <span
-            className="text-[11px] font-medium border rounded-full px-2 py-px tracking-wide hidden sm:inline"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-[13px] no-underline transition-colors"
             style={{
-              color: "var(--app-accent-soft-fg)",
-              background: "var(--app-accent-soft-bg)",
-              borderColor: "var(--app-accent-soft-border)",
+              color: "var(--app-text-muted)",
+              background: "var(--app-surface)",
+              borderColor: "var(--app-border)",
             }}
+            title="Back to docs"
+            aria-label="Back to docs"
           >
-            playground
-          </span>
-          {!AI_ENABLED && (
-            <a
-              href="/docs/guides/ai-features"
-              className="text-[11px] font-medium border rounded-full px-2 py-px tracking-wide no-underline transition-colors hidden md:inline"
-              style={{
-                color: "var(--app-text-muted)",
-                background: "var(--app-surface-2)",
-                borderColor: "var(--app-border)",
-              }}
-              title="AI features are available when running the docs app locally"
-            >
-              AI · local dev
-            </a>
-          )}
+            <ChevronLeft size={16} strokeWidth={2} />
+          </a>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-[14px] font-semibold" style={{ color: "var(--app-text)" }}>
+                Scrivr Playground
+              </span>
+            </div>
+            <div className="hidden items-center gap-1.5 text-[11px] md:flex" style={{ color: "var(--app-text-muted)" }}>
+              <FileText size={12} strokeWidth={2} />
+              <span className="truncate">Document editor playground</span>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center justify-center shrink-0">
-          <span
-            className="text-[12px] tabular-nums tracking-wide"
-            style={{ color: "var(--app-text-muted)" }}
-          >
-            {pageInfo.current} / {pageInfo.total}
-          </span>
+        <div className="hidden shrink-0 items-center lg:flex">
+          <StatusPill icon={<FileText size={12} strokeWidth={2} />}>
+            Page {pageInfo.current} of {pageInfo.total}
+          </StatusPill>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-1 justify-end min-w-0 hidden md:flex">
-          <button
-            type="button"
-            onClick={toggleDark}
-            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-            aria-label="Toggle theme"
-            className="flex items-center justify-center w-7 h-7 rounded-md border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] hover:opacity-80 transition-opacity shrink-0"
-          >
-            {/* Inline SVG so we don't pull in an icon library. The crescent
-                shows in light mode (toggle target = dark); the sun shows in
-                dark mode. */}
-            {isDark ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </svg>
-            )}
-          </button>
+        <div className="flex min-w-0 flex-[1.3] items-center justify-end gap-1.5">
           {USE_COLLAB && identity && (
-            <>
+            <div className="hidden min-w-0 items-center gap-1.5 md:flex">
               <span
-                className="w-[7px] h-[7px] rounded-full shrink-0"
+                className="h-2 w-2 shrink-0 rounded-full"
                 style={{ background: identity.userColor }}
               />
               <span
-                className="text-[12px] font-medium truncate"
+                className="truncate text-[12px] font-medium"
                 style={{ color: "var(--app-text)" }}
               >
                 {identity.userName}
               </span>
-              <span className="text-[12px]" style={{ color: "var(--app-text-faint)" }}>
-                ·
-              </span>
-              <span
-                className="text-[12px] truncate"
-                style={{ color: "var(--app-text-muted)" }}
-              >
-                {identity.room}
-              </span>
-            </>
+            </div>
           )}
+          {AI_ENABLED ? (
+            <StatusPill tone="accent" icon={<Sparkles size={12} strokeWidth={2} />}>AI</StatusPill>
+          ) : (
+            <a href="/docs/guides/ai-features" className="hidden no-underline lg:inline-flex">
+              <StatusPill>AI local</StatusPill>
+            </a>
+          )}
+          <ModeSwitcher editor={editor} />
+          <IconButton
+            onClick={toggleDark}
+            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            ariaLabel="Toggle theme"
+          >
+            {isDark ? <Sun size={15} strokeWidth={2} /> : <Moon size={15} strokeWidth={2} />}
+          </IconButton>
+          <IconButton
+            onClick={() => setSidebarOpen((open) => !open)}
+            title={sidebarOpen ? "Hide side panel" : "Show side panel"}
+            ariaLabel={sidebarOpen ? "Hide side panel" : "Show side panel"}
+            className="hidden md:inline-flex"
+          >
+            {sidebarOpen ? <PanelRightClose size={15} strokeWidth={2} /> : <PanelRightOpen size={15} strokeWidth={2} />}
+          </IconButton>
         </div>
       </header>
 
-      {/* ── Toolbar ── */}
       <div
-        className="flex items-stretch shrink-0 border-b"
+        className="flex shrink-0 items-stretch border-b"
         style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
       >
-        <div className="flex-1 overflow-x-auto">
+        <div className="min-w-0 flex-1 overflow-x-auto">
           <Toolbar
             items={editor?.toolbarItems ?? []}
             activeMarks={toolbar.activeMarks}
@@ -376,74 +334,144 @@ export function Playground() {
             editor={editor}
           />
         </div>
-        <div className="flex items-center px-3 border-l shrink-0" style={{ borderColor: "var(--app-border)" }}>
-          <ModeSwitcher editor={editor} />
+        <div className="flex shrink-0 items-center border-l px-2 md:hidden" style={{ borderColor: "var(--app-border)" }}>
+          <span className="text-[11px] tabular-nums" style={{ color: "var(--app-text-muted)" }}>
+            {pageInfo.current}/{pageInfo.total}
+          </span>
         </div>
       </div>
 
-      {/* ── Body ── */}
-      <div className="flex flex-1 overflow-hidden relative">
-        <main className="flex-1 overflow-auto p-1 md:p-4">
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 24, margin: "0 auto", width: "fit-content" }}>
-            <div style={{ position: "relative" }}>
+      <div className="relative flex flex-1 overflow-hidden">
+        <main className="min-w-0 flex-1 overflow-auto p-2 md:p-4">
+          <div className="mx-auto w-fit">
+            <div className="relative shrink-0" style={{ width: pageInfo.pageWidth }}>
               <Scrivr
                 editor={editor}
-                pageStyle={{ border: "1px solid var(--app-border)" }}
+                style={{ width: pageInfo.pageWidth }}
+                pageStyle={{
+                  border: "1px solid var(--scrivr-page-border)",
+                  background: "var(--scrivr-page-bg)",
+                  boxShadow: "none",
+                }}
               />
               <HeaderFooterRibbon editor={editor} />
             </div>
-            {AI_ENABLED && (
-              <AiSuggestionCardsPanel editor={editor} mode="tracked" />
-            )}
           </div>
         </main>
 
-        {/* ── Right sidebar — hidden on mobile ── */}
-        <div
-          className="hidden md:flex"
+        <aside
+          className={sidebarOpen ? "playground-sidebar hidden md:flex" : "hidden"}
           style={{
             flexDirection: "column",
-            width: 300,
+            width: 340,
             flexShrink: 0,
             overflow: "hidden",
             borderLeft: "1px solid var(--app-border)",
             background: "var(--app-surface)",
           }}
         >
+          <div
+            className="shrink-0 border-b p-3"
+            style={{
+              borderColor: "var(--app-border)",
+              background: "linear-gradient(180deg, var(--app-surface), var(--app-surface-2))",
+            }}
+          >
+            <div
+              className="grid grid-cols-2 gap-1 rounded-lg border p-1"
+              style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
+            >
+              {(AI_ENABLED ? (["ai", "changes"] as SidebarTab[]) : (["changes"] as SidebarTab[])).map((tab) => {
+                const selected = sidebarTab === tab || !AI_ENABLED;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setSidebarTab(tab)}
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border text-[12px] font-semibold transition-colors"
+                    style={{
+                      background: selected ? "var(--app-accent-soft-bg)" : "transparent",
+                      borderColor: selected ? "var(--app-accent-soft-border)" : "transparent",
+                      color: selected ? "var(--app-accent-soft-fg)" : "var(--app-text-muted)",
+                    }}
+                  >
+                    {tab === "ai" ? <MessageSquareText size={14} strokeWidth={2} /> : <History size={14} strokeWidth={2} />}
+                    {tab === "ai" ? "Assistant" : "Changes"}
+                    {tab === "changes" && trackPanel.changes.length > 0 && (
+                      <span
+                        className="ml-0.5 rounded-full px-1.5 text-[10px] leading-4"
+                        style={{
+                          background: selected ? "var(--app-surface)" : "var(--app-surface-2)",
+                          color: selected ? "var(--app-accent-soft-fg)" : "var(--app-text-muted)",
+                        }}
+                      >
+                        {trackPanel.changes.length}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-semibold" style={{ color: "var(--app-text)" }}>
+                    {sidebarTab === "ai" && AI_ENABLED ? "AI Assistant" : "Review Changes"}
+                  </span>
+                  {sidebarTab === "ai" && AI_ENABLED && (
+                    <span
+                      className="rounded-full border px-2 py-px text-[10px] font-semibold"
+                      style={{
+                        background: "var(--app-accent-soft-bg)",
+                        borderColor: "var(--app-accent-soft-border)",
+                        color: "var(--app-accent-soft-fg)",
+                      }}
+                    >
+                      Claude
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 text-[11px] leading-snug" style={{ color: "var(--app-text-muted)" }}>
+                  {sidebarTab === "ai" && AI_ENABLED
+                    ? "Ask with document context or edit selected text."
+                    : trackPanel.isEmpty
+                      ? "No pending tracked changes."
+                      : `${trackPanel.changes.length} pending change${trackPanel.changes.length === 1 ? "" : "s"} to review.`}
+                </div>
+              </div>
+              {sidebarTab === "changes" && !trackPanel.isEmpty && (
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    onClick={trackPanel.rejectAll}
+                    className="h-7 rounded-md border px-2 text-[11px] font-medium"
+                    style={{
+                      background: "var(--app-surface)",
+                      borderColor: "var(--app-border)",
+                      color: "var(--app-text-muted)",
+                    }}
+                  >
+                    Reject
+                  </button>
+                  <button
+                    type="button"
+                    onClick={trackPanel.acceptAll}
+                    className="h-7 rounded-md border px-2 text-[11px] font-semibold"
+                    style={{
+                      background: "var(--app-accent)",
+                      borderColor: "var(--app-accent)",
+                      color: "var(--app-accent-fg)",
+                    }}
+                  >
+                    Accept
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
           {AI_ENABLED ? (
             <>
-              {/* Tab bar — only when AI is available. In prod the AI tab is
-                  dropped entirely and the sidebar shows Track Changes only. */}
-              <div
-                style={{
-                  display: "flex",
-                  borderBottom: "1px solid var(--app-border)",
-                  flexShrink: 0,
-                }}
-              >
-                {(["ai", "changes"] as SidebarTab[]).map((tab) => {
-                  const selected = sidebarTab === tab;
-                  return (
-                    <button
-                      key={tab}
-                      onClick={() => setSidebarTab(tab)}
-                      style={{
-                        letterSpacing: "-0.01em",
-                        color: selected ? "var(--app-accent)" : "var(--app-text-muted)",
-                        borderBottom: selected
-                          ? "2px solid var(--app-accent)"
-                          : "2px solid transparent",
-                        fontWeight: selected ? 600 : 400,
-                      }}
-                      className="flex-1 h-9 border-none bg-transparent cursor-pointer text-xs transition-[color,border-color] duration-150"
-                    >
-                      {tab === "ai" ? "AI Assistant" : "Track Changes"}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Panel content — both mounted, only one visible */}
               <div
                 style={{
                   flex: 1,
@@ -452,7 +480,9 @@ export function Playground() {
                   flexDirection: "column",
                 }}
               >
-                <ChatPanel editor={editor} hideBorder />
+                <div className="playground-chat-shell flex min-h-0 flex-1 flex-col">
+                  <ChatPanel editor={editor} hideBorder />
+                </div>
               </div>
               <div
                 style={{
@@ -462,40 +492,22 @@ export function Playground() {
                   flexDirection: "column",
                 }}
               >
-                <TrackChangesPanel editor={editor} />
+                <TrackChangesPanel editor={editor} className="playground-track-panel" />
               </div>
             </>
           ) : (
-            <>
-              {/* Prod mode: no tab bar, just Track Changes full-height. */}
-              <div
-                style={{
-                  height: 36,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderBottom: "1px solid var(--app-border)",
-                  flexShrink: 0,
-                  letterSpacing: "-0.01em",
-                  color: "var(--app-accent)",
-                }}
-                className="text-xs font-semibold"
-              >
-                Track Changes
-              </div>
-              <div
-                style={{
-                  flex: 1,
-                  overflow: "hidden",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                <TrackChangesPanel editor={editor} />
-              </div>
-            </>
+            <div
+              style={{
+                flex: 1,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <TrackChangesPanel editor={editor} className="playground-track-panel" />
+            </div>
           )}
-        </div>
+        </aside>
 
         {USE_COLLAB && loadingState === "syncing" && (
           <div
@@ -555,5 +567,69 @@ function LoadingSpinner() {
         strokeLinecap="round"
       />
     </svg>
+  );
+}
+
+function IconButton({
+  children,
+  onClick,
+  title,
+  ariaLabel,
+  className = "",
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  title: string;
+  ariaLabel: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={ariaLabel}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors ${className}`}
+      style={{
+        background: "var(--app-surface)",
+        borderColor: "var(--app-border)",
+        color: "var(--app-text-muted)",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--app-surface-hover)";
+        e.currentTarget.style.color = "var(--app-text)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "var(--app-surface)";
+        e.currentTarget.style.color = "var(--app-text-muted)";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StatusPill({
+  children,
+  icon,
+  tone = "neutral",
+}: {
+  children: ReactNode;
+  icon?: ReactNode;
+  tone?: "neutral" | "accent";
+}) {
+  const accent = tone === "accent";
+  return (
+    <span
+      className="inline-flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium"
+      style={{
+        background: accent ? "var(--app-accent-soft-bg)" : "var(--app-surface-2)",
+        borderColor: accent ? "var(--app-accent-soft-border)" : "var(--app-border)",
+        color: accent ? "var(--app-accent-soft-fg)" : "var(--app-text-muted)",
+      }}
+    >
+      {icon}
+      {children}
+    </span>
   );
 }

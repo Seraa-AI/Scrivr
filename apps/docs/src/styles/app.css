@@ -6,46 +6,81 @@
 :root {
 	--fd-layout-width: 100%;
 
-	/* ── Scrivr canvas theme tokens ────────────────────────────────────────
-	 * These drive both DOM chrome and canvas paint. The Editor's
-	 * MutationObserver auto-refreshes the canvas when the `dark` class flips
-	 * on <html> (set by next-themes via fumadocs RootProvider). Toggling the
-	 * theme button repaints every page without an explicit setTheme call.
-	 * ───────────────────────────────────────────────────────────────────── */
-	--scrivr-page-bg: #ffffff;
-	--scrivr-page-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-	--scrivr-text: #1e293b;            /* slate-800 */
-	--scrivr-link: #2563eb;            /* blue-600 */
-	--scrivr-cursor: #1e293b;
-	--scrivr-selection: rgba(59, 130, 246, 0.25);
-	--scrivr-img-placeholder-bg: #f1f5f9;
-	--scrivr-img-placeholder-border: #cbd5e1;
-	--scrivr-img-placeholder-text: #64748b;
-	--scrivr-list-marker: #1e293b;
-	--scrivr-hr: #cbd5e1;
-	--scrivr-resize-handle: #3b82f6;
+	/* ── Unified Scrivr/Fumadocs theme tokens ───────────────────────────────
+	 * Canvas editor UI should feel like a quiet document workspace: neutral
+	 * chrome, soft paper, and one restrained blue-violet accent. Fumadocs,
+	 * Playground DOM chrome, @scrivr/react menus, and canvas paint all map
+	 * back to this layer so light/dark mode stays coherent. */
+	--scrivr-app-bg: #f3f5f7;
+	--scrivr-app-surface: #fbfcfd;
+	--scrivr-app-surface-2: #eef1f4;
+	--scrivr-app-surface-hover: #e5e9ee;
+	--scrivr-app-border: #d7dde5;
+	--scrivr-app-border-strong: #b9c3cf;
+	--scrivr-app-text: #172033;
+	--scrivr-app-text-muted: #5e6a7d;
+	--scrivr-app-text-faint: #9aa5b4;
+	--scrivr-app-accent: #4f6df5;
+	--scrivr-app-accent-hover: #3f5be0;
+	--scrivr-app-accent-fg: #ffffff;
+	--scrivr-app-accent-soft-bg: #e9eeff;
+	--scrivr-app-accent-soft-fg: #3048b8;
+	--scrivr-app-accent-soft-border: #bdc9ff;
 
-	/* App-shell tokens (header, toolbar, sidebar, panels)
-	 * Two-surface model: --app-surface for primary chrome (header, sidebar
-	 * panels), --app-surface-2 for nested surfaces (inputs, code blocks,
-	 * AI assistant message bubbles). */
-	--app-bg: #f7f8fa;
-	--app-surface: #ffffff;
-	--app-surface-2: #f9fafb;       /* gray-50 — nested cards / inputs */
-	--app-surface-hover: #f3f4f6;   /* gray-100 — button hover */
-	--app-border: #e8eaed;
-	--app-border-strong: #d1d5db;
-	--app-text: #111827;             /* gray-900 */
-	--app-text-muted: #4b5563;       /* gray-600 */
-	--app-text-faint: #9ca3af;       /* gray-400 — placeholder, dim labels */
+	--scrivr-paper-bg: #fcfbf7;
+	--scrivr-paper-border: #d5d8dd;
+	--scrivr-paper-text: #20283a;
+	--scrivr-paper-muted: #667085;
 
-	/* Accent (indigo) — used for active states, links, AI chat pill, send btn. */
-	--app-accent: #6366f1;            /* indigo-500 */
-	--app-accent-hover: #4f46e5;      /* indigo-600 */
-	--app-accent-fg: #ffffff;          /* text on solid accent */
-	--app-accent-soft-bg: #eef2ff;     /* indigo-50 — soft active bg */
-	--app-accent-soft-fg: #4338ca;     /* indigo-700 — text on soft */
-	--app-accent-soft-border: #c7d2fe; /* indigo-200 */
+	/* Canvas paint tokens */
+	--scrivr-page-bg: var(--scrivr-paper-bg);
+	--scrivr-page-border: var(--scrivr-paper-border);
+	--scrivr-page-shadow: none;
+	--scrivr-text: var(--scrivr-paper-text);
+	--scrivr-link: #285bd8;
+	--scrivr-cursor: var(--scrivr-paper-text);
+	--scrivr-selection: rgba(79, 109, 245, 0.22);
+	--scrivr-img-placeholder-bg: #eef1f4;
+	--scrivr-img-placeholder-border: #c7ced8;
+	--scrivr-img-placeholder-text: var(--scrivr-paper-muted);
+	--scrivr-list-marker: var(--scrivr-paper-text);
+	--scrivr-hr: #ccd2dc;
+	--scrivr-resize-handle: var(--scrivr-app-accent);
+
+	/* Playground/app chrome aliases */
+	--app-bg: var(--scrivr-app-bg);
+	--app-surface: var(--scrivr-app-surface);
+	--app-surface-2: var(--scrivr-app-surface-2);
+	--app-surface-hover: var(--scrivr-app-surface-hover);
+	--app-border: var(--scrivr-app-border);
+	--app-border-strong: var(--scrivr-app-border-strong);
+	--app-text: var(--scrivr-app-text);
+	--app-text-muted: var(--scrivr-app-text-muted);
+	--app-text-faint: var(--scrivr-app-text-faint);
+	--app-accent: var(--scrivr-app-accent);
+	--app-accent-hover: var(--scrivr-app-accent-hover);
+	--app-accent-fg: var(--scrivr-app-accent-fg);
+	--app-accent-soft-bg: var(--scrivr-app-accent-soft-bg);
+	--app-accent-soft-fg: var(--scrivr-app-accent-soft-fg);
+	--app-accent-soft-border: var(--scrivr-app-accent-soft-border);
+
+	/* Fumadocs UI theme mapping */
+	--color-fd-background: var(--scrivr-app-bg);
+	--color-fd-foreground: var(--scrivr-app-text);
+	--color-fd-card: var(--scrivr-app-surface);
+	--color-fd-card-foreground: var(--scrivr-app-text);
+	--color-fd-popover: var(--scrivr-app-surface);
+	--color-fd-popover-foreground: var(--scrivr-app-text);
+	--color-fd-muted: var(--scrivr-app-surface-2);
+	--color-fd-muted-foreground: var(--scrivr-app-text-muted);
+	--color-fd-secondary: var(--scrivr-app-surface-2);
+	--color-fd-secondary-foreground: var(--scrivr-app-text);
+	--color-fd-accent: var(--scrivr-app-accent-soft-bg);
+	--color-fd-accent-foreground: var(--scrivr-app-accent-soft-fg);
+	--color-fd-border: color-mix(in srgb, var(--scrivr-app-border) 80%, transparent);
+	--color-fd-primary: var(--scrivr-app-accent);
+	--color-fd-primary-foreground: var(--scrivr-app-accent-fg);
+	--color-fd-ring: var(--scrivr-app-accent);
 
 	--scrivr-react-surface: var(--app-surface);
 	--scrivr-react-surface-translucent: color-mix(in srgb, var(--app-surface) 95%, transparent);
@@ -60,36 +95,56 @@
 }
 
 .dark {
-	/* Canvas tokens — dark variant */
-	--scrivr-page-bg: #1f1f1f;
-	--scrivr-page-shadow: 0 4px 32px rgba(0, 0, 0, 0.6);
-	--scrivr-text: #e5e7eb;            /* gray-200 */
-	--scrivr-link: #60a5fa;            /* blue-400 — readable on dark */
-	--scrivr-cursor: #e5e7eb;
-	--scrivr-selection: rgba(96, 165, 250, 0.35);
-	--scrivr-img-placeholder-bg: #2a2a2a;
-	--scrivr-img-placeholder-border: #3f3f46;
-	--scrivr-img-placeholder-text: #9ca3af;
-	--scrivr-list-marker: #e5e7eb;
-	--scrivr-hr: #3f3f46;
-	--scrivr-resize-handle: #60a5fa;
+	--scrivr-app-bg: #101216;
+	--scrivr-app-surface: #171a20;
+	--scrivr-app-surface-2: #20242c;
+	--scrivr-app-surface-hover: #2b303a;
+	--scrivr-app-border: #2d3440;
+	--scrivr-app-border-strong: #46505e;
+	--scrivr-app-text: #e7ebf2;
+	--scrivr-app-text-muted: #a8b1c0;
+	--scrivr-app-text-faint: #727c8c;
+	--scrivr-app-accent: #8ea2ff;
+	--scrivr-app-accent-hover: #b4c0ff;
+	--scrivr-app-accent-fg: #101216;
+	--scrivr-app-accent-soft-bg: rgba(142, 162, 255, 0.16);
+	--scrivr-app-accent-soft-fg: #d2d9ff;
+	--scrivr-app-accent-soft-border: rgba(142, 162, 255, 0.38);
 
-	/* App-shell tokens — dark */
-	--app-bg: #0f0f10;
-	--app-surface: #18181b;             /* zinc-900 */
-	--app-surface-2: #27272a;           /* zinc-800 */
-	--app-surface-hover: #3f3f46;       /* zinc-700 */
-	--app-border: #2a2a2e;
-	--app-border-strong: #3f3f46;
-	--app-text: #e5e7eb;                /* gray-200 */
-	--app-text-muted: #a1a1aa;          /* zinc-400 */
-	--app-text-faint: #71717a;          /* zinc-500 */
+	--scrivr-paper-bg: #202329;
+	--scrivr-paper-border: #3a404a;
+	--scrivr-paper-text: #edf0f6;
+	--scrivr-paper-muted: #aab3c0;
 
-	/* Accent — slightly lighter indigo for dark contrast */
-	--app-accent: #818cf8;               /* indigo-400 */
-	--app-accent-hover: #a5b4fc;         /* indigo-300 */
-	--app-accent-fg: #0f0f10;             /* dark text on bright accent */
-	--app-accent-soft-bg: rgba(129, 140, 248, 0.16);
-	--app-accent-soft-fg: #c7d2fe;        /* indigo-200 */
-	--app-accent-soft-border: rgba(129, 140, 248, 0.4);
+	--scrivr-link: #9fb8ff;
+	--scrivr-selection: rgba(142, 162, 255, 0.32);
+	--scrivr-img-placeholder-bg: #252a32;
+	--scrivr-img-placeholder-border: #3a404a;
+	--scrivr-hr: #414855;
+}
+
+.dark #nd-sidebar {
+	--color-fd-muted: var(--scrivr-app-surface-2);
+	--color-fd-secondary: var(--scrivr-app-surface-2);
+	--color-fd-muted-foreground: var(--scrivr-app-text-muted);
+}
+
+.playground-chat-shell > aside > div:first-child,
+.playground-track-panel > div:first-child {
+	display: none !important;
+}
+
+.playground-track-panel {
+	width: 100% !important;
+	padding: 14px 14px 16px;
+	box-sizing: border-box;
+	background: var(--app-surface);
+}
+
+.playground-track-panel > div:nth-child(2) {
+	padding-top: 0 !important;
+}
+
+.playground-sidebar textarea {
+	border-radius: 10px;
 }
