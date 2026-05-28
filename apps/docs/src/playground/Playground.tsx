@@ -28,6 +28,7 @@ import { ModeSwitcher } from "./ModeSwitcher";
 import {
   TrackChangesPopover,
   TrackChangesPanel,
+  AiSuggestionCardsPanel,
   useTrackChangesPanel,
 } from "@scrivr/react";
 import { ChatPanel } from "./ChatPanel";
@@ -342,8 +343,8 @@ export function Playground() {
       </div>
 
       <div className="relative flex flex-1 overflow-hidden">
-        <main className="min-w-0 flex-1 overflow-auto p-2 md:p-4">
-          <div className="mx-auto w-fit">
+        <main className="flex min-w-0 flex-1 items-start gap-4 overflow-auto p-2 md:gap-6 md:p-4">
+          <div className="flex min-w-max flex-1 justify-center">
             <div className="relative shrink-0" style={{ width: pageInfo.pageWidth }}>
               <Scrivr
                 editor={editor}
@@ -357,6 +358,18 @@ export function Playground() {
               <HeaderFooterRibbon editor={editor} />
             </div>
           </div>
+          {AI_ENABLED && (
+            <AiSuggestionCardsPanel
+              editor={editor}
+              mode="tracked"
+              styles={{
+                panel: {
+                  top: 16,
+                  marginRight: 4,
+                },
+              }}
+            />
+          )}
         </main>
 
         <aside
