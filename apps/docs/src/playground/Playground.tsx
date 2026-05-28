@@ -343,41 +343,45 @@ export function Playground() {
       </div>
 
       <div className="relative flex flex-1 overflow-hidden">
-        <main className="flex min-w-0 flex-1 items-start gap-4 overflow-auto p-2 md:gap-6 md:p-4">
-          <div className="flex min-w-max flex-1 justify-center">
-            <div className="relative shrink-0" style={{ width: pageInfo.pageWidth }}>
-              <Scrivr
-                editor={editor}
-                style={{ width: pageInfo.pageWidth }}
-                pageStyle={{
-                  border: "1px solid var(--scrivr-page-border)",
-                  background: "var(--scrivr-page-bg)",
-                  boxShadow: "none",
-                }}
-              />
-              <HeaderFooterRibbon editor={editor} />
+        <main className="flex min-w-0 flex-1 overflow-hidden">
+          <div className="min-w-0 flex-1 overflow-auto p-2 md:p-4">
+            <div className="flex min-w-max justify-center">
+              <div className="relative shrink-0" style={{ width: pageInfo.pageWidth }}>
+                <Scrivr
+                  editor={editor}
+                  style={{ width: pageInfo.pageWidth }}
+                  pageStyle={{
+                    border: "1px solid var(--scrivr-page-border)",
+                    background: "var(--scrivr-page-bg)",
+                    boxShadow: "none",
+                  }}
+                />
+                <HeaderFooterRibbon editor={editor} />
+              </div>
             </div>
           </div>
           {AI_ENABLED && (
-            <AiSuggestionCardsPanel
-              editor={editor}
-              mode="tracked"
-              className="playground-ai-suggestions"
-              classNames={{
-                card: "playground-ai-suggestion-card",
-                header: "playground-ai-suggestion-header",
-                badge: "playground-ai-suggestion-badge",
-                diff: "playground-ai-suggestion-diff",
-                actions: "playground-ai-suggestion-actions",
-              }}
-              styles={{
-                panel: {
-                  top: 16,
-                  marginRight: 4,
-                  gap: 10,
-                },
-              }}
-            />
+            <div className="playground-ai-suggestions-scroll hidden shrink-0 overflow-y-auto overflow-x-hidden p-3 md:block">
+              <AiSuggestionCardsPanel
+                editor={editor}
+                mode="tracked"
+                className="playground-ai-suggestions"
+                classNames={{
+                  card: "playground-ai-suggestion-card",
+                  header: "playground-ai-suggestion-header",
+                  badge: "playground-ai-suggestion-badge",
+                  diff: "playground-ai-suggestion-diff",
+                  actions: "playground-ai-suggestion-actions",
+                }}
+                styles={{
+                  panel: {
+                    position: "static",
+                    top: "auto",
+                    gap: 10,
+                  },
+                }}
+              />
+            </div>
           )}
         </main>
 

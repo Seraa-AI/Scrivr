@@ -153,6 +153,13 @@
 	color: var(--app-text);
 }
 
+.playground-ai-suggestions-scroll {
+	width: 292px;
+	border-left: 1px solid var(--app-border);
+	background: color-mix(in srgb, var(--app-bg) 72%, var(--app-surface));
+	scrollbar-gutter: stable;
+}
+
 .playground-ai-suggestions > div:first-child {
 	border: 1px solid var(--app-border);
 	border-radius: 8px;
