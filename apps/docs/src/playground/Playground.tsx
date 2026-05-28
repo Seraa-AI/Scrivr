@@ -30,6 +30,7 @@ import {
   TrackChangesPanel,
   AiSuggestionCardsPanel,
   useTrackChangesPanel,
+  useAiSuggestionCards,
 } from "@scrivr/react";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent } from "./demoContent";
@@ -240,6 +241,7 @@ export function Playground() {
     equalityFn: Object.is,
   });
   const trackPanel = useTrackChangesPanel(editor);
+  const aiSuggestions = useAiSuggestionCards(editor);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden font-sans" style={{ background: "var(--app-bg)", color: "var(--app-text)" }}>
@@ -360,7 +362,7 @@ export function Playground() {
               </div>
             </div>
           </div>
-          {AI_ENABLED && (
+          {AI_ENABLED && aiSuggestions.cards.length > 0 && (
             <div className="playground-ai-suggestions-scroll hidden shrink-0 overflow-y-auto overflow-x-hidden p-3 md:block">
               <AiSuggestionCardsPanel
                 editor={editor}
