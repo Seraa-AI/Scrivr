@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/docx",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "DOCX import + export for Scrivr documents — semantic round-trip to WordprocessingML",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",

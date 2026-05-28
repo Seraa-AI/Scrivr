@@ -1,5 +1,533 @@
 # @scrivr/export
 
+## 1.0.11
+
+### Patch Changes
+
+- ec550ce: `@scrivr/docx` — lock the DOCX export base contract AND ship the
+  semantic-core default handlers. Replaces the type-only skeleton with a
+  real, deterministic pipeline that produces a Word-openable `.docx` out of
+  the box. Built so feature PRs (lists, tables, images, hyperlinks,
+  track-changes) can add handlers without renegotiating the contract.
+
+  The default handlers cover the StarterKit semantic primitives — paragraph,
+  heading (with auto-registered Heading1-6 paragraph styles), hardBreak,
+  pageBreak, horizontalRule, codeBlock, and the basic marks (bold, italic,
+  underline, strikethrough, code, color, highlight, fontSize, fontFamily).
+  Without them an unconfigured editor would export an empty body that Word
+  rejects, so they're part of the base, not deferred.
+
+  A new `DocxExport` extension contributes `editor.commands.exportDocx()` +
+  an "⬇ DOCX" toolbar button, mirroring the `PdfExport` pattern.
+
+  The base PR ships the pieces that are expensive to change later:
+
+  **Contract (locked)**
+
+  - `DocxNodeHandler(node, children, ctx, meta)` — walker owns recursion and
+    passes already-composed child XML in; handlers wrap or position it.
+  - `DocxMarkHandler(props, mark, ctx) → DocxRunProps` — marks accumulate
+    into a run-property bag, never wrap XML, so `bold(italic(...))` cannot
+    produce nested `<w:r>` (invalid OOXML).
+  - `DocxRunProps` reserves `trackedInsert`/`trackedDelete` fields. The
+    walker intentionally does NOT emit `<w:ins>`/`<w:del>` — track-changes
+    XML lands in a dedicated feature PR with author/date/comment-range
+    semantics.
+  - `DocxExportResult { bytes, diagnostics }` from `exportDocx()` — DOCX
+    is inherently lossy, so the API surfaces fidelity warnings from day
+    one. `exportDocxBytes()` is the ergonomic alias.
+  - `DocxExportError` carries `diagnostics` so fatal failures preserve the
+    warnings that preceded them.
+  - `options.unsupported: "drop" | "placeholder" | "throw"` and
+    `options.fidelity: "strict" | "compatible" | "best-effort"` — value
+    types locked even though only `"drop"` and `"compatible"` are honored
+    by the base walker (feature PRs branch on these without touching the
+    contract).
+
+  **Pipeline**
+
+  - `collect → createContext → onBeforeExport → walk → onBuildTreeComplete
+→ finalize / default packager → zip`.
+  - Handler layering: built-in defaults → extension `addExports().docx`
+    contributions → per-call `options.overrides`.
+  - `walkDocument` skips the implicit root, returns body XML; default
+    packager wraps it in `<w:document>/<w:body>` plus a US-Letter sectPr.
+  - `createDocxContext` exposes producer registries (`styles.getOrCreate`,
+    `numbering.getOrCreate`, `rels.addImage/addHyperlink`, `media.add`,
+    `diagnostics.warn/error`, `shared.getOrInit`) backed by an internal
+    `DocxBuildState` the OPC builder walks.
+  - `buildDocxPackage` emits all required OPC parts:
+    `[Content_Types].xml`, `_rels/.rels`, `word/document.xml`,
+    `word/_rels/document.xml.rels`, `word/styles.xml`, `word/numbering.xml`,
+    `word/settings.xml`, plus media parts and extension content-type
+    defaults per unique extension.
+  - Internal document rels use stable named IDs (`rIdStyles`,
+    `rIdNumbering`, `rIdSettings`) so they never collide with user-allocated
+    `rId{n}` IDs.
+
+  **Serializer**
+
+  - `xml(name, attrs?, children?)` builder + `serializeXml(root, opts?)`
+    with alphabetical attribute ordering for golden-test stability and
+    proper XML escaping for both text and attribute values.
+  - `xml:space="preserve"` is automatically applied to text runs with edge
+    whitespace.
+
+  **Mark merging**
+
+  - `<w:rPr>` children emitted in OOXML spec order (`rStyle`, `rFonts`,
+    `b`, `i`, `strike`, `color`, `sz`, `highlight`, `u`).
+  - Run-prop conversion: `fontSize` (px) → half-points (×1.5), `color`
+    strips leading `#`, `code` mark sets Courier New `rFonts` when no
+    explicit `fontFamily`.
+
+  **ZIP**
+
+  - `fflate` (`zipSync`) — small (~8KB), zero deps, browser + Node compatible.
+  - `mtime` pinned to the ZIP epoch so identical input produces identical
+    bytes (deterministic for content-addressable storage and golden tests).
+
+  **Word compatibility**
+
+  - The walker's "drop" policy now wraps orphan inline children of a
+    dropped textblock in `<w:p>` — bare `<w:r>` as a direct child of
+    `<w:body>` is invalid OOXML and Word refuses to open the file.
+  - `buildDocumentRoot` injects an empty `<w:p/>` when the walked body
+    is empty (same reason — Word rejects empty bodies).
+
+  **Tests**
+
+  - 51 unit tests across `xml`, `walker`, `package`, `defaults`,
+    `exportDocx`. Walker tests drive a real `ServerEditor` + StarterKit
+    schema (no fake nodes / fixtures) — exercises text emission,
+    whitespace preservation, mark merging into a single run, missing-mark
+    warnings, all three unsupported policies, font-size unit conversion,
+    and the reserved track-changes fields (verifies no `<w:ins>`/`<w:del>`
+    emission yet).
+  - End-to-end test exports a `ServerEditor` doc, unzips the bytes, and
+    asserts every required OPC part is present and well-formed.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- ec550ce: DOCX image export — `image` node now exports to `<w:drawing>` with all five
+  Scrivr wrap modes mapped to the corresponding OOXML wrap elements. Embedded
+  as binary parts under `word/media/`, referenced by document-level rels.
+
+  **Where it lives**
+
+  - `packages/core/src/extensions/built-in/Image.docx.ts` — the extension owns
+    its DOCX export shape. Uses LOCAL structural type stand-ins (no runtime
+    imports of `@scrivr/docx`) so the dependency direction stays
+    one-way (docx → core). The integration test in `@scrivr/docx`
+    asserts the local types stay structurally compatible with `DocxContext`.
+  - Image extension's `addExports()` returns `{ docx: imageDocxContribution }`.
+    StarterKit got a new `addExports()` that aggregates sub-extension
+    contributions (format-aware merge: `nodes`/`marks` combine, lifecycle
+    hooks chain, `onFinalize` is last-writer-wins) — Image's docx
+    contribution now propagates through StarterKit to the export pipeline.
+
+  **Wrap-mode mapping (Scrivr → OOXML)**
+  | Scrivr `wrapMode` | OOXML wrapper | Wrap element |
+  |-------------------|---------------------|-------------------------------|
+  | `inline` | `<wp:inline>` | (atom inside `<w:r>`) |
+  | `square` | `<wp:anchor>` | `<wp:wrapSquare wrapText=…/>` |
+  | `top-bottom` | `<wp:anchor>` | `<wp:wrapTopAndBottom/>` |
+  | `behind` | `<wp:anchor behindDoc="1">` | `<wp:wrapNone/>` |
+  | `front` | `<wp:anchor behindDoc="0">` | `<wp:wrapNone/>` |
+
+  **Pipeline**
+
+  - `onBeforeExport` walks the doc once, collects unique `image.src` values,
+    fetches the bytes (data URLs decoded synchronously; http(s) via `fetch`),
+    sniffs MIME from magic bytes (PNG / JPEG / GIF / WebP — fallback PNG),
+    registers media + rel via `ctx.media.add` / `ctx.rels.addImage`, and
+    stores `Map<src, ImageRecord>` under `ctx.shared["docx:images"]`.
+  - Sync `image` node handler reads the precomputed record, picks
+    `<wp:inline>` for `wrapMode: "inline"` and `<wp:anchor>` for the four
+    float modes, with the right wrap element per mode.
+
+  **Unit + position**
+
+  - `pxToEmu(px)` = `round(px × 9525)` (1px @ 96 DPI = 9525 EMU).
+  - Anchored position: `xAlign: left | center | right` → `<wp:align>`;
+    literal `x` (px) → `<wp:posOffset>` in EMU relative to column; `yOffset`
+    (px) → `<wp:posOffset>` relative to paragraph; `margin` (px) → all four
+    `dist*` attrs.
+
+  **Base contract tweak**
+
+  - `DocxContext.editor: IBaseEditor` — lifecycle hooks like
+    `onBeforeExport` need the doc to walk it for resource precomputation.
+    Previously hooks only received `ctx` with no way back to the source.
+
+  **Tests**
+
+  - 8 integration tests across all 5 wrap modes, dedup by src,
+    fetch-failure diagnostic, EMU conversion sanity. Mocked `fetch`
+    serves a real 1×1 PNG so the bytes survive ZIP encode/decode.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 19b2879: `@scrivr/docx` — add DOCX import. The package now round-trips: import a
+  `.docx` to a ProseMirror `Node` against the editor's schema, edit, and
+  re-export with semantic fidelity for everything the playground exercises.
+
+  Same architectural shape as the export side:
+
+  **Contract types in core**
+
+  - `@scrivr/core/exports/docx.ts` is the single source of truth for both
+    directions. New: `DocxImports` (blocks/paragraphStyles/marks/inlines +
+    lifecycle hooks), `DocxImportContext` (mirror of `DocxContext` with
+    `resolveImage` / `resolveHyperlink` instead of `addImage` / `addHyperlink`),
+    `DocxBlock` / `DocxInline` / `DocxMark` for the normalized intermediate
+    model the parser emits.
+  - `addImports()` extension lane added to `Extension`, collected by the
+    manager alongside `addExports()`.
+
+  **Two-stage pipeline**
+
+  - **Stage 1 — parser** (`packages/docx/src/import/parser.ts`). OOXML-pure;
+    no ProseMirror awareness. Emits `DocxImportModel { blocks: DocxBlock[] }`.
+    Tolerates real Word output via allowlists for ignorable metadata
+    (bookmarks, `proofErr`, comment markers, `smartTag`, permission ranges).
+    Hyperlinks survive as `link` marks carrying relId/anchor/history;
+    inline `<w:br w:type="page"/>` splits the surrounding paragraph;
+    toggle rPr (b/i/u/strike/...) is normalized via `parseOnOff` so
+    `<w:b w:val="false"/>` drops the mark instead of reaching Stage 2.
+    Images deep-look for `<a:blip>` to tolerate non-standard drawingML
+    nesting and preserve `relativeFrom` on positionH/positionV.
+  - **List reconstruction** (between stages) — flat `numPr` paragraphs →
+    nested `bulletList > listItem > paragraph` trees. Handles mixed nested
+    lists (bullet outer, ordered inner): nested paragraphs with a different
+    numId at `ilvl > 0` stay in the same run instead of splitting into
+    separate top-level lists.
+  - **Stage 2 — transform** (`transform.ts`). Dispatches via extension
+    contributions plus per-call overrides. Three dispatch lanes mirror
+    export: `blocks[block.type]`, `paragraphStyles[styleId]`,
+    `marks[mark.kind]`, plus a new `inlines[inline.type]` lane for images.
+    Handlers return real PM `Node` / `Mark` instances — no invented JSON
+    shape to drift from ProseMirror.
+
+  **Built-in import handlers (extension owns its import)**
+
+  - Heading — paragraphStyles dispatch for `Heading1`/`Heading2`/`Heading3`.
+  - Marks: bold, italic, underline, strikethrough, color, highlight
+    (named `val` and hex shading), fontSize (half-points → px),
+    fontFamily, link (relId → URL via `ctx.rels.resolveHyperlink`).
+  - Image — five wrap modes (`inline` / `square` / `topAndBottom` /
+    `behind` / `front`) with rel-resolved src.
+  - HorizontalRule — Stage 1 detects Word's empty-paragraph-with-bottom-
+    border convention and emits a `horizontalRule` block (matches the
+    export side's output shape).
+  - CodeBlock, PageBreak, Paragraph fallbacks live in the transform.
+
+  **Media materialization** (`media.ts`)
+
+  - `options.media`: `"data-url"` (default, base64 `data:` URL, works
+    everywhere) / `"object-url"` (`URL.createObjectURL(blob)`, browser-only)
+    / `"drop"` (emit no `src`, record a diagnostic — caller handles uploads).
+
+  **Unsupported policy honored on both sides**
+
+  - Parser emits `unsupported-docx-element` for any unmodeled body child
+    (tables, sdt, etc.) with an explicit ignorable allowlist for harmless
+    markup. Transform emits `unsupported-block` / `unsupported-mark` for
+    unknown kinds. `importDocx` escalates to `DocxImportError` post-pipeline
+    when `options.unsupported === "throw"`. Mirrors export-side semantics:
+    any content loss is fatal under `throw`, silent (but diagnosed) under
+    `drop`/`placeholder`.
+
+  **`DocxImport` extension** (`packages/docx/src/import/DocxImport.ts`)
+
+  - Toolbar button + file-picker flow. Opens a native `<input type="file">`,
+    runs `importDocx`, replaces the editor's doc via
+    `tr.replaceWith(0, doc.content.size, …)` — the same pattern the collab
+    YBinding uses for hard resets. Browser-only; server callers continue
+    to use `importDocx(editor, bytes)` directly.
+  - Playground wires the icon (Lucide `FileUp`) into the toolbar `ICON_MAP`
+    next to `⬇ DOCX` and registers the extension in both the collab and
+    standalone extension lists.
+
+  **Tests**
+
+  - 33 import tests in `import.test.ts`. Round-trips through
+    `exportDocxBytes`: build a known doc, serialize → bytes, parse bytes →
+    PM `Node`, assert structure. Covers all built-in marks, headings, code
+    blocks, page breaks, horizontal rule, bullet/ordered/nested/mixed-nested
+    lists, all five image wrap modes (inline + four anchored), drop policy,
+    extension dispatch.
+  - 4 dedicated tests for code-review fixes: HR round-trip, mixed-nested
+    list reconstruction, `unsupported-docx-element` diagnostic, `throw`
+    policy escalation.
+  - Full `@scrivr/docx` suite at 105 tests (export 72 + import 33).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 6f5fb5d: `@scrivr/docx` — replace the placeholder README with a proper one. Covers
+  installation, in-editor usage via the `DocxImport` / `DocxExport` extensions,
+  server-side usage via `importDocx` / `exportDocx` with `ServerEditor`, the
+  shared option dials (`unsupported`, `fidelity`, `media`), and how custom
+  extensions contribute their own DOCX handlers via `addImports` / `addExports`.
+
+  No code changes — the placeholder text was a leftover from when the package
+  was a type-only skeleton.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 8b3c741: `@scrivr/core` — new `editor.findExtension(name)` API and React
+  ribbon sizes itself from `HeaderFooter.options.activeEditingGap`
+  (no more parallel magic constant).
+
+  **New public API:**
+
+  ```ts
+  const ext = editor.findExtension("headerFooter");
+  if (ext) {
+    // ext.options is typed as `object` (the manager has no compile-time
+    // link from name → option shape); narrow with a runtime guard.
+  }
+  ```
+
+  Returns the registered `Extension` instance or `null`. Mirrors the
+  existing `ExtensionManager.findExtension(name)` it delegates to.
+  Useful for cross-package consumers (React adapter hooks, future
+  DevTools) that want to read another extension's configured options
+  without coupling to its presence.
+
+  **Ribbon now reads its size from the extension config:**
+
+  `useHeaderFooterRibbon` (in `@scrivr/react`) now calls
+  `editor.findExtension("headerFooter")` and reads
+  `options.activeEditingGap`. The returned hook value exposes
+  `ribbonHeight`, which `HeaderFooterRibbon.tsx` uses for both the
+  ribbon's CSS `height` and its top offset. The previous hardcoded
+  `28` is gone from the React side — the only remaining `28` is a
+  defensive fallback for the case where the `HeaderFooter` extension
+  is not registered at all (so `findExtension` returns null).
+
+  Change `HeaderFooter.configure({ activeEditingGap: 40 })` and the
+  extension's reserved gap _and_ the ribbon's height move together,
+  no manual sync.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 8b3c741: `@scrivr/plugins` — `HeaderFooter` extension is now configurable with
+  `activeEditingGap` so consumers can match the reserved gap to the
+  height of their editing affordance.
+
+  ```ts
+  HeaderFooter.configure({ activeEditingGap: 28 }); // default — matches React HeaderFooterRibbon
+  HeaderFooter.configure({ activeEditingGap: 40 }); // custom ribbon at a different height
+  HeaderFooter.configure({ activeEditingGap: 0 }); // headless — no UI to reserve for
+  ```
+
+  The value acts as a floor on `slot.margin`: smaller user-set margins
+  are clamped up at measure time so activating a surface does not push
+  body content down. Margins larger than the gap are honored as-is.
+
+  **Where the value lives.** Applied once at layout time inside
+  `resolveChrome.measureSlot` and baked into `slot.reservedHeight` +
+  `metrics.contentTop`. Every downstream consumer — canvas paint, PDF
+  chrome render, anything reading `editor.layout` — reads the same
+  baked value. The PDF render side is intentionally pure render and
+  has no knob of its own; configuring this option at editor
+  construction is the only place the gap is decided.
+
+  **Dual-use editor limitation.** A single browser `Editor` used for
+  both interactive editing and PDF export carries one value across
+  both modes — the same layout drives both. Configure for the editing
+  case (so the ribbon doesn't push content) and accept the same gap
+  in the exported PDF. Consumers that need a ribbon-friendly editor
+  _and_ a tight printed PDF should run PDF export against a separate
+  `ServerEditor` constructed with `activeEditingGap: 0`, sharing the
+  same doc JSON. A future per-export override would require a
+  layout-pipeline primitive that accepts per-call chrome option
+  overrides — deferred until a concrete consumer requests it.
+
+  Default unchanged for React consumers — the `HeaderFooterRibbon`
+  remains 28px tall, the extension defaults to 28, and the React
+  hook offsets the ribbon by `-28`. All three locations are
+  cross-referenced in code comments so a custom ribbon at a different
+  height has clear instructions.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 8b3c741: `@scrivr/plugins` — header/footer ribbon no longer pushes body content
+  down when activated.
+
+  Previously the layout reserved the slot's configured `margin` (default
+  12px) as the gap between header content and body. When the user clicked
+  into the header, the React ribbon (28px tall) needed more room than the
+  gap could fit — `policyWithLiveSurface` widened the margin to 28 on the
+  fly, recomputing the band's reserved height and shifting body content
+  down by ~16px. Clicking out reversed it. The shift was jarring.
+
+  Fix — always reserve at least ribbon-height for the gap at measure time,
+  inside `resolveChrome.measureSlot`. The body now sits at the same
+  position whether or not a surface is active; the ribbon simply appears
+  in space that was already there. The active-time clamp in
+  `policyWithLiveSurface` is gone — the function only updates the live
+  slot's content now.
+
+  Behavior delta — a header/footer with `margin < 28` is silently floored
+  to 28 at measure time (no API change; the stored value is preserved).
+  Documents that already used `margin >= 28` are unaffected. The slight
+  extra whitespace below tight headers is the cost of stable body
+  positioning.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- a749a3c: `@scrivr/core` — lift ingestion-time normalization from `ServerEditor`
+  up to `BaseEditor` so the browser `Editor` benefits too.
+
+  Previously `new Editor({ content: jsonFromAi })` only got URL safety
+  on the initial doc; node-ID assignment and table repair waited for the
+  first transaction to fire the `UniqueId` and `tableIntegrityPlugin`.
+  A consumer who constructed an editor and immediately serialised
+  without typing anything saw an un-normalized snapshot.
+
+  Now `BaseEditor`'s constructor routes the initial doc through
+  `normalizeDocument` — JSON, markdown, or extension-supplied default —
+  so every initial state is URL-safe, table-repaired, and fully
+  ID-stamped before the first transaction. `editor.lastNormalizeResult`
+  exposes the same `{ doc, warnings, fingerprint, changed }` shape that
+  `ServerEditor.setContent` already populated.
+
+  `normalizeDocument(input, options)` also now accepts a parsed
+  ProseMirror `Node` (not just JSON), so callers that already have a
+  Node — including `BaseEditor`'s own constructor after the markdown
+  parse — skip the wasted JSON round-trip.
+
+  Behaviour delta — the browser `Editor` now also stamps node IDs and
+  repairs tables on initial load. Symmetric with the server side; the
+  in-editor plugins (`UniqueId`, `tableIntegrityPlugin`) still run on
+  subsequent transactions and find no work to do because the constructor
+  already handled it. Full suite green (core 1105/1105, plugins 328 + 5
+  skipped, typecheck 13/13).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- a749a3c: `@scrivr/core` — extract pure-function normalization primitives from the
+  plugin layer in preparation for a public `normalizeDocument` entry point.
+
+  **New core exports** (`@scrivr/core`):
+
+  - `assignBlockIds(doc, { generate? })` — pure function that stamps a
+    stable `nodeId` onto every block whose schema declares the attr but
+    whose current value is `null`. Returns the same `Node` reference when
+    nothing needed assignment (fast-path), so callers can detect a no-op
+    cheaply. Mirrors the shape of `sanitizeDocUrls`.
+  - `planBlockIdAssignments(doc, { generate? })` — sibling for
+    transaction-grain callers. Returns one `{ pos, attrs }` entry per
+    block that needs an ID, so the caller can emit one `setNodeMarkup`
+    step per block instead of a whole-doc replace (better grain for
+    history and collab).
+  - `normalizeTablesDoc(doc, schema)` — doc-level wrapper around the
+    existing `normalizeTables(state)` so table-integrity repair is
+    reachable without materialising an `EditorState`. Same fast-path
+    semantics.
+
+  **`@scrivr/plugins`** — `UniqueId` plugin no longer carries its own
+  walk. `appendTransaction` calls `planBlockIdAssignments(newState.doc)`
+  and translates the result into `setNodeMarkup` steps. Single source of
+  truth for the "which blocks need IDs?" predicate, so server-side and
+  AI ingestion paths apply identical semantics to the live editor.
+
+  Behaviour delta: none. All existing tests pass unchanged
+  (core 1085/1085, plugins 328 + 5 skipped). Strictly a refactor that
+  makes the upcoming `normalizeDocument` and `diffDocuments` public APIs
+  possible without duplicating logic across packages.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- a749a3c: `@scrivr/core` — ingestion-time `normalizeDocument` and `ServerEditor`
+  wire-up.
+
+  **New public API**
+
+  ```ts
+  import { normalizeDocument } from "@scrivr/core";
+
+  const result = normalizeDocument(jsonFromAi, {
+    schema: editor.manager.schema,
+    // optional knobs
+    mode: "repair", // or "strict" — strict throws on bounds breach
+    assignIds: true, // default — stamp nodeId on blocks missing one
+    generate: () => uuid(), // override the ID generator (deterministic in tests)
+    maxNodes: 5000, // bounds check
+    maxDepth: 50,
+  });
+
+  // result.doc         — normalized PM Node
+  // result.warnings    — per-stage diagnostics (urls-sanitized, tables-normalized,
+  //                       ids-assigned, bounds-exceeded)
+  // result.fingerprint — FNV-1a 8-hex-char hash, deterministic per doc shape
+  // result.changed     — true when normalization mutated the input
+  ```
+
+  Pipeline composes the existing primitives in one pass:
+
+  1. `schema.nodeFromJSON(input)` — schema validation
+  2. bounds check (maxNodes / maxDepth)
+  3. `sanitizeDocUrls` — URL allow-list
+  4. `normalizeTablesDoc` — table integrity (gridSpan / vMerge / grid)
+  5. `assignBlockIds` — stable `nodeId` on every id-bearing block
+  6. fingerprint over a deterministic stringification of `doc.toJSON()`
+
+  Warnings are aggregate per stage (`{ code, message, count? }`) — enough
+  for an AI server-side review pipeline to decide "did the model output
+  something that needed repair?" without diffing two trees.
+
+  **`ServerEditor.setContent` now routes through `normalizeDocument`**.
+  The previous standalone `sanitizeDocUrls` call is gone; the same URL
+  gate still runs as one stage of the new pipeline, plus table repair
+  and ID assignment that previously only happened inside a live editor
+  transaction. The result lives on `editor.lastNormalizeResult` for
+  consumers that want to inspect warnings (e.g. reject AI output
+  containing `urls-sanitized`).
+
+  **Behaviour delta** — `ServerEditor.setContent` now also stamps node
+  IDs and repairs tables on initial load instead of waiting for the
+  first transaction. This brings server-side ingestion to parity with
+  the live editor (where the `UniqueId` and table-integrity plugins
+  were already doing it incrementally). Existing tests pass unchanged
+  (core 1100/1100, plugins 328 + 5 skipped).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 65cafa2: `@scrivr/docx` — first public release. Dropped `private: true`, aligned
+  version (`0.0.6` → `1.0.10`) with the lockstep version of the other
+  `@scrivr/*` packages, and added the missing publish metadata (author,
+  repository.directory, homepage, bugs, keywords, publishConfig). The
+  package now joins the changeset `fixed` group so future releases keep
+  all `@scrivr/*` packages in lockstep.
+
+  Why now: the DOCX round-trip (export PR #92 + import PR #94) shipped two
+  weeks ago and the demo has been exercising it. The package is ready to
+  ship to npm; the previous independent `0.0.x` versioning track and
+  `private: true` flag were holdovers from when only the skeleton existed.
+
+  No code or behavior changes — purely packaging metadata.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- Updated dependencies [ec550ce]
+- Updated dependencies [ec550ce]
+- Updated dependencies [19b2879]
+- Updated dependencies [6f5fb5d]
+- Updated dependencies [8b3c741]
+- Updated dependencies [8b3c741]
+- Updated dependencies [8b3c741]
+- Updated dependencies [a749a3c]
+- Updated dependencies [a749a3c]
+- Updated dependencies [a749a3c]
+- Updated dependencies [65cafa2]
+- Updated dependencies [51c1d1f]
+  - @scrivr/core@1.0.11
+  - @scrivr/export-pdf@1.0.11
+  - @scrivr/export-markdown@1.0.11
+
 ## 1.0.10
 
 ### Patch Changes
