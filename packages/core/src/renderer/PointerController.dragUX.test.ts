@@ -106,23 +106,48 @@ function stubImageSelection(
   vi.spyOn(setup.editor, "getState").mockReturnValue(state);
 }
 
-// ── Mouse event helpers ──────────────────────────────────────────────────────
+// ── Pointer event helpers ────────────────────────────────────────────────────
+
+function pointerEvent(
+  type: string,
+  x: number,
+  y: number,
+  init: PointerEventInit = {},
+): PointerEvent {
+  const EventCtor = globalThis.PointerEvent ?? MouseEvent;
+  const event = new EventCtor(type, {
+    clientX: x,
+    clientY: y,
+    bubbles: true,
+    cancelable: true,
+    pointerId: 1,
+    pointerType: "mouse",
+    ...init,
+  }) as PointerEvent;
+  if (!("pointerId" in event)) {
+    Object.defineProperty(event, "pointerId", { value: init.pointerId ?? 1 });
+  }
+  if (!("pointerType" in event)) {
+    Object.defineProperty(event, "pointerType", { value: init.pointerType ?? "mouse" });
+  }
+  return event;
+}
 
 function mousedown(container: HTMLDivElement, x: number, y: number): void {
   container.dispatchEvent(
-    new MouseEvent("mousedown", { clientX: x, clientY: y, bubbles: true, cancelable: true }),
+    pointerEvent("pointerdown", x, y),
   );
 }
 
 function mousemove(x: number, y: number): void {
   document.dispatchEvent(
-    new MouseEvent("mousemove", { clientX: x, clientY: y, bubbles: true, cancelable: true }),
+    pointerEvent("pointermove", x, y),
   );
 }
 
 function mouseup(x = 0, y = 0): void {
   document.dispatchEvent(
-    new MouseEvent("mouseup", { clientX: x, clientY: y, bubbles: true, cancelable: true }),
+    pointerEvent("pointerup", x, y),
   );
 }
 

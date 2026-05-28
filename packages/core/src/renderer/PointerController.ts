@@ -59,7 +59,7 @@ export interface PointerControllerDeps {
 }
 
 /**
- * PointerController — owns all mouse interaction logic for TileManager.
+ * PointerController — owns all pointer interaction logic for TileManager.
  *
  * Responsibilities:
  *   - Hit testing (text, resize handles, anchored-object bodies)
@@ -82,7 +82,7 @@ export class PointerController {
   private anchoredDrag: {
     docPos: number;
     nodeSize: number;
-    /** Mouse position at drag start, in client coordinates. */
+    /** Pointer position at drag start, in client coordinates. */
     startClientX: number;
     startClientY: number;
     /** Image's painted X at drag start, in page-local coordinates. */
@@ -102,10 +102,10 @@ export class PointerController {
     wrapMode: string;
     /** Image's docPos rect at drag start (for posBelow / posAbove fallback). */
     rect: { x: number; y: number; width: number; height: number; page: number };
-    /** Mouse position relative to the image's top-left at mousedown. */
+    /** Pointer position relative to the image's top-left at pointerdown. */
     grabOffsetX: number;
     grabOffsetY: number;
-    /** Live overlay state — refreshed on mousemove, read by TileManager. */
+    /** Live overlay state — refreshed on pointermove, read by TileManager. */
     overlay: {
       /** Page where the ghost is drawn (= page under the cursor). */
       ghostPage: number;
@@ -116,7 +116,7 @@ export class PointerController {
       caret: { page: number; x: number; y: number; height: number } | null;
       /**
        * True when the cursor is in a region that can't accept a drop (currently
-       * inter-page gaps). Renderer fades the ghost; mouseup commits a no-op.
+       * inter-page gaps). Renderer fades the ghost; pointerup commits a no-op.
        */
       disabled: boolean;
     };
@@ -136,6 +136,8 @@ export class PointerController {
     };
   } | null = null;
 
+  /** Active pointer capture. Null when hover/click handling is idle. */
+  private activePointerId: number | null = null;
   /** Click-count tracking for double/triple-click. */
   private clickCount = 0;
   private lastClickTime = 0;
@@ -148,18 +150,20 @@ export class PointerController {
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  /** Attach mouse event listeners. */
+  /** Attach pointer event listeners. */
   attach(): void {
-    this.deps.tilesContainer.addEventListener("mousedown", this.handleMouseDown);
-    document.addEventListener("mousemove", this.handleMouseMove);
-    document.addEventListener("mouseup", this.handleMouseUp);
+    this.deps.tilesContainer.addEventListener("pointerdown", this.handlePointerDown);
+    document.addEventListener("pointermove", this.handlePointerMove);
+    document.addEventListener("pointerup", this.handlePointerUp);
+    document.addEventListener("pointercancel", this.handlePointerCancel);
   }
 
-  /** Detach mouse event listeners. */
+  /** Detach pointer event listeners. */
   detach(): void {
-    this.deps.tilesContainer.removeEventListener("mousedown", this.handleMouseDown);
-    document.removeEventListener("mousemove", this.handleMouseMove);
-    document.removeEventListener("mouseup", this.handleMouseUp);
+    this.deps.tilesContainer.removeEventListener("pointerdown", this.handlePointerDown);
+    document.removeEventListener("pointermove", this.handlePointerMove);
+    document.removeEventListener("pointerup", this.handlePointerUp);
+    document.removeEventListener("pointercancel", this.handlePointerCancel);
   }
 
   /**
@@ -307,21 +311,28 @@ export class PointerController {
     return null;
   }
 
-  // ── Mouse events ────────────────────────────────────────────────────────────
+  // ── Pointer events ──────────────────────────────────────────────────────────
 
-  private handleMouseDown = (e: MouseEvent): void => {
+  private handlePointerDown = (e: PointerEvent): void => {
     e.preventDefault();
-    // Pointer capture analogue. While any drag is in flight, a second
-    // mousedown must NOT re-enter hit-testing — otherwise an accidental
+    // While any drag is in flight, a second pointerdown must NOT re-enter
+    // hit-testing — otherwise an accidental
     // double-click during drag fires two PM transactions, or text selection
-    // resolves at a stale point. Equivalent to setPointerCapture +
-    // pointerdown ignore; we use mouse events so we guard explicitly.
-    if (this.isDragging || this.resizeDrag || this.anchoredDrag || this.inlineImageDrag) {
+    // resolves at a stale point.
+    if (
+      this.activePointerId !== null ||
+      this.isDragging ||
+      this.resizeDrag ||
+      this.anchoredDrag ||
+      this.inlineImageDrag
+    ) {
       return;
     }
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return;
+    this.activePointerId = e.pointerId;
+    this.capturePointer(e.pointerId);
 
     const { page, docX, docY } = hit;
 
@@ -357,8 +368,8 @@ export class PointerController {
     if (anchoredHit) {
       if (editor.readOnly) return;
       editor.selectNode(anchoredHit.docPos);
-      // Mouse position relative to the image's top-left at mousedown — used
-      // by mousemove to keep the ghost rect anchored to the cursor's grab
+      // Pointer position relative to the image's top-left at pointerdown — used
+      // by pointermove to keep the ghost rect anchored to the cursor's grab
       // point (so the image doesn't snap to the cursor's top-left).
       const grabOffsetX = docX - anchoredHit.x;
       const grabOffsetY = docY - anchoredHit.y;
@@ -473,10 +484,12 @@ export class PointerController {
     }
   };
 
-  private handleMouseMove = (e: MouseEvent): void => {
+  private handlePointerMove = (e: PointerEvent): void => {
+    if (!this.acceptsPointer(e)) return;
+    if (this.activePointerId !== null) e.preventDefault();
     const { editor } = this.deps;
 
-    // Resize drag — buffer pending size; commit only on mouseup
+    // Resize drag — buffer pending size; commit only on pointerup
     if (this.resizeDrag) {
       const { handle, startX, startY, startW, startH } = this.resizeDrag;
       const { pageWidth, margins } = editor.layout.pageConfig;
@@ -496,7 +509,7 @@ export class PointerController {
     }
 
     // Anchored-object drag — keep the ghost overlay tracking the cursor and
-    // resolve the live insertion caret. Deltas commit on mouseup; this block
+    // resolve the live insertion caret. Deltas commit on pointerup; this block
     // is paint-only.
     if (this.anchoredDrag) {
       this.updateAnchoredDragOverlay(e);
@@ -555,7 +568,9 @@ export class PointerController {
     editor.selection.setSelection(editor.getSelectionSnapshot().anchor, pos);
   };
 
-  private handleMouseUp = (e: MouseEvent): void => {
+  private handlePointerUp = (e: PointerEvent): void => {
+    if (!this.acceptsPointer(e)) return;
+    e.preventDefault();
     const { editor } = this.deps;
     if (this.resizeDrag) {
       const { docPos, pendingWidth, pendingHeight } = this.resizeDrag;
@@ -574,9 +589,48 @@ export class PointerController {
       this.setCursorAll("text");
     }
     this.isDragging = false;
+    this.releasePointer(e.pointerId);
+    this.activePointerId = null;
   };
 
-  private commitInlineImageDrag(e: MouseEvent): void {
+  private handlePointerCancel = (e: PointerEvent): void => {
+    if (!this.acceptsPointer(e)) return;
+    this.resizeDrag = null;
+    this.anchoredDrag = null;
+    this.inlineImageDrag = null;
+    this.isDragging = false;
+    this.setCursorAll("text");
+    this.releasePointer(e.pointerId);
+    this.activePointerId = null;
+    this.deps.scheduleUpdate();
+  };
+
+  private acceptsPointer(e: PointerEvent): boolean {
+    return this.activePointerId === null || e.pointerId === this.activePointerId;
+  }
+
+  private capturePointer(pointerId: number): void {
+    const el = this.deps.tilesContainer;
+    if (typeof el.setPointerCapture !== "function") return;
+    try {
+      el.setPointerCapture(pointerId);
+    } catch {
+      // Capture can fail if the pointer is already gone; document listeners
+      // still keep the gesture coherent in tests and older environments.
+    }
+  }
+
+  private releasePointer(pointerId: number): void {
+    const el = this.deps.tilesContainer;
+    if (typeof el.releasePointerCapture !== "function") return;
+    try {
+      el.releasePointerCapture(pointerId);
+    } catch {
+      // Already released/cancelled; nothing else to clean up.
+    }
+  }
+
+  private commitInlineImageDrag(e: PointerEvent): void {
     const { editor } = this.deps;
     if (!this.inlineImageDrag) return;
 
@@ -618,7 +672,7 @@ export class PointerController {
    * Pure no-op when total movement is below a small threshold (treats
    * the gesture as a click). Gap drops mirror the disabled overlay state.
    */
-  private commitAnchoredDrag(e: MouseEvent): void {
+  private commitAnchoredDrag(e: PointerEvent): void {
     const { editor } = this.deps;
     if (!this.anchoredDrag) return;
 
@@ -630,7 +684,7 @@ export class PointerController {
     }
 
     // Drop in inter-page gap → no transaction. The ghost was already shown
-    // disabled during mousemove; commit must mirror that.
+    // disabled during pointermove; commit must mirror that.
     const finalHit = this.hitTest(e.clientX, e.clientY);
     if (finalHit?.gap) {
       dragDebugLog(editor, "gapDrop", {
@@ -818,7 +872,7 @@ export class PointerController {
     };
   }
 
-  private resolveCrossPageDropYOffset(e: MouseEvent, newDocPos: number): number {
+  private resolveCrossPageDropYOffset(e: PointerEvent, newDocPos: number): number {
     if (!this.anchoredDrag) return 0;
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit || hit.gap) return 0;
@@ -893,13 +947,13 @@ export class PointerController {
    * Returns `null` when the painted Y still resolves to the source
    * paragraph (no structural change needed).
    */
-  private resolveDragTargetDocPos(e: MouseEvent): number | null {
+  private resolveDragTargetDocPos(e: PointerEvent): number | null {
     if (!this.anchoredDrag) return null;
     return this.resolveDragTargetDocPosFrom(e, this.anchoredDrag);
   }
 
   private resolveDragTargetDocPosFrom(
-    e: MouseEvent,
+    e: PointerEvent,
     drag: {
       docPos: number;
       nodeSize: number;
@@ -981,17 +1035,17 @@ export class PointerController {
 
   /**
    * Refresh the live drag overlay state (ghost rect + insertion caret) from
-   * the current mouse position. Paint-only: never mutates layout, never
+   * the current pointer position. Paint-only: never mutates layout, never
    * affects hit testing.
    */
-  private updateAnchoredDragOverlay(e: MouseEvent): void {
+  private updateAnchoredDragOverlay(e: PointerEvent): void {
     if (!this.anchoredDrag) return;
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return;
 
     // Ghost top-left = current cursor minus the grab offset captured at
-    // mousedown. Stays anchored to where the user originally grabbed.
+    // pointerdown. Stays anchored to where the user originally grabbed.
     const ghostX = hit.docX - this.anchoredDrag.grabOffsetX;
     const ghostY = hit.docY - this.anchoredDrag.grabOffsetY;
 
@@ -1038,7 +1092,7 @@ export class PointerController {
     this.setCursorAll("move");
   }
 
-  private updateInlineImageDragOverlay(e: MouseEvent): void {
+  private updateInlineImageDragOverlay(e: PointerEvent): void {
     if (!this.inlineImageDrag) return;
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
