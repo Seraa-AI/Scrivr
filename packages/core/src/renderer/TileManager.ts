@@ -210,6 +210,7 @@ export class TileManager {
     Object.assign(this.tilesContainer.style, {
       position: "relative",
       margin: "0 auto",
+      touchAction: "manipulation",
     });
     container.appendChild(this.tilesContainer);
 
@@ -218,7 +219,7 @@ export class TileManager {
     // viewport. Wrappers are inserted once and never removed — only shown/hidden.
     this.ensurePoolSize(1);
 
-    // ── mouse events ─────────────────────────────────────────────────────────
+    // ── pointer events ───────────────────────────────────────────────────────
     this.pointer = new PointerController({
       editor,
       tilesContainer: this.tilesContainer,

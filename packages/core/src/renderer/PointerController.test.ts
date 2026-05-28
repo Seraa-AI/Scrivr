@@ -21,37 +21,46 @@ import type { ObjectRectEntry } from "../layout/CharacterMap";
 import type { DocumentLayout } from "../layout/PageLayout";
 import type { AnchoredObjectPlacement } from "../layout/AnchoredObjects";
 
+function pointerEvent(
+  type: string,
+  x: number,
+  y: number,
+  init: PointerEventInit = {},
+): PointerEvent {
+  const EventCtor = globalThis.PointerEvent ?? MouseEvent;
+  const event = new EventCtor(type, {
+    clientX: x,
+    clientY: y,
+    bubbles: true,
+    cancelable: true,
+    pointerId: 1,
+    pointerType: "mouse",
+    ...init,
+  }) as PointerEvent;
+  if (!("pointerId" in event)) {
+    Object.defineProperty(event, "pointerId", { value: init.pointerId ?? 1 });
+  }
+  if (!("pointerType" in event)) {
+    Object.defineProperty(event, "pointerType", { value: init.pointerType ?? "mouse" });
+  }
+  return event;
+}
+
 function mousedown(container: HTMLDivElement, x: number, y: number, shiftKey = false): void {
   container.dispatchEvent(
-    new MouseEvent("mousedown", {
-      clientX: x,
-      clientY: y,
-      bubbles: true,
-      cancelable: true,
-      shiftKey,
-    }),
+    pointerEvent("pointerdown", x, y, { shiftKey }),
   );
 }
 
 function mousemove(x: number, y: number): void {
   document.dispatchEvent(
-    new MouseEvent("mousemove", {
-      clientX: x,
-      clientY: y,
-      bubbles: true,
-      cancelable: true,
-    }),
+    pointerEvent("pointermove", x, y),
   );
 }
 
 function mouseup(x = 0, y = 0): void {
   document.dispatchEvent(
-    new MouseEvent("mouseup", {
-      clientX: x,
-      clientY: y,
-      bubbles: true,
-      cancelable: true,
-    }),
+    pointerEvent("pointerup", x, y),
   );
 }
 
@@ -139,6 +148,20 @@ describe("PointerController — image click routing", () => {
 
     expect(moveCursorTo).toHaveBeenCalledWith(42);
     expect(selectNode).not.toHaveBeenCalled();
+  });
+
+  it("touch tap in plain text routes through the same cursor path", () => {
+    const moveCursorTo = vi.spyOn(setup.editor.selection, "moveCursorTo").mockImplementation(() => {});
+    stubNoImageHit(setup, 42);
+
+    setup.container.dispatchEvent(
+      pointerEvent("pointerdown", 200, 200, { pointerId: 9, pointerType: "touch" }),
+    );
+    document.dispatchEvent(
+      pointerEvent("pointerup", 200, 200, { pointerId: 9, pointerType: "touch" }),
+    );
+
+    expect(moveCursorTo).toHaveBeenCalledWith(42);
   });
 
   it("shift+click never triggers selectNode, even on an image rect", () => {
