@@ -1,9 +1,28 @@
 {
   "name": "@scrivr/docx",
-  "private": true,
-  "version": "0.0.6",
+  "version": "1.0.10",
   "description": "DOCX import + export for Scrivr documents — semantic round-trip to WordprocessingML",
   "license": "Apache-2.0",
+  "author": "Seraa AI <hello@seraa.ai>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Seraa-AI/Scrivr.git",
+    "directory": "packages/docx"
+  },
+  "homepage": "https://github.com/Seraa-AI/Scrivr#readme",
+  "bugs": {
+    "url": "https://github.com/Seraa-AI/Scrivr/issues"
+  },
+  "keywords": [
+    "docx",
+    "word",
+    "wordprocessingml",
+    "ooxml",
+    "import",
+    "export",
+    "scrivr",
+    "prosemirror"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -23,6 +42,10 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
