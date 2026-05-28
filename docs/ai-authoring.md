@@ -1,162 +1,139 @@
 # AI Authoring and Private Proposal Model
 
-## Contract
+## Problem
 
-AI-generated proposals are private until the user commits them.
+Today the AI Toolkit surfaces proposals in a side panel. To review one, the user reads the panel item, finds the corresponding location in the document, mentally simulates the diff, then clicks accept. Two surfaces, cognitive overhead, slow review.
 
-While a user is reviewing AI output, other collaborators may continue editing the shared document and this client must continue receiving those remote updates. The user's AI proposals must not be broadcast as collaborative document updates, cursor positions inside private-only content must not leak, and undo/redo must not move content across the private/public boundary accidentally.
+We want the proposal rendered **in the document** at the location it would land. The doc itself becomes the review surface. The panel becomes an optional overview, or goes away.
 
-Commit is the explicit boundary. Before commit, AI work is local proposal state. After commit, the accepted work becomes a normal document transaction: either tracked changes or a direct edit.
+## Solution
 
-## Author, not mode
+Render AI proposals as canvas overlay decorations, indistinguishable from real edits, with inline accept/reject affordances. Until accepted, the proposal lives in plugin state — the shared document tree is unchanged.
 
-`Editing`, `Suggesting`, and `Viewing` describe the human user's intent. AI describes provenance.
+This is the same primitive AI Toolkit already uses for ghost text (`GhostText.ts`) and tracked-change strikethrough (`TrackChanges.ts`). We extend it to cover deletes, multi-block replaces, and inline accept/reject affordances so the panel is no longer load-bearing.
 
-Do not make AI a fourth core `TrackChangesStatus` or collaboration mode. That creates ambiguous states like "human suggesting, AI suggesting" where the mode implies broadcast but the AI privacy contract forbids it.
+## Invariant
 
-Use AI as an author/provenance layer instead:
+**AI proposals never enter `editorState.doc` until the user commits.**
 
-- Human editing remains `Editing`, `Suggesting`, or `Viewing`.
-- AI proposals are authored as local AI work, for example `authorID: "ai-local"`.
-- The UI may expose an "AI Workshop" or "AI Review" toggle, but that toggle is a workflow gate, not the load-bearing document mode.
-- The AI Workshop UI must clearly say that AI suggestions are private until committed.
+This single invariant makes the UX safe and makes every supporting concern below cheap:
 
-This keeps the human mode model stable while giving the editor a first-class place for local AI proposals, reviewer bots, named AI agents, and future provenance metadata.
+- Nothing AI-local crosses `YBinding`, so collaborators never see proposals.
+- No ghost cursors land in proposal-only text, because there is no proposal-only text in the shared model.
+- Exports walk the doc only, so workshop sessions are naturally invisible to DOCX / PDF / Markdown.
+- Undo of normal edits cannot cross the privacy boundary, because the boundary is the absence of doc mutation.
 
-## Current direction
+The invariant is enforced by construction: `AiSuggestionPlugin.ts` holds proposals in a `PluginKey<AiSuggestionPluginState>`, the overlay handler in `AiSuggestion.ts` reads `ps.suggestion.blocks` and paints, and only `applyAiSuggestion` in `showHideApply.ts` mutates `editorState.doc`.
 
-The AI Toolkit should keep the overlay/proposal model: streaming and preview are cosmetic, and the shared document is untouched until accept/commit.
+## What stays the same
 
-The next implementation work should extend that model instead of creating a forked local `Y.Doc`:
+- **Track-changes status is the user mode model.** `TrackChangesStatus.enabled` (Suggesting), `TrackChangesStatus.disabled` (Editing), `TrackChangesStatus.viewSnapshots` (Viewing). AI is not a fourth mode. AI proposals render on top of whatever mode the user is in.
+- **AI provenance is an author identity**, surfaced when AI work commits as tracked changes. It does not change how the user mode works.
+- **`AiSuggestionPlugin` holds proposal state.** Overlay handler in `AiSuggestion.ts` paints it.
+- **`applyAiSuggestion` is the only commit path.** Direct apply writes to the doc as a normal transaction; tracked apply writes `trackedInsert` / `trackedDelete` marks via the existing engine.
 
-- Inserts: continue using ghost/proposal rendering.
-- Deletes: add strikethrough/tombstone decorations.
-- Replaces: render delete + insert as one proposal/card.
-- Multi-block proposals: represent a proposal as a list of anchored decorations.
-- Anchors: use durable node IDs plus mapped offsets where needed.
+A visible "AI Review" toggle in the UI (collapse / expand proposals, jump to next pending) is a separate UX surface that does not need to be a mode. It is a view of the same underlying plugin state.
 
-This covers the main workflow: "let AI draft a rewrite, review it, then accept block-by-block or commit the whole proposal." It intentionally does not optimize for typing inside the middle of a private AI draft before accepting. The simpler product rule is: accept first, then edit.
+## What needs to be built (rendering)
 
-## Privacy boundary
+Four concrete gaps between the current overlay system and the "panel goes away" target:
 
-The privacy boundary belongs at the sync/promotion surface, not in a second collaborative document.
+1. **Inline insert rendering.** Ghost text drawn at a position inside a block, not appended after the block. `GhostText.ts` is anchored to *after* a block today; for inline AI rewrites it needs to anchor to a position inside a block. `CharacterMap.coordsAtPos` already provides the pixel position.
+2. **Inline delete rendering.** Strikethrough visible across all blocks by default, not only the active block. `AiSuggestion.ts:50` exposes `renderMode: "active-only" | "all" | "none"` — the default should become `"all"`, and the strikethrough needs to be rich enough to read as a diff at a glance.
+3. **Inline accept/reject affordance.** A small widget anchored at the diff range — check / x icons, or a hover-card. Canvas overlay (rendered alongside the diff) or a DOM widget at `coordsAtPos`. DOM is probably cleaner for click interaction.
+4. **Click-to-accept-then-place-cursor.** Clicking inside an inline insert (ghost text) or delete (strikethrough) accepts that op and places the caret at the click position. Without this, the user clicks on what looks like real text and the caret lands at the nearest real-doc position, which is confusing once the overlay looks like content.
 
-The intended rule is:
+## Interaction rules
+
+- **Accept is always explicit.** Click the affordance, or use a defined keymap (e.g. `Cmd+Enter` accepts the proposal at the cursor's nearest pending op).
+- **Typing does not implicitly accept.** Typing adjacent to a proposal must not accept it. The cursor is in real document text; typing edits that text. The proposal stays pending.
+- **The cursor cannot land inside proposal-only content.** It lands in the surrounding real text. This falls out of the invariant — there is no PM position to land on.
+- **Hover surfaces the affordance.** Hovering over an inline diff range shows the accept/reject controls. Without hover, the diff renders unobtrusively.
+
+## Constraints the inline rendering creates
+
+**Privacy** — enforced by the invariant. Proposals don't enter the doc, so `YBinding.targetObserver` never sees them, so `HocuspocusProvider` never broadcasts them.
+
+**Awareness** — collaborators must not see ghost cursors landing in proposal-only content (already true: the cursor can't land there). When the user is actively reviewing AI work, broadcast a separate awareness field so collaborators understand why the cursor may be relatively idle:
 
 ```ts
-if (transactionOrigin === "ai-local" || aiWorkshopActive) {
-  applyLocally();
-  doNotBroadcast();
-} else {
-  applyLocally();
-  broadcast();
-}
+awareness.setLocalStateField("activity", {
+  kind: "ai-workshop",       // discriminator
+  startedAt: 1716937200000,  // for "X has been reviewing AI for 5m" presence UI
+});
 ```
 
-That is the principle, not a confirmed one-line implementation. Scrivr owns a custom `YBinding` in `packages/plugins/src/collaboration/YBinding.ts`, so the implementation needs an explicit audit before we rely on transaction-origin filtering.
+While the activity is set, do not overwrite `awareness.cursor`. Do not delete it either — collaborators continue to see the user's last known shared-doc position.
 
-### YBinding audit checklist
+**Undo** — accepted proposals replay as a single normal transaction in the main document history. Rejected proposals leave no trace because they never entered the doc. No special undo isolate is required — the invariant means there is nothing in the main history that crosses the privacy boundary.
 
-Before implementing private AI proposals through origin filtering, verify:
+**Export** — exporters walk `state.doc`. AI proposals are invisible to all current export paths (`exportDocx`, `exportToPdf`, `exportToMarkdown`) and to `BaseEditor.toJSON()`. Correct by construction; no exporter change required.
 
-1. Transaction origins propagate through Scrivr's custom `YBinding` into Yjs transactions. The binding currently writes PM changes using `ydoc.transact(..., LOCAL_ORIGIN)`, so we need a way to preserve or classify AI-local origins instead of collapsing every local write into one origin.
-2. Provider filtering happens at the right granularity. If multiple PM transactions are coalesced into one Yjs update, a per-transaction origin may not be enough.
-3. Doc attrs and content share a sync transaction today. AI-private proposals must not accidentally broadcast private doc attrs or content-like markers.
-4. The undo manager currently tracks `LOCAL_ORIGIN`. AI-private history must not merge with normal collaborative history.
-5. Awareness is a separate channel. Document update filtering does not control cursor or presence broadcast.
+**Persistence** — to persist a review session across reload, the app serializes the suggestion separately: `{ doc: editor.toJSON(), aiSuggestion: ai.suggestions.getCurrent() }`. Restore via `editor.setContent(doc); ai.suggestions.show(aiSuggestion);`. Anchor mismatches surface through the existing `staleBlockIds` path in `AiSuggestionPlugin.ts`. A pair of `serializeWorkshopSession` / `restoreWorkshopSession` helpers (4–5 lines each) on `AiToolkitAPI` removes the boilerplate.
 
-The implementation target is still "filter at the sync boundary," but we should write the tests against the actual binding and provider behavior before committing to the API shape.
+`y-indexeddb` is not a privacy mechanism. It may be useful later for crash recovery of an open session, but it stores Yjs updates locally regardless of who connected — the privacy comes from the invariant, not from where the bytes are persisted.
 
-## Awareness policy
+## Decisions
 
-AI Workshop introduces a presence problem: the user's local selection may move inside private proposal content that does not exist for other collaborators.
+The following decisions were validated against the codebase on 2026-05-28.
 
-Policy:
+### 1. Transaction-origin API on YBinding
 
-- Do not broadcast cursor positions inside private-only AI proposal content.
-- Keep the collaborator-visible cursor pinned to the last valid shared anchor.
-- Broadcast a separate awareness flag such as `mode: "ai-workshop"` or `activity: "reviewing-ai"` so other users understand why the cursor is not moving normally.
+`YBinding.ts:73` collapses every local write into a single `LOCAL_ORIGIN`, and `targetObserver` (line 241) runs `prosemirrorToYXmlFragment(currentDoc, this.type)` only when `prevDoc.eq(currentDoc)` is false (line 252). Because AI proposals don't mutate `editorState.doc` (invariant), `prevDoc.eq(currentDoc)` already returns true for AI-only state changes, and the broadcast naturally fires zero times.
 
-This gives collaborators a truthful signal without leaking private proposal positions or text.
+**Decision:** no new origin API for v1. Rely on the invariant. If `editor.subscribe` is ever extended to pass the originating transaction, future per-write classification becomes possible without re-architecting the binding — but that work is not required to ship inline AI rendering.
 
-The awareness schema needs to support this explicitly. `CollaborationCursor` currently writes `user` and `cursor` fields through provider awareness; AI Workshop should add a presence/activity field rather than overloading document updates.
+### 2. Provider-level filtering
 
-## Undo history
+`HocuspocusProvider` ships outbound updates emitted by `ydoc.on('update', ...)` (constructed in `Collaboration.ts:128`). Inbound updates apply via `Y.applyUpdate(ydoc, update, "remote")` and surface on `YBinding.typeObserver`. The two directions are independent — filtering outbound does not block inbound.
 
-AI Workshop needs isolated history.
+**Decision:** provider filtering is feasible if ever needed, but unnecessary given the invariant. Mark as deferred; revisit only if AI-local content ever needs to enter `editorState.doc` while remaining private.
 
-Private AI proposal edits should not enter the same undo stack as normal user edits. Otherwise `Cmd+Z` can cross the privacy boundary: undoing private proposal changes after a commit, or undoing the commit in a way that appears to re-private already-shared content.
+### 3. Visible author vs. AI provenance on promotion
 
-Policy:
+`InsertDeleteAttrs.authorID` in `types.ts:54` is a single string. The track-changes color palette (`TrackChanges.ts:73-79`) keys on `authorID` and assigns distinct values to distinct slots, so two identities render with different colors automatically. `AiToolkit.ts:406` sets a `track-author` meta on `generateSuggestion`, but no code in `packages/plugins/src/track-changes/` reads it — the meta is dead.
 
-- Opening AI Workshop starts a private history isolate.
-- Private proposal changes undo/redo only within that isolate.
-- Commit closes the isolate and replays the accepted result as one normal undoable transaction in the main document history.
-- Reject/discard drops the private isolate without touching the shared document history.
+**Decision:** composite `authorID` for v1 — `"ai:claude+user:raph"`. Single field, parseable, no schema change, no exporter migration. Adopt a separate `committerID` field later only if the audit story demands it. Either way, wire or delete the `track-author` meta so the comment in `AiToolkit.ts:365` stops lying.
 
-The custom `YBinding` also owns a `Y.UndoManager` scoped to `LOCAL_ORIGIN`; that must be reviewed alongside ProseMirror history so AI-local work is not tracked as normal collaborative undo state.
+### 4. AI review availability under read-only documents
 
-## Persistence
+Scrivr has two view-only paths: `editor.readOnly` (`Editor.ts:146, 332, 551`), which gates `InputBridge` and pointer interaction; and `TrackChangesStatus.viewSnapshots` (`types.ts:46`), which sets PM's `editable: false` via plugin props (`trackChangesPlugin.ts:34-36`). `AiSuggestionsAPI.show` (`AiToolkit.ts:49`) does not check either flag today.
 
-`y-indexeddb` is not a privacy boundary.
+**Decision:** allow the read-only side of the API under `editor.readOnly === true` — `compute`, `show`, `hide`, `getCurrent`, `reject`. Block the commit side — `apply` no-ops with a warning. AI review of a published or immutable document is a real use case; only the commit path needs write access. Add the `readOnly` check at the top of `applyAiSuggestion` in `showHideApply.ts:53`.
 
-It may be useful later to persist an AI Workshop session across reloads, but it should only restore private local proposal state. It must not be the mechanism that prevents sharing. Privacy comes from not broadcasting AI-local updates and only promoting proposals on explicit commit.
+### 5. Awareness field shape
 
-Offline behavior should be straightforward:
+`CollaborationCursor.ts:48, 51-56` writes only `user` and `cursor` to awareness. The renderer at line 65-66 reads only those two keys. Awareness is a free-form `Map<string, unknown>` per client; adding fields cannot break existing consumers.
 
-- AI Workshop can function offline because proposals are local.
-- On reconnect, AI-local proposals remain local.
-- Only explicit commit creates broadcast-eligible document updates.
+**Decision:** richer activity object under a single new field:
 
-## Promotion
+```ts
+awareness.setLocalStateField("activity", {
+  kind: "ai-workshop",
+  startedAt: 1716937200000,
+  promptSummary?: string,   // optional, app-controlled, default omitted for privacy
+});
+```
 
-Promotion is where private AI work becomes shared document state.
+Discriminator extends to other non-broadcasting modes later (`"draft-revision"`, `"private-comment"`) without renaming.
 
-There should be two explicit commit paths:
+### 6. Export and persistence
 
-### Commit as suggestion
+`BaseEditor.ts:301-302`: `toJSON()` returns `editorState.doc.toJSON()` — document tree only, no plugin state. All exporters walk the doc:
 
-Convert accepted AI proposals into normal tracked changes.
+- `exportDocx` (`packages/docx/src/export/export.ts`)
+- `exportToPdf` (`packages/export-pdf/src/`)
+- `exportToMarkdown` (`packages/export-markdown/src/`)
 
-Open metadata decisions:
+AI proposals live in plugin state, so they are invisible to every export path and to `toJSON()`.
 
-- The visible author could be the current human user, with AI provenance metadata.
-- Or the visible author could be an AI author, such as `ai:claude`, with the human user recorded as the committer.
+**Decision:** add `serializeWorkshopSession()` and `restoreWorkshopSession(envelope)` to `AiToolkitAPI` so apps have one documented shape for resume across reload. Implementation is the envelope already described in the Persistence section above.
 
-The important rule is that `ai-local` must not remain as a private-only author after promotion. Promotion should produce normal, broadcastable tracked changes.
-
-### Apply directly
-
-Apply accepted AI proposals as normal document edits.
-
-This path should still preserve any audit/provenance metadata we decide is required, but it should not create tracked-change marks unless the user chooses that behavior.
-
-## Anchors and stale proposals
-
-Use cheap, explicit stale detection first.
-
-Anchor proposals to stable node IDs from the UniqueId extension plus offsets/ranges mapped through ProseMirror transactions when possible. On commit, validate:
-
-- The source node still exists.
-- The source range still exists.
-- The content under the source range has not materially changed.
-
-If validation fails, mark the proposal stale and require regenerate, discard, or manual re-anchor. Do not attempt diff-against-diff rebasing in the first version.
-
-## Non-goals for the first version
+## Non-goals
 
 - No forked local collaborative `Y.Doc`.
-- No branch rebase engine.
-- No typing into private AI draft text as if it were committed document text.
+- No branch / rebase engine.
+- No typing into proposal-only text as if it were committed document text.
 - No use of `y-indexeddb` as a privacy guarantee.
-
-If the overlay/proposal model later proves insufficient, the work above will still clarify what a branch/rebase model would need to preserve.
-
-## Open questions
-
-- What exact transaction-origin API should `YBinding` expose for AI-local work?
-- Can the provider filter local Yjs updates before network broadcast without suppressing normal remote application?
-- How should promoted AI suggestions represent visible author versus AI provenance?
-- Should AI Workshop be globally available in all human modes, or gated when the document is view-only?
-- What exact awareness field should collaborators see: `ai-workshop`, `reviewing-ai`, or a richer activity object?
-- How do private AI proposals interact with export/import if a session is persisted locally but not committed?
+- No fourth user mode for AI.
+- No mandatory side panel. Apps may still render one as an overview, but the in-document rendering is the primary surface.
