@@ -362,10 +362,19 @@ export function Playground() {
             <AiSuggestionCardsPanel
               editor={editor}
               mode="tracked"
+              className="playground-ai-suggestions"
+              classNames={{
+                card: "playground-ai-suggestion-card",
+                header: "playground-ai-suggestion-header",
+                badge: "playground-ai-suggestion-badge",
+                diff: "playground-ai-suggestion-diff",
+                actions: "playground-ai-suggestion-actions",
+              }}
               styles={{
                 panel: {
                   top: 16,
                   marginRight: 4,
+                  gap: 10,
                 },
               }}
             />
