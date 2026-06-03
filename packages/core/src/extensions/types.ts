@@ -28,6 +28,7 @@ import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { SurfaceRegistry } from "../surfaces/SurfaceRegistry";
 import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
+import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
@@ -191,6 +192,14 @@ export interface IEditor extends IBaseEditor {
   get loadingState(): "syncing" | "rendering" | "ready";
   /** Selection controller — cursor movement, word/line navigation, selection. */
   readonly selection: SelectionController;
+  /**
+   * Cursor blink controller. Use `cursorManager.isVisible` to gate overlay
+   * painting on the current blink phase, and `cursorManager.resetSilent()` to
+   * restart the cycle after a programmatic edit so the caret shows immediately
+   * without an extra repaint. Only exposed on `IEditor` because blink is a
+   * view-layer concern — `ServerEditor` has no cursor.
+   */
+  readonly cursorManager: CursorManager;
 }
 
 /**
