@@ -7,8 +7,10 @@ import {
   defaultPageConfig,
   defaultPagelessConfig,
   collapseMargins,
+  clampPlacementsToPages,
 } from "./PageLayout";
 import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
+import type { AnchoredObjectPlacement } from "./AnchoredObjects";
 import { computePageMetrics, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
 import type { LayoutBlock } from "./BlockLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
@@ -2563,5 +2565,79 @@ describe("runPipeline — pageRectsDigest invalidation", () => {
     const freshFirst = fresh.pages[0]!.blocks[0]!;
     expect(cachedFirst.y).toBe(freshFirst.y);
     expect(cached.pages.length).toBe(fresh.pages.length);
+  });
+});
+
+// Minimal placement factory for clamp tests — only the fields the clamp
+// touches need to be real; the rest can be plausible filler.
+function makePlacement(
+  overrides: Partial<AnchoredObjectPlacement> & { page: number },
+): AnchoredObjectPlacement {
+  return {
+    docPos: 0,
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+    wrapMode: "square",
+    zIndex: 0,
+    // `node` is referenced by downstream paint code, not the clamp itself.
+    // Using a non-node value here would fail type-check; the test only ever
+    // calls clampPlacementsToPages, which doesn't dereference `node`.
+    node: undefined as never,
+    anchorGlobalY: 0,
+    anchorPage: 1,
+    globalY: 0,
+    ...overrides,
+  };
+}
+
+describe("clampPlacementsToPages — phantom-page guard", () => {
+  it("clamps placements whose page exceeds the actual page count", () => {
+    const placements = [
+      makePlacement({ page: 1 }),
+      makePlacement({ page: 3 }), // phantom — only 2 real pages
+      makePlacement({ page: 5 }), // far phantom
+    ];
+
+    const result = clampPlacementsToPages(placements, 2);
+
+    expect(result.map((p) => p.page)).toEqual([1, 2, 2]);
+  });
+
+  it("preserves placement.y when clamping (graceful degradation, not relocation)", () => {
+    // The clamp is defensive — visual position is not re-projected onto the
+    // new page. Asserting `y` is unchanged guards the contract that downstream
+    // PDF/hit-test consumers see the same Y they would have seen on the
+    // phantom page; the only difference is they now have a valid page index.
+    const placements = [makePlacement({ page: 4, y: 999 })];
+    const result = clampPlacementsToPages(placements, 2);
+    expect(result[0]!.page).toBe(2);
+    expect(result[0]!.y).toBe(999);
+  });
+
+  it("returns the input reference unchanged when no clamping is needed", () => {
+    // Common case allocation-free — every layout pass calls this guard, so
+    // the no-op path must not produce a fresh array.
+    const placements = [
+      makePlacement({ page: 1 }),
+      makePlacement({ page: 2 }),
+    ];
+    const result = clampPlacementsToPages(placements, 2);
+    expect(result).toBe(placements);
+  });
+
+  it("handles the empty-input case", () => {
+    expect(clampPlacementsToPages([], 5)).toEqual([]);
+  });
+
+  it("returns the input unchanged when pageCount is 0", () => {
+    // Defensive: an empty layout with placements queued (e.g. mid-construction)
+    // shouldn't try to clamp to 0 — that would collapse every placement to
+    // page 0, which doesn't exist either. Leave them alone; upstream callers
+    // build layouts with at least one page before consulting placements.
+    const placements = [makePlacement({ page: 3 })];
+    const result = clampPlacementsToPages(placements, 0);
+    expect(result).toBe(placements);
   });
 });

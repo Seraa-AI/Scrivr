@@ -370,6 +370,39 @@ function pageLocalYForGlobalY(
   return metricsFor(pageNumber).contentTop + (globalY - pageStart);
 }
 
+/**
+ * Clamp `placement.page` to the actual page count so downstream consumers
+ * (PDF export, hit-testing, CharacterMap lookup) never reference a page that
+ * doesn't exist. Under extreme inputs (huge image height + dense float
+ * packing + yOffset extremes), the anchored-object solver can decide
+ * `placement.page` based on geometry before pagination finalizes its page
+ * count — if no flow content lands on the geometry-derived page, the page
+ * list truncates and the placement keeps the higher index. The clamp keeps
+ * `placement.y` untouched: the float was already painting off the bottom of
+ * its target page; the visual is no worse, but every consumer that loops
+ * over pages can now trust `placement.page <= layout.pages.length`.
+ *
+ * Returns the original array reference when no clamping was needed so the
+ * common case stays allocation-free.
+ */
+export function clampPlacementsToPages(
+  placements: AnchoredObjectPlacement[],
+  pageCount: number,
+): AnchoredObjectPlacement[] {
+  if (pageCount === 0) return placements;
+  let needsClamp = false;
+  for (const p of placements) {
+    if (p.page > pageCount) {
+      needsClamp = true;
+      break;
+    }
+  }
+  if (!needsClamp) return placements;
+  return placements.map((p) =>
+    p.page > pageCount ? { ...p, page: pageCount } : p,
+  );
+}
+
 function pageRectsDigest(rects: readonly AnchoredObjectPlacement[] | undefined): string {
   if (!rects || rects.length === 0) return "";
   return rects
@@ -1037,6 +1070,7 @@ export function runFlowPipeline(
       prevPageCount: pr.pages.length,
     };
     const partialPages = [...pr.pages, pr.currentPage];
+    const clampedPartial = clampPlacementsToPages(mergedPlacements, partialPages.length);
     const layout: DocumentLayout = {
       pages: partialPages,
       pageConfig,
@@ -1050,12 +1084,13 @@ export function runFlowPipeline(
       runId,
       convergence: "stable",
       iterationCount: 1,
-      anchoredObjects: mergedPlacements,
+      anchoredObjects: clampedPartial,
     };
-    return { layout, isPartial: true, ...context, y: pr.y, anchoredObjects: mergedPlacements };
+    return { layout, isPartial: true, ...context, y: pr.y, anchoredObjects: clampedPartial };
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
+  const clampedFinal = clampPlacementsToPages(mergedPlacements, allPages.length);
   const layout: DocumentLayout = {
     pages: allPages,
     pageConfig,
@@ -1065,9 +1100,9 @@ export function runFlowPipeline(
     runId,
     convergence: "stable",
     iterationCount: 1,
-    anchoredObjects: mergedPlacements,
+    anchoredObjects: clampedFinal,
   };
-  return { layout, isPartial: false, ...context, y: pr.y, anchoredObjects: mergedPlacements };
+  return { layout, isPartial: false, ...context, y: pr.y, anchoredObjects: clampedFinal };
 }
 
 function runPipelineBody(
