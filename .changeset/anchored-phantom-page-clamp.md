@@ -20,19 +20,25 @@ indexed by page, hit-testing reaching for `CharacterMap` on a
 non-existent page) reference a page that doesn't exist.
 
 `runPipeline` now calls `clampPlacementsToPages(mergedPlacements,
-pages.length)` at both finalization branches (partial-stream and
-complete) so every placement that survives into `layout.anchoredObjects`
-satisfies `placement.page <= layout.pages.length`. The clamp leaves
-`placement.y` untouched — the float was already painting off the bottom
-of its intended page; the visual is no worse, but every loop that
-iterates pages can now trust the index. Common case stays
-allocation-free (returns the input reference when no clamping is
-needed).
+pages.length)` on the **final** layout (non-partial branch) so every
+placement that survives into `layout.anchoredObjects` satisfies
+`placement.page <= layout.pages.length`. Partial layouts are
+intentionally left un-clamped: they get carried forward to the next
+streaming chunk as `previousLayout?.anchoredObjects`, and clamping there
+would permanently lose a placement's original page when a later chunk
+grows the layout back. View consumers reading a partial layout during
+streaming may briefly observe `placement.page > pages.length`; the
+window closes when the next chunk arrives.
 
-`clampPlacementsToPages` is exported from `./layout/PageLayout` for
-custom layout consumers that build placements outside `runPipeline`
-(advanced extension authors, format exporters); the package's public
-surface is unchanged.
+The clamp leaves `placement.y` untouched — the float was already
+painting off the bottom of its intended page; the visual is no worse,
+but every loop that iterates pages can now trust the index. Common
+case stays allocation-free (returns the input reference when no
+clamping is needed).
+
+`clampPlacementsToPages` is `@internal` — used by `runPipeline`
+finalization, not part of the `@scrivr/core` public API. The package
+barrel does not re-export it.
 
 Tests: 5 new cases in `PageLayout.test.ts` cover the clamp, the
 `y`-preservation contract, the allocation-free no-op path, the empty

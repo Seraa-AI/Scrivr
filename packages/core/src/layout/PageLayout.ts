@@ -382,8 +382,18 @@ function pageLocalYForGlobalY(
  * its target page; the visual is no worse, but every consumer that loops
  * over pages can now trust `placement.page <= layout.pages.length`.
  *
+ * Applied only to the **final** (non-partial) layout. Partial layouts feed
+ * the next streaming chunk and must keep raw page indices so a placement
+ * that lands on page 4 today survives a chunk-2 layout pass that grows the
+ * page list back to 4 pages — clamping a partial would lose that.
+ *
  * Returns the original array reference when no clamping was needed so the
  * common case stays allocation-free.
+ *
+ * @internal — used by `runPipeline`'s finalization. Not part of the
+ * package's public API surface (`@scrivr/core` does not re-export it via
+ * the barrel); exported here only so the internal test file can drive it
+ * directly without re-creating a phantom-page scenario from end-to-end.
  */
 export function clampPlacementsToPages(
   placements: AnchoredObjectPlacement[],
@@ -1070,7 +1080,15 @@ export function runFlowPipeline(
       prevPageCount: pr.pages.length,
     };
     const partialPages = [...pr.pages, pr.currentPage];
-    const clampedPartial = clampPlacementsToPages(mergedPlacements, partialPages.length);
+    // Intentionally NOT clamped: the partial layout's anchoredObjects gets
+    // carried forward to the next chunk as `previousLayout?.anchoredObjects`,
+    // and earlier chunks are never re-solved. Clamping a partial would
+    // permanently lose a placement's original page — e.g. a placement on
+    // page 4 clamped to partial-page count 2 cannot be restored when the
+    // next chunk grows the layout back to 4 pages. View consumers reading
+    // a partial layout may briefly see placement.page > pages.length during
+    // streaming; that window is bounded by the next chunk arriving, and the
+    // final non-partial layout below is clamped.
     const layout: DocumentLayout = {
       pages: partialPages,
       pageConfig,
@@ -1084,9 +1102,9 @@ export function runFlowPipeline(
       runId,
       convergence: "stable",
       iterationCount: 1,
-      anchoredObjects: clampedPartial,
+      anchoredObjects: mergedPlacements,
     };
-    return { layout, isPartial: true, ...context, y: pr.y, anchoredObjects: clampedPartial };
+    return { layout, isPartial: true, ...context, y: pr.y, anchoredObjects: mergedPlacements };
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
