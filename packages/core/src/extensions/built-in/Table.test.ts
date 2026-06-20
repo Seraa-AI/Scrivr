@@ -496,6 +496,63 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     container.remove();
   });
 
+  it("cell text is hit-testable — cursor coords land in the correct cell (Phase 4 render)", () => {
+    const json = {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { layout: "fixed", grid: [120, 120] },
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "LEFT" }] }] },
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "RIGHT" }] }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({
+      extensions: [StarterKit.configure({ table: true }), DefaultContent.configure({ json })],
+    });
+    editor.mount(container);
+    editor.ensurePagePopulated(1);
+
+    const posOf = (text: string): number => {
+      let p = -1;
+      editor.getState().doc.descendants((n, pos) => {
+        if (n.isText && n.text === text) {
+          p = pos;
+          return false;
+        }
+        return true;
+      });
+      if (p < 0) throw new Error(`no text node "${text}"`);
+      return p;
+    };
+
+    const left = editor.charMap.coordsAtPos(posOf("LEFT"));
+    const right = editor.charMap.coordsAtPos(posOf("RIGHT"));
+    // Both cells registered glyphs → the cursor can be placed inside a cell.
+    expect(left).not.toBeNull();
+    expect(right).not.toBeNull();
+    // The RIGHT cell sits to the right of the LEFT cell on the same row.
+    expect(right!.x).toBeGreaterThan(left!.x);
+    expect(Math.abs(right!.y - left!.y)).toBeLessThan(5);
+
+    // Clicking in the RIGHT cell resolves to a position inside it.
+    const hit = editor.charMap.posAtCoords(right!.x, right!.y + right!.height / 2, right!.page);
+    expect(hit).toBeGreaterThanOrEqual(posOf("RIGHT"));
+
+    editor.destroy();
+    container.remove();
+  });
+
   it("rejects misconfiguration when DefaultContent receives both markdown and json", () => {
     expect(() => {
       const editor = createTestEditor({

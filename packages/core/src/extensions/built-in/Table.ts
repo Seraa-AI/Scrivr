@@ -2,7 +2,7 @@ import { Extension } from "../Extension";
 import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
-import { TableRowStrategy } from "../../layout/TableRowStrategy";
+import { TableRowStrategy } from "../../renderer/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
 import { tableStructureCommands } from "../../table/commands";
 

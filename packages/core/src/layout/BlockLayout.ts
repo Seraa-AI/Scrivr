@@ -859,6 +859,26 @@ export function computeJustifySpaceBonus(
  * The renderer's own charMap population (in PageRenderer.drawBlock) is guarded
  * by hasGlyph/hasLine checks, so no duplicate entries are created.
  */
+/**
+ * Number of CharacterMap line indices a block occupies — the amount the caller
+ * advances the page-global line offset after registering this block. Text
+ * blocks contribute one per line; leaf blocks one; table rows the sum across
+ * every cell's child blocks.
+ */
+export function registeredLineCount(block: LayoutBlock): number {
+  if (block.kind === "leaf") return 1;
+  if (block.kind === "tableRow") {
+    let n = 0;
+    for (const cell of block.cells ?? []) {
+      for (const child of cell.blocks) {
+        n += child.kind === "leaf" ? 1 : child.lines.length;
+      }
+    }
+    return n;
+  }
+  return block.lines.length;
+}
+
 export function populateCharMap(
   block: LayoutBlock,
   map: CharacterMap,
@@ -890,6 +910,21 @@ export function populateCharMap(
     // Right half → cursor after the block
     if (!map.hasGlyph(afterPos)) {
       map.registerGlyph({ docPos: afterPos, x: block.x + halfWidth, y: block.y, lineY: block.y, width: halfWidth, height: block.height, page, lineIndex: li });
+    }
+    return;
+  }
+
+  // Table row: register each cell's child blocks at their absolute y (the row
+  // block's final y plus the child's row-relative offset). Recursion reuses the
+  // text/leaf branches above for the actual cell content.
+  if (block.kind === "tableRow") {
+    let offset = lineIndexOffset;
+    for (const cell of block.cells ?? []) {
+      for (const child of cell.blocks) {
+        const absolute: LayoutBlock = { ...child, y: block.y + child.y };
+        populateCharMap(absolute, map, page, offset, measurer);
+        offset += child.kind === "leaf" ? 1 : child.lines.length;
+      }
     }
     return;
   }
