@@ -1,16 +1,25 @@
 /**
  * Surface management for header/footer live editing.
  *
- * Builds a restricted schema (no tables, page breaks, floats) and lazily
- * creates EditorSurface instances per slot. Surfaces are cached so
- * re-activation after Escape + re-click is free.
+ * Surfaces share the host editor's Schema so NodeType identity matches: when
+ * the user presses Mod-Alt-1 inside a header, the InputBridge keymap fires
+ * `setBlockType(editor.schema.nodes["heading"], …)` against the surface state,
+ * and ProseMirror's `canChangeType` accepts the NodeType because it belongs to
+ * the same Schema instance the surface doc was built from. Same applies to
+ * every other extension command and toolbar action — they all work in headers
+ * because the schema is shared.
+ *
+ * Disallowed nodes (tables, page breaks) are enforced via a
+ * `filterTransaction` plugin instead of a separate Schema. That covers paste,
+ * commands, and any external dispatcher with one mechanism, and keeps the
+ * NodeType identity intact for everything else.
  */
 
 import { Schema } from "prosemirror-model";
-import type { NodeSpec, MarkSpec } from "prosemirror-model";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
 import { history, undo, redo } from "prosemirror-history";
+import { Plugin } from "prosemirror-state";
 import { EditorSurface } from "@scrivr/core";
 import type { HeaderFooterDefinition } from "./types";
 
@@ -20,8 +29,13 @@ export type SlotKey =
   | "firstPageHeader"
   | "firstPageFooter";
 
-/** Node types that are NOT allowed in header/footer content. */
-const BLOCKED_NODES = new Set([
+/**
+ * Node types disallowed inside header/footer content. Enforced as a
+ * transaction filter on the surface (see `createBlockedNodeFilter`) — the
+ * surface still shares the host schema, so commands and keymaps that target
+ * allowed node types keep working with identical NodeType identity.
+ */
+export const HEADER_FOOTER_BLOCKED_NODES: ReadonlySet<string> = new Set([
   "table",
   "tableRow",
   "tableCell",
@@ -29,27 +43,26 @@ const BLOCKED_NODES = new Set([
 ]);
 
 /**
- * Build a restricted schema from the main schema by filtering out nodes
- * that don't belong in header/footer content.
+ * Plugin that rejects any transaction whose resulting doc contains a blocked
+ * node type. Covers paste, command insertions, and external dispatches in one
+ * place — the surface schema does not have to diverge from the host.
  */
-export function buildRestrictedSchema(mainSchema: Schema): Schema {
-  const nodes: Record<string, NodeSpec> = {};
-  mainSchema.spec.nodes.forEach((name, spec) => {
-    if (BLOCKED_NODES.has(name)) return;
-    nodes[name] = spec;
+function createBlockedNodeFilter(blocked: ReadonlySet<string>): Plugin {
+  return new Plugin({
+    filterTransaction(tr) {
+      if (!tr.docChanged) return true;
+      let hasBlocked = false;
+      tr.doc.descendants((node) => {
+        if (hasBlocked) return false;
+        if (blocked.has(node.type.name)) {
+          hasBlocked = true;
+          return false;
+        }
+        return undefined;
+      });
+      return !hasBlocked;
+    },
   });
-
-  // Override doc content to only allow block nodes (no tables)
-  if (nodes["doc"]) {
-    nodes["doc"] = { ...nodes["doc"], content: "block+" };
-  }
-
-  const marks: Record<string, MarkSpec> = {};
-  mainSchema.spec.marks.forEach((name, spec) => {
-    marks[name] = spec;
-  });
-
-  return new Schema({ nodes, marks });
 }
 
 /**
@@ -60,8 +73,8 @@ export class HeaderFooterSurfaceCache {
   private surfaces = new Map<SlotKey, EditorSurface>();
   private schema: Schema;
 
-  constructor(mainSchema: Schema) {
-    this.schema = buildRestrictedSchema(mainSchema);
+  constructor(schema: Schema) {
+    this.schema = schema;
   }
 
   /** Get or create a surface for the given slot. */
@@ -78,6 +91,7 @@ export class HeaderFooterSurfaceCache {
         history(),
         keymap({ "Mod-z": undo, "Mod-Shift-z": redo, "Mod-y": redo }),
         keymap(baseKeymap),
+        createBlockedNodeFilter(HEADER_FOOTER_BLOCKED_NODES),
       ],
     });
 
