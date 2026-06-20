@@ -136,6 +136,19 @@ describe("CharacterMap", () => {
       expect(m.lineEndPos(34)).toBe(36);
     });
 
+    it("scopes glyphs to the line's x box even if two lines share a lineIndex (defense in depth)", () => {
+      const m = new CharacterMap();
+      // Hypothetical: two cell lines in a row with a colliding lineIndex. The
+      // x-box scoping must still keep each cell's glyphs to its own line.
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 36 });
+      m.registerGlyph({ docPos: 12, x: 46, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
+      m.registerGlyph({ docPos: 32, x: 126, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
+
+      // Click inside cell 2 resolves to cell 2's glyph, not cell 1's.
+      expect(m.posAtCoords(130, 65, 1)).toBe(32);
+    });
+
     it("clicking empty cell space resolves to the cell's content start, not its boundary", () => {
       const m = new CharacterMap();
       // Empty cell: a single zero-width sentinel at the content start.

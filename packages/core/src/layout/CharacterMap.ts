@@ -164,8 +164,19 @@ export class CharacterMap {
     const line = this.lineAtPoint(x, y, page) ?? this.nearestLineAtPoint(x, y, page);
     if (!line) return 0;
 
+    // Scope glyphs to the line: by lineIndex (globally unique per page) and by
+    // the line's x box as a hard boundary, so a neighbouring cell's glyphs can
+    // never leak in. Filter on the glyph's start (not its right edge) so an
+    // overflowing wide word stays hittable.
+    const lineRight = line.x + line.contentWidth;
     const lineGlyphs = this.glyphs
-      .filter((g) => g.page === page && g.lineIndex === line.lineIndex)
+      .filter(
+        (g) =>
+          g.page === page &&
+          g.lineIndex === line.lineIndex &&
+          g.x >= line.x &&
+          g.x < lineRight,
+      )
       .sort((a, b) => a.x - b.x);
 
     if (!lineGlyphs.length) return line.startDocPos;
@@ -402,13 +413,15 @@ export class CharacterMap {
    * row — so each cell owns its own hit region.
    */
   private lineAtPoint(x: number, y: number, page: number): LineEntry | undefined {
+    // Half-open bounds: adjacent cells share an edge (cell 1's right == cell 2's
+    // left), so a boundary click must belong to the cell on the right.
     return this.lines.find(
       (l) =>
         l.page === page &&
         y >= l.y &&
         y < l.y + l.height &&
         x >= l.x &&
-        x <= l.x + l.contentWidth,
+        x < l.x + l.contentWidth,
     );
   }
 
