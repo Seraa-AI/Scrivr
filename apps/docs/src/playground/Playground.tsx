@@ -133,7 +133,7 @@ const identity = USE_COLLAB
 const EXTENSIONS =
   USE_COLLAB && identity
     ? [
-        StarterKit.configure({ history: false }),
+        StarterKit.configure({ history: false, table: true }),
         Collaboration.configure({ url: identity.wsUrl, name: identity.room }),
         CollaborationCursor.configure({
           user: { name: identity.userName, color: identity.userColor },
@@ -150,7 +150,7 @@ const EXTENSIONS =
         ...(AI_ENABLED ? [AiToolkit] : []),
       ]
     : [
-        StarterKit,
+        StarterKit.configure({ table: true }),
         HeaderFooter,
         PdfExport.configure({ filename: "scrivr-demo" }),
         DocxExport.configure({ filename: "scrivr-demo" }),
