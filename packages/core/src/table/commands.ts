@@ -1,6 +1,6 @@
 import { Selection, TextSelection } from "prosemirror-state";
 import type { Command, EditorState } from "prosemirror-state";
-import type { Node } from "prosemirror-model";
+import type { Node, NodeType } from "prosemirror-model";
 import { getTableMap, type Rect, type TableMap } from "./TableMap";
 
 /**
@@ -69,6 +69,24 @@ function rowStartPos(table: Node, tableStart: number, idx: number): number {
   let pos = tableStart;
   for (let i = 0; i < idx; i++) pos += table.child(i).nodeSize;
   return pos;
+}
+
+/**
+ * Widest row by summed `gridSpan`. `TableMap.width` trusts `table.attrs.grid`,
+ * which can be shorter than the rows actually are before the integrity plugin
+ * extends it — so the physical count is the safe basis for "is this really the
+ * last column?" decisions that would otherwise delete the whole table.
+ */
+function maxPhysicalColumns(table: Node): number {
+  let max = 0;
+  table.forEach((rowNode) => {
+    let w = 0;
+    rowNode.forEach((cell) => {
+      w += readGridSpan(cell);
+    });
+    if (w > max) max = w;
+  });
+  return max;
 }
 
 function physicalCellColumn(rowNode: Node, rowPos: number, cellPos: number): number | null {
@@ -285,9 +303,11 @@ function addColumnCommand(after: boolean): Command {
     if (!dispatch) return true;
 
     // Plan against the original doc: each row either grows a straddling cell's
-    // gridSpan or gets one fresh cell inserted at the column boundary.
+    // gridSpan or gets one fresh cell inserted at the column boundary. The new
+    // cell mirrors a neighbour's node type so a header row stays all-header
+    // (Word keeps the inserted column the same kind as the row).
     const grows: Array<{ pos: number; cell: Node }> = [];
-    const insertPositions: number[] = [];
+    const inserts: Array<{ pos: number; type: NodeType }> = [];
 
     for (let r = 0; r < table.childCount; r++) {
       const rowNode = table.child(r);
@@ -304,14 +324,18 @@ function addColumnCommand(after: boolean): Command {
           break;
         }
         if (insertCol === col) {
-          insertPositions.push(cellPos);
+          inserts.push({ pos: cellPos, type: cell.type });
           placed = true;
           break;
         }
         col += span;
         cellPos += cell.nodeSize;
       }
-      if (!placed) insertPositions.push(cellPos); // insertCol === width → row end
+      if (!placed) {
+        // insertCol === width → append at row end, matching the last cell's type.
+        const lastCell = rowNode.child(rowNode.childCount - 1);
+        inserts.push({ pos: cellPos, type: lastCell ? lastCell.type : cellType });
+      }
     }
 
     let tr = state.tr;
@@ -320,11 +344,16 @@ function addColumnCommand(after: boolean): Command {
       tr = tr.setNodeMarkup(g.pos, undefined, { ...g.cell.attrs, gridSpan: readGridSpan(g.cell) + 1 });
     }
     // Inserts descending so earlier inserts don't shift later positions.
-    insertPositions.sort((a, b) => b - a);
-    for (const pos of insertPositions) {
-      tr = tr.insert(pos, cellType.create({ gridSpan: 1, vMerge: "none" }, paragraphType.create()));
+    inserts.sort((a, b) => b.pos - a.pos);
+    for (const ins of inserts) {
+      tr = tr.insert(ins.pos, ins.type.create({ gridSpan: 1, vMerge: "none" }, paragraphType.create()));
     }
+    // Work against a grid padded to the real column count. `table.attrs.grid`
+    // can be shorter than the grid width (e.g. a table parsed from HTML before
+    // the integrity plugin extends it); splicing a short grid would land the
+    // new width in the wrong column once per-column widths can differ.
     const grid = readGrid(table);
+    while (grid.length < ctx.map.width) grid.push(DEFAULT_COLUMN_WIDTH);
     const newGrid = [...grid.slice(0, insertCol), DEFAULT_COLUMN_WIDTH, ...grid.slice(insertCol)];
     tr = tr.setNodeMarkup(tablePos, undefined, { ...table.attrs, grid: newGrid });
 
@@ -340,8 +369,10 @@ function deleteColumnCommand(): Command {
     const { table, tablePos, tableStart, map, rect } = ctx;
     const delCol = rect.left;
 
-    if (map.width === 1) {
-      // Last column — remove the whole table.
+    if (maxPhysicalColumns(table) <= 1) {
+      // Genuinely single-column table — remove it whole. Guard on the physical
+      // column count, not `map.width`, so a short `grid` attr can't trick this
+      // branch into deleting a multi-column table.
       if (dispatch) dispatch(deleteTableKeepingValidDoc(state, tablePos, table).scrollIntoView());
       return true;
     }
@@ -374,7 +405,9 @@ function deleteColumnCommand(): Command {
     }
     deletions.sort((a, b) => b.from - a.from);
     for (const d of deletions) tr = tr.delete(d.from, d.to);
+    // Pad to the real column count before removing the slot (see addColumn).
     const grid = readGrid(table);
+    while (grid.length < map.width) grid.push(DEFAULT_COLUMN_WIDTH);
     const newGrid = [...grid.slice(0, delCol), ...grid.slice(delCol + 1)];
     tr = tr.setNodeMarkup(tablePos, undefined, { ...table.attrs, grid: newGrid });
 

@@ -284,6 +284,77 @@ describe("table commands — columns", () => {
     expect(editor.getState().doc.firstChild?.type.name).toBe("paragraph");
   });
 
+  it("addColumnAfter yields a grid whose length matches the column count even when grid attr starts empty", () => {
+    // A table parsed from HTML can arrive with an empty `grid` attr before the
+    // integrity plugin extends it. The command must still land a correctly
+    // sized grid (not splice a new width into the wrong slot).
+    const editor = makeEditor(
+      tableDoc(
+        [],
+        [
+          [{ text: "A" }, { text: "B" }],
+          [{ text: "C" }, { text: "D" }],
+        ],
+      ),
+    );
+    cursorInCellWithText(editor, "A");
+    editor.commands["addColumnAfter"]?.();
+
+    const table = getTable(editor);
+    expect(gridOf(table)).toHaveLength(3);
+    expect(rowsOf(table).map((r) => r.length)).toEqual([3, 3]);
+  });
+
+  it("addColumn inserts a header cell into a header row (keeps the row all-header)", () => {
+    const editor = makeEditor(
+      tableDoc(
+        [100, 100],
+        [
+          [{ text: "H1", header: true }, { text: "H2", header: true }],
+          [{ text: "a" }, { text: "b" }],
+        ],
+      ),
+    );
+    cursorInCellWithText(editor, "H1");
+    editor.commands["addColumnAfter"]?.();
+
+    const table = getTable(editor);
+    // Header row stays all tableHeader; body row stays all tableCell.
+    const typeName = (rowIdx: number, cellIdx: number) =>
+      table.child(rowIdx).child(cellIdx).type.name;
+    expect([0, 1, 2].map((c) => typeName(0, c))).toEqual([
+      "tableHeader",
+      "tableHeader",
+      "tableHeader",
+    ]);
+    expect([0, 1, 2].map((c) => typeName(1, c))).toEqual([
+      "tableCell",
+      "tableCell",
+      "tableCell",
+    ]);
+  });
+
+  it("deleteColumn does not nuke a physically multi-column table when grid attr is short", () => {
+    // grid says one column, but each row physically has two cells (a state that
+    // can exist before the integrity plugin extends the grid). deleteColumn must
+    // remove one column, not delete the whole table.
+    const editor = makeEditor(
+      tableDoc(
+        [100],
+        [
+          [{ text: "A" }, { text: "B" }],
+          [{ text: "C" }, { text: "D" }],
+        ],
+      ),
+    );
+    cursorInCell(editor, 0, 0);
+    editor.commands["deleteColumn"]?.();
+
+    expect(hasTable(editor)).toBe(true);
+    const table = getTable(editor);
+    expect(rowsOf(table).map((r) => r.map((c) => c.text))).toEqual([["B"], ["D"]]);
+  });
+
   it("addColumn through a horizontal span grows the span, fresh cell elsewhere (Word)", () => {
     // row0: one cell spanning both columns; row1: two single cells.
     const editor = makeEditor(
