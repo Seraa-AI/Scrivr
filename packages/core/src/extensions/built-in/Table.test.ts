@@ -484,7 +484,10 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     for (const block of rowBlocks) {
       expect(block.kind).toBe("tableRow");
       expect(block.lines).toEqual([]);
-      expect(block.cells).toEqual([]);   // Phase 1 stub: cells filled in Phase 4
+      // Phase 4: each row carries one cell sub-block per column, each with its
+      // laid-out child blocks.
+      expect(block.cells).toHaveLength(2);
+      expect(block.cells!.every((c) => c.blocks.length > 0)).toBe(true);
       expect(block.height).toBeGreaterThan(0);
       expect(block.availableWidth).toBeGreaterThan(0);
     }
