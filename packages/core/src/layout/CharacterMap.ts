@@ -164,19 +164,12 @@ export class CharacterMap {
     const line = this.lineAtPoint(x, y, page) ?? this.nearestLineAtPoint(x, y, page);
     if (!line) return 0;
 
-    // Scope glyphs to the line: by lineIndex (globally unique per page) and by
-    // the line's x box as a hard boundary, so a neighbouring cell's glyphs can
-    // never leak in. Filter on the glyph's start (not its right edge) so an
-    // overflowing wide word stays hittable.
-    const lineRight = line.x + line.contentWidth;
+    // (page, lineIndex) is globally unique per page — the layout threads one
+    // running global line index through every block and table cell — so
+    // lineIndex alone scopes glyphs to exactly this line, including the tail of
+    // an overflowing wide word whose glyphs extend past the line's content box.
     const lineGlyphs = this.glyphs
-      .filter(
-        (g) =>
-          g.page === page &&
-          g.lineIndex === line.lineIndex &&
-          g.x >= line.x &&
-          g.x < lineRight,
-      )
+      .filter((g) => g.page === page && g.lineIndex === line.lineIndex)
       .sort((a, b) => a.x - b.x);
 
     if (!lineGlyphs.length) return line.startDocPos;
@@ -270,7 +263,8 @@ export class CharacterMap {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
 
-    const currentLine = this.lineAtPoint(coords.x, coords.y, coords.page);
+    const currentLine = this.lineAtPoint(coords.x, coords.y, coords.page) ??
+      this.nearestLineAtPoint(coords.x, coords.y, coords.page);
     if (!currentLine) return null;
 
     // Find the highest line on this page that is strictly above currentLine.y
@@ -311,7 +305,8 @@ export class CharacterMap {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
 
-    const currentLine = this.lineAtPoint(coords.x, coords.y, coords.page);
+    const currentLine = this.lineAtPoint(coords.x, coords.y, coords.page) ??
+      this.nearestLineAtPoint(coords.x, coords.y, coords.page);
     if (!currentLine) return null;
 
     // Find the lowest line on this page that starts strictly below currentLine's bottom
@@ -347,7 +342,8 @@ export class CharacterMap {
   lineStartPos(docPos: number): number | null {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
-    const line = this.lineAtPoint(coords.x, coords.y, coords.page);
+    const line = this.lineAtPoint(coords.x, coords.y, coords.page) ??
+      this.nearestLineAtPoint(coords.x, coords.y, coords.page);
     if (!line) return null;
     return line.startDocPos;
   }
@@ -359,7 +355,8 @@ export class CharacterMap {
   lineEndPos(docPos: number): number | null {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
-    const line = this.lineAtPoint(coords.x, coords.y, coords.page);
+    const line = this.lineAtPoint(coords.x, coords.y, coords.page) ??
+      this.nearestLineAtPoint(coords.x, coords.y, coords.page);
     if (!line) return null;
     return line.endDocPos;
   }
@@ -425,14 +422,27 @@ export class CharacterMap {
     );
   }
 
-  /** Nearest line to (x, y) by 2D distance — for clicks in margins/padding/gaps. */
+  /**
+   * Nearest line to (x, y) — for clicks in margins/padding/gaps. Lines whose x
+   * range contains the click win first (a cell's lines own the blank space in
+   * that column, so a click below a short cell's text stays in that cell rather
+   * than crossing to a taller neighbour); ties and column-less clicks fall back
+   * to 2D distance.
+   */
   private nearestLineAtPoint(x: number, y: number, page: number): LineEntry | undefined {
     const pageLines = this.lines.filter((l) => l.page === page);
     if (!pageLines.length) return undefined;
+    const vDist = (l: LineEntry): number =>
+      y < l.y ? l.y - y : y > l.y + l.height ? y - (l.y + l.height) : 0;
+
+    const inColumn = pageLines.filter((l) => x >= l.x && x < l.x + l.contentWidth);
+    if (inColumn.length) {
+      return inColumn.reduce((closest, l) => (vDist(l) < vDist(closest) ? l : closest));
+    }
+
     const dist = (l: LineEntry): number => {
-      const dy = y < l.y ? l.y - y : y > l.y + l.height ? y - (l.y + l.height) : 0;
       const dx = x < l.x ? l.x - x : x > l.x + l.contentWidth ? x - (l.x + l.contentWidth) : 0;
-      return dx + dy;
+      return dx + vDist(l);
     };
     return pageLines.reduce((closest, l) => (dist(l) < dist(closest) ? l : closest));
   }

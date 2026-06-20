@@ -133,7 +133,7 @@ function tableRowBlock(node: Node, cells: CellSubBlock[], isLastRow = true): Lay
 describe("renderTableRowPdf", () => {
   it("a last-row cell draws all four grid lines (left, top, bottom, right) and renders its child", () => {
     const node = rowNode([{}]);
-    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, blocks: [childTextBlock(4)] };
+    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [childTextBlock(4)] };
     const { ctx, lines, textBlocks } = fakeCtx();
 
     renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
@@ -145,7 +145,7 @@ describe("renderTableRowPdf", () => {
 
   it("a non-last row omits the bottom — the row below owns that line (3 lines)", () => {
     const node = rowNode([{}]);
-    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, blocks: [] };
+    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [] };
     const { ctx, lines } = fakeCtx();
 
     renderTableRowPdf(tableRowBlock(node, [cell], false), ctx);
@@ -157,7 +157,7 @@ describe("renderTableRowPdf", () => {
     // A lone "continue" gets normalized away, so build a real 2-row vertical
     // merge (restart over continue) and take the continuation row.
     const node = continuationRowNode();
-    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, blocks: [] };
+    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "continue", background: null, blocks: [] };
     const { ctx, lines } = fakeCtx();
 
     renderTableRowPdf(tableRowBlock(node, [cell]), ctx);
@@ -167,7 +167,7 @@ describe("renderTableRowPdf", () => {
 
   it("does nothing for a non-PDF context (structural guard)", () => {
     const node = rowNode([{}]);
-    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, blocks: [childTextBlock(4)] };
+    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [childTextBlock(4)] };
     expect(() => renderTableRowPdf(tableRowBlock(node, [cell]), { not: "a ctx" })).not.toThrow();
   });
 });

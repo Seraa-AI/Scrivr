@@ -57,6 +57,16 @@ function readGridSpan(cell: Node): number {
   return 1;
 }
 
+function readVMerge(cell: Node): "none" | "restart" | "continue" {
+  const v = cell.attrs["vMerge"];
+  return v === "restart" || v === "continue" ? v : "none";
+}
+
+function readBackground(cell: Node): string | null {
+  const v = cell.attrs["background"];
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
 function columnWidth(columns: number[], index: number): number {
   return columns[index] ?? DEFAULT_COLUMN_WIDTH;
 }
@@ -131,6 +141,8 @@ export function layoutTableRowCells(
       y: 0, // cell top aligns with the row top
       width: cellWidth,
       height: cellHeight,
+      vMerge: readVMerge(cellNode),
+      background: readBackground(cellNode),
       blocks,
     });
 

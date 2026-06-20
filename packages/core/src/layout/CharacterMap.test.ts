@@ -136,17 +136,19 @@ describe("CharacterMap", () => {
       expect(m.lineEndPos(34)).toBe(36);
     });
 
-    it("scopes glyphs to the line's x box even if two lines share a lineIndex (defense in depth)", () => {
+    it("a click in a short cell's blank lower area stays in that cell, not the taller neighbour", () => {
       const m = new CharacterMap();
-      // Hypothetical: two cell lines in a row with a colliding lineIndex. The
-      // x-box scoping must still keep each cell's glyphs to its own line.
-      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
-      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 36 });
+      // Cell A (left): one line at the top of a tall row.
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 14 });
       m.registerGlyph({ docPos: 12, x: 46, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
-      m.registerGlyph({ docPos: 32, x: 126, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
+      // Cell B (right): a line near the bottom of the same tall row.
+      m.registerLine({ page: 1, lineIndex: 5, y: 200, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 34 });
+      m.registerGlyph({ docPos: 32, x: 126, y: 200, lineY: 200, width: 10, height: 20, page: 1, lineIndex: 5 });
 
-      // Click inside cell 2 resolves to cell 2's glyph, not cell 1's.
-      expect(m.posAtCoords(130, 65, 1)).toBe(32);
+      // Click low in cell A's column (blank space below A's text), on the glyph's
+      // x. 2D distance alone would pick B's bottom line; column preference keeps
+      // it in A.
+      expect(m.posAtCoords(50, 205, 1)).toBe(12);
     });
 
     it("clicking empty cell space resolves to the cell's content start, not its boundary", () => {
@@ -441,6 +443,18 @@ describe("CharacterMap — posAbove / posBelow (vertical navigation)", () => {
 
     it("lineStartPos of first glyph returns line start", () => {
       expect(map.lineStartPos(1)).toBe(1);
+    });
+
+    it("resolves even when the cursor sits at the line's right edge (2D lookup falls back to nearest)", () => {
+      const m = new CharacterMap();
+      // A glyph at the line's exact right edge (x === line.x + contentWidth):
+      // lineAtPoint is half-open on x and misses, so without the
+      // nearestLineAtPoint fallback Home/End would return null and no-op.
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
+      m.registerGlyph({ docPos: 16, x: 114, y: 58, lineY: 58, width: 0, height: 20, page: 1, lineIndex: 0 });
+
+      expect(m.lineStartPos(16)).toBe(12);
+      expect(m.lineEndPos(16)).toBe(16);
     });
   });
 });

@@ -98,7 +98,7 @@ describe("TableRowStrategy", () => {
       width: 120,
       height: 40,
       lines: [],
-      cells: [{ cellPos: 2, x: 10, y: 0, width: 120, height: 40, blocks: [child] }],
+      cells: [{ cellPos: 2, x: 10, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [child] }],
       spaceBefore: 0,
       spaceAfter: 0,
       blockType: "tableRow",

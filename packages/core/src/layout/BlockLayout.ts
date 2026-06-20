@@ -101,6 +101,10 @@ export interface CellSubBlock {
   width: number;
   /** Cell height including padding. */
   height: number;
+  /** Vertical-merge state from the cell node — drives render border ownership. */
+  vMerge: "none" | "restart" | "continue";
+  /** Cell background color, or null. */
+  background: string | null;
   /** Layout for the cell's child blocks. Empty array in Phase 1. */
   blocks: LayoutBlock[];
 }

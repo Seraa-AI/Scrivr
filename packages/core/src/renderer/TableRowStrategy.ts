@@ -15,18 +15,6 @@ import { drawBlock } from "./PageRenderer";
 const BORDER_COLOR = "#9ca3af"; // neutral gray
 const BORDER_WIDTH = 1;
 
-function vMergeOf(rowNode: LayoutBlock["node"], cellIndex: number): string {
-  const cell = rowNode.childCount > cellIndex ? rowNode.child(cellIndex) : null;
-  const v = cell?.attrs["vMerge"];
-  return typeof v === "string" ? v : "none";
-}
-
-function backgroundOf(rowNode: LayoutBlock["node"], cellIndex: number): string | null {
-  const cell = rowNode.childCount > cellIndex ? rowNode.child(cellIndex) : null;
-  const bg = cell?.attrs["background"];
-  return typeof bg === "string" && bg.length > 0 ? bg : null;
-}
-
 /**
  * Paints the row's grid lines, each exactly once, so internal borders (shared
  * by adjacent cells/rows) aren't double-stroked and heavier than the outer
@@ -43,11 +31,9 @@ function paintRowGrid(
 ): void {
   if (cells.length === 0) return;
 
-  for (let i = 0; i < cells.length; i++) {
-    const bg = backgroundOf(block.node, i);
-    if (bg) {
-      const cell = cells[i]!;
-      ctx.fillStyle = bg;
+  for (const cell of cells) {
+    if (cell.background) {
+      ctx.fillStyle = cell.background;
       ctx.fillRect(cell.x, block.y + cell.y, cell.width, cell.height);
     }
   }
@@ -56,15 +42,14 @@ function paintRowGrid(
   ctx.strokeStyle = BORDER_COLOR;
   ctx.lineWidth = BORDER_WIDTH;
   ctx.beginPath();
-  for (let i = 0; i < cells.length; i++) {
-    const cell = cells[i]!;
+  for (const cell of cells) {
     const top = block.y + cell.y;
     const bottom = top + cell.height;
     const left = cell.x;
     const right = cell.x + cell.width;
     ctx.moveTo(left, top);
     ctx.lineTo(left, bottom);
-    if (vMergeOf(block.node, i) !== "continue") {
+    if (cell.vMerge !== "continue") {
       ctx.moveTo(left, top);
       ctx.lineTo(right, top);
     }

@@ -57,14 +57,13 @@ export function renderTableRowPdf(block: LayoutBlock, ctx: unknown): void {
 
   // Each grid line once (same ownership as the canvas): cell owns LEFT + TOP,
   // the row owns one RIGHT edge, only the last row draws BOTTOM.
-  for (let i = 0; i < cells.length; i++) {
-    const cell = cells[i]!;
+  for (const cell of cells) {
     const lx = cell.x * PT_PER_PX;
     const rx = (cell.x + cell.width) * PT_PER_PX;
     const ty = flipY(block.y + cell.y);
     const by = flipY(block.y + cell.y + cell.height);
     stroke({ x: lx, y: ty }, { x: lx, y: by });
-    if (block.node.child(i)?.attrs["vMerge"] !== "continue") stroke({ x: lx, y: ty }, { x: rx, y: ty });
+    if (cell.vMerge !== "continue") stroke({ x: lx, y: ty }, { x: rx, y: ty });
     if (isLastRow) stroke({ x: lx, y: by }, { x: rx, y: by });
 
     for (const child of cell.blocks) {
