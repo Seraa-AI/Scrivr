@@ -354,6 +354,7 @@ export function layoutTableRow(
   const { cells, height } = layoutTableRowCells(node, {
     x,
     columns,
+    availableWidth,
     page,
     rowNodePos: nodePos,
     measurer,

@@ -259,7 +259,7 @@ export class CharacterMap {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
 
-    const currentLine = this.lineAtCoords(coords.y, coords.page);
+    const currentLine = this.lineAtPoint(coords.x, coords.y, coords.page);
     if (!currentLine) return null;
 
     // Find the highest line on this page that is strictly above currentLine.y
@@ -300,7 +300,7 @@ export class CharacterMap {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
 
-    const currentLine = this.lineAtCoords(coords.y, coords.page);
+    const currentLine = this.lineAtPoint(coords.x, coords.y, coords.page);
     if (!currentLine) return null;
 
     // Find the lowest line on this page that starts strictly below currentLine's bottom
@@ -336,7 +336,7 @@ export class CharacterMap {
   lineStartPos(docPos: number): number | null {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
-    const line = this.lineAtCoords(coords.y, coords.page);
+    const line = this.lineAtPoint(coords.x, coords.y, coords.page);
     if (!line) return null;
     return line.startDocPos;
   }
@@ -348,7 +348,7 @@ export class CharacterMap {
   lineEndPos(docPos: number): number | null {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
-    const line = this.lineAtCoords(coords.y, coords.page);
+    const line = this.lineAtPoint(coords.x, coords.y, coords.page);
     if (!line) return null;
     return line.endDocPos;
   }
@@ -397,9 +397,9 @@ export class CharacterMap {
   }
 
   /**
-   * The line whose box contains (x, y). Unlike `lineAtCoords` (y only), this
-   * disambiguates lines that share a y band but occupy different x ranges —
-   * cells in the same table row — so each cell owns its own hit region.
+   * The line whose box contains (x, y). Resolving in 2D disambiguates lines
+   * that share a y band but occupy different x ranges — cells in the same table
+   * row — so each cell owns its own hit region.
    */
   private lineAtPoint(x: number, y: number, page: number): LineEntry | undefined {
     return this.lines.find(
@@ -422,13 +422,6 @@ export class CharacterMap {
       return dx + dy;
     };
     return pageLines.reduce((closest, l) => (dist(l) < dist(closest) ? l : closest));
-  }
-
-  // Internal — find which line a y coordinate lands on
-  private lineAtCoords(y: number, page: number): LineEntry | undefined {
-    return this.lines.find(
-      (l) => l.page === page && y >= l.y && y < l.y + l.height,
-    );
   }
 
   // Internal — find the closest line when y is outside all line ranges.

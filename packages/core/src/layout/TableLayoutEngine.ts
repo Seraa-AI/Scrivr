@@ -39,6 +39,8 @@ export interface TableRowLayoutContext {
   x: number;
   /** Column widths in CSS px, from the table's `grid` attr. */
   columns: number[];
+  /** Content width the row must fit within — columns scale to fill it. */
+  availableWidth: number;
   /** Page this row sits on. */
   page: number;
   /** Absolute document position of the row node. */
@@ -67,13 +69,21 @@ export function layoutTableRowCells(
   rowNode: Node,
   ctx: TableRowLayoutContext,
 ): { cells: CellSubBlock[]; height: number } {
+  // Scale the grid to fill the available content width (Word/Docs fit a table
+  // to the page, never letting a wide grid overflow the margin). Proportions
+  // from `grid` are preserved.
+  const colCount = Math.max(ctx.columns.length, 1);
+  let rawTotal = 0;
+  for (let c = 0; c < colCount; c++) rawTotal += columnWidth(ctx.columns, c);
+  const scale = ctx.availableWidth > 0 && rawTotal > 0 ? ctx.availableWidth / rawTotal : 1;
+  const widthOf = (c: number): number => columnWidth(ctx.columns, c) * scale;
+
   // Cumulative x offset of each grid column from the row's left edge.
   const columnX: number[] = [];
   let acc = 0;
-  const colCount = Math.max(ctx.columns.length, 1);
   for (let c = 0; c < colCount; c++) {
     columnX.push(acc);
-    acc += columnWidth(ctx.columns, c);
+    acc += widthOf(c);
   }
 
   const cells: CellSubBlock[] = [];
@@ -84,7 +94,7 @@ export function layoutTableRowCells(
     const cellX = ctx.x + (columnX[col] ?? col * DEFAULT_COLUMN_WIDTH);
 
     let cellWidth = 0;
-    for (let c = col; c < col + span; c++) cellWidth += columnWidth(ctx.columns, c);
+    for (let c = col; c < col + span; c++) cellWidth += widthOf(c);
 
     const contentX = cellX + CELL_PADDING_H;
     const contentWidth = Math.max(0, cellWidth - 2 * CELL_PADDING_H);

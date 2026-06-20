@@ -8,6 +8,7 @@ export type { PdfContext, PdfFontRegistry, PdfDrawHelpers } from "./context";
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
 import type {
   IEditor,
+  IBaseEditor,
   DocumentLayout,
   AnchoredObjectPlacement,
   ResolvedTheme,
@@ -61,18 +62,23 @@ export async function exportToPdf(
   editor: IEditor,
   options?: PdfExportOptions,
 ): Promise<Uint8Array> {
-  return buildPdf(editor.layout, options ?? {}, editor);
+  return buildPdf(editor.layout, editor, options);
 }
 
 /**
- * Lower-level export — accepts a pre-computed DocumentLayout directly.
- * Useful for server-side rendering or testing.
- * When called without an editor, only default handlers are used.
+ * Lower-level export — accepts a pre-computed DocumentLayout directly (useful
+ * for server-side rendering or testing).
+ *
+ * `editor` is required: extension nodes (e.g. `table`) contribute their PDF
+ * handler through `editor.getExportContributions()`, so without it those blocks
+ * would render blank. A `ServerEditor` is sufficient (it satisfies the needed
+ * surface). A block whose node type still has no handler is skipped with a
+ * one-time warning.
  */
 export async function buildPdf(
   layout: DocumentLayout,
+  editor: IBaseEditor,
   options?: PdfExportOptions,
-  editor?: IEditor,
 ): Promise<Uint8Array> {
   // ── Phase 1: Collect handlers ──────────────────────────────────────────
   const nodeHandlers: Record<string, PdfNodeHandler> = { ...defaultNodeHandlers };
@@ -82,16 +88,13 @@ export async function buildPdf(
     after: Array<(ctx: PdfContext) => void | Promise<void>>;
   } = { before: [], after: [] };
 
-  if (editor) {
-    const contributions = editor.getExportContributions();
-    for (const contrib of contributions) {
-      const pdfContrib = contrib.pdf;
-      if (!pdfContrib) continue;
-      if (pdfContrib.nodes) Object.assign(nodeHandlers, pdfContrib.nodes);
-      if (pdfContrib.chrome) Object.assign(chromeHandlers, pdfContrib.chrome);
-      if (pdfContrib.onBeforeExport) lifecycleHooks.before.push(pdfContrib.onBeforeExport);
-      if (pdfContrib.onAfterExport) lifecycleHooks.after.push(pdfContrib.onAfterExport);
-    }
+  for (const contrib of editor.getExportContributions()) {
+    const pdfContrib = contrib.pdf;
+    if (!pdfContrib) continue;
+    if (pdfContrib.nodes) Object.assign(nodeHandlers, pdfContrib.nodes);
+    if (pdfContrib.chrome) Object.assign(chromeHandlers, pdfContrib.chrome);
+    if (pdfContrib.onBeforeExport) lifecycleHooks.before.push(pdfContrib.onBeforeExport);
+    if (pdfContrib.onAfterExport) lifecycleHooks.after.push(pdfContrib.onAfterExport);
   }
 
   // ── Phase 2: Build PDF document + assets ───────────────────────────────
@@ -138,7 +141,7 @@ export async function buildPdf(
     fonts: fontRegistry,
     images: imageCache,
     draw,
-    editor: editor ?? null,
+    editor,
     theme: resolvedTheme,
   };
 
@@ -148,6 +151,10 @@ export async function buildPdf(
   }
 
   // ── Phase 5: Walk pages, dispatch handlers ─────────────────────────────
+  // A block type with no handler is skipped (renders blank). Warn once per type
+  // so the gap is loud rather than silent (e.g. an extension that wasn't enabled
+  // on the editor).
+  const warnedMissing = new Set<string>();
   for (let i = 0; i < layout.pages.length; i++) {
     const layoutPage = layout.pages[i]!;
     const pageNumber = i + 1;
@@ -184,6 +191,13 @@ export async function buildPdf(
         ctx.y = block.y;
         ctx.width = block.width;
         handler(block, ctx);
+      } else if (!warnedMissing.has(block.node.type.name)) {
+        warnedMissing.add(block.node.type.name);
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[exportPdf] no PDF handler for "${block.node.type.name}" — it will not appear in the PDF. ` +
+            `Ensure the contributing extension is enabled on the editor passed to exportToPdf/buildPdf.`,
+        );
       }
     }
 

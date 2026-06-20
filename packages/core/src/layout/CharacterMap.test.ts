@@ -123,6 +123,19 @@ describe("CharacterMap", () => {
       expect(m.posAtCoords(122, 65, 1)).toBe(32);
     });
 
+    it("Home/End (lineStartPos/lineEndPos) resolve within the cursor's own cell, not the first cell in the row", () => {
+      const m = new CharacterMap();
+      // Two cells in a row (same y band, different x ranges), each with one glyph.
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
+      m.registerLine({ page: 1, lineIndex: 1, y: 58, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 36 });
+      m.registerGlyph({ docPos: 14, x: 60, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
+      m.registerGlyph({ docPos: 34, x: 140, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 1 });
+
+      // A position in the SECOND cell must report the second cell's line bounds.
+      expect(m.lineStartPos(34)).toBe(32);
+      expect(m.lineEndPos(34)).toBe(36);
+    });
+
     it("clicking empty cell space resolves to the cell's content start, not its boundary", () => {
       const m = new CharacterMap();
       // Empty cell: a single zero-width sentinel at the content start.

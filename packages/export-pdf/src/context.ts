@@ -19,7 +19,7 @@ import {
   type LayoutPage,
   type LayoutBlock,
   type LayoutLine,
-  type IEditor,
+  type IBaseEditor,
   type ResolvedTheme,
 } from "@scrivr/core";
 import type { PdfNodeHandler, PdfMarkHandler, PdfSpanStyle } from "./augmentation";
@@ -41,8 +41,8 @@ export interface PdfContext {
   fonts: PdfFontRegistry;
   images: Map<string, PDFImage | null>;
   draw: PdfDrawHelpers;
-  /** null when called via buildPdf(layout) without an editor instance. */
-  editor: IEditor | null;
+  /** The editor whose export contributions were collected (a ServerEditor suffices). */
+  editor: IBaseEditor;
   /**
    * Resolved colors used by every PDF handler. Defaults to the print-ready
    * `defaultPdfTheme` regardless of the canvas theme; callers opt into a

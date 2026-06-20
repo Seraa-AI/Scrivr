@@ -8,8 +8,16 @@
 import { describe, it, expect, vi } from "vitest";
 import { Schema } from "prosemirror-model";
 import zlib from "node:zlib";
-import { buildPdf } from "../index";
+import { buildPdf as buildPdfWithEditor, type PdfExportOptions } from "../index";
+import { ServerEditor, StarterKit } from "@scrivr/core";
 import type { DocumentLayout, LayoutBlock, LayoutLine } from "@scrivr/core";
+
+// buildPdf now requires an editor (it collects PDF handlers from extensions).
+// A ServerEditor satisfies the contract; table is enabled so the table handler
+// is available to the synthetic table layouts below.
+const exportEditor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+const buildPdf = (layout: DocumentLayout, options?: PdfExportOptions) =>
+  buildPdfWithEditor(layout, exportEditor, options);
 
 // ── Minimal schema ────────────────────────────────────────────────────────────
 

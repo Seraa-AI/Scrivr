@@ -59,9 +59,12 @@ function rowFixture(grid: number[], cells: CellSpec[]): { row: Node; rowNodePos:
   return { row: t.child(0), rowNodePos: tablePos + 1, grid: t.attrs["grid"] };
 }
 
-const baseCtx = (grid: number[], rowNodePos: number, x = 50) => ({
+// availableWidth defaults to the grid sum, so columns scale by 1 and the
+// geometry assertions read the raw grid widths. Scaling is covered separately.
+const baseCtx = (grid: number[], rowNodePos: number, x = 50, availableWidth?: number) => ({
   x,
   columns: grid,
+  availableWidth: availableWidth ?? grid.reduce((s, w) => s + w, 0),
   page: 0,
   rowNodePos,
   measurer: createMeasurer(),
@@ -77,6 +80,20 @@ describe("TableLayoutEngine — geometry", () => {
     expect(cells[0]!.width).toBe(120);
     expect(cells[1]!.x).toBe(50 + 120); // ctx.x + columnX[1]
     expect(cells[1]!.width).toBe(80);
+  });
+
+  it("scales columns to fill availableWidth — shrinks a wide grid, stretches a narrow one", () => {
+    const { row, rowNodePos, grid } = rowFixture([100, 100, 100], [{ text: "A" }, { text: "B" }, { text: "C" }]);
+
+    // Wide grid (300) shrunk into 150 → each column 50, no overflow past x+150.
+    const shrunk = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0, 150)).cells;
+    expect(shrunk.map((c) => c.width)).toEqual([50, 50, 50]);
+    const lastRight = shrunk[2]!.x + shrunk[2]!.width;
+    expect(lastRight).toBeCloseTo(150, 5);
+
+    // Narrow grid stretched to fill 600 → each column 200.
+    const stretched = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0, 600)).cells;
+    expect(stretched.map((c) => c.width)).toEqual([200, 200, 200]);
   });
 
   it("a gridSpan>1 cell spans the summed column widths", () => {
