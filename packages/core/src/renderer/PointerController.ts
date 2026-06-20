@@ -548,6 +548,19 @@ export class PointerController {
 
     // Text selection drag
     if (!this.isDragging || !hit) return;
+    // Mid-drag in the gap between two pages: hit.gap is true and hit.docY
+    // is clamped to the source page bottom. Letting posAtCoords run on that
+    // would re-collapse the selection's head to end-of-source-page on every
+    // frame of gap traversal. Skip the update — the last valid selection
+    // sticks until the pointer enters real page content again.
+    if (hit.gap) return;
+    // posAtCoords is page-scoped: on a destination page that hasn't been
+    // painted yet, its CharacterMap has no lines, the lookup falls through
+    // to 0, and setSelection(anchor, 0) collapses the selection to doc
+    // start — visually "stuck at the source page" because the destination
+    // half never gets a valid head. Populate the page first, same as the
+    // anchored-object drag handler below.
+    editor.ensurePagePopulated(hit.page);
     const pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
 
     // Word-granularity drag (after double-click)
