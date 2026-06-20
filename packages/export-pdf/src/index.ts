@@ -283,16 +283,29 @@ async function embedImages(
     if (src) srcs.add(src);
   }
 
-  const collectFromBlocks = (blocks: DocumentLayout["pages"][0]["blocks"]) => {
-    for (const block of blocks) {
-      for (const line of block.lines) {
-        for (const span of line.spans) {
-          if (span.kind === "object" && span.node.type.name === "image") {
-            const src = span.node.attrs["src"] as string | undefined;
-            if (src) srcs.add(src);
-          }
+  const collectFromBlock = (block: DocumentLayout["pages"][0]["blocks"][number]) => {
+    for (const cell of block.cells ?? []) {
+      for (const child of cell.blocks) collectFromBlock(child);
+    }
+
+    if (block.node.type.name === "image") {
+      const src = block.node.attrs["src"] as string | undefined;
+      if (src) srcs.add(src);
+    }
+
+    for (const line of block.lines) {
+      for (const span of line.spans) {
+        if (span.kind === "object" && span.node.type.name === "image") {
+          const src = span.node.attrs["src"] as string | undefined;
+          if (src) srcs.add(src);
         }
       }
+    }
+  };
+
+  const collectFromBlocks = (blocks: DocumentLayout["pages"][0]["blocks"]) => {
+    for (const block of blocks) {
+      collectFromBlock(block);
     }
   };
 

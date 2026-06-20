@@ -107,6 +107,51 @@ describe("CharacterMap", () => {
     it("returns 0 when clicking on the wrong page", () => {
       expect(map.posAtCoords(50, 65, 2)).toBe(0);
     });
+
+    it("restricts hits inside a table cell rect to that cell's own line", () => {
+      const m = new CharacterMap();
+      m.registerCellRect({
+        cellPos: 10,
+        x: 40,
+        y: 50,
+        width: 80,
+        height: 40,
+        page: 1,
+        defaultDocPos: 12,
+      });
+      m.registerCellRect({
+        cellPos: 30,
+        x: 120,
+        y: 50,
+        width: 80,
+        height: 40,
+        page: 1,
+        defaultDocPos: 32,
+      });
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
+      m.registerLine({ page: 1, lineIndex: 1, y: 58, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 36 });
+      m.registerGlyph({ docPos: 12, x: 46, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
+      m.registerGlyph({ docPos: 32, x: 126, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 1 });
+
+      // x=122 is inside the second cell's left padding and before its first glyph.
+      // The old y-only lookup grouped both cells and could snap to the left cell.
+      expect(m.posAtCoords(122, 65, 1)).toBe(32);
+    });
+
+    it("clicking empty table-cell space falls back to that cell content start", () => {
+      const m = new CharacterMap();
+      m.registerCellRect({
+        cellPos: 30,
+        x: 120,
+        y: 50,
+        width: 80,
+        height: 40,
+        page: 1,
+        defaultDocPos: 32,
+      });
+
+      expect(m.posAtCoords(150, 70, 1)).toBe(32);
+    });
   });
 
   describe("coordsAtPos", () => {
@@ -159,6 +204,17 @@ describe("CharacterMap", () => {
       const exact = crossMap.coordsAtPos(101, 2);
       expect(exact?.page).toBe(2);
       expect(exact?.x).toBe(72);
+    });
+
+    it("falls back within the line containing the position, not an arbitrary previous glyph", () => {
+      const m = new CharacterMap();
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
+      m.registerLine({ page: 1, lineIndex: 1, y: 58, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 36 });
+      m.registerGlyph({ docPos: 12, x: 46, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
+      m.registerGlyph({ docPos: 32, x: 126, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 1 });
+
+      const coords = m.coordsAtPos(36);
+      expect(coords).toMatchObject({ x: 136, y: 58, page: 1 });
     });
   });
 

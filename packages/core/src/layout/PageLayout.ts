@@ -271,6 +271,8 @@ export interface FlowBlock {
   lines: LayoutLine[];
   /** Cell sub-blocks for `kind: "tableRow"` flows (y relative to the row top). */
   cells?: CellSubBlock[];
+  /** True for a table's last row — drives table bottom-border ownership. */
+  isLastRow?: boolean;
   height: number;
   /** Block style spacing (styleKey-aware, e.g. list_item overrides paragraph). */
   spaceBefore: number;
@@ -1309,6 +1311,7 @@ export function paginateFlow(
       align: flow.align,
       availableWidth: blockWidth,
       ...(flow.kind === "tableRow" ? { cells: flow.cells ?? [] } : {}),
+      ...(flow.isLastRow ? { isLastRow: true } : {}),
     });
 
     const block = normalizeWrappedBlockForPage(
@@ -1708,6 +1711,7 @@ export function buildBlockFlow(
       kind: entry.kind,
       lines: entry.lines,
       ...(entry.cells ? { cells: entry.cells } : {}),
+      ...(item.isLastRow ? { isLastRow: true } : {}),
       height: entry.height,
       spaceBefore: anchorOnlyFlow ? 0 : blockStyle.spaceBefore,
       spaceAfter: anchorOnlyFlow ? 0 : blockStyle.spaceAfter,
@@ -1876,6 +1880,8 @@ export interface LayoutItem {
   styleKey?: string;
   /** Column widths (from the parent table's `grid`) — set on table row items. */
   tableColumns?: number[];
+  /** True for a table's last row — drives table bottom-border ownership. */
+  isLastRow?: boolean;
 }
 
 const LIST_INDENT = 24; // px — text starts this far right of the margin
@@ -1930,9 +1936,16 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
       const tableColumns = Array.isArray(gridAttr)
         ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
         : [];
-      node.forEach((rowNode, rowOffset) => {
+      const lastRowIndex = node.childCount - 1;
+      node.forEach((rowNode, rowOffset, rowIndex) => {
         const rowNodePos = offset + 1 + rowOffset;
-        items.push({ node: rowNode, nodePos: rowNodePos, indentLeft: 0, tableColumns });
+        items.push({
+          node: rowNode,
+          nodePos: rowNodePos,
+          indentLeft: 0,
+          tableColumns,
+          isLastRow: rowIndex === lastRowIndex,
+        });
       });
       return;
     }

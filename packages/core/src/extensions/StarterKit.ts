@@ -533,6 +533,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.horizontalRule !== false) {
       Object.assign(styles, HorizontalRule.resolve().blockStyles);
     }
+    if (opts.table === true) {
+      Object.assign(styles, Table.resolve().blockStyles);
+    }
     // Image is now an inline node — no block styles needed.
     return styles;
   },

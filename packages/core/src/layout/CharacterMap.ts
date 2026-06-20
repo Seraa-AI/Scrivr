@@ -77,22 +77,35 @@ export interface ObjectRectEntry {
   page: number;
 }
 
+export interface CellRectEntry {
+  cellPos: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  page: number;
+  defaultDocPos: number;
+}
+
 export class CharacterMap {
   private glyphs: GlyphEntry[] = [];
   private lines: LineEntry[] = [];
   private objectRects = new Map<number, ObjectRectEntry>();
+  private cellRects: CellRectEntry[] = [];
 
   // Called by the layout engine after each layout pass
   clear(): void {
     this.glyphs = [];
     this.lines = [];
     this.objectRects.clear();
+    this.cellRects = [];
   }
 
   /** Remove all entries belonging to a specific page (selective invalidation). */
   clearPage(pageNumber: number): void {
     this.glyphs = this.glyphs.filter(g => g.page !== pageNumber);
     this.lines  = this.lines.filter(l  => l.page  !== pageNumber);
+    this.cellRects = this.cellRects.filter(c => c.page !== pageNumber);
     for (const [pos, rect] of this.objectRects) {
       if (rect.page === pageNumber) this.objectRects.delete(pos);
     }
@@ -109,6 +122,14 @@ export class CharacterMap {
   /** Register the full visual bounding rect of an inline object (image, widget). */
   registerObjectRect(entry: ObjectRectEntry): void {
     this.objectRects.set(entry.docPos, entry);
+  }
+
+  registerCellRect(entry: CellRectEntry): void {
+    const existing = this.cellRects.findIndex(
+      (r) => r.page === entry.page && r.cellPos === entry.cellPos,
+    );
+    if (existing >= 0) this.cellRects[existing] = entry;
+    else this.cellRects.push(entry);
   }
 
   /** Returns the full visual rect of the inline object at docPos, or undefined. */
@@ -158,6 +179,9 @@ export class CharacterMap {
    *      after it; otherwise snap to the position before it.
    */
   posAtCoords(x: number, y: number, page: number): number {
+    const cell = this.cellRectAtPoint(x, y, page);
+    if (cell) return this.posAtCoordsInCell(x, y, page, cell);
+
     // Try exact hit first; fall back to nearest line if click is in a margin
     const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
     if (!line) return 0;
@@ -215,6 +239,28 @@ export class CharacterMap {
     const exact = pool.find((g) => g.docPos === docPos);
     if (exact) {
       return { x: exact.x, y: exact.y, height: exact.height, page: exact.page };
+    }
+
+    const containingLine = this.lineForDocPos(docPos, scopeToPage);
+    if (containingLine) {
+      const lineGlyphs = pool
+        .filter((g) => g.lineIndex === containingLine.lineIndex && g.page === containingLine.page)
+        .sort((a, b) => a.x - b.x);
+      const precedingOnLine = [...lineGlyphs].reverse().find((g) => g.docPos < docPos);
+      if (precedingOnLine) {
+        return {
+          x: precedingOnLine.x + precedingOnLine.width,
+          y: precedingOnLine.y,
+          height: precedingOnLine.height,
+          page: precedingOnLine.page,
+        };
+      }
+      return {
+        x: containingLine.x,
+        y: containingLine.y,
+        height: containingLine.height,
+        page: containingLine.page,
+      };
     }
 
     // Position is after the last glyph on a line — draw cursor at its right edge
@@ -373,6 +419,71 @@ export class CharacterMap {
   /** Returns true if a line entry exists for this page + lineIndex */
   hasLine(page: number, lineIndex: number): boolean {
     return this.lines.some((l) => l.page === page && l.lineIndex === lineIndex);
+  }
+
+  private cellRectAtPoint(x: number, y: number, page: number): CellRectEntry | undefined {
+    // Half-open bounds: a click on a shared edge belongs to the right cell.
+    return this.cellRects.find(
+      (c) =>
+        c.page === page &&
+        x >= c.x &&
+        x < c.x + c.width &&
+        y >= c.y &&
+        y < c.y + c.height,
+    );
+  }
+
+  private lineForDocPos(docPos: number, page?: number): LineEntry | undefined {
+    return this.lines.find((l) => {
+      if (page !== undefined && l.page !== page) return false;
+      if (l.startDocPos === l.endDocPos) return docPos === l.startDocPos;
+      return docPos >= l.startDocPos && docPos <= l.endDocPos;
+    });
+  }
+
+  private posAtCoordsInCell(x: number, y: number, page: number, cell: CellRectEntry): number {
+    const lines = this.lines
+      .filter(
+        (l) =>
+          l.page === page &&
+          l.x >= cell.x &&
+          l.x + l.contentWidth <= cell.x + cell.width &&
+          l.y >= cell.y &&
+          l.y < cell.y + cell.height,
+      )
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+
+    if (!lines.length) return cell.defaultDocPos;
+
+    const line =
+      lines.find((l) => y >= l.y && y < l.y + l.height) ??
+      lines.reduce((closest, candidate) => {
+        const closestDist = Math.min(
+          Math.abs(y - closest.y),
+          Math.abs(y - (closest.y + closest.height)),
+        );
+        const candidateDist = Math.min(
+          Math.abs(y - candidate.y),
+          Math.abs(y - (candidate.y + candidate.height)),
+        );
+        return candidateDist < closestDist ? candidate : closest;
+      });
+
+    const lineGlyphs = this.glyphs
+      .filter((g) => g.page === page && g.lineIndex === line.lineIndex)
+      .sort((a, b) => a.x - b.x);
+
+    if (!lineGlyphs.length) return line.startDocPos || cell.defaultDocPos;
+
+    for (const glyph of lineGlyphs) {
+      const midpoint = glyph.x + glyph.width / 2;
+      if (x <= midpoint) return glyph.docPos;
+    }
+
+    // endDocPos of an empty cell is its structural boundary — setSelection snaps
+    // it forward into the next cell, so use the cell's own content position.
+    const isEmptyCell = !lineGlyphs.some((g) => g.width > 0);
+    return isEmptyCell ? cell.defaultDocPos : line.endDocPos;
   }
 
   // Internal — find which line a y coordinate lands on

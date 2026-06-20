@@ -213,6 +213,14 @@ export const Table = Extension.create({
     return [tableIntegrityPlugin()];
   },
 
+  addBlockStyles() {
+    // Rows carry no spacing so they stack flush into one grid; row height is
+    // content-driven by the layout engine, so the font here is irrelevant.
+    return {
+      tableRow: { font: "14px", spaceBefore: 0, spaceAfter: 0, align: "left" as const },
+    };
+  },
+
   addExports() {
     // PDF parity for canvas-rendered table rows. Registered on the extension
     // (not in @scrivr/export-pdf defaults) using the structural-context pattern

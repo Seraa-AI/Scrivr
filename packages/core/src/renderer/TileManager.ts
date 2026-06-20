@@ -585,6 +585,9 @@ export class TileManager {
             dpr,
             measurer: this.editor.measurer,
             theme,
+            ...(this.editor.blockRegistry
+              ? { blockRegistry: this.editor.blockRegistry }
+              : {}),
             ...(this.editor.markDecorators
               ? { markDecorators: this.editor.markDecorators }
               : {}),
@@ -604,6 +607,7 @@ export class TileManager {
           lineIndexOffset,
           theme,
           this.editor.markDecorators,
+          this.editor.inlineRegistry,
         );
       }
     }

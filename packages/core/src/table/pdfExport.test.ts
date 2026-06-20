@@ -110,7 +110,7 @@ function continuationRowNode(): Node {
   return row;
 }
 
-function tableRowBlock(node: Node, cells: CellSubBlock[]): LayoutBlock {
+function tableRowBlock(node: Node, cells: CellSubBlock[], isLastRow = true): LayoutBlock {
   return {
     kind: "tableRow",
     node,
@@ -121,6 +121,7 @@ function tableRowBlock(node: Node, cells: CellSubBlock[]): LayoutBlock {
     height: 40,
     lines: [],
     cells,
+    isLastRow,
     spaceBefore: 0,
     spaceAfter: 0,
     blockType: "tableRow",
@@ -130,19 +131,29 @@ function tableRowBlock(node: Node, cells: CellSubBlock[]): LayoutBlock {
 }
 
 describe("renderTableRowPdf", () => {
-  it("draws four borders per normal cell and renders each child block", () => {
+  it("a last-row cell draws all four grid lines (left, top, bottom, right) and renders its child", () => {
     const node = rowNode([{}]);
     const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, blocks: [childTextBlock(4)] };
     const { ctx, lines, textBlocks } = fakeCtx();
 
-    renderTableRowPdf(tableRowBlock(node, [cell]), ctx);
+    renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
 
-    expect(lines).toHaveLength(4); // left, right, bottom, top
+    expect(lines).toHaveLength(4); // left, top, bottom (last row), right (row edge)
     // child text rendered at absolute y (row y 200 + relative 4)
     expect(textBlocks).toEqual([{ y: 204 }]);
   });
 
-  it("suppresses the top border for a vMerge continuation cell (3 borders)", () => {
+  it("a non-last row omits the bottom — the row below owns that line (3 lines)", () => {
+    const node = rowNode([{}]);
+    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, blocks: [] };
+    const { ctx, lines } = fakeCtx();
+
+    renderTableRowPdf(tableRowBlock(node, [cell], false), ctx);
+
+    expect(lines).toHaveLength(3); // left, top, right — no bottom
+  });
+
+  it("suppresses the top border for a vMerge continuation cell", () => {
     // A lone "continue" gets normalized away, so build a real 2-row vertical
     // merge (restart over continue) and take the continuation row.
     const node = continuationRowNode();

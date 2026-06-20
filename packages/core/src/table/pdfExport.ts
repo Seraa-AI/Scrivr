@@ -45,32 +45,33 @@ function isPdfContext(value: unknown): value is PdfContextLike {
 export function renderTableRowPdf(block: LayoutBlock, ctx: unknown): void {
   if (!isPdfContext(ctx)) return;
   const cells = block.cells ?? [];
+  if (cells.length === 0) return;
   const pageHeightPt = ctx.layout.pageConfig.pageHeight * PT_PER_PX;
   const thickness = PT_PER_PX;
+  const isLastRow = block.isLastRow === true;
 
   const stroke = (a: PdfPoint, b: PdfPoint): void =>
     ctx.page.drawLine({ start: a, end: b, thickness, color: BORDER_COLOR });
+  // CSS px (top-left origin) → PDF points (bottom-left origin).
+  const flipY = (yPx: number): number => pageHeightPt - yPx * PT_PER_PX;
 
+  // Each grid line once (same ownership as the canvas): cell owns LEFT + TOP,
+  // the row owns one RIGHT edge, only the last row draws BOTTOM.
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i]!;
-    const top = block.y + cell.y;
-    const rowNode = block.node.childCount > i ? block.node.child(i) : null;
-    const skipTop = rowNode?.attrs["vMerge"] === "continue";
-
-    // CSS px (top-left origin) → PDF points (bottom-left origin).
     const lx = cell.x * PT_PER_PX;
     const rx = (cell.x + cell.width) * PT_PER_PX;
-    const ty = pageHeightPt - top * PT_PER_PX;
-    const by = pageHeightPt - (top + cell.height) * PT_PER_PX;
+    const ty = flipY(block.y + cell.y);
+    const by = flipY(block.y + cell.y + cell.height);
+    stroke({ x: lx, y: ty }, { x: lx, y: by });
+    if (block.node.child(i)?.attrs["vMerge"] !== "continue") stroke({ x: lx, y: ty }, { x: rx, y: ty });
+    if (isLastRow) stroke({ x: lx, y: by }, { x: rx, y: by });
 
-    stroke({ x: lx, y: ty }, { x: lx, y: by }); // left
-    stroke({ x: rx, y: ty }, { x: rx, y: by }); // right
-    stroke({ x: lx, y: by }, { x: rx, y: by }); // bottom
-    if (!skipTop) stroke({ x: lx, y: ty }, { x: rx, y: ty }); // top
-
-    // Cell text: render each child block at its absolute y (row y + relative).
     for (const child of cell.blocks) {
       ctx.draw.lines({ ...child, y: block.y + child.y }, ctx);
     }
   }
+  const last = cells[cells.length - 1]!;
+  const rx = (last.x + last.width) * PT_PER_PX;
+  stroke({ x: rx, y: flipY(block.y + last.y) }, { x: rx, y: flipY(block.y + last.y + last.height) });
 }
