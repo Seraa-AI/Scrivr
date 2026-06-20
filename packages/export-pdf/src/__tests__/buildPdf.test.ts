@@ -142,7 +142,7 @@ function tableRowWithCellImage(src: string): LayoutBlock {
     width: 120,
     height: 40,
     lines: [],
-    cells: [{ cellPos: 1, x: MARGIN, y: 0, width: 120, height: 40, blocks: [child] }],
+    cells: [{ cellPos: 1, x: MARGIN, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [child] }],
     spaceBefore: 0,
     spaceAfter: 0,
     blockType: "tableRow",
