@@ -5,6 +5,7 @@ import type { Node, NodeSpec, Schema } from "prosemirror-model";
 import { TableRowStrategy } from "../../renderer/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
 import { tableStructureCommands } from "../../table/commands";
+import { renderTableRowPdf } from "../../table/pdfExport";
 
 /**
  * Table extension.
@@ -210,6 +211,13 @@ export const Table = Extension.create({
 
   addProseMirrorPlugins() {
     return [tableIntegrityPlugin()];
+  },
+
+  addExports() {
+    // PDF parity for canvas-rendered table rows. Registered on the extension
+    // (not in @scrivr/export-pdf defaults) using the structural-context pattern
+    // so core stays free of pdf-lib.
+    return { pdf: { nodes: { tableRow: renderTableRowPdf } } };
   },
 
   addLayoutHandlers() {

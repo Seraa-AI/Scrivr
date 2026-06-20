@@ -692,6 +692,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.pageBreak !== false) mergeFrom(PageBreak.resolve().exports);
     if (opts.list !== false) mergeFrom(List.resolve().exports);
     if (opts.image !== false) mergeFrom(Image.resolve().exports);
+    if (opts.table === true) mergeFrom(Table.resolve().exports);
 
     // Marks
     if (opts.bold !== false) {
