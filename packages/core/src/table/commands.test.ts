@@ -118,6 +118,34 @@ function cursorInCellWithText(editor: ServerEditor, text: string) {
   editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, target)));
 }
 
+function cursorInCell(editor: ServerEditor, rowIndex: number, cellIndex: number) {
+  let target = -1;
+  editor.getState().doc.descendants((n, pos) => {
+    if (n.type.name !== "table") return true;
+    let cellPos = pos + 1;
+    for (let r = 0; r < rowIndex; r++) cellPos += n.child(r).nodeSize;
+    const row = n.child(rowIndex);
+    cellPos += 1;
+    for (let c = 0; c < cellIndex; c++) cellPos += row.child(c).nodeSize;
+    target = cellPos + 2; // before cell → into cell → into first paragraph
+    return false;
+  });
+  if (target < 0) throw new Error(`no cell at row ${rowIndex}, cell ${cellIndex}`);
+  editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, target)));
+}
+
+function hasTable(editor: ServerEditor): boolean {
+  let found = false;
+  editor.getState().doc.descendants((n) => {
+    if (n.type.name === "table") {
+      found = true;
+      return false;
+    }
+    return true;
+  });
+  return found;
+}
+
 /** Text of the cell currently containing the selection head. */
 function cellTextAtSelection(editor: ServerEditor): string | null {
   const { $from } = editor.getState().selection;
@@ -185,11 +213,17 @@ describe("table commands — rows", () => {
     cursorInCellWithText(editor, "A");
     editor.commands["deleteRow"]?.();
 
-    let hasTable = false;
-    editor.getState().doc.descendants((n) => {
-      if (n.type.name === "table") hasTable = true;
-    });
-    expect(hasTable).toBe(false);
+    expect(hasTable(editor)).toBe(false);
+  });
+
+  it("deleteRow on the only row leaves a valid fallback paragraph when the table is the whole doc", () => {
+    const editor = makeEditor(tableDoc([100], [[{ text: "A" }]]));
+    cursorInCellWithText(editor, "A");
+    editor.commands["deleteRow"]?.();
+
+    expect(hasTable(editor)).toBe(false);
+    expect(editor.getState().doc.childCount).toBe(1);
+    expect(editor.getState().doc.firstChild?.type.name).toBe("paragraph");
   });
 });
 
@@ -237,11 +271,17 @@ describe("table commands — columns", () => {
     cursorInCellWithText(editor, "A");
     editor.commands["deleteColumn"]?.();
 
-    let hasTable = false;
-    editor.getState().doc.descendants((n) => {
-      if (n.type.name === "table") hasTable = true;
-    });
-    expect(hasTable).toBe(false);
+    expect(hasTable(editor)).toBe(false);
+  });
+
+  it("deleteColumn on the only column leaves a valid fallback paragraph when the table is the whole doc", () => {
+    const editor = makeEditor(tableDoc([100], [[{ text: "A" }], [{ text: "B" }]]));
+    cursorInCellWithText(editor, "A");
+    editor.commands["deleteColumn"]?.();
+
+    expect(hasTable(editor)).toBe(false);
+    expect(editor.getState().doc.childCount).toBe(1);
+    expect(editor.getState().doc.firstChild?.type.name).toBe("paragraph");
   });
 
   it("addColumn through a horizontal span grows the span, fresh cell elsewhere (Word)", () => {
@@ -314,6 +354,39 @@ describe("table commands — vertical merge", () => {
     expect(rows[1]![0]!.vMerge).toBe("continue");
     expect(rows.map((r) => r[1]!.text)).toEqual(["B1", "B2"]);
   });
+
+  it("commands can run from a vertical merge continuation cell", () => {
+    const editor = makeEditor(mergedDoc());
+    cursorInCell(editor, 1, 0); // physical continuation cell in row 1 / col 0
+
+    expect(canRun(editor, "addRowAfter")).toBe(true);
+    expect(canRun(editor, "deleteRow")).toBe(true);
+    expect(canRun(editor, "addColumnAfter")).toBe(true);
+    expect(canRun(editor, "deleteColumn")).toBe(true);
+    expect(canRun(editor, "goToNextCell")).toBe(true);
+  });
+
+  it("addRowAfter from a vertical merge continuation extends that merge at the cursor row", () => {
+    const editor = makeEditor(mergedDoc());
+    cursorInCell(editor, 1, 0); // physical continuation cell in row 1 / col 0
+    editor.commands["addRowAfter"]?.();
+
+    const rows = rowsOf(getTable(editor));
+    expect(rows).toHaveLength(4);
+    expect(rows.map((r) => r[1]!.text)).toEqual(["B0", "B1", "", "B2"]);
+    expect(rows.map((r) => r[0]!.vMerge)).toEqual(["restart", "continue", "continue", "continue"]);
+  });
+
+  it("deleteRow from a vertical merge continuation removes that physical row", () => {
+    const editor = makeEditor(mergedDoc());
+    cursorInCell(editor, 1, 0); // physical continuation cell in row 1 / col 0
+    editor.commands["deleteRow"]?.();
+
+    const rows = rowsOf(getTable(editor));
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r[1]!.text)).toEqual(["B0", "B2"]);
+    expect(rows.map((r) => r[0]!.vMerge)).toEqual(["restart", "continue"]);
+  });
 });
 
 // ── Navigation ──────────────────────────────────────────────────────────────────
@@ -340,6 +413,22 @@ describe("table commands — navigation", () => {
     expect(canRun(editor, "goToNextCell")).toBe(false);
     editor.commands["goToNextCell"]?.();
     expect(cellTextAtSelection(editor)).toBe("D"); // selection unchanged
+  });
+
+  it("goToNextCell works from a vertical merge continuation cell", () => {
+    const editor = makeEditor(
+      tableDoc(
+        [100, 100],
+        [
+          [{ text: "M", vMerge: "restart" }, { text: "B0" }],
+          [{ vMerge: "continue" }, { text: "B1" }],
+        ],
+      ),
+    );
+    cursorInCell(editor, 1, 0);
+    editor.commands["goToNextCell"]?.();
+
+    expect(cellTextAtSelection(editor)).toBe("B1");
   });
 });
 

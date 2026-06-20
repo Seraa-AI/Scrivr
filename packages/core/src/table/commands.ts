@@ -71,6 +71,54 @@ function rowStartPos(table: Node, tableStart: number, idx: number): number {
   return pos;
 }
 
+function physicalCellColumn(rowNode: Node, rowPos: number, cellPos: number): number | null {
+  let col = 0;
+  let pos = rowPos + 1;
+  for (let i = 0; i < rowNode.childCount; i++) {
+    const cell = rowNode.child(i);
+    if (pos === cellPos) return col;
+    col += readGridSpan(cell);
+    pos += cell.nodeSize;
+  }
+  return null;
+}
+
+function rectForCell(
+  map: TableMap,
+  rowNode: Node,
+  rowPos: number,
+  tableStart: number,
+  rowIndex: number,
+  cellPos: number,
+): Rect | null {
+  const cellOffset = cellPos - tableStart;
+  try {
+    return map.findCell(cellOffset);
+  } catch {
+    const col = physicalCellColumn(rowNode, rowPos, cellPos);
+    if (col == null) return null;
+    const occupyingOffset = slotAt(map, rowIndex, col);
+    if (occupyingOffset === -1) return null;
+    try {
+      const rect = map.findCell(occupyingOffset);
+      return { left: col, top: rowIndex, right: col + (rect.right - rect.left), bottom: rowIndex + 1 };
+    } catch {
+      return null;
+    }
+  }
+}
+
+function deleteTableKeepingValidDoc(state: EditorState, tablePos: number, table: Node) {
+  const tableEnd = tablePos + table.nodeSize;
+  const paragraphType = state.schema.nodes["paragraph"];
+  if (!paragraphType) return state.tr.delete(tablePos, tableEnd);
+
+  if (tablePos === 0 && tableEnd === state.doc.content.size) {
+    return state.tr.replaceWith(tablePos, tableEnd, paragraphType.create());
+  }
+  return state.tr.delete(tablePos, tableEnd);
+}
+
 /**
  * Resolve the table/row/cell context around the current selection, or `null`
  * if the selection is not inside a table.
@@ -97,12 +145,8 @@ function findCellContext(state: EditorState): CellContext | null {
   const cellPos = $from.before(cellDepth);
 
   const map = getTableMap(tableNode);
-  let rect: Rect;
-  try {
-    rect = map.findCell(cellPos - tableStart);
-  } catch {
-    return null;
-  }
+  const rect = rectForCell(map, rowNode, rowPos, tableStart, rowIndex, cellPos);
+  if (!rect) return null;
 
   return { table: tableNode, tablePos, tableStart, map, rowNode, rowPos, rowIndex, rect };
 }
@@ -196,7 +240,7 @@ function deleteRowCommand(): Command {
       if (table.childCount === 1) {
         // `tableRow+` forbids an empty table — deleting the last row removes
         // the whole table (matches Word).
-        tr = tr.delete(tablePos, tablePos + table.nodeSize);
+        tr = deleteTableKeepingValidDoc(state, tablePos, table);
       } else {
         // Promote next-row continuations of any merge that begins in this row,
         // so the merge survives (size-stable markup before the delete shifts
@@ -298,7 +342,7 @@ function deleteColumnCommand(): Command {
 
     if (map.width === 1) {
       // Last column — remove the whole table.
-      if (dispatch) dispatch(state.tr.delete(tablePos, tablePos + table.nodeSize).scrollIntoView());
+      if (dispatch) dispatch(deleteTableKeepingValidDoc(state, tablePos, table).scrollIntoView());
       return true;
     }
     if (!dispatch) return true;
