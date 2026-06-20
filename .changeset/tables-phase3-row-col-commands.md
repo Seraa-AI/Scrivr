@@ -27,6 +27,11 @@ exposes the structural editing commands on top of the existing
 - `deleteColumn` — remove the selected column and shrink `table.grid`. A cell
   whose span covers the deleted column shrinks by one; deleting the last
   column removes the table.
+
+When deleting the last row or column would remove a table that is the entire
+document, the table is replaced with an empty paragraph so the document stays
+valid rather than empty. A selection resting in a vertical-merge continuation
+cell resolves to its master cell, so the commands operate on the right cell.
 - `goToNextCell` / `goToPreviousCell` — move the selection between cells in
   document order. Binding these to `Tab`/`Shift-Tab` (with new-row-on-overflow)
   is the editing-guards plugin's job in a later phase.
