@@ -4,6 +4,7 @@ import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
 import { TableRowStrategy } from "../../layout/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
+import { tableStructureCommands } from "../../table/commands";
 
 /**
  * Table extension.
@@ -20,8 +21,9 @@ import { tableIntegrityPlugin } from "../../table/normalize";
  * What is intentionally deferred:
  *   - Editing-UX guards plugin (cross-cell selection promotion, Tab/Backspace
  *     semantics) — lands in a separate plugin so the two concerns stay
- *     testable in isolation.
- *   - Add/delete row/column commands, merge/split, header toggle.
+ *     testable in isolation. `goToNextCell` ships as a command here; binding it
+ *     to `Tab` (with new-row-on-overflow) is part of that guards plugin.
+ *   - Cell merge/split and header toggle.
  *   - Real cell layout, cell content rendering, PDF parity.
  *   - HTML paste round-trip, DOCX export.
  */
@@ -202,6 +204,7 @@ export const Table = Extension.create({
     return {
       insertTable: (args: unknown) => insertTableCommand(args),
       deleteTable: () => deleteTableCommand(),
+      ...tableStructureCommands(),
     };
   },
 
@@ -308,6 +311,22 @@ declare module "@scrivr/core" {
       insertTable: (args: { rows: number; cols: number }) => ReturnType;
       /** Delete the table containing the current selection, if any. */
       deleteTable: () => ReturnType;
+      /** Insert an empty row above the row holding the selection. */
+      addRowBefore: () => ReturnType;
+      /** Insert an empty row below the row holding the selection. */
+      addRowAfter: () => ReturnType;
+      /** Delete the row holding the selection (or the table, if it was the last row). */
+      deleteRow: () => ReturnType;
+      /** Insert an empty column to the left of the selected cell. */
+      addColumnBefore: () => ReturnType;
+      /** Insert an empty column to the right of the selected cell. */
+      addColumnAfter: () => ReturnType;
+      /** Delete the column holding the selection (or the table, if it was the last column). */
+      deleteColumn: () => ReturnType;
+      /** Move the selection to the next cell in document order. */
+      goToNextCell: () => ReturnType;
+      /** Move the selection to the previous cell in document order. */
+      goToPreviousCell: () => ReturnType;
     };
   }
 }
