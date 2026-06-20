@@ -108,49 +108,28 @@ describe("CharacterMap", () => {
       expect(map.posAtCoords(50, 65, 2)).toBe(0);
     });
 
-    it("restricts hits inside a table cell rect to that cell's own line", () => {
+    it("disambiguates cells sharing a y band by x — the click resolves to that cell's line", () => {
       const m = new CharacterMap();
-      m.registerCellRect({
-        cellPos: 10,
-        x: 40,
-        y: 50,
-        width: 80,
-        height: 40,
-        page: 1,
-        defaultDocPos: 12,
-      });
-      m.registerCellRect({
-        cellPos: 30,
-        x: 120,
-        y: 50,
-        width: 80,
-        height: 40,
-        page: 1,
-        defaultDocPos: 32,
-      });
+      // Two cells in a row: same y band, different x ranges.
       m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
       m.registerLine({ page: 1, lineIndex: 1, y: 58, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 36 });
       m.registerGlyph({ docPos: 12, x: 46, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
       m.registerGlyph({ docPos: 32, x: 126, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 1 });
 
-      // x=122 is inside the second cell's left padding and before its first glyph.
-      // The old y-only lookup grouped both cells and could snap to the left cell.
+      // Inside cell 1.
+      expect(m.posAtCoords(48, 65, 1)).toBe(12);
+      // x=122 is in cell 2's left padding; 2D lookup picks the nearer line
+      // (cell 2), where a y-only lookup would have grabbed cell 1.
       expect(m.posAtCoords(122, 65, 1)).toBe(32);
     });
 
-    it("clicking empty table-cell space falls back to that cell content start", () => {
+    it("clicking empty cell space resolves to the cell's content start, not its boundary", () => {
       const m = new CharacterMap();
-      m.registerCellRect({
-        cellPos: 30,
-        x: 120,
-        y: 50,
-        width: 80,
-        height: 40,
-        page: 1,
-        defaultDocPos: 32,
-      });
+      // Empty cell: a single zero-width sentinel at the content start.
+      m.registerLine({ page: 1, lineIndex: 0, y: 50, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 33 });
+      m.registerGlyph({ docPos: 32, x: 126, y: 50, lineY: 50, width: 0, height: 20, page: 1, lineIndex: 0 });
 
-      expect(m.posAtCoords(150, 70, 1)).toBe(32);
+      expect(m.posAtCoords(150, 60, 1)).toBe(32);
     });
   });
 

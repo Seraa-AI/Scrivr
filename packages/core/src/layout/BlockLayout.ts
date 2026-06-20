@@ -881,11 +881,6 @@ export function registeredLineCount(block: LayoutBlock): number {
   return block.lines.length;
 }
 
-function cellDefaultDocPos(cell: CellSubBlock): number {
-  const firstBlock = cell.blocks[0];
-  return firstBlock ? firstBlock.nodePos + 1 : cell.cellPos + 1;
-}
-
 export function populateCharMap(
   block: LayoutBlock,
   map: CharacterMap,
@@ -927,15 +922,6 @@ export function populateCharMap(
   if (block.kind === "tableRow") {
     let offset = lineIndexOffset;
     for (const cell of block.cells ?? []) {
-      map.registerCellRect({
-        cellPos: cell.cellPos,
-        x: cell.x,
-        y: block.y + cell.y,
-        width: cell.width,
-        height: cell.height,
-        page,
-        defaultDocPos: cellDefaultDocPos(cell),
-      });
       for (const child of cell.blocks) {
         const absolute: LayoutBlock = { ...child, y: block.y + child.y };
         populateCharMap(absolute, map, page, offset, measurer);

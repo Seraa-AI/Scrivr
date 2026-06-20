@@ -27,11 +27,6 @@ function backgroundOf(rowNode: LayoutBlock["node"], cellIndex: number): string |
   return typeof bg === "string" && bg.length > 0 ? bg : null;
 }
 
-function cellDefaultDocPos(cell: CellSubBlock): number {
-  const firstBlock = cell.blocks[0];
-  return firstBlock ? firstBlock.nodePos + 1 : cell.cellPos + 1;
-}
-
 /**
  * Paints the row's grid lines, each exactly once, so internal borders (shared
  * by adjacent cells/rows) aren't double-stroked and heavier than the outer
@@ -94,18 +89,7 @@ export const TableRowStrategy: BlockStrategy = {
 
     paintRowGrid(ctx, block, cells, block.isLastRow === true);
 
-    for (let i = 0; i < cells.length; i++) {
-      const cell = cells[i]!;
-      map.registerCellRect({
-        cellPos: cell.cellPos,
-        x: cell.x,
-        y: block.y + cell.y,
-        width: cell.width,
-        height: cell.height,
-        page: pageNumber,
-        defaultDocPos: cellDefaultDocPos(cell),
-      });
-
+    for (const cell of cells) {
       // Paint each child block at its absolute y (block.y + relative offsets).
       for (const child of cell.blocks) {
         const absoluteChild: LayoutBlock = { ...child, y: block.y + child.y };

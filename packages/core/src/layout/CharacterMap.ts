@@ -77,35 +77,22 @@ export interface ObjectRectEntry {
   page: number;
 }
 
-export interface CellRectEntry {
-  cellPos: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  page: number;
-  defaultDocPos: number;
-}
-
 export class CharacterMap {
   private glyphs: GlyphEntry[] = [];
   private lines: LineEntry[] = [];
   private objectRects = new Map<number, ObjectRectEntry>();
-  private cellRects: CellRectEntry[] = [];
 
   // Called by the layout engine after each layout pass
   clear(): void {
     this.glyphs = [];
     this.lines = [];
     this.objectRects.clear();
-    this.cellRects = [];
   }
 
   /** Remove all entries belonging to a specific page (selective invalidation). */
   clearPage(pageNumber: number): void {
     this.glyphs = this.glyphs.filter(g => g.page !== pageNumber);
     this.lines  = this.lines.filter(l  => l.page  !== pageNumber);
-    this.cellRects = this.cellRects.filter(c => c.page !== pageNumber);
     for (const [pos, rect] of this.objectRects) {
       if (rect.page === pageNumber) this.objectRects.delete(pos);
     }
@@ -122,14 +109,6 @@ export class CharacterMap {
   /** Register the full visual bounding rect of an inline object (image, widget). */
   registerObjectRect(entry: ObjectRectEntry): void {
     this.objectRects.set(entry.docPos, entry);
-  }
-
-  registerCellRect(entry: CellRectEntry): void {
-    const existing = this.cellRects.findIndex(
-      (r) => r.page === entry.page && r.cellPos === entry.cellPos,
-    );
-    if (existing >= 0) this.cellRects[existing] = entry;
-    else this.cellRects.push(entry);
   }
 
   /** Returns the full visual rect of the inline object at docPos, or undefined. */
@@ -179,39 +158,27 @@ export class CharacterMap {
    *      after it; otherwise snap to the position before it.
    */
   posAtCoords(x: number, y: number, page: number): number {
-    const cell = this.cellRectAtPoint(x, y, page);
-    if (cell) return this.posAtCoordsInCell(x, y, page, cell);
-
-    // Try exact hit first; fall back to nearest line if click is in a margin
-    const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
+    // Resolve the single line under the point in 2D. Lines that share a y band
+    // but occupy different x ranges (table cells in a row) are disambiguated by
+    // x, so glyph resolution stays scoped to the clicked line's own cell.
+    const line = this.lineAtPoint(x, y, page) ?? this.nearestLineAtPoint(x, y, page);
     if (!line) return 0;
 
-    // Filter by lineY rather than glyph.y so that:
-    // (a) table cells — which share the same lineY but have different lineIndex
-    //     values — all participate in the x hit-test, and
-    // (b) inline objects that inflate lineHeight — whose glyphs are vertically
-    //     offset from the line top — are still found alongside text glyphs.
     const lineGlyphs = this.glyphs
-      .filter((g) => g.page === page && g.lineY === line.y)
+      .filter((g) => g.page === page && g.lineIndex === line.lineIndex)
       .sort((a, b) => a.x - b.x);
 
     if (!lineGlyphs.length) return line.startDocPos;
 
     for (const glyph of lineGlyphs) {
-      const midpoint = glyph.x + glyph.width / 2;
-      if (x <= midpoint) {
-        // Click is on the left half — position is before this glyph
-        return glyph.docPos;
-      }
+      if (x <= glyph.x + glyph.width / 2) return glyph.docPos;
     }
 
-    // Click is past all glyphs at this y — return end of whichever line
-    // owns the rightmost glyph (handles multi-cell rows correctly).
-    const rightmost = lineGlyphs[lineGlyphs.length - 1]!;
-    const rightLine = this.lines.find(
-      (l) => l.page === page && l.lineIndex === rightmost.lineIndex,
-    );
-    return rightLine?.endDocPos ?? rightmost.docPos + 1;
+    // Past every glyph: end of the line if it holds real text, else its start.
+    // An empty line's endDocPos is the structural boundary (e.g. after an empty
+    // cell paragraph), which setSelection would snap into the next cell.
+    const hasRealGlyph = lineGlyphs.some((g) => g.width > 0);
+    return hasRealGlyph ? line.endDocPos : line.startDocPos;
   }
 
   /**
@@ -421,18 +388,6 @@ export class CharacterMap {
     return this.lines.some((l) => l.page === page && l.lineIndex === lineIndex);
   }
 
-  private cellRectAtPoint(x: number, y: number, page: number): CellRectEntry | undefined {
-    // Half-open bounds: a click on a shared edge belongs to the right cell.
-    return this.cellRects.find(
-      (c) =>
-        c.page === page &&
-        x >= c.x &&
-        x < c.x + c.width &&
-        y >= c.y &&
-        y < c.y + c.height,
-    );
-  }
-
   private lineForDocPos(docPos: number, page?: number): LineEntry | undefined {
     return this.lines.find((l) => {
       if (page !== undefined && l.page !== page) return false;
@@ -441,49 +396,32 @@ export class CharacterMap {
     });
   }
 
-  private posAtCoordsInCell(x: number, y: number, page: number, cell: CellRectEntry): number {
-    const lines = this.lines
-      .filter(
-        (l) =>
-          l.page === page &&
-          l.x >= cell.x &&
-          l.x + l.contentWidth <= cell.x + cell.width &&
-          l.y >= cell.y &&
-          l.y < cell.y + cell.height,
-      )
-      .sort((a, b) => a.y - b.y || a.x - b.x);
+  /**
+   * The line whose box contains (x, y). Unlike `lineAtCoords` (y only), this
+   * disambiguates lines that share a y band but occupy different x ranges —
+   * cells in the same table row — so each cell owns its own hit region.
+   */
+  private lineAtPoint(x: number, y: number, page: number): LineEntry | undefined {
+    return this.lines.find(
+      (l) =>
+        l.page === page &&
+        y >= l.y &&
+        y < l.y + l.height &&
+        x >= l.x &&
+        x <= l.x + l.contentWidth,
+    );
+  }
 
-    if (!lines.length) return cell.defaultDocPos;
-
-    const line =
-      lines.find((l) => y >= l.y && y < l.y + l.height) ??
-      lines.reduce((closest, candidate) => {
-        const closestDist = Math.min(
-          Math.abs(y - closest.y),
-          Math.abs(y - (closest.y + closest.height)),
-        );
-        const candidateDist = Math.min(
-          Math.abs(y - candidate.y),
-          Math.abs(y - (candidate.y + candidate.height)),
-        );
-        return candidateDist < closestDist ? candidate : closest;
-      });
-
-    const lineGlyphs = this.glyphs
-      .filter((g) => g.page === page && g.lineIndex === line.lineIndex)
-      .sort((a, b) => a.x - b.x);
-
-    if (!lineGlyphs.length) return line.startDocPos || cell.defaultDocPos;
-
-    for (const glyph of lineGlyphs) {
-      const midpoint = glyph.x + glyph.width / 2;
-      if (x <= midpoint) return glyph.docPos;
-    }
-
-    // endDocPos of an empty cell is its structural boundary — setSelection snaps
-    // it forward into the next cell, so use the cell's own content position.
-    const isEmptyCell = !lineGlyphs.some((g) => g.width > 0);
-    return isEmptyCell ? cell.defaultDocPos : line.endDocPos;
+  /** Nearest line to (x, y) by 2D distance — for clicks in margins/padding/gaps. */
+  private nearestLineAtPoint(x: number, y: number, page: number): LineEntry | undefined {
+    const pageLines = this.lines.filter((l) => l.page === page);
+    if (!pageLines.length) return undefined;
+    const dist = (l: LineEntry): number => {
+      const dy = y < l.y ? l.y - y : y > l.y + l.height ? y - (l.y + l.height) : 0;
+      const dx = x < l.x ? l.x - x : x > l.x + l.contentWidth ? x - (l.x + l.contentWidth) : 0;
+      return dx + dy;
+    };
+    return pageLines.reduce((closest, l) => (dist(l) < dist(closest) ? l : closest));
   }
 
   // Internal — find which line a y coordinate lands on
@@ -495,19 +433,4 @@ export class CharacterMap {
 
   // Internal — find the closest line when y is outside all line ranges.
   // Click above first line → first line. Click below last line → last line.
-  private nearestLine(y: number, page: number): LineEntry | undefined {
-    const pageLines = this.lines.filter((l) => l.page === page);
-    if (!pageLines.length) return undefined;
-    return pageLines.reduce((closest, line) => {
-      const closestDist = Math.min(
-        Math.abs(y - closest.y),
-        Math.abs(y - (closest.y + closest.height)),
-      );
-      const lineDist = Math.min(
-        Math.abs(y - line.y),
-        Math.abs(y - (line.y + line.height)),
-      );
-      return lineDist < closestDist ? line : closest;
-    });
-  }
 }
