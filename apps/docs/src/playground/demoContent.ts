@@ -612,7 +612,7 @@ const DEMO_DOC = {
       content: [
         {
           type: "text",
-          text: "Top-and-bottom wrap reserves the full content width above and below the figure.",
+          text: "Top-and-bottom wrap reserves the full content width for the image. The text in this paragraph sits above the figure, exactly as you'd expect from a Word or Pages document — paragraphs flow naturally until they meet the image's top margin, then they stop and resume on the other side.",
         },
       ],
     },
