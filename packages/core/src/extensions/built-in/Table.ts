@@ -6,6 +6,7 @@ import { TableRowStrategy } from "../../renderer/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
 import { tableStructureCommands } from "../../table/commands";
 import { renderTableRowPdf } from "../../table/pdfExport";
+import { tableDocxHandlers } from "../../table/docxExport";
 
 /**
  * Table extension.
@@ -224,8 +225,12 @@ export const Table = Extension.create({
   addExports() {
     // PDF parity for canvas-rendered table rows. Registered on the extension
     // (not in @scrivr/export-pdf defaults) using the structural-context pattern
-    // so core stays free of pdf-lib.
-    return { pdf: { nodes: { tableRow: renderTableRowPdf } } };
+    // so core stays free of pdf-lib. DOCX parity ships the same way — the
+    // walker dispatches table/tableRow/tableCell/tableHeader through these.
+    return {
+      pdf: { nodes: { tableRow: renderTableRowPdf } },
+      docx: { nodes: tableDocxHandlers },
+    };
   },
 
   addLayoutHandlers() {

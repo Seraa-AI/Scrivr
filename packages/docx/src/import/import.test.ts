@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { ServerEditor } from "@scrivr/core";
+import { ServerEditor, StarterKit } from "@scrivr/core";
 import type { Node as PmNode } from "prosemirror-model";
 import { exportDocxBytes } from "../export/export";
 import { importDocx } from "./import";
@@ -542,20 +542,105 @@ describe("importDocx — images", () => {
   });
 });
 
+describe("importDocx — tables", () => {
+  function tableEditor(content?: Record<string, unknown>): ServerEditor {
+    const ed = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    if (content) ed.setContent(content);
+    return ed;
+  }
+
+  const cell = (text: string, attrs?: Record<string, unknown>) => ({
+    type: "tableCell",
+    ...(attrs ? { attrs } : {}),
+    content: [{ type: "paragraph", content: text ? [{ type: "text", text }] : [] }],
+  });
+
+  const tableDoc = {
+    type: "doc",
+    content: [
+      {
+        type: "table",
+        attrs: { layout: "fixed", grid: [120, 200] },
+        content: [
+          {
+            type: "tableRow",
+            attrs: { repeatHeader: true },
+            content: [
+              { type: "tableHeader", attrs: { background: "#f3f4f6" }, content: [{ type: "paragraph", content: [{ type: "text", text: "Name" }] }] },
+              { type: "tableHeader", attrs: { background: "#f3f4f6" }, content: [{ type: "paragraph", content: [{ type: "text", text: "Role" }] }] },
+            ],
+          },
+          { type: "tableRow", content: [cell("Ada"), cell("Engineer")] },
+          { type: "tableRow", content: [cell("Grace"), cell("Admiral")] },
+        ],
+      },
+    ],
+  };
+
+  it("round-trips a table: rows, cells, and cell text survive", async () => {
+    const editor = tableEditor(tableDoc);
+    const bytes = await exportDocxBytes(editor);
+    const importer = tableEditor();
+    const { doc, diagnostics } = await importDocx(importer, bytes);
+
+    expect(diagnostics.filter((d) => d.level === "error")).toEqual([]);
+    const table = doc.child(0);
+    expect(table.type.name).toBe("table");
+    expect(table.childCount).toBe(3); // 3 rows
+    const firstRow = table.child(0);
+    expect(firstRow.childCount).toBe(2); // 2 cells
+    expect(firstRow.child(0).textContent).toBe("Name");
+    expect(table.child(1).child(0).textContent).toBe("Ada");
+    expect(table.child(2).child(1).textContent).toBe("Admiral");
+  });
+
+  it("recovers the column grid widths", async () => {
+    const editor = tableEditor(tableDoc);
+    const bytes = await exportDocxBytes(editor);
+    const importer = tableEditor();
+    const { doc } = await importDocx(importer, bytes);
+    expect(doc.child(0).attrs["grid"]).toEqual([120, 200]);
+  });
+
+  it("recovers the header row as repeatHeader + tableHeader cells with background", async () => {
+    const editor = tableEditor(tableDoc);
+    const bytes = await exportDocxBytes(editor);
+    const importer = tableEditor();
+    const { doc } = await importDocx(importer, bytes);
+
+    const headerRow = doc.child(0).child(0);
+    expect(headerRow.attrs["repeatHeader"]).toBe(true);
+    expect(headerRow.child(0).type.name).toBe("tableHeader");
+    expect(headerRow.child(0).attrs["background"]).toBe("#f3f4f6");
+  });
+
+  it("emits the OOXML table elements on export", async () => {
+    const editor = tableEditor(tableDoc);
+    const bytes = await exportDocxBytes(editor);
+    const { unzipSync, strFromU8 } = await import("fflate");
+    const xml = strFromU8(unzipSync(bytes)["word/document.xml"]!);
+    expect(xml).toContain("<w:tbl>");
+    expect(xml).toContain("<w:tblGrid>");
+    expect(xml).toContain('<w:gridCol w:w="1800"/>'); // 120px * 15 twips
+    expect(xml).toContain("<w:tblHeader/>");
+    expect(xml).toContain('w:fill="F3F4F6"');
+  });
+});
+
 describe("importDocx — unsupported policy", () => {
   // Build a real exported DOCX, then surgically swap its document.xml to
-  // include an element parser doesn't model (here: <w:tbl>). The rest of
-  // the package (Content_Types, rels, styles, numbering) stays valid so
-  // the only unusual thing is the body content.
-  async function buildDocWithUnsupportedTable(): Promise<Uint8Array> {
+  // include an element the parser doesn't model (here: <w:sdt>, a content
+  // control). The rest of the package (Content_Types, rels, styles,
+  // numbering) stays valid so the only unusual thing is the body content.
+  async function buildDocWithUnsupportedElement(): Promise<Uint8Array> {
     const editor = new ServerEditor({ content: "anchor" });
     const bytes = await exportDocxBytes(editor);
     const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
     const entries = unzipSync(bytes);
     const original = strFromU8(entries["word/document.xml"]!);
-    const tableXml =
-      '<w:tbl><w:tblPr/><w:tblGrid/><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';
-    const swapped = original.replace("<w:sectPr", tableXml + "<w:sectPr");
+    const sdtXml =
+      "<w:sdt><w:sdtPr/><w:sdtContent><w:p><w:r><w:t>control</w:t></w:r></w:p></w:sdtContent></w:sdt>";
+    const swapped = original.replace("<w:sectPr", sdtXml + "<w:sectPr");
     const rebuilt: Record<string, Uint8Array> = {};
     for (const [path, data] of Object.entries(entries)) {
       rebuilt[path] = path === "word/document.xml" ? strToU8(swapped) : data;
@@ -564,18 +649,18 @@ describe("importDocx — unsupported policy", () => {
   }
 
   it("emits a diagnostic for unsupported top-level blocks (default 'drop')", async () => {
-    const bytes = await buildDocWithUnsupportedTable();
+    const bytes = await buildDocWithUnsupportedElement();
     const importer = new ServerEditor();
     const { diagnostics } = await importDocx(importer, bytes);
-    const unsupportedTbl = diagnostics.find(
-      (d) => d.code === "unsupported-docx-element" && d.nodeType === "w:tbl",
+    const unsupported = diagnostics.find(
+      (d) => d.code === "unsupported-docx-element" && d.nodeType === "w:sdt",
     );
-    expect(unsupportedTbl).toBeDefined();
-    expect(unsupportedTbl?.level).toBe("warning");
+    expect(unsupported).toBeDefined();
+    expect(unsupported?.level).toBe("warning");
   });
 
   it("throws DocxImportError when policy is 'throw'", async () => {
-    const bytes = await buildDocWithUnsupportedTable();
+    const bytes = await buildDocWithUnsupportedElement();
     const importer = new ServerEditor();
     await expect(
       importDocx(importer, bytes, { unsupported: "throw" }),

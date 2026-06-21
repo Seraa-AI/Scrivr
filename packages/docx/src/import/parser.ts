@@ -31,8 +31,10 @@ import type {
   DocxInline,
   DocxMark,
   DocxParagraphAttrs,
+  DocxTableCell,
+  DocxTableRow,
 } from "@scrivr/core";
-import { emuToPx } from "@scrivr/core";
+import { emuToPx, twipsToPx } from "@scrivr/core";
 
 /**
  * Minimal diagnostics sink — same shape `DocxImportContext.diagnostics`
@@ -69,6 +71,8 @@ export function parseDocumentBody(
       // returns an array so the structural break survives Stage 2 as a
       // real `pageBreak` block instead of a stray inline.
       blocks.push(...parseParagraph(child, diagnostics));
+    } else if (child.name === "w:tbl") {
+      blocks.push(parseTable(child, diagnostics));
     } else if (child.name === "w:sectPr") {
       // Section properties — page size, margins, etc. Not modeled yet.
       continue;
@@ -215,6 +219,72 @@ function parseParagraph(el: OoxmlElement, diag: ParserDiagnostics): DocxBlock[] 
   const attrs = parseParagraphProperties(el);
   const inlines = parseParagraphInlines(el, diag);
   return splitOnInlinePageBreaks(attrs, inlines);
+}
+
+/**
+ * Parse a `<w:tbl>` into the intermediate table block. Mirrors the export in
+ * `@scrivr/core`'s `table/docxExport.ts`: `<w:tblGrid>` → px column widths,
+ * `<w:tr>` → rows, `<w:tc>` → cells with gridSpan / vMerge / shaded fill.
+ * Cell content reuses the paragraph/table parsers so nested blocks round-trip.
+ */
+function parseTable(el: OoxmlElement, diag: ParserDiagnostics): DocxBlock {
+  const grid: number[] = [];
+  const tblGrid = findChild(el, "w:tblGrid");
+  if (tblGrid) {
+    for (const col of findChildren(tblGrid, "w:gridCol")) {
+      const w = Number(attr(col, "w:w"));
+      grid.push(Number.isFinite(w) ? Math.round(twipsToPx(w)) : 100);
+    }
+  }
+
+  const rows: DocxTableRow[] = [];
+  for (const tr of findChildren(el, "w:tr")) {
+    const trPr = findChild(tr, "w:trPr");
+    const repeatHeader = trPr ? findChild(trPr, "w:tblHeader") !== undefined : false;
+
+    const cells: DocxTableCell[] = [];
+    for (const tc of findChildren(tr, "w:tc")) {
+      cells.push(parseTableCell(tc, diag));
+    }
+    rows.push({ repeatHeader, cells });
+  }
+
+  return { type: "table", grid, rows };
+}
+
+function parseTableCell(tc: OoxmlElement, diag: ParserDiagnostics): DocxTableCell {
+  const tcPr = findChild(tc, "w:tcPr");
+
+  let gridSpan = 1;
+  let vMerge: DocxTableCell["vMerge"] = "none";
+  let background: string | null = null;
+  if (tcPr) {
+    const gridSpanEl = findChild(tcPr, "w:gridSpan");
+    if (gridSpanEl) {
+      const span = Number(attr(gridSpanEl, "w:val"));
+      if (Number.isInteger(span) && span >= 1) gridSpan = span;
+    }
+
+    const vm = findChild(tcPr, "w:vMerge");
+    // OOXML quirk: a `<w:vMerge>` with no `w:val` means "continue".
+    if (vm) vMerge = attr(vm, "w:val") === "restart" ? "restart" : "continue";
+
+    const shd = findChild(tcPr, "w:shd");
+    const fill = shd ? attr(shd, "w:fill") : undefined;
+    if (fill && /^[0-9a-fA-F]{6}$/.test(fill)) background = `#${fill.toLowerCase()}`;
+  }
+
+  const content: DocxBlock[] = [];
+  for (const child of tc.children) {
+    if (typeof child === "string") continue;
+    if (child.name === "w:p") content.push(...parseParagraph(child, diag));
+    else if (child.name === "w:tbl") content.push(parseTable(child, diag));
+  }
+  // A `<w:tc>` always holds at least one block in Word; guarantee it so the
+  // schema's `block+` content requirement holds even for an empty cell.
+  if (content.length === 0) content.push({ type: "paragraph", attrs: {}, content: [] });
+
+  return { gridSpan, vMerge, background, isHeader: false, content };
 }
 
 function parseParagraphProperties(el: OoxmlElement): DocxParagraphAttrs {

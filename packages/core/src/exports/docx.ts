@@ -405,11 +405,32 @@ export interface DocxListItem {
   content: DocxBlock[];
 }
 
+/** One reconstructed `<w:tc>`. Cell content is `DocxBlock[]` (cells hold block content). */
+export interface DocxTableCell {
+  /** `<w:tcPr><w:gridSpan w:val>` — columns this cell spans. */
+  gridSpan: number;
+  /** `<w:tcPr><w:vMerge>` — "restart" / "continue", else "none". */
+  vMerge: "none" | "restart" | "continue";
+  /** `<w:tcPr><w:shd w:fill>` as a `#rrggbb`, or null. */
+  background: string | null;
+  /** True when the source cell was a `tableHeader` (round-trips via the row's header flag). */
+  isHeader: boolean;
+  content: DocxBlock[];
+}
+
+/** One reconstructed `<w:tr>`. */
+export interface DocxTableRow {
+  /** `<w:trPr><w:tblHeader/>` — repeat this row as a header on page breaks. */
+  repeatHeader: boolean;
+  cells: DocxTableCell[];
+}
+
 export type DocxBlock =
   | { type: "paragraph"; attrs: DocxParagraphAttrs; content: DocxInline[] }
   | { type: "horizontalRule" }
   | { type: "pageBreak" }
-  | { type: "list"; listType: "bullet" | "ordered"; items: DocxListItem[] };
+  | { type: "list"; listType: "bullet" | "ordered"; items: DocxListItem[] }
+  | { type: "table"; grid: number[]; rows: DocxTableRow[] };
 
 export interface DocxImportModel {
   blocks: DocxBlock[];

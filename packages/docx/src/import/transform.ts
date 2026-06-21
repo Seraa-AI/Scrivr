@@ -84,6 +84,12 @@ function transformBlock(
     return buildListNode(block, ctx, handlers);
   }
 
+  // Tables, like lists, are structural nested blocks — package-handled so the
+  // recursion has the handler set, rather than extension-dispatched.
+  if (block.type === "table") {
+    return buildTableNode(block, ctx, handlers);
+  }
+
   const blockHandler = handlers.blocks[block.type];
   if (blockHandler) return blockHandler(block, [], ctx);
   return fallbackBlock(block, ctx);
@@ -116,6 +122,59 @@ function buildListNode(
   }
   if (itemNodes.length === 0) return null;
   return listType.create(null, itemNodes);
+}
+
+function buildTableNode(
+  block: DocxBlock & { type: "table" },
+  ctx: DocxImportContext,
+  handlers: ResolvedImportHandlers,
+): PmNode | null {
+  const tableType = ctx.schema.nodes["table"];
+  const rowType = ctx.schema.nodes["tableRow"];
+  const cellType = ctx.schema.nodes["tableCell"];
+  const paragraphType = ctx.schema.nodes["paragraph"];
+  if (!tableType || !rowType || !cellType || !paragraphType) {
+    ctx.diagnostics.warn({
+      code: "schema-missing-table",
+      message: "Schema has no `table` / `tableRow` / `tableCell` — table dropped",
+      nodeType: "table",
+    });
+    return null;
+  }
+  const headerType = ctx.schema.nodes["tableHeader"] ?? cellType;
+
+  const rowNodes: PmNode[] = [];
+  for (const row of block.rows) {
+    // A DOCX header row (w:tblHeader) carries no th/td distinction; reconstruct
+    // its cells as `tableHeader` so the round trip recovers header semantics.
+    const useHeaderCells = row.repeatHeader && headerType !== cellType;
+    const cellNodes: PmNode[] = [];
+    for (const cell of row.cells) {
+      const cellChildren: PmNode[] = [];
+      for (const child of cell.content) {
+        const node = transformBlock(child, ctx, handlers);
+        if (node) cellChildren.push(node);
+      }
+      // `block+` requires at least one child.
+      if (cellChildren.length === 0) cellChildren.push(paragraphType.create());
+
+      const attrs: Record<string, unknown> = {};
+      if (cell.gridSpan > 1) attrs.gridSpan = cell.gridSpan;
+      if (cell.vMerge !== "none") attrs.vMerge = cell.vMerge;
+      if (cell.background) attrs.background = cell.background;
+
+      const type = useHeaderCells ? headerType : cellType;
+      cellNodes.push(type.create(Object.keys(attrs).length > 0 ? attrs : null, cellChildren));
+    }
+    if (cellNodes.length === 0) continue;
+
+    const rowAttrs = row.repeatHeader ? { repeatHeader: true } : null;
+    rowNodes.push(rowType.create(rowAttrs, cellNodes));
+  }
+  if (rowNodes.length === 0) return null;
+
+  const tableAttrs = block.grid.length > 0 ? { grid: block.grid } : null;
+  return tableType.create(tableAttrs, rowNodes);
 }
 
 function transformInlines(
