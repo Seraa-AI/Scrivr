@@ -4,7 +4,10 @@ import { DefaultContent } from "@scrivr/core";
 // Compact helpers so the demo table stays readable. Each cell holds one
 // left-aligned paragraph; headers are bold on a light fill.
 
-const HEADER_FILL = "#eef2f7";
+// Translucent neutral so the header shade blends over the page background
+// instead of fighting it — subtle gray on the light page, subtle lift on the
+// dark page. An opaque light fill would look wrong in dark mode.
+const HEADER_FILL = "rgba(148, 163, 184, 0.16)";
 
 function para(text: string, bold = false) {
   return {
@@ -609,7 +612,7 @@ const DEMO_DOC = {
       content: [
         {
           type: "text",
-          text: "Top-and-bottom wrap reserves the full content width for the image. The text in this paragraph sits above the figure, exactly as you'd expect from a Word or Pages document — paragraphs flow naturally until they meet the image's top margin, then they stop and resume on the other side.",
+          text: "Top-and-bottom wrap reserves the full content width above and below the figure.",
         },
       ],
     },
@@ -645,7 +648,6 @@ const DEMO_DOC = {
       ],
     },
 
-    { type: "pageBreak" },
     {
       type: "heading",
       attrs: { level: 3, align: "left" },
