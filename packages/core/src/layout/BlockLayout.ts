@@ -513,8 +513,11 @@ export function layoutBlock(
   let firstLineConsumed = false;
   const indentAwareLineSpace: LineSpaceProvider | undefined =
     textIndent > 0
-      ? (lineY: number) => {
-          const base = lineSpaceProvider?.(lineY, 1) ?? { segments: [{ x: 0, width: availableWidth }] };
+      ? (lineY: number, lineHeight: number) => {
+          // Forward the real line height so the float-exclusion probe inside the
+          // provider tests the line's true vertical extent (a 1px probe leaves a
+          // straddling first line full-width under a float's top edge).
+          const base = lineSpaceProvider?.(lineY, lineHeight) ?? { segments: [{ x: 0, width: availableWidth }] };
           if (!firstLineConsumed) {
             firstLineConsumed = true;
             return {

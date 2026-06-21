@@ -283,10 +283,23 @@ export class LineBreaker {
       }
     }
 
+    // Probe the float-exclusion provider with the line's real height, not a 1px
+    // sliver. A line whose top sits above a float zone but whose body reaches
+    // into it still overlaps the float; a 1px probe (lineY..lineY+1) misses that
+    // and leaves the line full-width, so text paints under the float's top edge.
+    // Estimate from the word that starts the line — its font height, or an inline
+    // object's height — which is exact for the common single-font line.
+    const probeLineHeight = (w: Token): number => {
+      const font =
+        w.kind === "text" ? w.font : lastSeenFont ?? `${defaultFontSize}px ${defaultFontFamily}`;
+      const fontHeight = this.measurer.getFontMetrics(font).lineHeight;
+      return w.kind === "object" ? Math.max(fontHeight, w.height) : fontHeight;
+    };
+
     for (const word of words) {
       // Determine the available inline segments for the current line.
       let absoluteLineY = startY + cumulativeLineY;
-      let lineSpace = resolveLineSpace(lineSpaceProvider, absoluteLineY, 1, maxWidth);
+      let lineSpace = resolveLineSpace(lineSpaceProvider, absoluteLineY, probeLineHeight(word), maxWidth);
 
       // Handle top-bottom ('full') float: flush any partial line then emit a
       // spacer line whose lineHeight equals the remaining gap to skipToY. The
@@ -327,7 +340,7 @@ export class LineBreaker {
           cumulativeLineY += gapHeight;
         }
         absoluteLineY = startY + cumulativeLineY;
-        lineSpace = resolveLineSpace(lineSpaceProvider, absoluteLineY, 1, maxWidth);
+        lineSpace = resolveLineSpace(lineSpaceProvider, absoluteLineY, probeLineHeight(word), maxWidth);
       }
 
       // Record constraint on the first word of a new line.
@@ -399,7 +412,7 @@ export class LineBreaker {
         currentSegmentUsed = 0;
         // Sample constraint for the new line that's about to start.
         const newAbsoluteLineY = startY + cumulativeLineY;
-        let newLineSpace = resolveLineSpace(lineSpaceProvider, newAbsoluteLineY, 1, maxWidth);
+        let newLineSpace = resolveLineSpace(lineSpaceProvider, newAbsoluteLineY, probeLineHeight(word), maxWidth);
         if (
           newLineSpace.skipToY !== undefined &&
           newLineSpace.skipToY > newAbsoluteLineY &&
@@ -419,7 +432,7 @@ export class LineBreaker {
             });
             cumulativeLineY += gapHeight;
           }
-          newLineSpace = resolveLineSpace(lineSpaceProvider, startY + cumulativeLineY, 1, maxWidth);
+          newLineSpace = resolveLineSpace(lineSpaceProvider, startY + cumulativeLineY, probeLineHeight(word), maxWidth);
         }
         currentLineSegments = newLineSpace.segments;
         currentLinePositioned = isPositionedLine(currentLineSegments, maxWidth);
