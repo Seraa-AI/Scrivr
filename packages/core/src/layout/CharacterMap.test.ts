@@ -107,6 +107,58 @@ describe("CharacterMap", () => {
     it("returns 0 when clicking on the wrong page", () => {
       expect(map.posAtCoords(50, 65, 2)).toBe(0);
     });
+
+    it("disambiguates cells sharing a y band by x — the click resolves to that cell's line", () => {
+      const m = new CharacterMap();
+      // Two cells in a row: same y band, different x ranges.
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
+      m.registerLine({ page: 1, lineIndex: 1, y: 58, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 36 });
+      m.registerGlyph({ docPos: 12, x: 46, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
+      m.registerGlyph({ docPos: 32, x: 126, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 1 });
+
+      // Inside cell 1.
+      expect(m.posAtCoords(48, 65, 1)).toBe(12);
+      // x=122 is in cell 2's left padding; 2D lookup picks the nearer line
+      // (cell 2), where a y-only lookup would have grabbed cell 1.
+      expect(m.posAtCoords(122, 65, 1)).toBe(32);
+    });
+
+    it("Home/End (lineStartPos/lineEndPos) resolve within the cursor's own cell, not the first cell in the row", () => {
+      const m = new CharacterMap();
+      // Two cells in a row (same y band, different x ranges), each with one glyph.
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
+      m.registerLine({ page: 1, lineIndex: 1, y: 58, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 36 });
+      m.registerGlyph({ docPos: 14, x: 60, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
+      m.registerGlyph({ docPos: 34, x: 140, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 1 });
+
+      // A position in the SECOND cell must report the second cell's line bounds.
+      expect(m.lineStartPos(34)).toBe(32);
+      expect(m.lineEndPos(34)).toBe(36);
+    });
+
+    it("a click in a short cell's blank lower area stays in that cell, not the taller neighbour", () => {
+      const m = new CharacterMap();
+      // Cell A (left): one line at the top of a tall row.
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 14 });
+      m.registerGlyph({ docPos: 12, x: 46, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
+      // Cell B (right): a line near the bottom of the same tall row.
+      m.registerLine({ page: 1, lineIndex: 5, y: 200, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 34 });
+      m.registerGlyph({ docPos: 32, x: 126, y: 200, lineY: 200, width: 10, height: 20, page: 1, lineIndex: 5 });
+
+      // Click low in cell A's column (blank space below A's text), on the glyph's
+      // x. 2D distance alone would pick B's bottom line; column preference keeps
+      // it in A.
+      expect(m.posAtCoords(50, 205, 1)).toBe(12);
+    });
+
+    it("clicking empty cell space resolves to the cell's content start, not its boundary", () => {
+      const m = new CharacterMap();
+      // Empty cell: a single zero-width sentinel at the content start.
+      m.registerLine({ page: 1, lineIndex: 0, y: 50, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 33 });
+      m.registerGlyph({ docPos: 32, x: 126, y: 50, lineY: 50, width: 0, height: 20, page: 1, lineIndex: 0 });
+
+      expect(m.posAtCoords(150, 60, 1)).toBe(32);
+    });
   });
 
   describe("coordsAtPos", () => {
@@ -159,6 +211,17 @@ describe("CharacterMap", () => {
       const exact = crossMap.coordsAtPos(101, 2);
       expect(exact?.page).toBe(2);
       expect(exact?.x).toBe(72);
+    });
+
+    it("falls back within the line containing the position, not an arbitrary previous glyph", () => {
+      const m = new CharacterMap();
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
+      m.registerLine({ page: 1, lineIndex: 1, y: 58, height: 20, x: 126, contentWidth: 68, startDocPos: 32, endDocPos: 36 });
+      m.registerGlyph({ docPos: 12, x: 46, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 0 });
+      m.registerGlyph({ docPos: 32, x: 126, y: 58, lineY: 58, width: 10, height: 20, page: 1, lineIndex: 1 });
+
+      const coords = m.coordsAtPos(36);
+      expect(coords).toMatchObject({ x: 136, y: 58, page: 1 });
     });
   });
 
@@ -380,6 +443,18 @@ describe("CharacterMap — posAbove / posBelow (vertical navigation)", () => {
 
     it("lineStartPos of first glyph returns line start", () => {
       expect(map.lineStartPos(1)).toBe(1);
+    });
+
+    it("resolves even when the cursor sits at the line's right edge (2D lookup falls back to nearest)", () => {
+      const m = new CharacterMap();
+      // A glyph at the line's exact right edge (x === line.x + contentWidth):
+      // lineAtPoint is half-open on x and misses, so without the
+      // nearestLineAtPoint fallback Home/End would return null and no-op.
+      m.registerLine({ page: 1, lineIndex: 0, y: 58, height: 20, x: 46, contentWidth: 68, startDocPos: 12, endDocPos: 16 });
+      m.registerGlyph({ docPos: 16, x: 114, y: 58, lineY: 58, width: 0, height: 20, page: 1, lineIndex: 0 });
+
+      expect(m.lineStartPos(16)).toBe(12);
+      expect(m.lineEndPos(16)).toBe(16);
     });
   });
 });

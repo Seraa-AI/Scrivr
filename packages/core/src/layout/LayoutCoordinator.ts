@@ -14,7 +14,7 @@ import type { InlineRegistry } from "./BlockRegistry";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
 import type { PageChromeContribution } from "./PageMetrics";
-import { populateCharMap } from "./BlockLayout";
+import { populateCharMap, registeredLineCount } from "./BlockLayout";
 import { spanEndDocPos } from "./LineBreaker";
 
 interface FragmentIndexEntry {
@@ -252,7 +252,7 @@ export class LayoutCoordinator {
         lineOffset,
         this.opts.measurer,
       );
-      lineOffset += block.lines.length;
+      lineOffset += registeredLineCount(block);
     }
 
     // Stamp anchored-object rects so getNodeViewportRect returns the rendered

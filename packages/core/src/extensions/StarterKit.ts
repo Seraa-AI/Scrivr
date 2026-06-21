@@ -533,6 +533,9 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.horizontalRule !== false) {
       Object.assign(styles, HorizontalRule.resolve().blockStyles);
     }
+    if (opts.table === true) {
+      Object.assign(styles, Table.resolve().blockStyles);
+    }
     // Image is now an inline node — no block styles needed.
     return styles;
   },
@@ -692,6 +695,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.pageBreak !== false) mergeFrom(PageBreak.resolve().exports);
     if (opts.list !== false) mergeFrom(List.resolve().exports);
     if (opts.image !== false) mergeFrom(Image.resolve().exports);
+    if (opts.table === true) mergeFrom(Table.resolve().exports);
 
     // Marks
     if (opts.bold !== false) {

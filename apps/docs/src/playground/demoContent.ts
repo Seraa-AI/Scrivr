@@ -1,5 +1,50 @@
 import { DefaultContent } from "@scrivr/core";
 
+// ── Table builders ────────────────────────────────────────────────────────────
+// Compact helpers so the demo table stays readable. Each cell holds one
+// left-aligned paragraph; headers are bold on a light fill.
+
+// Translucent neutral so the header shade blends over the page background
+// instead of fighting it — subtle gray on the light page, subtle lift on the
+// dark page. An opaque light fill would look wrong in dark mode.
+const HEADER_FILL = "rgba(148, 163, 184, 0.16)";
+
+function para(text: string, bold = false) {
+  return {
+    type: "paragraph",
+    attrs: { align: "left" as const },
+    content: text ? [{ type: "text", ...(bold ? { marks: [{ type: "bold" }] } : {}), text }] : [],
+  };
+}
+
+function headerCell(text: string) {
+  return { type: "tableHeader", attrs: { background: HEADER_FILL }, content: [para(text, true)] };
+}
+
+function bodyCell(text: string) {
+  return { type: "tableCell", content: [para(text)] };
+}
+
+/** Scrivr's four-layer architecture as a 3-column, 5-row table. */
+function architectureTable() {
+  const rows = [
+    ["Layer", "Technology", "Purpose"],
+    ["Model", "ProseMirror", "Immutable document tree, schema, and history"],
+    ["Layout", "Custom engine", "Pagination, line-breaking, and text measurement"],
+    ["Renderer", "HTML5 Canvas", "Pixel-perfect painting of the layout output"],
+    ["Input", "Hidden textarea", "Keyboard, IME, and paste into transactions"],
+  ];
+  return {
+    type: "table",
+    attrs: { layout: "fixed", grid: [110, 150, 250] },
+    content: rows.map((cells, i) => ({
+      type: "tableRow",
+      ...(i === 0 ? { attrs: { repeatHeader: true } } : {}),
+      content: cells.map((text) => (i === 0 ? headerCell(text) : bodyCell(text))),
+    })),
+  };
+}
+
 /**
  * Initial document loaded in the playground.
  * Showcases the full range of Scrivr formatting capabilities
@@ -449,6 +494,24 @@ const DEMO_DOC = {
       ],
     },
 
+    // ── Tables ──────────────────────────────────────────────────────────────────
+    {
+      type: "heading",
+      attrs: { level: 2, align: "left" },
+      content: [{ type: "text", text: "Tables" }],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "left" },
+      content: [
+        {
+          type: "text",
+          text: "Tables lay out as a real grid — each cell is its own mini-flow, so text wraps, marks render, and the caret hit-tests inside cells. Columns fit the content width, and the whole grid round-trips through PDF and DOCX export. Here is Scrivr's own four-layer architecture:",
+        },
+      ],
+    },
+    architectureTable(),
+
     // ── Layout engine ─────────────────────────────────────────────────────────
     {
       type: "heading",
@@ -549,7 +612,7 @@ const DEMO_DOC = {
       content: [
         {
           type: "text",
-          text: "Top-and-bottom wrap reserves the full content width for the image. The text in this paragraph sits above the figure, exactly as you'd expect from a Word or Pages document — paragraphs flow naturally until they meet the image's top margin, then they stop and resume on the other side.",
+          text: "Top-and-bottom wrap reserves the full content width above and below the figure.",
         },
       ],
     },
@@ -585,7 +648,6 @@ const DEMO_DOC = {
       ],
     },
 
-    { type: "pageBreak" },
     {
       type: "heading",
       attrs: { level: 3, align: "left" },

@@ -9,7 +9,7 @@ import {
   BlockStyle,
   applyPageFont,
 } from "./FontConfig";
-import { layoutBlock, LayoutBlock, type LayoutBlockKind } from "./BlockLayout";
+import { layoutBlock, LayoutBlock, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
 import { LineBreaker, type InputSpan, type LayoutLine, type LineSpaceProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
@@ -218,6 +218,8 @@ export interface MeasureCacheEntry {
   kind: LayoutBlockKind;
   height: number;
   lines: LayoutLine[];
+  /** Cell sub-blocks for `kind: "tableRow"` entries. */
+  cells?: CellSubBlock[];
   spaceBefore: number;
   spaceAfter: number;
   blockType: string;
@@ -267,6 +269,10 @@ export interface FlowBlock {
   kind: LayoutBlockKind;
   /** Measured lines — position-independent (lineHeight only, no absolute Y). */
   lines: LayoutLine[];
+  /** Cell sub-blocks for `kind: "tableRow"` flows (y relative to the row top). */
+  cells?: CellSubBlock[];
+  /** True for a table's last row — drives table bottom-border ownership. */
+  isLastRow?: boolean;
   height: number;
   /** Block style spacing (styleKey-aware, e.g. list_item overrides paragraph). */
   spaceBefore: number;
@@ -1288,9 +1294,8 @@ export function paginateFlow(
     const blockWidth = flow.availableWidth;
 
     // Build a positioned LayoutBlock from the FlowBlock measurements.
-    // `cells: []` is attached for tableRow blocks so the LayoutBlock invariant
-    // ("kind === tableRow → cells present") holds in Phase 1; Phase 4 replaces
-    // the empty array with real cell sub-blocks.
+    // `tableRow` blocks carry their cell sub-blocks (y relative to the row top,
+    // x absolute) so the invariant "kind === tableRow → cells present" holds.
     const buildBlock = (x: number, bY: number): LayoutBlock => ({
       kind: flow.kind,
       node,
@@ -1305,7 +1310,8 @@ export function paginateFlow(
       blockType: flow.blockType,
       align: flow.align,
       availableWidth: blockWidth,
-      ...(flow.kind === "tableRow" ? { cells: [] } : {}),
+      ...(flow.kind === "tableRow" ? { cells: flow.cells ?? [] } : {}),
+      ...(flow.isLastRow ? { isLastRow: true } : {}),
     });
 
     const block = normalizeWrappedBlockForPage(
@@ -1695,7 +1701,7 @@ export function buildBlockFlow(
     // Measure — position-independent (targetY=0, page=1 are not stored in entry).
     const entry = resolveBlockEntry(
       node, nodePos, blockX, 0, blockWidth, 1,
-      measurer, fontConfig, fontModifiers, measureCache, inlineRegistry,
+      measurer, fontConfig, fontModifiers, measureCache, inlineRegistry, item.tableColumns,
     );
     const anchorOnlyFlow = isAnchorOnlyFlowEntry(entry);
 
@@ -1704,6 +1710,8 @@ export function buildBlockFlow(
       nodePos,
       kind: entry.kind,
       lines: entry.lines,
+      ...(entry.cells ? { cells: entry.cells } : {}),
+      ...(item.isLastRow ? { isLastRow: true } : {}),
       height: entry.height,
       spaceBefore: anchorOnlyFlow ? 0 : blockStyle.spaceBefore,
       spaceAfter: anchorOnlyFlow ? 0 : blockStyle.spaceAfter,
@@ -1870,6 +1878,10 @@ export interface LayoutItem {
    * `list_item` spacing defined in addBlockStyles(), not the paragraph style.
    */
   styleKey?: string;
+  /** Column widths (from the parent table's `grid`) — set on table row items. */
+  tableColumns?: number[];
+  /** True for a table's last row — drives table bottom-border ownership. */
+  isLastRow?: boolean;
 }
 
 const LIST_INDENT = 24; // px — text starts this far right of the margin
@@ -1920,9 +1932,20 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
       // (leaf-like) block in v1 — whole row moves to the next page on
       // overflow, no line-splitting across cells. Phase 4 replaces the
       // stub row layout with sandboxed per-cell layout.
-      node.forEach((rowNode, rowOffset) => {
+      const gridAttr = node.attrs["grid"];
+      const tableColumns = Array.isArray(gridAttr)
+        ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
+        : [];
+      const lastRowIndex = node.childCount - 1;
+      node.forEach((rowNode, rowOffset, rowIndex) => {
         const rowNodePos = offset + 1 + rowOffset;
-        items.push({ node: rowNode, nodePos: rowNodePos, indentLeft: 0 });
+        items.push({
+          node: rowNode,
+          nodePos: rowNodePos,
+          indentLeft: 0,
+          tableColumns,
+          isLastRow: rowIndex === lastRowIndex,
+        });
       });
       return;
     }
@@ -1959,7 +1982,39 @@ function resolveBlockEntry(
   fontModifiers: Map<string, FontModifier> | undefined,
   measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
   inlineRegistry?: InlineRegistry,
+  tableColumns?: number[],
 ): MeasureCacheEntry {
+  // Table rows bypass the measure cache: their `cells` carry child-block span
+  // docPos values that the cache-hit delta-adjustment path does not rewrite, so
+  // re-measuring fresh each run keeps cell hit-testing correct. Tables are small
+  // relative to body text, so this is cheap.
+  if (node.type.name === "tableRow") {
+    const measured = layoutBlock(node, {
+      nodePos,
+      x: blockX,
+      y: targetY,
+      availableWidth: blockWidth,
+      page: pageNumber,
+      measurer,
+      fontConfig,
+      ...(fontModifiers ? { fontModifiers } : {}),
+      ...(inlineRegistry ? { inlineRegistry } : {}),
+      ...(tableColumns ? { tableColumns } : {}),
+    });
+    return {
+      availableWidth: blockWidth,
+      nodePos,
+      kind: measured.kind,
+      height: measured.height,
+      lines: measured.lines,
+      ...(measured.cells ? { cells: measured.cells } : {}),
+      spaceBefore: measured.spaceBefore,
+      spaceAfter: measured.spaceAfter,
+      blockType: measured.blockType,
+      align: measured.align,
+    };
+  }
+
   const cached = measureCache?.get(node);
   if (cached && cached.availableWidth === blockWidth) {
     const delta = nodePos - cached.nodePos;

@@ -12,6 +12,7 @@ import {
   BlockStyle,
 } from "./FontConfig";
 import { resolveFont, substituteFamily, parseFont } from "./StyleResolver";
+import { layoutTableRowCells } from "./TableLayoutEngine";
 
 /** Extracts px size from a CSS font string like "bold 14px Georgia, serif". Returns null if not found. */
 function parseFontSizePx(font: string): number | null {
@@ -100,6 +101,10 @@ export interface CellSubBlock {
   width: number;
   /** Cell height including padding. */
   height: number;
+  /** Vertical-merge state from the cell node — drives render border ownership. */
+  vMerge: "none" | "restart" | "continue";
+  /** Cell background color, or null. */
+  background: string | null;
   /** Layout for the cell's child blocks. Empty array in Phase 1. */
   blocks: LayoutBlock[];
 }
@@ -163,6 +168,8 @@ export interface LayoutBlock {
    * fills this with the cell rectangles and their child block layouts.
    */
   cells?: CellSubBlock[];
+  /** True for the last row of a table — only it paints the table's bottom border. */
+  isLastRow?: boolean;
 }
 
 export function isHiddenAnchorLine(line: LayoutLine): boolean {
@@ -229,17 +236,19 @@ export interface BlockLayoutOptions {
   lineSpaceProvider?: LineSpaceProvider;
   /** Inline object registry — used to call measure() on tokens during layout. */
   inlineRegistry?: InlineRegistry | undefined;
+  /**
+   * Column widths (CSS px) for a `tableRow` node, from the parent table's
+   * `grid` attr. Only consulted when laying out a `tableRow`; ignored for
+   * every other block kind.
+   */
+  tableColumns?: number[];
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────────
 const IMAGE_DEFAULT_HEIGHT = 200;
 const IMAGE_SPACE = 8;
-/**
- * Phase 1 placeholder height for a `tableRow` block. The Phase 4 layout
- * engine replaces this with content-driven row heights derived from the
- * tallest cell.
- */
-const TABLE_ROW_STUB_HEIGHT = 32;
+/** Fallback column width when a table row is laid out without a `grid`. */
+const TABLE_DEFAULT_COLUMN_WIDTH = 100;
 
 
 /**
@@ -318,20 +327,45 @@ export function layoutLeafBlock(
 }
 
 
+/** Sum of `gridSpan` across a row's physical cells — the column count. */
+function rowColumnCount(rowNode: Node): number {
+  let n = 0;
+  rowNode.forEach((cell) => {
+    const v = cell.attrs["gridSpan"];
+    n += typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : 1;
+  });
+  return n;
+}
+
 /**
- * Phase 1 stub layout for `tableRow` nodes. Returns a fixed-height block with
- * `kind: "tableRow"`, `lines: []`, and an empty `cells` array. Pagination
- * treats this like a leaf block (whole row moves to next page on overflow);
- * `TableRowStrategy` paints a placeholder rectangle.
- *
- * Phase 4 replaces this with the real `TableLayoutEngine` that builds cell
- * sub-blocks via the sandboxed `lineIndexOffset` contract.
+ * Layout for a `tableRow` node: delegates to `TableLayoutEngine` to lay out
+ * each cell's child blocks inside its column box and size the row to its
+ * tallest cell. Column widths come from `options.tableColumns` (the parent
+ * table's `grid`); when absent, a uniform default grid is derived from the
+ * row's column count so a row is never zero-width.
  */
 export function layoutTableRow(
   node: Node,
   options: BlockLayoutOptions,
 ): LayoutBlock {
-  const { nodePos, x, y, availableWidth } = options;
+  const { nodePos, x, y, availableWidth, page, measurer, fontConfig, fontModifiers, inlineRegistry, tableColumns } = options;
+
+  const columns =
+    tableColumns && tableColumns.length > 0
+      ? tableColumns
+      : Array.from({ length: Math.max(rowColumnCount(node), 1) }, () => TABLE_DEFAULT_COLUMN_WIDTH);
+
+  const { cells, height } = layoutTableRowCells(node, {
+    x,
+    columns,
+    availableWidth,
+    page,
+    rowNodePos: nodePos,
+    measurer,
+    ...(fontConfig ? { fontConfig } : {}),
+    ...(fontModifiers ? { fontModifiers } : {}),
+    ...(inlineRegistry ? { inlineRegistry } : {}),
+  });
 
   return {
     kind: "tableRow",
@@ -340,9 +374,9 @@ export function layoutTableRow(
     x,
     y,
     width: availableWidth,
-    height: TABLE_ROW_STUB_HEIGHT,
+    height,
     lines: [],
-    cells: [],
+    cells,
     spaceBefore: 0,
     spaceAfter: 0,
     blockType: "tableRow",
@@ -479,8 +513,11 @@ export function layoutBlock(
   let firstLineConsumed = false;
   const indentAwareLineSpace: LineSpaceProvider | undefined =
     textIndent > 0
-      ? (lineY: number) => {
-          const base = lineSpaceProvider?.(lineY, 1) ?? { segments: [{ x: 0, width: availableWidth }] };
+      ? (lineY: number, lineHeight: number) => {
+          // Forward the real line height so the float-exclusion probe inside the
+          // provider tests the line's true vertical extent (a 1px probe leaves a
+          // straddling first line full-width under a float's top edge).
+          const base = lineSpaceProvider?.(lineY, lineHeight) ?? { segments: [{ x: 0, width: availableWidth }] };
           if (!firstLineConsumed) {
             firstLineConsumed = true;
             return {
@@ -832,6 +869,26 @@ export function computeJustifySpaceBonus(
  * The renderer's own charMap population (in PageRenderer.drawBlock) is guarded
  * by hasGlyph/hasLine checks, so no duplicate entries are created.
  */
+/**
+ * Number of CharacterMap line indices a block occupies — the amount the caller
+ * advances the page-global line offset after registering this block. Text
+ * blocks contribute one per line; leaf blocks one; table rows the sum across
+ * every cell's child blocks.
+ */
+export function registeredLineCount(block: LayoutBlock): number {
+  if (block.kind === "leaf") return 1;
+  if (block.kind === "tableRow") {
+    let n = 0;
+    for (const cell of block.cells ?? []) {
+      for (const child of cell.blocks) {
+        n += child.kind === "leaf" ? 1 : child.lines.length;
+      }
+    }
+    return n;
+  }
+  return block.lines.length;
+}
+
 export function populateCharMap(
   block: LayoutBlock,
   map: CharacterMap,
@@ -863,6 +920,21 @@ export function populateCharMap(
     // Right half → cursor after the block
     if (!map.hasGlyph(afterPos)) {
       map.registerGlyph({ docPos: afterPos, x: block.x + halfWidth, y: block.y, lineY: block.y, width: halfWidth, height: block.height, page, lineIndex: li });
+    }
+    return;
+  }
+
+  // Table row: register each cell's child blocks at their absolute y (the row
+  // block's final y plus the child's row-relative offset). Recursion reuses the
+  // text/leaf branches above for the actual cell content.
+  if (block.kind === "tableRow") {
+    let offset = lineIndexOffset;
+    for (const cell of block.cells ?? []) {
+      for (const child of cell.blocks) {
+        const absolute: LayoutBlock = { ...child, y: block.y + child.y };
+        populateCharMap(absolute, map, page, offset, measurer);
+        offset += child.kind === "leaf" ? 1 : child.lines.length;
+      }
     }
     return;
   }

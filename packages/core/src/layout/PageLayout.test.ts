@@ -11,6 +11,7 @@ import {
 } from "./PageLayout";
 import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
 import type { AnchoredObjectPlacement } from "./AnchoredObjects";
+import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
 import { computePageMetrics, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
 import type { LayoutBlock } from "./BlockLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
@@ -1067,6 +1068,97 @@ describe("runPipeline — float image wrapping", () => {
     // 200 + ANCHORED_OBJECT_MARGIN (12) = 212.
     expect(Math.min(...firstLine.spans.map((span) => span.x))).toBe(212);
     expect(block.lines.length).toBeGreaterThan(unconstrainedBlock.lines.length);
+  });
+
+  it("a square float whose zone top falls mid-line keeps text off the image's top edge", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // yOffset drops the float's top a few px below the first text line's top, so
+    // the line's box straddles the zone top. The old 1px exclusion probe sampled
+    // only lineY..lineY+1, missed the zone, and left the line full-width — text
+    // then painted under the float's top edge. The probe now uses the real line
+    // height, so every line that overlaps the float wraps out of its column.
+    // Float lives in its own anchor paragraph; the yOffset drops the exclusion
+    // zone's TOP (paintedGlobalY - margin) mid-way through a line of the SEPARATE
+    // following paragraph (off the line grid), so that line's box straddles the
+    // zone top while its own top sits just above it — the exact case the 1px
+    // probe missed.
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 120, wrapMode: "square", xAlign: "left", yOffset: 40,
+    });
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [img]),
+      schema.node("paragraph", null, [schema.text(longText)]),
+    ]);
+    const layout = runPipeline(doc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+
+    // The exclusion band is the image rect grown by the anchored-object margin.
+    const float = layout.anchoredObjects![0]!;
+    const m = ANCHORED_OBJECT_MARGIN;
+    const zTop = float.y - m;
+    const zBottom = float.y + float.height + m;
+    const zLeft = float.x - m;
+    const zRight = float.x + float.width + m;
+
+    // No text span may sit inside the exclusion band on any line whose box
+    // vertically overlaps it — including the straddling line. `span.x` is
+    // block-relative, so shift it into the page-absolute frame by `block.x`.
+    const textBlock = layout.pages[0]!.blocks[1]!;
+    let lineTop = textBlock.y;
+    let checkedStraddle = false;
+    for (const line of textBlock.lines) {
+      const lineBottom = lineTop + line.lineHeight;
+      if (lineTop < zBottom && lineBottom > zTop) {
+        // This line straddles the zone top when its own top is above it.
+        if (lineTop < zTop) checkedStraddle = true;
+        for (const span of line.spans) {
+          const spanLeft = textBlock.x + span.x;
+          const hInside = spanLeft < zRight && spanLeft + span.width > zLeft;
+          expect(hInside).toBe(false);
+        }
+      }
+      lineTop = lineBottom;
+    }
+    // Guard the guard: the scenario must actually exercise a straddling line.
+    expect(checkedStraddle).toBe(true);
+  });
+
+  it("a top-bottom float reserves its full vertical band — no text line overlaps it", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Same straddle setup as the square case, but top-bottom reserves the FULL
+    // width: no text line may sit anywhere in the float's vertical band.
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 420, height: 100, wrapMode: "top-bottom", xAlign: "center", yOffset: 40,
+    });
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [img]),
+      schema.node("paragraph", null, [schema.text(longText)]),
+    ]);
+    const layout = runPipeline(doc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+
+    const float = layout.anchoredObjects![0]!;
+    const m = ANCHORED_OBJECT_MARGIN;
+    const zTop = float.y - m;
+    const zBottom = float.y + float.height + m;
+
+    const textBlock = layout.pages[0]!.blocks[1]!;
+    let lineTop = textBlock.y;
+    let overlapFound = false;
+    let contentBelowBand = false;
+    for (const line of textBlock.lines) {
+      const lineBottom = lineTop + line.lineHeight;
+      const hasContent = line.spans.some((s) => s.width > 0);
+      if (hasContent && lineTop < zBottom && lineBottom > zTop) overlapFound = true;
+      if (hasContent && lineTop >= zBottom) contentBelowBand = true;
+      lineTop = lineBottom;
+    }
+    // No content line sits in the reserved band, and text resumes below it
+    // (proving the band actually reserved space rather than there being no text).
+    expect(overlapFound).toBe(false);
+    expect(contentBelowBand).toBe(true);
   });
 
   it("square-right: constrained lines are positioned in the left available segment", () => {

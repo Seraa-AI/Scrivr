@@ -5,11 +5,19 @@
  * so tests run without a real Editor or DOM.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Schema } from "prosemirror-model";
 import zlib from "node:zlib";
-import { buildPdf } from "../index";
+import { buildPdf as buildPdfWithEditor, type PdfExportOptions } from "../index";
+import { ServerEditor, StarterKit } from "@scrivr/core";
 import type { DocumentLayout, LayoutBlock, LayoutLine } from "@scrivr/core";
+
+// buildPdf now requires an editor (it collects PDF handlers from extensions).
+// A ServerEditor satisfies the contract; table is enabled so the table handler
+// is available to the synthetic table layouts below.
+const exportEditor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+const buildPdf = (layout: DocumentLayout, options?: PdfExportOptions) =>
+  buildPdfWithEditor(layout, exportEditor, options);
 
 // ── Minimal schema ────────────────────────────────────────────────────────────
 
@@ -18,6 +26,8 @@ const schema = new Schema({
     doc: { content: "block+" },
     paragraph: { group: "block", content: "inline*" },
     horizontalRule: { group: "block" },
+    tableRow: { group: "block", content: "tableCell+" },
+    tableCell: { content: "block+" },
     image: {
       group: "block",
       attrs: { src: { default: "" }, width: { default: 100 }, height: { default: 100 } },
@@ -91,6 +101,51 @@ function hrBlock(y = MARGIN + 100): LayoutBlock {
     spaceBefore: 24,
     spaceAfter: 24,
     blockType: "horizontalRule",
+    align: "left",
+    availableWidth: AVAIL_W,
+  };
+}
+
+function imageObjectLine(src: string): LayoutLine {
+  return {
+    spans: [
+      {
+        kind: "object",
+        node: schema.nodes.image!.create({ src, width: 32, height: 24 }),
+        x: 0,
+        width: 32,
+        height: 24,
+        docPos: 10,
+        verticalAlign: "baseline",
+      },
+    ],
+    width: 32,
+    lineHeight: 28,
+    ascent: 24,
+    descent: 4,
+    cursorHeight: 20,
+    textAscent: 16,
+    xHeight: 8,
+  };
+}
+
+function tableRowWithCellImage(src: string): LayoutBlock {
+  const cellNode = schema.nodes.tableCell!.create(null, [schema.nodes.paragraph!.create()]);
+  const rowNode = schema.nodes.tableRow!.create(null, [cellNode]);
+  const child = paragraphBlock([imageObjectLine(src)], MARGIN + 4);
+  return {
+    kind: "tableRow",
+    node: rowNode,
+    nodePos: 0,
+    x: MARGIN,
+    y: MARGIN,
+    width: 120,
+    height: 40,
+    lines: [],
+    cells: [{ cellPos: 1, x: MARGIN, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [child] }],
+    spaceBefore: 0,
+    spaceAfter: 0,
+    blockType: "tableRow",
     align: "left",
     availableWidth: AVAIL_W,
   };
@@ -244,6 +299,21 @@ describe("buildPdf", () => {
       paragraphBlock([textLine("Below the rule")], MARGIN + 150),
     ]);
     await expect(buildPdf(layout)).resolves.toBeInstanceOf(Uint8Array);
+  });
+
+  it("collects image assets nested inside table cell blocks", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock: typeof fetch = vi.fn(async () =>
+      new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+    );
+    globalThis.fetch = fetchMock;
+    try {
+      const src = "https://example.test/cell-image.png";
+      await buildPdf(makeLayout([tableRowWithCellImage(src)]));
+      expect(fetchMock).toHaveBeenCalledWith(src);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("handles segment-positioned lines", async () => {

@@ -2,9 +2,11 @@ import { Extension } from "../Extension";
 import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
-import { TableRowStrategy } from "../../layout/TableRowStrategy";
+import { TableRowStrategy } from "../../renderer/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
 import { tableStructureCommands } from "../../table/commands";
+import { renderTableRowPdf } from "../../table/pdfExport";
+import { tableDocxHandlers } from "../../table/docxExport";
 
 /**
  * Table extension.
@@ -210,6 +212,25 @@ export const Table = Extension.create({
 
   addProseMirrorPlugins() {
     return [tableIntegrityPlugin()];
+  },
+
+  addBlockStyles() {
+    // Rows carry no spacing so they stack flush into one grid; row height is
+    // content-driven by the layout engine, so the font here is irrelevant.
+    return {
+      tableRow: { font: "14px", spaceBefore: 0, spaceAfter: 0, align: "left" as const },
+    };
+  },
+
+  addExports() {
+    // PDF parity for canvas-rendered table rows. Registered on the extension
+    // (not in @scrivr/export-pdf defaults) using the structural-context pattern
+    // so core stays free of pdf-lib. DOCX parity ships the same way — the
+    // walker dispatches table/tableRow/tableCell/tableHeader through these.
+    return {
+      pdf: { nodes: { tableRow: renderTableRowPdf } },
+      docx: { nodes: tableDocxHandlers },
+    };
   },
 
   addLayoutHandlers() {

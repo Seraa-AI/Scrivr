@@ -91,6 +91,8 @@ export interface BlockRenderContext {
   dpr: number;
   measurer: TextMeasurerLike;
   markDecorators?: Map<string, MarkDecorator>;
+  /** Registry for block render strategies, used by composite blocks such as table rows. */
+  blockRegistry?: BlockRegistry;
   /** Registry for inline objects (images, widgets) drawn inside line boxes. */
   inlineRegistry?: InlineRegistry;
   /**
