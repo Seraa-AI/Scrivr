@@ -312,11 +312,44 @@ export interface FlowBlock {
   prevNodePos?: number;
 }
 
-export function assignGlobalY(flows: FlowBlock[], initialY: number): FlowBlock[] {
+/**
+ * Global Y of the start of the first page strictly below `y`. A content bottom
+ * exactly on a page boundary belongs to the page above (it rendered there), so
+ * the break advances one page past it — matching `paginateFlow`, which always
+ * advances exactly one page per forced break.
+ */
+function nextPageStartAfter(
+  pageConfig: PageConfig,
+  metricsFor: (pageNumber: number) => PageMetrics,
+  y: number,
+): number {
+  let contentPage = pageForGlobalY(pageConfig, metricsFor, y);
+  if (contentPage > 1 && pageStartGlobalForMetrics(pageConfig, metricsFor, contentPage) === y) {
+    contentPage -= 1;
+  }
+  return pageStartGlobalForMetrics(pageConfig, metricsFor, contentPage + 1);
+}
+
+export function assignGlobalY(
+  flows: FlowBlock[],
+  initialY: number,
+  pageConfig: PageConfig,
+  metricsFor: (pageNumber: number) => PageMetrics,
+): FlowBlock[] {
   let y = initialY;
   let prevSpaceAfter = 0;
 
   return flows.map((flow, index) => {
+    // A forced page break consumes the rest of its page so globalY reflects the
+    // real vertical position. Stage 3's page derivation + exclusion zones then
+    // agree with Stage 4, so an anchored object after the break lands on the
+    // same page as its anchor instead of being left behind.
+    if (flow.isPageBreak && !pageConfig.pageless) {
+      const globalY = nextPageStartAfter(pageConfig, metricsFor, y);
+      y = globalY + flow.height;
+      prevSpaceAfter = 0;
+      return { ...flow, globalY, originalGlobalY: globalY };
+    }
     const gap = index === 0 ? 0 : collapseMargins(prevSpaceAfter, flow.spaceBefore);
     const globalY = y + gap;
     y = globalY + flow.height;
@@ -325,12 +358,22 @@ export function assignGlobalY(flows: FlowBlock[], initialY: number): FlowBlock[]
   });
 }
 
-function restampGlobalYFrom(flows: FlowBlock[], startIndex: number): FlowBlock[] {
+function restampGlobalYFrom(
+  flows: FlowBlock[],
+  startIndex: number,
+  pageConfig: PageConfig,
+  metricsFor: (pageNumber: number) => PageMetrics,
+): FlowBlock[] {
   const next = [...flows];
   for (let i = Math.max(1, startIndex); i < next.length; i++) {
     const prev = next[i - 1]!;
     const flow = next[i]!;
     const prevGlobalY = prev.globalY ?? 0;
+    if (flow.isPageBreak && !pageConfig.pageless) {
+      const globalY = nextPageStartAfter(pageConfig, metricsFor, prevGlobalY + prev.height);
+      next[i] = { ...flow, globalY };
+      continue;
+    }
     const gap = collapseMargins(prev.spaceAfter, flow.spaceBefore);
     const globalY = prevGlobalY + prev.height + gap;
     next[i] = { ...flow, globalY };
@@ -542,7 +585,7 @@ function resolveAnchoredObjects(
           { ...flows[i]!, globalY: pushedGlobalY, solverPushedThisFlow: true },
           ...flows.slice(i + 1),
         ];
-        flows = restampGlobalYFrom(flows, i + 1);
+        flows = restampGlobalYFrom(flows, i + 1, pageConfig, metricsFor);
         anchorGlobalY = pushedGlobalY;
         pageNumber = barriers.pageForGlobalY(anchorGlobalY);
         anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
@@ -581,7 +624,7 @@ function resolveAnchoredObjects(
             { ...flows[i]!, globalY: stackedAnchorGlobalY, solverPushedThisFlow: true },
             ...flows.slice(i + 1),
           ];
-          flows = restampGlobalYFrom(flows, i + 1);
+          flows = restampGlobalYFrom(flows, i + 1, pageConfig, metricsFor);
           anchorGlobalY = stackedAnchorGlobalY;
           pageNumber = barriers.pageForGlobalY(anchorGlobalY);
           anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
@@ -598,7 +641,7 @@ function resolveAnchoredObjects(
             { ...flows[i]!, globalY: pushedGlobalY, solverPushedThisFlow: true },
             ...flows.slice(i + 1),
           ];
-          flows = restampGlobalYFrom(flows, i + 1);
+          flows = restampGlobalYFrom(flows, i + 1, pageConfig, metricsFor);
           anchorGlobalY = pushedGlobalY;
           pageNumber = barriers.pageForGlobalY(anchorGlobalY);
           anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
@@ -677,6 +720,8 @@ function resolveAnchoredObjects(
             contentX,
             contentWidth,
           },
+          pageConfig,
+          metricsFor,
           measurer,
           fontConfig,
           fontModifiers,
@@ -717,6 +762,8 @@ function resolveAnchoredObjects(
             contentX,
             contentWidth,
           },
+          pageConfig,
+          metricsFor,
           measurer,
           fontConfig,
           fontModifiers,
@@ -747,6 +794,8 @@ function reflowFlowsAgainstExclusions(
     contentX: number;
     contentWidth: number;
   },
+  pageConfig: PageConfig,
+  metricsFor: (pageNumber: number) => PageMetrics,
   measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
@@ -826,7 +875,7 @@ function reflowFlowsAgainstExclusions(
         nextFlow,
         ...flows.slice(idx + 1),
       ];
-      flows = restampGlobalYFrom(flows, idx + 1);
+      flows = restampGlobalYFrom(flows, idx + 1, pageConfig, metricsFor);
     } else if (!flow.overlapsWrapZone) {
       flows = [
         ...flows.slice(0, idx),
@@ -1030,7 +1079,7 @@ export function runFlowPipeline(
     ? pageStartGlobalForMetrics(pageConfig, metricsFor, currentPage.pageNumber)
       + (initY - metricsFor(currentPage.pageNumber).contentTop)
     : metricsFor(1).contentTop;
-  const flowsWithGlobalY = assignGlobalY(flowResult.flows, seedGlobalY);
+  const flowsWithGlobalY = assignGlobalY(flowResult.flows, seedGlobalY, pageConfig, metricsFor);
   const anchoredFlow = resolveAnchoredObjects(
     flowsWithGlobalY,
     pageConfig,

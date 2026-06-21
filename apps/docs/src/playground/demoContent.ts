@@ -648,6 +648,7 @@ const DEMO_DOC = {
       ],
     },
 
+    { type: "pageBreak" },
     {
       type: "heading",
       attrs: { level: 3, align: "left" },

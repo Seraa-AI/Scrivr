@@ -1161,6 +1161,28 @@ describe("runPipeline — float image wrapping", () => {
     expect(contentBelowBand).toBe(true);
   });
 
+  it("an anchored float after an explicit page break travels to its anchor's page", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 120, wrapMode: "square", xAlign: "left",
+    });
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [schema.text(longText)]),
+      schema.node("pageBreak"),
+      schema.node("paragraph", null, [img, schema.text(longText)]),
+    ]);
+    const layout = runPipeline(doc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+
+    // The page break forces the anchor paragraph onto page 2; the float must
+    // travel with its anchor, not stay behind on page 1. Stage 2 now advances
+    // globalY past the break so Stage 3 derives the anchor's real page.
+    expect(layout.pages.length).toBe(2);
+    const float = layout.anchoredObjects![0]!;
+    expect(float.page).toBe(2);
+  });
+
   it("square-right: constrained lines are positioned in the left available segment", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-right" });
