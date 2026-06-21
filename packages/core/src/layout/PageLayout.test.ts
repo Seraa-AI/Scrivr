@@ -1183,6 +1183,59 @@ describe("runPipeline — float image wrapping", () => {
     expect(float.page).toBe(2);
   });
 
+  it("a top-bottom float after a paragraph that splits at a natural boundary stays below the tail", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const LH = createMeasurer().getFontMetrics("14px Arial").lineHeight;
+    // Content height = 4 lines + an 8px partial gap, so a 5-line paragraph splits
+    // 4 + 1 and leaves an unused gap at the page-1 bottom. The page-2 tail (1
+    // line) plus the image fit on page 2. Continuous globalY ignores the gap and
+    // places the float above the tail (overlap); the gap-aware advance places it
+    // below.
+    const pageConfig = {
+      pageWidth: 120,
+      pageHeight: Math.ceil(10 + 4 * LH + 8 + 10),
+      margins: { top: 10, right: 10, bottom: 10, left: 10 },
+    };
+    const fiveLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee";
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 80, height: 30, wrapMode: "top-bottom", xAlign: "center",
+    });
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [schema.text(fiveLineText)]),
+      schema.node("paragraph", null, [img, schema.text(fiveLineText)]),
+    ]);
+    const layout = runPipeline(doc, { pageConfig, fontConfig, measurer: createMeasurer() });
+
+    const float = layout.anchoredObjects![0]!;
+    const fTop = float.y;
+    const fBottom = float.y + float.height;
+
+    // Invariant: the float must not render on a page before the preceding
+    // paragraph's tail. Without the gap-aware advance the split tail is pushed
+    // a page past the float, which then renders ahead of content that precedes
+    // it in document order.
+    const aNodePos = layout.pages[0]!.blocks[0]!.nodePos;
+    let aLastPage = 1;
+    layout.pages.forEach((pg, pi) => {
+      for (const b of pg.blocks) if (b.nodePos === aNodePos) aLastPage = Math.max(aLastPage, pi + 1);
+    });
+    expect(float.page).toBeGreaterThanOrEqual(aLastPage);
+
+    // And on the float's own page, no text line may sit in its reserved band.
+    const page = layout.pages[float.page - 1]!;
+    let overlap = false;
+    for (const block of page.blocks) {
+      let lineTop = block.y;
+      for (const line of block.lines) {
+        const lineBottom = lineTop + line.lineHeight;
+        const hasContent = line.spans.some((s) => s.width > 0);
+        if (hasContent && lineTop < fBottom && lineBottom > fTop) overlap = true;
+        lineTop = lineBottom;
+      }
+    }
+    expect(overlap).toBe(false);
+  });
+
   it("square-right: constrained lines are positioned in the left available segment", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-right" });

@@ -330,6 +330,80 @@ function nextPageStartAfter(
   return pageStartGlobalForMetrics(pageConfig, metricsFor, contentPage + 1);
 }
 
+/**
+ * Advance a flow's continuous start through to its true end `globalY`, modelling
+ * the gaps `paginateFlow` introduces at page bottoms so Stage 2's coordinates
+ * match Stage 4's. A line is atomic: one that would cross the page bottom moves
+ * whole to the next page, leaving an unused gap that a naive `start + height`
+ * ignores. Without this, an anchored object whose anchor sits after a paragraph
+ * that splits across a page boundary is placed on an earlier page than the
+ * paragraph's tail — and overlaps it.
+ *
+ * Uses the same `fitLinesInCapacity` primitive as `paginateFlow` so the
+ * line-fit decision can't diverge. Returns the (possibly page-advanced) start
+ * and the gap-aware end.
+ */
+function advanceFlowGlobalY(
+  flow: FlowBlock,
+  naturalStart: number,
+  pageConfig: PageConfig,
+  metricsFor: (pageNumber: number) => PageMetrics,
+): { startGlobalY: number; endGlobalY: number } {
+  if (flow.isPageBreak && !pageConfig.pageless) {
+    const start = nextPageStartAfter(pageConfig, metricsFor, naturalStart);
+    return { startGlobalY: start, endGlobalY: start + flow.height };
+  }
+  if (pageConfig.pageless) {
+    return { startGlobalY: naturalStart, endGlobalY: naturalStart + flow.height };
+  }
+
+  const pageOf = (g: number): number => pageForGlobalY(pageConfig, metricsFor, g);
+  const pageStart = (p: number): number => pageStartGlobalForMetrics(pageConfig, metricsFor, p);
+  const pageBottom = (p: number): number => pageStart(p) + metricsFor(p).contentHeight;
+
+  // Atomic blocks (image / hr / tableRow) never split: if the block overflows
+  // its page and fits on a fresh one, it moves whole (the gap). `paginateFlow`
+  // keeps a too-tall block or a first-on-page block where it is.
+  const isAtomic = flow.kind === "leaf" || flow.kind === "tableRow";
+  if (isAtomic || flow.lines.length === 0) {
+    let start = naturalStart;
+    const page = pageOf(start);
+    const atTop = start === pageStart(page);
+    const tooTall = flow.height > metricsFor(page).contentHeight;
+    if (!atTop && !tooTall && start + flow.height > pageBottom(page)) {
+      start = pageStart(page + 1);
+    }
+    return { startGlobalY: start, endGlobalY: start + flow.height };
+  }
+
+  // Text blocks: place lines page by page; the remainder jumps to the next page
+  // top whenever a line would cross the bottom.
+  let remaining = flow.lines;
+  let cursor = naturalStart;
+  while (remaining.length > 0) {
+    const page = pageOf(cursor);
+    const top = pageStart(page);
+    const available = pageBottom(page) - cursor;
+    let { fitted, rest, fittedHeight } = fitLinesInCapacity(remaining, available);
+    if (fitted.length === 0) {
+      if (cursor === top) {
+        // A line taller than the page — force one to avoid an infinite loop
+        // (mirrors paginateFlow's top-of-page guard).
+        fitted = remaining.slice(0, 1);
+        rest = remaining.slice(1);
+        fittedHeight = remaining[0]!.lineHeight;
+      } else {
+        cursor = pageStart(page + 1);
+        continue;
+      }
+    }
+    cursor += fittedHeight;
+    remaining = rest;
+    if (remaining.length > 0) cursor = pageStart(page + 1);
+  }
+  return { startGlobalY: naturalStart, endGlobalY: cursor };
+}
+
 export function assignGlobalY(
   flows: FlowBlock[],
   initialY: number,
@@ -340,21 +414,13 @@ export function assignGlobalY(
   let prevSpaceAfter = 0;
 
   return flows.map((flow, index) => {
-    // A forced page break consumes the rest of its page so globalY reflects the
-    // real vertical position. Stage 3's page derivation + exclusion zones then
-    // agree with Stage 4, so an anchored object after the break lands on the
-    // same page as its anchor instead of being left behind.
-    if (flow.isPageBreak && !pageConfig.pageless) {
-      const globalY = nextPageStartAfter(pageConfig, metricsFor, y);
-      y = globalY + flow.height;
-      prevSpaceAfter = 0;
-      return { ...flow, globalY, originalGlobalY: globalY };
-    }
     const gap = index === 0 ? 0 : collapseMargins(prevSpaceAfter, flow.spaceBefore);
-    const globalY = y + gap;
-    y = globalY + flow.height;
-    prevSpaceAfter = flow.spaceAfter;
-    return { ...flow, globalY, originalGlobalY: globalY };
+    const { startGlobalY, endGlobalY } = advanceFlowGlobalY(
+      flow, y + gap, pageConfig, metricsFor,
+    );
+    y = endGlobalY;
+    prevSpaceAfter = flow.isPageBreak ? 0 : flow.spaceAfter;
+    return { ...flow, globalY: startGlobalY, originalGlobalY: startGlobalY };
   });
 }
 
@@ -368,15 +434,14 @@ function restampGlobalYFrom(
   for (let i = Math.max(1, startIndex); i < next.length; i++) {
     const prev = next[i - 1]!;
     const flow = next[i]!;
-    const prevGlobalY = prev.globalY ?? 0;
-    if (flow.isPageBreak && !pageConfig.pageless) {
-      const globalY = nextPageStartAfter(pageConfig, metricsFor, prevGlobalY + prev.height);
-      next[i] = { ...flow, globalY };
-      continue;
-    }
-    const gap = collapseMargins(prev.spaceAfter, flow.spaceBefore);
-    const globalY = prevGlobalY + prev.height + gap;
-    next[i] = { ...flow, globalY };
+    const prevEnd = advanceFlowGlobalY(
+      prev, prev.globalY ?? 0, pageConfig, metricsFor,
+    ).endGlobalY;
+    const gap = prev.isPageBreak ? 0 : collapseMargins(prev.spaceAfter, flow.spaceBefore);
+    const { startGlobalY } = advanceFlowGlobalY(
+      flow, prevEnd + gap, pageConfig, metricsFor,
+    );
+    next[i] = { ...flow, globalY: startGlobalY };
   }
   return next;
 }
