@@ -870,6 +870,14 @@ export class Editor extends BaseEditor implements IEditor {
   }
 
   /**
+   * Guarantees the layout covers the full document, not just the streamed
+   * first-paint chunk.
+   */
+  ensureFullLayout(): void {
+    this.lc.ensureFullLayout();
+  }
+
+  /**
    * Ensures the CharacterMap is populated for the given page.
    */
   ensurePagePopulated(pageNumber: number): void {

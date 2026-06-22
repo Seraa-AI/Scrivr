@@ -169,6 +169,11 @@ export interface IEditor extends IBaseEditor {
   /** Invalidate the layout cache and trigger a re-layout on next paint. */
   invalidateLayout(): void;
   /**
+   * Synchronously complete any streamed partial layout.
+   * Serialization paths should call this before reading `layout.pages`.
+   */
+  ensureFullLayout(): void;
+  /**
    * Signal that the editor is (or is no longer) ready to render.
    * Call setReady(false) before a collaborative provider connects to suppress
    * layout/paint during Y.js sync. Call setReady(true) from onSynced to do

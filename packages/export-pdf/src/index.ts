@@ -62,7 +62,15 @@ export async function exportToPdf(
   editor: IEditor,
   options?: PdfExportOptions,
 ): Promise<Uint8Array> {
-  return buildPdf(editor.layout, editor, options);
+  editor.ensureFullLayout();
+  const layout = editor.layout;
+  if (layout.isPartial) {
+    throw new Error(
+      "[exportToPdf] cannot export a partial layout. " +
+        "Upgrade @scrivr/core or call editor.ensureFullLayout() before exporting.",
+    );
+  }
+  return buildPdf(layout, editor, options);
 }
 
 /**
