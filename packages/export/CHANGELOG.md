@@ -1,5 +1,386 @@
 # @scrivr/export
 
+## 1.0.12
+
+### Patch Changes
+
+- 80e1e65: `@scrivr/core` — an anchored object no longer paints over a preceding paragraph
+  that splits across a natural page boundary.
+
+  Root cause (the natural-split sibling of the explicit-page-break fix): Stage 4
+  paginates at the line level — a line that would cross a page bottom moves whole
+  to the next page, leaving an unused sub-line gap. Stage 2's continuous
+  `globalY` ignored those gaps, so an anchored object whose anchor sits after a
+  paragraph that splits was placed from a coordinate that ran ahead of where
+  Stage 4 actually puts the surrounding lines — the float landed a page early /
+  too high and overlapped the paragraph's tail.
+
+  Fix: `assignGlobalY` and `restampGlobalYFrom` now advance through each flow with
+  a shared `advanceFlowGlobalY` helper that models the page-bottom gaps, reusing
+  the same `fitLinesInCapacity` primitive `paginateFlow` uses so the line-fit
+  decision can't diverge. With `globalY` reflecting true paginated positions,
+  Stage 3's page derivation, anchor-push, and exclusion zones agree with Stage 4
+  for every wrap mode — the model invariant ("no content after an anchored object
+  renders on an earlier page than the object") now holds for natural splits too.
+
+  Regression test: a top-bottom float after a paragraph that splits 4 + 1 at a
+  non-line-aligned page boundary stays below the tail (fails before, passes now).
+  Full core suite green (1173 tests) — no pagination/streaming/cache regressions.
+  The demo's "Top and bottom" intro is restored to its full multi-line form,
+  which now paginates correctly.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- d91051d: `@scrivr/core` — an anchored object after an explicit page break now stays on
+  the same page as its anchor instead of being left behind on the previous page.
+
+  Root cause: a `pageBreak` flow has height 0, so Stage 2 (`assignGlobalY`) gave
+  it no contribution to the continuous `globalY`. Stage 3 then derived the
+  anchor's page from that continuous coordinate — which still pointed at the
+  pre-break page — so an image anchored after the break was placed there, while
+  Stage 4 force-advanced the anchor text to the next page. The float and its
+  anchor split across pages (the "behind"/"front"/"square" image stranded on the
+  prior page, with text wrapping the wrong page).
+
+  Fix at the Stage 2/3 seam: `assignGlobalY` (and `restampGlobalYFrom`, used by
+  the anchor-push and wrap-zone reflow) now advance `globalY` to the next page's
+  content top when they cross a forced page break. With `globalY` reflecting the
+  real vertical position, Stage 3's page derivation, anchor-push, and exclusion
+  zones all agree with Stage 4's pagination — the model invariant ("no content
+  after an anchored object renders on an earlier page than the object") holds by
+  construction for the explicit-page-break case.
+
+  Regression test: a square float anchored after a `pageBreak` lands on page 2
+  with its anchor (fails before, passes now).
+
+  Remaining known limitation: a float can still desync from its anchor when the
+  _preceding paragraph_ splits across a natural page boundary (no explicit
+  break) — a separate Stage 3/Stage 4 case tracked for later.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 8ba5a90: `@scrivr/core` — defensive clamp so `AnchoredObjectPlacement.page` never
+  exceeds `layout.pages.length`.
+
+  Under extreme inputs (huge image height + dense float packing + extreme
+  `yOffset`), the anchored-object solver picks `placement.page` based on
+  geometry before pagination finalizes the page count. If no flow content
+  lands on that geometry-derived page, the page list truncates but the
+  placement keeps the higher index — and downstream consumers (PDF export
+  indexed by page, hit-testing reaching for `CharacterMap` on a
+  non-existent page) reference a page that doesn't exist.
+
+  `runPipeline` now calls `clampPlacementsToPages(mergedPlacements,
+pages.length)` on the **final** layout (non-partial branch) so every
+  placement that survives into `layout.anchoredObjects` satisfies
+  `placement.page <= layout.pages.length`. Partial layouts are
+  intentionally left un-clamped: they get carried forward to the next
+  streaming chunk as `previousLayout?.anchoredObjects`, and clamping there
+  would permanently lose a placement's original page when a later chunk
+  grows the layout back. View consumers reading a partial layout during
+  streaming may briefly observe `placement.page > pages.length`; the
+  window closes when the next chunk arrives.
+
+  The clamp leaves `placement.y` untouched — the float was already
+  painting off the bottom of its intended page; the visual is no worse,
+  but every loop that iterates pages can now trust the index. Common
+  case stays allocation-free (returns the input reference when no
+  clamping is needed).
+
+  `clampPlacementsToPages` is `@internal` — used by `runPipeline`
+  finalization, not part of the `@scrivr/core` public API. The package
+  barrel does not re-export it.
+
+  Tests: 5 new cases in `PageLayout.test.ts` cover the clamp, the
+  `y`-preservation contract, the allocation-free no-op path, the empty
+  input, and the `pageCount === 0` guard.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 5fb5ddd: `@scrivr/core` — fix text-selection drag getting stuck at the source page
+  when the cursor crosses into a page whose CharacterMap has not been
+  populated yet.
+
+  `PointerController.handlePointerMove` calls
+  `editor.charMap.posAtCoords(x, y, page)` on every frame of a text-select
+  drag. `posAtCoords` is page-scoped: on a destination page whose glyphs
+  have not been registered (the common case during the first drag into an
+  off-cursor page), `nearestLine` returns `undefined`, the lookup falls
+  through to `0`, and `setSelection(anchor, 0)` collapses the selection to
+  the document start — visually appearing as "drag stuck at the source
+  page" because the destination half never receives a valid head.
+
+  The anchored-object drag handler in the same controller already mitigates
+  this: it calls `editor.ensurePagePopulated(hit.page)` before resolving
+  `posAtCoords` (see `resolveDragTargetDocPos`). Text drag now does the
+  same. The selection head now updates correctly as the pointer enters
+  each new page during a drag.
+
+  In the same fix, mid-drag pointermoves whose `hitTest` result lands in
+  the inter-page gap (`hit.gap === true`) are now skipped instead of
+  re-running `posAtCoords` with `docY` clamped to the source-page bottom.
+  Without this, every gap-traversal frame would re-collapse the selection
+  head to end-of-source-page on the way down. The last valid selection now
+  sticks until the pointer enters real page content again.
+
+  Tests: three new cases in `PointerController.test.ts` cover (a) the
+  `ensurePagePopulated` call during a cross-page drag, (b) the gap-skip
+  behavior, and (c) the end-to-end selection-head update when dragging
+  into page 2.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 758dd29: `@scrivr/core` — expose `cursorManager: CursorManager` on the `IEditor`
+  interface so extensions running in `onViewReady` can reset the blink
+  cycle and read the current blink phase with full typing instead of
+  ad-hoc structural mirrors.
+
+  `ServerEditor` still does not implement this surface — blink is a
+  view-layer concern and only `Editor` (browser) carries a `CursorManager`.
+  The `IBaseEditor` interface is unchanged.
+
+  `@scrivr/plugins` — `HeaderFooter` no longer carries the `CursorManagerLike`
+  structural-typing workaround. The `isCursorManagerLike` runtime guard
+  and `getCursorManager` / `isCursorVisible` helpers are gone; call sites
+  now read `editor.cursorManager` directly. No behavior change — the
+  blink reset on every header keystroke and the cursor-visibility gate
+  on the overlay handler fire identically. Just the wrong-shape failure
+  class (a rename of `CursorManager.resetSilent` would have silently
+  broken header blink behavior) is removed.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 1e76d7c: `@scrivr/core` + `@scrivr/docx` — DOCX export and import for tables, so the
+  table extension round-trips through Word the same way it already does through
+  PDF.
+
+  Export is extension-owned: `Table.addExports()` now contributes `docx` node
+  handlers (`table` / `tableRow` / `tableCell` / `tableHeader`) alongside the
+  existing `pdf` handler, keeping `@scrivr/docx` free of table-specific
+  knowledge. The walker dispatches them like any other node — a `table` becomes
+  `<w:tbl>` with `<w:tblPr>` (single-line borders matching the canvas grid) +
+  `<w:tblGrid>` (column widths px→twips), each row a `<w:tr>` (with
+  `<w:tblHeader/>` when `repeatHeader` is set), each cell a `<w:tc>` carrying
+  `<w:gridSpan>`, `<w:vMerge>`, and `<w:shd w:fill>` for the background.
+
+  Import mirrors the list precedent — nested structural blocks are
+  package-handled (not extension-dispatched) so the recursion has the full
+  handler set. `parser.ts` claims `<w:tbl>` into a new `DocxBlock` table shape
+  (grid twips→px, rows, cells with gridSpan/vMerge/background); `transform.ts`'s
+  `buildTableNode` builds the `table` node, reconstructing a `<w:tblHeader/>` row
+  as `repeatHeader` + `tableHeader` cells so header semantics survive the trip.
+
+  A table imported into a schema without the table nodes warns
+  (`schema-missing-table`) and drops, the same non-fatal way a list does when
+  `bulletList`/`listItem` are absent.
+
+  Tests: round-trip coverage in `@scrivr/docx` (rows/cells/text, grid widths,
+  header row + background, and the emitted OOXML elements). The pre-existing
+  "unsupported element" policy tests move from `<w:tbl>` (now supported) to
+  `<w:sdt>`.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 1e76d7c: `@scrivr/core` — anchored floats no longer paint over text at their top edge.
+
+  The line-space exclusion probe in `LineBreaker` sampled each prospective line
+  with a 1px height (`lineY..lineY+1`). A line whose top sat just above a float's
+  exclusion zone but whose body extended into it was therefore read as
+  non-overlapping and laid out full-width, so text — or a heading directly above
+  the float — painted under the float's top edge.
+
+  The four probes now pass the line's real height (the starting word's font
+  metrics, or an inline object's height), and the `BlockLayout` first-line-indent
+  wrapper forwards that height instead of replacing it with 1. Every line that
+  actually overlaps a float now wraps out of its column.
+
+  Two regression tests cover it: a square float whose zone top falls mid-line,
+  and a top-bottom float reserving its full vertical band — both overlap at the
+  old 1px probe and are clean now.
+
+  Known limitation (unchanged): a float still desyncs from its anchor across an
+  explicit page break or a paragraph that splits across a page boundary; that's a
+  separate Stage 3/Stage 4 placement issue tracked for a later fix.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- ff43b26: `@scrivr/plugins` — fix heading/paragraph (and every other extension
+  command) inside header and footer editing surfaces.
+
+  Header/footer surfaces previously built their own restricted `Schema`
+  instance by copying the host editor's node specs into a fresh
+  `new Schema(...)`. `Heading.addKeymap()` and `addCommands()` capture
+  the host schema's `NodeType` at extension-resolve time and pass it to
+  `setBlockType()`. When the user pressed `Mod-Alt-1` (or invoked
+  `setHeading1` via a toolbar) inside a header, the keymap fired with a
+  host-schema `NodeType` against a surface state built from a _different_
+  `Schema` instance; ProseMirror's `canChangeType` rejected the mismatch
+  and the command silently returned `false`. The user saw nothing happen.
+
+  Surfaces now share `editor.schema` directly — same `Schema` instance,
+  same `NodeType` identity — so heading↔paragraph conversion, list
+  toggles, marks, and every other extension command work in headers and
+  footers exactly as they do in the body.
+
+  The "no tables, no page breaks in header/footer" restriction moves
+  from a rebuilt schema to a `filterTransaction` ProseMirror plugin on
+  the surface (`createBlockedNodeFilter`). The plugin walks the resulting
+  doc and rejects any transaction that introduces `table`, `tableRow`,
+  `tableCell`, or `pageBreak`. Same enforcement guarantee, applied at
+  the transaction layer instead of the schema layer, with one
+  mechanism covering paste, command insertions, and external dispatches.
+
+  **Public API surface:** `buildRestrictedSchema` is no longer exported
+  from `@scrivr/plugins` (the function is gone). The blocklist is
+  exposed as `HEADER_FOOTER_BLOCKED_NODES: ReadonlySet<string>` for
+  consumers that want to inspect or extend it.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- c18ea0b: `@scrivr/plugins` — the Collaboration extension now connects on a headless
+  `ServerEditor`.
+
+  Provider/binding setup lived in `onViewReady`, which only fires in the browser
+  `Editor` — so a `ServerEditor` (no view) never created its Y binding or provider
+  and never joined the document. Setup moves to `onEditorReady`, which fires in
+  both environments; `YBinding` already depends only on `IBaseEditor`, so it works
+  unchanged. The two `setReady` calls (layout/paint suppression during Y.js sync)
+  are view-only and are now guarded — they no-op headless, where there is no paint
+  to suppress. `collaborationRegistry` is keyed by `IBaseEditor` so server-side
+  collab registers there too.
+
+  A side benefit: collaboration now wires up in `onEditorReady`, which always runs
+  before `CollaborationCursor`'s `onViewReady`, so the cursor extension can rely on
+  the provider already being registered.
+
+  Test: a `ServerEditor` configured with Collaboration registers its provider and
+  Y.Doc on construction (fails on the old `onViewReady` path).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- be79212: `@scrivr/core` + `@scrivr/export-pdf` — PDF export of large documents no longer
+  truncates.
+
+  Large documents stream their layout: first paint lays out an initial chunk and
+  idle callbacks complete the rest. `exportToPdf` read `editor.layout.pages`
+  before the stream finished (and in a server/node context the idle callbacks may
+  never fire), so the exported PDF contained only the first chunk's pages.
+
+  `@scrivr/core` adds `IEditor.ensureFullLayout()`, which cancels pending idle
+  layout work and runs the full pipeline synchronously with no block cutoff.
+  `exportToPdf` now calls it before reading the layout and throws a clear error if
+  the layout is still partial (e.g. an older core without the method).
+
+  Tests: `Editor.ensureFullLayout` synchronously completes a streamed 160-block
+  layout; `buildPdf`/`exportToPdf` cover the paged-layout path.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 1e76d7c: Table fit/hit-test fixes, and a **breaking** `buildPdf` signature change.
+
+  **`@scrivr/export-pdf` — BREAKING:** `buildPdf(layout, options?, editor?)` is now
+  `buildPdf(layout, editor, options?)` with `editor` **required**. PDF handlers for
+  extension nodes (e.g. `table`) are contributed through
+  `editor.getExportContributions()`, so calling `buildPdf` without an editor
+  silently dropped those blocks (blank table rows). Making the editor required
+  removes that footgun at the type level. The editor only needs the
+  `getExportContributions` surface, so a `ServerEditor` is sufficient for
+  server-side/test use. `exportToPdf(editor, options?)` is unchanged. Migration:
+  `buildPdf(layout)` → `buildPdf(layout, editor)`; `buildPdf(layout, opts)` →
+  `buildPdf(layout, editor, opts)`. A block whose node type still has no handler is
+  skipped with a one-time `console.warn` instead of failing silently.
+
+  **`@scrivr/core` — table column fit:** `TableLayoutEngine` now scales the
+  `table.grid` widths to fill the available content width (Word/Docs behaviour), so
+  a grid whose sum exceeds the page no longer overflows the margin, and a narrow
+  grid stretches to fill. `availableWidth` is threaded into the engine.
+
+  **`@scrivr/core` — table cursor navigation:** Home/End and vertical line
+  navigation (`lineStartPos`/`lineEndPos`/`posAbove`/`posBelow`) now resolve the
+  line in 2D (x and y). Previously they used a y-only lookup that, in a table row
+  where cells share a y band, could resolve the first cell's line instead of the
+  cell the cursor is in. The y-only `lineAtCoords` helper is removed; all
+  point-based lookups use the unified 2D resolver.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 7b54708: `@scrivr/core` — Table Phase 3: structural row/column commands, mapped to Word.
+
+  The Table extension (opt-in via `StarterKit.configure({ table: true })`) now
+  exposes the structural editing commands on top of the existing
+  `insertTable`/`deleteTable`:
+
+  - `addRowBefore` / `addRowAfter` — insert an empty row above/below the
+    selected cell's row. Inserting a row through a vertical merge extends the
+    merge (a `continue` cell is added) instead of splitting it.
+  - `deleteRow` — remove the selected row. Deleting the top row of a vertical
+    merge promotes the continuation below to the new master so the merge
+    survives one row shorter. Deleting the last remaining row removes the whole
+    table (an empty table is invalid).
+  - `addColumnBefore` / `addColumnAfter` — insert an empty column left/right of
+    the selected cell and extend `table.grid`. Inserting through a horizontal
+    `gridSpan` grows that cell's span rather than adding a stray cell.
+  - `deleteColumn` — remove the selected column and shrink `table.grid`. A cell
+    whose span covers the deleted column shrinks by one; deleting the last
+    column removes the table.
+
+  When deleting the last row or column would remove a table that is the entire
+  document, the table is replaced with an empty paragraph so the document stays
+  valid rather than empty. A selection resting in a vertical-merge continuation
+  cell resolves to its master cell, so the commands operate on the right cell.
+
+  - `goToNextCell` / `goToPreviousCell` — move the selection between cells in
+    document order. Binding these to `Tab`/`Shift-Tab` (with new-row-on-overflow)
+    is the editing-guards plugin's job in a later phase.
+
+  Edits are fine-grained `setNodeMarkup` / `insert` / `delete` steps against the
+  live document, so cells untouched by a command keep their `Node` identity and
+  the measurement cache stays warm. `tableIntegrityPlugin` continues to repair
+  any residual structural drift after each command.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 1e76d7c: `@scrivr/core` — Table Phase 4: real cell layout, rendering, cursor, and PDF
+  parity. Tables (opt-in via `StarterKit.configure({ table: true })`) are now a
+  usable feature, not a placeholder.
+
+  - **Layout** — `TableLayoutEngine` lays out each cell's child blocks inside its
+    column box (width from the table's `grid`, minus padding) by reusing
+    `layoutBlock`, and sizes each row to its tallest cell. Cell `x` is absolute,
+    cell/child `y` is relative to the row top, so the layout stays
+    position-independent and reuses across page placements. Table rows are
+    re-measured fresh (bypass the block measure cache) so cell span positions stay
+    correct.
+  - **Rendering** — `TableRowStrategy` paints cell borders/backgrounds and the
+    cell text (reusing the body-text `drawBlock` path), with the top border
+    suppressed for `vMerge` continuations so a vertical merge reads as one cell.
+  - **Cursor** — `populateCharMap` descends into cells, so clicking a cell places
+    the caret inside it and typing works like any other block.
+  - **PDF parity** — table rows export to PDF. The handler is owned by the Table
+    extension (`addExports({ pdf: { nodes: { tableRow } } })`) using a structural
+    PDF-context shape, so core stays free of `pdf-lib`.
+
+  Demo: tables are enabled in the playground (`apps/docs`).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- Updated dependencies [80e1e65]
+- Updated dependencies [d91051d]
+- Updated dependencies [8ba5a90]
+- Updated dependencies [5fb5ddd]
+- Updated dependencies [758dd29]
+- Updated dependencies [1e76d7c]
+- Updated dependencies [1e76d7c]
+- Updated dependencies [ff43b26]
+- Updated dependencies [c18ea0b]
+- Updated dependencies [be79212]
+- Updated dependencies [1e76d7c]
+- Updated dependencies [7b54708]
+- Updated dependencies [1e76d7c]
+  - @scrivr/core@1.0.12
+  - @scrivr/export-pdf@1.0.12
+  - @scrivr/export-markdown@1.0.12
+
 ## 1.0.11
 
 ### Patch Changes
