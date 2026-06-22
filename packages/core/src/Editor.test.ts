@@ -95,6 +95,35 @@ describe("Editor — initial cursor placement", () => {
   });
 });
 
+describe("Editor.ensureFullLayout", () => {
+  it("synchronously completes a streamed initial layout", () => {
+    const content = {
+      type: "doc",
+      content: Array.from({ length: 160 }, (_, index) => ({
+        type: "paragraph",
+        content: [{ type: "text", text: `Paragraph ${index + 1}` }],
+      })),
+    };
+    const editor = createTestEditor({ content });
+
+    const initialLayout = editor.layout;
+    expect(initialLayout.isPartial).toBe(true);
+    expect(
+      initialLayout.pages.reduce((count, page) => count + page.blocks.length, 0),
+    ).toBe(100);
+
+    editor.ensureFullLayout();
+    const fullLayout = editor.layout;
+
+    expect(fullLayout.isPartial).toBeUndefined();
+    expect(
+      fullLayout.pages.reduce((count, page) => count + page.blocks.length, 0),
+    ).toBe(160);
+
+    editor.destroy();
+  });
+});
+
 describe("Editor.moveNode", () => {
   function installImageParagraph(editor: Editor) {
     const schema = editor.schema;

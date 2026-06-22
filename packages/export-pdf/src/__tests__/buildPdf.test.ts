@@ -8,9 +8,17 @@
 import { describe, it, expect, vi } from "vitest";
 import { Schema } from "prosemirror-model";
 import zlib from "node:zlib";
-import { buildPdf as buildPdfWithEditor, type PdfExportOptions } from "../index";
-import { ServerEditor, StarterKit } from "@scrivr/core";
-import type { DocumentLayout, LayoutBlock, LayoutLine } from "@scrivr/core";
+import { PDFDocument } from "pdf-lib";
+import { buildPdf as buildPdfWithEditor, exportToPdf, type PdfExportOptions } from "../index";
+import {
+  CharacterMap,
+  CursorManager,
+  SelectionController,
+  ServerEditor,
+  StarterKit,
+  SurfaceRegistry,
+} from "@scrivr/core";
+import type { DocumentLayout, IEditor, LayoutBlock, LayoutLine } from "@scrivr/core";
 
 // buildPdf now requires an editor (it collects PDF handlers from extensions).
 // A ServerEditor satisfies the contract; table is enabled so the table handler
@@ -165,6 +173,83 @@ function makeLayout(
   };
 }
 
+function makePagedLayout(pageCount: number): DocumentLayout {
+  return {
+    pages: Array.from({ length: pageCount }, (_, index) => ({
+      pageNumber: index + 1,
+      blocks: [paragraphBlock([textLine(`Page ${index + 1}`)])],
+    })),
+    pageConfig: PAGE_CONFIG,
+    version: 1,
+    totalContentHeight: PAGE_H * pageCount,
+    fragments: [],
+  };
+}
+
+class ExportPdfEditorDouble extends ServerEditor implements IEditor {
+  readonly surfaces = new SurfaceRegistry();
+  readonly cursorManager = new CursorManager(() => {});
+  readonly selection: SelectionController;
+  ensureFullLayoutCalls = 0;
+  private currentLayout: DocumentLayout;
+  private readonly completeLayout: DocumentLayout;
+  private readonly charMap = new CharacterMap();
+
+  constructor(initialLayout: DocumentLayout, completeLayout: DocumentLayout) {
+    super({ extensions: [StarterKit.configure({ table: true })] });
+    this.currentLayout = initialLayout;
+    this.completeLayout = completeLayout;
+    this.selection = new SelectionController({
+      getState: () => this.getState(),
+      dispatch: (tr) => this.applyTransaction(tr),
+      ensureLayout: () => {},
+      getCharMap: () => this.charMap,
+      focus: () => {},
+    });
+  }
+
+  get layout(): DocumentLayout {
+    return this.currentLayout;
+  }
+
+  ensureFullLayout(): void {
+    this.ensureFullLayoutCalls++;
+    this.currentLayout = this.completeLayout;
+  }
+
+  addOverlayRenderHandler(): () => void {
+    return () => {};
+  }
+
+  getViewportRect(): DOMRect | null {
+    return null;
+  }
+
+  getNodeViewportRect(): DOMRect | null {
+    return null;
+  }
+
+  getScrollContainerRect(): DOMRect | null {
+    return null;
+  }
+
+  selectNode(): void {}
+
+  getPageScreenPosition(): { screenLeft: number; screenTop: number } | null {
+    return null;
+  }
+
+  redraw(): void {}
+
+  invalidateLayout(): void {}
+
+  setReady(): void {}
+
+  override get loadingState(): "syncing" | "rendering" | "ready" {
+    return this.currentLayout.isPartial ? "rendering" : "ready";
+  }
+}
+
 // ── PDF inspection helpers ────────────────────────────────────────────────────
 
 /**
@@ -188,6 +273,20 @@ function decompressStreams(bytes: Uint8Array): string {
   }
   return chunks.join("\n");
 }
+
+describe("exportToPdf", () => {
+  it("forces a complete layout before serializing pages", async () => {
+    const partialLayout: DocumentLayout = { ...makePagedLayout(1), isPartial: true };
+    const completeLayout = makePagedLayout(3);
+    const editor = new ExportPdfEditorDouble(partialLayout, completeLayout);
+
+    const bytes = await exportToPdf(editor);
+    const pdf = await PDFDocument.load(bytes);
+
+    expect(editor.ensureFullLayoutCalls).toBe(1);
+    expect(pdf.getPageCount()).toBe(3);
+  });
+});
 
 /**
  * Decode the hex strings that pdf-lib uses for text operators.

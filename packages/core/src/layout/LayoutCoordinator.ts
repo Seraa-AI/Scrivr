@@ -179,6 +179,34 @@ export class LayoutCoordinator {
   }
 
   /**
+   * Synchronously finish the full document layout.
+   *
+   * The normal browser path streams large documents: first paint gets an
+   * initial chunk, then idle callbacks complete the rest. Serialization paths
+   * such as PDF export need the complete layout immediately, so they use this
+   * method to cancel pending idle work and run the same pipeline without a
+   * `maxBlocks` cutoff.
+   */
+  ensureFullLayout(): void {
+    this.cancelIdleLayout();
+    const prev = this.layout;
+    this.dirty = false;
+    this.layoutIsPartial = false;
+    this.layoutResumption = null;
+    this.charMap.clear();
+    this.populatedPages.clear();
+    this.layout = this.runLayout({
+      previousVersion: prev.version,
+      previousLayout: prev,
+    });
+    this.indexLayout();
+    this.cursorPageValue = this.cursorPageFromLayout();
+    this.ensurePagePopulated(this.cursorPageValue);
+    this.ensurePagePopulated(this.cursorPageValue - 1);
+    this.ensurePagePopulated(this.cursorPageValue + 1);
+  }
+
+  /**
    * Populate the CharacterMap for a single page (idempotent).
    *
    * Called eagerly for cursor page ± 1 after every layout pass.
