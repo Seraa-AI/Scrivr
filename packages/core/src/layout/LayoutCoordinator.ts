@@ -191,14 +191,13 @@ export class LayoutCoordinator {
     this.cancelIdleLayout();
     const prev = this.layout;
     this.dirty = false;
-    this.layoutIsPartial = false;
     this.layoutResumption = null;
     this.charMap.clear();
     this.populatedPages.clear();
-    this.layout = this.runLayout({
-      previousVersion: prev.version,
-      previousLayout: prev,
-    });
+    // From scratch: no `previousLayout`, or pagination's early-termination
+    // copies the partial's truncated tail. measureCache still speeds measuring.
+    this.layout = this.runLayout({ previousVersion: prev.version });
+    this.layoutIsPartial = this.layout.isPartial ?? false; // read, don't force false
     this.indexLayout();
     this.cursorPageValue = this.cursorPageFromLayout();
     this.ensurePagePopulated(this.cursorPageValue);
