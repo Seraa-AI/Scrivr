@@ -122,6 +122,46 @@ describe("Editor.ensureFullLayout", () => {
 
     editor.destroy();
   });
+
+  it("lays out the full tail past a mid-document table (no truncated copy)", () => {
+    // A tableRow bypasses the measure cache, so it's a cache miss mid-document;
+    // the cached paragraphs after it used to trigger pagination's
+    // early-termination, which copied the partial layout's truncated tail.
+    const cell = (t: string) => ({
+      type: "tableCell",
+      content: [{ type: "paragraph", content: [{ type: "text", text: t }] }],
+    });
+    const para = (i: number) => ({
+      type: "paragraph",
+      content: [{ type: "text", text: `Paragraph ${i} with enough words to wrap across a couple of lines in the column.` }],
+    });
+    const content = {
+      type: "doc",
+      content: [
+        ...Array.from({ length: 40 }, (_, i) => para(i + 1)),
+        {
+          type: "table",
+          attrs: { layout: "fixed", grid: [100, 100] },
+          content: [{ type: "tableRow", content: [cell("A"), cell("B")] }],
+        },
+        ...Array.from({ length: 260 }, (_, i) => para(i + 41)),
+      ],
+    };
+    const editor = createTestEditor({
+      content,
+      extensions: [StarterKit.configure({ table: true })],
+    });
+    expect(editor.layout.isPartial).toBe(true); // 300 paragraphs → streamed
+
+    editor.ensureFullLayout();
+
+    // Every paragraph must survive (≥300 blocks; page splits add a few more).
+    const blocks = editor.layout.pages.reduce((c, p) => c + p.blocks.length, 0);
+    expect(editor.layout.isPartial).toBeUndefined();
+    expect(blocks).toBeGreaterThanOrEqual(300);
+
+    editor.destroy();
+  });
 });
 
 describe("Editor.moveNode", () => {
