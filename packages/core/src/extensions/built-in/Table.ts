@@ -4,7 +4,12 @@ import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
 import { TableRowStrategy } from "../../renderer/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
-import { tableEditingGuards } from "../../table/editingGuards";
+import {
+  tabToNextCell,
+  tabToPreviousCell,
+  guardBackspace,
+  guardDelete,
+} from "../../table/editingGuards";
 import { tableStructureCommands } from "../../table/commands";
 import { renderTableRowPdf } from "../../table/pdfExport";
 import { tableDocxHandlers } from "../../table/docxExport";
@@ -210,13 +215,22 @@ export const Table = Extension.create({
     };
   },
 
+  addKeymap() {
+    // The canvas InputBridge dispatches keys through the merged extension keymap
+    // (addKeymap), never through ProseMirror plugin handleKeyDown props — so cell
+    // editing keys live here. StarterKit chains these with the base Backspace/
+    // Delete and the List/CodeBlock Tab handlers (a guard returns false when it
+    // doesn't apply, so the chain falls through).
+    return {
+      Tab: tabToNextCell,
+      "Shift-Tab": tabToPreviousCell,
+      Backspace: guardBackspace,
+      Delete: guardDelete,
+    };
+  },
+
   addProseMirrorPlugins() {
-    // Order matters: the editing-guards plugin handles Tab/Backspace/Delete and
-    // paste via its `handleKeyDown`/`handlePaste` props, which run before the
-    // merged extension keymap — so it can defer to BaseEditing's Backspace by
-    // returning false. The integrity plugin runs last, repairing any structural
-    // drift a guard's edit produced (via its own appendTransaction).
-    return [tableEditingGuards(), tableIntegrityPlugin()];
+    return [tableIntegrityPlugin()];
   },
 
   addBlockStyles() {

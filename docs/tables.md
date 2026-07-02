@@ -393,16 +393,28 @@ Goal: cell editing UX matches Word/Docs expectations.
 5. Paste into a `CellRange`: distribute pasted table cells into the selected rectangle; fill plain text/blocks row-major.
 6. Tests: cross-cell selection, deletion at cell boundaries, paste table into selected cells, paste plain text into cells, undo/redo across all of the above.
 
-**Status: shipped.** `table/editingGuards.ts` (`tableEditingGuards()` plugin) +
-`table/cellSelection.ts` (geometry). Key handling lives in the plugin's
-`handleKeyDown` prop, ordered before the merged extension keymap so it defers to
-`BaseEditing`'s Backspace/Delete by returning `false` (no keymap collision).
+**Status: shipped (navigation + boundary guards).** `table/editingGuards.ts`
+(plain `Command`s) + `table/cellSelection.ts` (geometry).
+
+Wiring note: the canvas `InputBridge` dispatches keys through the merged
+extension keymap (`addKeymap()`), never through ProseMirror plugin
+`handleKeyDown` props. Cell-editing keys therefore live in `Table.addKeymap()`
+and are chained in `StarterKit.addKeymap()` — Tab in front of the CodeBlock/List
+Tab chain, Shift-Tab in front of List dedent, and the Backspace/Delete guards in
+front of the base delete (a guard returns `false` when it doesn't apply, so the
+chain falls through).
+
 Deviation from item 2: a `CellRange` is **derived on demand** from a spanning
-text selection (`cellRangeFromSelection`) rather than stored as a promoted
-selection. A stored range + a real `Selection` subclass wait for Phase 6, where
-the drag-select and overlay that make a persisted range visible and useful
-actually land — see the Phase 9 deferral note on `CellRange`. A partially
-covered merged cell is normalized in whole (you can't select half a merge).
+text selection (`cellRangeFromSelection`) rather than stored. A stored range + a
+real `Selection` subclass wait for Phase 6, where drag-select + overlay make a
+persisted range visible (a partially covered merged cell normalizes in whole).
+Because table cells are `isolating`, a spanning text selection isn't reachable
+by mouse yet, so the multi-cell clear branch activates with Phase 6.
+
+Deferred from item 5: **paste distribution** into a cell rectangle. Its seam is
+`PasteTransformer` (the `InputBridge` paste path), not this keymap layer, and it
+needs the cross-cell selection Phase 6 introduces — so it moves to Phase 7
+(Clipboard round trip), which already owns paste.
 
 ### Phase 6 — Cell Selection And Merge/Split
 

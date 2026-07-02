@@ -1,29 +1,27 @@
-import { Plugin, Selection } from "prosemirror-state";
+import { Selection } from "prosemirror-state";
 import type { Command, EditorState, Transaction } from "prosemirror-state";
-import { keydownHandler } from "prosemirror-keymap";
-import { Fragment } from "prosemirror-model";
-import type { Node, ResolvedPos, Schema, Slice } from "prosemirror-model";
+import type { Node, ResolvedPos, Schema } from "prosemirror-model";
 import { tableStructureCommands } from "./commands";
-import { getTableMap } from "./TableMap";
 import { selectedCells, enclosingCell, type ResolvedCellRange } from "./cellSelection";
 
 /**
- * `tableEditingGuards` (Phase 5) — the editing-UX layer that sits on top of the
- * document-validity `tableIntegrityPlugin`. Where the integrity plugin keeps the
- * doc structurally valid, this plugin keeps *editing* faithful to Word/Docs:
+ * Table editing-UX commands (Phase 5) — the layer that sits on top of the
+ * document-validity `tableIntegrityPlugin` and keeps *editing* faithful to
+ * Word/Docs:
  *
  *   - Tab / Shift-Tab move between cells; Tab past the last cell appends a row.
  *   - Backspace/Delete never escape a cell boundary (no accidental cell merges
  *     or table deletion); on a multi-cell selection they clear the cells.
- *   - Pasting into a multi-cell selection distributes into the rectangle rather
- *     than dropping the payload into one cell.
  *
- * Key handling lives in the plugin's `handleKeyDown` prop (not `addKeymap`) so
- * it is ordered before the merged extension keymap and can defer to
- * `BaseEditing`'s Backspace/Delete by returning false — no keymap collision.
+ * These are plain `Command`s (not a plugin): the canvas `InputBridge` dispatches
+ * keys through the merged extension keymap, never through ProseMirror plugin
+ * `handleKeyDown` props, so they are wired via `Table.addKeymap()` and chained
+ * with the base Backspace/Delete + List/CodeBlock Tab in `StarterKit`. A guard
+ * returns false when it doesn't apply, so the chain falls through. All are
+ * exported for headless unit tests on `ServerEditor`.
  *
- * The individual `Command`s and transaction builders are exported so they can
- * be unit-tested headlessly on `ServerEditor`, without a view.
+ * Paste distribution into a multi-cell selection is deferred to Phase 7 (its
+ * seam is `PasteTransformer`, not this keymap layer).
  */
 
 const structure = tableStructureCommands();
@@ -163,113 +161,3 @@ export const guardDelete: Command = (state, dispatch) => {
   }
   return atCellEnd(state);
 };
-
-// ── Paste distribution ───────────────────────────────────────────────────────
-
-function firstTableInSlice(slice: Slice): Node | null {
-  const first = slice.content.firstChild;
-  return first && first.type.name === "table" ? first : null;
-}
-
-/** Map each source cell's grid offset (TableMap space) to its block content. */
-function sourceCellContents(table: Node): Map<number, Fragment> {
-  const out = new Map<number, Fragment>();
-  table.forEach((row, rowOffset) => {
-    row.forEach((cell, cellOffsetInRow) => {
-      out.set(rowOffset + 1 + cellOffsetInRow, cell.content);
-    });
-  });
-  return out;
-}
-
-/** Coerce a pasted slice to cell-valid block content (wrap loose inline runs). */
-function sliceAsBlocks(slice: Slice, schema: Schema): Fragment | null {
-  if (slice.content.childCount === 0) return null;
-  if (slice.content.firstChild?.isBlock) return slice.content;
-  const para = schema.nodes["paragraph"];
-  return para ? Fragment.from(para.create(null, slice.content)) : null;
-}
-
-/**
- * Content to drop into the target cell whose top-left grid cell is (dr, dc)
- * relative to the selection's top-left — matching by grid coordinate so a
- * pasted merged cell lands in the geometrically corresponding target, not the
- * n-th flattened cell. Null when the source has no cell at that coordinate.
- */
-function payloadForTargetCell(
-  srcTable: Node,
-  target: { top: number; left: number },
-  originTop: number,
-  originLeft: number,
-): Fragment | null {
-  const srcMap = getTableMap(srcTable);
-  const contents = sourceCellContents(srcTable);
-  const srcOffset = srcMap.positionAt(target.top - originTop, target.left - originLeft);
-  return srcOffset == null ? null : contents.get(srcOffset) ?? null;
-}
-
-/**
- * Distribute a paste into a multi-cell selection: a pasted table fills the
- * rectangle by grid coordinate (clipped to the target); any other payload fills
- * every selected cell with a copy. Cells with no matching source content — or
- * content invalid for a cell — are left untouched (never silently cleared).
- * Returns null when the selection is not a cell rectangle, so ordinary paste
- * proceeds.
- */
-export function distributePasteTr(state: EditorState, slice: Slice): Transaction | null {
-  const range = selectedCells(state);
-  if (!range) return null;
-
-  const srcTable = firstTableInSlice(slice);
-  const blocks = srcTable ? null : sliceAsBlocks(slice, state.schema);
-  const targets = [...range.cellPositions].sort((a, b) => a - b);
-
-  let tr = state.tr;
-  // Edit high→low so original positions stay valid across replacements.
-  for (let i = targets.length - 1; i >= 0; i--) {
-    const cellPos = targets[i]!;
-    const cellNode = state.doc.nodeAt(cellPos);
-    if (!cellNode) continue;
-
-    let content: Fragment | null;
-    if (srcTable) {
-      const targetRect = range.map.findCell(cellPos - range.tableStart);
-      content = payloadForTargetCell(srcTable, targetRect, range.rect.top, range.rect.left);
-    } else {
-      content = blocks;
-    }
-    if (!content || content.childCount === 0) continue;
-    if (!cellNode.type.validContent(content)) continue; // leave invalid pastes untouched
-
-    tr = tr.replaceWith(cellPos + 1, cellPos + cellNode.nodeSize - 1, content);
-  }
-  if (!tr.docChanged) return null;
-
-  return landInCell(tr, targets[0]!);
-}
-
-// ── Plugin ───────────────────────────────────────────────────────────────────
-
-/**
- * The editing-guards plugin. Key handling runs before the merged extension
- * keymap (plugin order) and defers to it on `false`; paste distribution
- * intercepts a paste into a cell rectangle.
- */
-export function tableEditingGuards(): Plugin {
-  return new Plugin({
-    props: {
-      handleKeyDown: keydownHandler({
-        Tab: tabToNextCell,
-        "Shift-Tab": tabToPreviousCell,
-        Backspace: guardBackspace,
-        Delete: guardDelete,
-      }),
-      handlePaste(view, _event, slice) {
-        const tr = distributePasteTr(view.state, slice);
-        if (!tr) return false;
-        view.dispatch(tr);
-        return true;
-      },
-    },
-  });
-}

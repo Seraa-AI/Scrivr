@@ -1,17 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
-import { Fragment, Slice } from "prosemirror-model";
 import type { Node } from "prosemirror-model";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
-import {
-  tabToNextCell,
-  tabToPreviousCell,
-  guardBackspace,
-  guardDelete,
-  distributePasteTr,
-} from "./editingGuards";
+import { tabToNextCell, tabToPreviousCell, guardBackspace, guardDelete } from "./editingGuards";
 
 /** Phase 5 editing semantics: Tab navigation, boundary guards, paste distribution. */
 
@@ -233,70 +226,50 @@ describe("Backspace / Delete boundary guards", () => {
   });
 });
 
-describe("paste distribution", () => {
-  it("returns null for a caret (ordinary paste proceeds)", () => {
+// Drives keys through the SAME merged keymap the canvas InputBridge dispatches
+// through — the wiring that was previously dead when guards lived in a plugin.
+describe("keymap wiring (InputBridge dispatch path)", () => {
+  function mergedKey(editor: ServerEditor, key: string): Command {
+    const km = editor["manager"].buildKeymap();
+    const cmd = km[key];
+    if (!cmd) throw new Error(`no merged keymap binding for "${key}"`);
+    return cmd;
+  }
+
+  it("Tab is wired to cell navigation", () => {
     const editor = makeEditor(rect2x2());
     caret(editor, posInCell(editor.getState().doc, "A"));
-    const slice = new Slice(Fragment.from(editor.getState().schema.text("X")), 0, 0);
-    expect(distributePasteTr(editor.getState(), slice)).toBeNull();
+    expect(run(editor, mergedKey(editor, "Tab"))).toBe(true);
+    expect(cellTextAtSelection(editor)).toBe("B");
   });
 
-  it("fills every selected cell with pasted plain text", () => {
+  it("Tab past the last cell appends a row through the merged keymap", () => {
     const editor = makeEditor(rect2x2());
-    selectCells(editor, "A", "B");
-    const slice = new Slice(Fragment.from(editor.getState().schema.text("X")), 0, 0);
-    const tr = distributePasteTr(editor.getState(), slice);
-    expect(tr).not.toBeNull();
-    editor.applyTransaction(tr!);
-    expect(rowsText(editor)).toEqual([
-      ["X", "X"],
-      ["C", "D"],
-    ]);
+    caret(editor, posInCell(editor.getState().doc, "D"));
+    run(editor, mergedKey(editor, "Tab"));
+    expect(rowsText(editor)).toHaveLength(3);
+    expect(cellTextAtSelection(editor)).toBe("");
   });
 
-  it("distributes a pasted table row-major into the target rectangle", () => {
+  it("Shift-Tab is wired to reverse cell navigation", () => {
     const editor = makeEditor(rect2x2());
-    selectCells(editor, "A", "B");
-    // Source: a 1x2 table (P, Q) built in the TARGET schema — real paste is
-    // always parsed into the current schema, so node types match on replace.
-    const schema = editor.getState().schema;
-    const srcTable = schema.nodeFromJSON(tableDoc([100, 100], [[{ text: "P" }, { text: "Q" }]]).content[0]);
-    const slice = new Slice(Fragment.from(srcTable), 0, 0);
-    const tr = distributePasteTr(editor.getState(), slice);
-    editor.applyTransaction(tr!);
-    expect(rowsText(editor)).toEqual([
-      ["P", "Q"],
-      ["C", "D"],
-    ]);
+    caret(editor, posInCell(editor.getState().doc, "B"));
+    run(editor, mergedKey(editor, "Shift-Tab"));
+    expect(cellTextAtSelection(editor)).toBe("A");
   });
 
-  it("aligns a pasted table by grid coordinate when the target has a merged cell", () => {
-    // Target: a merged top cell (spans 2 cols) over two bottom cells.
-    const editor = makeEditor(
-      tableDoc(
-        [100, 100],
-        [
-          [{ text: "wide", gridSpan: 2 }],
-          [{ text: "L" }, { text: "R" }],
-        ],
-      ),
-    );
-    selectCells(editor, "wide", "R"); // whole table
-    const schema = editor.getState().schema;
-    const srcTable = schema.nodeFromJSON(
-      tableDoc(
-        [100, 100],
-        [
-          [{ text: "P" }, { text: "Q" }],
-          [{ text: "S" }, { text: "T" }],
-        ],
-      ).content[0],
-    );
-    const tr = distributePasteTr(editor.getState(), new Slice(Fragment.from(srcTable), 0, 0));
-    editor.applyTransaction(tr!);
-    // (0,0)->P into the merge; (1,0)->S, (1,1)->T. Q (source (0,1)) is covered
-    // by the merge and dropped — NOT shifted into L/R.
-    expect(rowsText(editor)).toEqual([["P"], ["S", "T"]]);
+  it("Backspace at a cell start is swallowed via the merged keymap", () => {
+    const editor = makeEditor(rect2x2());
+    caret(editor, posInCell(editor.getState().doc, "A", 2)); // cell start
+    run(editor, mergedKey(editor, "Backspace"));
+    expect(rowsText(editor)[0]).toEqual(["A", "B"]); // unchanged
+  });
+
+  it("Backspace mid-cell falls through to base deletion", () => {
+    const editor = makeEditor(rect2x2());
+    caret(editor, posInCell(editor.getState().doc, "A", 3)); // after "A"
+    run(editor, mergedKey(editor, "Backspace"));
+    expect(rowsText(editor)[0]).toEqual(["", "B"]); // base deleted "A"
   });
 });
 
