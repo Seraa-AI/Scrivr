@@ -269,6 +269,55 @@ describe("flush scrolls the cursor only on intent", () => {
     editor.destroy();
     container.remove();
   });
+
+  it("an explicit range scroll cancels a cursor scroll coalesced into the same frame", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({ content: docWith("hello world") });
+    editor.mount(container);
+    const scroll = vi.spyOn(editor, "scrollCursorIntoView").mockImplementation(() => {});
+    const raf = rafHarness();
+    raf.flush();
+    scroll.mockClear();
+
+    // Local edit sets the pending cursor scroll, then a range scroll supersedes
+    // it before the frame flushes (the revealCitation-after-edit case).
+    const ta = container.querySelector("textarea")!;
+    ta.value = "x";
+    ta.dispatchEvent(new Event("input"));
+    editor.scrollRangeIntoView(1, 3);
+    raf.flush();
+    expect(scroll).not.toHaveBeenCalled();
+
+    raf.restore();
+    editor.destroy();
+    container.remove();
+  });
+
+  it("cancelling the flush on setReady(false) drops the pending scroll intent", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({ content: docWith("hello world") });
+    editor.mount(container);
+    const scroll = vi.spyOn(editor, "scrollCursorIntoView").mockImplementation(() => {});
+    const raf = rafHarness();
+    raf.flush();
+    scroll.mockClear();
+
+    const ta = container.querySelector("textarea")!;
+    ta.value = "a";
+    ta.dispatchEvent(new Event("input")); // sets flag + schedules the flush
+    editor.setReady(false); // cancels the flush and should drop the intent
+    editor.setReady(true);
+    // An external transaction after resume must not inherit the stale intent.
+    editor.applyTransaction(editor.getState().tr.insertText("!", 1));
+    raf.flush();
+    expect(scroll).not.toHaveBeenCalled();
+
+    raf.restore();
+    editor.destroy();
+    container.remove();
+  });
 });
 
 describe("Editor.moveNode", () => {

@@ -748,6 +748,9 @@ export class Editor extends BaseEditor implements IEditor {
     if (!ready && this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
+      // Drop any pending scroll intent with the cancelled flush, so a later
+      // flush after readiness resumes doesn't consume a stale request.
+      this.pendingScrollToCursor = false;
     }
     this.lc.setReady(ready);
   }
@@ -1148,6 +1151,10 @@ export class Editor extends BaseEditor implements IEditor {
   scrollRangeIntoView(from: number, to: number = from): boolean {
     this.lc.ensureLayout();
     if (!this.lc.ensureRangePopulated(from, to)) return false;
+    // An explicit range scroll supersedes any cursor scroll a local edit
+    // coalesced into this frame — otherwise the pending flush would scroll the
+    // caret back and undo the jump (the revealCitation case).
+    this.pendingScrollToCursor = false;
     return this.ib.scrollRangeIntoView(from, to);
   }
 
