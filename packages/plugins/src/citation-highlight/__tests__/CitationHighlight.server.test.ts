@@ -5,6 +5,7 @@
  * drop them, and none of it touches undo history.
  */
 import { describe, it, expect } from "vitest";
+import { TextSelection } from "prosemirror-state";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { CitationHighlight, citationHighlightPluginKey } from "../CitationHighlight";
 
@@ -111,6 +112,38 @@ describe("CitationHighlight on ServerEditor", () => {
       { id: "c3", from: 7, to: 13 },
       { id: "c2", from: 16, to: 20 },
     ]);
+  });
+
+  it("removeCitationHighlight removes one citation by id, leaving the rest", () => {
+    const editor = makeEditor();
+    editor.commands.setCitationHighlights([
+      { id: "c1", from: 1, to: 6 },
+      { id: "c2", from: 15, to: 21 },
+    ]);
+
+    editor.commands.removeCitationHighlight("c1");
+    expect(citations(editor)).toEqual([{ id: "c2", from: 15, to: 21 }]);
+
+    // Unknown id is a harmless no-op.
+    editor.commands.removeCitationHighlight("nope");
+    expect(citations(editor)).toEqual([{ id: "c2", from: 15, to: 21 }]);
+  });
+
+  it("citeSelection highlights the currently selected text", () => {
+    const editor = makeEditor();
+    const state = editor.getState();
+    editor.applyTransaction(
+      state.tr.setSelection(TextSelection.create(state.doc, 1, 6)),
+    );
+
+    editor.commands.citeSelection();
+    expect(citations(editor)).toEqual([{ id: "cite-1-6", from: 1, to: 6 }]);
+  });
+
+  it("citeSelection is a no-op on an empty selection", () => {
+    const editor = makeEditor();
+    editor.commands.citeSelection();
+    expect(citations(editor)).toEqual([]);
   });
 
   it("stays out of undo history", () => {

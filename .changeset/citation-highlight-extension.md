@@ -18,13 +18,15 @@ plugin state, remap through every edit (text typed at a boundary stays
 outside the highlight), and a citation whose text is deleted disappears.
 
 Commands `setCitationHighlights(citations)` / `addCitationHighlight(citation)`
-/ `clearCitationHighlights()` work headlessly on `ServerEditor`; painting
+/ `citeSelection()` / `removeCitationHighlight(id)` /
+`clearCitationHighlights()` work headlessly on `ServerEditor`; painting
 reuses the core `renderSelection` two-pass renderer via
 `addOverlayRenderHandler`, so multi-line, multi-page, and empty-paragraph
 ranges render like native selection. Highlight color is configurable via
 `CitationHighlight.configure({ color })`. `revealCitation(editor, citation)`
 upserts one highlight and scrolls it into view — the "click a citation chip,
-jump to the passage" affordance.
+jump to the passage" affordance. The extension registers Cite/Uncite toolbar
+items (group `"citation"`) for data-driven toolbars.
 
 `@scrivr/core` — new `Editor.scrollRangeIntoView(from, to?)` on `IEditor`.
 

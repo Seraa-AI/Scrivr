@@ -36,6 +36,13 @@ declare module "@scrivr/core" {
        * id is already present. Other citations are untouched.
        */
       addCitationHighlight: (citation: CitationRange) => ReturnType;
+      /**
+       * Highlight the currently selected text as a citation
+       * (id `cite-{from}-{to}`). No-op on an empty selection.
+       */
+      citeSelection: () => ReturnType;
+      /** Remove one citation highlight by id. Unknown ids are a no-op. */
+      removeCitationHighlight: (id: string) => ReturnType;
       /** Remove all citation highlights. */
       clearCitationHighlights: () => ReturnType;
     };
@@ -129,11 +136,51 @@ export const CitationHighlight = Extension.create<CitationHighlightOptions>({
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) =>
           setCitationsMeta(state, dispatch, upsert(state, citation)),
 
+      citeSelection:
+        () =>
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
+          const { from, to } = state.selection;
+          if (from === to) return false;
+          const citation = { id: `cite-${from}-${to}`, from, to };
+          return setCitationsMeta(state, dispatch, upsert(state, citation));
+        },
+
+      removeCitationHighlight:
+        (id: string) =>
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
+          const current =
+            citationHighlightPluginKey.getState(state)?.citations ?? [];
+          return setCitationsMeta(
+            state,
+            dispatch,
+            current.filter((c) => c.id !== id),
+          );
+        },
+
       clearCitationHighlights:
         () =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) =>
           setCitationsMeta(state, dispatch, []),
     };
+  },
+
+  addToolbarItems() {
+    return [
+      {
+        command: "citeSelection",
+        label: "Cite",
+        title: "Highlight selection as citation",
+        group: "citation",
+        isActive: () => false,
+      },
+      {
+        command: "clearCitationHighlights",
+        label: "Uncite",
+        title: "Clear citation highlights",
+        group: "citation",
+        isActive: () => false,
+      },
+    ];
   },
 
   onViewReady(editor: IEditor) {
