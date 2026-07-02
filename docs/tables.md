@@ -393,6 +393,17 @@ Goal: cell editing UX matches Word/Docs expectations.
 5. Paste into a `CellRange`: distribute pasted table cells into the selected rectangle; fill plain text/blocks row-major.
 6. Tests: cross-cell selection, deletion at cell boundaries, paste table into selected cells, paste plain text into cells, undo/redo across all of the above.
 
+**Status: shipped.** `table/editingGuards.ts` (`tableEditingGuards()` plugin) +
+`table/cellSelection.ts` (geometry). Key handling lives in the plugin's
+`handleKeyDown` prop, ordered before the merged extension keymap so it defers to
+`BaseEditing`'s Backspace/Delete by returning `false` (no keymap collision).
+Deviation from item 2: a `CellRange` is **derived on demand** from a spanning
+text selection (`cellRangeFromSelection`) rather than stored as a promoted
+selection. A stored range + a real `Selection` subclass wait for Phase 6, where
+the drag-select and overlay that make a persisted range visible and useful
+actually land — see the Phase 9 deferral note on `CellRange`. A partially
+covered merged cell is normalized in whole (you can't select half a merge).
+
 ### Phase 6 — Cell Selection And Merge/Split
 
 Goal: common table editing workflows work on canvas.
