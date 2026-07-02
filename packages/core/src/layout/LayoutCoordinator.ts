@@ -298,6 +298,30 @@ export class LayoutCoordinator {
   }
 
   /**
+   * Ensure every page touched by a document range has CharacterMap entries.
+   * Unlike CharacterMap.coordsAtPos(), this uses the layout index and therefore
+   * cannot mistake the last glyph on an already-populated page for the target.
+   */
+  ensureRangePopulated(from: number, to: number): boolean {
+    const docSize = this.opts.getDoc().content.size;
+    if (from < 0 || to < from || to > docSize) return false;
+
+    let pages = this.pagesTouchingRange(from, to);
+    const fromLocated = this.pagesTouchingRange(from, from).length > 0;
+    const toLocated = this.pagesTouchingRange(to, to).length > 0;
+
+    // A streamed layout may contain the start of a long range but not its end.
+    if (this.layoutIsPartial && (!fromLocated || !toLocated)) {
+      this.ensureFullLayout();
+      pages = this.pagesTouchingRange(from, to);
+    }
+
+    if (pages.length === 0) return false;
+    for (const page of pages) this.ensurePagePopulated(page);
+    return true;
+  }
+
+  /**
    * Switch between ready and suppressed (collaborative sync) modes.
    *
    * `true`  — cancel any stale idle work, run the first layout chunk
@@ -402,6 +426,18 @@ export class LayoutCoordinator {
     // lines within each block are in docPos order; overflow always moves to a later page.
     // The sentinel extension on the last line (end = nodePos + nodeSize) can exceed
     // the next entry's start, but start values remain strictly non-decreasing.
+  }
+
+  private pagesTouchingRange(from: number, to: number): number[] {
+    const pages = new Set<number>();
+    for (const entry of this.fragmentIndex) {
+      const touches =
+        from === to
+          ? entry.start <= from && entry.end >= from
+          : entry.end >= from && entry.start <= to;
+      if (touches) pages.add(entry.page);
+    }
+    return [...pages];
   }
 
   /**

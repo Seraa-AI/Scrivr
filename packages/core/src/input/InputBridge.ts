@@ -223,25 +223,66 @@ export class InputBridge {
     const scrollParent = findScrollParent(this.containerEl);
     if (!scrollParent) return;
 
-    // Convert screen-space page top to absolute Y within the scroll container.
-    const pageScreenRect = this.pageScreenRectLookup(coords.page);
-    if (!pageScreenRect) return;
-    const containerRect = scrollParent.getBoundingClientRect();
-    const pageTop =
-      pageScreenRect.screenTop - containerRect.top + scrollParent.scrollTop;
+    const band = this.absoluteBand(coords, scrollParent);
+    if (!band) return;
 
-    const cursorAbsTop = pageTop + coords.y;
-    const cursorAbsBottom = cursorAbsTop + coords.height;
     const visibleTop = scrollParent.scrollTop;
     const visibleBottom = visibleTop + scrollParent.clientHeight;
     const buffer = 40;
 
-    if (cursorAbsBottom > visibleBottom - buffer) {
-      scrollParent.scrollTop =
-        cursorAbsBottom - scrollParent.clientHeight + buffer;
-    } else if (cursorAbsTop < visibleTop + buffer) {
-      scrollParent.scrollTop = cursorAbsTop - buffer;
+    if (band.bottom > visibleBottom - buffer) {
+      scrollParent.scrollTop = band.bottom - scrollParent.clientHeight + buffer;
+    } else if (band.top < visibleTop + buffer) {
+      scrollParent.scrollTop = band.top - buffer;
     }
+  }
+
+  /**
+   * Scroll so the doc range [from, to] is visible — centered when it fits
+   * the viewport, top-pinned when taller (see rangeScrollTarget). Unlike
+   * scrollCursorIntoView this is position-driven, not selection-driven.
+   * Returns false when the range has no layout coords yet or nothing
+   * scrollable is attached.
+   */
+  scrollRangeIntoView(from: number, to: number): boolean {
+    if (!this.containerEl || !this.pageScreenRectLookup) return false;
+
+    const charMap = this.opts.getCharMap();
+    const fromCoords = charMap.coordsAtPos(from);
+    if (!fromCoords) return false;
+    const toCoords = charMap.coordsAtPos(to) ?? fromCoords;
+
+    const scrollParent = findScrollParent(this.containerEl);
+    if (!scrollParent) return false;
+
+    const fromBand = this.absoluteBand(fromCoords, scrollParent);
+    if (!fromBand) return false;
+    const toBand = this.absoluteBand(toCoords, scrollParent) ?? fromBand;
+
+    const target = rangeScrollTarget(
+      fromBand.top,
+      Math.max(fromBand.bottom, toBand.bottom),
+      scrollParent.scrollTop,
+      scrollParent.clientHeight,
+    );
+    if (target !== null) scrollParent.scrollTop = target;
+    return true;
+  }
+
+  /**
+   * Convert page-local coords to an absolute Y band inside the scroll
+   * container (page screen rect is viewport-space, so add scrollTop back).
+   */
+  private absoluteBand(
+    coords: { page: number; y: number; height: number },
+    scrollParent: HTMLElement,
+  ): { top: number; bottom: number } | null {
+    const pageScreenRect = this.pageScreenRectLookup?.(coords.page);
+    if (!pageScreenRect) return null;
+    const containerRect = scrollParent.getBoundingClientRect();
+    const pageTop =
+      pageScreenRect.screenTop - containerRect.top + scrollParent.scrollTop;
+    return { top: pageTop + coords.y, bottom: pageTop + coords.y + coords.height };
   }
 
   /** Private — textarea creation */
@@ -441,6 +482,24 @@ export class InputBridge {
 }
 
 /** Module-level helpers */
+
+/**
+ * New scrollTop that brings the absolute band [top, bottom] into view, or
+ * null when it is already fully visible. Ranges that fit are centered —
+ * the right feel for a jump (vs the cursor's stay-near-edge banding);
+ * ranges taller than the viewport pin their top with 40px breathing room.
+ */
+export function rangeScrollTarget(
+  top: number,
+  bottom: number,
+  scrollTop: number,
+  viewportHeight: number,
+): number | null {
+  if (top >= scrollTop && bottom <= scrollTop + viewportHeight) return null;
+  const height = bottom - top;
+  if (height >= viewportHeight) return Math.max(0, top - 40);
+  return Math.max(0, top - (viewportHeight - height) / 2);
+}
 
 export function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   if (!el) return null;

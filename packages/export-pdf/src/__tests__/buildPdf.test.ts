@@ -239,6 +239,10 @@ class ExportPdfEditorDouble extends ServerEditor implements IEditor {
     return null;
   }
 
+  scrollRangeIntoView(): boolean {
+    return false;
+  }
+
   redraw(): void {}
 
   invalidateLayout(): void {}

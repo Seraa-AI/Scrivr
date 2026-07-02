@@ -9,7 +9,7 @@ import {
   ImageMenu,
   HeaderFooterRibbon,
 } from "@scrivr/react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
 import type { EditorStateContext, EditorTheme } from "@scrivr/react";
 import { PdfExport } from "@scrivr/export-pdf";
@@ -20,6 +20,9 @@ import {
   TrackChanges,
   AiToolkit,
   HeaderFooter,
+  CitationHighlight,
+  citationHighlightPluginKey,
+  revealCitation,
 } from "@scrivr/plugins";
 import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
@@ -43,6 +46,7 @@ import {
   Moon,
   PanelRightClose,
   PanelRightOpen,
+  Quote,
   Sparkles,
   Sun,
 } from "lucide-react";
@@ -146,6 +150,7 @@ const EXTENSIONS =
           userID: identity.userName,
           canAcceptReject: true,
         }),
+        CitationHighlight,
         // AiToolkit is only loaded in local dev (see AI_ENABLED above).
         ...(AI_ENABLED ? [AiToolkit] : []),
       ]
@@ -156,6 +161,7 @@ const EXTENSIONS =
         DocxExport.configure({ filename: "scrivr-demo" }),
         DocxImport,
         TrackChanges.configure({ userID: "demo-user", canAcceptReject: true }),
+        CitationHighlight,
         ...(AI_ENABLED ? [AiToolkit] : []),
         DemoContent,
       ];
@@ -218,7 +224,21 @@ export function Playground() {
       console.log("[ProseMirror doc]", doc.toJSON());
       return doc.toJSON();
     };
+
   }
+
+  // Cycle through the current citation highlights, scrolling each into view.
+  // The Cite/Uncite buttons come from CitationHighlight's own toolbar items.
+  const citationCycleRef = useRef(0);
+  const jumpToCitation = () => {
+    if (!editor) return;
+    const cited =
+      citationHighlightPluginKey.getState(editor.getState())?.citations ?? [];
+    if (cited.length === 0) return;
+    const citation = cited[citationCycleRef.current % cited.length]!;
+    citationCycleRef.current += 1;
+    revealCitation(editor, citation);
+  };
   const toolbar =
     useEditorState({ editor, selector: selectToolbar }) ?? EMPTY_TOOLBAR;
 
@@ -305,6 +325,13 @@ export function Playground() {
             </a>
           )}
           <ModeSwitcher editor={editor} />
+          <IconButton
+            onClick={jumpToCitation}
+            title="Jump to next citation highlight"
+            ariaLabel="Jump to next citation highlight"
+          >
+            <Quote size={15} strokeWidth={2} />
+          </IconButton>
           <IconButton
             onClick={toggleDark}
             title={isDark ? "Switch to light mode" : "Switch to dark mode"}
