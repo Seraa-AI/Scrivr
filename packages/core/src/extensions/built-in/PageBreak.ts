@@ -30,9 +30,20 @@ export const PageBreak = Extension.create({
         group: "block",
         atom: true,
         selectable: false,
-        parseDOM: [{ tag: "div.scrivr-page-break" }],
-        toDOM() {
-          return ["div", { class: "scrivr-page-break" }];
+        attrs: { nodeId: { default: null } },
+        parseDOM: [
+          {
+            tag: "div.scrivr-page-break",
+            getAttrs(dom) {
+              const el = dom as HTMLElement;
+              return { nodeId: el.getAttribute("data-node-id") ?? null };
+            },
+          },
+        ],
+        toDOM(node) {
+          const attrs: Record<string, string> = { class: "scrivr-page-break" };
+          if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+          return ["div", attrs];
         },
       },
     };
