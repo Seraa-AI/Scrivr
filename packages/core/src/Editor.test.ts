@@ -164,6 +164,53 @@ describe("Editor.ensureFullLayout", () => {
   });
 });
 
+describe("Editor.scrollRangeIntoView", () => {
+  const paragraph = (index: number) => ({
+    type: "paragraph",
+    content: [
+      {
+        type: "text",
+        text: `Target paragraph ${index} with enough text to occupy its own layout line.`,
+      },
+    ],
+  });
+
+  it("populates a distant target page before resolving its coordinates", () => {
+    const editor = createTestEditor({
+      content: {
+        type: "doc",
+        content: Array.from({ length: 80 }, (_, index) => paragraph(index)),
+      },
+    });
+    const target = findTextPos(editor.getState(), "Target paragraph 79")!;
+
+    expect(editor.charMap.glyphsInRange(target, target + 1)).toHaveLength(0);
+    editor.scrollRangeIntoView(target, target + 6);
+
+    const glyph = editor.charMap.glyphsInRange(target, target + 1)[0];
+    expect(glyph).toBeDefined();
+    expect(glyph!.page).toBeGreaterThan(1);
+    editor.destroy();
+  });
+
+  it("finishes a streamed layout when the target lies in its tail", () => {
+    const editor = createTestEditor({
+      content: {
+        type: "doc",
+        content: Array.from({ length: 160 }, (_, index) => paragraph(index)),
+      },
+    });
+    const target = findTextPos(editor.getState(), "Target paragraph 159")!;
+    expect(editor.layout.isPartial).toBe(true);
+
+    editor.scrollRangeIntoView(target, target + 6);
+
+    expect(editor.layout.isPartial).toBeUndefined();
+    expect(editor.charMap.glyphsInRange(target, target + 1)[0]?.page).toBeGreaterThan(1);
+    editor.destroy();
+  });
+});
+
 describe("Editor.moveNode", () => {
   function installImageParagraph(editor: Editor) {
     const schema = editor.schema;

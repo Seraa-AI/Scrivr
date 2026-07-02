@@ -1131,7 +1131,7 @@ export class Editor extends BaseEditor implements IEditor {
    */
   scrollRangeIntoView(from: number, to: number = from): boolean {
     this.lc.ensureLayout();
-    if (!this.lc.charMap.coordsAtPos(from)) this.lc.ensureFullLayout();
+    if (!this.lc.ensureRangePopulated(from, to)) return false;
     return this.ib.scrollRangeIntoView(from, to);
   }
 
