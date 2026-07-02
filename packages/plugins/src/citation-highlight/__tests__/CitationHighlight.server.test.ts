@@ -7,6 +7,8 @@
 import { describe, it, expect } from "vitest";
 import { TextSelection } from "prosemirror-state";
 import { ServerEditor, StarterKit } from "@scrivr/core";
+import { AiToolkit } from "../../ai-toolkit/AiToolkit";
+import { getAiToolkit } from "../../ai-toolkit/aiToolkitRegistry";
 import { CitationHighlight, citationHighlightPluginKey } from "../CitationHighlight";
 
 function makeEditor() {
@@ -140,10 +142,49 @@ describe("CitationHighlight on ServerEditor", () => {
     expect(citations(editor)).toEqual([{ id: "cite-1-6", from: 1, to: 6 }]);
   });
 
-  it("citeSelection is a no-op on an empty selection", () => {
+  it("citeSelection with a caret cites the enclosing block", () => {
     const editor = makeEditor();
+    const state = editor.getState();
+    // Caret inside "Second block." (content range 15..28), no range selected.
+    editor.applyTransaction(
+      state.tr.setSelection(TextSelection.create(state.doc, 17)),
+    );
+
+    editor.commands.citeSelection();
+    expect(citations(editor)).toEqual([{ id: "cite-15-28", from: 15, to: 28 }]);
+  });
+
+  it("citeSelection is a no-op when the caret sits in an empty block", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, CitationHighlight],
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+    });
+
     editor.commands.citeSelection();
     expect(citations(editor)).toEqual([]);
+  });
+
+  it("citeNode cites a block by its nodeId", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, AiToolkit, CitationHighlight],
+      content: {
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "First block." }] },
+          { type: "paragraph", content: [{ type: "text", text: "Second block." }] },
+        ],
+      },
+    });
+    const blocks = getAiToolkit(editor)!.getBlocks();
+
+    editor.commands.citeNode(blocks[1]!.nodeId);
+    expect(citations(editor)).toEqual([
+      { id: blocks[1]!.nodeId, from: 15, to: 28 },
+    ]);
+
+    // Unknown nodeId → command fails, state untouched.
+    editor.commands.citeNode("no-such-node");
+    expect(citations(editor)).toHaveLength(1);
   });
 
   it("stays out of undo history", () => {

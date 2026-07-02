@@ -18,8 +18,11 @@ plugin state, remap through every edit (text typed at a boundary stays
 outside the highlight), and a citation whose text is deleted disappears.
 
 Commands `setCitationHighlights(citations)` / `addCitationHighlight(citation)`
-/ `citeSelection()` / `removeCitationHighlight(id)` /
-`clearCitationHighlights()` work headlessly on `ServerEditor`; painting
+/ `citeSelection()` / `citeNode(nodeId)` / `removeCitationHighlight(id)` /
+`clearCitationHighlights()` work headlessly on `ServerEditor`. `citeSelection`
+with a caret cites the enclosing block; `citeNode` cites the block stamped
+with a UniqueId nodeId (the AI-answer flow, paired with the `revealCitedNode`
+helper). Painting
 reuses the core `renderSelection` two-pass renderer via
 `addOverlayRenderHandler`, so multi-line, multi-page, and empty-paragraph
 ranges render like native selection. Highlight color is configurable via

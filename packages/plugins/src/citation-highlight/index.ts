@@ -2,6 +2,7 @@ export {
   CitationHighlight,
   citationHighlightPluginKey,
   revealCitation,
+  revealCitedNode,
 } from "./CitationHighlight";
 export type {
   CitationRange,

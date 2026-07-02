@@ -2,6 +2,8 @@ import { Plugin, PluginKey } from "prosemirror-state";
 import type { EditorState, Transaction } from "prosemirror-state";
 import { Extension, renderSelection } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
+import type { Node as PmNode } from "prosemirror-model";
+import { findNodeById } from "../ai-toolkit/UniqueId";
 
 /** A document range referenced by an external citation (AI answer, source panel). */
 export interface CitationRange {
@@ -38,9 +40,17 @@ declare module "@scrivr/core" {
       addCitationHighlight: (citation: CitationRange) => ReturnType;
       /**
        * Highlight the currently selected text as a citation
-       * (id `cite-{from}-{to}`). No-op on an empty selection.
+       * (id `cite-{from}-{to}`). A caret (empty selection) cites the
+       * enclosing block instead; only an empty block is a no-op.
        */
       citeSelection: () => ReturnType;
+      /**
+       * Cite the block stamped with the given nodeId (see UniqueId /
+       * `getAiToolkit().getBlocks()`). The citation id is the nodeId itself,
+       * so citing the same node twice updates in place. Fails when no block
+       * carries that id.
+       */
+      citeNode: (nodeId: string) => ReturnType;
       /** Remove one citation highlight by id. Unknown ids are a no-op. */
       removeCitationHighlight: (id: string) => ReturnType;
       /** Remove all citation highlights. */
@@ -58,6 +68,14 @@ function sanitize(citations: CitationRange[], state: EditorState): CitationRange
       to: Math.max(0, Math.min(c.to, max)),
     }))
     .filter((c) => c.from < c.to);
+}
+
+function nodeCitation(doc: PmNode, nodeId: string): CitationRange | null {
+  const found = findNodeById(doc, nodeId);
+  if (!found) return null;
+  const from = found.pos + 1;
+  const to = found.pos + found.node.nodeSize - 1;
+  return from < to ? { id: nodeId, from, to } : null;
 }
 
 function upsert(state: EditorState, citation: CitationRange): CitationRange[] {
@@ -139,9 +157,23 @@ export const CitationHighlight = Extension.create<CitationHighlightOptions>({
       citeSelection:
         () =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
-          const { from, to } = state.selection;
+          let { from, to } = state.selection;
+          if (from === to) {
+            // Caret only — cite the enclosing block.
+            const { $from } = state.selection;
+            from = $from.start();
+            to = $from.end();
+          }
           if (from === to) return false;
           const citation = { id: `cite-${from}-${to}`, from, to };
+          return setCitationsMeta(state, dispatch, upsert(state, citation));
+        },
+
+      citeNode:
+        (nodeId: string) =>
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
+          const citation = nodeCitation(state.doc, nodeId);
+          if (!citation) return false;
           return setCitationsMeta(state, dispatch, upsert(state, citation));
         },
 
@@ -169,7 +201,7 @@ export const CitationHighlight = Extension.create<CitationHighlightOptions>({
       {
         command: "citeSelection",
         label: "Cite",
-        title: "Highlight selection as citation",
+        title: "Cite selection (or current block)",
         group: "citation",
         isActive: () => false,
       },
@@ -217,4 +249,14 @@ export function revealCitation(editor: IEditor, citation: CitationRange): boolea
   const state = editor.getState();
   setCitationsMeta(state, (tr) => editor.applyTransaction(tr), upsert(state, citation));
   return editor.scrollRangeIntoView(citation.from, citation.to);
+}
+
+/**
+ * Node-flavored revealCitation: highlight the block stamped with nodeId and
+ * scroll it into view. Returns false when no block carries that id.
+ */
+export function revealCitedNode(editor: IEditor, nodeId: string): boolean {
+  const citation = nodeCitation(editor.getState().doc, nodeId);
+  if (!citation) return false;
+  return revealCitation(editor, citation);
 }
