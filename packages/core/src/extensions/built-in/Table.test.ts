@@ -6,7 +6,7 @@ import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { ExtensionManager } from "../ExtensionManager";
 import { createTestEditor } from "../../test-utils";
-import { DOMParser as PMDOMParser } from "prosemirror-model";
+import { DOMParser as PMDOMParser, DOMSerializer } from "prosemirror-model";
 import type { Node } from "prosemirror-model";
 import type { LayoutBlock } from "../../layout/BlockLayout";
 
@@ -92,6 +92,45 @@ describe("Table — addNodes", () => {
   it("tableHeader parses from <th> tag", () => {
     const rule = resolved.nodes["tableHeader"]!.parseDOM?.[0];
     expect((rule as { tag: string }).tag).toBe("th");
+  });
+});
+
+// ── nodeId round-trip (RFC 33: block ids must survive HTML parse) ──────────────
+
+describe("Table — nodeId round-trip", () => {
+  const resolved = Table.resolve();
+
+  it("table, tableRow, tableCell, and tableHeader each declare a nodeId attr", () => {
+    for (const name of ["table", "tableRow", "tableCell", "tableHeader"]) {
+      expect(resolved.nodes[name]!.attrs?.["nodeId"]?.default).toBe(null);
+    }
+  });
+
+  it("preserves data-node-id on table/row/cell/header through parse and re-serialize", () => {
+    const div = document.createElement("div");
+    div.innerHTML =
+      '<table data-node-id="t1"><tbody>' +
+      '<tr data-node-id="r1">' +
+      '<td data-node-id="c1"><p>cell</p></td>' +
+      '<th data-node-id="h1"><p>head</p></th>' +
+      "</tr></tbody></table>";
+    const doc = PMDOMParser.fromSchema(fullSchema).parse(div);
+
+    const ids: Record<string, string | null> = {};
+    doc.descendants((n) => {
+      if (["table", "tableRow", "tableCell", "tableHeader"].includes(n.type.name)) {
+        const raw = n.attrs["nodeId"];
+        ids[n.type.name] = typeof raw === "string" ? raw : null;
+      }
+    });
+    expect(ids).toEqual({ table: "t1", tableRow: "r1", tableCell: "c1", tableHeader: "h1" });
+
+    const out = document.createElement("div");
+    out.appendChild(DOMSerializer.fromSchema(fullSchema).serializeFragment(doc.content));
+    expect(out.querySelector("table")?.getAttribute("data-node-id")).toBe("t1");
+    expect(out.querySelector("tr")?.getAttribute("data-node-id")).toBe("r1");
+    expect(out.querySelector("td")?.getAttribute("data-node-id")).toBe("c1");
+    expect(out.querySelector("th")?.getAttribute("data-node-id")).toBe("h1");
   });
 });
 
