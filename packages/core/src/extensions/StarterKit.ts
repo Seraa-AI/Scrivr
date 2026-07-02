@@ -314,9 +314,15 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       const ext = typeof opts.heading === "object" ? Heading.configure(opts.heading) : Heading;
       Object.assign(km, ext.resolve(this.schema).keymap);
     }
-    // Tab: chain codeBlock (spaces) → list (indent)
+    // Tab: chain table (cell nav) → codeBlock (spaces) → list (indent). Table
+    // goes first so Tab moves between cells even when a cell holds a list, which
+    // matches Word (list indent inside a cell uses the indent control, not Tab).
     {
       const tabCmds: Command[] = [];
+      if (opts.table === true) {
+        const tableTab = Table.resolve(this.schema).keymap["Tab"];
+        if (tableTab) tabCmds.push(tableTab);
+      }
       if (opts.codeBlock !== false) tabCmds.push(insertCodeIndent());
       if (opts.list !== false) {
         const listTab = List.resolve(this.schema).keymap["Tab"];
@@ -354,6 +360,21 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
     if (opts.pageBreak !== false) {
       Object.assign(km, PageBreak.resolve(this.schema).keymap);
+    }
+
+    // Table cell-editing keys chain in front of the existing bindings: Shift-Tab
+    // before list dedent, and the Backspace/Delete cell-boundary guards before
+    // the base delete. Each guard returns false when it doesn't apply, so the
+    // chain falls through to the previous handler.
+    if (opts.table === true) {
+      const tk = Table.resolve(this.schema).keymap;
+      const chainBefore = (key: string, cmd: Command | undefined) => {
+        if (!cmd) return;
+        km[key] = km[key] ? chainCommands(cmd, km[key]) : cmd;
+      };
+      chainBefore("Shift-Tab", tk["Shift-Tab"]);
+      chainBefore("Backspace", tk["Backspace"]);
+      chainBefore("Delete", tk["Delete"]);
     }
 
     return km;

@@ -4,6 +4,12 @@ import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
 import { TableRowStrategy } from "../../renderer/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
+import {
+  tabToNextCell,
+  tabToPreviousCell,
+  guardBackspace,
+  guardDelete,
+} from "../../table/editingGuards";
 import { tableStructureCommands } from "../../table/commands";
 import { renderTableRowPdf } from "../../table/pdfExport";
 import { tableDocxHandlers } from "../../table/docxExport";
@@ -13,21 +19,20 @@ import { tableDocxHandlers } from "../../table/docxExport";
  *
  * What lands now:
  *   - Word-shaped schema for `table` / `tableRow` / `tableCell` / `tableHeader`.
- *   - `insertTable({ rows, cols })` and `deleteTable()` commands.
- *   - Placeholder canvas rendering via `TableRowStrategy` (one bordered box
- *     per row).
+ *   - `insertTable({ rows, cols })` / `deleteTable()` + row/column structural
+ *     commands and cell navigation.
+ *   - Real canvas cell layout + rendering (TableRowStrategy) and PDF/DOCX parity.
  *   - PageLayout dispatches each row as an atomic block (whole-row pagination).
  *   - `tableIntegrityPlugin()` — document-validity normalization on every
  *     doc-changing transaction (grid/gridSpan/vMerge repair, row padding).
+ *   - `tableEditingGuards()` — editing-UX layer: Tab/Shift-Tab cell navigation
+ *     (Tab past the last cell appends a row), Backspace/Delete cell-boundary
+ *     guards, and paste distribution into a multi-cell selection.
  *
  * What is intentionally deferred:
- *   - Editing-UX guards plugin (cross-cell selection promotion, Tab/Backspace
- *     semantics) — lands in a separate plugin so the two concerns stay
- *     testable in isolation. `goToNextCell` ships as a command here; binding it
- *     to `Tab` (with new-row-on-overflow) is part of that guards plugin.
- *   - Cell merge/split and header toggle.
- *   - Real cell layout, cell content rendering, PDF parity.
- *   - HTML paste round-trip, DOCX export.
+ *   - Persisted cell selection (drag-select + overlay) and merge/split — Phase 6.
+ *     Cross-cell selection is currently derived from a spanning text selection.
+ *   - HTML paste round-trip (Phase 7), Markdown export (Phase 8).
  */
 
 const DEFAULT_COLUMN_WIDTH = 100; // CSS px — uniform default; resizing arrives in Phase 9.
@@ -204,9 +209,23 @@ export const Table = Extension.create({
 
   addCommands() {
     return {
-      insertTable: (args: unknown) => insertTableCommand(args),
+      insertTable: (args) => insertTableCommand(args),
       deleteTable: () => deleteTableCommand(),
       ...tableStructureCommands(),
+    };
+  },
+
+  addKeymap() {
+    // The canvas InputBridge dispatches keys through the merged extension keymap
+    // (addKeymap), never through ProseMirror plugin handleKeyDown props — so cell
+    // editing keys live here. StarterKit chains these with the base Backspace/
+    // Delete and the List/CodeBlock Tab handlers (a guard returns false when it
+    // doesn't apply, so the chain falls through).
+    return {
+      Tab: tabToNextCell,
+      "Shift-Tab": tabToPreviousCell,
+      Backspace: guardBackspace,
+      Delete: guardDelete,
     };
   },
 
