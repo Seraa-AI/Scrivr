@@ -164,6 +164,13 @@ export interface IEditor extends IBaseEditor {
   selectNode(docPos: number): void;
   /** Get screen-space position of a page canvas. Null when not mounted. */
   getPageScreenPosition(page: number): { screenLeft: number; screenTop: number } | null;
+  /**
+   * Scroll so the doc range [from, to] is visible — centered when it fits
+   * the viewport, top-pinned when taller. Completes a partial streamed
+   * layout first if the target lies beyond the laid-out region. Returns
+   * false when the range cannot be located (not mounted, no coords).
+   */
+  scrollRangeIntoView(from: number, to?: number): boolean;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
   redraw(): void;
   /** Invalidate the layout cache and trigger a re-layout on next paint. */

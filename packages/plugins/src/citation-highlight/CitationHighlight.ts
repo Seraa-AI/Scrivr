@@ -31,6 +31,11 @@ declare module "@scrivr/core" {
        * Empty/inverted ranges are dropped; positions are clamped to the doc.
        */
       setCitationHighlights: (citations: CitationRange[]) => ReturnType;
+      /**
+       * Add one citation to the highlighted set, or update its range if the
+       * id is already present. Other citations are untouched.
+       */
+      addCitationHighlight: (citation: CitationRange) => ReturnType;
       /** Remove all citation highlights. */
       clearCitationHighlights: () => ReturnType;
     };
@@ -46,6 +51,11 @@ function sanitize(citations: CitationRange[], state: EditorState): CitationRange
       to: Math.max(0, Math.min(c.to, max)),
     }))
     .filter((c) => c.from < c.to);
+}
+
+function upsert(state: EditorState, citation: CitationRange): CitationRange[] {
+  const current = citationHighlightPluginKey.getState(state)?.citations ?? [];
+  return sanitize([...current.filter((c) => c.id !== citation.id), citation], state);
 }
 
 function setCitationsMeta(
@@ -114,6 +124,11 @@ export const CitationHighlight = Extension.create<CitationHighlightOptions>({
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) =>
           setCitationsMeta(state, dispatch, sanitize(citations, state)),
 
+      addCitationHighlight:
+        (citation: CitationRange) =>
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) =>
+          setCitationsMeta(state, dispatch, upsert(state, citation)),
+
       clearCitationHighlights:
         () =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) =>
@@ -143,3 +158,16 @@ export const CitationHighlight = Extension.create<CitationHighlightOptions>({
     return editor.addOverlayRenderHandler(handler);
   },
 });
+
+/**
+ * Highlight one cited range and scroll it into view — the "click a citation
+ * chip, jump to the passage" affordance. Upserts into the existing highlight
+ * set (other citations stay lit) and centers the range in the viewport.
+ * Returns false when the range has no layout position (e.g. cited text was
+ * deleted); the highlight set is still updated in that case.
+ */
+export function revealCitation(editor: IEditor, citation: CitationRange): boolean {
+  const state = editor.getState();
+  setCitationsMeta(state, (tr) => editor.applyTransaction(tr), upsert(state, citation));
+  return editor.scrollRangeIntoView(citation.from, citation.to);
+}

@@ -1123,6 +1123,18 @@ export class Editor extends BaseEditor implements IEditor {
     this.ib.scrollCursorIntoView();
   }
 
+  /**
+   * Scrolls so the doc range [from, to] is visible — centered when it fits
+   * the viewport, top-pinned when taller. Completes a partial streamed
+   * layout first if the target lies beyond the laid-out region. Returns
+   * false when the range cannot be located (not mounted, no coords).
+   */
+  scrollRangeIntoView(from: number, to: number = from): boolean {
+    this.lc.ensureLayout();
+    if (!this.lc.charMap.coordsAtPos(from)) this.lc.ensureFullLayout();
+    return this.ib.scrollRangeIntoView(from, to);
+  }
+
   /** Whether the editor's textarea currently has focus. */
   get isFocused(): boolean {
     return this.ib.isFocused;

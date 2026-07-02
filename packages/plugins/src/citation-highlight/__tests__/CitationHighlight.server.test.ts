@@ -93,6 +93,26 @@ describe("CitationHighlight on ServerEditor", () => {
     expect(citations(editor).map((c) => c.id)).toEqual(["stays"]);
   });
 
+  it("addCitationHighlight upserts without disturbing the rest of the set", () => {
+    const editor = makeEditor();
+    editor.commands.setCitationHighlights([
+      { id: "c1", from: 1, to: 6 },
+      { id: "c2", from: 15, to: 21 },
+    ]);
+
+    // New id → appended.
+    editor.commands.addCitationHighlight({ id: "c3", from: 7, to: 13 });
+    expect(citations(editor).map((c) => c.id)).toEqual(["c1", "c2", "c3"]);
+
+    // Existing id → range replaced in place, others untouched.
+    editor.commands.addCitationHighlight({ id: "c2", from: 16, to: 20 });
+    expect(citations(editor)).toEqual([
+      { id: "c1", from: 1, to: 6 },
+      { id: "c3", from: 7, to: 13 },
+      { id: "c2", from: 16, to: 20 },
+    ]);
+  });
+
   it("stays out of undo history", () => {
     const editor = makeEditor();
     editor.applyTransaction(editor.getState().tr.insertText("abc", 1));

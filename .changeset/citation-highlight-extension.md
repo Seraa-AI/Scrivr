@@ -17,8 +17,20 @@ collaborators, and undo history is untouched. Ranges live in ProseMirror
 plugin state, remap through every edit (text typed at a boundary stays
 outside the highlight), and a citation whose text is deleted disappears.
 
-Commands `setCitationHighlights(citations)` / `clearCitationHighlights()`
-work headlessly on `ServerEditor`; painting reuses the core `renderSelection`
-two-pass renderer via `addOverlayRenderHandler`, so multi-line, multi-page,
-and empty-paragraph ranges render like native selection. Highlight color is
-configurable via `CitationHighlight.configure({ color })`.
+Commands `setCitationHighlights(citations)` / `addCitationHighlight(citation)`
+/ `clearCitationHighlights()` work headlessly on `ServerEditor`; painting
+reuses the core `renderSelection` two-pass renderer via
+`addOverlayRenderHandler`, so multi-line, multi-page, and empty-paragraph
+ranges render like native selection. Highlight color is configurable via
+`CitationHighlight.configure({ color })`. `revealCitation(editor, citation)`
+upserts one highlight and scrolls it into view — the "click a citation chip,
+jump to the passage" affordance.
+
+`@scrivr/core` — new `Editor.scrollRangeIntoView(from, to?)` on `IEditor`.
+
+Scrolls an arbitrary doc range into view: centered when it fits the
+viewport, top-pinned when taller, no-op when already visible. Completes a
+partial streamed layout first when the target lies beyond the laid-out
+region, and virtualized pages paint automatically after the jump. The
+existing cursor scroll (`scrollCursorIntoView`) now shares the same
+page-to-container coordinate conversion.
