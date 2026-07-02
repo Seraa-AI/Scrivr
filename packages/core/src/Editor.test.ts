@@ -211,6 +211,115 @@ describe("Editor.scrollRangeIntoView", () => {
   });
 });
 
+describe("flush scrolls the cursor only on intent", () => {
+  /** Capture rAF callbacks so the pending flush can be run synchronously. */
+  function rafHarness() {
+    const cbs: FrameRequestCallback[] = [];
+    const spy = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((cb: FrameRequestCallback) => cbs.push(cb));
+    return {
+      flush: () => cbs.splice(0).forEach((cb) => cb(0)),
+      restore: () => spy.mockRestore(),
+    };
+  }
+
+  const docWith = (text: string) => ({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+  });
+
+  it("does not scroll for an external transaction that didn't ask to", () => {
+    const editor = createTestEditor({ content: docWith("hello world") });
+    const scroll = vi.spyOn(editor, "scrollCursorIntoView").mockImplementation(() => {});
+    const raf = rafHarness();
+    raf.flush(); // drain any construction-time flush
+    scroll.mockClear();
+
+    editor.applyTransaction(editor.getState().tr.insertText("!", 1));
+    raf.flush();
+    expect(scroll).not.toHaveBeenCalled();
+
+    // ...but an external transaction that explicitly requested it still scrolls.
+    editor.applyTransaction(editor.getState().tr.insertText("?", 1).scrollIntoView());
+    raf.flush();
+    expect(scroll).toHaveBeenCalledTimes(1);
+
+    raf.restore();
+    editor.destroy();
+  });
+
+  it("scrolls for local input (typing)", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor();
+    editor.mount(container);
+    const scroll = vi.spyOn(editor, "scrollCursorIntoView").mockImplementation(() => {});
+    const raf = rafHarness();
+    raf.flush(); // drain mount-time flush
+    scroll.mockClear();
+
+    const ta = container.querySelector("textarea")!;
+    ta.value = "abc";
+    ta.dispatchEvent(new Event("input"));
+    raf.flush();
+    expect(scroll).toHaveBeenCalled();
+
+    raf.restore();
+    editor.destroy();
+    container.remove();
+  });
+
+  it("an explicit range scroll cancels a cursor scroll coalesced into the same frame", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({ content: docWith("hello world") });
+    editor.mount(container);
+    const scroll = vi.spyOn(editor, "scrollCursorIntoView").mockImplementation(() => {});
+    const raf = rafHarness();
+    raf.flush();
+    scroll.mockClear();
+
+    // Local edit sets the pending cursor scroll, then a range scroll supersedes
+    // it before the frame flushes (the revealCitation-after-edit case).
+    const ta = container.querySelector("textarea")!;
+    ta.value = "x";
+    ta.dispatchEvent(new Event("input"));
+    editor.scrollRangeIntoView(1, 3);
+    raf.flush();
+    expect(scroll).not.toHaveBeenCalled();
+
+    raf.restore();
+    editor.destroy();
+    container.remove();
+  });
+
+  it("cancelling the flush on setReady(false) drops the pending scroll intent", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({ content: docWith("hello world") });
+    editor.mount(container);
+    const scroll = vi.spyOn(editor, "scrollCursorIntoView").mockImplementation(() => {});
+    const raf = rafHarness();
+    raf.flush();
+    scroll.mockClear();
+
+    const ta = container.querySelector("textarea")!;
+    ta.value = "a";
+    ta.dispatchEvent(new Event("input")); // sets flag + schedules the flush
+    editor.setReady(false); // cancels the flush and should drop the intent
+    editor.setReady(true);
+    // An external transaction after resume must not inherit the stale intent.
+    editor.applyTransaction(editor.getState().tr.insertText("!", 1));
+    raf.flush();
+    expect(scroll).not.toHaveBeenCalled();
+
+    raf.restore();
+    editor.destroy();
+    container.remove();
+  });
+});
+
 describe("Editor.moveNode", () => {
   function installImageParagraph(editor: Editor) {
     const schema = editor.schema;

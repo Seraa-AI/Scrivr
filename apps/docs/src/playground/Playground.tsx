@@ -9,7 +9,7 @@ import {
   ImageMenu,
   HeaderFooterRibbon,
 } from "@scrivr/react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
 import type { EditorStateContext, EditorTheme } from "@scrivr/react";
 import { PdfExport } from "@scrivr/export-pdf";
@@ -23,6 +23,7 @@ import {
   CitationHighlight,
   citationHighlightPluginKey,
   revealCitation,
+  type CitationRange,
 } from "@scrivr/plugins";
 import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
@@ -227,18 +228,8 @@ export function Playground() {
 
   }
 
-  // Cycle through the current citation highlights, scrolling each into view.
-  // The Cite/Uncite buttons come from CitationHighlight's own toolbar items.
-  const citationCycleRef = useRef(0);
-  const jumpToCitation = () => {
-    if (!editor) return;
-    const cited =
-      citationHighlightPluginKey.getState(editor.getState())?.citations ?? [];
-    if (cited.length === 0) return;
-    const citation = cited[citationCycleRef.current % cited.length]!;
-    citationCycleRef.current += 1;
-    revealCitation(editor, citation);
-  };
+  // The Cite/Uncite buttons come from CitationHighlight's own toolbar items;
+  // the live count + jump-to-citation popover is <CitationsControl> below.
   const toolbar =
     useEditorState({ editor, selector: selectToolbar }) ?? EMPTY_TOOLBAR;
 
@@ -326,13 +317,6 @@ export function Playground() {
           )}
           <ModeSwitcher editor={editor} />
           <IconButton
-            onClick={jumpToCitation}
-            title="Jump to next citation highlight"
-            ariaLabel="Jump to next citation highlight"
-          >
-            <Quote size={15} strokeWidth={2} />
-          </IconButton>
-          <IconButton
             onClick={toggleDark}
             title={isDark ? "Switch to light mode" : "Switch to dark mode"}
             ariaLabel="Toggle theme"
@@ -364,6 +348,7 @@ export function Playground() {
             editor={editor}
           />
         </div>
+        <CitationsControl editor={editor} />
         <div className="flex shrink-0 items-center border-l px-2 md:hidden" style={{ borderColor: "var(--app-border)" }}>
           <span className="text-[11px] tabular-nums" style={{ color: "var(--app-text-muted)" }}>
             {pageInfo.current}/{pageInfo.total}
@@ -622,6 +607,146 @@ function LoadingSpinner() {
         strokeLinecap="round"
       />
     </svg>
+  );
+}
+
+type PlaygroundEditor = ReturnType<typeof useScrivrEditor>;
+
+const NO_CITATIONS: readonly CitationRange[] = Object.freeze([]);
+
+function citationsEqual(
+  a: readonly CitationRange[],
+  b: readonly CitationRange[],
+): boolean {
+  return (
+    a.length === b.length &&
+    a.every((c, i) => c.id === b[i]?.id && c.from === b[i]?.from && c.to === b[i]?.to)
+  );
+}
+
+/**
+ * Dev affordance: a live count of active citation highlights plus a popover
+ * that lists them and jumps to one on click (via `revealCitation`). Lets us
+ * watch scroll-to-citation behaviour in the playground.
+ */
+function CitationsControl({ editor }: { editor: PlaygroundEditor }) {
+  const [open, setOpen] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const citations =
+    useEditorState({
+      editor,
+      selector: (ctx) =>
+        citationHighlightPluginKey.getState(ctx.editor.getState())?.citations ?? NO_CITATIONS,
+      equalityFn: citationsEqual,
+    }) ?? NO_CITATIONS;
+  const count = citations.length;
+
+  const snippet = (from: number, to: number): string => {
+    if (!editor) return "";
+    const { doc } = editor.getState();
+    const max = doc.content.size;
+    const text = doc.textBetween(Math.min(from, max), Math.min(to, max), " ").trim();
+    if (!text) return "(empty range)";
+    return text.length > 52 ? `${text.slice(0, 52)}…` : text;
+  };
+
+  const jump = (c: CitationRange): void => {
+    if (!editor) return;
+    setActiveId(c.id);
+    revealCitation(editor, c);
+  };
+
+  return (
+    <div
+      className="relative flex shrink-0 items-center border-l px-1.5"
+      style={{ borderColor: "var(--app-border)" }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={!editor}
+        title="Citations — list and jump to each"
+        aria-label={`Citations (${count})`}
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-[12px] transition-colors"
+        style={{
+          background: open ? "var(--app-surface-hover)" : "var(--app-surface)",
+          borderColor: "var(--app-border)",
+          color: count > 0 ? "var(--app-text)" : "var(--app-text-muted)",
+        }}
+      >
+        <Quote size={14} strokeWidth={2} />
+        <span className="tabular-nums">{count}</span>
+      </button>
+
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-hidden
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-40 cursor-default"
+            style={{ background: "transparent" }}
+          />
+          <div
+            className="absolute right-0 top-9 z-50 w-72 overflow-hidden rounded-md border shadow-lg"
+            style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
+          >
+            <div
+              className="border-b px-3 py-2 text-[11px] font-medium uppercase tracking-wide"
+              style={{ borderColor: "var(--app-border)", color: "var(--app-text-muted)" }}
+            >
+              Citations ({count})
+            </div>
+            {count === 0 ? (
+              <div className="px-3 py-3 text-[12px]" style={{ color: "var(--app-text-muted)" }}>
+                None yet — select text and click{" "}
+                <span style={{ color: "var(--app-text)" }}>Cite</span>.
+              </div>
+            ) : (
+              <ul className="max-h-64 overflow-y-auto py-1">
+                {citations.map((c, i) => {
+                  const active = c.id === activeId;
+                  return (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => jump(c)}
+                        className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-[12px] transition-colors"
+                        style={{
+                          background: active ? "var(--app-surface-hover)" : "transparent",
+                          color: "var(--app-text)",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!active) e.currentTarget.style.background = "var(--app-surface-hover)";
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!active) e.currentTarget.style.background = "transparent";
+                        }}
+                      >
+                        <span className="mt-px tabular-nums" style={{ color: "var(--app-text-muted)" }}>
+                          {i + 1}.
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{snippet(c.from, c.to)}</span>
+                          <span
+                            className="tabular-nums text-[10px]"
+                            style={{ color: "var(--app-text-muted)" }}
+                          >
+                            {c.from}–{c.to}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

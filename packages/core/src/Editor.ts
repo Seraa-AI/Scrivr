@@ -242,6 +242,16 @@ export class Editor extends BaseEditor implements IEditor {
    */
   private rafId: number | null = null;
 
+  /**
+   * Whether the next coalesced flush should scroll the cursor into view.
+   * Set by local edits/commands (which move the user's caret) and by any
+   * transaction that explicitly called `tr.scrollIntoView()`; left false for
+   * external/programmatic transactions (collab, AI overlays, citation
+   * highlights) so they don't yank the viewport away from an intentional
+   * `scrollRangeIntoView`. OR-accumulated across the frame; consumed by the rAF.
+   */
+  private pendingScrollToCursor = false;
+
   // ── Input bridge ──────────────────────────────────────────────────────────
 
   /** Owns all cursor movement, selection, and word/line navigation logic. */
@@ -522,9 +532,15 @@ export class Editor extends BaseEditor implements IEditor {
    * Override: route through the view-aware dispatch (layout invalidation + rAF).
    * This ensures external transaction sources (Y.js, AI suggestions) also
    * trigger layout + paint updates.
+   *
+   * Unlike local input/commands, these programmatic transactions only scroll
+   * the cursor into view when they explicitly asked (`tr.scrollIntoView()`).
+   * A collab/AI/citation-highlight transaction that didn't request it leaves
+   * the viewport where the caller put it — e.g. `revealCitation` sets the
+   * highlight here, then scrolls the cited range into view itself.
    */
   override applyTransaction(tr: Transaction): void {
-    this.viewDispatch(tr);
+    this.viewDispatch(tr, tr.scrolledIntoView);
   }
 
   /**
@@ -732,6 +748,9 @@ export class Editor extends BaseEditor implements IEditor {
     if (!ready && this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
+      // Drop any pending scroll intent with the cancelled flush, so a later
+      // flush after readiness resumes doesn't consume a stale request.
+      this.pendingScrollToCursor = false;
     }
     this.lc.setReady(ready);
   }
@@ -1132,6 +1151,10 @@ export class Editor extends BaseEditor implements IEditor {
   scrollRangeIntoView(from: number, to: number = from): boolean {
     this.lc.ensureLayout();
     if (!this.lc.ensureRangePopulated(from, to)) return false;
+    // An explicit range scroll supersedes any cursor scroll a local edit
+    // coalesced into this frame — otherwise the pending flush would scroll the
+    // caret back and undo the jump (the revealCitation case).
+    this.pendingScrollToCursor = false;
     return this.ib.scrollRangeIntoView(from, to);
   }
 
@@ -1156,7 +1179,7 @@ export class Editor extends BaseEditor implements IEditor {
    *
    * All transaction paths in Editor (commands, input, external) converge here.
    */
-  private viewDispatch(tr: Transaction): void {
+  private viewDispatch(tr: Transaction, scrollToCursor = true): void {
     // applyState is in BaseEditor: applies tr, emits "update", notifyListeners
     this.applyState(tr);
     this.lc.invalidate();
@@ -1164,6 +1187,7 @@ export class Editor extends BaseEditor implements IEditor {
     // Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.
     this.cursorManager.resetSilent();
     this.onChangeHandler?.(this.editorState);
+    if (scrollToCursor) this.pendingScrollToCursor = true;
     this.scheduleFlush();
   }
 
@@ -1177,8 +1201,14 @@ export class Editor extends BaseEditor implements IEditor {
     this.rafId = requestAnimationFrame(() => {
       this.rafId = null;
       this.lc.ensureLayout();
-      // Scroll first so the viewport is settled, then notify subscribers.
-      this.scrollCursorIntoView();
+      // Scroll first so the viewport is settled, then notify subscribers —
+      // but only when a local edit / explicit scroll asked for it. External
+      // transactions (collab, AI overlays, citation highlights) must not steal
+      // the viewport from an intentional scrollRangeIntoView.
+      if (this.pendingScrollToCursor) {
+        this.pendingScrollToCursor = false;
+        this.scrollCursorIntoView();
+      }
       this.syncInputBridge();
       this.notifyListeners();
     });
