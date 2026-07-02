@@ -1,5 +1,5 @@
 import { Extension } from "@scrivr/core";
-import type { IEditor } from "@scrivr/core";
+import type { IBaseEditor, IEditor } from "@scrivr/core";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
@@ -23,7 +23,7 @@ import type { ComputeAiSuggestionOptions } from "../ai-suggestion/computeAiSugge
  * manage state/dispatch themselves.
  */
 export class AiSuggestionsAPI {
-  constructor(private readonly editor: IEditor) {}
+  constructor(private readonly editor: IBaseEditor) {}
 
   /**
    * Compute a word-level diff between the current document and proposed text.
@@ -96,7 +96,7 @@ export class AiToolkitAPI {
    */
   readonly suggestions: AiSuggestionsAPI | null;
 
-  constructor(private readonly editor: IEditor, hasSuggestion: boolean) {
+  constructor(private readonly editor: IBaseEditor, hasSuggestion: boolean) {
     this.suggestions = hasSuggestion ? new AiSuggestionsAPI(editor) : null;
   }
 
@@ -475,14 +475,25 @@ export const AiToolkit = Extension.create<AiToolkitOptions>({
     return cmds;
   },
 
+  onEditorReady(editor: IBaseEditor) {
+    // The AiToolkitAPI only needs `IBaseEditor` methods (getState,
+    // applyTransaction, getMarkdown, schema), so register it here — fires in
+    // both the browser `Editor` and headless `ServerEditor`. Overlay painting
+    // is wired separately in `onViewReady` (view-only).
+    const hasSuggestion = this.options.aiSuggestion !== false;
+    const api = new AiToolkitAPI(editor, hasSuggestion);
+    aiToolkitRegistry.set(editor, api);
+
+    return () => {
+      aiToolkitRegistry.delete(editor);
+    };
+  },
+
   onViewReady(editor: IEditor) {
     // The sub-extensions (GhostText / AiCaret / AiSuggestion) are all
     // view-only — they paint overlays. Compose their `viewReadyCallback`s
     // here so the consumer registers them transitively without having to
-    // list each in the extensions array. The AiToolkitAPI itself only
-    // needs `IBaseEditor` methods (getState, applyTransaction, getMarkdown)
-    // but the registry is keyed on `IEditor` because that's the natural
-    // host of an active toolkit instance.
+    // list each in the extensions array.
     const cleanups: Array<() => void> = [];
 
     if (this.options.ghostText !== false) {
@@ -498,13 +509,8 @@ export const AiToolkit = Extension.create<AiToolkitOptions>({
       if (cleanup) cleanups.push(cleanup);
     }
 
-    const hasSuggestion = this.options.aiSuggestion !== false;
-    const api = new AiToolkitAPI(editor, hasSuggestion);
-    aiToolkitRegistry.set(editor, api);
-
     return () => {
       cleanups.forEach((c) => c());
-      aiToolkitRegistry.delete(editor);
     };
   },
 });

@@ -1,4 +1,4 @@
-import type { IEditor } from "@scrivr/core";
+import type { IBaseEditor } from "@scrivr/core";
 import type { AiToolkitAPI } from "./AiToolkit";
 
 /**
@@ -12,12 +12,16 @@ import type { AiToolkitAPI } from "./AiToolkit";
  *   await ai.streamGhostText(nodeId, stream);
  * }
  */
-export const aiToolkitRegistry = new WeakMap<IEditor, AiToolkitAPI>();
+export const aiToolkitRegistry = new WeakMap<IBaseEditor, AiToolkitAPI>();
 
 /**
  * Returns the AiToolkitAPI for an editor, or null if the AiToolkit extension
  * has not been added to that editor's extension list.
+ *
+ * Accepts any `IBaseEditor`, so a headless `ServerEditor` reaches the same
+ * read/stream/suggestion API as the browser `Editor` — only the overlay
+ * painting is view-only.
  */
-export function getAiToolkit(editor: IEditor): AiToolkitAPI | null {
+export function getAiToolkit(editor: IBaseEditor): AiToolkitAPI | null {
   return aiToolkitRegistry.get(editor) ?? null;
 }
