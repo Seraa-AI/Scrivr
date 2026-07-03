@@ -60,8 +60,21 @@ export const HorizontalRule = Extension.create({
     return {
       horizontalRule: {
         group: "block",
-        parseDOM: [{ tag: "hr" }],
-        toDOM() { return ["hr"]; },
+        attrs: { nodeId: { default: null } },
+        parseDOM: [
+          {
+            tag: "hr",
+            getAttrs(dom) {
+              const el = dom as HTMLElement;
+              return { nodeId: el.getAttribute("data-node-id") ?? null };
+            },
+          },
+        ],
+        toDOM(node) {
+          const attrs: Record<string, string> = {};
+          if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+          return ["hr", attrs];
+        },
       },
     };
   },

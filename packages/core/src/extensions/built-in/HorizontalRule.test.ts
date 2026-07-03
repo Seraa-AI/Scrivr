@@ -1,10 +1,44 @@
 import { describe, it, expect } from "vitest";
+import { DOMParser as PMDOMParser, DOMSerializer } from "prosemirror-model";
+import type { Node } from "prosemirror-model";
 import { HorizontalRule } from "./HorizontalRule";
 import { buildStarterKitContext } from "../../test-utils";
 
 // Full schema is needed for phase-2 resolution (commands, inputRules)
 const { schema: fullSchema } = buildStarterKitContext();
 const resolvedWithSchema = HorizontalRule.resolve(fullSchema);
+
+function firstOfType(node: Node, typeName: string): Node | null {
+  let found: Node | null = null;
+  node.descendants((n) => {
+    if (found) return false;
+    if (n.type.name === typeName) (found = n), false;
+    return !found;
+  });
+  return found;
+}
+
+// ── nodeId round-trip (RFC 33: block ids must survive HTML parse) ──────────────
+
+describe("HorizontalRule — nodeId round-trip", () => {
+  it("declares a nodeId attr defaulting to null", () => {
+    const spec = HorizontalRule.resolve().nodes["horizontalRule"]!;
+    expect(spec.attrs?.["nodeId"]?.default).toBe(null);
+  });
+
+  it("preserves data-node-id through parse and re-serialize", () => {
+    const div = document.createElement("div");
+    div.innerHTML = '<hr data-node-id="hr-42">';
+    const doc = PMDOMParser.fromSchema(fullSchema).parse(div);
+
+    const hr = firstOfType(doc, "horizontalRule");
+    expect(hr?.attrs["nodeId"]).toBe("hr-42");
+
+    const out = document.createElement("div");
+    out.appendChild(DOMSerializer.fromSchema(fullSchema).serializeFragment(doc.content));
+    expect(out.querySelector("hr")?.getAttribute("data-node-id")).toBe("hr-42");
+  });
+});
 
 // ── addNodes ──────────────────────────────────────────────────────────────────
 

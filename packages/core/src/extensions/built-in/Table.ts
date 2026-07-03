@@ -45,6 +45,19 @@ function uniformGrid(cols: number): number[] {
   return Array.from({ length: cols }, () => DEFAULT_COLUMN_WIDTH);
 }
 
+/** Read the persisted block id off a parsed DOM node (see model/assignBlockIds). */
+function parseNodeId(dom: HTMLElement | string): { nodeId: string | null } {
+  const el = dom as HTMLElement;
+  return { nodeId: el.getAttribute("data-node-id") ?? null };
+}
+
+/** Emit `data-node-id` when the node carries one, so the id survives serialize. */
+function nodeIdAttrs(node: Node): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+  return attrs;
+}
+
 // ── Schema ────────────────────────────────────────────────────────────────────
 
 function tableSpec(): NodeSpec {
@@ -55,12 +68,13 @@ function tableSpec(): NodeSpec {
     attrs: {
       layout: { default: "fixed" },
       grid: { default: [] as number[] },
+      nodeId: { default: null },
     },
-    parseDOM: [{ tag: "table" }],
-    toDOM() {
+    parseDOM: [{ tag: "table", getAttrs: parseNodeId }],
+    toDOM(node) {
       // Phase 1 keeps DOM serialization minimal — the canvas renderer is
       // authoritative. HTML paste round-trip lands in Phase 7.
-      return ["table", ["tbody", 0]];
+      return ["table", nodeIdAttrs(node), ["tbody", 0]];
     },
   };
 }
@@ -71,10 +85,11 @@ function tableRowSpec(): NodeSpec {
     attrs: {
       repeatHeader: { default: false },
       allowBreakAcrossPages: { default: false },
+      nodeId: { default: null },
     },
-    parseDOM: [{ tag: "tr" }],
-    toDOM() {
-      return ["tr", 0];
+    parseDOM: [{ tag: "tr", getAttrs: parseNodeId }],
+    toDOM(node) {
+      return ["tr", nodeIdAttrs(node), 0];
     },
   };
 }
@@ -89,6 +104,7 @@ function cellAttrs(): NonNullable<NodeSpec["attrs"]> {
     background: { default: null },
     margins: { default: null },
     borders: { default: null },
+    nodeId: { default: null },
   };
 }
 
@@ -97,9 +113,9 @@ function tableCellSpec(): NodeSpec {
     content: "block+",
     isolating: true,
     attrs: cellAttrs(),
-    parseDOM: [{ tag: "td" }],
-    toDOM() {
-      return ["td", 0];
+    parseDOM: [{ tag: "td", getAttrs: parseNodeId }],
+    toDOM(node) {
+      return ["td", nodeIdAttrs(node), 0];
     },
   };
 }
@@ -109,9 +125,9 @@ function tableHeaderSpec(): NodeSpec {
     content: "block+",
     isolating: true,
     attrs: cellAttrs(),
-    parseDOM: [{ tag: "th" }],
-    toDOM() {
-      return ["th", 0];
+    parseDOM: [{ tag: "th", getAttrs: parseNodeId }],
+    toDOM(node) {
+      return ["th", nodeIdAttrs(node), 0];
     },
   };
 }
