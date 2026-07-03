@@ -584,15 +584,20 @@ export class PointerController {
     // cell changes. Dragging back into the anchor cell drops the range and
     // resumes normal text selection inside that cell.
     if (this.cellDragAnchor !== null) {
+      const anchor = this.cellDragAnchor;
       const overCell = cellAtCoords(editor.layout.pages, hit.docX, hit.docY, hit.page);
-      if (overCell !== null && overCell !== this.cellDragAnchor) {
-        if (
-          overCell !== this.lastCellHead &&
-          cellRangeBetween(editor.getState().doc, this.cellDragAnchor, overCell)
-        ) {
+      // Only a different cell in the SAME table forms a range. A cell in another
+      // table (or a non-cell point) fails cellRangeBetween — fall through to drop
+      // any stale range and resume text selection, rather than suppressing it.
+      if (
+        overCell !== null &&
+        overCell !== anchor &&
+        cellRangeBetween(editor.getState().doc, anchor, overCell)
+      ) {
+        if (overCell !== this.lastCellHead) {
           this.lastCellHead = overCell;
           editor.applyTransaction(
-            setStoredCellRange(editor.getState().tr, { anchor: this.cellDragAnchor, head: overCell }),
+            setStoredCellRange(editor.getState().tr, { anchor, head: overCell }),
           );
         }
         return;
@@ -656,6 +661,11 @@ export class PointerController {
     this.anchoredDrag = null;
     this.inlineImageDrag = null;
     this.isDragging = false;
+    // A cancelled gesture leaves no selection: drop any range this drag committed.
+    if (this.lastCellHead !== null) {
+      const { editor } = this.deps;
+      editor.applyTransaction(setStoredCellRange(editor.getState().tr, null));
+    }
     this.cellDragAnchor = null;
     this.lastCellHead = null;
     this.setCursorAll("text");

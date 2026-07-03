@@ -279,6 +279,43 @@ describe("persisted drag range (cellSelectionPlugin)", () => {
     expect(sel?.cellPositions).toHaveLength(2);
   });
 
+  it("a compound tx (doc change + selection set) clears the range, not remap", () => {
+    const editor = makeEditor(rect2x2());
+    const doc = editor.getState().doc;
+    editor.applyTransaction(
+      setStoredCellRange(editor.getState().tr, {
+        anchor: cellNodePos(doc, 0, 0), // A
+        head: cellNodePos(doc, 0, 1), // B
+      }),
+    );
+    // One tx both edits the doc AND moves the caret — the user has moved on.
+    const s = editor.getState();
+    const at = posInCell(s.doc, "A");
+    const tr = s.tr.insertText("Z", at);
+    tr.setSelection(TextSelection.create(tr.doc, tr.mapping.map(at)));
+    editor.applyTransaction(tr);
+    expect(selectedCells(editor.getState())).toBeNull();
+  });
+
+  it("clears the range when an endpoint cell is deleted", () => {
+    const editor = makeEditor(rect2x2());
+    const doc = editor.getState().doc;
+    editor.applyTransaction(
+      setStoredCellRange(editor.getState().tr, {
+        anchor: cellNodePos(doc, 0, 0), // A
+        head: cellNodePos(doc, 0, 1), // B — will be deleted
+      }),
+    );
+    expect(selectedCells(editor.getState())).not.toBeNull();
+
+    const s = editor.getState();
+    const headPos = cellNodePos(s.doc, 0, 1);
+    const cellB = s.doc.nodeAt(headPos);
+    if (!cellB) throw new Error("cell B not found");
+    editor.applyTransaction(s.tr.delete(headPos, headPos + cellB.nodeSize));
+    expect(selectedCells(editor.getState())).toBeNull();
+  });
+
   it("explicit null meta clears the range", () => {
     const editor = makeEditor(rect2x2());
     const doc = editor.getState().doc;

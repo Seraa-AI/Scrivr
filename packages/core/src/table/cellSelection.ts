@@ -188,6 +188,11 @@ export function cellRangeBetween(
   const a = cellInfoAtPos(doc, anchorCellPos);
   const b = cellInfoAtPos(doc, headCellPos);
   if (!a || !b || a.tablePos !== b.tablePos) return null;
+  // Both endpoints must land exactly on a cell boundary. A position that merely
+  // falls *inside* a cell (e.g. a remap that drifted into content) resolves to
+  // that cell's before-pos, which wouldn't equal the supplied position — reject
+  // it rather than silently snapping.
+  if (a.cellPos !== anchorCellPos || b.cellPos !== headCellPos) return null;
 
   const map = getTableMap(a.tableNode);
   const ar = rectForCellOffset(map, a.tableNode, a.cellOffset);
@@ -249,13 +254,18 @@ export function cellSelectionPlugin(): Plugin {
         const meta = tr.getMeta(cellSelectionPluginKey);
         if (meta !== undefined) return meta; // explicit set (range) or clear (null)
         if (!value) return null;
-        // A selection change we didn't author (click, arrow, Tab) drops the range.
-        if (tr.selectionSet && !tr.docChanged) return null;
+        // ANY selection change we didn't author (click, arrow, Tab — even one that
+        // also changes the doc, e.g. the multi-cell clear) drops the drag range.
+        // Checked before docChanged so a compound tx can't slip through to remap.
+        if (tr.selectionSet) return null;
         if (tr.docChanged) {
-          const anchor = tr.mapping.map(value.anchor, -1);
-          const head = tr.mapping.map(value.head, -1);
-          if (!cellRangeBetween(tr.doc, anchor, head)) return null;
-          return { anchor, head };
+          // assoc +1 keeps an endpoint on the existing cell when text is inserted
+          // at its boundary; a deleted endpoint (cell removed) clears the range.
+          const a = tr.mapping.mapResult(value.anchor, 1);
+          const h = tr.mapping.mapResult(value.head, 1);
+          if (a.deleted || h.deleted) return null;
+          if (!cellRangeBetween(tr.doc, a.pos, h.pos)) return null;
+          return { anchor: a.pos, head: h.pos };
         }
         return value;
       },

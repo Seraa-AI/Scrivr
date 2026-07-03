@@ -140,4 +140,19 @@ describe("PointerController — cell drag-select", () => {
 
     expect(selectedCells(s.editor.getState())).toBeNull();
   });
+
+  it("pointercancel mid-drag drops the committed range", () => {
+    const s = setup(3);
+    clean = s.cleanup;
+    const row = s.rowBlock();
+    const a = center(row, 0);
+    const b = center(row, 1);
+
+    s.container.dispatchEvent(pointerEvent("pointerdown", a.x, a.y));
+    document.dispatchEvent(pointerEvent("pointermove", b.x, b.y));
+    expect(selectedCells(s.editor.getState())?.cellPositions).toHaveLength(2);
+    document.dispatchEvent(pointerEvent("pointercancel", b.x, b.y));
+
+    expect(selectedCells(s.editor.getState())).toBeNull();
+  });
 });
