@@ -3,7 +3,12 @@ import { TextSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
-import { cellRangeFromSelection, resolveCellRange, selectedCells } from "./cellSelection";
+import {
+  cellRangeFromSelection,
+  resolveCellRange,
+  selectedCells,
+  setStoredCellRange,
+} from "./cellSelection";
 
 /**
  * Cell selection geometry (Phase 5). A `CellRange` is derived from a text
@@ -205,5 +210,86 @@ describe("cellRangeFromSelection", () => {
     select(editor, posInCell(doc, "L"), posInCell(doc, "wide"));
     const range = cellRangeFromSelection(editor.getState());
     expect(range?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 2 });
+  });
+});
+
+/** Position immediately before the cell node at grid (rowIndex, cellIndex). */
+function cellNodePos(doc: Node, rowIndex: number, cellIndex: number): number {
+  let target = -1;
+  doc.descendants((n, pos) => {
+    if (n.type.name !== "table") return true;
+    let cp = pos + 1;
+    for (let r = 0; r < rowIndex; r++) cp += n.child(r).nodeSize;
+    cp += 1; // into the row, before its first cell
+    const row = n.child(rowIndex);
+    for (let c = 0; c < cellIndex; c++) cp += row.child(c).nodeSize;
+    target = cp;
+    return false;
+  });
+  if (target < 0) throw new Error(`no cell at ${rowIndex},${cellIndex}`);
+  return target;
+}
+
+describe("persisted drag range (cellSelectionPlugin)", () => {
+  it("selectedCells returns the stored range, preferred over the (empty) text selection", () => {
+    const editor = makeEditor(rect2x2());
+    const doc = editor.getState().doc;
+    editor.applyTransaction(
+      setStoredCellRange(editor.getState().tr, {
+        anchor: cellNodePos(doc, 0, 0), // A
+        head: cellNodePos(doc, 1, 1), // D
+      }),
+    );
+    // Text selection is still a caret → derived would be null; stored wins.
+    const sel = selectedCells(editor.getState());
+    expect(sel?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 2 });
+    expect(sel?.cellPositions).toHaveLength(4);
+  });
+
+  it("a plain caret move clears the stored range", () => {
+    const editor = makeEditor(rect2x2());
+    const doc = editor.getState().doc;
+    editor.applyTransaction(
+      setStoredCellRange(editor.getState().tr, {
+        anchor: cellNodePos(doc, 0, 0),
+        head: cellNodePos(doc, 0, 1),
+      }),
+    );
+    expect(selectedCells(editor.getState())).not.toBeNull();
+
+    const s = editor.getState();
+    editor.applyTransaction(s.tr.setSelection(TextSelection.create(s.doc, posInCell(s.doc, "A"))));
+    expect(selectedCells(editor.getState())).toBeNull();
+  });
+
+  it("remaps the stored range through a doc edit", () => {
+    const editor = makeEditor(rect2x2());
+    const doc0 = editor.getState().doc;
+    editor.applyTransaction(
+      setStoredCellRange(editor.getState().tr, {
+        anchor: cellNodePos(doc0, 0, 0), // A
+        head: cellNodePos(doc0, 0, 1), // B
+      }),
+    );
+    // Insert text into cell A — positions shift, range must still resolve to A+B.
+    const s = editor.getState();
+    editor.applyTransaction(s.tr.insertText("XYZ", posInCell(s.doc, "A")));
+    const sel = selectedCells(editor.getState());
+    expect(sel?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 1 });
+    expect(sel?.cellPositions).toHaveLength(2);
+  });
+
+  it("explicit null meta clears the range", () => {
+    const editor = makeEditor(rect2x2());
+    const doc = editor.getState().doc;
+    editor.applyTransaction(
+      setStoredCellRange(editor.getState().tr, {
+        anchor: cellNodePos(doc, 0, 0),
+        head: cellNodePos(doc, 1, 0),
+      }),
+    );
+    expect(selectedCells(editor.getState())).not.toBeNull();
+    editor.applyTransaction(setStoredCellRange(editor.getState().tr, null));
+    expect(selectedCells(editor.getState())).toBeNull();
   });
 });

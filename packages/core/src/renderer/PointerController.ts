@@ -15,6 +15,8 @@ import {
   type PageFlowMetrics,
 } from "../layout/PageMetrics";
 import { dragDebugLog } from "./DragDebugOverlay";
+import { cellAtCoords } from "../layout/cellHitTest";
+import { cellRangeBetween, setStoredCellRange } from "../table/cellSelection";
 
 /**
  * How close to the rect edge the pointer must be for a resize-handle hit to
@@ -145,6 +147,16 @@ export class PointerController {
   private lastClickY = 0;
   /** Word boundaries from double-click — used for word-granularity drag. */
   private wordAnchor: { from: number; to: number } | null = null;
+
+  /**
+   * Cell drag-select state. `cellDragAnchor` is the cell (by node pos) the drag
+   * started in; `lastCellHead` is the last cell the persisted range was set to,
+   * so a move that stays in the same cell doesn't re-dispatch. Cells are
+   * `isolating`, so a spanning text selection is impossible — a drag across
+   * cells sets the persisted range in `cellSelectionPlugin` instead.
+   */
+  private cellDragAnchor: number | null = null;
+  private lastCellHead: number | null = null;
 
   constructor(private readonly deps: PointerControllerDeps) {}
 
@@ -444,6 +456,10 @@ export class PointerController {
     }
 
     this.wordAnchor = null;
+    // Remember the cell the drag starts in; a cross-cell drag becomes a cell
+    // range (handled in pointermove). Null when the click isn't in a table.
+    this.cellDragAnchor = cellAtCoords(editor.layout.pages, docX, docY, page);
+    this.lastCellHead = null;
 
     if (!e.shiftKey) {
       // Click physically inside an inline image's rect → select the image.
@@ -561,6 +577,32 @@ export class PointerController {
     // half never gets a valid head. Populate the page first, same as the
     // anchored-object drag handler below.
     editor.ensurePagePopulated(hit.page);
+
+    // Cell drag-select: once the pointer leaves the anchor cell, express the
+    // gesture as a persisted cell range (isolating cells forbid a spanning
+    // text selection) and suppress text selection. Dispatch only when the head
+    // cell changes. Dragging back into the anchor cell drops the range and
+    // resumes normal text selection inside that cell.
+    if (this.cellDragAnchor !== null) {
+      const overCell = cellAtCoords(editor.layout.pages, hit.docX, hit.docY, hit.page);
+      if (overCell !== null && overCell !== this.cellDragAnchor) {
+        if (
+          overCell !== this.lastCellHead &&
+          cellRangeBetween(editor.getState().doc, this.cellDragAnchor, overCell)
+        ) {
+          this.lastCellHead = overCell;
+          editor.applyTransaction(
+            setStoredCellRange(editor.getState().tr, { anchor: this.cellDragAnchor, head: overCell }),
+          );
+        }
+        return;
+      }
+      if (this.lastCellHead !== null) {
+        this.lastCellHead = null;
+        editor.applyTransaction(setStoredCellRange(editor.getState().tr, null));
+      }
+    }
+
     const pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
 
     // Word-granularity drag (after double-click)
@@ -602,6 +644,8 @@ export class PointerController {
       this.setCursorAll("text");
     }
     this.isDragging = false;
+    this.cellDragAnchor = null;
+    this.lastCellHead = null;
     this.releasePointer(e.pointerId);
     this.activePointerId = null;
   };
@@ -612,6 +656,8 @@ export class PointerController {
     this.anchoredDrag = null;
     this.inlineImageDrag = null;
     this.isDragging = false;
+    this.cellDragAnchor = null;
+    this.lastCellHead = null;
     this.setCursorAll("text");
     this.releasePointer(e.pointerId);
     this.activePointerId = null;

@@ -1,17 +1,20 @@
-import type { EditorState } from "prosemirror-state";
+import { Plugin, PluginKey } from "prosemirror-state";
+import type { EditorState, Transaction } from "prosemirror-state";
 import type { Node, ResolvedPos } from "prosemirror-model";
 import { getTableMap, type Rect, type TableMap } from "./TableMap";
 
 /**
- * Cell selection geometry (Phase 5).
+ * Cell selection geometry + persisted range (Phases 5-6).
  *
- * A `CellRange` is the rectangular cell selection a user expresses by dragging
- * a text selection out of one cell and into another. In v1 it is DERIVED from
- * that spanning `TextSelection` on demand — there is no stored selection state
- * yet. Phase 6 (drag-select + overlay) will introduce a persisted range and a
- * real ProseMirror `Selection` subclass; until then the spanning text
- * selection is the single source of truth, and editing guards (delete, paste)
- * ask this module "does the current selection span cells, and which?".
+ * A `CellRange` is a rectangular cell selection. It has two sources:
+ *   - DERIVED (Phase 5): a spanning `TextSelection` across cells (keyboard).
+ *   - PERSISTED (Phase 6): a stored `{anchor, head}` cell-position pair set by
+ *     mouse drag-select, held in `cellSelectionPlugin` state and remapped
+ *     through edits. Cells are `isolating`, so a mouse drag can't produce a
+ *     spanning text selection — the persisted range is how drag expresses one.
+ *
+ * `selectedCells()` prefers the persisted range, else derives from the text
+ * selection, so editing guards (delete/paste) and the overlay see one answer.
  *
  * The rect is normalized so a partially-covered merged cell (gridSpan / vMerge)
  * pulls the whole merged cell in — matching Word/Docs, where you cannot select
@@ -98,6 +101,12 @@ function rectForCellOffset(map: TableMap, table: Node, cellOffset: number): Rect
   }
 }
 
+/** Resolve the cell/table for a cell node's absolute position, or null. */
+function cellInfoAtPos(doc: Node, cellPos: number): CellInfo | null {
+  if (cellPos < 0 || cellPos + 1 > doc.content.size) return null;
+  return cellInfoAt(doc.resolve(cellPos + 1));
+}
+
 /** Resolve the cell / table enclosing `$pos`, or null when outside a table. */
 function cellInfoAt($pos: ResolvedPos): CellInfo | null {
   for (let d = $pos.depth; d >= 2; d--) {
@@ -166,6 +175,28 @@ export function cellRangeFromSelection(state: EditorState): CellRange | null {
   return { tablePos: fromInfo.tablePos, rect: normalizeRect(map, unionRect(fromRect, toRect)) };
 }
 
+/**
+ * The rectangular cell selection spanning the cells at two absolute positions
+ * (the anchor and head of a drag), or null if they aren't cells in one table.
+ * Unlike {@link cellRangeFromSelection}, anchor === head is allowed (1 cell).
+ */
+export function cellRangeBetween(
+  doc: Node,
+  anchorCellPos: number,
+  headCellPos: number,
+): CellRange | null {
+  const a = cellInfoAtPos(doc, anchorCellPos);
+  const b = cellInfoAtPos(doc, headCellPos);
+  if (!a || !b || a.tablePos !== b.tablePos) return null;
+
+  const map = getTableMap(a.tableNode);
+  const ar = rectForCellOffset(map, a.tableNode, a.cellOffset);
+  const br = rectForCellOffset(map, b.tableNode, b.cellOffset);
+  if (!ar || !br) return null;
+
+  return { tablePos: a.tablePos, rect: normalizeRect(map, unionRect(ar, br)) };
+}
+
 /** Resolve a `CellRange` against the current doc, or null if it no longer fits. */
 export function resolveCellRange(state: EditorState, range: CellRange): ResolvedCellRange | null {
   const { doc } = state;
@@ -183,10 +214,68 @@ export function resolveCellRange(state: EditorState, range: CellRange): Resolved
   return { ...range, table, tableStart, map, cellPositions };
 }
 
-/** Convenience: resolve the cell selection the current selection implies. */
+/**
+ * Persisted drag-selection: the anchor and head cell positions of a mouse
+ * drag. Held here (not as a ProseMirror selection) because `isolating` cells
+ * forbid a spanning text selection. Remapped through edits; a real `Selection`
+ * subclass is deferred to Phase 9.
+ */
+export interface StoredCellRange {
+  anchor: number;
+  head: number;
+}
+
+export const cellSelectionPluginKey = new PluginKey<StoredCellRange | null>(
+  "tableCellSelection",
+);
+
+/** Meta-set the persisted drag range on a transaction (or clear with null). */
+export function setStoredCellRange(tr: Transaction, range: StoredCellRange | null): Transaction {
+  return tr.setMeta(cellSelectionPluginKey, range);
+}
+
+/**
+ * Holds the persisted drag range. Cleared whenever a selection is set without
+ * our meta (a plain click / caret move drops the drag range), and remapped
+ * through doc changes. Validated after remap — an edit that dissolves a cell
+ * clears the range rather than pointing at garbage.
+ */
+export function cellSelectionPlugin(): Plugin {
+  return new Plugin<StoredCellRange | null>({
+    key: cellSelectionPluginKey,
+    state: {
+      init: () => null,
+      apply(tr, value) {
+        const meta = tr.getMeta(cellSelectionPluginKey);
+        if (meta !== undefined) return meta; // explicit set (range) or clear (null)
+        if (!value) return null;
+        // A selection change we didn't author (click, arrow, Tab) drops the range.
+        if (tr.selectionSet && !tr.docChanged) return null;
+        if (tr.docChanged) {
+          const anchor = tr.mapping.map(value.anchor, -1);
+          const head = tr.mapping.map(value.head, -1);
+          if (!cellRangeBetween(tr.doc, anchor, head)) return null;
+          return { anchor, head };
+        }
+        return value;
+      },
+    },
+  });
+}
+
+/**
+ * The active cell selection: the persisted drag range if present, else derived
+ * from a spanning text selection. Editing guards and the overlay both call this
+ * so mouse and keyboard selections resolve identically.
+ */
 export function selectedCells(state: EditorState): ResolvedCellRange | null {
-  const range = cellRangeFromSelection(state);
-  return range ? resolveCellRange(state, range) : null;
+  const stored = cellSelectionPluginKey.getState(state);
+  if (stored) {
+    const range = cellRangeBetween(state.doc, stored.anchor, stored.head);
+    if (range) return resolveCellRange(state, range);
+  }
+  const derived = cellRangeFromSelection(state);
+  return derived ? resolveCellRange(state, derived) : null;
 }
 
 export interface EnclosingCell {

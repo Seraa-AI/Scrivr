@@ -427,6 +427,27 @@ Goal: common table editing workflows work on canvas.
 5. Implement `splitCell()`.
 6. Tests: rectangular selections, merge/split, delete selected cells.
 
+**Status: selection foundation shipped (6a).** Items 1-3 done; merge/split (4-5)
+follow in 6b.
+- Item 1 — `layout/cellHitTest.ts` `cellAtCoords(pages, x, y, page)` maps a point
+  to a cell doc position via the Phase 4 `CellSubBlock` rects (half-open borders).
+- Item 2 — `PointerController` cell drag: pointerdown records the anchor cell,
+  pointermove into a different cell sets a **persisted** range (cells are
+  `isolating`, so a spanning text selection is impossible), pointermove back to
+  the anchor drops it. Intra-cell drag stays a normal text selection.
+- Persisted range — `table/cellSelection.ts` `cellSelectionPlugin` holds
+  `{anchor, head}` cell positions, remapped through edits and cleared on any
+  selection change it didn't author. `selectedCells()` prefers the persisted
+  range over the derived (text-selection) one, so mouse and keyboard resolve
+  identically — which finally makes the Phase 5 multi-cell clear reachable by mouse.
+- Item 3 — `Table.onViewReady` registers an overlay handler that fills the
+  selected cell rects (`theme.selectionFill`). NOTE: `StarterKit.onViewReady` must
+  forward `Table`'s callback, else the overlay never registers on the StarterKit
+  path (regression-tested).
+- Known v1 limit: a vMerge continuation row of a selected merged cell isn't
+  filled (only the master's row) — cosmetic, revisited with merge/split in 6b.
+- A real ProseMirror `Selection` subclass for the range stays deferred to Phase 9.
+
 ### Phase 7 — Clipboard Round Trip
 
 Goal: paste/copy common tables.

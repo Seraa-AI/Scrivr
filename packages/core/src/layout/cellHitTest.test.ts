@@ -5,6 +5,7 @@ import { StarterKit } from "../extensions/StarterKit";
 import { DefaultContent } from "../extensions/built-in/DefaultContent";
 import type { Editor } from "../Editor";
 import type { LayoutBlock } from "./BlockLayout";
+import { cellAtCoords } from "./cellHitTest";
 
 /**
  * Regression: clicking a cell must land the caret inside THAT cell.
@@ -101,6 +102,40 @@ describe("table cell hit-testing — click lands in the clicked cell", () => {
   it("cells with text", () => {
     const { editor, cleanup } = mount(tableDoc([cell("AAA"), cell("BBB"), cell("CCC")]));
     assertClicksLandInOwnCell(editor);
+    cleanup();
+  });
+});
+
+describe("cellAtCoords — point → cell doc position", () => {
+  it("returns the cellPos of the cell whose rect contains the point", () => {
+    const { editor, cleanup } = mount(tableDoc([cell("A"), cell("B"), cell("C")]));
+    const row = rowBlock(editor);
+    for (const c of row.cells ?? []) {
+      const cy = row.y + c.y + c.height / 2;
+      for (const cx of [c.x + 4, c.x + c.width / 2, c.x + c.width - 4]) {
+        expect(cellAtCoords(editor.layout.pages, cx, cy, 1)).toBe(c.cellPos);
+      }
+    }
+    cleanup();
+  });
+
+  it("a shared vertical border resolves to exactly one cell (half-open)", () => {
+    const { editor, cleanup } = mount(tableDoc([cell("A"), cell("B")]));
+    const row = rowBlock(editor);
+    const [a, b] = row.cells!;
+    const y = row.y + a!.y + a!.height / 2;
+    // The border x = a.x + a.width = b.x belongs to b (left edge inclusive).
+    expect(cellAtCoords(editor.layout.pages, b!.x, y, 1)).toBe(b!.cellPos);
+    cleanup();
+  });
+
+  it("returns null outside any cell and for a page with no table", () => {
+    const { editor, cleanup } = mount(tableDoc([cell("A"), cell("B")]));
+    const row = rowBlock(editor);
+    const midY = row.y + row.cells![0]!.y + row.cells![0]!.height / 2;
+    expect(cellAtCoords(editor.layout.pages, -50, midY, 1)).toBeNull();
+    expect(cellAtCoords(editor.layout.pages, 5, row.y + 100000, 1)).toBeNull();
+    expect(cellAtCoords(editor.layout.pages, 5, midY, 99)).toBeNull();
     cleanup();
   });
 });

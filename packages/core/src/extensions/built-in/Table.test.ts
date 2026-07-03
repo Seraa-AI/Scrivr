@@ -9,6 +9,8 @@ import { createTestEditor } from "../../test-utils";
 import { DOMParser as PMDOMParser, DOMSerializer } from "prosemirror-model";
 import type { Node } from "prosemirror-model";
 import type { LayoutBlock } from "../../layout/BlockLayout";
+import type { Extension } from "../Extension";
+import type { IEditor } from "../types";
 
 // Table ships behind an opt-in flag (see `chore/tables-default-off`); build a
 // local context that enables it so the schema-integration assertions below
@@ -736,3 +738,27 @@ describe("Table — HTML parse via schema parseDOM", () => {
     expect(table!.firstChild!.firstChild!.textContent).toBe("x");
   });
 });
+
+// Regression: StarterKit must forward Table.onViewReady, else the cell-selection
+// overlay never registers when Table is used via StarterKit (the normal path) —
+// the drag range is set but never painted.
+describe("Table — cell-selection overlay is registered via StarterKit.onViewReady", () => {
+  function countOverlayHandlers(kit: Extension): number {
+    const schema = new ExtensionManager([kit]).schema;
+    let count = 0;
+    const mockEditor = {
+      addOverlayRenderHandler: () => {
+        count++;
+        return () => {};
+      },
+    } as unknown as IEditor;
+    kit.resolve(schema).viewReadyCallback?.(mockEditor);
+    return count;
+  }
+
+  it("StarterKit({table:true}) registers one more overlay handler than with table off", () => {
+    const withTable = countOverlayHandlers(StarterKit.configure({ table: true }));
+    const withoutTable = countOverlayHandlers(StarterKit); // table disabled by default
+    expect(withTable).toBe(withoutTable + 1);
+  });
+})

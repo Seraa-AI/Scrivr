@@ -2,6 +2,7 @@ import { Extension } from "../Extension";
 import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
+import type { IEditor, OverlayRenderHandler } from "../types";
 import { TableRowStrategy } from "../../renderer/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
 import {
@@ -11,6 +12,7 @@ import {
   guardDelete,
 } from "../../table/editingGuards";
 import { tableStructureCommands } from "../../table/commands";
+import { cellSelectionPlugin, selectedCells } from "../../table/cellSelection";
 import { renderTableRowPdf } from "../../table/pdfExport";
 import { tableDocxHandlers } from "../../table/docxExport";
 
@@ -246,7 +248,34 @@ export const Table = Extension.create({
   },
 
   addProseMirrorPlugins() {
-    return [tableIntegrityPlugin()];
+    // cellSelectionPlugin holds the persisted drag-select range; tableIntegrityPlugin
+    // runs last so it repairs any structural drift a range-consuming command produced.
+    return [cellSelectionPlugin(), tableIntegrityPlugin()];
+  },
+
+  onViewReady(editor: IEditor) {
+    // Paint the active cell selection: fill each selected cell's rect on its
+    // page. Cell rects come from the Phase 4 layout (cell.x absolute, cell.y
+    // relative to the row block top). Selection is view state — nothing is
+    // written to the document.
+    const handler: OverlayRenderHandler = (ctx, pageNumber, _pageConfig, _charMap, theme) => {
+      const sel = selectedCells(editor.getState());
+      if (!sel) return;
+      const page = editor.layout.pages.find((p) => p.pageNumber === pageNumber);
+      if (!page) return;
+
+      const selected = new Set(sel.cellPositions);
+      ctx.save();
+      ctx.fillStyle = theme.selectionFill;
+      for (const block of page.blocks) {
+        if (block.kind !== "tableRow" || !block.cells) continue;
+        for (const c of block.cells) {
+          if (selected.has(c.cellPos)) ctx.fillRect(c.x, block.y + c.y, c.width, c.height);
+        }
+      }
+      ctx.restore();
+    };
+    return editor.addOverlayRenderHandler(handler);
   },
 
   addBlockStyles() {

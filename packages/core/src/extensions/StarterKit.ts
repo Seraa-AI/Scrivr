@@ -844,15 +844,19 @@ export const StarterKit = Extension.create<StarterKitOptions>({
   },
 
   onViewReady(editor: IEditor) {
-    // Aggregate view-only lifecycle from sub-extensions. Image is the
-    // only one today (its `redraw` request when an `<img>` finishes
-    // loading is paint-only).
+    // Aggregate view-only lifecycle from sub-extensions. Each sub-extension's
+    // onViewReady must be forwarded here — the engine only invokes StarterKit's,
+    // not the bundled extensions' individually.
     const cleanups: Array<() => void> = [];
     const opts = this.options;
 
     if (opts.image !== false) {
-      const resolved = Image.resolve();
-      const cleanup = resolved.viewReadyCallback?.(editor);
+      const cleanup = Image.resolve().viewReadyCallback?.(editor);
+      if (cleanup) cleanups.push(cleanup);
+    }
+    if (opts.table === true) {
+      // Registers the cell-selection overlay (paints the drag-selected cells).
+      const cleanup = Table.resolve().viewReadyCallback?.(editor);
       if (cleanup) cleanups.push(cleanup);
     }
 
