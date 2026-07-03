@@ -1,5 +1,67 @@
 # @scrivr/export-pdf
 
+## 1.0.15
+
+### Patch Changes
+
+- dd224ef: `@scrivr/core` — the render flush now scrolls the cursor into view only when a
+  transaction intended it.
+
+  Every transaction converges on `viewDispatch` → `scheduleFlush`, whose rAF
+  previously called `scrollCursorIntoView()` unconditionally. That meant any
+  programmatic or remote transaction — a collaborator's edit, an AI overlay, or a
+  citation highlight — yanked the viewport back to the local caret. Most visibly,
+  `revealCitation` set its highlight (via `applyTransaction`) and then scrolled the
+  cited range into view, only for the next frame's flush to scroll back to the
+  cursor.
+
+  Local edits and commands still scroll the caret into view as before. External
+  transactions (those dispatched through `applyTransaction`: Y.js, AI toolkit/
+  suggestions, header/footer, citation highlights, imports) now scroll only when
+  they explicitly called `tr.scrollIntoView()`. So `revealCitation` and
+  `scrollRangeIntoView` land on the cited passage and stay there.
+
+- 4cd72e5: `@scrivr/core` — persist block ids on the horizontal rule, page break, and
+  table node families.
+
+  `horizontalRule`, `pageBreak`, `table`, `tableRow`, `tableCell`, and
+  `tableHeader` now declare a `nodeId` attribute and round-trip it through HTML as
+  `data-node-id` (parse + serialize), matching the paragraph/heading/codeBlock/
+  list/image nodes. Previously these block families dropped their id at parse, so
+  a copy/paste or HTML re-import lost the stable id that comment anchors, AI block
+  targeting, and citation reveal rely on. `assignBlockIds` already populates any
+  block node whose schema declares the attr, so ids are assigned automatically —
+  no other wiring changed.
+
+- 87515de: `@scrivr/core` — Tables Phase 5: cell-editing semantics for the opt-in Table
+  extension (`StarterKit.configure({ table: true })`).
+
+  - **Tab / Shift-Tab** move between cells; Tab past the last cell appends a row
+    and lands the caret in its first cell.
+  - **Backspace / Delete** never escape a cell boundary — a Backspace at the start
+    of a cell (or Delete at its end) is swallowed instead of merging cells or
+    deleting the table, while ordinary in-cell deletion falls through to the
+    normal handler. Boundary detection walks the full path from the cell down, so
+    a Backspace inside a nested list at the cell's top outdents. On a multi-cell
+    selection they clear the selected cells in one undoable step.
+
+  Cross-cell selection geometry lives in `table/cellSelection.ts`: a `CellRange`
+  is derived on demand from a text selection that spans cells, with a partially
+  covered merged cell normalized in whole.
+
+  Keys are wired through `Table.addKeymap()` and chained in `StarterKit` (the
+  canvas input path dispatches through the merged extension keymap, not
+  ProseMirror plugin key props); each guard returns false when it doesn't apply so
+  the chain falls through to List/CodeBlock Tab and the base Backspace/Delete.
+
+  Paste distribution into a cell rectangle is deferred to Phase 7 (its seam is the
+  paste transformer, and it needs the cross-cell drag selection Phase 6 adds).
+
+- Updated dependencies [dd224ef]
+- Updated dependencies [4cd72e5]
+- Updated dependencies [87515de]
+  - @scrivr/core@1.0.15
+
 ## 1.0.14
 
 ### Patch Changes
