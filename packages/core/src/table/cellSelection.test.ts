@@ -1,19 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { TextSelection } from "prosemirror-state";
+import { Selection, TextSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
-import {
-  cellRangeFromSelection,
-  resolveCellRange,
-  selectedCells,
-  setStoredCellRange,
-} from "./cellSelection";
-import { serializeCellSelection } from "../input/ClipboardSerializer";
+import { selectedCells, CellSelection } from "./cellSelection";
+import { cellsCoveredBySelection } from "./cellSelectionSeam";
+import { serializeSelectionToHtml, serializeSelectionToText } from "../input/ClipboardSerializer";
+import { insertText } from "../model/commands";
 
 /**
- * Cell selection geometry (Phase 5). A `CellRange` is derived from a text
- * selection that spans cells; a partially-covered merged cell pulls in whole.
+ * Cell selection geometry + the `CellSelection` class. A partially-covered
+ * merged cell pulls the whole cell into the rect (Word/Docs semantics).
  */
 
 interface CellSpec {
@@ -75,29 +72,6 @@ function posInCell(doc: Node, text: string): number {
   return target;
 }
 
-/** Content position inside the cell at grid (rowIndex, cellIndex). */
-function posInCellAt(doc: Node, rowIndex: number, cellIndex: number): number {
-  let target = -1;
-  doc.descendants((n, pos) => {
-    if (n.type.name !== "table") return true;
-    let cellPos = pos + 1;
-    for (let r = 0; r < rowIndex; r++) cellPos += n.child(r).nodeSize;
-    cellPos += 1;
-    const row = n.child(rowIndex);
-    for (let c = 0; c < cellIndex; c++) cellPos += row.child(c).nodeSize;
-    target = cellPos + 2;
-    return false;
-  });
-  if (target < 0) throw new Error(`no cell at ${rowIndex},${cellIndex}`);
-  return target;
-}
-
-function select(editor: ServerEditor, anchor: number, head: number) {
-  editor.applyTransaction(
-    editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, anchor, head)),
-  );
-}
-
 const rect2x2 = () =>
   tableDoc(
     [100, 100],
@@ -106,113 +80,6 @@ const rect2x2 = () =>
       [{ text: "C" }, { text: "D" }],
     ],
   );
-
-describe("cellRangeFromSelection", () => {
-  it("returns null for a caret", () => {
-    const editor = makeEditor(rect2x2());
-    const p = posInCell(editor.getState().doc, "A");
-    select(editor, p, p);
-    expect(cellRangeFromSelection(editor.getState())).toBeNull();
-  });
-
-  it("returns null for a selection inside a single cell", () => {
-    const editor = makeEditor(tableDoc([100], [[{ text: "hello" }]]));
-    const doc = editor.getState().doc;
-    const start = posInCell(doc, "hello");
-    select(editor, start, start + 3); // "hel" within one cell
-    expect(cellRangeFromSelection(editor.getState())).toBeNull();
-  });
-
-  it("returns null when the selection is outside any table", () => {
-    const editor = makeEditor(rect2x2());
-    const doc = editor.getState().doc;
-    let afterPos = -1;
-    doc.descendants((n, pos) => {
-      if (n.isText && n.text === "after") afterPos = pos;
-    });
-    select(editor, afterPos, afterPos + 3);
-    expect(cellRangeFromSelection(editor.getState())).toBeNull();
-  });
-
-  it("returns null when one end is outside the table", () => {
-    const editor = makeEditor(rect2x2());
-    const doc = editor.getState().doc;
-    const inA = posInCell(doc, "A");
-    let afterPos = -1;
-    doc.descendants((n, pos) => {
-      if (n.isText && n.text === "after") afterPos = pos + 1;
-    });
-    select(editor, inA, afterPos);
-    expect(cellRangeFromSelection(editor.getState())).toBeNull();
-  });
-
-  it("spans two cells in the same row", () => {
-    const editor = makeEditor(rect2x2());
-    const doc = editor.getState().doc;
-    select(editor, posInCell(doc, "A"), posInCell(doc, "B"));
-    const range = cellRangeFromSelection(editor.getState());
-    expect(range?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 1 });
-    expect(resolveCellRange(editor.getState(), range!)?.cellPositions).toHaveLength(2);
-  });
-
-  it("spans a rectangle across rows and columns", () => {
-    const editor = makeEditor(rect2x2());
-    const doc = editor.getState().doc;
-    select(editor, posInCell(doc, "A"), posInCell(doc, "D"));
-    const resolved = selectedCells(editor.getState());
-    expect(resolved?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 2 });
-    expect(resolved?.cellPositions).toHaveLength(4);
-  });
-
-  it("is order-independent (head before anchor)", () => {
-    const editor = makeEditor(rect2x2());
-    const doc = editor.getState().doc;
-    select(editor, posInCell(doc, "D"), posInCell(doc, "A"));
-    expect(cellRangeFromSelection(editor.getState())?.rect).toEqual({
-      left: 0,
-      top: 0,
-      right: 2,
-      bottom: 2,
-    });
-  });
-
-  it("pulls a partially covered vertical merge in whole", () => {
-    // col0 is one cell merged down two rows; select from its continuation
-    // (row 1) into the adjacent cell. The rect must include the merge's top row.
-    const editor = makeEditor(
-      tableDoc(
-        [100, 100],
-        [
-          [{ text: "M", vMerge: "restart" }, { text: "B0" }],
-          [{ vMerge: "continue" }, { text: "B1" }],
-        ],
-      ),
-    );
-    const doc = editor.getState().doc;
-    // anchor in the continuation cell (row 1, col 0), head in B1 (row 1, col 1)
-    select(editor, posInCellAt(doc, 1, 0), posInCell(doc, "B1"));
-    const range = cellRangeFromSelection(editor.getState());
-    expect(range?.rect.top).toBe(0); // merge's top row pulled in
-    expect(range?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 2 });
-  });
-
-  it("pulls a partially covered horizontal span in whole", () => {
-    // row 0 col 0 spans 2 columns; select from a row-1 cell up into the span.
-    const editor = makeEditor(
-      tableDoc(
-        [100, 100],
-        [
-          [{ text: "wide", gridSpan: 2 }],
-          [{ text: "L" }, { text: "R" }],
-        ],
-      ),
-    );
-    const doc = editor.getState().doc;
-    select(editor, posInCell(doc, "L"), posInCell(doc, "wide"));
-    const range = cellRangeFromSelection(editor.getState());
-    expect(range?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 2 });
-  });
-});
 
 /** Position immediately before the cell node at grid (rowIndex, cellIndex). */
 function cellNodePos(doc: Node, rowIndex: number, cellIndex: number): number {
@@ -231,125 +98,256 @@ function cellNodePos(doc: Node, rowIndex: number, cellIndex: number): number {
   return target;
 }
 
-describe("persisted drag range (cellSelectionPlugin)", () => {
-  it("selectedCells returns the stored range, preferred over the (empty) text selection", () => {
+describe("CellSelection (Selection subclass)", () => {
+  it("rejects direct construction with endpoints outside one table", () => {
     const editor = makeEditor(rect2x2());
     const doc = editor.getState().doc;
-    editor.applyTransaction(
-      setStoredCellRange(editor.getState().tr, {
-        anchor: cellNodePos(doc, 0, 0), // A
-        head: cellNodePos(doc, 1, 1), // D
-      }),
-    );
-    // Text selection is still a caret → derived would be null; stored wins.
-    const sel = selectedCells(editor.getState());
-    expect(sel?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 2 });
-    expect(sel?.cellPositions).toHaveLength(4);
+    const $cell = doc.resolve(cellNodePos(doc, 0, 0));
+    expect(() => new CellSelection($cell, doc.resolve(0))).toThrow(RangeError);
   });
 
-  it("a plain caret move clears the stored range", () => {
+  it("covers the whole rectangle between two cells", () => {
     const editor = makeEditor(rect2x2());
     const doc = editor.getState().doc;
-    editor.applyTransaction(
-      setStoredCellRange(editor.getState().tr, {
-        anchor: cellNodePos(doc, 0, 0),
-        head: cellNodePos(doc, 0, 1),
-      }),
-    );
-    expect(selectedCells(editor.getState())).not.toBeNull();
-
-    const s = editor.getState();
-    editor.applyTransaction(s.tr.setSelection(TextSelection.create(s.doc, posInCell(s.doc, "A"))));
-    expect(selectedCells(editor.getState())).toBeNull();
+    const sel = CellSelection.between(doc, cellNodePos(doc, 0, 0), cellNodePos(doc, 1, 1));
+    expect(sel).not.toBeNull();
+    expect(sel!.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 2 });
+    // The head cell is the primary range → the text anchor lands inside it.
+    expect(sel!.$headCell.pos).toBe(cellNodePos(doc, 1, 1));
+    expect(sel!.$head.pos).toBeGreaterThan(cellNodePos(doc, 1, 1));
   });
 
-  it("remaps the stored range through a doc edit", () => {
-    const editor = makeEditor(rect2x2());
-    const doc0 = editor.getState().doc;
-    editor.applyTransaction(
-      setStoredCellRange(editor.getState().tr, {
-        anchor: cellNodePos(doc0, 0, 0), // A
-        head: cellNodePos(doc0, 0, 1), // B
-      }),
-    );
-    // Insert text into cell A — positions shift, range must still resolve to A+B.
-    const s = editor.getState();
-    editor.applyTransaction(s.tr.insertText("XYZ", posInCell(s.doc, "A")));
-    const sel = selectedCells(editor.getState());
-    expect(sel?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 1 });
-    expect(sel?.cellPositions).toHaveLength(2);
-  });
-
-  it("a compound tx (doc change + selection set) clears the range, not remap", () => {
+  it("rejects positions that are not both cells of one table", () => {
     const editor = makeEditor(rect2x2());
     const doc = editor.getState().doc;
-    editor.applyTransaction(
-      setStoredCellRange(editor.getState().tr, {
-        anchor: cellNodePos(doc, 0, 0), // A
-        head: cellNodePos(doc, 0, 1), // B
-      }),
-    );
-    // One tx both edits the doc AND moves the caret — the user has moved on.
-    const s = editor.getState();
-    const at = posInCell(s.doc, "A");
-    const tr = s.tr.insertText("Z", at);
-    tr.setSelection(TextSelection.create(tr.doc, tr.mapping.map(at)));
-    editor.applyTransaction(tr);
-    expect(selectedCells(editor.getState())).toBeNull();
+    expect(CellSelection.between(doc, cellNodePos(doc, 0, 0), 0)).toBeNull();
   });
 
-  it("clears the range when an endpoint cell is deleted", () => {
+  it("content() is a standalone table slice of the sub-grid", () => {
     const editor = makeEditor(rect2x2());
     const doc = editor.getState().doc;
-    editor.applyTransaction(
-      setStoredCellRange(editor.getState().tr, {
-        anchor: cellNodePos(doc, 0, 0), // A
-        head: cellNodePos(doc, 0, 1), // B — will be deleted
-      }),
-    );
-    expect(selectedCells(editor.getState())).not.toBeNull();
-
-    const s = editor.getState();
-    const headPos = cellNodePos(s.doc, 0, 1);
-    const cellB = s.doc.nodeAt(headPos);
-    if (!cellB) throw new Error("cell B not found");
-    editor.applyTransaction(s.tr.delete(headPos, headPos + cellB.nodeSize));
-    expect(selectedCells(editor.getState())).toBeNull();
+    const sel = CellSelection.between(doc, cellNodePos(doc, 0, 0), cellNodePos(doc, 1, 0))!;
+    const slice = sel.content();
+    const table = slice.content.firstChild!;
+    expect(table.type.name).toBe("table");
+    expect(table.childCount).toBe(2); // two rows (col 0 only)
+    expect(table.child(0).childCount).toBe(1); // one cell per row
+    expect(table.textContent).toContain("A");
+    expect(table.textContent).toContain("C");
+    expect(table.textContent).not.toContain("B");
   });
 
-  it("serializeCellSelection copies the stored range as html table + tab/newline text", () => {
+  it("selectedCells resolves a CellSelection to its cell positions", () => {
+    const editor = makeEditor(rect2x2());
+    const s0 = editor.getState();
+    const sel = CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 1, 1))!;
+    editor.applyTransaction(s0.tr.setSelection(sel));
+    const resolved = selectedCells(editor.getState());
+    expect(resolved?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 2 });
+    expect(resolved?.cellPositions).toHaveLength(4);
+  });
+
+  it("remaps through an edit and stays a CellSelection", () => {
+    const editor = makeEditor(rect2x2());
+    const s0 = editor.getState();
+    const sel = CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 0, 1))!;
+    editor.applyTransaction(s0.tr.setSelection(sel));
+    const s1 = editor.getState();
+    editor.applyTransaction(s1.tr.insertText("XY", posInCell(s1.doc, "A")));
+    const mapped = editor.getState().selection;
+    expect(mapped).toBeInstanceOf(CellSelection);
+    expect(selectedCells(editor.getState())?.cellPositions).toHaveLength(2);
+  });
+
+  it("degrades to a text selection when a cell endpoint is deleted", () => {
+    const editor = makeEditor(rect2x2());
+    const s0 = editor.getState();
+    const sel = CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 0, 1))!;
+    editor.applyTransaction(s0.tr.setSelection(sel));
+    const s1 = editor.getState();
+    const headPos = cellNodePos(s1.doc, 0, 1);
+    const cellB = s1.doc.nodeAt(headPos)!;
+    editor.applyTransaction(s1.tr.delete(headPos, headPos + cellB.nodeSize));
+    expect(editor.getState().selection).not.toBeInstanceOf(CellSelection);
+  });
+
+  it("round-trips through JSON via the registered jsonID", () => {
     const editor = makeEditor(rect2x2());
     const doc = editor.getState().doc;
-    editor.applyTransaction(
-      setStoredCellRange(editor.getState().tr, {
-        anchor: cellNodePos(doc, 0, 0), // A
-        head: cellNodePos(doc, 1, 1), // D — whole 2x2
-      }),
-    );
-    const out = serializeCellSelection(editor.getState(), editor.getState().schema);
-    expect(out).not.toBeNull();
-    expect(out?.text).toBe("A\tB\nC\tD");
-    expect(out?.html).toContain("<table>");
-    expect(out?.html).toContain("A");
-    expect(out?.html).toContain("D");
+    const sel = CellSelection.between(doc, cellNodePos(doc, 0, 0), cellNodePos(doc, 1, 1))!;
+    const json = sel.toJSON();
+    expect(json.type).toBe("cell");
+    const restored = Selection.fromJSON(doc, json);
+    expect(restored).toBeInstanceOf(CellSelection);
+    expect(restored.eq(sel)).toBe(true);
   });
 
-  it("serializeCellSelection returns null with no cell range", () => {
-    const editor = makeEditor(rect2x2());
-    expect(serializeCellSelection(editor.getState(), editor.getState().schema)).toBeNull();
-  });
-
-  it("explicit null meta clears the range", () => {
+  it("fromJSON degrades invalid/untrusted positions to a non-cell selection", () => {
     const editor = makeEditor(rect2x2());
     const doc = editor.getState().doc;
-    editor.applyTransaction(
-      setStoredCellRange(editor.getState().tr, {
-        anchor: cellNodePos(doc, 0, 0),
-        head: cellNodePos(doc, 1, 0),
-      }),
+    // Positions that don't point at two cells of one table (0 is before the
+    // table) must not throw or fabricate an unrelated rectangle.
+    const restored = Selection.fromJSON(doc, { type: "cell", anchor: 0, head: 0 });
+    expect(restored).not.toBeInstanceOf(CellSelection);
+    // Out-of-range garbage is clamped, not thrown.
+    expect(() => Selection.fromJSON(doc, { type: "cell", anchor: 1e9, head: -5 })).not.toThrow();
+  });
+
+  it("resolves its bookmark back to an equal CellSelection", () => {
+    const editor = makeEditor(rect2x2());
+    const doc = editor.getState().doc;
+    const sel = CellSelection.between(doc, cellNodePos(doc, 0, 0), cellNodePos(doc, 1, 0))!;
+    const resolved = sel.getBookmark().resolve(doc);
+    expect(resolved).toBeInstanceOf(CellSelection);
+    expect((resolved as CellSelection).eq(sel)).toBe(true);
+  });
+});
+
+describe("CellSelection merged-cell normalization", () => {
+  it("pulls a partially covered vertical merge in whole", () => {
+    // col0 is one cell merged down two rows; anchor in its continuation cell.
+    const editor = makeEditor(
+      tableDoc(
+        [100, 100],
+        [
+          [{ text: "M", vMerge: "restart" }, { text: "B0" }],
+          [{ vMerge: "continue" }, { text: "B1" }],
+        ],
+      ),
     );
-    expect(selectedCells(editor.getState())).not.toBeNull();
-    editor.applyTransaction(setStoredCellRange(editor.getState().tr, null));
-    expect(selectedCells(editor.getState())).toBeNull();
+    const doc = editor.getState().doc;
+    const sel = CellSelection.between(doc, cellNodePos(doc, 1, 0), cellNodePos(doc, 1, 1));
+    expect(sel!.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 2 });
+  });
+
+  it("pulls a partially covered horizontal span in whole", () => {
+    const editor = makeEditor(
+      tableDoc(
+        [100, 100],
+        [
+          [{ text: "wide", gridSpan: 2 }],
+          [{ text: "L" }, { text: "R" }],
+        ],
+      ),
+    );
+    const doc = editor.getState().doc;
+    const sel = CellSelection.between(doc, cellNodePos(doc, 1, 0), cellNodePos(doc, 0, 0));
+    expect(sel!.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 2 });
+  });
+});
+
+describe("cellsCoveredBySelection (cell wash coverage)", () => {
+  const bodyAroundTable = () => ({
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: "before" }] },
+      {
+        type: "table",
+        attrs: { layout: "fixed", grid: [100, 100] },
+        content: [
+          { type: "tableRow", content: [cell({ text: "A" }), cell({ text: "B" })] },
+          { type: "tableRow", content: [cell({ text: "C" }), cell({ text: "D" })] },
+        ],
+      },
+      { type: "paragraph", content: [{ type: "text", text: "after" }] },
+    ],
+  });
+
+  it("covers every cell when a text selection spans the whole table", () => {
+    const editor = makeEditor(bodyAroundTable());
+    const doc = editor.getState().doc;
+    // Select from the "before" paragraph to the "after" paragraph.
+    let beforePos = -1;
+    let afterPos = -1;
+    doc.descendants((n, pos) => {
+      if (n.isText && n.text === "before") beforePos = pos + 1;
+      if (n.isText && n.text === "after") afterPos = pos + 1;
+    });
+    editor.applyTransaction(
+      editor.getState().tr.setSelection(TextSelection.create(doc, beforePos, afterPos)),
+    );
+    expect(cellsCoveredBySelection(editor.getState()).size).toBe(4);
+  });
+
+  it("covers nothing for a selection inside a single cell", () => {
+    const editor = makeEditor(bodyAroundTable());
+    const doc = editor.getState().doc;
+    const start = posInCell(doc, "A");
+    editor.applyTransaction(
+      editor.getState().tr.setSelection(TextSelection.create(doc, start, start + 1)),
+    );
+    expect(cellsCoveredBySelection(editor.getState()).size).toBe(0);
+  });
+
+  it("covers the CellSelection's own cells", () => {
+    const editor = makeEditor(bodyAroundTable());
+    const doc = editor.getState().doc;
+    const cellPositions: number[] = [];
+    doc.descendants((n, pos) => {
+      if (n.type.name === "tableCell") cellPositions.push(pos);
+    });
+    const sel = CellSelection.between(doc, cellPositions[0]!, cellPositions[3]!)!;
+    editor.applyTransaction(editor.getState().tr.setSelection(sel));
+    expect(cellsCoveredBySelection(editor.getState()).size).toBe(4);
+  });
+});
+
+describe("typing over a CellSelection", () => {
+  it("routes through replace(): clears the other cells instead of only the head cell", () => {
+    const editor = makeEditor(rect2x2());
+    const s0 = editor.getState();
+    const sel = CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 1, 1))!;
+    editor.applyTransaction(s0.tr.setSelection(sel));
+    const tr = insertText(editor.getState(), "X");
+    expect(tr).not.toBeNull();
+    editor.applyTransaction(tr!);
+
+    const texts: string[] = [];
+    editor.getState().doc.descendants((n) => {
+      if (n.type.name === "tableCell") texts.push(n.textContent);
+    });
+    // All four cells were touched: three cleared, exactly one holds the typed text.
+    expect(texts).toHaveLength(4);
+    expect(texts.filter((t) => t.length > 0)).toEqual(["X"]);
+  });
+});
+
+describe("clipboard serialization of a CellSelection", () => {
+  it("copies as an html table plus tab/newline text", () => {
+    const editor = makeEditor(rect2x2());
+    const s0 = editor.getState();
+    const sel = CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 1, 1))!;
+    editor.applyTransaction(s0.tr.setSelection(sel));
+    const state = editor.getState();
+    expect(serializeSelectionToText(state)).toBe("A\tB\nC\tD");
+    const html = serializeSelectionToHtml(state, state.schema);
+    expect(html).toContain("<table");
+    expect(html).toContain("<td");
+    expect(html).toContain("A");
+    expect(html).toContain("D");
+  });
+
+  it("preserves merged-cell spans in clipboard HTML", () => {
+    const editor = makeEditor(
+      tableDoc(
+        [100, 100],
+        [
+          [{ text: "wide", gridSpan: 2 }],
+          [{ text: "down", vMerge: "restart" }, { text: "B" }],
+          [{ vMerge: "continue" }, { text: "C" }],
+        ],
+      ),
+    );
+    const state = editor.getState();
+    const sel = CellSelection.between(
+      state.doc,
+      cellNodePos(state.doc, 0, 0),
+      cellNodePos(state.doc, 2, 1),
+    )!;
+    editor.applyTransaction(state.tr.setSelection(sel));
+
+    const html = serializeSelectionToHtml(editor.getState(), editor.getState().schema);
+    expect(html).toContain('colspan="2"');
+    expect(html).toContain('rowspan="2"');
   });
 });

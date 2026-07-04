@@ -1,5 +1,5 @@
 import type { Editor } from "../Editor";
-import { NodeSelection, Selection } from "prosemirror-state";
+import { NodeSelection } from "prosemirror-state";
 import type { SelectionGesture } from "../selection/types";
 import {
   getHandles,
@@ -16,8 +16,6 @@ import {
   type PageFlowMetrics,
 } from "../layout/PageMetrics";
 import { dragDebugLog } from "./DragDebugOverlay";
-import { cellAtCoords } from "../layout/cellHitTest";
-import { cellRangeBetween, setStoredCellRange } from "../table/cellSelection";
 
 /**
  * How close to the rect edge the pointer must be for a resize-handle hit to
@@ -154,16 +152,6 @@ export class PointerController {
    * instead of the built-in text/image handling. Transient — never editor state.
    */
   private activeGesture: SelectionGesture | null = null;
-
-  /**
-   * Cell drag-select state. `cellDragAnchor` is the cell (by node pos) the drag
-   * started in; `lastCellHead` is the last cell the persisted range was set to,
-   * so a move that stays in the same cell doesn't re-dispatch. Cells are
-   * `isolating`, so a spanning text selection is impossible — a drag across
-   * cells sets the persisted range in `cellSelectionPlugin` instead.
-   */
-  private cellDragAnchor: number | null = null;
-  private lastCellHead: number | null = null;
 
   constructor(private readonly deps: PointerControllerDeps) {}
 
@@ -332,6 +320,13 @@ export class PointerController {
       if (distToEdge > EDGE_BAND_PX) return null;
     }
 
+    // Resize hit-testing uses the canonical 8-point `getHandles(nodeRect)` grid.
+    // A behavior's `geometry()` paints its grips from the *same* `getHandles`
+    // over the *same* `editor.getNodeRect`, so paint and hit-test share one
+    // source of truth — the contract for `resize: true` is exactly these 8
+    // positions. A behavior that wants bespoke handle geometry can't express it
+    // yet (the emitted `handles` primitives carry no id to drive the drag);
+    // that lands with the resize → standalone gesture-provider refactor.
     return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
   }
 
@@ -405,7 +400,10 @@ export class PointerController {
 
     const semanticHit = editor.resolveHitTarget(docX, docY, page);
     if (semanticHit) {
-      const gesture = editor.beginSelectionGesture(semanticHit, e);
+      // Pass the authoritative click count — `event.detail` isn't reliable on
+      // pointerdown, so a gesture that treats double/triple-click specially (a
+      // cell gesture defers to word/block selection) needs this instead.
+      const gesture = editor.beginSelectionGesture(semanticHit, e, this.clickCount);
       if (gesture) {
         this.activeGesture = gesture;
         this.isDragging = true;
@@ -500,10 +498,6 @@ export class PointerController {
     }
 
     this.wordAnchor = null;
-    // Remember the cell the drag starts in; a cross-cell drag becomes a cell
-    // range (handled in pointermove). Null when the click isn't in a table.
-    this.cellDragAnchor = cellAtCoords(editor.layout.pages, docX, docY, page);
-    this.lastCellHead = null;
 
     if (!e.shiftKey) {
       // Click physically inside an inline image's rect → select the image.
@@ -553,8 +547,9 @@ export class PointerController {
     if (this.activeGesture) {
       const h = this.hitTest(e.clientX, e.clientY);
       const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
+      const point = h ? { page: h.page, docX: h.docX, docY: h.docY } : null;
       try {
-        this.activeGesture.update(target, e);
+        this.activeGesture.update(target, e, point);
       } catch (err) {
         // A throwing gesture must not lock the pointer for the rest of the session.
         this.endActiveGesture(e.pointerId);
@@ -636,40 +631,6 @@ export class PointerController {
     // anchored-object drag handler below.
     editor.ensurePagePopulated(hit.page);
 
-    // Cell drag-select: while the drag started in a cell, the pointer position
-    // decides the mode.
-    //   - A different cell in the same table → persisted cell range. Collapse the
-    //     PM selection to a caret in the same transaction (meta wins in the
-    //     plugin, so the range survives) so no leftover text selection paints a
-    //     cross-cell highlight or pops the bubble menu.
-    //   - Still inside the anchor cell → drop any range and fall through to normal
-    //     in-cell text selection.
-    //   - Off any cell (border / gap / outside the table) → freeze: do NOT run the
-    //     text path, which would set a spanning cross-cell selection.
-    if (this.cellDragAnchor !== null) {
-      const anchor = this.cellDragAnchor;
-      const overCell = cellAtCoords(editor.layout.pages, hit.docX, hit.docY, hit.page);
-      if (
-        overCell !== null &&
-        overCell !== anchor &&
-        cellRangeBetween(editor.getState().doc, anchor, overCell)
-      ) {
-        if (overCell !== this.lastCellHead) {
-          this.lastCellHead = overCell;
-          const tr = editor.getState().tr;
-          tr.setSelection(Selection.near(tr.doc.resolve(anchor + 1)));
-          editor.applyTransaction(setStoredCellRange(tr, { anchor, head: overCell }));
-        }
-        return;
-      }
-      if (this.lastCellHead !== null) {
-        this.lastCellHead = null;
-        editor.applyTransaction(setStoredCellRange(editor.getState().tr, null));
-      }
-      // Off-cell with no active range: freeze rather than select spanning text.
-      if (overCell === null) return;
-    }
-
     const pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
 
     // Word-granularity drag (after double-click)
@@ -701,8 +662,9 @@ export class PointerController {
       this.isDragging = false;
       const h = this.hitTest(e.clientX, e.clientY);
       const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
+      const point = h ? { page: h.page, docX: h.docX, docY: h.docY } : null;
       try {
-        gesture.finish(target, e);
+        gesture.finish(target, e, point);
       } finally {
         this.releasePointer(e.pointerId);
         this.activePointerId = null;
@@ -726,8 +688,6 @@ export class PointerController {
       this.setCursorAll("text");
     }
     this.isDragging = false;
-    this.cellDragAnchor = null;
-    this.lastCellHead = null;
     this.releasePointer(e.pointerId);
     this.activePointerId = null;
   };
@@ -742,13 +702,6 @@ export class PointerController {
     this.anchoredDrag = null;
     this.inlineImageDrag = null;
     this.isDragging = false;
-    // A cancelled gesture leaves no selection: drop any range this drag committed.
-    if (this.lastCellHead !== null) {
-      const { editor } = this.deps;
-      editor.applyTransaction(setStoredCellRange(editor.getState().tr, null));
-    }
-    this.cellDragAnchor = null;
-    this.lastCellHead = null;
     this.setCursorAll("text");
     this.releasePointer(e.pointerId);
     this.activePointerId = null;

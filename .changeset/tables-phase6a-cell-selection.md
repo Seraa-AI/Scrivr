@@ -8,28 +8,27 @@
 "@scrivr/docx": patch
 ---
 
-`@scrivr/core` — Tables Phase 6a: mouse cell selection for the opt-in Table
-extension.
+`@scrivr/core` — Table cell selection, built on a real `CellSelection`.
 
-You can now **drag across table cells to select a rectangle** and see it
-highlighted, and **Backspace/Delete clears the selected cells** — the Phase 5
-multi-cell clear that was previously unreachable by mouse (table cells are
-`isolating`, so a drag can't produce a spanning text selection).
+You can now **drag across table cells to select a rectangle**, **Shift-click a
+second cell to extend the selection**, and **Backspace/Delete or type to clear
+the selected cells**. Copy/cut round-trips the selection to an HTML `<table>`
+(with `colspan`/`rowspan` for merged cells) plus tab/newline text, so it pastes
+into Docs/Word/Notion as a grid. Because the cell selection is now a real
+ProseMirror selection, undo, collaboration, and clipboard all work without any
+special cases.
 
-- Cell hit-testing (`cellAtCoords`) maps a point to a cell from the laid-out
-  cell rects.
-- A persisted cell-selection range (`cellSelectionPlugin`) holds the dragged
-  `{anchor, head}` cells, remaps through edits, and clears on any other
-  selection change. `selectedCells()` resolves mouse and keyboard selections
-  identically.
-- The selection overlay paints a uniform translucent wash over the selected
-  cells (`theme.selectionFill`), matching Google Docs. Crossing into another
-  cell collapses the text selection, so the cell wash is the only selection
-  visual — the text inside a selected cell keeps no separate highlight, and no
-  formatting bubble menu pops.
-- Copy/cut of a cell range: `Cmd/Ctrl-C`/`-X` serialize the selected cells to an
-  HTML `<table>` (pastes into Docs/Word/Notion as a grid) plus tab/newline
-  `text/plain`. Cut also clears the copied cells.
+Selecting **across a table boundary** now matches Word/Google Docs: a drag that
+runs from body text through a table selects the leading text, the **whole table**
+(every cell washed), and the trailing text as one continuous selection — pointer
+drag and Shift+Arrow behave identically at the boundary. Clicking inside a cell
+places the caret exactly where you click (it no longer jumps to a neighbouring
+cell near a cell edge or in padding). **Double-click selects the word and
+triple-click the cell's text** — only a drag or Shift-click selects whole cells.
 
-Merge/split of a selected range follows in Phase 6b. A vMerge continuation row
-of a selected merged cell isn't filled yet (cosmetic).
+Under the hood this replaces the Phase-6 plugin shadow (a stored range + a
+collapsed caret) with a `CellSelection` registered entirely through the selection
+seam — a behavior, a hit tester, and a gesture. A text selection defers the
+interior of any node that opts into painting its own wash
+(`NodeSpec.selectionWash`), and untrusted serialized selections validate and
+degrade to a caret instead of throwing.

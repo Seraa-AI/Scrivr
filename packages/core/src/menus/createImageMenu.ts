@@ -60,13 +60,19 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
   let rafId: number | null = null;
 
   function update() {
-    const state = editor.getState();
-    // Selection *kind* comes from the descriptor (the seam), not instanceof; the
-    // Image extension owns the "image" kind. The image-specific node lookup stays
-    // here since this menu is image-only.
+    // The descriptor's `kind` is the stable semantic identity the Image
+    // extension's SelectionBehavior owns — key off it rather than re-deriving
+    // the node type. `descriptor.from` is a position in the *active surface's*
+    // document, so resolve the node against that surface, not the root body doc
+    // (a header image would otherwise resolve the wrong node).
     const descriptor = editor.getSelectionDescriptor();
+    if (descriptor.kind !== "image") {
+      if (visible) { visible = false; lastDocPos = -1; onHide(); }
+      return;
+    }
+    const state = editor.surfaces.activeSurface?.state ?? editor.getState();
     const docPos = descriptor.from;
-    const node = descriptor.kind === "image" ? state.doc.nodeAt(docPos) : null;
+    const node = state.doc.nodeAt(docPos);
 
     if (!node || node.type.name !== "image") {
       if (visible) { visible = false; lastDocPos = -1; onHide(); }

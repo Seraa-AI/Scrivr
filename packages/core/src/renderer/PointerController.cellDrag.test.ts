@@ -4,14 +4,16 @@ import { StarterKit } from "../extensions/StarterKit";
 import { DefaultContent } from "../extensions/built-in/DefaultContent";
 import { defaultPageConfig } from "../layout/PageLayout";
 import { PointerController, type PointerControllerDeps } from "./PointerController";
-import { selectedCells } from "../table/cellSelection";
+import { selectedCells, CellSelection } from "../table/cellSelection";
 import type { Editor } from "../Editor";
 import type { LayoutBlock } from "../layout/BlockLayout";
 
 /**
- * Cell drag-select through the real PointerController: pointerdown in one cell,
- * pointermove into another cell, sets the persisted CellRange (cells are
- * `isolating`, so a spanning text selection is impossible).
+ * Cell drag-select through the real PointerController + selection seam:
+ * pointerdown in one cell, pointermove into another cell dispatches a
+ * `CellSelection` (cells are `isolating`, so a spanning text selection is
+ * impossible). The drag is owned by the registered gesture provider, not by any
+ * cell-specific code in the pointer controller.
  *
  * Coordinates map 1:1 to doc coords via the pinned container rect (happy-dom
  * has no real layout), so a pointer at a cell's laid-out center hit-tests to
@@ -112,7 +114,7 @@ describe("PointerController — cell drag-select", () => {
     expect(sel?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 1 });
   });
 
-  it("a cross-cell drag collapses the text selection (no spanning highlight / bubble menu)", () => {
+  it("a cross-cell drag ends in a CellSelection (no spanning text highlight)", () => {
     const s = setup(3);
     clean = s.cleanup;
     const row = s.rowBlock();
@@ -128,8 +130,10 @@ describe("PointerController — cell drag-select", () => {
     document.dispatchEvent(pointerEvent("pointerup", b.x, b.y));
 
     const st = s.editor.getState();
-    expect(st.selection.empty).toBe(true); // collapsed — no bubble menu
-    expect(selectedCells(st)?.cellPositions).toHaveLength(3); // the cell range carries the selection
+    // A real CellSelection carries the selection — the text bubble menu is
+    // suppressed by the descriptor's `formatText: false`, not by an empty range.
+    expect(st.selection).toBeInstanceOf(CellSelection);
+    expect(selectedCells(st)?.cellPositions).toHaveLength(3);
   });
 
   it("a click that stays in one cell leaves no cell selection (text caret only)", () => {

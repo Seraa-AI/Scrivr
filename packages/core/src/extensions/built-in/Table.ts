@@ -2,7 +2,7 @@ import { Extension } from "../Extension";
 import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
-import type { IEditor, OverlayRenderHandler } from "../types";
+import type { IEditor } from "../types";
 import { TableRowStrategy } from "../../renderer/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
 import {
@@ -12,7 +12,12 @@ import {
   guardDelete,
 } from "../../table/editingGuards";
 import { tableStructureCommands } from "../../table/commands";
-import { cellSelectionPlugin, selectedCells } from "../../table/cellSelection";
+import {
+  cellSelectionBehavior,
+  cellHitTester,
+  cellSelectionGesture,
+  tableCellWashHandler,
+} from "../../table/cellSelectionSeam";
 import { renderTableRowPdf } from "../../table/pdfExport";
 import { tableDocxHandlers } from "../../table/docxExport";
 
@@ -67,6 +72,9 @@ function tableSpec(): NodeSpec {
     group: "block",
     content: "tableRow+",
     isolating: true,
+    // A selection that spans the table washes its cells (tableCellWashHandler),
+    // so the text behavior defers the table's interior instead of banding it.
+    selectionWash: true,
     attrs: {
       layout: { default: "fixed" },
       grid: { default: [] as number[] },
@@ -248,37 +256,31 @@ export const Table = Extension.create({
   },
 
   addProseMirrorPlugins() {
-    // cellSelectionPlugin holds the persisted drag-select range; tableIntegrityPlugin
-    // runs last so it repairs any structural drift a range-consuming command produced.
-    return [cellSelectionPlugin(), tableIntegrityPlugin()];
+    // tableIntegrityPlugin runs last so it repairs any structural drift a
+    // range-consuming command produced.
+    return [tableIntegrityPlugin()];
+  },
+
+  // Cell selection flows through the selection seam — a behavior (describe), a
+  // hit tester (pointer → cell), and a gesture (drag → CellSelection). The cell
+  // wash is painted by the overlay handler below, which covers both a cell range
+  // and a text range that spans the table.
+  addSelectionBehavior() {
+    return [cellSelectionBehavior];
+  },
+
+  addHitTester() {
+    return [cellHitTester];
+  },
+
+  addSelectionGesture() {
+    return [cellSelectionGesture];
   },
 
   onViewReady(editor: IEditor) {
-    // Paint the active cell selection: fill each selected cell's rect on its
-    // page. Cell rects come from the Phase 4 layout (cell.x absolute, cell.y
-    // relative to the row block top). Selection is view state — nothing is
-    // written to the document.
-    const handler: OverlayRenderHandler = (ctx, pageNumber, _pageConfig, _charMap, theme) => {
-      const sel = selectedCells(editor.getState());
-      if (!sel) return;
-      const page = editor.layout.pages.find((p) => p.pageNumber === pageNumber);
-      if (!page) return;
-
-      const selected = new Set(sel.cellPositions);
-      ctx.save();
-      // Uniform translucent wash over every selected cell (Google Docs style).
-      // The drag collapses the text selection, so this fill is the only
-      // selection visual — no per-cell text highlight underneath.
-      ctx.fillStyle = theme.selectionFill;
-      for (const block of page.blocks) {
-        if (block.kind !== "tableRow" || !block.cells) continue;
-        for (const c of block.cells) {
-          if (selected.has(c.cellPos)) ctx.fillRect(c.x, block.y + c.y, c.width, c.height);
-        }
-      }
-      ctx.restore();
-    };
-    return editor.addOverlayRenderHandler(handler);
+    // Paints the cell wash for any selection covering cells — a CellSelection
+    // rectangle, or a text selection that spans the whole table (Word/Docs).
+    return editor.addOverlayRenderHandler(tableCellWashHandler(editor));
   },
 
   addBlockStyles() {

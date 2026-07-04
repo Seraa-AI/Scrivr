@@ -1,6 +1,6 @@
-import { NodeSelection, TextSelection } from "prosemirror-state";
+import { NodeSelection, Selection, TextSelection } from "prosemirror-state";
 import type { EditorState, Transaction } from "prosemirror-state";
-import type { Node as PmNode } from "prosemirror-model";
+import type { Node as PmNode, ResolvedPos } from "prosemirror-model";
 import type { CharacterMap } from "./layout/CharacterMap";
 import { normalizeImageAttrs } from "./layout/AnchoredObjects";
 import type { EditorNavigator } from "./extensions/types";
@@ -46,14 +46,27 @@ export class SelectionController implements EditorNavigator {
 
   /** Set an explicit anchor + head, creating a non-collapsed selection. */
   setSelection(anchor: number, head: number): void {
-    const state = this.deps.getState();
-    const size = state.doc.content.size;
-    const a = Math.max(0, Math.min(anchor, size));
-    const h = Math.max(0, Math.min(head, size));
-    const $a = state.doc.resolve(a);
-    const $h = state.doc.resolve(h);
-    this.deps.dispatch(state.tr.setSelection(TextSelection.between($a, $h)));
+    this.dispatchTextSelection(anchor, head);
     this.deps.focus();
+  }
+
+  /**
+   * The one place a `TextSelection` is built from raw anchor/head positions, so
+   * pointer drag and keyboard extension normalize identically at a table
+   * boundary. Each endpoint is snapped out of any isolating node the other isn't
+   * in — a text selection can't end inside an isolating cell reached from
+   * outside, so a selection crossing a table includes the whole table (Word/Docs)
+   * instead of sticking at its edge.
+   */
+  private dispatchTextSelection(anchor: number, head: number): void {
+    const state = this.deps.getState();
+    const doc = state.doc;
+    const size = doc.content.size;
+    const $a0 = doc.resolve(Math.max(0, Math.min(anchor, size)));
+    const $h0 = doc.resolve(Math.max(0, Math.min(head, size)));
+    const $h = snapOutOfIsolating($h0, $a0);
+    const $a = snapOutOfIsolating($a0, $h);
+    this.deps.dispatch(state.tr.setSelection(TextSelection.between($a, $h)));
   }
 
   // ── Direction-based movement ────────────────────────────────────────────────
@@ -236,9 +249,9 @@ export class SelectionController implements EditorNavigator {
     const size = state.doc.content.size;
     const h = Math.max(0, Math.min(newHead, size));
     const a = extend ? state.selection.anchor : h;
-    const $a = state.doc.resolve(Math.max(0, Math.min(a, size)));
-    const $h = state.doc.resolve(h);
-    this.deps.dispatch(state.tr.setSelection(TextSelection.between($a, $h)));
+    // Same normalization as pointer selection, so Shift+arrow across a table
+    // boundary matches a drag across it.
+    this.dispatchTextSelection(a, h);
   }
 
   private applyNodeSelection(docPos: number): void {
@@ -285,6 +298,33 @@ export class SelectionController implements EditorNavigator {
 }
 
 // ── Module-level helpers ────────────────────────────────────────────────────
+
+/**
+ * Move `$pos` out of any `isolating` ancestor node that `$other` is not also
+ * inside, to that node's near/far boundary depending on drag direction. Generic
+ * (tables today, isolating embeds tomorrow): a `TextSelection` endpoint can't
+ * live inside an isolating node the other endpoint sits outside of, so a range
+ * that crosses the node must include it whole. Returns `$pos` unchanged when the
+ * two positions share every isolating ancestor (e.g. within one cell).
+ */
+function snapOutOfIsolating($pos: ResolvedPos, $other: ResolvedPos): ResolvedPos {
+  const doc = $pos.node(0);
+  // Outermost first, so a nested cell snaps past the whole enclosing table.
+  for (let d = 1; d <= $pos.depth; d++) {
+    const node = $pos.node(d);
+    if (!node.type.spec.isolating) continue;
+    const shared = $other.depth >= d && $other.node(d) === node;
+    if (shared) continue;
+    const forward = $pos.pos >= $other.pos;
+    // The position just before/after a block isolating node isn't inline
+    // content, so walk on to the nearest real text position in the drag
+    // direction — the last caret before the table, or the first one after it.
+    const boundary = doc.resolve(forward ? $pos.after(d) : $pos.before(d));
+    const found = Selection.findFrom(boundary, forward ? 1 : -1, true);
+    return found ? found.$head : boundary;
+  }
+  return $pos;
+}
 
 /** Word character: letters, digits, underscore (matches \w). */
 function isWordChar(ch: string): boolean {

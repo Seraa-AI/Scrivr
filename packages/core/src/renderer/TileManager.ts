@@ -14,6 +14,7 @@ import {
 import { NodeSelection } from "prosemirror-state";
 import { computeGhostRect, renderHandles } from "./ResizeController";
 import { PointerController } from "./PointerController";
+import { isCellDescriptor } from "../table/cellSelectionSeam";
 
 /** Constants */
 
@@ -631,8 +632,14 @@ export class TileManager {
         )
       : cursorPage - 1;
 
-    const sel = this.editor.getSelectionSnapshot();
-    const selKey = `${sel.head}:${sel.from}:${sel.to}`;
+    // Key on the descriptor, not raw offsets: a cell-range selection collapses
+    // its primary text range, so caret offsets alone miss a growing/shrinking
+    // rectangle. Kind + cell bounds + count capture every change that repaints.
+    const descriptor = this.editor.getSelectionDescriptor();
+    const selKey = isCellDescriptor(descriptor)
+      ? `cell:${descriptor.rows.from},${descriptor.rows.to},` +
+        `${descriptor.columns.from},${descriptor.columns.to}:${descriptor.selectedCellCount}`
+      : `${descriptor.kind}:${descriptor.head}:${descriptor.from}:${descriptor.to}`;
     const blinkOn =
       this.editor.isFocused && this.editor.cursorManager.isVisible;
 
