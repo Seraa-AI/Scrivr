@@ -9,6 +9,7 @@ import {
   selectedCells,
   setStoredCellRange,
 } from "./cellSelection";
+import { serializeCellSelection } from "../input/ClipboardSerializer";
 
 /**
  * Cell selection geometry (Phase 5). A `CellRange` is derived from a text
@@ -314,6 +315,28 @@ describe("persisted drag range (cellSelectionPlugin)", () => {
     if (!cellB) throw new Error("cell B not found");
     editor.applyTransaction(s.tr.delete(headPos, headPos + cellB.nodeSize));
     expect(selectedCells(editor.getState())).toBeNull();
+  });
+
+  it("serializeCellSelection copies the stored range as html table + tab/newline text", () => {
+    const editor = makeEditor(rect2x2());
+    const doc = editor.getState().doc;
+    editor.applyTransaction(
+      setStoredCellRange(editor.getState().tr, {
+        anchor: cellNodePos(doc, 0, 0), // A
+        head: cellNodePos(doc, 1, 1), // D — whole 2x2
+      }),
+    );
+    const out = serializeCellSelection(editor.getState(), editor.getState().schema);
+    expect(out).not.toBeNull();
+    expect(out?.text).toBe("A\tB\nC\tD");
+    expect(out?.html).toContain("<table>");
+    expect(out?.html).toContain("A");
+    expect(out?.html).toContain("D");
+  });
+
+  it("serializeCellSelection returns null with no cell range", () => {
+    const editor = makeEditor(rect2x2());
+    expect(serializeCellSelection(editor.getState(), editor.getState().schema)).toBeNull();
   });
 
   it("explicit null meta clears the range", () => {

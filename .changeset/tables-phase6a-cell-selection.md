@@ -27,6 +27,9 @@ multi-cell clear that was previously unreachable by mouse (table cells are
   cell collapses the text selection, so the cell wash is the only selection
   visual — the text inside a selected cell keeps no separate highlight, and no
   formatting bubble menu pops.
+- Copy/cut of a cell range: `Cmd/Ctrl-C`/`-X` serialize the selected cells to an
+  HTML `<table>` (pastes into Docs/Word/Notion as a grid) plus tab/newline
+  `text/plain`. Cut also clears the copied cells.
 
 Merge/split of a selected range follows in Phase 6b. A vMerge continuation row
 of a selected merged cell isn't filled yet (cosmetic).

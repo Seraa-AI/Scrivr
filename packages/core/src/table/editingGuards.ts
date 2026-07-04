@@ -96,6 +96,15 @@ function clearCellsTr(state: EditorState, range: ResolvedCellRange): Transaction
   return landInCell(tr, firstCell);
 }
 
+/**
+ * Clear every cell of the active drag/text cell-range selection, or null when
+ * there is no range. Shared by the Backspace/Delete guards and clipboard cut.
+ */
+export function clearSelectedCellsTr(state: EditorState): Transaction | null {
+  const range = selectedCells(state);
+  return range ? clearCellsTr(state, range) : null;
+}
+
 /** Collapse the selection to the start of the cell at `cellPos` in `tr.doc`. */
 function landInCell(tr: Transaction, cellPos: number): Transaction {
   const target = Math.min(cellPos + 2, tr.doc.content.size);

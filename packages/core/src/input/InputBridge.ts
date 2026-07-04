@@ -5,7 +5,8 @@ import type { CharacterMap } from "../layout/CharacterMap";
 import type { InputHandler, EditorNavigator } from "../extensions/types";
 import type { PasteTransformer } from "./PasteTransformer";
 import { insertText, deleteSelection } from "../model/commands";
-import { serializeSelectionToHtml } from "./ClipboardSerializer";
+import { serializeSelectionToHtml, serializeCellSelection } from "./ClipboardSerializer";
+import { clearSelectedCellsTr } from "../table/editingGuards";
 
 /**
  * Convert a DOM KeyboardEvent into a ProseMirror key string.
@@ -415,7 +416,17 @@ export class InputBridge {
   private handleCopy = (e: ClipboardEvent): void => {
     const state = this.opts.getState();
     const { from, to, empty } = state.selection;
-    if (empty || !e.clipboardData) return;
+    if (!e.clipboardData) return;
+    // A drag-selected cell range keeps a collapsed PM caret, so the selection
+    // looks empty — copy the range's cells instead of bailing out.
+    if (empty) {
+      const cells = serializeCellSelection(state, this.opts.getSchema());
+      if (!cells) return;
+      e.preventDefault();
+      e.clipboardData.setData("text/plain", cells.text);
+      e.clipboardData.setData("text/html", cells.html);
+      return;
+    }
     e.preventDefault();
     e.clipboardData.setData(
       "text/plain",
@@ -428,7 +439,19 @@ export class InputBridge {
   private handleCut = (e: ClipboardEvent): void => {
     const state = this.opts.getState();
     const { from, to, empty } = state.selection;
-    if (empty || !e.clipboardData) return;
+    if (!e.clipboardData) return;
+    // Cell-range cut: copy the cells, then clear their contents (Phase 5 logic).
+    if (empty) {
+      const cells = serializeCellSelection(state, this.opts.getSchema());
+      if (!cells) return;
+      e.preventDefault();
+      e.clipboardData.setData("text/plain", cells.text);
+      e.clipboardData.setData("text/html", cells.html);
+      if (this.readOnly) return;
+      const clear = clearSelectedCellsTr(state);
+      if (clear) this.opts.dispatch(clear);
+      return;
+    }
     e.preventDefault();
     e.clipboardData.setData(
       "text/plain",
