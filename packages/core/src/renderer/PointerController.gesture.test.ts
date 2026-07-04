@@ -14,9 +14,16 @@ import type { SelectionGesture } from "../selection/types";
  * controller.
  */
 
-function pointerEvent(type: string, x: number, y: number): Event {
+function pointerEvent(type: string, x: number, y: number, init: PointerEventInit = {}): Event {
   const Ctor = globalThis.PointerEvent ?? MouseEvent;
-  return new Ctor(type, { clientX: x, clientY: y, pointerId: 1, bubbles: true, cancelable: true });
+  return new Ctor(type, {
+    clientX: x,
+    clientY: y,
+    pointerId: 1,
+    bubbles: true,
+    cancelable: true,
+    ...init,
+  });
 }
 
 interface Calls {
@@ -80,6 +87,7 @@ function setup(calls: Calls) {
   editor.ensurePagePopulated(1);
   return {
     container,
+    editor,
     cleanup: () => {
       controller.detach();
       container.remove();
@@ -122,5 +130,36 @@ describe("PointerController — gesture seam", () => {
     expect(calls.begin).toBe(1);
     expect(calls.cancel).toBe(1);
     expect(calls.finish).toBe(0);
+  });
+
+  it("gives a registered gesture priority over built-in image handling", () => {
+    const calls: Calls = { begin: 0, update: 0, finish: 0, cancel: 0 };
+    const s = setup(calls);
+    clean = s.cleanup;
+    const imageHit = vi.spyOn(s.editor.charMap, "objectRectAtPoint").mockReturnValue({
+      docPos: 1,
+      x: 100,
+      y: 100,
+      width: 80,
+      height: 80,
+      page: 1,
+    });
+
+    s.container.dispatchEvent(pointerEvent("pointerdown", 120, 120));
+
+    expect(calls.begin).toBe(1);
+    expect(imageHit).not.toHaveBeenCalled();
+  });
+
+  it("offers Shift and repeated clicks to the registered gesture first", () => {
+    const calls: Calls = { begin: 0, update: 0, finish: 0, cancel: 0 };
+    const s = setup(calls);
+    clean = s.cleanup;
+
+    s.container.dispatchEvent(pointerEvent("pointerdown", 120, 120, { shiftKey: true }));
+    document.dispatchEvent(pointerEvent("pointerup", 120, 120, { shiftKey: true }));
+    s.container.dispatchEvent(pointerEvent("pointerdown", 120, 120));
+
+    expect(calls.begin).toBe(2);
   });
 });

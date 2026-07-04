@@ -125,8 +125,9 @@ export interface HitTestContext {
 /**
  * Turns a pointer position into a semantic `HitTarget`. Extensions register
  * these (tables add a "table-cell" tester); the registry runs them by descending
- * priority and takes the first non-null result. Core provides node and text
- * testers, so there is always a target.
+ * priority and takes the first non-null result. Returning null leaves the
+ * pointer controller's built-in image/text handling as the compatibility
+ * fallback.
  */
 export interface HitTester {
   /** Higher runs first. A cell/node tester outranks the catch-all text tester. */

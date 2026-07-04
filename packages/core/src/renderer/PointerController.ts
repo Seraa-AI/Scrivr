@@ -343,6 +343,40 @@ export class PointerController {
 
     const { page, docX, docY } = hit;
 
+    // Count clicks before resolving a semantic target. Registered gestures get
+    // first refusal for every pointerdown (including Shift/double/triple-click
+    // and points over built-in images); built-in text/image behavior is only the
+    // compatibility fallback when no provider claims the target.
+    const now = Date.now();
+    const CLICK_TIMEOUT = 500;
+    const CLICK_RADIUS = 5;
+    if (
+      now - this.lastClickTime < CLICK_TIMEOUT &&
+      Math.abs(e.clientX - this.lastClickX) < CLICK_RADIUS &&
+      Math.abs(e.clientY - this.lastClickY) < CLICK_RADIUS
+    ) {
+      this.clickCount++;
+    } else {
+      this.clickCount = 1;
+    }
+    this.lastClickTime = now;
+    this.lastClickX = e.clientX;
+    this.lastClickY = e.clientY;
+
+    // Chrome bands are separate editing surfaces, so their activation routing
+    // precedes body hit testing.
+    if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this.clickCount)) return;
+
+    const semanticHit = editor.resolveHitTarget(docX, docY, page);
+    if (semanticHit) {
+      const gesture = editor.beginSelectionGesture(semanticHit, e);
+      if (gesture) {
+        this.activeGesture = gesture;
+        this.isDragging = true;
+        return;
+      }
+    }
+
     // Resize handle — mutation, block in read-only
     const resizeHit = this.hitHandleAt(docX, docY, page);
     if (resizeHit) {
@@ -412,27 +446,6 @@ export class PointerController {
       return;
     }
 
-    // ── Click-count tracking (double/triple-click) ──────────────────────────
-    const now = Date.now();
-    const CLICK_TIMEOUT = 500;
-    const CLICK_RADIUS = 5;
-    if (
-      now - this.lastClickTime < CLICK_TIMEOUT &&
-      Math.abs(e.clientX - this.lastClickX) < CLICK_RADIUS &&
-      Math.abs(e.clientY - this.lastClickY) < CLICK_RADIUS
-    ) {
-      this.clickCount++;
-    } else {
-      this.clickCount = 1;
-    }
-    this.lastClickTime = now;
-    this.lastClickX = e.clientX;
-    this.lastClickY = e.clientY;
-
-    // Chrome band click — consumed for both activation (double-click) and
-    // cursor positioning (single click when surface is already active).
-    if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this.clickCount)) return;
-
     this.isDragging = true;
     const pos = editor.charMap.posAtCoords(docX, docY, page);
 
@@ -482,16 +495,6 @@ export class PointerController {
             };
             this.setCursorAll("move");
           }
-          return;
-        }
-      }
-      // An extension may claim this click (e.g. table cell drag-select). If a
-      // gesture provider takes it, it owns the drag; otherwise place the caret.
-      const hitTarget = editor.resolveHitTarget(docX, docY, page);
-      if (hitTarget) {
-        const gesture = editor.beginSelectionGesture(hitTarget, e);
-        if (gesture) {
-          this.activeGesture = gesture;
           return;
         }
       }

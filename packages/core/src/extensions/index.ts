@@ -43,6 +43,23 @@ export type {
   OverlayRenderHandler,
 } from "./types";
 export type {
+  GestureContext,
+  HitTarget,
+  HitTestContext,
+  HitTester,
+  SelectionBehavior,
+  SelectionCapabilities,
+  SelectionDescribeContext,
+  SelectionDescriptor,
+  SelectionGeometryContext,
+  SelectionGesture,
+  SelectionGestureProvider,
+  SelectionHandle,
+  SelectionPrimitive,
+  SelectionRect,
+  SelectionRole,
+} from "../selection/types";
+export type {
   FormatHandlers,
   ExportContributionMap,
   FormatImportHandlers,

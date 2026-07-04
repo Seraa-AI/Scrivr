@@ -204,9 +204,11 @@ selection **outline** they lack today.
    type-blind (behaviors emit; TileManager stops knowing node types).
 3. Semantic `HitTarget`s + a prioritized hit-test registry; `PointerController`
    captures and delegates gesture.
-4. Convert the built-ins through the seam: `TextSelection` (caret/glyph fills),
-   `NodeSelection`/**images** (outline + handles geometry, resize/body-drag
-   hit-test + gesture), `AllSelection`. Images are the proof.
+4. Convert built-in selection description and geometry through the seam:
+   `TextSelection` (caret/glyph fills), `NodeSelection`/**images** (outline +
+   handles), and `AllSelection`. Registered semantic gestures get first refusal
+   over every body target; the existing image resize/body-drag paths remain the
+   compatibility fallback until they become standalone providers.
 5. Wire menus/clipboard/deletion to descriptors + capabilities where they touch
    the converted built-ins; keep raw `from/to` only where a text range genuinely
    means a text range.
@@ -237,12 +239,12 @@ selection **outline** they lack today.
 
 - **This branch (`feat/selection-system`) — the seam + proof.** Build the whole
   framework (pillars 1-5) and convert the BUILT-IN selections through it:
-  `TextSelection`, `NodeSelection` (images), `AllSelection`. **Images are the
-  proving consumer** — they exercise geometry (outline + handles), hit-testing
-  (resize handles vs body drag, anchored vs inline), and gesture (resize, move).
-  A seam with no non-trivial consumer is unproven; images prove it here. The seam
-  APIs are designed against the `CellSelection` (range/rectangle) requirements
-  from the pm-tables research so cells drop in with zero seam changes.
+  `TextSelection`, `NodeSelection` (images), `AllSelection`. Images prove the
+  non-trivial geometry path (outline + handles). Extension integration tests
+  prove that semantic gestures outrank built-in image/text fallbacks for plain,
+  modified, and repeated clicks. The seam APIs are designed against the
+  `CellSelection` (range/rectangle) requirements from the pm-tables research so
+  cells drop in with zero seam changes.
 - **Tables PR (`feat/tables-phase6-cell-selection`) — first extension consumer.**
   Merge this branch in, then implement `CellSelection` + its registered
   `SelectionBehavior` there. Cells validate that a range selection plugs into the

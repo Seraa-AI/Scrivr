@@ -8,8 +8,9 @@ import type { Editor } from "../Editor";
  * of the active selection that UI reads instead of `instanceof`-ing the PM
  * selection.
  */
-function editorWithImage(): Editor {
+function editorWithImage(readOnly = false): Editor {
   return createTestEditor({
+    readOnly,
     content: {
       type: "doc",
       content: [
@@ -70,5 +71,32 @@ describe("getSelectionDescriptor", () => {
     const d = editor.getSelectionDescriptor();
     expect(d.kind).toBe("all");
     expect(d.capabilities.copy).toBe(true);
+  });
+
+  it("keeps copy available but suppresses mutations in read-only mode", () => {
+    editor = editorWithImage(true);
+    editor.selection.setSelection(1, 6);
+    const text = editor.getSelectionDescriptor();
+    expect(text.capabilities).toMatchObject({
+      copy: true,
+      cut: false,
+      delete: false,
+      formatText: false,
+    });
+
+    const doc = editor.getState().doc;
+    let imgPos = -1;
+    doc.descendants((n, pos) => {
+      if (n.type.name === "image") imgPos = pos;
+    });
+    editor.selectNode(imgPos);
+    const image = editor.getSelectionDescriptor();
+    expect(image.capabilities).toMatchObject({
+      copy: true,
+      cut: false,
+      delete: false,
+      drag: false,
+      resize: false,
+    });
   });
 });
