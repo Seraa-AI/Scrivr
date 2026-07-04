@@ -1,7 +1,8 @@
 /**
  * createImageMenu — framework-agnostic controller for an image toolbar popover.
  *
- * Shows when the editor has a NodeSelection on an image node.
+ * Shows when the active selection's descriptor kind is "image" (the kind the
+ * Image extension's SelectionBehavior reports).
  * Passes the image node, its doc position, and a viewport DOMRect to the
  * callbacks so the consumer can render resize / wrapping / margin controls.
  *
@@ -60,11 +61,12 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
 
   function update() {
     const state = editor.getState();
-    // Selection *type* comes from the descriptor (the seam), not instanceof; the
-    // image-specific node lookup stays here since this menu is image-only.
+    // Selection *kind* comes from the descriptor (the seam), not instanceof; the
+    // Image extension owns the "image" kind. The image-specific node lookup stays
+    // here since this menu is image-only.
     const descriptor = editor.getSelectionDescriptor();
     const docPos = descriptor.from;
-    const node = descriptor.kind === "node" ? state.doc.nodeAt(docPos) : null;
+    const node = descriptor.kind === "image" ? state.doc.nodeAt(docPos) : null;
 
     if (!node || node.type.name !== "image") {
       if (visible) { visible = false; lastDocPos = -1; onHide(); }
