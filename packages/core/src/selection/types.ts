@@ -1,28 +1,30 @@
 import type { EditorState, Selection } from "prosemirror-state";
-import type { PageConfig } from "../layout/PageLayout";
+import type { Schema } from "prosemirror-model";
+import type { DocumentLayout } from "../layout/PageLayout";
 import type { CharacterMap, ObjectRectEntry } from "../layout/CharacterMap";
-import type { ResolvedTheme } from "../model/theme";
 import type { IEditor } from "../extensions/types";
 
 /**
- * The selection system. Every active selection is a ProseMirror `Selection`
- * (the single source of truth in `state.selection`); a `SelectionBehavior`
- * translates it into three view-facing shapes:
+ * The selection system separates four concerns so one selection can be text, an
+ * image, a table range, or a Seraa custom node without the renderer or pointer
+ * controller knowing which:
  *
- *   - a `SelectionDescriptor` (what the UI may offer),
- *   - `SelectionPrimitive[]` (what the canvas paints),
- *   - a `SelectionGesture` (how a drag on it commits).
+ *   Selection   = durable logical state (a ProseMirror `Selection`; doc coords)
+ *   Descriptor  = semantic public representation (what the UI may offer)
+ *   Geometry    = visual representation (paintable primitives)
+ *   Gesture     = transient pointer interaction (never in editor state)
  *
- * Behaviors are registered by extensions, so tables, images, and Seraa's custom
- * nodes each own their selection without the renderer or pointer controller
- * knowing what they are.
+ * A `SelectionBehavior` interprets one selection kind into a descriptor and
+ * geometry. Pointer gestures live in a separate provider, so selections with no
+ * pointer interaction (keyboard, programmatic, collab, select-all) need not
+ * implement one. Behaviors are registered by extensions.
  */
 
 // ── Geometry primitives ──────────────────────────────────────────────────────
-// The complete vocabulary the renderer needs to paint any selection. TileManager
-// paints these; it never learns what a table, image, or custom node is.
+// The complete vocabulary the renderer needs to paint any selection. Behaviors
+// stay theme-agnostic: a primitive names a semantic `role`, and the renderer
+// maps role → theme color.
 
-/** A rectangle in page-local logical pixels. */
 export interface SelectionRect {
   x: number;
   y: number;
@@ -37,11 +39,14 @@ export interface SelectionHandle {
   cursor: string;
 }
 
+/** Which theme color a primitive paints in. */
+export type SelectionRole = "selection" | "caret" | "affordance";
+
 export type SelectionPrimitive =
-  | { type: "caret"; x: number; y: number; height: number; color: string }
-  | { type: "fill"; rects: SelectionRect[]; color: string }
-  | { type: "outline"; rect: SelectionRect; color: string; width: number }
-  | { type: "handles"; handles: SelectionHandle[]; color: string };
+  | { type: "caret"; x: number; y: number; height: number }
+  | { type: "fill"; rects: SelectionRect[]; role?: SelectionRole }
+  | { type: "outline"; rect: SelectionRect; width: number; role?: SelectionRole }
+  | { type: "handles"; handles: SelectionHandle[]; role?: SelectionRole };
 
 // ── Descriptor + capabilities ────────────────────────────────────────────────
 
@@ -60,11 +65,13 @@ export interface SelectionCapabilities {
 
 /**
  * The public, kind-tagged view of `state.selection`. Replaces the text-only
- * SelectionSnapshot so consumers branch on `kind`/`capabilities` instead of
- * `instanceof`.
+ * SelectionSnapshot so consumers branch on `kind`/`capabilities` and never
+ * touch ProseMirror classes, table maps, or resolved positions. Specific kinds
+ * extend this with their own semantic fields (e.g. a cell descriptor adds row/
+ * column bounds and a `selectedCellCount`).
  */
 export interface SelectionDescriptor {
-  /** Owning behavior kind, e.g. "text", "node", "cell". */
+  /** Owning behavior kind, e.g. "text", "node", "table-cell". */
   kind: string;
   /** Surface the selection lives in ("body", or a header/footer surface id). */
   surfaceId: string;
@@ -85,7 +92,7 @@ export interface SelectionDescriptor {
 
 /**
  * The semantic result of hit-testing a pointer position — what was under the
- * cursor, not where in pixels. Behaviors turn a target into a gesture.
+ * cursor, not where in pixels. A gesture provider turns a target into a gesture.
  */
 export interface HitTarget {
   /** e.g. "text", "node", "table-cell", or a custom kind. */
@@ -98,17 +105,29 @@ export interface HitTarget {
 }
 
 /**
- * A drag in progress, owned by the behavior that began it. Transient by
+ * A drag in progress, owned by the provider that began it. Transient by
  * design — it lives on the pointer controller, never in editor state; only the
  * committed selection belongs to ProseMirror.
  */
 export interface SelectionGesture {
   /** Advance for a pointer move; `hit` is the target now under the cursor. */
-  move(event: PointerEvent, hit: HitTarget | null): void;
+  update(hit: HitTarget | null, event: PointerEvent): void;
   /** Commit on pointerup. */
-  end(event: PointerEvent): void;
+  finish(hit: HitTarget | null, event: PointerEvent): void;
   /** Abort on pointercancel; leaves no selection change. */
   cancel(): void;
+}
+
+export interface GestureContext {
+  editor: IEditor;
+}
+
+/**
+ * Begins pointer gestures for a selection kind. Kept separate from
+ * `SelectionBehavior` so non-pointer selections need not implement it.
+ */
+export interface SelectionGestureProvider {
+  beginGesture(hit: HitTarget, event: PointerEvent, ctx: GestureContext): SelectionGesture | null;
 }
 
 // ── Behavior + contexts ──────────────────────────────────────────────────────
@@ -116,28 +135,31 @@ export interface SelectionGesture {
 export interface SelectionDescribeContext {
   state: EditorState;
   surfaceId: string;
+  schema: Schema;
+  readOnly: boolean;
 }
 
 export interface SelectionGeometryContext {
-  page: number;
-  pageConfig: PageConfig;
-  theme: ResolvedTheme;
+  state: EditorState;
+  layout: DocumentLayout;
   charMap: CharacterMap;
-  /** Painted rect for an object at docPos — reads current layout, no re-layout. */
+  /** 1-based page being painted. */
+  page: number;
+  /** Painted rect for an object at docPos from the current layout (no re-layout). */
   nodeRectAt(docPos: number): ObjectRectEntry | undefined;
 }
 
 /**
- * One selection kind's behavior. The registry picks the first behavior whose
- * `matches` is true (a default fallback matches anything, so custom selections
- * are never left un-describable / un-paintable).
+ * One selection kind's interpretation: how it is described and painted. Both
+ * methods are pure reads (`selection + state (+ layout) → value`); they never
+ * dispatch or mutate. The registry picks the first behavior whose `matches` is
+ * true (a default fallback matches anything, so a custom selection is never left
+ * un-describable / un-paintable).
  */
 export interface SelectionBehavior<S extends Selection = Selection> {
   kind: string;
   matches(selection: Selection): selection is S;
   describe(selection: S, ctx: SelectionDescribeContext): SelectionDescriptor;
-  /** Primitives to paint for `page`; called once per visible page during paint. */
+  /** Primitives to paint for `ctx.page`; called once per visible page. */
   geometry(selection: S, ctx: SelectionGeometryContext): SelectionPrimitive[];
-  /** Begin a drag on this selection, or null to decline (transient gesture). */
-  beginGesture?(hit: HitTarget, event: PointerEvent, editor: IEditor): SelectionGesture | null;
 }

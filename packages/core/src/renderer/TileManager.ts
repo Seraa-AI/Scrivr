@@ -6,8 +6,7 @@ import { renderPage } from "./PageRenderer";
 import { drawBlock } from "./PageRenderer";
 import {
   clearOverlay,
-  renderCursor,
-  renderSelection,
+  paintSelectionPrimitives,
   renderAnchoredDragSource,
   renderAnchoredDragGhost,
   renderAnchoredDragCaret,
@@ -697,72 +696,56 @@ export class TileManager {
       overlayCtx.translate(0, -tileTop);
     }
 
-    const pmSel =
-      this.editor.surfaces?.activeSurface?.state.selection ??
-      this.editor.getState().selection;
-    const isNodeSel = pmSel instanceof NodeSelection;
+    const selState =
+      this.editor.surfaces?.activeSurface?.state ?? this.editor.getState();
+    const pmSel = selState.selection;
     const pageNum = isPageless ? 1 : tile.tileIndex + 1;
 
-    // ── Selection ─────────────────────────────────────────────────────────
-    // Ensure this page's charMap is populated — during drag selection the
-    // cursor may be on another page and paintContent may not have run for
-    // this tile yet, leaving its glyphs missing from the charMap.
-    if (!sel.empty) this.editor.ensurePagePopulated(pageNum);
+    // ── Selection chrome ──────────────────────────────────────────────────
+    // A SelectionBehavior turns the active selection into paint primitives; the
+    // renderer stays blind to whether it is text, an image, a table, or a
+    // custom node. During a drag the cursor may be on another page whose glyphs
+    // aren't in the charMap yet — populate this page first.
+    if (!pmSel.empty) this.editor.ensurePagePopulated(pageNum);
 
     const overlayTheme = this.editor.getResolvedTheme();
-    if (!sel.empty && !isNodeSel) {
-      const lines = this.editor.charMap
-        .linesInRange(sel.from, sel.to)
-        .filter((l) => l.page === pageNum);
-      const glyphs = this.editor.charMap
-        .glyphsInRange(sel.from, sel.to)
-        .filter((g) => g.page === pageNum);
-      renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to, overlayTheme.selectionFill);
-    }
+    const primitives = this.editor.selectionRegistry.resolve(pmSel).geometry(pmSel, {
+      state: selState,
+      layout,
+      charMap: this.editor.charMap,
+      page: pageNum,
+      nodeRectAt: (pos) => this.editor.getNodeRect(pos),
+    });
 
-    // ── Cursor (suppressed when a surface is active — chrome bands own their cursor) ──
-    if (
-      !isNodeSel &&
-      blinkOn &&
-      tile.tileIndex === cursorTile &&
-      !surfaceActive
-    ) {
-      const coords = this.editor.charMap.coordsAtPos(sel.head, pageNum);
-      if (coords) renderCursor(overlayCtx, coords, overlayTheme.cursor);
-    }
+    // The caret blinks and lives on one tile; a resize ghost (below) replaces
+    // the selection's static handles. Both are decided here, not by the behavior.
+    const caretVisible = blinkOn && tile.tileIndex === cursorTile && !surfaceActive;
+    const resizing = pending !== null;
+    const toPaint = primitives.filter((p) => {
+      if (p.type === "caret") return caretVisible;
+      if (p.type === "handles" && resizing) return false;
+      return true;
+    });
+    paintSelectionPrimitives(overlayCtx, toPaint, overlayTheme);
 
-    // ── Image selection handles ───────────────────────────────────────────
-    if (isNodeSel && pmSel.node.type.name === "image") {
-      // Single-source rect lookup — anchored from layout.anchoredObjects,
-      // inline from charMap. Drops the handle-vs-body drift class.
+    // ── Resize ghost (transient pointer state, not selection-driven) ───────
+    // Ghost handles at the pending size, pinned to the edge opposite the dragged
+    // handle, in place of the static handles above. Without computeGhostRect the
+    // ghost would grow from the rect's top-left, so dragging a left/top handle
+    // would visually grow the box the wrong way until mouseup committed.
+    if (pending && pmSel instanceof NodeSelection && pmSel.node.type.name === "image") {
       const objRect = this.editor.getNodeRect(pmSel.from);
       if (objRect && objRect.page === pageNum) {
-        // During resize drag, show ghost handles at the pending size, pinned
-        // to the edge opposite the dragged handle. Without computeGhostRect
-        // the ghost would always grow from objRect's top-left, so dragging a
-        // left/top handle in its expected direction would visually grow the
-        // box the wrong way (right/down) until mouseup committed the attrs.
-        if (pending) {
-          const g = computeGhostRect(
-            pending.handle,
-            objRect.x,
-            objRect.y,
-            objRect.width,
-            objRect.height,
-            pending.width,
-            pending.height,
-          );
-          renderHandles(overlayCtx, g.x, g.y, g.width, g.height, overlayTheme.resizeHandle);
-        } else {
-          renderHandles(
-            overlayCtx,
-            objRect.x,
-            objRect.y,
-            objRect.width,
-            objRect.height,
-            overlayTheme.resizeHandle,
-          );
-        }
+        const g = computeGhostRect(
+          pending.handle,
+          objRect.x,
+          objRect.y,
+          objRect.width,
+          objRect.height,
+          pending.width,
+          pending.height,
+        );
+        renderHandles(overlayCtx, g.x, g.y, g.width, g.height, overlayTheme.resizeHandle);
       }
     }
 

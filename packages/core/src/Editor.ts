@@ -12,6 +12,8 @@ import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import { CursorManager } from "./renderer/CursorManager";
+import { SelectionRegistry } from "./selection/SelectionRegistry";
+import { builtinSelectionBehaviors, defaultSelectionBehavior } from "./selection/behaviors";
 import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
@@ -297,6 +299,14 @@ export class Editor extends BaseEditor implements IEditor {
   readonly toolbarItems: ToolbarItemSpec[];
 
   /**
+   * Resolves the SelectionBehavior for any `state.selection` — extension
+   * behaviors first, then core built-ins, with a default fallback last.
+   * The renderer and pointer controller consult this instead of branching on
+   * selection type.
+   */
+  readonly selectionRegistry: SelectionRegistry;
+
+  /**
    * Block registry built from all extensions.
    * Pass to renderPage — maps node type names to BlockStrategy instances.
    */
@@ -374,6 +384,10 @@ export class Editor extends BaseEditor implements IEditor {
     this.fontModifiers = this.manager.buildFontModifiers();
     this.markDecorators = this.manager.buildMarkDecorators();
     this.toolbarItems  = this.manager.buildToolbarItems();
+    this.selectionRegistry = new SelectionRegistry(
+      [...this.manager.buildSelectionBehaviors(), ...builtinSelectionBehaviors],
+      defaultSelectionBehavior,
+    );
     this.blockRegistry = this.manager.buildBlockRegistry();
     this.inlineRegistry = this.manager.buildInlineRegistry();
     this.pageChromeContributions = this.manager.getPageChromeContributions();
