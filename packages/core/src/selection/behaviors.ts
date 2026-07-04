@@ -57,11 +57,13 @@ export function rangeBandRects(
       left = startsBefore ? line.x : glyphs[0]!.x;
       right = endsAfter ? rightMargin : last.x + last.width;
     } else {
-      // A line with no selected glyphs: full-width band when it's an interior
-      // line of the selection (e.g. an empty paragraph or a block atom), else a
-      // line-height square marking an empty boundary line.
+      // A line with no selected glyphs (empty paragraph, or a block atom like an
+      // HR / block image). Fully covered → full-width band, so a block atom that
+      // the selection ends exactly at still fills. Otherwise (an empty paragraph
+      // the selection only just touches) → a line-height square.
+      const fullyInside = from <= line.startDocPos && to >= line.endDocPos;
       left = line.x;
-      right = startsBefore && endsAfter ? rightMargin : line.x + line.height;
+      right = fullyInside ? rightMargin : line.x + line.height;
     }
 
     if (right > left) rects.push({ x: left, y: line.y, width: right - left, height: line.height });
@@ -212,7 +214,13 @@ export const defaultSelectionBehavior: SelectionBehavior = {
     from: s.from,
     to: s.to,
   }),
-  geometry: (s, ctx) => fillGeometry(s.from, s.to, ctx),
+  geometry: (s, ctx) => {
+    // Best-effort: fill when it's a range, else a caret — never fully invisible.
+    const out = s.empty ? [] : fillGeometry(s.from, s.to, ctx);
+    const caret = caretPrimitive(s.head, ctx);
+    if (caret) out.push(caret);
+    return out;
+  },
 };
 
 /** Core built-ins, in resolution order (extensions are prepended by the Editor). */

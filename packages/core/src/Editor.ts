@@ -965,7 +965,8 @@ export class Editor extends BaseEditor implements IEditor {
     return this.selectionRegistry.resolve(selection).describe(selection, {
       state,
       surfaceId: activeSurface?.id ?? "body",
-      schema: this.schema,
+      // The surface may use a different schema than the root document.
+      schema: state.schema,
       readOnly: this.readOnly,
     });
   }

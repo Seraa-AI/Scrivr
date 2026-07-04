@@ -167,6 +167,21 @@ export class PointerController {
 
   /** Detach pointer event listeners. */
   detach(): void {
+    // Abort an in-flight extension gesture so teardown mid-drag doesn't leak
+    // pointer capture or leave the gesture believing it's still live.
+    const gesture = this.activeGesture;
+    this.activeGesture = null;
+    if (this.activePointerId !== null) {
+      this.releasePointer(this.activePointerId);
+      this.activePointerId = null;
+    }
+    if (gesture) {
+      try {
+        gesture.cancel();
+      } catch {
+        // A broken gesture must not block listener teardown.
+      }
+    }
     this.deps.tilesContainer.removeEventListener("pointerdown", this.handlePointerDown);
     document.removeEventListener("pointermove", this.handlePointerMove);
     document.removeEventListener("pointerup", this.handlePointerUp);
@@ -513,7 +528,13 @@ export class PointerController {
     if (this.activeGesture) {
       const h = this.hitTest(e.clientX, e.clientY);
       const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
-      this.activeGesture.update(target, e);
+      try {
+        this.activeGesture.update(target, e);
+      } catch (err) {
+        // A throwing gesture must not lock the pointer for the rest of the session.
+        this.endActiveGesture(e.pointerId);
+        throw err;
+      }
       return;
     }
 
@@ -614,13 +635,18 @@ export class PointerController {
     e.preventDefault();
     const { editor } = this.deps;
     if (this.activeGesture) {
-      const h = this.hitTest(e.clientX, e.clientY);
-      const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
-      this.activeGesture.finish(target, e);
+      const gesture = this.activeGesture;
+      // Clear first so a throwing finish() can't leave the gesture stuck active.
       this.activeGesture = null;
       this.isDragging = false;
-      this.releasePointer(e.pointerId);
-      this.activePointerId = null;
+      const h = this.hitTest(e.clientX, e.clientY);
+      const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
+      try {
+        gesture.finish(target, e);
+      } finally {
+        this.releasePointer(e.pointerId);
+        this.activePointerId = null;
+      }
       return;
     }
     if (this.resizeDrag) {
@@ -646,10 +672,10 @@ export class PointerController {
 
   private handlePointerCancel = (e: PointerEvent): void => {
     if (!this.acceptsPointer(e)) return;
-    if (this.activeGesture) {
-      this.activeGesture.cancel();
-      this.activeGesture = null;
-    }
+    // Reset all state first, then notify the gesture — a throwing cancel() must
+    // not skip teardown.
+    const gesture = this.activeGesture;
+    this.activeGesture = null;
     this.resizeDrag = null;
     this.anchoredDrag = null;
     this.inlineImageDrag = null;
@@ -658,7 +684,22 @@ export class PointerController {
     this.releasePointer(e.pointerId);
     this.activePointerId = null;
     this.deps.scheduleUpdate();
+    if (gesture) {
+      try {
+        gesture.cancel();
+      } catch {
+        // Teardown already done; a broken gesture's cancel must not propagate here.
+      }
+    }
   };
+
+  /** Drop the active gesture and release the pointer (used when a gesture throws). */
+  private endActiveGesture(pointerId: number): void {
+    this.activeGesture = null;
+    this.isDragging = false;
+    this.releasePointer(pointerId);
+    this.activePointerId = null;
+  }
 
   private acceptsPointer(e: PointerEvent): boolean {
     return this.activePointerId === null || e.pointerId === this.activePointerId;

@@ -38,6 +38,16 @@ describe("rangeBandRects", () => {
     expect(rects[1]).toEqual({ x: 80, y: 120, width: 400, height: 20 });
   });
 
+  it("fills a fully-covered block atom even when the selection ends at its boundary", () => {
+    // Line 1 is a block atom (no glyphs); selection 6..16 ends exactly at its
+    // endDocPos, so `endsAfter` is false — but it's fully covered, so full width.
+    const lines = [line(0, 100, 1, 15), line(1, 120, 15, 16)];
+    const glyphs = [glyph(0, 6, 150)];
+    const rects = rangeBandRects(6, 16, glyphs, lines);
+    expect(rects).toHaveLength(2);
+    expect(rects[1]).toEqual({ x: 80, y: 120, width: 400, height: 20 });
+  });
+
   it("keeps a single-line selection to its glyph span", () => {
     const lines = [line(0, 100, 1, 30)];
     const glyphs = [glyph(0, 6, 150), glyph(0, 7, 158)];

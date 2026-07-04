@@ -33,13 +33,14 @@ interface Calls {
   cancel: number;
 }
 
-function gestureExtension(calls: Calls): Extension {
+function gestureExtension(calls: Calls, opts: { throwOnFinish?: boolean } = {}): Extension {
   const gesture: SelectionGesture = {
     update: () => {
       calls.update++;
     },
     finish: () => {
       calls.finish++;
+      if (opts.throwOnFinish) throw new Error("gesture finish blew up");
     },
     cancel: () => {
       calls.cancel++;
@@ -61,10 +62,10 @@ function gestureExtension(calls: Calls): Extension {
   });
 }
 
-function setup(calls: Calls) {
+function setup(calls: Calls, opts: { throwOnFinish?: boolean } = {}) {
   const editor = createTestEditor({
     pageConfig: defaultPageConfig,
-    extensions: [StarterKit, gestureExtension(calls)],
+    extensions: [StarterKit, gestureExtension(calls, opts)],
     content: makeNPageDoc(1),
   });
   const container = document.createElement("div");
@@ -117,6 +118,23 @@ describe("PointerController — gesture seam", () => {
     expect(calls.update).toBe(2);
     expect(calls.finish).toBe(1);
     expect(calls.cancel).toBe(0);
+  });
+
+  it("a throwing gesture finish() still releases the pointer (no lock-up)", () => {
+    const calls: Calls = { begin: 0, update: 0, finish: 0, cancel: 0 };
+    const s = setup(calls, { throwOnFinish: true });
+    clean = s.cleanup;
+
+    s.container.dispatchEvent(pointerEvent("pointerdown", 120, 120));
+    expect(calls.begin).toBe(1);
+    try {
+      document.dispatchEvent(pointerEvent("pointerup", 120, 120));
+    } catch {
+      // finish() threw — cleanup must still have run.
+    }
+    // A fresh pointerdown must be accepted (pointer wasn't left captured).
+    s.container.dispatchEvent(pointerEvent("pointerdown", 130, 130));
+    expect(calls.begin).toBe(2);
   });
 
   it("routes pointercancel to the gesture", () => {
