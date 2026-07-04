@@ -195,33 +195,61 @@ type SelectionPrimitive =
 `renderHandles`, and the cell wash become primitive emitters. Images gain the
 selection **outline** they lack today.
 
-## Migration order
+## Build order
 
-1. Introduce `SelectionDescriptor`, capabilities, and the behavior registry
-   (additive; nothing removed yet).
-2. Convert the table shadow into a real `CellSelection` (mapping, bookmark, eq,
-   JSON). Fixes the undo bug; copy/cut move to `content()`.
-3. Move selection geometry behind registered behaviors (emit primitives;
-   TileManager renders them).
-4. Introduce semantic `HitTarget`s and gesture handlers.
-5. Remove image/table branches from PointerController.
-6. Make menus, clipboard, deletion, and collaboration consume descriptors and
-   capabilities.
+**On this branch (the seam + images):**
+1. `SelectionDescriptor` + capabilities + the `addSelectionBehavior` registry
+   with the required default fallback.
+2. `SelectionPrimitive` geometry pipeline; `TileManager` renders primitives
+   type-blind (behaviors emit; TileManager stops knowing node types).
+3. Semantic `HitTarget`s + a prioritized hit-test registry; `PointerController`
+   captures and delegates gesture.
+4. Convert the built-ins through the seam: `TextSelection` (caret/glyph fills),
+   `NodeSelection`/**images** (outline + handles geometry, resize/body-drag
+   hit-test + gesture), `AllSelection`. Images are the proof.
+5. Wire menus/clipboard/deletion to descriptors + capabilities where they touch
+   the converted built-ins; keep raw `from/to` only where a text range genuinely
+   means a text range.
 
-Phase 6b (merge/split) builds on step 2 instead of adding shadow reads.
+**On the tables PR (first extension consumer):**
+6. Implement `CellSelection` (map/content/bookmark/eq/JSON) + its registered
+   `SelectionBehavior` (geometry = rect fills, hit-test = table-cell, in-cell IME
+   anchor, command guards). No seam changes allowed — that is the acceptance
+   test. Phase 6b (merge/split) builds on it.
 
 ## Decisions (locked)
 
-- **Scope: build the full system correctly, upfront.** All five pillars
+- **Scope: build the full seam correctly, upfront.** All five pillars
   (canonical selection + descriptor + extension behavior registry + semantic hit
-  testing + geometry primitives), converting BOTH cells and images, as one
-  coherent body of work — not sequenced or deferred. Rationale (user): breaking
-  it up loses the cross-cutting learning and fine-tuning that only surface when
-  the whole thing is built together. The registry is not "premature" here — doing
-  it now is the point.
+  testing + geometry primitives) as one coherent body of work — not sequenced or
+  deferred. Rationale (user): breaking it up loses the cross-cutting learning and
+  fine-tuning that only surface when the whole thing is built together.
+- **Third-party extensibility is the requirement, not YAGNI.** The explicit goal
+  is that any extension can register a selection it drives on its own terms —
+  Seraa layers many custom nodes and needs to select them without patching core.
+  That is why the extension registry is built now: it is the product, not
+  speculation.
 - **Behaviors register via the extension seam** (`addSelectionBehavior`) with a
   **required default fallback** for unregistered selection kinds (Seraa custom
   nodes).
+
+### Branch split
+
+- **This branch (`feat/selection-system`) — the seam + proof.** Build the whole
+  framework (pillars 1-5) and convert the BUILT-IN selections through it:
+  `TextSelection`, `NodeSelection` (images), `AllSelection`. **Images are the
+  proving consumer** — they exercise geometry (outline + handles), hit-testing
+  (resize handles vs body drag, anchored vs inline), and gesture (resize, move).
+  A seam with no non-trivial consumer is unproven; images prove it here. The seam
+  APIs are designed against the `CellSelection` (range/rectangle) requirements
+  from the pm-tables research so cells drop in with zero seam changes.
+- **Tables PR (`feat/tables-phase6-cell-selection`) — first extension consumer.**
+  Merge this branch in, then implement `CellSelection` + its registered
+  `SelectionBehavior` there. Cells validate that a range selection plugs into the
+  seam without core changes; Phase 6b (merge/split) builds on it.
+- **Seraa — third-party consumer.** A Claude/Seraa library extension registers
+  its own `SelectionBehavior` for its custom nodes. If the tables consumer needed
+  a core change, the seam failed; that is the acceptance test for this branch.
 
 ## Review-hardened requirements (folded in from the eng + codex review)
 
