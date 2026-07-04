@@ -1,5 +1,5 @@
 import type { Editor } from "../Editor";
-import { NodeSelection } from "prosemirror-state";
+import { NodeSelection, Selection } from "prosemirror-state";
 import {
   getHandles,
   hitHandle,
@@ -558,19 +558,7 @@ export class PointerController {
         !resizeHit && !anchoredHit
           ? editor.charMap.objectRectAtPoint(hit.docX, hit.docY, hit.page)
           : undefined;
-      // Over a table cell (and nothing higher-priority): the spreadsheet-style
-      // `cell` cursor signals that a drag selects a range of cells, not text.
-      const overCell =
-        !resizeHit && !anchoredHit && !inlineImageHit
-          ? cellAtCoords(editor.layout.pages, hit.docX, hit.docY, hit.page) !== null
-          : false;
-      const cursor = resizeHit
-        ? resizeHit.cursor
-        : anchoredHit || inlineImageHit
-          ? "move"
-          : overCell
-            ? "cell"
-            : "text";
+      const cursor = resizeHit ? resizeHit.cursor : anchoredHit || inlineImageHit ? "move" : "text";
       this.setCursorAll(cursor);
     }
 
@@ -590,17 +578,19 @@ export class PointerController {
     // anchored-object drag handler below.
     editor.ensurePagePopulated(hit.page);
 
-    // Cell drag-select: once the pointer leaves the anchor cell, express the
-    // gesture as a persisted cell range (isolating cells forbid a spanning
-    // text selection) and suppress text selection. Dispatch only when the head
-    // cell changes. Dragging back into the anchor cell drops the range and
-    // resumes normal text selection inside that cell.
+    // Cell drag-select: while the drag started in a cell, the pointer position
+    // decides the mode.
+    //   - A different cell in the same table → persisted cell range. Collapse the
+    //     PM selection to a caret in the same transaction (meta wins in the
+    //     plugin, so the range survives) so no leftover text selection paints a
+    //     cross-cell highlight or pops the bubble menu.
+    //   - Still inside the anchor cell → drop any range and fall through to normal
+    //     in-cell text selection.
+    //   - Off any cell (border / gap / outside the table) → freeze: do NOT run the
+    //     text path, which would set a spanning cross-cell selection.
     if (this.cellDragAnchor !== null) {
       const anchor = this.cellDragAnchor;
       const overCell = cellAtCoords(editor.layout.pages, hit.docX, hit.docY, hit.page);
-      // Only a different cell in the SAME table forms a range. A cell in another
-      // table (or a non-cell point) fails cellRangeBetween — fall through to drop
-      // any stale range and resume text selection, rather than suppressing it.
       if (
         overCell !== null &&
         overCell !== anchor &&
@@ -608,9 +598,9 @@ export class PointerController {
       ) {
         if (overCell !== this.lastCellHead) {
           this.lastCellHead = overCell;
-          editor.applyTransaction(
-            setStoredCellRange(editor.getState().tr, { anchor, head: overCell }),
-          );
+          const tr = editor.getState().tr;
+          tr.setSelection(Selection.near(tr.doc.resolve(anchor + 1)));
+          editor.applyTransaction(setStoredCellRange(tr, { anchor, head: overCell }));
         }
         return;
       }
@@ -618,6 +608,8 @@ export class PointerController {
         this.lastCellHead = null;
         editor.applyTransaction(setStoredCellRange(editor.getState().tr, null));
       }
+      // Off-cell with no active range: freeze rather than select spanning text.
+      if (overCell === null) return;
     }
 
     const pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);

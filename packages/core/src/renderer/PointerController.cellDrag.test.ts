@@ -112,6 +112,26 @@ describe("PointerController — cell drag-select", () => {
     expect(sel?.rect).toEqual({ left: 0, top: 0, right: 2, bottom: 1 });
   });
 
+  it("a cross-cell drag collapses the text selection (no spanning highlight / bubble menu)", () => {
+    const s = setup(3);
+    clean = s.cleanup;
+    const row = s.rowBlock();
+    const a = center(row, 0);
+    const b = center(row, 2);
+
+    s.container.dispatchEvent(pointerEvent("pointerdown", a.x, a.y));
+    // Many small steps, including within the anchor cell, mimic a real mouse drag
+    // that would otherwise leave a text selection spanning the cells.
+    for (let x = a.x; x <= b.x; x += 6) {
+      document.dispatchEvent(pointerEvent("pointermove", x, a.y));
+    }
+    document.dispatchEvent(pointerEvent("pointerup", b.x, b.y));
+
+    const st = s.editor.getState();
+    expect(st.selection.empty).toBe(true); // collapsed — no bubble menu
+    expect(selectedCells(st)?.cellPositions).toHaveLength(3); // the cell range carries the selection
+  });
+
   it("a click that stays in one cell leaves no cell selection (text caret only)", () => {
     const s = setup(3);
     clean = s.cleanup;
@@ -139,20 +159,6 @@ describe("PointerController — cell drag-select", () => {
     document.dispatchEvent(pointerEvent("pointerup", a.x, a.y));
 
     expect(selectedCells(s.editor.getState())).toBeNull();
-  });
-
-  it("hovering a cell shows the spreadsheet `cell` cursor (drag-select affordance)", () => {
-    const s = setup(3);
-    clean = s.cleanup;
-    const row = s.rowBlock();
-    const a = center(row, 0);
-
-    s.container.dispatchEvent(pointerEvent("pointermove", a.x, a.y));
-    expect(s.container.style.cursor).toBe("cell");
-
-    // Far below the single-row table → ordinary text cursor.
-    document.dispatchEvent(pointerEvent("pointermove", a.x, a.y + 600));
-    expect(s.container.style.cursor).toBe("text");
   });
 
   it("pointercancel mid-drag drops the committed range", () => {

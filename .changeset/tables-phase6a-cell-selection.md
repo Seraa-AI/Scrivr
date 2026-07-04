@@ -22,12 +22,11 @@ multi-cell clear that was previously unreachable by mouse (table cells are
   `{anchor, head}` cells, remaps through edits, and clears on any other
   selection change. `selectedCells()` resolves mouse and keyboard selections
   identically.
-- The selection overlay paints the selected cells with a translucent fill
-  (`theme.selectionFill`) plus an opaque outline (`theme.selectionBorder`, new
-  token) so the selection stays legible over cells that already have a
-  background (header fill, shaded rows).
-- Hovering a table cell shows the spreadsheet-style `cell` cursor as an
-  affordance that a drag selects cells.
+- The selection overlay paints a uniform translucent wash over the selected
+  cells (`theme.selectionFill`), matching Google Docs. Crossing into another
+  cell collapses the text selection, so the cell wash is the only selection
+  visual — the text inside a selected cell keeps no separate highlight, and no
+  formatting bubble menu pops.
 
 Merge/split of a selected range follows in Phase 6b. A vMerge continuation row
 of a selected merged cell isn't filled yet (cosmetic).
