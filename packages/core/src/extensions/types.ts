@@ -15,7 +15,7 @@
 
 import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark } from "prosemirror-model";
 import type { MarkdownSerializerState } from "prosemirror-markdown";
-import type { Command, Plugin, Transaction, EditorState } from "prosemirror-state";
+import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
 import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
@@ -146,6 +146,8 @@ export interface IEditor extends IBaseEditor {
    * this instead of `instanceof`-ing the ProseMirror selection.
    */
   getSelectionDescriptor(): SelectionDescriptor;
+  /** Describe a specific selection (not necessarily the active one). */
+  describeSelection(selection: Selection): SelectionDescriptor;
   /** Current document layout (lazily recomputed when dirty). */
   get layout(): DocumentLayout;
   /**

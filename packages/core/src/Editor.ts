@@ -1,4 +1,4 @@
-import { EditorState, Transaction, NodeSelection } from "prosemirror-state";
+import { EditorState, Transaction, NodeSelection, type Selection } from "prosemirror-state";
 import { SelectionController } from "./SelectionController";
 import type {
   FontModifier,
@@ -959,9 +959,18 @@ export class Editor extends BaseEditor implements IEditor {
    * selection is described the same way as text or an image.
    */
   getSelectionDescriptor(): SelectionDescriptor {
+    const state = this.surfaces.activeSurface?.state ?? this.editorState;
+    return this.describeSelection(state.selection);
+  }
+
+  /**
+   * Describe a specific selection (not necessarily the active one) through its
+   * behavior. The pointer controller uses this to ask the capabilities of the
+   * selection it is holding, rather than re-deriving the active one.
+   */
+  describeSelection(selection: Selection): SelectionDescriptor {
     const activeSurface = this.surfaces.activeSurface;
     const state = activeSurface?.state ?? this.editorState;
-    const selection = state.selection;
     return this.selectionRegistry.resolve(selection).describe(selection, {
       state,
       surfaceId: activeSurface?.id ?? "body",

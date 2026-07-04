@@ -18,7 +18,7 @@ import {
   StarterKit,
   SurfaceRegistry,
 } from "@scrivr/core";
-import type { DocumentLayout, IEditor, LayoutBlock, LayoutLine } from "@scrivr/core";
+import type { DocumentLayout, IEditor, LayoutBlock, LayoutLine, Selection } from "@scrivr/core";
 
 // buildPdf now requires an editor (it collects PDF handlers from extensions).
 // A ServerEditor satisfies the contract; table is enabled so the table handler
@@ -222,7 +222,11 @@ class ExportPdfEditorDouble extends ServerEditor implements IEditor {
   }
 
   getSelectionDescriptor() {
-    const s = this.getState().selection;
+    return this.describeSelection(this.getState().selection);
+  }
+
+  describeSelection(selection: Selection) {
+    const s = selection;
     return {
       kind: "text",
       surfaceId: "body",

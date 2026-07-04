@@ -59,6 +59,9 @@ export type {
   SelectionRect,
   SelectionRole,
 } from "../selection/types";
+// The seam's public API speaks ProseMirror `Selection`; re-export it so
+// extension authors get the whole selection vocabulary from "@scrivr/core".
+export type { Selection } from "prosemirror-state";
 export type {
   FormatHandlers,
   ExportContributionMap,

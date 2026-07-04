@@ -733,7 +733,9 @@ export class TileManager {
     // handle, in place of the static handles above. Without computeGhostRect the
     // ghost would grow from the rect's top-left, so dragging a left/top handle
     // would visually grow the box the wrong way until mouseup committed.
-    if (pending && pmSel instanceof NodeSelection && pmSel.node.type.name === "image") {
+    // `pending` is only set once a resize handle was grabbed (any node whose
+    // behavior declares `resize`), so the selection is that resizable node.
+    if (pending && pmSel instanceof NodeSelection) {
       const objRect = this.editor.getNodeRect(pmSel.from);
       if (objRect && objRect.page === pageNum) {
         const g = computeGhostRect(

@@ -1,7 +1,9 @@
 import { Extension } from "../Extension";
-import type { Command } from "prosemirror-state";
+import { NodeSelection, type Command } from "prosemirror-state";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { IEditor } from "../types";
+import { getHandles } from "../../renderer/ResizeController";
+import type { SelectionBehavior } from "../../selection/types";
 import type { Node as PmNode } from "prosemirror-model";
 import type { ResolvedTheme } from "../../model/theme";
 import { safeUrl } from "../../model/safeUrl";
@@ -452,8 +454,58 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
 
 // ── Extension ─────────────────────────────────────────────────────────────────
 
+/**
+ * Image selection: a resizable, draggable object. The outline + 8 resize grips
+ * come from geometry primitives; the pointer controller grants grab/ghost/commit
+ * to any selection whose descriptor reports `resize`. This is the template an
+ * extension follows to make its own node resizable.
+ */
+const imageSelectionBehavior: SelectionBehavior<NodeSelection> = {
+  kind: "image",
+  matches: (s): s is NodeSelection =>
+    s instanceof NodeSelection && s.node.type.name === "image",
+  describe: (s, ctx) => ({
+    kind: "image",
+    surfaceId: ctx.surfaceId,
+    empty: false,
+    capabilities: {
+      copy: true,
+      cut: !ctx.readOnly,
+      delete: !ctx.readOnly,
+      formatText: false,
+      drag: !ctx.readOnly,
+      resize: !ctx.readOnly,
+    },
+    anchor: s.anchor,
+    head: s.head,
+    from: s.from,
+    to: s.to,
+  }),
+  geometry: (s, ctx) => {
+    const r = ctx.nodeRectAt(s.from);
+    if (!r || r.page !== ctx.page) return [];
+    const rect = { x: r.x, y: r.y, width: r.width, height: r.height };
+    return [
+      { type: "outline", rect, width: 1.5, role: "affordance" },
+      {
+        type: "handles",
+        handles: getHandles(r.x, r.y, r.width, r.height).map((h) => ({
+          x: h.hx,
+          y: h.hy,
+          cursor: h.cursor,
+        })),
+        role: "affordance",
+      },
+    ];
+  },
+};
+
 export const Image = Extension.create({
   name: "image",
+
+  addSelectionBehavior() {
+    return [imageSelectionBehavior];
+  },
 
   addNodes() {
     return {

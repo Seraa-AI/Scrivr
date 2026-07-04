@@ -32,6 +32,7 @@ import type { Command } from "prosemirror-state";
 import type { NodeSpec, MarkSpec } from "prosemirror-model";
 import type { FontModifier, MarkDecorator, ToolbarItemSpec, MarkdownBlockRule, MarkdownParserTokenSpec, MarkdownSerializerRules, IEditor } from "./types";
 import type { ExportContributionMap, ImportContributionMap } from "./export";
+import type { SelectionBehavior, HitTester, SelectionGestureProvider } from "../selection/types";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
 import type { PageConfig } from "../layout/PageLayout";
@@ -221,6 +222,32 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     }
 
     return nodes;
+  },
+
+  // TODO(starterkit-generic-forwarding): StarterKit forwards every contribution
+  // type by hand, so each new seam (selection behavior / hit tester / gesture)
+  // has to be wired here or it silently vanishes. Fixed generically after the
+  // tables PR — see project_starterkit_generic_forwarding.
+  addSelectionBehavior(): SelectionBehavior[] {
+    const opts = this.options;
+    const behaviors: SelectionBehavior[] = [];
+    if (opts.image !== false) behaviors.push(...Image.resolve().selectionBehaviors);
+    if (opts.table === true) behaviors.push(...Table.resolve().selectionBehaviors);
+    return behaviors;
+  },
+
+  addHitTester(): HitTester[] {
+    const opts = this.options;
+    const testers: HitTester[] = [];
+    if (opts.table === true) testers.push(...Table.resolve().hitTesters);
+    return testers;
+  },
+
+  addSelectionGesture(): SelectionGestureProvider[] {
+    const opts = this.options;
+    const gestures: SelectionGestureProvider[] = [];
+    if (opts.table === true) gestures.push(...Table.resolve().selectionGestures);
+    return gestures;
   },
 
   addMarks() {

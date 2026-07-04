@@ -49,7 +49,7 @@ describe("getSelectionDescriptor", () => {
     expect(d.capabilities.copy).toBe(false);
   });
 
-  it("describes a selected image: kind node, resizable, not formattable", () => {
+  it("describes a selected image: kind image (extension-owned), resizable", () => {
     editor = editorWithImage();
     const doc = editor.getState().doc;
     let imgPos = -1;
@@ -58,7 +58,9 @@ describe("getSelectionDescriptor", () => {
     });
     editor.selectNode(imgPos);
     const d = editor.getSelectionDescriptor();
-    expect(d.kind).toBe("node");
+    // The Image extension registers its own behavior, so it wins over the
+    // generic node fallback.
+    expect(d.kind).toBe("image");
     expect(d.capabilities.resize).toBe(true);
     expect(d.capabilities.drag).toBe(true);
     expect(d.capabilities.formatText).toBe(false);

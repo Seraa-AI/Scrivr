@@ -285,7 +285,16 @@ export class PointerController {
   private hitHandleAt(canvasX: number, canvasY: number, page: number) {
     const { editor } = this.deps;
     const sel = this.activeSelection();
-    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image")
+    if (!(sel instanceof NodeSelection)) return null;
+    // Any node is resizable, not just images: its SelectionBehavior must report
+    // the `resize` capability (also gates read-only) and the node must carry
+    // numeric width/height attrs to drive the drag. An extension's node that
+    // draws resize handles + declares `resize: true` gets grab/ghost/commit free.
+    if (!editor.describeSelection(sel).capabilities.resize) return null;
+    if (
+      typeof sel.node.attrs["width"] !== "number" ||
+      typeof sel.node.attrs["height"] !== "number"
+    )
       return null;
     // Step 6: read through editor.getNodeRect so anchored placements come
     // from layout.anchoredObjects (Stage 3 authoritative) and inline images

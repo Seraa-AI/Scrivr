@@ -1,6 +1,5 @@
 import { TextSelection, NodeSelection, AllSelection, type Selection } from "prosemirror-state";
 import type { GlyphEntry, LineEntry } from "../layout/CharacterMap";
-import { getHandles } from "../renderer/ResizeController";
 import type {
   SelectionBehavior,
   SelectionDescribeContext,
@@ -120,47 +119,37 @@ export const textSelectionBehavior: SelectionBehavior<TextSelection> = {
   },
 };
 
+/**
+ * Generic fallback for a `NodeSelection` no extension claimed. Outlines the node
+ * so the selection is visible; it is not draggable/resizable by default. An
+ * extension whose node supports those (e.g. Image) registers its own behavior,
+ * which resolves first and adds handles + the `resize`/`drag` capabilities.
+ */
 export const nodeSelectionBehavior: SelectionBehavior<NodeSelection> = {
   kind: "node",
   matches: (s): s is NodeSelection => s instanceof NodeSelection,
-  describe: (s, ctx: SelectionDescribeContext) => {
-    const isImage = s.node.type.name === "image";
-    return {
-      kind: "node",
-      surfaceId: ctx.surfaceId,
-      empty: false,
-      capabilities: {
-        copy: true,
-        cut: !ctx.readOnly,
-        delete: !ctx.readOnly,
-        formatText: false,
-        drag: !ctx.readOnly && isImage,
-        resize: !ctx.readOnly && isImage,
-      },
-      anchor: s.anchor,
-      head: s.head,
-      from: s.from,
-      to: s.to,
-    };
-  },
+  describe: (s, ctx: SelectionDescribeContext) => ({
+    kind: "node",
+    surfaceId: ctx.surfaceId,
+    empty: false,
+    capabilities: {
+      copy: true,
+      cut: !ctx.readOnly,
+      delete: !ctx.readOnly,
+      formatText: false,
+      drag: false,
+      resize: false,
+    },
+    anchor: s.anchor,
+    head: s.head,
+    from: s.from,
+    to: s.to,
+  }),
   geometry: (s, ctx) => {
-    // Only images draw selection chrome today. The resize ghost during a drag is
-    // transient pointer state and stays in TileManager, not here.
-    if (s.node.type.name !== "image") return [];
     const r = ctx.nodeRectAt(s.from);
     if (!r || r.page !== ctx.page) return [];
-    const rect = { x: r.x, y: r.y, width: r.width, height: r.height };
     return [
-      { type: "outline", rect, width: 1.5, role: "affordance" },
-      {
-        type: "handles",
-        handles: getHandles(r.x, r.y, r.width, r.height).map((h) => ({
-          x: h.hx,
-          y: h.hy,
-          cursor: h.cursor,
-        })),
-        role: "affordance",
-      },
+      { type: "outline", rect: { x: r.x, y: r.y, width: r.width, height: r.height }, width: 1.5, role: "affordance" },
     ];
   },
 };
