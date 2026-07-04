@@ -30,7 +30,7 @@ import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
-import type { SelectionBehavior } from "../selection/types";
+import type { SelectionBehavior, HitTester, SelectionGestureProvider } from "../selection/types";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
 
@@ -684,6 +684,20 @@ export interface ExtensionConfig<Options = object> {
   addSelectionBehavior?(this: Phase1Context<Options>): SelectionBehavior[];
 
   /**
+   * Semantic hit testers — turn a pointer position into a `HitTarget` (e.g. a
+   * table adds a "table-cell" target). Consulted by descending priority; the
+   * pointer controller delegates the gesture based on the winning target.
+   */
+  addHitTester?(this: Phase1Context<Options>): HitTester[];
+
+  /**
+   * Pointer-gesture providers — begin a drag for a `HitTarget` this extension
+   * owns (e.g. cell drag-select). Kept separate from `addSelectionBehavior` so
+   * non-pointer selection kinds need not implement one.
+   */
+  addSelectionGesture?(this: Phase1Context<Options>): SelectionGestureProvider[];
+
+  /**
    * Custom markdown block rules for PasteTransformer.
    * Tried before built-in heading/bullet/ordered rules on each pasted line.
    * Phase 1 — no schema needed at definition time; schema is passed to createNode at runtime.
@@ -815,6 +829,8 @@ export interface ResolvedExtension {
   fontModifiers: Map<string, FontModifier>;
   toolbarItems: ToolbarItemSpec[];
   selectionBehaviors: SelectionBehavior[];
+  hitTesters: HitTester[];
+  selectionGestures: SelectionGestureProvider[];
   inputHandlers: Record<string, InputHandler>;
   markdownRules: MarkdownBlockRule[];
   inputRules: InputRule[];

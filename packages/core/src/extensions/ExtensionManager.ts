@@ -18,7 +18,7 @@ import type {
   MarkdownMarkSerializer,
 } from "./types";
 import type { IBaseEditor, IEditor } from "./types";
-import type { SelectionBehavior } from "../selection/types";
+import type { SelectionBehavior, HitTester, SelectionGestureProvider } from "../selection/types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
 import type { PageConfig } from "../layout/PageLayout";
@@ -540,6 +540,18 @@ export class ExtensionManager {
    */
   buildSelectionBehaviors(): SelectionBehavior[] {
     return this.resolved.flatMap((ext) => ext.selectionBehaviors);
+  }
+
+  /** Semantic hit testers from all extensions, sorted by descending priority. */
+  buildHitTesters(): HitTester[] {
+    return this.resolved
+      .flatMap((ext) => ext.hitTesters)
+      .sort((a, b) => b.priority - a.priority);
+  }
+
+  /** Pointer-gesture providers from all extensions, in registration order. */
+  buildSelectionGestures(): SelectionGestureProvider[] {
+    return this.resolved.flatMap((ext) => ext.selectionGestures);
   }
 
   /**

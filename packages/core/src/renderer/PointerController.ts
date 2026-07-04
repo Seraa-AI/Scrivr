@@ -1,5 +1,6 @@
 import type { Editor } from "../Editor";
 import { NodeSelection } from "prosemirror-state";
+import type { SelectionGesture } from "../selection/types";
 import {
   getHandles,
   hitHandle,
@@ -145,6 +146,12 @@ export class PointerController {
   private lastClickY = 0;
   /** Word boundaries from double-click — used for word-granularity drag. */
   private wordAnchor: { from: number; to: number } | null = null;
+  /**
+   * An extension-owned drag (e.g. table cell selection) that claimed this
+   * pointerdown via the gesture registry. When set, moves/up/cancel route to it
+   * instead of the built-in text/image handling. Transient — never editor state.
+   */
+  private activeGesture: SelectionGesture | null = null;
 
   constructor(private readonly deps: PointerControllerDeps) {}
 
@@ -478,6 +485,16 @@ export class PointerController {
           return;
         }
       }
+      // An extension may claim this click (e.g. table cell drag-select). If a
+      // gesture provider takes it, it owns the drag; otherwise place the caret.
+      const hitTarget = editor.resolveHitTarget(docX, docY, page);
+      if (hitTarget) {
+        const gesture = editor.beginSelectionGesture(hitTarget, e);
+        if (gesture) {
+          this.activeGesture = gesture;
+          return;
+        }
+      }
       editor.selection.moveCursorTo(pos);
     } else {
       editor.selection.setSelection(editor.getSelectionSnapshot().anchor, pos);
@@ -488,6 +505,14 @@ export class PointerController {
     if (!this.acceptsPointer(e)) return;
     if (this.activePointerId !== null) e.preventDefault();
     const { editor } = this.deps;
+
+    // Extension gesture owns the drag — feed it the target under the cursor.
+    if (this.activeGesture) {
+      const h = this.hitTest(e.clientX, e.clientY);
+      const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
+      this.activeGesture.update(target, e);
+      return;
+    }
 
     // Resize drag — buffer pending size; commit only on pointerup
     if (this.resizeDrag) {
@@ -585,6 +610,16 @@ export class PointerController {
     if (!this.acceptsPointer(e)) return;
     e.preventDefault();
     const { editor } = this.deps;
+    if (this.activeGesture) {
+      const h = this.hitTest(e.clientX, e.clientY);
+      const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
+      this.activeGesture.finish(target, e);
+      this.activeGesture = null;
+      this.isDragging = false;
+      this.releasePointer(e.pointerId);
+      this.activePointerId = null;
+      return;
+    }
     if (this.resizeDrag) {
       const { docPos, pendingWidth, pendingHeight } = this.resizeDrag;
       editor.setNodeAttrs(docPos, { width: pendingWidth, height: pendingHeight });
@@ -608,6 +643,10 @@ export class PointerController {
 
   private handlePointerCancel = (e: PointerEvent): void => {
     if (!this.acceptsPointer(e)) return;
+    if (this.activeGesture) {
+      this.activeGesture.cancel();
+      this.activeGesture = null;
+    }
     this.resizeDrag = null;
     this.anchoredDrag = null;
     this.inlineImageDrag = null;

@@ -118,13 +118,31 @@ export interface SelectionGesture {
   cancel(): void;
 }
 
+export interface HitTestContext {
+  editor: IEditor;
+}
+
+/**
+ * Turns a pointer position into a semantic `HitTarget`. Extensions register
+ * these (tables add a "table-cell" tester); the registry runs them by descending
+ * priority and takes the first non-null result. Core provides node and text
+ * testers, so there is always a target.
+ */
+export interface HitTester {
+  /** Higher runs first. A cell/node tester outranks the catch-all text tester. */
+  priority: number;
+  hitTest(docX: number, docY: number, page: number, ctx: HitTestContext): HitTarget | null;
+}
+
 export interface GestureContext {
   editor: IEditor;
 }
 
 /**
  * Begins pointer gestures for a selection kind. Kept separate from
- * `SelectionBehavior` so non-pointer selections need not implement it.
+ * `SelectionBehavior` so non-pointer selections (keyboard, programmatic,
+ * collab, select-all) need not implement one. The registry asks each provider
+ * in order; the first to return a gesture owns the drag.
  */
 export interface SelectionGestureProvider {
   beginGesture(hit: HitTarget, event: PointerEvent, ctx: GestureContext): SelectionGesture | null;

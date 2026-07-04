@@ -14,6 +14,12 @@ import type { Extension } from "./extensions/Extension";
 import { CursorManager } from "./renderer/CursorManager";
 import { SelectionRegistry } from "./selection/SelectionRegistry";
 import { builtinSelectionBehaviors, defaultSelectionBehavior } from "./selection/behaviors";
+import type {
+  HitTarget,
+  HitTester,
+  SelectionGesture,
+  SelectionGestureProvider,
+} from "./selection/types";
 import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
@@ -306,6 +312,11 @@ export class Editor extends BaseEditor implements IEditor {
    */
   readonly selectionRegistry: SelectionRegistry;
 
+  /** Extension-registered semantic hit testers (highest priority first). */
+  private readonly hitTesters: HitTester[];
+  /** Extension-registered pointer-gesture providers. */
+  private readonly selectionGestures: SelectionGestureProvider[];
+
   /**
    * Block registry built from all extensions.
    * Pass to renderPage — maps node type names to BlockStrategy instances.
@@ -388,6 +399,8 @@ export class Editor extends BaseEditor implements IEditor {
       [...this.manager.buildSelectionBehaviors(), ...builtinSelectionBehaviors],
       defaultSelectionBehavior,
     );
+    this.hitTesters = this.manager.buildHitTesters();
+    this.selectionGestures = this.manager.buildSelectionGestures();
     this.blockRegistry = this.manager.buildBlockRegistry();
     this.inlineRegistry = this.manager.buildInlineRegistry();
     this.pageChromeContributions = this.manager.getPageChromeContributions();
@@ -1062,6 +1075,34 @@ export class Editor extends BaseEditor implements IEditor {
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void {
     this.overlayRenderHandlers.add(handler);
     return () => this.overlayRenderHandlers.delete(handler);
+  }
+
+  /**
+   * Resolve a pointer position to a semantic `HitTarget` via extension hit
+   * testers (highest priority first), or null when none claims it — in which
+   * case the pointer controller falls back to a plain text caret.
+   */
+  resolveHitTarget(docX: number, docY: number, page: number): HitTarget | null {
+    const ctx = { editor: this };
+    for (const tester of this.hitTesters) {
+      const hit = tester.hitTest(docX, docY, page, ctx);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /**
+   * Ask each registered gesture provider to begin a drag for `hit`; the first
+   * to return a gesture owns it. Null means no extension claims the target, so
+   * the pointer controller runs its built-in text/image handling.
+   */
+  beginSelectionGesture(hit: HitTarget, event: PointerEvent): SelectionGesture | null {
+    const ctx = { editor: this };
+    for (const provider of this.selectionGestures) {
+      const gesture = provider.beginGesture(hit, event, ctx);
+      if (gesture) return gesture;
+    }
+    return null;
   }
 
   /**
