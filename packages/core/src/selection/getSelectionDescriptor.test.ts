@@ -1,0 +1,74 @@
+import { describe, it, expect, afterEach } from "vitest";
+import { AllSelection } from "prosemirror-state";
+import { createTestEditor } from "../test-utils";
+import type { Editor } from "../Editor";
+
+/**
+ * editor.getSelectionDescriptor() is the capability-carrying, kind-tagged view
+ * of the active selection that UI reads instead of `instanceof`-ing the PM
+ * selection.
+ */
+function editorWithImage(): Editor {
+  return createTestEditor({
+    content: {
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "hello world" }] },
+        { type: "paragraph", content: [{ type: "image", attrs: { src: "x.png" } }] },
+      ],
+    },
+  });
+}
+
+describe("getSelectionDescriptor", () => {
+  let editor: Editor | null = null;
+  afterEach(() => {
+    editor?.destroy();
+    editor = null;
+  });
+
+  it("describes a text range: kind text, formattable, copyable", () => {
+    editor = editorWithImage();
+    editor.selection.setSelection(1, 6);
+    const d = editor.getSelectionDescriptor();
+    expect(d.kind).toBe("text");
+    expect(d.empty).toBe(false);
+    expect(d.capabilities.formatText).toBe(true);
+    expect(d.capabilities.copy).toBe(true);
+    expect(d.capabilities.resize).toBe(false);
+    expect(d.surfaceId).toBe("body");
+  });
+
+  it("describes a collapsed caret as empty and not copyable", () => {
+    editor = editorWithImage();
+    editor.selection.moveCursorTo(3);
+    const d = editor.getSelectionDescriptor();
+    expect(d.kind).toBe("text");
+    expect(d.empty).toBe(true);
+    expect(d.capabilities.copy).toBe(false);
+  });
+
+  it("describes a selected image: kind node, resizable, not formattable", () => {
+    editor = editorWithImage();
+    const doc = editor.getState().doc;
+    let imgPos = -1;
+    doc.descendants((n, pos) => {
+      if (n.type.name === "image") imgPos = pos;
+    });
+    editor.selectNode(imgPos);
+    const d = editor.getSelectionDescriptor();
+    expect(d.kind).toBe("node");
+    expect(d.capabilities.resize).toBe(true);
+    expect(d.capabilities.drag).toBe(true);
+    expect(d.capabilities.formatText).toBe(false);
+  });
+
+  it("describes a select-all as kind all", () => {
+    editor = editorWithImage();
+    const s = editor.getState();
+    editor.applyTransaction(s.tr.setSelection(new AllSelection(s.doc)));
+    const d = editor.getSelectionDescriptor();
+    expect(d.kind).toBe("all");
+    expect(d.capabilities.copy).toBe(true);
+  });
+});

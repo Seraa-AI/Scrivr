@@ -221,6 +221,20 @@ class ExportPdfEditorDouble extends ServerEditor implements IEditor {
     return () => {};
   }
 
+  getSelectionDescriptor() {
+    const s = this.getState().selection;
+    return {
+      kind: "text",
+      surfaceId: "body",
+      empty: s.empty,
+      capabilities: { copy: !s.empty, cut: !s.empty, delete: !s.empty, formatText: true, drag: false, resize: false },
+      anchor: s.anchor,
+      head: s.head,
+      from: s.from,
+      to: s.to,
+    };
+  }
+
   getViewportRect(): DOMRect | null {
     return null;
   }

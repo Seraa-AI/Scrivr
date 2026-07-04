@@ -17,6 +17,7 @@ import { builtinSelectionBehaviors, defaultSelectionBehavior } from "./selection
 import type {
   HitTarget,
   HitTester,
+  SelectionDescriptor,
   SelectionGesture,
   SelectionGestureProvider,
 } from "./selection/types";
@@ -949,6 +950,24 @@ export class Editor extends BaseEditor implements IEditor {
       blockType: blockInfo.blockType,
       blockAttrs: blockInfo.blockAttrs,
     };
+  }
+
+  /**
+   * The kind-tagged, capability-carrying view of the active selection. UI
+   * (menus, toolbars, clipboard) reads this instead of `instanceof`-ing the
+   * ProseMirror selection, so a table cell range or a Seraa custom-node
+   * selection is described the same way as text or an image.
+   */
+  getSelectionDescriptor(): SelectionDescriptor {
+    const activeSurface = this.surfaces.activeSurface;
+    const state = activeSurface?.state ?? this.editorState;
+    const selection = state.selection;
+    return this.selectionRegistry.resolve(selection).describe(selection, {
+      state,
+      surfaceId: activeSurface?.id ?? "body",
+      schema: this.schema,
+      readOnly: this.readOnly,
+    });
   }
 
   /**

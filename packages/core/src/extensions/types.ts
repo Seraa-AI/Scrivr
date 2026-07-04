@@ -30,7 +30,12 @@ import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
-import type { SelectionBehavior, HitTester, SelectionGestureProvider } from "../selection/types";
+import type {
+  SelectionBehavior,
+  HitTester,
+  SelectionGestureProvider,
+  SelectionDescriptor,
+} from "../selection/types";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
 
@@ -136,6 +141,11 @@ export interface IEditor extends IBaseEditor {
   readonly surfaces: SurfaceRegistry;
   /** Register a canvas draw function for the overlay layer. Returns unregister. */
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void;
+  /**
+   * The kind-tagged, capability-carrying view of the active selection. UI reads
+   * this instead of `instanceof`-ing the ProseMirror selection.
+   */
+  getSelectionDescriptor(): SelectionDescriptor;
   /** Current document layout (lazily recomputed when dirty). */
   get layout(): DocumentLayout;
   /**

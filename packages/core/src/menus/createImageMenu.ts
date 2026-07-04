@@ -21,7 +21,6 @@
  *     },
  *   });
  */
-import { NodeSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import type { IEditor } from "../extensions/types";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
@@ -61,15 +60,17 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
 
   function update() {
     const state = editor.getState();
-    const sel = state.selection;
+    // Selection *type* comes from the descriptor (the seam), not instanceof; the
+    // image-specific node lookup stays here since this menu is image-only.
+    const descriptor = editor.getSelectionDescriptor();
+    const docPos = descriptor.from;
+    const node = descriptor.kind === "node" ? state.doc.nodeAt(docPos) : null;
 
-    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") {
+    if (!node || node.type.name !== "image") {
       if (visible) { visible = false; lastDocPos = -1; onHide(); }
       return;
     }
 
-    const docPos = sel.from;
-    const node = sel.node;
     const rect = editor.getNodeViewportRect(docPos);
     if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
       if (visible) { visible = false; lastDocPos = -1; onHide(); }
