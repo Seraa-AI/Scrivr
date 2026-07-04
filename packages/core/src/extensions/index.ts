@@ -43,6 +43,26 @@ export type {
   OverlayRenderHandler,
 } from "./types";
 export type {
+  GestureContext,
+  HitTarget,
+  HitTestContext,
+  HitTester,
+  SelectionBehavior,
+  SelectionCapabilities,
+  SelectionDescribeContext,
+  SelectionDescriptor,
+  SelectionGeometryContext,
+  SelectionGesture,
+  SelectionGestureProvider,
+  SelectionHandle,
+  SelectionPrimitive,
+  SelectionRect,
+  SelectionRole,
+} from "../selection/types";
+// The seam's public API speaks ProseMirror `Selection`; re-export it so
+// extension authors get the whole selection vocabulary from "@scrivr/core".
+export type { Selection } from "prosemirror-state";
+export type {
   FormatHandlers,
   ExportContributionMap,
   FormatImportHandlers,

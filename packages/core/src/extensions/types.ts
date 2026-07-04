@@ -15,7 +15,7 @@
 
 import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark } from "prosemirror-model";
 import type { MarkdownSerializerState } from "prosemirror-markdown";
-import type { Command, Plugin, Transaction, EditorState } from "prosemirror-state";
+import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
 import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
@@ -30,6 +30,12 @@ import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
+import type {
+  SelectionBehavior,
+  HitTester,
+  SelectionGestureProvider,
+  SelectionDescriptor,
+} from "../selection/types";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
 
@@ -135,6 +141,13 @@ export interface IEditor extends IBaseEditor {
   readonly surfaces: SurfaceRegistry;
   /** Register a canvas draw function for the overlay layer. Returns unregister. */
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void;
+  /**
+   * The kind-tagged, capability-carrying view of the active selection. UI reads
+   * this instead of `instanceof`-ing the ProseMirror selection.
+   */
+  getSelectionDescriptor(): SelectionDescriptor;
+  /** Describe a specific selection (not necessarily the active one). */
+  describeSelection(selection: Selection): SelectionDescriptor;
   /** Current document layout (lazily recomputed when dirty). */
   get layout(): DocumentLayout;
   /**
@@ -675,6 +688,28 @@ export interface ExtensionConfig<Options = object> {
   addToolbarItems?(this: Phase1Context<Options>): ToolbarItemSpec[];
 
   /**
+   * Selection behaviors this extension owns — how its selection kind is
+   * described, painted, and dragged. Lets tables, images, and custom nodes
+   * drive selection on their own terms without patching the renderer or pointer
+   * controller. Registered before core built-ins, so an extension can override.
+   */
+  addSelectionBehavior?(this: Phase1Context<Options>): SelectionBehavior[];
+
+  /**
+   * Semantic hit testers — turn a pointer position into a `HitTarget` (e.g. a
+   * table adds a "table-cell" target). Consulted by descending priority; the
+   * pointer controller delegates the gesture based on the winning target.
+   */
+  addHitTester?(this: Phase1Context<Options>): HitTester[];
+
+  /**
+   * Pointer-gesture providers — begin a drag for a `HitTarget` this extension
+   * owns (e.g. cell drag-select). Kept separate from `addSelectionBehavior` so
+   * non-pointer selection kinds need not implement one.
+   */
+  addSelectionGesture?(this: Phase1Context<Options>): SelectionGestureProvider[];
+
+  /**
    * Custom markdown block rules for PasteTransformer.
    * Tried before built-in heading/bullet/ordered rules on each pasted line.
    * Phase 1 — no schema needed at definition time; schema is passed to createNode at runtime.
@@ -805,6 +840,9 @@ export interface ResolvedExtension {
   markDecorators: Map<string, MarkDecorator>;
   fontModifiers: Map<string, FontModifier>;
   toolbarItems: ToolbarItemSpec[];
+  selectionBehaviors: SelectionBehavior[];
+  hitTesters: HitTester[];
+  selectionGestures: SelectionGestureProvider[];
   inputHandlers: Record<string, InputHandler>;
   markdownRules: MarkdownBlockRule[];
   inputRules: InputRule[];

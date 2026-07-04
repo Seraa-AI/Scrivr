@@ -1,5 +1,6 @@
 import type { Editor } from "../Editor";
 import { NodeSelection } from "prosemirror-state";
+import type { SelectionGesture } from "../selection/types";
 import {
   getHandles,
   hitHandle,
@@ -145,6 +146,12 @@ export class PointerController {
   private lastClickY = 0;
   /** Word boundaries from double-click — used for word-granularity drag. */
   private wordAnchor: { from: number; to: number } | null = null;
+  /**
+   * An extension-owned drag (e.g. table cell selection) that claimed this
+   * pointerdown via the gesture registry. When set, moves/up/cancel route to it
+   * instead of the built-in text/image handling. Transient — never editor state.
+   */
+  private activeGesture: SelectionGesture | null = null;
 
   constructor(private readonly deps: PointerControllerDeps) {}
 
@@ -160,6 +167,21 @@ export class PointerController {
 
   /** Detach pointer event listeners. */
   detach(): void {
+    // Abort an in-flight extension gesture so teardown mid-drag doesn't leak
+    // pointer capture or leave the gesture believing it's still live.
+    const gesture = this.activeGesture;
+    this.activeGesture = null;
+    if (this.activePointerId !== null) {
+      this.releasePointer(this.activePointerId);
+      this.activePointerId = null;
+    }
+    if (gesture) {
+      try {
+        gesture.cancel();
+      } catch {
+        // A broken gesture must not block listener teardown.
+      }
+    }
     this.deps.tilesContainer.removeEventListener("pointerdown", this.handlePointerDown);
     document.removeEventListener("pointermove", this.handlePointerMove);
     document.removeEventListener("pointerup", this.handlePointerUp);
@@ -263,7 +285,16 @@ export class PointerController {
   private hitHandleAt(canvasX: number, canvasY: number, page: number) {
     const { editor } = this.deps;
     const sel = this.activeSelection();
-    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image")
+    if (!(sel instanceof NodeSelection)) return null;
+    // Any node is resizable, not just images: its SelectionBehavior must report
+    // the `resize` capability (also gates read-only) and the node must carry
+    // numeric width/height attrs to drive the drag. An extension's node that
+    // draws resize handles + declares `resize: true` gets grab/ghost/commit free.
+    if (!editor.describeSelection(sel).capabilities.resize) return null;
+    if (
+      typeof sel.node.attrs["width"] !== "number" ||
+      typeof sel.node.attrs["height"] !== "number"
+    )
       return null;
     // Step 6: read through editor.getNodeRect so anchored placements come
     // from layout.anchoredObjects (Stage 3 authoritative) and inline images
@@ -336,6 +367,40 @@ export class PointerController {
 
     const { page, docX, docY } = hit;
 
+    // Count clicks before resolving a semantic target. Registered gestures get
+    // first refusal for every pointerdown (including Shift/double/triple-click
+    // and points over built-in images); built-in text/image behavior is only the
+    // compatibility fallback when no provider claims the target.
+    const now = Date.now();
+    const CLICK_TIMEOUT = 500;
+    const CLICK_RADIUS = 5;
+    if (
+      now - this.lastClickTime < CLICK_TIMEOUT &&
+      Math.abs(e.clientX - this.lastClickX) < CLICK_RADIUS &&
+      Math.abs(e.clientY - this.lastClickY) < CLICK_RADIUS
+    ) {
+      this.clickCount++;
+    } else {
+      this.clickCount = 1;
+    }
+    this.lastClickTime = now;
+    this.lastClickX = e.clientX;
+    this.lastClickY = e.clientY;
+
+    // Chrome bands are separate editing surfaces, so their activation routing
+    // precedes body hit testing.
+    if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this.clickCount)) return;
+
+    const semanticHit = editor.resolveHitTarget(docX, docY, page);
+    if (semanticHit) {
+      const gesture = editor.beginSelectionGesture(semanticHit, e);
+      if (gesture) {
+        this.activeGesture = gesture;
+        this.isDragging = true;
+        return;
+      }
+    }
+
     // Resize handle — mutation, block in read-only
     const resizeHit = this.hitHandleAt(docX, docY, page);
     if (resizeHit) {
@@ -405,27 +470,6 @@ export class PointerController {
       return;
     }
 
-    // ── Click-count tracking (double/triple-click) ──────────────────────────
-    const now = Date.now();
-    const CLICK_TIMEOUT = 500;
-    const CLICK_RADIUS = 5;
-    if (
-      now - this.lastClickTime < CLICK_TIMEOUT &&
-      Math.abs(e.clientX - this.lastClickX) < CLICK_RADIUS &&
-      Math.abs(e.clientY - this.lastClickY) < CLICK_RADIUS
-    ) {
-      this.clickCount++;
-    } else {
-      this.clickCount = 1;
-    }
-    this.lastClickTime = now;
-    this.lastClickX = e.clientX;
-    this.lastClickY = e.clientY;
-
-    // Chrome band click — consumed for both activation (double-click) and
-    // cursor positioning (single click when surface is already active).
-    if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this.clickCount)) return;
-
     this.isDragging = true;
     const pos = editor.charMap.posAtCoords(docX, docY, page);
 
@@ -488,6 +532,20 @@ export class PointerController {
     if (!this.acceptsPointer(e)) return;
     if (this.activePointerId !== null) e.preventDefault();
     const { editor } = this.deps;
+
+    // Extension gesture owns the drag — feed it the target under the cursor.
+    if (this.activeGesture) {
+      const h = this.hitTest(e.clientX, e.clientY);
+      const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
+      try {
+        this.activeGesture.update(target, e);
+      } catch (err) {
+        // A throwing gesture must not lock the pointer for the rest of the session.
+        this.endActiveGesture(e.pointerId);
+        throw err;
+      }
+      return;
+    }
 
     // Resize drag — buffer pending size; commit only on pointerup
     if (this.resizeDrag) {
@@ -585,6 +643,21 @@ export class PointerController {
     if (!this.acceptsPointer(e)) return;
     e.preventDefault();
     const { editor } = this.deps;
+    if (this.activeGesture) {
+      const gesture = this.activeGesture;
+      // Clear first so a throwing finish() can't leave the gesture stuck active.
+      this.activeGesture = null;
+      this.isDragging = false;
+      const h = this.hitTest(e.clientX, e.clientY);
+      const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
+      try {
+        gesture.finish(target, e);
+      } finally {
+        this.releasePointer(e.pointerId);
+        this.activePointerId = null;
+      }
+      return;
+    }
     if (this.resizeDrag) {
       const { docPos, pendingWidth, pendingHeight } = this.resizeDrag;
       editor.setNodeAttrs(docPos, { width: pendingWidth, height: pendingHeight });
@@ -608,6 +681,10 @@ export class PointerController {
 
   private handlePointerCancel = (e: PointerEvent): void => {
     if (!this.acceptsPointer(e)) return;
+    // Reset all state first, then notify the gesture — a throwing cancel() must
+    // not skip teardown.
+    const gesture = this.activeGesture;
+    this.activeGesture = null;
     this.resizeDrag = null;
     this.anchoredDrag = null;
     this.inlineImageDrag = null;
@@ -616,7 +693,22 @@ export class PointerController {
     this.releasePointer(e.pointerId);
     this.activePointerId = null;
     this.deps.scheduleUpdate();
+    if (gesture) {
+      try {
+        gesture.cancel();
+      } catch {
+        // Teardown already done; a broken gesture's cancel must not propagate here.
+      }
+    }
   };
+
+  /** Drop the active gesture and release the pointer (used when a gesture throws). */
+  private endActiveGesture(pointerId: number): void {
+    this.activeGesture = null;
+    this.isDragging = false;
+    this.releasePointer(pointerId);
+    this.activePointerId = null;
+  }
 
   private acceptsPointer(e: PointerEvent): boolean {
     return this.activePointerId === null || e.pointerId === this.activePointerId;

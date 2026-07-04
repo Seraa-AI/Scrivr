@@ -3,6 +3,9 @@ import type {
   GlyphEntry,
   LineEntry,
 } from "../layout/CharacterMap";
+import { HANDLE_SIZE } from "./ResizeController";
+import type { SelectionPrimitive, SelectionRole } from "../selection/types";
+import type { ResolvedTheme } from "../model/theme";
 
 // ── AI / Track-changes overlay helpers ───────────────────────────────────────
 
@@ -454,6 +457,67 @@ export function clearOverlay(
  * visible. If the cursor is in the "off" phase, simply don't call it
  * (clearOverlay is sufficient to hide it).
  */
+/** Map a primitive's semantic role to its theme color. */
+function roleColor(role: SelectionRole, theme: ResolvedTheme): string {
+  switch (role) {
+    case "caret":
+      return theme.cursor;
+    case "affordance":
+      return theme.resizeHandle;
+    case "selection":
+      return theme.selectionFill;
+  }
+}
+
+/**
+ * Paints selection geometry primitives emitted by a SelectionBehavior. The only
+ * selection-drawing entry point the renderer needs — it never learns whether the
+ * primitives describe text, an image, a table, or a custom node; it maps each
+ * primitive's `role` to a theme color. The caller decides which primitives to
+ * pass (e.g. dropping the caret when the blink is off, or the handles during a
+ * resize-ghost drag).
+ */
+export function paintSelectionPrimitives(
+  ctx: CanvasRenderingContext2D,
+  primitives: readonly SelectionPrimitive[],
+  theme: ResolvedTheme,
+): void {
+  for (const p of primitives) {
+    ctx.save();
+    switch (p.type) {
+      case "fill":
+        ctx.fillStyle = roleColor(p.role ?? "selection", theme);
+        for (const r of p.rects) snappedFillRect(ctx, r.x, r.y, r.width, r.height);
+        break;
+      case "outline":
+        ctx.strokeStyle = roleColor(p.role ?? "affordance", theme);
+        ctx.lineWidth = p.width;
+        ctx.strokeRect(p.rect.x, p.rect.y, p.rect.width, p.rect.height);
+        break;
+      case "handles":
+        ctx.fillStyle = roleColor(p.role ?? "affordance", theme);
+        for (const h of p.handles) {
+          ctx.fillRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+        }
+        break;
+      case "caret": {
+        if (p.height <= 0) break;
+        // +0.5 so the 1px stroke lands on a physical pixel boundary.
+        const x = Math.round(p.x) + 0.5;
+        ctx.strokeStyle = theme.cursor;
+        ctx.lineWidth = 1.5;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(x, p.y + 1);
+        ctx.lineTo(x, p.y + p.height - 1);
+        ctx.stroke();
+        break;
+      }
+    }
+    ctx.restore();
+  }
+}
+
 export function renderCursor(
   ctx: CanvasRenderingContext2D,
   coords: CoordsResult,

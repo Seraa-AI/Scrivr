@@ -1,4 +1,4 @@
-import { EditorState, Transaction, NodeSelection } from "prosemirror-state";
+import { EditorState, Transaction, NodeSelection, type Selection } from "prosemirror-state";
 import { SelectionController } from "./SelectionController";
 import type {
   FontModifier,
@@ -12,6 +12,15 @@ import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import { CursorManager } from "./renderer/CursorManager";
+import { SelectionRegistry } from "./selection/SelectionRegistry";
+import { builtinSelectionBehaviors, defaultSelectionBehavior } from "./selection/behaviors";
+import type {
+  HitTarget,
+  HitTester,
+  SelectionDescriptor,
+  SelectionGesture,
+  SelectionGestureProvider,
+} from "./selection/types";
 import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
@@ -297,6 +306,19 @@ export class Editor extends BaseEditor implements IEditor {
   readonly toolbarItems: ToolbarItemSpec[];
 
   /**
+   * Resolves the SelectionBehavior for any `state.selection` — extension
+   * behaviors first, then core built-ins, with a default fallback last.
+   * The renderer and pointer controller consult this instead of branching on
+   * selection type.
+   */
+  readonly selectionRegistry: SelectionRegistry;
+
+  /** Extension-registered semantic hit testers (highest priority first). */
+  private readonly hitTesters: HitTester[];
+  /** Extension-registered pointer-gesture providers. */
+  private readonly selectionGestures: SelectionGestureProvider[];
+
+  /**
    * Block registry built from all extensions.
    * Pass to renderPage — maps node type names to BlockStrategy instances.
    */
@@ -374,6 +396,12 @@ export class Editor extends BaseEditor implements IEditor {
     this.fontModifiers = this.manager.buildFontModifiers();
     this.markDecorators = this.manager.buildMarkDecorators();
     this.toolbarItems  = this.manager.buildToolbarItems();
+    this.selectionRegistry = new SelectionRegistry(
+      [...this.manager.buildSelectionBehaviors(), ...builtinSelectionBehaviors],
+      defaultSelectionBehavior,
+    );
+    this.hitTesters = this.manager.buildHitTesters();
+    this.selectionGestures = this.manager.buildSelectionGestures();
     this.blockRegistry = this.manager.buildBlockRegistry();
     this.inlineRegistry = this.manager.buildInlineRegistry();
     this.pageChromeContributions = this.manager.getPageChromeContributions();
@@ -925,6 +953,34 @@ export class Editor extends BaseEditor implements IEditor {
   }
 
   /**
+   * The kind-tagged, capability-carrying view of the active selection. UI
+   * (menus, toolbars, clipboard) reads this instead of `instanceof`-ing the
+   * ProseMirror selection, so a table cell range or a Seraa custom-node
+   * selection is described the same way as text or an image.
+   */
+  getSelectionDescriptor(): SelectionDescriptor {
+    const state = this.surfaces.activeSurface?.state ?? this.editorState;
+    return this.describeSelection(state.selection);
+  }
+
+  /**
+   * Describe a specific selection (not necessarily the active one) through its
+   * behavior. The pointer controller uses this to ask the capabilities of the
+   * selection it is holding, rather than re-deriving the active one.
+   */
+  describeSelection(selection: Selection): SelectionDescriptor {
+    const activeSurface = this.surfaces.activeSurface;
+    const state = activeSurface?.state ?? this.editorState;
+    return this.selectionRegistry.resolve(selection).describe(selection, {
+      state,
+      surfaceId: activeSurface?.id ?? "body",
+      // The surface may use a different schema than the root document.
+      schema: state.schema,
+      readOnly: this.readOnly,
+    });
+  }
+
+  /**
    * Mount the editor onto a container element.
    * Creates the hidden textarea and attaches event listeners.
    */
@@ -1048,6 +1104,34 @@ export class Editor extends BaseEditor implements IEditor {
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void {
     this.overlayRenderHandlers.add(handler);
     return () => this.overlayRenderHandlers.delete(handler);
+  }
+
+  /**
+   * Resolve a pointer position to a semantic `HitTarget` via extension hit
+   * testers (highest priority first), or null when none claims it — in which
+   * case the pointer controller falls back to a plain text caret.
+   */
+  resolveHitTarget(docX: number, docY: number, page: number): HitTarget | null {
+    const ctx = { editor: this };
+    for (const tester of this.hitTesters) {
+      const hit = tester.hitTest(docX, docY, page, ctx);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /**
+   * Ask each registered gesture provider to begin a drag for `hit`; the first
+   * to return a gesture owns it. Null means no extension claims the target, so
+   * the pointer controller runs its built-in text/image handling.
+   */
+  beginSelectionGesture(hit: HitTarget, event: PointerEvent): SelectionGesture | null {
+    const ctx = { editor: this };
+    for (const provider of this.selectionGestures) {
+      const gesture = provider.beginGesture(hit, event, ctx);
+      if (gesture) return gesture;
+    }
+    return null;
   }
 
   /**
