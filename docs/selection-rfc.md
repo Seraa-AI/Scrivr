@@ -71,24 +71,28 @@ does and what we mirror:
   is deleted or the endpoints leave the table. (Replaces the plugin's `apply`
   remap.)
 - `content()` — the rectangular `Slice`, adjusting colspan/rowspan for clipped
-  cells. **Copy/cut become free** (delete `serializeCellSelection`).
+  cells. Copy/cut must be re-pointed to call `state.selection.content()`
+  (requirement 2); they read `from/to` today.
 - `replace()` / `replaceWith()` — typing clears every cell, content lands in the
-  anchor. (Replaces the guard's clear logic for the typing case.)
-- `eq`, `toJSON`, static `fromJSON`, `getBookmark` (+ `CellBookmark`) — history +
-  collab correctness for free. Registered `Selection.jsonID('cell', CellSelection)`
-  at module load, before any `EditorState.fromJSON` (new core registration hook;
+  anchor. Reachable only once `insertText` stops passing explicit `from/to`
+  (requirement 3).
+- `eq`, `toJSON`, static `fromJSON`, `getBookmark` (+ `CellBookmark`) — bookmark
+  makes undo correct; collab needs awareness serialization wired separately
+  (requirement 10). Registered `Selection.jsonID('cell', CellSelection)` at
+  module load, before any `EditorState.fromJSON` (new core registration hook;
   none exists today).
 
 Deletes on landing: `cellSelectionPlugin`, `setStoredCellRange`,
 `StoredCellRange`, the PointerController collapse-to-caret hack, and the
 `selectedCells` shadow branch (becomes `state.selection instanceof CellSelection`).
 
-**Canvas constraint.** `InputBridge.syncPosition` only needs a resolvable
-`selection.head` to park the hidden textarea; `CellSelection.head` resolves
-inside the head cell, so no shadow caret is needed. Destructive edits in
-`model/commands.ts` (which read `.from/.to` today) must route through the
-selection's own `replace`/`replaceWith` so subclass semantics apply — this is
-the one call-site set that needs auditing, not rewriting.
+**Canvas constraint.** The hidden textarea + cursor paint need a *text* anchor,
+and `CellSelection.head` is a structural boundary (before the head cell), not a
+caret position — feeding it to `syncPosition`/`coordsAtPos` can land the IME and
+cursor in the wrong cell. The selection must expose an explicit insertion anchor
+inside the head cell (see review-hardened requirement 4). Destructive edits in
+`model/commands.ts` must route through the selection's own `replace`/`replaceWith`
+(requirement 3) — `insertText`'s explicit `from/to` is the real gap.
 
 ## 2. Public discriminated selection descriptor
 
@@ -208,24 +212,70 @@ Phase 6b (merge/split) builds on step 2 instead of adding shadow reads.
 
 ## Decisions (locked)
 
-- **Scope: sequenced PRs.** PR1 = real `CellSelection` in `state.selection`
-  (map/content/bookmark/eq/jsonID) + `SelectionDescriptor`, converting cells and
-  deleting the shadow. Registries (behavior/geometry/hit-test) land as follow-on
-  PRs, converting images too. Each PR reviewable; not a big-bang.
+- **Scope: build the full system correctly, upfront.** All five pillars
+  (canonical selection + descriptor + extension behavior registry + semantic hit
+  testing + geometry primitives), converting BOTH cells and images, as one
+  coherent body of work — not sequenced or deferred. Rationale (user): breaking
+  it up loses the cross-cutting learning and fine-tuning that only surface when
+  the whole thing is built together. The registry is not "premature" here — doing
+  it now is the point.
 - **Behaviors register via the extension seam** (`addSelectionBehavior`) with a
   **required default fallback** for unregistered selection kinds (Seraa custom
   nodes).
 
-## Open questions (resolve during PR1 design)
+## Review-hardened requirements (folded in from the eng + codex review)
 
-- `CellSelection`: rectangle only for v1, or column/row variants now
-  (pm-tables `colSelection`/`rowSelection`)?
+These are in scope, not open questions. Each is a thing the naive version breaks.
+
+1. **Baseline.** This branch is off `main`, which never merged the Phase 6a
+   shadow (held on PR #123). So there is NO `StoredCellRange` plugin to delete
+   here — cells today are the Phase 5 *derived* cross-cell `TextSelection`
+   (`cellRangeFromSelection`). The build upgrades that to a real `CellSelection`.
+2. **Nothing is "free" — wire it.** `content()` does not auto-route to the
+   clipboard: copy/cut read `doc.textBetween(from,to)` (`InputBridge.ts:415`) and
+   HTML uses `doc.slice(from,to)` (`ClipboardSerializer.ts:21`); both must call
+   `state.selection.content()` and define rectangular plain-text/HTML output.
+3. **Typing must invoke the selection's `replace()`.** `insertText` passes
+   explicit `from/to` (`commands.ts:21`), bypassing `CellSelection.replace()`.
+   Switch to `tr.insertText(text)` (no positions) / `replaceSelectionWith`. IME
+   path is the same (`InputBridge.ts:396,405`). Delete/paste already route
+   through selection semantics (`commands.ts:27,54,88`, `PasteTransformer.ts:123`)
+   — audit + test, but `insertText` is the real gap.
+4. **`CellSelection.head` is a structural boundary, not caret geometry.** Feeding
+   it to `syncPosition`/`getViewportRect` (`InputBridge.ts:192`) or `coordsAtPos`
+   can put the IME/cursor in the wrong cell. The selection must expose an explicit
+   text-insertion/IME anchor *inside* the head cell for textarea + cursor paint.
+5. **Rendering ships with the selection.** `TileManager` only distinguishes
+   `NodeSelection` (`:703/713/725`); an unrendered `CellSelection` paints as one
+   contiguous glyph range + caret and highlights intervening cells. Cell/rect
+   geometry must land in the same change — this is why geometry primitives are
+   pillar 5, not a follow-up.
+6. **Command guards.** Keeping raw `from/to` is NOT compatibility for rectangular
+   selections — `Alignment.ts:26`, `FontSize.ts:67` et al. would format cells
+   *outside* the selection. Gate formatting/structural commands on the selection
+   kind (capabilities), and define arrow/Escape (navigation currently coerces any
+   custom selection back to `TextSelection`, `SelectionController.ts:234`).
+7. **`AllSelection`** is canonical too — include it in the descriptor union and
+   give it a default behavior (Cmd-A).
+8. **Surfaces are ownership, not decoration.** Input routes to the active surface
+   but the layout head stays the root selection (`Editor.ts:420,437`), and
+   textarea positioning is disabled for surfaces (`Editor.ts:1127`). Selection
+   geometry/context must be surface-scoped before header/footer selection works.
+9. **Transient state stays transient.** Resize + anchored-drag ghosts are
+   pointer state with their own repaint keys (`TileManager.ts:642,740`), not
+   selection-driven — geometry migration must define their ownership,
+   cancellation, and invalidation, not fold them into selection state.
+10. **History + collab need explicit tests, not faith.** Bookmark covers undo;
+    collab needs awareness serialization separately, and endpoint mapping needs
+    table-identity validation after concurrent row/cell delete/move. Test
+    undo/redo + remote structural remaps.
+
+## Remaining design questions (answer before/while building)
+
+- `CellSelection`: include column/row variants now (pm-tables
+  `colSelection`/`rowSelection`) or rectangle-first?
 - Bookmark shape — mirror pm-tables `CellBookmark` (two positions).
-- Registry ownership: does the behavior/geometry registry live on `Editor` or
-  `TileManager`, and do geometry contexts receive the painted `DocumentLayout`
-  (the P3 from the earlier code review, so paint never re-runs layout)?
-- Descriptor compatibility window: how long we keep raw `anchor/head/from/to`
-  before menus/commands consume capabilities.
-- Surfaces: descriptor `surfaceId` vs. the existing `activeSurface` selection
-  split (`PointerController.ts:272`).
+- Registry ownership: behavior/geometry registry on `Editor` vs `TileManager`;
+  geometry contexts receive the painted `DocumentLayout` so paint never re-runs
+  layout.
 ```
