@@ -111,6 +111,7 @@ export class Extension<Options extends object = object> {
       markDecorators: new Map(Object.entries(config.addMarkDecorators?.call(p1) ?? {})),
       fontModifiers: config.addFontModifiers?.call(p1) ?? new Map(),
       toolbarItems: config.addToolbarItems?.call(p1) ?? [],
+      selectionBehaviors: config.addSelectionBehavior?.call(p1) ?? [],
       inputHandlers: config.addInputHandlers?.call(p1) ?? {},
       markdownRules: config.addMarkdownRules?.call(p1) ?? [],
       inputRules: schema ? (config.addInputRules?.call(p2) ?? []) : [],

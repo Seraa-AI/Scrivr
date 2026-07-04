@@ -18,6 +18,7 @@ import type {
   MarkdownMarkSerializer,
 } from "./types";
 import type { IBaseEditor, IEditor } from "./types";
+import type { SelectionBehavior } from "../selection/types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
 import type { PageConfig } from "../layout/PageLayout";
@@ -530,6 +531,15 @@ export class ExtensionManager {
    */
   buildToolbarItems(): ToolbarItemSpec[] {
     return this.resolved.flatMap((ext) => ext.toolbarItems);
+  }
+
+  /**
+   * Selection behaviors from all extensions, in registration order. The Editor
+   * appends core built-ins after these and a default fallback last, so an
+   * extension's behavior wins for its own selection kind.
+   */
+  buildSelectionBehaviors(): SelectionBehavior[] {
+    return this.resolved.flatMap((ext) => ext.selectionBehaviors);
   }
 
   /**

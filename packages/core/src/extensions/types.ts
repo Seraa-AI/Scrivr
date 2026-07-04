@@ -30,6 +30,7 @@ import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
+import type { SelectionBehavior } from "../selection/types";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
 
@@ -675,6 +676,14 @@ export interface ExtensionConfig<Options = object> {
   addToolbarItems?(this: Phase1Context<Options>): ToolbarItemSpec[];
 
   /**
+   * Selection behaviors this extension owns — how its selection kind is
+   * described, painted, and dragged. Lets tables, images, and custom nodes
+   * drive selection on their own terms without patching the renderer or pointer
+   * controller. Registered before core built-ins, so an extension can override.
+   */
+  addSelectionBehavior?(this: Phase1Context<Options>): SelectionBehavior[];
+
+  /**
    * Custom markdown block rules for PasteTransformer.
    * Tried before built-in heading/bullet/ordered rules on each pasted line.
    * Phase 1 — no schema needed at definition time; schema is passed to createNode at runtime.
@@ -805,6 +814,7 @@ export interface ResolvedExtension {
   markDecorators: Map<string, MarkDecorator>;
   fontModifiers: Map<string, FontModifier>;
   toolbarItems: ToolbarItemSpec[];
+  selectionBehaviors: SelectionBehavior[];
   inputHandlers: Record<string, InputHandler>;
   markdownRules: MarkdownBlockRule[];
   inputRules: InputRule[];
