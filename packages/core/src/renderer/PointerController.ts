@@ -558,7 +558,19 @@ export class PointerController {
         !resizeHit && !anchoredHit
           ? editor.charMap.objectRectAtPoint(hit.docX, hit.docY, hit.page)
           : undefined;
-      const cursor = resizeHit ? resizeHit.cursor : anchoredHit || inlineImageHit ? "move" : "text";
+      // Over a table cell (and nothing higher-priority): the spreadsheet-style
+      // `cell` cursor signals that a drag selects a range of cells, not text.
+      const overCell =
+        !resizeHit && !anchoredHit && !inlineImageHit
+          ? cellAtCoords(editor.layout.pages, hit.docX, hit.docY, hit.page) !== null
+          : false;
+      const cursor = resizeHit
+        ? resizeHit.cursor
+        : anchoredHit || inlineImageHit
+          ? "move"
+          : overCell
+            ? "cell"
+            : "text";
       this.setCursorAll(cursor);
     }
 

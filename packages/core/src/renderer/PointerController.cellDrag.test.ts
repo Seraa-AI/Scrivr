@@ -141,6 +141,20 @@ describe("PointerController — cell drag-select", () => {
     expect(selectedCells(s.editor.getState())).toBeNull();
   });
 
+  it("hovering a cell shows the spreadsheet `cell` cursor (drag-select affordance)", () => {
+    const s = setup(3);
+    clean = s.cleanup;
+    const row = s.rowBlock();
+    const a = center(row, 0);
+
+    s.container.dispatchEvent(pointerEvent("pointermove", a.x, a.y));
+    expect(s.container.style.cursor).toBe("cell");
+
+    // Far below the single-row table → ordinary text cursor.
+    document.dispatchEvent(pointerEvent("pointermove", a.x, a.y + 600));
+    expect(s.container.style.cursor).toBe("text");
+  });
+
   it("pointercancel mid-drag drops the committed range", () => {
     const s = setup(3);
     clean = s.cleanup;

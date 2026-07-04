@@ -266,11 +266,19 @@ export const Table = Extension.create({
 
       const selected = new Set(sel.cellPositions);
       ctx.save();
+      // Translucent fill reads over white body cells; the opaque border keeps
+      // the selection legible over cells that already carry a background
+      // (header fill, shaded rows).
       ctx.fillStyle = theme.selectionFill;
+      ctx.strokeStyle = theme.selectionBorder;
+      ctx.lineWidth = 1.5;
       for (const block of page.blocks) {
         if (block.kind !== "tableRow" || !block.cells) continue;
         for (const c of block.cells) {
-          if (selected.has(c.cellPos)) ctx.fillRect(c.x, block.y + c.y, c.width, c.height);
+          if (!selected.has(c.cellPos)) continue;
+          const top = block.y + c.y;
+          ctx.fillRect(c.x, top, c.width, c.height);
+          ctx.strokeRect(c.x + 0.75, top + 0.75, c.width - 1.5, c.height - 1.5);
         }
       }
       ctx.restore();

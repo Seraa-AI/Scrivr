@@ -17,6 +17,7 @@ describe("theme — defaults", () => {
       "link",
       "cursor",
       "selectionFill",
+      "selectionBorder",
       "imagePlaceholderBg",
       "imagePlaceholderBorder",
       "imagePlaceholderText",

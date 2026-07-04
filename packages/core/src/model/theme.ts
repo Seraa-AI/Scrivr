@@ -47,6 +47,8 @@ export interface EditorTheme {
   cursor?: string;
   /** Selection rectangle fill (use rgba for transparency). */
   selectionFill?: string;
+  /** Opaque outline for a cell-range selection (drawn over cell backgrounds). */
+  selectionBorder?: string;
 
   // Image placeholders (loading / error)
   /** Image placeholder background fill. */
@@ -82,6 +84,7 @@ export interface ResolvedTheme {
   link: string;
   cursor: string;
   selectionFill: string;
+  selectionBorder: string;
   imagePlaceholderBg: string;
   imagePlaceholderBorder: string;
   imagePlaceholderText: string;
@@ -101,6 +104,7 @@ export interface ResolvedTheme {
  * - link: blue-600 — was Link.ts LINK_COLOR before tokens existed
  * - cursor: slate-800 — OverlayRenderer cursor fill
  * - selectionFill: blue-500 @ 25% — OverlayRenderer selection rect
+ * - selectionBorder: blue-500 (opaque) — cell-range selection outline
  * - imagePlaceholderBg / Border / Text: slate-100 / 300 / 500 — Image.ts
  * - listMarker: slate-800 — ListItemStrategy bullet/number fill
  * - hrColor: slate-300 — HorizontalRule.ts HR_COLOR
@@ -113,6 +117,7 @@ export const defaultEditorTheme: ResolvedTheme = Object.freeze({
   link: "#2563eb",
   cursor: "#1e293b",
   selectionFill: "rgba(59, 130, 246, 0.25)",
+  selectionBorder: "#3b82f6",
   imagePlaceholderBg: "#f1f5f9",
   imagePlaceholderBorder: "#cbd5e1",
   imagePlaceholderText: "#64748b",
@@ -136,6 +141,7 @@ export const defaultPdfTheme: ResolvedTheme = Object.freeze({
   link: "#0066cc",
   cursor: "#000000",
   selectionFill: "rgba(0, 0, 0, 0)",
+  selectionBorder: "rgba(0, 0, 0, 0)",
   imagePlaceholderBg: "#f5f5f5",
   imagePlaceholderBorder: "#cccccc",
   imagePlaceholderText: "#666666",
