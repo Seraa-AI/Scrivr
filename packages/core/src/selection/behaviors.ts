@@ -1,5 +1,5 @@
 import { TextSelection, NodeSelection, AllSelection, type Selection } from "prosemirror-state";
-import type { CharacterMap } from "../layout/CharacterMap";
+import type { GlyphEntry, LineEntry } from "../layout/CharacterMap";
 import { getHandles } from "../renderer/ResizeController";
 import type {
   SelectionBehavior,
@@ -19,24 +19,52 @@ import type {
  * Behaviors stay theme-agnostic — primitives name a `role`, the renderer colors.
  */
 
-/** Fill rects for a text range on one page — glyph rects plus empty-line marks. */
-function rangeFillRects(
+/**
+ * One full-height band rect per selected line (Word/Docs style), not per glyph:
+ *   - first line   → from the selection start x to the right margin,
+ *   - middle lines → the whole content width,
+ *   - last line    → from the left margin to the selection end x.
+ * Bands are line-height tall, so they read as continuous columns and cover
+ * inline atoms and block atoms (image, HR, page break — lines with no glyphs but
+ * real height) instead of leaving ragged glyph-only fills.
+ */
+export function rangeBandRects(
   from: number,
   to: number,
-  page: number,
-  charMap: CharacterMap,
+  glyphs: readonly GlyphEntry[],
+  lines: readonly LineEntry[],
 ): SelectionRect[] {
-  const glyphs = charMap.glyphsInRange(from, to).filter((g) => g.page === page);
-  const rects: SelectionRect[] = [];
+  const byLine = new Map<number, GlyphEntry[]>();
   for (const g of glyphs) {
-    if (g.height > 0) rects.push({ x: g.x, y: g.y, width: g.width, height: g.height });
+    const arr = byLine.get(g.lineIndex);
+    if (arr) arr.push(g);
+    else byLine.set(g.lineIndex, [g]);
   }
-  // Empty paragraphs have a line but no glyphs — a line-height square marks them.
-  const linesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
-  for (const l of charMap.linesInRange(from, to).filter((l) => l.page === page)) {
-    if (l.height > 0 && !linesWithGlyphs.has(l.lineIndex)) {
-      rects.push({ x: l.x, y: l.y, width: l.height, height: l.height });
+
+  const rects: SelectionRect[] = [];
+  for (const line of lines) {
+    if (line.height <= 0) continue;
+    const startsBefore = from <= line.startDocPos; // selection began on an earlier line
+    const endsAfter = to > line.endDocPos; // selection continues to a later line
+    const rightMargin = line.x + line.contentWidth;
+
+    const glyphs = byLine.get(line.lineIndex);
+    let left: number;
+    let right: number;
+    if (glyphs && glyphs.length) {
+      glyphs.sort((a, b) => a.x - b.x);
+      const last = glyphs[glyphs.length - 1]!;
+      left = startsBefore ? line.x : glyphs[0]!.x;
+      right = endsAfter ? rightMargin : last.x + last.width;
+    } else {
+      // A line with no selected glyphs: full-width band when it's an interior
+      // line of the selection (e.g. an empty paragraph or a block atom), else a
+      // line-height square marking an empty boundary line.
+      left = line.x;
+      right = startsBefore && endsAfter ? rightMargin : line.x + line.height;
     }
+
+    if (right > left) rects.push({ x: left, y: line.y, width: right - left, height: line.height });
   }
   return rects;
 }
@@ -56,7 +84,9 @@ function fillGeometry(
   to: number,
   ctx: SelectionGeometryContext,
 ): SelectionPrimitive[] {
-  const rects = rangeFillRects(from, to, ctx.page, ctx.charMap);
+  const glyphs = ctx.charMap.glyphsInRange(from, to).filter((g) => g.page === ctx.page);
+  const lines = ctx.charMap.linesInRange(from, to).filter((l) => l.page === ctx.page);
+  const rects = rangeBandRects(from, to, glyphs, lines);
   return rects.length ? [{ type: "fill", rects, role: "selection" }] : [];
 }
 
