@@ -17,6 +17,11 @@ slots all land back on the document's `headerFooter` policy. Activation follows
 Word — first-page chrome is gated on `<w:titlePg>` and even-page chrome on
 `<w:evenAndOddHeaders>`, not on the mere presence of a reference.
 
+Odd/even headers and footers are now a first-class rendered feature:
+`differentOddEven` + `evenPageHeader` / `evenPageFooter` render distinct even-page
+chrome (previously reserved), so imported even-page content is displayed, not just
+stored.
+
 `@scrivr/core` / `@scrivr/docx` — the DOCX import context gained the inverse of
 the export-side part seam: `ctx.section` exposes the `<w:sectPr>` header/footer
 references (previously dropped), and `ctx.walkPart(relId)` reads a header/footer
