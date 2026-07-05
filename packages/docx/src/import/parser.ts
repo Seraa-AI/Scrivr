@@ -31,6 +31,7 @@ import type {
   DocxInline,
   DocxMark,
   DocxParagraphAttrs,
+  DocxSectionRef,
   DocxTableCell,
   DocxTableRow,
 } from "@scrivr/core";
@@ -53,9 +54,21 @@ export function parseDocumentBody(
 ): DocxImportModel {
   const body = findChild(documentRoot, "w:body");
   if (!body) return { blocks: [] };
+  return parseBlockContainer(body, diagnostics);
+}
 
+/**
+ * Parse the block children of a container element (`<w:body>`, `<w:hdr>`,
+ * `<w:ftr>`, …) into the intermediate model. Header/footer parts reuse this
+ * through `ctx.walkPart` so their content runs through the exact same
+ * paragraph/table/page-break logic as the body.
+ */
+export function parseBlockContainer(
+  container: OoxmlElement,
+  diagnostics: ParserDiagnostics = NULL_DIAGNOSTICS,
+): DocxImportModel {
   const blocks: DocxBlock[] = [];
-  for (const child of body.children) {
+  for (const child of container.children) {
     if (typeof child === "string") continue;
     if (child.name === "w:p") {
       if (isPageBreakParagraph(child)) {
@@ -75,6 +88,7 @@ export function parseDocumentBody(
       blocks.push(parseTable(child, diagnostics));
     } else if (child.name === "w:sectPr") {
       // Section properties — page size, margins, etc. Not modeled yet.
+      // Header/footer references are read separately via parseSectionReferences.
       continue;
     } else if (IGNORABLE_BODY_CHILDREN.has(child.name)) {
       continue;
@@ -87,6 +101,53 @@ export function parseDocumentBody(
     }
   }
   return { blocks };
+}
+
+/**
+ * Read the header/footer references from the body `<w:sectPr>`. Word records
+ * each as `<w:headerReference w:type="default|first|even" r:id="…"/>`; the
+ * inverse of the export-side sectPr injection. Missing / unknown types are
+ * skipped rather than guessed.
+ */
+export function parseSectionReferences(documentRoot: OoxmlElement): {
+  headers: DocxSectionRef[];
+  footers: DocxSectionRef[];
+  /** `<w:titlePg/>` present — the flag that actually activates first-page chrome. */
+  titlePg: boolean;
+} {
+  const headers: DocxSectionRef[] = [];
+  const footers: DocxSectionRef[] = [];
+  const body = findChild(documentRoot, "w:body");
+  const sectPr = body ? findChild(body, "w:sectPr") : undefined;
+  if (!sectPr) return { headers, footers, titlePg: false };
+
+  let titlePg = false;
+  for (const child of sectPr.children) {
+    if (typeof child === "string") continue;
+    if (child.name === "w:titlePg") {
+      // A `<w:titlePg/>` with no `w:val`, or a truthy val, is on.
+      titlePg = isOoxmlOn(attr(child, "w:val"));
+      continue;
+    }
+    const bucket =
+      child.name === "w:headerReference" ? headers :
+      child.name === "w:footerReference" ? footers :
+      undefined;
+    if (!bucket) continue;
+    const relId = attr(child, "r:id");
+    const type = normalizeSectionType(attr(child, "w:type"));
+    if (relId) bucket.push({ type, relId });
+  }
+  return { headers, footers, titlePg };
+}
+
+/** OOXML on/off toggle: absent val = on; `"false"`/`"0"`/`"off"` = off. */
+export function isOoxmlOn(val: string | undefined): boolean {
+  return val !== "false" && val !== "0" && val !== "off";
+}
+
+function normalizeSectionType(raw: string | undefined): DocxSectionRef["type"] {
+  return raw === "first" || raw === "even" ? raw : "default";
 }
 
 /**
@@ -325,6 +386,13 @@ function parseParagraphInlines(el: OoxmlElement, diag: ParserDiagnostics): DocxI
     if (typeof child === "string") continue;
     if (child.name === "w:r") {
       content.push(...parseRun(child, diag));
+    } else if (child.name === "w:fldSimple") {
+      // A simple field, e.g. `<w:fldSimple w:instr=" PAGE ">`. Keep the
+      // instruction as a `field` inline; Stage 2 maps it back to a token
+      // node. The inner runs are Word's cached display value — dropped,
+      // since the field regenerates it.
+      const instr = attr(child, "w:instr");
+      if (instr !== undefined) content.push({ type: "field", instr, marks: [] });
     } else if (child.name === "w:hyperlink") {
       // Preserve hyperlink identity by attaching a `link` mark to every
       // inline produced by its inner runs. Stage 2 (Link extension)

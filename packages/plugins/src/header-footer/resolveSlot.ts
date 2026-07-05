@@ -41,7 +41,11 @@ export function resolveSlotKey(
   const def = resolveSlot(policy, { pageNumber }, kind);
   if (!def) return null;
   if (kind === "header") {
-    return def === policy.firstPageHeader ? "firstPageHeader" : "defaultHeader";
+    if (def === policy.firstPageHeader) return "firstPageHeader";
+    if (def === policy.evenPageHeader) return "evenPageHeader";
+    return "defaultHeader";
   }
-  return def === policy.firstPageFooter ? "firstPageFooter" : "defaultFooter";
+  if (def === policy.firstPageFooter) return "firstPageFooter";
+  if (def === policy.evenPageFooter) return "evenPageFooter";
+  return "defaultFooter";
 }

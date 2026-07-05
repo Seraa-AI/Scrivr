@@ -10,7 +10,7 @@
 
 import type { DocxDiagnostic } from "@scrivr/core";
 import type { DocxMediaSink } from "@scrivr/core";
-import type { DocxPackageReader } from "./opc";
+import { resolveOpcTarget, type DocxPackageReader } from "./opc";
 import type { RelationshipMap } from "./relationships";
 
 export function buildImageResolver(
@@ -21,13 +21,15 @@ export function buildImageResolver(
     warn(d: Omit<DocxDiagnostic, "level">): void;
     error(d: Omit<DocxDiagnostic, "level">): void;
   },
+  /** Part that owns `rels` — image targets resolve relative to it. */
+  sourcePart = "word/document.xml",
 ): (relId: string) => string | undefined {
   const cache = new Map<string, string>();
   return (relId) => {
     if (cache.has(relId)) return cache.get(relId);
     const rel = rels.get(relId);
     if (!rel || rel.type !== "image") return undefined;
-    const partPath = `word/${rel.target}`;
+    const partPath = resolveOpcTarget(sourcePart, rel.target);
     const bytes = pkg.readBytes(partPath);
     if (!bytes) {
       diagnostics.warn({
