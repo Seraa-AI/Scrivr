@@ -112,15 +112,23 @@ export function parseBlockContainer(
 export function parseSectionReferences(documentRoot: OoxmlElement): {
   headers: DocxSectionRef[];
   footers: DocxSectionRef[];
+  /** `<w:titlePg/>` present — the flag that actually activates first-page chrome. */
+  titlePg: boolean;
 } {
   const headers: DocxSectionRef[] = [];
   const footers: DocxSectionRef[] = [];
   const body = findChild(documentRoot, "w:body");
   const sectPr = body ? findChild(body, "w:sectPr") : undefined;
-  if (!sectPr) return { headers, footers };
+  if (!sectPr) return { headers, footers, titlePg: false };
 
+  let titlePg = false;
   for (const child of sectPr.children) {
     if (typeof child === "string") continue;
+    if (child.name === "w:titlePg") {
+      // A `<w:titlePg/>` with no `w:val`, or a truthy val, is on.
+      titlePg = isOoxmlOn(attr(child, "w:val"));
+      continue;
+    }
     const bucket =
       child.name === "w:headerReference" ? headers :
       child.name === "w:footerReference" ? footers :
@@ -130,7 +138,12 @@ export function parseSectionReferences(documentRoot: OoxmlElement): {
     const type = normalizeSectionType(attr(child, "w:type"));
     if (relId) bucket.push({ type, relId });
   }
-  return { headers, footers };
+  return { headers, footers, titlePg };
+}
+
+/** OOXML on/off toggle: absent val = on; `"false"`/`"0"`/`"off"` = off. */
+export function isOoxmlOn(val: string | undefined): boolean {
+  return val !== "false" && val !== "0" && val !== "off";
 }
 
 function normalizeSectionType(raw: string | undefined): DocxSectionRef["type"] {

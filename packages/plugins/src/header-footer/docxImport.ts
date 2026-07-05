@@ -53,17 +53,21 @@ function partToContent(part: PmNode): HeaderFooterContent {
 
 /** Which policy slot a reference fills, keyed by kind + `w:type`. */
 type SlotKey =
-  | "defaultHeader" | "firstPageHeader"
-  | "defaultFooter" | "firstPageFooter";
+  | "defaultHeader" | "firstPageHeader" | "evenPageHeader"
+  | "defaultFooter" | "firstPageFooter" | "evenPageFooter";
 
 function slotKey(
   kind: "header" | "footer",
   type: "default" | "first" | "even",
-): SlotKey | null {
-  // v1 policy models default + first only; "even" is exported by nothing yet.
-  if (type === "even") return null;
-  if (kind === "header") return type === "first" ? "firstPageHeader" : "defaultHeader";
-  return type === "first" ? "firstPageFooter" : "defaultFooter";
+): SlotKey {
+  if (kind === "header") {
+    return type === "first" ? "firstPageHeader"
+      : type === "even" ? "evenPageHeader"
+      : "defaultHeader";
+  }
+  return type === "first" ? "firstPageFooter"
+    : type === "even" ? "evenPageFooter"
+    : "defaultFooter";
 }
 
 function importHeaderFooter(doc: PmNode, ctx: DocxImportContext): PmNode {
@@ -74,22 +78,21 @@ function importHeaderFooter(doc: PmNode, ctx: DocxImportContext): PmNode {
   if (refs.length === 0) return doc;
 
   const slots: Partial<Record<SlotKey, HeaderFooterDefinition>> = {};
-  let differentFirstPage = false;
   for (const ref of refs) {
-    const key = slotKey(ref.kind, ref.type);
-    if (!key) continue;
     const part = ctx.walkPart(ref.relId);
     if (!part) continue;
-    slots[key] = { content: partToContent(part) };
-    if (ref.type === "first") differentFirstPage = true;
+    slots[slotKey(ref.kind, ref.type)] = { content: partToContent(part) };
   }
 
   if (Object.keys(slots).length === 0) return doc;
 
+  // The activation flags come from the section, not the mere presence of a
+  // reference: <w:titlePg> gates first-page chrome, <w:evenAndOddHeaders>
+  // gates even-page chrome. A reference can exist while inactive.
   const policy: HeaderFooterPolicy = {
     enabled: true,
-    differentFirstPage,
-    differentOddEven: false,
+    differentFirstPage: ctx.section.titlePg,
+    differentOddEven: ctx.section.evenAndOdd,
     ...slots,
   };
   return doc.type.create({ ...doc.attrs, headerFooter: policy }, doc.content, doc.marks);

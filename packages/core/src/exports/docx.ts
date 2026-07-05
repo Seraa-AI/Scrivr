@@ -535,6 +535,14 @@ export interface DocxImportContext {
   section: {
     headers: readonly DocxSectionRef[];
     footers: readonly DocxSectionRef[];
+    /**
+     * `<w:titlePg/>` present in the body sectPr — the flag that actually
+     * activates the first-page slot. A `first` reference without it is
+     * inactive; read this, not the mere presence of the reference.
+     */
+    titlePg: boolean;
+    /** `<w:evenAndOddHeaders/>` in settings.xml — activates even-page slots. */
+    evenAndOdd: boolean;
   };
   /**
    * Resolve a header/footer relationship id to its OPC part, parse it, and

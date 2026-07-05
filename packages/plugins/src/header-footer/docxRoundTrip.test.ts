@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { unzipSync, zipSync, strToU8, strFromU8 } from "fflate";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { exportDocx, importDocx } from "@scrivr/docx";
 import { HeaderFooter } from "./HeaderFooter";
@@ -77,6 +78,55 @@ describe("header/footer DOCX round-trip", () => {
     expect(json).toContain("\"image\"");
     // The image src materializes back to a data URL (part-scoped rels resolved).
     expect(json).toContain("data:image/png");
+  });
+
+  it("reconstructs odd/even chrome via <w:evenAndOddHeaders>", async () => {
+    const policy = await roundTrip({
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: true,
+      defaultHeader: { content: para("Odd Header") },
+      evenPageHeader: { content: para("Even Header") },
+    });
+
+    expect(policy).not.toBeNull();
+    expect(policy!.differentOddEven).toBe(true);
+    expect(JSON.stringify(policy!.defaultHeader!.content)).toContain("Odd Header");
+    expect(JSON.stringify(policy!.evenPageHeader!.content)).toContain("Even Header");
+  });
+
+  it("gates first-page chrome on <w:titlePg>, not the reference", async () => {
+    // Export a doc with a first-page header (writes both the reference AND
+    // <w:titlePg/>), then strip <w:titlePg/> from the document. A first
+    // reference without titlePg is inactive → differentFirstPage must be false.
+    const out = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+    out.setContent({
+      type: "doc",
+      attrs: {
+        headerFooter: {
+          enabled: true,
+          differentFirstPage: true,
+          differentOddEven: false,
+          defaultHeader: { content: para("Default Header") },
+          firstPageHeader: { content: para("First Header") },
+        },
+      },
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Body" }] }],
+    });
+    const { bytes } = await exportDocx(out);
+
+    const entries = unzipSync(bytes);
+    const doc = strFromU8(entries["word/document.xml"]!);
+    expect(doc).toContain("<w:titlePg");
+    entries["word/document.xml"] = strToU8(doc.replace(/<w:titlePg\s*\/>/, ""));
+    const stripped = zipSync(entries);
+
+    const back = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+    const { doc: imported } = await importDocx(back, stripped);
+    const policy = getHeaderFooterPolicy(imported);
+
+    expect(policy).not.toBeNull();
+    expect(policy!.differentFirstPage).toBe(false);
   });
 
   it("leaves a plain document with no headerFooter attr", async () => {

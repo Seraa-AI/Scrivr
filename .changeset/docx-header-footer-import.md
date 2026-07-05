@@ -12,8 +12,10 @@
 
 A `.docx` with headers/footers (exported by Scrivr, or any document using the
 `<w:fldSimple>` field form) now reconstructs its chrome on import: header/footer
-text, page-number / total-pages / date tokens, images, and different-first-page
-all land back on the document's `headerFooter` policy.
+text, page-number / total-pages / date tokens, images, first-page, and odd/even
+slots all land back on the document's `headerFooter` policy. Activation follows
+Word — first-page chrome is gated on `<w:titlePg>` and even-page chrome on
+`<w:evenAndOddHeaders>`, not on the mere presence of a reference.
 
 `@scrivr/core` / `@scrivr/docx` — the DOCX import context gained the inverse of
 the export-side part seam: `ctx.section` exposes the `<w:sectPr>` header/footer

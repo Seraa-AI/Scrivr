@@ -64,7 +64,7 @@ export function createDocxImportContext(
     },
     // Defaults — `importDocx` assigns the real section refs + part walker once
     // the OPC package and handlers are available (same pattern as resolveImage).
-    section: { headers: [], footers: [] },
+    section: { headers: [], footers: [], titlePg: false, evenAndOdd: false },
     walkPart: () => null,
     shared: {
       // Contained generic cast — Map stores unknown, caller owns the type.
