@@ -217,7 +217,6 @@ async function fetchImageBytes(src: string): Promise<Uint8Array | null> {
 
 interface DocxImageRecord {
   src: string;
-  relId: string;
   filename: string;
   width: number;
   height: number;
@@ -245,8 +244,19 @@ function collectImageSrcs(doc: PmNode): string[] {
   return Array.from(seen);
 }
 
-async function imageOnBeforeDocxExport(ctx: DocxContext): Promise<void> {
-  const doc = ctx.editor.getState().doc;
+/**
+ * Fetch every image in `doc`, register the bytes as `word/media/*`, and record
+ * `{src → filename}` in the shared map so the sync `image` handler can emit a
+ * `<w:drawing>` for it. Media is a document-global pool (deduped by src), but
+ * the *relationship* is allocated later, at emit time, into whichever OPC part
+ * references the image — so this pre-pass deliberately does NOT touch rels.
+ *
+ * Exported so contributions that render their own sub-documents (headers,
+ * footers, footnotes) can prepare their images through the same fetch/sniff
+ * path from their own async `onBeforeExport`, without the Image extension
+ * knowing those surfaces exist.
+ */
+export async function prepareDocxImages(ctx: DocxContext, doc: PmNode): Promise<void> {
   const srcs = collectImageSrcs(doc);
   if (srcs.length === 0) return;
 
@@ -268,10 +278,13 @@ async function imageOnBeforeDocxExport(ctx: DocxContext): Promise<void> {
       }
       const { contentType, ext } = sniffImageContentType(bytes);
       const filename = ctx.media.add({ data: bytes, contentType, ext });
-      const relId = ctx.rels.addImage(filename);
-      map.set(src, { src, relId, filename, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+      map.set(src, { src, filename, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
     }),
   );
+}
+
+async function imageOnBeforeDocxExport(ctx: DocxContext): Promise<void> {
+  await prepareDocxImages(ctx, ctx.editor.getState().doc);
 }
 
 const NS_WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
@@ -432,10 +445,13 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
   const width = readPositiveInt(node.attrs["width"], record.width);
   const height = readPositiveInt(node.attrs["height"], record.height);
   const wrapMode = readString(node.attrs["wrapMode"]) ?? "inline";
+  // Allocate the relationship into the OPC part currently being walked (body,
+  // header, footer…) — rels are part-scoped, media is not.
+  const relId = ctx.rels.addImage(record.filename);
 
   if (wrapMode === "inline") {
     return xml("w:r", undefined, [
-      buildInlineDrawing(ctx, record.filename, record.relId, width, height),
+      buildInlineDrawing(ctx, record.filename, relId, width, height),
     ]);
   }
 
@@ -448,7 +464,7 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
   if (typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
 
   return xml("w:r", undefined, [
-    buildAnchoredDrawing(ctx, record.filename, record.relId, width, height, anchor),
+    buildAnchoredDrawing(ctx, record.filename, relId, width, height, anchor),
   ]);
 };
 

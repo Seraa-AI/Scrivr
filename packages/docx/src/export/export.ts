@@ -62,8 +62,18 @@ export async function exportDocx(
   options: DocxExportOptions = {},
 ): Promise<DocxExportResult> {
   const handlers = collectHandlers(editor, options.overrides);
+  const walkerHandlers: WalkerHandlers = {
+    nodes: handlers.nodes,
+    marks: handlers.marks,
+  };
 
-  const contextInit: Parameters<typeof createDocxContext>[0] = { editor };
+  // Hand the merged handlers to the context so `ctx.walkContent` renders
+  // sub-documents (headers/footers) through the exact same node/mark handlers
+  // as the body.
+  const contextInit: Parameters<typeof createDocxContext>[0] = {
+    editor,
+    handlers: walkerHandlers,
+  };
   if (options.unsupported !== undefined) {
     contextInit.unsupported = options.unsupported;
   }
@@ -79,10 +89,6 @@ export async function exportDocx(
       await hook(ctx);
     }
 
-    const walkerHandlers: WalkerHandlers = {
-      nodes: handlers.nodes,
-      marks: handlers.marks,
-    };
     const body = walkDocument(editor.getState().doc, ctx, walkerHandlers);
 
     // Publish the assembled document tree so onBuildTreeComplete + onFinalize

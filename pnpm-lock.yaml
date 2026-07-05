@@ -304,6 +304,12 @@ importers:
       '@hocuspocus/provider':
         specifier: ^3.4.4
         version: 3.4.4(y-protocols@1.0.7(yjs@13.6.30))(yjs@13.6.30)
+      '@scrivr/docx':
+        specifier: workspace:*
+        version: link:../docx
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.2
       prosemirror-history:
         specifier: ^1.5.0
         version: 1.5.0

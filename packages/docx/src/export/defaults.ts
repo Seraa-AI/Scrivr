@@ -41,6 +41,10 @@ const REL_TYPE = {
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
   hyperlink:
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+  header:
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header",
+  footer:
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer",
 } as const;
 
 const CONTENT_TYPE = {
@@ -69,7 +73,7 @@ export function buildDocxPackage(
   const numberingXml = serializeXml(buildNumberingRoot(state.numbering), {
     declaration: true,
   });
-  const settingsXml = serializeXml(buildSettingsRoot(), { declaration: true });
+  const settingsXml = serializeXml(buildSettingsRoot(state), { declaration: true });
   const rootRelsXml = serializeXml(buildRootRelationships(), {
     declaration: true,
   });
@@ -85,6 +89,24 @@ export function buildDocxPackage(
     contentType: m.contentType,
     data: m.data,
   }));
+  // Header/footer (and future footnote/comment) parts contributed via
+  // `ctx.parts.add`. Content-type overrides come from `buildContentTypes`.
+  const extraParts = state.parts.map((p) => ({
+    path: p.path,
+    contentType: p.contentType,
+    data: p.data,
+  }));
+  // Part-scoped relationships (e.g. images inside a header) — one
+  // `word/_rels/{basename}.rels` per part that references anything. OOXML
+  // resolves an r:id from within header1.xml against header1.xml.rels.
+  const extraPartRels = state.parts
+    .filter((p) => p.rels.length > 0)
+    .map((p) => ({
+      path: partRelsPath(p.path),
+      data: serializeXml(buildDocumentRelationships(p.rels, { internal: false }), {
+        declaration: true,
+      }),
+    }));
 
   return {
     parts: [
@@ -96,8 +118,18 @@ export function buildDocxPackage(
       { path: "word/numbering.xml", contentType: CONTENT_TYPE.numbering, data: numberingXml },
       { path: "word/settings.xml", contentType: CONTENT_TYPE.settings, data: settingsXml },
       ...mediaParts,
+      ...extraParts,
+      ...extraPartRels,
     ],
   };
+}
+
+/** `word/header1.xml` → `word/_rels/header1.xml.rels`. */
+function partRelsPath(partPath: string): string {
+  const slash = partPath.lastIndexOf("/");
+  const dir = partPath.slice(0, slash);
+  const base = partPath.slice(slash + 1);
+  return `${dir}/_rels/${base}.rels`;
 }
 
 /**
@@ -272,8 +304,10 @@ function buildAbstractNum(abstractId: number, entry: NumberingEntry): XmlNode {
   return xml("w:abstractNum", { "w:abstractNumId": String(abstractId) }, levels);
 }
 
-function buildSettingsRoot(): XmlNode {
-  return xml("w:settings", { "xmlns:w": W_NS });
+function buildSettingsRoot(state: DocxBuildState): XmlNode {
+  const children: XmlNode[] = [];
+  if (state.evenAndOddHeaders) children.push(xml("w:evenAndOddHeaders"));
+  return xml("w:settings", { "xmlns:w": W_NS }, children);
 }
 
 function buildRootRelationships(): XmlNode {
@@ -286,29 +320,36 @@ function buildRootRelationships(): XmlNode {
   ]);
 }
 
-function buildDocumentRelationships(userRels: RelEntry[]): XmlNode {
-  const children: XmlNode[] = [
-    xml("Relationship", {
-      Id: "rIdStyles",
-      Type: REL_TYPE.styles,
-      Target: "styles.xml",
-    }),
-    xml("Relationship", {
-      Id: "rIdNumbering",
-      Type: REL_TYPE.numbering,
-      Target: "numbering.xml",
-    }),
-    xml("Relationship", {
-      Id: "rIdSettings",
-      Type: REL_TYPE.settings,
-      Target: "settings.xml",
-    }),
-  ];
+function buildDocumentRelationships(
+  userRels: RelEntry[],
+  opts: { internal: boolean } = { internal: true },
+): XmlNode {
+  // The document's own rels carry the styles/numbering/settings scaffold;
+  // part rels (header/footer) carry only their user refs.
+  const children: XmlNode[] = opts.internal
+    ? [
+        xml("Relationship", {
+          Id: "rIdStyles",
+          Type: REL_TYPE.styles,
+          Target: "styles.xml",
+        }),
+        xml("Relationship", {
+          Id: "rIdNumbering",
+          Type: REL_TYPE.numbering,
+          Target: "numbering.xml",
+        }),
+        xml("Relationship", {
+          Id: "rIdSettings",
+          Type: REL_TYPE.settings,
+          Target: "settings.xml",
+        }),
+      ]
+    : [];
 
   for (const rel of userRels) {
     const attrs: Record<string, string> = {
       Id: rel.id,
-      Type: rel.type === "image" ? REL_TYPE.image : REL_TYPE.hyperlink,
+      Type: REL_TYPE[rel.type],
       Target: rel.target,
     };
     if (rel.mode) attrs["TargetMode"] = rel.mode;
@@ -350,6 +391,11 @@ function buildContentTypes(state: DocxBuildState): XmlNode {
       ContentType: CONTENT_TYPE.settings,
     }),
   ];
+
+  // Header/footer (and future) parts each need a content-type override.
+  for (const part of state.parts) {
+    overrides.push(xml("Override", { PartName: `/${part.path}`, ContentType: part.contentType }));
+  }
 
   return xml("Types", { xmlns: PKG_CT_NS }, [...defaults, ...overrides]);
 }

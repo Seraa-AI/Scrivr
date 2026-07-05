@@ -25,6 +25,7 @@ import {
   renderTotalPagesPdf,
   renderDatePdf,
 } from "./pdfExport";
+import { headerFooterDocxHandlers } from "./docxExport";
 import { pageNumberStrategy, totalPagesStrategy, dateStrategy } from "./tokenStrategies";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import type { SlotKey } from "./surfaces";
@@ -342,6 +343,7 @@ export const HeaderFooter = Extension.create<HeaderFooterOptions>({
           headerFooter: renderHeaderFooterPdf,
         },
       },
+      docx: headerFooterDocxHandlers,
     };
   },
 
