@@ -7,7 +7,9 @@
  */
 
 import type { IBaseEditor } from "@scrivr/core";
-import { xml } from "./xml";
+import type { Node as PmNode } from "prosemirror-model";
+import { xml, serializeXml } from "./xml";
+import { walkDocument, type WalkerHandlers } from "./walker";
 import type {
   DocxContext,
   DocxFidelity,
@@ -16,11 +18,24 @@ import type {
   DocxResolvedOptions,
   DocxStyleSpec,
   DocxUnsupportedPolicy,
+  XmlNode,
 } from "./context";
 import type { DocxDiagnostic } from "./handlers";
 
+/** Content types + relationship types for header/footer parts. */
+const HEADER_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml";
+const FOOTER_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml";
+
 export interface CreateContextOptions {
   editor: IBaseEditor;
+  /**
+   * Merged node/mark handlers — `walkContent` reuses them for sub-documents.
+   * Optional so unit tests can build a bare context; the real export pipeline
+   * always supplies them (an empty set drops all content).
+   */
+  handlers?: WalkerHandlers;
   unsupported?: DocxUnsupportedPolicy;
   fidelity?: DocxFidelity;
 }
@@ -41,10 +56,23 @@ export interface NumberingEntry {
 
 export interface RelEntry {
   id: string;
-  type: "image" | "hyperlink";
+  type: "image" | "hyperlink" | "header" | "footer";
   target: string;
-  /** "External" for hyperlinks; absent for internal image refs. */
+  /** "External" for hyperlinks; absent for internal (image/header/footer) refs. */
   mode?: "External";
+}
+
+/** An extra OPC part (a header/footer XML document) plus its content type. */
+export interface ExtraPart {
+  /** ZIP-relative path, e.g. `word/header1.xml`. */
+  path: string;
+  contentType: string;
+  data: string;
+  /**
+   * Part-scoped relationships (images/hyperlinks referenced from this part).
+   * Emitted as `word/_rels/{basename}.rels`; empty when the part has none.
+   */
+  rels: RelEntry[];
 }
 
 export interface DocxBuildState {
@@ -52,6 +80,8 @@ export interface DocxBuildState {
   numbering: NumberingEntry[];
   rels: RelEntry[];
   media: DocxMediaPart[];
+  parts: ExtraPart[];
+  evenAndOddHeaders: boolean;
   diagnostics: DocxDiagnostic[];
 }
 
@@ -73,10 +103,19 @@ export function createDocxContext(
     numbering: [],
     rels: [],
     media: [],
+    parts: [],
+    evenAndOddHeaders: false,
     diagnostics: [],
   };
 
   const sharedStore = new Map<string, unknown>();
+
+  // OOXML relationships are part-scoped: a rel referenced from header1.xml must
+  // live in word/_rels/header1.xml.rels, not the document's. `currentRels` is
+  // the bucket `rels.addImage`/`addHyperlink` write to; it defaults to the
+  // document bucket and is swapped to a part's own bucket while `parts.add`
+  // walks that part's content.
+  let currentRels: RelEntry[] = state.rels;
 
   const getOrCreateStyle = (
     type: DocxStyleType,
@@ -114,13 +153,20 @@ export function createDocxContext(
     },
     rels: {
       addImage(mediaFilename) {
-        const id = `rId${state.rels.length + 1}`;
-        state.rels.push({ id, type: "image", target: `media/${mediaFilename}` });
+        // Dedup within the current part: the same media file referenced twice
+        // in one part reuses its relationship (media is a global pool).
+        const target = `media/${mediaFilename}`;
+        const existing = currentRels.find(
+          (r) => r.type === "image" && r.target === target,
+        );
+        if (existing) return existing.id;
+        const id = `rId${currentRels.length + 1}`;
+        currentRels.push({ id, type: "image", target });
         return id;
       },
       addHyperlink(url) {
-        const id = `rId${state.rels.length + 1}`;
-        state.rels.push({ id, type: "hyperlink", target: url, mode: "External" });
+        const id = `rId${currentRels.length + 1}`;
+        currentRels.push({ id, type: "hyperlink", target: url, mode: "External" });
         return id;
       },
     },
@@ -146,6 +192,43 @@ export function createDocxContext(
       },
     },
     document: xml("w:document"),
+    walkContent(doc: PmNode): XmlNode[] {
+      return walkDocument(doc, ctx, opts.handlers ?? { nodes: {}, marks: {} });
+    },
+    parts: {
+      add({ kind, build }) {
+        // The document-bucket rel that references this part from the sectPr.
+        const relId = `rId${state.rels.length + 1}`;
+        const index = state.parts.filter((p) => p.path.includes(`/${kind}`)).length + 1;
+        const filename = `${kind}${index}.xml`;
+        state.rels.push({ id: relId, type: kind, target: filename });
+
+        // Walk the part's content with rels scoped to its own bucket, so any
+        // images/hyperlinks it emits land in word/_rels/{filename}.rels.
+        const partRels: RelEntry[] = [];
+        const previous = currentRels;
+        currentRels = partRels;
+        let content: XmlNode;
+        try {
+          content = build();
+        } finally {
+          currentRels = previous;
+        }
+
+        state.parts.push({
+          path: `word/${filename}`,
+          contentType: kind === "header" ? HEADER_CONTENT_TYPE : FOOTER_CONTENT_TYPE,
+          data: serializeXml(content, { declaration: true }),
+          rels: partRels,
+        });
+        return { relId };
+      },
+    },
+    settings: {
+      enableEvenAndOddHeaders() {
+        state.evenAndOddHeaders = true;
+      },
+    },
     shared: {
       // Contained generic cast — the map stores `unknown` and the caller
       // owns the type via the generic parameter. Single use, inside impl,

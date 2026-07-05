@@ -254,6 +254,39 @@ export interface DocxContext {
   /** Root document tree — written by the walker before `onBuildTreeComplete`. */
   document: XmlNode;
 
+  /**
+   * Render a document node's block content through the collected node/mark
+   * handlers, exactly as the body is walked. Contributions that emit a separate
+   * OOXML part from their own mini-document — headers/footers today, footnotes
+   * and comments later — walk their content with this, then register it via
+   * `parts.add`.
+   */
+  walkContent(doc: PmNode): XmlNode[];
+
+  /**
+   * Register an extra OPC part (a `<w:hdr>` / `<w:ftr>` element) plus its
+   * content-type override and a document relationship. Returns the relationship
+   * id to reference the part from the body `sectPr`.
+   *
+   * `build` runs the walk that produces the part's XML. OOXML relationships are
+   * part-scoped, so any `rels.addImage`/`addHyperlink` calls made *inside*
+   * `build` (e.g. images emitted by `walkContent`) are filed under this part's
+   * own `word/_rels/{part}.rels`, not the document's — that's why the walk is a
+   * callback rather than pre-serialized content.
+   */
+  parts: {
+    add(part: {
+      kind: "header" | "footer";
+      build: () => XmlNode;
+    }): { relId: string };
+  };
+
+  /** Document-level settings toggles (settings.xml). */
+  settings: {
+    /** Emit `<w:evenAndOddHeaders/>` so even and odd pages use distinct chrome. */
+    enableEvenAndOddHeaders(): void;
+  };
+
   /** Collaborative cross-plugin storage. */
   shared: {
     getOrInit<T>(key: string, init: () => T): T;
