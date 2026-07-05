@@ -83,6 +83,37 @@ describe("exportDocx", () => {
     expect(Array.isArray(result.diagnostics)).toBe(true);
   });
 
+  it("exports a table at full text-area width (pct 100%), not the raw grid px", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    editor.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { layout: "fixed", grid: [100, 100] },
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }] },
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const bytes = await exportDocxBytes(editor);
+    const doc = readZip(bytes)["word/document.xml"]!;
+    // Full width so Word fits the table to the page (matches the canvas), rather
+    // than rendering the small raw grid-px sum.
+    expect(doc).toContain('w:type="pct"');
+    expect(doc).toContain('w:w="5000"');
+    expect(doc).not.toContain('w:type="auto"');
+    expect(doc).toContain("<w:tblGrid>");
+  });
+
   it("produces a valid OPC package with all required parts", async () => {
     const editor = new ServerEditor();
     const result = await exportDocx(editor);
