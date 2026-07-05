@@ -77,6 +77,21 @@ const makeDef = (text = "test") => ({
 });
 
 describe("resolveChrome", () => {
+  it("measures and reserves the even-page slot independently", () => {
+    const policy: HeaderFooterPolicy = {
+      enabled: true,
+      differentFirstPage: false,
+      differentOddEven: true,
+      defaultHeader: makeDef("odd"),
+      evenPageHeader: { ...makeDef("even"), minHeight: 80 },
+    };
+
+    const contrib = resolveChrome(policy, mockInput, mockCtx, 0);
+    expect(contrib.topForPage(2)).toBeGreaterThan(contrib.topForPage(3));
+    expect((contrib.payload as { slots: { evenPageHeader?: unknown } }).slots.evenPageHeader)
+      .toBeDefined();
+  });
+
   it("returns non-zero topForPage when defaultHeader is present", () => {
     const policy: HeaderFooterPolicy = {
       enabled: true,

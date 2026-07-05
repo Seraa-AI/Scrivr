@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveSlot } from "../resolveSlot";
+import { resolveSlot, resolveSlotKey } from "../resolveSlot";
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "../types";
 
 const makeDef = (text = "test"): HeaderFooterDefinition => ({
@@ -81,5 +81,17 @@ describe("resolveSlot", () => {
       firstPageFooter: makeDef("first-footer"),
     };
     expect(resolveSlot(policy, { pageNumber: 1 }, "footer")).toBe(policy.firstPageFooter);
+  });
+
+  it("routes even pages to their distinct header and footer slots", () => {
+    const policy: HeaderFooterPolicy = {
+      ...basePolicy,
+      differentOddEven: true,
+      evenPageHeader: makeDef("even-header"),
+      evenPageFooter: makeDef("even-footer"),
+    };
+    expect(resolveSlotKey(policy, 2, "header")).toBe("evenPageHeader");
+    expect(resolveSlotKey(policy, 2, "footer")).toBe("evenPageFooter");
+    expect(resolveSlotKey(policy, 3, "header")).toBe("defaultHeader");
   });
 });

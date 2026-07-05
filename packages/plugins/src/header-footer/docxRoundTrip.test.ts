@@ -129,6 +129,33 @@ describe("header/footer DOCX round-trip", () => {
     expect(policy!.differentFirstPage).toBe(false);
   });
 
+  it("reports unsupported fields instead of silently dropping them", async () => {
+    const out = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+    out.setContent({
+      type: "doc",
+      attrs: {
+        headerFooter: {
+          enabled: true,
+          differentFirstPage: false,
+          differentOddEven: false,
+          defaultHeader: { content: para("Header") },
+        },
+      },
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Body" }] }],
+    });
+    const { bytes } = await exportDocx(out);
+    const entries = unzipSync(bytes);
+    const headerPath = Object.keys(entries).find((p) => /^word\/header\d+\.xml$/.test(p))!;
+    const header = strFromU8(entries[headerPath]!);
+    entries[headerPath] = strToU8(
+      header.replace("</w:p>", '<w:fldSimple w:instr=" STYLEREF 1 "><w:r><w:t>Title</w:t></w:r></w:fldSimple></w:p>'),
+    );
+
+    const back = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+    const result = await importDocx(back, zipSync(entries));
+    expect(result.diagnostics.some((d) => d.code === "unsupported-docx-field")).toBe(true);
+  });
+
   it("leaves a plain document with no headerFooter attr", async () => {
     const back = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
     const out = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });

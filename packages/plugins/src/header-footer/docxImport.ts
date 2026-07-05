@@ -36,9 +36,20 @@ const fieldInlineHandler: DocxInlineTransform = (inline, _marks, ctx) => {
   if (inline.type !== "field") return null;
   const keyword = inline.instr.trim().split(/\s+/)[0]?.toUpperCase() ?? "";
   const nodeName = FIELD_TOKEN_NODES[keyword];
-  if (!nodeName) return null;
+  if (!nodeName) {
+    ctx.diagnostics.warn({
+      code: "unsupported-docx-field",
+      message: `Unsupported DOCX field "${inline.instr.trim()}" — dropped`,
+    });
+    return null;
+  }
   const type = ctx.schema.nodes[nodeName];
-  return type ? type.create() : null;
+  if (type) return type.create();
+  ctx.diagnostics.warn({
+    code: "field-node-missing",
+    message: `DOCX field "${keyword}" requires schema node "${nodeName}" — dropped`,
+  });
+  return null;
 };
 
 /** A walked part → the `HeaderFooterContent` JSON the policy stores. */

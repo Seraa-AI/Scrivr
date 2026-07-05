@@ -129,6 +129,13 @@ export async function importDocx(
         });
         return null;
       }
+      if ((rel.type !== "header" && rel.type !== "footer") || rel.targetMode === "External") {
+        ctx.diagnostics.warn({
+          code: "header-footer-rel-type",
+          message: `Relationship ${relId} is not an internal header/footer part — skipped`,
+        });
+        return null;
+      }
       // The reference lives in document.xml.rels, so the target resolves
       // relative to word/document.xml.
       const path = resolveOpcTarget("word/document.xml", rel.target);
@@ -142,6 +149,14 @@ export async function importDocx(
       }
       const partRoot = parseOoxml(partXml);
       if (!partRoot) return null;
+      const expectedRoot = rel.type === "header" ? "w:hdr" : "w:ftr";
+      if (partRoot.name !== expectedRoot) {
+        ctx.diagnostics.warn({
+          code: "header-footer-part-type",
+          message: `Relationship ${relId} expected <${expectedRoot}> but found <${partRoot.name}> — skipped`,
+        });
+        return null;
+      }
 
       // Relationships are part-scoped: a relId inside header1.xml resolves
       // against word/_rels/header1.xml.rels, never the document's. Always
@@ -214,6 +229,7 @@ const UNSUPPORTED_CODES = new Set([
   "unsupported-docx-element",
   "unsupported-block",
   "unsupported-mark",
+  "unsupported-docx-field",
 ]);
 
 function isUnsupportedCode(code: string): boolean {

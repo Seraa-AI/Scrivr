@@ -27,7 +27,9 @@ export type SlotKey =
   | "defaultHeader"
   | "defaultFooter"
   | "firstPageHeader"
-  | "firstPageFooter";
+  | "firstPageFooter"
+  | "evenPageHeader"
+  | "evenPageFooter";
 
 /**
  * Node types disallowed inside header/footer content. Enforced as a
@@ -113,7 +115,9 @@ export class HeaderFooterSurfaceCache {
       key === "defaultHeader" ||
       key === "defaultFooter" ||
       key === "firstPageHeader" ||
-      key === "firstPageFooter"
+      key === "firstPageFooter" ||
+      key === "evenPageHeader" ||
+      key === "evenPageFooter"
     ) {
       return key;
     }

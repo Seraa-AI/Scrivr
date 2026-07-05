@@ -100,11 +100,12 @@ function slotForPage(
   page: number,
   band: "header" | "footer",
 ): SlotKey {
-  // differentOddEven is reserved in the policy model but has no slot storage
-  // in v1. Keep routing explicit until odd/even slots are added end-to-end.
   const useFirstPage = page === 1 && policy.differentFirstPage;
-  if (band === "header") return useFirstPage ? "firstPageHeader" : "defaultHeader";
-  return useFirstPage ? "firstPageFooter" : "defaultFooter";
+  const useEvenPage = page % 2 === 0 && policy.differentOddEven;
+  if (band === "header") {
+    return useFirstPage ? "firstPageHeader" : useEvenPage ? "evenPageHeader" : "defaultHeader";
+  }
+  return useFirstPage ? "firstPageFooter" : useEvenPage ? "evenPageFooter" : "defaultFooter";
 }
 
 function sameContent(a: unknown, b: unknown): boolean {

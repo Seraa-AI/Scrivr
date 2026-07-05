@@ -43,7 +43,7 @@ export interface HeaderFooterPolicy {
 
   /** Use different header/footer on page 1. */
   differentFirstPage: boolean;
-  /** Reserved for v2 — always false in v1. */
+  /** Use distinct header/footer content on even pages. */
   differentOddEven: boolean;
 
   defaultHeader?: HeaderFooterDefinition | undefined;
@@ -53,7 +53,7 @@ export interface HeaderFooterPolicy {
   firstPageHeader?: HeaderFooterDefinition | undefined;
   firstPageFooter?: HeaderFooterDefinition | undefined;
 
-  /** Reserved for v2 — unused when differentOddEven is false. */
+  /** Used on even pages when differentOddEven is true. */
   evenPageHeader?: HeaderFooterDefinition | undefined;
   evenPageFooter?: HeaderFooterDefinition | undefined;
 }
