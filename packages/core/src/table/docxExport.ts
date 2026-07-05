@@ -64,8 +64,13 @@ function gridFromTable(node: Node): number[] {
 
 const tableHandler: DocxNodeHandler = (node, children) => {
   const grid = gridFromTable(node);
+  // Fill the text area (Word/Docs fit a table to the page — matching the canvas,
+  // which scales the grid to `availableWidth`). `pct` = fiftieths of a percent,
+  // so 5000 = 100%; the `<w:gridCol>` widths then act as column proportions.
+  // Auto width would render the raw grid px sum, which is much smaller than the
+  // page and reads as a shrunken table.
   const tblPr = xml("w:tblPr", undefined, [
-    xml("w:tblW", { "w:w": "0", "w:type": "auto" }),
+    xml("w:tblW", { "w:w": "5000", "w:type": "pct" }),
     tableBorders(),
   ]);
   const tblGrid = xml(
