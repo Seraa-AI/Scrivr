@@ -1,17 +1,17 @@
+import { Selection, SelectionRange, TextSelection } from "prosemirror-state";
 import type { EditorState } from "prosemirror-state";
+import { Fragment, Slice } from "prosemirror-model";
 import type { Node, ResolvedPos } from "prosemirror-model";
+import type { Mappable } from "prosemirror-transform";
 import { getTableMap, type Rect, type TableMap } from "./TableMap";
 
 /**
- * Cell selection geometry (Phase 5).
+ * Cell selection geometry + the `CellSelection` class.
  *
- * A `CellRange` is the rectangular cell selection a user expresses by dragging
- * a text selection out of one cell and into another. In v1 it is DERIVED from
- * that spanning `TextSelection` on demand — there is no stored selection state
- * yet. Phase 6 (drag-select + overlay) will introduce a persisted range and a
- * real ProseMirror `Selection` subclass; until then the spanning text
- * selection is the single source of truth, and editing guards (delete, paste)
- * ask this module "does the current selection span cells, and which?".
+ * A `CellRange` is a rectangular cell selection: an enclosing table plus a grid
+ * rect. The durable selection is the {@link CellSelection} class below (a real
+ * ProseMirror `Selection`); `CellRange` is the resolved geometry that editing
+ * guards, the clipboard, and the paint behavior read via {@link selectedCells}.
  *
  * The rect is normalized so a partially-covered merged cell (gridSpan / vMerge)
  * pulls the whole merged cell in — matching Word/Docs, where you cannot select
@@ -142,30 +142,6 @@ function normalizeRect(map: TableMap, rect: Rect): Rect {
   return r;
 }
 
-/**
- * The rectangular cell selection implied by the current selection, or null when
- * the selection is empty, lies within a single cell, or is not confined to one
- * table. This is the promotion the spec calls "cross-cell text selection → a
- * CellRange".
- */
-export function cellRangeFromSelection(state: EditorState): CellRange | null {
-  const sel = state.selection;
-  if (sel.empty) return null;
-
-  const fromInfo = cellInfoAt(sel.$from);
-  const toInfo = cellInfoAt(sel.$to);
-  if (!fromInfo || !toInfo) return null;
-  if (fromInfo.tablePos !== toInfo.tablePos) return null;
-  if (fromInfo.cellPos === toInfo.cellPos) return null;
-
-  const map = getTableMap(fromInfo.tableNode);
-  const fromRect = rectForCellOffset(map, fromInfo.tableNode, fromInfo.cellOffset);
-  const toRect = rectForCellOffset(map, toInfo.tableNode, toInfo.cellOffset);
-  if (!fromRect || !toRect) return null;
-
-  return { tablePos: fromInfo.tablePos, rect: normalizeRect(map, unionRect(fromRect, toRect)) };
-}
-
 /** Resolve a `CellRange` against the current doc, or null if it no longer fits. */
 export function resolveCellRange(state: EditorState, range: CellRange): ResolvedCellRange | null {
   const { doc } = state;
@@ -183,10 +159,207 @@ export function resolveCellRange(state: EditorState, range: CellRange): Resolved
   return { ...range, table, tableStart, map, cellPositions };
 }
 
-/** Convenience: resolve the cell selection the current selection implies. */
+// ── CellSelection (a real ProseMirror Selection subclass) ─────────────────────
+
+/** True when `$pos` sits immediately before a cell node inside a table row. */
+export function pointsAtCell($pos: ResolvedPos): boolean {
+  return (
+    $pos.parent.type.name === "tableRow" &&
+    !!$pos.nodeAfter &&
+    isCellType($pos.nodeAfter.type.name)
+  );
+}
+
+/** True when two cell positions belong to the same enclosing table. */
+export function inSameTable($a: ResolvedPos, $b: ResolvedPos): boolean {
+  return $a.depth >= 1 && $b.depth >= 1 && $a.node(-1) === $b.node(-1);
+}
+
+/** The node position of the cell enclosing `$pos`, or null when outside a table. */
+export function enclosingCellPos($pos: ResolvedPos): number | null {
+  return cellInfoAt($pos)?.cellPos ?? null;
+}
+
+/**
+ * A rectangular selection of table cells — Scrivr's own `Selection` subclass,
+ * mirroring prosemirror-tables. Cells are `isolating`, so a drag across them
+ * can't produce a spanning `TextSelection`; this is the durable, mappable,
+ * serializable representation that replaces the Phase-6 plugin shadow, which
+ * gives undo, collaboration, and clipboard round-tripping for free.
+ *
+ * `$anchorCell` / `$headCell` are resolved positions pointing immediately in
+ * front of the anchor and head cell nodes. The head cell's content is the
+ * primary selection range, so `.head` (and thus the hidden textarea / caret)
+ * lands inside the head cell rather than in some other cell of the rectangle.
+ */
+export class CellSelection extends Selection {
+  readonly $anchorCell: ResolvedPos;
+  readonly $headCell: ResolvedPos;
+  /** Normalized grid rect covering every cell in the selection. */
+  readonly rect: Rect;
+
+  constructor($anchorCell: ResolvedPos, $headCell: ResolvedPos = $anchorCell) {
+    if (
+      !pointsAtCell($anchorCell) ||
+      !pointsAtCell($headCell) ||
+      !inSameTable($anchorCell, $headCell)
+    ) {
+      throw new RangeError("CellSelection endpoints must point at cells in the same table");
+    }
+    const table = $anchorCell.node(-1);
+    const tableStart = $anchorCell.start(-1);
+    const map = getTableMap(table);
+    const anchorRect = rectForCellOffset(map, table, $anchorCell.pos - tableStart);
+    const headRect = rectForCellOffset(map, table, $headCell.pos - tableStart);
+    if (!anchorRect || !headRect) {
+      throw new RangeError("CellSelection endpoints are not present in the table map");
+    }
+    const rect = normalizeRect(map, unionRect(anchorRect, headRect));
+
+    const doc = $anchorCell.node(0);
+    const headOffset = $headCell.pos - tableStart;
+    // Head cell first, so the primary range (super's anchor/head) is the head
+    // cell's content — the in-cell text anchor (RFC requirement 4).
+    const offsets = map.cellsInRect(rect).filter((o) => o !== headOffset);
+    offsets.unshift(headOffset);
+
+    const ranges = offsets.map((offset) => {
+      const cell = table.nodeAt(offset);
+      const from = tableStart + offset + 1;
+      const to = from + (cell ? cell.content.size : 0);
+      return new SelectionRange(doc.resolve(from), doc.resolve(to));
+    });
+
+    super(ranges[0]!.$from, ranges[0]!.$to, ranges);
+    this.$anchorCell = $anchorCell;
+    this.$headCell = $headCell;
+    this.rect = rect;
+  }
+
+  override map(doc: Node, mapping: Mappable): Selection {
+    const $anchorCell = doc.resolve(mapping.map(this.$anchorCell.pos));
+    const $headCell = doc.resolve(mapping.map(this.$headCell.pos));
+    if (
+      pointsAtCell($anchorCell) &&
+      pointsAtCell($headCell) &&
+      inSameTable($anchorCell, $headCell)
+    ) {
+      return new CellSelection($anchorCell, $headCell);
+    }
+    // An edit dissolved a cell or split the range across tables — degrade to a
+    // plain text selection between the mapped endpoints.
+    return TextSelection.between($anchorCell, $headCell);
+  }
+
+  /**
+   * The selected rectangle as a standalone `table` slice. Because the rect is
+   * normalized to whole merged cells, each source row can be sliced by column
+   * without trimming spans — the sub-grid keeps its `gridSpan` / `vMerge` chain
+   * intact, so paste and undo round-trip the exact structure.
+   */
+  override content(): Slice {
+    const table = this.$anchorCell.node(-1);
+    const schema = table.type.schema;
+    const rowType = schema.nodes["tableRow"];
+    const { rect } = this;
+
+    const rows: Node[] = [];
+    for (let r = rect.top; r < rect.bottom && r < table.childCount; r++) {
+      const rowNode = table.child(r);
+      const cells: Node[] = [];
+      let col = 0;
+      rowNode.forEach((cellNode) => {
+        const span = readGridSpan(cellNode);
+        if (col >= rect.left && col + span <= rect.right) cells.push(cellNode);
+        col += span;
+      });
+      if (rowType) rows.push(rowType.create(rowNode.attrs, cells));
+    }
+
+    const grid = Array.isArray(table.attrs["grid"])
+      ? table.attrs["grid"].slice(rect.left, rect.right)
+      : [];
+    const sub = table.type.create({ ...table.attrs, grid }, Fragment.from(rows));
+    return new Slice(Fragment.from(sub), 0, 0);
+  }
+
+  override eq(other: Selection): boolean {
+    return (
+      other instanceof CellSelection &&
+      other.$anchorCell.pos === this.$anchorCell.pos &&
+      other.$headCell.pos === this.$headCell.pos
+    );
+  }
+
+  override toJSON(): { type: string; anchor: number; head: number } {
+    return { type: "cell", anchor: this.$anchorCell.pos, head: this.$headCell.pos };
+  }
+
+  override getBookmark(): CellBookmark {
+    return new CellBookmark(this.$anchorCell.pos, this.$headCell.pos);
+  }
+
+  static override fromJSON(doc: Node, json: { anchor: number; head: number }): Selection {
+    // Untrusted (persisted / collaborative) data: validate through the same
+    // guarded path as `between` and degrade to a caret rather than throwing or
+    // constructing an unrelated rectangle when the positions aren't two cells of
+    // one table.
+    const size = doc.content.size;
+    const clamp = (n: number): number =>
+      Number.isFinite(n) ? Math.max(0, Math.min(Math.floor(n), size)) : 0;
+    const anchor = clamp(json.anchor);
+    const head = clamp(json.head);
+    return CellSelection.between(doc, anchor, head) ?? Selection.near(doc.resolve(head));
+  }
+
+  /** Build a CellSelection between two cell node positions, or null if invalid. */
+  static between(doc: Node, anchorCellPos: number, headCellPos: number): CellSelection | null {
+    const $anchor = doc.resolve(anchorCellPos);
+    const $head = doc.resolve(headCellPos);
+    if (!pointsAtCell($anchor) || !pointsAtCell($head) || !inSameTable($anchor, $head)) {
+      return null;
+    }
+    return new CellSelection($anchor, $head);
+  }
+}
+
+/** A CellSelection's mappable, doc-independent form (for history/collab). */
+export class CellBookmark {
+  constructor(
+    readonly anchor: number,
+    readonly head: number,
+  ) {}
+
+  map(mapping: Mappable): CellBookmark {
+    return new CellBookmark(mapping.map(this.anchor), mapping.map(this.head));
+  }
+
+  resolve(doc: Node): Selection {
+    const $anchorCell = doc.resolve(this.anchor);
+    const $headCell = doc.resolve(this.head);
+    if (
+      pointsAtCell($anchorCell) &&
+      pointsAtCell($headCell) &&
+      inSameTable($anchorCell, $headCell)
+    ) {
+      return new CellSelection($anchorCell, $headCell);
+    }
+    return Selection.near($headCell, 1);
+  }
+}
+
+Selection.jsonID("cell", CellSelection);
+
+/**
+ * The active cell selection resolved to its cell positions, or null when the
+ * current selection is not a `CellSelection`. Editing guards and the clipboard
+ * both call this so they see one answer.
+ */
 export function selectedCells(state: EditorState): ResolvedCellRange | null {
-  const range = cellRangeFromSelection(state);
-  return range ? resolveCellRange(state, range) : null;
+  const sel = state.selection;
+  if (!(sel instanceof CellSelection)) return null;
+  const tablePos = sel.$anchorCell.before(-1);
+  return resolveCellRange(state, { tablePos, rect: sel.rect });
 }
 
 export interface EnclosingCell {

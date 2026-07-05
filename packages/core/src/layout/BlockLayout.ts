@@ -95,7 +95,7 @@ export interface CellSubBlock {
   cellPos: number;
   /** Absolute x position of the cell in CSS pixels. */
   x: number;
-  /** Absolute y position of the cell in CSS pixels. */
+  /** Y position RELATIVE to the row block's top (add `rowBlock.y` for absolute). */
   y: number;
   /** Cell width including padding. */
   width: number;

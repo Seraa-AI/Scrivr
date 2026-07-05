@@ -104,22 +104,47 @@ export interface HitTarget {
   payload?: unknown;
 }
 
+/** The raw pointer location for a gesture step, in page-local document coords. */
+export interface GesturePoint {
+  page: number;
+  docX: number;
+  docY: number;
+}
+
 /**
  * A drag in progress, owned by the provider that began it. Transient by
  * design — it lives on the pointer controller, never in editor state; only the
  * committed selection belongs to ProseMirror.
+ *
+ * `hit` is the semantic target under the cursor (null when nothing claims it);
+ * `point` is the raw pointer location (null only when off any page). A gesture
+ * that must react to positions its own hit tester doesn't claim — e.g. a cell
+ * drag leaving the table into the body — reads `point` + `ctx.posAtCoords`.
  */
 export interface SelectionGesture {
-  /** Advance for a pointer move; `hit` is the target now under the cursor. */
-  update(hit: HitTarget | null, event: PointerEvent): void;
+  /** Advance for a pointer move. */
+  update(hit: HitTarget | null, event: PointerEvent, point: GesturePoint | null): void;
   /** Commit on pointerup. */
-  finish(hit: HitTarget | null, event: PointerEvent): void;
+  finish(hit: HitTarget | null, event: PointerEvent, point: GesturePoint | null): void;
   /** Abort on pointercancel; leaves no selection change. */
   cancel(): void;
 }
 
 export interface HitTestContext {
   editor: IEditor;
+  /**
+   * The document state that owns the hit — resolve positions against this, not
+   * `editor.getState()`, so a hit tester stays correct if the pointer target
+   * belongs to a surface. Consistent with the layout the pointer hit-tested.
+   */
+  state: EditorState;
+  /**
+   * Resolve a page-local pointer position to the nearest document position.
+   * A hit tester uses this to carry a precise caret into its `HitTarget` (so a
+   * click that lands in a cell still places the caret exactly), keeping the
+   * coords→pos lookup on the seam instead of in the pointer controller.
+   */
+  posAtCoords(docX: number, docY: number, page: number): number;
 }
 
 /**
@@ -137,6 +162,20 @@ export interface HitTester {
 
 export interface GestureContext {
   editor: IEditor;
+  /**
+   * The document state that owns the gesture's target — build the initial
+   * selection against this rather than `editor.getState()`, so a gesture stays
+   * correct when the target belongs to a surface.
+   */
+  state: EditorState;
+  /**
+   * The pointer controller's authoritative click count (1 = single, 2 = double,
+   * 3+ = triple). Reliable where `event.detail` is not; a gesture that defers
+   * multi-click to built-in word/block selection reads this.
+   */
+  clickCount: number;
+  /** Resolve a page-local pointer position to the nearest document position. */
+  posAtCoords(docX: number, docY: number, page: number): number;
 }
 
 /**

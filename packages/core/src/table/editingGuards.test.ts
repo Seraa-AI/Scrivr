@@ -5,6 +5,7 @@ import type { Node } from "prosemirror-model";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
 import { tabToNextCell, tabToPreviousCell, guardBackspace, guardDelete } from "./editingGuards";
+import { CellSelection } from "./cellSelection";
 
 /** Phase 5 editing semantics: Tab navigation, boundary guards, paste distribution. */
 
@@ -105,11 +106,9 @@ function caret(editor: ServerEditor, pos: number) {
 
 function selectCells(editor: ServerEditor, a: string, b: string) {
   const doc = editor.getState().doc;
-  editor.applyTransaction(
-    editor.getState().tr.setSelection(
-      TextSelection.create(doc, posInCell(doc, a), posInCell(doc, b)),
-    ),
-  );
+  const sel = CellSelection.between(doc, posInCell(doc, a, 0), posInCell(doc, b, 0));
+  if (!sel) throw new Error(`cannot select cells ${a}..${b}`);
+  editor.applyTransaction(editor.getState().tr.setSelection(sel));
 }
 
 function run(editor: ServerEditor, cmd: Command): boolean {

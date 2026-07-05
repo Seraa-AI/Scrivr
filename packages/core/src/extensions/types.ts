@@ -146,8 +146,16 @@ export interface IEditor extends IBaseEditor {
    * this instead of `instanceof`-ing the ProseMirror selection.
    */
   getSelectionDescriptor(): SelectionDescriptor;
-  /** Describe a specific selection (not necessarily the active one). */
-  describeSelection(selection: Selection): SelectionDescriptor;
+  /**
+   * Describe a specific selection (not necessarily the active one). Pass `owner`
+   * when the selection belongs to a surface other than the active one, so it is
+   * resolved against the state/schema that owns it. Defaults to the active
+   * surface.
+   */
+  describeSelection(
+    selection: Selection,
+    owner?: { state: EditorState; surfaceId: string },
+  ): SelectionDescriptor;
   /** Current document layout (lazily recomputed when dirty). */
   get layout(): DocumentLayout;
   /**

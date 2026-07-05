@@ -5,7 +5,9 @@ import type { CharacterMap } from "../layout/CharacterMap";
 import type { InputHandler, EditorNavigator } from "../extensions/types";
 import type { PasteTransformer } from "./PasteTransformer";
 import { insertText, deleteSelection } from "../model/commands";
-import { serializeSelectionToHtml } from "./ClipboardSerializer";
+import { serializeSelectionToHtml, serializeSelectionToText } from "./ClipboardSerializer";
+import { clearSelectedCellsTr } from "../table/editingGuards";
+import { CellSelection } from "../table/cellSelection";
 
 /**
  * Convert a DOM KeyboardEvent into a ProseMirror key string.
@@ -414,32 +416,35 @@ export class InputBridge {
 
   private handleCopy = (e: ClipboardEvent): void => {
     const state = this.opts.getState();
-    const { from, to, empty } = state.selection;
-    if (empty || !e.clipboardData) return;
+    if (!e.clipboardData) return;
+    // One path for every selection kind: a CellSelection reports non-empty and
+    // serializes its cells; a text range serializes its slice.
+    const text = serializeSelectionToText(state);
+    if (text === null) return;
     e.preventDefault();
-    e.clipboardData.setData(
-      "text/plain",
-      state.doc.textBetween(from, to, "\n"),
-    );
+    e.clipboardData.setData("text/plain", text);
     const html = serializeSelectionToHtml(state, this.opts.getSchema());
     if (html) e.clipboardData.setData("text/html", html);
   };
 
   private handleCut = (e: ClipboardEvent): void => {
     const state = this.opts.getState();
-    const { from, to, empty } = state.selection;
-    if (empty || !e.clipboardData) return;
+    if (!e.clipboardData) return;
+    const text = serializeSelectionToText(state);
+    if (text === null) return;
     e.preventDefault();
-    e.clipboardData.setData(
-      "text/plain",
-      state.doc.textBetween(from, to, "\n"),
-    );
+    e.clipboardData.setData("text/plain", text);
     const html = serializeSelectionToHtml(state, this.opts.getSchema());
     if (html) e.clipboardData.setData("text/html", html);
     // In read-only mode, honour copy but skip the delete.
     if (this.readOnly) return;
-    const tr = deleteSelection(state);
-    if (tr) this.opts.dispatch(tr);
+    // A cell selection clears each cell's contents (keeping the grid); any other
+    // selection deletes its range.
+    const clear =
+      state.selection instanceof CellSelection
+        ? clearSelectedCellsTr(state)
+        : deleteSelection(state);
+    if (clear) this.opts.dispatch(clear);
   };
 
   private handlePaste = (e: ClipboardEvent): void => {

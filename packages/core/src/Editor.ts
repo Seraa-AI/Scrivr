@@ -17,6 +17,7 @@ import { builtinSelectionBehaviors, defaultSelectionBehavior } from "./selection
 import type {
   HitTarget,
   HitTester,
+  HitTestContext,
   SelectionDescriptor,
   SelectionGesture,
   SelectionGestureProvider,
@@ -959,21 +960,32 @@ export class Editor extends BaseEditor implements IEditor {
    * selection is described the same way as text or an image.
    */
   getSelectionDescriptor(): SelectionDescriptor {
-    const state = this.surfaces.activeSurface?.state ?? this.editorState;
-    return this.describeSelection(state.selection);
+    const activeSurface = this.surfaces.activeSurface;
+    const state = activeSurface?.state ?? this.editorState;
+    return this.describeSelection(state.selection, {
+      state,
+      surfaceId: activeSurface?.id ?? "body",
+    });
   }
 
   /**
    * Describe a specific selection (not necessarily the active one) through its
-   * behavior. The pointer controller uses this to ask the capabilities of the
-   * selection it is holding, rather than re-deriving the active one.
+   * behavior. Pass `owner` when the selection belongs to a surface other than
+   * the active one — the descriptor must be resolved against the state/schema
+   * that owns the selection (a header selection's positions mean nothing in the
+   * body doc). Defaults to the active surface, which is correct for callers that
+   * hold the active selection (e.g. the pointer controller).
    */
-  describeSelection(selection: Selection): SelectionDescriptor {
+  describeSelection(
+    selection: Selection,
+    owner?: { state: EditorState; surfaceId: string },
+  ): SelectionDescriptor {
     const activeSurface = this.surfaces.activeSurface;
-    const state = activeSurface?.state ?? this.editorState;
+    const state = owner?.state ?? activeSurface?.state ?? this.editorState;
+    const surfaceId = owner?.surfaceId ?? activeSurface?.id ?? "body";
     return this.selectionRegistry.resolve(selection).describe(selection, {
       state,
-      surfaceId: activeSurface?.id ?? "body",
+      surfaceId,
       // The surface may use a different schema than the root document.
       schema: state.schema,
       readOnly: this.readOnly,
@@ -1112,7 +1124,13 @@ export class Editor extends BaseEditor implements IEditor {
    * case the pointer controller falls back to a plain text caret.
    */
   resolveHitTarget(docX: number, docY: number, page: number): HitTarget | null {
-    const ctx = { editor: this };
+    const ctx: HitTestContext = {
+      editor: this,
+      // Cell hit-testing reads the body page layout, so the owning state is the
+      // root doc; a surface-aware pointer layout would pass the surface state.
+      state: this.getState(),
+      posAtCoords: (x, y, p) => this.charMap.posAtCoords(x, y, p),
+    };
     for (const tester of this.hitTesters) {
       const hit = tester.hitTest(docX, docY, page, ctx);
       if (hit) return hit;
@@ -1125,8 +1143,17 @@ export class Editor extends BaseEditor implements IEditor {
    * to return a gesture owns it. Null means no extension claims the target, so
    * the pointer controller runs its built-in text/image handling.
    */
-  beginSelectionGesture(hit: HitTarget, event: PointerEvent): SelectionGesture | null {
-    const ctx = { editor: this };
+  beginSelectionGesture(
+    hit: HitTarget,
+    event: PointerEvent,
+    clickCount = 1,
+  ): SelectionGesture | null {
+    const ctx = {
+      editor: this,
+      state: this.getState(),
+      clickCount,
+      posAtCoords: (x: number, y: number, p: number) => this.charMap.posAtCoords(x, y, p),
+    };
     for (const provider of this.selectionGestures) {
       const gesture = provider.beginGesture(hit, event, ctx);
       if (gesture) return gesture;

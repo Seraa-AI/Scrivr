@@ -2,6 +2,7 @@ import { Extension } from "../Extension";
 import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
+import type { IEditor } from "../types";
 import { TableRowStrategy } from "../../renderer/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
 import {
@@ -11,6 +12,12 @@ import {
   guardDelete,
 } from "../../table/editingGuards";
 import { tableStructureCommands } from "../../table/commands";
+import {
+  cellSelectionBehavior,
+  cellHitTester,
+  cellSelectionGesture,
+  tableCellWashHandler,
+} from "../../table/cellSelectionSeam";
 import { renderTableRowPdf } from "../../table/pdfExport";
 import { tableDocxHandlers } from "../../table/docxExport";
 
@@ -65,6 +72,9 @@ function tableSpec(): NodeSpec {
     group: "block",
     content: "tableRow+",
     isolating: true,
+    // A selection that spans the table washes its cells (tableCellWashHandler),
+    // so the text behavior defers the table's interior instead of banding it.
+    selectionWash: true,
     attrs: {
       layout: { default: "fixed" },
       grid: { default: [] as number[] },
@@ -246,7 +256,31 @@ export const Table = Extension.create({
   },
 
   addProseMirrorPlugins() {
+    // tableIntegrityPlugin runs last so it repairs any structural drift a
+    // range-consuming command produced.
     return [tableIntegrityPlugin()];
+  },
+
+  // Cell selection flows through the selection seam — a behavior (describe), a
+  // hit tester (pointer → cell), and a gesture (drag → CellSelection). The cell
+  // wash is painted by the overlay handler below, which covers both a cell range
+  // and a text range that spans the table.
+  addSelectionBehavior() {
+    return [cellSelectionBehavior];
+  },
+
+  addHitTester() {
+    return [cellHitTester];
+  },
+
+  addSelectionGesture() {
+    return [cellSelectionGesture];
+  },
+
+  onViewReady(editor: IEditor) {
+    // Paints the cell wash for any selection covering cells — a CellSelection
+    // rectangle, or a text selection that spans the whole table (Word/Docs).
+    return editor.addOverlayRenderHandler(tableCellWashHandler(editor));
   },
 
   addBlockStyles() {

@@ -1,5 +1,18 @@
 import { TextSelection, NodeSelection, AllSelection, type Selection } from "prosemirror-state";
+import type { Node } from "prosemirror-model";
 import type { GlyphEntry, LineEntry } from "../layout/CharacterMap";
+
+declare module "prosemirror-model" {
+  interface NodeSpec {
+    /**
+     * The node paints its own selection wash (e.g. a table washing its cells),
+     * so a text/range selection that fully contains it should NOT draw per-glyph
+     * bands over its interior — its owner fills it instead. Opt-in: a plain
+     * isolating node without this keeps normal text bands (no visual hole).
+     */
+    selectionWash?: boolean;
+  }
+}
 import type {
   SelectionBehavior,
   SelectionDescribeContext,
@@ -79,14 +92,43 @@ function caretPrimitive(
   return coords ? { type: "caret", x: coords.x, y: coords.y, height: coords.height } : null;
 }
 
+/**
+ * Content ranges of self-washing nodes (`selectionWash: true`, e.g. tables) that
+ * the selection fully contains. A text selection defers the *inside* of such a
+ * node to its owner's wash, so per-glyph text bands don't paint over (and double
+ * up on) it. Deferral is opt-in per node — a plain isolating node without the
+ * flag keeps its text bands rather than becoming a visual hole.
+ */
+function fullyContainedSelfWashedRanges(
+  doc: Node,
+  from: number,
+  to: number,
+): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (node.type.spec.selectionWash && from <= pos && to >= pos + node.nodeSize) {
+      out.push([pos, pos + node.nodeSize]);
+      return false; // don't descend — the whole node is deferred
+    }
+    return true;
+  });
+  return out;
+}
+
 /** Fill geometry shared by text, all-document, and the fallback. */
 function fillGeometry(
   from: number,
   to: number,
   ctx: SelectionGeometryContext,
 ): SelectionPrimitive[] {
-  const glyphs = ctx.charMap.glyphsInRange(from, to).filter((g) => g.page === ctx.page);
-  const lines = ctx.charMap.linesInRange(from, to).filter((l) => l.page === ctx.page);
+  const deferred = fullyContainedSelfWashedRanges(ctx.state.doc, from, to);
+  const inside = (pos: number): boolean => deferred.some(([a, b]) => pos >= a && pos < b);
+  const glyphs = ctx.charMap
+    .glyphsInRange(from, to)
+    .filter((g) => g.page === ctx.page && !inside(g.docPos));
+  const lines = ctx.charMap
+    .linesInRange(from, to)
+    .filter((l) => l.page === ctx.page && !inside(l.startDocPos));
   const rects = rangeBandRects(from, to, glyphs, lines);
   return rects.length ? [{ type: "fill", rects, role: "selection" }] : [];
 }

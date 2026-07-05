@@ -9,6 +9,7 @@ import { createTestEditor } from "../../test-utils";
 import { DOMParser as PMDOMParser, DOMSerializer } from "prosemirror-model";
 import type { Node } from "prosemirror-model";
 import type { LayoutBlock } from "../../layout/BlockLayout";
+import type { Extension } from "../Extension";
 
 // Table ships behind an opt-in flag (see `chore/tables-default-off`); build a
 // local context that enables it so the schema-integration assertions below
@@ -734,5 +735,34 @@ describe("Table — HTML parse via schema parseDOM", () => {
     expect(table).not.toBeNull();
     expect(table!.firstChild?.type.name).toBe("tableRow");
     expect(table!.firstChild!.firstChild!.textContent).toBe("x");
+  });
+});
+
+// Regression: StarterKit must forward Table's selection seam contributions
+// (behavior + hit tester + gesture), else cell selection silently vanishes when
+// Table is used via StarterKit (the normal path).
+describe("Table — cell selection is registered via the seam through StarterKit", () => {
+  function cellSeam(kit: Extension) {
+    const schema = new ExtensionManager([kit]).schema;
+    const resolved = kit.resolve(schema);
+    return {
+      behaviors: resolved.selectionBehaviors,
+      hitTesters: resolved.hitTesters,
+      gestures: resolved.selectionGestures,
+    };
+  }
+
+  it("StarterKit({table:true}) forwards the cell behavior, hit tester, and gesture", () => {
+    const on = cellSeam(StarterKit.configure({ table: true }));
+    expect(on.behaviors.some((b) => b.kind === "table-cell")).toBe(true);
+    expect(on.hitTesters.length).toBeGreaterThan(0);
+    expect(on.gestures.length).toBeGreaterThan(0);
+  });
+
+  it("with table off, no cell behavior / hit tester / gesture is registered", () => {
+    const off = cellSeam(StarterKit); // table disabled by default
+    expect(off.behaviors.some((b) => b.kind === "table-cell")).toBe(false);
+    expect(off.hitTesters.length).toBe(0);
+    expect(off.gestures.length).toBe(0);
   });
 });
