@@ -62,6 +62,10 @@ export function createDocxImportContext(
     rels: {
       resolveHyperlink,
     },
+    // Defaults — `importDocx` assigns the real section refs + part walker once
+    // the OPC package and handlers are available (same pattern as resolveImage).
+    section: { headers: [], footers: [] },
+    walkPart: () => null,
     shared: {
       // Contained generic cast — Map stores unknown, caller owns the type.
       getOrInit<T>(key: string, init: () => T): T {

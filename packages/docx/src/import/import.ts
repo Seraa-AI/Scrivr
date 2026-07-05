@@ -27,7 +27,11 @@ import type {
 } from "@scrivr/core";
 import { readDocxPackage } from "./opc";
 import { parseOoxml } from "./xml";
-import { parseDocumentBody } from "./parser";
+import {
+  parseDocumentBody,
+  parseBlockContainer,
+  parseSectionReferences,
+} from "./parser";
 import { readNumberingMap } from "./numbering";
 import { reconstructLists } from "./lists";
 import { readRelationshipMap } from "./relationships";
@@ -105,11 +109,69 @@ export async function importDocx(
       );
     }
 
+    const numbering = readNumberingMap(pkg.readText("word/numbering.xml"));
+
+    // Header/footer support: expose the section references + a part walker so
+    // a contribution (HeaderFooter) can reconstruct each part's content
+    // through the same handlers as the body. The inverse of the export seam.
+    ctx.section = parseSectionReferences(root);
+    ctx.walkPart = (relId: string): PmNode | null => {
+      const rel = rels.get(relId);
+      if (!rel) {
+        ctx.diagnostics.warn({
+          code: "header-footer-rel",
+          message: `Unresolved header/footer relationship ${relId} — skipped`,
+        });
+        return null;
+      }
+      const path = resolvePartPath(rel.target);
+      const partXml = pkg.readText(path);
+      if (partXml === undefined) {
+        ctx.diagnostics.warn({
+          code: "header-footer-part-missing",
+          message: `Missing header/footer part ${path} — skipped`,
+        });
+        return null;
+      }
+      const partRoot = parseOoxml(partXml);
+      if (!partRoot) return null;
+
+      // Relationships are part-scoped: images/hyperlinks inside header1.xml
+      // resolve against word/_rels/header1.xml.rels, not the document's.
+      // Swap the resolvers for the duration of the part walk (mirror of the
+      // export-side per-part rels scoping).
+      const savedResolveImage = ctx.media.resolveImage;
+      const savedResolveHyperlink = ctx.rels.resolveHyperlink;
+      const partRelsXml = pkg.readText(partRelsPath(path));
+      if (partRelsXml !== undefined) {
+        const partRels = readRelationshipMap(partRelsXml);
+        ctx.media.resolveImage = buildImageResolver(
+          partRels,
+          pkg,
+          ctx.options.media,
+          ctx.diagnostics,
+        );
+        ctx.rels.resolveHyperlink = (id: string) => {
+          const entry = partRels.get(id);
+          return entry?.type === "hyperlink" ? entry.target : undefined;
+        };
+      }
+      try {
+        const model = reconstructLists(
+          parseBlockContainer(partRoot, ctx.diagnostics),
+          numbering,
+        );
+        return transformToProseMirror(model, ctx, handlers);
+      } finally {
+        ctx.media.resolveImage = savedResolveImage;
+        ctx.rels.resolveHyperlink = savedResolveHyperlink;
+      }
+    };
+
     for (const hook of lifecycleHooks.onBeforeImport) {
       await hook(ctx);
     }
 
-    const numbering = readNumberingMap(pkg.readText("word/numbering.xml"));
     const rawModel = parseDocumentBody(root, ctx.diagnostics);
     const model = reconstructLists(rawModel, numbering);
     let doc = transformToProseMirror(model, ctx, handlers);
@@ -151,6 +213,18 @@ const UNSUPPORTED_CODES = new Set([
 
 function isUnsupportedCode(code: string): boolean {
   return UNSUPPORTED_CODES.has(code);
+}
+
+/** Relationship target (e.g. `header1.xml` or `/word/header1.xml`) → ZIP path. */
+function resolvePartPath(target: string): string {
+  if (target.startsWith("/")) return target.slice(1);
+  return target.startsWith("word/") ? target : `word/${target}`;
+}
+
+/** `word/header1.xml` → `word/_rels/header1.xml.rels`. */
+function partRelsPath(partPath: string): string {
+  const slash = partPath.lastIndexOf("/");
+  return `${partPath.slice(0, slash)}/_rels/${partPath.slice(slash + 1)}.rels`;
 }
 
 // ── Handler collection ──────────────────────────────────────────────────────

@@ -411,10 +411,26 @@ export interface DocxImageInline {
   marks: DocxMark[];
 }
 
+/**
+ * A field inline parsed from `<w:fldSimple w:instr="…">`. `instr` is the raw
+ * instruction (e.g. `" PAGE "`, `" NUMPAGES "`, `" DATE "`); Stage 2 dispatches
+ * on it via an inline handler to reconstruct the owning node (the HeaderFooter
+ * extension maps these back to `pageNumber` / `totalPages` / `date` tokens).
+ * Only the `<w:fldSimple>` form is parsed — not the older `<w:fldChar>`
+ * begin/separate/end run sequence.
+ */
+export interface DocxFieldInline {
+  type: "field";
+  /** Raw `w:instr`, verbatim including surrounding spaces. */
+  instr: string;
+  marks: DocxMark[];
+}
+
 export type DocxInline =
   | { type: "text"; text: string; marks: DocxMark[] }
   | { type: "hardBreak"; marks: DocxMark[] }
-  | DocxImageInline;
+  | DocxImageInline
+  | DocxFieldInline;
 
 export interface DocxParagraphAttrs {
   /** Paragraph style ID (`Heading1`, `Normal`, …) — resolved from `styles.xml`. */
@@ -511,10 +527,36 @@ export interface DocxImportContext {
     /** Hyperlink target URL (or in-document anchor name). */
     resolveHyperlink(relId: string): string | undefined;
   };
+  /**
+   * Header/footer references from the body `<w:sectPr>`. The inverse of the
+   * export-side `parts.add` — a contribution reads these, then calls
+   * `walkPart` on each `relId` to reconstruct the part's content.
+   */
+  section: {
+    headers: readonly DocxSectionRef[];
+    footers: readonly DocxSectionRef[];
+  };
+  /**
+   * Resolve a header/footer relationship id to its OPC part, parse it, and
+   * walk its block content back through the same handlers as the body —
+   * the inverse of the export-side `ctx.walkContent`. Returns a `doc` node
+   * whose content is the part's blocks, or `null` if the part is missing or
+   * empty. OOXML stays inside the docx package; contributions see only the
+   * resulting `Node`.
+   */
+  walkPart(relId: string): PmNode | null;
   shared: {
     getOrInit<T>(key: string, init: () => T): T;
     get<T>(key: string): T | undefined;
   };
+}
+
+/** A header/footer reference from `<w:sectPr>`. */
+export interface DocxSectionRef {
+  /** `w:type` on the reference — which page slot it applies to. */
+  type: "default" | "first" | "even";
+  /** OPC relationship id resolving to the header/footer part. */
+  relId: string;
 }
 
 // ── Import handlers ─────────────────────────────────────────────────────────

@@ -212,6 +212,18 @@ function transformInlines(
           nodeType: "image",
         });
       }
+    } else if (item.type === "field") {
+      const marks = transformMarks(item.marks, ctx, handlers);
+      const handler = handlers.inlines["field"];
+      if (handler) {
+        const node = handler(item, marks, ctx);
+        if (node) out.push(node);
+      } else {
+        ctx.diagnostics.warn({
+          code: "field-no-handler",
+          message: `No import handler for field "${item.instr.trim()}" — dropped`,
+        });
+      }
     }
   }
   return out;
