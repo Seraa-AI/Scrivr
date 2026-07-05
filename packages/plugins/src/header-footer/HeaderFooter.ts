@@ -26,6 +26,7 @@ import {
   renderDatePdf,
 } from "./pdfExport";
 import { headerFooterDocxHandlers } from "./docxExport";
+import { headerFooterDocxImportHandlers } from "./docxImport";
 import { pageNumberStrategy, totalPagesStrategy, dateStrategy } from "./tokenStrategies";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import type { SlotKey } from "./surfaces";
@@ -344,6 +345,12 @@ export const HeaderFooter = Extension.create<HeaderFooterOptions>({
         },
       },
       docx: headerFooterDocxHandlers,
+    };
+  },
+
+  addImports() {
+    return {
+      docx: headerFooterDocxImportHandlers,
     };
   },
 
