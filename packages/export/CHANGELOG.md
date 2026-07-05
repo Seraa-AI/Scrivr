@@ -1,5 +1,119 @@
 # @scrivr/export
 
+## 1.0.16
+
+### Patch Changes
+
+- 2e01d56: `@scrivr/plugins` — page headers and footers now export to DOCX, including images.
+
+  Headers and footers set in the editor now appear in the exported Word document as
+  real `<w:hdr>` / `<w:ftr>` parts referenced from the section. Different-first-page
+  is supported (`<w:titlePg/>` + a first-page part), page-number / total-pages /
+  date tokens export as live Word field codes (`PAGE`, `NUMPAGES`, `DATE`), and
+  images placed in a header or footer export with their bytes and a part-scoped
+  relationship (`word/_rels/header1.xml.rels`).
+
+  `@scrivr/core` — paragraph and heading exports now emit `<w:jc>` for the `align`
+  attribute, so centered / right-aligned / justified text keeps its alignment in
+  Word (previously dropped to left). `prepareDocxImages(ctx, doc)` is exported so
+  contributions that render their own sub-documents can pull images through the
+  same fetch/media path as the body.
+
+  `@scrivr/core` / `@scrivr/docx` — the DOCX export context gained reusable
+  capabilities the HeaderFooter contribution is the first to use: `ctx.walkContent`
+  (render a sub-document through the same node/mark handlers as the body) and
+  `ctx.parts.add({ kind, build })` (register an extra OOXML part; relationships
+  allocated inside `build` are scoped to that part's own `.rels`). Footnotes,
+  comments, and text boxes can reuse the same seam.
+
+- 11dfd4d: `@scrivr/plugins` — page headers and footers now import from DOCX, completing the round-trip.
+
+  A `.docx` with headers/footers (exported by Scrivr, or any document using the
+  `<w:fldSimple>` field form) now reconstructs its chrome on import: header/footer
+  text, page-number / total-pages / date tokens, images, first-page, and odd/even
+  slots all land back on the document's `headerFooter` policy. Activation follows
+  Word — first-page chrome is gated on `<w:titlePg>` and even-page chrome on
+  `<w:evenAndOddHeaders>`, not on the mere presence of a reference.
+
+  Odd/even headers and footers are now a first-class rendered feature:
+  `differentOddEven` + `evenPageHeader` / `evenPageFooter` render distinct even-page
+  chrome (previously reserved), so imported even-page content is displayed, not just
+  stored.
+
+  `@scrivr/core` / `@scrivr/docx` — the DOCX import context gained the inverse of
+  the export-side part seam: `ctx.section` exposes the `<w:sectPr>` header/footer
+  references (previously dropped), and `ctx.walkPart(relId)` reads a header/footer
+  part and walks its content back through the same node/mark handlers as the body,
+  with relationships resolved against the part's own `word/_rels/{part}.rels`. A new
+  `field` inline kind carries `<w:fldSimple>` fields through Stage 1 so extensions
+  can map them back to nodes. The older `<w:fldChar>` run-sequence field form is not
+  yet parsed.
+
+- 8bf11bb: `@scrivr/core` — DOCX export: tables now fill the page width.
+
+  A table exported to DOCX previously used its raw grid pixel widths, so Word
+  rendered it much smaller than the page even though the canvas fits the table to
+  the content area. Tables now export at 100% of the text area (`<w:tblW>` percent
+  width, with the grid preserved as column proportions), matching what you see in
+  the editor.
+
+- 56aae1c: `@scrivr/core` — Table cell selection, built on a real `CellSelection`.
+
+  You can now **drag across table cells to select a rectangle**, **Shift-click a
+  second cell to extend the selection**, and **Backspace/Delete or type to clear
+  the selected cells**. Copy/cut round-trips the selection to an HTML `<table>`
+  (with `colspan`/`rowspan` for merged cells) plus tab/newline text, so it pastes
+  into Docs/Word/Notion as a grid. Because the cell selection is now a real
+  ProseMirror selection, undo, collaboration, and clipboard all work without any
+  special cases.
+
+  Selecting **across a table boundary** now matches Word/Google Docs: a drag that
+  runs from body text through a table selects the leading text, the **whole table**
+  (every cell washed), and the trailing text as one continuous selection — pointer
+  drag and Shift+Arrow behave identically at the boundary. Clicking inside a cell
+  places the caret exactly where you click (it no longer jumps to a neighbouring
+  cell near a cell edge or in padding). **Double-click selects the word and
+  triple-click the cell's text** — only a drag or Shift-click selects whole cells.
+
+  Under the hood this replaces the Phase-6 plugin shadow (a stored range + a
+  collapsed caret) with a `CellSelection` registered entirely through the selection
+  seam — a behavior, a hit tester, and a gesture. A text selection defers the
+  interior of any node that opts into painting its own wash
+  (`NodeSpec.selectionWash`), and untrusted serialized selections validate and
+  degrade to a caret instead of throwing.
+
+- 890638d: `@scrivr/core` — unified selection system: one canonical ProseMirror selection
+  with an extension-owned behavior/geometry/gesture seam.
+
+  - **Cleaner mouse selection.** Selecting across multiple lines or block atoms
+    (image, horizontal rule, page break) now paints continuous Word/Docs-style
+    bands — first line to the margin, middle lines full width, last line to the
+    selection end — instead of ragged per-glyph fills that left gaps.
+  - **`editor.getSelectionDescriptor()`** — a kind-tagged, capability-carrying view
+    of the active selection (`kind`, `empty`, `surfaceId`, and a
+    `SelectionCapabilities` bag). UI reads this instead of `instanceof`-ing the
+    ProseMirror selection.
+  - **Extension seams** so an extension can own a selection kind on its own terms
+    without patching the renderer or pointer controller:
+    - `addSelectionBehavior()` — describe + geometry (paint primitives) for a
+      selection kind, with a required default fallback for unregistered kinds.
+    - `addHitTester()` / `addSelectionGesture()` — turn a pointer position into a
+      semantic target and own the resulting drag.
+
+  The canvas renderer now paints selection geometry primitives type-blind, and the
+  pointer controller delegates gestures to registered providers — the same seam a
+  table cell selection or a custom node plugs into. No app-facing behavior changes
+  for text or image selection beyond the band-rendering improvement.
+
+- Updated dependencies [2e01d56]
+- Updated dependencies [11dfd4d]
+- Updated dependencies [8bf11bb]
+- Updated dependencies [56aae1c]
+- Updated dependencies [890638d]
+  - @scrivr/core@1.0.16
+  - @scrivr/export-pdf@1.0.16
+  - @scrivr/export-markdown@1.0.16
+
 ## 1.0.15
 
 ### Patch Changes
