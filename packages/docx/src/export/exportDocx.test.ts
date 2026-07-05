@@ -83,6 +83,25 @@ describe("exportDocx", () => {
     expect(Array.isArray(result.diagnostics)).toBe(true);
   });
 
+  it("exports paragraph/heading alignment as <w:jc>", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1, align: "center" }, content: [{ type: "text", text: "Title" }] },
+        { type: "paragraph", attrs: { align: "right" }, content: [{ type: "text", text: "Right" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Default" }] },
+      ],
+    });
+    const bytes = await exportDocxBytes(editor);
+    const doc = readZip(bytes)["word/document.xml"]!;
+    expect(doc).toContain('<w:jc w:val="center"/>');
+    expect(doc).toContain('<w:jc w:val="right"/>');
+    // The default (left) paragraph gets no jc — exactly one jc-bearing paragraph
+    // besides the centered heading.
+    expect((doc.match(/<w:jc /g) ?? []).length).toBe(2);
+  });
+
   it("exports a table at full text-area width (pct 100%), not the raw grid px", async () => {
     const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
     editor.setContent({

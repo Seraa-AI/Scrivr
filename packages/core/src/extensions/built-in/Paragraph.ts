@@ -9,6 +9,18 @@ import {
 } from "../../exports/docx";
 
 /**
+ * OOXML `<w:jc>` value for a block `align` attr, or null for the default (left)
+ * — so the DOCX exporter carries centered/right/justified text. Shared by the
+ * Paragraph and Heading export handlers.
+ */
+export function alignToJc(align: unknown): string | null {
+  if (align === "center") return "center";
+  if (align === "right") return "right";
+  if (align === "justify") return "both";
+  return null;
+}
+
+/**
  * Splits the current block and carries `fontFamily` and `align` from the
  * source block onto the new block. Also preserves stored inline marks,
  * matching the behaviour of ProseMirror's built-in splitBlockKeepMarks.
@@ -146,8 +158,11 @@ export const Paragraph = Extension.create({
   },
 
   addExports() {
-    const handler: DocxNodeHandler = (_node, children) =>
-      xml("w:p", undefined, children);
+    const handler: DocxNodeHandler = (node, children) => {
+      const jc = alignToJc(node.attrs["align"]);
+      const lead = jc ? [xml("w:pPr", undefined, [xml("w:jc", { "w:val": jc })])] : [];
+      return xml("w:p", undefined, [...lead, ...children]);
+    };
     return { docx: { nodes: { paragraph: handler } } };
   },
 

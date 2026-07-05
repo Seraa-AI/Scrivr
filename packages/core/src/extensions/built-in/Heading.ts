@@ -9,7 +9,9 @@ import {
   pxToTwips,
   type DocxNodeHandler,
   type DocxParagraphStyleTransform,
+  type XmlNode,
 } from "../../exports/docx";
+import { alignToJc } from "./Paragraph";
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -169,10 +171,10 @@ export const Heading = Extension.create<HeadingOptions>({
         spacingBefore: spec ? pxToTwips(spec.spaceBefore) : 0,
         spacingAfter: spec ? pxToTwips(spec.spaceAfter) : 0,
       });
-      return xml("w:p", undefined, [
-        xml("w:pPr", undefined, [xml("w:pStyle", { "w:val": styleId })]),
-        ...children,
-      ]);
+      const pPr: XmlNode[] = [xml("w:pStyle", { "w:val": styleId })];
+      const jc = alignToJc(node.attrs["align"]);
+      if (jc) pPr.push(xml("w:jc", { "w:val": jc }));
+      return xml("w:p", undefined, [xml("w:pPr", undefined, pPr), ...children]);
     };
     return { docx: { nodes: { heading: headingHandler } } };
   },
