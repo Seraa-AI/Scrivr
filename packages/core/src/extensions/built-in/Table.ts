@@ -20,6 +20,7 @@ import {
 } from "../../table/cellSelectionSeam";
 import { renderTableRowPdf } from "../../table/pdfExport";
 import { tableDocxHandlers } from "../../table/docxExport";
+import { tableSemanticHandler } from "../../table/semanticExport";
 
 /**
  * Table extension.
@@ -299,6 +300,7 @@ export const Table = Extension.create({
     return {
       pdf: { nodes: { tableRow: renderTableRowPdf } },
       docx: { nodes: tableDocxHandlers },
+      semantic: { nodes: { table: tableSemanticHandler } },
     };
   },
 

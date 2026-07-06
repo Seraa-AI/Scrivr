@@ -11,6 +11,7 @@ import {
   type DocxParagraphStyleTransform,
   type XmlNode,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
 import { alignToJc } from "./Paragraph";
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
@@ -176,7 +177,11 @@ export const Heading = Extension.create<HeadingOptions>({
       if (jc) pPr.push(xml("w:jc", { "w:val": jc }));
       return xml("w:p", undefined, [xml("w:pPr", undefined, pPr), ...children]);
     };
-    return { docx: { nodes: { heading: headingHandler } } };
+    const semanticHandler: SemanticNodeHandler = () => ({ type: "heading" });
+    return {
+      docx: { nodes: { heading: headingHandler } },
+      semantic: { nodes: { heading: semanticHandler } },
+    };
   },
 
   addImports() {

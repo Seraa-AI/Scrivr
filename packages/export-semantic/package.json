@@ -1,0 +1,59 @@
+{
+  "name": "@scrivr/export-semantic",
+  "version": "1.0.16",
+  "description": "SemanticUnit chunk emitter for Scrivr documents — AI-ready units for RAG",
+  "license": "Apache-2.0",
+  "author": "Seraa AI <hello@seraa.ai>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Seraa-AI/Scrivr.git",
+    "directory": "packages/export-semantic"
+  },
+  "homepage": "https://github.com/Seraa-AI/Scrivr#readme",
+  "keywords": [
+    "semantic",
+    "chunking",
+    "rag",
+    "embedding",
+    "export",
+    "editor",
+    "prosemirror",
+    "scrivr"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "@scrivr/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@scrivr/core": "workspace:*",
+    "prosemirror-model": "^1.25.4",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -5,6 +5,7 @@ import {
   type DocxNodeHandler,
   type DocxBlockTransform,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
 
 function insertPageBreak(): Command {
   return (state, dispatch) => {
@@ -66,7 +67,11 @@ export const PageBreak = Extension.create({
       xml("w:p", undefined, [
         xml("w:r", undefined, [xml("w:br", { "w:type": "page" })]),
       ]);
-    return { docx: { nodes: { pageBreak: handler } } };
+    const semanticHandler: SemanticNodeHandler = () => ({ type: "pageBreak" });
+    return {
+      docx: { nodes: { pageBreak: handler } },
+      semantic: { nodes: { pageBreak: semanticHandler } },
+    };
   },
 
   addImports() {

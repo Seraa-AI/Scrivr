@@ -167,11 +167,13 @@ describe("CitationHighlight on ServerEditor", () => {
   it("citeNode cites a block by its nodeId", () => {
     const editor = new ServerEditor({
       extensions: [StarterKit, AiToolkit, CitationHighlight],
+      // Persisted nodeIds — ServerEditor preserves them and never fabricates
+      // ids on load, so block addressing is deterministic.
       content: {
         type: "doc",
         content: [
-          { type: "paragraph", content: [{ type: "text", text: "First block." }] },
-          { type: "paragraph", content: [{ type: "text", text: "Second block." }] },
+          { type: "paragraph", attrs: { nodeId: "b1" }, content: [{ type: "text", text: "First block." }] },
+          { type: "paragraph", attrs: { nodeId: "b2" }, content: [{ type: "text", text: "Second block." }] },
         ],
       },
     });

@@ -99,6 +99,18 @@ export class ServerEditor extends BaseEditor {
     this.fireEditorReady();
   }
 
+  /**
+   * A headless read/emit surface never fabricates identity on load. Loading the
+   * same `contentJSON` must be deterministic — stamping random `nodeId`s here
+   * would churn ids on every server run (breaking chunk identity, causing
+   * duplicate chunk sets). Persisted ids are preserved; absent ones fall back
+   * deterministically in the emitter. Server-side edits still get stable ids
+   * from `UniqueId`.
+   */
+  protected override assignsBlockIdsOnLoad(): boolean {
+    return false;
+  }
+
   /** The current input theme (may contain literal colors only on the server). */
   getTheme(): EditorTheme {
     return this.theme;
@@ -121,11 +133,14 @@ export class ServerEditor extends BaseEditor {
    * loading a fresh document. Call `subscribe` callbacks manually if needed.
    */
   setContent(json: Record<string, unknown>): void {
-    // Ingestion-time normalization — URL allow-list, table repair,
-    // block-ID assignment, fingerprint, warnings. Same pipeline as the
-    // base constructor; `lastNormalizeResult` (inherited from BaseEditor)
-    // is refreshed so consumers can inspect what was repaired.
-    const result = normalizeDocument(json, { schema: this.manager.schema });
+    // Ingestion-time normalization — URL allow-list, table repair, fingerprint,
+    // warnings. Same pipeline as the base constructor. Block-ID assignment is
+    // OFF on this read/emit surface (see assignsBlockIdsOnLoad): a headless load
+    // preserves persisted ids and never fabricates non-deterministic ones.
+    const result = normalizeDocument(json, {
+      schema: this.manager.schema,
+      assignIds: false,
+    });
     this.lastNormalizeResultValue = result;
     this.editorState = EditorState.create({
       schema: this.manager.schema,

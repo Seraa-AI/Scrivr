@@ -66,7 +66,14 @@ function tableDoc(grid: number[], rows: CellSpec[][], opts: { trailingParagraph?
 }
 
 function makeEditor(doc: Record<string, unknown>): ServerEditor {
-  return new ServerEditor({ extensions: [StarterKit.configure({ table: true })], content: doc });
+  // uniqueId off: these tests assert structural behavior + Node identity of
+  // untouched cells across edits. Stable-id stamping is orthogonal and would
+  // change Node identity of the (headlessly loaded, id-less) cells on the first
+  // structural transaction.
+  return new ServerEditor({
+    extensions: [StarterKit.configure({ table: true, uniqueId: false })],
+    content: doc,
+  });
 }
 
 function getTable(editor: ServerEditor): Node {

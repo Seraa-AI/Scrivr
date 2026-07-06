@@ -1,5 +1,5 @@
 import { Extension, renderTrackedInsert, renderTrackedDelete, renderTrackedConflict, renderTrackedAttrChange } from "@scrivr/core";
-import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler } from "@scrivr/core";
+import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler, SemanticMarkHandler } from "@scrivr/core";
 import type { EditorState, Transaction } from "prosemirror-state";
 
 import { setAction, skipTracking, TrackChangesAction } from "./actions";
@@ -137,6 +137,14 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         },
       },
     };
+  },
+
+  addExports() {
+    // Semantic chunking excludes suggested-deletion text — embedding content a
+    // reviewer has already marked for removal would poison retrieval. Inserted
+    // text is real proposed content and needs no handler (default keeps runs).
+    const dropDeleted: SemanticMarkHandler = () => null;
+    return { semantic: { marks: { trackedDelete: dropDeleted } } };
   },
 
   addProseMirrorPlugins() {

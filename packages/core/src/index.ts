@@ -26,5 +26,6 @@ export * from "./extensions";
 export * from "./menus";
 export * from "./surfaces";
 export * from "./exports/docx";
+export * from "./exports/semantic";
 /** ProseMirror's built-in DocAttrStep — prefer `tr.setDocAttribute(name, value)`. */
 export { DocAttrStep } from "prosemirror-transform";

@@ -22,6 +22,7 @@ import { HorizontalRule } from "./built-in/HorizontalRule";
 import { PageBreak } from "./built-in/PageBreak";
 import { Image } from "./built-in/Image";
 import { Table } from "./built-in/Table";
+import { UniqueId } from "./built-in/UniqueId";
 import { Typography } from "./built-in/Typography";
 import { defaultPageConfig } from "../layout/PageLayout";
 import { TrailingNode } from "./built-in/TrailingNode";
@@ -152,6 +153,13 @@ interface StarterKitOptions {
   typography?: false;
   trailingNode?: false;
   clearFormatting?: false;
+  /**
+   * `UniqueId` — stamps every new block with a stable `nodeId` at edit-time so
+   * ids persist and stay stable across reloads (needed for track changes,
+   * diffs, and semantic chunking, with or without the AI toolkit). Pass `false`
+   * to exclude it.
+   */
+  uniqueId?: false;
 }
 
 /**
@@ -302,6 +310,10 @@ export const StarterKit = Extension.create<StarterKitOptions>({
 
     if (opts.trailingNode !== false) {
       plugins.push(...TrailingNode.resolve(this.schema).plugins);
+    }
+
+    if (opts.uniqueId !== false) {
+      plugins.push(...UniqueId.resolve(this.schema).plugins);
     }
 
     if (opts.table === true) {

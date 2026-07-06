@@ -184,7 +184,10 @@ describe("normalizeDocument — ServerEditor wire-up", () => {
     const result = editor.lastNormalizeResult;
     expect(result).not.toBeNull();
     expect(result!.warnings.some((w) => w.code === "urls-sanitized")).toBe(true);
-    expect(result!.warnings.some((w) => w.code === "ids-assigned")).toBe(true);
+    // ServerEditor is a read/emit surface — it never fabricates block ids on
+    // load, so there is no ids-assigned warning (the doc is still `changed`
+    // because the unsafe link was stripped).
+    expect(result!.warnings.some((w) => w.code === "ids-assigned")).toBe(false);
     expect(typeof result!.fingerprint).toBe("string");
     expect(result!.changed).toBe(true);
     // The applied doc must be the normalized one — link stripped.
@@ -195,7 +198,7 @@ describe("normalizeDocument — ServerEditor wire-up", () => {
     expect(hasLink).toBe(false);
   });
 
-  it("a clean setContent produces no warnings beyond ids-assigned", () => {
+  it("a clean setContent produces no warnings", () => {
     const editor = new ServerEditor({});
     editor.setContent({
       type: "doc",
@@ -204,6 +207,8 @@ describe("normalizeDocument — ServerEditor wire-up", () => {
     const codes = editor.lastNormalizeResult!.warnings.map((w) => w.code);
     expect(codes).not.toContain("urls-sanitized");
     expect(codes).not.toContain("tables-normalized");
+    // No id fabrication on the read/emit path.
+    expect(codes).not.toContain("ids-assigned");
   });
 });
 

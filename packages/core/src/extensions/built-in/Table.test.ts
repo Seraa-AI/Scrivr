@@ -196,7 +196,11 @@ describe("Table — insertTable / deleteTable / undo-redo", () => {
   function makeEditor(): { editor: Editor; type: (s: string) => void; cleanup: () => void } {
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })] });
+    // uniqueId off: this block asserts exact-doc undo/redo of insertTable;
+    // stable-id stamping is orthogonal and would add ids on the insert edit.
+    const editor = createTestEditor({
+      extensions: [StarterKit.configure({ table: true, uniqueId: false })],
+    });
     editor.mount(container);
     const type = (s: string): void => {
       const ta = container.querySelector("textarea");
