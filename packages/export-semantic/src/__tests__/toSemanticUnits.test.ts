@@ -103,9 +103,25 @@ describe("toSemanticUnits — breadcrumb stack", () => {
         content: [heading(2, "A"), para(LONG), heading(2, "B"), para(LONG)],
       }),
     );
-    // Second H2 replaces the first on the stack — B's body sees only ["B"].
+    // A sibling heading must NOT inherit the previous sibling in its own
+    // breadcrumb, and the body under it sees only the current section.
+    expect(units[0]).toMatchObject({ type: "heading", breadcrumb: [] });
     expect(units[1]).toMatchObject({ breadcrumb: ["A"] });
+    expect(units[2]).toMatchObject({ type: "heading", breadcrumb: [] });
     expect(units[3]).toMatchObject({ breadcrumb: ["B"] });
+  });
+
+  it("gives a top-level heading an empty breadcrumb even mid-document", () => {
+    const units = toSemanticUnits(
+      edit({
+        type: "doc",
+        content: [heading(1, "Part One"), para(LONG), heading(1, "Part Two"), para(LONG)],
+      }),
+    );
+    // Both H1s are top-level — neither carries the other in its breadcrumb.
+    expect(units[0]).toMatchObject({ type: "heading", breadcrumb: [] });
+    expect(units[2]).toMatchObject({ type: "heading", breadcrumb: [] });
+    expect(units[3]).toMatchObject({ breadcrumb: ["Part Two"] });
   });
 });
 

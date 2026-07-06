@@ -56,10 +56,11 @@ export function walkSemantic(
       result = { type: "unknown" };
     }
 
-    // Breadcrumb is the ancestor heading path — captured before this group's
-    // own heading (if any) is pushed onto the stack.
-    const breadcrumb = stack.map((s) => s.title);
-
+    // Breadcrumb is the ancestor heading path. For a heading unit, pop
+    // same/shallower-level entries FIRST so its own breadcrumb reflects only
+    // true ancestors (a sibling heading — or a top-level heading with none —
+    // must not inherit the previous section). Body units then read the full
+    // active-heading stack.
     const isHeading = anchor.type.name === "heading";
     let headingLevel: number | undefined;
     if (isHeading) {
@@ -67,6 +68,9 @@ export function walkSemantic(
       while (stack.length > 0 && stack[stack.length - 1]!.level >= headingLevel) {
         stack.pop();
       }
+    }
+    const breadcrumb = stack.map((s) => s.title);
+    if (isHeading && headingLevel !== undefined) {
       // Breadcrumbs are embedding input too, so they must use the same
       // mark-aware extraction as unit text (notably excluding tracked deletes).
       stack.push({ level: headingLevel, title: ctx.toText(anchor) });
