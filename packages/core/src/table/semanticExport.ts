@@ -36,11 +36,13 @@ export const tableSemanticHandler: SemanticNodeHandler = (node, ctx) => {
     row.forEach((cell) => {
       const gridSpan = readGridSpan(cell);
       const vMerge = readVMerge(cell);
+      const changes = ctx.toChanges(cell);
       if (gridSpan !== 1 || vMerge !== "none") hasMerges = true;
       cells.push({
         // Keep structured cell text consistent with the unit's mark-aware text
         // (for example, pending tracked deletions must not leak into embeddings).
         text: ctx.toText(cell),
+        ...(changes.length > 0 ? { changes } : {}),
         gridSpan,
         vMerge,
         header: cell.type.name === "tableHeader",

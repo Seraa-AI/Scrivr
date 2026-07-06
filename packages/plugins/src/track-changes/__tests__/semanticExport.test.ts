@@ -33,6 +33,7 @@ describe("TrackChanges — semantic mark seam", () => {
     });
     const units = toSemanticUnits(editor);
     expect(units[0]!.text).toBe("Keep inserted tail");
+    expect(units[0]!.changes).toEqual([{ type: "suggestedDelete", text: "deleted " }]);
   });
 
   it("excludes suggested-deletion text from heading breadcrumbs", () => {
@@ -46,7 +47,22 @@ describe("TrackChanges — semantic mark seam", () => {
             attrs: { level: 1 },
             content: [
               { type: "text", text: "Current " },
-              { type: "text", text: "obsolete", marks: [{ type: "trackedDelete" }] },
+              {
+                type: "text",
+                text: "obsolete",
+                marks: [{
+                  type: "trackedDelete",
+                  attrs: {
+                    dataTracked: {
+                      id: "change-1",
+                      authorID: "u1",
+                      status: "pending",
+                      createdAt: 123,
+                      groupId: "replacement-1",
+                    },
+                  },
+                }],
+              },
             ],
           },
           { type: "paragraph", content: [{ type: "text", text: "x".repeat(250) }] },
@@ -54,7 +70,17 @@ describe("TrackChanges — semantic mark seam", () => {
       },
     });
 
-    expect(toSemanticUnits(editor)[1]!.breadcrumb).toEqual(["Current "]);
+    const units = toSemanticUnits(editor);
+    expect(units[1]!.breadcrumb).toEqual(["Current "]);
+    expect(units[0]!.changes).toEqual([{
+      type: "suggestedDelete",
+      text: "obsolete",
+      id: "change-1",
+      authorId: "u1",
+      status: "pending",
+      createdAt: 123,
+      groupId: "replacement-1",
+    }]);
   });
 
   it("excludes suggested-deletion text from structured table cells", () => {
@@ -98,5 +124,11 @@ describe("TrackChanges — semantic mark seam", () => {
     });
 
     expect(toSemanticUnits(editor)[0]!.cells!.rows[0]!.cells[0]!.text).toBe("keep ");
+    expect(toSemanticUnits(editor)[0]!.cells!.rows[0]!.cells[0]!.changes).toEqual([
+      { type: "suggestedDelete", text: "deleted" },
+    ]);
+    expect(toSemanticUnits(editor)[0]!.changes).toEqual([
+      { type: "suggestedDelete", text: "deleted" },
+    ]);
   });
 });

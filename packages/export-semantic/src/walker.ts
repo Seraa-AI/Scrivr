@@ -86,6 +86,8 @@ export function walkSemantic(
     const markdown = result.markdown ?? ctx.toMarkdown(nodes);
     if (markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
+    const changes = ctx.toChanges(nodes);
+    if (changes.length > 0) unit.changes = changes;
 
     units.push(unit);
   }

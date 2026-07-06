@@ -50,6 +50,18 @@ export interface SemanticUnit {
   markdown?: string;
   /** Structured rows/cells with spans — emitted for tables GFM can't encode. */
   cells?: TableCells;
+  /** Review changes excluded from `text` but preserved for audit/UI use. */
+  changes?: SemanticChange[];
+}
+
+export interface SemanticChange {
+  type: "suggestedDelete";
+  text: string;
+  id?: string;
+  authorId?: string;
+  status?: string;
+  createdAt?: number;
+  groupId?: string;
 }
 
 export interface TableCells {
@@ -62,6 +74,8 @@ export interface TableCellsRow {
 
 export interface TableCell {
   text: string;
+  /** Review changes scoped to this cell. Also included in the parent unit. */
+  changes?: SemanticChange[];
   gridSpan: number;
   vMerge: "none" | "restart" | "continue";
   header: boolean;
@@ -89,12 +103,14 @@ export type SemanticNodeHandler = (node: PmNode, ctx: UnitCtx) => SemanticNodeRe
 /** A single text run while building a unit's plain text. */
 export interface SemanticRun {
   text: string;
+  changes?: SemanticChange[];
 }
 
 /**
  * Contributed per mark type, keyed by `mark.type.name`. Transforms or drops a
- * text run while the walker builds `text`. Return `null` to exclude the run
- * (this is how `trackedDelete` keeps deleted content out of embeddings).
+ * text run while the walker builds `text`. Return `null` to exclude the run,
+ * or return an empty-text run with `changes` to preserve review metadata while
+ * keeping that text out of embeddings.
  * Formatting marks (bold/italic/…) need no handler — plain text is unaffected.
  */
 export type SemanticMarkHandler = (
@@ -120,8 +136,10 @@ export interface UnitCtx {
   readonly schema: Schema;
   /** Serialize one block, or an ordered group of blocks, to markdown. */
   toMarkdown(nodes: PmNode | readonly PmNode[]): string;
-  /** Plain text for embedding; folds semantic mark handlers (drops trackedDelete). */
+  /** Plain text for embedding; folds semantic mark handlers. */
   toText(nodes: PmNode | readonly PmNode[]): string;
+  /** Review changes found while applying semantic mark handlers. */
+  toChanges(nodes: PmNode | readonly PmNode[]): SemanticChange[];
   /** Physical column count = max over rows of Σ gridSpan (never TableMap.width). */
   physicalColumns(table: PmNode): number;
 }

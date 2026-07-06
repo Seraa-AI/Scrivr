@@ -1,4 +1,10 @@
-import type { BaseEditor, SemanticMarkHandler, SemanticRun, UnitCtx } from "@scrivr/core";
+import type {
+  BaseEditor,
+  SemanticChange,
+  SemanticMarkHandler,
+  SemanticRun,
+  UnitCtx,
+} from "@scrivr/core";
 import type { Node as PmNode } from "prosemirror-model";
 
 function readGridSpan(cell: PmNode): number {
@@ -25,39 +31,43 @@ function physicalColumns(table: PmNode): number {
 
 /**
  * Plain text for embedding. Walks inline text nodes and folds the semantic mark
- * handlers over each run — a handler returning `null` drops the run (this is how
- * `trackedDelete` keeps deleted content out of embeddings). Block boundaries
- * join with a newline; inline content within a textblock concatenates.
+ * handlers over each run. Handlers may remove text while retaining structured
+ * review changes. Block boundaries join with a newline; inline content within
+ * a textblock concatenates.
  */
-function extractText(
+function extractSemantic(
   node: PmNode,
   markHandlers: Record<string, SemanticMarkHandler>,
   ctx: UnitCtx,
-): string {
+): { text: string; changes: SemanticChange[] } {
   if (node.isText) {
     let run: SemanticRun | null = { text: node.text ?? "" };
     for (const mark of node.marks) {
       const handler = markHandlers[mark.type.name];
       if (!handler) continue;
       run = handler(run, mark, ctx);
-      if (run === null) return "";
+      if (run === null) return { text: "", changes: [] };
     }
-    return run.text;
+    return { text: run.text, changes: run.changes ?? [] };
   }
 
   // Preserve the semantic boundary represented by an explicit line break.
   // Other inline leaf nodes (for example images) have no intrinsic plain text.
-  if (node.type.name === "hardBreak") return "\n";
+  if (node.type.name === "hardBreak") return { text: "\n", changes: [] };
 
-  const parts: string[] = [];
+  const parts: { text: string; changes: SemanticChange[] }[] = [];
   node.forEach((child) => {
-    parts.push(extractText(child, markHandlers, ctx));
+    parts.push(extractSemantic(child, markHandlers, ctx));
   });
+
+  const changes = parts.flatMap((part) => part.changes);
 
   // A textblock (paragraph, heading) concatenates its inline runs; a block
   // container (list, table, cell) joins its block children with newlines.
-  if (node.isTextblock) return parts.join("");
-  return parts.filter((p) => p.length > 0).join("\n");
+  const text = node.isTextblock
+    ? parts.map((part) => part.text).join("")
+    : parts.map((part) => part.text).filter((part) => part.length > 0).join("\n");
+  return { text, changes };
 }
 
 /**
@@ -91,9 +101,13 @@ export function createUnitCtx(
     toText(nodes) {
       const list = Array.isArray(nodes) ? nodes : [nodes];
       return list
-        .map((n) => extractText(n, markHandlers, ctx))
+        .map((n) => extractSemantic(n, markHandlers, ctx).text)
         .filter((t) => t.length > 0)
         .join("\n");
+    },
+    toChanges(nodes) {
+      const list = Array.isArray(nodes) ? nodes : [nodes];
+      return list.flatMap((node) => extractSemantic(node, markHandlers, ctx).changes);
     },
     physicalColumns,
   };

@@ -6,6 +6,7 @@ export type {
   SemanticUnit,
   SemanticUnitType,
   SemanticRole,
+  SemanticChange,
   TableCells,
   TableCellsRow,
   TableCell,

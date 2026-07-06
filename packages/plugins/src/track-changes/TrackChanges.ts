@@ -140,10 +140,28 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
   },
 
   addExports() {
-    // Semantic chunking excludes suggested-deletion text — embedding content a
-    // reviewer has already marked for removal would poison retrieval. Inserted
-    // text is real proposed content and needs no handler (default keeps runs).
-    const dropDeleted: SemanticMarkHandler = () => null;
+    // Keep suggested-deletion text out of embeddings while preserving it as
+    // structured review metadata. Inserted text is proposed content and needs
+    // no handler (the default keeps it in the semantic text).
+    const dropDeleted: SemanticMarkHandler = (run, mark) => {
+      const raw = mark.attrs.dataTracked;
+      const entries = Array.isArray(raw) ? raw : raw ? [raw] : [{}];
+      return {
+        text: "",
+        changes: [
+          ...(run.changes ?? []),
+          ...entries.map((entry: Record<string, unknown>) => ({
+            type: "suggestedDelete" as const,
+            text: run.text,
+            ...(typeof entry.id === "string" ? { id: entry.id } : {}),
+            ...(typeof entry.authorID === "string" ? { authorId: entry.authorID } : {}),
+            ...(typeof entry.status === "string" ? { status: entry.status } : {}),
+            ...(typeof entry.createdAt === "number" ? { createdAt: entry.createdAt } : {}),
+            ...(typeof entry.groupId === "string" ? { groupId: entry.groupId } : {}),
+          })),
+        ],
+      };
+    };
     return { semantic: { marks: { trackedDelete: dropDeleted } } };
   },
 
