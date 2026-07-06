@@ -27,7 +27,7 @@ function readVMerge(cell: Node): TableCell["vMerge"] {
   return raw === "restart" || raw === "continue" ? raw : "none";
 }
 
-export const tableSemanticHandler: SemanticNodeHandler = (node) => {
+export const tableSemanticHandler: SemanticNodeHandler = (node, ctx) => {
   const rows: TableCellsRow[] = [];
   let hasMerges = false;
 
@@ -38,7 +38,9 @@ export const tableSemanticHandler: SemanticNodeHandler = (node) => {
       const vMerge = readVMerge(cell);
       if (gridSpan !== 1 || vMerge !== "none") hasMerges = true;
       cells.push({
-        text: cell.textContent,
+        // Keep structured cell text consistent with the unit's mark-aware text
+        // (for example, pending tracked deletions must not leak into embeddings).
+        text: ctx.toText(cell),
         gridSpan,
         vMerge,
         header: cell.type.name === "tableHeader",

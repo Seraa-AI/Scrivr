@@ -67,7 +67,9 @@ export function walkSemantic(
       while (stack.length > 0 && stack[stack.length - 1]!.level >= headingLevel) {
         stack.pop();
       }
-      stack.push({ level: headingLevel, title: anchor.textContent });
+      // Breadcrumbs are embedding input too, so they must use the same
+      // mark-aware extraction as unit text (notably excluding tracked deletes).
+      stack.push({ level: headingLevel, title: ctx.toText(anchor) });
     }
 
     const nodeIds = group.map(resolveNodeId);

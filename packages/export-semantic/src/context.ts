@@ -45,6 +45,10 @@ function extractText(
     return run.text;
   }
 
+  // Preserve the semantic boundary represented by an explicit line break.
+  // Other inline leaf nodes (for example images) have no intrinsic plain text.
+  if (node.type.name === "hardBreak") return "\n";
+
   const parts: string[] = [];
   node.forEach((child) => {
     parts.push(extractText(child, markHandlers, ctx));

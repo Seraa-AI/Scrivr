@@ -152,4 +152,23 @@ describe("toSemanticUnits — lists and other blocks", () => {
     expect(units.map((u) => u.type)).toEqual(["codeBlock", "horizontalRule", "pageBreak", "paragraph"]);
     expect(units[0]!.text).toContain("x = 1");
   });
+
+  it("preserves hard breaks in plain text", () => {
+    const units = toSemanticUnits(
+      edit({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "hello" },
+              { type: "hardBreak" },
+              { type: "text", text: "world" },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(units[0]!.text).toBe("hello\nworld");
+  });
 });
