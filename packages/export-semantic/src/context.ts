@@ -1,5 +1,5 @@
 import type {
-  BaseEditor,
+  IBaseEditor,
   SemanticChange,
   SemanticMarkHandler,
   SemanticRun,
@@ -75,7 +75,7 @@ function extractSemantic(
  * (reuse, don't reinvent) plus the mark-aware text extractor.
  */
 export function createUnitCtx(
-  editor: BaseEditor,
+  editor: IBaseEditor,
   markHandlers: Record<string, SemanticMarkHandler>,
 ): UnitCtx {
   const schema = editor.getState().doc.type.schema;

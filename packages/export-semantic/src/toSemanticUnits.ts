@@ -1,4 +1,4 @@
-import type { BaseEditor, SemanticExportOptions, SemanticUnit } from "@scrivr/core";
+import type { IBaseEditor, SemanticExportOptions, SemanticUnit } from "@scrivr/core";
 import { collectHandlers } from "./collectHandlers";
 import { createUnitCtx } from "./context";
 import { walkSemantic } from "./walker";
@@ -19,7 +19,7 @@ const DEFAULT_SHORT_MAX = 200;
  * for (const u of units) embed(u.breadcrumb.join(" › ") + "\n" + u.text);
  */
 export function toSemanticUnits(
-  editor: BaseEditor,
+  editor: IBaseEditor,
   options: SemanticExportOptions = {},
 ): SemanticUnit[] {
   const handlers = collectHandlers(editor, options.overrides);

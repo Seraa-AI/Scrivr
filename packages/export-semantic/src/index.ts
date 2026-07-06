@@ -2,6 +2,7 @@
 import "./augmentation";
 
 export { toSemanticUnits } from "./toSemanticUnits";
+export { SemanticExport } from "./SemanticExport";
 export type {
   SemanticUnit,
   SemanticUnitType,

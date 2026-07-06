@@ -14,7 +14,7 @@
  */
 
 import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark } from "prosemirror-model";
-import type { MarkdownSerializerState } from "prosemirror-markdown";
+import type { MarkdownSerializer, MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
 import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
 import type { InputRule } from "prosemirror-inputrules";
@@ -102,6 +102,12 @@ export interface IBaseEditor {
   readonly schema: Schema;
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
+  /**
+   * The MarkdownSerializer built from all extensions' serializer rules. Lets
+   * consumers serialize arbitrary nodes/fragments (not just the whole doc) —
+   * e.g. the semantic export lane rendering one block group at a time.
+   */
+  getMarkdownSerializer(): MarkdownSerializer;
   /** Returns the merged markdown parser token map from all extensions. */
   getMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec>;
   /** Parse a markdown string into a ProseMirror document node. */

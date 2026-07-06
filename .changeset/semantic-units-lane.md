@@ -12,7 +12,14 @@
 `SemanticUnit[]` for RAG pipelines. `toSemanticUnits(editor)` walks the document
 tree headless (ServerEditor, from `contentJSON`) and produces ordered units
 carrying structure, stable identity (`nodeId`, with a deterministic positional
-fallback), and heading breadcrumb.
+fallback), and heading breadcrumb. Ships a `SemanticExport` extension — add it to
+the editor and call `editor.commands.exportSemantic()` (downloads a `.json`, or
+pass `{ onExport: units => … }` to receive the data headlessly), mirroring
+`DocxExport` / `PdfExport`.
+
+`@scrivr/core` — `IBaseEditor` now declares `getMarkdownSerializer()` (both
+`Editor` and `ServerEditor` already implement it) so headless export lanes can
+serialize arbitrary node groups.
 
 `@scrivr/core` — adds the canonical `semantic` handler types (`SemanticUnit`,
 `TableCells`, `SemanticNodeHandler`, `SemanticMarkHandler`, `UnitCtx`) and, via
