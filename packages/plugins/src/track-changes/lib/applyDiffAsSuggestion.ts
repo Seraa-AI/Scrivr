@@ -33,7 +33,7 @@
 import type { Schema } from "prosemirror-model";
 import type { EditorState, Transaction } from "prosemirror-state";
 
-import { findNodeById } from "../../ai-toolkit/UniqueId";
+import { findNodeById } from "@scrivr/core";
 import {
   addTrackIdIfDoesntExist,
   createNewDeleteAttrs,

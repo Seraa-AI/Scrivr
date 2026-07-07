@@ -20,7 +20,7 @@ import { Extension } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { buildAcceptedTextMap } from "../track-changes/lib/acceptedTextMap";
+import { buildAcceptedTextMap } from "@scrivr/plugins";
 
 import {
   aiSuggestionPluginKey,

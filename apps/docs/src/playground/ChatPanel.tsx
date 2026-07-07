@@ -3,7 +3,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage, DataUIPart } from "ai";
 import type { Editor } from "@scrivr/core";
-import { getAiToolkit } from "@scrivr/plugins";
+import { getAiToolkit } from "@scrivr/ai";
 import type { ToolOutputData } from "../routes/api/ai";
 
 type AppDataTypes = { tool_result: ToolOutputData };

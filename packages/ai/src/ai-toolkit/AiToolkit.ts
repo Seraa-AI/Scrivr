@@ -5,7 +5,7 @@ import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
 import { findNodeById } from "./UniqueId";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
-import { buildAcceptedTextMap } from "../track-changes/lib/acceptedTextMap";
+import { buildAcceptedTextMap } from "@scrivr/plugins";
 import type { Schema } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { AiSuggestion as AiSuggestionExtension } from "../ai-suggestion/AiSuggestion";

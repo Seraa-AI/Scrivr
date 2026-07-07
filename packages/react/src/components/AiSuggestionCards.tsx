@@ -14,7 +14,7 @@
 
 import { useState } from "react";
 import type { Editor } from "@scrivr/core";
-import type { AiOp } from "@scrivr/plugins";
+import type { AiOp } from "@scrivr/ai";
 import { cx } from "../utils/classNames";
 import { useAiSuggestionCards } from "../hooks/useAiSuggestionCards";
 

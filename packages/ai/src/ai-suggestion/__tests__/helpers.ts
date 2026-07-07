@@ -16,8 +16,7 @@ import {
   getSchema,
 } from "@scrivr/core";
 import type { Node as PmNode } from "prosemirror-model";
-import { TrackChanges } from "../../track-changes/TrackChanges";
-import { TrackChangesStatus } from "../../track-changes/types";
+import { TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
 import {
   aiSuggestionPlugin,
   aiSuggestionPluginKey,

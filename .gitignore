@@ -2,6 +2,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+# Playground/debug scratch dumps
+testfile.json
 coverage/
 data/
 apps/server/data/

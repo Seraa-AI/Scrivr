@@ -19,9 +19,9 @@
 import type { EditorState } from "prosemirror-state";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { buildAcceptedTextMap } from "../track-changes/lib/acceptedTextMap";
-import { diffText, pairReplacements } from "../track-changes/lib/diffText";
-import type { PairedDiffOp } from "../track-changes/lib/diffText";
+import { buildAcceptedTextMap } from "@scrivr/plugins";
+import { diffText, pairReplacements } from "@scrivr/plugins";
+import type { PairedDiffOp } from "@scrivr/plugins";
 import type { AiSuggestion, AiSuggestionBlock, AiOp } from "./types";
 
 // ── Public types ──────────────────────────────────────────────────────────────

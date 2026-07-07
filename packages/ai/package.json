@@ -1,25 +1,24 @@
 {
-  "name": "@scrivr/react",
+  "name": "@scrivr/ai",
   "version": "1.0.17",
-  "description": "React bindings for the Scrivr canvas document editor",
+  "description": "AI layer for Scrivr — AI toolkit, suggestion overlay, and the semantic edit protocol",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
   "repository": {
     "type": "git",
     "url": "https://github.com/Seraa-AI/Scrivr.git",
-    "directory": "packages/react"
+    "directory": "packages/ai"
   },
   "homepage": "https://github.com/Seraa-AI/Scrivr#readme",
   "bugs": {
     "url": "https://github.com/Seraa-AI/Scrivr/issues"
   },
   "keywords": [
-    "canvas",
+    "ai",
     "editor",
-    "react",
     "prosemirror",
-    "document",
-    "rich-text",
+    "suggestions",
+    "semantic",
     "scrivr"
   ],
   "type": "module",
@@ -36,12 +35,10 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
-    },
-    "./styles.css": "./src/styles.css"
+    }
   },
   "files": [
-    "dist",
-    "src/styles.css"
+    "dist"
   ],
   "publishConfig": {
     "access": "public",
@@ -56,30 +53,18 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@floating-ui/dom": "^1.7.6"
+    "@scrivr/core": "workspace:*",
+    "@scrivr/plugins": "workspace:*"
   },
   "peerDependencies": {
-    "@scrivr/ai": "workspace:*",
-    "@scrivr/core": "workspace:*",
-    "@scrivr/plugins": "workspace:*",
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0"
-  },
-  "peerDependenciesMeta": {
-    "@scrivr/ai": {
-      "optional": true
-    },
-    "@scrivr/plugins": {
-      "optional": true
-    }
+    "prosemirror-model": ">=1.0.0",
+    "prosemirror-state": ">=1.0.0"
   },
   "devDependencies": {
-    "@scrivr/ai": "workspace:*",
-    "@scrivr/core": "workspace:*",
-    "@scrivr/plugins": "workspace:*",
-    "@types/react": "^18.0.0",
-    "@types/react-dom": "^18.0.0",
+    "prosemirror-model": "^1.25.4",
+    "prosemirror-state": "^1.4.4",
     "tsup": "^8.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.0"
   }
 }

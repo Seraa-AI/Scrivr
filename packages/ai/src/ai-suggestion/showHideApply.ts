@@ -17,16 +17,16 @@ import {
   aiSuggestionPluginKey,
   AI_SUGGESTION_SET,
 } from "./AiSuggestionPlugin";
-import { buildAcceptedTextMap } from "../track-changes/lib/acceptedTextMap";
-import { skipTracking, TrackChangesAction, setAction } from "../track-changes/actions";
+import { buildAcceptedTextMap } from "@scrivr/plugins";
+import { skipTracking, TrackChangesAction, setAction } from "@scrivr/plugins";
 import {
   addTrackIdIfDoesntExist,
   createNewDeleteAttrs,
   createNewInsertAttrs,
   createNewPendingAttrs,
-} from "../track-changes/helpers";
-import { applyTrackedDelete } from "../track-changes/lib/splitRangeForNewMark";
-import { acceptedRangeToDocRange } from "../track-changes/lib/acceptedTextMap";
+} from "@scrivr/plugins";
+import { applyTrackedDelete } from "@scrivr/plugins";
+import { acceptedRangeToDocRange } from "@scrivr/plugins";
 
 /**
  * Set the active AI suggestion. Dispatches AI_SUGGESTION_SET meta.
