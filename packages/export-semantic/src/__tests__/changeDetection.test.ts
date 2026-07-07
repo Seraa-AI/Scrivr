@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { toSemanticUnits } from "../toSemanticUnits";
-import { unitContentHash, unitEmbeddingInput, diffSemanticUnits } from "../changeDetection";
+import { unitContentHash, unitRichHash, unitEmbeddingInput, diffSemanticUnits } from "../changeDetection";
 import type { SemanticUnit } from "@scrivr/core";
 
 // Build units from content whose blocks carry persisted nodeIds (so diff can
@@ -54,6 +54,42 @@ describe("unitContentHash", () => {
     const underH1 = emit([heading("h1", 1, "Section A"), para("p", "x".repeat(250))])[1]!;
     const underH2 = emit([heading("h2", 1, "Section B"), para("p", "x".repeat(250))])[1]!;
     expect(unitContentHash(underH1)).not.toBe(unitContentHash(underH2));
+  });
+});
+
+describe("unitRichHash", () => {
+  const plain = emit([para("p", "The Provider shall indemnify the Client.")])[0]!;
+  const bold = emit([
+    { type: "paragraph", attrs: { nodeId: "p" }, content: [
+      { type: "text", text: "The " },
+      { type: "text", text: "Provider", marks: [{ type: "bold" }, { type: "color", attrs: { color: "#f00" } }] },
+      { type: "text", text: " shall indemnify the Client." },
+    ] },
+  ])[0]!;
+
+  it("DOES change on a formatting-only edit (unlike unitContentHash)", () => {
+    // Same text/breadcrumb, only marks differ.
+    expect(unitContentHash(bold)).toBe(unitContentHash(plain)); // embedding view: unchanged
+    expect(unitRichHash(bold)).not.toBe(unitRichHash(plain));   // rich view: changed
+  });
+
+  it("changes on a block-attr edit (alignment)", () => {
+    const left = emit([para("p", "centered?")])[0]!;
+    const centered = emit([
+      { type: "paragraph", attrs: { nodeId: "p", align: "center" }, content: [{ type: "text", text: "centered?" }] },
+    ])[0]!;
+    expect(unitContentHash(left)).toBe(unitContentHash(centered)); // same text
+    expect(unitRichHash(left)).not.toBe(unitRichHash(centered));   // different styling
+  });
+
+  it("is deterministic and stable across runs", () => {
+    expect(unitRichHash(bold)).toBe(unitRichHash(emit([
+      { type: "paragraph", attrs: { nodeId: "p" }, content: [
+        { type: "text", text: "The " },
+        { type: "text", text: "Provider", marks: [{ type: "bold" }, { type: "color", attrs: { color: "#f00" } }] },
+        { type: "text", text: " shall indemnify the Client." },
+      ] },
+    ])[0]!));
   });
 });
 

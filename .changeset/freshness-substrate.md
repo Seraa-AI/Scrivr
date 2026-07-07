@@ -21,12 +21,16 @@ re-embed only what changed between document versions instead of the whole doc:
 - `diffSemanticUnits(prev, next)` — matches units by stable anchor id and returns
   `{ added, removed, changed, unchanged }`. Editing one paragraph marks exactly
   one unit changed.
+- `unitRichHash(unit)` — a formatting-aware companion hash (`type` + `breadcrumb` +
+  `text` + `spans` + `attrs`). Unlike `unitContentHash` it DOES change on a
+  formatting-only edit (bold, color, alignment), so it's the detector for the
+  upcoming rich AI-edit loop, not embedding freshness.
 
 `@scrivr/core` — collab-safe stable ids. `UniqueId` now stamps a `nodeId` only on
 LOCAL edits; a remote Yjs apply (tagged `COLLAB_SYNC_META` by the collaboration
 binding) is skipped, so a block's id is assigned once by its author and synced
 rather than re-stamped with a divergent uuid on every receiving client. Also
-exports `fnv1aHex`, the shared hash used by the document fingerprint and the
-per-unit content hash.
+exports `fnv1aHex` + `stableStringify`, the shared hash + canonical serializer used
+by the document fingerprint and the per-unit hashes (no parallel copies).
 
 `@scrivr/plugins` — the Yjs binding marks remote applies with `COLLAB_SYNC_META`.

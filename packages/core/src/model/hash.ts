@@ -15,3 +15,21 @@ export function fnv1aHex(input: string): string {
   }
   return h.toString(16).padStart(8, "0");
 }
+
+/**
+ * Stable stringify — object keys emitted in sorted order so two structurally
+ * equal values always produce identical strings regardless of key insertion
+ * order. Pair with `fnv1aHex` for order-independent content hashes (document
+ * fingerprint, per-unit hashes).
+ */
+export function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return "[" + value.map(stableStringify).join(",") + "]";
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return "{" + keys.map((k) => JSON.stringify(k) + ":" + stableStringify(obj[k])).join(",") + "}";
+}

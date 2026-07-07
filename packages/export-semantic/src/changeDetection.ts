@@ -6,7 +6,7 @@
  * cost instead of document cost. The editor owns the identity (`nodeId`) and
  * the canonical embedding input; the consumer owns storage + the re-embed.
  */
-import { fnv1aHex, type SemanticUnit } from "@scrivr/core";
+import { fnv1aHex, stableStringify, type SemanticUnit } from "@scrivr/core";
 
 /**
  * The canonical string to embed for a unit — heading path + text, the same
@@ -27,6 +27,26 @@ export function unitEmbeddingInput(unit: SemanticUnit): string {
  */
 export function unitContentHash(unit: SemanticUnit): string {
   return fnv1aHex(unitEmbeddingInput(unit));
+}
+
+/**
+ * Formatting-aware hash of a unit's rendered content — `type`, `breadcrumb`,
+ * `text`, `spans` (marks + attrs), and block `attrs`. Unlike `unitContentHash`
+ * (embedding input, plain text only), this DOES change on formatting-only edits
+ * (bold, color, alignment), so it's the detector for the rich AI-edit loop:
+ * "would re-applying this unit produce a different document?". Deterministic —
+ * `stableStringify` makes it independent of attr key order.
+ */
+export function unitRichHash(unit: SemanticUnit): string {
+  return fnv1aHex(
+    stableStringify({
+      type: unit.type,
+      breadcrumb: unit.breadcrumb,
+      text: unit.text,
+      spans: unit.spans ?? [],
+      attrs: unit.attrs ?? {},
+    }),
+  );
 }
 
 export interface SemanticUnitDiff {
