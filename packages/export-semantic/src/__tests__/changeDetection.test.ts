@@ -91,6 +91,32 @@ describe("unitRichHash", () => {
       ] },
     ])[0]!));
   });
+
+  it("changes on a table cell styling edit (cell text unchanged)", () => {
+    // A cell alignment change leaves cell TEXT and top-level text/spans/attrs
+    // identical, but the rendered table differs — must be detected.
+    const tableWith = (cellAttrs: Record<string, unknown>): SemanticUnit =>
+      toSemanticUnits(
+        new ServerEditor({
+          extensions: [StarterKit.configure({ table: true })],
+          content: {
+            type: "doc",
+            content: [
+              { type: "table", attrs: { nodeId: "t", grid: [100] }, content: [
+                { type: "tableRow", content: [
+                  { type: "tableCell", attrs: cellAttrs, content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }] },
+                ] },
+              ] },
+            ],
+          },
+        }),
+      )[0]!;
+
+    const left = tableWith({});
+    const centered = tableWith({ hAlign: "center" });
+    expect(unitContentHash(left)).toBe(unitContentHash(centered)); // cell text unchanged
+    expect(unitRichHash(left)).not.toBe(unitRichHash(centered));   // cell styling changed
+  });
 });
 
 describe("diffSemanticUnits", () => {

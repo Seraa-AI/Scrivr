@@ -31,11 +31,12 @@ export function unitContentHash(unit: SemanticUnit): string {
 
 /**
  * Formatting-aware hash of a unit's rendered content — `type`, `breadcrumb`,
- * `text`, `spans` (marks + attrs), and block `attrs`. Unlike `unitContentHash`
- * (embedding input, plain text only), this DOES change on formatting-only edits
- * (bold, color, alignment), so it's the detector for the rich AI-edit loop:
- * "would re-applying this unit produce a different document?". Deterministic —
- * `stableStringify` makes it independent of attr key order.
+ * `text`, `spans` (marks + attrs), block `attrs`, and `cells` (table cell text,
+ * spans, styling, gridSpan/vMerge/header). Unlike `unitContentHash` (embedding
+ * input, plain text only), this DOES change on formatting-only edits (bold,
+ * color, alignment) and on table cell styling/merge edits — so it's the detector
+ * for the rich AI-edit loop: "would re-applying this unit produce a different
+ * document?". Deterministic — `stableStringify` makes it independent of key order.
  */
 export function unitRichHash(unit: SemanticUnit): string {
   return fnv1aHex(
@@ -45,6 +46,9 @@ export function unitRichHash(unit: SemanticUnit): string {
       text: unit.text,
       spans: unit.spans ?? [],
       attrs: unit.attrs ?? {},
+      // Table rich state lives in cells, not top-level text/spans/attrs — a cell
+      // alignment/merge/header edit is invisible without this.
+      cells: unit.cells ?? null,
     }),
   );
 }
