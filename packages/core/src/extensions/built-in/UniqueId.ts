@@ -54,12 +54,17 @@ export const UniqueId = Extension.create({
     return [
       new Plugin({
         appendTransaction(transactions, _oldState, newState) {
-          // Only stamp for a LOCAL doc change. A remote collab apply carries the
-          // author's ids already; re-stamping here would assign a divergent uuid
-          // to the same node on every receiving client (last-write-wins churn).
-          const hasLocalDocChange = transactions.some(
-            (tr) => tr.docChanged && !tr.getMeta(COLLAB_SYNC_META),
+          // Only stamp for a LOCAL doc change. A remote collab apply can also
+          // cause earlier plugins to append bookkeeping transactions (e.g. a
+          // trailing paragraph). Those appended transactions usually do not
+          // carry the original meta, so the whole append batch is treated as
+          // remote if any doc-changing transaction is tagged as collab sync.
+          const hasRemoteDocChange = transactions.some(
+            (tr) => tr.docChanged && tr.getMeta(COLLAB_SYNC_META),
           );
+          if (hasRemoteDocChange) return null;
+
+          const hasLocalDocChange = transactions.some((tr) => tr.docChanged);
           if (!hasLocalDocChange) return null;
 
           const assignments = planBlockIdAssignments(newState.doc);

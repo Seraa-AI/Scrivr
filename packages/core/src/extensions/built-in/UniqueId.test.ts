@@ -46,6 +46,24 @@ describe("UniqueId — collab-safe stamping", () => {
     expect(last.attrs["nodeId"]).toBeNull();
   });
 
+  it("does NOT stamp bookkeeping transactions appended during a REMOTE collab apply", () => {
+    const ed = editor();
+    const heading = ed.schema.node("heading", null, [ed.schema.text("remote heading")]);
+    const state = ed.getState();
+    const tr = state.tr
+      .replaceWith(0, state.doc.content.size, heading)
+      .setMeta(COLLAB_SYNC_META, true);
+
+    ed.applyTransaction(tr);
+
+    const doc = ed.getState().doc;
+    expect(doc.childCount).toBe(2);
+    expect(doc.child(0).type.name).toBe("heading");
+    expect(doc.child(0).attrs["nodeId"]).toBeNull();
+    expect(doc.child(1).type.name).toBe("paragraph");
+    expect(doc.child(1).attrs["nodeId"]).toBeNull();
+  });
+
   it("preserves existing ids on the rest of the document", () => {
     const ed = editor();
     appendNullIdParagraph(ed, "local", false);
