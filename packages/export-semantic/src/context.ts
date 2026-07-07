@@ -9,8 +9,20 @@ import type {
 } from "@scrivr/core";
 import type { Mark as PmMark, Node as PmNode } from "prosemirror-model";
 
-/** Block attrs that are identity/level bookkeeping, not user styling. */
-const NON_STYLING_ATTRS = new Set(["nodeId", "dataTracked", "level"]);
+/**
+ * Attrs excluded from `attrsOf` — not user styling. Identity/level bookkeeping
+ * (`nodeId`, `dataTracked`, `level`), and table structure that is either its own
+ * field on the unit/cell (`gridSpan`, `vMerge`) or pure layout (`grid`, `hMerge`).
+ */
+const NON_STYLING_ATTRS = new Set([
+  "nodeId",
+  "dataTracked",
+  "level",
+  "grid",
+  "gridSpan",
+  "vMerge",
+  "hMerge",
+]);
 
 function readGridSpan(cell: PmNode): number {
   const raw = cell.attrs["gridSpan"];

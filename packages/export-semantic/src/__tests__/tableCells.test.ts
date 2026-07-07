@@ -75,6 +75,27 @@ describe("table units — spanned", () => {
     expect(u.markdown).toBeUndefined();
   });
 
+  it("does not leak structural/layout attrs into unit.attrs or cell.attrs", () => {
+    const units = toSemanticUnits(
+      edit({
+        type: "doc",
+        content: [
+          table(
+            [row([cell("wide", { gridSpan: 2, hAlign: "center" })]), row([cell("a"), cell("b")])],
+            [100, 100],
+          ),
+        ],
+      }),
+    );
+    const u = units[0]!;
+    // grid (column widths) is layout, not semantic styling.
+    expect(u.attrs).toBeUndefined();
+    const spanned = u.cells!.rows[0]!.cells[0]!;
+    // gridSpan/vMerge are their own fields — cell.attrs carries only real styling.
+    expect(spanned.attrs).toEqual({ hAlign: "center" });
+    expect(spanned.gridSpan).toBe(2);
+  });
+
   it("counts physical columns by summed gridSpan, not TableMap.width", () => {
     const editor = edit(doc);
     const ctx = createUnitCtx(editor, {});
