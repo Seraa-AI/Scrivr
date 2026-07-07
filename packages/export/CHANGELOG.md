@@ -1,5 +1,14 @@
 # @scrivr/export
 
+## 1.0.17
+
+### Patch Changes
+
+- Updated dependencies [aea772a]
+  - @scrivr/core@1.0.17
+  - @scrivr/export-pdf@1.0.17
+  - @scrivr/export-markdown@1.0.17
+
 ## 1.0.16
 
 ### Patch Changes
