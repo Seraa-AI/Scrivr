@@ -11,6 +11,7 @@ import {
   type DocxNodeHandler,
   type DocxParagraphStyleTransform,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
 
 // ── Theme tokens — overridable via CodeBlock.configure({ theme: {...} }) ─────
 
@@ -177,7 +178,11 @@ export const CodeBlock = Extension.create<CodeBlockOptions>({
         ...children,
       ]);
     };
-    return { docx: { nodes: { codeBlock: handler } } };
+    const semanticHandler: SemanticNodeHandler = () => ({ type: "codeBlock" });
+    return {
+      docx: { nodes: { codeBlock: handler } },
+      semantic: { nodes: { codeBlock: semanticHandler } },
+    };
   },
 
   addImports() {

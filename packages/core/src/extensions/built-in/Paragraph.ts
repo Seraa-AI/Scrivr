@@ -7,6 +7,21 @@ import {
   type DocxNodeHandler,
   type DocxBlockTransform,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
+import type { Node as PmNode } from "prosemirror-model";
+
+/** A paragraph whose only non-whitespace content is a single image. */
+function isImageOnlyParagraph(node: PmNode): boolean {
+  let images = 0;
+  let other = 0;
+  node.forEach((child) => {
+    if (child.type.name === "image") images += 1;
+    else if (child.isText && (child.text ?? "").trim() === "") {
+      /* surrounding whitespace is fine */
+    } else other += 1;
+  });
+  return images === 1 && other === 0;
+}
 
 /**
  * OOXML `<w:jc>` value for a block `align` attr, or null for the default (left)
@@ -163,7 +178,12 @@ export const Paragraph = Extension.create({
       const lead = jc ? [xml("w:pPr", undefined, [xml("w:jc", { "w:val": jc })])] : [];
       return xml("w:p", undefined, [...lead, ...children]);
     };
-    return { docx: { nodes: { paragraph: handler } } };
+    const semanticHandler: SemanticNodeHandler = (node) =>
+      isImageOnlyParagraph(node) ? { type: "image" } : { type: "paragraph" };
+    return {
+      docx: { nodes: { paragraph: handler } },
+      semantic: { nodes: { paragraph: semanticHandler } },
+    };
   },
 
   addImports() {

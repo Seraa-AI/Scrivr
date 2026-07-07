@@ -127,6 +127,7 @@ export class BaseEditor implements IBaseEditor {
     if (rawInitialDoc) {
       const result = normalizeDocument(rawInitialDoc, {
         schema: this.manager.schema,
+        assignIds: this.assignsBlockIdsOnLoad(),
       });
       this.lastNormalizeResultValue = result;
       initialDoc = result.doc;
@@ -139,6 +140,19 @@ export class BaseEditor implements IBaseEditor {
     });
 
     this.commands = this.buildCommands();
+  }
+
+  /**
+   * Whether ingestion stamps block ids on load. The interactive editor does —
+   * a live session persists its edits, so a fresh anchor per new doc is fine.
+   * Read/emit surfaces (`ServerEditor`) override this to `false` so a headless
+   * load never fabricates non-deterministic identity: it preserves persisted
+   * `nodeId`s and lets absent ones fall back deterministically downstream (e.g.
+   * the semantic emitter's positional ids). Ongoing edits still get stable ids
+   * from the `UniqueId` extension, which persists them.
+   */
+  protected assignsBlockIdsOnLoad(): boolean {
+    return true;
   }
 
   /** The merged ProseMirror Schema built from all extensions. */

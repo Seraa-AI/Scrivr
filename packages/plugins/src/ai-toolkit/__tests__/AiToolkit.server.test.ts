@@ -14,11 +14,14 @@ import { getAiToolkit } from "../aiToolkitRegistry";
 function serverEditorWithToolkit() {
   return new ServerEditor({
     extensions: [StarterKit, AiToolkit],
+    // Persisted nodeIds — a real server doc carries the ids the client's
+    // UniqueId already assigned. ServerEditor preserves them and never
+    // fabricates new ones on load (deterministic addressing).
     content: {
       type: "doc",
       content: [
-        { type: "paragraph", content: [{ type: "text", text: "First block." }] },
-        { type: "paragraph", content: [{ type: "text", text: "Second block." }] },
+        { type: "paragraph", attrs: { nodeId: "b1" }, content: [{ type: "text", text: "First block." }] },
+        { type: "paragraph", attrs: { nodeId: "b2" }, content: [{ type: "text", text: "Second block." }] },
       ],
     },
   });

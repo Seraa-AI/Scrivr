@@ -17,6 +17,7 @@ import {
   type DocxNodeHandler,
   type XmlNode,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
 
 // ── Image cache ───────────────────────────────────────────────────────────────
 
@@ -631,11 +632,16 @@ export const Image = Extension.create({
   },
 
   addExports() {
+    // Image is inline (lives in a paragraph), so the walker classifies an
+    // image-only paragraph as type:"image" (see Paragraph). This handler is
+    // here for forward-compat if an image ever surfaces as a top-level block.
+    const semanticHandler: SemanticNodeHandler = () => ({ type: "image" });
     return {
       docx: {
         onBeforeExport: imageOnBeforeDocxExport,
         nodes: { image: imageDocxHandler },
       },
+      semantic: { nodes: { image: semanticHandler } },
     };
   },
 

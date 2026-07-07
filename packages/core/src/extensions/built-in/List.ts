@@ -13,6 +13,7 @@ import {
   type DocxNodeHandler,
   type XmlNode,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
 
 // ── DOCX export internals ───────────────────────────────────────────────────
 
@@ -288,6 +289,11 @@ export const List = Extension.create({
       );
     };
 
+    // A whole list is one semantic unit — the walker never descends into
+    // listItems, so only the wrappers register. text/markdown come from the
+    // shared serializer (correct `-`/`1.` markers).
+    const listSemanticHandler: SemanticNodeHandler = () => ({ type: "list" });
+
     return {
       docx: {
         onBeforeExport,
@@ -295,6 +301,12 @@ export const List = Extension.create({
           bulletList: listPassthrough,
           orderedList: listPassthrough,
           listItem: listItemHandler,
+        },
+      },
+      semantic: {
+        nodes: {
+          bulletList: listSemanticHandler,
+          orderedList: listSemanticHandler,
         },
       },
     };

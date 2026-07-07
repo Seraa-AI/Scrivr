@@ -9,6 +9,7 @@ import {
   type DocxNodeHandler,
   type DocxBlockTransform,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
 
 // ── HorizontalRule rendering strategy ────────────────────────────────────────
 
@@ -115,7 +116,11 @@ export const HorizontalRule = Extension.create({
           ]),
         ]),
       ]);
-    return { docx: { nodes: { horizontalRule: handler } } };
+    const semanticHandler: SemanticNodeHandler = () => ({ type: "horizontalRule" });
+    return {
+      docx: { nodes: { horizontalRule: handler } },
+      semantic: { nodes: { horizontalRule: semanticHandler } },
+    };
   },
 
   addImports() {
