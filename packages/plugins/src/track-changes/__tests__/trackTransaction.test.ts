@@ -180,6 +180,29 @@ describe("trackTransaction — basic insert and delete", () => {
   });
 });
 
+// Typing/deleting a word one keystroke at a time must group into ONE change
+// (same author, same place) — not one change per character. mergeTrackedMarks
+// unifies adjacent same-author/operation/status tracked marks under one id.
+describe("trackTransaction — word-level grouping", () => {
+  it("typing a word left-to-right produces one insert change", () => {
+    const editor = new TestEditor(doc(p("hello ")), "author42");
+    editor.insertAt(7, "w").insertAt(8, "o").insertAt(9, "r").insertAt(10, "d");
+
+    expect(editor.text).toBe("hello word");
+    expect(editor.pendingChanges).toHaveLength(1);
+    expect(editor.pendingChanges[0]!.dataTracked.operation).toBe(CHANGE_OPERATION.insert);
+  });
+
+  it("backspacing a word produces one delete change", () => {
+    const editor = new TestEditor(doc(p("hello world")), "author42");
+    // Backspace "world" one char at a time (end → start).
+    editor.deleteRange(11, 12).deleteRange(10, 11).deleteRange(9, 10).deleteRange(8, 9).deleteRange(7, 8);
+
+    expect(editor.pendingChanges).toHaveLength(1);
+    expect(editor.pendingChanges[0]!.dataTracked.operation).toBe(CHANGE_OPERATION.delete);
+  });
+});
+
 // ── Tracking disabled ─────────────────────────────────────────────────────────
 
 describe("trackTransaction — tracking disabled", () => {
