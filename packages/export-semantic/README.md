@@ -2,7 +2,7 @@
 
 Semantic chunk export for Scrivr documents — turn a document into an ordered list of **AI-ready `SemanticUnit`s** for RAG / embedding pipelines.
 
-Instead of flattening a document downstream and re-guessing where the chunks are, Scrivr emits the structure and identity it already knows: each unit carries its type, a stable id, the heading path it lives under, plain text for embedding, and structure-preserving markdown. Like `@scrivr/docx`, it is extension-aware — every node and mark contributes its own semantic handler, so custom extensions (a callout, a footnote, a comment mark) plug into the same seam with no changes to the walker.
+Instead of flattening a document downstream and re-guessing where the chunks are, Scrivr emits the structure and identity it already knows: each unit carries its type, a stable id, the heading path it lives under, explicit text view, plain text for embedding, and optional structure-preserving markdown. Like `@scrivr/docx`, it is extension-aware — every node and mark contributes its own semantic handler, so custom extensions (a callout, a footnote, a comment mark) plug into the same seam with no changes to the walker.
 
 It runs **headless**: given a `ServerEditor` and a document's `contentJSON`, it produces units with no canvas, layout, or DOM.
 
@@ -23,19 +23,22 @@ interface SemanticUnit {
   type: "heading" | "paragraph" | "table" | "list"
       | "codeBlock" | "image" | "horizontalRule" | "pageBreak" | "unknown";
   role: "body" | "header" | "footer";
+  view: "proposed";        // pending inserts included; pending deletes excluded into changes
   breadcrumb: string[];    // heading path, e.g. ["Master Agreement", "Indemnification"]
   headingLevel?: number;
   order: number;           // monotonic document order
   text: string;            // plain text for embedding
   attrs?: Record<string, unknown>; // block styling markdown can't express (align, indent, font…)
   spans?: InlineSpan[];    // inline formatting runs — bold/italic/color/highlight/link, with attrs
-  markdown?: string;       // structure-preserving markdown (convenience only; lossy for styling)
+  markdown?: string;       // convenience projection only; omitted when changes are present
   cells?: TableCells;      // structured rows/cells with gridSpan/vMerge (spanned tables)
   changes?: SemanticChange[]; // review metadata (e.g. suggested deletions), excluded from text
 }
 ```
 
 The editor owns **semantics + identity**. The consumer owns **sizing + embedding policy** — target chunk size is embedding-model-specific and stays in your pipeline, not the editor. Embed whatever you like from a unit; the recommended input is `breadcrumb.join(" › ") + "\n" + text`.
+
+`view: "proposed"` is the v1 text contract: suggested insertions are included in `text`, suggested deletions are excluded from `text` and preserved as `changes`. The same view applies to `spans` and `cells[].text`.
 
 ### What the walker does for you
 
@@ -182,7 +185,7 @@ toSemanticUnits(editor, {
 
 ## Formatting: styling & inline marks
 
-Markdown is a *lossy* view — it can't express alignment, indent, color, highlight, or font. So formatting has two structured, lossless fields; treat `markdown` as a convenience only.
+Markdown is a *lossy*, non-canonical view — it can't express alignment, indent, color, highlight, font, or review overlays safely. Treat `markdown` as a convenience only. When review `changes` are present, `markdown` is omitted so consumers do not accidentally mix proposed text with raw redline rendering.
 
 - **`attrs`** — the block's own styling markdown can't carry (`align`, `indent`, `textIndent`, `fontFamily`, list start, …). Only non-default values; identity/level bookkeeping (`nodeId`, `dataTracked`, `level`) is removed. For a grouped heading+lede unit these are the anchor (heading) block's attrs.
 - **`spans`** — the inline runs of the unit's text, each with its formatting marks and their attrs. It reconstructs the text exactly — `spans.map(s => s.text).join("") === text` — so a downstream agent knows precisely which text is bold, red, a link, etc., and can suggest edits that preserve formatting.
@@ -208,7 +211,7 @@ Both are emitted only when there's something to report — a plain, default-styl
 
 ## Track changes
 
-If `@scrivr/plugins`' `TrackChanges` is loaded, suggested-**deletion** text is excluded from `text`, `markdown`, breadcrumbs, and table-cell text (never embedded), and preserved as `changes` on the unit (and cell) with author / status / id / timestamps. Suggested-**insertion** text is kept, since it is proposed content.
+If `@scrivr/plugins`' `TrackChanges` is loaded, suggested-**deletion** text is excluded from `text`, breadcrumbs, and table-cell text (never embedded), and preserved as `changes` on the unit (and cell) with author / status / id / timestamps. Units with review changes omit `markdown`; use `text`/`spans`/`cells`/`changes` as the canonical data. Suggested-**insertion** text is kept, since it is proposed content.
 
 ## Determinism & stable ids
 

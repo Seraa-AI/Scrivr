@@ -12,8 +12,12 @@ function isHeading(node: BlockEntry["node"]): boolean {
 function isParagraph(node: BlockEntry["node"]): boolean {
   return node.type.name === "paragraph";
 }
-function isShort(node: BlockEntry["node"], max: number): boolean {
-  return node.textContent.length <= max;
+function isShort(
+  node: BlockEntry["node"],
+  max: number,
+  textOf: (node: BlockEntry["node"]) => string,
+): boolean {
+  return textOf(node).length <= max;
 }
 
 /**
@@ -32,6 +36,7 @@ function isShort(node: BlockEntry["node"], max: number): boolean {
 export function groupBlocks(
   blocks: BlockEntry[],
   shortBlockMaxChars: number = DEFAULT_SHORT_MAX,
+  textOf: (node: BlockEntry["node"]) => string = (node) => node.textContent,
 ): BlockEntry[][] {
   const groups: BlockEntry[][] = [];
   let i = 0;
@@ -51,7 +56,7 @@ export function groupBlocks(
       const pairs =
         next !== undefined &&
         isParagraph(next.node) &&
-        isShort(next.node, shortBlockMaxChars) &&
+        isShort(next.node, shortBlockMaxChars, textOf) &&
         (after === undefined || isHeading(after.node));
       if (pairs) {
         groups.push([entry, next]);

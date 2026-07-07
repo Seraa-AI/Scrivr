@@ -25,6 +25,7 @@ describe("toSemanticUnits — basic emission", () => {
     expect(units[0]).toMatchObject({
       type: "paragraph",
       role: "body",
+      view: "proposed",
       order: 0,
       breadcrumb: [],
       text: "Hello world",

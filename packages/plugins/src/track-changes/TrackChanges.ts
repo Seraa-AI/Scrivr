@@ -148,7 +148,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
     const keepInserted: SemanticMarkHandler = (run) => run;
     const dropDeleted: SemanticMarkHandler = (run, mark) => {
       const raw = mark.attrs.dataTracked;
-      const entries = Array.isArray(raw) ? raw : raw ? [raw] : [{}];
+      const entries = Array.isArray(raw) ? (raw.length > 0 ? raw : [{}]) : raw ? [raw] : [{}];
       return {
         text: "",
         changes: [

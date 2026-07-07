@@ -31,6 +31,11 @@ Lossless formatting on `SemanticUnit` (markdown can't express alignment/color/fo
   are review metadata (surfaced in `changes`) and are excluded from `spans`; the
   TrackChanges extension registers a `trackedInsert` seam handler so it is kept in
   text but not treated as formatting.
+- `view: "proposed"` states the text contract explicitly (pending inserts included,
+  pending deletes excluded into `changes`). `markdown` is a lossy convenience
+  projection and is omitted when a unit has `changes`, so its redline rendering
+  never contradicts the proposed `text`. Grouping's "short lede" test uses
+  mark-aware length; `spans` are emitted only when they reconstruct the final text.
 
 `@scrivr/core` — adds the canonical `semantic` handler types (`SemanticUnit`,
 `TableCells`, `SemanticNodeHandler`, `SemanticMarkHandler`, `UnitCtx`) and, via

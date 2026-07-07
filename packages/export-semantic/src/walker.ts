@@ -38,7 +38,7 @@ export function walkSemantic(
     entries.push({ node, index });
   });
 
-  const groups = groupBlocks(entries, shortBlockMaxChars);
+  const groups = groupBlocks(entries, shortBlockMaxChars, (node) => ctx.toText(node));
   const units: SemanticUnit[] = [];
   const stack: { level: number; title: string }[] = [];
   let order = 0;
@@ -77,29 +77,36 @@ export function walkSemantic(
     }
 
     const nodeIds = group.map(resolveNodeId);
+    const text = result.text ?? ctx.toText(nodes);
     const unit: SemanticUnit = {
       id: nodeIds[0]!,
       nodeIds,
       type: result.type,
       role: "body",
+      view: "proposed",
       breadcrumb,
       order: order++,
-      text: result.text ?? ctx.toText(nodes),
+      text,
     };
+    const changes = ctx.toChanges(nodes);
+    if (changes.length > 0) unit.changes = changes;
     if (headingLevel !== undefined) unit.headingLevel = headingLevel;
     // Block styling markdown can't express (alignment, indent, font, …), taken
     // from the anchor block. Only present when non-default.
     const attrs = ctx.attrsOf(anchor);
     if (attrs) unit.attrs = attrs;
     // Inline formatting runs — lossless where markdown is not. Emit only when
-    // something is actually formatted, so plain units stay lean.
+    // something is actually formatted, so plain units stay lean. If a handler
+    // overrides text, generated spans from the source nodes may no longer
+    // reconstruct the final unit text; omit them rather than emit contradictory
+    // output.
     const spans = ctx.toSpans(nodes);
-    if (spans.some((s) => s.marks.length > 0)) unit.spans = spans;
+    if (spans.map((s) => s.text).join("") === text && spans.some((s) => s.marks.length > 0)) {
+      unit.spans = spans;
+    }
     const markdown = result.markdown ?? ctx.toMarkdown(nodes);
-    if (markdown.length > 0) unit.markdown = markdown;
+    if (changes.length === 0 && markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
-    const changes = ctx.toChanges(nodes);
-    if (changes.length > 0) unit.changes = changes;
 
     units.push(unit);
   }

@@ -7,6 +7,7 @@ export type {
   SemanticUnit,
   SemanticUnitType,
   SemanticRole,
+  SemanticTextView,
   SemanticChange,
   InlineSpan,
   InlineMark,

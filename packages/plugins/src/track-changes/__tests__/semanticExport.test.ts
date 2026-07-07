@@ -32,8 +32,10 @@ describe("TrackChanges — semantic mark seam", () => {
       },
     });
     const units = toSemanticUnits(editor);
+    expect(units[0]!.view).toBe("proposed");
     expect(units[0]!.text).toBe("Keep inserted tail");
     expect(units[0]!.changes).toEqual([{ type: "suggestedDelete", text: "deleted " }]);
+    expect(units[0]!.markdown).toBeUndefined();
   });
 
   it("keeps tracked marks out of formatting spans", () => {
@@ -60,6 +62,32 @@ describe("TrackChanges — semantic mark seam", () => {
       { text: "bold", marks: [{ type: "bold" }] },
       { text: " inserted", marks: [] },
     ]);
+  });
+
+  it("preserves suggested deletion metadata when dataTracked is an empty array", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "u1" })],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "keep " },
+              {
+                type: "text",
+                text: "deleted",
+                marks: [{ type: "trackedDelete", attrs: { dataTracked: [] } }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const units = toSemanticUnits(editor);
+    expect(units[0]!.text).toBe("keep ");
+    expect(units[0]!.changes).toEqual([{ type: "suggestedDelete", text: "deleted" }]);
   });
 
   it("excludes suggested-deletion text from heading breadcrumbs", () => {
@@ -107,6 +135,39 @@ describe("TrackChanges — semantic mark seam", () => {
       createdAt: 123,
       groupId: "replacement-1",
     }]);
+  });
+
+  it("uses mark-aware text when deciding whether to group a heading with a short lede", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "u1" })],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "heading",
+            attrs: { level: 1 },
+            content: [{ type: "text", text: "Intro" }],
+          },
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "short" },
+              {
+                type: "text",
+                text: "x".repeat(250),
+                marks: [{ type: "trackedDelete" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const units = toSemanticUnits(editor);
+    expect(units).toHaveLength(1);
+    expect(units[0]!.nodeIds).toHaveLength(2);
+    expect(units[0]!.text).toBe("Intro\nshort");
+    expect(units[0]!.changes).toEqual([{ type: "suggestedDelete", text: "x".repeat(250) }]);
   });
 
   it("excludes suggested-deletion text from structured table cells", () => {

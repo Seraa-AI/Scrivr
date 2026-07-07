@@ -57,6 +57,26 @@ describe("semantic seam — custom extensions", () => {
     expect(units[0]!.text).toBe("CALLOUT");
   });
 
+  it("does not emit source-derived spans when a handler overrides text", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "source", marks: [{ type: "bold" }] }],
+          },
+        ],
+      },
+    });
+    const units = toSemanticUnits(editor, {
+      overrides: { nodes: { paragraph: () => ({ type: "paragraph", text: "replacement" }) } },
+    });
+    expect(units[0]!.text).toBe("replacement");
+    expect(units[0]!.spans).toBeUndefined();
+  });
+
   it("falls back to an unknown unit for an unregistered node, never dropping it", () => {
     const units = toSemanticUnits(editorWith([Bare], "bare", "orphan text"));
     expect(units).toHaveLength(1);

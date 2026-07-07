@@ -29,6 +29,13 @@ export type SemanticUnitType =
 /** Structural role of a unit. Body-only in v1; header/footer reserved. */
 export type SemanticRole = "body" | "header" | "footer";
 
+/**
+ * Text view exported by the semantic lane. In v1 this is the proposed review
+ * view: pending inserts are included, pending deletes are excluded from text
+ * and preserved in `changes`.
+ */
+export type SemanticTextView = "proposed";
+
 export interface SemanticUnit {
   /** Stable anchor id = `nodeIds[0]`. Always present. */
   id: string;
@@ -39,6 +46,8 @@ export interface SemanticUnit {
   nodeIds: string[];
   type: SemanticUnitType;
   role: SemanticRole;
+  /** Which document view `text`, `spans`, and `cells[].text` represent. */
+  view: SemanticTextView;
   /** Heading path, e.g. `["Limitation of Liability", "Exclusions"]`. */
   breadcrumb: string[];
   headingLevel?: number;
@@ -62,7 +71,8 @@ export interface SemanticUnit {
    */
   spans?: InlineSpan[];
   /** Structure-preserving markdown. Simple tables → GFM. Convenience only — a
-   * lossy view; `attrs`/`spans` are the source of truth for styling. */
+   * lossy, non-canonical projection; omitted when review `changes` are present
+   * to avoid mixing proposed text with raw redline rendering. */
   markdown?: string;
   /** Structured rows/cells with spans — emitted for tables GFM can't encode. */
   cells?: TableCells;
