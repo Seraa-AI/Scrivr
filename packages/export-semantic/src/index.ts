@@ -3,6 +3,8 @@ import "./augmentation";
 
 export { toSemanticUnits } from "./toSemanticUnits";
 export { SemanticExport } from "./SemanticExport";
+export { unitEmbeddingInput, unitContentHash, unitRichHash, diffSemanticUnits } from "./changeDetection";
+export type { SemanticUnitDiff } from "./changeDetection";
 export type {
   SemanticUnit,
   SemanticUnitType,

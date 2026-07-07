@@ -29,7 +29,7 @@ import * as Y from "yjs";
 import { yXmlFragmentToProseMirrorRootNode, prosemirrorToYXmlFragment } from "y-prosemirror";
 import type { Node } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
-import type { IBaseEditor } from "@scrivr/core";
+import { COLLAB_SYNC_META, type IBaseEditor } from "@scrivr/core";
 
 /**
  * Wire format for a single doc-level attribute in `Y.Map("prose_doc_attrs")`.
@@ -163,6 +163,10 @@ export class YBinding {
           Math.min(head, maxPos),
         ),
       );
+
+      // Mark this as a remote collab apply so UniqueId doesn't re-stamp ids the
+      // author already assigned (which would diverge across clients).
+      tr = tr.setMeta(COLLAB_SYNC_META, true);
 
       this.prevDoc = tr.doc;
       this.editor.applyTransaction(tr);

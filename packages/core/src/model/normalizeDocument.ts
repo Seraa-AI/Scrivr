@@ -38,6 +38,7 @@ import {
   planBlockIdAssignments,
 } from "./assignBlockIds";
 import { normalizeTablesDoc } from "../table/normalize";
+import { fnv1aHex, stableStringify } from "./hash";
 
 export type NormalizeMode = "repair" | "strict";
 
@@ -214,38 +215,10 @@ function makeReplayGenerator(
 }
 
 /**
- * FNV-1a 32-bit hash over a deterministic JSON serialisation of the
- * doc. Non-cryptographic — the goal is cheap, sync, collision-resistant
- * enough for "did this doc change between two normalize calls?" not
- * tamper-evidence. Returned as 8 hex chars.
+ * Structural fingerprint of a doc — FNV-1a over a deterministic JSON
+ * serialisation, so "did this doc change between two normalize calls?" is a
+ * cheap hash comparison. Returned as 8 hex chars.
  */
 function fingerprintOf(doc: Node): string {
-  const json = sortedStringify(doc.toJSON());
-  let h = 0x811c9dc5;
-  for (let i = 0; i < json.length; i++) {
-    h ^= json.charCodeAt(i);
-    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
-  }
-  return h.toString(16).padStart(8, "0");
-}
-
-/**
- * Stable stringify — object keys are emitted in sorted order so two
- * structurally-equal docs always produce identical strings regardless
- * of the order their attrs were authored.
- */
-function sortedStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return "[" + value.map(sortedStringify).join(",") + "]";
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  const parts: string[] = [];
-  for (const k of keys) {
-    parts.push(JSON.stringify(k) + ":" + sortedStringify(obj[k]));
-  }
-  return "{" + parts.join(",") + "}";
+  return fnv1aHex(stableStringify(doc.toJSON()));
 }
