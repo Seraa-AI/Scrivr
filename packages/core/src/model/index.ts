@@ -11,6 +11,7 @@ export { resolveTheme, resolveThemeColor, disposeProbe } from "./resolveTheme";
 export { safeUrl } from "./safeUrl";
 export { sanitizeDocUrls } from "./sanitizeDocUrls";
 export { assignBlockIds, planBlockIdAssignments } from "./assignBlockIds";
+export { fnv1aHex } from "./hash";
 export type {
   AssignBlockIdsOptions,
   BlockIdAssignment,

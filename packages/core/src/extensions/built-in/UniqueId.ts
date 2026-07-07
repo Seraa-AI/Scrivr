@@ -4,6 +4,14 @@ import { Extension } from "../Extension";
 import { planBlockIdAssignments } from "../../model/assignBlockIds";
 
 /**
+ * Transaction meta set by the collaboration binding when it applies a REMOTE
+ * (Yjs sync) update. `UniqueId` skips stamping for these so a block's id is
+ * assigned once — by its author — and synced, instead of each receiving client
+ * re-stamping a divergent uuid onto the same logical node.
+ */
+export const COLLAB_SYNC_META = "scrivr:collabSync";
+
+/**
  * Find a block node in the document by its stable nodeId attribute.
  * Returns the node and its absolute ProseMirror position, or null if not found.
  */
@@ -46,8 +54,13 @@ export const UniqueId = Extension.create({
     return [
       new Plugin({
         appendTransaction(transactions, _oldState, newState) {
-          // Skip if no document change occurred
-          if (!transactions.some((tr) => tr.docChanged)) return null;
+          // Only stamp for a LOCAL doc change. A remote collab apply carries the
+          // author's ids already; re-stamping here would assign a divergent uuid
+          // to the same node on every receiving client (last-write-wins churn).
+          const hasLocalDocChange = transactions.some(
+            (tr) => tr.docChanged && !tr.getMeta(COLLAB_SYNC_META),
+          );
+          if (!hasLocalDocChange) return null;
 
           const assignments = planBlockIdAssignments(newState.doc);
           if (assignments.length === 0) return null;

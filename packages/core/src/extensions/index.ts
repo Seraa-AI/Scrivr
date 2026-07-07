@@ -26,7 +26,7 @@ export { CodeBlock } from "./built-in/CodeBlock";
 export { HorizontalRule } from "./built-in/HorizontalRule";
 export { PageBreak } from "./built-in/PageBreak";
 export { Table } from "./built-in/Table";
-export { UniqueId, findNodeById } from "./built-in/UniqueId";
+export { UniqueId, findNodeById, COLLAB_SYNC_META } from "./built-in/UniqueId";
 export { ClearFormatting } from "./built-in/ClearFormatting";
 export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultContent";
 
