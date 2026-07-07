@@ -141,8 +141,11 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
 
   addExports() {
     // Keep suggested-deletion text out of embeddings while preserving it as
-    // structured review metadata. Inserted text is proposed content and needs
-    // no handler (the default keeps it in the semantic text).
+    // structured review metadata. Inserted text is proposed content, kept in
+    // the semantic text — the identity handler exists only so the seam knows
+    // trackedInsert is a review mark (excluded from formatting spans), not a
+    // styling mark like bold/color.
+    const keepInserted: SemanticMarkHandler = (run) => run;
     const dropDeleted: SemanticMarkHandler = (run, mark) => {
       const raw = mark.attrs.dataTracked;
       const entries = Array.isArray(raw) ? raw : raw ? [raw] : [{}];
@@ -162,7 +165,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         ],
       };
     };
-    return { semantic: { marks: { trackedDelete: dropDeleted } } };
+    return { semantic: { marks: { trackedDelete: dropDeleted, trackedInsert: keepInserted } } };
   },
 
   addProseMirrorPlugins() {

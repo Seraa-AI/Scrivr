@@ -36,6 +36,32 @@ describe("TrackChanges — semantic mark seam", () => {
     expect(units[0]!.changes).toEqual([{ type: "suggestedDelete", text: "deleted " }]);
   });
 
+  it("keeps tracked marks out of formatting spans", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "u1" })],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "bold", marks: [{ type: "bold" }] },
+              { type: "text", text: " inserted", marks: [{ type: "trackedInsert" }] },
+              { type: "text", text: " gone", marks: [{ type: "trackedDelete" }] },
+            ],
+          },
+        ],
+      },
+    });
+    const spans = toSemanticUnits(editor)[0]!.spans!;
+    // bold is a formatting span; inserted text is kept but WITHOUT the review
+    // mark; deleted text is absent entirely.
+    expect(spans).toEqual([
+      { text: "bold", marks: [{ type: "bold" }] },
+      { text: " inserted", marks: [] },
+    ]);
+  });
+
   it("excludes suggested-deletion text from heading breadcrumbs", () => {
     const editor = new ServerEditor({
       extensions: [StarterKit, TrackChanges.configure({ userID: "u1" })],

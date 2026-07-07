@@ -87,6 +87,14 @@ export function walkSemantic(
       text: result.text ?? ctx.toText(nodes),
     };
     if (headingLevel !== undefined) unit.headingLevel = headingLevel;
+    // Block styling markdown can't express (alignment, indent, font, …), taken
+    // from the anchor block. Only present when non-default.
+    const attrs = ctx.attrsOf(anchor);
+    if (attrs) unit.attrs = attrs;
+    // Inline formatting runs — lossless where markdown is not. Emit only when
+    // something is actually formatted, so plain units stay lean.
+    const spans = ctx.toSpans(nodes);
+    if (spans.some((s) => s.marks.length > 0)) unit.spans = spans;
     const markdown = result.markdown ?? ctx.toMarkdown(nodes);
     if (markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;

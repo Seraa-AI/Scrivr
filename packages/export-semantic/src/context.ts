@@ -1,11 +1,16 @@
 import type {
   IBaseEditor,
+  InlineMark,
+  InlineSpan,
   SemanticChange,
   SemanticMarkHandler,
   SemanticRun,
   UnitCtx,
 } from "@scrivr/core";
-import type { Node as PmNode } from "prosemirror-model";
+import type { Mark as PmMark, Node as PmNode } from "prosemirror-model";
+
+/** Block attrs that are identity/level bookkeeping, not user styling. */
+const NON_STYLING_ATTRS = new Set(["nodeId", "dataTracked", "level"]);
 
 function readGridSpan(cell: PmNode): number {
   const raw = cell.attrs["gridSpan"];
@@ -29,50 +34,99 @@ function physicalColumns(table: PmNode): number {
   return max;
 }
 
+/** Describe a mark as `{ type, attrs? }`, dropping null attrs and `dataTracked`. */
+function describeMark(mark: PmMark): InlineMark {
+  const attrs: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(mark.attrs)) {
+    if (key === "dataTracked" || value === null || value === undefined) continue;
+    attrs[key] = value;
+  }
+  return Object.keys(attrs).length > 0 ? { type: mark.type.name, attrs } : { type: mark.type.name };
+}
+
 /**
- * Plain text for embedding. Walks inline text nodes and folds the semantic mark
- * handlers over each run. Handlers may remove text while retaining structured
- * review changes. Block boundaries join with a newline; inline content within
- * a textblock concatenates.
+ * Formatting marks on a run — every mark EXCEPT those the semantic seam handles
+ * (i.e. tracked changes, surfaced separately in `changes`). Order is the node's
+ * mark order, so spans are deterministic.
+ */
+function formattingMarks(
+  marks: readonly PmMark[],
+  markHandlers: Record<string, SemanticMarkHandler>,
+): InlineMark[] {
+  return marks.filter((m) => !(m.type.name in markHandlers)).map(describeMark);
+}
+
+/** A block's non-default styling attrs, or undefined when it carries none. */
+function describeAttrs(node: PmNode): Record<string, unknown> | undefined {
+  const spec = node.type.spec.attrs;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node.attrs)) {
+    if (NON_STYLING_ATTRS.has(key) || value === null || value === undefined) continue;
+    const deflt = spec?.[key]?.default;
+    if (value === deflt || JSON.stringify(value) === JSON.stringify(deflt)) continue;
+    out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+const NEWLINE_SPAN: InlineSpan = { text: "\n", marks: [] };
+
+/** Join per-block span groups with a newline span, dropping empty groups. */
+function joinGroups(groups: InlineSpan[][]): InlineSpan[] {
+  const out: InlineSpan[] = [];
+  for (const group of groups) {
+    if (group.length === 0) continue;
+    if (out.length > 0) out.push(NEWLINE_SPAN);
+    out.push(...group);
+  }
+  return out;
+}
+
+/**
+ * Walk a node into inline formatting runs (`spans`) plus review `changes`. The
+ * semantic mark handlers are folded over each text run: a handler may drop the
+ * run (excluded from spans) or retain structured changes. `spans` reconstruct
+ * the plain text exactly, so `toText` derives from them.
  */
 function extractSemantic(
   node: PmNode,
   markHandlers: Record<string, SemanticMarkHandler>,
   ctx: UnitCtx,
-): { text: string; changes: SemanticChange[] } {
+): { spans: InlineSpan[]; changes: SemanticChange[] } {
   if (node.isText) {
     let run: SemanticRun | null = { text: node.text ?? "" };
     for (const mark of node.marks) {
       const handler = markHandlers[mark.type.name];
       if (!handler) continue;
       run = handler(run, mark, ctx);
-      if (run === null) return { text: "", changes: [] };
+      if (run === null) return { spans: [], changes: [] };
     }
-    return { text: run.text, changes: run.changes ?? [] };
+    const changes = run.changes ?? [];
+    const spans = run.text.length > 0 ? [{ text: run.text, marks: formattingMarks(node.marks, markHandlers) }] : [];
+    return { spans, changes };
   }
 
-  // Preserve the semantic boundary represented by an explicit line break.
-  // Other inline leaf nodes (for example images) have no intrinsic plain text.
-  if (node.type.name === "hardBreak") return { text: "\n", changes: [] };
+  // Preserve the semantic boundary of an explicit line break. Other inline leaf
+  // nodes (e.g. images) have no intrinsic plain text.
+  if (node.type.name === "hardBreak") return { spans: [NEWLINE_SPAN], changes: [] };
 
-  const parts: { text: string; changes: SemanticChange[] }[] = [];
+  const parts: { spans: InlineSpan[]; changes: SemanticChange[] }[] = [];
   node.forEach((child) => {
     parts.push(extractSemantic(child, markHandlers, ctx));
   });
-
-  const changes = parts.flatMap((part) => part.changes);
+  const changes = parts.flatMap((p) => p.changes);
 
   // A textblock (paragraph, heading) concatenates its inline runs; a block
   // container (list, table, cell) joins its block children with newlines.
-  const text = node.isTextblock
-    ? parts.map((part) => part.text).join("")
-    : parts.map((part) => part.text).filter((part) => part.length > 0).join("\n");
-  return { text, changes };
+  const spans = node.isTextblock
+    ? parts.flatMap((p) => p.spans)
+    : joinGroups(parts.map((p) => p.spans));
+  return { spans, changes };
 }
 
 /**
  * Build the producer context: the bridge to the editor's markdown serializer
- * (reuse, don't reinvent) plus the mark-aware text extractor.
+ * (reuse, don't reinvent) plus the mark-aware inline extractor.
  */
 export function createUnitCtx(
   editor: IBaseEditor,
@@ -93,21 +147,24 @@ export function createUnitCtx(
       } catch {
         // markdown is best-effort: a node or mark without a serializer rule
         // (pageBreak, tracked marks, custom nodes) yields no markdown rather
-        // than crashing the whole emit. The load-bearing `text` field is
-        // produced independently and stays correct.
+        // than crashing the whole emit. `text`/`spans`/`attrs` are the source
+        // of truth for styling and are produced independently.
         return "";
       }
     },
-    toText(nodes) {
+    toSpans(nodes) {
       const list = Array.isArray(nodes) ? nodes : [nodes];
-      return list
-        .map((n) => extractSemantic(n, markHandlers, ctx).text)
-        .filter((t) => t.length > 0)
-        .join("\n");
+      return joinGroups(list.map((n) => extractSemantic(n, markHandlers, ctx).spans));
+    },
+    toText(nodes) {
+      return ctx.toSpans(nodes).map((s) => s.text).join("");
     },
     toChanges(nodes) {
       const list = Array.isArray(nodes) ? nodes : [nodes];
       return list.flatMap((node) => extractSemantic(node, markHandlers, ctx).changes);
+    },
+    attrsOf(node) {
+      return describeAttrs(node);
     },
     physicalColumns,
   };

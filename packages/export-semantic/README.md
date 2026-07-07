@@ -27,7 +27,9 @@ interface SemanticUnit {
   headingLevel?: number;
   order: number;           // monotonic document order
   text: string;            // plain text for embedding
-  markdown?: string;       // structure-preserving markdown (GFM for simple tables)
+  attrs?: Record<string, unknown>; // block styling markdown can't express (align, indent, font…)
+  spans?: InlineSpan[];    // inline formatting runs — bold/italic/color/highlight/link, with attrs
+  markdown?: string;       // structure-preserving markdown (convenience only; lossy for styling)
   cells?: TableCells;      // structured rows/cells with gridSpan/vMerge (spanned tables)
   changes?: SemanticChange[]; // review metadata (e.g. suggested deletions), excluded from text
 }
@@ -177,6 +179,32 @@ toSemanticUnits(editor, {
   overrides: { nodes: { paragraph: () => ({ type: 'unknown' }) } },
 });
 ```
+
+## Formatting: styling & inline marks
+
+Markdown is a *lossy* view — it can't express alignment, indent, color, highlight, or font. So formatting has two structured, lossless fields; treat `markdown` as a convenience only.
+
+- **`attrs`** — the block's own styling markdown can't carry (`align`, `indent`, `textIndent`, `fontFamily`, list start, …). Only non-default values; identity/level bookkeeping (`nodeId`, `dataTracked`, `level`) is removed. For a grouped heading+lede unit these are the anchor (heading) block's attrs.
+- **`spans`** — the inline runs of the unit's text, each with its formatting marks and their attrs. It reconstructs the text exactly — `spans.map(s => s.text).join("") === text` — so a downstream agent knows precisely which text is bold, red, a link, etc., and can suggest edits that preserve formatting.
+
+```jsonc
+{
+  "type": "paragraph",
+  "attrs": { "align": "center", "indent": 2 },
+  "text": "The Provider shall indemnify the Client per clause 4.",
+  "spans": [
+    { "text": "The ", "marks": [] },
+    { "text": "Provider", "marks": [{ "type": "bold" }] },
+    { "text": " shall indemnify the ", "marks": [] },
+    { "text": "Client", "marks": [{ "type": "bold" }, { "type": "color", "attrs": { "color": "#dc2626" } }] },
+    { "text": " per ", "marks": [] },
+    { "text": "clause 4", "marks": [{ "type": "link", "attrs": { "href": "…" } }] },
+    { "text": ".", "marks": [] }
+  ]
+}
+```
+
+Both are emitted only when there's something to report — a plain, default-styled paragraph carries neither, so units stay lean. Custom marks and block attrs come through automatically. Review marks (tracked changes) are **not** formatting: they stay in `changes`, and their runs are excluded from `spans`.
 
 ## Track changes
 

@@ -8,6 +8,8 @@ export type {
   SemanticUnitType,
   SemanticRole,
   SemanticChange,
+  InlineSpan,
+  InlineMark,
   TableCells,
   TableCellsRow,
   TableCell,

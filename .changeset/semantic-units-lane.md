@@ -21,6 +21,17 @@ pass `{ onExport: units => … }` to receive the data headlessly), mirroring
 `Editor` and `ServerEditor` already implement it) so headless export lanes can
 serialize arbitrary node groups.
 
+Lossless formatting on `SemanticUnit` (markdown can't express alignment/color/font):
+
+- `attrs` — the block's non-default styling (`align`, `indent`, `fontFamily`, list
+  start, …), with identity/level bookkeeping stripped.
+- `spans` — inline formatting runs (`InlineSpan`), each carrying its marks + attrs
+  (bold, italic, color, highlight, fontSize, link, …). Reconstructs `text` exactly.
+- Both also on `TableCell`; both emitted only when non-empty. Tracked-change marks
+  are review metadata (surfaced in `changes`) and are excluded from `spans`; the
+  TrackChanges extension registers a `trackedInsert` seam handler so it is kept in
+  text but not treated as formatting.
+
 `@scrivr/core` — adds the canonical `semantic` handler types (`SemanticUnit`,
 `TableCells`, `SemanticNodeHandler`, `SemanticMarkHandler`, `UnitCtx`) and, via
 the per-extension `addExports().semantic` seam, node handlers for paragraph,
