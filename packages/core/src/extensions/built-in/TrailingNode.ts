@@ -1,5 +1,6 @@
 import { Plugin } from "prosemirror-state";
 import { Extension } from "../Extension";
+import { COLLAB_SYNC_META } from "./UniqueId";
 
 /**
  * TrailingNode — ensures the document always ends with an empty paragraph.
@@ -17,10 +18,14 @@ export const TrailingNode = Extension.create({
     const { paragraph } = this.schema.nodes;
     return [
       new Plugin({
-        appendTransaction(_, __, state) {
+        appendTransaction(transactions, __, state) {
           const last = state.doc.lastChild;
           if (!last || last.type === paragraph) return null;
-          return state.tr.insert(state.doc.content.size, paragraph!.create());
+          const tr = state.tr.insert(state.doc.content.size, paragraph!.create());
+          if (transactions.some((tx) => tx.docChanged && tx.getMeta(COLLAB_SYNC_META))) {
+            tr.setMeta(COLLAB_SYNC_META, true);
+          }
+          return tr;
         },
       }),
     ];
