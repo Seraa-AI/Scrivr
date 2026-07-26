@@ -14,7 +14,7 @@ import type { IEditor } from "@scrivr/core";
 import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContainer } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { buildAcceptedTextMap, acceptedRangeToDocRange } from "../track-changes/lib/acceptedTextMap";
+import { buildAcceptedTextMap, acceptedRangeToDocRange } from "@scrivr/plugins";
 import { aiSuggestionPluginKey } from "./AiSuggestionPlugin";
 import type { AiSuggestion, AiOp } from "./types";
 

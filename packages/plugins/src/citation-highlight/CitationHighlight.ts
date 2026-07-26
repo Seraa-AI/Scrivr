@@ -3,7 +3,7 @@ import type { EditorState, Transaction } from "prosemirror-state";
 import { Extension, renderSelection } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
 import type { Node as PmNode } from "prosemirror-model";
-import { findNodeById } from "../ai-toolkit/UniqueId";
+import { findNodeById } from "@scrivr/core";
 
 /** A document range referenced by an external citation (AI answer, source panel). */
 export interface CitationRange {

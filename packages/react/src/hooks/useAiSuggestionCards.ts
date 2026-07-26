@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import type { Editor } from "@scrivr/core";
-import { subscribeToAiSuggestions } from "@scrivr/plugins";
+import { subscribeToAiSuggestions } from "@scrivr/ai";
 import type {
   AiSuggestionCardActions,
   AiSuggestionCardData,
   AiSuggestionSubscribeOptions,
-} from "@scrivr/plugins";
+} from "@scrivr/ai";
 
 /**
  * Headless hook — use this if you want to build your own card UI.

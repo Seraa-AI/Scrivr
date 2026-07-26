@@ -18,13 +18,13 @@ import {
   Collaboration,
   CollaborationCursor,
   TrackChanges,
-  AiToolkit,
   HeaderFooter,
   CitationHighlight,
   citationHighlightPluginKey,
   revealCitation,
   type CitationRange,
 } from "@scrivr/plugins";
+import { AiToolkit } from "@scrivr/ai";
 import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
 import { FloatingMenuBar } from "./FloatingMenuBar";

@@ -13,7 +13,7 @@
 
 import type { CharacterMap, GlyphEntry } from "@scrivr/core";
 import type { AiOp } from "./types";
-import type { PosMapEntry } from "../track-changes/lib/acceptedTextMap";
+import type { PosMapEntry } from "@scrivr/plugins";
 
 // ── Render instruction types ──────────────────────────────────────────────────
 

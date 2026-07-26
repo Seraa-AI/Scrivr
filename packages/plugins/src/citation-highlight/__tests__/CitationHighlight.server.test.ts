@@ -7,8 +7,6 @@
 import { describe, it, expect } from "vitest";
 import { TextSelection } from "prosemirror-state";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { AiToolkit } from "../../ai-toolkit/AiToolkit";
-import { getAiToolkit } from "../../ai-toolkit/aiToolkitRegistry";
 import { CitationHighlight, citationHighlightPluginKey } from "../CitationHighlight";
 
 function makeEditor() {
@@ -166,7 +164,7 @@ describe("CitationHighlight on ServerEditor", () => {
 
   it("citeNode cites a block by its nodeId", () => {
     const editor = new ServerEditor({
-      extensions: [StarterKit, AiToolkit, CitationHighlight],
+      extensions: [StarterKit, CitationHighlight],
       // Persisted nodeIds — ServerEditor preserves them and never fabricates
       // ids on load, so block addressing is deterministic.
       content: {
@@ -177,11 +175,10 @@ describe("CitationHighlight on ServerEditor", () => {
         ],
       },
     });
-    const blocks = getAiToolkit(editor)!.getBlocks();
 
-    editor.commands.citeNode(blocks[1]!.nodeId);
+    editor.commands.citeNode("b2");
     expect(citations(editor)).toEqual([
-      { id: blocks[1]!.nodeId, from: 15, to: 28 },
+      { id: "b2", from: 15, to: 28 },
     ]);
 
     // Unknown nodeId → command fails, state untouched.
