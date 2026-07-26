@@ -180,6 +180,66 @@ describe("trackTransaction — basic insert and delete", () => {
   });
 });
 
+// Typing/deleting a word one keystroke at a time must group into ONE change
+// (same author, same place) — not one change per character. mergeTrackedMarks
+// unifies adjacent same-author/operation/status tracked marks under one id.
+describe("trackTransaction — word-level grouping", () => {
+  it("typing a word left-to-right produces one insert change", () => {
+    const editor = new TestEditor(doc(p("hello ")), "author42");
+    editor.insertAt(7, "w").insertAt(8, "o").insertAt(9, "r").insertAt(10, "d");
+
+    expect(editor.text).toBe("hello word");
+    expect(editor.pendingChanges).toHaveLength(1);
+    expect(editor.pendingChanges[0]!.dataTracked.operation).toBe(CHANGE_OPERATION.insert);
+  });
+
+  it("backspacing a word produces one delete change", () => {
+    const editor = new TestEditor(doc(p("hello world")), "author42");
+    // Backspace "world" one char at a time (end → start).
+    editor.deleteRange(11, 12).deleteRange(10, 11).deleteRange(9, 10).deleteRange(8, 9).deleteRange(7, 8);
+
+    expect(editor.pendingChanges).toHaveLength(1);
+    expect(editor.pendingChanges[0]!.dataTracked.operation).toBe(CHANGE_OPERATION.delete);
+  });
+});
+
+// Formatting marks (bold/color/…) are the case #133 adds: a run bolded in
+// several edits must group into ONE change, same as typing already does — but
+// two DIFFERENT formats (e.g. two colors) must stay distinct changes.
+describe("trackTransaction — formatting-mark grouping", () => {
+  const addMark = (editor: TestEditor, from: number, to: number, mark: ReturnType<typeof schema.marks.bold.create>) =>
+    editor.dispatch(editor.state.tr.addMark(from, to, mark));
+
+  it("bolding a word in two edits produces one mark change", () => {
+    const editor = new TestEditor(doc(p("hello world")), "author42");
+    // "world" spans 7–12: bold "wor" (7–10) then "ld" (10–12) separately.
+    addMark(editor, 7, 10, schema.marks.bold.create());
+    addMark(editor, 10, 12, schema.marks.bold.create());
+
+    const boldChanges = editor.pendingChanges.filter(c => c.type === "mark-change");
+    expect(boldChanges).toHaveLength(1);
+    expect(boldChanges[0]!.dataTracked.operation).toBe(CHANGE_OPERATION.insert);
+  });
+
+  it("two different colors on adjacent runs stay two changes", () => {
+    const editor = new TestEditor(doc(p("hello world")), "author42");
+    addMark(editor, 7, 10, schema.marks.textColor.create({ color: "red" }));
+    addMark(editor, 10, 12, schema.marks.textColor.create({ color: "blue" }));
+
+    const colorChanges = editor.pendingChanges.filter(c => c.type === "mark-change");
+    expect(colorChanges).toHaveLength(2);
+  });
+
+  it("same color on adjacent runs merges into one change", () => {
+    const editor = new TestEditor(doc(p("hello world")), "author42");
+    addMark(editor, 7, 10, schema.marks.textColor.create({ color: "red" }));
+    addMark(editor, 10, 12, schema.marks.textColor.create({ color: "red" }));
+
+    const colorChanges = editor.pendingChanges.filter(c => c.type === "mark-change");
+    expect(colorChanges).toHaveLength(1);
+  });
+});
+
 // ── Tracking disabled ─────────────────────────────────────────────────────────
 
 describe("trackTransaction — tracking disabled", () => {
