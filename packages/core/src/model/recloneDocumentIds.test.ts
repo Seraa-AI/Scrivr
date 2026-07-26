@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { Node, Schema } from "prosemirror-model";
+import { Schema } from "prosemirror-model";
+import type { Node } from "prosemirror-model";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
 import { recloneDocumentIds } from "./assignBlockIds";
@@ -87,7 +88,7 @@ describe("recloneDocumentIds", () => {
     }
   });
 
-  it("gives null-id blocks a fresh id but keeps them out of the map", () => {
+  it("leaves null-id blocks untouched and out of the map (pure re-key)", () => {
     const input = doc(
       paragraph("has-id", { nodeId: "keep" }),
       paragraph("no-id"), // nodeId defaults to null
@@ -96,9 +97,10 @@ describe("recloneDocumentIds", () => {
     const { doc: cloned, idMap } = recloneDocumentIds(input);
     const newIds = collectIds(cloned);
 
-    expect(newIds.every((id) => typeof id === "string" && id!.length > 0)).toBe(true);
     expect(idMap.size).toBe(1); // only the block that had an id
     expect(idMap.has("keep")).toBe(true);
+    // The null block stays null — clone re-keys, it does not invent ids.
+    expect(newIds.filter((id) => id === null)).toHaveLength(1);
   });
 
   it("preserves text, marks, and non-nodeId attrs", () => {
@@ -141,5 +143,69 @@ describe("recloneDocumentIds", () => {
 
     expect(collectIds(input)).toEqual(before); // "a1" still there, untouched
     expect(before).toEqual(["a1"]);
+  });
+});
+
+// A schema with a CUSTOM inline atom node and a CUSTOM mark, both carrying a
+// nodeId — proves clone is schema-driven and not limited to built-in blocks.
+const customSchema: Schema = new Schema({
+  nodes: {
+    doc: { content: "block+" },
+    para: { group: "block", content: "inline*", attrs: { nodeId: { default: null } } },
+    widget: { group: "inline", inline: true, atom: true, attrs: { nodeId: { default: null } } },
+    text: { group: "inline" },
+  },
+  marks: {
+    marker: { attrs: { nodeId: { default: null } } },
+  },
+});
+
+function customDoc(): Node {
+  const marker = customSchema.marks["marker"]!.create({ nodeId: "m1" });
+  return customSchema.nodes["doc"]!.create(null, [
+    customSchema.nodes["para"]!.create({ nodeId: "p1" }, [
+      customSchema.text("hi", [marker]),
+      customSchema.nodes["widget"]!.create({ nodeId: "w1" }),
+    ]),
+  ]);
+}
+
+describe("recloneDocumentIds — custom nodes and marks", () => {
+  it("re-keys a custom inline node, a custom mark, and a custom block alike", () => {
+    const { doc: cloned, idMap } = recloneDocumentIds(customDoc());
+
+    // All three id spaces re-keyed and mapped.
+    expect(new Set([...idMap.keys()])).toEqual(new Set(["p1", "m1", "w1"]));
+
+    const para = cloned.firstChild!;
+    expect(para.attrs["nodeId"]).toBe(idMap.get("p1"));
+    // widget (inline atom) re-keyed
+    const widget = para.child(1);
+    expect(widget.attrs["nodeId"]).toBe(idMap.get("w1"));
+    // marker (mark on the text node) re-keyed
+    const markerMark = para.child(0).marks[0]!;
+    expect(markerMark.attrs["nodeId"]).toBe(idMap.get("m1"));
+  });
+
+  it("shouldReclone restricts which types re-key (and appear in the map)", () => {
+    const { doc: cloned, idMap } = recloneDocumentIds(customDoc(), {
+      shouldReclone: ({ typeName }) => typeName === "para",
+    });
+
+    expect([...idMap.keys()]).toEqual(["p1"]);
+    const para = cloned.firstChild!;
+    // widget + marker kept their original ids
+    expect(para.child(1).attrs["nodeId"]).toBe("w1");
+    expect(para.child(0).marks[0]!.attrs["nodeId"]).toBe("m1");
+  });
+
+  it("generate controls the new id value", () => {
+    const { idMap } = recloneDocumentIds(customDoc(), {
+      generate: ({ oldId, kind }) => `${kind}:${oldId}:new`,
+    });
+
+    expect(idMap.get("p1")).toBe("node:p1:new");
+    expect(idMap.get("w1")).toBe("node:w1:new");
+    expect(idMap.get("m1")).toBe("mark:m1:new");
   });
 });

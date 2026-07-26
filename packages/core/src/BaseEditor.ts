@@ -13,7 +13,7 @@ import {
   normalizeDocument,
   type NormalizeResult,
 } from "./model/normalizeDocument";
-import { recloneDocumentIds } from "./model/assignBlockIds";
+import { recloneDocumentIds, type RecloneOptions } from "./model/assignBlockIds";
 
 export interface BaseEditorOptions {
   /**
@@ -32,13 +32,18 @@ export interface BaseEditorOptions {
    */
   content?: string | Record<string, unknown>;
   /**
-   * Clone mode. When true, the initial document is deep-copied into a fresh
-   * `nodeId` space: every id-bearing block is re-minted and the old→new
-   * mapping is exposed via `cloneIdMap`, so references held outside the doc
-   * (comment stores, citation indexes, semantic chunks) can be remapped onto
+   * Clone mode. When set, the initial document is deep-copied into a fresh
+   * `nodeId` space: every node/mark that carries a `nodeId` is re-minted and the
+   * old→new mapping is exposed via `cloneIdMap`, so references held outside the
+   * doc (comment stores, citation indexes, semantic chunks) can be remapped onto
    * the clone. The source content is never mutated. No-op with no initial doc.
+   *
+   * Pass `true` for defaults, or a `RecloneOptions` object to control which
+   * nodes/marks are re-keyed (`shouldReclone`) and what the new ids are
+   * (`generate`). Extensions can additionally hook clone via `addCloneHandlers`
+   * to re-key their own id spaces.
    */
-  clone?: boolean;
+  clone?: boolean | RecloneOptions;
 }
 
 /**
@@ -150,9 +155,23 @@ export class BaseEditor implements IBaseEditor {
         // Explicit write: mint a fresh nodeId space so the clone is an
         // independent document. This is not the load-time read path — reads
         // never fabricate ids; an intentional clone does.
-        const recloned = recloneDocumentIds(result.doc);
-        initialDoc = recloned.doc;
-        this.cloneIdMapValue = recloned.idMap;
+        const recloneOptions = clone === true ? {} : clone;
+        const recloned = recloneDocumentIds(result.doc, recloneOptions);
+        let clonedDoc = recloned.doc;
+        // Shared mutable map: extension handlers read it to rewrite nodeId
+        // references and write to it as they re-key their own id spaces.
+        const idMap = new Map(recloned.idMap);
+        for (const handler of this.manager.getCloneHandlers()) {
+          const out = handler({
+            doc: clonedDoc,
+            idMap,
+            newId: () => crypto.randomUUID(),
+            schema: this.manager.schema,
+          });
+          if (out) clonedDoc = out;
+        }
+        initialDoc = clonedDoc;
+        this.cloneIdMapValue = idMap;
       }
     }
 

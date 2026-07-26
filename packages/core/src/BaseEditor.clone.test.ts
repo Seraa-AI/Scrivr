@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { Node } from "prosemirror-model";
 import { ServerEditor } from "./ServerEditor";
+import { StarterKit } from "./extensions/StarterKit";
+import { Extension } from "./extensions/Extension";
 import { createTestEditor } from "./test-utils";
 
 /** A two-paragraph doc with explicit, persisted nodeIds. */
@@ -63,5 +65,56 @@ describe("clone mode — Editor (browser)", () => {
     expect(editor.cloneIdMap!.get("p-a")).toBe(ids[0]);
 
     editor.destroy();
+  });
+});
+
+describe("clone mode — options and extension hooks", () => {
+  it("forwards RecloneOptions (custom generate) through the editor", () => {
+    const editor = new ServerEditor({
+      content: CONTENT,
+      clone: { generate: ({ oldId }) => `v2-${oldId}` },
+    });
+    expect(idsOf(editor.getState().doc)).toEqual(["v2-p-a", "v2-p-b"]);
+    expect(editor.cloneIdMap!.get("p-a")).toBe("v2-p-a");
+  });
+
+  // An extension that owns a custom id space (a `refId` doc attr referencing a
+  // block nodeId) uses addCloneHandlers to remap it onto the clone.
+  const RefExt = Extension.create({
+    name: "refTest",
+    addDocAttrs() {
+      return { refId: { default: null } };
+    },
+    addCloneHandlers() {
+      return [
+        ({ doc, idMap }) => {
+          const oldRef = doc.attrs["refId"];
+          if (typeof oldRef !== "string") return;
+          const newRef = idMap.get(oldRef);
+          if (!newRef) return;
+          // Rebuild the doc node with the remapped reference.
+          return doc.type.create({ ...doc.attrs, refId: newRef }, doc.content, doc.marks);
+        },
+      ];
+    },
+  });
+
+  it("runs extension clone handlers to remap custom references via the idMap", () => {
+    const content = {
+      type: "doc",
+      attrs: { refId: "p-a" }, // points at the first paragraph's nodeId
+      content: CONTENT.content,
+    };
+    const editor = new ServerEditor({
+      extensions: [StarterKit, RefExt],
+      content,
+      clone: true,
+    });
+
+    const map = editor.cloneIdMap!;
+    const newFirst = map.get("p-a")!;
+    // The handler rewrote the doc-level reference to the clone's new id.
+    expect(editor.getState().doc.attrs["refId"]).toBe(newFirst);
+    expect(newFirst).not.toBe("p-a");
   });
 });

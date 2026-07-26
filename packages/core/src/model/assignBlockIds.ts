@@ -18,7 +18,7 @@
  *   const safe = assignBlockIds(schema.nodeFromJSON(savedJson));
  *   const state = EditorState.create({ schema, doc: safe });
  */
-import { Fragment, type Node } from "prosemirror-model";
+import { Fragment, type Node, type Mark, type Attrs } from "prosemirror-model";
 
 export interface AssignBlockIdsOptions {
   /** Override the ID source. Defaults to `crypto.randomUUID()`. */
@@ -115,74 +115,145 @@ export function planBlockIdAssignments(
 
 /** Result of `recloneDocumentIds`: the fresh-id doc plus the old→new mapping. */
 export interface RecloneResult {
-  /** A new document with a freshly minted `nodeId` on every id-bearing block. */
+  /** A new document with re-minted `nodeId`s. The source is never mutated. */
   doc: Node;
   /**
-   * old nodeId → new nodeId, one entry per block that carried a non-null id in
-   * the input. Blocks whose nodeId was null are re-keyed too (so the clone is
-   * fully id'd) but are absent here — they had no old id to map from.
+   * old nodeId → new nodeId, one entry per node/mark that was actually
+   * re-keyed. Ids left untouched (null, or filtered out by `shouldReclone`)
+   * are absent. When `generate` is custom, values are whatever it returned.
    */
   idMap: ReadonlyMap<string, string>;
 }
 
+/** What carries the id being re-keyed, passed to `generate` / `shouldReclone`. */
+export interface RecloneIdContext {
+  /** The existing id being replaced. */
+  oldId: string;
+  /** Whether the id lives on a node's attrs or on a mark. */
+  kind: "node" | "mark";
+  /** Node or mark type name, e.g. "paragraph", "image", "comment". */
+  typeName: string;
+}
+
+export interface RecloneOptions {
+  /**
+   * Produce the replacement id for a re-keyed node/mark. Receives the old id +
+   * carrier so callers can derive a custom id (e.g. `"v2-" + oldId`) or map to
+   * an externally-chosen id. Defaults to `crypto.randomUUID()`.
+   */
+  generate?: (ctx: RecloneIdContext) => string;
+  /**
+   * Decide whether a given id-bearing node/mark should be re-keyed. Return
+   * false to leave its id untouched and out of the map — e.g. re-key only
+   * paragraphs with `({ typeName }) => typeName === "paragraph"`. Defaults to
+   * re-keying every node/mark that carries a non-null `nodeId`.
+   */
+  shouldReclone?: (ctx: RecloneIdContext) => boolean;
+}
+
 /**
- * Clones a document into an independent `nodeId` space. Every block that
- * declares the attr gets a brand-new id, and the old→new map lets callers
- * remap references held OUTSIDE the doc (comment stores, citation indexes,
+ * Clones a document into an independent id space: re-mints the `nodeId` on
+ * every node AND mark that carries one, and returns the old→new map so callers
+ * can remap references held OUTSIDE the doc (comment stores, citation indexes,
  * semantic chunk tables) onto the clone. The source doc is never mutated.
  *
- * Only `nodeId` is re-keyed. Other id spaces (tracked-change `id`,
- * `referenceId`, `moveNodeId`) pass through untouched — they are self-contained
- * within the doc and nothing outside references them by value.
+ * Schema-driven and extension-agnostic: any node (block or inline) or mark
+ * whose spec declares a `nodeId` attr is covered — custom nodes/marks included,
+ * no per-type wiring. `generate` and `shouldReclone` let callers control the
+ * new ids and restrict which types get re-keyed (and so appear in the map).
  *
- * This is the third member of the id-assignment family alongside
- * `assignBlockIds` (fill nulls) and `planBlockIdAssignments` (per-block plan);
- * all three share the same "which blocks carry a nodeId?" rule. Unlike the
- * load-time read path (which never fabricates ids), a clone is an intentional
- * new document, so minting here is correct.
+ * Pure re-key: only non-null ids change; nulls are left as-is. Other id spaces
+ * (tracked-change `id`, `referenceId`, `moveNodeId`) are self-contained within
+ * the doc and pass through untouched — nothing outside references them by value.
+ *
+ * Unlike the load-time read path (which never fabricates ids), a clone is an
+ * intentional new document, so minting here is correct.
  */
 export function recloneDocumentIds(
   doc: Node,
-  options: AssignBlockIdsOptions = {},
+  options: RecloneOptions = {},
 ): RecloneResult {
-  const generate = options.generate ?? defaultGenerate;
+  const generate: Generate = options.generate ?? (() => defaultGenerate());
+  const shouldReclone: ShouldReclone = options.shouldReclone ?? (() => true);
   const idMap = new Map<string, string>();
-  return { doc: recloneWalk(doc, generate, idMap), idMap };
+  return { doc: recloneWalk(doc, generate, shouldReclone, idMap), idMap };
 }
+
+type Generate = (ctx: RecloneIdContext) => string;
+type ShouldReclone = (ctx: RecloneIdContext) => boolean;
 
 function recloneWalk(
   node: Node,
-  generate: () => string,
+  generate: Generate,
+  shouldReclone: ShouldReclone,
   idMap: Map<string, string>,
 ): Node {
-  if (node.isLeaf) {
-    return hasBlockIdAttr(node)
-      ? node.type.create(rekeyedAttrs(node, generate, idMap), null, node.marks)
-      : node;
+  const marks = recloneMarks(node, generate, shouldReclone, idMap);
+
+  // Text nodes never carry a nodeId attr; only their marks can be re-keyed, and
+  // text nodes must be copied via `.mark()`, not `type.create`.
+  if (node.isText) {
+    return marks === node.marks ? node : node.mark(marks);
   }
 
-  const newChildren: Node[] = [];
-  node.forEach((child) => newChildren.push(recloneWalk(child, generate, idMap)));
-  const attrs = hasBlockIdAttr(node)
-    ? rekeyedAttrs(node, generate, idMap)
-    : node.attrs;
-  return node.type.create(attrs, Fragment.fromArray(newChildren), node.marks);
+  const content = node.isLeaf
+    ? node.content
+    : Fragment.fromArray(recloneChildren(node, generate, shouldReclone, idMap));
+  const attrs = recloneAttrs(node, generate, shouldReclone, idMap);
+  return node.type.create(attrs, content, marks);
 }
 
-function rekeyedAttrs(
+function recloneChildren(
   node: Node,
-  generate: () => string,
+  generate: Generate,
+  shouldReclone: ShouldReclone,
   idMap: Map<string, string>,
-): Record<string, unknown> {
-  const newId = generate();
-  const old = node.attrs["nodeId"];
-  if (typeof old === "string" && old.length > 0) idMap.set(old, newId);
+): Node[] {
+  const out: Node[] = [];
+  node.forEach((child) => out.push(recloneWalk(child, generate, shouldReclone, idMap)));
+  return out;
+}
+
+/** Re-key a node's own `nodeId` attr if its spec declares one and it's set. */
+function recloneAttrs(
+  node: Node,
+  generate: Generate,
+  shouldReclone: ShouldReclone,
+  idMap: Map<string, string>,
+): Attrs {
+  if (!declaresNodeId(node.type.spec.attrs)) return node.attrs;
+  const oldId = node.attrs["nodeId"];
+  if (typeof oldId !== "string" || oldId.length === 0) return node.attrs;
+  const ctx: RecloneIdContext = { oldId, kind: "node", typeName: node.type.name };
+  if (!shouldReclone(ctx)) return node.attrs;
+  const newId = generate(ctx);
+  idMap.set(oldId, newId);
   return { ...node.attrs, nodeId: newId };
 }
 
-/** A block whose schema declares the `nodeId` attr, regardless of its value. */
-function hasBlockIdAttr(node: Node): boolean {
-  if (!node.isBlock) return false;
-  const attrs = node.type.spec.attrs;
+/** Re-key any of a node's marks that carry a `nodeId` (e.g. custom markers). */
+function recloneMarks(
+  node: Node,
+  generate: Generate,
+  shouldReclone: ShouldReclone,
+  idMap: Map<string, string>,
+): readonly Mark[] {
+  let changed = false;
+  const next = node.marks.map((mark) => {
+    if (!declaresNodeId(mark.type.spec.attrs)) return mark;
+    const oldId = mark.attrs["nodeId"];
+    if (typeof oldId !== "string" || oldId.length === 0) return mark;
+    const ctx: RecloneIdContext = { oldId, kind: "mark", typeName: mark.type.name };
+    if (!shouldReclone(ctx)) return mark;
+    const newId = generate(ctx);
+    idMap.set(oldId, newId);
+    changed = true;
+    return mark.type.create({ ...mark.attrs, nodeId: newId });
+  });
+  return changed ? next : node.marks;
+}
+
+/** Whether a node/mark spec's attrs declare a `nodeId`. */
+function declaresNodeId(attrs: Record<string, unknown> | null | undefined): boolean {
   return !!attrs && "nodeId" in attrs;
 }

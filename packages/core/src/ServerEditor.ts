@@ -10,6 +10,7 @@ import {
   type ResolvedTheme,
 } from "./model/theme";
 import { normalizeDocument } from "./model/normalizeDocument";
+import type { RecloneOptions } from "./model/assignBlockIds";
 
 export interface ServerEditorOptions {
   /**
@@ -26,11 +27,12 @@ export interface ServerEditorOptions {
    */
   content?: string | Record<string, unknown>;
   /**
-   * Clone mode. When true, the initial document is deep-copied into a fresh
-   * `nodeId` space and the old→new mapping is exposed via `cloneIdMap`. See
-   * `BaseEditorOptions.clone`.
+   * Clone mode. When set, the initial document is deep-copied into a fresh
+   * `nodeId` space and the old→new mapping is exposed via `cloneIdMap`. Pass a
+   * `RecloneOptions` object to control which nodes/marks re-key and what the new
+   * ids are. See `BaseEditorOptions.clone`.
    */
-  clone?: boolean;
+  clone?: boolean | RecloneOptions;
   /**
    * Theme accepted for type parity with the browser `Editor`. ServerEditor
    * never paints, so theme is stored but unused. Values containing `var(...)`

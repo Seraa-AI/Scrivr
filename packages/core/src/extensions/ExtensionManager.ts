@@ -16,6 +16,7 @@ import type {
   MarkdownSerializerRules,
   MarkdownNodeSerializer,
   MarkdownMarkSerializer,
+  CloneHandler,
 } from "./types";
 import type { IBaseEditor, IEditor } from "./types";
 import type { SelectionBehavior, HitTester, SelectionGestureProvider } from "../selection/types";
@@ -452,6 +453,15 @@ export class ExtensionManager {
    */
   getImportContributions(): ImportContributionMap[] {
     return this.resolved.map((ext) => ext.imports);
+  }
+
+  /**
+   * Clone participation hooks from all extensions, in registration order.
+   * BaseEditor runs these after the core nodeId re-key when cloning a document,
+   * so extensions can re-key their own id spaces or rewrite nodeId references.
+   */
+  getCloneHandlers(): CloneHandler[] {
+    return this.resolved.flatMap((ext) => ext.cloneHandlers);
   }
 
   /**

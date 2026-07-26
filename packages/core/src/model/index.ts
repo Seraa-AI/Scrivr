@@ -16,6 +16,8 @@ export type {
   AssignBlockIdsOptions,
   BlockIdAssignment,
   RecloneResult,
+  RecloneOptions,
+  RecloneIdContext,
 } from "./assignBlockIds";
 export { normalizeDocument } from "./normalizeDocument";
 export type {

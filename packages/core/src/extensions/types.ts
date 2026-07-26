@@ -505,6 +505,35 @@ export interface InitialDocContext<Options = object> extends ExtensionContext<Op
   parseMarkdown(text: string): Node;
 }
 
+/**
+ * Runtime context handed to an extension's clone handler. See
+ * `ExtensionConfig.addCloneHandlers`.
+ */
+export interface CloneHandlerContext {
+  /** The document after core `nodeId` re-key on nodes/marks + prior handlers. */
+  doc: Node;
+  /**
+   * old id → new id accumulated so far (core `nodeId` re-keys first, then each
+   * handler in registration order). Read it to rewrite references that point at
+   * a nodeId; write to it when you re-key your OWN id space so the map the
+   * caller receives stays complete.
+   */
+  idMap: Map<string, string>;
+  /** Mint a fresh id for a re-keyed value. */
+  newId(): string;
+  /** The built schema, for constructing replacement nodes/marks. */
+  schema: Schema;
+}
+
+/**
+ * A document-clone participation hook. Runs when an editor is created with
+ * `clone`, AFTER core has re-minted every `nodeId` on nodes and marks. Use it
+ * to re-key id spaces the `nodeId` convention doesn't cover, or to rewrite
+ * references that point at a nodeId. Return a transformed doc, or nothing to
+ * leave it unchanged. Contributed via `addCloneHandlers`.
+ */
+export type CloneHandler = (ctx: CloneHandlerContext) => Node | void;
+
 // ── Extension config (what you pass to Extension.create) ─────────────────────
 
 export interface ExtensionConfig<Options = object> {
@@ -602,6 +631,14 @@ export interface ExtensionConfig<Options = object> {
    * means in both directions.
    */
   addImports?(this: Phase1Context<Options>): ImportContributionMap;
+
+  /**
+   * Participate in document clone. Return handlers that re-key the extension's
+   * own id spaces (custom attrs/marks the `nodeId` convention doesn't cover) or
+   * rewrite references that point at a nodeId. Handlers run at clone time with
+   * the schema and the accumulated old→new map in context. See `CloneHandler`.
+   */
+  addCloneHandlers?(this: Phase1Context<Options>): CloneHandler[];
 
   // ── Phase 2: Behaviour ──────────────────────────────────────────────────────
   // Called with `this = ExtensionContext` — the built schema is available.
@@ -841,6 +878,8 @@ export interface ResolvedExtension {
   exports: ExportContributionMap;
   /** Format-specific import handler contributions. Empty map when absent. */
   imports: ImportContributionMap;
+  /** Document-clone participation hooks. Empty when absent. */
+  cloneHandlers: CloneHandler[];
   plugins: Plugin[];
   keymap: Record<string, Command>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
