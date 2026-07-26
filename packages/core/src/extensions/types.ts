@@ -30,6 +30,7 @@ import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
+import type { CloneIdMap } from "../model/assignBlockIds";
 import type {
   SelectionBehavior,
   HitTester,
@@ -100,6 +101,8 @@ export interface IBaseEditor {
   applyTransaction(tr: Transaction): void;
   /** The merged ProseMirror Schema built from all extensions. */
   readonly schema: Schema;
+  /** Typed old→new identity map produced during document cloning. */
+  readonly cloneIdMap: CloneIdMap | null;
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
   /**
@@ -505,6 +508,40 @@ export interface InitialDocContext<Options = object> extends ExtensionContext<Op
   parseMarkdown(text: string): Node;
 }
 
+/**
+ * Runtime context handed to an extension's clone handler. See
+ * `ExtensionConfig.addCloneHandlers`.
+ */
+export interface CloneHandlerContext {
+  /** The document after core `nodeId` re-key on nodes/marks + prior handlers. */
+  doc: Node;
+  /**
+   * old id → new id accumulated so far (core `nodeId` re-keys first, then each
+   * handler in registration order). Read it (`get` / `getByType`) to rewrite
+   * references that point at a nodeId. To add your OWN id space, call
+   * `recordId()` — it keeps the map complete and typed for `getByType()`.
+   */
+  idMap: CloneIdMap;
+  /**
+   * Mint a fresh extension-owned id. Supplying its type and old value also
+   * routes the request through the caller's `clone.generate` function.
+   */
+  newId(typeName?: string, oldId?: string): string;
+  /** Record an extension-owned mapping for typed lookup as `kind: "custom"`. */
+  recordId(typeName: string, oldId: string, newId: string): void;
+  /** The built schema, for constructing replacement nodes/marks. */
+  schema: Schema;
+}
+
+/**
+ * A document-clone participation hook. Runs when an editor is created with
+ * `clone`, AFTER core has re-minted every `nodeId` on nodes and marks. Use it
+ * to re-key id spaces the `nodeId` convention doesn't cover, or to rewrite
+ * references that point at a nodeId. Return a transformed doc, or nothing to
+ * leave it unchanged. Contributed via `addCloneHandlers`.
+ */
+export type CloneHandler = (ctx: CloneHandlerContext) => Node | void;
+
 // ── Extension config (what you pass to Extension.create) ─────────────────────
 
 export interface ExtensionConfig<Options = object> {
@@ -602,6 +639,14 @@ export interface ExtensionConfig<Options = object> {
    * means in both directions.
    */
   addImports?(this: Phase1Context<Options>): ImportContributionMap;
+
+  /**
+   * Participate in document clone. Return handlers that re-key the extension's
+   * own id spaces (custom attrs/marks the `nodeId` convention doesn't cover) or
+   * rewrite references that point at a nodeId. Handlers run at clone time with
+   * the schema and the accumulated old→new map in context. See `CloneHandler`.
+   */
+  addCloneHandlers?(this: Phase1Context<Options>): CloneHandler[];
 
   // ── Phase 2: Behaviour ──────────────────────────────────────────────────────
   // Called with `this = ExtensionContext` — the built schema is available.
@@ -841,6 +886,8 @@ export interface ResolvedExtension {
   exports: ExportContributionMap;
   /** Format-specific import handler contributions. Empty map when absent. */
   imports: ImportContributionMap;
+  /** Document-clone participation hooks. Empty when absent. */
+  cloneHandlers: CloneHandler[];
   plugins: Plugin[];
   keymap: Record<string, Command>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

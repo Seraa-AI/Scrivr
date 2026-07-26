@@ -1,6 +1,6 @@
 import { EditorState, Transaction } from "prosemirror-state";
 import { MarkdownSerializer } from "prosemirror-markdown";
-import type { Schema, Node } from "prosemirror-model";
+import { Node, type Schema } from "prosemirror-model";
 
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
@@ -13,6 +13,12 @@ import {
   normalizeDocument,
   type NormalizeResult,
 } from "./model/normalizeDocument";
+import {
+  recordCustomCloneId,
+  recloneDocumentIds,
+  type CloneIdMap,
+  type RecloneOptions,
+} from "./model/assignBlockIds";
 
 export interface BaseEditorOptions {
   /**
@@ -30,6 +36,19 @@ export interface BaseEditorOptions {
    * `addInitialDoc` contribution.
    */
   content?: string | Record<string, unknown>;
+  /**
+   * Clone mode. When set, the initial document is deep-copied into a fresh
+   * `nodeId` space: every node/mark that carries a `nodeId` is re-minted and the
+   * old→new mapping is exposed via `cloneIdMap`, so references held outside the
+   * doc (comment stores, citation indexes, semantic chunks) can be remapped onto
+   * the clone. The source content is never mutated. No-op with no initial doc.
+   *
+   * Pass `true` for defaults, or a `RecloneOptions` object to control which
+   * nodes/marks are re-keyed (`shouldReclone`) and what the new ids are
+   * (`generate`). Extensions can additionally hook clone via `addCloneHandlers`
+   * to re-key their own id spaces.
+   */
+  clone?: boolean | RecloneOptions;
 }
 
 /**
@@ -80,6 +99,9 @@ export class BaseEditor implements IBaseEditor {
    */
   protected lastNormalizeResultValue: NormalizeResult | null = null;
 
+  /** Backing store for `cloneIdMap`; null unless created with `clone: true`. */
+  protected cloneIdMapValue: CloneIdMap | null = null;
+
   /**
    * Bound command map. Type is `SafeFlatCommands` — augment
    * `Commands<ReturnType>` in your extension to get typed entries.
@@ -104,7 +126,7 @@ export class BaseEditor implements IBaseEditor {
    */
   protected runtimeCleanup: Array<() => void> = [];
 
-  constructor({ extensions = [StarterKit], content }: BaseEditorOptions = {}) {
+  constructor({ extensions = [StarterKit], content, clone = false }: BaseEditorOptions = {}) {
     this.manager = new ExtensionManager(extensions);
 
     const rawInitialDoc =
@@ -125,12 +147,61 @@ export class BaseEditor implements IBaseEditor {
     // (URL allow-list, table repair, block-ID assignment, fingerprint).
     let initialDoc: Node | undefined = rawInitialDoc;
     if (rawInitialDoc) {
+      // Clone mode re-keys the whole id space itself, so skip load-time id
+      // assignment — its throwaway ids would otherwise pollute the clone map.
       const result = normalizeDocument(rawInitialDoc, {
         schema: this.manager.schema,
-        assignIds: this.assignsBlockIdsOnLoad(),
+        assignIds: clone ? false : this.assignsBlockIdsOnLoad(),
       });
       this.lastNormalizeResultValue = result;
       initialDoc = result.doc;
+
+      if (clone) {
+        // Explicit write: mint a fresh nodeId space so the clone is an
+        // independent document. This is not the load-time read path — reads
+        // never fabricate ids; an intentional clone does.
+        const recloneOptions = clone === true ? {} : clone;
+        const recloned = recloneDocumentIds(result.doc, recloneOptions);
+        let clonedDoc = recloned.doc;
+        // Shared accumulator: extension handlers read it to rewrite nodeId
+        // references and add their own typed id spaces through recordId(), which
+        // validates and records into the same map exposed as cloneIdMap.
+        const idMap = recloned.idMap;
+        for (const handler of this.manager.getCloneHandlers()) {
+          const out = handler({
+            doc: clonedDoc,
+            idMap,
+            newId: (typeName = "custom", oldId = "") =>
+              recloneOptions.generate?.({ kind: "custom", typeName, oldId }) ?? crypto.randomUUID(),
+            recordId: (typeName, oldId, newId) => recordCustomCloneId(idMap, typeName, oldId, newId),
+            schema: this.manager.schema,
+          });
+          if (out !== undefined) {
+            if (!(out instanceof Node)) {
+              throw new TypeError("[BaseEditor] clone handler must return a ProseMirror Node or undefined");
+            }
+            clonedDoc = out;
+          }
+        }
+        // Treat extension output as another ingestion boundary: assert schema
+        // validity and repeat normalization so handlers cannot accidentally
+        // reintroduce unsafe URLs or malformed tables.
+        if (clonedDoc.type.schema !== this.manager.schema) {
+          throw new TypeError("[BaseEditor] clone handler returned a node from a different schema");
+        }
+        clonedDoc.check();
+        const postClone = normalizeDocument(clonedDoc, {
+          schema: this.manager.schema,
+          assignIds: false,
+        });
+        initialDoc = postClone.doc;
+        this.lastNormalizeResultValue = {
+          ...postClone,
+          warnings: [...result.warnings, ...postClone.warnings],
+          changed: result.changed || postClone.changed || postClone.doc !== result.doc,
+        };
+        this.cloneIdMapValue = idMap;
+      }
     }
 
     this.editorState = EditorState.create({
@@ -181,6 +252,16 @@ export class BaseEditor implements IBaseEditor {
    */
   get lastNormalizeResult(): NormalizeResult | null {
     return this.lastNormalizeResultValue;
+  }
+
+  /**
+   * old nodeId → new nodeId produced by clone mode, or `null` when the editor
+   * was not created with `clone: true`. Only ids present in the source document
+   * appear as keys. Remap references held outside the doc (comments, citations,
+   * semantic chunks) through this map to point them at the clone.
+   */
+  get cloneIdMap(): CloneIdMap | null {
+    return this.cloneIdMapValue;
   }
 
   getState(): EditorState {
