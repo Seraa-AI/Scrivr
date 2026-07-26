@@ -76,6 +76,17 @@ export const schema = new Schema({
       excludes: "",
       attrs: { dataTracked: { default: {} } },
     },
+    // Trackable formatting marks (name not "tracked*", dataTracked attr present)
+    // so mergeTrackedMarks' formatting path can be exercised. bold has no own
+    // attrs; textColor carries a `color` so two colors stay distinct changes.
+    bold: {
+      excludes: "",
+      attrs: { dataTracked: { default: [] } },
+    },
+    textColor: {
+      excludes: "",
+      attrs: { color: { default: null }, dataTracked: { default: [] } },
+    },
   },
 });
 

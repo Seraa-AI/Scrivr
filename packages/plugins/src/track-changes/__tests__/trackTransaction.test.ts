@@ -203,6 +203,43 @@ describe("trackTransaction — word-level grouping", () => {
   });
 });
 
+// Formatting marks (bold/color/…) are the case #133 adds: a run bolded in
+// several edits must group into ONE change, same as typing already does — but
+// two DIFFERENT formats (e.g. two colors) must stay distinct changes.
+describe("trackTransaction — formatting-mark grouping", () => {
+  const addMark = (editor: TestEditor, from: number, to: number, mark: ReturnType<typeof schema.marks.bold.create>) =>
+    editor.dispatch(editor.state.tr.addMark(from, to, mark));
+
+  it("bolding a word in two edits produces one mark change", () => {
+    const editor = new TestEditor(doc(p("hello world")), "author42");
+    // "world" spans 7–12: bold "wor" (7–10) then "ld" (10–12) separately.
+    addMark(editor, 7, 10, schema.marks.bold.create());
+    addMark(editor, 10, 12, schema.marks.bold.create());
+
+    const boldChanges = editor.pendingChanges.filter(c => c.type === "mark-change");
+    expect(boldChanges).toHaveLength(1);
+    expect(boldChanges[0]!.dataTracked.operation).toBe(CHANGE_OPERATION.insert);
+  });
+
+  it("two different colors on adjacent runs stay two changes", () => {
+    const editor = new TestEditor(doc(p("hello world")), "author42");
+    addMark(editor, 7, 10, schema.marks.textColor.create({ color: "red" }));
+    addMark(editor, 10, 12, schema.marks.textColor.create({ color: "blue" }));
+
+    const colorChanges = editor.pendingChanges.filter(c => c.type === "mark-change");
+    expect(colorChanges).toHaveLength(2);
+  });
+
+  it("same color on adjacent runs merges into one change", () => {
+    const editor = new TestEditor(doc(p("hello world")), "author42");
+    addMark(editor, 7, 10, schema.marks.textColor.create({ color: "red" }));
+    addMark(editor, 10, 12, schema.marks.textColor.create({ color: "red" }));
+
+    const colorChanges = editor.pendingChanges.filter(c => c.type === "mark-change");
+    expect(colorChanges).toHaveLength(1);
+  });
+});
+
 // ── Tracking disabled ─────────────────────────────────────────────────────────
 
 describe("trackTransaction — tracking disabled", () => {
