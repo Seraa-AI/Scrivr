@@ -18,6 +18,10 @@ export type {
   RecloneResult,
   RecloneOptions,
   RecloneIdContext,
+  CloneIdMap,
+  CloneIdKind,
+  CloneGenerateContext,
+  CustomCloneIdContext,
 } from "./assignBlockIds";
 export { normalizeDocument } from "./normalizeDocument";
 export type {

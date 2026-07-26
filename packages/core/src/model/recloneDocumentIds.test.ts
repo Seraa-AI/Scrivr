@@ -208,4 +208,53 @@ describe("recloneDocumentIds — custom nodes and marks", () => {
     expect(idMap.get("w1")).toBe("node:w1:new");
     expect(idMap.get("m1")).toBe("mark:m1:new");
   });
+
+  it("reuses one replacement when the same logical mark id spans text nodes", () => {
+    const marker = customSchema.marks["marker"]!.create({ nodeId: "shared" });
+    const input = customSchema.nodes["doc"]!.create(null, [
+      customSchema.nodes["para"]!.create({ nodeId: "p1" }, [
+        customSchema.text("one", [marker]),
+        customSchema.nodes["widget"]!.create({ nodeId: "w1" }),
+        customSchema.text("two", [marker]),
+      ]),
+    ]);
+    let calls = 0;
+
+    const { doc: cloned, idMap } = recloneDocumentIds(input, {
+      generate: ({ oldId }) => `${oldId}-${++calls}`,
+    });
+
+    const para = cloned.firstChild!;
+    expect(para.child(0).marks[0]!.attrs["nodeId"]).toBe(idMap.get("shared"));
+    expect(para.child(2).marks[0]!.attrs["nodeId"]).toBe(idMap.get("shared"));
+    expect(calls).toBe(3); // paragraph, shared marker, and widget
+  });
+
+  it("supports type-specific lookup when separate carriers reuse an old id", () => {
+    const marker = customSchema.marks["marker"]!.create({ nodeId: "same" });
+    const input = customSchema.nodes["doc"]!.create(null, [
+      customSchema.nodes["para"]!.create({ nodeId: "same" }, customSchema.text("text", [marker])),
+    ]);
+
+    const { idMap } = recloneDocumentIds(input, {
+      generate: ({ kind, typeName }) => `${kind}-${typeName}`,
+    });
+
+    expect(idMap.getByType("same", "para")).toBe("node-para");
+    expect(idMap.getByType("same", "marker", "mark")).toBe("mark-marker");
+    expect(idMap.get("same")).toBe("mark-marker"); // first carrier in traversal order
+  });
+
+  it.each(["", "same"])("rejects a generator result that is not a fresh id: %j", (generated) => {
+    const input = doc(paragraph("a", { nodeId: "same" }));
+    expect(() => recloneDocumentIds(input, { generate: () => generated })).toThrow();
+  });
+
+  it("rejects duplicate generated ids for distinct source identities", () => {
+    const input = doc(
+      paragraph("a", { nodeId: "a" }),
+      paragraph("b", { nodeId: "b" }),
+    );
+    expect(() => recloneDocumentIds(input, { generate: () => "duplicate" })).toThrow(/duplicate id/);
+  });
 });

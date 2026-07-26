@@ -29,16 +29,23 @@ want to re-key a document without an editor.
 
 - **Schema-driven, custom nodes/marks included.** Any node (block or inline) or
   mark whose spec declares a `nodeId` attr is re-keyed — no per-type wiring.
+- **Typed lookup.** `cloneIdMap.getByType(oldId, typeName, kind?)` resolves the
+  exact node, mark, or extension-owned id space when different types reuse the
+  same source string; ordinary `get(oldId)` remains available for globally
+  unique ids.
 - **Caller control.** `RecloneOptions` lets you restrict which types re-key
   (`shouldReclone`, so the map holds exactly what you chose) and set the new id
   values (`generate`). Pass them via `clone: { … }`.
+- **Tracked changes.** Change ids and their `referenceId`, `moveNodeId`, and
+  `groupId` links are re-keyed together when the TrackChanges extension is in
+  use, so a source and its clone can safely coexist.
 - **Extension hook.** Extensions can implement `addCloneHandlers()` to re-key
   their own id spaces or rewrite `nodeId` references during a clone, using the
   accumulated old→new map. Runs after the core re-key.
 
-Clone is a pure re-key: only non-null ids change; nulls are left as-is. Other id
-spaces (tracked-change `id`, `referenceId`, `moveNodeId`) are self-contained in
-the doc and pass through untouched. Clone is an explicit write, so it mints ids —
+Clone is a pure re-key: only non-null ids change; nulls are left as-is. Other
+custom id spaces pass through unless their owning extension contributes a clone
+handler. Clone is an explicit write, so it mints ids —
 distinct from the load-time read path, which never fabricates them.
 
 The other packages carry a version-only bump (lockstep group).

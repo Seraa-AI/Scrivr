@@ -122,8 +122,20 @@ export interface RecloneResult {
    * re-keyed. Ids left untouched (null, or filtered out by `shouldReclone`)
    * are absent. When `generate` is custom, values are whatever it returned.
    */
-  idMap: ReadonlyMap<string, string>;
+  idMap: CloneIdMap;
 }
+
+/** A clone map with an unambiguous lookup for a specific node/mark type. */
+export interface CloneIdMap extends ReadonlyMap<string, string> {
+  /**
+   * Resolve an id for one exact carrier type. Unlike `get(oldId)`, this remains
+   * unambiguous if custom schemas reuse the same source string in different id
+   * spaces. `kind` defaults to `"node"`.
+   */
+  getByType(oldId: string, typeName: string, kind?: CloneIdKind): string | undefined;
+}
+
+export type CloneIdKind = "node" | "mark" | "custom";
 
 /** What carries the id being re-keyed, passed to `generate` / `shouldReclone`. */
 export interface RecloneIdContext {
@@ -135,13 +147,24 @@ export interface RecloneIdContext {
   typeName: string;
 }
 
+/** Generator context for an id space owned by an extension clone handler. */
+export interface CustomCloneIdContext {
+  oldId: string;
+  kind: "custom";
+  typeName: string;
+}
+
+export type CloneGenerateContext = RecloneIdContext | CustomCloneIdContext;
+
 export interface RecloneOptions {
   /**
    * Produce the replacement id for a re-keyed node/mark. Receives the old id +
    * carrier so callers can derive a custom id (e.g. `"v2-" + oldId`) or map to
-   * an externally-chosen id. Defaults to `crypto.randomUUID()`.
+   * an externally-chosen id. Extension-owned ids use `kind: "custom"` when
+   * their clone handler calls `newId(typeName, oldId)`. Defaults to
+   * `crypto.randomUUID()`.
    */
-  generate?: (ctx: RecloneIdContext) => string;
+  generate?: (ctx: CloneGenerateContext) => string;
   /**
    * Decide whether a given id-bearing node/mark should be re-keyed. Return
    * false to leave its id untouched and out of the map — e.g. re-key only
@@ -175,18 +198,75 @@ export function recloneDocumentIds(
 ): RecloneResult {
   const generate: Generate = options.generate ?? (() => defaultGenerate());
   const shouldReclone: ShouldReclone = options.shouldReclone ?? (() => true);
-  const idMap = new Map<string, string>();
+  const idMap = new CloneIdMapImpl();
   return { doc: recloneWalk(doc, generate, shouldReclone, idMap), idMap };
 }
 
-type Generate = (ctx: RecloneIdContext) => string;
+type Generate = (ctx: CloneGenerateContext) => string;
 type ShouldReclone = (ctx: RecloneIdContext) => boolean;
+
+class CloneIdMapImpl extends Map<string, string> implements CloneIdMap {
+  private readonly typed = new Map<string, string>();
+  private readonly newIdOwners = new Map<string, string>();
+
+  getByType(oldId: string, typeName: string, kind: CloneIdKind = "node"): string | undefined {
+    return this.typed.get(typedIdKey({ oldId, typeName, kind }));
+  }
+
+  record(ctx: { oldId: string; typeName: string; kind: CloneIdKind }, newId: string): void {
+    const key = typedIdKey(ctx);
+    const owner = this.newIdOwners.get(newId);
+    if (owner !== undefined && owner !== key) {
+      throw new Error(`[recloneDocumentIds] generate() returned duplicate id "${newId}"`);
+    }
+    this.newIdOwners.set(newId, key);
+    this.typed.set(key, newId);
+    // Preserve the original Map API for documents whose IDs are globally
+    // unique. First-write wins when a custom schema reuses a source string;
+    // callers in that situation should use getByType().
+    if (!this.has(ctx.oldId)) this.set(ctx.oldId, newId);
+  }
+}
+
+function typedIdKey(ctx: { oldId: string; typeName: string; kind: CloneIdKind }): string {
+  return `${ctx.kind}\u0000${ctx.typeName}\u0000${ctx.oldId}`;
+}
+
+/** @internal Used by BaseEditor to expose typed custom-extension mappings. */
+export function recordCustomCloneId(
+  idMap: CloneIdMap,
+  typeName: string,
+  oldId: string,
+  newId: string,
+): void {
+  if (!(idMap instanceof CloneIdMapImpl)) {
+    throw new TypeError("[recordCustomCloneId] idMap was not created by recloneDocumentIds");
+  }
+  if (!typeName || !oldId || !newId) {
+    throw new TypeError("[recordCustomCloneId] typeName, oldId, and newId must be non-empty strings");
+  }
+  if (oldId === newId) {
+    throw new Error("[recordCustomCloneId] a cloned id must differ from its source id");
+  }
+  idMap.record({ kind: "custom", typeName, oldId }, newId);
+}
+
+function generateValidId(generate: Generate, ctx: RecloneIdContext): string {
+  const newId = generate(ctx);
+  if (typeof newId !== "string" || newId.length === 0) {
+    throw new TypeError(`[recloneDocumentIds] generate() returned an empty or non-string id for ${ctx.kind} "${ctx.typeName}"`);
+  }
+  if (newId === ctx.oldId) {
+    throw new Error(`[recloneDocumentIds] generate() returned the unchanged id for ${ctx.kind} "${ctx.typeName}"`);
+  }
+  return newId;
+}
 
 function recloneWalk(
   node: Node,
   generate: Generate,
   shouldReclone: ShouldReclone,
-  idMap: Map<string, string>,
+  idMap: CloneIdMapImpl,
 ): Node {
   const marks = recloneMarks(node, generate, shouldReclone, idMap);
 
@@ -207,7 +287,7 @@ function recloneChildren(
   node: Node,
   generate: Generate,
   shouldReclone: ShouldReclone,
-  idMap: Map<string, string>,
+  idMap: CloneIdMapImpl,
 ): Node[] {
   const out: Node[] = [];
   node.forEach((child) => out.push(recloneWalk(child, generate, shouldReclone, idMap)));
@@ -219,15 +299,18 @@ function recloneAttrs(
   node: Node,
   generate: Generate,
   shouldReclone: ShouldReclone,
-  idMap: Map<string, string>,
+  idMap: CloneIdMapImpl,
 ): Attrs {
   if (!declaresNodeId(node.type.spec.attrs)) return node.attrs;
   const oldId = node.attrs["nodeId"];
   if (typeof oldId !== "string" || oldId.length === 0) return node.attrs;
   const ctx: RecloneIdContext = { oldId, kind: "node", typeName: node.type.name };
   if (!shouldReclone(ctx)) return node.attrs;
-  const newId = generate(ctx);
-  idMap.set(oldId, newId);
+  // The same logical id can occur more than once (most commonly when a mark
+  // is split across adjacent text nodes). Reuse its first replacement so the
+  // clone preserves that identity and the returned map remains truthful.
+  const newId = idMap.getByType(oldId, node.type.name, "node") ?? generateValidId(generate, ctx);
+  idMap.record(ctx, newId);
   return { ...node.attrs, nodeId: newId };
 }
 
@@ -236,7 +319,7 @@ function recloneMarks(
   node: Node,
   generate: Generate,
   shouldReclone: ShouldReclone,
-  idMap: Map<string, string>,
+  idMap: CloneIdMapImpl,
 ): readonly Mark[] {
   let changed = false;
   const next = node.marks.map((mark) => {
@@ -245,8 +328,8 @@ function recloneMarks(
     if (typeof oldId !== "string" || oldId.length === 0) return mark;
     const ctx: RecloneIdContext = { oldId, kind: "mark", typeName: mark.type.name };
     if (!shouldReclone(ctx)) return mark;
-    const newId = generate(ctx);
-    idMap.set(oldId, newId);
+    const newId = idMap.getByType(oldId, mark.type.name, "mark") ?? generateValidId(generate, ctx);
+    idMap.record(ctx, newId);
     changed = true;
     return mark.type.create({ ...mark.attrs, nodeId: newId });
   });

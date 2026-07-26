@@ -1,6 +1,6 @@
 import { EditorState, Transaction } from "prosemirror-state";
 import { MarkdownSerializer } from "prosemirror-markdown";
-import type { Schema, Node } from "prosemirror-model";
+import { Node, type Schema } from "prosemirror-model";
 
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
@@ -13,7 +13,12 @@ import {
   normalizeDocument,
   type NormalizeResult,
 } from "./model/normalizeDocument";
-import { recloneDocumentIds, type RecloneOptions } from "./model/assignBlockIds";
+import {
+  recordCustomCloneId,
+  recloneDocumentIds,
+  type CloneIdMap,
+  type RecloneOptions,
+} from "./model/assignBlockIds";
 
 export interface BaseEditorOptions {
   /**
@@ -95,7 +100,7 @@ export class BaseEditor implements IBaseEditor {
   protected lastNormalizeResultValue: NormalizeResult | null = null;
 
   /** Backing store for `cloneIdMap`; null unless created with `clone: true`. */
-  protected cloneIdMapValue: ReadonlyMap<string, string> | null = null;
+  protected cloneIdMapValue: CloneIdMap | null = null;
 
   /**
    * Bound command map. Type is `SafeFlatCommands` — augment
@@ -158,19 +163,43 @@ export class BaseEditor implements IBaseEditor {
         const recloneOptions = clone === true ? {} : clone;
         const recloned = recloneDocumentIds(result.doc, recloneOptions);
         let clonedDoc = recloned.doc;
-        // Shared mutable map: extension handlers read it to rewrite nodeId
-        // references and write to it as they re-key their own id spaces.
-        const idMap = new Map(recloned.idMap);
+        // Shared accumulator: extension handlers read it to rewrite nodeId
+        // references and add their own typed id spaces through recordId(), which
+        // validates and records into the same map exposed as cloneIdMap.
+        const idMap = recloned.idMap;
         for (const handler of this.manager.getCloneHandlers()) {
           const out = handler({
             doc: clonedDoc,
             idMap,
-            newId: () => crypto.randomUUID(),
+            newId: (typeName = "custom", oldId = "") =>
+              recloneOptions.generate?.({ kind: "custom", typeName, oldId }) ?? crypto.randomUUID(),
+            recordId: (typeName, oldId, newId) => recordCustomCloneId(idMap, typeName, oldId, newId),
             schema: this.manager.schema,
           });
-          if (out) clonedDoc = out;
+          if (out !== undefined) {
+            if (!(out instanceof Node)) {
+              throw new TypeError("[BaseEditor] clone handler must return a ProseMirror Node or undefined");
+            }
+            clonedDoc = out;
+          }
         }
-        initialDoc = clonedDoc;
+        // Treat extension output as another ingestion boundary: assert schema
+        // validity and repeat normalization so handlers cannot accidentally
+        // reintroduce unsafe URLs or malformed tables.
+        if (clonedDoc.type.schema !== this.manager.schema) {
+          throw new TypeError("[BaseEditor] clone handler returned a node from a different schema");
+        }
+        clonedDoc.check();
+        const postClone = normalizeDocument(clonedDoc, {
+          schema: this.manager.schema,
+          assignIds: false,
+        });
+        initialDoc = postClone.doc;
+        this.lastNormalizeResultValue = {
+          ...postClone,
+          warnings: [...result.warnings, ...postClone.warnings],
+          changed: result.changed || postClone.changed || postClone.doc !== result.doc,
+        };
         this.cloneIdMapValue = idMap;
       }
     }
@@ -231,7 +260,7 @@ export class BaseEditor implements IBaseEditor {
    * appear as keys. Remap references held outside the doc (comments, citations,
    * semantic chunks) through this map to point them at the clone.
    */
-  get cloneIdMap(): ReadonlyMap<string, string> | null {
+  get cloneIdMap(): CloneIdMap | null {
     return this.cloneIdMapValue;
   }
 

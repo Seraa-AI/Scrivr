@@ -117,4 +117,43 @@ describe("clone mode — options and extension hooks", () => {
     expect(editor.getState().doc.attrs["refId"]).toBe(newFirst);
     expect(newFirst).not.toBe("p-a");
   });
+
+  it("re-normalizes clone-handler output and reports sanitization", () => {
+    const UnsafeLinkExt = Extension.create({
+      name: "unsafeCloneTest",
+      addCloneHandlers() {
+        return [({ doc }) => {
+          const link = doc.type.schema.marks["link"]!.create({ href: "javascript:alert(1)" });
+          const paragraph = doc.type.schema.nodes["paragraph"]!.create(
+            { nodeId: doc.firstChild!.attrs["nodeId"] },
+            doc.type.schema.text("unsafe", [link]),
+          );
+          return doc.type.create(doc.attrs, paragraph);
+        }];
+      },
+    });
+    const editor = new ServerEditor({
+      extensions: [StarterKit, UnsafeLinkExt],
+      content: CONTENT,
+      clone: true,
+    });
+
+    expect(editor.getState().doc.firstChild!.firstChild!.marks).toHaveLength(0);
+    expect(editor.lastNormalizeResult!.doc).toBe(editor.getState().doc);
+    expect(editor.lastNormalizeResult!.warnings.some((warning) => warning.code === "urls-sanitized")).toBe(true);
+  });
+
+  it("rejects a clone handler that returns a node from another schema", () => {
+    const ForeignDocExt = Extension.create({
+      name: "foreignCloneTest",
+      addCloneHandlers() {
+        return [() => new ServerEditor({ content: CONTENT }).getState().doc];
+      },
+    });
+    expect(() => new ServerEditor({
+      extensions: [StarterKit, ForeignDocExt],
+      content: CONTENT,
+      clone: true,
+    })).toThrow(/different schema/);
+  });
 });

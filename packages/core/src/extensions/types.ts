@@ -30,6 +30,7 @@ import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
+import type { CloneIdMap } from "../model/assignBlockIds";
 import type {
   SelectionBehavior,
   HitTester,
@@ -100,6 +101,8 @@ export interface IBaseEditor {
   applyTransaction(tr: Transaction): void;
   /** The merged ProseMirror Schema built from all extensions. */
   readonly schema: Schema;
+  /** Typed old→new identity map produced during document cloning. */
+  readonly cloneIdMap: CloneIdMap | null;
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
   /**
@@ -514,13 +517,18 @@ export interface CloneHandlerContext {
   doc: Node;
   /**
    * old id → new id accumulated so far (core `nodeId` re-keys first, then each
-   * handler in registration order). Read it to rewrite references that point at
-   * a nodeId; write to it when you re-key your OWN id space so the map the
-   * caller receives stays complete.
+   * handler in registration order). Read it (`get` / `getByType`) to rewrite
+   * references that point at a nodeId. To add your OWN id space, call
+   * `recordId()` — it keeps the map complete and typed for `getByType()`.
    */
-  idMap: Map<string, string>;
-  /** Mint a fresh id for a re-keyed value. */
-  newId(): string;
+  idMap: CloneIdMap;
+  /**
+   * Mint a fresh extension-owned id. Supplying its type and old value also
+   * routes the request through the caller's `clone.generate` function.
+   */
+  newId(typeName?: string, oldId?: string): string;
+  /** Record an extension-owned mapping for typed lookup as `kind: "custom"`. */
+  recordId(typeName: string, oldId: string, newId: string): void;
   /** The built schema, for constructing replacement nodes/marks. */
   schema: Schema;
 }
