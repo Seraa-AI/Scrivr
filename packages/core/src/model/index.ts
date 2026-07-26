@@ -10,11 +10,18 @@ export type { EditorTheme, ResolvedTheme } from "./theme";
 export { resolveTheme, resolveThemeColor, disposeProbe } from "./resolveTheme";
 export { safeUrl } from "./safeUrl";
 export { sanitizeDocUrls } from "./sanitizeDocUrls";
-export { assignBlockIds, planBlockIdAssignments } from "./assignBlockIds";
+export { assignBlockIds, planBlockIdAssignments, recloneDocumentIds } from "./assignBlockIds";
 export { fnv1aHex, stableStringify } from "./hash";
 export type {
   AssignBlockIdsOptions,
   BlockIdAssignment,
+  RecloneResult,
+  RecloneOptions,
+  RecloneIdContext,
+  CloneIdMap,
+  CloneIdKind,
+  CloneGenerateContext,
+  CustomCloneIdContext,
 } from "./assignBlockIds";
 export { normalizeDocument } from "./normalizeDocument";
 export type {

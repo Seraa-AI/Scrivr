@@ -6,6 +6,7 @@ import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs } from "./helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus } from "./types";
+import { cloneTrackedChanges } from "./cloneTrackedChanges";
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
@@ -137,6 +138,10 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         },
       },
     };
+  },
+
+  addCloneHandlers() {
+    return [cloneTrackedChanges];
   },
 
   addExports() {

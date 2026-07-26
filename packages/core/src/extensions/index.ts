@@ -42,6 +42,8 @@ export type {
   FontModifier,
   ToolbarItemSpec,
   OverlayRenderHandler,
+  CloneHandler,
+  CloneHandlerContext,
 } from "./types";
 export type {
   GestureContext,
