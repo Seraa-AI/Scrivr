@@ -112,3 +112,77 @@ export function planBlockIdAssignments(
   });
   return out;
 }
+
+/** Result of `recloneDocumentIds`: the fresh-id doc plus the old→new mapping. */
+export interface RecloneResult {
+  /** A new document with a freshly minted `nodeId` on every id-bearing block. */
+  doc: Node;
+  /**
+   * old nodeId → new nodeId, one entry per block that carried a non-null id in
+   * the input. Blocks whose nodeId was null are re-keyed too (so the clone is
+   * fully id'd) but are absent here — they had no old id to map from.
+   */
+  idMap: ReadonlyMap<string, string>;
+}
+
+/**
+ * Clones a document into an independent `nodeId` space. Every block that
+ * declares the attr gets a brand-new id, and the old→new map lets callers
+ * remap references held OUTSIDE the doc (comment stores, citation indexes,
+ * semantic chunk tables) onto the clone. The source doc is never mutated.
+ *
+ * Only `nodeId` is re-keyed. Other id spaces (tracked-change `id`,
+ * `referenceId`, `moveNodeId`) pass through untouched — they are self-contained
+ * within the doc and nothing outside references them by value.
+ *
+ * This is the third member of the id-assignment family alongside
+ * `assignBlockIds` (fill nulls) and `planBlockIdAssignments` (per-block plan);
+ * all three share the same "which blocks carry a nodeId?" rule. Unlike the
+ * load-time read path (which never fabricates ids), a clone is an intentional
+ * new document, so minting here is correct.
+ */
+export function recloneDocumentIds(
+  doc: Node,
+  options: AssignBlockIdsOptions = {},
+): RecloneResult {
+  const generate = options.generate ?? defaultGenerate;
+  const idMap = new Map<string, string>();
+  return { doc: recloneWalk(doc, generate, idMap), idMap };
+}
+
+function recloneWalk(
+  node: Node,
+  generate: () => string,
+  idMap: Map<string, string>,
+): Node {
+  if (node.isLeaf) {
+    return hasBlockIdAttr(node)
+      ? node.type.create(rekeyedAttrs(node, generate, idMap), null, node.marks)
+      : node;
+  }
+
+  const newChildren: Node[] = [];
+  node.forEach((child) => newChildren.push(recloneWalk(child, generate, idMap)));
+  const attrs = hasBlockIdAttr(node)
+    ? rekeyedAttrs(node, generate, idMap)
+    : node.attrs;
+  return node.type.create(attrs, Fragment.fromArray(newChildren), node.marks);
+}
+
+function rekeyedAttrs(
+  node: Node,
+  generate: () => string,
+  idMap: Map<string, string>,
+): Record<string, unknown> {
+  const newId = generate();
+  const old = node.attrs["nodeId"];
+  if (typeof old === "string" && old.length > 0) idMap.set(old, newId);
+  return { ...node.attrs, nodeId: newId };
+}
+
+/** A block whose schema declares the `nodeId` attr, regardless of its value. */
+function hasBlockIdAttr(node: Node): boolean {
+  if (!node.isBlock) return false;
+  const attrs = node.type.spec.attrs;
+  return !!attrs && "nodeId" in attrs;
+}

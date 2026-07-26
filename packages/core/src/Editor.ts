@@ -110,6 +110,12 @@ export interface EditorOptions {
    */
   content?: string | Record<string, unknown>;
   /**
+   * Clone mode. When true, the initial document is deep-copied into a fresh
+   * `nodeId` space and the old→new mapping is exposed via `cloneIdMap`. See
+   * `BaseEditorOptions.clone`.
+   */
+  clone?: boolean;
+  /**
    * Page dimensions and margins. Defaults to A4 with 1-inch margins.
    * The editor owns layout — it needs page geometry to run layoutDocument.
    */
@@ -357,6 +363,7 @@ export class Editor extends BaseEditor implements IEditor {
   constructor({
     extensions = [StarterKit],
     content,
+    clone = false,
     pageConfig,
     onChange,
     onFocusChange,
@@ -369,7 +376,7 @@ export class Editor extends BaseEditor implements IEditor {
     textMeasurer,
   }: EditorOptions) {
     // BaseEditor handles: manager, state, commands, storage, event emitter
-    super({ extensions, ...(content !== undefined ? { content } : {}) });
+    super({ extensions, clone, ...(content !== undefined ? { content } : {}) });
 
     // ── Theme ──────────────────────────────────────────────────────────────
     // Initialise before any paint-related setup so renderers can read it.

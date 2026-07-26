@@ -26,6 +26,12 @@ export interface ServerEditorOptions {
    */
   content?: string | Record<string, unknown>;
   /**
+   * Clone mode. When true, the initial document is deep-copied into a fresh
+   * `nodeId` space and the old→new mapping is exposed via `cloneIdMap`. See
+   * `BaseEditorOptions.clone`.
+   */
+  clone?: boolean;
+  /**
    * Theme accepted for type parity with the browser `Editor`. ServerEditor
    * never paints, so theme is stored but unused. Values containing `var(...)`
    * cannot be resolved without a DOM — the constructor warns on those once.
@@ -73,8 +79,8 @@ export class ServerEditor extends BaseEditor {
    */
   private readonly resolvedTheme: ResolvedTheme;
 
-  constructor({ extensions = [StarterKit], content, theme }: ServerEditorOptions = {}) {
-    super({ extensions, ...(content ? { content } : {}) });
+  constructor({ extensions = [StarterKit], content, clone = false, theme }: ServerEditorOptions = {}) {
+    super({ extensions, clone, ...(content ? { content } : {}) });
     if (theme && themeContainsCssVars(theme)) {
       console.warn(
         "[ServerEditor] theme contains var(--...) values that cannot be resolved without a DOM. " +
