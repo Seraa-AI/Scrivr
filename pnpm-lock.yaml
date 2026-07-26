@@ -157,6 +157,9 @@ importers:
       '@scrivr/core':
         specifier: workspace:*
         version: link:../core
+      '@scrivr/export-semantic':
+        specifier: workspace:*
+        version: link:../export-semantic
       '@scrivr/plugins':
         specifier: workspace:*
         version: link:../plugins

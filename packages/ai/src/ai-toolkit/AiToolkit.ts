@@ -1,11 +1,14 @@
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor, IEditor } from "@scrivr/core";
+import type { IBaseEditor, IEditor, SemanticUnit } from "@scrivr/core";
+import { toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
 import { findNodeById } from "./UniqueId";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
-import { buildAcceptedTextMap } from "@scrivr/plugins";
+import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
+
+export { unitRichHash };
 import type { Schema } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { AiSuggestion as AiSuggestionExtension } from "../ai-suggestion/AiSuggestion";
@@ -89,6 +92,22 @@ export class AiSuggestionsAPI {
  *
  * Never instantiate directly — created by AiToolkit.onEditorReady().
  */
+/** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
+function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUnit {
+  return "nodeIds" in item && Array.isArray(item.nodeIds);
+}
+
+/** A caller-pinned source hash on a unit (optional stale-edit guard). */
+function sourceHashOf(item: SemanticUnit): string | undefined {
+  return readStringField(item, "expectedContentHash") ?? readStringField(item, "richHash");
+}
+
+function readStringField(item: unknown, key: string): string | undefined {
+  if (!item || typeof item !== "object" || !(key in item)) return undefined;
+  const value = (item as Record<string, unknown>)[key]; // guarded cast after typeof + in
+  return typeof value === "string" ? value : undefined;
+}
+
 export class AiToolkitAPI {
   /**
    * AI suggestion overlay API.
@@ -264,6 +283,101 @@ export class AiToolkitAPI {
     });
 
     return blocks;
+  }
+
+  // ── Rich (formatting-aware) API ──────────────────────────────────────────────
+
+  /**
+   * Like `getBlocks`, but each block is a full `SemanticUnit` carrying its
+   * inline formatting (`spans`) and block styling (`attrs`) — the rich context
+   * an agent needs to see and preserve formatting. Emits ONE unit per top-level
+   * block (grouping bypassed) so the edit round-trips mechanically; container
+   * units still expose their inner leaves via `parts`.
+   *
+   * Pass `from` / `to` to restrict to blocks overlapping a position range.
+   *
+   * @example
+   * const units = ai.getRichBlocks();
+   * const edited = await llm.rewrite(units); // returns edited units
+   * ai.applyRichEdit(edited);
+   */
+  getRichBlocks(from?: number, to?: number): SemanticUnit[] {
+    const units = toSemanticUnits(this.editor, { groupBlocks: false });
+    if (from === undefined || to === undefined) return units;
+    const allowed = new Set(this.getBlocks(from, to).map((b) => b.nodeId));
+    return units.filter((u) => allowed.has(u.id));
+  }
+
+  /**
+   * Apply the agent's rich edits as tracked-change suggestions, preserving
+   * untouched formatting.
+   *
+   * Accepts either explicit `RichBlockEdit`s (`{ nodeId, spans?, attrs? }`) or
+   * whole edited `SemanticUnit`s — the latter are auto-diffed against the live
+   * document via `unitRichHash`, so the model never states which blocks changed
+   * (unchanged units are skipped). A `RichBlockEdit.expectedContentHash` (or a
+   * unit whose source hash the caller pins) is the stale-edit guard: if the
+   * block's current rich hash differs, the edit is skipped as `stale` rather
+   * than clobbering newer content.
+   *
+   * v1 is suggestions-only; `asSuggestion: false` (direct apply) is reserved.
+   */
+  applyRichEdit(
+    edits: RichBlockEdit[] | SemanticUnit[],
+    options: { authorID?: string; asSuggestion?: boolean } = {},
+  ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
+    const authorID = options.authorID ?? "AI Assistant";
+
+    // Current rich hash per block — the freshness base for both auto-diff
+    // (which units changed) and the stale guard (did the doc move under us).
+    const currentHash = new Map<string, string>();
+    for (const u of toSemanticUnits(this.editor, { groupBlocks: false })) {
+      currentHash.set(u.id, unitRichHash(u));
+    }
+
+    const resolved: RichBlockEdit[] = [];
+    const changed: string[] = [];
+    const stale: string[] = [];
+
+    for (const item of edits) {
+      if (isSemanticUnit(item)) {
+        const nodeId = item.nodeIds[0];
+        if (!nodeId) continue;
+        const current = currentHash.get(nodeId);
+        if (current === undefined) continue; // block no longer exists
+        const sourceHash = sourceHashOf(item);
+        if (sourceHash !== undefined && sourceHash !== current) {
+          stale.push(nodeId);
+          continue;
+        }
+        if (unitRichHash(item) === current) continue; // unchanged — skip
+        changed.push(nodeId);
+        // A plain-text edit has no `spans`; synthesize one unformatted run so
+        // the inline diff still sees the new text.
+        resolved.push({
+          nodeId,
+          spans: item.spans ?? [{ text: item.text, marks: [] }],
+          ...(item.attrs ? { attrs: item.attrs } : {}),
+          expectedContentHash: sourceHash ?? current,
+        });
+      } else {
+        if (item.expectedContentHash !== undefined && currentHash.get(item.nodeId) !== item.expectedContentHash) {
+          stale.push(item.nodeId);
+          continue;
+        }
+        resolved.push(item);
+        changed.push(item.nodeId);
+      }
+    }
+
+    if (resolved.length === 0) return { applied: false, changed, stale, notFound: [], rejected: [] };
+
+    const result = applyRichDiffAsSuggestion(
+      this.editor.getState(),
+      (tr) => this.editor.applyTransaction(tr),
+      { edits: resolved, authorID },
+    );
+    return { applied: result.applied, changed, stale, notFound: result.notFound, rejected: result.rejected };
   }
 
   // ── Streaming ──────────────────────────────────────────────────────────────

@@ -1,6 +1,9 @@
-// Side-effect: augments FormatHandlers with the "semantic" key.
-import "./augmentation";
-
+// NOTE: the `FormatHandlers` "semantic" key augmentation is intentionally NOT
+// side-effect-imported here. Importing this package for its runtime (e.g.
+// @scrivr/plugins' AiToolkit) must not drag the `semantic` key into the
+// consumer's addExports() type space — that would break the empty-map leniency
+// other extensions rely on. Extensions that WRITE semantic handlers opt in with
+//   import "@scrivr/export-semantic/augment";
 export { toSemanticUnits } from "./toSemanticUnits";
 export { SemanticExport } from "./SemanticExport";
 export { unitEmbeddingInput, unitContentHash, unitRichHash, diffSemanticUnits } from "./changeDetection";

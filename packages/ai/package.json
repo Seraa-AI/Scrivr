@@ -54,6 +54,7 @@
   },
   "dependencies": {
     "@scrivr/core": "workspace:*",
+    "@scrivr/export-semantic": "workspace:*",
     "@scrivr/plugins": "workspace:*"
   },
   "peerDependencies": {
