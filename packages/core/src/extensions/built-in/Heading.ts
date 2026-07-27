@@ -5,6 +5,16 @@ import type { ToolbarItemSpec } from "../types";
 import type { BlockStyle } from "../../layout/FontConfig";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import {
+  serializeParagraphBorders,
+  parseParagraphBordersAttr,
+  serializeParagraphShading,
+  parseParagraphShadingAttr,
+} from "../../model/paragraphBorders";
+import type {
+  ParagraphBorders,
+  ParagraphShading,
+} from "../../model/paragraphBorders";
+import {
   xml,
   pxToTwips,
   type DocxNodeHandler,
@@ -66,6 +76,8 @@ export const Heading = Extension.create<HeadingOptions>({
           indent: { default: 0 },
           textIndent: { default: 0 },
           fontFamily: { default: null },
+          borders: { default: null },
+          shading: { default: null },
           nodeId: { default: null },
           dataTracked: { default: [] },
         },
@@ -87,6 +99,12 @@ export const Heading = Extension.create<HeadingOptions>({
               indent: rawMarginLeft > 0 ? Math.round(rawMarginLeft / 24) : 0,
               textIndent: rawTextIndent > 0 ? rawTextIndent : 0,
               fontFamily: fontFamily,
+              borders: parseParagraphBordersAttr(
+                el.getAttribute("data-paragraph-borders"),
+              ),
+              shading: parseParagraphShadingAttr(
+                el.getAttribute("data-paragraph-shading"),
+              ),
               nodeId: el.getAttribute("data-node-id") ?? null,
             };
           },
@@ -103,6 +121,10 @@ export const Heading = Extension.create<HeadingOptions>({
             styles.push(`font-family:${node.attrs.fontFamily as string}`);
           const attrs: Record<string, string> = {};
           if (styles.length) attrs["style"] = styles.join(";");
+          const borders = serializeParagraphBorders(node.attrs.borders);
+          if (borders) attrs["data-paragraph-borders"] = borders;
+          const shading = serializeParagraphShading(node.attrs.shading);
+          if (shading) attrs["data-paragraph-shading"] = shading;
           if (node.attrs.nodeId)
             attrs["data-node-id"] = node.attrs.nodeId as string;
           return [`h${node.attrs.level as number}`, attrs, 0];
@@ -307,6 +329,10 @@ declare module "@scrivr/core" {
       align?: "left" | "center" | "right" | "justify";
       /** Font family override. */
       fontFamily?: string | null;
+      /** Paragraph border formatting (OOXML `w:pBdr`). */
+      borders?: ParagraphBorders | null;
+      /** Paragraph shading fill (OOXML `w:shd`). */
+      shading?: ParagraphShading | null;
     };
   }
 }

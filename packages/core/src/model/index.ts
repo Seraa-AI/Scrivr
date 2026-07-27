@@ -25,3 +25,24 @@ export type {
   NormalizeWarningCode,
 } from "./normalizeDocument";
 export { getNodeAttrs, getMarkAttrs } from "./getNodeAttrs";
+export {
+  isBorderLineStyle,
+  normalizeBorderSide,
+  normalizeParagraphBorders,
+  normalizeShading,
+  hasAnyBorders,
+  mergeBorderSide,
+  serializeParagraphBorders,
+  parseParagraphBordersAttr,
+  serializeParagraphShading,
+  parseParagraphShadingAttr,
+  outsideBorders,
+  DEFAULT_PARAGRAPH_BORDER,
+} from "./paragraphBorders";
+export type {
+  BorderLineStyle,
+  ParagraphBorderSide,
+  ParagraphBorderEdge,
+  ParagraphBorders,
+  ParagraphShading,
+} from "./paragraphBorders";

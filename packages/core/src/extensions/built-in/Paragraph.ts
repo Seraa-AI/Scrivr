@@ -3,6 +3,16 @@ import type { Command } from "prosemirror-state";
 import { splitBlockAs } from "prosemirror-commands";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import {
+  serializeParagraphBorders,
+  parseParagraphBordersAttr,
+  serializeParagraphShading,
+  parseParagraphShadingAttr,
+} from "../../model/paragraphBorders";
+import type {
+  ParagraphBorders,
+  ParagraphShading,
+} from "../../model/paragraphBorders";
+import {
   xml,
   type DocxNodeHandler,
   type DocxBlockTransform,
@@ -69,6 +79,12 @@ const splitParagraph = splitBlockAs((parent, _atEnd, $from) => {
     attrs["indent"] = parent.attrs["indent"] ?? 0;
   if ("textIndent" in (newType.spec.attrs ?? {}))
     attrs["textIndent"] = parent.attrs["textIndent"] ?? 0;
+  // Borders/shading carry to the split paragraph so Enter inside a bordered
+  // paragraph keeps the box (and, once grouping lands, forms one group).
+  if ("borders" in (newType.spec.attrs ?? {}))
+    attrs["borders"] = parent.attrs["borders"] ?? null;
+  if ("shading" in (newType.spec.attrs ?? {}))
+    attrs["shading"] = parent.attrs["shading"] ?? null;
 
   return { type: newType, attrs };
 });
@@ -109,6 +125,8 @@ export const Paragraph = Extension.create({
           indent: { default: 0 },
           textIndent: { default: 0 },
           fontFamily: { default: null },
+          borders: { default: null },
+          shading: { default: null },
           nodeId: { default: null },
           dataTracked: { default: [] },
         },
@@ -129,6 +147,12 @@ export const Paragraph = Extension.create({
                 indent: rawMarginLeft > 0 ? Math.round(rawMarginLeft / 24) : 0,
                 textIndent: rawTextIndent > 0 ? rawTextIndent : 0,
                 fontFamily: fontFamily,
+                borders: parseParagraphBordersAttr(
+                  el.getAttribute("data-paragraph-borders"),
+                ),
+                shading: parseParagraphShadingAttr(
+                  el.getAttribute("data-paragraph-shading"),
+                ),
                 nodeId: el.getAttribute("data-node-id") ?? null,
               };
             },
@@ -143,6 +167,10 @@ export const Paragraph = Extension.create({
           if (node.attrs.fontFamily)
             style += `;font-family:${node.attrs.fontFamily as string}`;
           const attrs: Record<string, string> = { style };
+          const borders = serializeParagraphBorders(node.attrs.borders);
+          if (borders) attrs["data-paragraph-borders"] = borders;
+          const shading = serializeParagraphShading(node.attrs.shading);
+          if (shading) attrs["data-paragraph-shading"] = shading;
           if (node.attrs.nodeId)
             attrs["data-node-id"] = node.attrs.nodeId as string;
           return ["p", attrs, 0];
@@ -228,6 +256,10 @@ declare module "@scrivr/core" {
       align?: "left" | "center" | "right" | "justify";
       /** Font family override. */
       fontFamily?: string | null;
+      /** Paragraph border formatting (OOXML `w:pBdr`). */
+      borders?: ParagraphBorders | null;
+      /** Paragraph shading fill (OOXML `w:shd`). */
+      shading?: ParagraphShading | null;
     };
   }
 }
