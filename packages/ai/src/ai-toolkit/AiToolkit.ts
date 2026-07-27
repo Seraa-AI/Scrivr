@@ -1,6 +1,7 @@
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor, IEditor, SemanticUnit } from "@scrivr/core";
+import type { IBaseEditor, IEditor, InlineSpan, SemanticUnit } from "@scrivr/core";
 import { toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
+import type { InlineSpan as EditInlineSpan, SemanticEdit } from "../schema/edit";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
@@ -95,6 +96,19 @@ export class AiSuggestionsAPI {
 /** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
 function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUnit {
   return "nodeIds" in item && Array.isArray(item.nodeIds);
+}
+
+/**
+ * Validated spans (zod: `attrs?: T | undefined`) → core `InlineSpan`s
+ * (`exactOptionalPropertyTypes`-clean: omit `attrs` when absent). Runtime data
+ * is identical; this only reconciles the optional-property types across the
+ * zod ↔ core boundary.
+ */
+function toCoreSpans(spans: EditInlineSpan[]): InlineSpan[] {
+  return spans.map((span) => ({
+    text: span.text,
+    marks: span.marks.map((mark) => (mark.attrs !== undefined ? { type: mark.type, attrs: mark.attrs } : { type: mark.type })),
+  }));
 }
 
 /** A caller-pinned source hash on a unit (optional stale-edit guard). */
@@ -378,6 +392,36 @@ export class AiToolkitAPI {
       { edits: resolved, authorID },
     );
     return { applied: result.applied, changed, stale, notFound: result.notFound, rejected: result.rejected };
+  }
+
+  /**
+   * Apply zod-validated protocol edits (from `parseRichEdits` /
+   * `SemanticEditSchema`). The typed entry point for the public edit protocol:
+   * parse untrusted agent output, then hand the validated edits here.
+   *
+   * Phase 1 handles `richText` (inline). Unsupported kinds (the structural ops
+   * specced for later phases) are returned in `unsupported` rather than applied.
+   */
+  applySemanticEdits(
+    edits: SemanticEdit[],
+    options: { authorID?: string; asSuggestion?: boolean } = {},
+  ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[]; unsupported: string[] } {
+    const rich: RichBlockEdit[] = [];
+    const unsupported: string[] = [];
+    for (const edit of edits) {
+      // Phase 1: only `richText`. Structural ops join `SemanticEdit` in later
+      // phases and route to a dedicated adapter here (→ `unsupported` until then).
+      if (edit.kind === "richText") {
+        rich.push({
+          nodeId: edit.nodeId,
+          ...(edit.spans ? { spans: toCoreSpans(edit.spans) } : {}),
+          ...(edit.attrs ? { attrs: edit.attrs } : {}),
+          ...(edit.expectedContentHash ? { expectedContentHash: edit.expectedContentHash } : {}),
+        });
+      }
+    }
+    const result = this.applyRichEdit(rich, options);
+    return { ...result, unsupported };
   }
 
   // ── Streaming ──────────────────────────────────────────────────────────────

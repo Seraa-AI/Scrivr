@@ -55,7 +55,8 @@
   "dependencies": {
     "@scrivr/core": "workspace:*",
     "@scrivr/export-semantic": "workspace:*",
-    "@scrivr/plugins": "workspace:*"
+    "@scrivr/plugins": "workspace:*",
+    "zod": "^4.3.6"
   },
   "peerDependencies": {
     "prosemirror-model": ">=1.0.0",
