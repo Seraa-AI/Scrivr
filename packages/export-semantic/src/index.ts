@@ -6,7 +6,13 @@
 //   import "@scrivr/export-semantic/augment";
 export { toSemanticUnits } from "./toSemanticUnits";
 export { SemanticExport } from "./SemanticExport";
-export { unitEmbeddingInput, unitContentHash, unitRichHash, diffSemanticUnits } from "./changeDetection";
+export {
+  unitEmbeddingInput,
+  unitContentHash,
+  unitRichHash,
+  semanticPartRichHash,
+  diffSemanticUnits,
+} from "./changeDetection";
 export type { SemanticUnitDiff } from "./changeDetection";
 export type {
   SemanticUnit,

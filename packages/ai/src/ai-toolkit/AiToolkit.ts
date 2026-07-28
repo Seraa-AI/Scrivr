@@ -1,6 +1,6 @@
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor, IEditor, InlineSpan, SemanticUnit } from "@scrivr/core";
-import { toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
+import type { IBaseEditor, IEditor, InlineSpan, SemanticPart, SemanticUnit } from "@scrivr/core";
+import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
 import type { InlineSpan as EditInlineSpan, SemanticEdit } from "../schema/edit";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
@@ -114,6 +114,14 @@ function toCoreSpans(spans: EditInlineSpan[]): InlineSpan[] {
 /** A caller-pinned source hash on a unit (optional stale-edit guard). */
 function sourceHashOf(item: SemanticUnit): string | undefined {
   return readStringField(item, "expectedContentHash") ?? readStringField(item, "richHash");
+}
+
+function editForPart(part: SemanticPart): RichBlockEdit {
+  return {
+    nodeId: part.nodeId,
+    spans: part.spans ?? [{ text: part.text, marks: [] }],
+    ...(part.attrs ? { attrs: part.attrs } : {}),
+  };
 }
 
 function readStringField(item: unknown, key: string): string | undefined {
@@ -344,27 +352,56 @@ export class AiToolkitAPI {
 
     // Current rich hash per block — the freshness base for both auto-diff
     // (which units changed) and the stale guard (did the doc move under us).
-    const currentHash = new Map<string, string>();
+    const currentUnits = new Map<string, SemanticUnit>();
+    const currentHashByNodeId = new Map<string, string>();
     for (const u of toSemanticUnits(this.editor, { groupBlocks: false })) {
-      currentHash.set(u.id, unitRichHash(u));
+      currentUnits.set(u.id, u);
+      currentHashByNodeId.set(u.id, unitRichHash(u));
+      for (const part of u.parts ?? []) {
+        currentHashByNodeId.set(part.nodeId, semanticPartRichHash(part));
+      }
     }
 
     const resolved: RichBlockEdit[] = [];
     const changed: string[] = [];
     const stale: string[] = [];
+    const notFound: string[] = [];
 
     for (const item of edits) {
       if (isSemanticUnit(item)) {
         const nodeId = item.nodeIds[0];
         if (!nodeId) continue;
-        const current = currentHash.get(nodeId);
-        if (current === undefined) continue; // block no longer exists
+        const currentUnit = currentUnits.get(nodeId);
+        if (currentUnit === undefined) {
+          notFound.push(nodeId);
+          continue;
+        }
+        const current = unitRichHash(currentUnit);
         const sourceHash = sourceHashOf(item);
         if (sourceHash !== undefined && sourceHash !== current) {
           stale.push(nodeId);
           continue;
         }
         if (unitRichHash(item) === current) continue; // unchanged — skip
+
+        // Container units are context envelopes; their individually-addressable
+        // parts are the edit surface. Diff those leaves and never send the
+        // container itself to the leaf-only merge engine.
+        if (item.parts || currentUnit.parts) {
+          const currentParts = new Map((currentUnit.parts ?? []).map((part) => [part.nodeId, part]));
+          for (const part of item.parts ?? []) {
+            const currentPart = currentParts.get(part.nodeId);
+            if (!currentPart) {
+              notFound.push(part.nodeId);
+              continue;
+            }
+            if (semanticPartRichHash(part) === semanticPartRichHash(currentPart)) continue;
+            resolved.push(editForPart(part));
+            changed.push(part.nodeId);
+          }
+          continue;
+        }
+
         changed.push(nodeId);
         // A plain-text edit has no `spans`; synthesize one unformatted run so
         // the inline diff still sees the new text.
@@ -375,7 +412,7 @@ export class AiToolkitAPI {
           expectedContentHash: sourceHash ?? current,
         });
       } else {
-        if (item.expectedContentHash !== undefined && currentHash.get(item.nodeId) !== item.expectedContentHash) {
+        if (item.expectedContentHash !== undefined && currentHashByNodeId.get(item.nodeId) !== item.expectedContentHash) {
           stale.push(item.nodeId);
           continue;
         }
@@ -384,14 +421,20 @@ export class AiToolkitAPI {
       }
     }
 
-    if (resolved.length === 0) return { applied: false, changed, stale, notFound: [], rejected: [] };
+    if (resolved.length === 0) return { applied: false, changed, stale, notFound, rejected: [] };
 
     const result = applyRichDiffAsSuggestion(
       this.editor.getState(),
       (tr) => this.editor.applyTransaction(tr),
       { edits: resolved, authorID },
     );
-    return { applied: result.applied, changed, stale, notFound: result.notFound, rejected: result.rejected };
+    return {
+      applied: result.applied,
+      changed,
+      stale,
+      notFound: [...notFound, ...result.notFound],
+      rejected: result.rejected,
+    };
   }
 
   /**

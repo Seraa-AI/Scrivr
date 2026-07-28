@@ -149,11 +149,13 @@ function applyRichBlockToTr(
   authorID: string,
   onWarn?: (message: string) => void,
 ): boolean {
-  // Clear this author's prior pending marks so re-runs are idempotent (mirrors
-  // the plain-text path — repeated calls must not stack marks).
+  // Replacing inline intent supersedes this author's earlier inline suggestion.
+  // Attribute-only edits are independent and must preserve pending text edits.
   const found = findNodeById(tr.doc, edit.nodeId);
   if (!found) return false;
-  clearAuthorPendingMarks(tr, found.pos, found.pos + found.node.nodeSize, authorID, schema);
+  if (edit.spans) {
+    clearAuthorPendingMarks(tr, found.pos, found.pos + found.node.nodeSize, authorID, schema);
+  }
 
   const updated = findNodeById(tr.doc, edit.nodeId);
   if (!updated) return false;

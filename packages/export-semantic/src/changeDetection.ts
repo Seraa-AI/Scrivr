@@ -6,7 +6,22 @@
  * cost instead of document cost. The editor owns the identity (`nodeId`) and
  * the canonical embedding input; the consumer owns storage + the re-embed.
  */
-import { fnv1aHex, stableStringify, type SemanticUnit } from "@scrivr/core";
+import { fnv1aHex, stableStringify, type SemanticPart, type SemanticUnit } from "@scrivr/core";
+
+function richPartValue(part: SemanticPart): Record<string, unknown> {
+  return {
+    type: part.type,
+    breadcrumb: part.breadcrumb,
+    text: part.text,
+    spans: part.spans ?? [],
+    attrs: part.attrs ?? {},
+  };
+}
+
+/** Formatting-aware hash for one editable leaf nested inside a container unit. */
+export function semanticPartRichHash(part: SemanticPart): string {
+  return fnv1aHex(stableStringify(richPartValue(part)));
+}
 
 /**
  * The canonical string to embed for a unit — heading path + text, the same
@@ -46,6 +61,9 @@ export function unitRichHash(unit: SemanticUnit): string {
       text: unit.text,
       spans: unit.spans ?? [],
       attrs: unit.attrs ?? {},
+      // Lists and other containers expose their editable textblocks through
+      // parts. Include them so a formatting-only leaf edit is observable.
+      parts: unit.parts?.map(richPartValue) ?? null,
       // Table rich state lives in cells, not top-level text/spans/attrs — a cell
       // alignment/merge/header edit is invisible without this.
       cells: unit.cells ?? null,

@@ -195,6 +195,20 @@ describe("applyRichDiffAsSuggestion — block attrs", () => {
     const res = apply(ed, [{ nodeId: "p", attrs: { align: "diagonal" } }]);
     expect(res.applied).toBe(false);
   });
+
+  it("preserves the author's pending text suggestion during an attrs-only edit", () => {
+    const ed = editor(para("p", [{ type: "text", text: "Original" }]));
+    apply(ed, [{ nodeId: "p", spans: [{ text: "Original addition", marks: [] }] }]);
+    const pendingTextChanges = textChanges(ed);
+    expect(pendingTextChanges.length).toBeGreaterThan(0);
+
+    const res = apply(ed, [{ nodeId: "p", attrs: { align: "center" } }]);
+
+    expect(res.applied).toBe(true);
+    expect(ed.getState().doc.textContent).toBe("Original addition");
+    expect(textChanges(ed)).toEqual(pendingTextChanges);
+    expect(changes(ed).filter((change) => change.type === "node-attr-change")).toHaveLength(1);
+  });
 });
 
 describe("applyRichDiffAsSuggestion — untrusted spans", () => {

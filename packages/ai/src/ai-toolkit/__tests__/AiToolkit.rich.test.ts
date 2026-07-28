@@ -107,6 +107,17 @@ describe("AiToolkit.applyRichEdit — auto-diff whole units", () => {
     expect(res.stale).toEqual(["p2"]);
     expect(editor.getState().doc.textContent).toContain("Second clause live.");
   });
+
+  it("reports a whole-unit target that no longer exists", () => {
+    const { ai } = build();
+    const source = ai.getRichBlocks()[0]!;
+    const missing = { ...source, id: "missing", nodeIds: ["missing"] };
+
+    const res = ai.applyRichEdit([missing]);
+
+    expect(res.applied).toBe(false);
+    expect(res.notFound).toEqual(["missing"]);
+  });
 });
 
 describe("AiToolkit.applyRichEdit — explicit edits + stale guard", () => {
@@ -191,6 +202,31 @@ describe("round-trip fidelity — echoing what the agent saw is a no-op", () => 
     const bold = changes.filter((c) => c.type === "mark-change" && c.mark.type.name === "bold");
     expect(bold).toHaveLength(1); // only "two" bolded
     expect(changes.filter((c) => c.type === "text-change")).toHaveLength(0); // no churn
+  });
+
+  it("auto-diffs edited parts returned inside a whole container unit", () => {
+    const editor = richEditor();
+    const ai = getAiToolkit(editor)!;
+    const units = ai.getRichBlocks();
+    const edited = units.map((unit) => {
+      if (unit.id !== "list") return unit;
+      return {
+        ...unit,
+        parts: unit.parts!.map((part) =>
+          part.nodeId === "li2"
+            ? { ...part, spans: [{ text: part.text, marks: [{ type: "bold" }] }] }
+            : part,
+        ),
+      };
+    });
+
+    const res = ai.applyRichEdit(edited);
+
+    expect(res.applied).toBe(true);
+    expect(res.changed).toEqual(["li2"]);
+    expect(res.rejected).toEqual([]);
+    const bold = markChanges(editor).filter((change) => change.type === "mark-change" && change.mark.type.name === "bold");
+    expect(bold).toHaveLength(1);
   });
 });
 

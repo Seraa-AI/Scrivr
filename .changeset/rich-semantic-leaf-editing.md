@@ -23,10 +23,12 @@ verbatim echo of a list into hundreds of spurious changes.
   paragraph/heading/codeBlock addressed by `nodeId`. The agent sees the grouping;
   every leaf is individually editable.
 - `applyRichEdit(editor, edit, { asSuggestion })` — the write half: resolves the
-  target leaf by `nodeId`, auto-diffs against a per-leaf rich hash
-  (`unitRichHash` over `{text, spans, attrs}`) as a stale guard, and applies via
-  the track-changes engine. A rich edit targeting a non-textblock container
-  `nodeId` is rejected and surfaced, never flat-edited.
+  target leaf by `nodeId`, auto-diffs against a per-leaf rich hash as a stale
+  guard, and applies via the track-changes engine. When a whole **container**
+  unit (list/table) is passed, its editable `parts` are diffed leaf-by-leaf and
+  only the changed leaves are applied — the container is never sent to the
+  leaf-only merge. Targets that no longer exist are reported via `notFound`; a
+  rich edit resolving to a non-textblock is rejected, never flat-edited.
 - **zod schemas are first-class public API.** `RichSemanticEditSchema` plus the
   reused primitives (`InlineSpanSchema`, `InlineMarkSchema`) let any consumer
   `safeParse` untrusted agent output into validated, typed edits before it can
@@ -39,6 +41,10 @@ verbatim echo of a list into hundreds of spurious changes.
   / `attrs`. A unit has EITHER `spans` (it is a leaf) OR `parts` (it is a
   container). The flat `text` projection for embedding is unchanged; `parts` is
   the universal edit surface. Table `cells` geometry stays read-only.
+- New `semanticPartRichHash(part)` — the formatting-aware hash for a single
+  editable leaf, the freshness base for per-leaf auto-diff. `unitRichHash` now
+  folds in a container's `parts`, so a formatting-only edit to a nested leaf is
+  observable at the container level (previously invisible).
 
 `@scrivr/plugins`
 
@@ -48,6 +54,9 @@ verbatim echo of a list into hundreds of spurious changes.
   lockstep). Guards against non-textblock targets. Exported from the package's
   public API for `@scrivr/ai` to build on. `applyDiffAsSuggestion` imports
   `findNodeById` from `@scrivr/core` (canonical home).
+- An **attrs-only** rich edit no longer clears the author's pending inline text
+  suggestion — only an edit carrying `spans` supersedes prior inline intent — so
+  changing a block attr (e.g. alignment) preserves an in-flight text suggestion.
 
 `@scrivr/core`
 
