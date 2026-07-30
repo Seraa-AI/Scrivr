@@ -21,4 +21,11 @@ theirs, and its `toJSON` emits the same namespaced id from a shared constant so
 the two can't drift. The registration is also guarded so a duplicate
 `@scrivr/core` copy in a consumer's bundle no longer crashes on import.
 
+**Behavior change:** a persisted selection serialized before this release
+carries `"type": "cell"`. On load it no longer resolves to a `CellSelection` —
+`Selection.fromJSON` degrades it to a caret near the stored position (the doc
+itself is unaffected). Selections are rarely persisted, so most apps see nothing;
+apps that do store editor state and want the old selection back should rewrite
+`"cell"` → `"scrivr:cell"` in the saved `selection.type` before loading.
+
 The other packages carry a version-only bump (lockstep group).
