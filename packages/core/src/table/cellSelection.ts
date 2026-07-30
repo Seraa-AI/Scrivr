@@ -349,23 +349,18 @@ export class CellBookmark {
 }
 
 /**
- * jsonID under which `CellSelection` registers with prosemirror-state's single
- * global selection registry. Namespaced because that registry is process-wide:
- * prosemirror-tables (which Tiptap ships) also claims the bare `"cell"`, so an
- * app running Tiptap alongside Scrivr would throw "Duplicate use of selection
- * JSON ID cell" on import. `"scrivr:cell"` cannot collide with theirs.
+ * jsonID under which `CellSelection` registers with prosemirror-state's
+ * selection registry. Namespaced because every consumer of the same
+ * prosemirror-state instance shares that registry: prosemirror-tables (which
+ * Tiptap ships) also claims the bare `"cell"`, so an app running Tiptap alongside
+ * Scrivr would throw "Duplicate use of selection JSON ID cell" on import.
  */
 export const CELL_SELECTION_JSON_ID = "scrivr:cell";
 
-// The registry is keyed globally, so a second registration of this id — a
-// duplicate @scrivr/core copy in a consumer's bundle — also throws. Swallow it:
-// any registration under our namespace is a Scrivr CellSelection, so the already
-// registered class is compatible.
-try {
-  Selection.jsonID(CELL_SELECTION_JSON_ID, CellSelection);
-} catch {
-  // already registered by another @scrivr/core instance — harmless
-}
+// Register exactly once. A duplicate Scrivr runtime must fail fast: allowing a
+// second CellSelection class to share this id would make deserialized selections
+// fail that runtime's instanceof checks.
+Selection.jsonID(CELL_SELECTION_JSON_ID, CellSelection);
 
 /**
  * The active cell selection resolved to its cell positions, or null when the

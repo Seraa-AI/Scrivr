@@ -182,6 +182,20 @@ describe("CellSelection (Selection subclass)", () => {
     expect(restored.eq(sel)).toBe(true);
   });
 
+  it("does not register the legacy unnamespaced JSON id", () => {
+    // TODO: Remove after the pre-`scrivr:cell` release window has passed; this
+    // only guards a short-lived compatibility boundary for transient state.
+    const editor = makeEditor(rect2x2());
+    const doc = editor.getState().doc;
+    expect(() =>
+      Selection.fromJSON(doc, {
+        type: "cell",
+        anchor: cellNodePos(doc, 0, 0),
+        head: cellNodePos(doc, 1, 1),
+      }),
+    ).toThrow("No selection type cell defined");
+  });
+
   it("fromJSON degrades invalid/untrusted positions to a non-cell selection", () => {
     const editor = makeEditor(rect2x2());
     const doc = editor.getState().doc;
