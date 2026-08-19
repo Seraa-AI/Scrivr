@@ -3,7 +3,7 @@ import { Selection, TextSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
-import { selectedCells, CellSelection } from "./cellSelection";
+import { selectedCells, CellSelection, CELL_SELECTION_JSON_ID } from "./cellSelection";
 import { cellsCoveredBySelection } from "./cellSelectionSeam";
 import { serializeSelectionToHtml, serializeSelectionToText } from "../input/ClipboardSerializer";
 import { insertText } from "../model/commands";
@@ -176,10 +176,24 @@ describe("CellSelection (Selection subclass)", () => {
     const doc = editor.getState().doc;
     const sel = CellSelection.between(doc, cellNodePos(doc, 0, 0), cellNodePos(doc, 1, 1))!;
     const json = sel.toJSON();
-    expect(json.type).toBe("cell");
+    expect(json.type).toBe(CELL_SELECTION_JSON_ID);
     const restored = Selection.fromJSON(doc, json);
     expect(restored).toBeInstanceOf(CellSelection);
     expect(restored.eq(sel)).toBe(true);
+  });
+
+  it("does not register the legacy unnamespaced JSON id", () => {
+    // TODO: Remove after the pre-`scrivr:cell` release window has passed; this
+    // only guards a short-lived compatibility boundary for transient state.
+    const editor = makeEditor(rect2x2());
+    const doc = editor.getState().doc;
+    expect(() =>
+      Selection.fromJSON(doc, {
+        type: "cell",
+        anchor: cellNodePos(doc, 0, 0),
+        head: cellNodePos(doc, 1, 1),
+      }),
+    ).toThrow("No selection type cell defined");
   });
 
   it("fromJSON degrades invalid/untrusted positions to a non-cell selection", () => {
@@ -187,10 +201,12 @@ describe("CellSelection (Selection subclass)", () => {
     const doc = editor.getState().doc;
     // Positions that don't point at two cells of one table (0 is before the
     // table) must not throw or fabricate an unrelated rectangle.
-    const restored = Selection.fromJSON(doc, { type: "cell", anchor: 0, head: 0 });
+    const restored = Selection.fromJSON(doc, { type: CELL_SELECTION_JSON_ID, anchor: 0, head: 0 });
     expect(restored).not.toBeInstanceOf(CellSelection);
     // Out-of-range garbage is clamped, not thrown.
-    expect(() => Selection.fromJSON(doc, { type: "cell", anchor: 1e9, head: -5 })).not.toThrow();
+    expect(() =>
+      Selection.fromJSON(doc, { type: CELL_SELECTION_JSON_ID, anchor: 1e9, head: -5 }),
+    ).not.toThrow();
   });
 
   it("resolves its bookmark back to an equal CellSelection", () => {
