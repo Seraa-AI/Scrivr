@@ -24,6 +24,7 @@ import type {
 } from "./selection/types";
 import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
+import type { RecloneOptions } from "./model/assignBlockIds";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
 import type { FontConfig } from "./layout/FontConfig";
 import { LayoutCoordinator } from "./layout/LayoutCoordinator";
@@ -109,6 +110,13 @@ export interface EditorOptions {
    * `DefaultContent`).
    */
   content?: string | Record<string, unknown>;
+  /**
+   * Clone mode. When set, the initial document is deep-copied into a fresh
+   * `nodeId` space and the old→new mapping is exposed via `cloneIdMap`. Pass a
+   * `RecloneOptions` object to control which nodes/marks re-key and what the new
+   * ids are. See `BaseEditorOptions.clone`.
+   */
+  clone?: boolean | RecloneOptions;
   /**
    * Page dimensions and margins. Defaults to A4 with 1-inch margins.
    * The editor owns layout — it needs page geometry to run layoutDocument.
@@ -357,6 +365,7 @@ export class Editor extends BaseEditor implements IEditor {
   constructor({
     extensions = [StarterKit],
     content,
+    clone = false,
     pageConfig,
     onChange,
     onFocusChange,
@@ -369,7 +378,7 @@ export class Editor extends BaseEditor implements IEditor {
     textMeasurer,
   }: EditorOptions) {
     // BaseEditor handles: manager, state, commands, storage, event emitter
-    super({ extensions, ...(content !== undefined ? { content } : {}) });
+    super({ extensions, clone, ...(content !== undefined ? { content } : {}) });
 
     // ── Theme ──────────────────────────────────────────────────────────────
     // Initialise before any paint-related setup so renderers can read it.

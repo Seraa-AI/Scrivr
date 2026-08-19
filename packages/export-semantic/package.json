@@ -34,6 +34,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./augment": {
+      "import": {
+        "types": "./dist/augmentation.d.ts",
+        "default": "./dist/augmentation.js"
+      },
+      "require": {
+        "types": "./dist/augmentation.d.cts",
+        "default": "./dist/augmentation.cjs"
+      }
     }
   },
   "files": [

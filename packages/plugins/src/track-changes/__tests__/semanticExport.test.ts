@@ -7,6 +7,10 @@
  * FormatHandlers augmentation into this package's typecheck, which is what lets
  * TrackChanges' `addExports().semantic` return type-check.
  */
+// Opt into the FormatHandlers "semantic" key so TrackChanges' addExports().semantic
+// return type-checks. The package's runtime index no longer side-effect-loads this
+// (so AiToolkit can import export-semantic without polluting plugins' DTS build).
+import "@scrivr/export-semantic/augment";
 import { describe, it, expect } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { toSemanticUnits } from "@scrivr/export-semantic";

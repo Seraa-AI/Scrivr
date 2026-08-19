@@ -1,11 +1,15 @@
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor, IEditor } from "@scrivr/core";
+import type { IBaseEditor, IEditor, InlineSpan, SemanticPart, SemanticUnit } from "@scrivr/core";
+import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
+import type { InlineSpan as EditInlineSpan, SemanticEdit } from "../schema/edit";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
 import { findNodeById } from "./UniqueId";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
-import { buildAcceptedTextMap } from "@scrivr/plugins";
+import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
+
+export { unitRichHash };
 import type { Schema } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { AiSuggestion as AiSuggestionExtension } from "../ai-suggestion/AiSuggestion";
@@ -89,6 +93,43 @@ export class AiSuggestionsAPI {
  *
  * Never instantiate directly — created by AiToolkit.onEditorReady().
  */
+/** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
+function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUnit {
+  return "nodeIds" in item && Array.isArray(item.nodeIds);
+}
+
+/**
+ * Validated spans (zod: `attrs?: T | undefined`) → core `InlineSpan`s
+ * (`exactOptionalPropertyTypes`-clean: omit `attrs` when absent). Runtime data
+ * is identical; this only reconciles the optional-property types across the
+ * zod ↔ core boundary.
+ */
+function toCoreSpans(spans: EditInlineSpan[]): InlineSpan[] {
+  return spans.map((span) => ({
+    text: span.text,
+    marks: span.marks.map((mark) => (mark.attrs !== undefined ? { type: mark.type, attrs: mark.attrs } : { type: mark.type })),
+  }));
+}
+
+/** A caller-pinned source hash on a unit (optional stale-edit guard). */
+function sourceHashOf(item: SemanticUnit): string | undefined {
+  return readStringField(item, "expectedContentHash") ?? readStringField(item, "richHash");
+}
+
+function editForPart(part: SemanticPart): RichBlockEdit {
+  return {
+    nodeId: part.nodeId,
+    spans: part.spans ?? [{ text: part.text, marks: [] }],
+    ...(part.attrs ? { attrs: part.attrs } : {}),
+  };
+}
+
+function readStringField(item: unknown, key: string): string | undefined {
+  if (!item || typeof item !== "object" || !(key in item)) return undefined;
+  const value = (item as Record<string, unknown>)[key]; // guarded cast after typeof + in
+  return typeof value === "string" ? value : undefined;
+}
+
 export class AiToolkitAPI {
   /**
    * AI suggestion overlay API.
@@ -264,6 +305,166 @@ export class AiToolkitAPI {
     });
 
     return blocks;
+  }
+
+  // ── Rich (formatting-aware) API ──────────────────────────────────────────────
+
+  /**
+   * Like `getBlocks`, but each block is a full `SemanticUnit` carrying its
+   * inline formatting (`spans`) and block styling (`attrs`) — the rich context
+   * an agent needs to see and preserve formatting. Emits ONE unit per top-level
+   * block (grouping bypassed) so the edit round-trips mechanically; container
+   * units still expose their inner leaves via `parts`.
+   *
+   * Pass `from` / `to` to restrict to blocks overlapping a position range.
+   *
+   * @example
+   * const units = ai.getRichBlocks();
+   * const edited = await llm.rewrite(units); // returns edited units
+   * ai.applyRichEdit(edited);
+   */
+  getRichBlocks(from?: number, to?: number): SemanticUnit[] {
+    const units = toSemanticUnits(this.editor, { groupBlocks: false });
+    if (from === undefined || to === undefined) return units;
+    const allowed = new Set(this.getBlocks(from, to).map((b) => b.nodeId));
+    return units.filter((u) => allowed.has(u.id));
+  }
+
+  /**
+   * Apply the agent's rich edits as tracked-change suggestions, preserving
+   * untouched formatting.
+   *
+   * Accepts either explicit `RichBlockEdit`s (`{ nodeId, spans?, attrs? }`) or
+   * whole edited `SemanticUnit`s — the latter are auto-diffed against the live
+   * document via `unitRichHash`, so the model never states which blocks changed
+   * (unchanged units are skipped). A `RichBlockEdit.expectedContentHash` (or a
+   * unit whose source hash the caller pins) is the stale-edit guard: if the
+   * block's current rich hash differs, the edit is skipped as `stale` rather
+   * than clobbering newer content.
+   *
+   * v1 is suggestions-only; `asSuggestion: false` (direct apply) is reserved.
+   */
+  applyRichEdit(
+    edits: RichBlockEdit[] | SemanticUnit[],
+    options: { authorID?: string; asSuggestion?: boolean } = {},
+  ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
+    const authorID = options.authorID ?? "AI Assistant";
+
+    // Current rich hash per block — the freshness base for both auto-diff
+    // (which units changed) and the stale guard (did the doc move under us).
+    const currentUnits = new Map<string, SemanticUnit>();
+    const currentHashByNodeId = new Map<string, string>();
+    for (const u of toSemanticUnits(this.editor, { groupBlocks: false })) {
+      currentUnits.set(u.id, u);
+      currentHashByNodeId.set(u.id, unitRichHash(u));
+      for (const part of u.parts ?? []) {
+        currentHashByNodeId.set(part.nodeId, semanticPartRichHash(part));
+      }
+    }
+
+    const resolved: RichBlockEdit[] = [];
+    const changed: string[] = [];
+    const stale: string[] = [];
+    const notFound: string[] = [];
+
+    for (const item of edits) {
+      if (isSemanticUnit(item)) {
+        const nodeId = item.nodeIds[0];
+        if (!nodeId) continue;
+        const currentUnit = currentUnits.get(nodeId);
+        if (currentUnit === undefined) {
+          notFound.push(nodeId);
+          continue;
+        }
+        const current = unitRichHash(currentUnit);
+        const sourceHash = sourceHashOf(item);
+        if (sourceHash !== undefined && sourceHash !== current) {
+          stale.push(nodeId);
+          continue;
+        }
+        if (unitRichHash(item) === current) continue; // unchanged — skip
+
+        // Container units are context envelopes; their individually-addressable
+        // parts are the edit surface. Diff those leaves and never send the
+        // container itself to the leaf-only merge engine.
+        if (item.parts || currentUnit.parts) {
+          const currentParts = new Map((currentUnit.parts ?? []).map((part) => [part.nodeId, part]));
+          for (const part of item.parts ?? []) {
+            const currentPart = currentParts.get(part.nodeId);
+            if (!currentPart) {
+              notFound.push(part.nodeId);
+              continue;
+            }
+            if (semanticPartRichHash(part) === semanticPartRichHash(currentPart)) continue;
+            resolved.push(editForPart(part));
+            changed.push(part.nodeId);
+          }
+          continue;
+        }
+
+        changed.push(nodeId);
+        // A plain-text edit has no `spans`; synthesize one unformatted run so
+        // the inline diff still sees the new text.
+        resolved.push({
+          nodeId,
+          spans: item.spans ?? [{ text: item.text, marks: [] }],
+          ...(item.attrs ? { attrs: item.attrs } : {}),
+          expectedContentHash: sourceHash ?? current,
+        });
+      } else {
+        if (item.expectedContentHash !== undefined && currentHashByNodeId.get(item.nodeId) !== item.expectedContentHash) {
+          stale.push(item.nodeId);
+          continue;
+        }
+        resolved.push(item);
+        changed.push(item.nodeId);
+      }
+    }
+
+    if (resolved.length === 0) return { applied: false, changed, stale, notFound, rejected: [] };
+
+    const result = applyRichDiffAsSuggestion(
+      this.editor.getState(),
+      (tr) => this.editor.applyTransaction(tr),
+      { edits: resolved, authorID },
+    );
+    return {
+      applied: result.applied,
+      changed,
+      stale,
+      notFound: [...notFound, ...result.notFound],
+      rejected: result.rejected,
+    };
+  }
+
+  /**
+   * Apply zod-validated protocol edits (from `parseRichEdits` /
+   * `SemanticEditSchema`). The typed entry point for the public edit protocol:
+   * parse untrusted agent output, then hand the validated edits here.
+   *
+   * Phase 1 handles `richText` (inline). Unsupported kinds (the structural ops
+   * specced for later phases) are returned in `unsupported` rather than applied.
+   */
+  applySemanticEdits(
+    edits: SemanticEdit[],
+    options: { authorID?: string; asSuggestion?: boolean } = {},
+  ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[]; unsupported: string[] } {
+    const rich: RichBlockEdit[] = [];
+    const unsupported: string[] = [];
+    for (const edit of edits) {
+      // Phase 1: only `richText`. Structural ops join `SemanticEdit` in later
+      // phases and route to a dedicated adapter here (→ `unsupported` until then).
+      if (edit.kind === "richText") {
+        rich.push({
+          nodeId: edit.nodeId,
+          ...(edit.spans ? { spans: toCoreSpans(edit.spans) } : {}),
+          ...(edit.attrs ? { attrs: edit.attrs } : {}),
+          ...(edit.expectedContentHash ? { expectedContentHash: edit.expectedContentHash } : {}),
+        });
+      }
+    }
+    const result = this.applyRichEdit(rich, options);
+    return { ...result, unsupported };
   }
 
   // ── Streaming ──────────────────────────────────────────────────────────────

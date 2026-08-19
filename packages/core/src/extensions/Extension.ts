@@ -92,6 +92,9 @@ export class Extension<Options extends object = object> {
       // Phase 1 — format-specific import contributions collected by format
       // packages at import time (e.g. importDocx walks addImports().docx contributions).
       imports: config.addImports?.call(p1) ?? {},
+      // Phase 1 — clone participation hooks; BaseEditor runs them after the core
+      // nodeId re-key when an editor is created with `clone`.
+      cloneHandlers: config.addCloneHandlers?.call(p1) ?? [],
       // Phase 2: only when schema is available
       plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
       ...(schema && config.addInitialDoc
