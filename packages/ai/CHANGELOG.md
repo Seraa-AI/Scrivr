@@ -1,4 +1,4 @@
-# @scrivr/export-semantic
+# @scrivr/ai
 
 ## 1.0.18
 
@@ -103,33 +103,6 @@
 
   The other packages carry a version-only bump (lockstep group).
 
-- 90e96e9: Substrate for node-level incremental re-embedding (freshness engine).
-
-  `@scrivr/export-semantic` — new change-detection helpers so a consumer can
-  re-embed only what changed between document versions instead of the whole doc:
-
-  - `unitEmbeddingInput(unit)` — the canonical string to embed (`breadcrumb + text`),
-    one source of truth for both embedding and hashing.
-  - `unitContentHash(unit)` — deterministic hash of that input. Identical hash ⇒
-    the vector is unchanged ⇒ skip re-embed. Formatting-only edits (bold, color,
-    alignment) don't change it; a text or breadcrumb change does.
-  - `diffSemanticUnits(prev, next)` — matches units by stable anchor id and returns
-    `{ added, removed, changed, unchanged }`. Editing one paragraph marks exactly
-    one unit changed.
-  - `unitRichHash(unit)` — a formatting-aware companion hash (`type` + `breadcrumb` +
-    `text` + `spans` + `attrs`). Unlike `unitContentHash` it DOES change on a
-    formatting-only edit (bold, color, alignment), so it's the detector for the
-    upcoming rich AI-edit loop, not embedding freshness.
-
-  `@scrivr/core` — collab-safe stable ids. `UniqueId` now stamps a `nodeId` only on
-  LOCAL edits; a remote Yjs apply (tagged `COLLAB_SYNC_META` by the collaboration
-  binding) is skipped, so a block's id is assigned once by its author and synced
-  rather than re-stamped with a divergent uuid on every receiving client. Also
-  exports `fnv1aHex` + `stableStringify`, the shared hash + canonical serializer used
-  by the document fingerprint and the per-unit hashes (no parallel copies).
-
-  `@scrivr/plugins` — the Yjs binding marks remote applies with `COLLAB_SYNC_META`.
-
 - de5fff9: Leaf-based rich semantic editing — an AI agent can now read a document with its
   formatting and write inline edits back that land as tracked-change suggestions,
   without churning the parts it didn't touch. The editable surface is the **leaf
@@ -189,19 +162,6 @@
 
   The other packages carry a version-only bump (lockstep group).
 
-- d677454: `@scrivr/plugins`
-
-  - Track-changes engine: `mergeTrackedMarks` now fuses adjacent **formatting**
-    marks (bold/highlight/color/…), not only tracked insert/delete text. A run of
-    the same mark with the same author, operation and status collapses to one
-    tracking id — the grouping typed text already got, now for formatting. Marks
-    with different own attrs (e.g. two colors) never merge. `trackTransaction`
-    invokes the merge after `AddMarkStep`/`RemoveMarkStep` at both boundaries.
-
-    Fixes a live-editing bug: bolding two adjacent words (or applying a mark in
-    several steps over a run) previously produced one tracked change per segment
-    instead of a single reviewable change.
-
 - Updated dependencies [287c6c0]
 - Updated dependencies [ff38bc1]
 - Updated dependencies [da917c2]
@@ -209,65 +169,5 @@
 - Updated dependencies [de5fff9]
 - Updated dependencies [d677454]
   - @scrivr/core@1.0.18
-
-## 1.0.17
-
-### Patch Changes
-
-- aea772a: `@scrivr/export-semantic` — new `semantic` export lane that emits AI-ready
-  `SemanticUnit[]` for RAG pipelines. `toSemanticUnits(editor)` walks the document
-  tree headless (ServerEditor, from `contentJSON`) and produces ordered units
-  carrying structure, stable identity (`nodeId`, with a deterministic positional
-  fallback), and heading breadcrumb. Ships a `SemanticExport` extension — add it to
-  the editor and call `editor.commands.exportSemantic()` (downloads a `.json`, or
-  pass `{ onExport: units => … }` to receive the data headlessly), mirroring
-  `DocxExport` / `PdfExport`.
-
-  `@scrivr/core` — `IBaseEditor` now declares `getMarkdownSerializer()` (both
-  `Editor` and `ServerEditor` already implement it) so headless export lanes can
-  serialize arbitrary node groups.
-
-  Lossless formatting on `SemanticUnit` (markdown can't express alignment/color/font):
-
-  - `attrs` — the block's non-default styling (`align`, `indent`, `fontFamily`, list
-    start, …), with identity/level bookkeeping stripped.
-  - `spans` — inline formatting runs (`InlineSpan`), each carrying its marks + attrs
-    (bold, italic, color, highlight, fontSize, link, …). Reconstructs `text` exactly.
-  - Both also on `TableCell`; both emitted only when non-empty. Tracked-change marks
-    are review metadata (surfaced in `changes`) and are excluded from `spans`; the
-    TrackChanges extension registers a `trackedInsert` seam handler so it is kept in
-    text but not treated as formatting.
-  - `view: "proposed"` states the text contract explicitly (pending inserts included,
-    pending deletes excluded into `changes`). `markdown` is a lossy convenience
-    projection and is omitted when a unit has `changes`, so its redline rendering
-    never contradicts the proposed `text`. Grouping's "short lede" test uses
-    mark-aware length; `spans` are emitted only when they reconstruct the final text.
-
-  `@scrivr/core` — adds the canonical `semantic` handler types (`SemanticUnit`,
-  `TableCells`, `SemanticNodeHandler`, `SemanticMarkHandler`, `UnitCtx`) and, via
-  the per-extension `addExports().semantic` seam, node handlers for paragraph,
-  heading, list, table (structured cells with gridSpan/vMerge), codeBlock,
-  horizontalRule, pageBreak, and image. Unregistered nodes degrade to a visible
-  `type:"unknown"` unit rather than being dropped.
-
-  `@scrivr/plugins` — TrackChanges contributes a `semantic` mark handler so
-  suggested-deletion text is excluded from unit text (not embedded) while inserted
-  text is kept.
-
-  Deterministic block identity (fixes non-deterministic chunk ids):
-
-  - `UniqueId` now ships in `@scrivr/core` and is bundled in **StarterKit** (opt
-    out with `StarterKit.configure({ uniqueId: false })`), so stable, persisted
-    block `nodeId`s are the default with or without the AI toolkit. It also now
-    preserves pending `storedMarks` when it stamps, so mark inheritance across an
-    Enter split is unaffected. `@scrivr/plugins` re-exports `UniqueId` /
-    `findNodeById` from core for back-compat.
-  - `ServerEditor` no longer fabricates block ids on load. A headless read/emit
-    surface must be deterministic: it preserves persisted `nodeId`s and never
-    stamps random ones, so loading the same `contentJSON` twice yields the same
-    ids (previously every load churned ids, breaking chunk identity and causing
-    duplicate chunk sets). The interactive `Editor` still assigns ids on load, and
-    `normalizeDocument({ assignIds })` remains available for explicit assign passes.
-
-- Updated dependencies [aea772a]
-  - @scrivr/core@1.0.17
+  - @scrivr/plugins@1.0.18
+  - @scrivr/export-semantic@1.0.18
