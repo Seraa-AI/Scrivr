@@ -17,6 +17,7 @@ import { Link } from "./built-in/Link";
 import { List } from "./built-in/List";
 import { Alignment } from "./built-in/Alignment";
 import { Indent } from "./built-in/Indent";
+import { ParagraphBorders } from "./built-in/ParagraphBorders";
 import { CodeBlock, insertCodeIndent } from "./built-in/CodeBlock";
 import { HorizontalRule } from "./built-in/HorizontalRule";
 import { PageBreak } from "./built-in/PageBreak";
@@ -475,6 +476,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       Object.assign(cmds, Alignment.resolve(this.schema).commands);
     }
     Object.assign(cmds, Indent.resolve(this.schema).commands);
+    Object.assign(cmds, ParagraphBorders.resolve(this.schema).commands);
     if (opts.codeBlock !== false) {
       Object.assign(cmds, CodeBlock.resolve(this.schema).commands);
     }
@@ -621,6 +623,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
       items.push(...Alignment.resolve().toolbarItems);
     }
     items.push(...Indent.resolve().toolbarItems);
+    items.push(...ParagraphBorders.resolve().toolbarItems);
     if (opts.bold !== false) {
       const ext = typeof opts.bold === "object" ? Bold.configure(opts.bold) : Bold;
       items.push(...ext.resolve().toolbarItems);
