@@ -25,5 +25,6 @@ export function toSemanticUnits(
   const handlers = collectHandlers(editor, options.overrides);
   const ctx = createUnitCtx(editor, handlers.marks);
   const shortMax = options.shortBlockMaxChars ?? DEFAULT_SHORT_MAX;
-  return walkSemantic(editor.getState().doc, ctx, handlers, shortMax);
+  const group = options.groupBlocks ?? true;
+  return walkSemantic(editor.getState().doc, ctx, handlers, shortMax, group);
 }

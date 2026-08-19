@@ -65,7 +65,7 @@ import { skipTracking, TrackChangesAction, setAction } from "../actions";
  * Deletions are applied in reverse position order so earlier positions remain
  * stable as we go.
  */
-function clearAuthorPendingMarks(
+export function clearAuthorPendingMarks(
   tr: Transaction,
   nodeFrom: number,
   nodeTo: number,

@@ -189,3 +189,109 @@ describe("toSemanticUnits — lists and other blocks", () => {
     expect(units[0]!.text).toBe("hello\nworld");
   });
 });
+
+describe("toSemanticUnits — parts (editable leaves)", () => {
+  const listItem = (nodeId: string, text: string, marks?: Record<string, unknown>[]) => ({
+    type: "listItem",
+    content: [
+      {
+        type: "paragraph",
+        attrs: { nodeId },
+        content: [{ type: "text", text, ...(marks ? { marks } : {}) }],
+      },
+    ],
+  });
+  const cell = (nodeId: string, text: string) => ({
+    type: "tableCell",
+    content: [{ type: "paragraph", attrs: { nodeId }, content: [{ type: "text", text }] }],
+  });
+
+  it("exposes each list item's paragraph as an addressable part", () => {
+    const units = toSemanticUnits(
+      edit({
+        type: "doc",
+        content: [
+          { type: "bulletList", content: [listItem("li1", "Basic tier"), listItem("li2", "Pro tier")] },
+        ],
+      }),
+    );
+    const list = units.find((u) => u.type === "list")!;
+    expect(list.text).toContain("Basic tier");
+    expect(list.parts).toEqual([
+      { nodeId: "li1", type: "paragraph", breadcrumb: ["item 1"], text: "Basic tier" },
+      { nodeId: "li2", type: "paragraph", breadcrumb: ["item 2"], text: "Pro tier" },
+    ]);
+  });
+
+  it("part breadcrumb extends the unit's heading path", () => {
+    const units = toSemanticUnits(
+      edit({
+        type: "doc",
+        content: [
+          heading(1, "Pricing"),
+          { type: "bulletList", content: [listItem("li1", "Basic tier")] },
+        ],
+      }),
+    );
+    const list = units.find((u) => u.type === "list")!;
+    expect(list.parts![0]!.breadcrumb).toEqual(["Pricing", "item 1"]);
+  });
+
+  it("carries per-part spans when a leaf is formatted", () => {
+    const units = toSemanticUnits(
+      edit({
+        type: "doc",
+        content: [
+          { type: "bulletList", content: [listItem("li1", "Bold item", [{ type: "bold" }])] },
+        ],
+      }),
+    );
+    const part = units.find((u) => u.type === "list")!.parts![0]!;
+    expect(part.spans).toEqual([{ text: "Bold item", marks: [{ type: "bold" }] }]);
+  });
+
+  it("addresses table cells as parts with row/col breadcrumbs", () => {
+    // Tables are an opt-in StarterKit preview, so enable the schema here.
+    const editor = new ServerEditor({
+      extensions: [StarterKit.configure({ table: true })],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "table",
+            attrs: { layout: "fixed", grid: [120, 120] },
+            content: [
+              { type: "tableRow", content: [cell("c1", "A1"), cell("c2", "B1")] },
+              { type: "tableRow", content: [cell("c3", "A2"), cell("c4", "B2")] },
+            ],
+          },
+        ],
+      },
+    });
+    const units = toSemanticUnits(editor);
+    const table = units.find((u) => u.type === "table")!;
+    const byId = Object.fromEntries(table.parts!.map((p) => [p.nodeId, p.breadcrumb]));
+    expect(byId["c1"]).toEqual(["row 1", "col 1"]);
+    expect(byId["c4"]).toEqual(["row 2", "col 2"]);
+    expect(table.parts!.find((p) => p.nodeId === "c4")!.text).toBe("B2");
+  });
+
+  it("a top-level leaf block has no parts (it is addressed as the unit)", () => {
+    const units = toSemanticUnits(edit({ type: "doc", content: [para("just a paragraph")] }));
+    expect(units[0]!.parts).toBeUndefined();
+  });
+
+  it("groupBlocks:false emits one unit per top-level block", () => {
+    const grouped = toSemanticUnits(
+      edit({ type: "doc", content: [heading(1, "Intro"), para("A short lede.")] }),
+    );
+    expect(grouped).toHaveLength(1); // cohesive pair
+
+    const ungrouped = toSemanticUnits(
+      edit({ type: "doc", content: [heading(1, "Intro"), para("A short lede.")] }),
+      { groupBlocks: false },
+    );
+    expect(ungrouped).toHaveLength(2);
+    expect(ungrouped.map((u) => u.type)).toEqual(["heading", "paragraph"]);
+  });
+});

@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "prosemirror-model";
-import type { SemanticNodeResult, SemanticUnit, UnitCtx } from "@scrivr/core";
+import type { SemanticNodeResult, SemanticPart, SemanticUnit, UnitCtx } from "@scrivr/core";
 import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";
 import { resolveNodeId, type BlockEntry } from "./id";
@@ -32,13 +32,19 @@ export function walkSemantic(
   ctx: UnitCtx,
   handlers: ResolvedHandlers,
   shortBlockMaxChars: number,
+  group = true,
 ): SemanticUnit[] {
   const entries: BlockEntry[] = [];
   doc.forEach((node, _offset, index) => {
     entries.push({ node, index });
   });
 
-  const groups = groupBlocks(entries, shortBlockMaxChars, (node) => ctx.toText(node));
+  // One unit per block (the edit read path) bypasses cohesive-pair grouping so
+  // each unit maps to exactly one block. Container units still expose their
+  // inner leaves as `parts` either way.
+  const groups = group
+    ? groupBlocks(entries, shortBlockMaxChars, (node) => ctx.toText(node))
+    : entries.map((e) => [e]);
   const units: SemanticUnit[] = [];
   const stack: { level: number; title: string }[] = [];
   let order = 0;
@@ -107,9 +113,90 @@ export function walkSemantic(
     const markdown = result.markdown ?? ctx.toMarkdown(nodes);
     if (changes.length === 0 && markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
+    // Container units (list, table, …) expose their inner leaf textblocks as
+    // individually addressable `parts` — the edit surface. A leaf unit has none.
+    const parts = extractParts(nodes, ctx, breadcrumb);
+    if (parts) unit.parts = parts;
 
     units.push(unit);
   }
 
   return units;
+}
+
+/** Location label for a positional container level in a part breadcrumb. */
+const CONTAINER_LABELS: Record<string, string> = {
+  listItem: "item",
+  tableRow: "row",
+  tableCell: "col",
+  tableHeader: "col",
+};
+
+/** The textblock types exposed as editable parts (matches `SemanticPart.type`). */
+function partTypeOf(name: string): SemanticPart["type"] | null {
+  switch (name) {
+    case "paragraph":
+      return "paragraph";
+    case "heading":
+      return "heading";
+    case "codeBlock":
+      return "codeBlock";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Collect the editable leaf textblocks nested inside a unit's blocks. Only
+ * containers (list, table) yield parts; a group whose blocks are all leaf
+ * textblocks yields none (those are addressed as the unit itself). Breadcrumb
+ * extends the unit's with positional context (`item 2`, `row 1`, `col 2`).
+ */
+function extractParts(
+  nodes: readonly PmNode[],
+  ctx: UnitCtx,
+  unitBreadcrumb: string[],
+): SemanticPart[] | undefined {
+  const parts: SemanticPart[] = [];
+  for (const node of nodes) {
+    // A top-level leaf block is the unit itself, not a nested part.
+    if (node.isTextblock) continue;
+    collectParts(node, ctx, unitBreadcrumb, parts);
+  }
+  return parts.length > 0 ? parts : undefined;
+}
+
+function collectParts(
+  node: PmNode,
+  ctx: UnitCtx,
+  breadcrumb: string[],
+  out: SemanticPart[],
+): void {
+  node.forEach((child, _offset, index) => {
+    const label = CONTAINER_LABELS[child.type.name];
+    const childBreadcrumb = label ? [...breadcrumb, `${label} ${index + 1}`] : breadcrumb;
+
+    if (child.isTextblock) {
+      const partType = partTypeOf(child.type.name);
+      const nodeId = child.attrs["nodeId"];
+      if (partType && typeof nodeId === "string" && nodeId.length > 0) {
+        const part: SemanticPart = {
+          nodeId,
+          type: partType,
+          breadcrumb: childBreadcrumb,
+          text: ctx.toText(child),
+        };
+        const spans = ctx.toSpans(child);
+        if (spans.map((s) => s.text).join("") === part.text && spans.some((s) => s.marks.length > 0)) {
+          part.spans = spans;
+        }
+        const attrs = ctx.attrsOf(child);
+        if (attrs) part.attrs = attrs;
+        out.push(part);
+      }
+      return; // textblocks hold only inline content — nothing deeper to collect
+    }
+
+    collectParts(child, ctx, childBreadcrumb, out);
+  });
 }
