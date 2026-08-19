@@ -1,6 +1,7 @@
 import { Schema } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { keymap } from "prosemirror-keymap";
+import { chainCommands } from "prosemirror-commands";
 import { inputRules } from "prosemirror-inputrules";
 import type { Plugin, Command } from "prosemirror-state";
 import type { Node as ProseMirrorNode, AttributeSpec, NodeSpec, MarkSpec } from "prosemirror-model";
@@ -105,6 +106,42 @@ function specsOf<T>(target: Map<string, Contribution<T>>): Record<string, T> {
 }
 
 /**
+ * Expand every extension that declares `addExtensions()` into a flat list:
+ * each parent is followed immediately by its children, depth-first.
+ *
+ * Everything downstream — schema build, keymap, commands, layout handlers,
+ * clone handlers, and every seam added later — then sees a bundle's children
+ * as ordinary extensions. That is the whole point: a bundle can never drop a
+ * contribution it forgot to forward, because it does not forward anything.
+ *
+ * Parent-before-children keeps the composition rule consumers already rely on:
+ * anything listed after a bundle still layers on top of everything inside it.
+ */
+export function flattenExtensions(extensions: Extension[]): Extension[] {
+  const out: Extension[] = [];
+  const seen = new Set<Extension>();
+
+  const visit = (ext: Extension): void => {
+    // Guards against a bundle that (directly or transitively) lists itself.
+    // Without this the recursion never terminates and the failure surfaces as
+    // a stack overflow far from the misconfigured extension.
+    if (seen.has(ext)) {
+      console.warn(
+        `[ExtensionManager] Extension "${ext.name}" appears more than once in the extension tree; ` +
+          `the duplicate is ignored. Check for a bundle that includes itself or a doubly-listed extension.`,
+      );
+      return;
+    }
+    seen.add(ext);
+    out.push(ext);
+    for (const child of ext.children()) visit(child);
+  };
+
+  for (const ext of extensions) visit(ext);
+  return out;
+}
+
+/**
  * Walk extensions once for Phase 1 schema contributions. This keeps
  * addNodes/addMarks/addDocAttrs in the same resolution pass and avoids
  * re-running phase-1 extension hooks just to expose doc-attr ownership.
@@ -189,7 +226,7 @@ function buildSchemaFromPhase1(contribs: Phase1SchemaContributions): Schema {
  *   const schema = getSchema([StarterKit]);
  */
 export function getSchema(extensions: Extension[]): Schema {
-  return buildSchemaFromPhase1(collectPhase1SchemaContributions(extensions));
+  return buildSchemaFromPhase1(collectPhase1SchemaContributions(flattenExtensions(extensions)));
 }
 
 /**
@@ -217,15 +254,18 @@ export class ExtensionManager {
   private readonly docAttrOwners: Record<string, string>;
 
   constructor(extensions: Extension[]) {
-    this.extensions = extensions;
+    // Phase 0: expand bundles. From here on there are no bundles, only
+    // extensions — every later phase treats a StarterKit child exactly like an
+    // extension the consumer listed themselves.
+    this.extensions = flattenExtensions(extensions);
 
     // Phase 1: build schema and capture doc-attr ownership in one pass.
-    const phase1 = collectPhase1SchemaContributions(extensions);
+    const phase1 = collectPhase1SchemaContributions(this.extensions);
     this.schema = buildSchemaFromPhase1(phase1);
     this.docAttrOwners = phase1.docAttrOwners;
 
     // Phase 2+: resolve everything else with the built schema in context
-    this.resolved = extensions.map((ext) => ext.resolve(this.schema));
+    this.resolved = this.extensions.map((ext) => ext.resolve(this.schema));
   }
 
   /**
@@ -252,8 +292,14 @@ export class ExtensionManager {
    * shape.
    */
   findExtension(name: string): Extension | null {
-    for (const ext of this.extensions) {
-      if (ext.name === name) return ext;
+    // Last match wins, matching how every other contribution resolves: a name
+    // listed after a bundle overrides the bundle's own copy. `[StarterKit,
+    // Heading.configure({levels:[1]})]` must resolve to the caller's Heading,
+    // not the kit's — the kit's child is registered under the same name and
+    // comes first.
+    for (let i = this.extensions.length - 1; i >= 0; i--) {
+      const ext = this.extensions[i];
+      if (ext && ext.name === name) return ext;
     }
     return null;
   }
@@ -378,9 +424,25 @@ export class ExtensionManager {
    * Used by the Editor to dispatch key events without a ProseMirror EditorView.
    */
   buildKeymap(): Record<string, Command> {
+    // Keybindings compose; they don't override. A ProseMirror command returning
+    // `false` is declaring "not applicable here", so the next contributor for
+    // that key must get a turn — that is how one key carries several meanings:
+    // Tab moves between table cells, indents a list, or inserts code
+    // indentation depending on where the cursor is.
+    //
+    // Last-wins would keep only the final contributor and silently delete the
+    // rest, which is the class of bug that made bundles hand-chain their own
+    // keymaps. Order is extension registration order, so a later extension
+    // chains behind an earlier one and an earlier one gets first refusal.
     const bindings = new Map<string, Contribution<Command>>();
     for (const ext of this.resolved) {
-      mergeContributions(bindings, ext.keymap, ext.name, "Keymap", "warn");
+      for (const [key, command] of Object.entries(ext.keymap)) {
+        const prev = bindings.get(key);
+        bindings.set(key, {
+          spec: prev ? chainCommands(prev.spec, command) : command,
+          owner: prev ? `${prev.owner} → ${ext.name}` : ext.name,
+        });
+      }
     }
     return specsOf(bindings);
   }

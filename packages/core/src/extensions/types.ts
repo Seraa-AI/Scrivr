@@ -13,6 +13,7 @@
  *   Phase 3 — addLayoutHandler / addMarkDecorators → wired into BlockRegistry + renderer
  */
 
+import type { Extension } from "./Extension";
 import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark } from "prosemirror-model";
 import type { MarkdownSerializer, MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
@@ -134,7 +135,7 @@ export interface IBaseEditor {
    * `Extension` because the manager has no compile-time link from `name`
    * to option shape.
    */
-  findExtension(name: string): import("./Extension").Extension | null;
+  findExtension(name: string): Extension | null;
 }
 
 /**
@@ -554,6 +555,22 @@ export interface ExtensionConfig<Options = object> {
   // Called with `this = Phase1Context` — options available, schema is not yet built.
 
   /** Contribute ProseMirror node specs. Keys become schema node type names. */
+  /**
+   * Sub-extensions this extension is composed of. The manager flattens them
+   * into its own list before any other phase runs, so a bundle never has to
+   * forward its children's contributions by hand — every `add*` hook a child
+   * declares is collected exactly as if the consumer had listed it directly.
+   *
+   * Children resolve in the order returned, immediately after their parent, so
+   * an extension listed after the bundle still layers on top of everything the
+   * bundle brought. Flattening is recursive: a bundle may contain a bundle.
+   *
+   * This is the hook that keeps `StarterKit` honest — without it, each new
+   * contribution seam has to be re-plumbed through the bundle or it silently
+   * vanishes for everyone using the default kit.
+   */
+  addExtensions?(this: Phase1Context<Options>): Extension[];
+
   addNodes?(this: Phase1Context<Options>): Record<string, NodeSpec>;
 
   /** Contribute ProseMirror mark specs. Keys become schema mark type names. */
