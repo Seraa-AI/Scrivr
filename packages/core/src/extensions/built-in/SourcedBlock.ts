@@ -34,6 +34,56 @@ export function remintSourcedBlockIdentity(slice: Slice): Slice {
   return new Slice(Fragment.from(flattenFragment(slice.content, 0, slice.openStart, slice.openEnd)), slice.openStart, slice.openEnd);
 }
 
+// ── Reconciler ────────────────────────────────────────────────────────────────
+
+export interface SourcedBlockRecord {
+  instanceId: string | null;
+  kind: string | null;
+  resourceId: string | null;
+  versionId: string | null;
+  baseHash: string | null;
+  baseNormalizer: number | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseStringOrNull(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function parseNumberOrNull(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+export function collectSourcedBlocks(doc: Node): SourcedBlockRecord[] {
+  const records: SourcedBlockRecord[] = [];
+
+  doc.descendants((node) => {
+    if (node.type.name !== "sourcedBlock") {
+      return true; 
+    }
+
+    const attrs: unknown = node.attrs;
+    
+    if (isRecord(attrs)) {
+      records.push({
+        instanceId: parseStringOrNull(attrs["instanceId"]),
+        kind: parseStringOrNull(attrs["kind"]),
+        resourceId: parseStringOrNull(attrs["resourceId"]),
+        versionId: parseStringOrNull(attrs["versionId"]),
+        baseHash: parseStringOrNull(attrs["baseHash"]),
+        baseNormalizer: parseNumberOrNull(attrs["baseNormalizer"]),
+      });
+    }
+
+    return false; 
+  });
+
+  return records;
+}
+
 export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
   name: "sourcedBlock",
 

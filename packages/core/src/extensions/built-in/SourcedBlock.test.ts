@@ -3,7 +3,7 @@ import { EditorState, TextSelection } from "prosemirror-state";
 import type { Schema } from "prosemirror-model";
 import { ExtensionManager } from "../ExtensionManager";
 import { StarterKit } from "../StarterKit";
-import { SourcedBlockExtension, remintSourcedBlockIdentity } from "./SourcedBlock";
+import { SourcedBlockExtension, remintSourcedBlockIdentity, collectSourcedBlocks } from "./SourcedBlock";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -206,5 +206,24 @@ describe("SourcedBlock — clipboard identity re-minting", () => {
 		transformedSlice.content.descendants(node => {
 			expect(node.type.name).not.toBe("sourcedBlock");
 		});
+	});
+});
+
+describe("SourcedBlock — reconciliation collector", () => {
+	it("scans a document and returns correctly typed provenance records", () => {
+		const { schema, state } = makeContext();
+		const s1 = setupSourcedBlock(schema, state, "Clause text");
+		
+		const records = collectSourcedBlocks(s1.doc);
+		
+		expect(records.length).toBe(1);
+		
+		const record = records[0];
+		expect(record?.instanceId).toBe("src_123");
+		expect(record?.kind).toBe("clause");
+		expect(record?.resourceId).toBe("cl_456");
+		expect(record?.versionId).toBe("v1");
+		expect(record?.baseHash).toBe("abc");
+		expect(record?.baseNormalizer).toBe(1);
 	});
 });
