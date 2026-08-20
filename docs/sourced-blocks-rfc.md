@@ -1,6 +1,6 @@
 # RFC: Sourced Blocks — content with provenance
 
-Status: draft (2026-08-19)
+Status: draft (2026-08-19) · updated 2026-08-20 — prereq resolved by #141
 
 ## Problem
 
@@ -162,8 +162,9 @@ Consequences, each of which is a real bug if missed:
   already handles `nodeId`.
 - **Clone** re-mints, via `addCloneHandlers`. Document clone mode (#135) gives us
   an independent id space and an old→new map; a cloned document's sourced blocks
-  are *new instances of the same source*, not the same instances. Note this hook
-  is **not currently forwarded by StarterKit** — see the prereq in §13.
+  are *new instances of the same source*, not the same instances. (This hook was
+  silently dropped by StarterKit until #141 — worth a test that asserts it fires
+  through the kit, not just in isolation.)
 - **Cross-tenant paste** must not preserve `resourceId`. Core cannot know tenancy
   boundaries, so the provider gets a veto: `SourceProvider.adoptPasted(attrs)`
   returns either rewritten attrs or `null`, meaning "strip provenance, paste as
@@ -359,10 +360,11 @@ absorb the gap.
 
 ## Build order
 
-**Phase 0 — prereq.** `addExtensions()` on the Extension contract so StarterKit
-stops hand-merging 24 of 27 hooks. `addCloneHandlers` — which §3 depends on — is
-among the hooks it currently drops. Blocks this RFC and the node-actions RFC
-alike.
+**Phase 0 — prereq. DONE** (#141, `c8952d7`). StarterKit no longer hand-merges
+contributions; it declares its children and the manager flattens them. This
+matters concretely for §3: `addCloneHandlers` was one of four hooks the kit
+silently dropped, and clone re-minting depends on it — the instance-id rule
+below would simply not have fired for any editor built on StarterKit.
 
 **Phase 1 — the primitive.** Node + schema + normalization (§4) + hashing (§5) +
 clipboard/clone id re-minting (§3) + `collectSourcedBlocks`. No provider, no UI.

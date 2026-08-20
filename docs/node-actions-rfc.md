@@ -1,6 +1,6 @@
 # RFC: Node Actions
 
-Status: draft (2026-08-19)
+Status: draft (2026-08-19) · updated 2026-08-20 — prereq resolved by #141
 
 ## Problem
 
@@ -186,6 +186,13 @@ Actions from different extensions can target the same kind (Image contributes
 order broken deliberately — two extensions must not produce different menus
 depending on array position in `new Editor({ extensions })`.
 
+This follows the precedent set by `keymapPriority` in #141: the extension
+list's order already means "schema default block type", and overloading it with
+a second meaning (keymap precedence) produced a system that could not satisfy
+both at once. Menu order is a third meaning; it gets its own explicit `order`
+field rather than inheriting list position. The general rule for this codebase:
+**if a contribution needs an ordering, it declares one.**
+
 Duplicate `id` is a hard error at registry build, matching the fail-fast
 precedent set for surface owners (`ExtensionManager.ts:424`) and for duplicate
 cell-selection registration (#137). Silent override is how contributions
@@ -242,23 +249,34 @@ better UX than a silently missing menu item.
 
 ## Build order
 
-1. **Prereq — `addExtensions()` on the Extension contract.** StarterKit
-   currently hand-merges 24 of the 27 contribution hooks over ~28 built-ins,
-   reimplementing `ExtensionManager`'s per-slot merge. A new hook means a 25th
-   hand-written merge, and any sub-extension contributing one before that edit
-   is silently dropped (`addCloneHandlers`, `addDocAttrs`, `addPageChrome`,
-   `addSurfaceOwner` are already unforwarded today). Manager flattens nested
-   extensions into its normal pipeline; StarterKit keeps option→extension
-   selection only. Separate PR, no feature risk.
-2. `NodeAction` types + `NodeActionRegistry` + `addNodeActions` hook + manager
-   collection.
-3. `editor.getNodeActions()` / `runNodeAction()` + descriptor plumbing.
-4. Migrate `createImageMenu` onto the registry; its existing tests must pass
-   untouched.
-5. Node gutter surface.
-6. `useNodeActions()` in `@scrivr/react`.
+0. ~~**Prereq — `addExtensions()` on the Extension contract.**~~ **DONE** —
+   landed in #141 (`c8952d7`). StarterKit no longer forwards anything: it
+   declares its children and the manager flattens them into its normal
+   pipeline, so `addNodeActions` can be added to the contract **without editing
+   StarterKit at all**. That was the entire point of the prereq.
 
-Steps 2–4 are the RFC's real content; 5–6 can trail.
+   The refactor also produced a finding this RFC depends on. Flattening alone
+   was not enough, because registration order is *already* load-bearing for the
+   schema (ProseMirror fills `block+` with the first registered block type), and
+   the keymap needs a different order. One list cannot encode two orderings —
+   which is why the kit hand-chained in the first place. Precedence is now an
+   explicit `keymapPriority` with a named ladder (`table` 400 → `codeBlock` 300
+   → `list` 200 → `default` 100), and colliding bindings chain, with `false`
+   meaning "not applicable here".
+
+   **The lesson generalises to this RFC:** when a contribution needs an
+   ordering, give it an explicit one. Do not make the extension list's position
+   mean a third thing. See "Ordering across extensions" below.
+
+1. `NodeAction` types + `NodeActionRegistry` + `addNodeActions` hook + manager
+   collection.
+2. `editor.getNodeActions()` / `runNodeAction()` + descriptor plumbing.
+3. Migrate `createImageMenu` onto the registry; its existing tests must pass
+   untouched.
+4. Node gutter surface.
+5. `useNodeActions()` in `@scrivr/react`.
+
+Steps 1–3 are the RFC's real content; 4–5 can trail.
 
 ## Open questions
 
