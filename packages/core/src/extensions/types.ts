@@ -13,6 +13,30 @@
  *   Phase 3 — addLayoutHandler / addMarkDecorators → wired into BlockRegistry + renderer
  */
 
+import type { Extension } from "./Extension";
+
+/**
+ * Named keybinding precedences. Higher wins first refusal for a key.
+ *
+ * The ladder is "most specific context first": a binding only applies inside a
+ * table, then inside a code block, then inside a list, then anywhere. Each
+ * declines by returning `false`, delegating down the chain.
+ *
+ * Extensions may use any number; these names exist so built-ins read as intent
+ * rather than magic constants, and so third parties can slot in relative to
+ * them (e.g. `KeymapPriority.list + 10`).
+ */
+export const KeymapPriority = {
+  /** Bindings that only apply inside a table cell. */
+  table: 400,
+  /** Bindings that only apply inside a code block. */
+  codeBlock: 300,
+  /** Bindings that only apply inside a list item. */
+  list: 200,
+  /** Everything else: block-level and document-wide fallbacks. */
+  default: 100,
+} as const;
+
 import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark } from "prosemirror-model";
 import type { MarkdownSerializer, MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
@@ -134,7 +158,7 @@ export interface IBaseEditor {
    * `Extension` because the manager has no compile-time link from `name`
    * to option shape.
    */
-  findExtension(name: string): import("./Extension").Extension | null;
+  findExtension(name: string): Extension | null;
 }
 
 /**
@@ -554,6 +578,42 @@ export interface ExtensionConfig<Options = object> {
   // Called with `this = Phase1Context` — options available, schema is not yet built.
 
   /** Contribute ProseMirror node specs. Keys become schema node type names. */
+  /**
+   * Precedence for this extension's keybindings. Higher runs first.
+   *
+   * Colliding bindings are **chained**, not overridden: a command returning
+   * `false` means "not applicable here" and delegates to the next binding for
+   * that key. Priority decides who gets first refusal, which is how one key
+   * carries several meanings — Tab is cell navigation inside a table, code
+   * indentation inside a code block, and list indentation inside a list.
+   *
+   * Context-specific handlers outrank general fallbacks. Use `KeymapPriority`
+   * rather than bare numbers. Ties resolve by registration order.
+   *
+   * This is deliberately separate from the extension list's order: that order
+   * already means something for the schema (ProseMirror fills `block+` with the
+   * first registered block type), and one list cannot encode two orderings.
+   *
+   * @default KeymapPriority.default (100)
+   */
+  keymapPriority?: number;
+
+  /**
+   * Sub-extensions this extension is composed of. The manager flattens them
+   * into its own list before any other phase runs, so a bundle never has to
+   * forward its children's contributions by hand — every `add*` hook a child
+   * declares is collected exactly as if the consumer had listed it directly.
+   *
+   * Children resolve in the order returned, immediately after their parent, so
+   * an extension listed after the bundle still layers on top of everything the
+   * bundle brought. Flattening is recursive: a bundle may contain a bundle.
+   *
+   * This is the hook that keeps `StarterKit` honest — without it, each new
+   * contribution seam has to be re-plumbed through the bundle or it silently
+   * vanishes for everyone using the default kit.
+   */
+  addExtensions?(this: Phase1Context<Options>): Extension[];
+
   addNodes?(this: Phase1Context<Options>): Record<string, NodeSpec>;
 
   /** Contribute ProseMirror mark specs. Keys become schema mark type names. */
@@ -863,6 +923,8 @@ export interface ExtensionConfig<Options = object> {
 
 export interface ResolvedExtension {
   name: string;
+  /** Resolved keybinding precedence. See `ExtensionConfig.keymapPriority`. */
+  keymapPriority: number;
   nodes: Record<string, NodeSpec>;
   marks: Record<string, MarkSpec>;
   /**

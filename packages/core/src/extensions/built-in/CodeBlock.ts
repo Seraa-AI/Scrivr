@@ -1,4 +1,5 @@
 import { Extension } from "../Extension";
+import { KeymapPriority } from "../types";
 import { setBlockType } from "prosemirror-commands";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
@@ -106,6 +107,10 @@ function makeToggleCodeBlock(): Command {
 
 export const CodeBlock = Extension.create<CodeBlockOptions>({
   name: "codeBlock",
+
+  // Tab inserts indentation, but only inside a code block — it declines
+  // elsewhere so list Tab still sinks a list item.
+  keymapPriority: KeymapPriority.codeBlock,
 
   defaultOptions: {
     theme: {},

@@ -3,6 +3,7 @@ import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
 import type { IEditor } from "../types";
+import { KeymapPriority } from "../types";
 import { TableRowStrategy } from "../../renderer/TableRowStrategy";
 import { tableIntegrityPlugin } from "../../table/normalize";
 import {
@@ -224,6 +225,11 @@ function deleteTableCommand(): Command {
 
 export const Table = Extension.create({
   name: "table",
+
+  // Tab/Shift-Tab move between cells and Backspace/Delete guard the cell
+  // boundary. All four decline (return false) outside a table, so they must get
+  // first refusal ahead of list, code-block, and base editing bindings.
+  keymapPriority: KeymapPriority.table,
 
   addNodes() {
     return {
