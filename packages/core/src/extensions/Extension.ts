@@ -1,4 +1,5 @@
 import type { Schema } from "prosemirror-model";
+import { KeymapPriority } from "./types";
 import type {
   ExtensionConfig,
   ExtensionContext,
@@ -49,8 +50,22 @@ export class Extension<Options extends object = object> {
    * @example
    * Heading.configure({ levels: [1, 2, 3] })
    */
-  configure(options: Partial<Options>): Extension<Options> {
+  configure(options?: Partial<Options>): Extension<Options> {
     return new Extension(this.config, { ...this.options, ...options });
+  }
+
+  /**
+   * Sub-extensions declared via `addExtensions()`, already configured by this
+   * extension's own options. Returns a fresh array; empty for a leaf extension.
+   *
+   * Read by the manager during flattening, before any resolution phase — the
+   * children then take part in every phase on equal footing with top-level
+   * extensions.
+   */
+  children(): Extension[] {
+    const { config, name, options } = this;
+    const p1: Phase1Context<Options> = { name, options };
+    return config.addExtensions?.call(p1) ?? [];
   }
 
   /**
@@ -70,6 +85,7 @@ export class Extension<Options extends object = object> {
 
     return {
       name,
+      keymapPriority: config.keymapPriority ?? KeymapPriority.default,
       // Phase 1: called with p1 so addNodes/addMarks/addDocAttrs can access this.options
       nodes: config.addNodes?.call(p1) ?? {},
       marks: config.addMarks?.call(p1) ?? {},

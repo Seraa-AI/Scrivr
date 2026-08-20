@@ -70,6 +70,15 @@ export interface SemanticUnit {
    * review marks (tracked changes) are surfaced in `changes`, not here.
    */
   spans?: InlineSpan[];
+  /**
+   * Editable leaves inside a container unit (list items, table cells), each
+   * addressable by its own `nodeId`. Present only for container units (list,
+   * table); a leaf unit carries `spans` instead. `parts` is the universal edit
+   * surface — the rich edit protocol targets a `SemanticPart.nodeId`, so any
+   * leaf anywhere (incl. inside lists and tables) is individually editable.
+   * `text`/`cells` stay for embedding and geometry; the merge never reads them.
+   */
+  parts?: SemanticPart[];
   /** Structure-preserving markdown. Simple tables → GFM. Convenience only — a
    * lossy, non-canonical projection; omitted when review `changes` are present
    * to avoid mixing proposed text with raw redline rendering. */
@@ -91,6 +100,23 @@ export interface InlineSpan {
 export interface InlineMark {
   type: string;
   /** Non-null mark attributes (e.g. `{ color: "#dc2626" }`, `{ href: "…" }`). */
+  attrs?: Record<string, unknown>;
+}
+
+/**
+ * An editable leaf textblock inside a container unit — a list item's paragraph,
+ * a table cell's paragraph. Addressed by its own stable `nodeId`; `breadcrumb`
+ * is location context for the agent only, never an address. `spans` reconstructs
+ * `text` exactly, same contract as on a leaf `SemanticUnit`.
+ */
+export interface SemanticPart {
+  /** The address — stable, depth-agnostic. Resolves via `findNodeById`. */
+  nodeId: string;
+  type: "paragraph" | "heading" | "codeBlock";
+  /** Location as context only, e.g. `["Pricing", "item 2"]`. */
+  breadcrumb: string[];
+  text: string;
+  spans?: InlineSpan[];
   attrs?: Record<string, unknown>;
 }
 
@@ -201,4 +227,11 @@ export interface SemanticExportOptions {
    * @default 200
    */
   shortBlockMaxChars?: number;
+  /**
+   * When false, emit one unit per top-level block instead of grouping cohesive
+   * pairs (e.g. a heading and its lede). The edit read path uses this so each
+   * unit maps to exactly one block; container units still expose `parts`.
+   * @default true
+   */
+  groupBlocks?: boolean;
 }

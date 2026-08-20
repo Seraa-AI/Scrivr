@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/export-semantic",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "SemanticUnit chunk emitter for Scrivr documents — AI-ready units for RAG",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -33,6 +33,16 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
+      }
+    },
+    "./augment": {
+      "import": {
+        "types": "./dist/augmentation.d.ts",
+        "default": "./dist/augmentation.js"
+      },
+      "require": {
+        "types": "./dist/augmentation.d.cts",
+        "default": "./dist/augmentation.cjs"
       }
     }
   },

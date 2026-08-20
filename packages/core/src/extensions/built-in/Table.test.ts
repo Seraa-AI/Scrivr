@@ -742,17 +742,20 @@ describe("Table — HTML parse via schema parseDOM", () => {
   });
 });
 
-// Regression: StarterKit must forward Table's selection seam contributions
-// (behavior + hit tester + gesture), else cell selection silently vanishes when
-// Table is used via StarterKit (the normal path).
+// Regression: Table's selection seam contributions (behavior + hit tester +
+// gesture) must reach the editor when Table is used via StarterKit — the normal
+// path — else cell selection silently vanishes.
+//
+// Asserted through the manager, not off the kit's own resolution: the kit
+// declares its children via addExtensions() and contributes nothing itself, so
+// what matters is what the manager collects.
 describe("Table — cell selection is registered via the seam through StarterKit", () => {
   function cellSeam(kit: Extension) {
-    const schema = new ExtensionManager([kit]).schema;
-    const resolved = kit.resolve(schema);
+    const manager = new ExtensionManager([kit]);
     return {
-      behaviors: resolved.selectionBehaviors,
-      hitTesters: resolved.hitTesters,
-      gestures: resolved.selectionGestures,
+      behaviors: manager.buildSelectionBehaviors(),
+      hitTesters: manager.buildHitTesters(),
+      gestures: manager.buildSelectionGestures(),
     };
   }
 

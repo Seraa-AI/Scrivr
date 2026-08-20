@@ -644,17 +644,107 @@ describe("ExtensionManager", () => {
       expect(message).toMatch(/"extB"/);
     });
 
-    it("warns when two extensions bind the same keymap shortcut", () => {
+    // Keybindings are the one contribution that composes instead of overriding:
+    // a command returning false means "not applicable here", so the next
+    // contributor for that key must get a turn. Overriding would delete
+    // meanings — it is why Tab can be cell-nav, code-indent, and list-indent.
+    it("chains keymap bindings that collide, in registration order", () => {
+      const calls: string[] = [];
+      const makeChainable = (extName: string, binding: string, handled: boolean) =>
+        Extension.create({
+          name: extName,
+          addKeymap() {
+            return {
+              [binding]: () => {
+                calls.push(extName);
+                return handled;
+              },
+            };
+          },
+        });
+
+      // extA declines, so extB must still run and own the key.
+      const A = makeChainable("extA", "Mod-x", false);
+      const B = makeChainable("extB", "Mod-x", true);
+      const manager = new ExtensionManager([StarterKit, A, B]);
+      const bound = manager.buildKeymap()["Mod-x"];
+
+      expect(bound).toBeDefined();
+      expect(bound!({} as never, undefined, undefined)).toBe(true);
+      expect(calls).toEqual(["extA", "extB"]);
+    });
+
+    it("stops at the first binding that handles the key", () => {
+      const calls: string[] = [];
+      const makeChainable = (extName: string, handled: boolean) =>
+        Extension.create({
+          name: extName,
+          addKeymap() {
+            return {
+              "Mod-x": () => {
+                calls.push(extName);
+                return handled;
+              },
+            };
+          },
+        });
+
+      const manager = new ExtensionManager([StarterKit, makeChainable("first", true), makeChainable("second", false)]);
+      expect(manager.buildKeymap()["Mod-x"]!({} as never, undefined, undefined)).toBe(true);
+      expect(calls).toEqual(["first"]);
+    });
+
+    it("orders chained bindings by keymapPriority, not by registration order", () => {
+      const calls: string[] = [];
+      const make = (extName: string, priority: number) =>
+        Extension.create({
+          name: extName,
+          keymapPriority: priority,
+          addKeymap() {
+            return {
+              "Mod-x": () => {
+                calls.push(extName);
+                return false; // decline, so every contributor gets a turn
+              },
+            };
+          },
+        });
+
+      // "low" is registered FIRST but must run LAST.
+      const manager = new ExtensionManager([StarterKit, make("low", 100), make("high", 400)]);
+      manager.buildKeymap()["Mod-x"]!({} as never, undefined, undefined);
+
+      expect(calls).toEqual(["high", "low"]);
+    });
+
+    it("falls back to registration order for equal priorities", () => {
+      const calls: string[] = [];
+      const make = (extName: string) =>
+        Extension.create({
+          name: extName,
+          addKeymap() {
+            return {
+              "Mod-x": () => {
+                calls.push(extName);
+                return false;
+              },
+            };
+          },
+        });
+
+      const manager = new ExtensionManager([StarterKit, make("first"), make("second")]);
+      manager.buildKeymap()["Mod-x"]!({} as never, undefined, undefined);
+
+      expect(calls).toEqual(["first", "second"]);
+    });
+
+    it("does not warn about keymap collisions — chaining is the intended behaviour", () => {
       const A = makeKeymapContributor("extA", "Mod-x");
       const B = makeKeymapContributor("extB", "Mod-x");
-      const manager = new ExtensionManager([StarterKit, A, B]);
-      // Keymap merge happens lazily in buildKeymap — invoke it to trigger.
-      manager.buildKeymap();
+      new ExtensionManager([StarterKit, A, B]).buildKeymap();
 
       const message = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
-      expect(message).toMatch(/Keymap "Mod-x"/);
-      expect(message).toMatch(/"extA"/);
-      expect(message).toMatch(/"extB"/);
+      expect(message).not.toMatch(/Keymap "Mod-x"/);
     });
 
     it("names the overridden owner — not just the new contributor", () => {

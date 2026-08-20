@@ -43,3 +43,9 @@ export type {
   ChangeStep,
   IncompleteChange,
 } from "./types";
+
+// Rich (leaf-based) semantic edits → tracked suggestions. The write-side merge
+// primitive @scrivr/ai's applyRichEdit drives.
+export { applyRichDiffAsSuggestion } from "./lib/applyRichDiffAsSuggestion";
+export type { RichBlockEdit, RichDiffOptions, RichDiffResult } from "./lib/applyRichDiffAsSuggestion";
+export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";

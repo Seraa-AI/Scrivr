@@ -49,6 +49,35 @@ addKeymap() {
 },
 ```
 
+Bindings for the same key **chain** rather than override. Returning `false` means "not
+applicable here" and delegates to the next binding, which is how one key carries several
+meanings — `Tab` navigates cells inside a table, indents inside a code block, and sinks a list
+item inside a list.
+
+### `keymapPriority`
+
+Decides which binding gets first refusal for a key. Higher runs first; the default is
+`KeymapPriority.default` (100), and equal priorities fall back to registration order.
+
+```ts
+import { Extension, KeymapPriority } from '@scrivr/core';
+
+Extension.create({
+  name: 'myTableThing',
+  keymapPriority: KeymapPriority.table, // 400 — only applies inside a table
+  addKeymap() {
+    return { Tab: myCellCommand };
+  },
+});
+```
+
+Give context-specific handlers a higher priority than general fallbacks. The built-in ladder is
+`table` (400) → `codeBlock` (300) → `list` (200) → `default` (100); slot your own in relative to
+those (e.g. `KeymapPriority.list + 10`).
+
+This is deliberately independent of where an extension sits in the `extensions` array: that
+order already decides the schema's default block type, and one ordering cannot serve both.
+
 ---
 
 ### `addCommands`
@@ -168,10 +197,25 @@ editor.commands.sayHello();
 
 ## Composing sub-extensions
 
-To bundle multiple extensions into one, implement the schema/behaviour hooks for each member
-directly, or call `.resolve()` on each sub-extension and merge the results. This is the pattern
-`StarterKit` uses internally — it aggregates all built-in extensions by resolving and merging
-their `nodes`, `marks`, `keymap`, `commands`, etc. into a single `Extension.create()` config.
+To bundle multiple extensions into one, return them from `addExtensions()`. The editor flattens
+the bundle into its own extension list, so every hook a member declares is collected exactly as
+if it had been listed directly:
+
+```ts
+const MyKit = Extension.create({
+  name: 'myKit',
+
+  addExtensions() {
+    const extensions = [MyExtensionA];
+    if (this.options.b !== false) extensions.push(MyExtensionB.configure(this.options.b));
+    return extensions;
+  },
+});
+```
+
+This is what `StarterKit` does. Note that a bundle should **not** forward its members'
+contributions by hand — a bundle that re-merges `nodes`, `marks`, `keymap` and friends itself
+silently drops any hook added after it was last edited.
 
 For most use cases, simply pass multiple extensions to the `extensions` array in `EditorOptions`
 rather than building an aggregator extension:
