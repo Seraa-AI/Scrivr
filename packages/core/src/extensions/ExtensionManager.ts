@@ -425,26 +425,41 @@ export class ExtensionManager {
    */
   buildKeymap(): Record<string, Command> {
     // Keybindings compose; they don't override. A ProseMirror command returning
-    // `false` is declaring "not applicable here", so the next contributor for
-    // that key must get a turn — that is how one key carries several meanings:
-    // Tab moves between table cells, indents a list, or inserts code
-    // indentation depending on where the cursor is.
+    // `false` declares "not applicable here" and delegates to the next binding
+    // for that key — that is how one key carries several meanings: Tab is cell
+    // navigation in a table, code indentation in a code block, and list
+    // indentation in a list. Last-wins would keep one meaning and silently
+    // delete the rest.
     //
-    // Last-wins would keep only the final contributor and silently delete the
-    // rest, which is the class of bug that made bundles hand-chain their own
-    // keymaps. Order is extension registration order, so a later extension
-    // chains behind an earlier one and an earlier one gets first refusal.
-    const bindings = new Map<string, Contribution<Command>>();
-    for (const ext of this.resolved) {
-      for (const [key, command] of Object.entries(ext.keymap)) {
-        const prev = bindings.get(key);
-        bindings.set(key, {
-          spec: prev ? chainCommands(prev.spec, command) : command,
-          owner: prev ? `${prev.owner} → ${ext.name}` : ext.name,
-        });
-      }
+    // Precedence comes from `keymapPriority`, NOT from the extension list's
+    // order. That order already means something else — ProseMirror fills
+    // `block+` with the first registered block type — and one list cannot
+    // encode two orderings. Only keymap contributions are sorted here; schema
+    // and command collisions keep their own semantics.
+    interface KeyBinding {
+      command: Command;
+      priority: number;
+      /** Registration index — the stable tie-break within a priority. */
+      index: number;
+      owner: string;
     }
-    return specsOf(bindings);
+    const byKey = new Map<string, KeyBinding[]>();
+
+    this.resolved.forEach((ext, index) => {
+      for (const [key, command] of Object.entries(ext.keymap)) {
+        const list = byKey.get(key) ?? [];
+        list.push({ command, priority: ext.keymapPriority, index, owner: ext.name });
+        byKey.set(key, list);
+      }
+    });
+
+    const merged: Record<string, Command> = {};
+    for (const [key, bindings] of byKey) {
+      bindings.sort((a, b) => b.priority - a.priority || a.index - b.index);
+      const commands = bindings.map((b) => b.command);
+      merged[key] = commands.length === 1 ? commands[0]! : chainCommands(...commands);
+    }
+    return merged;
   }
 
   /**

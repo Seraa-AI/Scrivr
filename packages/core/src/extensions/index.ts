@@ -1,6 +1,7 @@
 export { Extension } from "./Extension";
-export { ExtensionManager, getSchema } from "./ExtensionManager";
+export { ExtensionManager, getSchema, flattenExtensions } from "./ExtensionManager";
 export { StarterKit } from "./StarterKit";
+export { KeymapPriority } from "./types";
 
 // Built-in extensions — individually importable
 export { Document } from "./built-in/Document";

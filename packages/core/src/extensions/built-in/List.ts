@@ -7,6 +7,7 @@ import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
 import { ListItemStrategy } from "../../layout/ListItemStrategy";
 import type { ToolbarItemSpec } from "../types";
+import { KeymapPriority } from "../types";
 import {
   xml,
   type DocxContext,
@@ -103,6 +104,11 @@ function makeToggleList(listType: NodeType, itemType: NodeType): Command {
  */
 export const List = Extension.create({
   name: "list",
+
+  // Enter must reach `splitListItem` before Paragraph's `splitBlockInheritAttrs`
+  // — which is also the last link in List's own Enter chain, so Paragraph
+  // running first would always succeed and no list item would ever split.
+  keymapPriority: KeymapPriority.list,
 
   addNodes() {
     return {

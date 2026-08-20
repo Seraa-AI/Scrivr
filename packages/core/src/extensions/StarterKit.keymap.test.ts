@@ -8,11 +8,11 @@ import { StarterKit } from "./StarterKit";
 /**
  * Keymap composition invariants.
  *
- * `ExtensionManager.buildKeymap()` chains colliding bindings in registration
- * order, so the ORDER of StarterKit's `addExtensions()` list decides what a key
- * means. These tests pin the orderings that carry meaning — without them,
- * alphabetising that list looks harmless and silently breaks Enter in lists or
- * Tab in tables.
+ * `ExtensionManager.buildKeymap()` chains colliding bindings by
+ * `keymapPriority` — most specific context first (table → code block → list →
+ * everything else) — and each binding delegates by returning `false`. These
+ * tests pin what the resulting chains actually DO, so a priority change shows
+ * up as a behavioural failure rather than a silent one.
  *
  * They deliberately drive the merged keymap (what `InputBridge` dispatches),
  * not an individual extension's `addKeymap()`, because composition is the thing
@@ -54,7 +54,7 @@ function countType(doc: PMNode, typeName: string): number {
 }
 
 describe("StarterKit keymap composition", () => {
-  describe("Enter — List must get first refusal, before Paragraph", () => {
+  describe("Enter — list bindings outrank the paragraph fallback", () => {
     it("splits a list item into a SECOND list item, not a second paragraph in the same item", () => {
       const { schema, keymap } = makeKit();
       const { bulletList, listItem, paragraph } = schema.nodes;
@@ -67,7 +67,8 @@ describe("StarterKit keymap composition", () => {
 
       expect(next).not.toBeNull();
       // The regression this guards: Paragraph's splitBlockInheritAttrs running
-      // first would produce ONE item holding TWO paragraphs.
+      // first (i.e. List losing its higher keymapPriority) would produce ONE
+      // item holding TWO paragraphs.
       expect(countType(next!.doc, "listItem")).toBe(2);
       expect(countType(next!.doc, "paragraph")).toBe(2);
       expect(next!.doc.textContent).toBe("Hello");
@@ -86,7 +87,7 @@ describe("StarterKit keymap composition", () => {
     });
   });
 
-  describe("Tab — Table, then CodeBlock, then List", () => {
+  describe("Tab — table, then code block, then list", () => {
     it("indents inside a code block rather than sinking a list item", () => {
       const { schema, keymap } = makeKit();
       const doc = schema.topNodeType.create(null, [
@@ -118,7 +119,7 @@ describe("StarterKit keymap composition", () => {
     });
   });
 
-  describe("Table — must get first refusal before CodeBlock/List/BaseEditing", () => {
+  describe("Table — outranks code block, list, and base editing", () => {
     it("binds Tab, Shift-Tab, Backspace and Delete when tables are enabled", () => {
       const withTable = makeKit({ table: true });
       const withoutTable = makeKit();

@@ -694,6 +694,50 @@ describe("ExtensionManager", () => {
       expect(calls).toEqual(["first"]);
     });
 
+    it("orders chained bindings by keymapPriority, not by registration order", () => {
+      const calls: string[] = [];
+      const make = (extName: string, priority: number) =>
+        Extension.create({
+          name: extName,
+          keymapPriority: priority,
+          addKeymap() {
+            return {
+              "Mod-x": () => {
+                calls.push(extName);
+                return false; // decline, so every contributor gets a turn
+              },
+            };
+          },
+        });
+
+      // "low" is registered FIRST but must run LAST.
+      const manager = new ExtensionManager([StarterKit, make("low", 100), make("high", 400)]);
+      manager.buildKeymap()["Mod-x"]!({} as never, undefined, undefined);
+
+      expect(calls).toEqual(["high", "low"]);
+    });
+
+    it("falls back to registration order for equal priorities", () => {
+      const calls: string[] = [];
+      const make = (extName: string) =>
+        Extension.create({
+          name: extName,
+          addKeymap() {
+            return {
+              "Mod-x": () => {
+                calls.push(extName);
+                return false;
+              },
+            };
+          },
+        });
+
+      const manager = new ExtensionManager([StarterKit, make("first"), make("second")]);
+      manager.buildKeymap()["Mod-x"]!({} as never, undefined, undefined);
+
+      expect(calls).toEqual(["first", "second"]);
+    });
+
     it("does not warn about keymap collisions — chaining is the intended behaviour", () => {
       const A = makeKeymapContributor("extA", "Mod-x");
       const B = makeKeymapContributor("extB", "Mod-x");

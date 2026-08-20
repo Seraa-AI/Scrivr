@@ -101,45 +101,37 @@ export const StarterKit = Extension.create<StarterKitOptions>({
   name: "starterKit",
 
   /**
-   * ORDER IS BEHAVIOUR — do not alphabetise this list.
+   * This list carries exactly ONE ordering constraint, and it is a schema one:
+   * **Paragraph must come first.** ProseMirror fills a `block+` content
+   * expression with the first matching block type in the schema, so whichever
+   * block node registers first becomes the default — put CodeBlock ahead of
+   * Paragraph and an empty document opens as a code block.
    *
-   * Keybindings compose in registration order (`ExtensionManager.buildKeymap`
-   * chains colliding bindings), so a key's meaning is decided by who gets first
-   * refusal. Three orderings below are load-bearing:
-   *
-   *   Table before CodeBlock before List — Tab means "next cell", then "indent
-   *     code", then "sink list item". Each guard returns false when it doesn't
-   *     apply. Matches Word: list indent inside a cell uses the indent control,
-   *     not Tab.
-   *   Table before BaseEditing — table's Backspace/Delete are cell-boundary
-   *     guards that must run before the base delete.
-   *   List before Paragraph — List's Enter chain ends in `splitBlockInheritAttrs`,
-   *     which is precisely Paragraph's Enter. Reversed, Paragraph's binding
-   *     would always succeed and `splitListItem` would never run, breaking Enter
-   *     inside every list.
-   *
-   * Everything after that block is order-independent (distinct keys, distinct
-   * schema names) and grouped by kind for readability.
+   * Keybinding precedence is NOT decided here. It comes from each extension's
+   * `keymapPriority` (see `ExtensionManager.buildKeymap`), because the keymap
+   * needs a different order than the schema does — Table before CodeBlock
+   * before List before Paragraph — and one list cannot encode two orderings.
+   * Reordering anything below the first entry is therefore safe.
    */
   addExtensions() {
     const opts = this.options;
     const extensions: Extension[] = [];
 
-    // ── Order-sensitive: keymap precedence (see above) ───────────────────────
+    // Must be first — see above.
     if (opts.paragraph !== false) extensions.push(Paragraph);
-    if (opts.table === true) extensions.push(Table);
-    if (opts.codeBlock !== false) extensions.push(CodeBlock.configure(opts.codeBlock));
-    if (opts.list !== false) extensions.push(List);
-    // Backspace + Delete are not optional — the editor is unusable without them.
-    extensions.push(BaseEditing);
 
     // ── Structure ────────────────────────────────────────────────────────────
     if (opts.document !== false) extensions.push(Document);
     if (opts.hardBreak !== false) extensions.push(HardBreak.configure(opts.hardBreak));
     if (opts.heading !== false) extensions.push(Heading.configure(opts.heading));
+    if (opts.list !== false) extensions.push(List);
+    if (opts.codeBlock !== false) extensions.push(CodeBlock.configure(opts.codeBlock));
+    if (opts.table === true) extensions.push(Table);
     if (opts.horizontalRule !== false) extensions.push(HorizontalRule);
     if (opts.pageBreak !== false) extensions.push(PageBreak);
     if (opts.image !== false) extensions.push(Image);
+    // Backspace + Delete are not optional — the editor is unusable without them.
+    extensions.push(BaseEditing);
 
     // ── Marks ────────────────────────────────────────────────────────────────
     if (opts.bold !== false) extensions.push(Bold.configure(opts.bold));

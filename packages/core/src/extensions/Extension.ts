@@ -1,4 +1,5 @@
 import type { Schema } from "prosemirror-model";
+import { KeymapPriority } from "./types";
 import type {
   ExtensionConfig,
   ExtensionContext,
@@ -84,6 +85,7 @@ export class Extension<Options extends object = object> {
 
     return {
       name,
+      keymapPriority: config.keymapPriority ?? KeymapPriority.default,
       // Phase 1: called with p1 so addNodes/addMarks/addDocAttrs can access this.options
       nodes: config.addNodes?.call(p1) ?? {},
       marks: config.addMarks?.call(p1) ?? {},
