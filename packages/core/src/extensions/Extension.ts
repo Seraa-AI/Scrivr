@@ -130,6 +130,7 @@ export class Extension<Options extends object = object> {
       markDecorators: new Map(Object.entries(config.addMarkDecorators?.call(p1) ?? {})),
       fontModifiers: config.addFontModifiers?.call(p1) ?? new Map(),
       toolbarItems: config.addToolbarItems?.call(p1) ?? [],
+      nodeActions: config.addNodeActions?.call(p1) ?? [],
       selectionBehaviors: config.addSelectionBehavior?.call(p1) ?? [],
       hitTesters: config.addHitTester?.call(p1) ?? [],
       selectionGestures: config.addSelectionGesture?.call(p1) ?? [],

@@ -239,6 +239,12 @@ class ExportPdfEditorDouble extends ServerEditor implements IEditor {
     };
   }
 
+  getNodeActions() {
+    return [];
+  }
+
+  async runNodeAction() {}
+
   getViewportRect(): DOMRect | null {
     return null;
   }

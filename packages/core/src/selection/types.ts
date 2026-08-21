@@ -221,3 +221,62 @@ export interface SelectionBehavior<S extends Selection = Selection> {
   /** Primitives to paint for `ctx.page`; called once per visible page. */
   geometry(selection: S, ctx: SelectionGeometryContext): SelectionPrimitive[];
 }
+
+// ── Node actions ─────────────────────────────────────────────────────────────
+
+/** Where an action runs. Everything an action needs, already surface-resolved. */
+export interface NodeActionContext {
+  editor: IEditor;
+  /** The active selection's public descriptor — carries kind, surfaceId, capabilities. */
+  descriptor: SelectionDescriptor;
+  /** State of the surface that owns the selection. NEVER editor.getState(). */
+  state: EditorState;
+  /** The node the action targets, resolved against `state`. Null for text ranges. */
+  node: import("prosemirror-model").Node | null;
+  /** Document position of `node` within `state`. -1 when node is null. */
+  pos: number;
+  readOnly: boolean;
+}
+
+export interface NodeAction {
+  /** Namespaced, stable, unique: "clause.compare", "image.replace". */
+  id: string;
+  label: string;
+  /** Longer text for tooltips / palette. Defaults to `label`. */
+  title?: string;
+  /** Logical grouping; renderers draw dividers between groups. */
+  group?: string;
+  /** Lower sorts first within a group. Default 100. */
+  order?: number;
+  /** Destructive/irreversible — renderers may style or confirm. */
+  danger?: boolean;
+
+  /**
+   * Does this action apply right now? Must be PURE and SYNCHRONOUS — it is
+   * called for every registered action on every selection change, during
+   * render. No I/O, no dispatch, no allocation-heavy work.
+   *
+   * Omit to mean "always, when the kind matches".
+   */
+  when?(ctx: NodeActionContext): boolean;
+
+  /**
+   * Is this action currently unavailable, with a reason to show the user?
+   * Distinct from `when` returning false (which hides it entirely). Use for
+   * "you lack permission" / "library is offline" — visible but inert.
+   */
+  disabled?(ctx: NodeActionContext): string | false;
+
+  /** Perform it. May be async (network, dialogs, host round-trips). */
+  run(ctx: NodeActionContext): void | Promise<void>;
+}
+
+export interface NodeActionContribution {
+  /** SelectionDescriptor.kind this action set attaches to. */
+  kind: string;
+  actions: NodeAction[];
+}
+
+export interface ResolvedNodeAction extends NodeAction {
+  disabledReason: string | false;
+}
