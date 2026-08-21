@@ -60,21 +60,14 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
   let rafId: number | null = null;
 
   function update() {
-    // The descriptor's `kind` is the stable semantic identity the Image
-    // extension's SelectionBehavior owns — key off it rather than re-deriving
-    // the node type. `descriptor.from` is a position in the *active surface's*
-    // document, so resolve the node against that surface, not the root body doc
-    // (a header image would otherwise resolve the wrong node).
+    const actions = editor.getNodeActions();
     const descriptor = editor.getSelectionDescriptor();
-    if (descriptor.kind !== "image") {
-      if (visible) { visible = false; lastDocPos = -1; onHide(); }
-      return;
-    }
     const state = editor.surfaces.activeSurface?.state ?? editor.getState();
     const docPos = descriptor.from;
     const node = state.doc.nodeAt(docPos);
 
-    if (!node || node.type.name !== "image") {
+    // If there are no actions for this node, or the node doesn't exist, hide the menu.
+    if (actions.length === 0 || !node) {
       if (visible) { visible = false; lastDocPos = -1; onHide(); }
       return;
     }

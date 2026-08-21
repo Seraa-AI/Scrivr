@@ -1,11 +1,16 @@
-import { EditorState, Transaction, NodeSelection, type Selection } from "prosemirror-state";
+import {
+	EditorState,
+	Transaction,
+	NodeSelection,
+	type Selection,
+} from "prosemirror-state";
 import { SelectionController } from "./SelectionController";
 import type {
-  FontModifier,
-  MarkDecorator,
-  ToolbarItemSpec,
-  OverlayRenderHandler,
-  IEditor,
+	FontModifier,
+	MarkDecorator,
+	ToolbarItemSpec,
+	OverlayRenderHandler,
+	IEditor,
 } from "./extensions/types";
 import type { Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
@@ -13,14 +18,17 @@ import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import { CursorManager } from "./renderer/CursorManager";
 import { SelectionRegistry } from "./selection/SelectionRegistry";
-import { builtinSelectionBehaviors, defaultSelectionBehavior } from "./selection/behaviors";
+import {
+	builtinSelectionBehaviors,
+	defaultSelectionBehavior,
+} from "./selection/behaviors";
 import type {
-  HitTarget,
-  HitTester,
-  HitTestContext,
-  SelectionDescriptor,
-  SelectionGesture,
-  SelectionGestureProvider,
+	HitTarget,
+	HitTester,
+	HitTestContext,
+	SelectionDescriptor,
+	SelectionGesture,
+	SelectionGestureProvider,
 } from "./selection/types";
 import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
@@ -34,15 +42,20 @@ import { PasteTransformer } from "./input/PasteTransformer";
 import { BaseEditor } from "./BaseEditor";
 import type { EditorEvents } from "./types/augmentation";
 import { SurfaceRegistry } from "./surfaces/SurfaceRegistry";
+import { NodeActionRegistry } from "./selection/NodeActionRegistry";
+import type { NodeActionContext, ResolvedNodeAction } from "./selection/types";
 import type { PageChromeContribution } from "./layout/PageMetrics";
-import { installDragDebugOverlay, type DragDebugConfig } from "./renderer/DragDebugOverlay";
+import {
+	installDragDebugOverlay,
+	type DragDebugConfig,
+} from "./renderer/DragDebugOverlay";
 import { installAnchoredObjectDebugOverlay } from "./renderer/AnchoredObjectDebugOverlay";
 import {
-  defaultEditorTheme,
-  mergeEditorTheme,
-  themeContainsCssVars,
-  type EditorTheme,
-  type ResolvedTheme,
+	defaultEditorTheme,
+	mergeEditorTheme,
+	themeContainsCssVars,
+	type EditorTheme,
+	type ResolvedTheme,
 } from "./model/theme";
 import { resolveTheme, disposeProbe } from "./model/resolveTheme";
 
@@ -54,151 +67,157 @@ export type EditorChangeHandler = (state: EditorState) => void;
  * ProseMirror types.
  */
 export interface SelectionSnapshot {
-  /** The fixed end of the selection (doesn't move when you Shift+arrow) */
-  anchor: number;
-  /** The moving end — where the cursor is drawn */
-  head: number;
-  /** Math.min(anchor, head) — start of the highlighted range */
-  from: number;
-  /** Math.max(anchor, head) — end of the highlighted range */
-  to: number;
-  /** True when anchor === head (cursor only, no highlight) */
-  empty: boolean;
-  /**
-   * Names of marks active at the cursor (or present anywhere in the selection).
-   * Use this to show toolbar button active states without importing ProseMirror.
-   */
-  activeMarks: string[];
-  /**
-   * Attributes of each active mark, keyed by mark name.
-   * e.g. { color: { color: "#dc2626" }, fontSize: { size: 18 } }
-   */
-  activeMarkAttrs: Record<string, Record<string, unknown>>;
-  /** The ProseMirror node type name of the block containing the cursor: "paragraph", "heading", etc. */
-  blockType: string;
-  /** Attributes of that block node — e.g. { level: 1, align: "left" } for a heading */
-  blockAttrs: Record<string, unknown>;
+	/** The fixed end of the selection (doesn't move when you Shift+arrow) */
+	anchor: number;
+	/** The moving end — where the cursor is drawn */
+	head: number;
+	/** Math.min(anchor, head) — start of the highlighted range */
+	from: number;
+	/** Math.max(anchor, head) — end of the highlighted range */
+	to: number;
+	/** True when anchor === head (cursor only, no highlight) */
+	empty: boolean;
+	/**
+	 * Names of marks active at the cursor (or present anywhere in the selection).
+	 * Use this to show toolbar button active states without importing ProseMirror.
+	 */
+	activeMarks: string[];
+	/**
+	 * Attributes of each active mark, keyed by mark name.
+	 * e.g. { color: { color: "#dc2626" }, fontSize: { size: 18 } }
+	 */
+	activeMarkAttrs: Record<string, Record<string, unknown>>;
+	/** The ProseMirror node type name of the block containing the cursor: "paragraph", "heading", etc. */
+	blockType: string;
+	/** Attributes of that block node — e.g. { level: 1, align: "left" } for a heading */
+	blockAttrs: Record<string, unknown>;
 }
 
 function moveDeleteRange(
-  doc: PmNode,
-  docPos: number,
-  node: PmNode,
+	doc: PmNode,
+	docPos: number,
+	node: PmNode,
 ): { from: number; to: number } {
-  if (!node.isInline) return { from: docPos, to: docPos + node.nodeSize };
+	if (!node.isInline) return { from: docPos, to: docPos + node.nodeSize };
 
-  const $pos = doc.resolve(docPos);
-  const parent = $pos.parent;
-  if (!parent.isTextblock || parent.childCount !== 1 || parent.firstChild !== node) {
-    return { from: docPos, to: docPos + node.nodeSize };
-  }
+	const $pos = doc.resolve(docPos);
+	const parent = $pos.parent;
+	if (
+		!parent.isTextblock ||
+		parent.childCount !== 1 ||
+		parent.firstChild !== node
+	) {
+		return { from: docPos, to: docPos + node.nodeSize };
+	}
 
-  const parentFrom = $pos.before($pos.depth);
-  return { from: parentFrom, to: parentFrom + parent.nodeSize };
+	const parentFrom = $pos.before($pos.depth);
+	return { from: parentFrom, to: parentFrom + parent.nodeSize };
 }
 
 export interface EditorOptions {
-  /**
-   * Extensions that define the schema, keymap, and commands.
-   * Defaults to [StarterKit] — paragraph, heading, bold, italic, history.
-   */
-  extensions?: Extension[];
-  /**
-   * Optional initial document. Strings are parsed as markdown using the
-   * merged token map from all extensions; objects are parsed as ProseMirror
-   * JSON. If omitted, falls back to extensions' `addInitialDoc` (e.g.
-   * `DefaultContent`).
-   */
-  content?: string | Record<string, unknown>;
-  /**
-   * Clone mode. When set, the initial document is deep-copied into a fresh
-   * `nodeId` space and the old→new mapping is exposed via `cloneIdMap`. Pass a
-   * `RecloneOptions` object to control which nodes/marks re-key and what the new
-   * ids are. See `BaseEditorOptions.clone`.
-   */
-  clone?: boolean | RecloneOptions;
-  /**
-   * Page dimensions and margins. Defaults to A4 with 1-inch margins.
-   * The editor owns layout — it needs page geometry to run layoutDocument.
-   */
-  pageConfig?: PageConfig;
-  /**
-   * Called on every state change. Optional when using the React adapter —
-   * the Canvas component subscribes internally via editor.subscribe().
-   */
-  onChange?: EditorChangeHandler;
-  /**
-   * Called when the editor gains or loses focus.
-   * Use this to show/hide the cursor overlay.
-   * Framework-agnostic — works with React, Vue, plain HTML.
-   */
-  onFocusChange?: (focused: boolean) => void;
-  /**
-   * Called on every cursor blink tick (every 530ms) and immediately after
-   * any user interaction that moves the cursor.
-   *
-   * The adapter (e.g. React PageView) should redraw the overlay canvas when
-   * this fires. Receives `isVisible` so the overlay knows whether to draw
-   * or clear the cursor.
-   */
-  onCursorTick?: (isVisible: boolean) => void;
-  /**
-   * When false, all rAF render flushes are suppressed until setReady(true)
-   * is called. Use this for collaborative documents where a Y.js / HocusPocus
-   * provider will fire hundreds of typeObserver events during initial sync —
-   * suppressing flushes means zero layout work during sync, then a single
-   * full layout + paint once the provider fires its `synced` event.
-   *
-   * Example:
-   *   const editor = new Editor({ startReady: false, ... });
-   *   provider.on('synced', () => editor.setReady(true));
-   *
-   * Defaults to true (standard, non-collaborative use).
-   */
-  startReady?: boolean;
-  /**
-   * Start the editor in read-only / view mode.
-   * Can also be toggled at any time via `editor.setReadOnly(value)`.
-   * Defaults to false.
-   */
-  readOnly?: boolean;
-  /**
-   * Diagnostic flags. Currently only `drag` — when true, PointerController
-   * console.debugs structured drag events and DragDebugOverlay paints anchored
-   * vs charMap rects on every page. Mutable at runtime via `editor.debug`;
-   * call `editor.redraw()` after toggling to repaint overlays.
-   */
-  debug?: DragDebugConfig;
-  /**
-   * Canvas paint colors. Each token accepts any CSS color string, including
-   * `var(--token)` references that resolve against `themeRoot`. Defaults
-   * match the historical hardcoded values, so apps that don't pass `theme`
-   * see zero visual change.
-   *
-   * Toggle dark mode by changing CSS variables on `themeRoot` (the editor
-   * auto-repaints) or by calling `editor.setTheme({...})` with new literals.
-   */
-  theme?: EditorTheme;
-  /**
-   * Element whose computed CSS variables drive `var(--...)` lookups in the
-   * theme. Defaults to the mounted container (set in `mount()`). For
-   * Tailwind `darkMode: 'class'` setups where the `dark` class is on
-   * `<html>`, set this to `document.documentElement` so toggles are seen.
-   */
-  themeRoot?: HTMLElement;
-  /**
-   * Advanced measurement injection point. If omitted, the editor creates the
-   * DOM-canvas-backed `TextMeasurer` default. Tests and custom runtimes may
-   * provide any implementation that satisfies the `TextMeasurerLike` API.
-   *
-   * This is not required for normal app usage; use it when text measurement
-   * must be supplied by a specific backend such as a server-side canvas,
-   * deterministic test canvas, or platform-native measurement service.
-   */
-  textMeasurer?: TextMeasurerLike;
+	/**
+	 * Extensions that define the schema, keymap, and commands.
+	 * Defaults to [StarterKit] — paragraph, heading, bold, italic, history.
+	 */
+	extensions?: Extension[];
+	/**
+	 * Optional initial document. Strings are parsed as markdown using the
+	 * merged token map from all extensions; objects are parsed as ProseMirror
+	 * JSON. If omitted, falls back to extensions' `addInitialDoc` (e.g.
+	 * `DefaultContent`).
+	 */
+	content?: string | Record<string, unknown>;
+	/**
+	 * Clone mode. When set, the initial document is deep-copied into a fresh
+	 * `nodeId` space and the old→new mapping is exposed via `cloneIdMap`. Pass a
+	 * `RecloneOptions` object to control which nodes/marks re-key and what the new
+	 * ids are. See `BaseEditorOptions.clone`.
+	 */
+	clone?: boolean | RecloneOptions;
+	/**
+	 * Page dimensions and margins. Defaults to A4 with 1-inch margins.
+	 * The editor owns layout — it needs page geometry to run layoutDocument.
+	 */
+	pageConfig?: PageConfig;
+	/**
+	 * Called on every state change. Optional when using the React adapter —
+	 * the Canvas component subscribes internally via editor.subscribe().
+	 */
+	onChange?: EditorChangeHandler;
+	/**
+	 * Called when the editor gains or loses focus.
+	 * Use this to show/hide the cursor overlay.
+	 * Framework-agnostic — works with React, Vue, plain HTML.
+	 */
+	onFocusChange?: (focused: boolean) => void;
+	/**
+	 * Called on every cursor blink tick (every 530ms) and immediately after
+	 * any user interaction that moves the cursor.
+	 *
+	 * The adapter (e.g. React PageView) should redraw the overlay canvas when
+	 * this fires. Receives `isVisible` so the overlay knows whether to draw
+	 * or clear the cursor.
+	 */
+	onCursorTick?: (isVisible: boolean) => void;
+	/**
+	 * When false, all rAF render flushes are suppressed until setReady(true)
+	 * is called. Use this for collaborative documents where a Y.js / HocusPocus
+	 * provider will fire hundreds of typeObserver events during initial sync —
+	 * suppressing flushes means zero layout work during sync, then a single
+	 * full layout + paint once the provider fires its `synced` event.
+	 *
+	 * Example:
+	 *   const editor = new Editor({ startReady: false, ... });
+	 *   provider.on('synced', () => editor.setReady(true));
+	 *
+	 * Defaults to true (standard, non-collaborative use).
+	 */
+	startReady?: boolean;
+	/**
+	 * Start the editor in read-only / view mode.
+	 * Can also be toggled at any time via `editor.setReadOnly(value)`.
+	 * Defaults to false.
+	 */
+	readOnly?: boolean;
+	/**
+	 * Diagnostic flags. Currently only `drag` — when true, PointerController
+	 * console.debugs structured drag events and DragDebugOverlay paints anchored
+	 * vs charMap rects on every page. Mutable at runtime via `editor.debug`;
+	 * call `editor.redraw()` after toggling to repaint overlays.
+	 */
+	debug?: DragDebugConfig;
+	/**
+	 * Canvas paint colors. Each token accepts any CSS color string, including
+	 * `var(--token)` references that resolve against `themeRoot`. Defaults
+	 * match the historical hardcoded values, so apps that don't pass `theme`
+	 * see zero visual change.
+	 *
+	 * Toggle dark mode by changing CSS variables on `themeRoot` (the editor
+	 * auto-repaints) or by calling `editor.setTheme({...})` with new literals.
+	 */
+	theme?: EditorTheme;
+	/**
+	 * Element whose computed CSS variables drive `var(--...)` lookups in the
+	 * theme. Defaults to the mounted container (set in `mount()`). For
+	 * Tailwind `darkMode: 'class'` setups where the `dark` class is on
+	 * `<html>`, set this to `document.documentElement` so toggles are seen.
+	 */
+	themeRoot?: HTMLElement;
+	/**
+	 * Advanced measurement injection point. If omitted, the editor creates the
+	 * DOM-canvas-backed `TextMeasurer` default. Tests and custom runtimes may
+	 * provide any implementation that satisfies the `TextMeasurerLike` API.
+	 *
+	 * This is not required for normal app usage; use it when text measurement
+	 * must be supplied by a specific backend such as a server-side canvas,
+	 * deterministic test canvas, or platform-native measurement service.
+	 */
+	textMeasurer?: TextMeasurerLike;
 }
 
-/**
+/**eant to ask is if you approve the plan so that we can transition out of "Brainstorm" mode. If you are happy with the plan as written in that document, just give me the green light, and I will create our task.md checklist and begin writing the code!
+
+
  * Editor — the full browser editor. Extends `BaseEditor` with layout,
  * canvas rendering, input capture, and cursor management.
  *
@@ -212,1125 +231,1241 @@ export interface EditorOptions {
  *   editor.commands.undo()
  */
 export class Editor extends BaseEditor implements IEditor {
-  private readonly onChangeHandler: EditorChangeHandler | undefined;
-  private readonly onFocusChangeHandler: ((focused: boolean) => void) | undefined;
-
-  /**
-   * Incremented by redraw() and setTheme() to signal asset-only or
-   * theme-only repaints. TileManager compares against this to bypass the
-   * layout-version paint guard.
-   */
-  renderGeneration = 0;
-
-  // ── Theme ─────────────────────────────────────────────────────────────────
-
-  /** User-provided theme (may contain `var(--token)` strings). */
-  private theme: EditorTheme;
-  /** Resolved theme — literal colors only. Replaced atomically on setTheme. */
-  private resolvedTheme: ResolvedTheme;
-  /**
-   * Element used as the CSS-variable resolution root. Set lazily — at
-   * construct if user provided `themeRoot`, else at `mount()` to the mounted
-   * container, else falls back to `document.documentElement`.
-   */
-  private themeRoot: HTMLElement | null;
-  /** True when the user explicitly passed `themeRoot` — don't override on mount. */
-  private readonly explicitThemeRoot: boolean;
-  /** MutationObserver watching themeRoot for class/style/data-theme flips. */
-  private themeObserver: MutationObserver | null = null;
-  /** rAF id for the coalesced theme refresh — tracked so destroy/unmount can cancel it. */
-  private themeRefreshRafId: number | null = null;
-
-  /** Page dimensions and margins — passed to LayoutCoordinator and read by renderers. */
-  readonly pageConfig: PageConfig;
-
-  /** The text measurer — created once; its internal caches are reused across layouts. */
-  readonly measurer: TextMeasurerLike;
-
-  // ── Layout coordinator ────────────────────────────────────────────────────
-
-  /** Owns all layout state: DocumentLayout, CharacterMap, dirty/partial flags,
-   *  measure cache, and idle-callback scheduling. */
-  private readonly lc: LayoutCoordinator;
-
-  /**
-   * requestAnimationFrame handle for the pending render flush.
-   * Multiple dispatch() calls within the same frame share a single flush,
-   * collapsing e.g. hundreds of Y.js sync operations into one layout + one paint.
-   */
-  private rafId: number | null = null;
-
-  /**
-   * Whether the next coalesced flush should scroll the cursor into view.
-   * Set by local edits/commands (which move the user's caret) and by any
-   * transaction that explicitly called `tr.scrollIntoView()`; left false for
-   * external/programmatic transactions (collab, AI overlays, citation
-   * highlights) so they don't yank the viewport away from an intentional
-   * `scrollRangeIntoView`. OR-accumulated across the frame; consumed by the rAF.
-   */
-  private pendingScrollToCursor = false;
-
-  // ── Input bridge ──────────────────────────────────────────────────────────
-
-  /** Owns all cursor movement, selection, and word/line navigation logic. */
-  readonly selection: SelectionController;
-
-  /** Owns the hidden textarea, all DOM event listeners, and clipboard handling. */
-  private readonly ib: InputBridge;
-
-  /** Owns the cursor blink timer. Public so adapters can read isVisible. */
-  readonly cursorManager: CursorManager;
-
-  /**
-   * Multi-surface registry — tracks plugin-owned edit regions (headers,
-   * footnote bodies, etc.). The root editor document is the implicit default
-   * (activeId === null). `editor.getState()` always returns the root editor
-   * state regardless of activation: surfaces re-route input, never document
-   * identity.
-   */
-  readonly surfaces: SurfaceRegistry;
-
-  /**
-   * Merged block styles from all extensions — the fontConfig passed to every
-   * layoutDocument call. Built once at construction from ExtensionManager.
-   */
-  readonly fontConfig: FontConfig;
-
-  /**
-   * Font modifier map built from all extensions.
-   * Computed once at construction, used by layoutDocument.
-   */
-  readonly fontModifiers: Map<string, FontModifier>;
-
-  /**
-   * Mark decorator map built from all extensions.
-   * Pass to renderPage — computed once at construction.
-   */
-  readonly markDecorators: Map<string, MarkDecorator>;
-
-  /**
-   * Toolbar item specs from all extensions, in registration order.
-   * Data-only — no React. Computed once at construction.
-   */
-  readonly toolbarItems: ToolbarItemSpec[];
-
-  /**
-   * Resolves the SelectionBehavior for any `state.selection` — extension
-   * behaviors first, then core built-ins, with a default fallback last.
-   * The renderer and pointer controller consult this instead of branching on
-   * selection type.
-   */
-  readonly selectionRegistry: SelectionRegistry;
-
-  /** Extension-registered semantic hit testers (highest priority first). */
-  private readonly hitTesters: HitTester[];
-  /** Extension-registered pointer-gesture providers. */
-  private readonly selectionGestures: SelectionGestureProvider[];
-
-  /**
-   * Block registry built from all extensions.
-   * Pass to renderPage — maps node type names to BlockStrategy instances.
-   */
-  readonly blockRegistry: BlockRegistry;
-
-  /**
-   * Inline object registry built from all extensions.
-   * Pass to renderPage — maps node type names to InlineStrategy instances.
-   */
-  readonly inlineRegistry: InlineRegistry;
-
-  /**
-   * Page chrome contributions from all extensions (headers, footers, etc.).
-   * Passed to renderPage for paint-time dispatch.
-   */
-  readonly pageChromeContributions: PageChromeContribution[];
-
-  /**
-   * Overlay render handlers registered by extensions (e.g. CollaborationCursor).
-   * Called by TileManager.paintOverlay() for each visible page.
-   */
-  private readonly overlayRenderHandlers = new Set<OverlayRenderHandler>();
-
-  /**
-   * Diagnostic flags. Mutable — flip `editor.debug.drag = true; editor.redraw()`
-   * to enable the drag debug overlay and structured drag-event logging.
-   */
-  debug: DragDebugConfig;
-
-  /** Dispose handle for the always-installed drag debug overlay handler. */
-  private readonly disposeDragDebug: () => void;
-  /** Dispose handle for the always-installed anchored-object debug overlay. */
-  private readonly disposeAnchoredDebug: () => void;
-
-  constructor({
-    extensions = [StarterKit],
-    content,
-    clone = false,
-    pageConfig,
-    onChange,
-    onFocusChange,
-    onCursorTick,
-    startReady = true,
-    readOnly = false,
-    debug = {},
-    theme,
-    themeRoot,
-    textMeasurer,
-  }: EditorOptions) {
-    // BaseEditor handles: manager, state, commands, storage, event emitter
-    super({ extensions, clone, ...(content !== undefined ? { content } : {}) });
-
-    // ── Theme ──────────────────────────────────────────────────────────────
-    // Initialise before any paint-related setup so renderers can read it.
-    this.theme = mergeEditorTheme({}, theme ?? {});
-    this.explicitThemeRoot = themeRoot != null;
-    this.themeRoot =
-      themeRoot ??
-      (typeof document !== "undefined" ? document.documentElement : null);
-    this.resolvedTheme = this.themeRoot
-      ? resolveTheme(this.theme, this.themeRoot)
-      : Object.freeze({ ...defaultEditorTheme });
-
-    this.onChangeHandler = onChange;
-    this.onFocusChangeHandler = onFocusChange;
-
-    const builtConfig = this.manager.buildPageConfig();
-    // User-supplied pageConfig overrides extension-built config so that
-    // top-level options like fontFamily are always respected.
-    this.pageConfig = builtConfig && pageConfig
-      ? { ...builtConfig, ...pageConfig }
-      : builtConfig ?? pageConfig ?? defaultPageConfig;
-
-    this.fontConfig    = this.manager.buildBlockStyles();
-    this.measurer      = textMeasurer ?? new TextMeasurer({ lineHeightMultiplier: 1.2 });
-    this.fontModifiers = this.manager.buildFontModifiers();
-    this.markDecorators = this.manager.buildMarkDecorators();
-    this.toolbarItems  = this.manager.buildToolbarItems();
-    this.selectionRegistry = new SelectionRegistry(
-      [...this.manager.buildSelectionBehaviors(), ...builtinSelectionBehaviors],
-      defaultSelectionBehavior,
-    );
-    this.hitTesters = this.manager.buildHitTesters();
-    this.selectionGestures = this.manager.buildSelectionGestures();
-    this.blockRegistry = this.manager.buildBlockRegistry();
-    this.inlineRegistry = this.manager.buildInlineRegistry();
-    this.pageChromeContributions = this.manager.getPageChromeContributions();
-
-    this.cursorManager = new CursorManager(() => {
-      onCursorTick?.(this.cursorManager.isVisible);
-      this.notifyListeners();
-    });
-
-    // ── Surface registry — plugins register their own surfaces lazily.
-    this.surfaces = new SurfaceRegistry();
-    const owners = this.manager.getSurfaceOwners();
-    this.surfaces.setOwnerMediator({
-      commit: (s) => {
-        const reg = owners.get(s.owner);
-        if (reg?.onCommit) {
-          // Throws propagate — commit failures must abort activation so the
-          // owner can surface a real error instead of silently discarding edits.
-          reg.onCommit(s);
-        }
-      },
-      deactivate: (s) => {
-        const reg = owners.get(s.owner);
-        try {
-          reg?.onDeactivate?.(s);
-        } catch (err) {
-          console.error(`[Editor] onDeactivate("${s.id}") threw:`, err);
-        }
-      },
-      activate: (s) => {
-        const reg = owners.get(s.owner);
-        try {
-          reg?.onActivate?.(s);
-        } catch (err) {
-          console.error(`[Editor] onActivate("${s.id}") threw:`, err);
-        }
-      },
-    });
-
-    // Routing helpers — InputBridge + SelectionController read/write via the
-    // active surface when one is set, else the root editor document.
-    // editor.getState() always refers to the root editor state, never an
-    // active surface (Invariant 5); only input routes flip.
-    const getRoutedState = (): EditorState =>
-      this.surfaces.activeSurface?.state ?? this.editorState;
-    const getRoutedCharMap = (): CharacterMap =>
-      this.surfaces.activeSurface?.charMap ?? this.lc.charMap;
-    const routedDispatch = (tr: Transaction | null): void => {
-      if (tr === null) return;
-      const active = this.surfaces.activeSurface;
-      if (active) active.dispatch(tr);
-      else this.viewDispatch(tr);
-    };
-
-    this.lc = new LayoutCoordinator({
-      pageConfig: this.pageConfig,
-      fontConfig: this.fontConfig,
-      measurer: this.measurer,
-      fontModifiers: this.fontModifiers,
-      getDoc: () => this.editorState.doc,
-      getHead: () => this.editorState.selection.head,
-      onUpdate: () => this.notifyListeners(),
-      getPageChromeContributions: () => this.manager.getPageChromeContributions(),
-      inlineRegistry: this.inlineRegistry,
-    });
-
-    // If startReady:false, cancel the idle layout and suppress all flushes
-    // until setReady(true) is called (e.g. from provider.on('synced', ...)).
-    if (!startReady) {
-      this.lc.setReady(false);
-    }
-
-    this.selection = new SelectionController({
-      getState: getRoutedState,
-      dispatch: routedDispatch,
-      ensureLayout: () => this.lc.ensureLayout(),
-      getCharMap: getRoutedCharMap,
-      focus: () => this.focus(),
-    });
-
-    const pasteTransformer = new PasteTransformer(
-      this.manager.schema,
-      this.manager.buildMarkdownRules(),
-      this.manager.buildMarkdownParserTokens(),
-    );
-
-    this.ib = new InputBridge({
-      getState: getRoutedState,
-      dispatch: routedDispatch,
-      getSchema: () => this.manager.schema,
-      getViewportRect: (from, to) => this.getViewportRect(from, to),
-      // TODO(pr7): getViewportRect still resolves positions against the flow
-      // layout. When a surface is active, `from`/`to` are surface-doc positions
-      // and need surface-aware coordinate lookup. Safe today because no plugin
-      // activates a surface yet.
-      getCharMap: getRoutedCharMap,
-      getAnchoredObjectPosition: (docPos: number) => {
-        const f = this.layout.anchoredObjects?.find((fl) => fl.docPos === docPos);
-        if (!f) return null;
-        return { page: f.page, y: f.y, height: f.height };
-      },
-      keymap: this.manager.buildKeymap(),
-      inputHandlers: this.manager.buildInputHandlers(),
-      navigator: this.selection,
-      pasteTransformer,
-      onFocus: () => {
-        this.cursorManager.start();
-        this.notifyListeners();
-        this.onFocusChangeHandler?.(true);
-        this.emit("focus", undefined as EditorEvents["focus"]);
-      },
-      onBlur: () => {
-        this.cursorManager.stop();
-        this.notifyListeners();
-        this.onFocusChangeHandler?.(false);
-        this.emit("blur", undefined as EditorEvents["blur"]);
-      },
-    });
-
-    // Apply initial read-only state after infrastructure is ready.
-    if (readOnly) this.setReadOnly(true);
-
-    // Debug overlays — always installed; self-gate on the corresponding
-    // `this.debug.<flag>` at paint time so toggling at runtime requires no
-    // re-registration.
-    this.debug = debug;
-    this.disposeDragDebug = installDragDebugOverlay(this);
-    this.disposeAnchoredDebug = installAnchoredObjectDebugOverlay(this);
-
-    // Lifecycle: engine-side hooks first (`onEditorReady`), then view-side
-    // hooks (`onViewReady`). Both run with all infrastructure available;
-    // the split is so view-only extensions can declare `onViewReady` and
-    // skip headless contexts without crashing on `addOverlayRenderHandler`
-    // / `redraw` / `selection`.
-    this.fireEditorReady();
-    this.fireViewReady();
-  }
-
-  /**
-   * Invoke all `onViewReady` callbacks from extensions. View-only — never
-   * called in `ServerEditor`. Cleanup fns land in the shared
-   * `runtimeCleanup` array so `destroy()` releases both lifecycles in one
-   * sweep.
-   */
-  protected fireViewReady(): void {
-    const callbacks = this.manager.buildViewReadyCallbacks();
-    for (const cb of callbacks) {
-      const cleanup = cb(this);
-      if (typeof cleanup === "function") this.runtimeCleanup.push(cleanup);
-    }
-  }
-
-  // ── BaseEditor overrides ─────────────────────────────────────────────────
-
-  /**
-   * Override: route through the view-aware dispatch (layout invalidation + rAF).
-   * This ensures external transaction sources (Y.js, AI suggestions) also
-   * trigger layout + paint updates.
-   *
-   * Unlike local input/commands, these programmatic transactions only scroll
-   * the cursor into view when they explicitly asked (`tr.scrollIntoView()`).
-   * A collab/AI/citation-highlight transaction that didn't request it leaves
-   * the viewport where the caller put it — e.g. `revealCitation` sets the
-   * highlight here, then scrolls the cited range into view itself.
-   */
-  override applyTransaction(tr: Transaction): void {
-    this.viewDispatch(tr, tr.scrolledIntoView);
-  }
-
-  /**
-   * Override: commands also go through the view-aware dispatch so every
-   * command triggers layout + paint.
-   */
-  protected override getActiveState(): EditorState {
-    return this.surfaces.activeSurface?.state ?? this.editorState;
-  }
-
-  protected override dispatchToActive(tr: Transaction): void {
-    const active = this.surfaces.activeSurface;
-    if (active) {
-      active.dispatch(tr);
-    } else {
-      this.viewDispatch(tr);
-    }
-  }
-
-  /**
-   * Override: gate InputBridge mutations and cursor blink in addition to
-   * setting the flag and notifying subscribers.
-   */
-  override setReadOnly(value: boolean): void {
-    if (this.readOnly === value) return;
-    super.setReadOnly(value);
-    this.ib.setReadOnly(value);
-    if (value) {
-      this.cursorManager.stop();
-    } else if (this.ib.isFocused) {
-      this.cursorManager.start();
-    }
-  }
-
-  /** Override to route through active surface when one is set. */
-  override setNodeAttrs(docPos: number, attrs: Record<string, unknown>): void {
-    const state = this.getActiveState();
-    const node = state.doc.nodeAt(docPos);
-    if (!node) return;
-    this.dispatchToActive(
-      state.tr.setNodeMarkup(docPos, undefined, { ...node.attrs, ...attrs }),
-    );
-  }
-
-  moveNode(docPos: number, targetPos: number): boolean {
-    const state = this.getActiveState();
-    const node = state.doc.nodeAt(docPos);
-    if (!node) return false;
-
-    const from = docPos;
-    const to = docPos + node.nodeSize;
-    if (targetPos >= from && targetPos <= to) return false;
-    const deleteRange = moveDeleteRange(state.doc, docPos, node);
-    if (targetPos >= deleteRange.from && targetPos <= deleteRange.to) return false;
-
-    try {
-      let tr = state.tr.delete(deleteRange.from, deleteRange.to);
-      const finalInsertPos = Math.max(0, Math.min(tr.mapping.map(targetPos, -1), tr.doc.content.size));
-      tr = tr.insert(finalInsertPos, node);
-      tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
-      this.dispatchToActive(tr);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Atomically move a node to `targetPos` AND update its attrs in a single
-   * transaction. Used by drag mechanics where a diagonal drag changes both
-   * the structural anchor (vertical) and the placement attrs (horizontal)
-   * in one user action — committing them separately produces two re-layouts
-   * with an inconsistent intermediate state.
-   *
-   * Equivalent to `moveNode` + `setNodeAttrs` but composed in one tr so
-   * layout sees a single consistent post-edit state.
-   */
-  moveAndUpdateNode(
-    docPos: number,
-    targetPos: number,
-    attrs: Record<string, unknown>,
-  ): boolean {
-    const state = this.getActiveState();
-    const node = state.doc.nodeAt(docPos);
-    if (!node) return false;
-
-    const from = docPos;
-    const to = docPos + node.nodeSize;
-    if (targetPos >= from && targetPos <= to) {
-      // Same position — degenerate to plain attrs update.
-      this.setNodeAttrs(docPos, attrs);
-      return true;
-    }
-    const deleteRange = moveDeleteRange(state.doc, docPos, node);
-    if (targetPos >= deleteRange.from && targetPos <= deleteRange.to) {
-      this.setNodeAttrs(docPos, attrs);
-      return true;
-    }
-
-    try {
-      const updated = node.type.create({ ...node.attrs, ...attrs }, node.content, node.marks);
-      let tr = state.tr.delete(deleteRange.from, deleteRange.to);
-      const finalInsertPos = Math.max(0, Math.min(tr.mapping.map(targetPos, -1), tr.doc.content.size));
-      tr = tr.insert(finalInsertPos, updated);
-      tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
-      this.dispatchToActive(tr);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Convert a floating image back to inline content at its current painted
-   * location. Floating modes treat docPos as ownership and attrs as geometry;
-   * inline mode is the opposite, so this is the one place where visual X/Y is
-   * resolved back to a document insertion point.
-   */
-  convertImageToInlineAtVisualPosition(docPos: number): boolean {
-    const state = this.getActiveState();
-    const node = state.doc.nodeAt(docPos);
-    if (!node || node.type.name !== "image") return false;
-
-    const inlineAttrs: Record<string, unknown> = {
-      wrapMode: "inline",
-      wrappingMode: "inline",
-      xAlign: "left",
-      x: null,
-      yOffset: 0,
-      floatOffset: { x: 0, y: 0 },
-    };
-
-    const rect = this.getNodeRect(docPos);
-    if (!rect) {
-      this.setNodeAttrs(docPos, inlineAttrs);
-      return true;
-    }
-
-    this.ensurePagePopulated(rect.page);
-    const targetPos = this.charMap.posAtCoords(
-      rect.x + rect.width / 2,
-      rect.y + rect.height / 2,
-      rect.page,
-    );
-
-    const from = docPos;
-    const to = docPos + node.nodeSize;
-    if (targetPos > 0 && (targetPos < from || targetPos > to)) {
-      if (this.moveAndUpdateNode(docPos, targetPos, inlineAttrs)) return true;
-      // moveAndUpdateNode rejected the position (PM placement guard).
-      // Falling back to attrs-only update keeps the image inline at its
-      // current docPos rather than failing the gesture; logged so the
-      // divergence is traceable when debugging "image stayed in place
-      // after toggling to inline."
-      if (this.debug?.drag) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          "[convertImageToInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
-          { from, to, targetPos },
-        );
-      }
-    }
-
-    this.setNodeAttrs(docPos, inlineAttrs);
-    return true;
-  }
-
-  override destroy(): void {
-    if (this.rafId !== null) {
-      cancelAnimationFrame(this.rafId);
-      this.rafId = null;
-    }
-    super.destroy(); // emits "destroy", fires cleanup callbacks
-    // Run owner onDeactivate via implicit activate(null), unregister every
-    // surface, clear listeners, and reset the mediator to noop so any stray
-    // post-destroy callers can't re-invoke plugin callbacks.
-    this.surfaces.destroy();
-    this.lc.destroy();
-    this.disposeDragDebug();
-    this.disposeAnchoredDebug();
-    this.overlayRenderHandlers.clear();
-    this.cursorManager.stop();
-    this.unmount();
-    if (this.themeRoot) {
-      disposeProbe(this.themeRoot);
-      // Null the root so any stray rAF/observer that fires post-destroy
-      // bails on the `!_themeRoot` guard instead of recreating the probe.
-      this.themeRoot = null;
-    }
-  }
-
-  // ── Public API ──────────────────────────────────────────────────────────────
-
-  /**
-   * Signal that the editor is (or is no longer) ready to render.
-   *
-   * Pass `false` before a collaborative provider connects to suppress all rAF
-   * render flushes during the initial Y.js document sync — prevents O(N²)
-   * layout work while typeObserver fires hundreds of times.
-   *
-   * Pass `true` once the provider fires its `synced` event. The editor will
-   * do a single full layout + paint of the complete document.
-   */
-  setReady(ready: boolean): void {
-    if (!ready && this.rafId !== null) {
-      cancelAnimationFrame(this.rafId);
-      this.rafId = null;
-      // Drop any pending scroll intent with the cancelled flush, so a later
-      // flush after readiness resumes doesn't consume a stale request.
-      this.pendingScrollToCursor = false;
-    }
-    this.lc.setReady(ready);
-  }
-
-  /** The merged ProseMirror Schema built from all extensions. */
-  override get schema(): Schema {
-    return this.manager.schema;
-  }
-
-  /**
-   * The CharacterMap — glyph positions for hit-testing and cursor rendering.
-   */
-  get charMap(): CharacterMap {
-    return this.surfaces.activeSurface?.charMap ?? this.lc.charMap;
-  }
-
-  /**
-   * The current document layout. Calls ensureLayout() so the result
-   * always reflects the latest EditorState.
-   */
-  get layout(): DocumentLayout {
-    this.lc.ensureLayout();
-    return this.lc.current;
-  }
-
-  /** True when the editor is in pageless (infinite-scroll) mode. */
-  get isPageless(): boolean {
-    return this.pageConfig.pageless === true;
-  }
-
-  /**
-   * Three-phase loading state for collaborative documents.
-   */
-  get loadingState(): "syncing" | "rendering" | "ready" {
-    return this.lc.loadingState;
-  }
-
-  /**
-   * The page number the cursor currently resides on.
-   */
-  get cursorPage(): number {
-    return this.lc.cursorPage;
-  }
-
-  /**
-   * Convert a doc position range to a viewport DOMRect.
-   */
-  getViewportRect(from: number, to: number): DOMRect | null {
-    this.lc.ensureLayout();
-
-    const fromCoords = this.lc.charMap.coordsAtPos(from);
-    if (!fromCoords) return null;
-
-    const pageScreenRect = this.ib.lookupPageScreenRect(fromCoords.page);
-    if (!pageScreenRect) return null;
-
-    const toCoords = this.lc.charMap.coordsAtPos(to);
-
-    const left = pageScreenRect.screenLeft + fromCoords.x;
-    const top  = pageScreenRect.screenTop  + fromCoords.y;
-    const height = fromCoords.height;
-
-    const sameLine =
-      toCoords &&
-      toCoords.page === fromCoords.page &&
-      Math.abs(toCoords.y - fromCoords.y) < 2;
-    const width =
-      sameLine && toCoords ? Math.abs(toCoords.x - fromCoords.x) : 1;
-
-    return new DOMRect(left, top, Math.max(1, width), height);
-  }
-
-  getNodeViewportRect(docPos: number): DOMRect | null {
-    const rect = this.getNodeRect(docPos);
-    if (!rect) return null;
-    const pageScreenRect = this.ib.lookupPageScreenRect(rect.page);
-    if (!pageScreenRect) return null;
-    return new DOMRect(
-      pageScreenRect.screenLeft + rect.x,
-      pageScreenRect.screenTop  + rect.y,
-      rect.width, rect.height,
-    );
-  }
-
-  /**
-   * Single-source-of-truth rect lookup for image-like nodes.
-   *
-   * Anchored objects (`wrapMode !== "inline"`) are authoritative in
-   * `layout.anchoredObjects` — Stage 3 owns their position. Inline images
-   * register a rect in `charMap.objectRects` during paint. `getNodeRect`
-   * checks the anchored set first, falls back to the charMap.
-   *
-   * Without this consolidation, hitHandleAt and overlay handle painting
-   * could read a stale charMap rect on a virtualized page where Stage 3
-   * already moved the anchor — handles render at the wrong place and the
-   * resize drag pivots on the wrong corner.
-   */
-  getNodeRect(docPos: number): ObjectRectEntry | undefined {
-    this.lc.ensureLayout();
-    const anchored = this.lc.current.anchoredObjects?.find(
-      (o) => o.docPos === docPos,
-    );
-    if (anchored) {
-      return {
-        docPos: anchored.docPos,
-        x: anchored.x,
-        y: anchored.y,
-        width: anchored.width,
-        height: anchored.height,
-        page: anchored.page,
-      };
-    }
-    return this.lc.charMap.getObjectRect(docPos);
-  }
-
-  /**
-   * Select the inline node at docPos using a NodeSelection.
-   * Falls back to selection.moveCursorTo if the node is not selectable.
-   */
-  selectNode(docPos: number): void {
-    try {
-      const state = this.getActiveState();
-      const sel = NodeSelection.create(state.doc, docPos);
-      this.dispatchToActive(state.tr.setSelection(sel));
-      this.focus();
-    } catch {
-      this.selection.moveCursorTo(docPos);
-    }
-  }
-
-  /**
-   * Guarantees the layout reflects the current EditorState.
-   */
-  ensureLayout(): void {
-    this.lc.ensureLayout();
-  }
-
-  /**
-   * Guarantees the layout covers the full document, not just the streamed
-   * first-paint chunk.
-   */
-  ensureFullLayout(): void {
-    this.lc.ensureFullLayout();
-  }
-
-  /**
-   * Ensures the CharacterMap is populated for the given page.
-   */
-  ensurePagePopulated(pageNumber: number): void {
-    this.lc.ensurePagePopulated(pageNumber);
-  }
-
-  /**
-   * Returns a lightweight snapshot of the current selection state.
-   */
-  getSelectionSnapshot(): SelectionSnapshot {
-    this.lc.ensureLayout();
-    const state = this.surfaces.activeSurface?.state ?? this.editorState;
-    const { selection } = state;
-    const blockInfo = this.getBlockInfo();
-    return {
-      anchor: selection.anchor,
-      head: selection.head,
-      from: selection.from,
-      to: selection.to,
-      empty: selection.empty,
-      activeMarks: this.getActiveMarks(),
-      activeMarkAttrs: this.getActiveMarkAttrs(),
-      blockType: blockInfo.blockType,
-      blockAttrs: blockInfo.blockAttrs,
-    };
-  }
-
-  /**
-   * The kind-tagged, capability-carrying view of the active selection. UI
-   * (menus, toolbars, clipboard) reads this instead of `instanceof`-ing the
-   * ProseMirror selection, so a table cell range or a Seraa custom-node
-   * selection is described the same way as text or an image.
-   */
-  getSelectionDescriptor(): SelectionDescriptor {
-    const activeSurface = this.surfaces.activeSurface;
-    const state = activeSurface?.state ?? this.editorState;
-    return this.describeSelection(state.selection, {
-      state,
-      surfaceId: activeSurface?.id ?? "body",
-    });
-  }
-
-  /**
-   * Describe a specific selection (not necessarily the active one) through its
-   * behavior. Pass `owner` when the selection belongs to a surface other than
-   * the active one — the descriptor must be resolved against the state/schema
-   * that owns the selection (a header selection's positions mean nothing in the
-   * body doc). Defaults to the active surface, which is correct for callers that
-   * hold the active selection (e.g. the pointer controller).
-   */
-  describeSelection(
-    selection: Selection,
-    owner?: { state: EditorState; surfaceId: string },
-  ): SelectionDescriptor {
-    const activeSurface = this.surfaces.activeSurface;
-    const state = owner?.state ?? activeSurface?.state ?? this.editorState;
-    const surfaceId = owner?.surfaceId ?? activeSurface?.id ?? "body";
-    return this.selectionRegistry.resolve(selection).describe(selection, {
-      state,
-      surfaceId,
-      // The surface may use a different schema than the root document.
-      schema: state.schema,
-      readOnly: this.readOnly,
-    });
-  }
-
-  /**
-   * Mount the editor onto a container element.
-   * Creates the hidden textarea and attaches event listeners.
-   */
-  mount(container: HTMLElement): void {
-    this.ib.mount(container);
-    if (!this.explicitThemeRoot) {
-      // Constructor may have created a probe at document.documentElement to
-      // resolve the initial theme; dispose it before switching roots so the
-      // probe doesn't leak when the editor is later destroyed.
-      const previousRoot = this.themeRoot;
-      if (previousRoot && previousRoot !== container) {
-        disposeProbe(previousRoot);
-      }
-      this.themeRoot = container;
-      this.resolvedTheme = resolveTheme(this.theme, container);
-    }
-    this.installThemeObserver();
-  }
-
-  /**
-   * Tear down the mounted view (textarea + event listeners) without
-   * destroying the Editor itself. Safe to call multiple times.
-   */
-  unmount(): void {
-    this.uninstallThemeObserver();
-    // When themeRoot was implicitly bound to the mount container, drop the
-    // probe so a subsequent mount() onto a different container doesn't leak.
-    if (!this.explicitThemeRoot && this.themeRoot) {
-      disposeProbe(this.themeRoot);
-    }
-    this.ib.unmount();
-  }
-
-  // ── Theme API ──────────────────────────────────────────────────────────────
-
-  /** The current input theme (may contain `var(--token)` strings). */
-  getTheme(): EditorTheme {
-    return this.theme;
-  }
-
-  /** The resolved theme (literal colors only) used by every paint site. */
-  getResolvedTheme(): ResolvedTheme {
-    return this.resolvedTheme;
-  }
-
-  /**
-   * Update the theme. Pass an object with one or more tokens; tokens not
-   * mentioned are left alone. Pass `null` for a token to reset it to the
-   * default. Triggers re-resolution and a redraw.
-   *
-   * @example
-   * editor.setTheme({ pageBg: "#1e1e1e", defaultText: "#e0e0e0" });
-   * editor.setTheme({ pageBg: null });  // reset pageBg to default
-   * editor.setTheme({});                // pure refresh — re-resolve current
-   *
-   * Per-instance precedence: this overrides any extension's theme contribution.
-   */
-  setTheme(partial: { [K in keyof EditorTheme]?: EditorTheme[K] | null | undefined }): void {
-    this.theme = mergeEditorTheme(this.theme, partial);
-    if (this.themeRoot) {
-      this.resolvedTheme = resolveTheme(this.theme, this.themeRoot);
-    }
-    this.installThemeObserver();
-    this.redraw();
-  }
-
-  private installThemeObserver(): void {
-    this.uninstallThemeObserver();
-    if (!this.themeRoot) return;
-    if (!themeContainsCssVars(this.theme)) return;
-    if (typeof MutationObserver === "undefined") return;
-    const observer = new MutationObserver(() => this.scheduleThemeRefresh());
-    observer.observe(this.themeRoot, {
-      attributes: true,
-      attributeFilter: ["class", "style", "data-theme"],
-    });
-    this.themeObserver = observer;
-  }
-
-  private uninstallThemeObserver(): void {
-    if (this.themeObserver) {
-      this.themeObserver.disconnect();
-      this.themeObserver = null;
-    }
-    if (this.themeRefreshRafId !== null) {
-      if (typeof cancelAnimationFrame !== "undefined") {
-        cancelAnimationFrame(this.themeRefreshRafId);
-      } else {
-        clearTimeout(this.themeRefreshRafId);
-      }
-      this.themeRefreshRafId = null;
-    }
-  }
-
-  private scheduleThemeRefresh(): void {
-    if (this.themeRefreshRafId !== null) return;
-    const schedule =
-      typeof requestAnimationFrame !== "undefined"
-        ? requestAnimationFrame
-        : (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16) as unknown as number;
-    this.themeRefreshRafId = schedule(() => {
-      this.themeRefreshRafId = null;
-      // Guard against post-destroy fire: unmount + destroy null _themeRoot
-      // and disposeProbe; without this, the rAF body would recreate a probe
-      // via ensureProbe and call redraw() on a torn-down editor.
-      if (!this.themeRoot) return;
-      this.resolvedTheme = resolveTheme(this.theme, this.themeRoot);
-      this.redraw();
-    });
-  }
-
-  focus(): void {
-    this.ib.focus();
-  }
-
-  /**
-   * Register a canvas draw function on the overlay layer.
-   * Called by TileManager.paintOverlay() after the local cursor and selection.
-   * Returns an unregister function.
-   */
-  addOverlayRenderHandler(handler: OverlayRenderHandler): () => void {
-    this.overlayRenderHandlers.add(handler);
-    return () => this.overlayRenderHandlers.delete(handler);
-  }
-
-  /**
-   * Resolve a pointer position to a semantic `HitTarget` via extension hit
-   * testers (highest priority first), or null when none claims it — in which
-   * case the pointer controller falls back to a plain text caret.
-   */
-  resolveHitTarget(docX: number, docY: number, page: number): HitTarget | null {
-    const ctx: HitTestContext = {
-      editor: this,
-      // Cell hit-testing reads the body page layout, so the owning state is the
-      // root doc; a surface-aware pointer layout would pass the surface state.
-      state: this.getState(),
-      posAtCoords: (x, y, p) => this.charMap.posAtCoords(x, y, p),
-    };
-    for (const tester of this.hitTesters) {
-      const hit = tester.hitTest(docX, docY, page, ctx);
-      if (hit) return hit;
-    }
-    return null;
-  }
-
-  /**
-   * Ask each registered gesture provider to begin a drag for `hit`; the first
-   * to return a gesture owns it. Null means no extension claims the target, so
-   * the pointer controller runs its built-in text/image handling.
-   */
-  beginSelectionGesture(
-    hit: HitTarget,
-    event: PointerEvent,
-    clickCount = 1,
-  ): SelectionGesture | null {
-    const ctx = {
-      editor: this,
-      state: this.getState(),
-      clickCount,
-      posAtCoords: (x: number, y: number, p: number) => this.charMap.posAtCoords(x, y, p),
-    };
-    for (const provider of this.selectionGestures) {
-      const gesture = provider.beginGesture(hit, event, ctx);
-      if (gesture) return gesture;
-    }
-    return null;
-  }
-
-  /**
-   * Invoke all registered overlay render handlers for a given page.
-   * Called by TileManager.paintOverlay() — not intended for external use.
-   */
-  runOverlayHandlers(
-    ctx: CanvasRenderingContext2D,
-    pageNumber: number,
-    pageConfig: PageConfig,
-  ): void {
-    for (const handler of this.overlayRenderHandlers) {
-      handler(ctx, pageNumber, pageConfig, this.lc.charMap, this.resolvedTheme);
-    }
-  }
-
-  /**
-   * Trigger a UI redraw without a document/selection change.
-   * Use when external state (e.g. Y.js awareness) changes and the overlay
-   * needs to be repainted with fresh remote cursor positions.
-   */
-  redraw(): void {
-    this.renderGeneration++;
-    this.notifyListeners();
-  }
-
-  /**
-   * Get the screen-space position of a page. Returns null if the page
-   * lookup is not registered (editor not mounted) or the page doesn't exist.
-   */
-  getPageScreenPosition(page: number): { screenLeft: number; screenTop: number } | null {
-    return this.ib.lookupPageScreenRect(page);
-  }
-
-  /**
-   * Invalidate the layout cache so the next paint triggers a full re-layout.
-   * Use when external factors change chrome heights (e.g. live surface editing
-   * grows the header band).
-   */
-  invalidateLayout(): void {
-    this.lc.invalidate();
-    this.redraw();
-  }
-
-  /**
-   * Register a function that returns the screen-space top-left corner of
-   * page N. Used by scrollCursorIntoView, getViewportRect, and
-   * getNodeViewportRect — no DOM element per page needed.
-   */
-  setPageTopLookup(
-    fn: ((page: number) => { screenLeft: number; screenTop: number } | null) | null,
-  ): void {
-    this.ib.setPageScreenRectLookup(fn);
-  }
-
-  private scrollContainerLookup: (() => DOMRect | null) | null = null;
-
-  /**
-   * Register a function that returns the current DOMRect of the scrollable
-   * container holding the editor. Popovers use this to hide when their
-   * anchor scrolls above/below the visible content area — without it, a
-   * position:fixed popover renders over surrounding chrome (e.g. a toolbar)
-   * as the user scrolls past it. TileManager wires this on construction.
-   */
-  setScrollContainerLookup(fn: (() => DOMRect | null) | null): void {
-    this.scrollContainerLookup = fn;
-  }
-
-  /**
-   * Current viewport DOMRect of the scrollable container, or null if none
-   * is registered (SSR, ServerEditor, or editor not yet mounted).
-   */
-  getScrollContainerRect(): DOMRect | null {
-    return this.scrollContainerLookup?.() ?? null;
-  }
-
-  /**
-   * Positions the hidden textarea at the cursor's visual location.
-   * Skipped while a surface is active: the textarea's current anchor path
-   * resolves `head` against flow layout, and surface-doc positions would
-   * produce garbage coordinates. TODO(pr7): surface-aware viewport lookup.
-   */
-  syncInputBridge(): void {
-    if (this.surfaces.activeSurface !== null) return;
-    this.ib.syncPosition();
-  }
-
-  /**
-   * Scrolls the nearest scrollable ancestor so the cursor is visible.
-   */
-  scrollCursorIntoView(): void {
-    this.ib.scrollCursorIntoView();
-  }
-
-  /**
-   * Scrolls so the doc range [from, to] is visible — centered when it fits
-   * the viewport, top-pinned when taller. Completes a partial streamed
-   * layout first if the target lies beyond the laid-out region. Returns
-   * false when the range cannot be located (not mounted, no coords).
-   */
-  scrollRangeIntoView(from: number, to: number = from): boolean {
-    this.lc.ensureLayout();
-    if (!this.lc.ensureRangePopulated(from, to)) return false;
-    // An explicit range scroll supersedes any cursor scroll a local edit
-    // coalesced into this frame — otherwise the pending flush would scroll the
-    // caret back and undo the jump (the revealCitation case).
-    this.pendingScrollToCursor = false;
-    return this.ib.scrollRangeIntoView(from, to);
-  }
-
-  /** Whether the editor's textarea currently has focus. */
-  get isFocused(): boolean {
-    return this.ib.isFocused;
-  }
-
-  /**
-   * Returns the current ProseMirror EditorState.
-   * Used as the getSnapshot function for useSyncExternalStore.
-   */
-  getSnapshot(): EditorState {
-    return this.editorState;
-  }
-
-  // ── Private ─────────────────────────────────────────────────────────────────
-
-  /**
-   * The view-aware dispatch: applies state + invalidates layout + resets
-   * cursor blink + calls onChange + schedules rAF flush.
-   *
-   * All transaction paths in Editor (commands, input, external) converge here.
-   */
-  private viewDispatch(tr: Transaction, scrollToCursor = true): void {
-    // applyState is in BaseEditor: applies tr, emits "update", notifyListeners
-    this.applyState(tr);
-    this.lc.invalidate();
-    // resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
-    // Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.
-    this.cursorManager.resetSilent();
-    this.onChangeHandler?.(this.editorState);
-    if (scrollToCursor) this.pendingScrollToCursor = true;
-    this.scheduleFlush();
-  }
-
-  /**
-   * Schedules a layout + render flush for the next animation frame.
-   * Idempotent — calling it multiple times before the frame fires is free.
-   */
-  private scheduleFlush(): void {
-    if (!this.lc.isReady) return; // suppress during collaborative sync
-    if (this.rafId !== null) return;
-    this.rafId = requestAnimationFrame(() => {
-      this.rafId = null;
-      this.lc.ensureLayout();
-      // Scroll first so the viewport is settled, then notify subscribers —
-      // but only when a local edit / explicit scroll asked for it. External
-      // transactions (collab, AI overlays, citation highlights) must not steal
-      // the viewport from an intentional scrollRangeIntoView.
-      if (this.pendingScrollToCursor) {
-        this.pendingScrollToCursor = false;
-        this.scrollCursorIntoView();
-      }
-      this.syncInputBridge();
-      this.notifyListeners();
-    });
-  }
+	private readonly onChangeHandler: EditorChangeHandler | undefined;
+	private readonly onFocusChangeHandler:
+		| ((focused: boolean) => void)
+		| undefined;
+
+	/**
+	 * Incremented by redraw() and setTheme() to signal asset-only or
+	 * theme-only repaints. TileManager compares against this to bypass the
+	 * layout-version paint guard.
+	 */
+	renderGeneration = 0;
+
+	// ── Theme ─────────────────────────────────────────────────────────────────
+
+	/** User-provided theme (may contain `var(--token)` strings). */
+	private theme: EditorTheme;
+	/** Resolved theme — literal colors only. Replaced atomically on setTheme. */
+	private resolvedTheme: ResolvedTheme;
+	/**
+	 * Element used as the CSS-variable resolution root. Set lazily — at
+	 * construct if user provided `themeRoot`, else at `mount()` to the mounted
+	 * container, else falls back to `document.documentElement`.
+	 */
+	private themeRoot: HTMLElement | null;
+	/** True when the user explicitly passed `themeRoot` — don't override on mount. */
+	private readonly explicitThemeRoot: boolean;
+	/** MutationObserver watching themeRoot for class/style/data-theme flips. */
+	private themeObserver: MutationObserver | null = null;
+	/** rAF id for the coalesced theme refresh — tracked so destroy/unmount can cancel it. */
+	private themeRefreshRafId: number | null = null;
+
+	/** Page dimensions and margins — passed to LayoutCoordinator and read by renderers. */
+	readonly pageConfig: PageConfig;
+
+	/** The text measurer — created once; its internal caches are reused across layouts. */
+	readonly measurer: TextMeasurerLike;
+
+	// ── Layout coordinator ────────────────────────────────────────────────────
+
+	/** Owns all layout state: DocumentLayout, CharacterMap, dirty/partial flags,
+	 *  measure cache, and idle-callback scheduling. */
+	private readonly lc: LayoutCoordinator;
+
+	/**
+	 * requestAnimationFrame handle for the pending render flush.
+	 * Multiple dispatch() calls within the same frame share a single flush,
+	 * collapsing e.g. hundreds of Y.js sync operations into one layout + one paint.
+	 */
+	private rafId: number | null = null;
+
+	/**
+	 * Whether the next coalesced flush should scroll the cursor into view.
+	 * Set by local edits/commands (which move the user's caret) and by any
+	 * transaction that explicitly called `tr.scrollIntoView()`; left false for
+	 * external/programmatic transactions (collab, AI overlays, citation
+	 * highlights) so they don't yank the viewport away from an intentional
+	 * `scrollRangeIntoView`. OR-accumulated across the frame; consumed by the rAF.
+	 */
+	private pendingScrollToCursor = false;
+
+	// ── Input bridge ──────────────────────────────────────────────────────────
+
+	/** Owns all cursor movement, selection, and word/line navigation logic. */
+	readonly selection: SelectionController;
+
+	/** Owns the hidden textarea, all DOM event listeners, and clipboard handling. */
+	private readonly ib: InputBridge;
+
+	/** Owns the cursor blink timer. Public so adapters can read isVisible. */
+	readonly cursorManager: CursorManager;
+
+	/**
+	 * Multi-surface registry — tracks plugin-owned edit regions (headers,
+	 * footnote bodies, etc.). The root editor document is the implicit default
+	 * (activeId === null). `editor.getState()` always returns the root editor
+	 * state regardless of activation: surfaces re-route input, never document
+	 * identity.
+	 */
+	readonly surfaces: SurfaceRegistry;
+
+	/**
+	 * Merged block styles from all extensions — the fontConfig passed to every
+	 * layoutDocument call. Built once at construction from ExtensionManager.
+	 */
+	readonly fontConfig: FontConfig;
+
+	/**
+	 * Font modifier map built from all extensions.
+	 * Computed once at construction, used by layoutDocument.
+	 */
+	readonly fontModifiers: Map<string, FontModifier>;
+
+	/**
+	 * Mark decorator map built from all extensions.
+	 * Pass to renderPage — computed once at construction.
+	 */
+	readonly markDecorators: Map<string, MarkDecorator>;
+
+	/**
+	 * Toolbar item specs from all extensions, in registration order.
+	 * Data-only — no React. Computed once at construction.
+	 */
+	readonly toolbarItems: ToolbarItemSpec[];
+
+	readonly nodeActionRegistry: NodeActionRegistry;
+
+	/**
+	 * Resolves the SelectionBehavior for any `state.selection` — extension
+	 * behaviors first, then core built-ins, with a default fallback last.
+	 * The renderer and pointer controller consult this instead of branching on
+	 * selection type.
+	 */
+	readonly selectionRegistry: SelectionRegistry;
+
+	/** Extension-registered semantic hit testers (highest priority first). */
+	private readonly hitTesters: HitTester[];
+	/** Extension-registered pointer-gesture providers. */
+	private readonly selectionGestures: SelectionGestureProvider[];
+
+	/**
+	 * Block registry built from all extensions.
+	 * Pass to renderPage — maps node type names to BlockStrategy instances.
+	 */
+	readonly blockRegistry: BlockRegistry;
+
+	/**
+	 * Inline object registry built from all extensions.
+	 * Pass to renderPage — maps node type names to InlineStrategy instances.
+	 */
+	readonly inlineRegistry: InlineRegistry;
+
+	/**
+	 * Page chrome contributions from all extensions (headers, footers, etc.).
+	 * Passed to renderPage for paint-time dispatch.
+	 */
+	readonly pageChromeContributions: PageChromeContribution[];
+
+	/**
+	 * Overlay render handlers registered by extensions (e.g. CollaborationCursor).
+	 * Called by TileManager.paintOverlay() for each visible page.
+	 */
+	private readonly overlayRenderHandlers = new Set<OverlayRenderHandler>();
+
+	/**
+	 * Diagnostic flags. Mutable — flip `editor.debug.drag = true; editor.redraw()`
+	 * to enable the drag debug overlay and structured drag-event logging.
+	 */
+	debug: DragDebugConfig;
+
+	/** Dispose handle for the always-installed drag debug overlay handler. */
+	private readonly disposeDragDebug: () => void;
+	/** Dispose handle for the always-installed anchored-object debug overlay. */
+	private readonly disposeAnchoredDebug: () => void;
+
+	constructor({
+		extensions = [StarterKit],
+		content,
+		clone = false,
+		pageConfig,
+		onChange,
+		onFocusChange,
+		onCursorTick,
+		startReady = true,
+		readOnly = false,
+		debug = {},
+		theme,
+		themeRoot,
+		textMeasurer,
+	}: EditorOptions) {
+		// BaseEditor handles: manager, state, commands, storage, event emitter
+		super({
+			extensions,
+			clone,
+			...(content !== undefined ? { content } : {}),
+		});
+
+		// ── Theme ──────────────────────────────────────────────────────────────
+		// Initialise before any paint-related setup so renderers can read it.
+		this.theme = mergeEditorTheme({}, theme ?? {});
+		this.explicitThemeRoot = themeRoot != null;
+		this.themeRoot =
+			themeRoot ??
+			(typeof document !== "undefined" ? document.documentElement : null);
+		this.resolvedTheme = this.themeRoot
+			? resolveTheme(this.theme, this.themeRoot)
+			: Object.freeze({ ...defaultEditorTheme });
+
+		this.onChangeHandler = onChange;
+		this.onFocusChangeHandler = onFocusChange;
+
+		const builtConfig = this.manager.buildPageConfig();
+		// User-supplied pageConfig overrides extension-built config so that
+		// top-level options like fontFamily are always respected.
+		this.pageConfig =
+			builtConfig && pageConfig
+				? { ...builtConfig, ...pageConfig }
+				: (builtConfig ?? pageConfig ?? defaultPageConfig);
+
+		this.fontConfig = this.manager.buildBlockStyles();
+		this.measurer =
+			textMeasurer ?? new TextMeasurer({ lineHeightMultiplier: 1.2 });
+		this.fontModifiers = this.manager.buildFontModifiers();
+		this.markDecorators = this.manager.buildMarkDecorators();
+		this.toolbarItems = this.manager.buildToolbarItems();
+		this.nodeActionRegistry = new NodeActionRegistry(
+			this.manager.buildNodeActions(),
+		);
+		this.selectionRegistry = new SelectionRegistry(
+			[
+				...this.manager.buildSelectionBehaviors(),
+				...builtinSelectionBehaviors,
+			],
+			defaultSelectionBehavior,
+		);
+		this.hitTesters = this.manager.buildHitTesters();
+		this.selectionGestures = this.manager.buildSelectionGestures();
+		this.blockRegistry = this.manager.buildBlockRegistry();
+		this.inlineRegistry = this.manager.buildInlineRegistry();
+		this.pageChromeContributions =
+			this.manager.getPageChromeContributions();
+
+		this.cursorManager = new CursorManager(() => {
+			onCursorTick?.(this.cursorManager.isVisible);
+			this.notifyListeners();
+		});
+
+		// ── Surface registry — plugins register their own surfaces lazily.
+		this.surfaces = new SurfaceRegistry();
+		const owners = this.manager.getSurfaceOwners();
+		this.surfaces.setOwnerMediator({
+			commit: s => {
+				const reg = owners.get(s.owner);
+				if (reg?.onCommit) {
+					// Throws propagate — commit failures must abort activation so the
+					// owner can surface a real error instead of silently discarding edits.
+					reg.onCommit(s);
+				}
+			},
+			deactivate: s => {
+				const reg = owners.get(s.owner);
+				try {
+					reg?.onDeactivate?.(s);
+				} catch (err) {
+					console.error(
+						`[Editor] onDeactivate("${s.id}") threw:`,
+						err,
+					);
+				}
+			},
+			activate: s => {
+				const reg = owners.get(s.owner);
+				try {
+					reg?.onActivate?.(s);
+				} catch (err) {
+					console.error(`[Editor] onActivate("${s.id}") threw:`, err);
+				}
+			},
+		});
+
+		// Routing helpers — InputBridge + SelectionController read/write via the
+		// active surface when one is set, else the root editor document.
+		// editor.getState() always refers to the root editor state, never an
+		// active surface (Invariant 5); only input routes flip.
+		const getRoutedState = (): EditorState =>
+			this.surfaces.activeSurface?.state ?? this.editorState;
+		const getRoutedCharMap = (): CharacterMap =>
+			this.surfaces.activeSurface?.charMap ?? this.lc.charMap;
+		const routedDispatch = (tr: Transaction | null): void => {
+			if (tr === null) return;
+			const active = this.surfaces.activeSurface;
+			if (active) active.dispatch(tr);
+			else this.viewDispatch(tr);
+		};
+
+		this.lc = new LayoutCoordinator({
+			pageConfig: this.pageConfig,
+			fontConfig: this.fontConfig,
+			measurer: this.measurer,
+			fontModifiers: this.fontModifiers,
+			getDoc: () => this.editorState.doc,
+			getHead: () => this.editorState.selection.head,
+			onUpdate: () => this.notifyListeners(),
+			getPageChromeContributions: () =>
+				this.manager.getPageChromeContributions(),
+			inlineRegistry: this.inlineRegistry,
+		});
+
+		// If startReady:false, cancel the idle layout and suppress all flushes
+		// until setReady(true) is called (e.g. from provider.on('synced', ...)).
+		if (!startReady) {
+			this.lc.setReady(false);
+		}
+
+		this.selection = new SelectionController({
+			getState: getRoutedState,
+			dispatch: routedDispatch,
+			ensureLayout: () => this.lc.ensureLayout(),
+			getCharMap: getRoutedCharMap,
+			focus: () => this.focus(),
+		});
+
+		const pasteTransformer = new PasteTransformer(
+			this.manager.schema,
+			this.manager.buildMarkdownRules(),
+			this.manager.buildMarkdownParserTokens(),
+		);
+
+		this.ib = new InputBridge({
+			getState: getRoutedState,
+			dispatch: routedDispatch,
+			getSchema: () => this.manager.schema,
+			getViewportRect: (from, to) => this.getViewportRect(from, to),
+			// TODO(pr7): getViewportRect still resolves positions against the flow
+			// layout. When a surface is active, `from`/`to` are surface-doc positions
+			// and need surface-aware coordinate lookup. Safe today because no plugin
+			// activates a surface yet.
+			getCharMap: getRoutedCharMap,
+			getAnchoredObjectPosition: (docPos: number) => {
+				const f = this.layout.anchoredObjects?.find(
+					fl => fl.docPos === docPos,
+				);
+				if (!f) return null;
+				return { page: f.page, y: f.y, height: f.height };
+			},
+			keymap: this.manager.buildKeymap(),
+			inputHandlers: this.manager.buildInputHandlers(),
+			navigator: this.selection,
+			pasteTransformer,
+			onFocus: () => {
+				this.cursorManager.start();
+				this.notifyListeners();
+				this.onFocusChangeHandler?.(true);
+				this.emit("focus", undefined as EditorEvents["focus"]);
+			},
+			onBlur: () => {
+				this.cursorManager.stop();
+				this.notifyListeners();
+				this.onFocusChangeHandler?.(false);
+				this.emit("blur", undefined as EditorEvents["blur"]);
+			},
+		});
+
+		// Apply initial read-only state after infrastructure is ready.
+		if (readOnly) this.setReadOnly(true);
+
+		// Debug overlays — always installed; self-gate on the corresponding
+		// `this.debug.<flag>` at paint time so toggling at runtime requires no
+		// re-registration.
+		this.debug = debug;
+		this.disposeDragDebug = installDragDebugOverlay(this);
+		this.disposeAnchoredDebug = installAnchoredObjectDebugOverlay(this);
+
+		// Lifecycle: engine-side hooks first (`onEditorReady`), then view-side
+		// hooks (`onViewReady`). Both run with all infrastructure available;
+		// the split is so view-only extensions can declare `onViewReady` and
+		// skip headless contexts without crashing on `addOverlayRenderHandler`
+		// / `redraw` / `selection`.
+		this.fireEditorReady();
+		this.fireViewReady();
+	}
+
+	/**
+	 * Invoke all `onViewReady` callbacks from extensions. View-only — never
+	 * called in `ServerEditor`. Cleanup fns land in the shared
+	 * `runtimeCleanup` array so `destroy()` releases both lifecycles in one
+	 * sweep.
+	 */
+	protected fireViewReady(): void {
+		const callbacks = this.manager.buildViewReadyCallbacks();
+		for (const cb of callbacks) {
+			const cleanup = cb(this);
+			if (typeof cleanup === "function")
+				this.runtimeCleanup.push(cleanup);
+		}
+	}
+
+	// ── BaseEditor overrides ─────────────────────────────────────────────────
+
+	/**
+	 * Override: route through the view-aware dispatch (layout invalidation + rAF).
+	 * This ensures external transaction sources (Y.js, AI suggestions) also
+	 * trigger layout + paint updates.
+	 *
+	 * Unlike local input/commands, these programmatic transactions only scroll
+	 * the cursor into view when they explicitly asked (`tr.scrollIntoView()`).
+	 * A collab/AI/citation-highlight transaction that didn't request it leaves
+	 * the viewport where the caller put it — e.g. `revealCitation` sets the
+	 * highlight here, then scrolls the cited range into view itself.
+	 */
+	override applyTransaction(tr: Transaction): void {
+		this.viewDispatch(tr, tr.scrolledIntoView);
+	}
+
+	/**
+	 * Override: commands also go through the view-aware dispatch so every
+	 * command triggers layout + paint.
+	 */
+	protected override getActiveState(): EditorState {
+		return this.surfaces.activeSurface?.state ?? this.editorState;
+	}
+
+	protected override dispatchToActive(tr: Transaction): void {
+		const active = this.surfaces.activeSurface;
+		if (active) {
+			active.dispatch(tr);
+		} else {
+			this.viewDispatch(tr);
+		}
+	}
+
+	/**
+	 * Override: gate InputBridge mutations and cursor blink in addition to
+	 * setting the flag and notifying subscribers.
+	 */
+	override setReadOnly(value: boolean): void {
+		if (this.readOnly === value) return;
+		super.setReadOnly(value);
+		this.ib.setReadOnly(value);
+		if (value) {
+			this.cursorManager.stop();
+		} else if (this.ib.isFocused) {
+			this.cursorManager.start();
+		}
+	}
+
+	/** Override to route through active surface when one is set. */
+	override setNodeAttrs(
+		docPos: number,
+		attrs: Record<string, unknown>,
+	): void {
+		const state = this.getActiveState();
+		const node = state.doc.nodeAt(docPos);
+		if (!node) return;
+		this.dispatchToActive(
+			state.tr.setNodeMarkup(docPos, undefined, {
+				...node.attrs,
+				...attrs,
+			}),
+		);
+	}
+
+	moveNode(docPos: number, targetPos: number): boolean {
+		const state = this.getActiveState();
+		const node = state.doc.nodeAt(docPos);
+		if (!node) return false;
+
+		const from = docPos;
+		const to = docPos + node.nodeSize;
+		if (targetPos >= from && targetPos <= to) return false;
+		const deleteRange = moveDeleteRange(state.doc, docPos, node);
+		if (targetPos >= deleteRange.from && targetPos <= deleteRange.to)
+			return false;
+
+		try {
+			let tr = state.tr.delete(deleteRange.from, deleteRange.to);
+			const finalInsertPos = Math.max(
+				0,
+				Math.min(tr.mapping.map(targetPos, -1), tr.doc.content.size),
+			);
+			tr = tr.insert(finalInsertPos, node);
+			tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
+			this.dispatchToActive(tr);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Atomically move a node to `targetPos` AND update its attrs in a single
+	 * transaction. Used by drag mechanics where a diagonal drag changes both
+	 * the structural anchor (vertical) and the placement attrs (horizontal)
+	 * in one user action — committing them separately produces two re-layouts
+	 * with an inconsistent intermediate state.
+	 *
+	 * Equivalent to `moveNode` + `setNodeAttrs` but composed in one tr so
+	 * layout sees a single consistent post-edit state.
+	 */
+	moveAndUpdateNode(
+		docPos: number,
+		targetPos: number,
+		attrs: Record<string, unknown>,
+	): boolean {
+		const state = this.getActiveState();
+		const node = state.doc.nodeAt(docPos);
+		if (!node) return false;
+
+		const from = docPos;
+		const to = docPos + node.nodeSize;
+		if (targetPos >= from && targetPos <= to) {
+			// Same position — degenerate to plain attrs update.
+			this.setNodeAttrs(docPos, attrs);
+			return true;
+		}
+		const deleteRange = moveDeleteRange(state.doc, docPos, node);
+		if (targetPos >= deleteRange.from && targetPos <= deleteRange.to) {
+			this.setNodeAttrs(docPos, attrs);
+			return true;
+		}
+
+		try {
+			const updated = node.type.create(
+				{ ...node.attrs, ...attrs },
+				node.content,
+				node.marks,
+			);
+			let tr = state.tr.delete(deleteRange.from, deleteRange.to);
+			const finalInsertPos = Math.max(
+				0,
+				Math.min(tr.mapping.map(targetPos, -1), tr.doc.content.size),
+			);
+			tr = tr.insert(finalInsertPos, updated);
+			tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
+			this.dispatchToActive(tr);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Convert a floating image back to inline content at its current painted
+	 * location. Floating modes treat docPos as ownership and attrs as geometry;
+	 * inline mode is the opposite, so this is the one place where visual X/Y is
+	 * resolved back to a document insertion point.
+	 */
+	convertImageToInlineAtVisualPosition(docPos: number): boolean {
+		const state = this.getActiveState();
+		const node = state.doc.nodeAt(docPos);
+		if (!node || node.type.name !== "image") return false;
+
+		const inlineAttrs: Record<string, unknown> = {
+			wrapMode: "inline",
+			wrappingMode: "inline",
+			xAlign: "left",
+			x: null,
+			yOffset: 0,
+			floatOffset: { x: 0, y: 0 },
+		};
+
+		const rect = this.getNodeRect(docPos);
+		if (!rect) {
+			this.setNodeAttrs(docPos, inlineAttrs);
+			return true;
+		}
+
+		this.ensurePagePopulated(rect.page);
+		const targetPos = this.charMap.posAtCoords(
+			rect.x + rect.width / 2,
+			rect.y + rect.height / 2,
+			rect.page,
+		);
+
+		const from = docPos;
+		const to = docPos + node.nodeSize;
+		if (targetPos > 0 && (targetPos < from || targetPos > to)) {
+			if (this.moveAndUpdateNode(docPos, targetPos, inlineAttrs))
+				return true;
+			// moveAndUpdateNode rejected the position (PM placement guard).
+			// Falling back to attrs-only update keeps the image inline at its
+			// current docPos rather than failing the gesture; logged so the
+			// divergence is traceable when debugging "image stayed in place
+			// after toggling to inline."
+			if (this.debug?.drag) {
+				// eslint-disable-next-line no-console
+				console.warn(
+					"[convertImageToInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
+					{ from, to, targetPos },
+				);
+			}
+		}
+
+		this.setNodeAttrs(docPos, inlineAttrs);
+		return true;
+	}
+
+	override destroy(): void {
+		if (this.rafId !== null) {
+			cancelAnimationFrame(this.rafId);
+			this.rafId = null;
+		}
+		super.destroy(); // emits "destroy", fires cleanup callbacks
+		// Run owner onDeactivate via implicit activate(null), unregister every
+		// surface, clear listeners, and reset the mediator to noop so any stray
+		// post-destroy callers can't re-invoke plugin callbacks.
+		this.surfaces.destroy();
+		this.lc.destroy();
+		this.disposeDragDebug();
+		this.disposeAnchoredDebug();
+		this.overlayRenderHandlers.clear();
+		this.cursorManager.stop();
+		this.unmount();
+		if (this.themeRoot) {
+			disposeProbe(this.themeRoot);
+			// Null the root so any stray rAF/observer that fires post-destroy
+			// bails on the `!_themeRoot` guard instead of recreating the probe.
+			this.themeRoot = null;
+		}
+	}
+
+	// ── Public API ──────────────────────────────────────────────────────────────
+
+	/**
+	 * Signal that the editor is (or is no longer) ready to render.
+	 *
+	 * Pass `false` before a collaborative provider connects to suppress all rAF
+	 * render flushes during the initial Y.js document sync — prevents O(N²)
+	 * layout work while typeObserver fires hundreds of times.
+	 *
+	 * Pass `true` once the provider fires its `synced` event. The editor will
+	 * do a single full layout + paint of the complete document.
+	 */
+	setReady(ready: boolean): void {
+		if (!ready && this.rafId !== null) {
+			cancelAnimationFrame(this.rafId);
+			this.rafId = null;
+			// Drop any pending scroll intent with the cancelled flush, so a later
+			// flush after readiness resumes doesn't consume a stale request.
+			this.pendingScrollToCursor = false;
+		}
+		this.lc.setReady(ready);
+	}
+
+	/** The merged ProseMirror Schema built from all extensions. */
+	override get schema(): Schema {
+		return this.manager.schema;
+	}
+
+	/**
+	 * The CharacterMap — glyph positions for hit-testing and cursor rendering.
+	 */
+	get charMap(): CharacterMap {
+		return this.surfaces.activeSurface?.charMap ?? this.lc.charMap;
+	}
+
+	/**
+	 * The current document layout. Calls ensureLayout() so the result
+	 * always reflects the latest EditorState.
+	 */
+	get layout(): DocumentLayout {
+		this.lc.ensureLayout();
+		return this.lc.current;
+	}
+
+	/** True when the editor is in pageless (infinite-scroll) mode. */
+	get isPageless(): boolean {
+		return this.pageConfig.pageless === true;
+	}
+
+	/**
+	 * Three-phase loading state for collaborative documents.
+	 */
+	get loadingState(): "syncing" | "rendering" | "ready" {
+		return this.lc.loadingState;
+	}
+
+	/**
+	 * The page number the cursor currently resides on.
+	 */
+	get cursorPage(): number {
+		return this.lc.cursorPage;
+	}
+
+	/**
+	 * Convert a doc position range to a viewport DOMRect.
+	 */
+	getViewportRect(from: number, to: number): DOMRect | null {
+		this.lc.ensureLayout();
+
+		const fromCoords = this.lc.charMap.coordsAtPos(from);
+		if (!fromCoords) return null;
+
+		const pageScreenRect = this.ib.lookupPageScreenRect(fromCoords.page);
+		if (!pageScreenRect) return null;
+
+		const toCoords = this.lc.charMap.coordsAtPos(to);
+
+		const left = pageScreenRect.screenLeft + fromCoords.x;
+		const top = pageScreenRect.screenTop + fromCoords.y;
+		const height = fromCoords.height;
+
+		const sameLine =
+			toCoords &&
+			toCoords.page === fromCoords.page &&
+			Math.abs(toCoords.y - fromCoords.y) < 2;
+		const width =
+			sameLine && toCoords ? Math.abs(toCoords.x - fromCoords.x) : 1;
+
+		return new DOMRect(left, top, Math.max(1, width), height);
+	}
+
+	getNodeViewportRect(docPos: number): DOMRect | null {
+		const rect = this.getNodeRect(docPos);
+		if (!rect) return null;
+		const pageScreenRect = this.ib.lookupPageScreenRect(rect.page);
+		if (!pageScreenRect) return null;
+		return new DOMRect(
+			pageScreenRect.screenLeft + rect.x,
+			pageScreenRect.screenTop + rect.y,
+			rect.width,
+			rect.height,
+		);
+	}
+
+	/**
+	 * Single-source-of-truth rect lookup for image-like nodes.
+	 *
+	 * Anchored objects (`wrapMode !== "inline"`) are authoritative in
+	 * `layout.anchoredObjects` — Stage 3 owns their position. Inline images
+	 * register a rect in `charMap.objectRects` during paint. `getNodeRect`
+	 * checks the anchored set first, falls back to the charMap.
+	 *
+	 * Without this consolidation, hitHandleAt and overlay handle painting
+	 * could read a stale charMap rect on a virtualized page where Stage 3
+	 * already moved the anchor — handles render at the wrong place and the
+	 * resize drag pivots on the wrong corner.
+	 */
+	getNodeRect(docPos: number): ObjectRectEntry | undefined {
+		this.lc.ensureLayout();
+		const anchored = this.lc.current.anchoredObjects?.find(
+			o => o.docPos === docPos,
+		);
+		if (anchored) {
+			return {
+				docPos: anchored.docPos,
+				x: anchored.x,
+				y: anchored.y,
+				width: anchored.width,
+				height: anchored.height,
+				page: anchored.page,
+			};
+		}
+		return this.lc.charMap.getObjectRect(docPos);
+	}
+
+	/**
+	 * Select the inline node at docPos using a NodeSelection.
+	 * Falls back to selection.moveCursorTo if the node is not selectable.
+	 */
+	selectNode(docPos: number): void {
+		try {
+			const state = this.getActiveState();
+			const sel = NodeSelection.create(state.doc, docPos);
+			this.dispatchToActive(state.tr.setSelection(sel));
+			this.focus();
+		} catch {
+			this.selection.moveCursorTo(docPos);
+		}
+	}
+
+	/**
+	 * Guarantees the layout reflects the current EditorState.
+	 */
+	ensureLayout(): void {
+		this.lc.ensureLayout();
+	}
+
+	/**
+	 * Guarantees the layout covers the full document, not just the streamed
+	 * first-paint chunk.
+	 */
+	ensureFullLayout(): void {
+		this.lc.ensureFullLayout();
+	}
+
+	/**
+	 * Ensures the CharacterMap is populated for the given page.
+	 */
+	ensurePagePopulated(pageNumber: number): void {
+		this.lc.ensurePagePopulated(pageNumber);
+	}
+
+	/**
+	 * Returns a lightweight snapshot of the current selection state.
+	 */
+	getSelectionSnapshot(): SelectionSnapshot {
+		this.lc.ensureLayout();
+		const state = this.surfaces.activeSurface?.state ?? this.editorState;
+		const { selection } = state;
+		const blockInfo = this.getBlockInfo();
+		return {
+			anchor: selection.anchor,
+			head: selection.head,
+			from: selection.from,
+			to: selection.to,
+			empty: selection.empty,
+			activeMarks: this.getActiveMarks(),
+			activeMarkAttrs: this.getActiveMarkAttrs(),
+			blockType: blockInfo.blockType,
+			blockAttrs: blockInfo.blockAttrs,
+		};
+	}
+
+	/**
+	 * The kind-tagged, capability-carrying view of the active selection. UI
+	 * (menus, toolbars, clipboard) reads this instead of `instanceof`-ing the
+	 * ProseMirror selection, so a table cell range or a Seraa custom-node
+	 * selection is described the same way as text or an image.
+	 */
+	getSelectionDescriptor(): SelectionDescriptor {
+		const activeSurface = this.surfaces.activeSurface;
+		const state = activeSurface?.state ?? this.editorState;
+		return this.describeSelection(state.selection, {
+			state,
+			surfaceId: activeSurface?.id ?? "body",
+		});
+	}
+
+	getNodeActions(): ResolvedNodeAction[] {
+		const descriptor = this.getSelectionDescriptor();
+		const state = this.surfaces.activeSurface?.state ?? this.getState();
+		const pos = descriptor.empty ? -1 : descriptor.from;
+		const node = pos >= 0 ? state.doc.nodeAt(pos) : null;
+
+		const ctx: NodeActionContext = {
+			editor: this,
+			descriptor,
+			state,
+			node: node ?? null,
+			pos: node ? descriptor.from : -1,
+			readOnly: this.readOnly,
+		};
+
+		return this.nodeActionRegistry.resolve(ctx);
+	}
+
+	async runNodeAction(id: string): Promise<void> {
+		const actions = this.getNodeActions();
+		const action = actions.find(a => a.id === id);
+
+		if (!action) {
+			throw new Error(
+				`NodeAction "${id}" is not applicable to the current selection.`,
+			);
+		}
+
+		if (action.disabledReason !== false) {
+			throw new Error(
+				`NodeAction "${id}" is currently disabled: ${action.disabledReason}`,
+			);
+		}
+
+		const descriptor = this.getSelectionDescriptor();
+		const state = this.surfaces.activeSurface?.state ?? this.getState();
+		const pos = descriptor.empty ? -1 : descriptor.from;
+		const node = pos >= 0 ? state.doc.nodeAt(pos) : null;
+
+		const ctx: NodeActionContext = {
+			editor: this,
+			descriptor,
+			state,
+			node: node ?? null,
+			pos: node ? descriptor.from : -1,
+			readOnly: this.readOnly,
+		};
+
+		await action.run(ctx);
+	}
+
+	/**
+	 * Describe a specific selection (not necessarily the active one) through its
+	 * behavior. Pass `owner` when the selection belongs to a surface other than
+	 * the active one — the descriptor must be resolved against the state/schema
+	 * that owns the selection (a header selection's positions mean nothing in the
+	 * body doc). Defaults to the active surface, which is correct for callers that
+	 * hold the active selection (e.g. the pointer controller).
+	 */
+	describeSelection(
+		selection: Selection,
+		owner?: { state: EditorState; surfaceId: string },
+	): SelectionDescriptor {
+		const activeSurface = this.surfaces.activeSurface;
+		const state = owner?.state ?? activeSurface?.state ?? this.editorState;
+		const surfaceId = owner?.surfaceId ?? activeSurface?.id ?? "body";
+		return this.selectionRegistry.resolve(selection).describe(selection, {
+			state,
+			surfaceId,
+			// The surface may use a different schema than the root document.
+			schema: state.schema,
+			readOnly: this.readOnly,
+		});
+	}
+
+	/**
+	 * Mount the editor onto a container element.
+	 * Creates the hidden textarea and attaches event listeners.
+	 */
+	mount(container: HTMLElement): void {
+		this.ib.mount(container);
+		if (!this.explicitThemeRoot) {
+			// Constructor may have created a probe at document.documentElement to
+			// resolve the initial theme; dispose it before switching roots so the
+			// probe doesn't leak when the editor is later destroyed.
+			const previousRoot = this.themeRoot;
+			if (previousRoot && previousRoot !== container) {
+				disposeProbe(previousRoot);
+			}
+			this.themeRoot = container;
+			this.resolvedTheme = resolveTheme(this.theme, container);
+		}
+		this.installThemeObserver();
+	}
+
+	/**
+	 * Tear down the mounted view (textarea + event listeners) without
+	 * destroying the Editor itself. Safe to call multiple times.
+	 */
+	unmount(): void {
+		this.uninstallThemeObserver();
+		// When themeRoot was implicitly bound to the mount container, drop the
+		// probe so a subsequent mount() onto a different container doesn't leak.
+		if (!this.explicitThemeRoot && this.themeRoot) {
+			disposeProbe(this.themeRoot);
+		}
+		this.ib.unmount();
+	}
+
+	// ── Theme API ──────────────────────────────────────────────────────────────
+
+	/** The current input theme (may contain `var(--token)` strings). */
+	getTheme(): EditorTheme {
+		return this.theme;
+	}
+
+	/** The resolved theme (literal colors only) used by every paint site. */
+	getResolvedTheme(): ResolvedTheme {
+		return this.resolvedTheme;
+	}
+
+	/**
+	 * Update the theme. Pass an object with one or more tokens; tokens not
+	 * mentioned are left alone. Pass `null` for a token to reset it to the
+	 * default. Triggers re-resolution and a redraw.
+	 *
+	 * @example
+	 * editor.setTheme({ pageBg: "#1e1e1e", defaultText: "#e0e0e0" });
+	 * editor.setTheme({ pageBg: null });  // reset pageBg to default
+	 * editor.setTheme({});                // pure refresh — re-resolve current
+	 *
+	 * Per-instance precedence: this overrides any extension's theme contribution.
+	 */
+	setTheme(partial: {
+		[K in keyof EditorTheme]?: EditorTheme[K] | null | undefined;
+	}): void {
+		this.theme = mergeEditorTheme(this.theme, partial);
+		if (this.themeRoot) {
+			this.resolvedTheme = resolveTheme(this.theme, this.themeRoot);
+		}
+		this.installThemeObserver();
+		this.redraw();
+	}
+
+	private installThemeObserver(): void {
+		this.uninstallThemeObserver();
+		if (!this.themeRoot) return;
+		if (!themeContainsCssVars(this.theme)) return;
+		if (typeof MutationObserver === "undefined") return;
+		const observer = new MutationObserver(() =>
+			this.scheduleThemeRefresh(),
+		);
+		observer.observe(this.themeRoot, {
+			attributes: true,
+			attributeFilter: ["class", "style", "data-theme"],
+		});
+		this.themeObserver = observer;
+	}
+
+	private uninstallThemeObserver(): void {
+		if (this.themeObserver) {
+			this.themeObserver.disconnect();
+			this.themeObserver = null;
+		}
+		if (this.themeRefreshRafId !== null) {
+			if (typeof cancelAnimationFrame !== "undefined") {
+				cancelAnimationFrame(this.themeRefreshRafId);
+			} else {
+				clearTimeout(this.themeRefreshRafId);
+			}
+			this.themeRefreshRafId = null;
+		}
+	}
+
+	private scheduleThemeRefresh(): void {
+		if (this.themeRefreshRafId !== null) return;
+		const schedule =
+			typeof requestAnimationFrame !== "undefined"
+				? requestAnimationFrame
+				: (cb: FrameRequestCallback) =>
+						setTimeout(() => cb(0), 16) as unknown as number;
+		this.themeRefreshRafId = schedule(() => {
+			this.themeRefreshRafId = null;
+			// Guard against post-destroy fire: unmount + destroy null _themeRoot
+			// and disposeProbe; without this, the rAF body would recreate a probe
+			// via ensureProbe and call redraw() on a torn-down editor.
+			if (!this.themeRoot) return;
+			this.resolvedTheme = resolveTheme(this.theme, this.themeRoot);
+			this.redraw();
+		});
+	}
+
+	focus(): void {
+		this.ib.focus();
+	}
+
+	/**
+	 * Register a canvas draw function on the overlay layer.
+	 * Called by TileManager.paintOverlay() after the local cursor and selection.
+	 * Returns an unregister function.
+	 */
+	addOverlayRenderHandler(handler: OverlayRenderHandler): () => void {
+		this.overlayRenderHandlers.add(handler);
+		return () => this.overlayRenderHandlers.delete(handler);
+	}
+
+	/**
+	 * Resolve a pointer position to a semantic `HitTarget` via extension hit
+	 * testers (highest priority first), or null when none claims it — in which
+	 * case the pointer controller falls back to a plain text caret.
+	 */
+	resolveHitTarget(
+		docX: number,
+		docY: number,
+		page: number,
+	): HitTarget | null {
+		const ctx: HitTestContext = {
+			editor: this,
+			// Cell hit-testing reads the body page layout, so the owning state is the
+			// root doc; a surface-aware pointer layout would pass the surface state.
+			state: this.getState(),
+			posAtCoords: (x, y, p) => this.charMap.posAtCoords(x, y, p),
+		};
+		for (const tester of this.hitTesters) {
+			const hit = tester.hitTest(docX, docY, page, ctx);
+			if (hit) return hit;
+		}
+		return null;
+	}
+
+	/**
+	 * Ask each registered gesture provider to begin a drag for `hit`; the first
+	 * to return a gesture owns it. Null means no extension claims the target, so
+	 * the pointer controller runs its built-in text/image handling.
+	 */
+	beginSelectionGesture(
+		hit: HitTarget,
+		event: PointerEvent,
+		clickCount = 1,
+	): SelectionGesture | null {
+		const ctx = {
+			editor: this,
+			state: this.getState(),
+			clickCount,
+			posAtCoords: (x: number, y: number, p: number) =>
+				this.charMap.posAtCoords(x, y, p),
+		};
+		for (const provider of this.selectionGestures) {
+			const gesture = provider.beginGesture(hit, event, ctx);
+			if (gesture) return gesture;
+		}
+		return null;
+	}
+
+	/**
+	 * Invoke all registered overlay render handlers for a given page.
+	 * Called by TileManager.paintOverlay() — not intended for external use.
+	 */
+	runOverlayHandlers(
+		ctx: CanvasRenderingContext2D,
+		pageNumber: number,
+		pageConfig: PageConfig,
+	): void {
+		for (const handler of this.overlayRenderHandlers) {
+			handler(
+				ctx,
+				pageNumber,
+				pageConfig,
+				this.lc.charMap,
+				this.resolvedTheme,
+			);
+		}
+	}
+
+	/**
+	 * Trigger a UI redraw without a document/selection change.
+	 * Use when external state (e.g. Y.js awareness) changes and the overlay
+	 * needs to be repainted with fresh remote cursor positions.
+	 */
+	redraw(): void {
+		this.renderGeneration++;
+		this.notifyListeners();
+	}
+
+	/**
+	 * Get the screen-space position of a page. Returns null if the page
+	 * lookup is not registered (editor not mounted) or the page doesn't exist.
+	 */
+	getPageScreenPosition(
+		page: number,
+	): { screenLeft: number; screenTop: number } | null {
+		return this.ib.lookupPageScreenRect(page);
+	}
+
+	/**
+	 * Invalidate the layout cache so the next paint triggers a full re-layout.
+	 * Use when external factors change chrome heights (e.g. live surface editing
+	 * grows the header band).
+	 */
+	invalidateLayout(): void {
+		this.lc.invalidate();
+		this.redraw();
+	}
+
+	/**
+	 * Register a function that returns the screen-space top-left corner of
+	 * page N. Used by scrollCursorIntoView, getViewportRect, and
+	 * getNodeViewportRect — no DOM element per page needed.
+	 */
+	setPageTopLookup(
+		fn:
+			| ((
+					page: number,
+			  ) => { screenLeft: number; screenTop: number } | null)
+			| null,
+	): void {
+		this.ib.setPageScreenRectLookup(fn);
+	}
+
+	private scrollContainerLookup: (() => DOMRect | null) | null = null;
+
+	/**
+	 * Register a function that returns the current DOMRect of the scrollable
+	 * container holding the editor. Popovers use this to hide when their
+	 * anchor scrolls above/below the visible content area — without it, a
+	 * position:fixed popover renders over surrounding chrome (e.g. a toolbar)
+	 * as the user scrolls past it. TileManager wires this on construction.
+	 */
+	setScrollContainerLookup(fn: (() => DOMRect | null) | null): void {
+		this.scrollContainerLookup = fn;
+	}
+
+	/**
+	 * Current viewport DOMRect of the scrollable container, or null if none
+	 * is registered (SSR, ServerEditor, or editor not yet mounted).
+	 */
+	getScrollContainerRect(): DOMRect | null {
+		return this.scrollContainerLookup?.() ?? null;
+	}
+
+	/**
+	 * Positions the hidden textarea at the cursor's visual location.
+	 * Skipped while a surface is active: the textarea's current anchor path
+	 * resolves `head` against flow layout, and surface-doc positions would
+	 * produce garbage coordinates. TODO(pr7): surface-aware viewport lookup.
+	 */
+	syncInputBridge(): void {
+		if (this.surfaces.activeSurface !== null) return;
+		this.ib.syncPosition();
+	}
+
+	/**
+	 * Scrolls the nearest scrollable ancestor so the cursor is visible.
+	 */
+	scrollCursorIntoView(): void {
+		this.ib.scrollCursorIntoView();
+	}
+
+	/**
+	 * Scrolls so the doc range [from, to] is visible — centered when it fits
+	 * the viewport, top-pinned when taller. Completes a partial streamed
+	 * layout first if the target lies beyond the laid-out region. Returns
+	 * false when the range cannot be located (not mounted, no coords).
+	 */
+	scrollRangeIntoView(from: number, to: number = from): boolean {
+		this.lc.ensureLayout();
+		if (!this.lc.ensureRangePopulated(from, to)) return false;
+		// An explicit range scroll supersedes any cursor scroll a local edit
+		// coalesced into this frame — otherwise the pending flush would scroll the
+		// caret back and undo the jump (the revealCitation case).
+		this.pendingScrollToCursor = false;
+		return this.ib.scrollRangeIntoView(from, to);
+	}
+
+	/** Whether the editor's textarea currently has focus. */
+	get isFocused(): boolean {
+		return this.ib.isFocused;
+	}
+
+	/**
+	 * Returns the current ProseMirror EditorState.
+	 * Used as the getSnapshot function for useSyncExternalStore.
+	 */
+	getSnapshot(): EditorState {
+		return this.editorState;
+	}
+
+	// ── Private ─────────────────────────────────────────────────────────────────
+
+	/**
+	 * The view-aware dispatch: applies state + invalidates layout + resets
+	 * cursor blink + calls onChange + schedules rAF flush.
+	 *
+	 * All transaction paths in Editor (commands, input, external) converge here.
+	 */
+	private viewDispatch(tr: Transaction, scrollToCursor = true): void {
+		// applyState is in BaseEditor: applies tr, emits "update", notifyListeners
+		this.applyState(tr);
+		this.lc.invalidate();
+		// resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
+		// Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.
+		this.cursorManager.resetSilent();
+		this.onChangeHandler?.(this.editorState);
+		if (scrollToCursor) this.pendingScrollToCursor = true;
+		this.scheduleFlush();
+	}
+
+	/**
+	 * Schedules a layout + render flush for the next animation frame.
+	 * Idempotent — calling it multiple times before the frame fires is free.
+	 */
+	private scheduleFlush(): void {
+		if (!this.lc.isReady) return; // suppress during collaborative sync
+		if (this.rafId !== null) return;
+		this.rafId = requestAnimationFrame(() => {
+			this.rafId = null;
+			this.lc.ensureLayout();
+			// Scroll first so the viewport is settled, then notify subscribers —
+			// but only when a local edit / explicit scroll asked for it. External
+			// transactions (collab, AI overlays, citation highlights) must not steal
+			// the viewport from an intentional scrollRangeIntoView.
+			if (this.pendingScrollToCursor) {
+				this.pendingScrollToCursor = false;
+				this.scrollCursorIntoView();
+			}
+			this.syncInputBridge();
+			this.notifyListeners();
+		});
+	}
 }
