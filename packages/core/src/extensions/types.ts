@@ -60,6 +60,8 @@ import type {
   HitTester,
   SelectionGestureProvider,
   SelectionDescriptor,
+  NodeActionContribution,
+  ResolvedNodeAction,
 } from "../selection/types";
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
@@ -179,6 +181,16 @@ export interface IEditor extends IBaseEditor {
    * this instead of `instanceof`-ing the ProseMirror selection.
    */
   getSelectionDescriptor(): SelectionDescriptor;
+  /**
+   * Node actions for the active selection, resolved and filtered against the
+   * current surface state. Used by UI to render node gutters / context menus.
+   */
+  getNodeActions(): ResolvedNodeAction[];
+  /**
+   * Execute a NodeAction by ID against the current selection context.
+   * Throws if the action is not applicable or is currently disabled.
+   */
+  runNodeAction(id: string): Promise<void>;
   /**
    * Describe a specific selection (not necessarily the active one). Pass `owner`
    * when the selection belongs to a surface other than the active one, so it is
@@ -807,6 +819,13 @@ export interface ExtensionConfig<Options = object> {
   addToolbarItems?(this: Phase1Context<Options>): ToolbarItemSpec[];
 
   /**
+   * Node actions this extension contributes (contextual operations on its nodes).
+   * Actions are registered against a selection kind, evaluated on selection
+   * changes, and exposed via `editor.getNodeActions()`.
+   */
+  addNodeActions?(this: Phase1Context<Options>): NodeActionContribution[];
+
+  /**
    * Selection behaviors this extension owns — how its selection kind is
    * described, painted, and dragged. Lets tables, images, and custom nodes
    * drive selection on their own terms without patching the renderer or pointer
@@ -963,6 +982,7 @@ export interface ResolvedExtension {
   markDecorators: Map<string, MarkDecorator>;
   fontModifiers: Map<string, FontModifier>;
   toolbarItems: ToolbarItemSpec[];
+  nodeActions: NodeActionContribution[];
   selectionBehaviors: SelectionBehavior[];
   hitTesters: HitTester[];
   selectionGestures: SelectionGestureProvider[];

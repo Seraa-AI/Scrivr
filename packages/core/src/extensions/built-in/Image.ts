@@ -631,6 +631,23 @@ export const Image = Extension.create({
     ];
   },
 
+  addNodeActions() {
+    return [
+      {
+        kind: "image",
+        actions: [
+          {
+            id: "image.placeholder",
+            label: "Placeholder Action",
+            run: () => {
+              // Placeholder for React migration
+            },
+          },
+        ],
+      },
+    ];
+  },
+
   addExports() {
     // Image is inline (lives in a paragraph), so the walker classifies an
     // image-only paragraph as type:"image" (see Paragraph). This handler is

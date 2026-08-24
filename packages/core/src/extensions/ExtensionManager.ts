@@ -20,7 +20,7 @@ import type {
   CloneHandler,
 } from "./types";
 import type { IBaseEditor, IEditor } from "./types";
-import type { SelectionBehavior, HitTester, SelectionGestureProvider } from "../selection/types";
+import type { SelectionBehavior, HitTester, SelectionGestureProvider, NodeActionContribution } from "../selection/types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
 import type { PageConfig } from "../layout/PageLayout";
@@ -618,6 +618,13 @@ export class ExtensionManager {
    */
   buildToolbarItems(): ToolbarItemSpec[] {
     return this.resolved.flatMap((ext) => ext.toolbarItems);
+  }
+
+  /**
+   * Node actions from all extensions, in registration order.
+   */
+  buildNodeActions(): NodeActionContribution[] {
+    return this.resolved.flatMap((ext) => ext.nodeActions);
   }
 
   /**
