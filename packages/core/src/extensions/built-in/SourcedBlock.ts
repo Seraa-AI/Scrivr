@@ -2,6 +2,7 @@ import { Plugin, PluginKey } from "prosemirror-state";
 import { Extension } from "../Extension";
 import { Slice, Fragment, Node } from "prosemirror-model";
 import { cloneSourcedBlocks } from "./cloneSourcedBlocks";
+import { sourcedBlockDivergencePlugin } from "./sourcedBlockHashing";
 
 export interface SourcedBlockOptions {
   // Empty for now
@@ -145,6 +146,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 
   addProseMirrorPlugins() {
     return [
+      sourcedBlockDivergencePlugin(),
       new Plugin({
         key: new PluginKey("sourcedBlockNormalization"),
         appendTransaction(transactions, _oldState, newState) {
