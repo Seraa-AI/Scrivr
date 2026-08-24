@@ -2,10 +2,19 @@ import { Plugin, PluginKey } from "prosemirror-state";
 import { Extension } from "../Extension";
 import { Slice, Fragment, Node } from "prosemirror-model";
 import { cloneSourcedBlocks } from "./cloneSourcedBlocks";
-import { sourcedBlockDivergencePlugin } from "./sourcedBlockHashing";
+import { sourcedBlockDivergencePlugin, computeBlockHash, NORMALIZER_VERSION } from "./sourcedBlockHashing";
+import type { SourceProvider, SourceContent } from "./SourcedBlock.types";
 
 export interface SourcedBlockOptions {
-  // Empty for now
+  providers?: SourceProvider[];
+}
+
+declare module "@scrivr/core" {
+  interface Commands<ReturnType> {
+    sourcedBlock: {
+      insertSourcedBlock: (options: { kind: string; content: SourceContent }) => ReturnType;
+    };
+  }
 }
 
 export function remintSourcedBlockIdentity(slice: Slice): Slice {
@@ -136,6 +145,62 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
             0,
           ];
         },
+      },
+    };
+  },
+
+  addCommands() {
+    return {
+      insertSourcedBlock: (options: { kind: string; content: SourceContent }) => (state, dispatch) => {
+        const { kind, content } = options;
+        const schema = state.schema;
+
+        try {
+          // Assume contentJSON is a Node (e.g. { type: "doc", content: [...] })
+          // or at least a block node containing the actual content
+          const parsedNode = schema.nodeFromJSON(content.contentJSON);
+          const fragment = parsedNode.content;
+          
+          if (dispatch) {
+            const tr = state.tr;
+            const instanceId = `src_${Math.random().toString(36).substring(2, 11)}`;
+            const baseHash = computeBlockHash(fragment);
+
+            const blockType = schema.nodes["sourcedBlock"];
+            if (!blockType) return false;
+
+            const blockNode = blockType.create({
+              instanceId,
+              kind,
+              resourceId: content.resourceId,
+              versionId: content.versionId,
+              baseHash,
+              baseNormalizer: NORMALIZER_VERSION,
+            }, fragment);
+
+            tr.replaceSelectionWith(blockNode);
+            dispatch(tr);
+
+            const providers = this.options.providers ?? [];
+            const provider = providers.find((p) => p.kind === kind);
+            
+            if (provider) {
+              provider.registerInstance({
+                instanceId,
+                resourceId: content.resourceId,
+                versionId: content.versionId,
+                kind,
+              }).catch((error: unknown) => {
+                console.error("[SourcedBlock] Failed to register instance:", error);
+              });
+            }
+          }
+
+          return true;
+        } catch (error: unknown) {
+          console.error("[SourcedBlock] Invalid contentJSON provided to insertSourcedBlock", error);
+          return false;
+        }
       },
     };
   },
