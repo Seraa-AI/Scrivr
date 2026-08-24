@@ -1,6 +1,7 @@
 import { Plugin, PluginKey } from "prosemirror-state";
 import { Extension } from "../Extension";
 import { Slice, Fragment, Node } from "prosemirror-model";
+import { cloneSourcedBlocks } from "./cloneSourcedBlocks";
 
 export interface SourcedBlockOptions {
   // Empty for now
@@ -136,6 +137,10 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
         },
       },
     };
+  },
+
+  addCloneHandlers() {
+    return [cloneSourcedBlocks];
   },
 
   addProseMirrorPlugins() {
