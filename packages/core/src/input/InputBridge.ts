@@ -101,6 +101,13 @@ export class InputBridge {
     | null = null;
   private focused = false;
   private readOnly = false;
+  /**
+   * A native paste event does not expose keyboard modifiers, so remember only
+   * the specific Mod-Shift-v gesture that immediately precedes it. This is
+   * consumed by handlePaste rather than retaining general Shift state, which
+   * would incorrectly affect a later context-menu paste.
+   */
+  private pasteWithoutFormattingPending = false;
 
   constructor(opts: InputBridgeOptions) {
     this.opts = opts;
@@ -354,10 +361,16 @@ export class InputBridge {
 
   private handleBlur = (): void => {
     this.focused = false;
+    this.pasteWithoutFormattingPending = false;
     this.opts.onBlur();
   };
 
   private handleKeydown = (e: KeyboardEvent): void => {
+    this.pasteWithoutFormattingPending =
+      e.key.toLowerCase() === "v" &&
+      (e.metaKey || e.ctrlKey) &&
+      e.shiftKey &&
+      !e.altKey;
     if (this.readOnly) {
       // Allow arrow-key navigation and selection-only shortcuts; block all mutations.
       const keyStr = keyEventToString(e);
@@ -451,11 +464,34 @@ export class InputBridge {
     if (this.readOnly) return;
     e.preventDefault();
     if (!e.clipboardData) return;
+    const preferPlain = this.pasteWithoutFormattingPending;
+    this.pasteWithoutFormattingPending = false;
     const tr = this.opts.pasteTransformer.transform(
       e.clipboardData,
       this.opts.getState(),
+      { preferPlain },
     );
     if (tr) this.opts.dispatch(tr);
+
+    // "Paste without formatting" means text only — an image is formatting the
+    // user opted out of, so the bytes are not read at all.
+    if (preferPlain) return;
+
+    // Image bytes resolve asynchronously (read or upload), so this dispatches
+    // separately once a src exists. It no-ops whenever the clipboard's markup
+    // already described the content — see transformFiles.
+    //
+    // An upload can take seconds, so the editor may have gone read-only or been
+    // unmounted by the time it lands: both are re-checked here rather than only
+    // at event time. A rejection is swallowed on purpose — a screenshot that
+    // fails to read is not worth tearing down the page over.
+    void this.opts.pasteTransformer
+      .transformFiles(e.clipboardData, this.opts.getState)
+      .then((fileTr) => {
+        if (!fileTr || this.readOnly || !this.textarea) return;
+        this.opts.dispatch(fileTr);
+      })
+      .catch(() => {});
   };
 
   /** Private — helpers */
