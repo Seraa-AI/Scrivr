@@ -124,7 +124,11 @@ function insertSectionBreak(breakType?: SectionBreakType): Command {
     };
 
     if (dispatch) {
-      dispatch(state.tr.insert(at, type.create({ settings })).scrollIntoView());
+      dispatch(
+        state.tr
+          .insert(at, type.create({ nodeId: crypto.randomUUID(), settings }))
+          .scrollIntoView(),
+      );
     }
     return true;
   };

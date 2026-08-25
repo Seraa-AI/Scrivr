@@ -13,6 +13,7 @@ import type {
   MarkdownParserTokenSpec,
 } from "../extensions/types";
 import { insertText } from "../model/commands";
+import { recloneDocumentIds } from "../model/assignBlockIds";
 
 /** Markdown detection heuristic */
 // Require intentional block-level structure — mid-sentence asterisks are NOT markdown.
@@ -95,9 +96,12 @@ export class PasteTransformer {
     // a Slice with openStart:0. parseSlice sets openStart:1 for block-level
     // content which causes replaceSelection to merge the first block into the
     // cursor paragraph — discarding that block's attrs (e.g. align:"center").
-    const doc = PMDOMParser.fromSchema(this.schema).parse(div, {
+    const parsed = PMDOMParser.fromSchema(this.schema).parse(div, {
       preserveWhitespace: false,
     });
+    // Clipboard paste is a clone boundary. Persistent structural IDs identify
+    // the source nodes and must never be duplicated into the destination doc.
+    const doc = recloneDocumentIds(parsed).doc;
 
     // Collect only block-level nodes. parse() may produce inline nodes (e.g.
     // hardBreak) at the document level from Google Docs' trailing <br> tags.

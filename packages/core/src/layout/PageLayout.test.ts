@@ -158,6 +158,44 @@ describe("runPipeline — sectionBreak node", () => {
     });
     expect(layout.pages).toHaveLength(2);
   });
+
+  it("starts an even-page section on the next even page", () => {
+    const layout = runPipeline(
+      doc(p("Section 1"), sectionBreak({ breakType: "evenPage" }), p("Section 2")),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+
+    expect(layout.pages).toHaveLength(2);
+    expect(layout.pages[1]!.blocks[0]!.node.textContent).toBe("Section 2");
+  });
+
+  it("inserts a blank page when an even-page section would start on an odd page", () => {
+    const layout = runPipeline(
+      doc(
+        p("Page 1"),
+        pageBreak(),
+        p("Section 1"),
+        sectionBreak({ breakType: "evenPage" }),
+        p("Section 2"),
+      ),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+
+    expect(layout.pages).toHaveLength(4);
+    expect(layout.pages[2]!.blocks).toHaveLength(0);
+    expect(layout.pages[3]!.blocks[0]!.node.textContent).toBe("Section 2");
+  });
+
+  it("inserts a blank page when an odd-page section would start on an even page", () => {
+    const layout = runPipeline(
+      doc(p("Section 1"), sectionBreak({ breakType: "oddPage" }), p("Section 2")),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+
+    expect(layout.pages).toHaveLength(3);
+    expect(layout.pages[1]!.blocks).toHaveLength(0);
+    expect(layout.pages[2]!.blocks[0]!.node.textContent).toBe("Section 2");
+  });
 });
 
 // ── Soft page break (overflow) ────────────────────────────────────────────────

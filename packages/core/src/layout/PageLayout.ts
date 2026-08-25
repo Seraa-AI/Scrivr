@@ -31,6 +31,7 @@ import {
   type PageChromeMeasureInput,
 } from "./PageMetrics";
 import { coerceSectionSettings, isSectionBreak } from "../model/sections";
+import type { SectionBreakType } from "../model/sections";
 import { fitLinesInCapacity } from "./splitLines";
 import { runChromeLoop } from "./aggregateChrome";
 import { parseFont } from "./StyleResolver";
@@ -290,6 +291,8 @@ export interface FlowBlock {
   inputHash: number;
   /** True when this entry represents a hard page break node. */
   isPageBreak?: true;
+  /** Section-aware page target; absent means an ordinary next-page break. */
+  pageBreakType?: Exclude<SectionBreakType, "continuous">;
   /** True when the block measurement was a cache hit. */
   wasCacheHit: boolean;
   partKind?: "block" | "fragment";
@@ -323,12 +326,27 @@ function nextPageStartAfter(
   pageConfig: PageConfig,
   metricsFor: (pageNumber: number) => PageMetrics,
   y: number,
+  breakType: FlowBlock["pageBreakType"],
 ): number {
   let contentPage = pageForGlobalY(pageConfig, metricsFor, y);
   if (contentPage > 1 && pageStartGlobalForMetrics(pageConfig, metricsFor, contentPage) === y) {
     contentPage -= 1;
   }
-  return pageStartGlobalForMetrics(pageConfig, metricsFor, contentPage + 1);
+  return pageStartGlobalForMetrics(
+    pageConfig,
+    metricsFor,
+    targetPageNumber(contentPage, breakType),
+  );
+}
+
+function targetPageNumber(
+  currentPage: number,
+  breakType: FlowBlock["pageBreakType"],
+): number {
+  let target = currentPage + 1;
+  if (breakType === "evenPage" && target % 2 !== 0) target++;
+  if (breakType === "oddPage" && target % 2 === 0) target++;
+  return target;
 }
 
 /**
@@ -351,7 +369,12 @@ function advanceFlowGlobalY(
   metricsFor: (pageNumber: number) => PageMetrics,
 ): { startGlobalY: number; endGlobalY: number } {
   if (flow.isPageBreak && !pageConfig.pageless) {
-    const start = nextPageStartAfter(pageConfig, metricsFor, naturalStart);
+    const start = nextPageStartAfter(
+      pageConfig,
+      metricsFor,
+      naturalStart,
+      flow.pageBreakType,
+    );
     return { startGlobalY: start, endGlobalY: start + flow.height };
   }
   if (pageConfig.pageless) {
@@ -1366,10 +1389,13 @@ export function paginateFlow(
   for (const flow of flows) {
     // ── Hard page break (skipped in pageless mode) ───────────────────────────
     if (flow.isPageBreak && !pageless) {
-      pages.push(currentPage);
-      currentPage = newPage(pages.length + 1);
+      const target = targetPageNumber(currentPage.pageNumber, flow.pageBreakType);
+      while (currentPage.pageNumber < target) {
+        pages.push(currentPage);
+        currentPage = newPage(pages.length + 1);
+        metrics.push(metricsFor(currentPage.pageNumber));
+      }
       y = metricsFor(currentPage.pageNumber).contentTop;
-      metrics.push(metricsFor(currentPage.pageNumber));
       prevSpaceAfter = 0;
       continue;
     }
@@ -1794,6 +1820,7 @@ export function buildBlockFlow(
         hasAnchoredObject: false,
         inputHash: 0,
         isPageBreak: true,
+        ...(item.pageBreakType ? { pageBreakType: item.pageBreakType } : {}),
         wasCacheHit: false,
       });
       continue;
@@ -1981,6 +2008,7 @@ function normalizeWrappedBlockForPage(
 /** A single item ready for layout — either a plain block or an expanded list item. */
 export interface LayoutItem {
   isPageBreak?: true;
+  pageBreakType?: Exclude<SectionBreakType, "continuous">;
   node: Node;
   nodePos: number;
   /** Extra left indent in px (0 for regular blocks, LIST_INDENT for list items). */
@@ -2020,8 +2048,15 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
     // start on a fresh page. A continuous break is a pure model marker, and
     // column geometry is read from the derived sections, not from here.
     if (isSectionBreak(node)) {
-      if (coerceSectionSettings(node.attrs["settings"]).breakType !== "continuous") {
-        items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
+      const breakType = coerceSectionSettings(node.attrs["settings"]).breakType;
+      if (breakType !== "continuous") {
+        items.push({
+          isPageBreak: true,
+          pageBreakType: breakType,
+          node,
+          nodePos: offset,
+          indentLeft: 0,
+        });
       }
       return;
     }

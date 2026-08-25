@@ -28,8 +28,13 @@ columns, page chrome, and page geometry will build on
   `removeSectionBreak`. Inserting copies the current section's settings to both
   halves; removing merges forward, which is Word's behavior and also what a raw
   deletion of the node produces.
-- **Layout** — a `continuous` break has no flow effect; any other break type
-  starts a new page. Documents with no section break are unchanged.
+- **Layout** — a `continuous` break has no flow effect, `nextPage` starts the
+  next page, and `evenPage`/`oddPage` skip a page when the next one has the
+  wrong parity. Documents with no section break are unchanged.
+
+Also in `@scrivr/core`: pasted content now goes through `recloneDocumentIds`,
+so a clipboard paste no longer duplicates the source nodes' persistent
+structural ids into the destination document.
 
 All other `@scrivr/*` packages bump for lockstep version alignment only — no
 code changes in them.

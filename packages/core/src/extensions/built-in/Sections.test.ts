@@ -4,6 +4,7 @@ import type { Node } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
 import { Sections } from "./Sections";
 import { buildStarterKitContext, createTestEditor } from "../../test-utils";
+import { StarterKit } from "../StarterKit";
 import {
   DEFAULT_SECTION_SETTINGS,
   FINAL_SECTION_ID,
@@ -118,7 +119,7 @@ describe("Sections — insertSectionBreak", () => {
     });
   });
 
-  it("gives the new section a stable id via UniqueId", () => {
+  it("gives the new section a stable id", () => {
     withEditor((editor) => {
       caretInFirstParagraph(editor);
       editor.commands["insertSectionBreak"]!();
@@ -126,6 +127,23 @@ describe("Sections — insertSectionBreak", () => {
       expect(first!.id).not.toBe(FINAL_SECTION_ID);
       expect(first!.id.startsWith("section:")).toBe(false);
     });
+  });
+
+  it("creates section identity even when UniqueId is disabled", () => {
+    const editor = createTestEditor({
+      extensions: [StarterKit.configure({ uniqueId: false })],
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+    });
+    try {
+      caretInFirstParagraph(editor);
+      editor.commands["insertSectionBreak"]!();
+
+      const [first] = deriveSections(editor.getState().doc);
+      expect(first!.id).toEqual(expect.any(String));
+      expect(first!.id.startsWith("section:")).toBe(false);
+    } finally {
+      editor.destroy();
+    }
   });
 });
 

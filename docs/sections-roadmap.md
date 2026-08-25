@@ -133,11 +133,14 @@ the *following* section starts. This is DOCX's own ownership rule for
 `<w:type>` inside `sectPr`, so the round trip stays direct. It is inert on the
 final section, which has no break.
 
-Layout in this phase reads exactly one thing from the model: a `continuous`
-break is a pure marker with no flow effect, and any other break type forces a
-new page (`collectLayoutItems`). Even/odd parity padding lands with the rest of
-the section page geometry; `<w:sectPr>` export/import lands with the DOCX
-section round trip.
+Layout in this phase reads exactly one thing from the model, the break type: a
+`continuous` break is a pure marker with no flow effect; `nextPage` starts the
+next page; `evenPage`/`oddPage` skip a page when the next one has the wrong
+parity, emitting the blank page Word does. The parity rule lives in one helper
+(`targetPageNumber`) that both the pagination loop and the global-Y advance
+call, so page geometry and anchored-object placement agree.
+
+`<w:sectPr>` export/import lands with the DOCX section round trip.
 
 ### Invariants
 
@@ -278,7 +281,9 @@ interface HeaderFooterController {
    the only flow effect is that a non-continuous break starts a new page.
    Invariant 4 needs no normalization pass: because settings live on the
    terminator, raw deletion of a break already merges forward onto the next
-   terminator, which is both the command's policy and Word's.
+   terminator, which is both the command's policy and Word's. Even/odd section
+   starts landed here too, since the parity rule is one helper on the same
+   page-advance seam — step 6 keeps orientation, margins, and page numbering.
 2. **Region-ready pagination**: refactor page/Y advancement into a single-region
    `ContentRegion` cursor with byte-for-byte-equivalent one-column output.
 3. **Section-scoped columns**: generate equal-width regions from the derived
