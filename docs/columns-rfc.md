@@ -136,6 +136,12 @@ if blockBottom > region.bottom:
 ## Rendering, selection, navigation
 
 - **Rendering:** Blocks already carry absolute `x` and per-line positions from `layoutBlock`. The painter draws each fragment at its region `x` — no new painter. Optional vertical **rule line** between columns is a paint-only addition in the renderer (Open Question).
+- **Headers and footers:** Columns divide the body content box only. Page chrome
+  remains full-width and renders once per physical page. When a continuous
+  section starts mid-page, the first section present on that page owns its
+  header/footer; the new section's chrome takes effect on the first later page
+  it owns. Pagination records this page-to-section ownership explicitly. See
+  `sections-roadmap.md`.
 - **Hit-testing:** `CharacterMap.lineAtPoint` already filters by `x >= l.x && x < l.x + l.contentWidth` (`CharacterMap.ts`). A click in column 2 resolves to column-2 lines because their `x` differs. No change.
 - **Caret nav:** `posBelow`/`posAbove` resolve by 2D line geometry, not by a single-column vertical-stack assumption. The one thing to **verify** (test contract, not code): at the bottom of column 1, ArrowDown should land at the top of column 2 (next region), because that's the next line by document order whose geometry sits down-and-right. This is the highest-risk nav case and gets explicit tests.
 

@@ -88,10 +88,9 @@ interface Section {
   };
 
   links: {
-    /** When true, this section inherits the previous section's header. */
-    header: boolean;
-    /** When true, this section inherits the previous section's footer. */
-    footer: boolean;
+    /** Word links each header/footer variant independently. */
+    header: Record<"default" | "firstPage" | "evenPage", boolean>;
+    footer: Record<"default" | "firstPage" | "evenPage", boolean>;
   };
 }
 ```
@@ -131,10 +130,48 @@ multi-section behavior.
 
 ## Resolution algorithm
 
+### Physical-page ownership
+
+Columns divide only the **body content region**. Headers and footers remain one
+page-wide chrome pair; they are never repeated per column.
+
+A continuous section break can place more than one section on the same physical
+page, so page chrome cannot use "the section containing the last block." For
+Word parity, the first section present on a physical page owns that page's
+header and footer. A later continuous section begins using its own chrome on the
+first subsequent page where it is the first section present. A `nextPage`,
+`evenPage`, or `oddPage` break naturally makes the new section the owner of the
+page it starts.
+
+```ts
+interface PageSectionOwnership {
+  pageNumber: number;
+  /** Section whose body content occurs first on this physical page. */
+  ownerSectionId: string;
+  /** All sections with body fragments on this page, in document order. */
+  sectionIds: string[];
+}
+```
+
+Pagination produces this ownership alongside `LayoutPage`. Chrome resolution
+consumes `ownerSectionId`; it does not rescan positions or infer ownership from
+the fragment painted last.
+
+`differentFirstPage` is evaluated against the first physical page owned by the
+section, not merely the page containing its boundary. This avoids switching a
+page-wide header halfway down a page when a continuous section begins.
+
+### Header/footer inheritance
+
+Link-to-previous is resolved independently for the default, first-page, and
+even-page variants of each band. Resolving a linked slot walks backward by
+section and variant until it finds an unlinked definition. Columns do not
+participate in this lookup.
+
 ```
 resolveHeader(sections, page, variant):
-  section = findSectionForPage(sections, page)
-  if section.links.header:
+  section = findSectionById(page.ownerSectionId)
+  if section.links.header[variant]:
     prev = findPreviousSection(sections, section.id)
     return resolveHeaderFromSection(prev, page, variant)
   return resolveHeaderFromSection(section, page, variant)
@@ -175,7 +212,12 @@ interface HeaderFooterController {
   setSectionSettings(sectionId: string, partial: Partial<Section["settings"]>): void;
   updateHeader(sectionId: string, variant: Variant, partial: Partial<HeaderFooterDefinition>): void;
   updateFooter(sectionId: string, variant: Variant, partial: Partial<HeaderFooterDefinition>): void;
-  linkToPrevious(sectionId: string, band: "header" | "footer", linked: boolean): void;
+  linkToPrevious(
+    sectionId: string,
+    band: "header" | "footer",
+    variant: Variant,
+    linked: boolean,
+  ): void;
   addSection(atPos: number): void;
   removeSection(sectionId: string): void;
 }
