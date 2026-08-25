@@ -168,6 +168,28 @@ even-page variants of each band. Resolving a linked slot walks backward by
 section and variant until it finds an unlinked definition. Columns do not
 participate in this lookup.
 
+Microsoft exposes two phrases for one relationship, and the UI must keep their
+roles distinct:
+
+- **Link to Previous** is the editable toggle for the active band and variant.
+- **Same as Previous** is a derived status label shown when that toggle is on;
+  it is not a second stored setting.
+
+New sections start linked for all six slots (three header variants and three
+footer variants). The first section cannot link backward, so its toggles are
+disabled and resolve as unlinked.
+
+Turning a link **off** materializes the currently resolved previous-section
+content into a new local definition before clearing the flag. The page therefore
+looks unchanged immediately after unlinking, but later edits are independent.
+Turning a link **on** makes the matching previous-section slot authoritative;
+any local definition becomes dormant while linked and must not be exported as
+the active relationship. Transaction history preserves it for undo.
+
+Editing a linked header/footer edits the resolved source section, matching the
+existing reference-based decision. The surface UI must show both the source
+section and “Same as Previous” so the mutation target is not surprising.
+
 ```
 resolveHeader(sections, page, variant):
   section = findSectionById(page.ownerSectionId)
