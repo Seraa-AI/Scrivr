@@ -55,19 +55,33 @@ Columns extend the section substrate already designed in `sections-roadmap.md`. 
 // sections-roadmap.md Section.settings, extended:
 settings: {
   // ...existing header/footer settings...
-  columnCount: number;   // default 1
-  columnGap: number;     // gutter in px, default 24 (~0.33in; DOCX default is 720 twips = 0.5in)
+  columns: {
+    count: number;       // default 1
+    gap: number;         // px; default 24
+    equalWidth: true;    // unequal widths are deferred
+  }
 }
 ```
 
-Storage stays `doc.attrs.sections: Section[]` (range-based `from`/`to`). A document with no section breaks is one implicit section with `columnCount: 1` — the degenerate case, identical to today.
+Sections are derived from `sectionBreak` boundaries; ranges are never persisted.
+Each intermediate break carries the settings of the section it terminates, and
+`doc.attrs.finalSection` carries the final section. A document with no
+section breaks is one implicit section with `columns.count: 1` — the degenerate
+case, identical to today. See `sections-roadmap.md` for the ownership and
+normalization invariants.
 
 ### Nodes
 
-- **`sectionBreak`** — already on the sections-roadmap migration path (step 2). An atom node carrying the section settings that apply *from this boundary forward*. This is the DOCX `sectPr`-on-a-paragraph representation, modeled as a delimiter so the flat doc tree is never re-parented. If sections land first, columns only add the two attrs above.
+- **`sectionBreak`** — an atom node carrying the settings of the section it
+  terminates. This exactly matches paragraph-level DOCX `sectPr` ownership and
+  keeps the body tree flat. Layout obtains the following section's settings
+  from the next terminator (or `finalSection`) through
+  `deriveSections(doc)`.
 - **`columnBreak`** — a hard break that forces a region advance to the next column (new page if in the last column). Mirrors `pageBreak` exactly: atom, `group: "block"`, and the importer maps `<w:br w:type="column"/>` to it the same way it maps `w:type="page"` → `pageBreak`.
 
-Until sections ship, a **doc-level fallback** (`doc.attrs.columnCount` / `columnGap`) lets the engine be built and verified first; the section reparenting of the attr is then mechanical. See Phasing.
+There is deliberately no temporary `doc.attrs.columnCount` fallback. The
+region-cursor refactor can be verified with one generated region per page; the
+first public column settings land directly in `SectionSettings`.
 
 ## The `ContentRegion` engine
 
@@ -135,19 +149,32 @@ Per `feedback_pdf_parity`: any new layout the canvas renders must render in PDF,
 
 ## Phased implementation
 
-### Phase 1 — Engine (doc-level attr)
+### Phase 0 — Section substrate
 
-`doc.attrs.columnCount` / `columnGap`. Build the `ContentRegion` refactor in `paginateFlow`, sequential fill, equal width. Verify the whole snake + the entangled-cursor collapse + Phase 1b region keys against a single-section doc. This de-risks the hard part before touching the schema.
+Land the boundary-based section model from `sections-roadmap.md`:
+`SectionSettings`, `sectionBreak`, `finalSection`, `deriveSections`, and
+normalization. Inserting a break copies settings so the operation itself does
+not alter layout.
 
-### Phase 2 — `columnBreak` node
+### Phase 1 — Region cursor, one region per page
 
-Mirror `pageBreak`: schema node, command, keymap, forced region-advance, DOCX `<w:br w:type="column"/>` round trip.
+Refactor `paginateFlow` from separate page/Y/split cursors to a
+`ContentRegionCursor`, but generate exactly one region per page. Existing
+single-column output is the regression oracle. Phase 1b cache keys become
+region-aware here, before multiple regions exist.
 
-### Phase 3 — Section scoping
+### Phase 2 — Section-scoped equal-width columns
 
-Land (or extend) the `sectionBreak` substrate from `sections-roadmap.md`; reparent `columnCount`/`columnGap` from doc attr onto `Section.settings`. Engine is unchanged — only the attr source moves. Unlocks title-over-2-up.
+Generate regions from each derived section's `columns` settings. Implement
+sequential snaking plus `continuous` and `nextPage` section transitions. This is
+the first phase that changes rendered output and unlocks title-over-2-up.
 
-### Phase 4 — Export round trip + UX
+### Phase 3 — `columnBreak`
+
+Mirror `pageBreak`: schema node, command, keymap, forced region advance, and
+DOCX `<w:br w:type="column"/>` round trip.
+
+### Phase 4 — DOCX section round trip + UX
 
 DOCX `<w:cols>` export/import; toolbar control (1 / 2 / 3 columns); column rule cosmetic.
 
@@ -174,5 +201,6 @@ Balanced columns; unequal widths; column-spanning blocks; float confinement poli
 
 ## Dependencies
 
-- **Sections substrate** (`sections-roadmap.md`) for Phase 3. Phases 1–2 deliberately avoid this dependency via the doc-level attr so the engine can be built and proven first.
+- **Sections substrate** (`sections-roadmap.md`) is Phase 0. Columns do not need
+  the later section-aware header/footer controller and surface work.
 - No dependency on the table work beyond the shared `layoutBlock` contract, which is already stable.
