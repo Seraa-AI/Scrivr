@@ -64,6 +64,7 @@
   "devDependencies": {
     "@scrivr/core": "workspace:*",
     "prosemirror-model": "^1.25.4",
+    "prosemirror-state": "^1.4.3",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^2.1.9"
