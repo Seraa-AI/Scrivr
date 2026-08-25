@@ -8,7 +8,7 @@ export {
 } from "./theme";
 export type { EditorTheme, ResolvedTheme } from "./theme";
 export { resolveTheme, resolveThemeColor, disposeProbe } from "./resolveTheme";
-export { safeUrl } from "./safeUrl";
+export { safeUrl, safeImageUrl } from "./safeUrl";
 export { spansToFragment, sameMark, resolveInlineMark } from "./spansToFragment";
 export type { SpansToFragmentOptions } from "./spansToFragment";
 export { sanitizeDocUrls } from "./sanitizeDocUrls";
