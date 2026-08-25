@@ -30,6 +30,7 @@ import {
   type PageChromeContribution,
   type PageChromeMeasureInput,
 } from "./PageMetrics";
+import { coerceSectionSettings, isSectionBreak } from "../model/sections";
 import { fitLinesInCapacity } from "./splitLines";
 import { runChromeLoop } from "./aggregateChrome";
 import { parseFont } from "./StyleResolver";
@@ -2012,6 +2013,16 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
   doc.forEach((node, offset) => {
     if (node.type.name === "pageBreak") {
       items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
+      return;
+    }
+
+    // A section boundary affects the flow only when the next section must
+    // start on a fresh page. A continuous break is a pure model marker, and
+    // column geometry is read from the derived sections, not from here.
+    if (isSectionBreak(node)) {
+      if (coerceSectionSettings(node.attrs["settings"]).breakType !== "continuous") {
+        items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
+      }
       return;
     }
 

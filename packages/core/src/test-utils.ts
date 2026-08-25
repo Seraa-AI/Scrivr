@@ -29,6 +29,7 @@ import type { Node } from "prosemirror-model";
 import type { Schema } from "prosemirror-model";
 import type { FontConfig } from "./layout/FontConfig";
 import type { PageConfig } from "./layout/PageLayout";
+import type { SectionSettings } from "./model/sections";
 
 /**
  * Default text style used by `measureTextWidth()`. Mirrors the engine's
@@ -120,6 +121,14 @@ export function doc(...blocks: Node[]): Node {
 /** Hard page-break node. */
 export function pageBreak(): Node {
   return schema.node("pageBreak");
+}
+
+/** Section boundary node terminating the section before it. */
+export function sectionBreak(
+  settings?: Partial<SectionSettings>,
+  nodeId: string | null = null,
+): Node {
+  return schema.node("sectionBreak", { nodeId, settings: settings ?? null });
 }
 
 export interface FullEditorContext {

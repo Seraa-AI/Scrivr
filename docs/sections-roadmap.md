@@ -1,6 +1,7 @@
 # Sections Roadmap
 
-> Status: **design** — not started. Documents the migration path from the current single-section header/footer model to a full section-based document layout system matching Microsoft Word.
+> Status: **step 1 landed** (section substrate — `sectionBreak`, `finalSection`,
+> `deriveSections`, structural commands). The rest is design. Documents the migration path from the current single-section header/footer model to a full section-based document layout system matching Microsoft Word.
 
 ## Why sections
 
@@ -103,17 +104,40 @@ sectionBreak.attrs = {
   settings: SectionSettings;
 }
 
-doc.attrs.finalSection = {
-  id: string;
-  settings: SectionSettings;
-};
+doc.attrs.finalSection = SectionSettings | null;
 ```
 
 `Section` objects are projections returned by `deriveSections(doc)`. Section
-identity comes from the terminating break's `nodeId`; the final section uses the
-stable ID in `finalSection`. Header/footer content and link
-metadata can move into `SectionSettings` incrementally when that feature needs
-multi-section behavior.
+identity comes from the terminating break's `nodeId`. Header/footer content and
+link metadata can move into `SectionSettings` incrementally when that feature
+needs multi-section behavior.
+
+### What the substrate landed (v1)
+
+The shipped `SectionSettings` is `{ breakType, columns }`. The header/footer
+flags and band geometry above stay in the document-level `HeaderFooterPolicy`
+until the section-aware chrome phase moves their **readers**; landing them in
+two places first would create a second source of truth that nothing reads.
+
+`doc.attrs.finalSection` stores the settings directly rather than
+`{ id, settings }`, and the final section's derived id is the constant
+`section:final` (`FINAL_SECTION_ID`). The final section is a stable *slot*, not a
+minted identity: inserting a break above it hands the preceding content the
+break's `nodeId` and leaves the tail as the final section — which is the
+relationship consumers key on. Nothing on the read path mints ids, so
+`deriveSections` is deterministic. A break not yet stamped by `UniqueId` falls
+back to a deterministic ordinal id (`section:<n>`).
+
+`breakType` describes the boundary a section's terminating break creates — how
+the *following* section starts. This is DOCX's own ownership rule for
+`<w:type>` inside `sectPr`, so the round trip stays direct. It is inert on the
+final section, which has no break.
+
+Layout in this phase reads exactly one thing from the model: a `continuous`
+break is a pure marker with no flow effect, and any other break type forces a
+new page (`collectLayoutItems`). Even/odd parity padding lands with the rest of
+the section page geometry; `<w:sectPr>` export/import lands with the DOCX
+section round trip.
 
 ### Invariants
 
@@ -247,9 +271,14 @@ interface HeaderFooterController {
 
 ## Implementation order
 
-1. **Section substrate**: `SectionSettings`, `sectionBreak`,
+1. ~~**Section substrate**: `SectionSettings`, `sectionBreak`,
    `finalSection`, `deriveSections`, normalization, and structural
-   commands. No layout behavior changes.
+   commands.~~ **Landed** — `model/sections.ts` +
+   `extensions/built-in/Sections.ts`. Documents with no break are unchanged;
+   the only flow effect is that a non-continuous break starts a new page.
+   Invariant 4 needs no normalization pass: because settings live on the
+   terminator, raw deletion of a break already merges forward onto the next
+   terminator, which is both the command's policy and Word's.
 2. **Region-ready pagination**: refactor page/Y advancement into a single-region
    `ContentRegion` cursor with byte-for-byte-equivalent one-column output.
 3. **Section-scoped columns**: generate equal-width regions from the derived
