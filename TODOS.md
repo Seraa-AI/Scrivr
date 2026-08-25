@@ -19,6 +19,9 @@ still load-bearing under the current model.
 - **Cache invalidation test for changed wrap zone** (originally #19) —
   covered by `Phase 1b does not copy a cached tail after a changed square
   zone overlaps it` plus the new `pageRectsDigest invalidation` suite.
+- **Orphaned paste-placeholder sweep** — `dropPendingPlaceholders` as a
+  `normalizeDocument` stage; a tab closed mid-upload no longer leaves an
+  unresolvable image in the saved document.
 - **Stale-mark legacy CSS-float docs** (originally #1 / #25) — landed in
   this PR.
 
@@ -142,24 +145,6 @@ message, or a warning surfaced to the app, or docs steering multi-image
 users to an uploader. Needs a product call, not just a constant.
 
 **Effort.** ~2 hrs / ~30 LOC + test.
-
-#### Orphaned image placeholders on abrupt teardown (P3)
-
-**What.** `prepareImagePaste` reserves a placeholder image node carrying
-`pendingPasteId`. `cancel()` clears it on unmount, on `setReadOnly(true)`,
-and on a failed resolve — but a closed tab or a crash runs none of those.
-A document saved mid-upload keeps a 1x1 transparent placeholder with a
-live `pendingPasteId`.
-
-**Why.** The attr is schema-declared, so it survives serialization. On
-reload the user sees a tiny invisible image they cannot explain, and
-nothing will ever resolve it.
-
-**Fix.** Sweep placeholder nodes at ingestion — a document being loaded
-has no in-flight upload by definition, so any `pendingPasteId` in it is
-orphaned and the node should be dropped.
-
-**Effort.** ~1 hr / ~15 LOC + test.
 
 #### Table-cell clipboard round-trip (P2)
 

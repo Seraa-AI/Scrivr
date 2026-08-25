@@ -6,9 +6,10 @@
  *   1. parse JSON via `schema.nodeFromJSON`
  *   2. bounds check (maxNodes / maxDepth)
  *   3. URL allow-list sweep — `sanitizeDocUrls`
- *   4. table integrity repair — `normalizeTablesDoc`
- *   5. block-ID assignment — `assignBlockIds`
- *   6. structural fingerprint
+ *   4. orphaned paste placeholders — `dropPendingPlaceholders`
+ *   5. table integrity repair — `normalizeTablesDoc`
+ *   6. block-ID assignment — `assignBlockIds`
+ *   7. structural fingerprint
  *
  * The result tells the caller (a) what was repaired (`warnings`), (b)
  * whether anything was repaired (`changed`), and (c) a deterministic
@@ -33,6 +34,7 @@
  */
 import { Node, type Schema } from "prosemirror-model";
 import { sanitizeDocUrls } from "./sanitizeDocUrls";
+import { dropPendingPlaceholders } from "./dropPendingPlaceholders";
 import {
   assignBlockIds,
   planBlockIdAssignments,
@@ -44,6 +46,7 @@ export type NormalizeMode = "repair" | "strict";
 
 export type NormalizeWarningCode =
   | "urls-sanitized"
+  | "placeholders-dropped"
   | "tables-normalized"
   | "ids-assigned"
   | "bounds-exceeded";
@@ -122,7 +125,20 @@ export function normalizeDocument(
     doc = sanitized;
   }
 
-  // 4. Table integrity. Same-ref on no-op.
+  // 4. Orphaned paste placeholders. A document being loaded has no upload in
+  //    flight, so any reservation in it died with the page that made it.
+  //    Runs before table repair so that repair sees the final node set.
+  const swept = dropPendingPlaceholders(doc);
+  if (swept.dropped > 0) {
+    warnings.push({
+      code: "placeholders-dropped",
+      message: `Dropped ${swept.dropped} placeholder(s) left by an unfinished paste.`,
+      count: swept.dropped,
+    });
+    doc = swept.doc;
+  }
+
+  // 5. Table integrity. Same-ref on no-op.
   const tableNormalized = normalizeTablesDoc(doc, schema);
   if (tableNormalized !== doc) {
     warnings.push({
@@ -132,7 +148,7 @@ export function normalizeDocument(
     doc = tableNormalized;
   }
 
-  // 5. Block IDs. Use planBlockIdAssignments first so we know the count
+  // 6. Block IDs. Use planBlockIdAssignments first so we know the count
   //    cheaply, then materialise via assignBlockIds (single tree walk).
   if (assignIds) {
     const plan = planBlockIdAssignments(doc, options.generate ? { generate: options.generate } : {});
