@@ -617,6 +617,8 @@ export const Image = Extension.create({
           width: { default: 200 },
           height: { default: 200 },
           nodeId: { default: null },
+          /** Internal identity while an asynchronously pasted image is resolving. */
+          pendingPasteId: { default: null },
           /** Vertical alignment within the line box — matches InlineObjectVerticalAlign */
           verticalAlign: { default: "baseline" },
           // ── Anchored-object attrs (current model) ─────────────────────────

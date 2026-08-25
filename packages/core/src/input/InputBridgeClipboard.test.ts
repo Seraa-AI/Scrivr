@@ -23,6 +23,14 @@ interface Harness {
   docJSON: () => ReturnType<EditorState["doc"]["toJSON"]>;
 }
 
+function imagesInDocument(
+  doc: ReturnType<EditorState["doc"]["toJSON"]>,
+): { type: string }[] {
+  return doc.content.flatMap((block: { content?: { type: string }[] }) =>
+    (block.content ?? []).filter((node) => node.type === "image"),
+  );
+}
+
 let harness: Harness | null = null;
 
 function mountEditor(initialText = "Hello world"): Harness {
@@ -274,23 +282,25 @@ describe("image paste lands only while the editor can accept it", () => {
 
   it("does not insert an image that resolves after the editor goes read-only", async () => {
     const h = harness!;
-    const before = h.docJSON();
+    const before = h.doc();
     h.textarea.dispatchEvent(pasteEvent({}, [png()]));
     // Read-only flips while the bytes are still being read.
     h.bridge.setReadOnly(true);
     await settle();
 
-    expect(h.docJSON()).toEqual(before);
+    expect(h.doc()).toBe(before);
+    expect(imagesInDocument(h.docJSON())).toHaveLength(0);
   });
 
   it("does not insert an image that resolves after unmount", async () => {
     const h = harness!;
-    const before = h.docJSON();
+    const before = h.doc();
     h.textarea.dispatchEvent(pasteEvent({}, [png()]));
     h.bridge.unmount();
     await settle();
 
-    expect(h.docJSON()).toEqual(before);
+    expect(h.doc()).toBe(before);
+    expect(imagesInDocument(h.docJSON())).toHaveLength(0);
   });
 
   it("survives a clipboard that throws while being read", async () => {

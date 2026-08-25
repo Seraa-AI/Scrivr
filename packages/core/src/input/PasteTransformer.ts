@@ -46,6 +46,16 @@ export interface PasteTransformerOptions {
   uploadImage?: (file: File) => Promise<string | null>;
 }
 
+/** A synchronous reservation followed by asynchronous image resolution. */
+export interface PendingImagePaste {
+  /** Inserts stable placeholders at the user's paste selection immediately. */
+  insert: Transaction;
+  /** Replaces those placeholders with uploaded images, or removes failed ones. */
+  resolve: (getState: () => EditorState) => Promise<Transaction | null>;
+  /** Removes unresolved placeholders and prevents a later resolution. */
+  cancel: (state: EditorState) => Transaction | null;
+}
+
 /**
  * Widest a pasted image is allowed to start out. Roughly the content column of
  * an A4 page at 96dpi — a full-screen screenshot pasted at its natural 2560px
@@ -167,10 +177,10 @@ export class PasteTransformer {
    * on the clipboard, and the markup is the better source — it keeps the
    * original URL instead of inlining a second copy of the image.
    */
-  async transformFiles(
+  prepareImagePaste(
     clipboardData: DataTransfer,
-    getState: () => EditorState,
-  ): Promise<Transaction | null> {
+    state: EditorState,
+  ): PendingImagePaste | null {
     if (clipboardData.getData("text/html").trim()) return null;
 
     const imageType = this.schema.nodes["image"];
@@ -179,27 +189,85 @@ export class PasteTransformer {
     const files = imageFiles(clipboardData);
     if (files.length === 0) return null;
 
+    const reservations = files.map(() => {
+      const id = crypto.randomUUID();
+      return {
+        id,
+        node: imageType.create({
+          src: PENDING_IMAGE_SRC,
+          alt: "Uploading image…",
+          pendingPasteId: id,
+        }),
+      };
+    });
+    const insert = state.tr.replaceSelection(
+      new Slice(Fragment.from(reservations.map(({ node }) => node)), 0, 0),
+    );
+
+    let cancelled = false;
+    const reservationIds = reservations.map(({ id }) => id);
+    return {
+      insert,
+      resolve: async (getState) => {
+        if (cancelled) return null;
+        const resolved = await this.resolveImageFiles(files);
+        if (cancelled) return null;
+        return resolveImageReservations(getState(), reservationIds, resolved);
+      },
+      cancel: (currentState) => {
+        cancelled = true;
+        return resolveImageReservations(
+          currentState,
+          reservationIds,
+          reservationIds.map(() => null),
+        );
+      },
+    };
+  }
+
+  /**
+   * Resolve an image paste without placeholders. Kept as a low-level helper for
+   * headless callers that can guarantee the supplied state has not moved.
+   */
+  async transformFiles(
+    clipboardData: DataTransfer,
+    getState: () => EditorState,
+  ): Promise<Transaction | null> {
+    if (clipboardData.getData("text/html").trim()) return null;
+    const imageType = this.schema.nodes["image"];
+    if (!imageType) return null;
+    const files = imageFiles(clipboardData);
+    if (files.length === 0) return null;
+    const resolved = await this.resolveImageFiles(files);
+
+    const nodes: Node[] = [];
+    for (const image of resolved) {
+      if (image) nodes.push(imageType.create(image));
+    }
+    if (nodes.length === 0) return null;
+
+    return getState().tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0));
+  }
+
+  private async resolveImageFiles(
+    files: readonly File[],
+  ): Promise<Array<{ src: string; width: number; height: number } | null>> {
     const upload = this.options.uploadImage ?? readAsDataUrl;
     const sources = await Promise.all(
       files.map((file) =>
         Promise.resolve()
           .then(() => upload(file))
-          // A failed read or upload drops that image; the rest still paste.
           .catch(() => null),
       ),
     );
 
-    const nodes: Node[] = [];
-    for (const source of sources) {
-      // The uploader is app-supplied, so its result crosses the same ingestion
-      // gate as any other URL entering the document.
-      const src = safeImageUrl(source);
-      if (src === null) continue;
-      nodes.push(imageType.create({ src, ...(await measureImage(src)) }));
-    }
-    if (nodes.length === 0) return null;
-
-    return getState().tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0));
+    return Promise.all(
+      sources.map(async (source) => {
+        // App-supplied URLs cross the same ingestion gate as every other image.
+        const src = safeImageUrl(source);
+        return src === null ? null : { src, ...(await measureImage(src)) };
+      }),
+    );
   }
 
   /** Plain text */
@@ -459,6 +527,41 @@ export class PasteTransformer {
 
 /** Image files */
 
+const PENDING_IMAGE_SRC =
+  "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+
+function resolveImageReservations(
+  state: EditorState,
+  ids: readonly string[],
+  images: readonly ({ src: string; width: number; height: number } | null)[],
+): Transaction | null {
+  const byId = new Map(ids.map((id, index) => [id, images[index] ?? null]));
+  const matches: Array<{ pos: number; node: Node; image: { src: string; width: number; height: number } | null }> = [];
+  state.doc.descendants((node, pos) => {
+    const id = node.attrs["pendingPasteId"];
+    if (typeof id === "string" && byId.has(id)) {
+      matches.push({ pos, node, image: byId.get(id) ?? null });
+    }
+  });
+  if (matches.length === 0) return null;
+
+  const tr = state.tr;
+  for (const { pos, node, image } of matches.sort((a, b) => b.pos - a.pos)) {
+    if (image) {
+      tr.setNodeMarkup(pos, undefined, {
+        ...node.attrs,
+        ...image,
+        alt: "",
+        pendingPasteId: null,
+      });
+    } else {
+      tr.delete(pos, pos + node.nodeSize);
+    }
+  }
+  tr.setMeta("addToHistory", false);
+  return tr;
+}
+
 /** Image files on the clipboard, in order. Reading `files` can throw once the event's DataTransfer is detached. */
 function imageFiles(clipboardData: DataTransfer): File[] {
   try {
@@ -615,14 +718,16 @@ function openDepth(fragment: Fragment, end: "start" | "end"): number {
  * should drop the glyph and infer real list structure. Pasted untranslated,
  * a Word list becomes a stack of paragraphs each starting with a stray "·".
  */
-const WORD_LIST_STYLE = /mso-list:\s*l\d+\s+level(\d+)/i;
+const WORD_LIST_STYLE = /mso-list:\s*(l\d+)\s+level(\d+)\s+(lfo\d+)/i;
 const WORD_LIST_MARKER = /mso-list:\s*ignore/i;
 /** A marker is a number or letter followed by a separator: "1.", "a)", "iv.". Bare "·" or "o" is a bullet. */
 const ORDERED_MARKER = /^\s*[0-9a-z]+[.)]/i;
 
 interface WordListItem {
   element: HTMLElement;
+  listId: string;
   level: number;
+  overrideId: string;
   ordered: boolean;
 }
 
@@ -642,7 +747,9 @@ function convertWordLists(root: HTMLElement): void {
       items.push(readWordListItem(element));
       element = element.nextElementSibling;
     }
-    start.parentNode?.insertBefore(buildWordList(items, doc), start);
+    for (const run of splitWordListRuns(items)) {
+      start.parentNode?.insertBefore(buildWordList(run, doc), start);
+    }
     for (const item of items) item.element.remove();
   }
 }
@@ -657,9 +764,10 @@ function isWordListItem(el: Element | null): el is HTMLElement {
 
 /** Read an item's depth and kind, and strip the literal marker glyph from its content. */
 function readWordListItem(element: HTMLElement): WordListItem {
-  const level = Number(
-    WORD_LIST_STYLE.exec(element.getAttribute("style") ?? "")?.[1] ?? 1,
-  );
+  const match = WORD_LIST_STYLE.exec(element.getAttribute("style") ?? "");
+  const listId = match?.[1]?.toLowerCase() ?? "l0";
+  const level = Number(match?.[2] ?? 1);
+  const overrideId = match?.[3]?.toLowerCase() ?? "lfo0";
 
   let ordered = false;
   for (const span of Array.from(element.querySelectorAll("span"))) {
@@ -668,7 +776,29 @@ function readWordListItem(element: HTMLElement): WordListItem {
     span.remove();
   }
 
-  return { element, level, ordered };
+  return { element, listId, level, overrideId, ordered };
+}
+
+/**
+ * Consecutive Word paragraphs are not necessarily one list. Word identifies a
+ * logical list with both its abstract-list and override ids; a same-level
+ * marker-kind change is also a new sibling list, not a continuation whose
+ * first marker gets to decide the type for every following item.
+ */
+function splitWordListRuns(items: readonly WordListItem[]): WordListItem[][] {
+  const runs: WordListItem[][] = [];
+  for (const item of items) {
+    const run = runs[runs.length - 1];
+    const previous = run?.[run.length - 1];
+    const continues =
+      previous !== undefined &&
+      previous.listId === item.listId &&
+      previous.overrideId === item.overrideId &&
+      !(previous.level === item.level && previous.ordered !== item.ordered);
+    if (continues) run!.push(item);
+    else runs.push([item]);
+  }
+  return runs;
 }
 
 /** Build nested `<ul>`/`<ol>` from a flat run of levelled items. */

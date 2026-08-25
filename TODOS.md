@@ -143,6 +143,24 @@ users to an uploader. Needs a product call, not just a constant.
 
 **Effort.** ~2 hrs / ~30 LOC + test.
 
+#### Orphaned image placeholders on abrupt teardown (P3)
+
+**What.** `prepareImagePaste` reserves a placeholder image node carrying
+`pendingPasteId`. `cancel()` clears it on unmount, on `setReadOnly(true)`,
+and on a failed resolve — but a closed tab or a crash runs none of those.
+A document saved mid-upload keeps a 1x1 transparent placeholder with a
+live `pendingPasteId`.
+
+**Why.** The attr is schema-declared, so it survives serialization. On
+reload the user sees a tiny invisible image they cannot explain, and
+nothing will ever resolve it.
+
+**Fix.** Sweep placeholder nodes at ingestion — a document being loaded
+has no in-flight upload by definition, so any `pendingPasteId` in it is
+orphaned and the node should be dropped.
+
+**Effort.** ~1 hr / ~15 LOC + test.
+
 #### Table-cell clipboard round-trip (P2)
 
 **What.** `serializeSelectionToHtml` emits `data-pm-slice` for text

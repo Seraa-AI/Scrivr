@@ -3,7 +3,7 @@ import { TextSelection } from "prosemirror-state";
 import type { Schema } from "prosemirror-model";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { InputHandler, EditorNavigator } from "../extensions/types";
-import type { PasteTransformer } from "./PasteTransformer";
+import type { PasteTransformer, PendingImagePaste } from "./PasteTransformer";
 import { insertText, deleteSelection } from "../model/commands";
 import { serializeSelectionToHtml, serializeSelectionToText } from "./ClipboardSerializer";
 import { clearSelectedCellsTr } from "../table/editingGuards";
@@ -108,6 +108,7 @@ export class InputBridge {
    * would incorrectly affect a later context-menu paste.
    */
   private pasteWithoutFormattingPending = false;
+  private readonly pendingImagePastes = new Set<PendingImagePaste>();
 
   constructor(opts: InputBridgeOptions) {
     this.opts = opts;
@@ -122,6 +123,7 @@ export class InputBridge {
 
   /** Block or unblock all document mutations. */
   setReadOnly(value: boolean): void {
+    if (value) this.cancelPendingImagePastes();
     this.readOnly = value;
   }
 
@@ -156,6 +158,7 @@ export class InputBridge {
    * Safe to call multiple times.
    */
   unmount(): void {
+    this.cancelPendingImagePastes();
     if (this.textarea) {
       this.detachListeners();
       this.textarea.remove();
@@ -485,16 +488,36 @@ export class InputBridge {
     // unmounted by the time it lands: both are re-checked here rather than only
     // at event time. A rejection is swallowed on purpose — a screenshot that
     // fails to read is not worth tearing down the page over.
-    void this.opts.pasteTransformer
-      .transformFiles(e.clipboardData, this.opts.getState)
+    const imagePaste = this.opts.pasteTransformer.prepareImagePaste(
+      e.clipboardData,
+      this.opts.getState(),
+    );
+    if (!imagePaste) return;
+    this.pendingImagePastes.add(imagePaste);
+    this.opts.dispatch(imagePaste.insert);
+    void imagePaste
+      .resolve(this.opts.getState)
       .then((fileTr) => {
+        this.pendingImagePastes.delete(imagePaste);
         if (!fileTr || this.readOnly || !this.textarea) return;
         this.opts.dispatch(fileTr);
       })
-      .catch(() => {});
+      .catch(() => {
+        this.pendingImagePastes.delete(imagePaste);
+        const cleanup = imagePaste.cancel(this.opts.getState());
+        if (cleanup && !this.readOnly && this.textarea) this.opts.dispatch(cleanup);
+      });
   };
 
   /** Private — helpers */
+
+  private cancelPendingImagePastes(): void {
+    for (const pending of this.pendingImagePastes) {
+      const cleanup = pending.cancel(this.opts.getState());
+      if (cleanup) this.opts.dispatch(cleanup);
+    }
+    this.pendingImagePastes.clear();
+  }
 
   private tryInputHandler(e: KeyboardEvent): boolean {
     // Try the fully-qualified key first (e.g. "Alt-ArrowLeft" for word-jump),

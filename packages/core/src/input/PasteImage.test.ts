@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { EditorState } from "prosemirror-state";
+import { AllSelection, EditorState } from "prosemirror-state";
 import type { Node as PMNode } from "prosemirror-model";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
@@ -67,6 +67,40 @@ describe("fitPastedImage", () => {
 // ── Image files on the clipboard ──────────────────────────────────────────────
 
 describe("pasting an image file", () => {
+  it("resolves the reserved image without touching a later selection", async () => {
+    class FailingDecoder {
+      onerror: (() => void) | null = null;
+      set src(_value: string) {
+        queueMicrotask(() => this.onerror?.());
+      }
+    }
+    vi.stubGlobal("Image", FailingDecoder);
+
+    const { schema, state } = makeContext();
+    const transformer = new PasteTransformer(schema, [], {}, {
+      uploadImage: async () => "https://cdn.example.com/uploaded.png",
+    });
+    const pending = transformer.prepareImagePaste(
+      clipboard([file("shot.png", "image/png")]),
+      state,
+    );
+    expect(pending).not.toBeNull();
+
+    let current = state.apply(pending!.insert);
+    current = current.apply(current.tr.insertText("keep"));
+    current = current.apply(current.tr.setSelection(new AllSelection(current.doc)));
+
+    const resolved = await pending!.resolve(() => current);
+    expect(resolved).not.toBeNull();
+    current = current.apply(resolved!);
+
+    expect(current.doc.textContent).toBe("keep");
+    const [img] = images(current.doc);
+    expect(img!.attrs["src"]).toBe("https://cdn.example.com/uploaded.png");
+    expect(img!.attrs["pendingPasteId"]).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   it("inserts an image node with an inline data URL by default", async () => {
     const { schema, state } = makeContext();
     const transformer = new PasteTransformer(schema);

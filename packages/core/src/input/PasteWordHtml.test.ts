@@ -52,9 +52,15 @@ function shape(doc: PMNode): string[] {
 }
 
 /** A Word list paragraph: the marker span Word tells us to ignore, then the text. */
-function wordListItem(marker: string, text: string, level = 1): string {
+function wordListItem(
+  marker: string,
+  text: string,
+  level = 1,
+  identity = "l0 level1 lfo1",
+): string {
+  const listIdentity = identity.replace(/level\d+/i, `level${level}`);
   return (
-    `<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l0 level${level} lfo1'>` +
+    `<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:${listIdentity}'>` +
     `<![if !supportLists]><span style='font-family:Symbol'>` +
     `<span style='mso-list:Ignore'>${marker}<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp; </span></span>` +
     `</span><![endif]>${text}<o:p></o:p></p>`
@@ -144,6 +150,25 @@ describe("Word HTML paste — lists", () => {
 
     expect(shape(doc)).toEqual(["bulletList", "paragraph", "bulletList"]);
     expect(doc.child(1).textContent).toBe("Interlude");
+  });
+
+  it("keeps adjacent Word lists with different identities as separate lists", () => {
+    const doc = pasteWord(
+      wordListItem("·", "Bullet", 1, "l0 level1 lfo1") +
+        wordListItem("1.", "Numbered", 1, "l1 level1 lfo2"),
+    );
+
+    expect(shape(doc)).toEqual(["bulletList", "orderedList"]);
+    expect(doc.child(0).textContent).toBe("Bullet");
+    expect(doc.child(1).textContent).toBe("Numbered");
+  });
+
+  it("splits a same-level marker-kind change even when Word reuses the identity", () => {
+    const doc = pasteWord(
+      wordListItem("·", "Bullet") + wordListItem("1.", "Numbered"),
+    );
+
+    expect(shape(doc)).toEqual(["bulletList", "orderedList"]);
   });
 
   it("keeps inline formatting inside a list item", () => {
