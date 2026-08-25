@@ -1,23 +1,263 @@
-import { Plugin, PluginKey } from "prosemirror-state";
 import { Extension } from "../Extension";
-import { Slice, Fragment, Node } from "prosemirror-model";
-import { cloneSourcedBlocks } from "./cloneSourcedBlocks";
+import { fnv1aHex, stableStringify } from "../../model/hash";
+import { Slice, Fragment, type Node as PmNode, Node } from "prosemirror-model";
 import {
-	sourcedBlockDivergencePlugin,
-	computeBlockHash,
-	NORMALIZER_VERSION,
-	sourcedBlockDivergenceKey,
-} from "./sourcedBlockHashing";
+	Plugin,
+	PluginKey,
+	type EditorState,
+	type Transaction,
+} from "prosemirror-state";
+import type { CloneHandler, IEditor } from "../types";
 import type {
-	SourceProvider,
-	SourceContent,
-	SourceCapability,
-} from "./SourcedBlock.types";
-import type {
-	NodeActionContribution,
 	NodeActionContext,
+	NodeActionContribution,
 } from "../../selection/types";
-import type { IEditor } from "../types";
+
+export type SourceCapability =
+	| "update"
+	| "detach"
+	| "compare"
+	| "saveVersion"
+	| "reset";
+
+export interface SourceSearchResult<TMeta = unknown> {
+	resourceId: string;
+	versionId: string;
+	label: string;
+	meta?: TMeta;
+}
+
+export interface SourceContent {
+	resourceId: string;
+	versionId: string;
+	/** A Scrivr fragment as JSON — parsed against the editor's own schema. */
+	contentJSON: unknown;
+	label: string;
+}
+
+export interface SourcedBlockEvent {
+	instanceId: string;
+	resourceId: string;
+	versionId: string;
+	kind: string;
+}
+
+export interface SourcedBlockChangedEvent extends SourcedBlockEvent {
+	modified: boolean;
+	outdated: boolean;
+}
+
+export interface SourceProvider<TMeta = unknown> {
+	kind: string;
+	search(
+		query: string,
+		signal?: AbortSignal,
+	): Promise<SourceSearchResult<TMeta>[]>;
+	/** Full content for insertion. */
+	fetch(resourceId: string, versionId?: string): Promise<SourceContent>;
+	/** Called after a block is inserted/created, so the host can index it. */
+	registerInstance(event: SourcedBlockEvent): Promise<void>;
+	/** Called when divergence state changes. Host persists/indexes as it likes. */
+	onInstanceChanged?(event: SourcedBlockChangedEvent): Promise<void>;
+	/** Host authority for gating node actions. */
+	can?(capability: SourceCapability, resourceId: string): boolean;
+}
+
+interface EditorViewLike {
+	state: EditorState;
+	dispatch: (tr: Transaction) => void;
+}
+
+export const NORMALIZER_VERSION = 1;
+
+export function normalizeSourcedBlock(fragment: Fragment): unknown[] {
+	const walkNode = (node: Node): unknown => {
+		// 1. Strip out transient attributes (like nodeId)
+		const cleanAttrs = { ...node.attrs };
+		if ("nodeId" in cleanAttrs) delete cleanAttrs.nodeId;
+		if ("selectionId" in cleanAttrs) delete cleanAttrs.selectionId;
+
+		// 2. Filter out Tracked Changes
+		const cleanMarks = node.marks
+			.filter(
+				mark =>
+					mark.type.name !== "trackedInsert" &&
+					mark.type.name !== "trackedDelete",
+			)
+			.map(mark => ({ type: mark.type.name, attrs: mark.attrs }));
+
+		if (node.isText) {
+			return {
+				type: "text",
+				text: node.text,
+				...(cleanMarks.length > 0 ? { marks: cleanMarks } : {}),
+			};
+		}
+
+		// Recursively walk children
+		const children: unknown[] = [];
+		node.content.forEach(child => children.push(walkNode(child)));
+
+		return {
+			type: node.type.name,
+			...(Object.keys(cleanAttrs).length > 0
+				? { attrs: cleanAttrs }
+				: {}),
+			...(children.length > 0 ? { content: children } : {}),
+			...(cleanMarks.length > 0 ? { marks: cleanMarks } : {}),
+		};
+	};
+
+	const content: unknown[] = [];
+	fragment.forEach(child => content.push(walkNode(child)));
+	return content;
+}
+
+export function computeBlockHash(fragment: Fragment): string {
+	const normalizedJSON = normalizeSourcedBlock(fragment);
+	return fnv1aHex(stableStringify(normalizedJSON));
+}
+
+export interface SourcedBlockDivergenceState {
+	modifiedBlocks: Set<number>;
+}
+
+export const sourcedBlockDivergenceKey =
+	new PluginKey<SourcedBlockDivergenceState>("sourcedBlockDivergence");
+
+export function sourcedBlockDivergencePlugin() {
+	return new Plugin({
+		key: sourcedBlockDivergenceKey,
+		state: {
+			init() {
+				return { modifiedBlocks: new Set<number>() };
+			},
+			apply(tr, value) {
+				let nextSet = value.modifiedBlocks;
+				if (tr.docChanged) {
+					nextSet = new Set();
+					for (const pos of value.modifiedBlocks) {
+						const mapped = tr.mapping.map(pos);
+						nextSet.add(mapped);
+					}
+				}
+
+				const meta = tr.getMeta(sourcedBlockDivergenceKey);
+				if (meta && Array.isArray(meta)) {
+					const newSet = new Set(nextSet);
+					for (const { pos, isModified } of meta) {
+						if (isModified) {
+							newSet.add(pos);
+						} else {
+							newSet.delete(pos);
+						}
+					}
+					return { modifiedBlocks: newSet };
+				}
+
+				return { modifiedBlocks: nextSet };
+			},
+		},
+		view(view: EditorViewLike) {
+			let timeoutId: ReturnType<typeof setTimeout>;
+
+			return {
+				update(view: EditorViewLike, prevState: EditorState) {
+					const state = view.state;
+
+					if (prevState.doc.eq(state.doc)) return;
+
+					clearTimeout(timeoutId);
+
+					timeoutId = setTimeout(() => {
+						const updates: Array<{
+							pos: number;
+							isModified: boolean;
+						}> = [];
+
+						state.doc.descendants((node: Node, pos: number) => {
+							if (node.type.name === "sourcedBlock") {
+								const currentHash = computeBlockHash(
+									node.content,
+								);
+								const isModified =
+									currentHash !== node.attrs["baseHash"];
+
+								const pluginState =
+									sourcedBlockDivergenceKey.getState(state);
+								const wasModified =
+									pluginState?.modifiedBlocks.has(pos) ??
+									false;
+
+								if (isModified !== wasModified) {
+									updates.push({ pos, isModified });
+								}
+							}
+							return false; // don't descend into sourcedBlock's children
+						});
+
+						if (updates.length > 0) {
+							view.dispatch(
+								state.tr.setMeta(
+									sourcedBlockDivergenceKey,
+									updates,
+								),
+							);
+						}
+					}, 500);
+				},
+
+				destroy() {
+					clearTimeout(timeoutId);
+				},
+			};
+		},
+	});
+}
+
+/**
+ * Re-key sourcedBlock identity during document clone.
+ * Ensures a cloned document does not share instanceIds with the original.
+ */
+const cloneSourcedBlocks: CloneHandler = ({ doc, newId, recordId }) => {
+	const walk = (node: Node): Node => {
+		if (node.isText) {
+			return node;
+		}
+
+		let childrenChanged = false;
+		const children: Node[] = [];
+		node.forEach(child => {
+			const newChild = walk(child);
+			if (newChild !== child) {
+				childrenChanged = true;
+			}
+			children.push(newChild);
+		});
+
+		let newAttrs = node.attrs;
+		if (node.type.name === "sourcedBlock") {
+			const oldId = newAttrs.instanceId;
+			if (typeof oldId === "string" && oldId.length > 0) {
+				const replacement = newId("sourcedBlock", oldId);
+				recordId("sourcedBlock", oldId, replacement);
+				newAttrs = { ...newAttrs, instanceId: replacement };
+			}
+		}
+
+		if (!childrenChanged && newAttrs === node.attrs) {
+			return node;
+		}
+
+		return node.type.create(
+			newAttrs,
+			Fragment.fromArray(children),
+			node.marks,
+		);
+	};
+
+	return walk(doc);
+};
 
 export interface SourcedBlockOptions {
 	providers?: SourceProvider[];
@@ -309,7 +549,12 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					); // end of inner block
 
 					// Ensure both coordinates exist and are on the current page being rendered
-					if (startCoords && endCoords && (startCoords.page === pageIndex || endCoords.page === pageIndex)) {
+					if (
+						startCoords &&
+						endCoords &&
+						(startCoords.page === pageIndex ||
+							endCoords.page === pageIndex)
+					) {
 						ctx.save();
 						// Use divergedGutter from theme if available, otherwise amber fallback
 						ctx.fillStyle = theme.divergedGutter ?? "#FFC107";
