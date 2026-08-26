@@ -1,6 +1,6 @@
-import { Fragment, Node as PMNode, Slice } from "prosemirror-model";
-import { EditorState, Transaction } from "prosemirror-state";
-import { ReplaceStep } from "prosemirror-transform";
+import { Fragment, Node as PMNode, Slice } from "@scrivr/core/pm";
+import { EditorState, Transaction } from "@scrivr/core/pm";
+import { ReplaceStep } from "@scrivr/core/pm";
 
 import { TrackChangesAction } from "../actions";
 import { findChanges } from "../findChanges";

@@ -1,8 +1,8 @@
-import { Plugin, PluginKey } from "prosemirror-state";
-import type { EditorState, Transaction } from "prosemirror-state";
+import { Plugin, PluginKey } from "@scrivr/core/pm";
+import type { EditorState, Transaction } from "@scrivr/core/pm";
 import { Extension, renderSelection } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
-import type { Node as PmNode } from "prosemirror-model";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import { findNodeById } from "@scrivr/core";
 
 /** A document range referenced by an external citation (AI answer, source panel). */

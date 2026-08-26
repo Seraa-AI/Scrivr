@@ -35,6 +35,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./pm": {
+      "import": {
+        "types": "./dist/pm.d.ts",
+        "default": "./dist/pm.js"
+      },
+      "require": {
+        "types": "./dist/pm.d.cts",
+        "default": "./dist/pm.cjs"
+      }
     }
   },
   "files": [

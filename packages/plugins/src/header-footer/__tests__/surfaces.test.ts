@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { setBlockType } from "prosemirror-commands";
-import { TextSelection } from "prosemirror-state";
+import { setBlockType } from "@scrivr/core/pm";
+import { TextSelection } from "@scrivr/core/pm";
 import { HeaderFooter } from "../HeaderFooter";
 import { HeaderFooterSurfaceCache, HEADER_FOOTER_BLOCKED_NODES } from "../surfaces";
 import type { HeaderFooterDefinition } from "../types";

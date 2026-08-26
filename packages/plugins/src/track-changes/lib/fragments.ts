@@ -1,5 +1,5 @@
-import { Fragment, Node as PMNode, ResolvedPos, Schema } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
+import { Fragment, Node as PMNode, ResolvedPos, Schema } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
 
 import {
   addTrackIdIfDoesntExist,

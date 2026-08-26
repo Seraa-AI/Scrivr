@@ -6,7 +6,7 @@
  * header/footer heights don't depend on flow content layout.
  */
 
-import type { Node } from "prosemirror-model";
+import type { Node } from "@scrivr/core/pm";
 import {
   runMiniPipeline,
   type DocumentLayout,

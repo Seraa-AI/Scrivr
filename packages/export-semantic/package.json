@@ -1,7 +1,7 @@
 {
   "name": "@scrivr/export-semantic",
   "version": "1.0.18",
-  "description": "SemanticUnit chunk emitter for Scrivr documents — AI-ready units for RAG",
+  "description": "SemanticUnit chunk emitter for Scrivr documents \u2014 AI-ready units for RAG",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
   "repository": {
@@ -61,7 +61,6 @@
   },
   "devDependencies": {
     "@scrivr/core": "workspace:*",
-    "prosemirror-model": "^1.25.4",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^2.1.0"

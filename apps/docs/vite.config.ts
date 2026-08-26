@@ -34,6 +34,7 @@ export default defineConfig({
       // `@scrivr/react/styles.css` would resolve to `src/index.ts/styles.css`
       // (ENOTDIR). Mirror every subpath export declared in the package.json.
       '@scrivr/react/styles.css': resolve(__dirname, '../../packages/react/src/styles.css'),
+      '@scrivr/core/pm': resolve(__dirname, '../../packages/core/src/pm.ts'),
       '@scrivr/core': resolve(__dirname, '../../packages/core/src/index.ts'),
       '@scrivr/plugins': resolve(__dirname, '../../packages/plugins/src/index.ts'),
       '@scrivr/export-pdf': resolve(__dirname, '../../packages/export-pdf/src/index.ts'),

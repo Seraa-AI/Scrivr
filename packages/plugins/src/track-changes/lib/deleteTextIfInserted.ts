@@ -1,5 +1,5 @@
-import { Fragment, Node as PMNode, Schema } from "prosemirror-model";
-import type { Transaction } from "prosemirror-state";
+import { Fragment, Node as PMNode, Schema } from "@scrivr/core/pm";
+import type { Transaction } from "@scrivr/core/pm";
 
 import { addTrackIdIfDoesntExist, getMergeableMarkTrackedAttrs, NewDeleteAttrs } from "../helpers";
 

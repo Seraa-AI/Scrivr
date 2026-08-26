@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import type { Node as PmNode } from "prosemirror-model";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import { exportDocxBytes } from "../export/export";
 import { importDocx } from "./import";
 import { DocxImportError } from "./error";

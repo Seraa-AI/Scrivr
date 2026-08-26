@@ -43,9 +43,6 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
-  "dependencies": {
-    "prosemirror-markdown": "^1.13.4"
-  },
   "peerDependencies": {
     "@scrivr/core": "workspace:*"
   },

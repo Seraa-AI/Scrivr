@@ -1,6 +1,6 @@
-import { Node as PMNode } from "prosemirror-model";
-import { EditorState, Transaction } from "prosemirror-state";
-import { AttrStep } from "prosemirror-transform";
+import { Node as PMNode } from "@scrivr/core/pm";
+import { EditorState, Transaction } from "@scrivr/core/pm";
+import { AttrStep } from "@scrivr/core/pm";
 
 import { NewEmptyAttrs } from "../helpers";
 import { ChangeStep } from "../types";

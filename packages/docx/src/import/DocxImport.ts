@@ -24,7 +24,7 @@
 
 import { Extension } from "@scrivr/core";
 import type { IBaseEditor } from "@scrivr/core";
-import type { Node as PmNode } from "prosemirror-model";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import { importDocx as runImportDocx } from "./import";
 import type { DocxImportOptions } from "./import";
 

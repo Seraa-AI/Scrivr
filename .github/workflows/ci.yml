@@ -37,3 +37,11 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      # Root `pnpm build` filters to ./packages/**, so nothing here consumed the
+      # published packages the way an app does. The docs app resolves them
+      # through its own vite aliases, which means a new subpath in an exports map
+      # can resolve fine for every package and still break the app — and only
+      # the post-merge Deploy Docs job would say so. Build it here instead.
+      - name: Build docs app
+        run: pnpm turbo run build --filter=@scrivr/docs...

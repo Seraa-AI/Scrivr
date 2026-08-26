@@ -1,5 +1,5 @@
-import { Fragment, Node as PMNode } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
+import { Fragment, Node as PMNode } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
 
 import { dropStructuralChangeShadow } from "./structuralChange";
 import { addTrackIdIfDoesntExist, getBlockInlineTrackedData, NewDeleteAttrs } from "../helpers";

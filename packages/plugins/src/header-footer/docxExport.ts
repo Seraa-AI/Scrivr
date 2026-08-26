@@ -23,7 +23,7 @@ import {
   type DocxHandlers,
   type XmlNode,
 } from "@scrivr/core";
-import type { Node } from "prosemirror-model";
+import type { Node } from "@scrivr/core/pm";
 import { getHeaderFooterPolicy } from "./getPolicy";
 import type { HeaderFooterDefinition, HeaderFooterPolicy } from "./types";
 

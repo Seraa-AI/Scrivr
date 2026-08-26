@@ -1,6 +1,6 @@
-import { Node as PMNode, Slice } from "prosemirror-model";
-import type { EditorState, Transaction } from "prosemirror-state";
-import { ReplaceAroundStep, ReplaceStep } from "prosemirror-transform";
+import { Node as PMNode, Slice } from "@scrivr/core/pm";
+import type { EditorState, Transaction } from "@scrivr/core/pm";
+import { ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
 
 import { TrackChangesAction } from "../actions";
 import { createNewInsertAttrs, NewEmptyAttrs } from "../helpers";

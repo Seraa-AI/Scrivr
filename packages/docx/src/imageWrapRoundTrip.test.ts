@@ -15,8 +15,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { AllSelection } from "prosemirror-state";
-import type { Node as PMNode } from "prosemirror-model";
+import { AllSelection } from "@scrivr/core/pm";
+import type { Node as PMNode } from "@scrivr/core/pm";
 import {
   ServerEditor,
   PasteTransformer,

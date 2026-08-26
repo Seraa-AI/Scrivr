@@ -1,6 +1,6 @@
-import { Node as PMNode, Slice } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
-import { liftTarget, Mapping, ReplaceAroundStep } from "prosemirror-transform";
+import { Node as PMNode, Slice } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
+import { liftTarget, Mapping, ReplaceAroundStep } from "@scrivr/core/pm";
 
 import { ChangeSet } from "../ChangeSet";
 import { excludeFromTracked, getBlockInlineTrackedData } from "../helpers";
