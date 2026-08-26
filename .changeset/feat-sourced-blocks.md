@@ -1,6 +1,13 @@
 ---
-"@scrivr/core": minor
-"@scrivr/docx": minor
+"@scrivr/core": patch
+"@scrivr/docx": patch
+"@scrivr/ai": patch
+"@scrivr/export": patch
+"@scrivr/export-markdown": patch
+"@scrivr/export-pdf": patch
+"@scrivr/export-semantic": patch
+"@scrivr/plugins": patch
+"@scrivr/react": patch
 ---
 
 **Sourced Blocks**

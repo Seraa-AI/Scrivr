@@ -22,6 +22,7 @@ import { HorizontalRule } from "./built-in/HorizontalRule";
 import { PageBreak } from "./built-in/PageBreak";
 import { Image } from "./built-in/Image";
 import { Table } from "./built-in/Table";
+import { SourcedBlockExtension } from "./built-in/SourcedBlock";
 import { UniqueId } from "./built-in/UniqueId";
 import { Typography } from "./built-in/Typography";
 import { TrailingNode } from "./built-in/TrailingNode";
@@ -68,6 +69,10 @@ interface StarterKitOptions {
    * StarterKit.configure({ table: true })
    */
   table?: true;
+  /**
+   * Sourced blocks are opt-in. Default is `false` — pass `true` to register the schema/commands/actions.
+   */
+  sourcedBlock?: true;
   typography?: false;
   trailingNode?: false;
   clearFormatting?: false;
@@ -127,6 +132,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.list !== false) extensions.push(List);
     if (opts.codeBlock !== false) extensions.push(CodeBlock.configure(opts.codeBlock));
     if (opts.table === true) extensions.push(Table);
+    if (opts.sourcedBlock === true) extensions.push(SourcedBlockExtension);
     if (opts.horizontalRule !== false) extensions.push(HorizontalRule);
     if (opts.pageBreak !== false) extensions.push(PageBreak);
     if (opts.image !== false) extensions.push(Image);
