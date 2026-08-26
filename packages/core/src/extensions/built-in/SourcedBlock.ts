@@ -302,7 +302,7 @@ export function remintSourcedBlockIdentity(slice: Slice): Slice {
 					);
 				} else {
 					// Full copy. Remint instanceId.
-					const newId = `src_pasted_${Math.random().toString(36).substring(2, 11)}`;
+					const newId = `src_pasted_${crypto.randomUUID()}`;
 					nodes.push(
 						node.type.create(
 							{ ...node.attrs, instanceId: newId },
@@ -417,16 +417,16 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					{
 						tag: "div[data-sourced-block]",
 						getAttrs: dom => {
-							const el = dom as HTMLElement;
-							const normalizerAttr = el.getAttribute(
+							if (!(dom instanceof HTMLElement)) return false;
+							const normalizerAttr = dom.getAttribute(
 								"data-base-normalizer",
 							);
 							return {
-								instanceId: el.getAttribute("data-instance-id"),
-								kind: el.getAttribute("data-kind"),
-								resourceId: el.getAttribute("data-resource-id"),
-								versionId: el.getAttribute("data-version-id"),
-								baseHash: el.getAttribute("data-base-hash"),
+								instanceId: dom.getAttribute("data-instance-id"),
+								kind: dom.getAttribute("data-kind"),
+								resourceId: dom.getAttribute("data-resource-id"),
+								versionId: dom.getAttribute("data-version-id"),
+								baseHash: dom.getAttribute("data-base-hash"),
 								baseNormalizer: normalizerAttr
 									? parseInt(normalizerAttr, 10)
 									: 1,
@@ -472,7 +472,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 
 						if (dispatch) {
 							const tr = state.tr;
-							const instanceId = `src_${Math.random().toString(36).substring(2, 11)}`;
+							const instanceId = `src_${crypto.randomUUID()}`;
 							const baseHash = computeBlockHash(fragment);
 
 							const blockType = schema.nodes["sourcedBlock"];
@@ -620,31 +620,6 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				kind: "node",
 				actions: [
 					{
-						id: "source.view",
-						label: "View Source",
-						group: "source",
-						order: 10,
-						when: isTarget,
-						run: () => {
-							console.log(
-								"[SourcedBlock] View source not implemented in headless core",
-							);
-						},
-					},
-					{
-						id: "source.compare",
-						label: "Compare with Source",
-						group: "source",
-						order: 20,
-						when: isModified,
-						disabled: ctx => checkPermission(ctx, "compare"),
-						run: () => {
-							console.log(
-								"[SourcedBlock] Compare UI not implemented in headless core",
-							);
-						},
-					},
-					{
 						id: "source.update",
 						label: "Update to Latest",
 						group: "source",
@@ -770,7 +745,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					newState.doc.descendants((node, pos) => {
 						if (node.type.name === "sourcedBlock") {
 							// Rule 1: Empty wrapper normalization
-							if (node.textContent === "") {
+							if (node.content.size === 0) {
 								tr.replaceWith(
 									pos,
 									pos + node.nodeSize,

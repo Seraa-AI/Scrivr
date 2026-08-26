@@ -98,7 +98,10 @@ function transformBlock(
     });
     
     const blockHandler = handlers.blocks["sdt"];
-    if (blockHandler) return blockHandler(block, contentNodes, ctx);
+    if (blockHandler) {
+      const handled = blockHandler(block, contentNodes, ctx);
+      if (handled) return handled;
+    }
     
     // Degrade gracefully by returning the unwrapped children
     return contentNodes;
