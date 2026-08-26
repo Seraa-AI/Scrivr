@@ -15,11 +15,11 @@
  * NodeType identity intact for everything else.
  */
 
-import { Schema } from "prosemirror-model";
-import { keymap } from "prosemirror-keymap";
-import { baseKeymap } from "prosemirror-commands";
-import { history, undo, redo } from "prosemirror-history";
-import { Plugin } from "prosemirror-state";
+import { Schema } from "@scrivr/core/pm";
+import { keymap } from "@scrivr/core/pm";
+import { baseKeymap } from "@scrivr/core/pm";
+import { history, undo, redo } from "@scrivr/core/pm";
+import { Plugin } from "@scrivr/core/pm";
 import { EditorSurface } from "@scrivr/core";
 import type { HeaderFooterDefinition } from "./types";
 

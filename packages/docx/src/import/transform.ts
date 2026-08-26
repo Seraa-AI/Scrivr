@@ -18,7 +18,7 @@
  * import registration.
  */
 
-import type { Node as PmNode, Mark as PmMark } from "prosemirror-model";
+import type { Node as PmNode, Mark as PmMark } from "@scrivr/core/pm";
 import type {
   DocxBlock,
   DocxImportContext,

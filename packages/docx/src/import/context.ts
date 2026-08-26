@@ -5,7 +5,7 @@
  * handlers against it. This file holds the runtime factory.
  */
 
-import type { Schema } from "prosemirror-model";
+import type { Schema } from "@scrivr/core/pm";
 import type {
   DocxDiagnostic,
   DocxImportContext,

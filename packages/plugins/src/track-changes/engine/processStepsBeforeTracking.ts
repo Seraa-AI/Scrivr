@@ -1,5 +1,5 @@
-import { Transaction } from "prosemirror-state";
-import { Step } from "prosemirror-transform";
+import { Transaction } from "@scrivr/core/pm";
+import { Step } from "@scrivr/core/pm";
 
 import { TrTrackingContext } from "../types";
 

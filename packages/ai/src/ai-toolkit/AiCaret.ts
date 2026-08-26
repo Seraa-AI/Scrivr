@@ -1,5 +1,5 @@
-import { Plugin, PluginKey } from "prosemirror-state";
-import type { EditorState, Transaction } from "prosemirror-state";
+import { Plugin, PluginKey } from "@scrivr/core/pm";
+import type { EditorState, Transaction } from "@scrivr/core/pm";
 import { Extension, renderAiCaret } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
 

@@ -13,7 +13,7 @@ import type {
   DocxImports,
   DocxInlineTransform,
 } from "@scrivr/core";
-import type { Node as PmNode } from "prosemirror-model";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import type {
   HeaderFooterContent,
   HeaderFooterDefinition,

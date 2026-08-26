@@ -12,7 +12,7 @@
  * draws correctly, only the hit-testing width is approximate.
  */
 
-import type { NodeSpec } from "prosemirror-model";
+import type { NodeSpec } from "@scrivr/core/pm";
 
 export const pageNumberNode: NodeSpec = {
   group: "inline",

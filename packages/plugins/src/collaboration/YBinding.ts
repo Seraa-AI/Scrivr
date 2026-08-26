@@ -27,8 +27,8 @@
  */
 import * as Y from "yjs";
 import { yXmlFragmentToProseMirrorRootNode, prosemirrorToYXmlFragment } from "y-prosemirror";
-import type { Node } from "prosemirror-model";
-import { TextSelection } from "prosemirror-state";
+import type { Node } from "@scrivr/core/pm";
+import { TextSelection } from "@scrivr/core/pm";
 import { COLLAB_SYNC_META, type IBaseEditor } from "@scrivr/core";
 
 /**

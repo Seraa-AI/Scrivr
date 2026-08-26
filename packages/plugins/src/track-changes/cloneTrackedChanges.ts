@@ -1,4 +1,4 @@
-import { Fragment, type Mark, type Node } from "prosemirror-model";
+import { Fragment, type Mark, type Node } from "@scrivr/core/pm";
 import type { CloneHandler } from "@scrivr/core";
 
 const TRACKED_ID_FIELDS = ["id", "referenceId", "moveNodeId", "groupId"] as const;

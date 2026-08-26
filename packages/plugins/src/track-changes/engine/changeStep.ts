@@ -1,4 +1,4 @@
-import { Mapping } from "prosemirror-transform";
+import { Mapping } from "@scrivr/core/pm";
 
 import { ChangeStep } from "../types";
 

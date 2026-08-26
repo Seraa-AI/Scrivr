@@ -1,6 +1,6 @@
-import { Schema } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
-import { Mapping, ReplaceStep } from "prosemirror-transform";
+import { Schema } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
+import { Mapping, ReplaceStep } from "@scrivr/core/pm";
 
 import {
   addTrackIdIfDoesntExist,

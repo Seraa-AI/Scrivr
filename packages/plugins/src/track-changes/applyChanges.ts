@@ -1,6 +1,6 @@
-import { Node as PMNode, Schema } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
-import { Mapping } from "prosemirror-transform";
+import { Node as PMNode, Schema } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
+import { Mapping } from "@scrivr/core/pm";
 
 import { revertSplitNodeChange, revertWrapNodeChange } from "./lib/revertChanges";
 import { restoreNode, updateChangeChildrenAttributes } from "./engine/updateAttributes";

@@ -1,4 +1,4 @@
-import type { Node as PmNode } from "prosemirror-model";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import type { SemanticNodeResult, SemanticPart, SemanticUnit, UnitCtx } from "@scrivr/core";
 import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";

@@ -7,7 +7,7 @@
  * 3. ServerEditor + literal-only theme works server-side (no DOM, no resolver).
  */
 import { describe, it, expect, vi } from "vitest";
-import { Schema } from "prosemirror-model";
+import { Schema } from "@scrivr/core/pm";
 import { ServerEditor, StarterKit, defaultPdfTheme } from "@scrivr/core";
 import type { DocumentLayout, LayoutBlock, LayoutLine } from "@scrivr/core";
 import { buildPdf as buildPdfWithEditor, type PdfExportOptions } from "../index";

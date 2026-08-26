@@ -7,7 +7,7 @@
  */
 
 import type { IBaseEditor } from "@scrivr/core";
-import type { Node as PmNode } from "prosemirror-model";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import { xml, serializeXml } from "./xml";
 import { walkDocument, type WalkerHandlers } from "./walker";
 import type {

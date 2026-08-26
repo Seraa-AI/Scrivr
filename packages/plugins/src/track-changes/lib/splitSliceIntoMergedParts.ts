@@ -1,4 +1,4 @@
-import { Fragment, Node as PMNode } from "prosemirror-model";
+import { Fragment, Node as PMNode } from "@scrivr/core/pm";
 
 import { ExposedFragment, ExposedSlice } from "../types";
 

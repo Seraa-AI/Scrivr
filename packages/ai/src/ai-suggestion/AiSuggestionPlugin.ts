@@ -14,8 +14,8 @@
  *   AI_SUGGESTION_SET_ACTIVE   — payload: string | null
  */
 
-import { Plugin, PluginKey } from "prosemirror-state";
-import type { Transaction } from "prosemirror-state";
+import { Plugin, PluginKey } from "@scrivr/core/pm";
+import type { Transaction } from "@scrivr/core/pm";
 import type { AiSuggestionPluginState } from "./types";
 
 export const aiSuggestionPluginKey = new PluginKey<AiSuggestionPluginState>("aiSuggestion");

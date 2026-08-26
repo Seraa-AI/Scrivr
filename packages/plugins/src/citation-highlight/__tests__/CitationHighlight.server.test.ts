@@ -5,7 +5,7 @@
  * drop them, and none of it touches undo history.
  */
 import { describe, it, expect } from "vitest";
-import { TextSelection } from "prosemirror-state";
+import { TextSelection } from "@scrivr/core/pm";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { CitationHighlight, citationHighlightPluginKey } from "../CitationHighlight";
 

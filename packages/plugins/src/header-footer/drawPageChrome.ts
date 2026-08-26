@@ -15,7 +15,7 @@ import {
   type DocumentLayout,
   type PageChromePaintContext,
 } from "@scrivr/core";
-import type { Node } from "prosemirror-model";
+import type { Node } from "@scrivr/core/pm";
 import type { ResolvedHeaderFooter, SlotLayout } from "./resolveChrome";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import { resolveSlotKey } from "./resolveSlot";

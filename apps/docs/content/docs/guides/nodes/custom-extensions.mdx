@@ -9,6 +9,30 @@ custom marks, and the canvas rendering strategies that go with them.
 
 ---
 
+## Importing ProseMirror
+
+Extensions need ProseMirror types and helpers — `Node`, `Slice`, `Plugin`, `toggleMark`. Import
+them from **`@scrivr/core/pm`**, not from the `prosemirror-*` packages directly:
+
+```ts
+import { Plugin, PluginKey, Fragment, toggleMark } from '@scrivr/core/pm';
+import type { Node, EditorState } from '@scrivr/core/pm';
+```
+
+`@scrivr/core` owns the ProseMirror versions and re-exports them, so your extension runs against
+the same instance as the engine. That matters: `instanceof` checks on `Node`, `Slice` and
+`Selection` are load-bearing, and a second copy of `prosemirror-model` in the same process breaks
+them in ways that surface as unexplained failed transactions. You also don't declare the
+dependency yourself.
+
+<Callout type="warn">
+  `prosemirror-view` is not re-exported and is not a dependency. Scrivr paints to canvas and has
+  no `EditorView`, so `Plugin.spec.view()` and plugin `props` (`handleKeyDown`, `transformPasted`,
+  `decorations`) never run. Use `appendTransaction`, `addKeymap`, or `PasteTransformer` instead.
+</Callout>
+
+---
+
 ## Layout strategies
 
 Every block node must register a **`BlockStrategy`** — the object the canvas renderer calls to
@@ -96,6 +120,7 @@ rendering (e.g. drawing a background colour or underline).
 ```ts
 import { Extension } from '@scrivr/core';
 import type { MarkDecorator } from '@scrivr/core';
+import { toggleMark } from '@scrivr/core/pm';
 
 const Spoiler = Extension.create({
   name: 'spoiler',
@@ -125,7 +150,6 @@ const Spoiler = Extension.create({
       toggleSpoiler: () => (state, dispatch) => {
         const mark = state.schema.marks['spoiler'];
         if (!mark) return false;
-        const { toggleMark } = require('prosemirror-commands');
         return toggleMark(mark)(state, dispatch);
       },
     };

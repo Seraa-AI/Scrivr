@@ -1,7 +1,7 @@
 {
   "name": "@scrivr/export-pdf",
   "version": "1.0.18",
-  "description": "PDF export for Scrivr documents — same layout pipeline as the canvas renderer",
+  "description": "PDF export for Scrivr documents \u2014 same layout pipeline as the canvas renderer",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
   "repository": {
@@ -54,7 +54,6 @@
   },
   "devDependencies": {
     "@scrivr/core": "workspace:*",
-    "prosemirror-model": "^1.25.4",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^2.1.9"

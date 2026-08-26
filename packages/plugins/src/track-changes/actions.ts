@@ -1,4 +1,4 @@
-import { Transaction } from "prosemirror-state";
+import { Transaction } from "@scrivr/core/pm";
 
 import { CHANGE_STATUS, StructureAttrs, TrackChangesStatus } from "./types";
 
