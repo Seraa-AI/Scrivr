@@ -47,6 +47,28 @@ The short version: use `TextBlockStrategy` for any block that contains inline te
 text rendering, mark decorators, inline images, and `CharacterMap` registration. Only write a
 custom strategy for blocks with non-text content (tables, diagrams).
 
+### Wrapper nodes
+
+A node that only *contains* other blocks — a grouping or provenance wrapper — paints nothing of
+its own, so it has no strategy to register. Mark its spec `layoutContainer: true` instead and the
+layout walker treats it as transparent, laying out its children as independent blocks:
+
+```ts
+addNodes() {
+  return {
+    sourcedBlock: {
+      content: 'block+',
+      group: 'block',
+      layoutContainer: true,
+      // ...attrs, parseDOM, toDOM
+    },
+  };
+},
+```
+
+Without either a strategy or this flag, a `block+` node reaches the text-block path and lays out
+as a single empty line — its children never paint.
+
 ---
 
 ## Adding a custom block node

@@ -536,6 +536,7 @@ export class Editor extends BaseEditor implements IEditor {
 			this.manager.schema,
 			this.manager.buildMarkdownRules(),
 			this.manager.buildMarkdownParserTokens(),
+			this.manager.buildPasteTransforms(),
 		);
 
 		this.ib = new InputBridge({

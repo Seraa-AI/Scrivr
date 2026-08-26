@@ -37,7 +37,7 @@ export const KeymapPriority = {
   default: 100,
 } as const;
 
-import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark } from "prosemirror-model";
+import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark, Slice } from "prosemirror-model";
 import type { MarkdownSerializer, MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
 import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
@@ -368,6 +368,12 @@ export interface MarkdownSerializerRules {
  *   createNode(match, schema) { return schema.nodes.horizontalRule?.create() ?? null; },
  * }
  */
+/**
+ * Rewrites a pasted slice before it is inserted. Contributed via
+ * `addPasteTransforms`; return the slice unchanged to decline.
+ */
+export type PasteTransform = (slice: Slice) => Slice;
+
 export interface MarkdownBlockRule {
   /** Tested against each trimmed line of pasted text. */
   pattern: RegExp;
@@ -626,6 +632,16 @@ export interface ExtensionConfig<Options = object> {
    */
   addExtensions?(this: Phase1Context<Options>): Extension[];
 
+  /**
+   * Contribute ProseMirror node specs. Keys become schema node type names.
+   *
+   * A block node normally also registers a `BlockStrategy` via
+   * `addLayoutHandlers` — that's what paints it. A node that only *wraps*
+   * other blocks (no painting of its own) instead sets `layoutContainer: true`
+   * on its spec: the layout walker then treats it as transparent and lays out
+   * its children as independent blocks. Without one of the two, a `block+`
+   * node reaches the text-block path and renders as a single empty line.
+   */
   addNodes?(this: Phase1Context<Options>): Record<string, NodeSpec>;
 
   /** Contribute ProseMirror mark specs. Keys become schema mark type names. */
@@ -855,6 +871,19 @@ export interface ExtensionConfig<Options = object> {
   addMarkdownRules?(this: Phase1Context<Options>): MarkdownBlockRule[];
 
   /**
+   * Rewrite pasted content before it enters the document.
+   *
+   * Runs in `PasteTransformer` on the parsed slice, whatever the clipboard
+   * flavour was — this is the engine's equivalent of ProseMirror's
+   * `transformPasted` view prop, which never fires here because Scrivr has no
+   * `EditorView`. Use it for anything that must not survive a copy verbatim:
+   * re-minting identity attrs, stripping host-specific state.
+   *
+   * Transforms run in registration order, each seeing the previous one's output.
+   */
+  addPasteTransforms?(this: Phase1Context<Options>): PasteTransform[];
+
+  /**
    * ProseMirror input rules (auto-format while typing).
    * Collected by ExtensionManager and wrapped in a single inputRules() plugin.
    * Phase 2 — schema is available via this.schema.
@@ -988,6 +1017,7 @@ export interface ResolvedExtension {
   selectionGestures: SelectionGestureProvider[];
   inputHandlers: Record<string, InputHandler>;
   markdownRules: MarkdownBlockRule[];
+  pasteTransforms: PasteTransform[];
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
   markdownSerializerRules: MarkdownSerializerRules;

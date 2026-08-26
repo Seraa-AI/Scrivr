@@ -11,6 +11,7 @@ import MarkdownIt from "markdown-it";
 import type {
   MarkdownBlockRule,
   MarkdownParserTokenSpec,
+  PasteTransform,
 } from "../extensions/types";
 import { insertText } from "../model/commands";
 
@@ -45,6 +46,7 @@ export class PasteTransformer {
       string,
       MarkdownParserTokenSpec
     > = {},
+    private readonly pasteTransforms: PasteTransform[] = [],
   ) {
     // Disable rules that generate tokens our schema can't handle (blockquote, link, image).
     // Their content still renders as plain text — no data loss, just no special formatting.
@@ -109,18 +111,34 @@ export class PasteTransformer {
       blockNodes.length ? blockNodes : doc.content,
     );
 
+    const slice = this.applyPasteTransforms(new Slice(fragment, 0, 0));
+
     // When pasting into an empty paragraph, replace the whole paragraph so we
     // don't leave a stray empty paragraph before the inserted blocks.
     const { $from } = state.selection;
     if ($from.depth >= 1 && $from.parent.content.size === 0) {
       const blockFrom = $from.before($from.depth);
       const blockTo = $from.after($from.depth);
-      return state.tr.replaceWith(blockFrom, blockTo, fragment);
+      return state.tr.replaceWith(blockFrom, blockTo, slice.content);
     }
 
     // Non-empty position: insert complete blocks (openStart:0) so every
     // pasted block retains its own attrs rather than merging with the cursor's.
-    return state.tr.replaceSelection(new Slice(fragment, 0, 0));
+    return state.tr.replaceSelection(slice);
+  }
+
+  /**
+   * Run extension-contributed transforms over a parsed slice.
+   *
+   * Every clipboard flavour funnels through here, so a transform sees the
+   * content once regardless of whether it arrived as HTML or markdown. This is
+   * the seam that ProseMirror's `transformPasted` view prop would occupy in a
+   * DOM editor — Scrivr has no `EditorView`, so plugin props never run.
+   */
+  private applyPasteTransforms(slice: Slice): Slice {
+    let out = slice;
+    for (const transform of this.pasteTransforms) out = transform(out);
+    return out;
   }
 
   /** Markdown */
@@ -144,7 +162,9 @@ export class PasteTransformer {
         const parser = new MarkdownParser(this.schema, this.md, tokens);
         const doc = parser.parse(text);
         if (doc) {
-          return state.tr.replaceSelection(new Slice(doc.content, 0, 0));
+          return state.tr.replaceSelection(
+            this.applyPasteTransforms(new Slice(doc.content, 0, 0)),
+          );
         }
       } catch {
         // Unknown token or schema mismatch — fall through to legacy parser
@@ -154,7 +174,9 @@ export class PasteTransformer {
     // Legacy line-by-line parser (handles extension addMarkdownRules + built-in patterns)
     const nodes = this.parseMarkdownBlocks(text);
     if (nodes.length === 0) return insertText(state, text);
-    return state.tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0));
+    return state.tr.replaceSelection(
+      this.applyPasteTransforms(new Slice(Fragment.from(nodes), 0, 0)),
+    );
   }
 
   /** Legacy line-by-line parser */

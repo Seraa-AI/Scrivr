@@ -1,6 +1,6 @@
 import { Extension } from "../Extension";
 import { fnv1aHex, stableStringify } from "../../model/hash";
-import { Slice, Fragment, type Node as PmNode, Node } from "prosemirror-model";
+import { Slice, Fragment, Node } from "prosemirror-model";
 import {
 	Plugin,
 	PluginKey,
@@ -65,12 +65,10 @@ export interface SourceProvider<TMeta = unknown> {
 	can?(capability: SourceCapability, resourceId: string): boolean;
 }
 
-interface EditorViewLike {
-	state: EditorState;
-	dispatch: (tr: Transaction) => void;
-}
-
 export const NORMALIZER_VERSION = 1;
+
+/** ECMA-376 caps `w:tag/@w:val` (ST_String) at 255 characters. */
+const DOCX_TAG_MAX_LENGTH = 255;
 
 export function normalizeSourcedBlock(fragment: Fragment): unknown[] {
 	const walkNode = (node: Node): unknown => {
@@ -120,99 +118,112 @@ export function computeBlockHash(fragment: Fragment): string {
 	return fnv1aHex(stableStringify(normalizedJSON));
 }
 
+/**
+ * Which sourced blocks currently differ from the source they were inserted
+ * from, keyed by `instanceId`.
+ *
+ * Identity, not position: an instanceId survives every edit that moves the
+ * block, so nothing has to be re-mapped when the document shifts around it.
+ * A stale id left behind by a deleted block is inert — lookups go through the
+ * live document — and instanceIds are re-minted on paste and clone, so an id
+ * never comes back attached to different content.
+ */
 export interface SourcedBlockDivergenceState {
-	modifiedBlocks: Set<number>;
+	diverged: Set<string>;
 }
 
 export const sourcedBlockDivergenceKey =
 	new PluginKey<SourcedBlockDivergenceState>("sourcedBlockDivergence");
 
+/**
+ * True when the block holds nothing but empty text blocks.
+ *
+ * `textContent` is not enough: it is `""` for a block wrapping only an image,
+ * a table or a horizontal rule, and unwrapping those destroys provenance on
+ * every unrelated edit in the document.
+ */
+export function isEmptyShell(node: Node): boolean {
+	let empty = true;
+	node.forEach(child => {
+		if (!child.isTextblock || child.content.size > 0) empty = false;
+	});
+	return empty;
+}
+
+/** Hash the block's current content and compare it against its recorded base. */
+function isDiverged(node: Node): boolean {
+	return computeBlockHash(node.content) !== node.attrs["baseHash"];
+}
+
+function instanceIdOf(node: Node): string | null {
+	const id = node.attrs["instanceId"];
+	return typeof id === "string" ? id : null;
+}
+
+/**
+ * Document ranges this transaction touched, in post-transaction coordinates.
+ */
+function changedRanges(tr: Transaction): Array<[number, number]> {
+	const ranges: Array<[number, number]> = [];
+	tr.mapping.maps.forEach((map, i) => {
+		const rest = tr.mapping.slice(i + 1);
+		map.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+			ranges.push([rest.map(newStart, -1), rest.map(newEnd, 1)]);
+		});
+	});
+	return ranges;
+}
+
+/**
+ * Tracks divergence in plugin state, recomputed from the steps of each
+ * transaction.
+ *
+ * Only blocks overlapping a changed range are re-hashed, so the cost is
+ * proportional to the edit rather than to the document. It runs synchronously
+ * inside `apply` — an earlier draft debounced the hashing behind
+ * `Plugin.spec.view`, which never fires here: Scrivr paints to canvas and has
+ * no `EditorView`, so the state stayed permanently empty.
+ */
 export function sourcedBlockDivergencePlugin() {
 	return new Plugin({
 		key: sourcedBlockDivergenceKey,
 		state: {
-			init() {
-				return { modifiedBlocks: new Set<number>() };
+			init(_config, state: EditorState) {
+				const diverged = new Set<string>();
+				state.doc.descendants(node => {
+					if (node.type.name !== "sourcedBlock") return true;
+					const id = instanceIdOf(node);
+					if (id && isDiverged(node)) diverged.add(id);
+					return false;
+				});
+				return { diverged };
 			},
-			apply(tr, value) {
-				let nextSet = value.modifiedBlocks;
-				if (tr.docChanged) {
-					nextSet = new Set();
-					for (const pos of value.modifiedBlocks) {
-						const mapped = tr.mapping.map(pos);
-						nextSet.add(mapped);
-					}
-				}
+			apply(tr, value, _oldState, newState) {
+				if (!tr.docChanged) return value;
 
-				const meta = tr.getMeta(sourcedBlockDivergenceKey);
-				if (meta && Array.isArray(meta)) {
-					const newSet = new Set(nextSet);
-					for (const { pos, isModified } of meta) {
-						if (isModified) {
-							newSet.add(pos);
-						} else {
-							newSet.delete(pos);
-						}
-					}
-					return { modifiedBlocks: newSet };
-				}
+				const diverged = new Set(value.diverged);
+				let changed = false;
 
-				return { modifiedBlocks: nextSet };
-			},
-		},
-		view(view: EditorViewLike) {
-			let timeoutId: ReturnType<typeof setTimeout>;
+				for (const [from, to] of changedRanges(tr)) {
+					newState.doc.nodesBetween(from, to, node => {
+						if (node.type.name !== "sourcedBlock") return true;
+						const id = instanceIdOf(node);
+						if (!id) return false;
 
-			return {
-				update(view: EditorViewLike, prevState: EditorState) {
-					const state = view.state;
-
-					if (prevState.doc.eq(state.doc)) return;
-
-					clearTimeout(timeoutId);
-
-					timeoutId = setTimeout(() => {
-						const updates: Array<{
-							pos: number;
-							isModified: boolean;
-						}> = [];
-
-						state.doc.descendants((node: Node, pos: number) => {
-							if (node.type.name === "sourcedBlock") {
-								const currentHash = computeBlockHash(
-									node.content,
-								);
-								const isModified =
-									currentHash !== node.attrs["baseHash"];
-
-								const pluginState =
-									sourcedBlockDivergenceKey.getState(state);
-								const wasModified =
-									pluginState?.modifiedBlocks.has(pos) ??
-									false;
-
-								if (isModified !== wasModified) {
-									updates.push({ pos, isModified });
-								}
+						if (isDiverged(node)) {
+							if (!diverged.has(id)) {
+								diverged.add(id);
+								changed = true;
 							}
-							return false; // don't descend into sourcedBlock's children
-						});
-
-						if (updates.length > 0) {
-							view.dispatch(
-								state.tr.setMeta(
-									sourcedBlockDivergenceKey,
-									updates,
-								),
-							);
+						} else if (diverged.delete(id)) {
+							changed = true;
 						}
-					}, 500);
-				},
+						return false;
+					});
+				}
 
-				destroy() {
-					clearTimeout(timeoutId);
-				},
-			};
+				return changed ? { diverged } : value;
+			},
 		},
 	});
 }
@@ -405,6 +416,9 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				group: "block",
 				defining: true,
 				isolating: false,
+				// Transparent to layout: the wrapper paints nothing itself, its
+				// children flow as ordinary blocks. See `collectLayoutItems`.
+				layoutContainer: true,
 				attrs: {
 					instanceId: { default: null },
 					kind: { default: null },
@@ -534,15 +548,14 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				const divergenceState =
 					sourcedBlockDivergenceKey.getState(state);
 
-				if (
-					!divergenceState ||
-					divergenceState.modifiedBlocks.size === 0
-				)
+				if (!divergenceState || divergenceState.diverged.size === 0)
 					return;
 
-				for (const pos of divergenceState.modifiedBlocks) {
-					const node = state.doc.nodeAt(pos);
-					if (!node || node.type.name !== "sourcedBlock") continue;
+				state.doc.descendants((node, pos) => {
+					if (node.type.name !== "sourcedBlock") return true;
+
+					const id = instanceIdOf(node);
+					if (!id || !divergenceState.diverged.has(id)) return false;
 
 					// coordsAtPos returns { x, y, height, page }
 					const startCoords = charMap.coordsAtPos(pos + 1);
@@ -570,7 +583,8 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 						ctx.fillRect(gutterX, top, gutterWidth, height);
 						ctx.restore();
 					}
-				}
+					return false;
+				});
 			},
 		);
 
@@ -583,9 +597,11 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 		};
 
 		const isModified = (ctx: NodeActionContext): boolean => {
-			if (!isTarget(ctx)) return false;
+			if (!isTarget(ctx) || !ctx.node) return false;
+			const id = instanceIdOf(ctx.node);
+			if (!id) return false;
 			const state = sourcedBlockDivergenceKey.getState(ctx.state);
-			return state?.modifiedBlocks.has(ctx.pos) ?? false;
+			return state?.diverged.has(id) ?? false;
 		};
 
 		const getProvider = (
@@ -730,6 +746,12 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 		return [cloneSourcedBlocks];
 	},
 
+	addPasteTransforms() {
+		// A pasted block is a second instance of the same source, not the same
+		// instance twice — the host's registry keys on instanceId.
+		return [remintSourcedBlockIdentity];
+	},
+
 	addProseMirrorPlugins() {
 		return [
 			sourcedBlockDivergencePlugin(),
@@ -742,32 +764,36 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					const tr = newState.tr;
 					let modified = false;
 
-					newState.doc.descendants((node, pos) => {
-						if (node.type.name === "sourcedBlock") {
-							// Rule 1: Empty wrapper normalization
-							if (node.content.size === 0) {
-								tr.replaceWith(
-									pos,
-									pos + node.nodeSize,
-									node.content,
-								);
-								modified = true;
-								return false;
-							}
+					// Positions come from `newState.doc`, but each write shifts
+					// everything after it — map through the steps accumulated so
+					// far before writing, or the second edit lands on a stale
+					// range and eats the content next to it.
+					const unwrap = (pos: number, node: Node): void => {
+						const from = tr.mapping.map(pos);
+						const to = tr.mapping.map(pos + node.nodeSize);
+						tr.replaceWith(from, to, node.content);
+						modified = true;
+					};
 
-							// Rule 2: No nested sourcedBlocks
-							node.forEach((child, offset) => {
-								if (child.type.name === "sourcedBlock") {
-									const childPos = pos + 1 + offset;
-									tr.replaceWith(
-										childPos,
-										childPos + child.nodeSize,
-										child.content,
-									);
-									modified = true;
-								}
-							});
+					newState.doc.descendants((node, pos) => {
+						if (node.type.name !== "sourcedBlock") return true;
+
+						// Rule 1: a wrapper holding nothing but empty text blocks
+						// is a shell — the user deleted the content, so the
+						// provenance goes with it. An image, table or rule is
+						// content even though it contributes no `textContent`.
+						if (isEmptyShell(node)) {
+							unwrap(pos, node);
+							return false;
 						}
+
+						// Rule 2: No nested sourcedBlocks
+						node.forEach((child, offset) => {
+							if (child.type.name === "sourcedBlock") {
+								unwrap(pos + 1 + offset, child);
+							}
+						});
+						return false;
 					});
 
 					if (modified) {
@@ -775,11 +801,6 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 						return tr;
 					}
 					return null;
-				},
-				props: {
-					transformPasted(slice) {
-						return remintSourcedBlockIdentity(slice);
-					},
 				},
 			}),
 		];
@@ -806,10 +827,10 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 			type: "sourcedBlock"
 		});
 
-		const docxHandler: DocxNodeHandler = (node, children) => {
+		const docxHandler: DocxNodeHandler = (node, children, ctx) => {
 			const attrs = node.attrs;
 			const params = new URLSearchParams();
-			
+
 			// Serialize strictly non-empty primitives
 			for (const [key, value] of Object.entries(attrs)) {
 				if (typeof value === "string" && value) {
@@ -818,8 +839,24 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					params.set(key, value.toString());
 				}
 			}
-			
+
 			const tagValue = `scrivr:sourcedBlock:${params.toString()}`;
+
+			if (tagValue.length > DOCX_TAG_MAX_LENGTH) {
+				// `w:tag/@w:val` is ST_String, capped at 255 characters — Word
+				// rejects a document that exceeds it. Emit the block without
+				// provenance rather than an unopenable file; the content still
+				// round-trips, the source link does not.
+				ctx.diagnostics.warn({
+					code: "sourced-block-tag-too-long",
+					nodeType: "sourcedBlock",
+					message:
+						`Sourced block provenance is ${tagValue.length} characters, over the ` +
+						`${DOCX_TAG_MAX_LENGTH}-character OOXML limit for w:tag. The block was ` +
+						`exported as plain content, without its source link.`,
+				});
+				return children;
+			}
 			// Use the 'kind' attribute as the label for MS Word, fallback to "Sourced Block"
 			const aliasValue = typeof attrs["kind"] === "string" && attrs["kind"] ? attrs["kind"] : "Sourced Block";
 

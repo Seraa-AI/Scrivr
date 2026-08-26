@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 import { unzipSync, strFromU8 } from "fflate";
-import { ServerEditor, Extension, StarterKit } from "@scrivr/core";
+import { ServerEditor, Extension, StarterKit, SourcedBlockExtension } from "@scrivr/core";
 import { exportDocx, exportDocxBytes } from "./export";
 import { DocxExportError } from "./error";
 import { xml } from "./xml";
@@ -405,5 +405,67 @@ describe("exportDocx — determinism", () => {
     const a = await exportDocxBytes(editor, { overrides });
     const b = await exportDocxBytes(editor, { overrides });
     expect(a).toEqual(b);
+  });
+});
+
+describe("exportDocx — sourced blocks", () => {
+  function editorWith(resourceId: string): ServerEditor {
+    return new ServerEditor({
+      extensions: [StarterKit, SourcedBlockExtension],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "sourcedBlock",
+            attrs: {
+              instanceId: "src_1",
+              kind: "clause",
+              resourceId,
+              versionId: "v1",
+              baseHash: "abc123",
+              baseNormalizer: 1,
+            },
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: "Indemnity clause" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+  }
+
+  async function documentXml(editor: ServerEditor): Promise<string> {
+    const bytes = await exportDocxBytes(editor);
+    return strFromU8(unzipSync(bytes)["word/document.xml"]!);
+  }
+
+  it("carries provenance in the content control's w:tag", async () => {
+    const editor = editorWith("cl_456");
+    const xmlText = await documentXml(editor);
+    expect(xmlText).toContain("scrivr:sourcedBlock:");
+    expect(xmlText).toContain("resourceId=cl_456");
+    expect(xmlText).toContain("Indemnity clause");
+  });
+
+  it("drops the control rather than emitting a w:tag Word would reject", async () => {
+    // ST_String caps w:tag/@w:val at 255 characters.
+    const editor = editorWith("cl_" + "x".repeat(300));
+    const { diagnostics } = await exportDocx(editor);
+
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        level: "warning",
+        code: "sourced-block-tag-too-long",
+        nodeType: "sourcedBlock",
+      }),
+    );
+
+    // The content survives — only the source link is lost.
+    const xmlText = await documentXml(editor);
+    expect(xmlText).toContain("Indemnity clause");
+    expect(xmlText).not.toContain("scrivr:sourcedBlock:");
   });
 });

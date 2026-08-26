@@ -2002,71 +2002,100 @@ const LIST_INDENT = 24; // px — text starts this far right of the margin
 const MARKER_RIGHT_GAP = 6; // px — gap between the marker's right edge and the text
 
 /**
- * Walks the doc's top-level children and returns a flat array of layout items.
+ * True when a node's children flow as independent blocks rather than being
+ * painted by a strategy of their own — the node spec opts in with
+ * `layoutContainer: true`.
+ *
+ * Lists and tables are expanded below by name because they also contribute
+ * markers and column widths. A plain wrapper (a sourced block, and any future
+ * provenance/grouping node) has nothing to add, so it declares the flag and
+ * the walker recurses. Without this, a `block+` wrapper reaches `layoutBlock`
+ * as a text block and lays out as one empty line — its children never paint.
+ */
+function isLayoutContainer(node: Node): boolean {
+  return node.type.spec["layoutContainer"] === true;
+}
+
+/**
+ * Walks the doc's block children and returns a flat array of layout items.
  * List container nodes (bulletList, orderedList) are expanded into one item
- * per list item so each renders as an independent LayoutBlock.
+ * per list item so each renders as an independent LayoutBlock; nodes marked
+ * `layoutContainer` are transparent and expand into their own children.
  */
 export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutItem[] {
   const items: LayoutItem[] = [];
 
-  doc.forEach((node, offset) => {
-    if (node.type.name === "pageBreak") {
-      items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
-      return;
-    }
+  // `base` is the document position of `parent`'s first child, so a child at
+  // relative `offset` sits at `base + offset`.
+  const walk = (parent: Node, base: number): void => {
+    parent.forEach((node, relOffset) => {
+      const offset = base + relOffset;
 
-    if (node.type.name === "bulletList" || node.type.name === "orderedList") {
-      const isBullet = node.type.name === "bulletList";
-      let itemIndex = (node.attrs["order"] as number) ?? 1;
+      if (node.type.name === "pageBreak") {
+        items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
+        return;
+      }
 
-      node.forEach((listItem, liOffset) => {
-        // nodePos of the paragraph inside this listItem:
-        // offset (before bulletList) + 1 (into bulletList) + liOffset (before listItem) + 1 (into listItem)
-        const paraNodePos = offset + 1 + liOffset + 1;
-        const para = listItem.firstChild;
-        if (!para) return;
+      if (node.type.name === "bulletList" || node.type.name === "orderedList") {
+        const isBullet = node.type.name === "bulletList";
+        let itemIndex = (node.attrs["order"] as number) ?? 1;
 
-        const marker = isBullet ? "•" : `${itemIndex}.`;
+        node.forEach((listItem, liOffset) => {
+          // nodePos of the paragraph inside this listItem:
+          // offset (before bulletList) + 1 (into bulletList) + liOffset (before listItem) + 1 (into listItem)
+          const paraNodePos = offset + 1 + liOffset + 1;
+          const para = listItem.firstChild;
+          if (!para) return;
 
-        items.push({
-          node: para,
-          nodePos: paraNodePos,
-          indentLeft: LIST_INDENT,
-          listMarker: marker,
-          styleKey: "list_item",
+          const marker = isBullet ? "•" : `${itemIndex}.`;
+
+          items.push({
+            node: para,
+            nodePos: paraNodePos,
+            indentLeft: LIST_INDENT,
+            listMarker: marker,
+            styleKey: "list_item",
+          });
+
+          itemIndex++;
         });
+        return;
+      }
 
-        itemIndex++;
-      });
-      return;
-    }
-
-    if (node.type.name === "table") {
-      // Tables expand into one item per row. Each row lays out as an atomic
-      // (leaf-like) block in v1 — whole row moves to the next page on
-      // overflow, no line-splitting across cells. Phase 4 replaces the
-      // stub row layout with sandboxed per-cell layout.
-      const gridAttr = node.attrs["grid"];
-      const tableColumns = Array.isArray(gridAttr)
-        ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
-        : [];
-      const lastRowIndex = node.childCount - 1;
-      node.forEach((rowNode, rowOffset, rowIndex) => {
-        const rowNodePos = offset + 1 + rowOffset;
-        items.push({
-          node: rowNode,
-          nodePos: rowNodePos,
-          indentLeft: 0,
-          tableColumns,
-          isLastRow: rowIndex === lastRowIndex,
+      if (node.type.name === "table") {
+        // Tables expand into one item per row. Each row lays out as an atomic
+        // (leaf-like) block in v1 — whole row moves to the next page on
+        // overflow, no line-splitting across cells. Phase 4 replaces the
+        // stub row layout with sandboxed per-cell layout.
+        const gridAttr = node.attrs["grid"];
+        const tableColumns = Array.isArray(gridAttr)
+          ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
+          : [];
+        const lastRowIndex = node.childCount - 1;
+        node.forEach((rowNode, rowOffset, rowIndex) => {
+          const rowNodePos = offset + 1 + rowOffset;
+          items.push({
+            node: rowNode,
+            nodePos: rowNodePos,
+            indentLeft: 0,
+            tableColumns,
+            isLastRow: rowIndex === lastRowIndex,
+          });
         });
-      });
-      return;
-    }
+        return;
+      }
 
-    const blockIndent = (node.attrs["indent"] as number) ?? 0;
-    items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
-  });
+      if (isLayoutContainer(node)) {
+        walk(node, offset + 1);
+        return;
+      }
+
+      const blockIndent = (node.attrs["indent"] as number) ?? 0;
+      items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
+    });
+  };
+
+  walk(doc, 0);
 
   return items;
 }
