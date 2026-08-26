@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest";
 import { ServerEditor } from "@scrivr/core";
-import type { Node } from "prosemirror-model";
+import type { Node, Schema } from "@scrivr/core/pm";
 import { walkDocument } from "./walker";
 import { createDocxContext } from "./createContext";
 import { serializeXml, xml } from "./xml";
@@ -45,7 +45,7 @@ const colorMark: DocxMarkHandler = (props, mark) => {
   return typeof v === "string" ? { ...props, color: v } : props;
 };
 
-function buildDocFrom(editor: ServerEditor, build: (s: import("prosemirror-model").Schema) => Node): Node {
+function buildDocFrom(editor: ServerEditor, build: (s: Schema) => Node): Node {
   return build(editor.schema);
 }
 

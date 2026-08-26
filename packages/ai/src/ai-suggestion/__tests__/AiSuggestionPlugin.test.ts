@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { EditorState } from "prosemirror-state";
+import { EditorState } from "@scrivr/core/pm";
 import {
   aiSuggestionPlugin,
   aiSuggestionPluginKey,

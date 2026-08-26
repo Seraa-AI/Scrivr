@@ -16,7 +16,7 @@
  * noise for AI suggestions where the unit of accept/reject is a whole word.
  */
 
-import type { EditorState } from "prosemirror-state";
+import type { EditorState } from "@scrivr/core/pm";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { buildAcceptedTextMap } from "@scrivr/plugins";

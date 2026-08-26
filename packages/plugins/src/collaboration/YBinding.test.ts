@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as Y from "yjs";
-import { TextSelection } from "prosemirror-state";
+import { TextSelection } from "@scrivr/core/pm";
 import { ServerEditor, Extension, StarterKit } from "@scrivr/core";
 import { YBinding } from "./YBinding";
 import type { DocAttrEnvelope } from "./YBinding";

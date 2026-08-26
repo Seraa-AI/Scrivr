@@ -1,6 +1,6 @@
-import { Node as PMNode, Slice } from "prosemirror-model";
-import { Selection } from "prosemirror-state";
-import { ReplaceAroundStep, ReplaceStep } from "prosemirror-transform";
+import { Node as PMNode, Slice } from "@scrivr/core/pm";
+import { Selection } from "@scrivr/core/pm";
+import { ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
 
 import { ChangeSet } from "../ChangeSet";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs } from "../types";

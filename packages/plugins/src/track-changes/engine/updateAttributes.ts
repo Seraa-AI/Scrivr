@@ -1,6 +1,6 @@
-import { Schema } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
-import { Mapping } from "prosemirror-transform";
+import { Schema } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
+import { Mapping } from "@scrivr/core/pm";
 
 import { ChangeSet } from "../ChangeSet";
 import {

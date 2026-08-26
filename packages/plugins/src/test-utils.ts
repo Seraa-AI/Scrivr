@@ -7,7 +7,7 @@
  * acceptable. Reuse this helper instead of newing up `ServerEditor` inline.
  */
 import { ServerEditor } from "@scrivr/core";
-import type { Node, NodeType, Schema } from "prosemirror-model";
+import type { Node, NodeType, Schema } from "@scrivr/core/pm";
 
 export interface RealSchema {
   /** Built from StarterKit — identical to the production read-path schema. */

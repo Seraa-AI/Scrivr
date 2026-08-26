@@ -23,7 +23,7 @@
  *   6. Apply the diff as tracked insert/delete marks via splitRangeForNewMark().
  */
 
-import type { Node as PMNode, Schema } from "prosemirror-model";
+import type { Node as PMNode, Schema } from "@scrivr/core/pm";
 
 export interface PosMapEntry {
   /** 0-based index into acceptedText */

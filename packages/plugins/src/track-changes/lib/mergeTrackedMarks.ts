@@ -1,5 +1,5 @@
-import { Mark, Node as PMNode, Schema } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
+import { Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
 import { stableStringify } from "@scrivr/core";
 
 import { genId, isValidTrackableMark, shouldMergeTrackedAttributes } from "../helpers";

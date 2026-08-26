@@ -1,4 +1,4 @@
-import { EditorState, Transaction } from "prosemirror-state";
+import { EditorState, Transaction } from "@scrivr/core/pm";
 import {
   AddMarkStep,
   AddNodeMarkStep,
@@ -9,7 +9,7 @@ import {
   ReplaceAroundStep,
   ReplaceStep,
   Step,
-} from "prosemirror-transform";
+} from "@scrivr/core/pm";
 
 import { TrTrackingContext } from "../types";
 import { processChangeSteps } from "./processReplaceStep";

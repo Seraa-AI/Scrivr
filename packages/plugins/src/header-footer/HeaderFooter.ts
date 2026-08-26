@@ -12,7 +12,7 @@
 
 import { Extension, renderCursor } from "@scrivr/core";
 import type { IEditor, EditorSurface } from "@scrivr/core";
-import { TextSelection } from "prosemirror-state";
+import { TextSelection } from "@scrivr/core/pm";
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { getHeaderFooterPolicy } from "./getPolicy";
 import { resolveChrome } from "./resolveChrome";

@@ -1,6 +1,6 @@
-import { Fragment, Slice } from "prosemirror-model";
-import { EditorState, Transaction } from "prosemirror-state";
-import { Mapping, ReplaceStep } from "prosemirror-transform";
+import { Fragment, Slice } from "@scrivr/core/pm";
+import { EditorState, Transaction } from "@scrivr/core/pm";
+import { Mapping, ReplaceStep } from "@scrivr/core/pm";
 
 import { ChangeStep, ExposedReplaceStep, ExposedSlice, TrTrackingContext } from "../types";
 import { getAction, TrackChangesAction } from "../actions";

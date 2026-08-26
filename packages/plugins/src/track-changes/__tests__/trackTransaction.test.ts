@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { doc, p, h, ul, ol, li, TestEditor } from "./helpers";
 import { CHANGE_OPERATION, TrackChangesStatus } from "../types";
 import { trackChangesPlugin, trackChangesPluginKey } from "../engine/trackChangesPlugin";
-import { EditorState } from "prosemirror-state";
-import type { Transaction } from "prosemirror-state";
-import { history } from "prosemirror-history";
+import { EditorState } from "@scrivr/core/pm";
+import type { Transaction } from "@scrivr/core/pm";
+import { history } from "@scrivr/core/pm";
 import { schema } from "./helpers";
 
 // ── Node attribute change tracking ─────────────────────────────────────��──────

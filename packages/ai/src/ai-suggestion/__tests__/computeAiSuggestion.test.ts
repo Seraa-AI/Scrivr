@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { Node as PmNode } from "prosemirror-model";
-import { EditorState } from "prosemirror-state";
+import type { Node as PmNode } from "@scrivr/core/pm";
+import { EditorState } from "@scrivr/core/pm";
 import { computeAiSuggestion } from "../computeAiSuggestion";
 import { doc, p, h } from "./helpers";
 

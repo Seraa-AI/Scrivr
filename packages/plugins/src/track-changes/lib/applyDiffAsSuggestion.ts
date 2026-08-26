@@ -30,8 +30,8 @@
  *                   > 0.7 → full rewrite, offer "Accept rewrite" button
  */
 
-import type { Schema } from "prosemirror-model";
-import type { EditorState, Transaction } from "prosemirror-state";
+import type { Schema } from "@scrivr/core/pm";
+import type { EditorState, Transaction } from "@scrivr/core/pm";
 
 import { findNodeById } from "@scrivr/core";
 import {

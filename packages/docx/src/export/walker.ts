@@ -16,7 +16,7 @@
  * unknown mark is silently absent).
  */
 
-import type { Node, Mark } from "prosemirror-model";
+import type { Node, Mark } from "@scrivr/core/pm";
 import { cssColorToDocxHex } from "@scrivr/core";
 import { xml } from "./xml";
 import type { XmlNode, DocxContext } from "./context";

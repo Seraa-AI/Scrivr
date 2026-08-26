@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { Schema } from "prosemirror-model";
+import { Schema } from "@scrivr/core/pm";
 import zlib from "node:zlib";
 import { PDFDocument } from "pdf-lib";
 import { buildPdf as buildPdfWithEditor, exportToPdf, type PdfExportOptions } from "../index";

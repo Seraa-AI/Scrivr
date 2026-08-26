@@ -1,6 +1,6 @@
-import { Fragment, Node as PMNode } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
-import { canJoin } from "prosemirror-transform";
+import { Fragment, Node as PMNode } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
+import { canJoin } from "@scrivr/core/pm";
 
 /** Deletes node but tries to preserve content by joining or replacing with empty. */
 export function mergeNode(node: PMNode, pos: number, tr: Transaction) {

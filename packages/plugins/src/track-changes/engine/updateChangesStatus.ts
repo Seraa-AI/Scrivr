@@ -1,4 +1,4 @@
-import { EditorState, Transaction } from "prosemirror-state";
+import { EditorState, Transaction } from "@scrivr/core/pm";
 
 import { ChangeSet } from "../ChangeSet";
 import {
