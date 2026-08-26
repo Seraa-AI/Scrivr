@@ -1,11 +1,11 @@
-import { Mark, Node as PMNode } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
+import { Mark, Node as PMNode } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
 import {
   AddMarkStep,
   AddNodeMarkStep,
   RemoveMarkStep,
   RemoveNodeMarkStep,
-} from "prosemirror-transform";
+} from "@scrivr/core/pm";
 
 import {
   createNewDeleteAttrs,

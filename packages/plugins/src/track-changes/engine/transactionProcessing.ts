@@ -1,7 +1,7 @@
-import { Node } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
-import { isHistoryTransaction } from "prosemirror-history";
-import { ReplaceStep, Step } from "prosemirror-transform";
+import { Node } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
+import { isHistoryTransaction } from "@scrivr/core/pm";
+import { ReplaceStep, Step } from "@scrivr/core/pm";
 
 import { isIndentationAction, TrackChangesAction } from "../actions";
 import { ChangeSet } from "../ChangeSet";

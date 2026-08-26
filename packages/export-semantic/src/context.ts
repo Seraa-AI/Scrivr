@@ -7,7 +7,7 @@ import type {
   SemanticRun,
   UnitCtx,
 } from "@scrivr/core";
-import type { Mark as PmMark, Node as PmNode } from "prosemirror-model";
+import type { Mark as PmMark, Node as PmNode } from "@scrivr/core/pm";
 
 /**
  * Attrs excluded from `attrsOf` — not user styling. Identity/level bookkeeping

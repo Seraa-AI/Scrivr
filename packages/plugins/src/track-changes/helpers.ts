@@ -1,4 +1,4 @@
-import { Attrs, Fragment, Mark, Node as PMNode, Schema } from "prosemirror-model";
+import { Attrs, Fragment, Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
 
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs } from "./types";
 

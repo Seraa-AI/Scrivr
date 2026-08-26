@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { Schema } from "prosemirror-model";
-import type { Mark } from "prosemirror-model";
+import { Schema } from "@scrivr/core/pm";
+import type { Mark } from "@scrivr/core/pm";
 import {
   buildAcceptedTextMap,
   acceptedOffsetToDocPos,

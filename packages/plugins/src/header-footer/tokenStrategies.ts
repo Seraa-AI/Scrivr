@@ -12,7 +12,7 @@
  */
 
 import type { InlineStrategy, TextMeasurerLike } from "@scrivr/core";
-import type { Node } from "prosemirror-model";
+import type { Node } from "@scrivr/core/pm";
 
 /** Current page context — set before rendering, read by token strategies. */
 let currentPageNumber = 1;

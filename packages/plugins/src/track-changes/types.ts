@@ -1,6 +1,6 @@
-import { Fragment, Mark, Node, NodeType, Slice } from "prosemirror-model";
-import { PluginKey } from "prosemirror-state";
-import { ReplaceAroundStep, ReplaceStep } from "prosemirror-transform";
+import { Fragment, Mark, Node, NodeType, Slice } from "@scrivr/core/pm";
+import { PluginKey } from "@scrivr/core/pm";
+import { ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
 
 import { getAction } from "./actions";
 import { ChangeSet } from "./ChangeSet";

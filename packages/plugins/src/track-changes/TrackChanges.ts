@@ -1,6 +1,6 @@
 import { Extension, renderTrackedInsert, renderTrackedDelete, renderTrackedConflict, renderTrackedAttrChange } from "@scrivr/core";
 import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler, SemanticMarkHandler } from "@scrivr/core";
-import type { EditorState, Transaction } from "prosemirror-state";
+import type { EditorState, Transaction } from "@scrivr/core/pm";
 
 import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";

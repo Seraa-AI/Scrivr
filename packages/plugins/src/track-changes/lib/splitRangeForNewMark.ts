@@ -15,8 +15,8 @@
  * Used by applyDiffAsSuggestion for the AI suggestion pipeline.
  */
 
-import type { Mark, MarkType, Node as PMNode, Schema } from "prosemirror-model";
-import type { Transaction } from "prosemirror-state";
+import type { Mark, MarkType, Node as PMNode, Schema } from "@scrivr/core/pm";
+import type { Transaction } from "@scrivr/core/pm";
 
 export interface SplitRangeOptions {
   mark: Mark;

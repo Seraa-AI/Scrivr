@@ -15,7 +15,7 @@ import {
   StarterKit,
   getSchema,
 } from "@scrivr/core";
-import type { Node as PmNode } from "prosemirror-model";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import { TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
 import {
   aiSuggestionPlugin,

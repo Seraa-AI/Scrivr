@@ -19,7 +19,7 @@
  * layout, just the schema + extensions.
  */
 
-import type { Node as PmNode } from "prosemirror-model";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import type {
   DocxImports,
   IBaseEditor,

@@ -10,8 +10,8 @@ import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
 
 export { unitRichHash };
-import type { Schema } from "prosemirror-model";
-import type { Command } from "prosemirror-state";
+import type { Schema } from "@scrivr/core/pm";
+import type { Command } from "@scrivr/core/pm";
 import { AiSuggestion as AiSuggestionExtension } from "../ai-suggestion/AiSuggestion";
 import { computeAiSuggestion } from "../ai-suggestion/computeAiSuggestion";
 import { showAiSuggestion, applyAiSuggestion, rejectAiSuggestion } from "../ai-suggestion/showHideApply";

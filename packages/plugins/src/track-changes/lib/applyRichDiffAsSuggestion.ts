@@ -24,8 +24,8 @@
  * applications never invalidate later positions.
  */
 
-import { Fragment, type Mark, type Node as PMNode, type Schema } from "prosemirror-model";
-import type { EditorState, Transaction } from "prosemirror-state";
+import { Fragment, type Mark, type Node as PMNode, type Schema } from "@scrivr/core/pm";
+import type { EditorState, Transaction } from "@scrivr/core/pm";
 import {
   findNodeById,
   resolveInlineMark,
