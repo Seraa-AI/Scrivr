@@ -11,6 +11,7 @@ import {
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
+import { nodeLayout } from "./BlockRegistry";
 import { LineBreaker, type InputSpan, type LayoutLine, type LineSpaceProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
 import {
@@ -2002,25 +2003,16 @@ const LIST_INDENT = 24; // px — text starts this far right of the margin
 const MARKER_RIGHT_GAP = 6; // px — gap between the marker's right edge and the text
 
 /**
- * True when a node's children flow as independent blocks rather than being
- * painted by a strategy of their own — the node spec opts in with
- * `layoutContainer: true`.
- *
- * Lists and tables are expanded below by name because they also contribute
- * markers and column widths. A plain wrapper (a sourced block, and any future
- * provenance/grouping node) has nothing to add, so it declares the flag and
- * the walker recurses. Without this, a `block+` wrapper reaches `layoutBlock`
- * as a text block and lays out as one empty line — its children never paint.
- */
-function isLayoutContainer(node: Node): boolean {
-  return node.type.spec["layoutContainer"] === true;
-}
-
-/**
  * Walks the doc's block children and returns a flat array of layout items.
- * List container nodes (bulletList, orderedList) are expanded into one item
- * per list item so each renders as an independent LayoutBlock; nodes marked
- * `layoutContainer` are transparent and expand into their own children.
+ *
+ * Each node contributes according to the layout participation its spec
+ * declares (see `NodeLayout`): a `block` node contributes one item, a
+ * `transparent` node contributes none of its own and its children are
+ * collected into the enclosing flow instead.
+ *
+ * Lists and tables are expanded by name ahead of that, because their
+ * expansion is not merely transparent — they carry markers and column widths
+ * down to the items they produce.
  */
 export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutItem[] {
   const items: LayoutItem[] = [];
@@ -2085,13 +2077,17 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
         return;
       }
 
-      if (isLayoutContainer(node)) {
-        walk(node, offset + 1);
-        return;
-      }
+      switch (nodeLayout(node.type).kind) {
+        case "transparent":
+          walk(node, offset + 1);
+          return;
 
-      const blockIndent = (node.attrs["indent"] as number) ?? 0;
-      items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
+        case "block": {
+          const blockIndent = (node.attrs["indent"] as number) ?? 0;
+          items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
+          return;
+        }
+      }
     });
   };
 

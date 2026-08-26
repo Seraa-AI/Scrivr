@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EditorState, TextSelection, NodeSelection } from "prosemirror-state";
 import { collectLayoutItems } from "../../layout/PageLayout";
+import { nodeLayout } from "../../layout/BlockRegistry";
 import { defaultFontConfig } from "../../layout/FontConfig";
 import { PasteTransformer } from "../../input/PasteTransformer";
 import { ExtensionManager } from "../ExtensionManager";
@@ -558,6 +559,28 @@ describe("SourcedBlock Extension", () => {
 			baseHash: "abc",
 			baseNormalizer: NORMALIZER_VERSION,
 		};
+
+		it("contributes no layout item of its own", () => {
+			const { schema } = makeContext();
+			const doc = schema.node("doc", null, [
+				schema.node("sourcedBlock", attrs, [
+					schema.node("paragraph", null, [schema.text("clause")]),
+				]),
+			]);
+
+			const items = collectLayoutItems(doc, defaultFontConfig);
+
+			expect(items.map(i => i.node.type.name)).toEqual(["paragraph"]);
+		});
+
+		it("declares itself transparent", () => {
+			const { schema } = makeContext();
+			expect(nodeLayout(schema.nodes["sourcedBlock"]!)).toEqual({
+				kind: "transparent",
+			});
+			// Everything that paints a box of its own is a block, declared or not.
+			expect(nodeLayout(schema.nodes["paragraph"]!)).toEqual({ kind: "block" });
+		});
 
 		it("expands the wrapper into one layout item per inner block", () => {
 			const { schema } = makeContext();

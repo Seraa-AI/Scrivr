@@ -35,6 +35,8 @@ export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultCo
 export type {
   ExtensionConfig,
   ExtensionContext,
+  ScrivrNodeSpec,
+  PasteTransform,
   InitialDocContext,
   IBaseEditor,
   IEditor,

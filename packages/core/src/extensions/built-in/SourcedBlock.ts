@@ -416,9 +416,9 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				group: "block",
 				defining: true,
 				isolating: false,
-				// Transparent to layout: the wrapper paints nothing itself, its
-				// children flow as ordinary blocks. See `collectLayoutItems`.
-				layoutContainer: true,
+				// No visual box of its own: the boundary matters to the model, not
+				// to the page. Its children lay out into the enclosing flow.
+				layout: { kind: "transparent" },
 				attrs: {
 					instanceId: { default: null },
 					kind: { default: null },

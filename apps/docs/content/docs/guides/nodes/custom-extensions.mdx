@@ -47,11 +47,19 @@ The short version: use `TextBlockStrategy` for any block that contains inline te
 text rendering, mark decorators, inline images, and `CharacterMap` registration. Only write a
 custom strategy for blocks with non-text content (tables, diagrams).
 
-### Wrapper nodes
+### Declaring layout participation
 
-A node that only *contains* other blocks — a grouping or provenance wrapper — paints nothing of
-its own, so it has no strategy to register. Mark its spec `layoutContainer: true` instead and the
-layout walker treats it as transparent, laying out its children as independent blocks:
+How a node participates in layout is a separate dimension from what it means in the document
+tree, so the node spec declares it:
+
+| `layout` | Meaning |
+|---|---|
+| `{ kind: 'block' }` | The node occupies its own box in the flow, painted by the `BlockStrategy` it registers. This is the default when `layout` is omitted. |
+| `{ kind: 'transparent' }` | The node contributes no box of its own. It stays in the editor tree, and its children lay out into the enclosing flow as if the boundary weren't there. |
+
+A node can matter enormously to the model and have no visual existence of its own — it carries
+identity, provenance, actions and a lifecycle, but the reader only ever sees its children. That
+node is `transparent`:
 
 ```ts
 addNodes() {
@@ -59,15 +67,19 @@ addNodes() {
     sourcedBlock: {
       content: 'block+',
       group: 'block',
-      layoutContainer: true,
+      layout: { kind: 'transparent' },
       // ...attrs, parseDOM, toDOM
     },
   };
 },
 ```
 
-Without either a strategy or this flag, a `block+` node reaches the text-block path and lays out
-as a single empty line — its children never paint.
+The document keeps its structure — `sourcedBlock → heading, paragraph, paragraph` — while the
+layout stream sees `heading, paragraph, paragraph`. Detaching such a node removes the boundary
+without touching the content inside it.
+
+Declare `transparent` rather than leaving `layout` off: an undeclared `block+` node falls through
+to the text-block path and lays out as a single empty line, painting nothing.
 
 ---
 
