@@ -45,8 +45,9 @@ export function transformToProseMirror(
 ): PmNode {
   const blocks: PmNode[] = [];
   for (const block of model.blocks) {
-    const node = transformBlock(block, ctx, handlers);
-    if (node) blocks.push(node);
+    const result = transformBlock(block, ctx, handlers);
+    if (Array.isArray(result)) blocks.push(...result);
+    else if (result) blocks.push(result);
   }
   // Schemas typically require at least one block child in `doc`.
   if (blocks.length === 0) {
@@ -60,7 +61,7 @@ function transformBlock(
   block: DocxBlock,
   ctx: DocxImportContext,
   handlers: ResolvedImportHandlers,
-): PmNode | null {
+): PmNode | PmNode[] | null {
   // Paragraph-style override fires first — Heading extension claims
   // `Heading1` / `Heading2` / etc. before the default paragraph transform.
   if (block.type === "paragraph") {
@@ -90,6 +91,19 @@ function transformBlock(
     return buildTableNode(block, ctx, handlers);
   }
 
+  if (block.type === "sdt") {
+    const contentNodes = block.content.flatMap((b) => {
+      const res = transformBlock(b, ctx, handlers);
+      return Array.isArray(res) ? res : res ? [res] : [];
+    });
+    
+    const blockHandler = handlers.blocks["sdt"];
+    if (blockHandler) return blockHandler(block, contentNodes, ctx);
+    
+    // Degrade gracefully by returning the unwrapped children
+    return contentNodes;
+  }
+
   const blockHandler = handlers.blocks[block.type];
   if (blockHandler) return blockHandler(block, [], ctx);
   return fallbackBlock(block, ctx);
@@ -114,8 +128,9 @@ function buildListNode(
   for (const item of block.items) {
     const itemChildren: PmNode[] = [];
     for (const child of item.content) {
-      const node = transformBlock(child, ctx, handlers);
-      if (node) itemChildren.push(node);
+      const result = transformBlock(child, ctx, handlers);
+      if (Array.isArray(result)) itemChildren.push(...result);
+      else if (result) itemChildren.push(result);
     }
     if (itemChildren.length === 0) continue;
     itemNodes.push(listItemType.create(null, itemChildren));
@@ -152,8 +167,9 @@ function buildTableNode(
     for (const cell of row.cells) {
       const cellChildren: PmNode[] = [];
       for (const child of cell.content) {
-        const node = transformBlock(child, ctx, handlers);
-        if (node) cellChildren.push(node);
+        const result = transformBlock(child, ctx, handlers);
+        if (Array.isArray(result)) cellChildren.push(...result);
+        else if (result) cellChildren.push(result);
       }
       // `block+` requires at least one child.
       if (cellChildren.length === 0) cellChildren.push(paragraphType.create());

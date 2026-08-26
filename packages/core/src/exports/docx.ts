@@ -479,7 +479,8 @@ export type DocxBlock =
   | { type: "horizontalRule" }
   | { type: "pageBreak" }
   | { type: "list"; listType: "bullet" | "ordered"; items: DocxListItem[] }
-  | { type: "table"; grid: number[]; rows: DocxTableRow[] };
+  | { type: "table"; grid: number[]; rows: DocxTableRow[] }
+  | { type: "sdt"; tag: string | null; content: DocxBlock[] };
 
 export interface DocxImportModel {
   blocks: DocxBlock[];
@@ -583,7 +584,7 @@ export type DocxBlockTransform = (
   block: DocxBlock,
   content: PmNode[],
   ctx: DocxImportContext,
-) => PmNode | null;
+) => PmNode | PmNode[] | null;
 
 /**
  * Paragraph-style override — wins over the default `paragraph` block

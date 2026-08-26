@@ -57,6 +57,22 @@ export function parseDocumentBody(
   return parseBlockContainer(body, diagnostics);
 }
 
+function parseSdt(el: OoxmlElement, diag: ParserDiagnostics): DocxBlock {
+  const sdtPr = findChild(el, "w:sdtPr");
+  let tag: string | null = null;
+  if (sdtPr) {
+    const tagEl = findChild(sdtPr, "w:tag");
+    if (tagEl) {
+      tag = attr(tagEl, "w:val") ?? null;
+    }
+  }
+
+  const contentEl = findChild(el, "w:sdtContent");
+  const content = contentEl ? parseBlockContainer(contentEl, diag).blocks : [];
+
+  return { type: "sdt", tag, content };
+}
+
 /**
  * Parse the block children of a container element (`<w:body>`, `<w:hdr>`,
  * `<w:ftr>`, …) into the intermediate model. Header/footer parts reuse this
@@ -86,6 +102,8 @@ export function parseBlockContainer(
       blocks.push(...parseParagraph(child, diagnostics));
     } else if (child.name === "w:tbl") {
       blocks.push(parseTable(child, diagnostics));
+    } else if (child.name === "w:sdt") {
+      blocks.push(parseSdt(child, diagnostics));
     } else if (child.name === "w:sectPr") {
       // Section properties — page size, margins, etc. Not modeled yet.
       // Header/footer references are read separately via parseSectionReferences.

@@ -12,6 +12,8 @@ import type {
 	NodeActionContext,
 	NodeActionContribution,
 } from "../../selection/types";
+import type { SemanticNodeHandler } from "../../exports/semantic";
+import { xml, type DocxNodeHandler, type DocxBlockTransform } from "../../exports/docx";
 
 export type SourceCapability =
 	| "update"
@@ -806,5 +808,98 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				},
 			}),
 		];
+	},
+
+	addMarkdownParserTokens() {
+		return {
+			sourcedBlock: { block: "sourcedBlock" },
+		};
+	},
+
+	addMarkdownSerializerRules() {
+		return {
+			nodes: {
+				sourcedBlock(state, node) {
+					state.renderContent(node);
+				},
+			},
+		};
+	},
+
+	addExports() {
+		const semanticHandler: SemanticNodeHandler = () => ({
+			type: "sourcedBlock"
+		});
+
+		const docxHandler: DocxNodeHandler = (node, children) => {
+			const attrs = node.attrs;
+			const params = new URLSearchParams();
+			
+			// Serialize strictly non-empty primitives
+			for (const [key, value] of Object.entries(attrs)) {
+				if (typeof value === "string" && value) {
+					params.set(key, value);
+				} else if (typeof value === "number") {
+					params.set(key, value.toString());
+				}
+			}
+			
+			const tagValue = `scrivr:sourcedBlock:${params.toString()}`;
+			// Use the 'kind' attribute as the label for MS Word, fallback to "Sourced Block"
+			const aliasValue = typeof attrs["kind"] === "string" && attrs["kind"] ? attrs["kind"] : "Sourced Block";
+
+			return xml("w:sdt", undefined, [
+				xml("w:sdtPr", undefined, [
+					xml("w:alias", { "w:val": aliasValue }),
+					xml("w:tag", { "w:val": tagValue }),
+				]),
+				xml("w:sdtContent", undefined, children),
+			]);
+		};
+
+		return {
+			semantic: {
+				nodes: {
+					sourcedBlock: semanticHandler,
+				},
+			},
+			docx: {
+				nodes: {
+					sourcedBlock: docxHandler,
+				},
+			},
+		};
+	},
+
+	addImports() {
+		const importer: DocxBlockTransform = (block, content, ctx) => {
+			if (block.type !== "sdt" || !block.tag) return null;
+			if (!block.tag.startsWith("scrivr:sourcedBlock:")) return null;
+
+			const t = ctx.schema.nodes["sourcedBlock"];
+			if (!t) return null;
+
+			const query = block.tag.slice("scrivr:sourcedBlock:".length);
+			const params = new URLSearchParams(query);
+
+			const attrs = {
+				instanceId: params.get("instanceId") ?? "",
+				kind: params.get("kind") ?? "",
+				resourceId: params.get("resourceId") ?? "",
+				versionId: params.get("versionId") ?? "",
+				baseHash: params.get("baseHash") ?? "",
+				baseNormalizer: Number(params.get("baseNormalizer")) || 1,
+			};
+
+			return t.create(attrs, content);
+		};
+
+		return {
+			docx: {
+				blocks: {
+					sdt: importer,
+				},
+			},
+		};
 	},
 });
