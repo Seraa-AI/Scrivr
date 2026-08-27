@@ -13,6 +13,7 @@ export type {
   DocxNodeHandler,
   DocxRunProps,
   DocxMarkHandler,
+  DocxRunWrapper,
   DocxDiagnosticLevel,
   DocxDiagnostic,
   DocxHandlers,

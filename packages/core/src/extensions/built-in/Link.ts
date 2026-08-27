@@ -1,4 +1,5 @@
 import { Extension } from "../Extension";
+import { xml, type DocxMarkHandler, type DocxRunWrapper } from "../../exports/docx";
 import type { MarkDecorator, SpanRect } from "../types";
 import { safeUrl } from "../../model/safeUrl";
 import { getMarkAttrs } from "../../model/getNodeAttrs";
@@ -159,6 +160,33 @@ export const Link = Extension.create({
         },
       },
     };
+  },
+  addExports() {
+    // OOXML expresses a hyperlink as an element wrapping the runs, carrying a
+    // relationship id — no run property can produce one, which is why this
+    // needs a wrapper as well as a mark handler. Without both, a link reached
+    // Word as ordinary text and the export logged an unsupported-mark warning
+    // no UI surfaces.
+    const style: DocxMarkHandler = (props, _mark, ctx) => ({
+      ...props,
+      // Word's built-in Hyperlink character style: blue and underlined, and
+      // the thing readers recognise as a link.
+      styleId: ctx.styles.character.getOrCreate("Hyperlink", {
+        color: "0563C1",
+        underline: true,
+      }),
+    });
+
+    const wrap: DocxRunWrapper = (run, mark, ctx) => {
+      const href = mark.attrs["href"];
+      // A link with no usable href is styled text, not a broken relationship:
+      // emitting `r:id` for a rel that was never registered produces a file
+      // Word refuses to open.
+      if (typeof href !== "string" || href.length === 0) return run;
+      return xml("w:hyperlink", { "r:id": ctx.rels.addHyperlink(href) }, [run]);
+    };
+
+    return { docx: { marks: { link: style }, markWrappers: { link: wrap } } };
   },
 });
 

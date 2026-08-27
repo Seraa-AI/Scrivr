@@ -307,6 +307,25 @@ export type DocxNodeHandler = (
   meta: DocxNodeMeta,
 ) => XmlNode | XmlNode[];
 
+/**
+ * A mark that *wraps* the runs it covers instead of styling them.
+ *
+ * `DocxMarkHandler` contributes run properties — bold, colour, size — which is
+ * all most marks need. A hyperlink is not one of them: OOXML expresses it as a
+ * `<w:hyperlink>` element around the runs, carrying a relationship id, so no
+ * amount of `<w:rPr>` can produce one. A wrapper receives the finished run and
+ * returns whatever should stand in its place; returning the run unchanged
+ * declines.
+ *
+ * Wrappers run outermost-last, in the order the marks appear on the text, so
+ * two wrapping marks nest predictably rather than by registration accident.
+ */
+export type DocxRunWrapper = (
+  run: XmlNode,
+  mark: PmMark,
+  ctx: DocxContext,
+) => XmlNode;
+
 export type DocxMarkHandler = (
   props: DocxRunProps,
   mark: PmMark,
@@ -320,6 +339,12 @@ export type DocxMarkHandler = (
 export interface DocxHandlers {
   nodes?: Record<string, DocxNodeHandler>;
   marks?: Record<string, DocxMarkHandler>;
+  /**
+   * Marks that wrap their runs rather than styling them — see `DocxRunWrapper`.
+   * A mark may contribute both: a hyperlink wraps the run *and* gives it the
+   * Hyperlink character style.
+   */
+  markWrappers?: Record<string, DocxRunWrapper>;
   onBeforeExport?(ctx: DocxContext): void | Promise<void>;
   onBuildTreeComplete?(ctx: DocxContext): void | Promise<void>;
   onFinalize?(ctx: DocxContext): DocxPackage | Promise<DocxPackage>;
