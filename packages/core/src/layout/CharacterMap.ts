@@ -405,6 +405,17 @@ export class CharacterMap {
   }
 
   /**
+   * Is a line of text painted at this point?
+   *
+   * Answers "is the reader pointing at text here", which is what decides
+   * whether a `behind` anchored object may take the click: it paints *under*
+   * the body, so wherever text is, the text owns the point.
+   */
+  hasTextAt(x: number, y: number, page: number): boolean {
+    return this.lineAtPoint(x, y, page) !== undefined;
+  }
+
+  /**
    * The line whose box contains (x, y). Resolving in 2D disambiguates lines
    * that share a y band but occupy different x ranges — cells in the same table
    * row — so each cell owns its own hit region.

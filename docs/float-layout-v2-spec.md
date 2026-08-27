@@ -430,7 +430,7 @@ These are validated and should be kept as-is in v2:
 | Float clipping | `TileManager.ts:731` — `overflow: hidden` on page wrappers | Verified working |
 | Cursor on float-only pages | `CharacterMap.ts:381-392` — `nearestLineOrAdjacent` | Verified working |
 | Orphaned narrow lines | `PageLayout.ts:1311-1346` — `clearOrphanedConstraints` | Verified working |
-| Enter after float | `Paragraph.ts:36-61` — `cursorIsAfterFloat` + split adjustment | Verified working |
+| Enter after float | `Paragraph.ts` — `isAnchoredObjectSelected` guard in `splitBlockInheritAttrs` | The `cursorIsAfterFloat` approach described here is not in the code |
 
 ---
 
