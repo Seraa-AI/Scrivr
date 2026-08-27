@@ -1,5 +1,5 @@
 ---
-"@scrivr/core": minor
+"@scrivr/core": patch
 ---
 
 **Node Actions Support**
