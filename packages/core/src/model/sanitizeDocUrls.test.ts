@@ -259,3 +259,75 @@ describe("sanitizeDocUrls — ServerEditor integration", () => {
     expect(hasLink).toBe(false);
   });
 });
+
+/**
+ * Image `src` and link `href` sit behind different gates. Inline raster bytes
+ * are safe to paint, so an image keeps them — that is what lets a pasted
+ * screenshot and a DOCX-imported image survive. A link is a navigation target,
+ * so it keeps the stricter gate and drops the same URL.
+ */
+describe("sanitizeDocUrls — inline image data URLs", () => {
+  const RASTER = "data:image/png;base64,iVBORw0KGgo=";
+
+  it("keeps an image whose src is inline raster bytes", () => {
+    const editor = buildEditor();
+    const doc = editor.schema.nodeFromJSON({
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [{ type: "image", attrs: { src: RASTER, alt: "shot" } }],
+      }],
+    });
+    const cleaned = sanitizeDocUrls(doc, editor.schema);
+
+    const found: string[] = [];
+    cleaned.descendants((n) => {
+      if (n.type.name === "image") found.push(String(n.attrs["src"]));
+    });
+    expect(found).toEqual([RASTER]);
+  });
+
+  it("drops an image whose src is an SVG data URL", () => {
+    const editor = buildEditor();
+    const doc = editor.schema.nodeFromJSON({
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [{
+          type: "image",
+          attrs: { src: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", alt: "x" },
+        }],
+      }],
+    });
+    const cleaned = sanitizeDocUrls(doc, editor.schema);
+
+    let seenImage = false;
+    cleaned.descendants((n) => {
+      if (n.type.name === "image") seenImage = true;
+    });
+    expect(seenImage).toBe(false);
+  });
+
+  it("still strips a link whose href is that same raster data URL", () => {
+    const editor = buildEditor();
+    const doc = editor.schema.nodeFromJSON({
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [{
+          type: "text",
+          text: "click",
+          marks: [{ type: "link", attrs: { href: RASTER } }],
+        }],
+      }],
+    });
+    const cleaned = sanitizeDocUrls(doc, editor.schema);
+
+    expect(cleaned.textContent).toBe("click");
+    let seenLink = false;
+    cleaned.descendants((n) => {
+      if (n.marks.some((m) => m.type.name === "link")) seenLink = true;
+    });
+    expect(seenLink).toBe(false);
+  });
+});

@@ -26,6 +26,7 @@ export { Image, prepareDocxImages } from "./built-in/Image";
 export { CodeBlock } from "./built-in/CodeBlock";
 export { HorizontalRule } from "./built-in/HorizontalRule";
 export { PageBreak } from "./built-in/PageBreak";
+export { Sections } from "./built-in/Sections";
 export { Table } from "./built-in/Table";
 export { SourcedBlockExtension } from "./built-in/SourcedBlock";
 export { UniqueId, findNodeById, COLLAB_SYNC_META } from "./built-in/UniqueId";

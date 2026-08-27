@@ -3,7 +3,7 @@ import { TextSelection } from "prosemirror-state";
 import type { Schema } from "prosemirror-model";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { InputHandler, EditorNavigator } from "../extensions/types";
-import type { PasteTransformer } from "./PasteTransformer";
+import type { PasteTransformer, PendingImagePaste } from "./PasteTransformer";
 import { insertText, deleteSelection } from "../model/commands";
 import { serializeSelectionToHtml, serializeSelectionToText } from "./ClipboardSerializer";
 import { clearSelectedCellsTr } from "../table/editingGuards";
@@ -101,6 +101,14 @@ export class InputBridge {
     | null = null;
   private focused = false;
   private readOnly = false;
+  /**
+   * A native paste event does not expose keyboard modifiers, so remember only
+   * the specific Mod-Shift-v gesture that immediately precedes it. This is
+   * consumed by handlePaste rather than retaining general Shift state, which
+   * would incorrectly affect a later context-menu paste.
+   */
+  private pasteWithoutFormattingPending = false;
+  private readonly pendingImagePastes = new Set<PendingImagePaste>();
 
   constructor(opts: InputBridgeOptions) {
     this.opts = opts;
@@ -115,6 +123,7 @@ export class InputBridge {
 
   /** Block or unblock all document mutations. */
   setReadOnly(value: boolean): void {
+    if (value) this.cancelPendingImagePastes();
     this.readOnly = value;
   }
 
@@ -149,6 +158,7 @@ export class InputBridge {
    * Safe to call multiple times.
    */
   unmount(): void {
+    this.cancelPendingImagePastes();
     if (this.textarea) {
       this.detachListeners();
       this.textarea.remove();
@@ -354,10 +364,16 @@ export class InputBridge {
 
   private handleBlur = (): void => {
     this.focused = false;
+    this.pasteWithoutFormattingPending = false;
     this.opts.onBlur();
   };
 
   private handleKeydown = (e: KeyboardEvent): void => {
+    this.pasteWithoutFormattingPending =
+      e.key.toLowerCase() === "v" &&
+      (e.metaKey || e.ctrlKey) &&
+      e.shiftKey &&
+      !e.altKey;
     if (this.readOnly) {
       // Allow arrow-key navigation and selection-only shortcuts; block all mutations.
       const keyStr = keyEventToString(e);
@@ -451,14 +467,57 @@ export class InputBridge {
     if (this.readOnly) return;
     e.preventDefault();
     if (!e.clipboardData) return;
+    const preferPlain = this.pasteWithoutFormattingPending;
+    this.pasteWithoutFormattingPending = false;
     const tr = this.opts.pasteTransformer.transform(
       e.clipboardData,
       this.opts.getState(),
+      { preferPlain },
     );
     if (tr) this.opts.dispatch(tr);
+
+    // "Paste without formatting" means text only — an image is formatting the
+    // user opted out of, so the bytes are not read at all.
+    if (preferPlain) return;
+
+    // Image bytes resolve asynchronously (read or upload), so this dispatches
+    // separately once a src exists. It no-ops whenever the clipboard's markup
+    // already described the content — see transformFiles.
+    //
+    // An upload can take seconds, so the editor may have gone read-only or been
+    // unmounted by the time it lands: both are re-checked here rather than only
+    // at event time. A rejection is swallowed on purpose — a screenshot that
+    // fails to read is not worth tearing down the page over.
+    const imagePaste = this.opts.pasteTransformer.prepareImagePaste(
+      e.clipboardData,
+      this.opts.getState(),
+    );
+    if (!imagePaste) return;
+    this.pendingImagePastes.add(imagePaste);
+    this.opts.dispatch(imagePaste.insert);
+    void imagePaste
+      .resolve(this.opts.getState)
+      .then((fileTr) => {
+        this.pendingImagePastes.delete(imagePaste);
+        if (!fileTr || this.readOnly || !this.textarea) return;
+        this.opts.dispatch(fileTr);
+      })
+      .catch(() => {
+        this.pendingImagePastes.delete(imagePaste);
+        const cleanup = imagePaste.cancel(this.opts.getState());
+        if (cleanup && !this.readOnly && this.textarea) this.opts.dispatch(cleanup);
+      });
   };
 
   /** Private — helpers */
+
+  private cancelPendingImagePastes(): void {
+    for (const pending of this.pendingImagePastes) {
+      const cleanup = pending.cancel(this.opts.getState());
+      if (cleanup) this.opts.dispatch(cleanup);
+    }
+    this.pendingImagePastes.clear();
+  }
 
   private tryInputHandler(e: KeyboardEvent): boolean {
     // Try the fully-qualified key first (e.g. "Alt-ArrowLeft" for word-jump),

@@ -59,8 +59,9 @@ Four-layer design:
 
 **Input (`input/`)**
 - `InputBridge` — hidden textarea with 8 DOM event listeners → ProseMirror transactions
-- `PasteTransformer` — cleans pasted HTML before ProseMirror ingestion
-- `ClipboardSerializer` — serializes selection to `text/plain` + `text/html`
+- `PasteTransformer` — clipboard → transaction. Cleans pasted HTML (incl. Google Docs and Word `mso-list` lists), decides slice openness, converts markdown, and inserts image files. `transform()` is sync; `transformFiles()` is async because image bytes must be read or uploaded first
+- `ClipboardSerializer` — serializes selection to `text/plain` + `text/html`, recording the slice's open depths in `data-pm-slice` so a paste back into an editor rebuilds the exact slice
+- URL-bearing attrs pass a per-sink gate on ingestion: `safeUrl` for link `href`, `safeImageUrl` for image `src` (raster `data:` allowed, `svg+xml` not)
 
 **Model (`model/`)**
 - `schema.ts` — nodes: `doc`, `paragraph`, `heading`, `bulletList`, `orderedList`, `listItem`, `codeBlock`, `horizontalRule`, `pageBreak`, `image`, `hardBreak`, `text`; marks: `bold`, `italic`, `underline`, `strikethrough`, `highlight`, `color`, `fontSize`, `fontFamily`, `link`, `trackedInsert`, `trackedDelete`

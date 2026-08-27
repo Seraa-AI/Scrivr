@@ -151,6 +151,16 @@ export interface EditorOptions {
 	 */
 	onFocusChange?: (focused: boolean) => void;
 	/**
+	 * Turn an image pasted as raw bytes (a screenshot) into the `src` the
+	 * document stores. Defaults to an inline `data:` URL, which works with no
+	 * setup but grows the document by the size of the image; supply this to
+	 * upload the bytes somewhere and return a URL instead.
+	 *
+	 * Return null to drop the image. The returned URL still passes the same
+	 * ingestion gate as any other URL entering the document.
+	 */
+	uploadPastedImage?: (file: File) => Promise<string | null>;
+	/**
 	 * Called on every cursor blink tick (every 530ms) and immediately after
 	 * any user interaction that moves the cursor.
 	 *
@@ -393,6 +403,7 @@ export class Editor extends BaseEditor implements IEditor {
 		onChange,
 		onFocusChange,
 		onCursorTick,
+		uploadPastedImage,
 		startReady = true,
 		readOnly = false,
 		debug = {},
@@ -536,7 +547,10 @@ export class Editor extends BaseEditor implements IEditor {
 			this.manager.schema,
 			this.manager.buildMarkdownRules(),
 			this.manager.buildMarkdownParserTokens(),
-			this.manager.buildPasteTransforms(),
+			{
+				pasteTransforms: this.manager.buildPasteTransforms(),
+				...(uploadPastedImage ? { uploadImage: uploadPastedImage } : {}),
+			},
 		);
 
 		this.ib = new InputBridge({

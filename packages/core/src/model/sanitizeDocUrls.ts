@@ -26,21 +26,25 @@
  */
 import type { Mark, Node, Schema } from "prosemirror-model";
 import { Fragment } from "prosemirror-model";
-import { safeUrl } from "./safeUrl";
+import { safeUrl, safeImageUrl } from "./safeUrl";
+
+/** Returns the value when it may be stored, null when it must be rejected. */
+type UrlGate = (value: unknown) => string | null;
 
 /**
- * Built-in nodes that carry URL attrs which must pass safeUrl. Extensions
- * with custom URL attrs aren't covered here — they should either validate
- * at command-handler time (preferred) or post-process via this same helper
- * with a custom allow-list (future API: an extension lane that lets
- * extensions register URL attrs centrally).
+ * Built-in nodes that carry URL attrs which must pass a URL gate, and which
+ * gate each attr uses — image `src` accepts inline raster bytes that a link
+ * `href` must not. Extensions with custom URL attrs aren't covered here — they
+ * should either validate at command-handler time (preferred) or post-process
+ * via this same helper with a custom allow-list (future API: an extension lane
+ * that lets extensions register URL attrs centrally).
  */
-const NODE_URL_ATTRS = new Map<string, readonly string[]>([
-  ["image", ["src"]],
+const NODE_URL_ATTRS = new Map<string, Readonly<Record<string, UrlGate>>>([
+  ["image", { src: safeImageUrl }],
 ]);
 
-const MARK_URL_ATTRS = new Map<string, readonly string[]>([
-  ["link", ["href"]],
+const MARK_URL_ATTRS = new Map<string, Readonly<Record<string, UrlGate>>>([
+  ["link", { href: safeUrl }],
 ]);
 
 export function sanitizeDocUrls(doc: Node, _schema: Schema): Node {
@@ -59,10 +63,10 @@ export function sanitizeDocUrls(doc: Node, _schema: Schema): Node {
  */
 function walkNode(node: Node): Node | null {
   // 1. Check this node's own URL attrs.
-  const nodeAttrKeys = NODE_URL_ATTRS.get(node.type.name);
-  if (nodeAttrKeys) {
-    for (const key of nodeAttrKeys) {
-      if (safeUrl(node.attrs[key]) === null) {
+  const nodeGates = NODE_URL_ATTRS.get(node.type.name);
+  if (nodeGates) {
+    for (const [key, gate] of Object.entries(nodeGates)) {
+      if (gate(node.attrs[key]) === null) {
         return null;
       }
     }
@@ -103,10 +107,10 @@ function filterUnsafeMarks(marks: readonly Mark[]): readonly Mark[] {
 }
 
 function isMarkUnsafe(mark: Mark): boolean {
-  const keys = MARK_URL_ATTRS.get(mark.type.name);
-  if (!keys) return false;
-  for (const key of keys) {
-    if (safeUrl(mark.attrs[key]) === null) return true;
+  const gates = MARK_URL_ATTRS.get(mark.type.name);
+  if (!gates) return false;
+  for (const [key, gate] of Object.entries(gates)) {
+    if (gate(mark.attrs[key]) === null) return true;
   }
   return false;
 }

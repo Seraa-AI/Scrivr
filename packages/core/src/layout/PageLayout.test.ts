@@ -15,7 +15,7 @@ import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
 import { computePageMetrics, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
 import type { LayoutBlock } from "./BlockLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
-import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak } from "../test-utils";
+import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, sectionBreak } from "../test-utils";
 
 /**
  * Default-paragraph line height as the real Skia-backed measurer reports it.
@@ -128,6 +128,73 @@ describe("runPipeline — pageBreak node", () => {
     });
     const blockOnPage2 = layout.pages[1]!.blocks[0]!;
     expect(blockOnPage2.y).toBe(defaultPageConfig.margins.top);
+  });
+});
+
+// ── Section break ─────────────────────────────────────────────────────────────
+
+describe("runPipeline — sectionBreak node", () => {
+  it("starts the next section on a new page for a nextPage break", () => {
+    const layout = runPipeline(
+      doc(p("Section 1"), sectionBreak({ breakType: "nextPage" }), p("Section 2")),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+    expect(layout.pages).toHaveLength(2);
+  });
+
+  it("keeps a continuous break on the same page and paints nothing for it", () => {
+    const layout = runPipeline(
+      doc(p("Section 1"), sectionBreak({ breakType: "continuous" }), p("Section 2")),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+    expect(layout.pages).toHaveLength(1);
+    expect(layout.pages[0]!.blocks).toHaveLength(2);
+  });
+
+  it("treats a break with no stored settings as the nextPage default", () => {
+    const layout = runPipeline(doc(p("A"), sectionBreak(), p("B")), {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+    });
+    expect(layout.pages).toHaveLength(2);
+  });
+
+  it("starts an even-page section on the next even page", () => {
+    const layout = runPipeline(
+      doc(p("Section 1"), sectionBreak({ breakType: "evenPage" }), p("Section 2")),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+
+    expect(layout.pages).toHaveLength(2);
+    expect(layout.pages[1]!.blocks[0]!.node.textContent).toBe("Section 2");
+  });
+
+  it("inserts a blank page when an even-page section would start on an odd page", () => {
+    const layout = runPipeline(
+      doc(
+        p("Page 1"),
+        pageBreak(),
+        p("Section 1"),
+        sectionBreak({ breakType: "evenPage" }),
+        p("Section 2"),
+      ),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+
+    expect(layout.pages).toHaveLength(4);
+    expect(layout.pages[2]!.blocks).toHaveLength(0);
+    expect(layout.pages[3]!.blocks[0]!.node.textContent).toBe("Section 2");
+  });
+
+  it("inserts a blank page when an odd-page section would start on an even page", () => {
+    const layout = runPipeline(
+      doc(p("Section 1"), sectionBreak({ breakType: "oddPage" }), p("Section 2")),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+
+    expect(layout.pages).toHaveLength(3);
+    expect(layout.pages[1]!.blocks).toHaveLength(0);
+    expect(layout.pages[2]!.blocks[0]!.node.textContent).toBe("Section 2");
   });
 });
 

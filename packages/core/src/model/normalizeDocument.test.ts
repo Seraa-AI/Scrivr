@@ -253,3 +253,87 @@ describe("normalizeDocument — bounds", () => {
     expect(result.warnings.some((w) => w.code === "bounds-exceeded")).toBe(false);
   });
 });
+
+// ── Orphaned paste placeholders ──────────────────────────────────────────────
+
+/**
+ * Pasting an image reserves a placeholder node carrying `pendingPasteId` while
+ * the bytes are read or uploaded, and clears it when that resolves. A closed
+ * tab or a crash resolves nothing, so a document can be saved with the
+ * placeholder still in it — a 1x1 transparent image that will never become
+ * anything. A document being loaded has no upload in flight by definition, so
+ * any `pendingPasteId` it carries is orphaned and the node is dropped.
+ */
+const pendingImage = (id: string | null): JsonNode => ({
+  type: "image",
+  attrs: {
+    src: "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+    alt: "Uploading image…",
+    pendingPasteId: id,
+  },
+});
+
+const paraWith = (...content: JsonNode[]): JsonNode => ({
+  type: "paragraph",
+  content,
+});
+
+function imageCount(node: { descendants: (f: (n: { type: { name: string } }) => void) => void }): number {
+  let count = 0;
+  node.descendants((n) => {
+    if (n.type.name === "image") count++;
+  });
+  return count;
+}
+
+describe("normalizeDocument — orphaned paste placeholders", () => {
+  it("drops an image left mid-upload, keeping the text around it", () => {
+    const result = normalizeDocument(
+      doc(paraWith({ type: "text", text: "before " }, pendingImage("abc-123"), { type: "text", text: " after" })),
+      { schema },
+    );
+
+    expect(imageCount(result.doc)).toBe(0);
+    expect(result.doc.textContent).toBe("before  after");
+    expect(result.changed).toBe(true);
+  });
+
+  it("reports the drop as a warning with a count", () => {
+    const result = normalizeDocument(
+      doc(paraWith(pendingImage("a")), paraWith(pendingImage("b"))),
+      { schema },
+    );
+
+    const warning = result.warnings.find((w) => w.code === "placeholders-dropped");
+    expect(warning).toBeDefined();
+    expect(warning!.count).toBe(2);
+  });
+
+  it("leaves a resolved image alone", () => {
+    const result = normalizeDocument(
+      doc(paraWith({
+        type: "image",
+        attrs: { src: "https://example.com/a.png", alt: "", pendingPasteId: null },
+      })),
+      { schema },
+    );
+
+    expect(imageCount(result.doc)).toBe(1);
+    expect(result.warnings.some((w) => w.code === "placeholders-dropped")).toBe(false);
+  });
+
+  it("does not report a warning for a document with no placeholders", () => {
+    const result = normalizeDocument(doc(para("plain")), { schema });
+    expect(result.warnings.some((w) => w.code === "placeholders-dropped")).toBe(false);
+  });
+
+  it("sweeps placeholders when a real editor loads the document", () => {
+    const editor = new ServerEditor();
+    editor.setContent(
+      doc(paraWith({ type: "text", text: "kept" }, pendingImage("orphan"))),
+    );
+
+    expect(imageCount(editor.getState().doc)).toBe(0);
+    expect(editor.getState().doc.textContent).toBe("kept");
+  });
+});

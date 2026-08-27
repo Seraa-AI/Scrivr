@@ -831,7 +831,7 @@ describe("SourcedBlock Extension", () => {
 				schema,
 				manager.buildMarkdownRules(),
 				manager.buildMarkdownParserTokens(),
-				manager.buildPasteTransforms(),
+				{ pasteTransforms: manager.buildPasteTransforms() },
 			);
 
 			const clipboard = new DataTransfer();

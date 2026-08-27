@@ -19,6 +19,9 @@ still load-bearing under the current model.
 - **Cache invalidation test for changed wrap zone** (originally #19) —
   covered by `Phase 1b does not copy a cached tail after a changed square
   zone overlaps it` plus the new `pageRectsDigest invalidation` suite.
+- **Orphaned paste-placeholder sweep** — `dropPendingPlaceholders` as a
+  `normalizeDocument` stage; a tab closed mid-upload no longer leaves an
+  unresolvable image in the saved document.
 - **Stale-mark legacy CSS-float docs** (originally #1 / #25) — landed in
   this PR.
 
@@ -123,6 +126,39 @@ typography, colour, spacing, motion, brand voice.
 visual language.
 
 **Effort.** ~half day / ~30 min consultation + writeup.
+
+### Paste & clipboard
+
+#### Pasted-screenshot document bloat (P2)
+
+**What.** `uploadPastedImage` defaults to embedding the bytes as a `data:`
+URL. A full-screen screenshot is several MB of base64 inside the document,
+which every save and every Yjs sync then carries.
+
+**Why.** The default has to work with no infrastructure, so embedding is
+right for the zero-config case. But there is no size ceiling, and a user
+pasting a few screenshots can make a document that is slow to sync without
+any feedback that it happened.
+
+**Options.** A byte threshold above which the paste is refused with a
+message, or a warning surfaced to the app, or docs steering multi-image
+users to an uploader. Needs a product call, not just a constant.
+
+**Effort.** ~2 hrs / ~30 LOC + test.
+
+#### Table-cell clipboard round-trip (P2)
+
+**What.** `serializeSelectionToHtml` emits `data-pm-slice` for text
+selections but takes a separate path for `CellSelection`, which emits a
+bare `<table>` with no slice data. Copying cells and pasting them back
+therefore goes through the foreign-HTML path rather than the exact-slice
+path, and has no round-trip test.
+
+**Why.** Related learning `pm-selection-subclass-not-free-in-canvas`: a
+custom PM Selection subclass does not get clipboard behaviour for free.
+The text lane was fixed; the cell lane was not audited.
+
+**Effort.** ~2 hrs / test first, then decide whether cells need slice data.
 
 ### Observability
 

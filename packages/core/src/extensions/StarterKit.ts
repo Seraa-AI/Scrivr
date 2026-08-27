@@ -20,6 +20,7 @@ import { Indent } from "./built-in/Indent";
 import { CodeBlock } from "./built-in/CodeBlock";
 import { HorizontalRule } from "./built-in/HorizontalRule";
 import { PageBreak } from "./built-in/PageBreak";
+import { Sections } from "./built-in/Sections";
 import { Image } from "./built-in/Image";
 import { Table } from "./built-in/Table";
 import { SourcedBlockExtension } from "./built-in/SourcedBlock";
@@ -59,6 +60,13 @@ interface StarterKitOptions {
   codeBlock?: false;
   horizontalRule?: false;
   pageBreak?: false;
+  /**
+   * `Sections` — the `sectionBreak` node and `finalSection` doc attr that
+   * partition the document for columns and (later) per-section page chrome
+   * and geometry. A document with no breaks is one implicit section, which is
+   * exactly today's behavior. Pass `false` to exclude it.
+   */
+  sections?: false;
   image?: false;
   /**
    * Tables are an opt-in preview while the layout/render/export pipeline
@@ -135,6 +143,7 @@ export const StarterKit = Extension.create<StarterKitOptions>({
     if (opts.sourcedBlock === true) extensions.push(SourcedBlockExtension);
     if (opts.horizontalRule !== false) extensions.push(HorizontalRule);
     if (opts.pageBreak !== false) extensions.push(PageBreak);
+    if (opts.sections !== false) extensions.push(Sections);
     if (opts.image !== false) extensions.push(Image);
     // Backspace + Delete are not optional — the editor is unusable without them.
     extensions.push(BaseEditing);

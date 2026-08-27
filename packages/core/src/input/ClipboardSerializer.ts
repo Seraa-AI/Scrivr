@@ -5,6 +5,19 @@ import { CellSelection } from "../table/cellSelection";
 import { getTableMap } from "../table/TableMap";
 
 /**
+ * Records how deeply the copied slice was open at each end, so a paste back into
+ * an editor can rebuild the exact slice instead of guessing from tag shape.
+ * Without it, HTML alone cannot distinguish "half a paragraph" from "a whole
+ * paragraph" — both serialize to the same markup.
+ *
+ * The `openStart openEnd context` triple is ProseMirror's own clipboard
+ * convention, so slices also round-trip with other ProseMirror-based editors.
+ * The context field is always empty here: the full open path is serialized
+ * rather than unwrapped, so there is no stripped ancestry to describe.
+ */
+export const SLICE_DATA_ATTR = "data-pm-slice";
+
+/**
  * ClipboardSerializer — converts the current PM selection to clipboard payloads.
  *
  * Both the HTML and text forms read `state.selection.content()`, so every
@@ -26,9 +39,14 @@ export function serializeSelectionToHtml(
   if (sel instanceof CellSelection) {
     return serializeCellSelectionToHtml(sel, serializer);
   }
+  const slice = sel.content();
   const container = document.createElement("div");
-  container.appendChild(serializer.serializeFragment(sel.content().content));
-  return container.innerHTML;
+  container.setAttribute(
+    SLICE_DATA_ATTR,
+    `${slice.openStart} ${slice.openEnd} []`,
+  );
+  container.appendChild(serializer.serializeFragment(slice.content));
+  return container.outerHTML;
 }
 
 /**

@@ -155,12 +155,14 @@ Per `feedback_pdf_parity`: any new layout the canvas renders must render in PDF,
 
 ## Phased implementation
 
-### Phase 0 — Section substrate
+### Phase 0 — Section substrate ✅ landed
 
-Land the boundary-based section model from `sections-roadmap.md`:
-`SectionSettings`, `sectionBreak`, `finalSection`, `deriveSections`, and
-normalization. Inserting a break copies settings so the operation itself does
-not alter layout.
+The boundary-based section model from `sections-roadmap.md` is in core:
+`SectionSettings`, `sectionBreak`, `finalSection`, `deriveSections`, and the
+structural commands. Inserting a break copies the current section's settings to
+both halves, so the operation changes no geometry — `columns.count` is already
+carried per section and simply reads as `1` everywhere until Phase 2 generates
+regions from it.
 
 ### Phase 1 — Region cursor, one region per page
 
