@@ -11,6 +11,7 @@ import {
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
+import { nodeLayout } from "./BlockRegistry";
 import { LineBreaker, type InputSpan, type LayoutLine, type LineSpaceProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
 import {
@@ -2031,88 +2032,112 @@ const LIST_INDENT = 24; // px — text starts this far right of the margin
 const MARKER_RIGHT_GAP = 6; // px — gap between the marker's right edge and the text
 
 /**
- * Walks the doc's top-level children and returns a flat array of layout items.
- * List container nodes (bulletList, orderedList) are expanded into one item
- * per list item so each renders as an independent LayoutBlock.
+ * Walks the doc's block children and returns a flat array of layout items.
+ *
+ * Each node contributes according to the layout participation its spec
+ * declares (see `NodeLayout`): a `block` node contributes one item, a
+ * `transparent` node contributes none of its own and its children are
+ * collected into the enclosing flow instead.
+ *
+ * Lists and tables are expanded by name ahead of that, because their
+ * expansion is not merely transparent — they carry markers and column widths
+ * down to the items they produce.
  */
 export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutItem[] {
   const items: LayoutItem[] = [];
 
-  doc.forEach((node, offset) => {
-    if (node.type.name === "pageBreak") {
-      items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
-      return;
-    }
+  // `base` is the document position of `parent`'s first child, so a child at
+  // relative `offset` sits at `base + offset`.
+  const walk = (parent: Node, base: number): void => {
+    parent.forEach((node, relOffset) => {
+      const offset = base + relOffset;
 
-    // A section boundary affects the flow only when the next section must
-    // start on a fresh page. A continuous break is a pure model marker, and
-    // column geometry is read from the derived sections, not from here.
-    if (isSectionBreak(node)) {
-      const breakType = coerceSectionSettings(node.attrs["settings"]).breakType;
-      if (breakType !== "continuous") {
-        items.push({
-          isPageBreak: true,
-          pageBreakType: breakType,
-          node,
-          nodePos: offset,
-          indentLeft: 0,
-        });
+      if (node.type.name === "pageBreak") {
+        items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
+        return;
       }
-      return;
-    }
 
-    if (node.type.name === "bulletList" || node.type.name === "orderedList") {
-      const isBullet = node.type.name === "bulletList";
-      let itemIndex = (node.attrs["order"] as number) ?? 1;
+      // A section boundary affects the flow only when the next section must
+      // start on a fresh page. A continuous break is a pure model marker, and
+      // column geometry is read from the derived sections, not from here.
+      if (isSectionBreak(node)) {
+        const breakType = coerceSectionSettings(node.attrs["settings"]).breakType;
+        if (breakType !== "continuous") {
+          items.push({
+            isPageBreak: true,
+            pageBreakType: breakType,
+            node,
+            nodePos: offset,
+            indentLeft: 0,
+          });
+        }
+        return;
+      }
 
-      node.forEach((listItem, liOffset) => {
-        // nodePos of the paragraph inside this listItem:
-        // offset (before bulletList) + 1 (into bulletList) + liOffset (before listItem) + 1 (into listItem)
-        const paraNodePos = offset + 1 + liOffset + 1;
-        const para = listItem.firstChild;
-        if (!para) return;
+      if (node.type.name === "bulletList" || node.type.name === "orderedList") {
+        const isBullet = node.type.name === "bulletList";
+        let itemIndex = (node.attrs["order"] as number) ?? 1;
 
-        const marker = isBullet ? "•" : `${itemIndex}.`;
+        node.forEach((listItem, liOffset) => {
+          // nodePos of the paragraph inside this listItem:
+          // offset (before bulletList) + 1 (into bulletList) + liOffset (before listItem) + 1 (into listItem)
+          const paraNodePos = offset + 1 + liOffset + 1;
+          const para = listItem.firstChild;
+          if (!para) return;
 
-        items.push({
-          node: para,
-          nodePos: paraNodePos,
-          indentLeft: LIST_INDENT,
-          listMarker: marker,
-          styleKey: "list_item",
+          const marker = isBullet ? "•" : `${itemIndex}.`;
+
+          items.push({
+            node: para,
+            nodePos: paraNodePos,
+            indentLeft: LIST_INDENT,
+            listMarker: marker,
+            styleKey: "list_item",
+          });
+
+          itemIndex++;
         });
+        return;
+      }
 
-        itemIndex++;
-      });
-      return;
-    }
-
-    if (node.type.name === "table") {
-      // Tables expand into one item per row. Each row lays out as an atomic
-      // (leaf-like) block in v1 — whole row moves to the next page on
-      // overflow, no line-splitting across cells. Phase 4 replaces the
-      // stub row layout with sandboxed per-cell layout.
-      const gridAttr = node.attrs["grid"];
-      const tableColumns = Array.isArray(gridAttr)
-        ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
-        : [];
-      const lastRowIndex = node.childCount - 1;
-      node.forEach((rowNode, rowOffset, rowIndex) => {
-        const rowNodePos = offset + 1 + rowOffset;
-        items.push({
-          node: rowNode,
-          nodePos: rowNodePos,
-          indentLeft: 0,
-          tableColumns,
-          isLastRow: rowIndex === lastRowIndex,
+      if (node.type.name === "table") {
+        // Tables expand into one item per row. Each row lays out as an atomic
+        // (leaf-like) block in v1 — whole row moves to the next page on
+        // overflow, no line-splitting across cells. Phase 4 replaces the
+        // stub row layout with sandboxed per-cell layout.
+        const gridAttr = node.attrs["grid"];
+        const tableColumns = Array.isArray(gridAttr)
+          ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
+          : [];
+        const lastRowIndex = node.childCount - 1;
+        node.forEach((rowNode, rowOffset, rowIndex) => {
+          const rowNodePos = offset + 1 + rowOffset;
+          items.push({
+            node: rowNode,
+            nodePos: rowNodePos,
+            indentLeft: 0,
+            tableColumns,
+            isLastRow: rowIndex === lastRowIndex,
+          });
         });
-      });
-      return;
-    }
+        return;
+      }
 
-    const blockIndent = (node.attrs["indent"] as number) ?? 0;
-    items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
-  });
+      switch (nodeLayout(node.type).kind) {
+        case "transparent":
+          walk(node, offset + 1);
+          return;
+
+        case "block": {
+          const blockIndent = (node.attrs["indent"] as number) ?? 0;
+          items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
+          return;
+        }
+      }
+    });
+  };
+
+  walk(doc, 0);
 
   return items;
 }

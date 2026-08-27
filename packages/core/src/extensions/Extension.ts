@@ -136,6 +136,7 @@ export class Extension<Options extends object = object> {
       selectionGestures: config.addSelectionGesture?.call(p1) ?? [],
       inputHandlers: config.addInputHandlers?.call(p1) ?? {},
       markdownRules: config.addMarkdownRules?.call(p1) ?? [],
+      pasteTransforms: config.addPasteTransforms?.call(p1) ?? [],
       inputRules: schema ? (config.addInputRules?.call(p2) ?? []) : [],
       markdownParserTokens: config.addMarkdownParserTokens?.call(p1) ?? {},
       markdownSerializerRules: config.addMarkdownSerializerRules?.call(p1) ?? {},

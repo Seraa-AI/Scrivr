@@ -37,14 +37,14 @@ export const KeymapPriority = {
   default: 100,
 } as const;
 
-import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark } from "prosemirror-model";
+import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark, Slice } from "prosemirror-model";
 import type { MarkdownSerializer, MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
 import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
-import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
+import type { BlockStrategy, InlineStrategy, NodeLayout } from "../layout/BlockRegistry";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
@@ -63,6 +63,19 @@ import type {
   NodeActionContribution,
   ResolvedNodeAction,
 } from "../selection/types";
+
+// ── Node spec ─────────────────────────────────────────────────────────────────
+
+/**
+ * A ProseMirror node spec plus the Scrivr-side declarations that go with it.
+ *
+ * `layout` says how the node participates in the visual flow — a dimension
+ * independent of what it means in the document tree. Omit it and the node
+ * behaves as `{ kind: "block" }`, which is what every built-in node relies on.
+ */
+export type ScrivrNodeSpec = NodeSpec & {
+  layout?: NodeLayout;
+};
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
 
@@ -368,6 +381,12 @@ export interface MarkdownSerializerRules {
  *   createNode(match, schema) { return schema.nodes.horizontalRule?.create() ?? null; },
  * }
  */
+/**
+ * Rewrites a pasted slice before it is inserted. Contributed via
+ * `addPasteTransforms`; return the slice unchanged to decline.
+ */
+export type PasteTransform = (slice: Slice) => Slice;
+
 export interface MarkdownBlockRule {
   /** Tested against each trimmed line of pasted text. */
   pattern: RegExp;
@@ -626,7 +645,18 @@ export interface ExtensionConfig<Options = object> {
    */
   addExtensions?(this: Phase1Context<Options>): Extension[];
 
-  addNodes?(this: Phase1Context<Options>): Record<string, NodeSpec>;
+  /**
+   * Contribute ProseMirror node specs. Keys become schema node type names.
+   *
+   * Alongside the ProseMirror spec, a node declares how it participates in
+   * layout via `layout` (see `NodeLayout`) — a dimension independent of what
+   * the node means in the document tree. A node that occupies its own box is
+   * `{ kind: "block" }` (the default) and registers a painter through
+   * `addLayoutHandlers`. A node that exists structurally but has no visual box
+   * of its own is `{ kind: "transparent" }`: it stays in the tree, and its
+   * children are laid out into the enclosing flow as if it weren't there.
+   */
+  addNodes?(this: Phase1Context<Options>): Record<string, ScrivrNodeSpec>;
 
   /** Contribute ProseMirror mark specs. Keys become schema mark type names. */
   addMarks?(this: Phase1Context<Options>): Record<string, MarkSpec>;
@@ -855,6 +885,19 @@ export interface ExtensionConfig<Options = object> {
   addMarkdownRules?(this: Phase1Context<Options>): MarkdownBlockRule[];
 
   /**
+   * Rewrite pasted content before it enters the document.
+   *
+   * Runs in `PasteTransformer` on the parsed slice, whatever the clipboard
+   * flavour was — this is the engine's equivalent of ProseMirror's
+   * `transformPasted` view prop, which never fires here because Scrivr has no
+   * `EditorView`. Use it for anything that must not survive a copy verbatim:
+   * re-minting identity attrs, stripping host-specific state.
+   *
+   * Transforms run in registration order, each seeing the previous one's output.
+   */
+  addPasteTransforms?(this: Phase1Context<Options>): PasteTransform[];
+
+  /**
    * ProseMirror input rules (auto-format while typing).
    * Collected by ExtensionManager and wrapped in a single inputRules() plugin.
    * Phase 2 — schema is available via this.schema.
@@ -944,7 +987,7 @@ export interface ResolvedExtension {
   name: string;
   /** Resolved keybinding precedence. See `ExtensionConfig.keymapPriority`. */
   keymapPriority: number;
-  nodes: Record<string, NodeSpec>;
+  nodes: Record<string, ScrivrNodeSpec>;
   marks: Record<string, MarkSpec>;
   /**
    * Doc-level attribute contributions. See `ExtensionConfig.addDocAttrs`.
@@ -988,6 +1031,7 @@ export interface ResolvedExtension {
   selectionGestures: SelectionGestureProvider[];
   inputHandlers: Record<string, InputHandler>;
   markdownRules: MarkdownBlockRule[];
+  pasteTransforms: PasteTransform[];
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
   markdownSerializerRules: MarkdownSerializerRules;

@@ -13,6 +13,7 @@ import type {
   ToolbarItemSpec,
   InputHandler,
   MarkdownBlockRule,
+  PasteTransform,
   MarkdownParserTokenSpec,
   MarkdownSerializerRules,
   MarkdownNodeSerializer,
@@ -666,6 +667,14 @@ export class ExtensionManager {
    */
   buildMarkdownRules(): MarkdownBlockRule[] {
     return this.resolved.flatMap((ext) => ext.markdownRules);
+  }
+
+  /**
+   * All paste transforms from all extensions, in registration order.
+   * Passed to PasteTransformer, which applies them to every parsed slice.
+   */
+  buildPasteTransforms(): PasteTransform[] {
+    return this.resolved.flatMap((ext) => ext.pasteTransforms);
   }
 
   /**

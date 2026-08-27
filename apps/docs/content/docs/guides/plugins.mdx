@@ -104,25 +104,60 @@ After registration: `editor.commands.insertArrow()`.
 
 ### `addProseMirrorPlugins`
 
-Contributes low-level ProseMirror plugins for event handling or decorations.
+Contributes low-level ProseMirror plugins — plugin state, and transactions derived from other
+transactions.
 
 ```ts
 addProseMirrorPlugins() {
   return [
     new Plugin({
-      props: {
-        handleKeyDown(view, event) {
-          if (event.key === 'Tab') {
-            // custom tab handling
-            return true; // mark as handled
-          }
-          return false;
-        },
+      key: new PluginKey('myPlugin'),
+      state: {
+        init: () => ({ count: 0 }),
+        apply: (tr, value) => (tr.docChanged ? { count: value.count + 1 } : value),
+      },
+      // Enforce a document invariant after every change.
+      appendTransaction(transactions, oldState, newState) {
+        if (!transactions.some((tr) => tr.docChanged)) return null;
+        // ...return a transaction, or null to decline
+        return null;
       },
     }),
   ];
 },
 ```
+
+<Callout type="warn">
+  **`Plugin.spec.view()` and plugin `props` never run.** They are `prosemirror-view` hooks, and
+  Scrivr paints to canvas — there is no `EditorView` to call them. A plugin that puts its logic in
+  `view()`, `props.handleKeyDown`, `props.transformPasted` or `props.decorations` is silently
+  inert, and its tests pass because they call the function directly.
+
+  Use `appendTransaction` for document invariants, [`addKeymap`](#addkeymap) for keys,
+  [`addPasteTransforms`](#addpastetransforms) for paste, and `editor.addOverlayRenderHandler`
+  (from [`onEditorReady`](#oneditorready)) for anything you would have drawn with decorations.
+</Callout>
+
+---
+
+### `addPasteTransforms`
+
+Rewrites pasted content before it enters the document. `PasteTransformer` applies these to the
+parsed slice whatever the clipboard flavour was — HTML or markdown — so a transform sees the
+content exactly once.
+
+```ts
+addPasteTransforms() {
+  return [
+    (slice) => remintIdentityAttrs(slice),
+  ];
+},
+```
+
+Use it for anything that must not survive a copy verbatim: re-minting identity attributes so a
+pasted node is a new instance rather than a duplicate of the original, or stripping state that
+only made sense in the document it came from. Transforms run in registration order, each seeing
+the previous one's output; return the slice unchanged to decline.
 
 ---
 

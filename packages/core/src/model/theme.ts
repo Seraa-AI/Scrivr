@@ -65,6 +65,10 @@ export interface EditorTheme {
   // Image resize / drag handles
   /** Image resize handle stroke + fill (visible during image edit). */
   resizeHandle?: string;
+
+  // SourcedBlock visual indicator
+  /** Color of the vertical gutter line for diverged sourced blocks. */
+  divergedGutter?: string;
 }
 
 /**
@@ -88,6 +92,7 @@ export interface ResolvedTheme {
   listMarker: string;
   hrColor: string;
   resizeHandle: string;
+  divergedGutter: string;
 }
 
 /**
@@ -119,6 +124,7 @@ export const defaultEditorTheme: ResolvedTheme = Object.freeze({
   listMarker: "#1e293b",
   hrColor: "#cbd5e1",
   resizeHandle: "#3b82f6",
+  divergedGutter: "#fbbf24",
 });
 
 /**
@@ -142,6 +148,7 @@ export const defaultPdfTheme: ResolvedTheme = Object.freeze({
   listMarker: "#000000",
   hrColor: "#999999",
   resizeHandle: "#000000",
+  divergedGutter: "#fbbf24",
 });
 
 /**

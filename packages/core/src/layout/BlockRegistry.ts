@@ -1,4 +1,4 @@
-import type { Node } from "prosemirror-model";
+import type { Node, NodeType } from "prosemirror-model";
 import type { CharacterMap } from "./CharacterMap";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { LayoutBlock } from "./BlockLayout";
@@ -145,4 +145,50 @@ export class BlockRegistry {
   has(nodeTypeName: string): boolean {
     return this.strategies.has(nodeTypeName);
   }
+}
+
+// ── NodeLayout ────────────────────────────────────────────────────────────────
+
+/**
+ * How a node participates in layout — declared on its node spec, independent of
+ * what the node means in the document tree.
+ *
+ * These are two separate dimensions. A node can matter enormously to the model
+ * (identity, provenance, actions, lifecycle) and have no visual existence of
+ * its own; `sourcedBlock` is exactly that. Before this existed, the layout
+ * walker inferred participation from the node's *name* — lists and tables
+ * expanded, everything else was assumed to be a text block — so a new
+ * structural node either had to be added to that list or laid out as one empty
+ * line.
+ *
+ * - `block` — the node occupies its own box in the flow. Today its painter
+ *   comes from `addLayoutHandlers()`; the strategy is expected to move onto
+ *   this declaration, at which point the text-block fallback for undeclared
+ *   nodes can become an error instead of a guess.
+ * - `transparent` — the node contributes no box of its own. It stays in the
+ *   editor tree, but its children are collected into the parent's layout flow
+ *   as if the boundary weren't there.
+ */
+export type NodeLayout = { kind: "block" } | { kind: "transparent" };
+
+/** Layout for a node that declares nothing — its own box, painted by strategy. */
+export const DEFAULT_NODE_LAYOUT: NodeLayout = { kind: "block" };
+
+function isNodeLayout(value: unknown): value is NodeLayout {
+  if (typeof value !== "object" || value === null || !("kind" in value)) {
+    return false;
+  }
+  const { kind } = value;
+  return kind === "block" || kind === "transparent";
+}
+
+/**
+ * Read a node type's declared layout participation.
+ *
+ * Nodes that declare nothing default to `block`, which is what every built-in
+ * node was implicitly relying on before the declaration existed.
+ */
+export function nodeLayout(type: NodeType): NodeLayout {
+  const declared: unknown = type.spec["layout"];
+  return isNodeLayout(declared) ? declared : DEFAULT_NODE_LAYOUT;
 }

@@ -629,18 +629,18 @@ describe("importDocx — tables", () => {
 
 describe("importDocx — unsupported policy", () => {
   // Build a real exported DOCX, then surgically swap its document.xml to
-  // include an element the parser doesn't model (here: <w:sdt>, a content
-  // control). The rest of the package (Content_Types, rels, styles,
-  // numbering) stays valid so the only unusual thing is the body content.
+  // include an element the parser doesn't model (here: <w:oMath>).
+  // The rest of the package (Content_Types, rels, styles, numbering) 
+  // stays valid so the only unusual thing is the body content.
   async function buildDocWithUnsupportedElement(): Promise<Uint8Array> {
     const editor = new ServerEditor({ content: "anchor" });
     const bytes = await exportDocxBytes(editor);
     const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
     const entries = unzipSync(bytes);
     const original = strFromU8(entries["word/document.xml"]!);
-    const sdtXml =
-      "<w:sdt><w:sdtPr/><w:sdtContent><w:p><w:r><w:t>control</w:t></w:r></w:p></w:sdtContent></w:sdt>";
-    const swapped = original.replace("<w:sectPr", sdtXml + "<w:sectPr");
+    const oMathXml =
+      "<w:oMath><w:p><w:r><w:t>math</w:t></w:r></w:p></w:oMath>";
+    const swapped = original.replace("<w:sectPr", oMathXml + "<w:sectPr");
     const rebuilt: Record<string, Uint8Array> = {};
     for (const [path, data] of Object.entries(entries)) {
       rebuilt[path] = path === "word/document.xml" ? strToU8(swapped) : data;
@@ -653,7 +653,7 @@ describe("importDocx — unsupported policy", () => {
     const importer = new ServerEditor();
     const { diagnostics } = await importDocx(importer, bytes);
     const unsupported = diagnostics.find(
-      (d) => d.code === "unsupported-docx-element" && d.nodeType === "w:sdt",
+      (d) => d.code === "unsupported-docx-element" && d.nodeType === "w:oMath",
     );
     expect(unsupported).toBeDefined();
     expect(unsupported?.level).toBe("warning");
@@ -702,5 +702,37 @@ describe("importDocx — extension dispatch", () => {
     const run = para.child(0);
     expect(run.type.name).toBe("text");
     expect(run.marks.map((m) => m.type.name)).toEqual(["bold"]);
+  });
+
+  it("unwraps <w:sdt> content when no extension handles it", async () => {
+    async function buildDocWithSdtElement(): Promise<Uint8Array> {
+      const editor = new ServerEditor({ content: "anchor" });
+      const bytes = await exportDocxBytes(editor);
+      const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+      const entries = unzipSync(bytes);
+      const original = strFromU8(entries["word/document.xml"]!);
+      const sdtXml =
+        "<w:sdt><w:sdtPr><w:tag w:val=\"scrivr:sourcedBlock:instanceId=1\"/></w:sdtPr><w:sdtContent><w:p><w:r><w:t>control content</w:t></w:r></w:p></w:sdtContent></w:sdt>";
+      const swapped = original.replace("<w:sectPr", sdtXml + "<w:sectPr");
+      const rebuilt: Record<string, Uint8Array> = {};
+      for (const [path, data] of Object.entries(entries)) {
+        rebuilt[path] = path === "word/document.xml" ? strToU8(swapped) : data;
+      }
+      return zipSync(rebuilt);
+    }
+
+    const bytes = await buildDocWithSdtElement();
+    const importer = new ServerEditor();
+    const { doc } = await importDocx(importer, bytes);
+    
+    // We expect the sdt to degrade gracefully into its children, preserving the paragraph inside
+    let foundControlContent = false;
+    doc.descendants((node) => {
+      if (node.isText && node.text === "control content") {
+        foundControlContent = true;
+      }
+    });
+    
+    expect(foundControlContent).toBe(true);
   });
 });

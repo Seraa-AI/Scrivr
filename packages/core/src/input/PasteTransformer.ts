@@ -11,6 +11,7 @@ import MarkdownIt from "markdown-it";
 import type {
   MarkdownBlockRule,
   MarkdownParserTokenSpec,
+  PasteTransform,
 } from "../extensions/types";
 import { insertText } from "../model/commands";
 import { recloneDocumentIds } from "../model/assignBlockIds";
@@ -45,6 +46,12 @@ export interface PasteTransformerOptions {
    * one. The result still passes the URL gate before it is stored.
    */
   uploadImage?: (file: File) => Promise<string | null>;
+
+  /**
+   * Extension-contributed rewrites, applied to every parsed slice before it is
+   * inserted. Collected by `ExtensionManager.buildPasteTransforms()`.
+   */
+  pasteTransforms?: PasteTransform[];
 }
 
 /** A synchronous reservation followed by asynchronous image resolution. */
@@ -289,7 +296,9 @@ export class PasteTransformer {
       .map((line) =>
         paragraph.create(null, line ? this.schema.text(line) : null),
       );
-    return state.tr.replaceSelection(new Slice(Fragment.from(blocks), 1, 1));
+    return state.tr.replaceSelection(
+      this.applyPasteTransforms(new Slice(Fragment.from(blocks), 1, 1)),
+    );
   }
 
   /** HTML */
@@ -324,6 +333,8 @@ export class PasteTransformer {
       blockNodes.length ? blockNodes : doc.content,
     );
 
+    const slice = this.applyPasteTransforms(buildSlice(fragment, recorded));
+
     // When pasting into an empty paragraph, replace the whole paragraph so we
     // don't leave a stray empty paragraph before the inserted blocks. Openness
     // is irrelevant here — there is no surrounding text to merge with.
@@ -331,10 +342,28 @@ export class PasteTransformer {
     if ($from.depth >= 1 && $from.parent.content.size === 0) {
       const blockFrom = $from.before($from.depth);
       const blockTo = $from.after($from.depth);
-      return state.tr.replaceWith(blockFrom, blockTo, fragment);
+      return state.tr.replaceWith(blockFrom, blockTo, slice.content);
     }
 
-    return state.tr.replaceSelection(buildSlice(fragment, recorded));
+    return state.tr.replaceSelection(slice);
+  }
+
+  /**
+   * Run extension-contributed transforms over a parsed slice.
+   *
+   * Every clipboard flavour funnels through here, so a transform sees the
+   * content once regardless of whether it arrived as HTML, markdown or plain
+   * text. This is the seam that ProseMirror's `transformPasted` view prop would
+   * occupy in a DOM editor — Scrivr has no `EditorView`, so plugin props never
+   * run.
+   *
+   * Pasted image files do not pass through here: they arrive as bytes and
+   * become new nodes, not as document content carried over from somewhere else.
+   */
+  private applyPasteTransforms(slice: Slice): Slice {
+    let out = slice;
+    for (const transform of this.options.pasteTransforms ?? []) out = transform(out);
+    return out;
   }
 
   /** Markdown */
@@ -358,7 +387,9 @@ export class PasteTransformer {
         const parser = new MarkdownParser(this.schema, this.md, tokens);
         const doc = parser.parse(text);
         if (doc) {
-          return state.tr.replaceSelection(new Slice(doc.content, 0, 0));
+          return state.tr.replaceSelection(
+            this.applyPasteTransforms(new Slice(doc.content, 0, 0)),
+          );
         }
       } catch {
         // Unknown token or schema mismatch — fall through to legacy parser
@@ -368,7 +399,9 @@ export class PasteTransformer {
     // Legacy line-by-line parser (handles extension addMarkdownRules + built-in patterns)
     const nodes = this.parseMarkdownBlocks(text);
     if (nodes.length === 0) return insertText(state, text);
-    return state.tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0));
+    return state.tr.replaceSelection(
+      this.applyPasteTransforms(new Slice(Fragment.from(nodes), 0, 0)),
+    );
   }
 
   /** Legacy line-by-line parser */

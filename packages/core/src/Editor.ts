@@ -547,7 +547,10 @@ export class Editor extends BaseEditor implements IEditor {
 			this.manager.schema,
 			this.manager.buildMarkdownRules(),
 			this.manager.buildMarkdownParserTokens(),
-			uploadPastedImage ? { uploadImage: uploadPastedImage } : {},
+			{
+				pasteTransforms: this.manager.buildPasteTransforms(),
+				...(uploadPastedImage ? { uploadImage: uploadPastedImage } : {}),
+			},
 		);
 
 		this.ib = new InputBridge({
