@@ -59,3 +59,77 @@ jobs:
 
       - name: Check for changeset
         run: pnpm changeset status --since=origin/main
+
+  no-unintended-major:
+    name: No Unintended Major
+    runs-on: ubuntu-latest
+    # A deliberate major release opts in with the `major-release` label.
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'major-release') }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # A minor bump on @scrivr/core force-bumps every package that declares it
+      # as a peerDependency to MAJOR — changesets majors a peer dependent
+      # whenever the new version leaves the declared range, and `workspace:*`
+      # never satisfies a semver check, so it always reads as out of range. The
+      # `fixed` group then carries that major to all eight packages. That is how
+      # one `minor` changeset produced a 2.0.0 release plan.
+      - name: Release plan contains no major
+        run: |
+          pnpm changeset status --output=release-plan.json
+          node -e '
+            const plan = require("./release-plan.json");
+            const majors = plan.releases.filter((r) => r.type === "major");
+            if (majors.length === 0) process.exit(0);
+            console.error("Release plan bumps these packages to a new major:");
+            for (const r of majors) console.error(`  ${r.name} (${r.oldVersion} -> major)`);
+            console.error("\nIf that is intended, label the PR `major-release`.");
+            process.exit(1);
+          '
+
+      # The version PR carries no changesets — the bumps are already applied to
+      # package.json, so check those instead.
+      - name: Versioned packages stay on the same major
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          node -e '
+            const { execSync } = require("child_process");
+            const fs = require("fs");
+            const base = "origin/${{ github.base_ref }}";
+            const files = execSync(`git diff --name-only ${base}...HEAD -- "packages/*/package.json"`)
+              .toString().split("\n").filter(Boolean);
+            const bad = [];
+            for (const file of files) {
+              const next = JSON.parse(fs.readFileSync(file, "utf8"));
+              let prev;
+              try {
+                prev = JSON.parse(execSync(`git show ${base}:${file}`).toString());
+              } catch {
+                continue; // new package
+              }
+              const major = (v) => Number(v.split(".")[0]);
+              if (major(next.version) > major(prev.version)) {
+                bad.push(`  ${next.name}: ${prev.version} -> ${next.version}`);
+              }
+            }
+            if (bad.length === 0) process.exit(0);
+            console.error("These packages jump a major version:");
+            console.error(bad.join("\n"));
+            console.error("\nIf that is intended, label the PR `major-release`.");
+            process.exit(1);
+          '
