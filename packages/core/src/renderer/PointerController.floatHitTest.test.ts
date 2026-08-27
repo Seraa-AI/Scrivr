@@ -177,4 +177,45 @@ describe("clicking where an anchored image overlaps text", () => {
     h.hoverAt(float.x + float.width / 2, float.y + float.height / 2);
     expect(h.cursor()).toBe("move");
   });
+
+  it("behind: the cursor flips between text and move as the pointer crosses inside the image", () => {
+    const h = setup("behind");
+    clean = h.cleanup;
+
+    const float = h.float();
+    const overText = { x: float.x + float.width / 2, y: float.y + float.height / 2 };
+    expect(h.editor.charMap.hasTextAt(overText.x, overText.y, 1)).toBe(true);
+
+    // A point inside the same image where no text is painted.
+    let overImage: { x: number; y: number } | null = null;
+    for (let y = float.y + 2; y < float.y + float.height; y += 4) {
+      for (let x = float.x + float.width - 2; x > float.x; x -= 4) {
+        if (!h.editor.charMap.hasTextAt(x, y, 1)) { overImage = { x, y }; break; }
+      }
+      if (overImage) break;
+    }
+    expect(overImage).not.toBeNull();
+
+    // Both points are inside one image rect. The cursor still has to change
+    // between them, because ownership does — and it has to change back.
+    h.hoverAt(overText.x, overText.y);
+    expect(h.cursor()).toBe("text");
+    h.hoverAt(overImage!.x, overImage!.y);
+    expect(h.cursor()).toBe("move");
+    h.hoverAt(overText.x, overText.y);
+    expect(h.cursor()).toBe("text");
+  });
+
+  it("front: the cursor reads move over the image and text below it", () => {
+    const h = setup("front");
+    clean = h.cleanup;
+
+    const float = h.float();
+    h.hoverAt(float.x + float.width / 2, float.y + float.height / 2);
+    expect(h.cursor()).toBe("move");
+
+    // Below the float, on ordinary body text.
+    h.hoverAt(float.x + float.width / 2, float.y + float.height + 60);
+    expect(h.cursor()).toBe("text");
+  });
 });

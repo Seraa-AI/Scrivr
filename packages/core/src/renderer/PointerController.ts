@@ -6,10 +6,8 @@ import {
   hitHandle,
   computeNewSize,
 } from "./ResizeController";
-import {
-  compareAnchoredObjectHitOrder,
-  normalizeImageAttrs,
-} from "../layout/AnchoredObjects";
+import { normalizeImageAttrs } from "../layout/AnchoredObjects";
+import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
 import {
   pageLocalYToGlobalForMetrics,
   pageStartGlobalForMetrics,
@@ -152,6 +150,12 @@ export class PointerController {
    * instead of the built-in text/image handling. Transient — never editor state.
    */
   private activeGesture: SelectionGesture | null = null;
+  /**
+   * Cursor currently written to the DOM. Pointer moves fire continuously and
+   * most of them stay inside one region; re-writing the same value on every
+   * one of them is pure style churn.
+   */
+  private appliedCursor: string | null = null;
 
   constructor(private readonly deps: PointerControllerDeps) {}
 
@@ -330,49 +334,39 @@ export class PointerController {
     return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
   }
 
-  /** Does this doc position hold an anchored object on this page? */
-  private isAnchoredObjectAt(docPos: number, page: number): boolean {
-    const objects = this.deps.editor.layout.anchoredObjects;
-    if (!objects) return false;
-    return objects.some((object) => object.docPos === docPos && object.page === page);
+  /**
+   * Who owns this point — the one answer click routing, hover and drags all
+   * read, so they cannot disagree about it. See `resolvePointOwner`.
+   */
+  private ownerAt(docX: number, docY: number, page: number): PointOwner {
+    const { editor } = this.deps;
+    return resolvePointOwner(docX, docY, page, {
+      anchoredObjects: editor.layout.anchoredObjects ?? [],
+      hasTextAt: (x, y, p) => editor.charMap.hasTextAt(x, y, p),
+      objectRectAt: (x, y, p) => editor.charMap.objectRectAtPoint(x, y, p),
+    });
   }
 
-  private hitAnchoredAt(canvasX: number, canvasY: number, page: number) {
-    const objects = this.deps.editor.layout.anchoredObjects;
-    if (!objects) return null;
-    const pageObjects = objects
-      .filter((object) => object.page === page)
-      .sort(compareAnchoredObjectHitOrder);
-    for (const object of pageObjects) {
-      const inside =
-        canvasX >= object.x &&
-        canvasX <= object.x + object.width &&
-        canvasY >= object.y &&
-        canvasY <= object.y + object.height;
-      if (!inside) continue;
+  /**
+   * The cursor for a hover position: a resize handle's own cursor, `move` over
+   * something draggable, `text` over the page, `default` off it.
+   *
+   * Resize handles sit above ownership — they are chrome painted over the
+   * selected node, not part of the page.
+   */
+  private hoverCursorFor(
+    hit: { docX: number; docY: number; page: number } | null,
+  ): string {
+    if (!hit) return "default";
 
-      // Z-order decides who owns the point. `behind` paints under the body, so
-      // wherever there is text the text takes the click; the image is still
-      // grabbable through the gaps between lines and around short ones. Every
-      // other mode is either on top of the text (`front`) or in space the text
-      // was pushed out of (`square`, `top-bottom`), so the object wins there.
-      //
-      // Without this, clicking a word that happens to sit over a behind image
-      // node-selects the image, and the next keystroke edits at the image's
-      // anchor instead of the sentence the reader was pointing at — Enter then
-      // splits at the anchor, which looks like nothing happened and leaves an
-      // empty paragraph behind.
-      if (
-        object.wrapMode === "behind" &&
-        this.deps.editor.charMap.hasTextAt(canvasX, canvasY, page)
-      ) {
-        continue;
-      }
+    const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
+    if (resizeHit) return resizeHit.cursor;
 
-      return object;
-    }
-    return null;
+    return this.ownerAt(hit.docX, hit.docY, hit.page).kind === "text"
+      ? "text"
+      : "move";
   }
+
 
   // ── Pointer events ──────────────────────────────────────────────────────────
 
@@ -464,7 +458,10 @@ export class PointerController {
     // horizontal movement updates `xAlign: "custom"` + `x`; vertical
     // movement updates the docPos. Diagonal drag commits both atomically
     // via Editor.moveAndUpdateNode.
-    const anchoredHit = this.hitAnchoredAt(docX, docY, page);
+    // Resolved once for this pointerdown and reused below, so the anchored and
+    // inline branches cannot reach different conclusions about the same point.
+    const owner = this.ownerAt(docX, docY, page);
+    const anchoredHit = owner.kind === "anchored" ? owner.object : null;
     if (anchoredHit) {
       if (editor.readOnly) return;
       editor.selectNode(anchoredHit.docPos);
@@ -526,15 +523,9 @@ export class PointerController {
 
     if (!e.shiftKey) {
       // Click physically inside an inline image's rect → select the image.
-      //
-      // Anchored objects are registered in the same rect map (getNodeViewportRect
-      // and the resize handles need their bounds), but their pointer semantics
-      // were already settled above by `hitAnchoredAt`, Z-order included. Falling
-      // through to here would re-select a `behind` float that just deliberately
-      // yielded the click to the text painted over it.
       if (!editor.readOnly) {
-        const imageHit = editor.charMap.objectRectAtPoint(docX, docY, page);
-        if (imageHit && !this.isAnchoredObjectAt(imageHit.docPos, page)) {
+        const imageHit = owner.kind === "inlineObject" ? owner.rect : null;
+        if (imageHit) {
           editor.selectNode(imageHit.docPos);
           const node = editor.getState().doc.nodeAt(imageHit.docPos);
           if (node) {
@@ -632,28 +623,12 @@ export class PointerController {
       return;
     }
 
-    // Hover cursor
+    // Hover cursor — resolved on every move, including moves that leave the
+    // page. Skipping the update when nothing is hit left the last cursor
+    // frozen on screen, so crossing from text to image (or off the page
+    // entirely) kept promising whatever the previous position offered.
     const hit = this.hitTest(e.clientX, e.clientY);
-    if (hit) {
-      const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
-      const anchoredHit =
-        !resizeHit && this.hitAnchoredAt(hit.docX, hit.docY, hit.page);
-      // Same rule as pointerdown: anchored objects are decided by
-      // `hitAnchoredAt` alone. Their rects live in the inline map too, so
-      // without this filter the cursor would read "move" over text that a
-      // `behind` float yields the click to — an affordance promising a drag
-      // that a click then refuses to start.
-      const inlineRectHit =
-        !resizeHit && !anchoredHit
-          ? editor.charMap.objectRectAtPoint(hit.docX, hit.docY, hit.page)
-          : undefined;
-      const inlineImageHit =
-        inlineRectHit && !this.isAnchoredObjectAt(inlineRectHit.docPos, hit.page)
-          ? inlineRectHit
-          : undefined;
-      const cursor = resizeHit ? resizeHit.cursor : anchoredHit || inlineImageHit ? "move" : "text";
-      this.setCursorAll(cursor);
-    }
+    this.setCursorAll(this.hoverCursorFor(hit));
 
     // Text selection drag
     if (!this.isDragging || !hit) return;
@@ -1292,6 +1267,8 @@ export class PointerController {
   }
 
   private setCursorAll(cursor: string): void {
+    if (cursor === this.appliedCursor) return;
+    this.appliedCursor = cursor;
     this.deps.tilesContainer.style.cursor = cursor;
     for (const entry of this.deps.pool) {
       entry.wrapper.style.cursor = cursor;

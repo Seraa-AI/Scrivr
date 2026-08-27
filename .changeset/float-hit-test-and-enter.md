@@ -24,10 +24,15 @@ wherever text is painted and stays grabbable through the gaps; `front`,
 `square` and `top-bottom` keep the point themselves. The hover cursor follows
 the same rule, so the affordance matches what the click will do.
 
-- **`@scrivr/core`** — `PointerController` resolves anchored objects in exactly
-  one place; the inline-image click and hover paths no longer re-claim an
-  anchored rect that hit-testing deliberately passed over. New
-  `CharacterMap.hasTextAt(x, y, page)` answers "is text painted here".
+- **`@scrivr/core`** — new `resolvePointOwner()` owns the rule. Click routing,
+  hover cursors and drags all read one answer, so they cannot disagree about a
+  point; the three call sites that each re-derived it are gone. It is a pure
+  function over placements, text lines and object rects, so the rule is tested
+  without a document, a canvas or a DOM. New `CharacterMap.hasTextAt()` answers
+  "is text painted here", the one primitive the rule needs.
+- **`@scrivr/core`** — the hover cursor is resolved from that same answer, so it
+  stops reading `move` over text a `behind` float yields to. Redundant cursor
+  writes are skipped, since pointer moves mostly stay inside one region.
 - **`@scrivr/core`** — Enter with an anchored object selected does nothing
   rather than splitting at its anchor. An inline image still splits, because it
   is content in the sentence.
