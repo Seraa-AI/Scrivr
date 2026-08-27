@@ -29,6 +29,20 @@ export { PageBreak } from "./built-in/PageBreak";
 export { Sections } from "./built-in/Sections";
 export { Table } from "./built-in/Table";
 export { SourcedBlockExtension } from "./built-in/SourcedBlock";
+// Reconciliation is the host's job — it owns the trigger (there is no safe one
+// under collaborative editing), core only supplies the pure parts: read the
+// provenance out of a document, recompute a content hash to compare against a
+// source, and read which instances have drifted.
+export {
+  collectSourcedBlocks,
+  computeBlockHash,
+  sourcedBlockDivergenceKey,
+  NORMALIZER_VERSION,
+} from "./built-in/SourcedBlock";
+export type {
+  SourcedBlockRecord,
+  SourcedBlockDivergenceState,
+} from "./built-in/SourcedBlock";
 export { UniqueId, findNodeById, COLLAB_SYNC_META } from "./built-in/UniqueId";
 export { ClearFormatting } from "./built-in/ClearFormatting";
 export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultContent";
