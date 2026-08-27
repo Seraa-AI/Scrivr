@@ -7,7 +7,7 @@ import {
 	type EditorState,
 	type Transaction,
 } from "prosemirror-state";
-import type { CloneHandler, IEditor } from "../types";
+import type { CloneHandler, IBaseEditor, IEditor } from "../types";
 import type {
 	NodeActionContext,
 	NodeActionContribution,
@@ -44,6 +44,16 @@ export interface SourcedBlockEvent {
 	kind: string;
 }
 
+/**
+ * A block's relationship to its source changed.
+ *
+ * The two facts have different owners. `modified` is the document's: the editor
+ * hashes the block's content and compares it to the base it was inserted with.
+ * `outdated` is the library's — whether the source moved on past `versionId` is
+ * not knowable from this document, so the host sets it (from a server check, or
+ * from a collaborator who ran one) via `setSourcedBlockOutdated`, and the
+ * editor stores and relays it rather than guessing.
+ */
 export interface SourcedBlockChangedEvent extends SourcedBlockEvent {
 	modified: boolean;
 	outdated: boolean;
@@ -283,6 +293,18 @@ declare module "@scrivr/core" {
 				kind: string;
 				content: SourceContent;
 			}) => ReturnType;
+			/**
+			 * Record which instances hold a version their source has moved past
+			 * — the host's answer, stored on the blocks so collaborators and
+			 * reloads see it too. Takes a list because a library check answers
+			 * for every instance at once, and one transaction means one undo
+			 * step and one repaint. Pass `outdated: false` to clear them after
+			 * an update. Ids not in the document are ignored.
+			 */
+			setSourcedBlocksOutdated: (options: {
+				instanceIds: readonly string[];
+				outdated: boolean;
+			}) => ReturnType;
 		};
 	}
 }
@@ -365,6 +387,8 @@ export interface SourcedBlockRecord {
 	versionId: string | null;
 	baseHash: string | null;
 	baseNormalizer: number | null;
+	/** Host-set: the source moved on past `versionId`. */
+	outdated: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -397,6 +421,7 @@ export function collectSourcedBlocks(doc: Node): SourcedBlockRecord[] {
 				versionId: parseStringOrNull(attrs["versionId"]),
 				baseHash: parseStringOrNull(attrs["baseHash"]),
 				baseNormalizer: parseNumberOrNull(attrs["baseNormalizer"]),
+				outdated: attrs["outdated"] === true,
 			});
 		}
 
@@ -426,6 +451,13 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					versionId: { default: null },
 					baseHash: { default: null },
 					baseNormalizer: { default: null },
+					/**
+					 * Set by the host when it learns the source has moved on
+					 * past `versionId`. An attr rather than plugin state so it
+					 * syncs to collaborators and survives a reload: one peer
+					 * runs the check, everyone sees the result.
+					 */
+					outdated: { default: false },
 				},
 				parseDOM: [
 					{
@@ -444,6 +476,8 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 								baseNormalizer: normalizerAttr
 									? parseInt(normalizerAttr, 10)
 									: 1,
+								outdated:
+									dom.getAttribute("data-outdated") === "true",
 							};
 						},
 					},
@@ -460,6 +494,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 							"data-base-hash": node.attrs["baseHash"],
 							"data-base-normalizer":
 								node.attrs["baseNormalizer"],
+							"data-outdated": String(node.attrs["outdated"] === true),
 						},
 						0,
 					];
@@ -470,6 +505,39 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 
 	addCommands() {
 		return {
+			setSourcedBlocksOutdated:
+				(options: { instanceIds: readonly string[]; outdated: boolean }) =>
+				(state, dispatch) => {
+					const wanted = new Set(options.instanceIds);
+					if (wanted.size === 0) return false;
+
+					const targets: Array<{ pos: number; node: Node }> = [];
+					state.doc.descendants((node, pos) => {
+						if (node.type.name !== "sourcedBlock") return true;
+						const id = instanceIdOf(node);
+						if (id && wanted.has(id) && node.attrs["outdated"] !== options.outdated) {
+							targets.push({ pos, node });
+						}
+						return false;
+					});
+					if (targets.length === 0) return false;
+
+					if (dispatch) {
+						const tr = state.tr;
+						for (const { pos, node } of targets) {
+							// Positions come from the pre-write document and
+							// setNodeMarkup does not resize the node, so no
+							// mapping is needed — unlike the unwrap paths.
+							tr.setNodeMarkup(pos, undefined, {
+								...node.attrs,
+								outdated: options.outdated,
+							});
+						}
+						dispatch(tr);
+					}
+					return true;
+				},
+
 			insertSourcedBlock:
 				(options: { kind: string; content: SourceContent }) =>
 				(state, dispatch) => {
@@ -539,6 +607,72 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					}
 				},
 		};
+	},
+
+	/**
+	 * Tell the provider when a block's relationship to its source changes, so a
+	 * host can persist it without polling the document.
+	 *
+	 * Both facts are watched: `modified`, computed from plugin state, and
+	 * `outdated`, read from the attr the host set. Divergence is computed in
+	 * plugin state, which must stay pure, so this observes the result rather
+	 * than firing from inside it. Whatever is true when the editor opens is the
+	 * baseline, not news — a document loaded with three already-edited clauses
+	 * should not fire three writes on open.
+	 */
+	onEditorReady(editor: IBaseEditor) {
+		const providers = this.options.providers ?? [];
+		if (!providers.some(provider => provider.onInstanceChanged)) return;
+
+		const snapshot = (): Map<string, SourcedBlockChangedEvent> => {
+			const state = editor.getState();
+			const diverged =
+				sourcedBlockDivergenceKey.getState(state)?.diverged ?? new Set<string>();
+			const byInstance = new Map<string, SourcedBlockChangedEvent>();
+			for (const record of collectSourcedBlocks(state.doc)) {
+				if (!record.instanceId || !record.resourceId || !record.kind) continue;
+				byInstance.set(record.instanceId, {
+					instanceId: record.instanceId,
+					resourceId: record.resourceId,
+					versionId: record.versionId ?? "",
+					kind: record.kind,
+					modified: diverged.has(record.instanceId),
+					outdated: record.outdated,
+				});
+			}
+			return byInstance;
+		};
+
+		let previous = snapshot();
+
+		return editor.on("update", ({ docChanged }) => {
+			if (!docChanged) return;
+
+			const current = snapshot();
+			const changed: SourcedBlockChangedEvent[] = [];
+			for (const [instanceId, event] of current) {
+				const before = previous.get(instanceId);
+				// A block that just appeared is reported only if it arrives
+				// already off its source — pasting a clean clause is not news.
+				if (!before) {
+					if (event.modified || event.outdated) changed.push(event);
+					continue;
+				}
+				if (before.modified !== event.modified || before.outdated !== event.outdated) {
+					changed.push(event);
+				}
+			}
+			previous = current;
+
+			for (const event of changed) {
+				const provider = providers.find(candidate => candidate.kind === event.kind);
+				if (!provider?.onInstanceChanged) continue;
+				void provider.onInstanceChanged(event).catch((error: unknown) => {
+					// A host that throws here must not take the editor with it.
+					console.error("[SourcedBlock] onInstanceChanged failed:", error);
+				});
+			}
+		});
 	},
 
 	onViewReady(editor: IEditor) {
