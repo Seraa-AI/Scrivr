@@ -1,6 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
+// Imported through the package barrel on purpose: these are the types a host
+// implements against, and `tsc` fails here the moment the barrel stops
+// exporting one. The gap this test file was written for was exactly that —
+// helpers reachable, the provider contract not.
+import type {
+  SourceProvider as PublicSourceProvider,
+  SourceContent as PublicSourceContent,
+  SourceSearchResult as PublicSourceSearchResult,
+  SourceCapability as PublicSourceCapability,
+  SourcedBlockEvent as PublicSourcedBlockEvent,
+  SourcedBlockChangedEvent as PublicSourcedBlockChangedEvent,
+  SourcedBlockRecord as PublicSourcedBlockRecord,
+  SourcedBlockDivergenceState as PublicSourcedBlockDivergenceState,
+} from "../../index";
 import {
   SourcedBlockExtension,
   collectSourcedBlocks,
@@ -19,6 +33,18 @@ import {
  * is a question about the library — so the host answers it and the editor
  * stores the answer on the block, where collaborators and reloads can see it.
  */
+
+/** The host-facing surface, as a consumer sees it. */
+export type PublicSurface = [
+  PublicSourceProvider,
+  PublicSourceContent,
+  PublicSourceSearchResult,
+  PublicSourceCapability,
+  PublicSourcedBlockEvent,
+  PublicSourcedBlockChangedEvent,
+  PublicSourcedBlockRecord,
+  PublicSourcedBlockDivergenceState,
+];
 
 function blockJSON(instanceId: string, text: string, attrs: Record<string, unknown> = {}) {
   return {

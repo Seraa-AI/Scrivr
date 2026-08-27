@@ -19,9 +19,13 @@ which instances have drifted — was never exported, and the provider callback
 for drift never fired.
 
 - **`@scrivr/core`** — `collectSourcedBlocks`, `computeBlockHash`,
-  `sourcedBlockDivergenceKey`, `NORMALIZER_VERSION` and their types are now
-  exported. Reconciliation stays the host's to trigger (there is no safe
-  trigger under collaborative editing); core supplies the pure parts.
+  `sourcedBlockDivergenceKey` and `NORMALIZER_VERSION` are now exported, along
+  with the provider contract a host implements against: `SourceProvider`,
+  `SourceContent`, `SourceSearchResult`, `SourceCapability`,
+  `SourcedBlockEvent`, `SourcedBlockChangedEvent`, `SourcedBlockOptions`,
+  `SourcedBlockRecord`, `SourcedBlockDivergenceState`. Reconciliation stays the
+  host's to trigger (there is no safe trigger under collaborative editing);
+  core supplies the pure parts.
 - **`@scrivr/core`** — `SourceProvider.onInstanceChanged` now fires. It reports
   both facts and says which is which: `modified` is the document's, computed by
   hashing content against the base it was inserted with; `outdated` is the

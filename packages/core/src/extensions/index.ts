@@ -39,7 +39,15 @@ export {
   sourcedBlockDivergenceKey,
   NORMALIZER_VERSION,
 } from "./built-in/SourcedBlock";
+// The provider contract a host implements, and the events it is handed.
 export type {
+  SourceProvider,
+  SourceContent,
+  SourceSearchResult,
+  SourceCapability,
+  SourcedBlockEvent,
+  SourcedBlockChangedEvent,
+  SourcedBlockOptions,
   SourcedBlockRecord,
   SourcedBlockDivergenceState,
 } from "./built-in/SourcedBlock";
