@@ -89,9 +89,12 @@ jobs:
       # never satisfies a semver check, so it always reads as out of range. The
       # `fixed` group then carries that major to all eight packages. That is how
       # one `minor` changeset produced a 2.0.0 release plan.
+      # `changeset status` resolves the config's `baseBranch` as a local ref,
+      # which a PR checkout does not have — pass the remote ref explicitly, the
+      # way the Changeset Check job above already does.
       - name: Release plan contains no major
         run: |
-          pnpm changeset status --output=release-plan.json
+          pnpm changeset status --since=origin/main --output=release-plan.json
           node -e '
             const plan = require("./release-plan.json");
             const majors = plan.releases.filter((r) => r.type === "major");
