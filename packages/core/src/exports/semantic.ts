@@ -24,6 +24,7 @@ export type SemanticUnitType =
   | "image"
   | "horizontalRule"
   | "pageBreak"
+  | "sectionBreak"
   | "unknown";
 
 /** Structural role of a unit. Body-only in v1; header/footer reserved. */

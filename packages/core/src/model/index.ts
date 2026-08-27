@@ -35,3 +35,26 @@ export type {
   NormalizeWarningCode,
 } from "./normalizeDocument";
 export { getNodeAttrs, getMarkAttrs } from "./getNodeAttrs";
+export {
+  DEFAULT_SECTION_COLUMNS,
+  DEFAULT_SECTION_SETTINGS,
+  FINAL_SECTION_ID,
+  SECTION_BREAK_TYPES,
+  applySectionSettingsPatch,
+  coerceSectionSettings,
+  deriveSections,
+  findSectionById,
+  isSectionBreak,
+  isSectionBreakType,
+  isSectionColumns,
+  isSectionSettings,
+  previousSection,
+  sectionAt,
+} from "./sections";
+export type {
+  Section,
+  SectionBreakType,
+  SectionColumns,
+  SectionSettings,
+  SectionSettingsPatch,
+} from "./sections";

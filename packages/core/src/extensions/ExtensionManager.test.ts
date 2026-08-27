@@ -505,8 +505,12 @@ describe("ExtensionManager", () => {
     it("returns the attr name and owner when one extension contributes", () => {
       const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
       const manager = new ExtensionManager([StarterKit, HeaderFooter]);
-      expect(manager.getDocAttrNames()).toEqual(["headerFooter"]);
-      expect(manager.getDocAttrOwners()).toEqual({ headerFooter: "headerFooter" });
+      // StarterKit itself contributes `finalSection` (the Sections extension).
+      expect(manager.getDocAttrNames().sort()).toEqual(["finalSection", "headerFooter"]);
+      expect(manager.getDocAttrOwners()).toEqual({
+        finalSection: "sections",
+        headerFooter: "headerFooter",
+      });
     });
 
     it("returns every contributed attr across extensions", () => {
@@ -516,9 +520,10 @@ describe("ExtensionManager", () => {
       const manager = new ExtensionManager([StarterKit, HeaderFooter, Footnotes, TrackChanges]);
 
       expect(manager.getDocAttrNames().sort()).toEqual(
-        ["footnotes", "headerFooter", "trackChanges"].sort(),
+        ["finalSection", "footnotes", "headerFooter", "trackChanges"].sort(),
       );
       expect(manager.getDocAttrOwners()).toEqual({
+        finalSection: "sections",
         headerFooter: "headerFooter",
         footnotes: "footnotes",
         trackChanges: "trackChanges",
@@ -530,7 +535,10 @@ describe("ExtensionManager", () => {
       // the extension that actually contributed, not the attr name.
       const Headered = makeDocAttrContributor("myHeaderPlugin", "headerFooter", null);
       const manager = new ExtensionManager([StarterKit, Headered]);
-      expect(manager.getDocAttrOwners()).toEqual({ headerFooter: "myHeaderPlugin" });
+      expect(manager.getDocAttrOwners()).toEqual({
+        finalSection: "sections",
+        headerFooter: "myHeaderPlugin",
+      });
     });
 
     it("returns a defensive copy — mutating the result does not affect the manager", () => {
@@ -559,11 +567,13 @@ describe("ExtensionManager", () => {
     it("ServerEditor.getDocAttrNames() returns names declared by extensions", () => {
       const HeaderFooter = makeDocAttrContributor("headerFooter", "headerFooter", null);
       const editor = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
-      expect(editor.getDocAttrNames()).toEqual(["headerFooter"]);
+      expect(editor.getDocAttrNames().sort()).toEqual(["finalSection", "headerFooter"]);
     });
 
     it("ServerEditor.getDocAttrNames() is empty when no extension contributes", () => {
-      const editor = new ServerEditor({ extensions: [StarterKit] });
+      const editor = new ServerEditor({
+        extensions: [StarterKit.configure({ sections: false })],
+      });
       expect(editor.getDocAttrNames()).toEqual([]);
     });
   });

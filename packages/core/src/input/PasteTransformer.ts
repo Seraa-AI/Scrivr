@@ -13,6 +13,7 @@ import type {
   MarkdownParserTokenSpec,
 } from "../extensions/types";
 import { insertText } from "../model/commands";
+import { recloneDocumentIds } from "../model/assignBlockIds";
 import { SLICE_DATA_ATTR } from "./ClipboardSerializer";
 import { safeImageUrl } from "../model/safeUrl";
 
@@ -306,9 +307,12 @@ export class PasteTransformer {
     // Whitespace in our own slice is document content — "big " copied with its
     // trailing space must paste back with it. Foreign HTML gets the usual
     // collapsing, where that space is only markup formatting.
-    const doc = PMDOMParser.fromSchema(this.schema).parse(div, {
+    const parsed = PMDOMParser.fromSchema(this.schema).parse(div, {
       preserveWhitespace: recorded !== null,
     });
+    // Clipboard paste is a clone boundary. Persistent structural IDs identify
+    // the source nodes and must never be duplicated into the destination doc.
+    const doc = recloneDocumentIds(parsed).doc;
 
     // Collect only block-level nodes. parse() may produce inline nodes (e.g.
     // hardBreak) at the document level from Google Docs' trailing <br> tags.
