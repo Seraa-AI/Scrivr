@@ -1,5 +1,193 @@
 # @scrivr/core
 
+## 1.0.19
+
+### Patch Changes
+
+- 15dbf0c: **`@scrivr/core/pm` — one ProseMirror instance for the whole stack**
+
+  `@scrivr/core` now publishes a `./pm` subpath that re-exports the ProseMirror surface Scrivr is
+  built on: `prosemirror-model`, `-state`, `-transform`, `-commands`, `-keymap`, `-history`,
+  `-inputrules`, `-schema-list`, `-markdown`.
+
+  Extensions and downstream packages import from `@scrivr/core/pm` instead of the `prosemirror-*`
+  packages directly, so they run against the same instance as the engine — the `instanceof` checks
+  on `Node`, `Slice`, `Selection` and `Plugin` that the engine relies on can no longer be broken by
+  a duplicate copy of `prosemirror-model` in the dependency tree. `prosemirror-view` is
+  deliberately absent: there is no `EditorView` in Scrivr, so view-only hooks never run.
+
+  - **`@scrivr/core`** — new `./pm` entry point (ESM + CJS + types). No change to the main barrel.
+  - **`@scrivr/ai`, `@scrivr/docx`, `@scrivr/export-pdf`, `@scrivr/export-semantic`,
+    `@scrivr/plugins`** — source imports moved to `@scrivr/core/pm`; direct `prosemirror-*`
+    dependencies and peer ranges dropped. `@scrivr/ai` no longer declares any peer dependencies;
+    `@scrivr/plugins` keeps `prosemirror-model`/`-state` peers only because `y-prosemirror` requires
+    them, not for its own code.
+  - **`@scrivr/export-markdown`** — dropped an unused `prosemirror-markdown` dependency.
+  - **`@scrivr/export`, `@scrivr/react`** — version alignment only.
+
+- fc33e99: **Hyperlinks survive DOCX export**
+
+  A document exported to Word lost every hyperlink. The text came through, the
+  link did not, and the export logged an `unsupported-mark` warning that no UI
+  surfaces — so the first sign of it was a Word file where nothing was clickable.
+
+  - **`@scrivr/core`** — new `DocxRunWrapper` contribution kind, and
+    `DocxHandlers.markWrappers`. `DocxMarkHandler` contributes run _properties_,
+    which is all bold or colour need; OOXML expresses a hyperlink as a
+    `<w:hyperlink>` element wrapping the runs and carrying a relationship id, so
+    no run property can produce one. That is why `Link` had no export handler at
+    all rather than a broken one.
+  - **`@scrivr/core`** — `Link` now contributes both halves: the wrapper that
+    registers the relationship through the existing `ctx.rels.addHyperlink()`,
+    and Word's built-in Hyperlink character style so the link looks like one. A
+    link with no usable href stays styled text rather than emitting a `r:id` for
+    a relationship that was never registered, which produces a file Word refuses
+    to open.
+  - **`@scrivr/docx`** — the walker applies wrapping marks around the run it just
+    built, in the order the marks appear on the text, so two wrapping marks nest
+    predictably.
+
+- 87198ec: **Sourced Blocks**
+
+  A new end-to-end system for embedding, tracking, and updating content blocks (such as clauses or definitions) that originate from an external library or provider.
+
+  - **`SourcedBlock` Extension (`@scrivr/core`)** — A generic node wrapper that retains source metadata (`instanceId`, `kind`, `resourceId`, `versionId`, and `baseHash`). It leverages a new `insertSourcedBlock` command to seamlessly request and insert content from registered `SourceProvider` implementations.
+  - **Divergence Detection (`@scrivr/core`)** — A built-in plugin hashes block content and compares it against the `baseHash` to detect if the local content has drifted from the source. Diverged blocks are visually indicated using a new `divergedGutter` theme property.
+  - **Node Actions (`@scrivr/core`)** — Includes built-in Node Actions for Sourced Blocks, providing "Update to Latest", "Discard Local Edits" and "Detach from Library" capabilities based on user permissions.
+  - **`layout` node spec declaration (`@scrivr/core`)** — Nodes now declare how they participate in layout, independent of what they mean in the document tree: `{ kind: "block" }` (the default — the node occupies its own box) or `{ kind: "transparent" }` (the node stays in the tree but contributes no box; its children lay out into the enclosing flow). Previously layout participation was inferred from the node's name — lists and tables expanded, everything else was assumed to be a text block — so a structural node like `sourcedBlock` laid out as a single empty line and never painted its content. The painter for a `block` node still comes from `addLayoutHandlers()`; folding the strategy into this declaration, and turning the text-block fallback into an error for undeclared nodes, is the next step.
+  - **`addPasteTransforms()` (`@scrivr/core`)** — New extension seam for rewriting pasted content before it enters the document, applied by `PasteTransformer` to every clipboard flavour. This is the engine's equivalent of ProseMirror's `transformPasted` view prop, which never fires because Scrivr has no `EditorView`. Sourced blocks use it to re-mint `instanceId` so a pasted block is a second instance rather than a duplicate identity.
+  - **DOCX Interoperability (`@scrivr/docx`)** — Sourced Blocks seamlessly round-trip through MS Word using `<w:sdt>` (Structured Document Tag) content controls. Source metadata is encoded in the `w:tag` attribute, meaning blocks retain their provenance even after being edited in Word. Provenance that would exceed the 255-character OOXML limit for `w:tag` is dropped with an export diagnostic rather than producing a file Word rejects.
+  - **Semantic Mapping (`@scrivr/core`)** — Ensures Sourced Blocks preserve their boundaries and metadata when processed for semantic analysis.
+
+- 81f1b00: **Node Actions Support**
+
+  Extensions can now contribute contextual operations for the UI to render (e.g., context menus, node gutters) based on the current selection.
+
+  - **`addNodeActions()`** — introduced in the `Extension` contract. Extensions declare what actions they support for a given selection `kind`, moving action definition away from hand-written UI factories into the extensions themselves.
+  - **`NodeActionRegistry`** — resolves, deduplicates, and sorts node actions dynamically against the active selection context during render.
+  - **`IEditor.getNodeActions()` and `IEditor.runNodeAction(id)`** — new API surface exposing resolved actions to the UI, allowing it to seamlessly render and execute actions by ID.
+  - **`buildNodeActions()`** — implemented in `ExtensionManager` to aggregate these contributions across all loaded extensions.
+
+  The built-in `Image` extension has been updated to provide a placeholder node action as a proof of concept.
+
+- 1b42472: **Paste improvements**
+
+  `@scrivr/core`
+
+  - **Slice-accurate paste.** Copying now records the slice's open depths on the clipboard HTML (`data-pm-slice`, ProseMirror's own convention), and pasting rebuilds that slice exactly. Copy/paste inside the editor round-trips, including whitespace, which is document content in an internal slice but collapsible markup in foreign HTML.
+  - **Inline HTML no longer splits the paragraph.** `fromHtml` previously forced `openStart: 0`, so pasting an inline fragment mid-sentence broke the paragraph into three. Openness is now derived from the pasted content: a default-attr paragraph merges into the cursor's block (matching Word/Docs), while anything carrying its own identity — a heading, a list, an aligned paragraph — stays a separate block and keeps its attrs.
+  - **Paste without formatting (`Mod-Shift-v`).** Inserts the clipboard's text form only, skipping both HTML and markdown inference.
+  - **Multi-line plain text becomes paragraphs** instead of one paragraph holding newline characters the canvas cannot render.
+  - **Image paste.** A screenshot or image file on the clipboard is inserted as an image node, sized to its natural dimensions and scaled to fit the page. The default embeds an inline `data:` URL; the new `uploadPastedImage` editor option takes the bytes and returns a URL instead. Ignored when the clipboard also carries HTML, so a web-page image copy is not inserted twice.
+  - **Word/Outlook lists.** Word emits lists as `mso-list`-tagged paragraphs whose bullet is literal text; these are now rebuilt into real `bulletList`/`orderedList` nodes, nesting included, with the marker glyphs dropped.
+  - **Image placement survives an HTML round-trip.** `wrapMode`, `xAlign`, `x`, `yOffset`, `zIndex`, `margin`, and `verticalAlign` now serialize to and parse from `data-*` attributes; copying a floating image previously pasted it back as inline. One declaration drives both directions.
+  - **`safeImageUrl`** — image `src` now accepts inline base64 `data:` URLs for raster types (png, jpeg, gif, webp, bmp, avif). `image/svg+xml` stays rejected, since SVG can carry script. Link `href` keeps the stricter `safeUrl` gate. This is what lets a pasted screenshot, and an image imported from a `.docx`, survive ingestion.
+  - New public exports: `serializeSelectionToHtml`, `serializeSelectionToText`, `SLICE_DATA_ATTR`, `safeImageUrl`, `PasteOptions`, `PasteTransformerOptions`.
+
+  `@scrivr/docx`
+
+  - Adds a chain round-trip test covering images in all five wrap modes across export → import → clipboard copy → paste.
+
+  Other packages are version-only (lockstep).
+
+- e2431a2: **Section substrate**
+
+  `@scrivr/core` gains the boundary-derived section model that per-section
+  columns, page chrome, and page geometry will build on
+  (`docs/sections-roadmap.md` step 1).
+
+  - **`sectionBreak`** — a block atom carrying the settings of the section it
+    terminates, mirroring DOCX's paragraph-level `sectPr` ownership. The body
+    tree stays flat.
+  - **`doc.attrs.finalSection`** — settings for the trailing section, which has
+    no terminating break.
+  - **`deriveSections(doc)`** — projects the boundaries into `{ id, from, to,
+breakPos, settings }` ranges. Pure, mints no ids, and never persists
+    positions, so it is safe on the read path.
+  - **Commands** — `insertSectionBreak`, `setSectionSettings`,
+    `removeSectionBreak`. Inserting copies the current section's settings to both
+    halves; removing merges forward, which is Word's behavior and also what a raw
+    deletion of the node produces.
+  - **Layout** — a `continuous` break has no flow effect, `nextPage` starts the
+    next page, and `evenPage`/`oddPage` skip a page when the next one has the
+    wrong parity. Documents with no section break are unchanged.
+
+  Also in `@scrivr/core`: pasted content now goes through `recloneDocumentIds`,
+  so a clipboard paste no longer duplicates the source nodes' persistent
+  structural ids into the destination document.
+
+  All other `@scrivr/*` packages bump for lockstep version alignment only — no
+  code changes in them.
+
+- 4c0b3f4: **Sourced blocks: the host's half**
+
+  Sourced blocks shipped with the document half reachable and the host half not.
+  A host could register providers and insert blocks, but the reconciler the
+  design hands it — read the provenance out of a document, compare a hash, see
+  which instances have drifted — was never exported, and the provider callback
+  for drift never fired.
+
+  - **`@scrivr/core`** — `collectSourcedBlocks`, `computeBlockHash`,
+    `sourcedBlockDivergenceKey` and `NORMALIZER_VERSION` are now exported, along
+    with the provider contract a host implements against: `SourceProvider`,
+    `SourceContent`, `SourceSearchResult`, `SourceCapability`,
+    `SourcedBlockEvent`, `SourcedBlockChangedEvent`, `SourcedBlockOptions`,
+    `SourcedBlockRecord`, `SourcedBlockDivergenceState`. Reconciliation stays the
+    host's to trigger (there is no safe trigger under collaborative editing);
+    core supplies the pure parts.
+  - **`@scrivr/core`** — `SourceProvider.onInstanceChanged` now fires. It reports
+    both facts and says which is which: `modified` is the document's, computed by
+    hashing content against the base it was inserted with; `outdated` is the
+    library's, and the editor only relays what the host told it. Nothing fires
+    for the state a document already had when it opened.
+  - **`@scrivr/core`** — new `setSourcedBlocksOutdated({ instanceIds, outdated })`
+    command and an `outdated` attr on the node. A library check answers for many
+    instances at once, so the command takes a list and writes one transaction:
+    one undo step, one repaint. Storing it as an attr rather than plugin state
+    means one peer can run the check and every collaborator sees the result, and
+    it survives a reload.
+
+- c8952d7: Extension bundles now compose instead of forwarding by hand, and keybinding
+  precedence is explicit.
+
+  `@scrivr/core`
+
+  - **`addExtensions()`** — an extension may declare the sub-extensions it is
+    composed of. `ExtensionManager` flattens them into its own list before any
+    resolution phase, so every hook a member declares is collected exactly as if
+    the consumer had listed it directly. `StarterKit` uses this and drops from 944
+    lines to ~180: it previously re-implemented the manager's merge for **24 of
+    27** contribution hooks, which meant each new seam had to be re-plumbed
+    through the kit or it silently vanished for everyone using the default. Four
+    hooks were already being dropped that way (`addCloneHandlers`, `addDocAttrs`,
+    `addPageChrome`, `addSurfaceOwner`).
+  - **`keymapPriority` + the `KeymapPriority` ladder** (`table` 400 → `codeBlock`
+    300 → `list` 200 → `default` 100). Colliding keybindings now **chain** instead
+    of last-wins: a command returning `false` means "not applicable here" and
+    delegates to the next binding for that key. Priority decides who gets first
+    refusal, which is how `Tab` can be cell navigation, code indentation, or list
+    indentation depending on context. Previously bundles hand-chained this
+    themselves and two independent extensions binding one key silently lost one of
+    them.
+  - Keymap precedence is deliberately **not** the extension list's order. That
+    order already decides the schema's default block type — ProseMirror fills
+    `block+` with the first registered block node — and one list cannot encode two
+    orderings. `StarterKit`'s list now carries a single constraint (Paragraph
+    first) and is otherwise free to reorder.
+  - `findExtension()` returns the **last** match rather than the first, so
+    `[StarterKit, Heading.configure({ levels: [1] })]` resolves to the caller's
+    Heading rather than the kit's copy — consistent with how every other
+    contribution resolves.
+  - `Extension.configure()` accepts an optional argument, and `Extension.children()`
+    / `flattenExtensions()` are exported for bundle authors.
+
+  Behaviour change worth noting: an extension that previously _replaced_ a
+  built-in keybinding by being registered later now chains behind it, and will not
+  run if the built-in handles the key. Raise its `keymapPriority` to restore
+  first refusal.
+
+  The other packages carry a version-only bump (lockstep group).
+
 ## 1.0.18
 
 ### Patch Changes

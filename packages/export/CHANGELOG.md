@@ -1,5 +1,133 @@
 # @scrivr/export
 
+## 1.0.19
+
+### Patch Changes
+
+- 15dbf0c: **`@scrivr/core/pm` — one ProseMirror instance for the whole stack**
+
+  `@scrivr/core` now publishes a `./pm` subpath that re-exports the ProseMirror surface Scrivr is
+  built on: `prosemirror-model`, `-state`, `-transform`, `-commands`, `-keymap`, `-history`,
+  `-inputrules`, `-schema-list`, `-markdown`.
+
+  Extensions and downstream packages import from `@scrivr/core/pm` instead of the `prosemirror-*`
+  packages directly, so they run against the same instance as the engine — the `instanceof` checks
+  on `Node`, `Slice`, `Selection` and `Plugin` that the engine relies on can no longer be broken by
+  a duplicate copy of `prosemirror-model` in the dependency tree. `prosemirror-view` is
+  deliberately absent: there is no `EditorView` in Scrivr, so view-only hooks never run.
+
+  - **`@scrivr/core`** — new `./pm` entry point (ESM + CJS + types). No change to the main barrel.
+  - **`@scrivr/ai`, `@scrivr/docx`, `@scrivr/export-pdf`, `@scrivr/export-semantic`,
+    `@scrivr/plugins`** — source imports moved to `@scrivr/core/pm`; direct `prosemirror-*`
+    dependencies and peer ranges dropped. `@scrivr/ai` no longer declares any peer dependencies;
+    `@scrivr/plugins` keeps `prosemirror-model`/`-state` peers only because `y-prosemirror` requires
+    them, not for its own code.
+  - **`@scrivr/export-markdown`** — dropped an unused `prosemirror-markdown` dependency.
+  - **`@scrivr/export`, `@scrivr/react`** — version alignment only.
+
+- fc33e99: **Hyperlinks survive DOCX export**
+
+  A document exported to Word lost every hyperlink. The text came through, the
+  link did not, and the export logged an `unsupported-mark` warning that no UI
+  surfaces — so the first sign of it was a Word file where nothing was clickable.
+
+  - **`@scrivr/core`** — new `DocxRunWrapper` contribution kind, and
+    `DocxHandlers.markWrappers`. `DocxMarkHandler` contributes run _properties_,
+    which is all bold or colour need; OOXML expresses a hyperlink as a
+    `<w:hyperlink>` element wrapping the runs and carrying a relationship id, so
+    no run property can produce one. That is why `Link` had no export handler at
+    all rather than a broken one.
+  - **`@scrivr/core`** — `Link` now contributes both halves: the wrapper that
+    registers the relationship through the existing `ctx.rels.addHyperlink()`,
+    and Word's built-in Hyperlink character style so the link looks like one. A
+    link with no usable href stays styled text rather than emitting a `r:id` for
+    a relationship that was never registered, which produces a file Word refuses
+    to open.
+  - **`@scrivr/docx`** — the walker applies wrapping marks around the run it just
+    built, in the order the marks appear on the text, so two wrapping marks nest
+    predictably.
+
+- 87198ec: **Sourced Blocks**
+
+  A new end-to-end system for embedding, tracking, and updating content blocks (such as clauses or definitions) that originate from an external library or provider.
+
+  - **`SourcedBlock` Extension (`@scrivr/core`)** — A generic node wrapper that retains source metadata (`instanceId`, `kind`, `resourceId`, `versionId`, and `baseHash`). It leverages a new `insertSourcedBlock` command to seamlessly request and insert content from registered `SourceProvider` implementations.
+  - **Divergence Detection (`@scrivr/core`)** — A built-in plugin hashes block content and compares it against the `baseHash` to detect if the local content has drifted from the source. Diverged blocks are visually indicated using a new `divergedGutter` theme property.
+  - **Node Actions (`@scrivr/core`)** — Includes built-in Node Actions for Sourced Blocks, providing "Update to Latest", "Discard Local Edits" and "Detach from Library" capabilities based on user permissions.
+  - **`layout` node spec declaration (`@scrivr/core`)** — Nodes now declare how they participate in layout, independent of what they mean in the document tree: `{ kind: "block" }` (the default — the node occupies its own box) or `{ kind: "transparent" }` (the node stays in the tree but contributes no box; its children lay out into the enclosing flow). Previously layout participation was inferred from the node's name — lists and tables expanded, everything else was assumed to be a text block — so a structural node like `sourcedBlock` laid out as a single empty line and never painted its content. The painter for a `block` node still comes from `addLayoutHandlers()`; folding the strategy into this declaration, and turning the text-block fallback into an error for undeclared nodes, is the next step.
+  - **`addPasteTransforms()` (`@scrivr/core`)** — New extension seam for rewriting pasted content before it enters the document, applied by `PasteTransformer` to every clipboard flavour. This is the engine's equivalent of ProseMirror's `transformPasted` view prop, which never fires because Scrivr has no `EditorView`. Sourced blocks use it to re-mint `instanceId` so a pasted block is a second instance rather than a duplicate identity.
+  - **DOCX Interoperability (`@scrivr/docx`)** — Sourced Blocks seamlessly round-trip through MS Word using `<w:sdt>` (Structured Document Tag) content controls. Source metadata is encoded in the `w:tag` attribute, meaning blocks retain their provenance even after being edited in Word. Provenance that would exceed the 255-character OOXML limit for `w:tag` is dropped with an export diagnostic rather than producing a file Word rejects.
+  - **Semantic Mapping (`@scrivr/core`)** — Ensures Sourced Blocks preserve their boundaries and metadata when processed for semantic analysis.
+
+- e2431a2: **Section substrate**
+
+  `@scrivr/core` gains the boundary-derived section model that per-section
+  columns, page chrome, and page geometry will build on
+  (`docs/sections-roadmap.md` step 1).
+
+  - **`sectionBreak`** — a block atom carrying the settings of the section it
+    terminates, mirroring DOCX's paragraph-level `sectPr` ownership. The body
+    tree stays flat.
+  - **`doc.attrs.finalSection`** — settings for the trailing section, which has
+    no terminating break.
+  - **`deriveSections(doc)`** — projects the boundaries into `{ id, from, to,
+breakPos, settings }` ranges. Pure, mints no ids, and never persists
+    positions, so it is safe on the read path.
+  - **Commands** — `insertSectionBreak`, `setSectionSettings`,
+    `removeSectionBreak`. Inserting copies the current section's settings to both
+    halves; removing merges forward, which is Word's behavior and also what a raw
+    deletion of the node produces.
+  - **Layout** — a `continuous` break has no flow effect, `nextPage` starts the
+    next page, and `evenPage`/`oddPage` skip a page when the next one has the
+    wrong parity. Documents with no section break are unchanged.
+
+  Also in `@scrivr/core`: pasted content now goes through `recloneDocumentIds`,
+  so a clipboard paste no longer duplicates the source nodes' persistent
+  structural ids into the destination document.
+
+  All other `@scrivr/*` packages bump for lockstep version alignment only — no
+  code changes in them.
+
+- 4c0b3f4: **Sourced blocks: the host's half**
+
+  Sourced blocks shipped with the document half reachable and the host half not.
+  A host could register providers and insert blocks, but the reconciler the
+  design hands it — read the provenance out of a document, compare a hash, see
+  which instances have drifted — was never exported, and the provider callback
+  for drift never fired.
+
+  - **`@scrivr/core`** — `collectSourcedBlocks`, `computeBlockHash`,
+    `sourcedBlockDivergenceKey` and `NORMALIZER_VERSION` are now exported, along
+    with the provider contract a host implements against: `SourceProvider`,
+    `SourceContent`, `SourceSearchResult`, `SourceCapability`,
+    `SourcedBlockEvent`, `SourcedBlockChangedEvent`, `SourcedBlockOptions`,
+    `SourcedBlockRecord`, `SourcedBlockDivergenceState`. Reconciliation stays the
+    host's to trigger (there is no safe trigger under collaborative editing);
+    core supplies the pure parts.
+  - **`@scrivr/core`** — `SourceProvider.onInstanceChanged` now fires. It reports
+    both facts and says which is which: `modified` is the document's, computed by
+    hashing content against the base it was inserted with; `outdated` is the
+    library's, and the editor only relays what the host told it. Nothing fires
+    for the state a document already had when it opened.
+  - **`@scrivr/core`** — new `setSourcedBlocksOutdated({ instanceIds, outdated })`
+    command and an `outdated` attr on the node. A library check answers for many
+    instances at once, so the command takes a list and writes one transaction:
+    one undo step, one repaint. Storing it as an attr rather than plugin state
+    means one peer can run the check and every collaborator sees the result, and
+    it survives a reload.
+
+- Updated dependencies [15dbf0c]
+- Updated dependencies [fc33e99]
+- Updated dependencies [87198ec]
+- Updated dependencies [81f1b00]
+- Updated dependencies [1b42472]
+- Updated dependencies [e2431a2]
+- Updated dependencies [4c0b3f4]
+- Updated dependencies [c8952d7]
+  - @scrivr/core@1.0.19
+  - @scrivr/export-markdown@1.0.19
+  - @scrivr/export-pdf@1.0.19
+
 ## 1.0.18
 
 ### Patch Changes
