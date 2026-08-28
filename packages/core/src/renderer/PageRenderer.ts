@@ -61,7 +61,7 @@ export interface RenderPageOptions {
  * Does NOT own the canvas — receives ctx from the caller.
  * Does NOT run layout — receives a pre-computed LayoutPage.
  */
-export function renderPage(options: RenderPageOptions): void {
+export function renderPage(options: RenderPageOptions): boolean {
   const {
     ctx,
     page,
@@ -86,7 +86,11 @@ export function renderPage(options: RenderPageOptions): void {
   const { pageWidth, pageHeight, margins } = pageConfig;
 
   // ── Stale render guard ────────────────────────────────────────────────────
-  if (renderVersion !== currentVersion()) return;
+  // Returning false rather than nothing: the caller records this version as
+  // painted, and a tile that believes it painted a version it abandoned will
+  // not repaint until something else moves it. The reader is then looking at
+  // content the document no longer holds.
+  if (renderVersion !== currentVersion()) return false;
 
   // ── Clear + background ────────────────────────────────────────────────────
   clearCanvas(ctx, pageWidth, pageHeight, dpr, theme.pageBg);
@@ -108,7 +112,7 @@ export function renderPage(options: RenderPageOptions): void {
   }
 
   // ── Check stale again before drawing (layout may have changed) ───────────
-  if (renderVersion !== currentVersion()) return;
+  if (renderVersion !== currentVersion()) return false;
 
   // Floats on this page, partitioned by render order.
   const pageFloats = (anchoredObjects?.filter((f) => f.page === page.pageNumber) ?? [])
@@ -201,6 +205,8 @@ export function renderPage(options: RenderPageOptions): void {
       });
     }
   }
+
+  return true;
 }
 
 /**

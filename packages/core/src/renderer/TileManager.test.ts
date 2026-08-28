@@ -594,3 +594,55 @@ describe("TileManager — margin click activation (no policy)", () => {
     setup.cleanup();
   });
 });
+
+/**
+ * A tile records a version only if it painted that version.
+ *
+ * `renderPage` abandons a paint when the layout moves under it — correct, or
+ * the page shows pixels from a layout that no longer exists. The hazard is the
+ * bookkeeping: stamping the version regardless tells the tile it is current,
+ * so it sits on stale content until something unrelated moves it. The reader
+ * sees an edit go missing, presses the key again, and now two edits are hiding
+ * behind one frame.
+ *
+ * Observable form of the contract: at an unchanged layout version, an
+ * abandoned paint is retried on the next update and a completed one is not.
+ */
+describe("TileManager — recording a paint that did not happen", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("retries a page whose paint was abandoned", async () => {
+    const renderer = await import("./PageRenderer");
+    const spy = vi.spyOn(renderer, "renderPage").mockReturnValue(false);
+
+    const setup = makeRendererTestSetup();
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    const afterFirst = spy.mock.calls.length;
+    expect(afterFirst).toBeGreaterThan(0);
+
+    tm.update();
+    expect(spy.mock.calls.length).toBeGreaterThan(afterFirst);
+
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("does not repaint a page it already painted", async () => {
+    const renderer = await import("./PageRenderer");
+    const spy = vi.spyOn(renderer, "renderPage").mockReturnValue(true);
+
+    const setup = makeRendererTestSetup();
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    const afterFirst = spy.mock.calls.length;
+
+    tm.update();
+    expect(spy.mock.calls.length).toBe(afterFirst);
+
+    tm.destroy();
+    setup.cleanup();
+  });
+});

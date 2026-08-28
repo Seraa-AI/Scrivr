@@ -447,12 +447,19 @@ export class TileManager {
       performance.mark("scrivr:first-paint-start");
     }
 
+    // A paint that abandoned itself must not be recorded as done. renderPage
+    // bails when the layout moves under it, and a tile stamped with a version
+    // it never drew will sit on stale pixels until something else happens to
+    // move it — the reader looking at content the document no longer holds.
+    let painted: boolean;
     if (this.editor.isPageless) {
-      this.paintContentPageless(tile, layout);
+      painted = this.paintContentPageless(tile, layout);
     } else {
       this.applyPagedWrapperTheme(tile);
-      this.paintContentPaged(tile, layout, pageNumber);
+      painted = this.paintContentPaged(tile, layout, pageNumber);
     }
+
+    if (!painted) return;
 
     tile.lastPaintedVersion = version;
     tile.lastRenderGeneration = renderGen;
@@ -485,14 +492,15 @@ export class TileManager {
     }
   }
 
+  /** Returns whether the page was actually painted — see `paintContent`. */
   private paintContentPaged(
     tile: TileEntry,
     layout: DocumentLayout,
     _pageNumber: number,
-  ): void {
+  ): boolean {
     const { pageConfig } = layout;
     const page = layout.pages[tile.tileIndex];
-    if (!page) return;
+    if (!page) return false;
 
     const { dpr } = setupCanvas(tile.contentCanvas, {
       width: pageConfig.pageWidth,
@@ -506,7 +514,7 @@ export class TileManager {
     tile.overlayCanvas.style.width = `${pageConfig.pageWidth}px`;
     tile.overlayCanvas.style.height = `${pageConfig.pageHeight}px`;
 
-    renderPage({
+    return renderPage({
       ctx: tile.contentCanvas.getContext("2d", { alpha: false })!,
       page,
       pageConfig,
@@ -538,7 +546,8 @@ export class TileManager {
     });
   }
 
-  private paintContentPageless(tile: TileEntry, layout: DocumentLayout): void {
+  /** Returns whether the tile was painted — see `paintContent`. */
+  private paintContentPageless(tile: TileEntry, layout: DocumentLayout): boolean {
     const { pageConfig } = layout;
     const tileTop = tile.tileIndex * this.tileHeight;
     const tileBottom = tileTop + this.tileHeight;
@@ -613,6 +622,8 @@ export class TileManager {
     }
 
     ctx.restore();
+    // Pageless has no stale guard of its own — reaching here means it drew.
+    return true;
   }
 
   // ── Overlay painting ───────────────────────────────────────────────────────
