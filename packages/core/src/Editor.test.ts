@@ -114,6 +114,45 @@ describe("charMap generation", () => {
   });
 });
 
+describe("publication order", () => {
+  it("marks the layout stale before the new document is observable", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const before = editor.layout.version;
+
+    // Capture the FIRST notification only — the rAF flush that follows would
+    // report a correct version either way and mask the ordering.
+    let seenByListener: number | null = null;
+    const off = editor.subscribe(() => {
+      if (seenByListener === null) seenByListener = editor.layout.version;
+    });
+    type("hello");
+    off();
+
+    expect(seenByListener).not.toBeNull();
+    expect(seenByListener).toBeGreaterThan(before);
+    cleanup();
+  });
+
+  it("hands the same layout to an update handler and a subscriber", () => {
+    const { editor, type, cleanup } = makeEditor();
+
+    let seenByEvent: number | null = null;
+    let seenByListener: number | null = null;
+    const offEvent = editor.on("update", () => {
+      if (seenByEvent === null) seenByEvent = editor.layout.version;
+    });
+    const offListener = editor.subscribe(() => {
+      if (seenByListener === null) seenByListener = editor.layout.version;
+    });
+    type("hello");
+    offEvent();
+    offListener();
+
+    expect(seenByEvent).toBe(seenByListener);
+    cleanup();
+  });
+});
+
 describe("Editor.ensureFullLayout", () => {
   it("synchronously completes a streamed initial layout", () => {
     const content = {

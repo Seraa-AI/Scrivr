@@ -1450,9 +1450,16 @@ export class Editor extends BaseEditor implements IEditor {
 	 * All transaction paths in Editor (commands, input, external) converge here.
 	 */
 	private viewDispatch(tr: Transaction, scrollToCursor = true): void {
+		// Stale first, publish second. applyState emits "update" and notifies
+		// listeners synchronously, so anything it wakes reads the new document —
+		// and would read the old layout with it, because a coordinator that still
+		// believes it is clean hands back the previous pass untouched. That pair
+		// is not detectably wrong from the outside: the charmap's generation
+		// matches the stale layout it came from, so the geometry looks coherent
+		// while describing text that has already moved.
+		this.lc.invalidate();
 		// applyState is in BaseEditor: applies tr, emits "update", notifyListeners
 		this.applyState(tr);
-		this.lc.invalidate();
 		// resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
 		// Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.
 		this.cursorManager.resetSilent();
