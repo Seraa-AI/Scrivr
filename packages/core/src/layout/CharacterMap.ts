@@ -82,6 +82,13 @@ function extentKey(page: number, lineIndex: number): string {
   return `${page}:${lineIndex}`;
 }
 
+/**
+ * Generation of a map that no layout has claimed — freshly constructed, or
+ * cleared and not yet repopulated. Layout versions start at 1, so this can
+ * never collide with a real one.
+ */
+export const UNOWNED_GENERATION = 0;
+
 export class CharacterMap {
   private glyphs: GlyphEntry[] = [];
   private lines: LineEntry[] = [];
@@ -94,6 +101,24 @@ export class CharacterMap {
    * cost the hover path cannot carry.
    */
   private lineExtents = new Map<string, { left: number; right: number }>();
+  private populationGeneration = UNOWNED_GENERATION;
+
+  /**
+   * Layout version whose geometry this map holds, or `UNOWNED_GENERATION`.
+   *
+   * Coordinates only mean something next to the pixels they were computed
+   * for: a caret placed from one layout onto a canvas painted from another
+   * lands where the text used to be. Readers that paint compare this against
+   * the generation of what is already on screen.
+   */
+  get generation(): number {
+    return this.populationGeneration;
+  }
+
+  /** Declare which layout version populated this map. */
+  setGeneration(version: number): void {
+    this.populationGeneration = version;
+  }
 
   // Called by the layout engine after each layout pass
   clear(): void {
@@ -101,6 +126,9 @@ export class CharacterMap {
     this.lines = [];
     this.objectRects.clear();
     this.lineExtents.clear();
+    // The contents left, so the claim on them goes too — until the next
+    // layout stamps its own version, this map speaks for no generation.
+    this.populationGeneration = UNOWNED_GENERATION;
   }
 
   /** Remove all entries belonging to a specific page (selective invalidation). */

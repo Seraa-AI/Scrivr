@@ -95,6 +95,25 @@ describe("Editor — initial cursor placement", () => {
   });
 });
 
+describe("charMap generation", () => {
+  it("carries the version of the layout that populated it", () => {
+    const { editor, cleanup } = makeEditor();
+    const version = editor.layout.version;
+    expect(editor.charMap.generation).toBe(version);
+    cleanup();
+  });
+
+  it("advances with the layout when the document changes", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const before = editor.layout.version;
+    type("hello");
+    const after = editor.layout.version;
+    expect(after).toBeGreaterThan(before);
+    expect(editor.charMap.generation).toBe(after);
+    cleanup();
+  });
+});
+
 describe("Editor.ensureFullLayout", () => {
   it("synchronously completes a streamed initial layout", () => {
     const content = {

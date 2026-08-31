@@ -460,6 +460,50 @@ describe("TileManager — overlay repaint with active surface", () => {
   });
 });
 
+describe("TileManager — overlay generation guard", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does not draw overlay geometry from a layout the painted pixels never showed", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update(); // content + overlay painted together at the current version
+
+    const spy = vi.spyOn(setup.editor, "runOverlayHandlers");
+    // Desync geometry from pixels the way a bailed content paint does, and
+    // make the overlay dirty so only the guard can hold it back.
+    setup.editor.selection.moveCursorTo(5);
+    setup.editor.charMap.setGeneration(setup.editor.layout.version + 99);
+    tm.update();
+
+    expect(spy).not.toHaveBeenCalled();
+
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("draws the overlay once geometry and pixels agree again", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    const spy = vi.spyOn(setup.editor, "runOverlayHandlers");
+    setup.editor.selection.moveCursorTo(5);
+    setup.editor.charMap.setGeneration(setup.editor.layout.version);
+    tm.update();
+
+    expect(spy).toHaveBeenCalled();
+
+    tm.destroy();
+    setup.cleanup();
+  });
+});
+
 describe("TileManager — body click deactivates surface", () => {
   beforeEach(() => {
     vi.useFakeTimers();

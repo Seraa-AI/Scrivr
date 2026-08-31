@@ -419,10 +419,10 @@ export class TileManager {
         this.activeTiles.set(idx, tile);
       }
 
-      // Snapshot version once — content + overlay use the same snapshot
-      const version = layout.version;
-      this.paintContent(tile, layout, version);
-      this.paintOverlay(tile, layout, version);
+      // Content stamps the tile with this version; the overlay then reads that
+      // stamp to check the charmap describes the pixels it is drawing over.
+      this.paintContent(tile, layout, layout.version);
+      this.paintOverlay(tile, layout);
     }
   }
 
@@ -628,11 +628,24 @@ export class TileManager {
 
   // ── Overlay painting ───────────────────────────────────────────────────────
 
-  private paintOverlay(
-    tile: TileEntry,
-    layout: DocumentLayout,
-    _version: number,
-  ): void {
+  private paintOverlay(tile: TileEntry, layout: DocumentLayout): void {
+    // Carets and selection rectangles are geometry read from the charmap, and
+    // they only mean anything over the pixels they were computed for. When a
+    // content paint bails, this tile keeps older pixels while the charmap has
+    // already moved to the new layout — drawing from it puts the caret where
+    // the text used to be. Skip, and let the paint that does land draw it.
+    //
+    // A surface owns its own charmap, populated by its paint hook with no
+    // layout version behind it, so there is no generation to agree on.
+    // `!= null` on purpose: no registry means no surface is active, and
+    // reading that as "active" would switch this guard off entirely.
+    const surfaceActive = this.editor.surfaces?.activeSurface != null;
+    if (
+      !surfaceActive &&
+      this.editor.charMap.generation !== tile.lastPaintedVersion
+    )
+      return;
+
     const { pageConfig } = layout;
     const tileTop = tile.tileIndex * this.tileHeight;
     const cursorPage = this.editor.cursorPage;
@@ -683,7 +696,6 @@ export class TileManager {
     // When a surface is active, always repaint the overlay so the cursor
     // blinks correctly and selection updates are visible. The header cursor
     // is drawn by an overlay handler that needs blink-tick repaints.
-    const surfaceActive = this.editor.surfaces?.activeSurface !== null;
     const surfaceStateDirty = surfaceActive;
     if (
       !blinkDirty &&

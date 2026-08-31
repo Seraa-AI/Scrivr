@@ -374,6 +374,11 @@ export class LayoutCoordinator {
   private indexLayout(): void {
     this.pageMap.clear();
     this.fragmentIndex = [];
+    // Every layout assignment routes through here, so this is the one place
+    // the charmap's generation can be kept honest. Pages populate lazily
+    // afterwards, but they can only populate from this layout — `clear()`
+    // above each assignment took the previous one's geometry with it.
+    this.charMap.setGeneration(this.layout.version);
 
     for (const page of this.layout.pages) {
       this.pageMap.set(page.pageNumber, page);
