@@ -1101,6 +1101,63 @@ describe("runPipeline — float image wrapping", () => {
   // Long text to force several wrapped lines in the constrained content width.
   const longText = "word ".repeat(60).trim(); // 60 words × 5 chars = ~300 chars, ~6+ lines
 
+  /**
+   * `behind` and `front` reserve no flow space, so a tall one anchored near the
+   * bottom of a page must not move its own paragraph. Pushing the anchor sent
+   * the text to the next page and left a hole where it had been — the reader
+   * sees a blank band and text that jumped, with nothing on the page to explain
+   * either. `square` is the contrast: it does reserve space, so it still moves.
+   */
+  describe.each(["behind", "front"] as const)("%s float: the text is unaware", (wrapMode) => {
+    /** Fills most of page 1 so the anchor paragraph sits near the bottom. */
+    function layoutWithTallFloatNearPageBottom(mode: string) {
+      const { schema, fontConfig } = buildStarterKitContext();
+      const img = schema.nodes["image"]!.create({
+        src: "", width: 300, height: 400, wrapMode: mode, xAlign: "left",
+      });
+      const doc = schema.node("doc", null, [
+        ...Array.from({ length: 7 }, () =>
+          schema.node("paragraph", null, [schema.text(longText)]),
+        ),
+        schema.node("paragraph", null, [schema.text("ANCHOR"), img]),
+        schema.node("paragraph", null, [schema.text("AFTER")]),
+      ]);
+      return runPipeline(doc, {
+        pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+      });
+    }
+
+    function pageOf(layout: ReturnType<typeof runPipeline>, needle: string): number | null {
+      for (const page of layout.pages) {
+        for (const block of page.blocks) {
+          if (block.node.textContent.includes(needle)) return page.pageNumber;
+        }
+      }
+      return null;
+    }
+
+    it("leaves the anchor paragraph and the text after it where they were", () => {
+      const layout = layoutWithTallFloatNearPageBottom(wrapMode);
+      expect(pageOf(layout, "ANCHOR")).toBe(1);
+      expect(pageOf(layout, "AFTER")).toBe(1);
+    });
+
+    it("keeps the image on its anchor's page by clamping, not by moving text", () => {
+      const layout = layoutWithTallFloatNearPageBottom(wrapMode);
+      const float = layout.anchoredObjects![0]!;
+      expect(float.page).toBe(1);
+      const metrics = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, 1);
+      expect(float.y + float.height).toBeLessThanOrEqual(
+        metrics.contentTop + metrics.contentHeight + 0.5,
+      );
+    });
+
+    it("a square float in the same position does move its anchor", () => {
+      const layout = layoutWithTallFloatNearPageBottom("square");
+      expect(pageOf(layout, "ANCHOR")).toBe(2);
+    });
+  });
+
   it("square-left: produces floats array with the float image", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });

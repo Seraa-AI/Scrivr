@@ -657,14 +657,18 @@ function resolveAnchoredObjects(
       let pageNumber = barriers.pageForGlobalY(anchorGlobalY);
       let anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
 
-      // Anchor-push: any wrapping mode whose visual extent overflows its
-      // anchor's page is pushed to the next page (provided the next page
-      // can fit it). This applies uniformly to square / top-bottom /
-      // behind / front. yOffset is intentionally not factored in — the
-      // anchor flow's natural fit decides the page; yOffset only shifts
-      // within the resulting page (and clamps if it would escape).
+      // Anchor-push: a mode that reserves flow space and whose visual extent
+      // overflows its anchor's page moves the anchor flow to the next page
+      // (provided the next page can fit it). yOffset is intentionally not
+      // factored in — the anchor flow's natural fit decides the page; yOffset
+      // only shifts within the resulting page (and clamps if it would escape).
+      //
+      // `behind` and `front` reserve no flow space, so they take no part in
+      // this: pushing their anchor moves text the image never touches, leaving
+      // a hole on the page the reader cannot account for. The clamp below is
+      // what keeps those images on their anchor's page.
       if (
-        wrapMode !== "inline" &&
+        (wrapMode === "square" || wrapMode === "top-bottom") &&
         !pageConfig.pageless &&
         anchorLocalY + height > barriers.contentBottomLocal(pageNumber) &&
         height <= barriers.contentHeight(pageNumber + 1)

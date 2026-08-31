@@ -77,16 +77,30 @@ export interface ObjectRectEntry {
   page: number;
 }
 
+/** Key for the per-line painted-run index. */
+function extentKey(page: number, lineIndex: number): string {
+  return `${page}:${lineIndex}`;
+}
+
 export class CharacterMap {
   private glyphs: GlyphEntry[] = [];
   private lines: LineEntry[] = [];
   private objectRects = new Map<number, ObjectRectEntry>();
+  /**
+   * Horizontal run of painted glyphs per line, keyed `page:lineIndex`.
+   *
+   * Maintained as glyphs register rather than derived on demand: `hasTextAt`
+   * runs on every pointer move, and scanning a page of glyphs per move is a
+   * cost the hover path cannot carry.
+   */
+  private lineExtents = new Map<string, { left: number; right: number }>();
 
   // Called by the layout engine after each layout pass
   clear(): void {
     this.glyphs = [];
     this.lines = [];
     this.objectRects.clear();
+    this.lineExtents.clear();
   }
 
   /** Remove all entries belonging to a specific page (selective invalidation). */
@@ -96,10 +110,26 @@ export class CharacterMap {
     for (const [pos, rect] of this.objectRects) {
       if (rect.page === pageNumber) this.objectRects.delete(pos);
     }
+    for (const key of this.lineExtents.keys()) {
+      if (key.startsWith(`${pageNumber}:`)) this.lineExtents.delete(key);
+    }
   }
 
   registerGlyph(entry: GlyphEntry): void {
     this.glyphs.push(entry);
+
+    // Zero-width glyphs are structural, not visible — the caret sentinel on a
+    // block's last line is one. They occupy no space a reader can see, so they
+    // do not extend the painted run.
+    if (entry.width <= 0) return;
+    const key = extentKey(entry.page, entry.lineIndex);
+    const extent = this.lineExtents.get(key);
+    if (!extent) {
+      this.lineExtents.set(key, { left: entry.x, right: entry.x + entry.width });
+      return;
+    }
+    if (entry.x < extent.left) extent.left = entry.x;
+    if (entry.x + entry.width > extent.right) extent.right = entry.x + entry.width;
   }
 
   registerLine(entry: LineEntry): void {
@@ -402,6 +432,25 @@ export class CharacterMap {
       if (l.startDocPos === l.endDocPos) return docPos === l.startDocPos;
       return docPos >= l.startDocPos && docPos <= l.endDocPos;
     });
+  }
+
+  /**
+   * Is text actually painted at this point?
+   *
+   * Deliberately narrower than "does a line claim this point". A line's box
+   * spans the full content width however short its text is, so a one-word
+   * paragraph claims hundreds of pixels of blank space to its right. That
+   * blank space is still the line's for caret placement — clicking past the
+   * end of a short line puts the caret at its end, as every editor does — but
+   * it is not text, and it must not out-rank an image the reader can see
+   * sitting there. Ownership asks this; caret placement asks `posAtCoords`.
+   */
+  hasTextAt(x: number, y: number, page: number): boolean {
+    const line = this.lineAtPoint(x, y, page);
+    if (!line) return false;
+    const extent = this.lineExtents.get(extentKey(page, line.lineIndex));
+    if (!extent) return false; // an empty line paints nothing
+    return x >= extent.left && x < extent.right;
   }
 
   /**
