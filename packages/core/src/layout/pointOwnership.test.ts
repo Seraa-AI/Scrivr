@@ -86,6 +86,14 @@ describe("who owns a point", () => {
     if (owner.kind === "anchored") expect(owner.object.docPos).toBe(20);
   });
 
+  it("keeps the front layer above a higher-z behind object", () => {
+    const behind = float({ wrapMode: "behind", docPos: 20, zIndex: 100 });
+    const front = float({ wrapMode: "front", docPos: 10, zIndex: 0 });
+    const owner = resolvePointOwner(X, Y, 1, input([behind, front]));
+    expect(owner.kind).toBe("anchored");
+    if (owner.kind === "anchored") expect(owner.object.docPos).toBe(10);
+  });
+
   it("lets a lower front float take a point the behind float above it declined", () => {
     const behind = float({ wrapMode: "behind", docPos: 20, zIndex: 5 });
     const front = float({ wrapMode: "front", docPos: 10, zIndex: 0 });
@@ -109,6 +117,14 @@ describe("who owns a point", () => {
       const behindRect: ObjectRectEntry = { ...rect, docPos: 42 };
       const owner = resolvePointOwner(X, Y, 1, input([behind], { text: true, rect: behindRect }));
       expect(owner.kind).toBe("text");
+    });
+
+    // No text here, so the behind float is otherwise grabbable — but an inline
+    // object paints with the body, above the behind layer, and takes it first.
+    it("keeps inline content above a behind float in a text gap", () => {
+      const behind = float({ wrapMode: "behind", docPos: 42, zIndex: 100 });
+      const owner = resolvePointOwner(X, Y, 1, input([behind], { rect }));
+      expect(owner.kind).toBe("inlineObject");
     });
   });
 });

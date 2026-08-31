@@ -52,19 +52,6 @@ function contains(object: AnchoredObjectPlacement, x: number, y: number): boolea
 }
 
 /**
- * Does this anchored object take a point that also has text painted on it?
- *
- * `behind` paints under the body, so text wins wherever text is; the image
- * stays reachable through the gaps between lines and past short ones. `front`
- * paints over the body and takes the point — that is what the mode means.
- * `square` and `top-bottom` push text out of their space, so a point that has
- * both is a boundary pixel and the object may as well take it.
- */
-function takesPointOverText(object: AnchoredObjectPlacement): boolean {
-  return object.wrapMode !== "behind";
-}
-
-/**
  * Resolve who owns `(x, y)` on `page` — the single answer every surface uses,
  * so click routing, hover cursors and drags cannot disagree about it.
  *
@@ -81,12 +68,17 @@ export function resolvePointOwner(
   const onPage = input.anchoredObjects
     .filter((object) => object.page === page)
     .sort(compareAnchoredObjectHitOrder);
+  const front = onPage.filter((object) => object.wrapMode !== "behind");
+  const behind = onPage.filter((object) => object.wrapMode === "behind");
 
   const hasText = input.hasTextAt(x, y, page);
 
-  for (const object of onPage) {
+  // PageRenderer paints every non-behind object after document content, so
+  // this layer owns matching points before either text or behind objects. The
+  // z-index comparator only orders objects *within* a paint layer; it must not
+  // allow a high-z behind object to jump above a front object.
+  for (const object of front) {
     if (!contains(object, x, y)) continue;
-    if (hasText && !takesPointOverText(object)) continue;
     return { kind: "anchored", object };
   }
 
@@ -98,6 +90,14 @@ export function resolvePointOwner(
     // overturn that decision.
     const isAnchored = onPage.some((object) => object.docPos === rect.docPos);
     if (!isAnchored) return { kind: "inlineObject", rect };
+  }
+
+  // Document content is painted between the front and behind layers. A behind
+  // object is selectable only through unpainted gaps in that content.
+  if (hasText) return { kind: "text" };
+
+  for (const object of behind) {
+    if (contains(object, x, y)) return { kind: "anchored", object };
   }
 
   return { kind: "text" };
