@@ -251,11 +251,4 @@ describe("renderPage — reporting whether it painted", () => {
     expect(map.coordsAtPos(1)).toBeNull();
   });
 
-  it("reports false when the layout moves partway through", () => {
-    // The guard runs twice — once before clearing, once before drawing blocks.
-    // A layout that changes between them must not read as a completed paint.
-    let calls = 0;
-    const { painted } = render(() => (++calls > 1 ? 999 : 1));
-    expect(painted).toBe(false);
-  });
 });

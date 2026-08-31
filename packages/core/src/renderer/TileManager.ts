@@ -447,10 +447,11 @@ export class TileManager {
       performance.mark("scrivr:first-paint-start");
     }
 
-    // A paint that abandoned itself must not be recorded as done. renderPage
-    // bails when the layout moves under it, and a tile stamped with a version
-    // it never drew will sit on stale pixels until something else happens to
-    // move it — the reader looking at content the document no longer holds.
+    // A paint that abandoned itself must not be recorded as done. The paged
+    // path admits a candidate before it touches either canvas and rejects a
+    // stale one outright, and a tile stamped with a version it never drew
+    // would sit on stale pixels until something else happened to move it —
+    // the reader looking at content the document no longer holds.
     let painted: boolean;
     if (this.editor.isPageless) {
       painted = this.paintContentPageless(tile, layout);
@@ -502,20 +503,27 @@ export class TileManager {
     const page = layout.pages[tile.tileIndex];
     if (!page) return false;
 
-    const { dpr } = setupCanvas(tile.contentCanvas, {
+    // Admission happens before setupCanvas: assigning either canvas dimension
+    // clears the visible backing bitmap, even if the assigned value is unchanged.
+    // Canvas painting below is synchronous, so once this candidate is admitted
+    // no other layout can become current until the complete frame has landed.
+    if (layout.version !== this.editor.layout.version) return false;
+
+    const { ctx, dpr } = setupCanvas(tile.contentCanvas, {
       width: pageConfig.pageWidth,
       height: pageConfig.pageHeight,
     });
     tile.dpr = dpr;
 
-    // Size overlay canvas to match
+    // Size overlay canvas only after the content candidate is admitted, so a
+    // rejected frame preserves both visible layers.
     tile.overlayCanvas.width = Math.round(pageConfig.pageWidth * dpr);
     tile.overlayCanvas.height = Math.round(pageConfig.pageHeight * dpr);
     tile.overlayCanvas.style.width = `${pageConfig.pageWidth}px`;
     tile.overlayCanvas.style.height = `${pageConfig.pageHeight}px`;
 
     return renderPage({
-      ctx: tile.contentCanvas.getContext("2d", { alpha: false })!,
+      ctx,
       page,
       pageConfig,
       renderVersion: layout.version,
@@ -548,6 +556,12 @@ export class TileManager {
 
   /** Returns whether the tile was painted — see `paintContent`. */
   private paintContentPageless(tile: TileEntry, layout: DocumentLayout): boolean {
+    // Match the paged admission contract: reject before assigning either
+    // canvas dimension, because even a same-value assignment clears the
+    // visible backing bitmap. The synchronous paint below can then complete
+    // without a newer layout interleaving midway through it.
+    if (layout.version !== this.editor.layout.version) return false;
+
     const { pageConfig } = layout;
     const tileTop = tile.tileIndex * this.tileHeight;
     const tileBottom = tileTop + this.tileHeight;
@@ -622,7 +636,6 @@ export class TileManager {
     }
 
     ctx.restore();
-    // Pageless has no stale guard of its own — reaching here means it drew.
     return true;
   }
 

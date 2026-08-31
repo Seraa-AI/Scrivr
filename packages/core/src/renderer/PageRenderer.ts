@@ -111,9 +111,6 @@ export function renderPage(options: RenderPageOptions): boolean {
     ctx.restore();
   }
 
-  // ── Check stale again before drawing (layout may have changed) ───────────
-  if (renderVersion !== currentVersion()) return false;
-
   // Floats on this page, partitioned by render order.
   const pageFloats = (anchoredObjects?.filter((f) => f.page === page.pageNumber) ?? [])
     .sort(compareAnchoredObjectPaintOrder);

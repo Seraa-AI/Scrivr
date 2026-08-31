@@ -17,7 +17,11 @@ import {
   fixedChromeBandsExtension,
   registerActiveSurface,
 } from "../test-utils";
-import type { LayoutFragment } from "../layout/PageLayout";
+import {
+  defaultPagelessConfig,
+  type LayoutFragment,
+  type PageConfig,
+} from "../layout/PageLayout";
 
 function frag(y: number, height: number): LayoutFragment {
   return { y, height } as LayoutFragment;
@@ -657,6 +661,44 @@ describe("TileManager — recording a paint that did not happen", () => {
     vi.restoreAllMocks();
   });
 
+  function expectStaleCandidatePreservesBitmap(pageConfig?: PageConfig): void {
+    const setup = makeRendererTestSetup({
+      ...(pageConfig ? { pageConfig } : {}),
+    });
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    const contentCanvas = setup.container.querySelector("canvas");
+    if (!contentCanvas) throw new Error("TileManager did not create a content canvas");
+    const contentCtx = contentCanvas.getContext("2d");
+    if (!contentCtx) throw new Error("Content canvas has no 2D rendering context");
+    // A sentinel in the existing backing bitmap makes a reset observable
+    // without comparing an entire page-sized pixel buffer.
+    contentCtx.save();
+    contentCtx.resetTransform();
+    contentCtx.fillStyle = "rgb(17, 34, 51)";
+    contentCtx.fillRect(0, 0, 1, 1);
+    contentCtx.restore();
+    const beforeWidth = contentCanvas.width;
+    const beforeHeight = contentCanvas.height;
+    const beforePixel = contentCtx.getImageData(0, 0, 1, 1).data;
+
+    const current = setup.editor.layout;
+    vi.spyOn(setup.editor, "layout", "get")
+      .mockReturnValueOnce(current)
+      .mockReturnValue({ ...current, version: current.version + 1 });
+    setup.editor.renderGeneration++;
+    tm.update();
+
+    const afterPixel = contentCtx.getImageData(0, 0, 1, 1).data;
+    expect(contentCanvas.width).toBe(beforeWidth);
+    expect(contentCanvas.height).toBe(beforeHeight);
+    expect(afterPixel).toEqual(beforePixel);
+
+    tm.destroy();
+    setup.cleanup();
+  }
+
   it("retries a page whose paint was abandoned", async () => {
     const renderer = await import("./PageRenderer");
     const spy = vi.spyOn(renderer, "renderPage").mockReturnValue(false);
@@ -672,6 +714,14 @@ describe("TileManager — recording a paint that did not happen", () => {
 
     tm.destroy();
     setup.cleanup();
+  });
+
+  it("keeps the last complete paged bitmap when a stale candidate is rejected", () => {
+    expectStaleCandidatePreservesBitmap();
+  });
+
+  it("keeps the last complete pageless bitmap when a stale candidate is rejected", () => {
+    expectStaleCandidatePreservesBitmap(defaultPagelessConfig);
   });
 
   it("does not repaint a page it already painted", async () => {
