@@ -711,7 +711,34 @@ const DEMO_DOC = {
   ],
 };
 
-const PERFORMANCE_PAGE_COUNT = 200;
+/**
+ * Upper bound on `?pages=`. Generation itself is linear and cheap, but the
+ * layout work the fixture then provokes is not, and a mistyped extra zero
+ * should not lock up the tab before the editor can paint.
+ */
+const MAX_PERFORMANCE_PAGES = 5000;
+
+/**
+ * Pages requested via `?pages=<n>`, or 0 when the parameter is absent. Zero
+ * keeps the playground on the standard fixture, so the long-document path is
+ * something you opt into per visit rather than something every visitor loads.
+ */
+function requestedPageCount(): number {
+  if (typeof window === "undefined") return 0;
+  const raw = new URLSearchParams(window.location.search).get("pages");
+  if (raw === null) return 0;
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.warn(`[playground] ignoring ?pages=${raw} — expected a positive integer`);
+    return 0;
+  }
+  if (parsed > MAX_PERFORMANCE_PAGES) {
+    console.warn(`[playground] clamping ?pages=${parsed} to ${MAX_PERFORMANCE_PAGES}`);
+    return MAX_PERFORMANCE_PAGES;
+  }
+  return parsed;
+}
 
 /**
  * Deterministic long-document tail used to exercise streamed layout,
@@ -796,13 +823,22 @@ function performancePages(pageCount: number): Record<string, unknown>[] {
   }).flat();
 }
 
-const PERFORMANCE_DEMO_DOC = {
-  ...DEMO_DOC,
-  content: [...DEMO_DOC.content, ...performancePages(PERFORMANCE_PAGE_COUNT)],
-};
+const performancePageCount = requestedPageCount();
 
 /**
  * DemoContent — seeds the editor with the playground demo document.
  * Drop this extension to start with an empty document instead.
+ *
+ * Append a long deterministic tail with `?pages=<n>` — e.g. `?pages=200` or
+ * `?pages=1000` — to exercise streamed layout, virtualization, and late-page
+ * editing at whatever size you want to measure.
  */
-export const DemoContent = DefaultContent.configure({ json: PERFORMANCE_DEMO_DOC });
+export const DemoContent = DefaultContent.configure({
+  json:
+    performancePageCount > 0
+      ? {
+          ...DEMO_DOC,
+          content: [...DEMO_DOC.content, ...performancePages(performancePageCount)],
+        }
+      : DEMO_DOC,
+});
