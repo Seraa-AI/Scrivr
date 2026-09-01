@@ -481,6 +481,22 @@ describe("runPipeline — measureCache", () => {
 // ── Phase 1b: early termination ───────────────────────────────────────────────
 
 describe("runPipeline — Phase 1b early termination", () => {
+  it("does not reuse a tail before a later cache miss", () => {
+    const stableMiddle = p("stable middle");
+    const stableTail = p("stable tail");
+    const doc1 = doc(p("prefix A"), stableMiddle, p("old later block"), stableTail);
+    const doc2 = doc(p("prefix B"), stableMiddle, p("new later block"), stableTail);
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    const layout1 = runPipeline(doc1, opts);
+    const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1 });
+
+    expect(layout2.pages.flatMap((page) => page.blocks).map((block) => block.node.textContent))
+      .toEqual(["prefix B", "stable middle", "new later block", "stable tail"]);
+  });
+
   it("returns the correct layout when early termination fires on second layout run", () => {
     // Three paragraphs. Edit the first one — the second and third are structurally
     // shared and should be copied from previousLayout without re-looping.

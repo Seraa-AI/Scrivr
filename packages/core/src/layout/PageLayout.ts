@@ -1385,11 +1385,19 @@ export function paginateFlow(
 
   // Phase 1b: only valid after we've seen at least one cache miss (= the edit point).
   let seenCacheMiss = false;
+  // A geometrically stable cache hit is not a safe tail boundary when another
+  // changed/new block still exists later in the document. Precompute the
+  // remaining misses so reuse can begin only after the final one.
+  let remainingCacheMisses = flows.reduce(
+    (count, flow) => count + (flow.wasCacheHit ? 0 : 1),
+    0,
+  );
   let earlyTerminated = false;
 
   for (const flow of flows) {
     // ── Hard page break (skipped in pageless mode) ───────────────────────────
     if (flow.isPageBreak && !pageless) {
+      remainingCacheMisses -= 1;
       const target = targetPageNumber(currentPage.pageNumber, flow.pageBreakType);
       while (currentPage.pageNumber < target) {
         pages.push(currentPage);
@@ -1404,6 +1412,7 @@ export function paginateFlow(
     const { node, nodePos } = flow;
 
     if (!flow.wasCacheHit) seenCacheMiss = true;
+    if (!flow.wasCacheHit) remainingCacheMisses -= 1;
 
     if (!pageless && flow.globalY !== undefined) {
       while (
@@ -1688,6 +1697,7 @@ export function paginateFlow(
       previousLayout &&
       canUsePreviousLayoutTail &&
       seenCacheMiss &&
+      remainingCacheMisses === 0 &&
       flow.wasCacheHit &&
       flow.preCachedTargetY !== undefined &&
       flow.preCachedPage !== undefined &&
