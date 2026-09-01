@@ -711,8 +711,98 @@ const DEMO_DOC = {
   ],
 };
 
+const PERFORMANCE_PAGE_COUNT = 200;
+
+/**
+ * Deterministic long-document tail used to exercise streamed layout,
+ * virtualization, late-page editing, and incremental tail reuse. Explicit
+ * breaks guarantee at least one physical page per generated section.
+ */
+function performancePages(pageCount: number): Record<string, unknown>[] {
+  return Array.from({ length: pageCount }, (_, index) => {
+    const pageNumber = index + 1;
+    return [
+      { type: "pageBreak" },
+      {
+        type: "heading",
+        attrs: { level: 2, align: "left" },
+        content: [{ type: "text", text: `Performance page ${pageNumber}` }],
+      },
+      {
+        type: "paragraph",
+        attrs: { align: "left" },
+        content: [{
+          type: "text",
+          text: `Page ${pageNumber} exercises deterministic multi-page layout. Editing this paragraph tests whether an early-page transaction can invalidate and repaint a long document without copying stale blocks from a previous layout.`,
+        }],
+      },
+      {
+        type: "paragraph",
+        attrs: { align: "justify" },
+        content: [{
+          type: "text",
+          text: "The generated fixture intentionally uses ordinary text rather than large embedded assets. This keeps measurement repeatable while still exercising pagination, CharacterMap population, canvas tile reuse, scrolling, selection, and paragraph splitting across a document much larger than the initial synchronous layout window.",
+        }],
+      },
+      {
+        type: "paragraph",
+        attrs: { align: "justify" },
+        content: [{
+          type: "text",
+          text: "Incremental layout should preserve exact line positions for unchanged material while recomputing every block affected by an edit. A stable paragraph before a later mutation must never be treated as proof that the remaining document is unchanged, because multiple independent changes can exist in one immutable transaction.",
+        }],
+      },
+      {
+        type: "paragraph",
+        attrs: { align: "left" },
+        content: [{
+          type: "text",
+          text: "Virtual page rendering keeps memory bounded by recycling canvas tiles outside the viewport. Scrolling through this fixture exercises tile assignment, page-local CharacterMap population, overlay painting, and selection restoration without requiring hundreds of permanent canvas elements.",
+        }],
+      },
+      {
+        type: "paragraph",
+        attrs: { align: "justify" },
+        content: [{
+          type: "text",
+          text: "The repeated prose is deliberately long enough to create realistic line-breaking work. It includes varied word lengths, punctuation, and spacing so measurement caches receive representative input instead of tiny placeholder strings that would make a large document look artificially inexpensive.",
+        }],
+      },
+      {
+        type: "paragraph",
+        attrs: { align: "left" },
+        content: [{
+          type: "text",
+          text: `Generated section ${pageNumber} also provides several independent caret targets. Try inserting text near the beginning, splitting a middle paragraph, undoing the change, and then editing this late paragraph to compare warm-cache and cold-path behavior.`,
+        }],
+      },
+      {
+        type: "paragraph",
+        attrs: { align: "justify" },
+        content: [{
+          type: "text",
+          text: "A correct optimization may avoid repeating measurements and may reuse a verified unchanged suffix, but correctness always comes before reuse. The rendered pixels, hit-test geometry, selection overlay, and immutable editor state must describe the same document generation after every transaction.",
+        }],
+      },
+      {
+        type: "paragraph",
+        attrs: { align: "left" },
+        content: [{
+          type: "text",
+          text: `End of generated page ${pageNumber}. Use this line for late-document Enter and typing tests.`,
+        }],
+      },
+    ];
+  }).flat();
+}
+
+const PERFORMANCE_DEMO_DOC = {
+  ...DEMO_DOC,
+  content: [...DEMO_DOC.content, ...performancePages(PERFORMANCE_PAGE_COUNT)],
+};
+
 /**
  * DemoContent — seeds the editor with the playground demo document.
  * Drop this extension to start with an empty document instead.
  */
-export const DemoContent = DefaultContent.configure({ json: DEMO_DOC });
+export const DemoContent = DefaultContent.configure({ json: PERFORMANCE_DEMO_DOC });
