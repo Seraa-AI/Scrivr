@@ -12,7 +12,7 @@ import {
 import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
 import type { AnchoredObjectPlacement } from "./AnchoredObjects";
 import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
-import { computePageMetrics, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
+import { computePageMetrics, createPageGeometry, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
 import type { LayoutBlock } from "./BlockLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, sectionBreak } from "../test-utils";
@@ -2558,16 +2558,8 @@ describe("paginateFlow — Stage 2", () => {
   // Shared helper: build the per-page metrics lookup the way runPipeline does.
   // With EMPTY_RESOLVED_CHROME, every page produces identical metrics matching
   // the pre-refactor hand-computed formula.
-  const makeMetricsFor = () => {
-    const cache = new Map<number, PageMetrics>();
-    return (pageNumber: number): PageMetrics => {
-      const hit = cache.get(pageNumber);
-      if (hit) return hit;
-      const m = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, pageNumber);
-      cache.set(pageNumber, m);
-      return m;
-    };
-  };
+  const makeGeometry = () =>
+    createPageGeometry(defaultPageConfig, EMPTY_RESOLVED_CHROME);
 
   it("single short paragraph fits on page 1", () => {
     const testDoc = doc(p("Hello"));
@@ -2578,10 +2570,10 @@ describe("paginateFlow — Stage 2", () => {
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
     const initPage = { pageNumber: 1, blocks: [] };
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: initPage, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: initPage, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     const allPages = [...pr.pages, pr.currentPage];
     expect(allPages).toHaveLength(1);
@@ -2597,10 +2589,10 @@ describe("paginateFlow — Stage 2", () => {
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
     const initPage = { pageNumber: 1, blocks: [] };
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: initPage, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: initPage, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     const allPages = [...pr.pages, pr.currentPage];
     expect(allPages).toHaveLength(2);
@@ -2614,10 +2606,10 @@ describe("paginateFlow — Stage 2", () => {
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     expect(pr.earlyTerminated).toBe(false);
   });
@@ -2642,10 +2634,10 @@ describe("paginateFlow — Stage 2", () => {
     const contentWidth = defaultPageConfig.pageWidth - margins.left - margins.right;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     expect(pr.earlyTerminated).toBe(false);
     expect(pr.pages.length).toBeGreaterThanOrEqual(1);
