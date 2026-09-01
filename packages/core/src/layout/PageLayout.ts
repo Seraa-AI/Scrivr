@@ -1395,9 +1395,15 @@ export function paginateFlow(
   let earlyTerminated = false;
 
   for (const flow of flows) {
+    // Count down on the same predicate the total was built from, once per flow
+    // and before any branch can `continue` past it. Decrementing inside the
+    // branches instead would let the counter drift from the count that seeded
+    // it the moment either branch's notion of a cache hit changed, and the
+    // stale tail that drift lets through is invisible to every test.
+    if (!flow.wasCacheHit) remainingCacheMisses -= 1;
+
     // ── Hard page break (skipped in pageless mode) ───────────────────────────
     if (flow.isPageBreak && !pageless) {
-      remainingCacheMisses -= 1;
       const target = targetPageNumber(currentPage.pageNumber, flow.pageBreakType);
       while (currentPage.pageNumber < target) {
         pages.push(currentPage);
@@ -1412,7 +1418,6 @@ export function paginateFlow(
     const { node, nodePos } = flow;
 
     if (!flow.wasCacheHit) seenCacheMiss = true;
-    if (!flow.wasCacheHit) remainingCacheMisses -= 1;
 
     if (!pageless && flow.globalY !== undefined) {
       while (
