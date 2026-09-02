@@ -92,7 +92,19 @@ jobs:
       # `changeset status` resolves the config's `baseBranch` as a local ref,
       # which a PR checkout does not have — pass the remote ref explicitly, the
       # way the Changeset Check job above already does.
+      # This step reads a release plan out of `changeset status`, so it can only
+      # run where that command can succeed — the same two cases Changeset Check
+      # above skips, and for the same reasons. The version PR has consumed every
+      # changeset, and a `no-release` PR never had one; in both, `changeset
+      # status` sees changed packages with nothing explaining them and exits 1
+      # before reporting a plan. Keep this condition in step with that job's:
+      # if they drift, a `no-release` label silences one check and not the other.
+      # Nothing is lost by skipping — a PR with no release plan has no major in
+      # it, and the version PR is covered by the next step.
       - name: Release plan contains no major
+        if: |
+          github.head_ref != 'changeset-release/main' &&
+          !contains(github.event.pull_request.labels.*.name, 'no-release')
         run: |
           pnpm changeset status --since=origin/main --output=release-plan.json
           node -e '
