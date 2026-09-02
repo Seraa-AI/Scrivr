@@ -36,26 +36,31 @@ export interface PageMetrics {
 export type PageFlowMetrics = Pick<PageMetrics, "contentTop" | "contentHeight">;
 
 /**
- * Global flow Y where a page's content begins, derived by walking every page
- * before it — O(pageNumber) per call.
+ * Page starts for a finished layout: `pageStarts[p - 1]` is the global flow Y
+ * where page `p`'s content begins.
  *
- * Fine for an isolated cold-path lookup such as a single pointer event. Not
- * fine anywhere a page position is asked for repeatedly: calling this once per
- * block makes the caller quadratic in page count, and calling it inside a
- * page-advancing loop makes it cubic. Use {@link PageGeometry.startOf}, which
- * answers the same question in O(1), for pipeline and event-loop work.
+ * Derived once from the layout's own `metrics`, so consumers read an array
+ * rather than re-summing every page before the one they asked about.
+ *
+ * Distinct from {@link PageGeometry}, which answers the same question *during*
+ * a layout run and therefore has to grow on demand — pagination decides the
+ * page count as it goes. This one is built after that count is known.
  */
-export function pageStartGlobalForMetrics(
+export function buildPageStarts(
   pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageFlowMetrics,
-  pageNumber: number,
-): number {
-  if (pageConfig.pageless) return metricsFor(1).contentTop;
-  let y = metricsFor(1).contentTop;
-  for (let page = 1; page < pageNumber; page++) {
-    y += metricsFor(page).contentHeight;
+  metrics: readonly PageFlowMetrics[],
+): number[] {
+  const first = metrics[0]?.contentTop ?? pageConfig.margins.top;
+  // Pageless has a single continuous flow: every page shares one origin.
+  if (pageConfig.pageless) return metrics.map(() => first);
+
+  const starts: number[] = [];
+  let y = first;
+  for (const m of metrics) {
+    starts.push(y);
+    y += m.contentHeight;
   }
-  return y;
+  return starts;
 }
 
 /**
@@ -145,16 +150,6 @@ export function createPageGeometry(
       return lo;
     },
   };
-}
-
-export function pageLocalYToGlobalForMetrics(
-  pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageFlowMetrics,
-  pageNumber: number,
-  localY: number,
-): number {
-  return pageStartGlobalForMetrics(pageConfig, metricsFor, pageNumber)
-    + (localY - metricsFor(pageNumber).contentTop);
 }
 
 /** One chrome contribution (header, footer, footnote band, etc.). */

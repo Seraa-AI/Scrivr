@@ -43,8 +43,7 @@ export type {
   PageChromeContribution,
 } from "./PageMetrics";
 export {
-  pageStartGlobalForMetrics,
-  pageLocalYToGlobalForMetrics,
+  buildPageStarts,
 } from "./PageMetrics";
 export { runMiniPipeline } from "./runMiniPipeline";
 export type { MiniPipelineOptions } from "./runMiniPipeline";

@@ -24,6 +24,7 @@ import {
 } from "./AnchoredObjects";
 import {
   computePageMetrics,
+  buildPageStarts,
   createPageGeometry,
   EMPTY_RESOLVED_CHROME,
   type PageGeometry,
@@ -156,6 +157,14 @@ export interface DocumentLayout {
 
   /** Per-page metrics, one entry per page. Optional for test fixtures. */
   metrics?: PageMetrics[];
+
+  /**
+   * Global flow Y where each page's content begins — the prefix sum over
+   * `metrics`, aligned with it 1:1. Carried on the layout so hit-testing and
+   * pointer geometry read a page's origin instead of summing the pages before
+   * it on every event.
+   */
+  pageStarts?: number[];
 
   /** Monotonic per-run identity for cache invalidation. Currently aliased to `version`. */
   runId?: number;
@@ -1182,6 +1191,7 @@ export function runFlowPipeline(
         ? pr.y + margins.bottom
         : partialPages.length * pageHeight,
       metrics: pr.metrics,
+      pageStarts: buildPageStarts(pageConfig, pr.metrics),
       runId,
       convergence: "stable",
       iterationCount: 1,
@@ -1198,6 +1208,7 @@ export function runFlowPipeline(
     version: chunkVersion,
     totalContentHeight: 0,
     metrics: pr.metrics,
+    pageStarts: buildPageStarts(pageConfig, pr.metrics),
     runId,
     convergence: "stable",
     iterationCount: 1,

@@ -11,8 +11,6 @@ import {
   normalizeImageAttrs,
 } from "../layout/AnchoredObjects";
 import {
-  pageLocalYToGlobalForMetrics,
-  pageStartGlobalForMetrics,
   type PageFlowMetrics,
 } from "../layout/PageMetrics";
 import { dragDebugLog } from "./DragDebugOverlay";
@@ -1016,20 +1014,30 @@ export class PointerController {
 
   private pageStartGlobal(pageNumber: number): number {
     const layout = this.deps.editor.layout;
-    return pageStartGlobalForMetrics(
-      layout.pageConfig,
-      (page) => this.metricsForPage(page),
-      pageNumber,
-    );
+    const starts = layout.pageStarts;
+    // Pageless is one continuous flow — every page shares the first origin.
+    if (layout.pageConfig.pageless) {
+      return starts?.[0] ?? this.metricsForPage(1).contentTop;
+    }
+
+    const known = starts?.[pageNumber - 1];
+    if (known !== undefined) return known;
+
+    // Past the end of the laid-out range, which a partial layout mid-stream can
+    // produce. Continue from the last known start using the same synthesized
+    // page height metricsForPage() falls back to.
+    const laidOut = starts?.length ?? 0;
+    let y = laidOut > 0 ? starts![laidOut - 1]! : this.metricsForPage(1).contentTop;
+    for (let page = Math.max(laidOut, 1); page < pageNumber; page++) {
+      y += this.metricsForPage(page).contentHeight;
+    }
+    return y;
   }
 
   private pageLocalYToGlobal(pageNumber: number, localY: number): number {
-    const layout = this.deps.editor.layout;
-    return pageLocalYToGlobalForMetrics(
-      layout.pageConfig,
-      (page) => this.metricsForPage(page),
-      pageNumber,
-      localY,
+    return (
+      this.pageStartGlobal(pageNumber) +
+      (localY - this.metricsForPage(pageNumber).contentTop)
     );
   }
 

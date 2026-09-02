@@ -14,9 +14,7 @@ import {
   type MeasureCacheEntry,
 } from "./PageLayout";
 import {
-  computePageMetrics,
   createPageGeometry,
-  pageStartGlobalForMetrics,
   EMPTY_RESOLVED_CHROME,
   type PageGeometry,
   type PageMetrics,
@@ -468,68 +466,6 @@ describe("pipeline trace (issue #161)", () => {
           `  buildFragments time ${exp(a.fragmentsMs, b.fragmentsMs).toFixed(2)}`,
       );
 
-      // ── The two helpers under assignGlobalY, current vs prefix-sum ──────────
-      //
-      // Current: pageStartGlobalForMetrics loops 1..P, and pageForGlobalY loops
-      // pages while calling it — so locating one block on page P costs O(P²).
-      // Prefix-sum: page starts are cumulative, so lookup is O(1) and locating
-      // a block is a binary search.
-      const prefixStarts = (pageCount: number): number[] => {
-        const starts = [0, computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, 1).contentTop];
-        for (let p = 1; p <= pageCount; p++) {
-          starts[p + 1] =
-            starts[p]! +
-            computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, p).contentHeight;
-        }
-        return starts;
-      };
-      const pageForGlobalYBinary = (starts: number[], globalY: number): number => {
-        let lo = 1;
-        let hi = starts.length - 2;
-        while (lo < hi) {
-          const mid = (lo + hi + 1) >> 1;
-          if (globalY >= starts[mid + 1]!) lo = mid;
-          else hi = mid - 1 < lo ? lo : mid;
-          if (lo === hi) break;
-          if (globalY < starts[mid + 1]!) hi = mid;
-          else lo = mid + 1;
-        }
-        return lo;
-      };
-
-      console.log(
-        `\n  ── locating one block's page: current O(P²) vs prefix-sum O(log P) ──`,
-      );
-      console.log("  pages |  current    prefix-sum |  speedup");
-      console.log("  ----- |  -------    ---------- |  -------");
-      for (const pageCount of [10, 50, 100, 250]) {
-        let cachedPage = -1;
-        let cached: PageMetrics | null = null;
-        const metricsFor = (n: number): PageMetrics => {
-          if (cachedPage === n && cached !== null) return cached;
-          cached = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, n);
-          cachedPage = n;
-          return cached;
-        };
-        const target = pageStartGlobalForMetrics(defaultPageConfig, metricsFor, pageCount) + 1;
-
-        const currentMs = median(() => {
-          let p = 1;
-          while (
-            target >=
-            pageStartGlobalForMetrics(defaultPageConfig, metricsFor, p) +
-              metricsFor(p).contentHeight
-          )
-            p++;
-        }, 51);
-
-        const starts = prefixStarts(pageCount + 2);
-        const prefixMs = median(() => void pageForGlobalYBinary(starts, target), 51);
-
-        console.log(
-          `  ${String(pageCount).padStart(5)} | ${(currentMs * 1000).toFixed(1).padStart(8)}µs ${(prefixMs * 1000).toFixed(2).padStart(10)}µs | ${(currentMs / Math.max(prefixMs, 1e-6)).toFixed(0).padStart(6)}x`,
-        );
-      }
       console.log("");
     },
     900_000,

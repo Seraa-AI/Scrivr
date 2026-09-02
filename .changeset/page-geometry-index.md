@@ -9,6 +9,13 @@ scan. Editing a large document no longer slows down as the page count grows:
 on a 250-page document a caret move drops from ~1017ms to ~6ms and typing from
 ~1008ms to ~15ms, keeping interaction inside a single frame.
 
-`paginateFlow` now takes a `PageGeometry` in place of a bare `metricsFor`
-callback. `pageStartGlobalForMetrics` still works and is unchanged, but is
-documented as cold-path only.
+A finished layout now carries `pageStarts` alongside `metrics`, so hit-testing
+and pointer geometry read a page's origin instead of summing the pages before
+it on every event.
+
+Breaking, though only for direct users of the layout internals:
+
+- `paginateFlow` takes a `PageGeometry` in place of a bare `metricsFor` callback.
+- `pageStartGlobalForMetrics` and `pageLocalYToGlobalForMetrics` are removed.
+  Both walked the pages before the one asked about. Read `layout.pageStarts`
+  for a finished layout, or use `PageGeometry` during a layout run.
