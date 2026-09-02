@@ -481,6 +481,46 @@ describe("runPipeline — measureCache", () => {
 // ── Phase 1b: early termination ───────────────────────────────────────────────
 
 describe("runPipeline — Phase 1b early termination", () => {
+  it("does not reuse a tail before a later cache miss", () => {
+    const stableMiddle = p("stable middle");
+    const stableTail = p("stable tail");
+    const doc1 = doc(p("prefix A"), stableMiddle, p("old later block"), stableTail);
+    const doc2 = doc(p("prefix B"), stableMiddle, p("new later block"), stableTail);
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    const layout1 = runPipeline(doc1, opts);
+    const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1 });
+
+    expect(layout2.pages.flatMap((page) => page.blocks).map((block) => block.node.textContent))
+      .toEqual(["prefix B", "stable middle", "new later block", "stable tail"]);
+  });
+
+  it("does not reuse a tail before a later cache miss across a page break", () => {
+    // A page break sits between the two edits. It is a cache miss by
+    // construction, so it must be counted and discounted on the same terms as
+    // any other flow — a page break that stopped counting would let the tail
+    // splice in before "new later block" was ever processed.
+    const stableMiddle = p("stable middle");
+    const stableTail = p("stable tail");
+    const doc1 = doc(p("prefix A"), stableMiddle, pageBreak(), p("old later block"), stableTail);
+    const doc2 = doc(p("prefix B"), stableMiddle, pageBreak(), p("new later block"), stableTail);
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    const layout1 = runPipeline(doc1, opts);
+    const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1 });
+
+    expect(
+      layout2.pages
+        .flatMap((page) => page.blocks)
+        .map((block) => block.node.textContent)
+        .filter((text) => text !== ""),
+    ).toEqual(["prefix B", "stable middle", "new later block", "stable tail"]);
+  });
+
   it("returns the correct layout when early termination fires on second layout run", () => {
     // Three paragraphs. Edit the first one — the second and third are structurally
     // shared and should be copied from previousLayout without re-looping.
