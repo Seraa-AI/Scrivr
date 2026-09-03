@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildPageStarts,
   computePageMetrics,
   EMPTY_RESOLVED_CHROME,
   type ChromeContribution,
+  type PageMetrics,
   type ResolvedChrome,
 } from "./PageMetrics";
 import { defaultPageConfig, defaultPagelessConfig, type PageConfig } from "./PageLayout";
@@ -216,5 +218,64 @@ describe("EMPTY_RESOLVED_CHROME", () => {
   it("is a stable reference (same object across accesses)", () => {
     // Not strictly required, but nice for identity-based optimization later.
     expect(EMPTY_RESOLVED_CHROME).toBe(EMPTY_RESOLVED_CHROME);
+  });
+});
+
+describe("buildPageStarts", () => {
+  /**
+   * Page starts used to be derived by summing the pages before the one asked
+   * about. These cases pin the values that walk produced, so moving the sum
+   * into the layout snapshot cannot shift hit-testing geometry.
+   */
+  const uniform = (count: number): PageMetrics[] =>
+    Array.from({ length: count }, (_, i) =>
+      computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, i + 1),
+    );
+
+  it("starts page 1 at its own content top", () => {
+    expect(buildPageStarts(defaultPageConfig, uniform(1))).toEqual([72]);
+  });
+
+  it("accumulates content height across pages", () => {
+    // contentTop 72, contentHeight 979 per page.
+    expect(buildPageStarts(defaultPageConfig, uniform(4))).toEqual([
+      72,
+      72 + 979,
+      72 + 979 * 2,
+      72 + 979 * 3,
+    ]);
+  });
+
+  it("matches a running sum over the pages before each one", () => {
+    const metrics = uniform(25);
+    const starts = buildPageStarts(defaultPageConfig, metrics);
+
+    let expected = metrics[0]!.contentTop;
+    for (let page = 1; page <= metrics.length; page++) {
+      expect(starts[page - 1]).toBe(expected);
+      expected += metrics[page - 1]!.contentHeight;
+    }
+  });
+
+  it("honours per-page metrics that differ, e.g. a taller first-page header", () => {
+    const varied: PageMetrics[] = [
+      { ...uniform(1)[0]!, contentTop: 200, contentHeight: 800 },
+      { ...uniform(1)[0]!, contentTop: 72, contentHeight: 979 },
+      { ...uniform(1)[0]!, contentTop: 72, contentHeight: 979 },
+    ];
+    expect(buildPageStarts(defaultPageConfig, varied)).toEqual([200, 1000, 1979]);
+  });
+
+  it("gives every page one shared origin in pageless mode", () => {
+    const metrics = [
+      computePageMetrics(defaultPagelessConfig, EMPTY_RESOLVED_CHROME, 1),
+      computePageMetrics(defaultPagelessConfig, EMPTY_RESOLVED_CHROME, 2),
+    ];
+    const starts = buildPageStarts(defaultPagelessConfig, metrics);
+    expect(starts).toEqual([metrics[0]!.contentTop, metrics[0]!.contentTop]);
+  });
+
+  it("returns nothing to index for an empty layout", () => {
+    expect(buildPageStarts(defaultPageConfig, [])).toEqual([]);
   });
 });
