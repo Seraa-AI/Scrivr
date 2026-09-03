@@ -17,7 +17,11 @@ import {
   fixedChromeBandsExtension,
   registerActiveSurface,
 } from "../test-utils";
-import type { LayoutFragment } from "../layout/PageLayout";
+import {
+  defaultPagelessConfig,
+  type LayoutFragment,
+  type PageConfig,
+} from "../layout/PageLayout";
 
 function frag(y: number, height: number): LayoutFragment {
   return { y, height } as LayoutFragment;
@@ -460,6 +464,50 @@ describe("TileManager — overlay repaint with active surface", () => {
   });
 });
 
+describe("TileManager — overlay generation guard", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does not draw overlay geometry from a layout the painted pixels never showed", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update(); // content + overlay painted together at the current version
+
+    const spy = vi.spyOn(setup.editor, "runOverlayHandlers");
+    // Desync geometry from pixels the way a bailed content paint does, and
+    // make the overlay dirty so only the guard can hold it back.
+    setup.editor.selection.moveCursorTo(5);
+    setup.editor.charMap.setGeneration(setup.editor.layout.version + 99);
+    tm.update();
+
+    expect(spy).not.toHaveBeenCalled();
+
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("draws the overlay once geometry and pixels agree again", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    const spy = vi.spyOn(setup.editor, "runOverlayHandlers");
+    setup.editor.selection.moveCursorTo(5);
+    setup.editor.charMap.setGeneration(setup.editor.layout.version);
+    tm.update();
+
+    expect(spy).toHaveBeenCalled();
+
+    tm.destroy();
+    setup.cleanup();
+  });
+});
+
 describe("TileManager — body click deactivates surface", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -591,6 +639,104 @@ describe("TileManager — margin click activation (no policy)", () => {
       expect.objectContaining({ band: "header" }),
     );
 
+    setup.cleanup();
+  });
+});
+
+/**
+ * A tile records a version only if it painted that version.
+ *
+ * `renderPage` abandons a paint when the layout moves under it — correct, or
+ * the page shows pixels from a layout that no longer exists. The hazard is the
+ * bookkeeping: stamping the version regardless tells the tile it is current,
+ * so it sits on stale content until something unrelated moves it. The reader
+ * sees an edit go missing, presses the key again, and now two edits are hiding
+ * behind one frame.
+ *
+ * Observable form of the contract: at an unchanged layout version, an
+ * abandoned paint is retried on the next update and a completed one is not.
+ */
+describe("TileManager — recording a paint that did not happen", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function expectStaleCandidatePreservesBitmap(pageConfig?: PageConfig): void {
+    const setup = makeRendererTestSetup({
+      ...(pageConfig ? { pageConfig } : {}),
+    });
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    const contentCanvas = setup.container.querySelector("canvas");
+    if (!contentCanvas) throw new Error("TileManager did not create a content canvas");
+    const contentCtx = contentCanvas.getContext("2d");
+    if (!contentCtx) throw new Error("Content canvas has no 2D rendering context");
+    // A sentinel in the existing backing bitmap makes a reset observable
+    // without comparing an entire page-sized pixel buffer.
+    contentCtx.save();
+    contentCtx.resetTransform();
+    contentCtx.fillStyle = "rgb(17, 34, 51)";
+    contentCtx.fillRect(0, 0, 1, 1);
+    contentCtx.restore();
+    const beforeWidth = contentCanvas.width;
+    const beforeHeight = contentCanvas.height;
+    const beforePixel = contentCtx.getImageData(0, 0, 1, 1).data;
+
+    const current = setup.editor.layout;
+    vi.spyOn(setup.editor, "layout", "get")
+      .mockReturnValueOnce(current)
+      .mockReturnValue({ ...current, version: current.version + 1 });
+    setup.editor.renderGeneration++;
+    tm.update();
+
+    const afterPixel = contentCtx.getImageData(0, 0, 1, 1).data;
+    expect(contentCanvas.width).toBe(beforeWidth);
+    expect(contentCanvas.height).toBe(beforeHeight);
+    expect(afterPixel).toEqual(beforePixel);
+
+    tm.destroy();
+    setup.cleanup();
+  }
+
+  it("retries a page whose paint was abandoned", async () => {
+    const renderer = await import("./PageRenderer");
+    const spy = vi.spyOn(renderer, "renderPage").mockReturnValue(false);
+
+    const setup = makeRendererTestSetup();
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    const afterFirst = spy.mock.calls.length;
+    expect(afterFirst).toBeGreaterThan(0);
+
+    tm.update();
+    expect(spy.mock.calls.length).toBeGreaterThan(afterFirst);
+
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("keeps the last complete paged bitmap when a stale candidate is rejected", () => {
+    expectStaleCandidatePreservesBitmap();
+  });
+
+  it("keeps the last complete pageless bitmap when a stale candidate is rejected", () => {
+    expectStaleCandidatePreservesBitmap(defaultPagelessConfig);
+  });
+
+  it("does not repaint a page it already painted", async () => {
+    const renderer = await import("./PageRenderer");
+    const spy = vi.spyOn(renderer, "renderPage").mockReturnValue(true);
+
+    const setup = makeRendererTestSetup();
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    const afterFirst = spy.mock.calls.length;
+
+    tm.update();
+    expect(spy.mock.calls.length).toBe(afterFirst);
+
+    tm.destroy();
     setup.cleanup();
   });
 });

@@ -1,5 +1,5 @@
+import type { Node as PmNode, Schema } from "prosemirror-model";
 import type { EditorState, Selection } from "prosemirror-state";
-import type { Schema } from "prosemirror-model";
 import type { DocumentLayout } from "../layout/PageLayout";
 import type { CharacterMap, ObjectRectEntry } from "../layout/CharacterMap";
 import type { IEditor } from "../extensions/types";
@@ -232,7 +232,7 @@ export interface NodeActionContext {
   /** State of the surface that owns the selection. NEVER editor.getState(). */
   state: EditorState;
   /** The node the action targets, resolved against `state`. Null for text ranges. */
-  node: import("prosemirror-model").Node | null;
+  node: PmNode | null;
   /** Document position of `node` within `state`. -1 when node is null. */
   pos: number;
   readOnly: boolean;

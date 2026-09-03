@@ -35,27 +35,121 @@ export interface PageMetrics {
 
 export type PageFlowMetrics = Pick<PageMetrics, "contentTop" | "contentHeight">;
 
-export function pageStartGlobalForMetrics(
+/**
+ * Page starts for a finished layout: `pageStarts[p - 1]` is the global flow Y
+ * where page `p`'s content begins.
+ *
+ * Derived once from the layout's own `metrics`, so consumers read an array
+ * rather than re-summing every page before the one they asked about.
+ *
+ * Distinct from {@link PageGeometry}, which answers the same question *during*
+ * a layout run and therefore has to grow on demand — pagination decides the
+ * page count as it goes. This one is built after that count is known.
+ */
+export function buildPageStarts(
   pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageFlowMetrics,
-  pageNumber: number,
-): number {
-  if (pageConfig.pageless) return metricsFor(1).contentTop;
-  let y = metricsFor(1).contentTop;
-  for (let page = 1; page < pageNumber; page++) {
-    y += metricsFor(page).contentHeight;
+  metrics: readonly PageFlowMetrics[],
+): number[] {
+  const first = metrics[0]?.contentTop ?? pageConfig.margins.top;
+  // Pageless has a single continuous flow: every page shares one origin.
+  if (pageConfig.pageless) return metrics.map(() => first);
+
+  const starts: number[] = [];
+  let y = first;
+  for (const m of metrics) {
+    starts.push(y);
+    y += m.contentHeight;
   }
-  return y;
+  return starts;
 }
 
-export function pageLocalYToGlobalForMetrics(
+/**
+ * Page starts in continuous flow space, and the inverse lookup from a flow Y
+ * back to its page.
+ *
+ * A page's start is the running sum of every earlier page's contentHeight, so
+ * the two queries are a prefix sum and a predecessor search over it. Computing
+ * them from `metricsFor` on demand — as `pageStartGlobalForMetrics` does —
+ * makes `startOf` cost O(pages) and `pageAt` cost O(pages²), which is why a
+ * per-block page lookup during layout turned the pass cubic in document size.
+ *
+ * The prefix array is grown on demand rather than built upfront: pagination
+ * decides the page count as it goes, so the total is not known when the flow
+ * stage starts asking.
+ */
+export interface PageGeometry {
+  /** Metrics for a page. Memoized — repeated lookups are free. */
+  metricsFor(pageNumber: number): PageMetrics;
+  /** Global flow Y where `pageNumber`'s content begins. */
+  startOf(pageNumber: number): number;
+  /** Global flow Y where `pageNumber`'s content ends. */
+  bottomOf(pageNumber: number): number;
+  /** The page whose content range contains `globalY`. */
+  pageAt(globalY: number): number;
+}
+
+export function createPageGeometry(
   pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageFlowMetrics,
-  pageNumber: number,
-  localY: number,
-): number {
-  return pageStartGlobalForMetrics(pageConfig, metricsFor, pageNumber)
-    + (localY - metricsFor(pageNumber).contentTop);
+  resolved: ResolvedChrome,
+): PageGeometry {
+  const metrics = new Map<number, PageMetrics>();
+  // starts[p] = global Y of page p's content top. Index 0 is unused so page
+  // numbers index the array directly.
+  const starts: number[] = [];
+  let highest = 0;
+
+  const metricsFor = (pageNumber: number): PageMetrics => {
+    let m = metrics.get(pageNumber);
+    if (m === undefined) {
+      m = computePageMetrics(pageConfig, resolved, pageNumber);
+      metrics.set(pageNumber, m);
+    }
+    return m;
+  };
+
+  /** Extend the prefix array so `starts[pageNumber]` is defined. */
+  const growTo = (pageNumber: number): void => {
+    if (highest === 0) {
+      starts[1] = metricsFor(1).contentTop;
+      highest = 1;
+    }
+    while (highest < pageNumber) {
+      starts[highest + 1] = starts[highest]! + metricsFor(highest).contentHeight;
+      highest++;
+    }
+  };
+
+  const startOf = (pageNumber: number): number => {
+    if (pageConfig.pageless) return metricsFor(1).contentTop;
+    growTo(pageNumber);
+    return starts[pageNumber]!;
+  };
+
+  return {
+    metricsFor,
+    startOf,
+    bottomOf: (pageNumber) => startOf(pageNumber) + metricsFor(pageNumber).contentHeight,
+    pageAt: (globalY) => {
+      if (pageConfig.pageless) return 1;
+      // Materialize far enough that globalY falls inside the known range,
+      // doubling so an unbounded Y costs O(log) growth steps rather than O(n).
+      growTo(1);
+      let bound = Math.max(highest, 1);
+      while (globalY >= starts[bound]! + metricsFor(bound).contentHeight) {
+        bound *= 2;
+        growTo(bound);
+      }
+      // Greatest page whose start is <= globalY.
+      let lo = 1;
+      let hi = bound;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (starts[mid]! <= globalY) lo = mid;
+        else hi = mid - 1;
+      }
+      return lo;
+    },
+  };
 }
 
 /** One chrome contribution (header, footer, footnote band, etc.). */

@@ -115,12 +115,18 @@ When the user's request matches an available skill, ALWAYS invoke it using the S
 tool as your FIRST action. Do NOT answer directly, do NOT use other tools first.
 The skill has specialized workflows that produce better results than ad-hoc answers.
 
+**Before any ship or merge: `scrivr-review` runs first.** Every time — before
+`/ship`, before merging a PR, before pushing a release. It runs seven
+specialized reviewers over the diff (data flow, conditions, readability,
+comments, public API surface, typing discipline, repo conventions) and returns
+a ranked verdict. Blockers get fixed before the merge, not after.
+
 Key routing rules:
+- Ship, deploy, merge, release → invoke scrivr-review FIRST, then ship
 - Product ideas, "is this worth building", brainstorming → invoke office-hours
 - Bugs, errors, "why is this broken", 500 errors → invoke investigate
-- Ship, deploy, push, create PR → invoke ship
 - QA, test the site, find bugs → invoke qa
-- Code review, check my diff → invoke review
+- Code review, check my diff → invoke scrivr-review (gstack `review` is the generic fallback)
 - Update docs after shipping → invoke document-release
 - Weekly retro → invoke retro
 - Design system, brand → invoke design-consultation

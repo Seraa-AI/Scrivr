@@ -469,3 +469,88 @@ describe("exportDocx — sourced blocks", () => {
     expect(xmlText).not.toContain("scrivr:sourcedBlock:");
   });
 });
+
+describe("exportDocx — hyperlinks", () => {
+  function editorWithLink(href: string): ServerEditor {
+    return new ServerEditor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "see " },
+              {
+                type: "text",
+                text: "the terms",
+                marks: [{ type: "link", attrs: { href } }],
+              },
+              { type: "text", text: " for detail" },
+            ],
+          },
+        ],
+      },
+    });
+  }
+
+  async function partsOf(editor: ServerEditor): Promise<Record<string, string>> {
+    const bytes = await exportDocxBytes(editor);
+    const entries = unzipSync(bytes);
+    const out: Record<string, string> = {};
+    for (const [path, data] of Object.entries(entries)) out[path] = strFromU8(data);
+    return out;
+  }
+
+  it("emits a w:hyperlink around the linked runs, with a relationship", async () => {
+    const editor = editorWithLink("https://example.com/terms");
+    const parts = await partsOf(editor);
+
+    const document = parts["word/document.xml"]!;
+    const rels = parts["word/_rels/document.xml.rels"]!;
+
+    const relId = /<w:hyperlink w:r:id="([^"]+)"|<w:hyperlink r:id="([^"]+)"/.exec(document);
+    expect(relId).not.toBeNull();
+    const id = relId![1] ?? relId![2]!;
+
+    // The link text is inside the hyperlink element, the surrounding text is not.
+    expect(document).toMatch(new RegExp(`<w:hyperlink [^>]*${id}[^>]*>.*?the terms.*?</w:hyperlink>`));
+    expect(document).toContain("see ");
+    expect(document).toContain(" for detail");
+
+    // The relationship exists and points outside the package.
+    expect(rels).toContain(`Id="${id}"`);
+    expect(rels).toContain("https://example.com/terms");
+    expect(rels).toContain('TargetMode="External"');
+  });
+
+  it("no longer warns that the link mark is unsupported", async () => {
+    const { diagnostics } = await exportDocx(editorWithLink("https://example.com"));
+    expect(
+      diagnostics.filter((d) => d.code === "unsupported-mark" && d.markType === "link"),
+    ).toEqual([]);
+  });
+
+  it("styles the link so a reader recognises it", async () => {
+    const parts = await partsOf(editorWithLink("https://example.com"));
+    expect(parts["word/styles.xml"]).toContain("Hyperlink");
+  });
+
+  it("leaves a link with no href as plain styled text rather than a dangling relationship", async () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "bare", marks: [{ type: "link", attrs: { href: "" } }] }],
+          },
+        ],
+      },
+    });
+    const parts = await partsOf(editor);
+    expect(parts["word/document.xml"]).not.toContain("<w:hyperlink");
+    expect(parts["word/document.xml"]).toContain("bare");
+  });
+});

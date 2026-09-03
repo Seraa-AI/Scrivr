@@ -24,8 +24,10 @@ import {
 } from "./AnchoredObjects";
 import {
   computePageMetrics,
+  buildPageStarts,
+  createPageGeometry,
   EMPTY_RESOLVED_CHROME,
-  pageStartGlobalForMetrics,
+  type PageGeometry,
   type PageMetrics,
   type ResolvedChrome,
   type PageChromeContribution,
@@ -155,6 +157,14 @@ export interface DocumentLayout {
 
   /** Per-page metrics, one entry per page. Optional for test fixtures. */
   metrics?: PageMetrics[];
+
+  /**
+   * Global flow Y where each page's content begins — the prefix sum over
+   * `metrics`, aligned with it 1:1. Carried on the layout so hit-testing and
+   * pointer geometry read a page's origin instead of summing the pages before
+   * it on every event.
+   */
+  pageStarts?: number[];
 
   /** Monotonic per-run identity for cache invalidation. Currently aliased to `version`. */
   runId?: number;
@@ -324,20 +334,15 @@ export interface FlowBlock {
  * advances exactly one page per forced break.
  */
 function nextPageStartAfter(
-  pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
   y: number,
   breakType: FlowBlock["pageBreakType"],
 ): number {
-  let contentPage = pageForGlobalY(pageConfig, metricsFor, y);
-  if (contentPage > 1 && pageStartGlobalForMetrics(pageConfig, metricsFor, contentPage) === y) {
+  let contentPage = geometry.pageAt(y);
+  if (contentPage > 1 && geometry.startOf(contentPage) === y) {
     contentPage -= 1;
   }
-  return pageStartGlobalForMetrics(
-    pageConfig,
-    metricsFor,
-    targetPageNumber(contentPage, breakType),
-  );
+  return geometry.startOf(targetPageNumber(contentPage, breakType));
 }
 
 function targetPageNumber(
@@ -367,24 +372,19 @@ function advanceFlowGlobalY(
   flow: FlowBlock,
   naturalStart: number,
   pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
 ): { startGlobalY: number; endGlobalY: number } {
   if (flow.isPageBreak && !pageConfig.pageless) {
-    const start = nextPageStartAfter(
-      pageConfig,
-      metricsFor,
-      naturalStart,
-      flow.pageBreakType,
-    );
+    const start = nextPageStartAfter(geometry, naturalStart, flow.pageBreakType);
     return { startGlobalY: start, endGlobalY: start + flow.height };
   }
   if (pageConfig.pageless) {
     return { startGlobalY: naturalStart, endGlobalY: naturalStart + flow.height };
   }
 
-  const pageOf = (g: number): number => pageForGlobalY(pageConfig, metricsFor, g);
-  const pageStart = (p: number): number => pageStartGlobalForMetrics(pageConfig, metricsFor, p);
-  const pageBottom = (p: number): number => pageStart(p) + metricsFor(p).contentHeight;
+  const pageOf = (g: number): number => geometry.pageAt(g);
+  const pageStart = (p: number): number => geometry.startOf(p);
+  const pageBottom = (p: number): number => geometry.bottomOf(p);
 
   // Atomic blocks (image / hr / tableRow) never split: if the block overflows
   // its page and fits on a fresh one, it moves whole (the gap). `paginateFlow`
@@ -394,7 +394,7 @@ function advanceFlowGlobalY(
     let start = naturalStart;
     const page = pageOf(start);
     const atTop = start === pageStart(page);
-    const tooTall = flow.height > metricsFor(page).contentHeight;
+    const tooTall = flow.height > geometry.metricsFor(page).contentHeight;
     if (!atTop && !tooTall && start + flow.height > pageBottom(page)) {
       start = pageStart(page + 1);
     }
@@ -433,7 +433,7 @@ export function assignGlobalY(
   flows: FlowBlock[],
   initialY: number,
   pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
 ): FlowBlock[] {
   let y = initialY;
   let prevSpaceAfter = 0;
@@ -441,7 +441,7 @@ export function assignGlobalY(
   return flows.map((flow, index) => {
     const gap = index === 0 ? 0 : collapseMargins(prevSpaceAfter, flow.spaceBefore);
     const { startGlobalY, endGlobalY } = advanceFlowGlobalY(
-      flow, y + gap, pageConfig, metricsFor,
+      flow, y + gap, pageConfig, geometry,
     );
     y = endGlobalY;
     prevSpaceAfter = flow.isPageBreak ? 0 : flow.spaceAfter;
@@ -453,18 +453,18 @@ function restampGlobalYFrom(
   flows: FlowBlock[],
   startIndex: number,
   pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
 ): FlowBlock[] {
   const next = [...flows];
   for (let i = Math.max(1, startIndex); i < next.length; i++) {
     const prev = next[i - 1]!;
     const flow = next[i]!;
     const prevEnd = advanceFlowGlobalY(
-      prev, prev.globalY ?? 0, pageConfig, metricsFor,
+      prev, prev.globalY ?? 0, pageConfig, geometry,
     ).endGlobalY;
     const gap = prev.isPageBreak ? 0 : collapseMargins(prev.spaceAfter, flow.spaceBefore);
     const { startGlobalY } = advanceFlowGlobalY(
-      flow, prevEnd + gap, pageConfig, metricsFor,
+      flow, prevEnd + gap, pageConfig, geometry,
     );
     next[i] = { ...flow, globalY: startGlobalY };
   }
@@ -490,23 +490,12 @@ function getAnchoredObjectAnchors(flow: FlowBlock): AnchorRef[] {
   return anchors;
 }
 
-function pageForGlobalY(pageConfig: PageConfig, metricsFor: (pageNumber: number) => PageMetrics, globalY: number): number {
-  if (pageConfig.pageless) return 1;
-  let pageNumber = 1;
-  while (globalY >= pageStartGlobalForMetrics(pageConfig, metricsFor, pageNumber) + metricsFor(pageNumber).contentHeight) {
-    pageNumber++;
-  }
-  return pageNumber;
-}
-
 function pageLocalYForGlobalY(
-  pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
   pageNumber: number,
   globalY: number,
 ): number {
-  const pageStart = pageStartGlobalForMetrics(pageConfig, metricsFor, pageNumber);
-  return metricsFor(pageNumber).contentTop + (globalY - pageStart);
+  return geometry.metricsFor(pageNumber).contentTop + (globalY - geometry.startOf(pageNumber));
 }
 
 /**
@@ -568,57 +557,21 @@ interface PageBarrierProvider {
   localYForGlobalY(pageNumber: number, globalY: number): number;
 }
 
-function createPageBarrierProvider(
-  pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
-): PageBarrierProvider {
-  const pageStartCache = new Map<number, number>();
-  pageStartCache.set(1, metricsFor(1).contentTop);
-
-  const pageStartFor = (pageNumber: number): number => {
-    if (pageConfig.pageless) return metricsFor(1).contentTop;
-    const cached = pageStartCache.get(pageNumber);
-    if (cached !== undefined) return cached;
-
-    let nearestPage = 1;
-    for (const page of pageStartCache.keys()) {
-      if (page < pageNumber && page > nearestPage) nearestPage = page;
-    }
-
-    let y = pageStartCache.get(nearestPage)!;
-    for (let page = nearestPage; page < pageNumber; page++) {
-      y += metricsFor(page).contentHeight;
-      pageStartCache.set(page + 1, y);
-    }
-    return y;
-  };
-
+function createPageBarrierProvider(geometry: PageGeometry): PageBarrierProvider {
   return {
-    pageForGlobalY(globalY: number): number {
-      if (pageConfig.pageless) return 1;
-      let pageNumber = 1;
-      while (globalY >= pageStartFor(pageNumber) + metricsFor(pageNumber).contentHeight) {
-        pageNumber++;
-      }
-      return pageNumber;
-    },
-    pageStartGlobal: pageStartFor,
-    contentBottomLocal(pageNumber: number): number {
-      return metricsFor(pageNumber).contentBottom;
-    },
-    contentHeight(pageNumber: number): number {
-      return metricsFor(pageNumber).contentHeight;
-    },
-    localYForGlobalY(pageNumber: number, globalY: number): number {
-      return metricsFor(pageNumber).contentTop + (globalY - pageStartFor(pageNumber));
-    },
+    pageForGlobalY: (globalY) => geometry.pageAt(globalY),
+    pageStartGlobal: (pageNumber) => geometry.startOf(pageNumber),
+    contentBottomLocal: (pageNumber) => geometry.metricsFor(pageNumber).contentBottom,
+    contentHeight: (pageNumber) => geometry.metricsFor(pageNumber).contentHeight,
+    localYForGlobalY: (pageNumber, globalY) =>
+      pageLocalYForGlobalY(geometry, pageNumber, globalY),
   };
 }
 
 function resolveAnchoredObjects(
   inputFlows: FlowBlock[],
   pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
   measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
@@ -629,7 +582,7 @@ function resolveAnchoredObjects(
   const contentX = pageConfig.margins.left;
   const contentRight = pageConfig.pageWidth - pageConfig.margins.right;
   const contentWidth = contentRight - contentX;
-  const barriers = createPageBarrierProvider(pageConfig, metricsFor);
+  const barriers = createPageBarrierProvider(geometry);
   // Phase 4: one ExclusionManager per page, accumulating every square rect.
   // Sequential anchors share the same manager so a flow that overlaps two
   // images on the same page reflows against the union of both rects rather
@@ -657,14 +610,18 @@ function resolveAnchoredObjects(
       let pageNumber = barriers.pageForGlobalY(anchorGlobalY);
       let anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
 
-      // Anchor-push: any wrapping mode whose visual extent overflows its
-      // anchor's page is pushed to the next page (provided the next page
-      // can fit it). This applies uniformly to square / top-bottom /
-      // behind / front. yOffset is intentionally not factored in — the
-      // anchor flow's natural fit decides the page; yOffset only shifts
-      // within the resulting page (and clamps if it would escape).
+      // Anchor-push: a mode that reserves flow space and whose visual extent
+      // overflows its anchor's page moves the anchor flow to the next page
+      // (provided the next page can fit it). yOffset is intentionally not
+      // factored in — the anchor flow's natural fit decides the page; yOffset
+      // only shifts within the resulting page (and clamps if it would escape).
+      //
+      // `behind` and `front` reserve no flow space, so they take no part in
+      // this: pushing their anchor moves text the image never touches, leaving
+      // a hole on the page the reader cannot account for. The clamp below is
+      // what keeps those images on their anchor's page.
       if (
-        wrapMode !== "inline" &&
+        (wrapMode === "square" || wrapMode === "top-bottom") &&
         !pageConfig.pageless &&
         anchorLocalY + height > barriers.contentBottomLocal(pageNumber) &&
         height <= barriers.contentHeight(pageNumber + 1)
@@ -675,7 +632,7 @@ function resolveAnchoredObjects(
           { ...flows[i]!, globalY: pushedGlobalY, solverPushedThisFlow: true },
           ...flows.slice(i + 1),
         ];
-        flows = restampGlobalYFrom(flows, i + 1, pageConfig, metricsFor);
+        flows = restampGlobalYFrom(flows, i + 1, pageConfig, geometry);
         anchorGlobalY = pushedGlobalY;
         pageNumber = barriers.pageForGlobalY(anchorGlobalY);
         anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
@@ -714,7 +671,7 @@ function resolveAnchoredObjects(
             { ...flows[i]!, globalY: stackedAnchorGlobalY, solverPushedThisFlow: true },
             ...flows.slice(i + 1),
           ];
-          flows = restampGlobalYFrom(flows, i + 1, pageConfig, metricsFor);
+          flows = restampGlobalYFrom(flows, i + 1, pageConfig, geometry);
           anchorGlobalY = stackedAnchorGlobalY;
           pageNumber = barriers.pageForGlobalY(anchorGlobalY);
           anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
@@ -731,7 +688,7 @@ function resolveAnchoredObjects(
             { ...flows[i]!, globalY: pushedGlobalY, solverPushedThisFlow: true },
             ...flows.slice(i + 1),
           ];
-          flows = restampGlobalYFrom(flows, i + 1, pageConfig, metricsFor);
+          flows = restampGlobalYFrom(flows, i + 1, pageConfig, geometry);
           anchorGlobalY = pushedGlobalY;
           pageNumber = barriers.pageForGlobalY(anchorGlobalY);
           anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
@@ -811,7 +768,7 @@ function resolveAnchoredObjects(
             contentWidth,
           },
           pageConfig,
-          metricsFor,
+          geometry,
           measurer,
           fontConfig,
           fontModifiers,
@@ -853,7 +810,7 @@ function resolveAnchoredObjects(
             contentWidth,
           },
           pageConfig,
-          metricsFor,
+          geometry,
           measurer,
           fontConfig,
           fontModifiers,
@@ -885,7 +842,7 @@ function reflowFlowsAgainstExclusions(
     contentWidth: number;
   },
   pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
   measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
@@ -965,7 +922,7 @@ function reflowFlowsAgainstExclusions(
         nextFlow,
         ...flows.slice(idx + 1),
       ];
-      flows = restampGlobalYFrom(flows, idx + 1, pageConfig, metricsFor);
+      flows = restampGlobalYFrom(flows, idx + 1, pageConfig, geometry);
     } else if (!flow.overlapsWrapZone) {
       flows = [
         ...flows.slice(0, idx),
@@ -1130,17 +1087,11 @@ export function runFlowPipeline(
   const contentWidth = pageWidth - margins.left - margins.right;
   const maxBlocks = options.maxBlocks;
 
-  // Per-page metrics with single-entry cache (pages advance sequentially).
-  let cachedMetricsPage = -1;
-  let cachedMetrics: PageMetrics | null = null;
-  const metricsFor = (pageNumber: number): PageMetrics => {
-    if (cachedMetricsPage === pageNumber && cachedMetrics !== null) {
-      return cachedMetrics;
-    }
-    cachedMetrics = computePageMetrics(pageConfig, resolved, pageNumber);
-    cachedMetricsPage = pageNumber;
-    return cachedMetrics;
-  };
+  // Page metrics plus the prefix index over their heights, built once per run.
+  // Every page-position question in the pipeline reads through this, so none of
+  // them re-derive a page start by summing the pages before it.
+  const geometry = createPageGeometry(pageConfig, resolved);
+  const metricsFor = geometry.metricsFor;
 
   // Resumption: restore cursor from prior chunk instead of re-walking the doc.
   const r = options.resumption;
@@ -1166,14 +1117,14 @@ export function runFlowPipeline(
   // chunk would resolve as if the chunk's flows started near the document's
   // top — wrong page assignment, wrong wrap decisions.
   const seedGlobalY = r
-    ? pageStartGlobalForMetrics(pageConfig, metricsFor, currentPage.pageNumber)
+    ? geometry.startOf(currentPage.pageNumber)
       + (initY - metricsFor(currentPage.pageNumber).contentTop)
     : metricsFor(1).contentTop;
-  const flowsWithGlobalY = assignGlobalY(flowResult.flows, seedGlobalY, pageConfig, metricsFor);
+  const flowsWithGlobalY = assignGlobalY(flowResult.flows, seedGlobalY, pageConfig, geometry);
   const anchoredFlow = resolveAnchoredObjects(
     flowsWithGlobalY,
     pageConfig,
-    metricsFor,
+    geometry,
     measurer,
     fontConfig,
     fontModifiers,
@@ -1198,7 +1149,7 @@ export function runFlowPipeline(
       : undefined;
 
   const pr = paginateFlow(
-    anchoredFlow.flows, pageConfig, resolved, metricsFor, runId,
+    anchoredFlow.flows, pageConfig, resolved, geometry, runId,
     {
       previousLayout: previousLayoutForPagination,
       measureCache,
@@ -1244,6 +1195,7 @@ export function runFlowPipeline(
         ? pr.y + margins.bottom
         : partialPages.length * pageHeight,
       metrics: pr.metrics,
+      pageStarts: buildPageStarts(pageConfig, pr.metrics),
       runId,
       convergence: "stable",
       iterationCount: 1,
@@ -1260,6 +1212,7 @@ export function runFlowPipeline(
     version: chunkVersion,
     totalContentHeight: 0,
     metrics: pr.metrics,
+    pageStarts: buildPageStarts(pageConfig, pr.metrics),
     runId,
     convergence: "stable",
     iterationCount: 1,
@@ -1356,18 +1309,20 @@ export interface PaginateFlowResult {
   metrics: PageMetrics[];
 }
 
-/** Stage 2: assign measured FlowBlocks to pages. All positions read through metricsFor(). */
+/** Stage 2: assign measured FlowBlocks to pages. All positions read through `geometry`. */
 export function paginateFlow(
   flows: FlowBlock[],
   pageConfig: PageConfig,
   resolved: ResolvedChrome,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
   runId: number,
   opts: PaginateFlowOptions,
 ): PaginateFlowResult {
-  // `resolved` is threaded through metricsFor; reserved for future cache checks
-  // keyed off resolved.metricsVersion. Read access today is intentional no-op.
+  // `resolved` is what `geometry` was built from; reserved for future cache
+  // checks keyed off resolved.metricsVersion. Read access today is a no-op.
   void resolved;
+
+  const metricsFor = geometry.metricsFor;
 
   const { previousLayout, measureCache, measurer = new TextMeasurer(), pageless, init } = opts;
   const { margins } = pageConfig;
@@ -1385,9 +1340,23 @@ export function paginateFlow(
 
   // Phase 1b: only valid after we've seen at least one cache miss (= the edit point).
   let seenCacheMiss = false;
+  // A geometrically stable cache hit is not a safe tail boundary when another
+  // changed/new block still exists later in the document. Precompute the
+  // remaining misses so reuse can begin only after the final one.
+  let remainingCacheMisses = flows.reduce(
+    (count, flow) => count + (flow.wasCacheHit ? 0 : 1),
+    0,
+  );
   let earlyTerminated = false;
 
   for (const flow of flows) {
+    // Count down on the same predicate the total was built from, once per flow
+    // and before any branch can `continue` past it. Decrementing inside the
+    // branches instead would let the counter drift from the count that seeded
+    // it the moment either branch's notion of a cache hit changed, and the
+    // stale tail that drift lets through is invisible to every test.
+    if (!flow.wasCacheHit) remainingCacheMisses -= 1;
+
     // ── Hard page break (skipped in pageless mode) ───────────────────────────
     if (flow.isPageBreak && !pageless) {
       const target = targetPageNumber(currentPage.pageNumber, flow.pageBreakType);
@@ -1408,8 +1377,7 @@ export function paginateFlow(
     if (!pageless && flow.globalY !== undefined) {
       while (
         flow.globalY >=
-        pageStartGlobalForMetrics(pageConfig, metricsFor, currentPage.pageNumber) +
-          metricsFor(currentPage.pageNumber).contentHeight
+        geometry.bottomOf(currentPage.pageNumber)
       ) {
         pages.push(currentPage);
         currentPage = newPage(pages.length + 1);
@@ -1428,7 +1396,7 @@ export function paginateFlow(
     const naturalY = y + gap;
     const pageLocalGlobalY =
       !pageless && flow.globalY !== undefined
-        ? pageLocalYForGlobalY(pageConfig, metricsFor, currentPage.pageNumber, flow.globalY)
+        ? pageLocalYForGlobalY(geometry, currentPage.pageNumber, flow.globalY)
         : naturalY;
     const firstOnPageNatural = isFirstOnPage && !flow.solverPushedThisFlow;
     const targetY = firstOnPageNatural ? naturalY : Math.max(naturalY, pageLocalGlobalY);
@@ -1688,6 +1656,7 @@ export function paginateFlow(
       previousLayout &&
       canUsePreviousLayoutTail &&
       seenCacheMiss &&
+      remainingCacheMisses === 0 &&
       flow.wasCacheHit &&
       flow.preCachedTargetY !== undefined &&
       flow.preCachedPage !== undefined &&

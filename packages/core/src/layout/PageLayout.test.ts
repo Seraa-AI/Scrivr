@@ -12,7 +12,7 @@ import {
 import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
 import type { AnchoredObjectPlacement } from "./AnchoredObjects";
 import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
-import { computePageMetrics, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
+import { computePageMetrics, createPageGeometry, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
 import type { LayoutBlock } from "./BlockLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
 import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, sectionBreak } from "../test-utils";
@@ -481,6 +481,46 @@ describe("runPipeline — measureCache", () => {
 // ── Phase 1b: early termination ───────────────────────────────────────────────
 
 describe("runPipeline — Phase 1b early termination", () => {
+  it("does not reuse a tail before a later cache miss", () => {
+    const stableMiddle = p("stable middle");
+    const stableTail = p("stable tail");
+    const doc1 = doc(p("prefix A"), stableMiddle, p("old later block"), stableTail);
+    const doc2 = doc(p("prefix B"), stableMiddle, p("new later block"), stableTail);
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    const layout1 = runPipeline(doc1, opts);
+    const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1 });
+
+    expect(layout2.pages.flatMap((page) => page.blocks).map((block) => block.node.textContent))
+      .toEqual(["prefix B", "stable middle", "new later block", "stable tail"]);
+  });
+
+  it("does not reuse a tail before a later cache miss across a page break", () => {
+    // A page break sits between the two edits. It is a cache miss by
+    // construction, so it must be counted and discounted on the same terms as
+    // any other flow — a page break that stopped counting would let the tail
+    // splice in before "new later block" was ever processed.
+    const stableMiddle = p("stable middle");
+    const stableTail = p("stable tail");
+    const doc1 = doc(p("prefix A"), stableMiddle, pageBreak(), p("old later block"), stableTail);
+    const doc2 = doc(p("prefix B"), stableMiddle, pageBreak(), p("new later block"), stableTail);
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    const layout1 = runPipeline(doc1, opts);
+    const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1 });
+
+    expect(
+      layout2.pages
+        .flatMap((page) => page.blocks)
+        .map((block) => block.node.textContent)
+        .filter((text) => text !== ""),
+    ).toEqual(["prefix B", "stable middle", "new later block", "stable tail"]);
+  });
+
   it("returns the correct layout when early termination fires on second layout run", () => {
     // Three paragraphs. Edit the first one — the second and third are structurally
     // shared and should be copied from previousLayout without re-looping.
@@ -1100,6 +1140,63 @@ describe("runPipeline — pageConfig.fontFamily", () => {
 describe("runPipeline — float image wrapping", () => {
   // Long text to force several wrapped lines in the constrained content width.
   const longText = "word ".repeat(60).trim(); // 60 words × 5 chars = ~300 chars, ~6+ lines
+
+  /**
+   * `behind` and `front` reserve no flow space, so a tall one anchored near the
+   * bottom of a page must not move its own paragraph. Pushing the anchor sent
+   * the text to the next page and left a hole where it had been — the reader
+   * sees a blank band and text that jumped, with nothing on the page to explain
+   * either. `square` is the contrast: it does reserve space, so it still moves.
+   */
+  describe.each(["behind", "front"] as const)("%s float: the text is unaware", (wrapMode) => {
+    /** Fills most of page 1 so the anchor paragraph sits near the bottom. */
+    function layoutWithTallFloatNearPageBottom(mode: string) {
+      const { schema, fontConfig } = buildStarterKitContext();
+      const img = schema.nodes["image"]!.create({
+        src: "", width: 300, height: 400, wrapMode: mode, xAlign: "left",
+      });
+      const doc = schema.node("doc", null, [
+        ...Array.from({ length: 7 }, () =>
+          schema.node("paragraph", null, [schema.text(longText)]),
+        ),
+        schema.node("paragraph", null, [schema.text("ANCHOR"), img]),
+        schema.node("paragraph", null, [schema.text("AFTER")]),
+      ]);
+      return runPipeline(doc, {
+        pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+      });
+    }
+
+    function pageOf(layout: ReturnType<typeof runPipeline>, needle: string): number | null {
+      for (const page of layout.pages) {
+        for (const block of page.blocks) {
+          if (block.node.textContent.includes(needle)) return page.pageNumber;
+        }
+      }
+      return null;
+    }
+
+    it("leaves the anchor paragraph and the text after it where they were", () => {
+      const layout = layoutWithTallFloatNearPageBottom(wrapMode);
+      expect(pageOf(layout, "ANCHOR")).toBe(1);
+      expect(pageOf(layout, "AFTER")).toBe(1);
+    });
+
+    it("keeps the image on its anchor's page by clamping, not by moving text", () => {
+      const layout = layoutWithTallFloatNearPageBottom(wrapMode);
+      const float = layout.anchoredObjects![0]!;
+      expect(float.page).toBe(1);
+      const metrics = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, 1);
+      expect(float.y + float.height).toBeLessThanOrEqual(
+        metrics.contentTop + metrics.contentHeight + 0.5,
+      );
+    });
+
+    it("a square float in the same position does move its anchor", () => {
+      const layout = layoutWithTallFloatNearPageBottom("square");
+      expect(pageOf(layout, "ANCHOR")).toBe(2);
+    });
+  });
 
   it("square-left: produces floats array with the float image", () => {
     const { schema, fontConfig } = buildStarterKitContext();
@@ -2518,16 +2615,8 @@ describe("paginateFlow — Stage 2", () => {
   // Shared helper: build the per-page metrics lookup the way runPipeline does.
   // With EMPTY_RESOLVED_CHROME, every page produces identical metrics matching
   // the pre-refactor hand-computed formula.
-  const makeMetricsFor = () => {
-    const cache = new Map<number, PageMetrics>();
-    return (pageNumber: number): PageMetrics => {
-      const hit = cache.get(pageNumber);
-      if (hit) return hit;
-      const m = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, pageNumber);
-      cache.set(pageNumber, m);
-      return m;
-    };
-  };
+  const makeGeometry = () =>
+    createPageGeometry(defaultPageConfig, EMPTY_RESOLVED_CHROME);
 
   it("single short paragraph fits on page 1", () => {
     const testDoc = doc(p("Hello"));
@@ -2538,10 +2627,10 @@ describe("paginateFlow — Stage 2", () => {
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
     const initPage = { pageNumber: 1, blocks: [] };
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: initPage, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: initPage, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     const allPages = [...pr.pages, pr.currentPage];
     expect(allPages).toHaveLength(1);
@@ -2557,10 +2646,10 @@ describe("paginateFlow — Stage 2", () => {
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
     const initPage = { pageNumber: 1, blocks: [] };
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: initPage, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: initPage, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     const allPages = [...pr.pages, pr.currentPage];
     expect(allPages).toHaveLength(2);
@@ -2574,10 +2663,10 @@ describe("paginateFlow — Stage 2", () => {
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     expect(pr.earlyTerminated).toBe(false);
   });
@@ -2602,10 +2691,10 @@ describe("paginateFlow — Stage 2", () => {
     const contentWidth = defaultPageConfig.pageWidth - margins.left - margins.right;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     expect(pr.earlyTerminated).toBe(false);
     expect(pr.pages.length).toBeGreaterThanOrEqual(1);
