@@ -1,7 +1,9 @@
 export { CharacterMap } from "./CharacterMap";
 export { ExclusionManager } from "./ExclusionManager";
 export type { AvailableSegment, ExclusionRect, LineSpace } from "./ExclusionManager";
-export type { GlyphEntry, LineEntry, CoordsResult } from "./CharacterMap";
+export type { GlyphEntry, LineEntry, CoordsResult, ObjectRectEntry } from "./CharacterMap";
+export { resolvePointOwner } from "./pointOwnership";
+export type { PointOwner, PointOwnershipInput } from "./pointOwnership";
 export { TextMeasurer } from "./TextMeasurer";
 export type { FontMetrics, RunMetrics, TextMeasurerLike } from "./TextMeasurer";
 export { LineBreaker } from "./LineBreaker";

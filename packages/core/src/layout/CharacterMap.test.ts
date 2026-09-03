@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { CharacterMap } from "./CharacterMap";
+import { CharacterMap, UNOWNED_GENERATION } from "./CharacterMap";
 
 // Two-line helper used by posAbove / posBelow tests.
 // Page 1, line 0: "Hello" at docPos 1-5, y=60, each char 10px wide
@@ -251,6 +251,23 @@ describe("CharacterMap", () => {
       map.clear();
       expect(map.posAtCoords(50, 65, 1)).toBe(0);
       expect(map.coordsAtPos(1)).toBeNull();
+    });
+  });
+
+  describe("generation", () => {
+    it("starts unowned, so geometry is never mistaken for a real layout's", () => {
+      expect(new CharacterMap().generation).toBe(UNOWNED_GENERATION);
+    });
+
+    it("reports the layout version that populated it", () => {
+      map.setGeneration(7);
+      expect(map.generation).toBe(7);
+    });
+
+    it("goes back to unowned when cleared — the contents left with it", () => {
+      map.setGeneration(7);
+      map.clear();
+      expect(map.generation).toBe(UNOWNED_GENERATION);
     });
   });
 

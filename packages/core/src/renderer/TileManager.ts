@@ -419,10 +419,10 @@ export class TileManager {
         this.activeTiles.set(idx, tile);
       }
 
-      // Snapshot version once — content + overlay use the same snapshot
-      const version = layout.version;
-      this.paintContent(tile, layout, version);
-      this.paintOverlay(tile, layout, version);
+      // Content stamps the tile with this version; the overlay then reads that
+      // stamp to check the charmap describes the pixels it is drawing over.
+      this.paintContent(tile, layout, layout.version);
+      this.paintOverlay(tile, layout);
     }
   }
 
@@ -447,12 +447,20 @@ export class TileManager {
       performance.mark("scrivr:first-paint-start");
     }
 
+    // A paint that abandoned itself must not be recorded as done. The paged
+    // path admits a candidate before it touches either canvas and rejects a
+    // stale one outright, and a tile stamped with a version it never drew
+    // would sit on stale pixels until something else happened to move it —
+    // the reader looking at content the document no longer holds.
+    let painted: boolean;
     if (this.editor.isPageless) {
-      this.paintContentPageless(tile, layout);
+      painted = this.paintContentPageless(tile, layout);
     } else {
       this.applyPagedWrapperTheme(tile);
-      this.paintContentPaged(tile, layout, pageNumber);
+      painted = this.paintContentPaged(tile, layout, pageNumber);
     }
+
+    if (!painted) return;
 
     tile.lastPaintedVersion = version;
     tile.lastRenderGeneration = renderGen;
@@ -485,29 +493,37 @@ export class TileManager {
     }
   }
 
+  /** Returns whether the page was actually painted — see `paintContent`. */
   private paintContentPaged(
     tile: TileEntry,
     layout: DocumentLayout,
     _pageNumber: number,
-  ): void {
+  ): boolean {
     const { pageConfig } = layout;
     const page = layout.pages[tile.tileIndex];
-    if (!page) return;
+    if (!page) return false;
 
-    const { dpr } = setupCanvas(tile.contentCanvas, {
+    // Admission happens before setupCanvas: assigning either canvas dimension
+    // clears the visible backing bitmap, even if the assigned value is unchanged.
+    // Canvas painting below is synchronous, so once this candidate is admitted
+    // no other layout can become current until the complete frame has landed.
+    if (layout.version !== this.editor.layout.version) return false;
+
+    const { ctx, dpr } = setupCanvas(tile.contentCanvas, {
       width: pageConfig.pageWidth,
       height: pageConfig.pageHeight,
     });
     tile.dpr = dpr;
 
-    // Size overlay canvas to match
+    // Size overlay canvas only after the content candidate is admitted, so a
+    // rejected frame preserves both visible layers.
     tile.overlayCanvas.width = Math.round(pageConfig.pageWidth * dpr);
     tile.overlayCanvas.height = Math.round(pageConfig.pageHeight * dpr);
     tile.overlayCanvas.style.width = `${pageConfig.pageWidth}px`;
     tile.overlayCanvas.style.height = `${pageConfig.pageHeight}px`;
 
-    renderPage({
-      ctx: tile.contentCanvas.getContext("2d", { alpha: false })!,
+    return renderPage({
+      ctx,
       page,
       pageConfig,
       renderVersion: layout.version,
@@ -538,7 +554,14 @@ export class TileManager {
     });
   }
 
-  private paintContentPageless(tile: TileEntry, layout: DocumentLayout): void {
+  /** Returns whether the tile was painted — see `paintContent`. */
+  private paintContentPageless(tile: TileEntry, layout: DocumentLayout): boolean {
+    // Match the paged admission contract: reject before assigning either
+    // canvas dimension, because even a same-value assignment clears the
+    // visible backing bitmap. The synchronous paint below can then complete
+    // without a newer layout interleaving midway through it.
+    if (layout.version !== this.editor.layout.version) return false;
+
     const { pageConfig } = layout;
     const tileTop = tile.tileIndex * this.tileHeight;
     const tileBottom = tileTop + this.tileHeight;
@@ -613,15 +636,29 @@ export class TileManager {
     }
 
     ctx.restore();
+    return true;
   }
 
   // ── Overlay painting ───────────────────────────────────────────────────────
 
-  private paintOverlay(
-    tile: TileEntry,
-    layout: DocumentLayout,
-    _version: number,
-  ): void {
+  private paintOverlay(tile: TileEntry, layout: DocumentLayout): void {
+    // Carets and selection rectangles are geometry read from the charmap, and
+    // they only mean anything over the pixels they were computed for. When a
+    // content paint bails, this tile keeps older pixels while the charmap has
+    // already moved to the new layout — drawing from it puts the caret where
+    // the text used to be. Skip, and let the paint that does land draw it.
+    //
+    // A surface owns its own charmap, populated by its paint hook with no
+    // layout version behind it, so there is no generation to agree on.
+    // `!= null` on purpose: no registry means no surface is active, and
+    // reading that as "active" would switch this guard off entirely.
+    const surfaceActive = this.editor.surfaces?.activeSurface != null;
+    if (
+      !surfaceActive &&
+      this.editor.charMap.generation !== tile.lastPaintedVersion
+    )
+      return;
+
     const { pageConfig } = layout;
     const tileTop = tile.tileIndex * this.tileHeight;
     const cursorPage = this.editor.cursorPage;
@@ -672,7 +709,6 @@ export class TileManager {
     // When a surface is active, always repaint the overlay so the cursor
     // blinks correctly and selection updates are visible. The header cursor
     // is drawn by an overlay handler that needs blink-tick repaints.
-    const surfaceActive = this.editor.surfaces?.activeSurface !== null;
     const surfaceStateDirty = surfaceActive;
     if (
       !blinkDirty &&

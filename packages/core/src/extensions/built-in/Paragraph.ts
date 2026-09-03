@@ -1,5 +1,6 @@
 import { Extension } from "../Extension";
-import type { Command } from "prosemirror-state";
+import { NodeSelection } from "prosemirror-state";
+import type { Command, EditorState } from "prosemirror-state";
 import { splitBlockAs } from "prosemirror-commands";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import {
@@ -9,6 +10,7 @@ import {
 } from "../../exports/docx";
 import type { SemanticNodeHandler } from "../../exports/semantic";
 import type { Node as PmNode } from "prosemirror-model";
+import { normalizeImageAttrs } from "../../layout/AnchoredObjects";
 
 /** A paragraph whose only non-whitespace content is a single image. */
 function isImageOnlyParagraph(node: PmNode): boolean {
@@ -73,7 +75,30 @@ const splitParagraph = splitBlockAs((parent, _atEnd, $from) => {
   return { type: newType, attrs };
 });
 
+/**
+ * Is the selection a whole anchored object — an image that floats out of the
+ * text flow rather than sitting in it?
+ *
+ * An inline image is content: selecting it and pressing Enter replaces it with
+ * a break, the same as selected text. An anchored one is not in the flow at
+ * all; its position in the document is an anchor, not a place in the sentence.
+ * Splitting there inserts a paragraph break the reader never asked for, in a
+ * spot they cannot see.
+ */
+function isAnchoredObjectSelected(state: EditorState): boolean {
+  const { selection } = state;
+  if (!(selection instanceof NodeSelection)) return false;
+  if (selection.node.type.name !== "image") return false;
+  return normalizeImageAttrs(selection.node).wrapMode !== "inline";
+}
+
 export const splitBlockInheritAttrs: Command = (state, dispatch) => {
+  // Enter with a float selected does nothing. The alternative is splitting at
+  // the anchor: the visible text stays whole, so the keypress reads as ignored
+  // while an empty paragraph accumulates each time — press Enter a few times
+  // and a hole opens in the page with no undo affordance pointing at it.
+  if (isAnchoredObjectSelected(state)) return true;
+
   return splitParagraph(
     state,
     dispatch &&
