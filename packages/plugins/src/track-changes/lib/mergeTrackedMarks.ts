@@ -1,7 +1,8 @@
-import { Node as PMNode, Schema } from "prosemirror-model";
-import { Transaction } from "prosemirror-state";
+import { Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
+import { Transaction } from "@scrivr/core/pm";
+import { stableStringify } from "@scrivr/core";
 
-import { genId, shouldMergeTrackedAttributes } from "../helpers";
+import { genId, isValidTrackableMark, shouldMergeTrackedAttributes } from "../helpers";
 import { ChangeStep, DeleteNodeStep, DeleteTextStep } from "../types";
 import { ExposedFragment, TrackedAttrs } from "../types";
 
@@ -61,16 +62,40 @@ const assignId = (
   return attrs;
 };
 
+/** The single pending tracking descriptor on a mark, regardless of storage shape. */
+function descriptorOf(mark: Mark): Partial<TrackedAttrs> | null {
+  const dt = mark.attrs.dataTracked;
+  if (!dt) return null;
+  // Tracked insert/delete text stores a single object; formatting marks
+  // (bold/color/…) store an array of stacked entries.
+  if (Array.isArray(dt)) return dt.length > 0 ? dt[dt.length - 1] : null;
+  return dt;
+}
+
+/** A mark eligible for adjacency-merge: a tracked-text mark or a pending trackable formatting mark. */
+function isMergeableTrackedMark(mark: Mark, schema: Schema): boolean {
+  if (mark.type === schema.marks.trackedInsert || mark.type === schema.marks.trackedDelete) {
+    return descriptorOf(mark) !== null;
+  }
+  return isValidTrackableMark(mark) && descriptorOf(mark) !== null;
+}
+
+/** Equal formatting identity: same mark attrs ignoring the tracking bookkeeping. */
+function sameOwnAttrs(a: Mark, b: Mark): boolean {
+  const strip = (m: Mark) => {
+    const { dataTracked: _drop, ...rest } = m.attrs;
+    return rest;
+  };
+  return stableStringify(strip(a)) === stableStringify(strip(b));
+}
+
 /**
- * Merges tracked marks between text nodes at a position
- *
- * Will work for any nodes that use trackedInsert or trackedDelete marks which may not be preferrable
- * if used for block nodes (since we possibly want to show the individual changed nodes).
- * Merging is done based on the userID, operation type and status.
- * @param pos
- * @param doc
- * @param newTr
- * @param schema
+ * Merges adjacent tracked marks at a position so one logical change isn't split
+ * into many. Covers tracked insert/delete text AND formatting marks
+ * (bold/highlight/color/…): a run of the same mark, same author, operation and
+ * status collapses to one tracking id — the same grouping typing already gets,
+ * now for formatting. Marks with different OWN attrs (e.g. two colors) never
+ * merge. Merging is keyed on userID + operation + status.
  */
 export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, schema: Schema) {
   const resolved = doc.resolve(pos);
@@ -78,12 +103,8 @@ export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, 
 
   if (!nodeAfter || !nodeBefore) return;
 
-  const leftMarks = nodeBefore.marks.filter(
-    m => m.type === schema.marks.trackedInsert || m.type === schema.marks.trackedDelete,
-  );
-  const rightMarks = nodeAfter.marks.filter(
-    m => m.type === schema.marks.trackedInsert || m.type === schema.marks.trackedDelete,
-  );
+  const leftMarks = nodeBefore.marks.filter(m => isMergeableTrackedMark(m, schema));
+  const rightMarks = nodeAfter.marks.filter(m => isMergeableTrackedMark(m, schema));
 
   if (leftMarks.length === 0 || rightMarks.length === 0) return;
 
@@ -92,11 +113,13 @@ export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, 
 
   // Merge all matching pairs across stacked marks (supports multi-author coexistence).
   for (const leftMark of leftMarks) {
-    const rightMark = rightMarks.find(m => m.type === leftMark.type);
+    // Same type AND same formatting attrs — never fuse two different colors.
+    const rightMark = rightMarks.find(m => m.type === leftMark.type && sameOwnAttrs(m, leftMark));
     if (!rightMark) continue;
 
-    const leftDataTracked: Partial<TrackedAttrs> = leftMark.attrs.dataTracked;
-    const rightDataTracked: Partial<TrackedAttrs> = rightMark.attrs.dataTracked;
+    const leftDataTracked = descriptorOf(leftMark);
+    const rightDataTracked = descriptorOf(rightMark);
+    if (!leftDataTracked || !rightDataTracked) continue;
 
     // Already the same change — no need to regenerate the ID (would fragment the group).
     if (leftDataTracked.id && leftDataTracked.id === rightDataTracked.id) continue;
@@ -105,11 +128,11 @@ export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, 
 
     const isLeftOlder = (leftDataTracked.createdAt || 0) < (rightDataTracked.createdAt || 0);
     const ancestorAttrs = isLeftOlder ? leftDataTracked : rightDataTracked;
-    const dataTracked = { ...ancestorAttrs, updatedAt: Date.now() };
-    const unifiedMark = leftMark.type.create({
-      ...leftMark.attrs,
-      dataTracked: assignId(dataTracked, leftDataTracked, rightDataTracked),
-    });
+    const merged = assignId({ ...ancestorAttrs, updatedAt: Date.now() }, leftDataTracked, rightDataTracked);
+    // Preserve the original storage shape (array for formatting marks, single
+    // object for tracked insert/delete text).
+    const dataTracked = Array.isArray(leftMark.attrs.dataTracked) ? [merged] : merged;
+    const unifiedMark = leftMark.type.create({ ...leftMark.attrs, dataTracked });
 
     // With excludes:"" marks don't auto-remove each other, so we must explicitly
     // remove both individual marks before adding the unified one. Otherwise the

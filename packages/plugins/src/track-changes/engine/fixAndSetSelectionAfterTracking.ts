@@ -3,8 +3,8 @@ import {
   Selection,
   TextSelection,
   Transaction,
-} from "prosemirror-state";
-import { Mapping, ReplaceStep } from "prosemirror-transform";
+} from "@scrivr/core/pm";
+import { Mapping, ReplaceStep } from "@scrivr/core/pm";
 
 import { isStructuralChange } from "../lib/structuralChange";
 import { TrTrackingContext } from "../types";

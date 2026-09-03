@@ -95,6 +95,289 @@ describe("Editor — initial cursor placement", () => {
   });
 });
 
+describe("charMap generation", () => {
+  it("carries the version of the layout that populated it", () => {
+    const { editor, cleanup } = makeEditor();
+    const version = editor.layout.version;
+    expect(editor.charMap.generation).toBe(version);
+    cleanup();
+  });
+
+  it("advances with the layout when the document changes", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const before = editor.layout.version;
+    type("hello");
+    const after = editor.layout.version;
+    expect(after).toBeGreaterThan(before);
+    expect(editor.charMap.generation).toBe(after);
+    cleanup();
+  });
+});
+
+describe("publication order", () => {
+  it("marks the layout stale before the new document is observable", () => {
+    const { editor, type, cleanup } = makeEditor();
+    const before = editor.layout.version;
+
+    // Capture the FIRST notification only — the rAF flush that follows would
+    // report a correct version either way and mask the ordering.
+    let seenByListener: number | null = null;
+    const off = editor.subscribe(() => {
+      if (seenByListener === null) seenByListener = editor.layout.version;
+    });
+    type("hello");
+    off();
+
+    expect(seenByListener).not.toBeNull();
+    expect(seenByListener).toBeGreaterThan(before);
+    cleanup();
+  });
+
+  it("hands the same layout to an update handler and a subscriber", () => {
+    const { editor, type, cleanup } = makeEditor();
+
+    let seenByEvent: number | null = null;
+    let seenByListener: number | null = null;
+    const offEvent = editor.on("update", () => {
+      if (seenByEvent === null) seenByEvent = editor.layout.version;
+    });
+    const offListener = editor.subscribe(() => {
+      if (seenByListener === null) seenByListener = editor.layout.version;
+    });
+    type("hello");
+    offEvent();
+    offListener();
+
+    expect(seenByEvent).toBe(seenByListener);
+    cleanup();
+  });
+});
+
+describe("Editor.ensureFullLayout", () => {
+  it("synchronously completes a streamed initial layout", () => {
+    const content = {
+      type: "doc",
+      content: Array.from({ length: 160 }, (_, index) => ({
+        type: "paragraph",
+        content: [{ type: "text", text: `Paragraph ${index + 1}` }],
+      })),
+    };
+    const editor = createTestEditor({ content });
+
+    const initialLayout = editor.layout;
+    expect(initialLayout.isPartial).toBe(true);
+    expect(
+      initialLayout.pages.reduce((count, page) => count + page.blocks.length, 0),
+    ).toBe(100);
+
+    editor.ensureFullLayout();
+    const fullLayout = editor.layout;
+
+    expect(fullLayout.isPartial).toBeUndefined();
+    expect(
+      fullLayout.pages.reduce((count, page) => count + page.blocks.length, 0),
+    ).toBe(160);
+
+    editor.destroy();
+  });
+
+  it("lays out the full tail past a mid-document table (no truncated copy)", () => {
+    // A tableRow bypasses the measure cache, so it's a cache miss mid-document;
+    // the cached paragraphs after it used to trigger pagination's
+    // early-termination, which copied the partial layout's truncated tail.
+    const cell = (t: string) => ({
+      type: "tableCell",
+      content: [{ type: "paragraph", content: [{ type: "text", text: t }] }],
+    });
+    const para = (i: number) => ({
+      type: "paragraph",
+      content: [{ type: "text", text: `Paragraph ${i} with enough words to wrap across a couple of lines in the column.` }],
+    });
+    const content = {
+      type: "doc",
+      content: [
+        ...Array.from({ length: 40 }, (_, i) => para(i + 1)),
+        {
+          type: "table",
+          attrs: { layout: "fixed", grid: [100, 100] },
+          content: [{ type: "tableRow", content: [cell("A"), cell("B")] }],
+        },
+        ...Array.from({ length: 260 }, (_, i) => para(i + 41)),
+      ],
+    };
+    const editor = createTestEditor({
+      content,
+      extensions: [StarterKit.configure({ table: true })],
+    });
+    expect(editor.layout.isPartial).toBe(true); // 300 paragraphs → streamed
+
+    editor.ensureFullLayout();
+
+    // Every paragraph must survive (≥300 blocks; page splits add a few more).
+    const blocks = editor.layout.pages.reduce((c, p) => c + p.blocks.length, 0);
+    expect(editor.layout.isPartial).toBeUndefined();
+    expect(blocks).toBeGreaterThanOrEqual(300);
+
+    editor.destroy();
+  });
+});
+
+describe("Editor.scrollRangeIntoView", () => {
+  const paragraph = (index: number) => ({
+    type: "paragraph",
+    content: [
+      {
+        type: "text",
+        text: `Target paragraph ${index} with enough text to occupy its own layout line.`,
+      },
+    ],
+  });
+
+  it("populates a distant target page before resolving its coordinates", () => {
+    const editor = createTestEditor({
+      content: {
+        type: "doc",
+        content: Array.from({ length: 80 }, (_, index) => paragraph(index)),
+      },
+    });
+    const target = findTextPos(editor.getState(), "Target paragraph 79")!;
+
+    expect(editor.charMap.glyphsInRange(target, target + 1)).toHaveLength(0);
+    editor.scrollRangeIntoView(target, target + 6);
+
+    const glyph = editor.charMap.glyphsInRange(target, target + 1)[0];
+    expect(glyph).toBeDefined();
+    expect(glyph!.page).toBeGreaterThan(1);
+    editor.destroy();
+  });
+
+  it("finishes a streamed layout when the target lies in its tail", () => {
+    const editor = createTestEditor({
+      content: {
+        type: "doc",
+        content: Array.from({ length: 160 }, (_, index) => paragraph(index)),
+      },
+    });
+    const target = findTextPos(editor.getState(), "Target paragraph 159")!;
+    expect(editor.layout.isPartial).toBe(true);
+
+    editor.scrollRangeIntoView(target, target + 6);
+
+    expect(editor.layout.isPartial).toBeUndefined();
+    expect(editor.charMap.glyphsInRange(target, target + 1)[0]?.page).toBeGreaterThan(1);
+    editor.destroy();
+  });
+});
+
+describe("flush scrolls the cursor only on intent", () => {
+  /** Capture rAF callbacks so the pending flush can be run synchronously. */
+  function rafHarness() {
+    const cbs: FrameRequestCallback[] = [];
+    const spy = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((cb: FrameRequestCallback) => cbs.push(cb));
+    return {
+      flush: () => cbs.splice(0).forEach((cb) => cb(0)),
+      restore: () => spy.mockRestore(),
+    };
+  }
+
+  const docWith = (text: string) => ({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+  });
+
+  it("does not scroll for an external transaction that didn't ask to", () => {
+    const editor = createTestEditor({ content: docWith("hello world") });
+    const scroll = vi.spyOn(editor, "scrollCursorIntoView").mockImplementation(() => {});
+    const raf = rafHarness();
+    raf.flush(); // drain any construction-time flush
+    scroll.mockClear();
+
+    editor.applyTransaction(editor.getState().tr.insertText("!", 1));
+    raf.flush();
+    expect(scroll).not.toHaveBeenCalled();
+
+    // ...but an external transaction that explicitly requested it still scrolls.
+    editor.applyTransaction(editor.getState().tr.insertText("?", 1).scrollIntoView());
+    raf.flush();
+    expect(scroll).toHaveBeenCalledTimes(1);
+
+    raf.restore();
+    editor.destroy();
+  });
+
+  it("scrolls for local input (typing)", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor();
+    editor.mount(container);
+    const scroll = vi.spyOn(editor, "scrollCursorIntoView").mockImplementation(() => {});
+    const raf = rafHarness();
+    raf.flush(); // drain mount-time flush
+    scroll.mockClear();
+
+    const ta = container.querySelector("textarea")!;
+    ta.value = "abc";
+    ta.dispatchEvent(new Event("input"));
+    raf.flush();
+    expect(scroll).toHaveBeenCalled();
+
+    raf.restore();
+    editor.destroy();
+    container.remove();
+  });
+
+  it("an explicit range scroll cancels a cursor scroll coalesced into the same frame", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({ content: docWith("hello world") });
+    editor.mount(container);
+    const scroll = vi.spyOn(editor, "scrollCursorIntoView").mockImplementation(() => {});
+    const raf = rafHarness();
+    raf.flush();
+    scroll.mockClear();
+
+    // Local edit sets the pending cursor scroll, then a range scroll supersedes
+    // it before the frame flushes (the revealCitation-after-edit case).
+    const ta = container.querySelector("textarea")!;
+    ta.value = "x";
+    ta.dispatchEvent(new Event("input"));
+    editor.scrollRangeIntoView(1, 3);
+    raf.flush();
+    expect(scroll).not.toHaveBeenCalled();
+
+    raf.restore();
+    editor.destroy();
+    container.remove();
+  });
+
+  it("cancelling the flush on setReady(false) drops the pending scroll intent", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({ content: docWith("hello world") });
+    editor.mount(container);
+    const scroll = vi.spyOn(editor, "scrollCursorIntoView").mockImplementation(() => {});
+    const raf = rafHarness();
+    raf.flush();
+    scroll.mockClear();
+
+    const ta = container.querySelector("textarea")!;
+    ta.value = "a";
+    ta.dispatchEvent(new Event("input")); // sets flag + schedules the flush
+    editor.setReady(false); // cancels the flush and should drop the intent
+    editor.setReady(true);
+    // An external transaction after resume must not inherit the stale intent.
+    editor.applyTransaction(editor.getState().tr.insertText("!", 1));
+    raf.flush();
+    expect(scroll).not.toHaveBeenCalled();
+
+    raf.restore();
+    editor.destroy();
+    container.remove();
+  });
+});
+
 describe("Editor.moveNode", () => {
   function installImageParagraph(editor: Editor) {
     const schema = editor.schema;

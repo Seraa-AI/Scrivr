@@ -254,6 +254,39 @@ export interface DocxContext {
   /** Root document tree — written by the walker before `onBuildTreeComplete`. */
   document: XmlNode;
 
+  /**
+   * Render a document node's block content through the collected node/mark
+   * handlers, exactly as the body is walked. Contributions that emit a separate
+   * OOXML part from their own mini-document — headers/footers today, footnotes
+   * and comments later — walk their content with this, then register it via
+   * `parts.add`.
+   */
+  walkContent(doc: PmNode): XmlNode[];
+
+  /**
+   * Register an extra OPC part (a `<w:hdr>` / `<w:ftr>` element) plus its
+   * content-type override and a document relationship. Returns the relationship
+   * id to reference the part from the body `sectPr`.
+   *
+   * `build` runs the walk that produces the part's XML. OOXML relationships are
+   * part-scoped, so any `rels.addImage`/`addHyperlink` calls made *inside*
+   * `build` (e.g. images emitted by `walkContent`) are filed under this part's
+   * own `word/_rels/{part}.rels`, not the document's — that's why the walk is a
+   * callback rather than pre-serialized content.
+   */
+  parts: {
+    add(part: {
+      kind: "header" | "footer";
+      build: () => XmlNode;
+    }): { relId: string };
+  };
+
+  /** Document-level settings toggles (settings.xml). */
+  settings: {
+    /** Emit `<w:evenAndOddHeaders/>` so even and odd pages use distinct chrome. */
+    enableEvenAndOddHeaders(): void;
+  };
+
   /** Collaborative cross-plugin storage. */
   shared: {
     getOrInit<T>(key: string, init: () => T): T;
@@ -274,6 +307,25 @@ export type DocxNodeHandler = (
   meta: DocxNodeMeta,
 ) => XmlNode | XmlNode[];
 
+/**
+ * A mark that *wraps* the runs it covers instead of styling them.
+ *
+ * `DocxMarkHandler` contributes run properties — bold, colour, size — which is
+ * all most marks need. A hyperlink is not one of them: OOXML expresses it as a
+ * `<w:hyperlink>` element around the runs, carrying a relationship id, so no
+ * amount of `<w:rPr>` can produce one. A wrapper receives the finished run and
+ * returns whatever should stand in its place; returning the run unchanged
+ * declines.
+ *
+ * Wrappers run outermost-last, in the order the marks appear on the text, so
+ * two wrapping marks nest predictably rather than by registration accident.
+ */
+export type DocxRunWrapper = (
+  run: XmlNode,
+  mark: PmMark,
+  ctx: DocxContext,
+) => XmlNode;
+
 export type DocxMarkHandler = (
   props: DocxRunProps,
   mark: PmMark,
@@ -287,6 +339,12 @@ export type DocxMarkHandler = (
 export interface DocxHandlers {
   nodes?: Record<string, DocxNodeHandler>;
   marks?: Record<string, DocxMarkHandler>;
+  /**
+   * Marks that wrap their runs rather than styling them — see `DocxRunWrapper`.
+   * A mark may contribute both: a hyperlink wraps the run *and* gives it the
+   * Hyperlink character style.
+   */
+  markWrappers?: Record<string, DocxRunWrapper>;
   onBeforeExport?(ctx: DocxContext): void | Promise<void>;
   onBuildTreeComplete?(ctx: DocxContext): void | Promise<void>;
   onFinalize?(ctx: DocxContext): DocxPackage | Promise<DocxPackage>;
@@ -378,10 +436,26 @@ export interface DocxImageInline {
   marks: DocxMark[];
 }
 
+/**
+ * A field inline parsed from `<w:fldSimple w:instr="…">`. `instr` is the raw
+ * instruction (e.g. `" PAGE "`, `" NUMPAGES "`, `" DATE "`); Stage 2 dispatches
+ * on it via an inline handler to reconstruct the owning node (the HeaderFooter
+ * extension maps these back to `pageNumber` / `totalPages` / `date` tokens).
+ * Only the `<w:fldSimple>` form is parsed — not the older `<w:fldChar>`
+ * begin/separate/end run sequence.
+ */
+export interface DocxFieldInline {
+  type: "field";
+  /** Raw `w:instr`, verbatim including surrounding spaces. */
+  instr: string;
+  marks: DocxMark[];
+}
+
 export type DocxInline =
   | { type: "text"; text: string; marks: DocxMark[] }
   | { type: "hardBreak"; marks: DocxMark[] }
-  | DocxImageInline;
+  | DocxImageInline
+  | DocxFieldInline;
 
 export interface DocxParagraphAttrs {
   /** Paragraph style ID (`Heading1`, `Normal`, …) — resolved from `styles.xml`. */
@@ -405,11 +479,33 @@ export interface DocxListItem {
   content: DocxBlock[];
 }
 
+/** One reconstructed `<w:tc>`. Cell content is `DocxBlock[]` (cells hold block content). */
+export interface DocxTableCell {
+  /** `<w:tcPr><w:gridSpan w:val>` — columns this cell spans. */
+  gridSpan: number;
+  /** `<w:tcPr><w:vMerge>` — "restart" / "continue", else "none". */
+  vMerge: "none" | "restart" | "continue";
+  /** `<w:tcPr><w:shd w:fill>` as a `#rrggbb`, or null. */
+  background: string | null;
+  /** True when the source cell was a `tableHeader` (round-trips via the row's header flag). */
+  isHeader: boolean;
+  content: DocxBlock[];
+}
+
+/** One reconstructed `<w:tr>`. */
+export interface DocxTableRow {
+  /** `<w:trPr><w:tblHeader/>` — repeat this row as a header on page breaks. */
+  repeatHeader: boolean;
+  cells: DocxTableCell[];
+}
+
 export type DocxBlock =
   | { type: "paragraph"; attrs: DocxParagraphAttrs; content: DocxInline[] }
   | { type: "horizontalRule" }
   | { type: "pageBreak" }
-  | { type: "list"; listType: "bullet" | "ordered"; items: DocxListItem[] };
+  | { type: "list"; listType: "bullet" | "ordered"; items: DocxListItem[] }
+  | { type: "table"; grid: number[]; rows: DocxTableRow[] }
+  | { type: "sdt"; tag: string | null; content: DocxBlock[] };
 
 export interface DocxImportModel {
   blocks: DocxBlock[];
@@ -457,10 +553,44 @@ export interface DocxImportContext {
     /** Hyperlink target URL (or in-document anchor name). */
     resolveHyperlink(relId: string): string | undefined;
   };
+  /**
+   * Header/footer references from the body `<w:sectPr>`. The inverse of the
+   * export-side `parts.add` — a contribution reads these, then calls
+   * `walkPart` on each `relId` to reconstruct the part's content.
+   */
+  section: {
+    headers: readonly DocxSectionRef[];
+    footers: readonly DocxSectionRef[];
+    /**
+     * `<w:titlePg/>` present in the body sectPr — the flag that actually
+     * activates the first-page slot. A `first` reference without it is
+     * inactive; read this, not the mere presence of the reference.
+     */
+    titlePg: boolean;
+    /** `<w:evenAndOddHeaders/>` in settings.xml — activates even-page slots. */
+    evenAndOdd: boolean;
+  };
+  /**
+   * Resolve a header/footer relationship id to its OPC part, parse it, and
+   * walk its block content back through the same handlers as the body —
+   * the inverse of the export-side `ctx.walkContent`. Returns a `doc` node
+   * whose content is the part's blocks, or `null` if the part is missing or
+   * empty. OOXML stays inside the docx package; contributions see only the
+   * resulting `Node`.
+   */
+  walkPart(relId: string): PmNode | null;
   shared: {
     getOrInit<T>(key: string, init: () => T): T;
     get<T>(key: string): T | undefined;
   };
+}
+
+/** A header/footer reference from `<w:sectPr>`. */
+export interface DocxSectionRef {
+  /** `w:type` on the reference — which page slot it applies to. */
+  type: "default" | "first" | "even";
+  /** OPC relationship id resolving to the header/footer part. */
+  relId: string;
 }
 
 // ── Import handlers ─────────────────────────────────────────────────────────
@@ -479,7 +609,7 @@ export type DocxBlockTransform = (
   block: DocxBlock,
   content: PmNode[],
   ctx: DocxImportContext,
-) => PmNode | null;
+) => PmNode | PmNode[] | null;
 
 /**
  * Paragraph-style override — wins over the default `paragraph` block

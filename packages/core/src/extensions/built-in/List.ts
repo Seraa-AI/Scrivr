@@ -7,12 +7,14 @@ import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
 import { ListItemStrategy } from "../../layout/ListItemStrategy";
 import type { ToolbarItemSpec } from "../types";
+import { KeymapPriority } from "../types";
 import {
   xml,
   type DocxContext,
   type DocxNodeHandler,
   type XmlNode,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
 
 // ── DOCX export internals ───────────────────────────────────────────────────
 
@@ -102,6 +104,11 @@ function makeToggleList(listType: NodeType, itemType: NodeType): Command {
  */
 export const List = Extension.create({
   name: "list",
+
+  // Enter must reach `splitListItem` before Paragraph's `splitBlockInheritAttrs`
+  // — which is also the last link in List's own Enter chain, so Paragraph
+  // running first would always succeed and no list item would ever split.
+  keymapPriority: KeymapPriority.list,
 
   addNodes() {
     return {
@@ -288,6 +295,11 @@ export const List = Extension.create({
       );
     };
 
+    // A whole list is one semantic unit — the walker never descends into
+    // listItems, so only the wrappers register. text/markdown come from the
+    // shared serializer (correct `-`/`1.` markers).
+    const listSemanticHandler: SemanticNodeHandler = () => ({ type: "list" });
+
     return {
       docx: {
         onBeforeExport,
@@ -295,6 +307,12 @@ export const List = Extension.create({
           bulletList: listPassthrough,
           orderedList: listPassthrough,
           listItem: listItemHandler,
+        },
+      },
+      semantic: {
+        nodes: {
+          bulletList: listSemanticHandler,
+          orderedList: listSemanticHandler,
         },
       },
     };

@@ -6,8 +6,7 @@ import { renderPage } from "./PageRenderer";
 import { drawBlock } from "./PageRenderer";
 import {
   clearOverlay,
-  renderCursor,
-  renderSelection,
+  paintSelectionPrimitives,
   renderAnchoredDragSource,
   renderAnchoredDragGhost,
   renderAnchoredDragCaret,
@@ -15,6 +14,7 @@ import {
 import { NodeSelection } from "prosemirror-state";
 import { computeGhostRect, renderHandles } from "./ResizeController";
 import { PointerController } from "./PointerController";
+import { isCellDescriptor } from "../table/cellSelectionSeam";
 
 /** Constants */
 
@@ -210,6 +210,7 @@ export class TileManager {
     Object.assign(this.tilesContainer.style, {
       position: "relative",
       margin: "0 auto",
+      touchAction: "manipulation",
     });
     container.appendChild(this.tilesContainer);
 
@@ -218,7 +219,7 @@ export class TileManager {
     // viewport. Wrappers are inserted once and never removed — only shown/hidden.
     this.ensurePoolSize(1);
 
-    // ── mouse events ─────────────────────────────────────────────────────────
+    // ── pointer events ───────────────────────────────────────────────────────
     this.pointer = new PointerController({
       editor,
       tilesContainer: this.tilesContainer,
@@ -418,10 +419,10 @@ export class TileManager {
         this.activeTiles.set(idx, tile);
       }
 
-      // Snapshot version once — content + overlay use the same snapshot
-      const version = layout.version;
-      this.paintContent(tile, layout, version);
-      this.paintOverlay(tile, layout, version);
+      // Content stamps the tile with this version; the overlay then reads that
+      // stamp to check the charmap describes the pixels it is drawing over.
+      this.paintContent(tile, layout, layout.version);
+      this.paintOverlay(tile, layout);
     }
   }
 
@@ -446,12 +447,20 @@ export class TileManager {
       performance.mark("scrivr:first-paint-start");
     }
 
+    // A paint that abandoned itself must not be recorded as done. The paged
+    // path admits a candidate before it touches either canvas and rejects a
+    // stale one outright, and a tile stamped with a version it never drew
+    // would sit on stale pixels until something else happened to move it —
+    // the reader looking at content the document no longer holds.
+    let painted: boolean;
     if (this.editor.isPageless) {
-      this.paintContentPageless(tile, layout);
+      painted = this.paintContentPageless(tile, layout);
     } else {
       this.applyPagedWrapperTheme(tile);
-      this.paintContentPaged(tile, layout, pageNumber);
+      painted = this.paintContentPaged(tile, layout, pageNumber);
     }
+
+    if (!painted) return;
 
     tile.lastPaintedVersion = version;
     tile.lastRenderGeneration = renderGen;
@@ -484,29 +493,37 @@ export class TileManager {
     }
   }
 
+  /** Returns whether the page was actually painted — see `paintContent`. */
   private paintContentPaged(
     tile: TileEntry,
     layout: DocumentLayout,
     _pageNumber: number,
-  ): void {
+  ): boolean {
     const { pageConfig } = layout;
     const page = layout.pages[tile.tileIndex];
-    if (!page) return;
+    if (!page) return false;
 
-    const { dpr } = setupCanvas(tile.contentCanvas, {
+    // Admission happens before setupCanvas: assigning either canvas dimension
+    // clears the visible backing bitmap, even if the assigned value is unchanged.
+    // Canvas painting below is synchronous, so once this candidate is admitted
+    // no other layout can become current until the complete frame has landed.
+    if (layout.version !== this.editor.layout.version) return false;
+
+    const { ctx, dpr } = setupCanvas(tile.contentCanvas, {
       width: pageConfig.pageWidth,
       height: pageConfig.pageHeight,
     });
     tile.dpr = dpr;
 
-    // Size overlay canvas to match
+    // Size overlay canvas only after the content candidate is admitted, so a
+    // rejected frame preserves both visible layers.
     tile.overlayCanvas.width = Math.round(pageConfig.pageWidth * dpr);
     tile.overlayCanvas.height = Math.round(pageConfig.pageHeight * dpr);
     tile.overlayCanvas.style.width = `${pageConfig.pageWidth}px`;
     tile.overlayCanvas.style.height = `${pageConfig.pageHeight}px`;
 
-    renderPage({
-      ctx: tile.contentCanvas.getContext("2d", { alpha: false })!,
+    return renderPage({
+      ctx,
       page,
       pageConfig,
       renderVersion: layout.version,
@@ -537,7 +554,14 @@ export class TileManager {
     });
   }
 
-  private paintContentPageless(tile: TileEntry, layout: DocumentLayout): void {
+  /** Returns whether the tile was painted — see `paintContent`. */
+  private paintContentPageless(tile: TileEntry, layout: DocumentLayout): boolean {
+    // Match the paged admission contract: reject before assigning either
+    // canvas dimension, because even a same-value assignment clears the
+    // visible backing bitmap. The synchronous paint below can then complete
+    // without a newer layout interleaving midway through it.
+    if (layout.version !== this.editor.layout.version) return false;
+
     const { pageConfig } = layout;
     const tileTop = tile.tileIndex * this.tileHeight;
     const tileBottom = tileTop + this.tileHeight;
@@ -584,6 +608,9 @@ export class TileManager {
             dpr,
             measurer: this.editor.measurer,
             theme,
+            ...(this.editor.blockRegistry
+              ? { blockRegistry: this.editor.blockRegistry }
+              : {}),
             ...(this.editor.markDecorators
               ? { markDecorators: this.editor.markDecorators }
               : {}),
@@ -603,20 +630,35 @@ export class TileManager {
           lineIndexOffset,
           theme,
           this.editor.markDecorators,
+          this.editor.inlineRegistry,
         );
       }
     }
 
     ctx.restore();
+    return true;
   }
 
   // ── Overlay painting ───────────────────────────────────────────────────────
 
-  private paintOverlay(
-    tile: TileEntry,
-    layout: DocumentLayout,
-    _version: number,
-  ): void {
+  private paintOverlay(tile: TileEntry, layout: DocumentLayout): void {
+    // Carets and selection rectangles are geometry read from the charmap, and
+    // they only mean anything over the pixels they were computed for. When a
+    // content paint bails, this tile keeps older pixels while the charmap has
+    // already moved to the new layout — drawing from it puts the caret where
+    // the text used to be. Skip, and let the paint that does land draw it.
+    //
+    // A surface owns its own charmap, populated by its paint hook with no
+    // layout version behind it, so there is no generation to agree on.
+    // `!= null` on purpose: no registry means no surface is active, and
+    // reading that as "active" would switch this guard off entirely.
+    const surfaceActive = this.editor.surfaces?.activeSurface != null;
+    if (
+      !surfaceActive &&
+      this.editor.charMap.generation !== tile.lastPaintedVersion
+    )
+      return;
+
     const { pageConfig } = layout;
     const tileTop = tile.tileIndex * this.tileHeight;
     const cursorPage = this.editor.cursorPage;
@@ -627,8 +669,14 @@ export class TileManager {
         )
       : cursorPage - 1;
 
-    const sel = this.editor.getSelectionSnapshot();
-    const selKey = `${sel.head}:${sel.from}:${sel.to}`;
+    // Key on the descriptor, not raw offsets: a cell-range selection collapses
+    // its primary text range, so caret offsets alone miss a growing/shrinking
+    // rectangle. Kind + cell bounds + count capture every change that repaints.
+    const descriptor = this.editor.getSelectionDescriptor();
+    const selKey = isCellDescriptor(descriptor)
+      ? `cell:${descriptor.rows.from},${descriptor.rows.to},` +
+        `${descriptor.columns.from},${descriptor.columns.to}:${descriptor.selectedCellCount}`
+      : `${descriptor.kind}:${descriptor.head}:${descriptor.from}:${descriptor.to}`;
     const blinkOn =
       this.editor.isFocused && this.editor.cursorManager.isVisible;
 
@@ -661,7 +709,6 @@ export class TileManager {
     // When a surface is active, always repaint the overlay so the cursor
     // blinks correctly and selection updates are visible. The header cursor
     // is drawn by an overlay handler that needs blink-tick repaints.
-    const surfaceActive = this.editor.surfaces?.activeSurface !== null;
     const surfaceStateDirty = surfaceActive;
     if (
       !blinkDirty &&
@@ -692,72 +739,58 @@ export class TileManager {
       overlayCtx.translate(0, -tileTop);
     }
 
-    const pmSel =
-      this.editor.surfaces?.activeSurface?.state.selection ??
-      this.editor.getState().selection;
-    const isNodeSel = pmSel instanceof NodeSelection;
+    const selState =
+      this.editor.surfaces?.activeSurface?.state ?? this.editor.getState();
+    const pmSel = selState.selection;
     const pageNum = isPageless ? 1 : tile.tileIndex + 1;
 
-    // ── Selection ─────────────────────────────────────────────────────────
-    // Ensure this page's charMap is populated — during drag selection the
-    // cursor may be on another page and paintContent may not have run for
-    // this tile yet, leaving its glyphs missing from the charMap.
-    if (!sel.empty) this.editor.ensurePagePopulated(pageNum);
+    // ── Selection chrome ──────────────────────────────────────────────────
+    // A SelectionBehavior turns the active selection into paint primitives; the
+    // renderer stays blind to whether it is text, an image, a table, or a
+    // custom node. During a drag the cursor may be on another page whose glyphs
+    // aren't in the charMap yet — populate this page first.
+    if (!pmSel.empty) this.editor.ensurePagePopulated(pageNum);
 
     const overlayTheme = this.editor.getResolvedTheme();
-    if (!sel.empty && !isNodeSel) {
-      const lines = this.editor.charMap
-        .linesInRange(sel.from, sel.to)
-        .filter((l) => l.page === pageNum);
-      const glyphs = this.editor.charMap
-        .glyphsInRange(sel.from, sel.to)
-        .filter((g) => g.page === pageNum);
-      renderSelection(overlayCtx, lines, glyphs, sel.from, sel.to, overlayTheme.selectionFill);
-    }
+    const primitives = this.editor.selectionRegistry.resolve(pmSel).geometry(pmSel, {
+      state: selState,
+      layout,
+      charMap: this.editor.charMap,
+      page: pageNum,
+      nodeRectAt: (pos) => this.editor.getNodeRect(pos),
+    });
 
-    // ── Cursor (suppressed when a surface is active — chrome bands own their cursor) ──
-    if (
-      !isNodeSel &&
-      blinkOn &&
-      tile.tileIndex === cursorTile &&
-      !surfaceActive
-    ) {
-      const coords = this.editor.charMap.coordsAtPos(sel.head, pageNum);
-      if (coords) renderCursor(overlayCtx, coords, overlayTheme.cursor);
-    }
+    // The caret blinks and lives on one tile; a resize ghost (below) replaces
+    // the selection's static handles. Both are decided here, not by the behavior.
+    const caretVisible = blinkOn && tile.tileIndex === cursorTile && !surfaceActive;
+    const resizing = pending !== null;
+    const toPaint = primitives.filter((p) => {
+      if (p.type === "caret") return caretVisible;
+      if (p.type === "handles" && resizing) return false;
+      return true;
+    });
+    paintSelectionPrimitives(overlayCtx, toPaint, overlayTheme);
 
-    // ── Image selection handles ───────────────────────────────────────────
-    if (isNodeSel && pmSel.node.type.name === "image") {
-      // Single-source rect lookup — anchored from layout.anchoredObjects,
-      // inline from charMap. Drops the handle-vs-body drift class.
+    // ── Resize ghost (transient pointer state, not selection-driven) ───────
+    // Ghost handles at the pending size, pinned to the edge opposite the dragged
+    // handle, in place of the static handles above. Without computeGhostRect the
+    // ghost would grow from the rect's top-left, so dragging a left/top handle
+    // would visually grow the box the wrong way until mouseup committed.
+    // `pending` is only set once a resize handle was grabbed (any node whose
+    // behavior declares `resize`), so the selection is that resizable node.
+    if (pending && pmSel instanceof NodeSelection) {
       const objRect = this.editor.getNodeRect(pmSel.from);
       if (objRect && objRect.page === pageNum) {
-        // During resize drag, show ghost handles at the pending size, pinned
-        // to the edge opposite the dragged handle. Without computeGhostRect
-        // the ghost would always grow from objRect's top-left, so dragging a
-        // left/top handle in its expected direction would visually grow the
-        // box the wrong way (right/down) until mouseup committed the attrs.
-        if (pending) {
-          const g = computeGhostRect(
-            pending.handle,
-            objRect.x,
-            objRect.y,
-            objRect.width,
-            objRect.height,
-            pending.width,
-            pending.height,
-          );
-          renderHandles(overlayCtx, g.x, g.y, g.width, g.height, overlayTheme.resizeHandle);
-        } else {
-          renderHandles(
-            overlayCtx,
-            objRect.x,
-            objRect.y,
-            objRect.width,
-            objRect.height,
-            overlayTheme.resizeHandle,
-          );
-        }
+        const g = computeGhostRect(
+          pending.handle,
+          objRect.x,
+          objRect.y,
+          objRect.width,
+          objRect.height,
+          pending.width,
+          pending.height,
+        );
+        renderHandles(overlayCtx, g.x, g.y, g.width, g.height, overlayTheme.resizeHandle);
       }
     }
 

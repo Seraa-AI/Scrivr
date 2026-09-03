@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/react",
-  "version": "1.0.10",
+  "version": "1.0.19",
   "description": "React bindings for the Scrivr canvas document editor",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -59,17 +59,22 @@
     "@floating-ui/dom": "^1.7.6"
   },
   "peerDependencies": {
+    "@scrivr/ai": "workspace:*",
     "@scrivr/core": "workspace:*",
     "@scrivr/plugins": "workspace:*",
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
   },
   "peerDependenciesMeta": {
+    "@scrivr/ai": {
+      "optional": true
+    },
     "@scrivr/plugins": {
       "optional": true
     }
   },
   "devDependencies": {
+    "@scrivr/ai": "workspace:*",
     "@scrivr/core": "workspace:*",
     "@scrivr/plugins": "workspace:*",
     "@types/react": "^18.0.0",

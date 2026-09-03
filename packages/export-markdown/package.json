@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/export-markdown",
-  "version": "1.0.10",
+  "version": "1.0.19",
   "description": "Markdown export for Scrivr documents",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -42,9 +42,6 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
-  },
-  "dependencies": {
-    "prosemirror-markdown": "^1.13.4"
   },
   "peerDependencies": {
     "@scrivr/core": "workspace:*"

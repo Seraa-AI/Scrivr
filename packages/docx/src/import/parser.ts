@@ -31,8 +31,11 @@ import type {
   DocxInline,
   DocxMark,
   DocxParagraphAttrs,
+  DocxSectionRef,
+  DocxTableCell,
+  DocxTableRow,
 } from "@scrivr/core";
-import { emuToPx } from "@scrivr/core";
+import { emuToPx, twipsToPx } from "@scrivr/core";
 
 /**
  * Minimal diagnostics sink — same shape `DocxImportContext.diagnostics`
@@ -51,9 +54,37 @@ export function parseDocumentBody(
 ): DocxImportModel {
   const body = findChild(documentRoot, "w:body");
   if (!body) return { blocks: [] };
+  return parseBlockContainer(body, diagnostics);
+}
 
+function parseSdt(el: OoxmlElement, diag: ParserDiagnostics): DocxBlock {
+  const sdtPr = findChild(el, "w:sdtPr");
+  let tag: string | null = null;
+  if (sdtPr) {
+    const tagEl = findChild(sdtPr, "w:tag");
+    if (tagEl) {
+      tag = attr(tagEl, "w:val") ?? null;
+    }
+  }
+
+  const contentEl = findChild(el, "w:sdtContent");
+  const content = contentEl ? parseBlockContainer(contentEl, diag).blocks : [];
+
+  return { type: "sdt", tag, content };
+}
+
+/**
+ * Parse the block children of a container element (`<w:body>`, `<w:hdr>`,
+ * `<w:ftr>`, …) into the intermediate model. Header/footer parts reuse this
+ * through `ctx.walkPart` so their content runs through the exact same
+ * paragraph/table/page-break logic as the body.
+ */
+export function parseBlockContainer(
+  container: OoxmlElement,
+  diagnostics: ParserDiagnostics = NULL_DIAGNOSTICS,
+): DocxImportModel {
   const blocks: DocxBlock[] = [];
-  for (const child of body.children) {
+  for (const child of container.children) {
     if (typeof child === "string") continue;
     if (child.name === "w:p") {
       if (isPageBreakParagraph(child)) {
@@ -69,8 +100,13 @@ export function parseDocumentBody(
       // returns an array so the structural break survives Stage 2 as a
       // real `pageBreak` block instead of a stray inline.
       blocks.push(...parseParagraph(child, diagnostics));
+    } else if (child.name === "w:tbl") {
+      blocks.push(parseTable(child, diagnostics));
+    } else if (child.name === "w:sdt") {
+      blocks.push(parseSdt(child, diagnostics));
     } else if (child.name === "w:sectPr") {
       // Section properties — page size, margins, etc. Not modeled yet.
+      // Header/footer references are read separately via parseSectionReferences.
       continue;
     } else if (IGNORABLE_BODY_CHILDREN.has(child.name)) {
       continue;
@@ -83,6 +119,53 @@ export function parseDocumentBody(
     }
   }
   return { blocks };
+}
+
+/**
+ * Read the header/footer references from the body `<w:sectPr>`. Word records
+ * each as `<w:headerReference w:type="default|first|even" r:id="…"/>`; the
+ * inverse of the export-side sectPr injection. Missing / unknown types are
+ * skipped rather than guessed.
+ */
+export function parseSectionReferences(documentRoot: OoxmlElement): {
+  headers: DocxSectionRef[];
+  footers: DocxSectionRef[];
+  /** `<w:titlePg/>` present — the flag that actually activates first-page chrome. */
+  titlePg: boolean;
+} {
+  const headers: DocxSectionRef[] = [];
+  const footers: DocxSectionRef[] = [];
+  const body = findChild(documentRoot, "w:body");
+  const sectPr = body ? findChild(body, "w:sectPr") : undefined;
+  if (!sectPr) return { headers, footers, titlePg: false };
+
+  let titlePg = false;
+  for (const child of sectPr.children) {
+    if (typeof child === "string") continue;
+    if (child.name === "w:titlePg") {
+      // A `<w:titlePg/>` with no `w:val`, or a truthy val, is on.
+      titlePg = isOoxmlOn(attr(child, "w:val"));
+      continue;
+    }
+    const bucket =
+      child.name === "w:headerReference" ? headers :
+      child.name === "w:footerReference" ? footers :
+      undefined;
+    if (!bucket) continue;
+    const relId = attr(child, "r:id");
+    const type = normalizeSectionType(attr(child, "w:type"));
+    if (relId) bucket.push({ type, relId });
+  }
+  return { headers, footers, titlePg };
+}
+
+/** OOXML on/off toggle: absent val = on; `"false"`/`"0"`/`"off"` = off. */
+export function isOoxmlOn(val: string | undefined): boolean {
+  return val !== "false" && val !== "0" && val !== "off";
+}
+
+function normalizeSectionType(raw: string | undefined): DocxSectionRef["type"] {
+  return raw === "first" || raw === "even" ? raw : "default";
 }
 
 /**
@@ -217,6 +300,72 @@ function parseParagraph(el: OoxmlElement, diag: ParserDiagnostics): DocxBlock[] 
   return splitOnInlinePageBreaks(attrs, inlines);
 }
 
+/**
+ * Parse a `<w:tbl>` into the intermediate table block. Mirrors the export in
+ * `@scrivr/core`'s `table/docxExport.ts`: `<w:tblGrid>` → px column widths,
+ * `<w:tr>` → rows, `<w:tc>` → cells with gridSpan / vMerge / shaded fill.
+ * Cell content reuses the paragraph/table parsers so nested blocks round-trip.
+ */
+function parseTable(el: OoxmlElement, diag: ParserDiagnostics): DocxBlock {
+  const grid: number[] = [];
+  const tblGrid = findChild(el, "w:tblGrid");
+  if (tblGrid) {
+    for (const col of findChildren(tblGrid, "w:gridCol")) {
+      const w = Number(attr(col, "w:w"));
+      grid.push(Number.isFinite(w) ? Math.round(twipsToPx(w)) : 100);
+    }
+  }
+
+  const rows: DocxTableRow[] = [];
+  for (const tr of findChildren(el, "w:tr")) {
+    const trPr = findChild(tr, "w:trPr");
+    const repeatHeader = trPr ? findChild(trPr, "w:tblHeader") !== undefined : false;
+
+    const cells: DocxTableCell[] = [];
+    for (const tc of findChildren(tr, "w:tc")) {
+      cells.push(parseTableCell(tc, diag));
+    }
+    rows.push({ repeatHeader, cells });
+  }
+
+  return { type: "table", grid, rows };
+}
+
+function parseTableCell(tc: OoxmlElement, diag: ParserDiagnostics): DocxTableCell {
+  const tcPr = findChild(tc, "w:tcPr");
+
+  let gridSpan = 1;
+  let vMerge: DocxTableCell["vMerge"] = "none";
+  let background: string | null = null;
+  if (tcPr) {
+    const gridSpanEl = findChild(tcPr, "w:gridSpan");
+    if (gridSpanEl) {
+      const span = Number(attr(gridSpanEl, "w:val"));
+      if (Number.isInteger(span) && span >= 1) gridSpan = span;
+    }
+
+    const vm = findChild(tcPr, "w:vMerge");
+    // OOXML quirk: a `<w:vMerge>` with no `w:val` means "continue".
+    if (vm) vMerge = attr(vm, "w:val") === "restart" ? "restart" : "continue";
+
+    const shd = findChild(tcPr, "w:shd");
+    const fill = shd ? attr(shd, "w:fill") : undefined;
+    if (fill && /^[0-9a-fA-F]{6}$/.test(fill)) background = `#${fill.toLowerCase()}`;
+  }
+
+  const content: DocxBlock[] = [];
+  for (const child of tc.children) {
+    if (typeof child === "string") continue;
+    if (child.name === "w:p") content.push(...parseParagraph(child, diag));
+    else if (child.name === "w:tbl") content.push(parseTable(child, diag));
+  }
+  // A `<w:tc>` always holds at least one block in Word; guarantee it so the
+  // schema's `block+` content requirement holds even for an empty cell.
+  if (content.length === 0) content.push({ type: "paragraph", attrs: {}, content: [] });
+
+  return { gridSpan, vMerge, background, isHeader: false, content };
+}
+
 function parseParagraphProperties(el: OoxmlElement): DocxParagraphAttrs {
   const attrs: DocxParagraphAttrs = {};
   const pPr = findChild(el, "w:pPr");
@@ -255,6 +404,13 @@ function parseParagraphInlines(el: OoxmlElement, diag: ParserDiagnostics): DocxI
     if (typeof child === "string") continue;
     if (child.name === "w:r") {
       content.push(...parseRun(child, diag));
+    } else if (child.name === "w:fldSimple") {
+      // A simple field, e.g. `<w:fldSimple w:instr=" PAGE ">`. Keep the
+      // instruction as a `field` inline; Stage 2 maps it back to a token
+      // node. The inner runs are Word's cached display value — dropped,
+      // since the field regenerates it.
+      const instr = attr(child, "w:instr");
+      if (instr !== undefined) content.push({ type: "field", instr, marks: [] });
     } else if (child.name === "w:hyperlink") {
       // Preserve hyperlink identity by attaching a `link` mark to every
       // inline produced by its inner runs. Stage 2 (Link extension)

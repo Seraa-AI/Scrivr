@@ -9,6 +9,7 @@ import {
   type DocxNodeHandler,
   type DocxBlockTransform,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
 
 // ── HorizontalRule rendering strategy ────────────────────────────────────────
 
@@ -60,8 +61,21 @@ export const HorizontalRule = Extension.create({
     return {
       horizontalRule: {
         group: "block",
-        parseDOM: [{ tag: "hr" }],
-        toDOM() { return ["hr"]; },
+        attrs: { nodeId: { default: null } },
+        parseDOM: [
+          {
+            tag: "hr",
+            getAttrs(dom) {
+              const el = dom as HTMLElement;
+              return { nodeId: el.getAttribute("data-node-id") ?? null };
+            },
+          },
+        ],
+        toDOM(node) {
+          const attrs: Record<string, string> = {};
+          if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+          return ["hr", attrs];
+        },
       },
     };
   },
@@ -102,7 +116,11 @@ export const HorizontalRule = Extension.create({
           ]),
         ]),
       ]);
-    return { docx: { nodes: { horizontalRule: handler } } };
+    const semanticHandler: SemanticNodeHandler = () => ({ type: "horizontalRule" });
+    return {
+      docx: { nodes: { horizontalRule: handler } },
+      semantic: { nodes: { horizontalRule: semanticHandler } },
+    };
   },
 
   addImports() {

@@ -1,4 +1,5 @@
 import { Extension } from "../Extension";
+import { KeymapPriority } from "../types";
 import { setBlockType } from "prosemirror-commands";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
@@ -11,6 +12,7 @@ import {
   type DocxNodeHandler,
   type DocxParagraphStyleTransform,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
 
 // ── Theme tokens — overridable via CodeBlock.configure({ theme: {...} }) ─────
 
@@ -106,6 +108,10 @@ function makeToggleCodeBlock(): Command {
 export const CodeBlock = Extension.create<CodeBlockOptions>({
   name: "codeBlock",
 
+  // Tab inserts indentation, but only inside a code block — it declines
+  // elsewhere so list Tab still sinks a list item.
+  keymapPriority: KeymapPriority.codeBlock,
+
   defaultOptions: {
     theme: {},
   },
@@ -177,7 +183,11 @@ export const CodeBlock = Extension.create<CodeBlockOptions>({
         ...children,
       ]);
     };
-    return { docx: { nodes: { codeBlock: handler } } };
+    const semanticHandler: SemanticNodeHandler = () => ({ type: "codeBlock" });
+    return {
+      docx: { nodes: { codeBlock: handler } },
+      semantic: { nodes: { codeBlock: semanticHandler } },
+    };
   },
 
   addImports() {

@@ -1,4 +1,4 @@
-import { EditorState, Transaction } from "prosemirror-state";
+import { EditorState, TextSelection, Transaction } from "prosemirror-state";
 import { joinBackward, joinForward } from "prosemirror-commands";
 
 /**
@@ -19,9 +19,15 @@ import { joinBackward, joinForward } from "prosemirror-commands";
  */
 
 export function insertText(state: EditorState, text: string): Transaction | null {
-  const { from, to } = state.selection;
-  const tr = state.tr.insertText(text, from, to);
-  return tr;
+  const sel = state.selection;
+  // A structural selection (e.g. a table CellSelection) must delete through its
+  // own `replace()` — passing explicit from/to would only touch the head cell's
+  // range and leave the other selected cells intact. `insertText(text)` with no
+  // range routes through `replaceSelection`, which asks the selection.
+  if (!(sel instanceof TextSelection)) {
+    return state.tr.insertText(text);
+  }
+  return state.tr.insertText(text, sel.from, sel.to);
 }
 
 export function deleteSelection(state: EditorState): Transaction | null {

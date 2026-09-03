@@ -9,11 +9,11 @@
  * the harness just calls state.apply(tr) — no manual loop needed.
  */
 
-import { Schema } from "prosemirror-model";
-import type { Node as PmNode } from "prosemirror-model";
-import { EditorState } from "prosemirror-state";
-import type { Transaction } from "prosemirror-state";
-import { history, undo, redo } from "prosemirror-history";
+import { Schema } from "@scrivr/core/pm";
+import type { Node as PmNode } from "@scrivr/core/pm";
+import { EditorState } from "@scrivr/core/pm";
+import type { Transaction } from "@scrivr/core/pm";
+import { history, undo, redo } from "@scrivr/core/pm";
 import { trackChangesPlugin, trackChangesPluginKey } from "../engine/trackChangesPlugin";
 import { CHANGE_STATUS, TrackChangesStatus } from "../types";
 import { setAction, TrackChangesAction } from "../actions";
@@ -75,6 +75,17 @@ export const schema = new Schema({
     trackedDelete: {
       excludes: "",
       attrs: { dataTracked: { default: {} } },
+    },
+    // Trackable formatting marks (name not "tracked*", dataTracked attr present)
+    // so mergeTrackedMarks' formatting path can be exercised. bold has no own
+    // attrs; textColor carries a `color` so two colors stay distinct changes.
+    bold: {
+      excludes: "",
+      attrs: { dataTracked: { default: [] } },
+    },
+    textColor: {
+      excludes: "",
+      attrs: { color: { default: null }, dataTracked: { default: [] } },
     },
   },
 });

@@ -6,9 +6,10 @@ import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { ExtensionManager } from "../ExtensionManager";
 import { createTestEditor } from "../../test-utils";
-import { DOMParser as PMDOMParser } from "prosemirror-model";
+import { DOMParser as PMDOMParser, DOMSerializer } from "prosemirror-model";
 import type { Node } from "prosemirror-model";
 import type { LayoutBlock } from "../../layout/BlockLayout";
+import type { Extension } from "../Extension";
 
 // Table ships behind an opt-in flag (see `chore/tables-default-off`); build a
 // local context that enables it so the schema-integration assertions below
@@ -95,6 +96,45 @@ describe("Table — addNodes", () => {
   });
 });
 
+// ── nodeId round-trip (RFC 33: block ids must survive HTML parse) ──────────────
+
+describe("Table — nodeId round-trip", () => {
+  const resolved = Table.resolve();
+
+  it("table, tableRow, tableCell, and tableHeader each declare a nodeId attr", () => {
+    for (const name of ["table", "tableRow", "tableCell", "tableHeader"]) {
+      expect(resolved.nodes[name]!.attrs?.["nodeId"]?.default).toBe(null);
+    }
+  });
+
+  it("preserves data-node-id on table/row/cell/header through parse and re-serialize", () => {
+    const div = document.createElement("div");
+    div.innerHTML =
+      '<table data-node-id="t1"><tbody>' +
+      '<tr data-node-id="r1">' +
+      '<td data-node-id="c1"><p>cell</p></td>' +
+      '<th data-node-id="h1"><p>head</p></th>' +
+      "</tr></tbody></table>";
+    const doc = PMDOMParser.fromSchema(fullSchema).parse(div);
+
+    const ids: Record<string, string | null> = {};
+    doc.descendants((n) => {
+      if (["table", "tableRow", "tableCell", "tableHeader"].includes(n.type.name)) {
+        const raw = n.attrs["nodeId"];
+        ids[n.type.name] = typeof raw === "string" ? raw : null;
+      }
+    });
+    expect(ids).toEqual({ table: "t1", tableRow: "r1", tableCell: "c1", tableHeader: "h1" });
+
+    const out = document.createElement("div");
+    out.appendChild(DOMSerializer.fromSchema(fullSchema).serializeFragment(doc.content));
+    expect(out.querySelector("table")?.getAttribute("data-node-id")).toBe("t1");
+    expect(out.querySelector("tr")?.getAttribute("data-node-id")).toBe("r1");
+    expect(out.querySelector("td")?.getAttribute("data-node-id")).toBe("c1");
+    expect(out.querySelector("th")?.getAttribute("data-node-id")).toBe("h1");
+  });
+});
+
 // ── addLayoutHandlers ─────────────────────────────────────────────────────────
 
 describe("Table — addLayoutHandlers", () => {
@@ -156,7 +196,11 @@ describe("Table — insertTable / deleteTable / undo-redo", () => {
   function makeEditor(): { editor: Editor; type: (s: string) => void; cleanup: () => void } {
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })] });
+    // uniqueId off: this block asserts exact-doc undo/redo of insertTable;
+    // stable-id stamping is orthogonal and would add ids on the insert edit.
+    const editor = createTestEditor({
+      extensions: [StarterKit.configure({ table: true, uniqueId: false })],
+    });
     editor.mount(container);
     const type = (s: string): void => {
       const ta = container.querySelector("textarea");
@@ -484,10 +528,70 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     for (const block of rowBlocks) {
       expect(block.kind).toBe("tableRow");
       expect(block.lines).toEqual([]);
-      expect(block.cells).toEqual([]);   // Phase 1 stub: cells filled in Phase 4
+      // Phase 4: each row carries one cell sub-block per column, each with its
+      // laid-out child blocks.
+      expect(block.cells).toHaveLength(2);
+      expect(block.cells!.every((c) => c.blocks.length > 0)).toBe(true);
       expect(block.height).toBeGreaterThan(0);
       expect(block.availableWidth).toBeGreaterThan(0);
     }
+
+    editor.destroy();
+    container.remove();
+  });
+
+  it("cell text is hit-testable — cursor coords land in the correct cell (Phase 4 render)", () => {
+    const json = {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { layout: "fixed", grid: [120, 120] },
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "LEFT" }] }] },
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "RIGHT" }] }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({
+      extensions: [StarterKit.configure({ table: true }), DefaultContent.configure({ json })],
+    });
+    editor.mount(container);
+    editor.ensurePagePopulated(1);
+
+    const posOf = (text: string): number => {
+      let p = -1;
+      editor.getState().doc.descendants((n, pos) => {
+        if (n.isText && n.text === text) {
+          p = pos;
+          return false;
+        }
+        return true;
+      });
+      if (p < 0) throw new Error(`no text node "${text}"`);
+      return p;
+    };
+
+    const left = editor.charMap.coordsAtPos(posOf("LEFT"));
+    const right = editor.charMap.coordsAtPos(posOf("RIGHT"));
+    // Both cells registered glyphs → the cursor can be placed inside a cell.
+    expect(left).not.toBeNull();
+    expect(right).not.toBeNull();
+    // The RIGHT cell sits to the right of the LEFT cell on the same row.
+    expect(right!.x).toBeGreaterThan(left!.x);
+    expect(Math.abs(right!.y - left!.y)).toBeLessThan(5);
+
+    // Clicking in the RIGHT cell resolves to a position inside it.
+    const hit = editor.charMap.posAtCoords(right!.x, right!.y + right!.height / 2, right!.page);
+    expect(hit).toBeGreaterThanOrEqual(posOf("RIGHT"));
 
     editor.destroy();
     container.remove();
@@ -635,5 +739,37 @@ describe("Table — HTML parse via schema parseDOM", () => {
     expect(table).not.toBeNull();
     expect(table!.firstChild?.type.name).toBe("tableRow");
     expect(table!.firstChild!.firstChild!.textContent).toBe("x");
+  });
+});
+
+// Regression: Table's selection seam contributions (behavior + hit tester +
+// gesture) must reach the editor when Table is used via StarterKit — the normal
+// path — else cell selection silently vanishes.
+//
+// Asserted through the manager, not off the kit's own resolution: the kit
+// declares its children via addExtensions() and contributes nothing itself, so
+// what matters is what the manager collects.
+describe("Table — cell selection is registered via the seam through StarterKit", () => {
+  function cellSeam(kit: Extension) {
+    const manager = new ExtensionManager([kit]);
+    return {
+      behaviors: manager.buildSelectionBehaviors(),
+      hitTesters: manager.buildHitTesters(),
+      gestures: manager.buildSelectionGestures(),
+    };
+  }
+
+  it("StarterKit({table:true}) forwards the cell behavior, hit tester, and gesture", () => {
+    const on = cellSeam(StarterKit.configure({ table: true }));
+    expect(on.behaviors.some((b) => b.kind === "table-cell")).toBe(true);
+    expect(on.hitTesters.length).toBeGreaterThan(0);
+    expect(on.gestures.length).toBeGreaterThan(0);
+  });
+
+  it("with table off, no cell behavior / hit tester / gesture is registered", () => {
+    const off = cellSeam(StarterKit); // table disabled by default
+    expect(off.behaviors.some((b) => b.kind === "table-cell")).toBe(false);
+    expect(off.hitTesters.length).toBe(0);
+    expect(off.gestures.length).toBe(0);
   });
 });

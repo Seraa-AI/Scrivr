@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/core",
-  "version": "1.0.10",
+  "version": "1.0.19",
   "description": "High-performance canvas-based document editor engine",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -34,6 +34,16 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
+      }
+    },
+    "./pm": {
+      "import": {
+        "types": "./dist/pm.d.ts",
+        "default": "./dist/pm.js"
+      },
+      "require": {
+        "types": "./dist/pm.d.cts",
+        "default": "./dist/pm.cjs"
       }
     }
   },

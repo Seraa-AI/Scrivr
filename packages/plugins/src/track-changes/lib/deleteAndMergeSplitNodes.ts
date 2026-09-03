@@ -1,4 +1,4 @@
-import { Fragment, Node as PMNode, Schema, Slice } from "prosemirror-model";
+import { Fragment, Node as PMNode, Schema, Slice } from "@scrivr/core/pm";
 
 import { createNewInsertAttrs, NewEmptyAttrs } from "../helpers";
 import { setFragmentAsInserted } from "./fragments";

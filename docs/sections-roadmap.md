@@ -1,6 +1,7 @@
 # Sections Roadmap
 
-> Status: **design** — not started. Documents the migration path from the current single-section header/footer model to a full section-based document layout system matching Microsoft Word.
+> Status: **step 1 landed** (section substrate — `sectionBreak`, `finalSection`,
+> `deriveSections`, structural commands). The rest is design. Documents the migration path from the current single-section header/footer model to a full section-based document layout system matching Microsoft Word.
 
 ## Why sections
 
@@ -28,17 +29,51 @@ The v1 header/footer system was designed with sections in mind:
 
 The migration is a lift, not a rewrite.
 
+## Core design decision: boundaries, not stored ranges
+
+Sections are derived from structural boundaries in the ProseMirror document.
+They are **not** stored as `{ from, to }` ranges in a doc attribute: document
+positions move on every edit, so persisted ranges would need mapping through
+every local, remote, normalization, and paste transaction.
+
+The canonical representation mirrors OOXML:
+
+- an intermediate `sectionBreak` terminates the section before it and carries
+  that section's settings;
+- `doc.attrs.finalSection` carries the final section's identity and settings because
+  the final section has no trailing break;
+- `deriveSections(doc)` scans top-level children and returns transient ranges
+  for layout and UI consumers.
+
+```text
+section 1 blocks
+sectionBreak(settings for section 1)
+section 2 blocks
+sectionBreak(settings for section 2)
+final section blocks
+doc.attrs.finalSection
+```
+
+This is the same ownership model as DOCX: paragraph-level `<w:sectPr>` closes
+an intermediate section, while body-level `<w:sectPr>` describes the final one.
+
 ## Target data model
 
 ```ts
 interface Section {
   id: string;
 
-  /** Doc position range this section covers. */
+  /** Derived positions; never persisted in doc attrs. */
   from: number;
   to: number;
 
   settings: {
+    breakType: "continuous" | "nextPage" | "evenPage" | "oddPage";
+    columns: {
+      count: number;
+      gap: number;
+      equalWidth: true;
+    };
     differentFirstPage: boolean;
     differentOddEven: boolean;
     headerTop: number;
@@ -54,22 +89,138 @@ interface Section {
   };
 
   links: {
-    /** When true, this section inherits the previous section's header. */
-    header: boolean;
-    /** When true, this section inherits the previous section's footer. */
-    footer: boolean;
+    /** Word links each header/footer variant independently. */
+    header: Record<"default" | "firstPage" | "evenPage", boolean>;
+    footer: Record<"default" | "firstPage" | "evenPage", boolean>;
   };
 }
 ```
 
-Storage: `doc.attrs.sections: Section[]` replaces `doc.attrs.headerFooter`.
+Storage:
+
+```ts
+sectionBreak.attrs = {
+  nodeId: string | null;
+  settings: SectionSettings;
+}
+
+doc.attrs.finalSection = SectionSettings | null;
+```
+
+`Section` objects are projections returned by `deriveSections(doc)`. Section
+identity comes from the terminating break's `nodeId`. Header/footer content and
+link metadata can move into `SectionSettings` incrementally when that feature
+needs multi-section behavior.
+
+### What the substrate landed (v1)
+
+The shipped `SectionSettings` is `{ breakType, columns }`. The header/footer
+flags and band geometry above stay in the document-level `HeaderFooterPolicy`
+until the section-aware chrome phase moves their **readers**; landing them in
+two places first would create a second source of truth that nothing reads.
+
+`doc.attrs.finalSection` stores the settings directly rather than
+`{ id, settings }`, and the final section's derived id is the constant
+`section:final` (`FINAL_SECTION_ID`). The final section is a stable *slot*, not a
+minted identity: inserting a break above it hands the preceding content the
+break's `nodeId` and leaves the tail as the final section — which is the
+relationship consumers key on. Nothing on the read path mints ids, so
+`deriveSections` is deterministic. A break not yet stamped by `UniqueId` falls
+back to a deterministic ordinal id (`section:<n>`).
+
+`breakType` describes the boundary a section's terminating break creates — how
+the *following* section starts. This is DOCX's own ownership rule for
+`<w:type>` inside `sectPr`, so the round trip stays direct. It is inert on the
+final section, which has no break.
+
+Layout in this phase reads exactly one thing from the model, the break type: a
+`continuous` break is a pure marker with no flow effect; `nextPage` starts the
+next page; `evenPage`/`oddPage` skip a page when the next one has the wrong
+parity, emitting the blank page Word does. The parity rule lives in one helper
+(`targetPageNumber`) that both the pagination loop and the global-Y advance
+call, so page geometry and anchored-object placement agree.
+
+`<w:sectPr>` export/import lands with the DOCX section round trip.
+
+### Invariants
+
+1. Every document has at least one derived section.
+2. Every non-final section ends at exactly one `sectionBreak`.
+3. A `sectionBreak` belongs to the section it terminates, not the one after it.
+4. Removing a break merges two sections using an explicit command policy; raw
+   deletion must be normalized to the same policy.
+5. Inserting a break copies the current section settings to both resulting
+   sections before the caller changes either side. Insertion alone is visually
+   neutral.
+6. `columns.count >= 1`, `columns.gap >= 0`, and v1 always has
+   `columns.equalWidth === true`.
 
 ## Resolution algorithm
 
+### Physical-page ownership
+
+Columns divide only the **body content region**. Headers and footers remain one
+page-wide chrome pair; they are never repeated per column.
+
+A continuous section break can place more than one section on the same physical
+page, so page chrome cannot use "the section containing the last block." For
+Word parity, the first section present on a physical page owns that page's
+header and footer. A later continuous section begins using its own chrome on the
+first subsequent page where it is the first section present. A `nextPage`,
+`evenPage`, or `oddPage` break naturally makes the new section the owner of the
+page it starts.
+
+```ts
+interface PageSectionOwnership {
+  pageNumber: number;
+  /** Section whose body content occurs first on this physical page. */
+  ownerSectionId: string;
+  /** All sections with body fragments on this page, in document order. */
+  sectionIds: string[];
+}
+```
+
+Pagination produces this ownership alongside `LayoutPage`. Chrome resolution
+consumes `ownerSectionId`; it does not rescan positions or infer ownership from
+the fragment painted last.
+
+`differentFirstPage` is evaluated against the first physical page owned by the
+section, not merely the page containing its boundary. This avoids switching a
+page-wide header halfway down a page when a continuous section begins.
+
+### Header/footer inheritance
+
+Link-to-previous is resolved independently for the default, first-page, and
+even-page variants of each band. Resolving a linked slot walks backward by
+section and variant until it finds an unlinked definition. Columns do not
+participate in this lookup.
+
+Microsoft exposes two phrases for one relationship, and the UI must keep their
+roles distinct:
+
+- **Link to Previous** is the editable toggle for the active band and variant.
+- **Same as Previous** is a derived status label shown when that toggle is on;
+  it is not a second stored setting.
+
+New sections start linked for all six slots (three header variants and three
+footer variants). The first section cannot link backward, so its toggles are
+disabled and resolve as unlinked.
+
+Turning a link **off** materializes the currently resolved previous-section
+content into a new local definition before clearing the flag. The page therefore
+looks unchanged immediately after unlinking, but later edits are independent.
+Turning a link **on** makes the matching previous-section slot authoritative;
+any local definition becomes dormant while linked and must not be exported as
+the active relationship. Transaction history preserves it for undo.
+
+Editing a linked header/footer edits the resolved source section, matching the
+existing reference-based decision. The surface UI must show both the source
+section and “Same as Previous” so the mutation target is not surprising.
+
 ```
 resolveHeader(sections, page, variant):
-  section = findSectionForPage(sections, page)
-  if section.links.header:
+  section = findSectionById(page.ownerSectionId)
+  if section.links.header[variant]:
     prev = findPreviousSection(sections, section.id)
     return resolveHeaderFromSection(prev, page, variant)
   return resolveHeaderFromSection(section, page, variant)
@@ -110,21 +261,42 @@ interface HeaderFooterController {
   setSectionSettings(sectionId: string, partial: Partial<Section["settings"]>): void;
   updateHeader(sectionId: string, variant: Variant, partial: Partial<HeaderFooterDefinition>): void;
   updateFooter(sectionId: string, variant: Variant, partial: Partial<HeaderFooterDefinition>): void;
-  linkToPrevious(sectionId: string, band: "header" | "footer", linked: boolean): void;
+  linkToPrevious(
+    sectionId: string,
+    band: "header" | "footer",
+    variant: Variant,
+    linked: boolean,
+  ): void;
   addSection(atPos: number): void;
   removeSection(sectionId: string): void;
 }
 ```
 
-## Migration path from v1
+## Implementation order
 
-1. **Schema**: Add `sections` doc attr alongside `headerFooter`. Migration reads old policy into a single-section array.
-2. **ProseMirror**: Add `sectionBreak` node type. Splitting a paragraph at a section break creates two sections.
-3. **resolveSlot**: Accept section instead of policy. `SlotContext.section` becomes required.
-4. **resolveChrome**: Iterate sections, find which section covers each page, resolve per-section.
-5. **Controller**: Add section-aware methods. Old `setHeaderMarginTop()` becomes `setSectionSettings(sectionId, { headerTop })`.
-6. **Surfaces**: Encode section ID in surface IDs. Surface cache becomes per-section.
-7. **Ribbon**: Show section name ("Header — Section 2"), link-to-previous toggle.
+1. ~~**Section substrate**: `SectionSettings`, `sectionBreak`,
+   `finalSection`, `deriveSections`, normalization, and structural
+   commands.~~ **Landed** — `model/sections.ts` +
+   `extensions/built-in/Sections.ts`. Documents with no break are unchanged;
+   the only flow effect is that a non-continuous break starts a new page.
+   Invariant 4 needs no normalization pass: because settings live on the
+   terminator, raw deletion of a break already merges forward onto the next
+   terminator, which is both the command's policy and Word's. Even/odd section
+   starts landed here too, since the parity rule is one helper on the same
+   page-advance seam — step 6 keeps orientation, margins, and page numbering.
+2. **Region-ready pagination**: refactor page/Y advancement into a single-region
+   `ContentRegion` cursor with byte-for-byte-equivalent one-column output.
+3. **Section-scoped columns**: generate equal-width regions from the derived
+   section settings and support continuous/next-page transitions.
+4. **Column breaks**: forced region advancement plus DOCX round trip.
+5. **Section-aware chrome**: move header/footer policy into section settings,
+   make `SlotContext.section` required, then update controllers and surfaces.
+6. **Remaining section geometry**: orientation, margins, page numbering, and
+   odd/even section starts.
+
+The section substrate precedes columns, but the complete header/footer section
+migration does not block columns. This keeps the first implementation small
+without introducing a temporary document-level column model.
 
 ## UI requirements (Word parity)
 
@@ -146,6 +318,11 @@ interface HeaderFooterController {
 1. **Don't store resolved headers** — always compute from sections + linking. Otherwise link edits break.
 2. **Don't duplicate content on link** — use reference resolution, not copy.
 3. **Don't tie headers to pages** — pages are derived from sections. Sections are the source of truth.
+4. **Don't persist section position ranges** — derive and map them from boundary
+   nodes instead.
+5. **Don't model a section as a container node** — the body remains a flat
+   `block+` stream so editing, tables, lists, and existing exporters retain
+   their current tree contracts.
 
 ## What this unlocks
 

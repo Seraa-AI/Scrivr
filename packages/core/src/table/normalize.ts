@@ -1,5 +1,6 @@
 import { EditorState, Plugin, type Transaction } from "prosemirror-state";
 import type { Node, NodeType, Schema } from "prosemirror-model";
+import { COLLAB_SYNC_META } from "../extensions/built-in/UniqueId";
 
 /**
  * Document-validity normalisation for tables. Run from
@@ -237,7 +238,11 @@ export function tableIntegrityPlugin(): Plugin {
       // Skip if no transaction changed the doc — saves a full descendants walk
       // on selection-only changes (which fire constantly during cursor moves).
       if (!transactions.some((t) => t.docChanged)) return null;
-      return normalizeTables(newState);
+      const tr = normalizeTables(newState);
+      if (tr && transactions.some((t) => t.docChanged && t.getMeta(COLLAB_SYNC_META))) {
+        tr.setMeta(COLLAB_SYNC_META, true);
+      }
+      return tr;
     },
   });
 }

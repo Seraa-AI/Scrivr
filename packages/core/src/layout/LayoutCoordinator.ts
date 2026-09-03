@@ -14,7 +14,7 @@ import type { InlineRegistry } from "./BlockRegistry";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
 import type { PageChromeContribution } from "./PageMetrics";
-import { populateCharMap } from "./BlockLayout";
+import { populateCharMap, registeredLineCount } from "./BlockLayout";
 import { spanEndDocPos } from "./LineBreaker";
 
 interface FragmentIndexEntry {
@@ -179,6 +179,33 @@ export class LayoutCoordinator {
   }
 
   /**
+   * Synchronously finish the full document layout.
+   *
+   * The normal browser path streams large documents: first paint gets an
+   * initial chunk, then idle callbacks complete the rest. Serialization paths
+   * such as PDF export need the complete layout immediately, so they use this
+   * method to cancel pending idle work and run the same pipeline without a
+   * `maxBlocks` cutoff.
+   */
+  ensureFullLayout(): void {
+    this.cancelIdleLayout();
+    const prev = this.layout;
+    this.dirty = false;
+    this.layoutResumption = null;
+    this.charMap.clear();
+    this.populatedPages.clear();
+    // From scratch: no `previousLayout`, or pagination's early-termination
+    // copies the partial's truncated tail. measureCache still speeds measuring.
+    this.layout = this.runLayout({ previousVersion: prev.version });
+    this.layoutIsPartial = this.layout.isPartial ?? false; // read, don't force false
+    this.indexLayout();
+    this.cursorPageValue = this.cursorPageFromLayout();
+    this.ensurePagePopulated(this.cursorPageValue);
+    this.ensurePagePopulated(this.cursorPageValue - 1);
+    this.ensurePagePopulated(this.cursorPageValue + 1);
+  }
+
+  /**
    * Populate the CharacterMap for a single page (idempotent).
    *
    * Called eagerly for cursor page ± 1 after every layout pass.
@@ -252,7 +279,7 @@ export class LayoutCoordinator {
         lineOffset,
         this.opts.measurer,
       );
-      lineOffset += block.lines.length;
+      lineOffset += registeredLineCount(block);
     }
 
     // Stamp anchored-object rects so getNodeViewportRect returns the rendered
@@ -268,6 +295,30 @@ export class LayoutCoordinator {
         page: pageNumber,
       });
     }
+  }
+
+  /**
+   * Ensure every page touched by a document range has CharacterMap entries.
+   * Unlike CharacterMap.coordsAtPos(), this uses the layout index and therefore
+   * cannot mistake the last glyph on an already-populated page for the target.
+   */
+  ensureRangePopulated(from: number, to: number): boolean {
+    const docSize = this.opts.getDoc().content.size;
+    if (from < 0 || to < from || to > docSize) return false;
+
+    let pages = this.pagesTouchingRange(from, to);
+    const fromLocated = this.pagesTouchingRange(from, from).length > 0;
+    const toLocated = this.pagesTouchingRange(to, to).length > 0;
+
+    // A streamed layout may contain the start of a long range but not its end.
+    if (this.layoutIsPartial && (!fromLocated || !toLocated)) {
+      this.ensureFullLayout();
+      pages = this.pagesTouchingRange(from, to);
+    }
+
+    if (pages.length === 0) return false;
+    for (const page of pages) this.ensurePagePopulated(page);
+    return true;
   }
 
   /**
@@ -323,6 +374,11 @@ export class LayoutCoordinator {
   private indexLayout(): void {
     this.pageMap.clear();
     this.fragmentIndex = [];
+    // Every layout assignment routes through here, so this is the one place
+    // the charmap's generation can be kept honest. Pages populate lazily
+    // afterwards, but they can only populate from this layout — `clear()`
+    // above each assignment took the previous one's geometry with it.
+    this.charMap.setGeneration(this.layout.version);
 
     for (const page of this.layout.pages) {
       this.pageMap.set(page.pageNumber, page);
@@ -375,6 +431,18 @@ export class LayoutCoordinator {
     // lines within each block are in docPos order; overflow always moves to a later page.
     // The sentinel extension on the last line (end = nodePos + nodeSize) can exceed
     // the next entry's start, but start values remain strictly non-decreasing.
+  }
+
+  private pagesTouchingRange(from: number, to: number): number[] {
+    const pages = new Set<number>();
+    for (const entry of this.fragmentIndex) {
+      const touches =
+        from === to
+          ? entry.start <= from && entry.end >= from
+          : entry.end >= from && entry.start <= to;
+      if (touches) pages.add(entry.page);
+    }
+    return [...pages];
   }
 
   /**

@@ -31,12 +31,21 @@ describe("LineBreaker — basic wrapping", () => {
       { defaultFontFamily: "serif", defaultFontSize: 14 },
     );
     expect(lines).toHaveLength(1);
-    // The single line's width agrees with the measurer's own measurement
-    // of the full string — line breaker and measurer share one source of truth.
-    expect(lines[0]?.width).toBeCloseTo(
-      measurer.measureWidth("Hello world", "14px serif"),
-      2,
-    );
+    // The single line's width agrees with the measurer's own measurement of
+    // the full string. Exact agreement is not guaranteed and must not be
+    // asserted to sub-pixel precision: the line breaker sums per-word
+    // measurements, while `measureWidth` measures the whole string in one
+    // call, so inter-word kerning can diverge by a small amount that depends
+    // on the resolved font (≈0 on some serif faces, ~0.3px on others). Assert
+    // agreement within 1px — tight enough to catch a real break/measure bug
+    // (which mismeasures by whole word widths), loose enough to stay
+    // independent of which serif the host environment resolves.
+    expect(
+      Math.abs(
+        (lines[0]?.width ?? 0) -
+          measurer.measureWidth("Hello world", "14px serif"),
+      ),
+    ).toBeLessThan(1);
   });
 
   it("wraps onto a new line when text exceeds maxWidth", () => {

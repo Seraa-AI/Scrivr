@@ -2,6 +2,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+# Playground/debug scratch dumps
+testfile.json
 coverage/
 data/
 apps/server/data/
@@ -11,3 +13,6 @@ apps/server/data/
 *.code-workspace
 *MS-OE376*.docx
 .gstack/
+
+# Per-developer Claude Code settings — the shared skill and agents are committed.
+.claude/settings.local.json

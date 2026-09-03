@@ -1,5 +1,1623 @@
 # @scrivr/export-markdown
 
+## 1.0.19
+
+### Patch Changes
+
+- 15dbf0c: **`@scrivr/core/pm` — one ProseMirror instance for the whole stack**
+
+  `@scrivr/core` now publishes a `./pm` subpath that re-exports the ProseMirror surface Scrivr is
+  built on: `prosemirror-model`, `-state`, `-transform`, `-commands`, `-keymap`, `-history`,
+  `-inputrules`, `-schema-list`, `-markdown`.
+
+  Extensions and downstream packages import from `@scrivr/core/pm` instead of the `prosemirror-*`
+  packages directly, so they run against the same instance as the engine — the `instanceof` checks
+  on `Node`, `Slice`, `Selection` and `Plugin` that the engine relies on can no longer be broken by
+  a duplicate copy of `prosemirror-model` in the dependency tree. `prosemirror-view` is
+  deliberately absent: there is no `EditorView` in Scrivr, so view-only hooks never run.
+
+  - **`@scrivr/core`** — new `./pm` entry point (ESM + CJS + types). No change to the main barrel.
+  - **`@scrivr/ai`, `@scrivr/docx`, `@scrivr/export-pdf`, `@scrivr/export-semantic`,
+    `@scrivr/plugins`** — source imports moved to `@scrivr/core/pm`; direct `prosemirror-*`
+    dependencies and peer ranges dropped. `@scrivr/ai` no longer declares any peer dependencies;
+    `@scrivr/plugins` keeps `prosemirror-model`/`-state` peers only because `y-prosemirror` requires
+    them, not for its own code.
+  - **`@scrivr/export-markdown`** — dropped an unused `prosemirror-markdown` dependency.
+  - **`@scrivr/export`, `@scrivr/react`** — version alignment only.
+
+- fc33e99: **Hyperlinks survive DOCX export**
+
+  A document exported to Word lost every hyperlink. The text came through, the
+  link did not, and the export logged an `unsupported-mark` warning that no UI
+  surfaces — so the first sign of it was a Word file where nothing was clickable.
+
+  - **`@scrivr/core`** — new `DocxRunWrapper` contribution kind, and
+    `DocxHandlers.markWrappers`. `DocxMarkHandler` contributes run _properties_,
+    which is all bold or colour need; OOXML expresses a hyperlink as a
+    `<w:hyperlink>` element wrapping the runs and carrying a relationship id, so
+    no run property can produce one. That is why `Link` had no export handler at
+    all rather than a broken one.
+  - **`@scrivr/core`** — `Link` now contributes both halves: the wrapper that
+    registers the relationship through the existing `ctx.rels.addHyperlink()`,
+    and Word's built-in Hyperlink character style so the link looks like one. A
+    link with no usable href stays styled text rather than emitting a `r:id` for
+    a relationship that was never registered, which produces a file Word refuses
+    to open.
+  - **`@scrivr/docx`** — the walker applies wrapping marks around the run it just
+    built, in the order the marks appear on the text, so two wrapping marks nest
+    predictably.
+
+- 87198ec: **Sourced Blocks**
+
+  A new end-to-end system for embedding, tracking, and updating content blocks (such as clauses or definitions) that originate from an external library or provider.
+
+  - **`SourcedBlock` Extension (`@scrivr/core`)** — A generic node wrapper that retains source metadata (`instanceId`, `kind`, `resourceId`, `versionId`, and `baseHash`). It leverages a new `insertSourcedBlock` command to seamlessly request and insert content from registered `SourceProvider` implementations.
+  - **Divergence Detection (`@scrivr/core`)** — A built-in plugin hashes block content and compares it against the `baseHash` to detect if the local content has drifted from the source. Diverged blocks are visually indicated using a new `divergedGutter` theme property.
+  - **Node Actions (`@scrivr/core`)** — Includes built-in Node Actions for Sourced Blocks, providing "Update to Latest", "Discard Local Edits" and "Detach from Library" capabilities based on user permissions.
+  - **`layout` node spec declaration (`@scrivr/core`)** — Nodes now declare how they participate in layout, independent of what they mean in the document tree: `{ kind: "block" }` (the default — the node occupies its own box) or `{ kind: "transparent" }` (the node stays in the tree but contributes no box; its children lay out into the enclosing flow). Previously layout participation was inferred from the node's name — lists and tables expanded, everything else was assumed to be a text block — so a structural node like `sourcedBlock` laid out as a single empty line and never painted its content. The painter for a `block` node still comes from `addLayoutHandlers()`; folding the strategy into this declaration, and turning the text-block fallback into an error for undeclared nodes, is the next step.
+  - **`addPasteTransforms()` (`@scrivr/core`)** — New extension seam for rewriting pasted content before it enters the document, applied by `PasteTransformer` to every clipboard flavour. This is the engine's equivalent of ProseMirror's `transformPasted` view prop, which never fires because Scrivr has no `EditorView`. Sourced blocks use it to re-mint `instanceId` so a pasted block is a second instance rather than a duplicate identity.
+  - **DOCX Interoperability (`@scrivr/docx`)** — Sourced Blocks seamlessly round-trip through MS Word using `<w:sdt>` (Structured Document Tag) content controls. Source metadata is encoded in the `w:tag` attribute, meaning blocks retain their provenance even after being edited in Word. Provenance that would exceed the 255-character OOXML limit for `w:tag` is dropped with an export diagnostic rather than producing a file Word rejects.
+  - **Semantic Mapping (`@scrivr/core`)** — Ensures Sourced Blocks preserve their boundaries and metadata when processed for semantic analysis.
+
+- 1b42472: **Paste improvements**
+
+  `@scrivr/core`
+
+  - **Slice-accurate paste.** Copying now records the slice's open depths on the clipboard HTML (`data-pm-slice`, ProseMirror's own convention), and pasting rebuilds that slice exactly. Copy/paste inside the editor round-trips, including whitespace, which is document content in an internal slice but collapsible markup in foreign HTML.
+  - **Inline HTML no longer splits the paragraph.** `fromHtml` previously forced `openStart: 0`, so pasting an inline fragment mid-sentence broke the paragraph into three. Openness is now derived from the pasted content: a default-attr paragraph merges into the cursor's block (matching Word/Docs), while anything carrying its own identity — a heading, a list, an aligned paragraph — stays a separate block and keeps its attrs.
+  - **Paste without formatting (`Mod-Shift-v`).** Inserts the clipboard's text form only, skipping both HTML and markdown inference.
+  - **Multi-line plain text becomes paragraphs** instead of one paragraph holding newline characters the canvas cannot render.
+  - **Image paste.** A screenshot or image file on the clipboard is inserted as an image node, sized to its natural dimensions and scaled to fit the page. The default embeds an inline `data:` URL; the new `uploadPastedImage` editor option takes the bytes and returns a URL instead. Ignored when the clipboard also carries HTML, so a web-page image copy is not inserted twice.
+  - **Word/Outlook lists.** Word emits lists as `mso-list`-tagged paragraphs whose bullet is literal text; these are now rebuilt into real `bulletList`/`orderedList` nodes, nesting included, with the marker glyphs dropped.
+  - **Image placement survives an HTML round-trip.** `wrapMode`, `xAlign`, `x`, `yOffset`, `zIndex`, `margin`, and `verticalAlign` now serialize to and parse from `data-*` attributes; copying a floating image previously pasted it back as inline. One declaration drives both directions.
+  - **`safeImageUrl`** — image `src` now accepts inline base64 `data:` URLs for raster types (png, jpeg, gif, webp, bmp, avif). `image/svg+xml` stays rejected, since SVG can carry script. Link `href` keeps the stricter `safeUrl` gate. This is what lets a pasted screenshot, and an image imported from a `.docx`, survive ingestion.
+  - New public exports: `serializeSelectionToHtml`, `serializeSelectionToText`, `SLICE_DATA_ATTR`, `safeImageUrl`, `PasteOptions`, `PasteTransformerOptions`.
+
+  `@scrivr/docx`
+
+  - Adds a chain round-trip test covering images in all five wrap modes across export → import → clipboard copy → paste.
+
+  Other packages are version-only (lockstep).
+
+- e2431a2: **Section substrate**
+
+  `@scrivr/core` gains the boundary-derived section model that per-section
+  columns, page chrome, and page geometry will build on
+  (`docs/sections-roadmap.md` step 1).
+
+  - **`sectionBreak`** — a block atom carrying the settings of the section it
+    terminates, mirroring DOCX's paragraph-level `sectPr` ownership. The body
+    tree stays flat.
+  - **`doc.attrs.finalSection`** — settings for the trailing section, which has
+    no terminating break.
+  - **`deriveSections(doc)`** — projects the boundaries into `{ id, from, to,
+breakPos, settings }` ranges. Pure, mints no ids, and never persists
+    positions, so it is safe on the read path.
+  - **Commands** — `insertSectionBreak`, `setSectionSettings`,
+    `removeSectionBreak`. Inserting copies the current section's settings to both
+    halves; removing merges forward, which is Word's behavior and also what a raw
+    deletion of the node produces.
+  - **Layout** — a `continuous` break has no flow effect, `nextPage` starts the
+    next page, and `evenPage`/`oddPage` skip a page when the next one has the
+    wrong parity. Documents with no section break are unchanged.
+
+  Also in `@scrivr/core`: pasted content now goes through `recloneDocumentIds`,
+  so a clipboard paste no longer duplicates the source nodes' persistent
+  structural ids into the destination document.
+
+  All other `@scrivr/*` packages bump for lockstep version alignment only — no
+  code changes in them.
+
+- 4c0b3f4: **Sourced blocks: the host's half**
+
+  Sourced blocks shipped with the document half reachable and the host half not.
+  A host could register providers and insert blocks, but the reconciler the
+  design hands it — read the provenance out of a document, compare a hash, see
+  which instances have drifted — was never exported, and the provider callback
+  for drift never fired.
+
+  - **`@scrivr/core`** — `collectSourcedBlocks`, `computeBlockHash`,
+    `sourcedBlockDivergenceKey` and `NORMALIZER_VERSION` are now exported, along
+    with the provider contract a host implements against: `SourceProvider`,
+    `SourceContent`, `SourceSearchResult`, `SourceCapability`,
+    `SourcedBlockEvent`, `SourcedBlockChangedEvent`, `SourcedBlockOptions`,
+    `SourcedBlockRecord`, `SourcedBlockDivergenceState`. Reconciliation stays the
+    host's to trigger (there is no safe trigger under collaborative editing);
+    core supplies the pure parts.
+  - **`@scrivr/core`** — `SourceProvider.onInstanceChanged` now fires. It reports
+    both facts and says which is which: `modified` is the document's, computed by
+    hashing content against the base it was inserted with; `outdated` is the
+    library's, and the editor only relays what the host told it. Nothing fires
+    for the state a document already had when it opened.
+  - **`@scrivr/core`** — new `setSourcedBlocksOutdated({ instanceIds, outdated })`
+    command and an `outdated` attr on the node. A library check answers for many
+    instances at once, so the command takes a list and writes one transaction:
+    one undo step, one repaint. Storing it as an attr rather than plugin state
+    means one peer can run the check and every collaborator sees the result, and
+    it survives a reload.
+
+- c8952d7: Extension bundles now compose instead of forwarding by hand, and keybinding
+  precedence is explicit.
+
+  `@scrivr/core`
+
+  - **`addExtensions()`** — an extension may declare the sub-extensions it is
+    composed of. `ExtensionManager` flattens them into its own list before any
+    resolution phase, so every hook a member declares is collected exactly as if
+    the consumer had listed it directly. `StarterKit` uses this and drops from 944
+    lines to ~180: it previously re-implemented the manager's merge for **24 of
+    27** contribution hooks, which meant each new seam had to be re-plumbed
+    through the kit or it silently vanished for everyone using the default. Four
+    hooks were already being dropped that way (`addCloneHandlers`, `addDocAttrs`,
+    `addPageChrome`, `addSurfaceOwner`).
+  - **`keymapPriority` + the `KeymapPriority` ladder** (`table` 400 → `codeBlock`
+    300 → `list` 200 → `default` 100). Colliding keybindings now **chain** instead
+    of last-wins: a command returning `false` means "not applicable here" and
+    delegates to the next binding for that key. Priority decides who gets first
+    refusal, which is how `Tab` can be cell navigation, code indentation, or list
+    indentation depending on context. Previously bundles hand-chained this
+    themselves and two independent extensions binding one key silently lost one of
+    them.
+  - Keymap precedence is deliberately **not** the extension list's order. That
+    order already decides the schema's default block type — ProseMirror fills
+    `block+` with the first registered block node — and one list cannot encode two
+    orderings. `StarterKit`'s list now carries a single constraint (Paragraph
+    first) and is otherwise free to reorder.
+  - `findExtension()` returns the **last** match rather than the first, so
+    `[StarterKit, Heading.configure({ levels: [1] })]` resolves to the caller's
+    Heading rather than the kit's copy — consistent with how every other
+    contribution resolves.
+  - `Extension.configure()` accepts an optional argument, and `Extension.children()`
+    / `flattenExtensions()` are exported for bundle authors.
+
+  Behaviour change worth noting: an extension that previously _replaced_ a
+  built-in keybinding by being registered later now chains behind it, and will not
+  run if the built-in handles the key. Raise its `keymapPriority` to restore
+  first refusal.
+
+  The other packages carry a version-only bump (lockstep group).
+
+- Updated dependencies [15dbf0c]
+- Updated dependencies [fc33e99]
+- Updated dependencies [87198ec]
+- Updated dependencies [81f1b00]
+- Updated dependencies [1b42472]
+- Updated dependencies [e2431a2]
+- Updated dependencies [4c0b3f4]
+- Updated dependencies [c8952d7]
+  - @scrivr/core@1.0.19
+
+## 1.0.18
+
+### Patch Changes
+
+- 287c6c0: **BREAKING (`@scrivr/plugins`):** the AI toolkit and AI-suggestion overlay have
+  moved out of `@scrivr/plugins` into a new package, **`@scrivr/ai`**. There are no
+  compatibility re-exports (pre-1.x hard move).
+
+  `@scrivr/ai` (new)
+
+  - Home of the AI layer: `AiToolkit` / `AiToolkitAPI` / `getAiToolkit`,
+    `GhostText`, `AiCaret`, and the AI-suggestion overlay (`AiSuggestion`,
+    `computeAiSuggestion`, `showAiSuggestion` / `applyAiSuggestion` /
+    `rejectAiSuggestion`, `subscribeToAiSuggestions`, `createSuggestionPopover`,
+    the op render helpers, and their types).
+  - Depends on `@scrivr/core` and `@scrivr/plugins`; it consumes the tracked-merge
+    engine from `@scrivr/plugins`' public API.
+
+  Migration: `import { AiToolkit, getAiToolkit, AiSuggestion, … } from "@scrivr/ai"`
+  instead of `"@scrivr/plugins"`.
+
+  `@scrivr/plugins`
+
+  - No longer re-exports `ai-toolkit` / `ai-suggestion`.
+  - The tracked-merge engine stays here and is the seam `@scrivr/ai` builds on.
+    Widened the public surface with the primitives that layer needs:
+    `pairReplacements` / `PairedDiffOp` and the tracked-attrs builders
+    (`addTrackIdIfDoesntExist`, `createNewPendingAttrs`, `createNewInsertAttrs`,
+    `createNewDeleteAttrs`).
+  - Cycle fix: `applyDiffAsSuggestion` and `CitationHighlight` now import
+    `findNodeById` from `@scrivr/core` (its canonical home) instead of through the
+    moved `ai-toolkit`.
+
+  `@scrivr/react`
+
+  - The AI hooks/components (`useAiSuggestionPopover`, `useAiSuggestionCards`,
+    `AiSuggestionCards`) import from `@scrivr/ai`. `@scrivr/ai` is a new optional
+    peer dependency, mirroring `@scrivr/plugins`.
+
+  Behaviour is unchanged — this is a mechanical package extraction.
+
+- ff38bc1: **`@scrivr/core`:** namespace the `CellSelection` JSON id to `"scrivr:cell"`.
+
+  Consumers of the same prosemirror-state instance share its selection JSON id
+  registry, and `CellSelection` claimed the bare `"cell"` — the same id
+  prosemirror-tables (which Tiptap ships) uses. An app running Tiptap alongside
+  Scrivr threw `Duplicate use of selection JSON ID cell` at import time, whichever
+  loaded second.
+
+  `CellSelection` now registers under `"scrivr:cell"`, which cannot collide with
+  theirs, and its `toJSON` emits the same namespaced id from a shared constant so
+  the two can't drift. Duplicate Scrivr registrations still fail fast because two
+  different `CellSelection` classes sharing one JSON id are not runtime-compatible.
+
+  **Behavior change:** a persisted selection serialized before this release
+  carries `"type": "cell"` and is no longer supported. Passing it to
+  `Selection.fromJSON` throws because Scrivr no longer registers that id. The
+  document itself is unaffected, and applications normally persist document JSON
+  rather than transient editor selections.
+
+  The other packages carry a version-only bump (lockstep group).
+
+- da917c2: **`@scrivr/core`:** document clone mode.
+
+  Create an editor with `clone` to deep-copy its initial document into a fresh id
+  space: every node AND mark that carries a `nodeId` is re-minted, and the old→new
+  mapping is exposed via `editor.cloneIdMap` so references held outside the doc
+  (comment stores, citation indexes, semantic chunk tables) can be remapped onto
+  the clone. The source content is never mutated.
+
+  ```ts
+  const editor = new ServerEditor({ content, clone: true });
+  editor.cloneIdMap; // ReadonlyMap<oldId, newId> | null
+  ```
+
+  Available on both `ServerEditor` (headless) and the browser `Editor` — the logic
+  lives in the shared `BaseEditor`. The underlying primitive,
+  `recloneDocumentIds(doc, opts?) → { doc, idMap }`, is exported for callers that
+  want to re-key a document without an editor.
+
+  - **Schema-driven, custom nodes/marks included.** Any node (block or inline) or
+    mark whose spec declares a `nodeId` attr is re-keyed — no per-type wiring.
+  - **Typed lookup.** `cloneIdMap.getByType(oldId, typeName, kind?)` resolves the
+    exact node, mark, or extension-owned id space when different types reuse the
+    same source string; ordinary `get(oldId)` remains available for globally
+    unique ids.
+  - **Caller control.** `RecloneOptions` lets you restrict which types re-key
+    (`shouldReclone`, so the map holds exactly what you chose) and set the new id
+    values (`generate`). Pass them via `clone: { … }`.
+  - **Tracked changes.** Change ids and their `referenceId`, `moveNodeId`, and
+    `groupId` links are re-keyed together when the TrackChanges extension is in
+    use, so a source and its clone can safely coexist.
+  - **Extension hook.** Extensions can implement `addCloneHandlers()` to re-key
+    their own id spaces or rewrite `nodeId` references during a clone, using the
+    accumulated old→new map. Runs after the core re-key.
+
+  Clone is a pure re-key: only non-null ids change; nulls are left as-is. Other
+  custom id spaces pass through unless their owning extension contributes a clone
+  handler. Clone is an explicit write, so it mints ids —
+  distinct from the load-time read path, which never fabricates them.
+
+  The other packages carry a version-only bump (lockstep group).
+
+- 90e96e9: Substrate for node-level incremental re-embedding (freshness engine).
+
+  `@scrivr/export-semantic` — new change-detection helpers so a consumer can
+  re-embed only what changed between document versions instead of the whole doc:
+
+  - `unitEmbeddingInput(unit)` — the canonical string to embed (`breadcrumb + text`),
+    one source of truth for both embedding and hashing.
+  - `unitContentHash(unit)` — deterministic hash of that input. Identical hash ⇒
+    the vector is unchanged ⇒ skip re-embed. Formatting-only edits (bold, color,
+    alignment) don't change it; a text or breadcrumb change does.
+  - `diffSemanticUnits(prev, next)` — matches units by stable anchor id and returns
+    `{ added, removed, changed, unchanged }`. Editing one paragraph marks exactly
+    one unit changed.
+  - `unitRichHash(unit)` — a formatting-aware companion hash (`type` + `breadcrumb` +
+    `text` + `spans` + `attrs`). Unlike `unitContentHash` it DOES change on a
+    formatting-only edit (bold, color, alignment), so it's the detector for the
+    upcoming rich AI-edit loop, not embedding freshness.
+
+  `@scrivr/core` — collab-safe stable ids. `UniqueId` now stamps a `nodeId` only on
+  LOCAL edits; a remote Yjs apply (tagged `COLLAB_SYNC_META` by the collaboration
+  binding) is skipped, so a block's id is assigned once by its author and synced
+  rather than re-stamped with a divergent uuid on every receiving client. Also
+  exports `fnv1aHex` + `stableStringify`, the shared hash + canonical serializer used
+  by the document fingerprint and the per-unit hashes (no parallel copies).
+
+  `@scrivr/plugins` — the Yjs binding marks remote applies with `COLLAB_SYNC_META`.
+
+- de5fff9: Leaf-based rich semantic editing — an AI agent can now read a document with its
+  formatting and write inline edits back that land as tracked-change suggestions,
+  without churning the parts it didn't touch. The editable surface is the **leaf
+  textblock addressed by its stable `nodeId`**; structure (lists, tables) stays
+  read-only context. Replaces the earlier flattened-string merge that turned a
+  verbatim echo of a list into hundreds of spurious changes.
+
+  `@scrivr/ai`
+
+  - `getRichBlocks(editor)` — the read half: semantic units where container units
+    (lists, tables) expose their editable leaves as nested `parts`, each a
+    paragraph/heading/codeBlock addressed by `nodeId`. The agent sees the grouping;
+    every leaf is individually editable.
+  - `applyRichEdit(editor, edit, { asSuggestion })` — the write half: resolves the
+    target leaf by `nodeId`, auto-diffs against a per-leaf rich hash as a stale
+    guard, and applies via the track-changes engine. When a whole **container**
+    unit (list/table) is passed, its editable `parts` are diffed leaf-by-leaf and
+    only the changed leaves are applied — the container is never sent to the
+    leaf-only merge. Targets that no longer exist are reported via `notFound`; a
+    rich edit resolving to a non-textblock is rejected, never flat-edited.
+  - **zod schemas are first-class public API.** `RichSemanticEditSchema` plus the
+    reused primitives (`InlineSpanSchema`, `InlineMarkSchema`) let any consumer
+    `safeParse` untrusted agent output into validated, typed edits before it can
+    touch the document. The structural-edit union is specced for later phases.
+
+  `@scrivr/export-semantic`
+
+  - Container units now carry `parts: SemanticPart[]` — the editable leaves inside
+    a list or table, each with `nodeId` / `type` / `breadcrumb` / `text` / `spans`
+    / `attrs`. A unit has EITHER `spans` (it is a leaf) OR `parts` (it is a
+    container). The flat `text` projection for embedding is unchanged; `parts` is
+    the universal edit surface. Table `cells` geometry stays read-only.
+  - New `semanticPartRichHash(part)` — the formatting-aware hash for a single
+    editable leaf, the freshness base for per-leaf auto-diff. `unitRichHash` now
+    folds in a container's `parts`, so a formatting-only edit to a nested leaf is
+    observable at the container level (previously invisible).
+
+  `@scrivr/plugins`
+
+  - Track-changes: `applyRichDiffAsSuggestion` now operates on a **single leaf
+    textblock** — one text derivation over the leaf's real doc positions (no
+    recursion into containers, no synthetic newline separators, no cross-package
+    lockstep). Guards against non-textblock targets. Exported from the package's
+    public API for `@scrivr/ai` to build on. `applyDiffAsSuggestion` imports
+    `findNodeById` from `@scrivr/core` (canonical home).
+  - An **attrs-only** rich edit no longer clears the author's pending inline text
+    suggestion — only an edit carrying `spans` supersedes prior inline intent — so
+    changing a block attr (e.g. alignment) preserves an in-flight text suggestion.
+
+  `@scrivr/core`
+
+  - `spansToFragment(spans, schema, opts)` reconstructs a ProseMirror inline
+    fragment from agent-emitted `InlineSpan[]`, with `sameMark` / `resolveInlineMark`
+    — the primitive that turns validated agent spans into real inline content.
+  - `exports/semantic` gains the `SemanticPart` type and the `parts?` field on
+    `SemanticUnit`.
+
+  The other packages carry a version-only bump (lockstep group).
+
+- d677454: `@scrivr/plugins`
+
+  - Track-changes engine: `mergeTrackedMarks` now fuses adjacent **formatting**
+    marks (bold/highlight/color/…), not only tracked insert/delete text. A run of
+    the same mark with the same author, operation and status collapses to one
+    tracking id — the grouping typed text already got, now for formatting. Marks
+    with different own attrs (e.g. two colors) never merge. `trackTransaction`
+    invokes the merge after `AddMarkStep`/`RemoveMarkStep` at both boundaries.
+
+    Fixes a live-editing bug: bolding two adjacent words (or applying a mark in
+    several steps over a run) previously produced one tracked change per segment
+    instead of a single reviewable change.
+
+- Updated dependencies [287c6c0]
+- Updated dependencies [ff38bc1]
+- Updated dependencies [da917c2]
+- Updated dependencies [90e96e9]
+- Updated dependencies [de5fff9]
+- Updated dependencies [d677454]
+  - @scrivr/core@1.0.18
+
+## 1.0.17
+
+### Patch Changes
+
+- aea772a: `@scrivr/export-semantic` — new `semantic` export lane that emits AI-ready
+  `SemanticUnit[]` for RAG pipelines. `toSemanticUnits(editor)` walks the document
+  tree headless (ServerEditor, from `contentJSON`) and produces ordered units
+  carrying structure, stable identity (`nodeId`, with a deterministic positional
+  fallback), and heading breadcrumb. Ships a `SemanticExport` extension — add it to
+  the editor and call `editor.commands.exportSemantic()` (downloads a `.json`, or
+  pass `{ onExport: units => … }` to receive the data headlessly), mirroring
+  `DocxExport` / `PdfExport`.
+
+  `@scrivr/core` — `IBaseEditor` now declares `getMarkdownSerializer()` (both
+  `Editor` and `ServerEditor` already implement it) so headless export lanes can
+  serialize arbitrary node groups.
+
+  Lossless formatting on `SemanticUnit` (markdown can't express alignment/color/font):
+
+  - `attrs` — the block's non-default styling (`align`, `indent`, `fontFamily`, list
+    start, …), with identity/level bookkeeping stripped.
+  - `spans` — inline formatting runs (`InlineSpan`), each carrying its marks + attrs
+    (bold, italic, color, highlight, fontSize, link, …). Reconstructs `text` exactly.
+  - Both also on `TableCell`; both emitted only when non-empty. Tracked-change marks
+    are review metadata (surfaced in `changes`) and are excluded from `spans`; the
+    TrackChanges extension registers a `trackedInsert` seam handler so it is kept in
+    text but not treated as formatting.
+  - `view: "proposed"` states the text contract explicitly (pending inserts included,
+    pending deletes excluded into `changes`). `markdown` is a lossy convenience
+    projection and is omitted when a unit has `changes`, so its redline rendering
+    never contradicts the proposed `text`. Grouping's "short lede" test uses
+    mark-aware length; `spans` are emitted only when they reconstruct the final text.
+
+  `@scrivr/core` — adds the canonical `semantic` handler types (`SemanticUnit`,
+  `TableCells`, `SemanticNodeHandler`, `SemanticMarkHandler`, `UnitCtx`) and, via
+  the per-extension `addExports().semantic` seam, node handlers for paragraph,
+  heading, list, table (structured cells with gridSpan/vMerge), codeBlock,
+  horizontalRule, pageBreak, and image. Unregistered nodes degrade to a visible
+  `type:"unknown"` unit rather than being dropped.
+
+  `@scrivr/plugins` — TrackChanges contributes a `semantic` mark handler so
+  suggested-deletion text is excluded from unit text (not embedded) while inserted
+  text is kept.
+
+  Deterministic block identity (fixes non-deterministic chunk ids):
+
+  - `UniqueId` now ships in `@scrivr/core` and is bundled in **StarterKit** (opt
+    out with `StarterKit.configure({ uniqueId: false })`), so stable, persisted
+    block `nodeId`s are the default with or without the AI toolkit. It also now
+    preserves pending `storedMarks` when it stamps, so mark inheritance across an
+    Enter split is unaffected. `@scrivr/plugins` re-exports `UniqueId` /
+    `findNodeById` from core for back-compat.
+  - `ServerEditor` no longer fabricates block ids on load. A headless read/emit
+    surface must be deterministic: it preserves persisted `nodeId`s and never
+    stamps random ones, so loading the same `contentJSON` twice yields the same
+    ids (previously every load churned ids, breaking chunk identity and causing
+    duplicate chunk sets). The interactive `Editor` still assigns ids on load, and
+    `normalizeDocument({ assignIds })` remains available for explicit assign passes.
+
+- Updated dependencies [aea772a]
+  - @scrivr/core@1.0.17
+
+## 1.0.16
+
+### Patch Changes
+
+- 2e01d56: `@scrivr/plugins` — page headers and footers now export to DOCX, including images.
+
+  Headers and footers set in the editor now appear in the exported Word document as
+  real `<w:hdr>` / `<w:ftr>` parts referenced from the section. Different-first-page
+  is supported (`<w:titlePg/>` + a first-page part), page-number / total-pages /
+  date tokens export as live Word field codes (`PAGE`, `NUMPAGES`, `DATE`), and
+  images placed in a header or footer export with their bytes and a part-scoped
+  relationship (`word/_rels/header1.xml.rels`).
+
+  `@scrivr/core` — paragraph and heading exports now emit `<w:jc>` for the `align`
+  attribute, so centered / right-aligned / justified text keeps its alignment in
+  Word (previously dropped to left). `prepareDocxImages(ctx, doc)` is exported so
+  contributions that render their own sub-documents can pull images through the
+  same fetch/media path as the body.
+
+  `@scrivr/core` / `@scrivr/docx` — the DOCX export context gained reusable
+  capabilities the HeaderFooter contribution is the first to use: `ctx.walkContent`
+  (render a sub-document through the same node/mark handlers as the body) and
+  `ctx.parts.add({ kind, build })` (register an extra OOXML part; relationships
+  allocated inside `build` are scoped to that part's own `.rels`). Footnotes,
+  comments, and text boxes can reuse the same seam.
+
+- 11dfd4d: `@scrivr/plugins` — page headers and footers now import from DOCX, completing the round-trip.
+
+  A `.docx` with headers/footers (exported by Scrivr, or any document using the
+  `<w:fldSimple>` field form) now reconstructs its chrome on import: header/footer
+  text, page-number / total-pages / date tokens, images, first-page, and odd/even
+  slots all land back on the document's `headerFooter` policy. Activation follows
+  Word — first-page chrome is gated on `<w:titlePg>` and even-page chrome on
+  `<w:evenAndOddHeaders>`, not on the mere presence of a reference.
+
+  Odd/even headers and footers are now a first-class rendered feature:
+  `differentOddEven` + `evenPageHeader` / `evenPageFooter` render distinct even-page
+  chrome (previously reserved), so imported even-page content is displayed, not just
+  stored.
+
+  `@scrivr/core` / `@scrivr/docx` — the DOCX import context gained the inverse of
+  the export-side part seam: `ctx.section` exposes the `<w:sectPr>` header/footer
+  references (previously dropped), and `ctx.walkPart(relId)` reads a header/footer
+  part and walks its content back through the same node/mark handlers as the body,
+  with relationships resolved against the part's own `word/_rels/{part}.rels`. A new
+  `field` inline kind carries `<w:fldSimple>` fields through Stage 1 so extensions
+  can map them back to nodes. The older `<w:fldChar>` run-sequence field form is not
+  yet parsed.
+
+- 8bf11bb: `@scrivr/core` — DOCX export: tables now fill the page width.
+
+  A table exported to DOCX previously used its raw grid pixel widths, so Word
+  rendered it much smaller than the page even though the canvas fits the table to
+  the content area. Tables now export at 100% of the text area (`<w:tblW>` percent
+  width, with the grid preserved as column proportions), matching what you see in
+  the editor.
+
+- 56aae1c: `@scrivr/core` — Table cell selection, built on a real `CellSelection`.
+
+  You can now **drag across table cells to select a rectangle**, **Shift-click a
+  second cell to extend the selection**, and **Backspace/Delete or type to clear
+  the selected cells**. Copy/cut round-trips the selection to an HTML `<table>`
+  (with `colspan`/`rowspan` for merged cells) plus tab/newline text, so it pastes
+  into Docs/Word/Notion as a grid. Because the cell selection is now a real
+  ProseMirror selection, undo, collaboration, and clipboard all work without any
+  special cases.
+
+  Selecting **across a table boundary** now matches Word/Google Docs: a drag that
+  runs from body text through a table selects the leading text, the **whole table**
+  (every cell washed), and the trailing text as one continuous selection — pointer
+  drag and Shift+Arrow behave identically at the boundary. Clicking inside a cell
+  places the caret exactly where you click (it no longer jumps to a neighbouring
+  cell near a cell edge or in padding). **Double-click selects the word and
+  triple-click the cell's text** — only a drag or Shift-click selects whole cells.
+
+  Under the hood this replaces the Phase-6 plugin shadow (a stored range + a
+  collapsed caret) with a `CellSelection` registered entirely through the selection
+  seam — a behavior, a hit tester, and a gesture. A text selection defers the
+  interior of any node that opts into painting its own wash
+  (`NodeSpec.selectionWash`), and untrusted serialized selections validate and
+  degrade to a caret instead of throwing.
+
+- 890638d: `@scrivr/core` — unified selection system: one canonical ProseMirror selection
+  with an extension-owned behavior/geometry/gesture seam.
+
+  - **Cleaner mouse selection.** Selecting across multiple lines or block atoms
+    (image, horizontal rule, page break) now paints continuous Word/Docs-style
+    bands — first line to the margin, middle lines full width, last line to the
+    selection end — instead of ragged per-glyph fills that left gaps.
+  - **`editor.getSelectionDescriptor()`** — a kind-tagged, capability-carrying view
+    of the active selection (`kind`, `empty`, `surfaceId`, and a
+    `SelectionCapabilities` bag). UI reads this instead of `instanceof`-ing the
+    ProseMirror selection.
+  - **Extension seams** so an extension can own a selection kind on its own terms
+    without patching the renderer or pointer controller:
+    - `addSelectionBehavior()` — describe + geometry (paint primitives) for a
+      selection kind, with a required default fallback for unregistered kinds.
+    - `addHitTester()` / `addSelectionGesture()` — turn a pointer position into a
+      semantic target and own the resulting drag.
+
+  The canvas renderer now paints selection geometry primitives type-blind, and the
+  pointer controller delegates gestures to registered providers — the same seam a
+  table cell selection or a custom node plugs into. No app-facing behavior changes
+  for text or image selection beyond the band-rendering improvement.
+
+- Updated dependencies [2e01d56]
+- Updated dependencies [11dfd4d]
+- Updated dependencies [8bf11bb]
+- Updated dependencies [56aae1c]
+- Updated dependencies [890638d]
+  - @scrivr/core@1.0.16
+
+## 1.0.15
+
+### Patch Changes
+
+- dd224ef: `@scrivr/core` — the render flush now scrolls the cursor into view only when a
+  transaction intended it.
+
+  Every transaction converges on `viewDispatch` → `scheduleFlush`, whose rAF
+  previously called `scrollCursorIntoView()` unconditionally. That meant any
+  programmatic or remote transaction — a collaborator's edit, an AI overlay, or a
+  citation highlight — yanked the viewport back to the local caret. Most visibly,
+  `revealCitation` set its highlight (via `applyTransaction`) and then scrolled the
+  cited range into view, only for the next frame's flush to scroll back to the
+  cursor.
+
+  Local edits and commands still scroll the caret into view as before. External
+  transactions (those dispatched through `applyTransaction`: Y.js, AI toolkit/
+  suggestions, header/footer, citation highlights, imports) now scroll only when
+  they explicitly called `tr.scrollIntoView()`. So `revealCitation` and
+  `scrollRangeIntoView` land on the cited passage and stay there.
+
+- 4cd72e5: `@scrivr/core` — persist block ids on the horizontal rule, page break, and
+  table node families.
+
+  `horizontalRule`, `pageBreak`, `table`, `tableRow`, `tableCell`, and
+  `tableHeader` now declare a `nodeId` attribute and round-trip it through HTML as
+  `data-node-id` (parse + serialize), matching the paragraph/heading/codeBlock/
+  list/image nodes. Previously these block families dropped their id at parse, so
+  a copy/paste or HTML re-import lost the stable id that comment anchors, AI block
+  targeting, and citation reveal rely on. `assignBlockIds` already populates any
+  block node whose schema declares the attr, so ids are assigned automatically —
+  no other wiring changed.
+
+- 87515de: `@scrivr/core` — Tables Phase 5: cell-editing semantics for the opt-in Table
+  extension (`StarterKit.configure({ table: true })`).
+
+  - **Tab / Shift-Tab** move between cells; Tab past the last cell appends a row
+    and lands the caret in its first cell.
+  - **Backspace / Delete** never escape a cell boundary — a Backspace at the start
+    of a cell (or Delete at its end) is swallowed instead of merging cells or
+    deleting the table, while ordinary in-cell deletion falls through to the
+    normal handler. Boundary detection walks the full path from the cell down, so
+    a Backspace inside a nested list at the cell's top outdents. On a multi-cell
+    selection they clear the selected cells in one undoable step.
+
+  Cross-cell selection geometry lives in `table/cellSelection.ts`: a `CellRange`
+  is derived on demand from a text selection that spans cells, with a partially
+  covered merged cell normalized in whole.
+
+  Keys are wired through `Table.addKeymap()` and chained in `StarterKit` (the
+  canvas input path dispatches through the merged extension keymap, not
+  ProseMirror plugin key props); each guard returns false when it doesn't apply so
+  the chain falls through to List/CodeBlock Tab and the base Backspace/Delete.
+
+  Paste distribution into a cell rectangle is deferred to Phase 7 (its seam is the
+  paste transformer, and it needs the cross-cell drag selection Phase 6 adds).
+
+- Updated dependencies [dd224ef]
+- Updated dependencies [4cd72e5]
+- Updated dependencies [87515de]
+  - @scrivr/core@1.0.15
+
+## 1.0.14
+
+### Patch Changes
+
+- ab64370: `@scrivr/plugins` — `getAiToolkit()` now works on a headless `ServerEditor`.
+
+  The toolkit was registered in the extension's `onViewReady` hook and the registry
+  plus `getAiToolkit()` were keyed on the browser-only `IEditor`, so `ServerEditor`
+  (an `IBaseEditor`) neither received a toolkit instance nor type-checked at the
+  call site — `getBlocks()` and the rest of the read/stream/suggestion API were
+  unreachable server-side. Every `AiToolkitAPI` method only touches `IBaseEditor`
+  surface (`getState` / `applyTransaction` / `getMarkdown` / `schema`), so the API
+  is now created in `onEditorReady` (fires in both `Editor` and `ServerEditor`) and
+  the registry + accessor are typed to `IBaseEditor`. Only the overlay-painting
+  sub-extensions (GhostText / AiCaret / AiSuggestion) remain wired in `onViewReady`.
+
+- dd92049: `@scrivr/plugins` — new `CitationHighlight` extension.
+
+  Paints translucent highlight rects over document ranges referenced by an
+  external citation (e.g. an AI answer citing a passage). The highlight is
+  ephemeral view state: nothing is written into the document, nothing syncs to
+  collaborators, and undo history is untouched. Ranges live in ProseMirror
+  plugin state, remap through every edit (text typed at a boundary stays
+  outside the highlight), and a citation whose text is deleted disappears.
+
+  Commands `setCitationHighlights(citations)` / `addCitationHighlight(citation)`
+  / `citeSelection()` / `citeNode(nodeId)` / `removeCitationHighlight(id)` /
+  `clearCitationHighlights()` work headlessly on `ServerEditor`. `citeSelection`
+  with a caret cites the enclosing block; `citeNode` cites the block stamped
+  with a UniqueId nodeId (the AI-answer flow, paired with the `revealCitedNode`
+  helper). Painting
+  reuses the core `renderSelection` two-pass renderer via
+  `addOverlayRenderHandler`, so multi-line, multi-page, and empty-paragraph
+  ranges render like native selection. Highlight color is configurable via
+  `CitationHighlight.configure({ color })`. `revealCitation(editor, citation)`
+  upserts one highlight and scrolls it into view — the "click a citation chip,
+  jump to the passage" affordance. The extension registers Cite/Uncite toolbar
+  items (group `"citation"`) for data-driven toolbars.
+
+  `@scrivr/core` — new `Editor.scrollRangeIntoView(from, to?)` on `IEditor`.
+
+  Scrolls an arbitrary doc range into view: centered when it fits the
+  viewport, top-pinned when taller, no-op when already visible. Completes a
+  partial streamed layout first when the target lies beyond the laid-out
+  region, and virtualized pages paint automatically after the jump. The
+  existing cursor scroll (`scrollCursorIntoView`) now shares the same
+  page-to-container coordinate conversion.
+
+- Updated dependencies [ab64370]
+- Updated dependencies [dd92049]
+  - @scrivr/core@1.0.14
+
+## 1.0.13
+
+### Patch Changes
+
+- 741709c: `@scrivr/core` — `ensureFullLayout()` no longer inherits a truncated tail (fixes
+  PDF export still dropping the end of large documents, the residual from 1.0.12).
+
+  It seeded the re-layout with the partial layout, so pagination's
+  early-termination copied that partial's downstream pages — which end at the
+  streamed block cutoff (the tail was never laid out). A mid-document cache miss
+  (e.g. a `tableRow`, whose measurement bypasses the cache) followed by cached
+  paragraphs was enough to trigger the copy, producing a "complete" layout that
+  was actually cut off at the partial boundary. It also forced `layoutIsPartial =
+false`, so `exportToPdf`'s partial-layout guard could never fire.
+
+  `ensureFullLayout` now lays out from scratch (no `previousLayout`), making the
+  early-termination guard unsatisfiable, and reads `isPartial` back instead of
+  forcing it false (restoring the export guard as a real backstop). The
+  `measureCache` still speeds per-block measurement.
+
+  Regression test: a 300-paragraph doc with a mid-document table lays out all
+  blocks after `ensureFullLayout` (truncated to the 100-block partial before).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- Updated dependencies [741709c]
+  - @scrivr/core@1.0.13
+
+## 1.0.12
+
+### Patch Changes
+
+- 80e1e65: `@scrivr/core` — an anchored object no longer paints over a preceding paragraph
+  that splits across a natural page boundary.
+
+  Root cause (the natural-split sibling of the explicit-page-break fix): Stage 4
+  paginates at the line level — a line that would cross a page bottom moves whole
+  to the next page, leaving an unused sub-line gap. Stage 2's continuous
+  `globalY` ignored those gaps, so an anchored object whose anchor sits after a
+  paragraph that splits was placed from a coordinate that ran ahead of where
+  Stage 4 actually puts the surrounding lines — the float landed a page early /
+  too high and overlapped the paragraph's tail.
+
+  Fix: `assignGlobalY` and `restampGlobalYFrom` now advance through each flow with
+  a shared `advanceFlowGlobalY` helper that models the page-bottom gaps, reusing
+  the same `fitLinesInCapacity` primitive `paginateFlow` uses so the line-fit
+  decision can't diverge. With `globalY` reflecting true paginated positions,
+  Stage 3's page derivation, anchor-push, and exclusion zones agree with Stage 4
+  for every wrap mode — the model invariant ("no content after an anchored object
+  renders on an earlier page than the object") now holds for natural splits too.
+
+  Regression test: a top-bottom float after a paragraph that splits 4 + 1 at a
+  non-line-aligned page boundary stays below the tail (fails before, passes now).
+  Full core suite green (1173 tests) — no pagination/streaming/cache regressions.
+  The demo's "Top and bottom" intro is restored to its full multi-line form,
+  which now paginates correctly.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- d91051d: `@scrivr/core` — an anchored object after an explicit page break now stays on
+  the same page as its anchor instead of being left behind on the previous page.
+
+  Root cause: a `pageBreak` flow has height 0, so Stage 2 (`assignGlobalY`) gave
+  it no contribution to the continuous `globalY`. Stage 3 then derived the
+  anchor's page from that continuous coordinate — which still pointed at the
+  pre-break page — so an image anchored after the break was placed there, while
+  Stage 4 force-advanced the anchor text to the next page. The float and its
+  anchor split across pages (the "behind"/"front"/"square" image stranded on the
+  prior page, with text wrapping the wrong page).
+
+  Fix at the Stage 2/3 seam: `assignGlobalY` (and `restampGlobalYFrom`, used by
+  the anchor-push and wrap-zone reflow) now advance `globalY` to the next page's
+  content top when they cross a forced page break. With `globalY` reflecting the
+  real vertical position, Stage 3's page derivation, anchor-push, and exclusion
+  zones all agree with Stage 4's pagination — the model invariant ("no content
+  after an anchored object renders on an earlier page than the object") holds by
+  construction for the explicit-page-break case.
+
+  Regression test: a square float anchored after a `pageBreak` lands on page 2
+  with its anchor (fails before, passes now).
+
+  Remaining known limitation: a float can still desync from its anchor when the
+  _preceding paragraph_ splits across a natural page boundary (no explicit
+  break) — a separate Stage 3/Stage 4 case tracked for later.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 8ba5a90: `@scrivr/core` — defensive clamp so `AnchoredObjectPlacement.page` never
+  exceeds `layout.pages.length`.
+
+  Under extreme inputs (huge image height + dense float packing + extreme
+  `yOffset`), the anchored-object solver picks `placement.page` based on
+  geometry before pagination finalizes the page count. If no flow content
+  lands on that geometry-derived page, the page list truncates but the
+  placement keeps the higher index — and downstream consumers (PDF export
+  indexed by page, hit-testing reaching for `CharacterMap` on a
+  non-existent page) reference a page that doesn't exist.
+
+  `runPipeline` now calls `clampPlacementsToPages(mergedPlacements,
+pages.length)` on the **final** layout (non-partial branch) so every
+  placement that survives into `layout.anchoredObjects` satisfies
+  `placement.page <= layout.pages.length`. Partial layouts are
+  intentionally left un-clamped: they get carried forward to the next
+  streaming chunk as `previousLayout?.anchoredObjects`, and clamping there
+  would permanently lose a placement's original page when a later chunk
+  grows the layout back. View consumers reading a partial layout during
+  streaming may briefly observe `placement.page > pages.length`; the
+  window closes when the next chunk arrives.
+
+  The clamp leaves `placement.y` untouched — the float was already
+  painting off the bottom of its intended page; the visual is no worse,
+  but every loop that iterates pages can now trust the index. Common
+  case stays allocation-free (returns the input reference when no
+  clamping is needed).
+
+  `clampPlacementsToPages` is `@internal` — used by `runPipeline`
+  finalization, not part of the `@scrivr/core` public API. The package
+  barrel does not re-export it.
+
+  Tests: 5 new cases in `PageLayout.test.ts` cover the clamp, the
+  `y`-preservation contract, the allocation-free no-op path, the empty
+  input, and the `pageCount === 0` guard.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 5fb5ddd: `@scrivr/core` — fix text-selection drag getting stuck at the source page
+  when the cursor crosses into a page whose CharacterMap has not been
+  populated yet.
+
+  `PointerController.handlePointerMove` calls
+  `editor.charMap.posAtCoords(x, y, page)` on every frame of a text-select
+  drag. `posAtCoords` is page-scoped: on a destination page whose glyphs
+  have not been registered (the common case during the first drag into an
+  off-cursor page), `nearestLine` returns `undefined`, the lookup falls
+  through to `0`, and `setSelection(anchor, 0)` collapses the selection to
+  the document start — visually appearing as "drag stuck at the source
+  page" because the destination half never receives a valid head.
+
+  The anchored-object drag handler in the same controller already mitigates
+  this: it calls `editor.ensurePagePopulated(hit.page)` before resolving
+  `posAtCoords` (see `resolveDragTargetDocPos`). Text drag now does the
+  same. The selection head now updates correctly as the pointer enters
+  each new page during a drag.
+
+  In the same fix, mid-drag pointermoves whose `hitTest` result lands in
+  the inter-page gap (`hit.gap === true`) are now skipped instead of
+  re-running `posAtCoords` with `docY` clamped to the source-page bottom.
+  Without this, every gap-traversal frame would re-collapse the selection
+  head to end-of-source-page on the way down. The last valid selection now
+  sticks until the pointer enters real page content again.
+
+  Tests: three new cases in `PointerController.test.ts` cover (a) the
+  `ensurePagePopulated` call during a cross-page drag, (b) the gap-skip
+  behavior, and (c) the end-to-end selection-head update when dragging
+  into page 2.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 758dd29: `@scrivr/core` — expose `cursorManager: CursorManager` on the `IEditor`
+  interface so extensions running in `onViewReady` can reset the blink
+  cycle and read the current blink phase with full typing instead of
+  ad-hoc structural mirrors.
+
+  `ServerEditor` still does not implement this surface — blink is a
+  view-layer concern and only `Editor` (browser) carries a `CursorManager`.
+  The `IBaseEditor` interface is unchanged.
+
+  `@scrivr/plugins` — `HeaderFooter` no longer carries the `CursorManagerLike`
+  structural-typing workaround. The `isCursorManagerLike` runtime guard
+  and `getCursorManager` / `isCursorVisible` helpers are gone; call sites
+  now read `editor.cursorManager` directly. No behavior change — the
+  blink reset on every header keystroke and the cursor-visibility gate
+  on the overlay handler fire identically. Just the wrong-shape failure
+  class (a rename of `CursorManager.resetSilent` would have silently
+  broken header blink behavior) is removed.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 1e76d7c: `@scrivr/core` + `@scrivr/docx` — DOCX export and import for tables, so the
+  table extension round-trips through Word the same way it already does through
+  PDF.
+
+  Export is extension-owned: `Table.addExports()` now contributes `docx` node
+  handlers (`table` / `tableRow` / `tableCell` / `tableHeader`) alongside the
+  existing `pdf` handler, keeping `@scrivr/docx` free of table-specific
+  knowledge. The walker dispatches them like any other node — a `table` becomes
+  `<w:tbl>` with `<w:tblPr>` (single-line borders matching the canvas grid) +
+  `<w:tblGrid>` (column widths px→twips), each row a `<w:tr>` (with
+  `<w:tblHeader/>` when `repeatHeader` is set), each cell a `<w:tc>` carrying
+  `<w:gridSpan>`, `<w:vMerge>`, and `<w:shd w:fill>` for the background.
+
+  Import mirrors the list precedent — nested structural blocks are
+  package-handled (not extension-dispatched) so the recursion has the full
+  handler set. `parser.ts` claims `<w:tbl>` into a new `DocxBlock` table shape
+  (grid twips→px, rows, cells with gridSpan/vMerge/background); `transform.ts`'s
+  `buildTableNode` builds the `table` node, reconstructing a `<w:tblHeader/>` row
+  as `repeatHeader` + `tableHeader` cells so header semantics survive the trip.
+
+  A table imported into a schema without the table nodes warns
+  (`schema-missing-table`) and drops, the same non-fatal way a list does when
+  `bulletList`/`listItem` are absent.
+
+  Tests: round-trip coverage in `@scrivr/docx` (rows/cells/text, grid widths,
+  header row + background, and the emitted OOXML elements). The pre-existing
+  "unsupported element" policy tests move from `<w:tbl>` (now supported) to
+  `<w:sdt>`.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 1e76d7c: `@scrivr/core` — anchored floats no longer paint over text at their top edge.
+
+  The line-space exclusion probe in `LineBreaker` sampled each prospective line
+  with a 1px height (`lineY..lineY+1`). A line whose top sat just above a float's
+  exclusion zone but whose body extended into it was therefore read as
+  non-overlapping and laid out full-width, so text — or a heading directly above
+  the float — painted under the float's top edge.
+
+  The four probes now pass the line's real height (the starting word's font
+  metrics, or an inline object's height), and the `BlockLayout` first-line-indent
+  wrapper forwards that height instead of replacing it with 1. Every line that
+  actually overlaps a float now wraps out of its column.
+
+  Two regression tests cover it: a square float whose zone top falls mid-line,
+  and a top-bottom float reserving its full vertical band — both overlap at the
+  old 1px probe and are clean now.
+
+  Known limitation (unchanged): a float still desyncs from its anchor across an
+  explicit page break or a paragraph that splits across a page boundary; that's a
+  separate Stage 3/Stage 4 placement issue tracked for a later fix.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- ff43b26: `@scrivr/plugins` — fix heading/paragraph (and every other extension
+  command) inside header and footer editing surfaces.
+
+  Header/footer surfaces previously built their own restricted `Schema`
+  instance by copying the host editor's node specs into a fresh
+  `new Schema(...)`. `Heading.addKeymap()` and `addCommands()` capture
+  the host schema's `NodeType` at extension-resolve time and pass it to
+  `setBlockType()`. When the user pressed `Mod-Alt-1` (or invoked
+  `setHeading1` via a toolbar) inside a header, the keymap fired with a
+  host-schema `NodeType` against a surface state built from a _different_
+  `Schema` instance; ProseMirror's `canChangeType` rejected the mismatch
+  and the command silently returned `false`. The user saw nothing happen.
+
+  Surfaces now share `editor.schema` directly — same `Schema` instance,
+  same `NodeType` identity — so heading↔paragraph conversion, list
+  toggles, marks, and every other extension command work in headers and
+  footers exactly as they do in the body.
+
+  The "no tables, no page breaks in header/footer" restriction moves
+  from a rebuilt schema to a `filterTransaction` ProseMirror plugin on
+  the surface (`createBlockedNodeFilter`). The plugin walks the resulting
+  doc and rejects any transaction that introduces `table`, `tableRow`,
+  `tableCell`, or `pageBreak`. Same enforcement guarantee, applied at
+  the transaction layer instead of the schema layer, with one
+  mechanism covering paste, command insertions, and external dispatches.
+
+  **Public API surface:** `buildRestrictedSchema` is no longer exported
+  from `@scrivr/plugins` (the function is gone). The blocklist is
+  exposed as `HEADER_FOOTER_BLOCKED_NODES: ReadonlySet<string>` for
+  consumers that want to inspect or extend it.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- c18ea0b: `@scrivr/plugins` — the Collaboration extension now connects on a headless
+  `ServerEditor`.
+
+  Provider/binding setup lived in `onViewReady`, which only fires in the browser
+  `Editor` — so a `ServerEditor` (no view) never created its Y binding or provider
+  and never joined the document. Setup moves to `onEditorReady`, which fires in
+  both environments; `YBinding` already depends only on `IBaseEditor`, so it works
+  unchanged. The two `setReady` calls (layout/paint suppression during Y.js sync)
+  are view-only and are now guarded — they no-op headless, where there is no paint
+  to suppress. `collaborationRegistry` is keyed by `IBaseEditor` so server-side
+  collab registers there too.
+
+  A side benefit: collaboration now wires up in `onEditorReady`, which always runs
+  before `CollaborationCursor`'s `onViewReady`, so the cursor extension can rely on
+  the provider already being registered.
+
+  Test: a `ServerEditor` configured with Collaboration registers its provider and
+  Y.Doc on construction (fails on the old `onViewReady` path).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- be79212: `@scrivr/core` + `@scrivr/export-pdf` — PDF export of large documents no longer
+  truncates.
+
+  Large documents stream their layout: first paint lays out an initial chunk and
+  idle callbacks complete the rest. `exportToPdf` read `editor.layout.pages`
+  before the stream finished (and in a server/node context the idle callbacks may
+  never fire), so the exported PDF contained only the first chunk's pages.
+
+  `@scrivr/core` adds `IEditor.ensureFullLayout()`, which cancels pending idle
+  layout work and runs the full pipeline synchronously with no block cutoff.
+  `exportToPdf` now calls it before reading the layout and throws a clear error if
+  the layout is still partial (e.g. an older core without the method).
+
+  Tests: `Editor.ensureFullLayout` synchronously completes a streamed 160-block
+  layout; `buildPdf`/`exportToPdf` cover the paged-layout path.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 1e76d7c: Table fit/hit-test fixes, and a **breaking** `buildPdf` signature change.
+
+  **`@scrivr/export-pdf` — BREAKING:** `buildPdf(layout, options?, editor?)` is now
+  `buildPdf(layout, editor, options?)` with `editor` **required**. PDF handlers for
+  extension nodes (e.g. `table`) are contributed through
+  `editor.getExportContributions()`, so calling `buildPdf` without an editor
+  silently dropped those blocks (blank table rows). Making the editor required
+  removes that footgun at the type level. The editor only needs the
+  `getExportContributions` surface, so a `ServerEditor` is sufficient for
+  server-side/test use. `exportToPdf(editor, options?)` is unchanged. Migration:
+  `buildPdf(layout)` → `buildPdf(layout, editor)`; `buildPdf(layout, opts)` →
+  `buildPdf(layout, editor, opts)`. A block whose node type still has no handler is
+  skipped with a one-time `console.warn` instead of failing silently.
+
+  **`@scrivr/core` — table column fit:** `TableLayoutEngine` now scales the
+  `table.grid` widths to fill the available content width (Word/Docs behaviour), so
+  a grid whose sum exceeds the page no longer overflows the margin, and a narrow
+  grid stretches to fill. `availableWidth` is threaded into the engine.
+
+  **`@scrivr/core` — table cursor navigation:** Home/End and vertical line
+  navigation (`lineStartPos`/`lineEndPos`/`posAbove`/`posBelow`) now resolve the
+  line in 2D (x and y). Previously they used a y-only lookup that, in a table row
+  where cells share a y band, could resolve the first cell's line instead of the
+  cell the cursor is in. The y-only `lineAtCoords` helper is removed; all
+  point-based lookups use the unified 2D resolver.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 7b54708: `@scrivr/core` — Table Phase 3: structural row/column commands, mapped to Word.
+
+  The Table extension (opt-in via `StarterKit.configure({ table: true })`) now
+  exposes the structural editing commands on top of the existing
+  `insertTable`/`deleteTable`:
+
+  - `addRowBefore` / `addRowAfter` — insert an empty row above/below the
+    selected cell's row. Inserting a row through a vertical merge extends the
+    merge (a `continue` cell is added) instead of splitting it.
+  - `deleteRow` — remove the selected row. Deleting the top row of a vertical
+    merge promotes the continuation below to the new master so the merge
+    survives one row shorter. Deleting the last remaining row removes the whole
+    table (an empty table is invalid).
+  - `addColumnBefore` / `addColumnAfter` — insert an empty column left/right of
+    the selected cell and extend `table.grid`. Inserting through a horizontal
+    `gridSpan` grows that cell's span rather than adding a stray cell.
+  - `deleteColumn` — remove the selected column and shrink `table.grid`. A cell
+    whose span covers the deleted column shrinks by one; deleting the last
+    column removes the table.
+
+  When deleting the last row or column would remove a table that is the entire
+  document, the table is replaced with an empty paragraph so the document stays
+  valid rather than empty. A selection resting in a vertical-merge continuation
+  cell resolves to its master cell, so the commands operate on the right cell.
+
+  - `goToNextCell` / `goToPreviousCell` — move the selection between cells in
+    document order. Binding these to `Tab`/`Shift-Tab` (with new-row-on-overflow)
+    is the editing-guards plugin's job in a later phase.
+
+  Edits are fine-grained `setNodeMarkup` / `insert` / `delete` steps against the
+  live document, so cells untouched by a command keep their `Node` identity and
+  the measurement cache stays warm. `tableIntegrityPlugin` continues to repair
+  any residual structural drift after each command.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 1e76d7c: `@scrivr/core` — Table Phase 4: real cell layout, rendering, cursor, and PDF
+  parity. Tables (opt-in via `StarterKit.configure({ table: true })`) are now a
+  usable feature, not a placeholder.
+
+  - **Layout** — `TableLayoutEngine` lays out each cell's child blocks inside its
+    column box (width from the table's `grid`, minus padding) by reusing
+    `layoutBlock`, and sizes each row to its tallest cell. Cell `x` is absolute,
+    cell/child `y` is relative to the row top, so the layout stays
+    position-independent and reuses across page placements. Table rows are
+    re-measured fresh (bypass the block measure cache) so cell span positions stay
+    correct.
+  - **Rendering** — `TableRowStrategy` paints cell borders/backgrounds and the
+    cell text (reusing the body-text `drawBlock` path), with the top border
+    suppressed for `vMerge` continuations so a vertical merge reads as one cell.
+  - **Cursor** — `populateCharMap` descends into cells, so clicking a cell places
+    the caret inside it and typing works like any other block.
+  - **PDF parity** — table rows export to PDF. The handler is owned by the Table
+    extension (`addExports({ pdf: { nodes: { tableRow } } })`) using a structural
+    PDF-context shape, so core stays free of `pdf-lib`.
+
+  Demo: tables are enabled in the playground (`apps/docs`).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- Updated dependencies [80e1e65]
+- Updated dependencies [d91051d]
+- Updated dependencies [8ba5a90]
+- Updated dependencies [5fb5ddd]
+- Updated dependencies [758dd29]
+- Updated dependencies [1e76d7c]
+- Updated dependencies [1e76d7c]
+- Updated dependencies [ff43b26]
+- Updated dependencies [c18ea0b]
+- Updated dependencies [be79212]
+- Updated dependencies [1e76d7c]
+- Updated dependencies [7b54708]
+- Updated dependencies [1e76d7c]
+  - @scrivr/core@1.0.12
+
+## 1.0.11
+
+### Patch Changes
+
+- ec550ce: `@scrivr/docx` — lock the DOCX export base contract AND ship the
+  semantic-core default handlers. Replaces the type-only skeleton with a
+  real, deterministic pipeline that produces a Word-openable `.docx` out of
+  the box. Built so feature PRs (lists, tables, images, hyperlinks,
+  track-changes) can add handlers without renegotiating the contract.
+
+  The default handlers cover the StarterKit semantic primitives — paragraph,
+  heading (with auto-registered Heading1-6 paragraph styles), hardBreak,
+  pageBreak, horizontalRule, codeBlock, and the basic marks (bold, italic,
+  underline, strikethrough, code, color, highlight, fontSize, fontFamily).
+  Without them an unconfigured editor would export an empty body that Word
+  rejects, so they're part of the base, not deferred.
+
+  A new `DocxExport` extension contributes `editor.commands.exportDocx()` +
+  an "⬇ DOCX" toolbar button, mirroring the `PdfExport` pattern.
+
+  The base PR ships the pieces that are expensive to change later:
+
+  **Contract (locked)**
+
+  - `DocxNodeHandler(node, children, ctx, meta)` — walker owns recursion and
+    passes already-composed child XML in; handlers wrap or position it.
+  - `DocxMarkHandler(props, mark, ctx) → DocxRunProps` — marks accumulate
+    into a run-property bag, never wrap XML, so `bold(italic(...))` cannot
+    produce nested `<w:r>` (invalid OOXML).
+  - `DocxRunProps` reserves `trackedInsert`/`trackedDelete` fields. The
+    walker intentionally does NOT emit `<w:ins>`/`<w:del>` — track-changes
+    XML lands in a dedicated feature PR with author/date/comment-range
+    semantics.
+  - `DocxExportResult { bytes, diagnostics }` from `exportDocx()` — DOCX
+    is inherently lossy, so the API surfaces fidelity warnings from day
+    one. `exportDocxBytes()` is the ergonomic alias.
+  - `DocxExportError` carries `diagnostics` so fatal failures preserve the
+    warnings that preceded them.
+  - `options.unsupported: "drop" | "placeholder" | "throw"` and
+    `options.fidelity: "strict" | "compatible" | "best-effort"` — value
+    types locked even though only `"drop"` and `"compatible"` are honored
+    by the base walker (feature PRs branch on these without touching the
+    contract).
+
+  **Pipeline**
+
+  - `collect → createContext → onBeforeExport → walk → onBuildTreeComplete
+→ finalize / default packager → zip`.
+  - Handler layering: built-in defaults → extension `addExports().docx`
+    contributions → per-call `options.overrides`.
+  - `walkDocument` skips the implicit root, returns body XML; default
+    packager wraps it in `<w:document>/<w:body>` plus a US-Letter sectPr.
+  - `createDocxContext` exposes producer registries (`styles.getOrCreate`,
+    `numbering.getOrCreate`, `rels.addImage/addHyperlink`, `media.add`,
+    `diagnostics.warn/error`, `shared.getOrInit`) backed by an internal
+    `DocxBuildState` the OPC builder walks.
+  - `buildDocxPackage` emits all required OPC parts:
+    `[Content_Types].xml`, `_rels/.rels`, `word/document.xml`,
+    `word/_rels/document.xml.rels`, `word/styles.xml`, `word/numbering.xml`,
+    `word/settings.xml`, plus media parts and extension content-type
+    defaults per unique extension.
+  - Internal document rels use stable named IDs (`rIdStyles`,
+    `rIdNumbering`, `rIdSettings`) so they never collide with user-allocated
+    `rId{n}` IDs.
+
+  **Serializer**
+
+  - `xml(name, attrs?, children?)` builder + `serializeXml(root, opts?)`
+    with alphabetical attribute ordering for golden-test stability and
+    proper XML escaping for both text and attribute values.
+  - `xml:space="preserve"` is automatically applied to text runs with edge
+    whitespace.
+
+  **Mark merging**
+
+  - `<w:rPr>` children emitted in OOXML spec order (`rStyle`, `rFonts`,
+    `b`, `i`, `strike`, `color`, `sz`, `highlight`, `u`).
+  - Run-prop conversion: `fontSize` (px) → half-points (×1.5), `color`
+    strips leading `#`, `code` mark sets Courier New `rFonts` when no
+    explicit `fontFamily`.
+
+  **ZIP**
+
+  - `fflate` (`zipSync`) — small (~8KB), zero deps, browser + Node compatible.
+  - `mtime` pinned to the ZIP epoch so identical input produces identical
+    bytes (deterministic for content-addressable storage and golden tests).
+
+  **Word compatibility**
+
+  - The walker's "drop" policy now wraps orphan inline children of a
+    dropped textblock in `<w:p>` — bare `<w:r>` as a direct child of
+    `<w:body>` is invalid OOXML and Word refuses to open the file.
+  - `buildDocumentRoot` injects an empty `<w:p/>` when the walked body
+    is empty (same reason — Word rejects empty bodies).
+
+  **Tests**
+
+  - 51 unit tests across `xml`, `walker`, `package`, `defaults`,
+    `exportDocx`. Walker tests drive a real `ServerEditor` + StarterKit
+    schema (no fake nodes / fixtures) — exercises text emission,
+    whitespace preservation, mark merging into a single run, missing-mark
+    warnings, all three unsupported policies, font-size unit conversion,
+    and the reserved track-changes fields (verifies no `<w:ins>`/`<w:del>`
+    emission yet).
+  - End-to-end test exports a `ServerEditor` doc, unzips the bytes, and
+    asserts every required OPC part is present and well-formed.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- ec550ce: DOCX image export — `image` node now exports to `<w:drawing>` with all five
+  Scrivr wrap modes mapped to the corresponding OOXML wrap elements. Embedded
+  as binary parts under `word/media/`, referenced by document-level rels.
+
+  **Where it lives**
+
+  - `packages/core/src/extensions/built-in/Image.docx.ts` — the extension owns
+    its DOCX export shape. Uses LOCAL structural type stand-ins (no runtime
+    imports of `@scrivr/docx`) so the dependency direction stays
+    one-way (docx → core). The integration test in `@scrivr/docx`
+    asserts the local types stay structurally compatible with `DocxContext`.
+  - Image extension's `addExports()` returns `{ docx: imageDocxContribution }`.
+    StarterKit got a new `addExports()` that aggregates sub-extension
+    contributions (format-aware merge: `nodes`/`marks` combine, lifecycle
+    hooks chain, `onFinalize` is last-writer-wins) — Image's docx
+    contribution now propagates through StarterKit to the export pipeline.
+
+  **Wrap-mode mapping (Scrivr → OOXML)**
+  | Scrivr `wrapMode` | OOXML wrapper | Wrap element |
+  |-------------------|---------------------|-------------------------------|
+  | `inline` | `<wp:inline>` | (atom inside `<w:r>`) |
+  | `square` | `<wp:anchor>` | `<wp:wrapSquare wrapText=…/>` |
+  | `top-bottom` | `<wp:anchor>` | `<wp:wrapTopAndBottom/>` |
+  | `behind` | `<wp:anchor behindDoc="1">` | `<wp:wrapNone/>` |
+  | `front` | `<wp:anchor behindDoc="0">` | `<wp:wrapNone/>` |
+
+  **Pipeline**
+
+  - `onBeforeExport` walks the doc once, collects unique `image.src` values,
+    fetches the bytes (data URLs decoded synchronously; http(s) via `fetch`),
+    sniffs MIME from magic bytes (PNG / JPEG / GIF / WebP — fallback PNG),
+    registers media + rel via `ctx.media.add` / `ctx.rels.addImage`, and
+    stores `Map<src, ImageRecord>` under `ctx.shared["docx:images"]`.
+  - Sync `image` node handler reads the precomputed record, picks
+    `<wp:inline>` for `wrapMode: "inline"` and `<wp:anchor>` for the four
+    float modes, with the right wrap element per mode.
+
+  **Unit + position**
+
+  - `pxToEmu(px)` = `round(px × 9525)` (1px @ 96 DPI = 9525 EMU).
+  - Anchored position: `xAlign: left | center | right` → `<wp:align>`;
+    literal `x` (px) → `<wp:posOffset>` in EMU relative to column; `yOffset`
+    (px) → `<wp:posOffset>` relative to paragraph; `margin` (px) → all four
+    `dist*` attrs.
+
+  **Base contract tweak**
+
+  - `DocxContext.editor: IBaseEditor` — lifecycle hooks like
+    `onBeforeExport` need the doc to walk it for resource precomputation.
+    Previously hooks only received `ctx` with no way back to the source.
+
+  **Tests**
+
+  - 8 integration tests across all 5 wrap modes, dedup by src,
+    fetch-failure diagnostic, EMU conversion sanity. Mocked `fetch`
+    serves a real 1×1 PNG so the bytes survive ZIP encode/decode.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 19b2879: `@scrivr/docx` — add DOCX import. The package now round-trips: import a
+  `.docx` to a ProseMirror `Node` against the editor's schema, edit, and
+  re-export with semantic fidelity for everything the playground exercises.
+
+  Same architectural shape as the export side:
+
+  **Contract types in core**
+
+  - `@scrivr/core/exports/docx.ts` is the single source of truth for both
+    directions. New: `DocxImports` (blocks/paragraphStyles/marks/inlines +
+    lifecycle hooks), `DocxImportContext` (mirror of `DocxContext` with
+    `resolveImage` / `resolveHyperlink` instead of `addImage` / `addHyperlink`),
+    `DocxBlock` / `DocxInline` / `DocxMark` for the normalized intermediate
+    model the parser emits.
+  - `addImports()` extension lane added to `Extension`, collected by the
+    manager alongside `addExports()`.
+
+  **Two-stage pipeline**
+
+  - **Stage 1 — parser** (`packages/docx/src/import/parser.ts`). OOXML-pure;
+    no ProseMirror awareness. Emits `DocxImportModel { blocks: DocxBlock[] }`.
+    Tolerates real Word output via allowlists for ignorable metadata
+    (bookmarks, `proofErr`, comment markers, `smartTag`, permission ranges).
+    Hyperlinks survive as `link` marks carrying relId/anchor/history;
+    inline `<w:br w:type="page"/>` splits the surrounding paragraph;
+    toggle rPr (b/i/u/strike/...) is normalized via `parseOnOff` so
+    `<w:b w:val="false"/>` drops the mark instead of reaching Stage 2.
+    Images deep-look for `<a:blip>` to tolerate non-standard drawingML
+    nesting and preserve `relativeFrom` on positionH/positionV.
+  - **List reconstruction** (between stages) — flat `numPr` paragraphs →
+    nested `bulletList > listItem > paragraph` trees. Handles mixed nested
+    lists (bullet outer, ordered inner): nested paragraphs with a different
+    numId at `ilvl > 0` stay in the same run instead of splitting into
+    separate top-level lists.
+  - **Stage 2 — transform** (`transform.ts`). Dispatches via extension
+    contributions plus per-call overrides. Three dispatch lanes mirror
+    export: `blocks[block.type]`, `paragraphStyles[styleId]`,
+    `marks[mark.kind]`, plus a new `inlines[inline.type]` lane for images.
+    Handlers return real PM `Node` / `Mark` instances — no invented JSON
+    shape to drift from ProseMirror.
+
+  **Built-in import handlers (extension owns its import)**
+
+  - Heading — paragraphStyles dispatch for `Heading1`/`Heading2`/`Heading3`.
+  - Marks: bold, italic, underline, strikethrough, color, highlight
+    (named `val` and hex shading), fontSize (half-points → px),
+    fontFamily, link (relId → URL via `ctx.rels.resolveHyperlink`).
+  - Image — five wrap modes (`inline` / `square` / `topAndBottom` /
+    `behind` / `front`) with rel-resolved src.
+  - HorizontalRule — Stage 1 detects Word's empty-paragraph-with-bottom-
+    border convention and emits a `horizontalRule` block (matches the
+    export side's output shape).
+  - CodeBlock, PageBreak, Paragraph fallbacks live in the transform.
+
+  **Media materialization** (`media.ts`)
+
+  - `options.media`: `"data-url"` (default, base64 `data:` URL, works
+    everywhere) / `"object-url"` (`URL.createObjectURL(blob)`, browser-only)
+    / `"drop"` (emit no `src`, record a diagnostic — caller handles uploads).
+
+  **Unsupported policy honored on both sides**
+
+  - Parser emits `unsupported-docx-element` for any unmodeled body child
+    (tables, sdt, etc.) with an explicit ignorable allowlist for harmless
+    markup. Transform emits `unsupported-block` / `unsupported-mark` for
+    unknown kinds. `importDocx` escalates to `DocxImportError` post-pipeline
+    when `options.unsupported === "throw"`. Mirrors export-side semantics:
+    any content loss is fatal under `throw`, silent (but diagnosed) under
+    `drop`/`placeholder`.
+
+  **`DocxImport` extension** (`packages/docx/src/import/DocxImport.ts`)
+
+  - Toolbar button + file-picker flow. Opens a native `<input type="file">`,
+    runs `importDocx`, replaces the editor's doc via
+    `tr.replaceWith(0, doc.content.size, …)` — the same pattern the collab
+    YBinding uses for hard resets. Browser-only; server callers continue
+    to use `importDocx(editor, bytes)` directly.
+  - Playground wires the icon (Lucide `FileUp`) into the toolbar `ICON_MAP`
+    next to `⬇ DOCX` and registers the extension in both the collab and
+    standalone extension lists.
+
+  **Tests**
+
+  - 33 import tests in `import.test.ts`. Round-trips through
+    `exportDocxBytes`: build a known doc, serialize → bytes, parse bytes →
+    PM `Node`, assert structure. Covers all built-in marks, headings, code
+    blocks, page breaks, horizontal rule, bullet/ordered/nested/mixed-nested
+    lists, all five image wrap modes (inline + four anchored), drop policy,
+    extension dispatch.
+  - 4 dedicated tests for code-review fixes: HR round-trip, mixed-nested
+    list reconstruction, `unsupported-docx-element` diagnostic, `throw`
+    policy escalation.
+  - Full `@scrivr/docx` suite at 105 tests (export 72 + import 33).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 6f5fb5d: `@scrivr/docx` — replace the placeholder README with a proper one. Covers
+  installation, in-editor usage via the `DocxImport` / `DocxExport` extensions,
+  server-side usage via `importDocx` / `exportDocx` with `ServerEditor`, the
+  shared option dials (`unsupported`, `fidelity`, `media`), and how custom
+  extensions contribute their own DOCX handlers via `addImports` / `addExports`.
+
+  No code changes — the placeholder text was a leftover from when the package
+  was a type-only skeleton.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 8b3c741: `@scrivr/core` — new `editor.findExtension(name)` API and React
+  ribbon sizes itself from `HeaderFooter.options.activeEditingGap`
+  (no more parallel magic constant).
+
+  **New public API:**
+
+  ```ts
+  const ext = editor.findExtension("headerFooter");
+  if (ext) {
+    // ext.options is typed as `object` (the manager has no compile-time
+    // link from name → option shape); narrow with a runtime guard.
+  }
+  ```
+
+  Returns the registered `Extension` instance or `null`. Mirrors the
+  existing `ExtensionManager.findExtension(name)` it delegates to.
+  Useful for cross-package consumers (React adapter hooks, future
+  DevTools) that want to read another extension's configured options
+  without coupling to its presence.
+
+  **Ribbon now reads its size from the extension config:**
+
+  `useHeaderFooterRibbon` (in `@scrivr/react`) now calls
+  `editor.findExtension("headerFooter")` and reads
+  `options.activeEditingGap`. The returned hook value exposes
+  `ribbonHeight`, which `HeaderFooterRibbon.tsx` uses for both the
+  ribbon's CSS `height` and its top offset. The previous hardcoded
+  `28` is gone from the React side — the only remaining `28` is a
+  defensive fallback for the case where the `HeaderFooter` extension
+  is not registered at all (so `findExtension` returns null).
+
+  Change `HeaderFooter.configure({ activeEditingGap: 40 })` and the
+  extension's reserved gap _and_ the ribbon's height move together,
+  no manual sync.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 8b3c741: `@scrivr/plugins` — `HeaderFooter` extension is now configurable with
+  `activeEditingGap` so consumers can match the reserved gap to the
+  height of their editing affordance.
+
+  ```ts
+  HeaderFooter.configure({ activeEditingGap: 28 }); // default — matches React HeaderFooterRibbon
+  HeaderFooter.configure({ activeEditingGap: 40 }); // custom ribbon at a different height
+  HeaderFooter.configure({ activeEditingGap: 0 }); // headless — no UI to reserve for
+  ```
+
+  The value acts as a floor on `slot.margin`: smaller user-set margins
+  are clamped up at measure time so activating a surface does not push
+  body content down. Margins larger than the gap are honored as-is.
+
+  **Where the value lives.** Applied once at layout time inside
+  `resolveChrome.measureSlot` and baked into `slot.reservedHeight` +
+  `metrics.contentTop`. Every downstream consumer — canvas paint, PDF
+  chrome render, anything reading `editor.layout` — reads the same
+  baked value. The PDF render side is intentionally pure render and
+  has no knob of its own; configuring this option at editor
+  construction is the only place the gap is decided.
+
+  **Dual-use editor limitation.** A single browser `Editor` used for
+  both interactive editing and PDF export carries one value across
+  both modes — the same layout drives both. Configure for the editing
+  case (so the ribbon doesn't push content) and accept the same gap
+  in the exported PDF. Consumers that need a ribbon-friendly editor
+  _and_ a tight printed PDF should run PDF export against a separate
+  `ServerEditor` constructed with `activeEditingGap: 0`, sharing the
+  same doc JSON. A future per-export override would require a
+  layout-pipeline primitive that accepts per-call chrome option
+  overrides — deferred until a concrete consumer requests it.
+
+  Default unchanged for React consumers — the `HeaderFooterRibbon`
+  remains 28px tall, the extension defaults to 28, and the React
+  hook offsets the ribbon by `-28`. All three locations are
+  cross-referenced in code comments so a custom ribbon at a different
+  height has clear instructions.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 8b3c741: `@scrivr/plugins` — header/footer ribbon no longer pushes body content
+  down when activated.
+
+  Previously the layout reserved the slot's configured `margin` (default
+  12px) as the gap between header content and body. When the user clicked
+  into the header, the React ribbon (28px tall) needed more room than the
+  gap could fit — `policyWithLiveSurface` widened the margin to 28 on the
+  fly, recomputing the band's reserved height and shifting body content
+  down by ~16px. Clicking out reversed it. The shift was jarring.
+
+  Fix — always reserve at least ribbon-height for the gap at measure time,
+  inside `resolveChrome.measureSlot`. The body now sits at the same
+  position whether or not a surface is active; the ribbon simply appears
+  in space that was already there. The active-time clamp in
+  `policyWithLiveSurface` is gone — the function only updates the live
+  slot's content now.
+
+  Behavior delta — a header/footer with `margin < 28` is silently floored
+  to 28 at measure time (no API change; the stored value is preserved).
+  Documents that already used `margin >= 28` are unaffected. The slight
+  extra whitespace below tight headers is the cost of stable body
+  positioning.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- a749a3c: `@scrivr/core` — lift ingestion-time normalization from `ServerEditor`
+  up to `BaseEditor` so the browser `Editor` benefits too.
+
+  Previously `new Editor({ content: jsonFromAi })` only got URL safety
+  on the initial doc; node-ID assignment and table repair waited for the
+  first transaction to fire the `UniqueId` and `tableIntegrityPlugin`.
+  A consumer who constructed an editor and immediately serialised
+  without typing anything saw an un-normalized snapshot.
+
+  Now `BaseEditor`'s constructor routes the initial doc through
+  `normalizeDocument` — JSON, markdown, or extension-supplied default —
+  so every initial state is URL-safe, table-repaired, and fully
+  ID-stamped before the first transaction. `editor.lastNormalizeResult`
+  exposes the same `{ doc, warnings, fingerprint, changed }` shape that
+  `ServerEditor.setContent` already populated.
+
+  `normalizeDocument(input, options)` also now accepts a parsed
+  ProseMirror `Node` (not just JSON), so callers that already have a
+  Node — including `BaseEditor`'s own constructor after the markdown
+  parse — skip the wasted JSON round-trip.
+
+  Behaviour delta — the browser `Editor` now also stamps node IDs and
+  repairs tables on initial load. Symmetric with the server side; the
+  in-editor plugins (`UniqueId`, `tableIntegrityPlugin`) still run on
+  subsequent transactions and find no work to do because the constructor
+  already handled it. Full suite green (core 1105/1105, plugins 328 + 5
+  skipped, typecheck 13/13).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- a749a3c: `@scrivr/core` — extract pure-function normalization primitives from the
+  plugin layer in preparation for a public `normalizeDocument` entry point.
+
+  **New core exports** (`@scrivr/core`):
+
+  - `assignBlockIds(doc, { generate? })` — pure function that stamps a
+    stable `nodeId` onto every block whose schema declares the attr but
+    whose current value is `null`. Returns the same `Node` reference when
+    nothing needed assignment (fast-path), so callers can detect a no-op
+    cheaply. Mirrors the shape of `sanitizeDocUrls`.
+  - `planBlockIdAssignments(doc, { generate? })` — sibling for
+    transaction-grain callers. Returns one `{ pos, attrs }` entry per
+    block that needs an ID, so the caller can emit one `setNodeMarkup`
+    step per block instead of a whole-doc replace (better grain for
+    history and collab).
+  - `normalizeTablesDoc(doc, schema)` — doc-level wrapper around the
+    existing `normalizeTables(state)` so table-integrity repair is
+    reachable without materialising an `EditorState`. Same fast-path
+    semantics.
+
+  **`@scrivr/plugins`** — `UniqueId` plugin no longer carries its own
+  walk. `appendTransaction` calls `planBlockIdAssignments(newState.doc)`
+  and translates the result into `setNodeMarkup` steps. Single source of
+  truth for the "which blocks need IDs?" predicate, so server-side and
+  AI ingestion paths apply identical semantics to the live editor.
+
+  Behaviour delta: none. All existing tests pass unchanged
+  (core 1085/1085, plugins 328 + 5 skipped). Strictly a refactor that
+  makes the upcoming `normalizeDocument` and `diffDocuments` public APIs
+  possible without duplicating logic across packages.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- a749a3c: `@scrivr/core` — ingestion-time `normalizeDocument` and `ServerEditor`
+  wire-up.
+
+  **New public API**
+
+  ```ts
+  import { normalizeDocument } from "@scrivr/core";
+
+  const result = normalizeDocument(jsonFromAi, {
+    schema: editor.manager.schema,
+    // optional knobs
+    mode: "repair", // or "strict" — strict throws on bounds breach
+    assignIds: true, // default — stamp nodeId on blocks missing one
+    generate: () => uuid(), // override the ID generator (deterministic in tests)
+    maxNodes: 5000, // bounds check
+    maxDepth: 50,
+  });
+
+  // result.doc         — normalized PM Node
+  // result.warnings    — per-stage diagnostics (urls-sanitized, tables-normalized,
+  //                       ids-assigned, bounds-exceeded)
+  // result.fingerprint — FNV-1a 8-hex-char hash, deterministic per doc shape
+  // result.changed     — true when normalization mutated the input
+  ```
+
+  Pipeline composes the existing primitives in one pass:
+
+  1. `schema.nodeFromJSON(input)` — schema validation
+  2. bounds check (maxNodes / maxDepth)
+  3. `sanitizeDocUrls` — URL allow-list
+  4. `normalizeTablesDoc` — table integrity (gridSpan / vMerge / grid)
+  5. `assignBlockIds` — stable `nodeId` on every id-bearing block
+  6. fingerprint over a deterministic stringification of `doc.toJSON()`
+
+  Warnings are aggregate per stage (`{ code, message, count? }`) — enough
+  for an AI server-side review pipeline to decide "did the model output
+  something that needed repair?" without diffing two trees.
+
+  **`ServerEditor.setContent` now routes through `normalizeDocument`**.
+  The previous standalone `sanitizeDocUrls` call is gone; the same URL
+  gate still runs as one stage of the new pipeline, plus table repair
+  and ID assignment that previously only happened inside a live editor
+  transaction. The result lives on `editor.lastNormalizeResult` for
+  consumers that want to inspect warnings (e.g. reject AI output
+  containing `urls-sanitized`).
+
+  **Behaviour delta** — `ServerEditor.setContent` now also stamps node
+  IDs and repairs tables on initial load instead of waiting for the
+  first transaction. This brings server-side ingestion to parity with
+  the live editor (where the `UniqueId` and table-integrity plugins
+  were already doing it incrementally). Existing tests pass unchanged
+  (core 1100/1100, plugins 328 + 5 skipped).
+
+  Other packages: lockstep version bump, no behavior change.
+
+- 65cafa2: `@scrivr/docx` — first public release. Dropped `private: true`, aligned
+  version (`0.0.6` → `1.0.10`) with the lockstep version of the other
+  `@scrivr/*` packages, and added the missing publish metadata (author,
+  repository.directory, homepage, bugs, keywords, publishConfig). The
+  package now joins the changeset `fixed` group so future releases keep
+  all `@scrivr/*` packages in lockstep.
+
+  Why now: the DOCX round-trip (export PR #92 + import PR #94) shipped two
+  weeks ago and the demo has been exercising it. The package is ready to
+  ship to npm; the previous independent `0.0.x` versioning track and
+  `private: true` flag were holdovers from when only the skeleton existed.
+
+  No code or behavior changes — purely packaging metadata.
+
+  Other packages: lockstep version bump, no behavior change.
+
+- Updated dependencies [ec550ce]
+- Updated dependencies [ec550ce]
+- Updated dependencies [19b2879]
+- Updated dependencies [6f5fb5d]
+- Updated dependencies [8b3c741]
+- Updated dependencies [8b3c741]
+- Updated dependencies [8b3c741]
+- Updated dependencies [a749a3c]
+- Updated dependencies [a749a3c]
+- Updated dependencies [a749a3c]
+- Updated dependencies [65cafa2]
+- Updated dependencies [51c1d1f]
+  - @scrivr/core@1.0.11
+
 ## 1.0.10
 
 ### Patch Changes

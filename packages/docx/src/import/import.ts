@@ -19,15 +19,20 @@
  * layout, just the schema + extensions.
  */
 
-import type { Node as PmNode } from "prosemirror-model";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import type {
   DocxImports,
   IBaseEditor,
   DocxDiagnostic,
 } from "@scrivr/core";
-import { readDocxPackage } from "./opc";
-import { parseOoxml } from "./xml";
-import { parseDocumentBody } from "./parser";
+import { readDocxPackage, resolveOpcTarget } from "./opc";
+import { parseOoxml, findChild, attr } from "./xml";
+import {
+  parseDocumentBody,
+  parseBlockContainer,
+  parseSectionReferences,
+  isOoxmlOn,
+} from "./parser";
 import { readNumberingMap } from "./numbering";
 import { reconstructLists } from "./lists";
 import { readRelationshipMap } from "./relationships";
@@ -105,11 +110,88 @@ export async function importDocx(
       );
     }
 
+    const numbering = readNumberingMap(pkg.readText("word/numbering.xml"));
+
+    // Header/footer support: expose the section references + a part walker so
+    // a contribution (HeaderFooter) can reconstruct each part's content
+    // through the same handlers as the body. The inverse of the export seam.
+    const sectionRefs = parseSectionReferences(root);
+    ctx.section = {
+      ...sectionRefs,
+      evenAndOdd: readEvenAndOddHeaders(pkg.readText("word/settings.xml")),
+    };
+    ctx.walkPart = (relId: string): PmNode | null => {
+      const rel = rels.get(relId);
+      if (!rel) {
+        ctx.diagnostics.warn({
+          code: "header-footer-rel",
+          message: `Unresolved header/footer relationship ${relId} — skipped`,
+        });
+        return null;
+      }
+      if ((rel.type !== "header" && rel.type !== "footer") || rel.targetMode === "External") {
+        ctx.diagnostics.warn({
+          code: "header-footer-rel-type",
+          message: `Relationship ${relId} is not an internal header/footer part — skipped`,
+        });
+        return null;
+      }
+      // The reference lives in document.xml.rels, so the target resolves
+      // relative to word/document.xml.
+      const path = resolveOpcTarget("word/document.xml", rel.target);
+      const partXml = pkg.readText(path);
+      if (partXml === undefined) {
+        ctx.diagnostics.warn({
+          code: "header-footer-part-missing",
+          message: `Missing header/footer part ${path} — skipped`,
+        });
+        return null;
+      }
+      const partRoot = parseOoxml(partXml);
+      if (!partRoot) return null;
+      const expectedRoot = rel.type === "header" ? "w:hdr" : "w:ftr";
+      if (partRoot.name !== expectedRoot) {
+        ctx.diagnostics.warn({
+          code: "header-footer-part-type",
+          message: `Relationship ${relId} expected <${expectedRoot}> but found <${partRoot.name}> — skipped`,
+        });
+        return null;
+      }
+
+      // Relationships are part-scoped: a relId inside header1.xml resolves
+      // against word/_rels/header1.xml.rels, never the document's. Always
+      // install a part-scoped map for the walk — an empty one when the part
+      // has no .rels — so a missing file can't leak document-level rels.
+      const partRels = readRelationshipMap(pkg.readText(partRelsPath(path)));
+      const savedResolveImage = ctx.media.resolveImage;
+      const savedResolveHyperlink = ctx.rels.resolveHyperlink;
+      ctx.media.resolveImage = buildImageResolver(
+        partRels,
+        pkg,
+        ctx.options.media,
+        ctx.diagnostics,
+        path,
+      );
+      ctx.rels.resolveHyperlink = (id: string) => {
+        const entry = partRels.get(id);
+        return entry?.type === "hyperlink" ? entry.target : undefined;
+      };
+      try {
+        const model = reconstructLists(
+          parseBlockContainer(partRoot, ctx.diagnostics),
+          numbering,
+        );
+        return transformToProseMirror(model, ctx, handlers);
+      } finally {
+        ctx.media.resolveImage = savedResolveImage;
+        ctx.rels.resolveHyperlink = savedResolveHyperlink;
+      }
+    };
+
     for (const hook of lifecycleHooks.onBeforeImport) {
       await hook(ctx);
     }
 
-    const numbering = readNumberingMap(pkg.readText("word/numbering.xml"));
     const rawModel = parseDocumentBody(root, ctx.diagnostics);
     const model = reconstructLists(rawModel, numbering);
     let doc = transformToProseMirror(model, ctx, handlers);
@@ -147,10 +229,26 @@ const UNSUPPORTED_CODES = new Set([
   "unsupported-docx-element",
   "unsupported-block",
   "unsupported-mark",
+  "unsupported-docx-field",
 ]);
 
 function isUnsupportedCode(code: string): boolean {
   return UNSUPPORTED_CODES.has(code);
+}
+
+/** `word/header1.xml` → `word/_rels/header1.xml.rels`. */
+function partRelsPath(partPath: string): string {
+  const slash = partPath.lastIndexOf("/");
+  return `${partPath.slice(0, slash)}/_rels/${partPath.slice(slash + 1)}.rels`;
+}
+
+/** Read `<w:evenAndOddHeaders/>` from settings.xml — activates even-page slots. */
+function readEvenAndOddHeaders(settingsXml: string | undefined): boolean {
+  if (settingsXml === undefined) return false;
+  const root = parseOoxml(settingsXml);
+  if (!root) return false;
+  const el = findChild(root, "w:evenAndOddHeaders");
+  return el ? isOoxmlOn(attr(el, "w:val")) : false;
 }
 
 // ── Handler collection ──────────────────────────────────────────────────────

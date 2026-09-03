@@ -11,8 +11,8 @@
  */
 
 import { Extension, renderCursor } from "@scrivr/core";
-import type { IBaseEditor, IEditor, EditorSurface } from "@scrivr/core";
-import { TextSelection } from "prosemirror-state";
+import type { IEditor, EditorSurface } from "@scrivr/core";
+import { TextSelection } from "@scrivr/core/pm";
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { getHeaderFooterPolicy } from "./getPolicy";
 import { resolveChrome } from "./resolveChrome";
@@ -25,30 +25,12 @@ import {
   renderTotalPagesPdf,
   renderDatePdf,
 } from "./pdfExport";
+import { headerFooterDocxHandlers } from "./docxExport";
+import { headerFooterDocxImportHandlers } from "./docxImport";
 import { pageNumberStrategy, totalPagesStrategy, dateStrategy } from "./tokenStrategies";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import type { SlotKey } from "./surfaces";
 import { ensurePolicy } from "./HeaderFooterController";
-
-interface CursorManagerLike { isVisible: boolean; resetSilent(): void }
-
-function isCursorManagerLike(value: unknown): value is CursorManagerLike {
-  if (typeof value !== "object" || value === null) return false;
-  return (
-    "isVisible" in value && typeof (value as { isVisible: unknown }).isVisible === "boolean" &&
-    "resetSilent" in value && typeof (value as { resetSilent: unknown }).resetSilent === "function"
-  );
-}
-
-function getCursorManager(editor: IBaseEditor): CursorManagerLike | null {
-  if (!("cursorManager" in editor)) return null;
-  const cm = editor.cursorManager;
-  return isCursorManagerLike(cm) ? cm : null;
-}
-
-function isCursorVisible(editor: IBaseEditor): boolean {
-  return getCursorManager(editor)?.isVisible ?? true;
-}
 
 /**
  * Cached active surface info — set by onUpdate/onSurfaceChange, read by
@@ -118,11 +100,12 @@ function slotForPage(
   page: number,
   band: "header" | "footer",
 ): SlotKey {
-  // differentOddEven is reserved in the policy model but has no slot storage
-  // in v1. Keep routing explicit until odd/even slots are added end-to-end.
   const useFirstPage = page === 1 && policy.differentFirstPage;
-  if (band === "header") return useFirstPage ? "firstPageHeader" : "defaultHeader";
-  return useFirstPage ? "firstPageFooter" : "defaultFooter";
+  const useEvenPage = page % 2 === 0 && policy.differentOddEven;
+  if (band === "header") {
+    return useFirstPage ? "firstPageHeader" : useEvenPage ? "evenPageHeader" : "defaultHeader";
+  }
+  return useFirstPage ? "firstPageFooter" : useEvenPage ? "evenPageFooter" : "defaultFooter";
 }
 
 function sameContent(a: unknown, b: unknown): boolean {
@@ -362,6 +345,13 @@ export const HeaderFooter = Extension.create<HeaderFooterOptions>({
           headerFooter: renderHeaderFooterPdf,
         },
       },
+      docx: headerFooterDocxHandlers,
+    };
+  },
+
+  addImports() {
+    return {
+      docx: headerFooterDocxImportHandlers,
     };
   },
 
@@ -507,7 +497,7 @@ export const HeaderFooter = Extension.create<HeaderFooterOptions>({
 
       const surface = cache.getOrCreate(slotKey, def);
       surface.onUpdate(({ docChanged }) => {
-        getCursorManager(editor)?.resetSilent();
+        editor.cursorManager.resetSilent();
         updateLiveSurfaceCache(editor);
         if (docChanged) {
           editor.invalidateLayout();
@@ -571,7 +561,7 @@ export const HeaderFooter = Extension.create<HeaderFooterOptions>({
       const entry = editorEntries.get(editor);
       if (!entry || pageNumber !== entry.activePage) return;
 
-      if (!isCursorVisible(editor)) return;
+      if (!editor.cursorManager.isVisible) return;
 
       const head = active.state.selection.head;
       const coords = active.charMap.coordsAtPos(head, pageNumber);

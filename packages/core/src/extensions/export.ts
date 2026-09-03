@@ -17,7 +17,10 @@
  * When no format package is loaded, `keyof FormatHandlers` is `never` and
  * `ExportContributionMap` resolves to `{}` — extensions can still declare
  * `addExports()` but the return type makes it impossible to add a key
- * without a format package imported (type-safe).
+ * without a format package imported (type-safe). The `semantic` handler types
+ * live in core (`exports/semantic`), but the key is augmented in by
+ * `@scrivr/export-semantic` (or any package that contributes a semantic
+ * handler), following the same pattern as docx/pdf/markdown.
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface FormatHandlers {}

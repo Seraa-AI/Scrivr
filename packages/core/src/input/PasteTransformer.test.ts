@@ -3,7 +3,7 @@ import { EditorState, TextSelection } from "prosemirror-state";
 import { DOMParser as PMDOMParser } from "prosemirror-model";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
-import { cleanPastedHtml } from "./PasteTransformer";
+import { cleanPastedHtml, PasteTransformer } from "./PasteTransformer";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -86,6 +86,27 @@ describe("cleanPastedHtml", () => {
     root.innerHTML = `<p><span>foo\u00a0</span><span>\u00a0bar</span></p>`;
     cleanPastedHtml(root);
     expect(root.textContent).toBe("foo  bar");
+  });
+});
+
+describe("PasteTransformer — structural identity", () => {
+  it("assigns fresh ids when clipboard HTML clones document nodes", () => {
+    const { schema, state } = makeContext();
+    const clipboardData = {
+      getData(type: string) {
+        if (type === "text/html") {
+          return '<div class="scrivr-section-break" data-node-id="section-source"></div>';
+        }
+        return "";
+      },
+    } as DataTransfer;
+
+    const transaction = new PasteTransformer(schema).transform(clipboardData, state);
+    const pastedBreak = transaction?.doc.firstChild;
+
+    expect(pastedBreak?.type.name).toBe("sectionBreak");
+    expect(pastedBreak?.attrs["nodeId"]).toEqual(expect.any(String));
+    expect(pastedBreak?.attrs["nodeId"]).not.toBe("section-source");
   });
 });
 

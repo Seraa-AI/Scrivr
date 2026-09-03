@@ -7,12 +7,15 @@ import {
   defaultPageConfig,
   defaultPagelessConfig,
   collapseMargins,
+  clampPlacementsToPages,
 } from "./PageLayout";
 import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
-import { computePageMetrics, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
+import type { AnchoredObjectPlacement } from "./AnchoredObjects";
+import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
+import { computePageMetrics, createPageGeometry, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
 import type { LayoutBlock } from "./BlockLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
-import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak } from "../test-utils";
+import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, sectionBreak } from "../test-utils";
 
 /**
  * Default-paragraph line height as the real Skia-backed measurer reports it.
@@ -125,6 +128,73 @@ describe("runPipeline — pageBreak node", () => {
     });
     const blockOnPage2 = layout.pages[1]!.blocks[0]!;
     expect(blockOnPage2.y).toBe(defaultPageConfig.margins.top);
+  });
+});
+
+// ── Section break ─────────────────────────────────────────────────────────────
+
+describe("runPipeline — sectionBreak node", () => {
+  it("starts the next section on a new page for a nextPage break", () => {
+    const layout = runPipeline(
+      doc(p("Section 1"), sectionBreak({ breakType: "nextPage" }), p("Section 2")),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+    expect(layout.pages).toHaveLength(2);
+  });
+
+  it("keeps a continuous break on the same page and paints nothing for it", () => {
+    const layout = runPipeline(
+      doc(p("Section 1"), sectionBreak({ breakType: "continuous" }), p("Section 2")),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+    expect(layout.pages).toHaveLength(1);
+    expect(layout.pages[0]!.blocks).toHaveLength(2);
+  });
+
+  it("treats a break with no stored settings as the nextPage default", () => {
+    const layout = runPipeline(doc(p("A"), sectionBreak(), p("B")), {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+    });
+    expect(layout.pages).toHaveLength(2);
+  });
+
+  it("starts an even-page section on the next even page", () => {
+    const layout = runPipeline(
+      doc(p("Section 1"), sectionBreak({ breakType: "evenPage" }), p("Section 2")),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+
+    expect(layout.pages).toHaveLength(2);
+    expect(layout.pages[1]!.blocks[0]!.node.textContent).toBe("Section 2");
+  });
+
+  it("inserts a blank page when an even-page section would start on an odd page", () => {
+    const layout = runPipeline(
+      doc(
+        p("Page 1"),
+        pageBreak(),
+        p("Section 1"),
+        sectionBreak({ breakType: "evenPage" }),
+        p("Section 2"),
+      ),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+
+    expect(layout.pages).toHaveLength(4);
+    expect(layout.pages[2]!.blocks).toHaveLength(0);
+    expect(layout.pages[3]!.blocks[0]!.node.textContent).toBe("Section 2");
+  });
+
+  it("inserts a blank page when an odd-page section would start on an even page", () => {
+    const layout = runPipeline(
+      doc(p("Section 1"), sectionBreak({ breakType: "oddPage" }), p("Section 2")),
+      { pageConfig: defaultPageConfig, measurer: createMeasurer() },
+    );
+
+    expect(layout.pages).toHaveLength(3);
+    expect(layout.pages[1]!.blocks).toHaveLength(0);
+    expect(layout.pages[2]!.blocks[0]!.node.textContent).toBe("Section 2");
   });
 });
 
@@ -411,6 +481,46 @@ describe("runPipeline — measureCache", () => {
 // ── Phase 1b: early termination ───────────────────────────────────────────────
 
 describe("runPipeline — Phase 1b early termination", () => {
+  it("does not reuse a tail before a later cache miss", () => {
+    const stableMiddle = p("stable middle");
+    const stableTail = p("stable tail");
+    const doc1 = doc(p("prefix A"), stableMiddle, p("old later block"), stableTail);
+    const doc2 = doc(p("prefix B"), stableMiddle, p("new later block"), stableTail);
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    const layout1 = runPipeline(doc1, opts);
+    const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1 });
+
+    expect(layout2.pages.flatMap((page) => page.blocks).map((block) => block.node.textContent))
+      .toEqual(["prefix B", "stable middle", "new later block", "stable tail"]);
+  });
+
+  it("does not reuse a tail before a later cache miss across a page break", () => {
+    // A page break sits between the two edits. It is a cache miss by
+    // construction, so it must be counted and discounted on the same terms as
+    // any other flow — a page break that stopped counting would let the tail
+    // splice in before "new later block" was ever processed.
+    const stableMiddle = p("stable middle");
+    const stableTail = p("stable tail");
+    const doc1 = doc(p("prefix A"), stableMiddle, pageBreak(), p("old later block"), stableTail);
+    const doc2 = doc(p("prefix B"), stableMiddle, pageBreak(), p("new later block"), stableTail);
+    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const measurer = createMeasurer();
+    const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
+
+    const layout1 = runPipeline(doc1, opts);
+    const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1 });
+
+    expect(
+      layout2.pages
+        .flatMap((page) => page.blocks)
+        .map((block) => block.node.textContent)
+        .filter((text) => text !== ""),
+    ).toEqual(["prefix B", "stable middle", "new later block", "stable tail"]);
+  });
+
   it("returns the correct layout when early termination fires on second layout run", () => {
     // Three paragraphs. Edit the first one — the second and third are structurally
     // shared and should be copied from previousLayout without re-looping.
@@ -1031,6 +1141,63 @@ describe("runPipeline — float image wrapping", () => {
   // Long text to force several wrapped lines in the constrained content width.
   const longText = "word ".repeat(60).trim(); // 60 words × 5 chars = ~300 chars, ~6+ lines
 
+  /**
+   * `behind` and `front` reserve no flow space, so a tall one anchored near the
+   * bottom of a page must not move its own paragraph. Pushing the anchor sent
+   * the text to the next page and left a hole where it had been — the reader
+   * sees a blank band and text that jumped, with nothing on the page to explain
+   * either. `square` is the contrast: it does reserve space, so it still moves.
+   */
+  describe.each(["behind", "front"] as const)("%s float: the text is unaware", (wrapMode) => {
+    /** Fills most of page 1 so the anchor paragraph sits near the bottom. */
+    function layoutWithTallFloatNearPageBottom(mode: string) {
+      const { schema, fontConfig } = buildStarterKitContext();
+      const img = schema.nodes["image"]!.create({
+        src: "", width: 300, height: 400, wrapMode: mode, xAlign: "left",
+      });
+      const doc = schema.node("doc", null, [
+        ...Array.from({ length: 7 }, () =>
+          schema.node("paragraph", null, [schema.text(longText)]),
+        ),
+        schema.node("paragraph", null, [schema.text("ANCHOR"), img]),
+        schema.node("paragraph", null, [schema.text("AFTER")]),
+      ]);
+      return runPipeline(doc, {
+        pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+      });
+    }
+
+    function pageOf(layout: ReturnType<typeof runPipeline>, needle: string): number | null {
+      for (const page of layout.pages) {
+        for (const block of page.blocks) {
+          if (block.node.textContent.includes(needle)) return page.pageNumber;
+        }
+      }
+      return null;
+    }
+
+    it("leaves the anchor paragraph and the text after it where they were", () => {
+      const layout = layoutWithTallFloatNearPageBottom(wrapMode);
+      expect(pageOf(layout, "ANCHOR")).toBe(1);
+      expect(pageOf(layout, "AFTER")).toBe(1);
+    });
+
+    it("keeps the image on its anchor's page by clamping, not by moving text", () => {
+      const layout = layoutWithTallFloatNearPageBottom(wrapMode);
+      const float = layout.anchoredObjects![0]!;
+      expect(float.page).toBe(1);
+      const metrics = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, 1);
+      expect(float.y + float.height).toBeLessThanOrEqual(
+        metrics.contentTop + metrics.contentHeight + 0.5,
+      );
+    });
+
+    it("a square float in the same position does move its anchor", () => {
+      const layout = layoutWithTallFloatNearPageBottom("square");
+      expect(pageOf(layout, "ANCHOR")).toBe(2);
+    });
+  });
+
   it("square-left: produces floats array with the float image", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const img = schema.nodes["image"]!.create({ src: "", width: 200, height: 200, wrappingMode: "square-left" });
@@ -1065,6 +1232,172 @@ describe("runPipeline — float image wrapping", () => {
     // 200 + ANCHORED_OBJECT_MARGIN (12) = 212.
     expect(Math.min(...firstLine.spans.map((span) => span.x))).toBe(212);
     expect(block.lines.length).toBeGreaterThan(unconstrainedBlock.lines.length);
+  });
+
+  it("a square float whose zone top falls mid-line keeps text off the image's top edge", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // yOffset drops the float's top a few px below the first text line's top, so
+    // the line's box straddles the zone top. The old 1px exclusion probe sampled
+    // only lineY..lineY+1, missed the zone, and left the line full-width — text
+    // then painted under the float's top edge. The probe now uses the real line
+    // height, so every line that overlaps the float wraps out of its column.
+    // Float lives in its own anchor paragraph; the yOffset drops the exclusion
+    // zone's TOP (paintedGlobalY - margin) mid-way through a line of the SEPARATE
+    // following paragraph (off the line grid), so that line's box straddles the
+    // zone top while its own top sits just above it — the exact case the 1px
+    // probe missed.
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 120, wrapMode: "square", xAlign: "left", yOffset: 40,
+    });
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [img]),
+      schema.node("paragraph", null, [schema.text(longText)]),
+    ]);
+    const layout = runPipeline(doc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+
+    // The exclusion band is the image rect grown by the anchored-object margin.
+    const float = layout.anchoredObjects![0]!;
+    const m = ANCHORED_OBJECT_MARGIN;
+    const zTop = float.y - m;
+    const zBottom = float.y + float.height + m;
+    const zLeft = float.x - m;
+    const zRight = float.x + float.width + m;
+
+    // No text span may sit inside the exclusion band on any line whose box
+    // vertically overlaps it — including the straddling line. `span.x` is
+    // block-relative, so shift it into the page-absolute frame by `block.x`.
+    const textBlock = layout.pages[0]!.blocks[1]!;
+    let lineTop = textBlock.y;
+    let checkedStraddle = false;
+    for (const line of textBlock.lines) {
+      const lineBottom = lineTop + line.lineHeight;
+      if (lineTop < zBottom && lineBottom > zTop) {
+        // This line straddles the zone top when its own top is above it.
+        if (lineTop < zTop) checkedStraddle = true;
+        for (const span of line.spans) {
+          const spanLeft = textBlock.x + span.x;
+          const hInside = spanLeft < zRight && spanLeft + span.width > zLeft;
+          expect(hInside).toBe(false);
+        }
+      }
+      lineTop = lineBottom;
+    }
+    // Guard the guard: the scenario must actually exercise a straddling line.
+    expect(checkedStraddle).toBe(true);
+  });
+
+  it("a top-bottom float reserves its full vertical band — no text line overlaps it", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    // Same straddle setup as the square case, but top-bottom reserves the FULL
+    // width: no text line may sit anywhere in the float's vertical band.
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 420, height: 100, wrapMode: "top-bottom", xAlign: "center", yOffset: 40,
+    });
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [img]),
+      schema.node("paragraph", null, [schema.text(longText)]),
+    ]);
+    const layout = runPipeline(doc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+
+    const float = layout.anchoredObjects![0]!;
+    const m = ANCHORED_OBJECT_MARGIN;
+    const zTop = float.y - m;
+    const zBottom = float.y + float.height + m;
+
+    const textBlock = layout.pages[0]!.blocks[1]!;
+    let lineTop = textBlock.y;
+    let overlapFound = false;
+    let contentBelowBand = false;
+    for (const line of textBlock.lines) {
+      const lineBottom = lineTop + line.lineHeight;
+      const hasContent = line.spans.some((s) => s.width > 0);
+      if (hasContent && lineTop < zBottom && lineBottom > zTop) overlapFound = true;
+      if (hasContent && lineTop >= zBottom) contentBelowBand = true;
+      lineTop = lineBottom;
+    }
+    // No content line sits in the reserved band, and text resumes below it
+    // (proving the band actually reserved space rather than there being no text).
+    expect(overlapFound).toBe(false);
+    expect(contentBelowBand).toBe(true);
+  });
+
+  it("an anchored float after an explicit page break travels to its anchor's page", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 200, height: 120, wrapMode: "square", xAlign: "left",
+    });
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [schema.text(longText)]),
+      schema.node("pageBreak"),
+      schema.node("paragraph", null, [img, schema.text(longText)]),
+    ]);
+    const layout = runPipeline(doc, {
+      pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer(),
+    });
+
+    // The page break forces the anchor paragraph onto page 2; the float must
+    // travel with its anchor, not stay behind on page 1. Stage 2 now advances
+    // globalY past the break so Stage 3 derives the anchor's real page.
+    expect(layout.pages.length).toBe(2);
+    const float = layout.anchoredObjects![0]!;
+    expect(float.page).toBe(2);
+  });
+
+  it("a top-bottom float after a paragraph that splits at a natural boundary stays below the tail", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const LH = createMeasurer().getFontMetrics("14px Arial").lineHeight;
+    // Content height = 4 lines + an 8px partial gap, so a 5-line paragraph splits
+    // 4 + 1 and leaves an unused gap at the page-1 bottom. The page-2 tail (1
+    // line) plus the image fit on page 2. Continuous globalY ignores the gap and
+    // places the float above the tail (overlap); the gap-aware advance places it
+    // below.
+    const pageConfig = {
+      pageWidth: 120,
+      pageHeight: Math.ceil(10 + 4 * LH + 8 + 10),
+      margins: { top: 10, right: 10, bottom: 10, left: 10 },
+    };
+    const fiveLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee";
+    const img = schema.nodes["image"]!.create({
+      src: "", width: 80, height: 30, wrapMode: "top-bottom", xAlign: "center",
+    });
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [schema.text(fiveLineText)]),
+      schema.node("paragraph", null, [img, schema.text(fiveLineText)]),
+    ]);
+    const layout = runPipeline(doc, { pageConfig, fontConfig, measurer: createMeasurer() });
+
+    const float = layout.anchoredObjects![0]!;
+    const fTop = float.y;
+    const fBottom = float.y + float.height;
+
+    // Invariant: the float must not render on a page before the preceding
+    // paragraph's tail. Without the gap-aware advance the split tail is pushed
+    // a page past the float, which then renders ahead of content that precedes
+    // it in document order.
+    const aNodePos = layout.pages[0]!.blocks[0]!.nodePos;
+    let aLastPage = 1;
+    layout.pages.forEach((pg, pi) => {
+      for (const b of pg.blocks) if (b.nodePos === aNodePos) aLastPage = Math.max(aLastPage, pi + 1);
+    });
+    expect(float.page).toBeGreaterThanOrEqual(aLastPage);
+
+    // And on the float's own page, no text line may sit in its reserved band.
+    const page = layout.pages[float.page - 1]!;
+    let overlap = false;
+    for (const block of page.blocks) {
+      let lineTop = block.y;
+      for (const line of block.lines) {
+        const lineBottom = lineTop + line.lineHeight;
+        const hasContent = line.spans.some((s) => s.width > 0);
+        if (hasContent && lineTop < fBottom && lineBottom > fTop) overlap = true;
+        lineTop = lineBottom;
+      }
+    }
+    expect(overlap).toBe(false);
   });
 
   it("square-right: constrained lines are positioned in the left available segment", () => {
@@ -2282,16 +2615,8 @@ describe("paginateFlow — Stage 2", () => {
   // Shared helper: build the per-page metrics lookup the way runPipeline does.
   // With EMPTY_RESOLVED_CHROME, every page produces identical metrics matching
   // the pre-refactor hand-computed formula.
-  const makeMetricsFor = () => {
-    const cache = new Map<number, PageMetrics>();
-    return (pageNumber: number): PageMetrics => {
-      const hit = cache.get(pageNumber);
-      if (hit) return hit;
-      const m = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, pageNumber);
-      cache.set(pageNumber, m);
-      return m;
-    };
-  };
+  const makeGeometry = () =>
+    createPageGeometry(defaultPageConfig, EMPTY_RESOLVED_CHROME);
 
   it("single short paragraph fits on page 1", () => {
     const testDoc = doc(p("Hello"));
@@ -2302,10 +2627,10 @@ describe("paginateFlow — Stage 2", () => {
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
     const initPage = { pageNumber: 1, blocks: [] };
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: initPage, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: initPage, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     const allPages = [...pr.pages, pr.currentPage];
     expect(allPages).toHaveLength(1);
@@ -2321,10 +2646,10 @@ describe("paginateFlow — Stage 2", () => {
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
     const initPage = { pageNumber: 1, blocks: [] };
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: initPage, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: initPage, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     const allPages = [...pr.pages, pr.currentPage];
     expect(allPages).toHaveLength(2);
@@ -2338,10 +2663,10 @@ describe("paginateFlow — Stage 2", () => {
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     expect(pr.earlyTerminated).toBe(false);
   });
@@ -2366,10 +2691,10 @@ describe("paginateFlow — Stage 2", () => {
     const contentWidth = defaultPageConfig.pageWidth - margins.left - margins.right;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
-    const metricsFor = makeMetricsFor();
+    const geometry = makeGeometry();
     const pr = paginateFlow(
-      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, metricsFor, 1,
-      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: metricsFor(1).contentTop, prevSpaceAfter: 0 } },
+      flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
+      { init: { pages: [], page: { pageNumber: 1, blocks: [] }, y: geometry.metricsFor(1).contentTop, prevSpaceAfter: 0 } },
     );
     expect(pr.earlyTerminated).toBe(false);
     expect(pr.pages.length).toBeGreaterThanOrEqual(1);
@@ -2563,5 +2888,79 @@ describe("runPipeline — pageRectsDigest invalidation", () => {
     const freshFirst = fresh.pages[0]!.blocks[0]!;
     expect(cachedFirst.y).toBe(freshFirst.y);
     expect(cached.pages.length).toBe(fresh.pages.length);
+  });
+});
+
+// Minimal placement factory for clamp tests — only the fields the clamp
+// touches need to be real; the rest can be plausible filler.
+function makePlacement(
+  overrides: Partial<AnchoredObjectPlacement> & { page: number },
+): AnchoredObjectPlacement {
+  return {
+    docPos: 0,
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+    wrapMode: "square",
+    zIndex: 0,
+    // `node` is referenced by downstream paint code, not the clamp itself.
+    // Using a non-node value here would fail type-check; the test only ever
+    // calls clampPlacementsToPages, which doesn't dereference `node`.
+    node: undefined as never,
+    anchorGlobalY: 0,
+    anchorPage: 1,
+    globalY: 0,
+    ...overrides,
+  };
+}
+
+describe("clampPlacementsToPages — phantom-page guard", () => {
+  it("clamps placements whose page exceeds the actual page count", () => {
+    const placements = [
+      makePlacement({ page: 1 }),
+      makePlacement({ page: 3 }), // phantom — only 2 real pages
+      makePlacement({ page: 5 }), // far phantom
+    ];
+
+    const result = clampPlacementsToPages(placements, 2);
+
+    expect(result.map((p) => p.page)).toEqual([1, 2, 2]);
+  });
+
+  it("preserves placement.y when clamping (graceful degradation, not relocation)", () => {
+    // The clamp is defensive — visual position is not re-projected onto the
+    // new page. Asserting `y` is unchanged guards the contract that downstream
+    // PDF/hit-test consumers see the same Y they would have seen on the
+    // phantom page; the only difference is they now have a valid page index.
+    const placements = [makePlacement({ page: 4, y: 999 })];
+    const result = clampPlacementsToPages(placements, 2);
+    expect(result[0]!.page).toBe(2);
+    expect(result[0]!.y).toBe(999);
+  });
+
+  it("returns the input reference unchanged when no clamping is needed", () => {
+    // Common case allocation-free — every layout pass calls this guard, so
+    // the no-op path must not produce a fresh array.
+    const placements = [
+      makePlacement({ page: 1 }),
+      makePlacement({ page: 2 }),
+    ];
+    const result = clampPlacementsToPages(placements, 2);
+    expect(result).toBe(placements);
+  });
+
+  it("handles the empty-input case", () => {
+    expect(clampPlacementsToPages([], 5)).toEqual([]);
+  });
+
+  it("returns the input unchanged when pageCount is 0", () => {
+    // Defensive: an empty layout with placements queued (e.g. mid-construction)
+    // shouldn't try to clamp to 0 — that would collapse every placement to
+    // page 0, which doesn't exist either. Leave them alone; upstream callers
+    // build layouts with at least one page before consulting placements.
+    const placements = [makePlacement({ page: 3 })];
+    const result = clampPlacementsToPages(placements, 0);
+    expect(result).toBe(placements);
   });
 });

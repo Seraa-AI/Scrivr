@@ -77,16 +77,58 @@ export interface ObjectRectEntry {
   page: number;
 }
 
+/** Key for the per-line painted-run index. */
+function extentKey(page: number, lineIndex: number): string {
+  return `${page}:${lineIndex}`;
+}
+
+/**
+ * Generation of a map that no layout has claimed — freshly constructed, or
+ * cleared and not yet repopulated. Layout versions start at 1, so this can
+ * never collide with a real one.
+ */
+export const UNOWNED_GENERATION = 0;
+
 export class CharacterMap {
   private glyphs: GlyphEntry[] = [];
   private lines: LineEntry[] = [];
   private objectRects = new Map<number, ObjectRectEntry>();
+  /**
+   * Horizontal run of painted glyphs per line, keyed `page:lineIndex`.
+   *
+   * Maintained as glyphs register rather than derived on demand: `hasTextAt`
+   * runs on every pointer move, and scanning a page of glyphs per move is a
+   * cost the hover path cannot carry.
+   */
+  private lineExtents = new Map<string, { left: number; right: number }>();
+  private populationGeneration = UNOWNED_GENERATION;
+
+  /**
+   * Layout version whose geometry this map holds, or `UNOWNED_GENERATION`.
+   *
+   * Coordinates only mean something next to the pixels they were computed
+   * for: a caret placed from one layout onto a canvas painted from another
+   * lands where the text used to be. Readers that paint compare this against
+   * the generation of what is already on screen.
+   */
+  get generation(): number {
+    return this.populationGeneration;
+  }
+
+  /** Declare which layout version populated this map. */
+  setGeneration(version: number): void {
+    this.populationGeneration = version;
+  }
 
   // Called by the layout engine after each layout pass
   clear(): void {
     this.glyphs = [];
     this.lines = [];
     this.objectRects.clear();
+    this.lineExtents.clear();
+    // The contents left, so the claim on them goes too — until the next
+    // layout stamps its own version, this map speaks for no generation.
+    this.populationGeneration = UNOWNED_GENERATION;
   }
 
   /** Remove all entries belonging to a specific page (selective invalidation). */
@@ -96,10 +138,26 @@ export class CharacterMap {
     for (const [pos, rect] of this.objectRects) {
       if (rect.page === pageNumber) this.objectRects.delete(pos);
     }
+    for (const key of this.lineExtents.keys()) {
+      if (key.startsWith(`${pageNumber}:`)) this.lineExtents.delete(key);
+    }
   }
 
   registerGlyph(entry: GlyphEntry): void {
     this.glyphs.push(entry);
+
+    // Zero-width glyphs are structural, not visible — the caret sentinel on a
+    // block's last line is one. They occupy no space a reader can see, so they
+    // do not extend the painted run.
+    if (entry.width <= 0) return;
+    const key = extentKey(entry.page, entry.lineIndex);
+    const extent = this.lineExtents.get(key);
+    if (!extent) {
+      this.lineExtents.set(key, { left: entry.x, right: entry.x + entry.width });
+      return;
+    }
+    if (entry.x < extent.left) extent.left = entry.x;
+    if (entry.x + entry.width > extent.right) extent.right = entry.x + entry.width;
   }
 
   registerLine(entry: LineEntry): void {
@@ -158,36 +216,31 @@ export class CharacterMap {
    *      after it; otherwise snap to the position before it.
    */
   posAtCoords(x: number, y: number, page: number): number {
-    // Try exact hit first; fall back to nearest line if click is in a margin
-    const line = this.lineAtCoords(y, page) ?? this.nearestLine(y, page);
+    // Resolve the single line under the point in 2D. Lines that share a y band
+    // but occupy different x ranges (table cells in a row) are disambiguated by
+    // x, so glyph resolution stays scoped to the clicked line's own cell.
+    const line = this.lineAtPoint(x, y, page) ?? this.nearestLineAtPoint(x, y, page);
     if (!line) return 0;
 
-    // Filter by lineY rather than glyph.y so that:
-    // (a) table cells — which share the same lineY but have different lineIndex
-    //     values — all participate in the x hit-test, and
-    // (b) inline objects that inflate lineHeight — whose glyphs are vertically
-    //     offset from the line top — are still found alongside text glyphs.
+    // (page, lineIndex) is globally unique per page — the layout threads one
+    // running global line index through every block and table cell — so
+    // lineIndex alone scopes glyphs to exactly this line, including the tail of
+    // an overflowing wide word whose glyphs extend past the line's content box.
     const lineGlyphs = this.glyphs
-      .filter((g) => g.page === page && g.lineY === line.y)
+      .filter((g) => g.page === page && g.lineIndex === line.lineIndex)
       .sort((a, b) => a.x - b.x);
 
     if (!lineGlyphs.length) return line.startDocPos;
 
     for (const glyph of lineGlyphs) {
-      const midpoint = glyph.x + glyph.width / 2;
-      if (x <= midpoint) {
-        // Click is on the left half — position is before this glyph
-        return glyph.docPos;
-      }
+      if (x <= glyph.x + glyph.width / 2) return glyph.docPos;
     }
 
-    // Click is past all glyphs at this y — return end of whichever line
-    // owns the rightmost glyph (handles multi-cell rows correctly).
-    const rightmost = lineGlyphs[lineGlyphs.length - 1]!;
-    const rightLine = this.lines.find(
-      (l) => l.page === page && l.lineIndex === rightmost.lineIndex,
-    );
-    return rightLine?.endDocPos ?? rightmost.docPos + 1;
+    // Past every glyph: end of the line if it holds real text, else its start.
+    // An empty line's endDocPos is the structural boundary (e.g. after an empty
+    // cell paragraph), which setSelection would snap into the next cell.
+    const hasRealGlyph = lineGlyphs.some((g) => g.width > 0);
+    return hasRealGlyph ? line.endDocPos : line.startDocPos;
   }
 
   /**
@@ -215,6 +268,28 @@ export class CharacterMap {
     const exact = pool.find((g) => g.docPos === docPos);
     if (exact) {
       return { x: exact.x, y: exact.y, height: exact.height, page: exact.page };
+    }
+
+    const containingLine = this.lineForDocPos(docPos, scopeToPage);
+    if (containingLine) {
+      const lineGlyphs = pool
+        .filter((g) => g.lineIndex === containingLine.lineIndex && g.page === containingLine.page)
+        .sort((a, b) => a.x - b.x);
+      const precedingOnLine = [...lineGlyphs].reverse().find((g) => g.docPos < docPos);
+      if (precedingOnLine) {
+        return {
+          x: precedingOnLine.x + precedingOnLine.width,
+          y: precedingOnLine.y,
+          height: precedingOnLine.height,
+          page: precedingOnLine.page,
+        };
+      }
+      return {
+        x: containingLine.x,
+        y: containingLine.y,
+        height: containingLine.height,
+        page: containingLine.page,
+      };
     }
 
     // Position is after the last glyph on a line — draw cursor at its right edge
@@ -246,7 +321,8 @@ export class CharacterMap {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
 
-    const currentLine = this.lineAtCoords(coords.y, coords.page);
+    const currentLine = this.lineAtPoint(coords.x, coords.y, coords.page) ??
+      this.nearestLineAtPoint(coords.x, coords.y, coords.page);
     if (!currentLine) return null;
 
     // Find the highest line on this page that is strictly above currentLine.y
@@ -287,7 +363,8 @@ export class CharacterMap {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
 
-    const currentLine = this.lineAtCoords(coords.y, coords.page);
+    const currentLine = this.lineAtPoint(coords.x, coords.y, coords.page) ??
+      this.nearestLineAtPoint(coords.x, coords.y, coords.page);
     if (!currentLine) return null;
 
     // Find the lowest line on this page that starts strictly below currentLine's bottom
@@ -323,7 +400,8 @@ export class CharacterMap {
   lineStartPos(docPos: number): number | null {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
-    const line = this.lineAtCoords(coords.y, coords.page);
+    const line = this.lineAtPoint(coords.x, coords.y, coords.page) ??
+      this.nearestLineAtPoint(coords.x, coords.y, coords.page);
     if (!line) return null;
     return line.startDocPos;
   }
@@ -335,7 +413,8 @@ export class CharacterMap {
   lineEndPos(docPos: number): number | null {
     const coords = this.coordsAtPos(docPos);
     if (!coords) return null;
-    const line = this.lineAtCoords(coords.y, coords.page);
+    const line = this.lineAtPoint(coords.x, coords.y, coords.page) ??
+      this.nearestLineAtPoint(coords.x, coords.y, coords.page);
     if (!line) return null;
     return line.endDocPos;
   }
@@ -375,28 +454,76 @@ export class CharacterMap {
     return this.lines.some((l) => l.page === page && l.lineIndex === lineIndex);
   }
 
-  // Internal — find which line a y coordinate lands on
-  private lineAtCoords(y: number, page: number): LineEntry | undefined {
+  private lineForDocPos(docPos: number, page?: number): LineEntry | undefined {
+    return this.lines.find((l) => {
+      if (page !== undefined && l.page !== page) return false;
+      if (l.startDocPos === l.endDocPos) return docPos === l.startDocPos;
+      return docPos >= l.startDocPos && docPos <= l.endDocPos;
+    });
+  }
+
+  /**
+   * Is text actually painted at this point?
+   *
+   * Deliberately narrower than "does a line claim this point". A line's box
+   * spans the full content width however short its text is, so a one-word
+   * paragraph claims hundreds of pixels of blank space to its right. That
+   * blank space is still the line's for caret placement — clicking past the
+   * end of a short line puts the caret at its end, as every editor does — but
+   * it is not text, and it must not out-rank an image the reader can see
+   * sitting there. Ownership asks this; caret placement asks `posAtCoords`.
+   */
+  hasTextAt(x: number, y: number, page: number): boolean {
+    const line = this.lineAtPoint(x, y, page);
+    if (!line) return false;
+    const extent = this.lineExtents.get(extentKey(page, line.lineIndex));
+    if (!extent) return false; // an empty line paints nothing
+    return x >= extent.left && x < extent.right;
+  }
+
+  /**
+   * The line whose box contains (x, y). Resolving in 2D disambiguates lines
+   * that share a y band but occupy different x ranges — cells in the same table
+   * row — so each cell owns its own hit region.
+   */
+  private lineAtPoint(x: number, y: number, page: number): LineEntry | undefined {
+    // Half-open bounds: adjacent cells share an edge (cell 1's right == cell 2's
+    // left), so a boundary click must belong to the cell on the right.
     return this.lines.find(
-      (l) => l.page === page && y >= l.y && y < l.y + l.height,
+      (l) =>
+        l.page === page &&
+        y >= l.y &&
+        y < l.y + l.height &&
+        x >= l.x &&
+        x < l.x + l.contentWidth,
     );
+  }
+
+  /**
+   * Nearest line to (x, y) — for clicks in margins/padding/gaps. Lines whose x
+   * range contains the click win first (a cell's lines own the blank space in
+   * that column, so a click below a short cell's text stays in that cell rather
+   * than crossing to a taller neighbour); ties and column-less clicks fall back
+   * to 2D distance.
+   */
+  private nearestLineAtPoint(x: number, y: number, page: number): LineEntry | undefined {
+    const pageLines = this.lines.filter((l) => l.page === page);
+    if (!pageLines.length) return undefined;
+    const vDist = (l: LineEntry): number =>
+      y < l.y ? l.y - y : y > l.y + l.height ? y - (l.y + l.height) : 0;
+
+    const inColumn = pageLines.filter((l) => x >= l.x && x < l.x + l.contentWidth);
+    if (inColumn.length) {
+      return inColumn.reduce((closest, l) => (vDist(l) < vDist(closest) ? l : closest));
+    }
+
+    const dist = (l: LineEntry): number => {
+      const dx = x < l.x ? l.x - x : x > l.x + l.contentWidth ? x - (l.x + l.contentWidth) : 0;
+      return dx + vDist(l);
+    };
+    return pageLines.reduce((closest, l) => (dist(l) < dist(closest) ? l : closest));
   }
 
   // Internal — find the closest line when y is outside all line ranges.
   // Click above first line → first line. Click below last line → last line.
-  private nearestLine(y: number, page: number): LineEntry | undefined {
-    const pageLines = this.lines.filter((l) => l.page === page);
-    if (!pageLines.length) return undefined;
-    return pageLines.reduce((closest, line) => {
-      const closestDist = Math.min(
-        Math.abs(y - closest.y),
-        Math.abs(y - (closest.y + closest.height)),
-      );
-      const lineDist = Math.min(
-        Math.abs(y - line.y),
-        Math.abs(y - (line.y + line.height)),
-      );
-      return lineDist < closestDist ? line : closest;
-    });
-  }
 }

@@ -59,8 +59,9 @@ Four-layer design:
 
 **Input (`input/`)**
 - `InputBridge` — hidden textarea with 8 DOM event listeners → ProseMirror transactions
-- `PasteTransformer` — cleans pasted HTML before ProseMirror ingestion
-- `ClipboardSerializer` — serializes selection to `text/plain` + `text/html`
+- `PasteTransformer` — clipboard → transaction. Cleans pasted HTML (incl. Google Docs and Word `mso-list` lists), decides slice openness, converts markdown, and inserts image files. `transform()` is sync; `transformFiles()` is async because image bytes must be read or uploaded first
+- `ClipboardSerializer` — serializes selection to `text/plain` + `text/html`, recording the slice's open depths in `data-pm-slice` so a paste back into an editor rebuilds the exact slice
+- URL-bearing attrs pass a per-sink gate on ingestion: `safeUrl` for link `href`, `safeImageUrl` for image `src` (raster `data:` allowed, `svg+xml` not)
 
 **Model (`model/`)**
 - `schema.ts` — nodes: `doc`, `paragraph`, `heading`, `bulletList`, `orderedList`, `listItem`, `codeBlock`, `horizontalRule`, `pageBreak`, `image`, `hardBreak`, `text`; marks: `bold`, `italic`, `underline`, `strikethrough`, `highlight`, `color`, `fontSize`, `fontFamily`, `link`, `trackedInsert`, `trackedDelete`
@@ -114,12 +115,18 @@ When the user's request matches an available skill, ALWAYS invoke it using the S
 tool as your FIRST action. Do NOT answer directly, do NOT use other tools first.
 The skill has specialized workflows that produce better results than ad-hoc answers.
 
+**Before any ship or merge: `scrivr-review` runs first.** Every time — before
+`/ship`, before merging a PR, before pushing a release. It runs seven
+specialized reviewers over the diff (data flow, conditions, readability,
+comments, public API surface, typing discipline, repo conventions) and returns
+a ranked verdict. Blockers get fixed before the merge, not after.
+
 Key routing rules:
+- Ship, deploy, merge, release → invoke scrivr-review FIRST, then ship
 - Product ideas, "is this worth building", brainstorming → invoke office-hours
 - Bugs, errors, "why is this broken", 500 errors → invoke investigate
-- Ship, deploy, push, create PR → invoke ship
 - QA, test the site, find bugs → invoke qa
-- Code review, check my diff → invoke review
+- Code review, check my diff → invoke scrivr-review (gstack `review` is the generic fallback)
 - Update docs after shipping → invoke document-release
 - Weekly retro → invoke retro
 - Design system, brand → invoke design-consultation

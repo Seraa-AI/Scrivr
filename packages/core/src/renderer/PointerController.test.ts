@@ -21,37 +21,46 @@ import type { ObjectRectEntry } from "../layout/CharacterMap";
 import type { DocumentLayout } from "../layout/PageLayout";
 import type { AnchoredObjectPlacement } from "../layout/AnchoredObjects";
 
+function pointerEvent(
+  type: string,
+  x: number,
+  y: number,
+  init: PointerEventInit = {},
+): PointerEvent {
+  const EventCtor = globalThis.PointerEvent ?? MouseEvent;
+  const event = new EventCtor(type, {
+    clientX: x,
+    clientY: y,
+    bubbles: true,
+    cancelable: true,
+    pointerId: 1,
+    pointerType: "mouse",
+    ...init,
+  }) as PointerEvent;
+  if (!("pointerId" in event)) {
+    Object.defineProperty(event, "pointerId", { value: init.pointerId ?? 1 });
+  }
+  if (!("pointerType" in event)) {
+    Object.defineProperty(event, "pointerType", { value: init.pointerType ?? "mouse" });
+  }
+  return event;
+}
+
 function mousedown(container: HTMLDivElement, x: number, y: number, shiftKey = false): void {
   container.dispatchEvent(
-    new MouseEvent("mousedown", {
-      clientX: x,
-      clientY: y,
-      bubbles: true,
-      cancelable: true,
-      shiftKey,
-    }),
+    pointerEvent("pointerdown", x, y, { shiftKey }),
   );
 }
 
 function mousemove(x: number, y: number): void {
   document.dispatchEvent(
-    new MouseEvent("mousemove", {
-      clientX: x,
-      clientY: y,
-      bubbles: true,
-      cancelable: true,
-    }),
+    pointerEvent("pointermove", x, y),
   );
 }
 
 function mouseup(x = 0, y = 0): void {
   document.dispatchEvent(
-    new MouseEvent("mouseup", {
-      clientX: x,
-      clientY: y,
-      bubbles: true,
-      cancelable: true,
-    }),
+    pointerEvent("pointerup", x, y),
   );
 }
 
@@ -139,6 +148,20 @@ describe("PointerController — image click routing", () => {
 
     expect(moveCursorTo).toHaveBeenCalledWith(42);
     expect(selectNode).not.toHaveBeenCalled();
+  });
+
+  it("touch tap in plain text routes through the same cursor path", () => {
+    const moveCursorTo = vi.spyOn(setup.editor.selection, "moveCursorTo").mockImplementation(() => {});
+    stubNoImageHit(setup, 42);
+
+    setup.container.dispatchEvent(
+      pointerEvent("pointerdown", 200, 200, { pointerId: 9, pointerType: "touch" }),
+    );
+    document.dispatchEvent(
+      pointerEvent("pointerup", 200, 200, { pointerId: 9, pointerType: "touch" }),
+    );
+
+    expect(moveCursorTo).toHaveBeenCalledWith(42);
   });
 
   it("shift+click never triggers selectNode, even on an image rect", () => {
@@ -307,5 +330,85 @@ describe("PointerController — image click routing", () => {
     expect((call[1] as { x: number }).x).toBeLessThan(100);
     expect(moveNode).not.toHaveBeenCalled();
     expect(moveAndUpdateNode).not.toHaveBeenCalled();
+  });
+});
+
+describe("PointerController — cross-page text-selection drag", () => {
+  let setup: PointerControllerSetup;
+
+  beforeEach(() => {
+    // Paged mode so the slot/tile gap exists (slot=1224, tile=1200 → 24px gap).
+    setup = makePointerControllerSetup({
+      isPageless: false,
+      tileHeight: 1200,
+      slotHeight: 1224,
+    });
+  });
+
+  afterEach(() => {
+    setup.cleanup();
+  });
+
+  it("populates the destination page's CharacterMap before resolving posAtCoords", () => {
+    // posAtCoords returns 0 on a page whose charMap hasn't been populated,
+    // which would collapse the selection to docPos 0. The drag handler must
+    // call ensurePagePopulated(hit.page) first — same mitigation the
+    // anchored-object drag handler uses.
+    const ensurePagePopulated = vi
+      .spyOn(setup.editor, "ensurePagePopulated")
+      .mockImplementation(() => {});
+    vi.spyOn(setup.editor.charMap, "objectRectAtPoint").mockReturnValue(undefined);
+    vi.spyOn(setup.editor.charMap, "posAtCoords").mockReturnValue(42);
+    vi.spyOn(setup.editor.selection, "setSelection").mockImplementation(() => {});
+
+    // Mousedown on page 1, drag to page 2 (visualY=1500 → tile 1 → page 2).
+    mousedown(setup.container, 100, 200);
+    mousemove(100, 1500);
+
+    expect(ensurePagePopulated).toHaveBeenCalledWith(2);
+  });
+
+  it("does not re-update selection while pointer is in the inter-page gap", () => {
+    // The gap is 1200..1224 in visualY (between page 1's tile content
+    // height and the next slot start). Without the guard, posAtCoords runs
+    // every frame with docY clamped to the page bottom, collapsing the
+    // selection's head back to end-of-page-1 on every move.
+    vi.spyOn(setup.editor.charMap, "objectRectAtPoint").mockReturnValue(undefined);
+    const posAtCoords = vi
+      .spyOn(setup.editor.charMap, "posAtCoords")
+      .mockReturnValue(7);
+    const setSelection = vi
+      .spyOn(setup.editor.selection, "setSelection")
+      .mockImplementation(() => {});
+
+    mousedown(setup.container, 100, 200);
+    // Reset spies so we only measure the drag moves, not mousedown's setup.
+    setSelection.mockClear();
+    posAtCoords.mockClear();
+
+    // Move into the gap (visualY=1210, between tile end 1200 and slot end 1224).
+    mousemove(100, 1210);
+
+    expect(posAtCoords).not.toHaveBeenCalled();
+    expect(setSelection).not.toHaveBeenCalled();
+  });
+
+  it("dragging from page 1 into page 2 updates the selection head to the page-2 docPos", () => {
+    vi.spyOn(setup.editor, "ensurePagePopulated").mockImplementation(() => {});
+    vi.spyOn(setup.editor.charMap, "objectRectAtPoint").mockReturnValue(undefined);
+    // Page 1 mousedown resolves to docPos 10; page 2 drag resolves to docPos 50.
+    vi.spyOn(setup.editor.charMap, "posAtCoords").mockImplementation(
+      (_x, _y, page) => (page === 2 ? 50 : 10),
+    );
+    const setSelection = vi
+      .spyOn(setup.editor.selection, "setSelection")
+      .mockImplementation(() => {});
+
+    mousedown(setup.container, 100, 200);
+    mousemove(100, 1500); // page 2 content
+
+    // Anchor (from mousedown) = 10, head (from cross-page drag) = 50.
+    const last = setSelection.mock.calls.at(-1);
+    expect(last?.[1]).toBe(50);
   });
 });

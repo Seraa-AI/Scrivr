@@ -5,6 +5,7 @@ import {
 } from "../layout/AnchoredObjects";
 import { LayoutBlock, computeAlignmentOffset, isHiddenAnchorLine } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
+import { computeObjectRenderY } from "../layout/LineBreaker";
 import type { TextMeasurerLike } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
 import type { MarkDecorator } from "../extensions/types";
@@ -60,7 +61,7 @@ export interface RenderPageOptions {
  * Does NOT own the canvas — receives ctx from the caller.
  * Does NOT run layout — receives a pre-computed LayoutPage.
  */
-export function renderPage(options: RenderPageOptions): void {
+export function renderPage(options: RenderPageOptions): boolean {
   const {
     ctx,
     page,
@@ -85,7 +86,11 @@ export function renderPage(options: RenderPageOptions): void {
   const { pageWidth, pageHeight, margins } = pageConfig;
 
   // ── Stale render guard ────────────────────────────────────────────────────
-  if (renderVersion !== currentVersion()) return;
+  // Returning false rather than nothing: the caller records this version as
+  // painted, and a tile that believes it painted a version it abandoned will
+  // not repaint until something else moves it. The reader is then looking at
+  // content the document no longer holds.
+  if (renderVersion !== currentVersion()) return false;
 
   // ── Clear + background ────────────────────────────────────────────────────
   clearCanvas(ctx, pageWidth, pageHeight, dpr, theme.pageBg);
@@ -105,9 +110,6 @@ export function renderPage(options: RenderPageOptions): void {
     ctx.setLineDash([]);
     ctx.restore();
   }
-
-  // ── Check stale again before drawing (layout may have changed) ───────────
-  if (renderVersion !== currentVersion()) return;
 
   // Floats on this page, partitioned by render order.
   const pageFloats = (anchoredObjects?.filter((f) => f.page === page.pageNumber) ?? [])
@@ -137,13 +139,24 @@ export function renderPage(options: RenderPageOptions): void {
           dpr,
           measurer,
           theme,
+          ...(blockRegistry ? { blockRegistry } : {}),
           ...(markDecorators ? { markDecorators } : {}),
           ...(inlineRegistry ? { inlineRegistry } : {}),
         },
         map,
       );
     } else {
-      lineIndexOffset = drawBlock(ctx, block, measurer, map, page.pageNumber, lineIndexOffset, theme, markDecorators);
+      lineIndexOffset = drawBlock(
+        ctx,
+        block,
+        measurer,
+        map,
+        page.pageNumber,
+        lineIndexOffset,
+        theme,
+        markDecorators,
+        inlineRegistry,
+      );
     }
   }
 
@@ -189,6 +202,8 @@ export function renderPage(options: RenderPageOptions): void {
       });
     }
   }
+
+  return true;
 }
 
 /**
@@ -254,7 +269,8 @@ export function drawBlock(
   pageNumber: number,
   lineIndexOffset: number,
   theme: ResolvedTheme,
-  markDecorators?: Map<string, MarkDecorator>
+  markDecorators?: Map<string, MarkDecorator>,
+  inlineRegistry?: InlineRegistry,
 ): number {
   const contentWidth = block.availableWidth;
   // Running Y accumulator — O(n) replacement for the getTotalLineHeight O(n²) reduce.
@@ -282,9 +298,27 @@ export function drawBlock(
 
     for (const span of line.spans) {
       if (span.kind === "object") {
-        // Fallback: object spans in drawBlock — no inline strategy available here.
-        // Register two glyphs with cursorHeight so caret and hit-testing work.
+        // Fallback object spans: render through the inline registry when
+        // available, then register glyphs with cursorHeight for hit-testing.
         const objX = block.x + lineOffsetX + span.x;
+        const objY = computeObjectRenderY(lineY, line, span);
+        inlineRegistry?.get(span.node.type.name)?.render(
+          ctx,
+          objX,
+          objY,
+          span.width,
+          span.height,
+          span.node,
+          theme,
+        );
+        map.registerObjectRect({
+          docPos: span.docPos,
+          x: objX,
+          y: objY,
+          width: span.width,
+          height: span.height,
+          page: pageNumber,
+        });
         // Full-width glyph: midpoint at image center → 50/50 click split.
         // y = textY so cursor draws at the text baseline, not the image top.
         if (!map.hasGlyph(span.docPos)) {

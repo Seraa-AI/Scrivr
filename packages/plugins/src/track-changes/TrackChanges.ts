@@ -1,11 +1,12 @@
 import { Extension, renderTrackedInsert, renderTrackedDelete, renderTrackedConflict, renderTrackedAttrChange } from "@scrivr/core";
-import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler } from "@scrivr/core";
-import type { EditorState, Transaction } from "prosemirror-state";
+import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler, SemanticMarkHandler } from "@scrivr/core";
+import type { EditorState, Transaction } from "@scrivr/core/pm";
 
 import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs } from "./helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus } from "./types";
+import { cloneTrackedChanges } from "./cloneTrackedChanges";
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
@@ -137,6 +138,39 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         },
       },
     };
+  },
+
+  addCloneHandlers() {
+    return [cloneTrackedChanges];
+  },
+
+  addExports() {
+    // Keep suggested-deletion text out of embeddings while preserving it as
+    // structured review metadata. Inserted text is proposed content, kept in
+    // the semantic text — the identity handler exists only so the seam knows
+    // trackedInsert is a review mark (excluded from formatting spans), not a
+    // styling mark like bold/color.
+    const keepInserted: SemanticMarkHandler = (run) => run;
+    const dropDeleted: SemanticMarkHandler = (run, mark) => {
+      const raw = mark.attrs.dataTracked;
+      const entries = Array.isArray(raw) ? (raw.length > 0 ? raw : [{}]) : raw ? [raw] : [{}];
+      return {
+        text: "",
+        changes: [
+          ...(run.changes ?? []),
+          ...entries.map((entry: Record<string, unknown>) => ({
+            type: "suggestedDelete" as const,
+            text: run.text,
+            ...(typeof entry.id === "string" ? { id: entry.id } : {}),
+            ...(typeof entry.authorID === "string" ? { authorId: entry.authorID } : {}),
+            ...(typeof entry.status === "string" ? { status: entry.status } : {}),
+            ...(typeof entry.createdAt === "number" ? { createdAt: entry.createdAt } : {}),
+            ...(typeof entry.groupId === "string" ? { groupId: entry.groupId } : {}),
+          })),
+        ],
+      };
+    };
+    return { semantic: { marks: { trackedDelete: dropDeleted, trackedInsert: keepInserted } } };
   },
 
   addProseMirrorPlugins() {

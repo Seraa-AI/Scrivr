@@ -393,6 +393,29 @@ Goal: cell editing UX matches Word/Docs expectations.
 5. Paste into a `CellRange`: distribute pasted table cells into the selected rectangle; fill plain text/blocks row-major.
 6. Tests: cross-cell selection, deletion at cell boundaries, paste table into selected cells, paste plain text into cells, undo/redo across all of the above.
 
+**Status: shipped (navigation + boundary guards).** `table/editingGuards.ts`
+(plain `Command`s) + `table/cellSelection.ts` (geometry).
+
+Wiring note: the canvas `InputBridge` dispatches keys through the merged
+extension keymap (`addKeymap()`), never through ProseMirror plugin
+`handleKeyDown` props. Cell-editing keys therefore live in `Table.addKeymap()`
+and are chained in `StarterKit.addKeymap()` — Tab in front of the CodeBlock/List
+Tab chain, Shift-Tab in front of List dedent, and the Backspace/Delete guards in
+front of the base delete (a guard returns `false` when it doesn't apply, so the
+chain falls through).
+
+Deviation from item 2: a `CellRange` is **derived on demand** from a spanning
+text selection (`cellRangeFromSelection`) rather than stored. A stored range + a
+real `Selection` subclass wait for Phase 6, where drag-select + overlay make a
+persisted range visible (a partially covered merged cell normalizes in whole).
+Because table cells are `isolating`, a spanning text selection isn't reachable
+by mouse yet, so the multi-cell clear branch activates with Phase 6.
+
+Deferred from item 5: **paste distribution** into a cell rectangle. Its seam is
+`PasteTransformer` (the `InputBridge` paste path), not this keymap layer, and it
+needs the cross-cell selection Phase 6 introduces — so it moves to Phase 7
+(Clipboard round trip), which already owns paste.
+
 ### Phase 6 — Cell Selection And Merge/Split
 
 Goal: common table editing workflows work on canvas.
@@ -403,6 +426,27 @@ Goal: common table editing workflows work on canvas.
 4. Implement `mergeCells()`.
 5. Implement `splitCell()`.
 6. Tests: rectangular selections, merge/split, delete selected cells.
+
+**Status: selection foundation shipped (6a).** Items 1-3 done; merge/split (4-5)
+follow in 6b.
+- Item 1 — `layout/cellHitTest.ts` `cellAtCoords(pages, x, y, page)` maps a point
+  to a cell doc position via the Phase 4 `CellSubBlock` rects (half-open borders).
+- Item 2 — `PointerController` cell drag: pointerdown records the anchor cell,
+  pointermove into a different cell sets a **persisted** range (cells are
+  `isolating`, so a spanning text selection is impossible), pointermove back to
+  the anchor drops it. Intra-cell drag stays a normal text selection.
+- Persisted range — `table/cellSelection.ts` `cellSelectionPlugin` holds
+  `{anchor, head}` cell positions, remapped through edits and cleared on any
+  selection change it didn't author. `selectedCells()` prefers the persisted
+  range over the derived (text-selection) one, so mouse and keyboard resolve
+  identically — which finally makes the Phase 5 multi-cell clear reachable by mouse.
+- Item 3 — `Table.onViewReady` registers an overlay handler that fills the
+  selected cell rects (`theme.selectionFill`). NOTE: `StarterKit.onViewReady` must
+  forward `Table`'s callback, else the overlay never registers on the StarterKit
+  path (regression-tested).
+- Known v1 limit: a vMerge continuation row of a selected merged cell isn't
+  filled (only the master's row) — cosmetic, revisited with merge/split in 6b.
+- A real ProseMirror `Selection` subclass for the range stays deferred to Phase 9.
 
 ### Phase 7 — Clipboard Round Trip
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Editor } from "@scrivr/core";
-import { createSuggestionPopover, getAiToolkit } from "@scrivr/plugins";
-import type { SuggestionGroupInfo } from "@scrivr/plugins";
+import { createSuggestionPopover, getAiToolkit } from "@scrivr/ai";
+import type { SuggestionGroupInfo } from "@scrivr/ai";
 import { useFloatingPosition } from "./useFloatingPosition";
 
 export interface UseAiSuggestionPopoverOptions {

@@ -3,9 +3,11 @@ import { TextSelection } from "prosemirror-state";
 import type { Schema } from "prosemirror-model";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { InputHandler, EditorNavigator } from "../extensions/types";
-import type { PasteTransformer } from "./PasteTransformer";
+import type { PasteTransformer, PendingImagePaste } from "./PasteTransformer";
 import { insertText, deleteSelection } from "../model/commands";
-import { serializeSelectionToHtml } from "./ClipboardSerializer";
+import { serializeSelectionToHtml, serializeSelectionToText } from "./ClipboardSerializer";
+import { clearSelectedCellsTr } from "../table/editingGuards";
+import { CellSelection } from "../table/cellSelection";
 
 /**
  * Convert a DOM KeyboardEvent into a ProseMirror key string.
@@ -99,6 +101,14 @@ export class InputBridge {
     | null = null;
   private focused = false;
   private readOnly = false;
+  /**
+   * A native paste event does not expose keyboard modifiers, so remember only
+   * the specific Mod-Shift-v gesture that immediately precedes it. This is
+   * consumed by handlePaste rather than retaining general Shift state, which
+   * would incorrectly affect a later context-menu paste.
+   */
+  private pasteWithoutFormattingPending = false;
+  private readonly pendingImagePastes = new Set<PendingImagePaste>();
 
   constructor(opts: InputBridgeOptions) {
     this.opts = opts;
@@ -113,6 +123,7 @@ export class InputBridge {
 
   /** Block or unblock all document mutations. */
   setReadOnly(value: boolean): void {
+    if (value) this.cancelPendingImagePastes();
     this.readOnly = value;
   }
 
@@ -147,6 +158,7 @@ export class InputBridge {
    * Safe to call multiple times.
    */
   unmount(): void {
+    this.cancelPendingImagePastes();
     if (this.textarea) {
       this.detachListeners();
       this.textarea.remove();
@@ -223,25 +235,66 @@ export class InputBridge {
     const scrollParent = findScrollParent(this.containerEl);
     if (!scrollParent) return;
 
-    // Convert screen-space page top to absolute Y within the scroll container.
-    const pageScreenRect = this.pageScreenRectLookup(coords.page);
-    if (!pageScreenRect) return;
-    const containerRect = scrollParent.getBoundingClientRect();
-    const pageTop =
-      pageScreenRect.screenTop - containerRect.top + scrollParent.scrollTop;
+    const band = this.absoluteBand(coords, scrollParent);
+    if (!band) return;
 
-    const cursorAbsTop = pageTop + coords.y;
-    const cursorAbsBottom = cursorAbsTop + coords.height;
     const visibleTop = scrollParent.scrollTop;
     const visibleBottom = visibleTop + scrollParent.clientHeight;
     const buffer = 40;
 
-    if (cursorAbsBottom > visibleBottom - buffer) {
-      scrollParent.scrollTop =
-        cursorAbsBottom - scrollParent.clientHeight + buffer;
-    } else if (cursorAbsTop < visibleTop + buffer) {
-      scrollParent.scrollTop = cursorAbsTop - buffer;
+    if (band.bottom > visibleBottom - buffer) {
+      scrollParent.scrollTop = band.bottom - scrollParent.clientHeight + buffer;
+    } else if (band.top < visibleTop + buffer) {
+      scrollParent.scrollTop = band.top - buffer;
     }
+  }
+
+  /**
+   * Scroll so the doc range [from, to] is visible — centered when it fits
+   * the viewport, top-pinned when taller (see rangeScrollTarget). Unlike
+   * scrollCursorIntoView this is position-driven, not selection-driven.
+   * Returns false when the range has no layout coords yet or nothing
+   * scrollable is attached.
+   */
+  scrollRangeIntoView(from: number, to: number): boolean {
+    if (!this.containerEl || !this.pageScreenRectLookup) return false;
+
+    const charMap = this.opts.getCharMap();
+    const fromCoords = charMap.coordsAtPos(from);
+    if (!fromCoords) return false;
+    const toCoords = charMap.coordsAtPos(to) ?? fromCoords;
+
+    const scrollParent = findScrollParent(this.containerEl);
+    if (!scrollParent) return false;
+
+    const fromBand = this.absoluteBand(fromCoords, scrollParent);
+    if (!fromBand) return false;
+    const toBand = this.absoluteBand(toCoords, scrollParent) ?? fromBand;
+
+    const target = rangeScrollTarget(
+      fromBand.top,
+      Math.max(fromBand.bottom, toBand.bottom),
+      scrollParent.scrollTop,
+      scrollParent.clientHeight,
+    );
+    if (target !== null) scrollParent.scrollTop = target;
+    return true;
+  }
+
+  /**
+   * Convert page-local coords to an absolute Y band inside the scroll
+   * container (page screen rect is viewport-space, so add scrollTop back).
+   */
+  private absoluteBand(
+    coords: { page: number; y: number; height: number },
+    scrollParent: HTMLElement,
+  ): { top: number; bottom: number } | null {
+    const pageScreenRect = this.pageScreenRectLookup?.(coords.page);
+    if (!pageScreenRect) return null;
+    const containerRect = scrollParent.getBoundingClientRect();
+    const pageTop =
+      pageScreenRect.screenTop - containerRect.top + scrollParent.scrollTop;
+    return { top: pageTop + coords.y, bottom: pageTop + coords.y + coords.height };
   }
 
   /** Private — textarea creation */
@@ -311,10 +364,16 @@ export class InputBridge {
 
   private handleBlur = (): void => {
     this.focused = false;
+    this.pasteWithoutFormattingPending = false;
     this.opts.onBlur();
   };
 
   private handleKeydown = (e: KeyboardEvent): void => {
+    this.pasteWithoutFormattingPending =
+      e.key.toLowerCase() === "v" &&
+      (e.metaKey || e.ctrlKey) &&
+      e.shiftKey &&
+      !e.altKey;
     if (this.readOnly) {
       // Allow arrow-key navigation and selection-only shortcuts; block all mutations.
       const keyStr = keyEventToString(e);
@@ -373,46 +432,92 @@ export class InputBridge {
 
   private handleCopy = (e: ClipboardEvent): void => {
     const state = this.opts.getState();
-    const { from, to, empty } = state.selection;
-    if (empty || !e.clipboardData) return;
+    if (!e.clipboardData) return;
+    // One path for every selection kind: a CellSelection reports non-empty and
+    // serializes its cells; a text range serializes its slice.
+    const text = serializeSelectionToText(state);
+    if (text === null) return;
     e.preventDefault();
-    e.clipboardData.setData(
-      "text/plain",
-      state.doc.textBetween(from, to, "\n"),
-    );
+    e.clipboardData.setData("text/plain", text);
     const html = serializeSelectionToHtml(state, this.opts.getSchema());
     if (html) e.clipboardData.setData("text/html", html);
   };
 
   private handleCut = (e: ClipboardEvent): void => {
     const state = this.opts.getState();
-    const { from, to, empty } = state.selection;
-    if (empty || !e.clipboardData) return;
+    if (!e.clipboardData) return;
+    const text = serializeSelectionToText(state);
+    if (text === null) return;
     e.preventDefault();
-    e.clipboardData.setData(
-      "text/plain",
-      state.doc.textBetween(from, to, "\n"),
-    );
+    e.clipboardData.setData("text/plain", text);
     const html = serializeSelectionToHtml(state, this.opts.getSchema());
     if (html) e.clipboardData.setData("text/html", html);
     // In read-only mode, honour copy but skip the delete.
     if (this.readOnly) return;
-    const tr = deleteSelection(state);
-    if (tr) this.opts.dispatch(tr);
+    // A cell selection clears each cell's contents (keeping the grid); any other
+    // selection deletes its range.
+    const clear =
+      state.selection instanceof CellSelection
+        ? clearSelectedCellsTr(state)
+        : deleteSelection(state);
+    if (clear) this.opts.dispatch(clear);
   };
 
   private handlePaste = (e: ClipboardEvent): void => {
     if (this.readOnly) return;
     e.preventDefault();
     if (!e.clipboardData) return;
+    const preferPlain = this.pasteWithoutFormattingPending;
+    this.pasteWithoutFormattingPending = false;
     const tr = this.opts.pasteTransformer.transform(
       e.clipboardData,
       this.opts.getState(),
+      { preferPlain },
     );
     if (tr) this.opts.dispatch(tr);
+
+    // "Paste without formatting" means text only — an image is formatting the
+    // user opted out of, so the bytes are not read at all.
+    if (preferPlain) return;
+
+    // Image bytes resolve asynchronously (read or upload), so this dispatches
+    // separately once a src exists. It no-ops whenever the clipboard's markup
+    // already described the content — see transformFiles.
+    //
+    // An upload can take seconds, so the editor may have gone read-only or been
+    // unmounted by the time it lands: both are re-checked here rather than only
+    // at event time. A rejection is swallowed on purpose — a screenshot that
+    // fails to read is not worth tearing down the page over.
+    const imagePaste = this.opts.pasteTransformer.prepareImagePaste(
+      e.clipboardData,
+      this.opts.getState(),
+    );
+    if (!imagePaste) return;
+    this.pendingImagePastes.add(imagePaste);
+    this.opts.dispatch(imagePaste.insert);
+    void imagePaste
+      .resolve(this.opts.getState)
+      .then((fileTr) => {
+        this.pendingImagePastes.delete(imagePaste);
+        if (!fileTr || this.readOnly || !this.textarea) return;
+        this.opts.dispatch(fileTr);
+      })
+      .catch(() => {
+        this.pendingImagePastes.delete(imagePaste);
+        const cleanup = imagePaste.cancel(this.opts.getState());
+        if (cleanup && !this.readOnly && this.textarea) this.opts.dispatch(cleanup);
+      });
   };
 
   /** Private — helpers */
+
+  private cancelPendingImagePastes(): void {
+    for (const pending of this.pendingImagePastes) {
+      const cleanup = pending.cancel(this.opts.getState());
+      if (cleanup) this.opts.dispatch(cleanup);
+    }
+    this.pendingImagePastes.clear();
+  }
 
   private tryInputHandler(e: KeyboardEvent): boolean {
     // Try the fully-qualified key first (e.g. "Alt-ArrowLeft" for word-jump),
@@ -441,6 +546,24 @@ export class InputBridge {
 }
 
 /** Module-level helpers */
+
+/**
+ * New scrollTop that brings the absolute band [top, bottom] into view, or
+ * null when it is already fully visible. Ranges that fit are centered —
+ * the right feel for a jump (vs the cursor's stay-near-edge banding);
+ * ranges taller than the viewport pin their top with 40px breathing room.
+ */
+export function rangeScrollTarget(
+  top: number,
+  bottom: number,
+  scrollTop: number,
+  viewportHeight: number,
+): number | null {
+  if (top >= scrollTop && bottom <= scrollTop + viewportHeight) return null;
+  const height = bottom - top;
+  if (height >= viewportHeight) return Math.max(0, top - 40);
+  return Math.max(0, top - (viewportHeight - height) / 2);
+}
 
 export function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   if (!el) return null;

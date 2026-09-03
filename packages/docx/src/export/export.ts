@@ -30,6 +30,7 @@ import type {
   DocxHandlers,
   DocxMarkHandler,
   DocxNodeHandler,
+  DocxRunWrapper,
 } from "./handlers";
 import type {
   DocxFidelity,
@@ -62,8 +63,19 @@ export async function exportDocx(
   options: DocxExportOptions = {},
 ): Promise<DocxExportResult> {
   const handlers = collectHandlers(editor, options.overrides);
+  const walkerHandlers: WalkerHandlers = {
+    nodes: handlers.nodes,
+    marks: handlers.marks,
+    markWrappers: handlers.markWrappers,
+  };
 
-  const contextInit: Parameters<typeof createDocxContext>[0] = { editor };
+  // Hand the merged handlers to the context so `ctx.walkContent` renders
+  // sub-documents (headers/footers) through the exact same node/mark handlers
+  // as the body.
+  const contextInit: Parameters<typeof createDocxContext>[0] = {
+    editor,
+    handlers: walkerHandlers,
+  };
   if (options.unsupported !== undefined) {
     contextInit.unsupported = options.unsupported;
   }
@@ -79,10 +91,6 @@ export async function exportDocx(
       await hook(ctx);
     }
 
-    const walkerHandlers: WalkerHandlers = {
-      nodes: handlers.nodes,
-      marks: handlers.marks,
-    };
     const body = walkDocument(editor.getState().doc, ctx, walkerHandlers);
 
     // Publish the assembled document tree so onBuildTreeComplete + onFinalize
@@ -123,6 +131,7 @@ export async function exportDocxBytes(
 interface ResolvedHandlers {
   nodes: Record<string, DocxNodeHandler>;
   marks: Record<string, DocxMarkHandler>;
+  markWrappers: Record<string, DocxRunWrapper>;
 }
 
 interface LifecycleHooks {
@@ -141,20 +150,23 @@ function collectHandlers(
   // in this package — see Bold.ts, Image.ts, Heading.ts, etc.
   const nodes: Record<string, DocxNodeHandler> = {};
   const marks: Record<string, DocxMarkHandler> = {};
+  const markWrappers: Record<string, DocxRunWrapper> = {};
 
   for (const contrib of editor.getExportContributions()) {
     const docx = contrib.docx;
     if (!docx) continue;
     if (docx.nodes) Object.assign(nodes, docx.nodes);
     if (docx.marks) Object.assign(marks, docx.marks);
+    if (docx.markWrappers) Object.assign(markWrappers, docx.markWrappers);
   }
 
   if (overrides) {
     if (overrides.nodes) Object.assign(nodes, overrides.nodes);
     if (overrides.marks) Object.assign(marks, overrides.marks);
+    if (overrides.markWrappers) Object.assign(markWrappers, overrides.markWrappers);
   }
 
-  return { nodes, marks };
+  return { nodes, marks, markWrappers };
 }
 
 function collectLifecycleHooks(

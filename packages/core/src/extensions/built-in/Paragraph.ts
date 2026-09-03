@@ -1,5 +1,6 @@
 import { Extension } from "../Extension";
-import type { Command } from "prosemirror-state";
+import { NodeSelection } from "prosemirror-state";
+import type { Command, EditorState } from "prosemirror-state";
 import { splitBlockAs } from "prosemirror-commands";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import {
@@ -7,6 +8,34 @@ import {
   type DocxNodeHandler,
   type DocxBlockTransform,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
+import type { Node as PmNode } from "prosemirror-model";
+import { normalizeImageAttrs } from "../../layout/AnchoredObjects";
+
+/** A paragraph whose only non-whitespace content is a single image. */
+function isImageOnlyParagraph(node: PmNode): boolean {
+  let images = 0;
+  let other = 0;
+  node.forEach((child) => {
+    if (child.type.name === "image") images += 1;
+    else if (child.isText && (child.text ?? "").trim() === "") {
+      /* surrounding whitespace is fine */
+    } else other += 1;
+  });
+  return images === 1 && other === 0;
+}
+
+/**
+ * OOXML `<w:jc>` value for a block `align` attr, or null for the default (left)
+ * — so the DOCX exporter carries centered/right/justified text. Shared by the
+ * Paragraph and Heading export handlers.
+ */
+export function alignToJc(align: unknown): string | null {
+  if (align === "center") return "center";
+  if (align === "right") return "right";
+  if (align === "justify") return "both";
+  return null;
+}
 
 /**
  * Splits the current block and carries `fontFamily` and `align` from the
@@ -46,7 +75,30 @@ const splitParagraph = splitBlockAs((parent, _atEnd, $from) => {
   return { type: newType, attrs };
 });
 
+/**
+ * Is the selection a whole anchored object — an image that floats out of the
+ * text flow rather than sitting in it?
+ *
+ * An inline image is content: selecting it and pressing Enter replaces it with
+ * a break, the same as selected text. An anchored one is not in the flow at
+ * all; its position in the document is an anchor, not a place in the sentence.
+ * Splitting there inserts a paragraph break the reader never asked for, in a
+ * spot they cannot see.
+ */
+function isAnchoredObjectSelected(state: EditorState): boolean {
+  const { selection } = state;
+  if (!(selection instanceof NodeSelection)) return false;
+  if (selection.node.type.name !== "image") return false;
+  return normalizeImageAttrs(selection.node).wrapMode !== "inline";
+}
+
 export const splitBlockInheritAttrs: Command = (state, dispatch) => {
+  // Enter with a float selected does nothing. The alternative is splitting at
+  // the anchor: the visible text stays whole, so the keypress reads as ignored
+  // while an empty paragraph accumulates each time — press Enter a few times
+  // and a hole opens in the page with no undo affordance pointing at it.
+  if (isAnchoredObjectSelected(state)) return true;
+
   return splitParagraph(
     state,
     dispatch &&
@@ -146,9 +198,17 @@ export const Paragraph = Extension.create({
   },
 
   addExports() {
-    const handler: DocxNodeHandler = (_node, children) =>
-      xml("w:p", undefined, children);
-    return { docx: { nodes: { paragraph: handler } } };
+    const handler: DocxNodeHandler = (node, children) => {
+      const jc = alignToJc(node.attrs["align"]);
+      const lead = jc ? [xml("w:pPr", undefined, [xml("w:jc", { "w:val": jc })])] : [];
+      return xml("w:p", undefined, [...lead, ...children]);
+    };
+    const semanticHandler: SemanticNodeHandler = (node) =>
+      isImageOnlyParagraph(node) ? { type: "image" } : { type: "paragraph" };
+    return {
+      docx: { nodes: { paragraph: handler } },
+      semantic: { nodes: { paragraph: semanticHandler } },
+    };
   },
 
   addImports() {

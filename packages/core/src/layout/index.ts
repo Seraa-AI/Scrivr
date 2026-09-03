@@ -1,7 +1,9 @@
 export { CharacterMap } from "./CharacterMap";
 export { ExclusionManager } from "./ExclusionManager";
 export type { AvailableSegment, ExclusionRect, LineSpace } from "./ExclusionManager";
-export type { GlyphEntry, LineEntry, CoordsResult } from "./CharacterMap";
+export type { GlyphEntry, LineEntry, CoordsResult, ObjectRectEntry } from "./CharacterMap";
+export { resolvePointOwner } from "./pointOwnership";
+export type { PointOwner, PointOwnershipInput } from "./pointOwnership";
 export { TextMeasurer } from "./TextMeasurer";
 export type { FontMetrics, RunMetrics, TextMeasurerLike } from "./TextMeasurer";
 export { LineBreaker } from "./LineBreaker";
@@ -43,15 +45,14 @@ export type {
   PageChromeContribution,
 } from "./PageMetrics";
 export {
-  pageStartGlobalForMetrics,
-  pageLocalYToGlobalForMetrics,
+  buildPageStarts,
 } from "./PageMetrics";
 export { runMiniPipeline } from "./runMiniPipeline";
 export type { MiniPipelineOptions } from "./runMiniPipeline";
 export { resolveFont } from "./StyleResolver";
-export { BlockRegistry } from "./BlockRegistry";
+export { BlockRegistry, nodeLayout, DEFAULT_NODE_LAYOUT } from "./BlockRegistry";
 export { LayoutCoordinator } from "./LayoutCoordinator";
 export type { LayoutCoordinatorOptions } from "./LayoutCoordinator";
-export type { BlockStrategy, BlockRenderContext, InlineStrategy } from "./BlockRegistry";
+export type { BlockStrategy, BlockRenderContext, InlineStrategy, NodeLayout } from "./BlockRegistry";
 export { TextBlockStrategy } from "./TextBlockStrategy";
 export { ListItemStrategy } from "./ListItemStrategy";

@@ -197,3 +197,58 @@ describe("renderPage — image strategy zero-size guard", () => {
     }).not.toThrow();
   });
 });
+
+/**
+ * A paint that abandons itself has to say so.
+ *
+ * `renderPage` bails when the layout moves under it — the version it was
+ * handed is no longer the editor's. That is correct: painting a page from a
+ * layout that has already been replaced puts stale pixels on screen. What it
+ * cannot do is bail silently, because the caller records the version as
+ * painted either way, and a tile that believes it is current will not repaint
+ * until something else moves. The user is then looking at content the document
+ * no longer contains.
+ */
+describe("renderPage — reporting whether it painted", () => {
+  function render(currentVersion: () => number): { painted: boolean; map: CharacterMap } {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [schema.text("hello world")]),
+    ]);
+    const layout = runPipeline(doc, {
+      pageConfig: defaultPageConfig,
+      fontConfig,
+      measurer: createMeasurer(),
+    });
+    const map = new CharacterMap();
+    const painted = renderPage({
+      ctx: makeCtx(),
+      page: layout.pages[0]!,
+      pageConfig: defaultPageConfig,
+      renderVersion: layout.version,
+      currentVersion,
+      dpr: 1,
+      measurer: createMeasurer(),
+      map,
+      blockRegistry: new BlockRegistry().register("paragraph", TextBlockStrategy),
+      anchoredObjects: layout.anchoredObjects ?? [],
+    });
+    return { painted, map };
+  }
+
+  it("reports true when it painted the version it was given", () => {
+    const layoutVersion = 1;
+    const { painted, map } = render(() => layoutVersion);
+    expect(painted).toBe(true);
+    // It really did draw: glyphs reached the map.
+    expect(map.coordsAtPos(1)).not.toBeNull();
+  });
+
+  it("reports false when the layout moved before it started", () => {
+    const { painted, map } = render(() => 999);
+    expect(painted).toBe(false);
+    // Nothing was drawn, so nothing was registered.
+    expect(map.coordsAtPos(1)).toBeNull();
+  });
+
+});

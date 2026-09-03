@@ -1,4 +1,4 @@
-import { EditorState, Plugin, PluginKey, Transaction } from "prosemirror-state";
+import { EditorState, Plugin, PluginKey, Transaction } from "@scrivr/core/pm";
 
 import {
   getAction,

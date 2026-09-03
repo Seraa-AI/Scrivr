@@ -5,7 +5,7 @@
  * handlers against it. This file holds the runtime factory.
  */
 
-import type { Schema } from "prosemirror-model";
+import type { Schema } from "@scrivr/core/pm";
 import type {
   DocxDiagnostic,
   DocxImportContext,
@@ -62,6 +62,10 @@ export function createDocxImportContext(
     rels: {
       resolveHyperlink,
     },
+    // Defaults — `importDocx` assigns the real section refs + part walker once
+    // the OPC package and handlers are available (same pattern as resolveImage).
+    section: { headers: [], footers: [], titlePg: false, evenAndOdd: false },
+    walkPart: () => null,
     shared: {
       // Contained generic cast — Map stores unknown, caller owns the type.
       getOrInit<T>(key: string, init: () => T): T {

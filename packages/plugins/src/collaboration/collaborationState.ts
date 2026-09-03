@@ -7,11 +7,15 @@
  */
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import type * as Y from "yjs";
-import type { IEditor } from "@scrivr/core";
+import type { IBaseEditor } from "@scrivr/core";
 
 export interface CollabState {
   ydoc: Y.Doc;
   provider: HocuspocusProvider;
 }
 
-export const collaborationRegistry = new WeakMap<IEditor, CollabState>();
+// Keyed by `IBaseEditor` so headless `ServerEditor` collaboration registers
+// here too. A browser `Editor` is both `IEditor` and `IBaseEditor` (same object
+// reference), so CollaborationCursor's `get(editor)` with an `IEditor` resolves
+// the entry the Collaboration extension wrote with an `IBaseEditor`.
+export const collaborationRegistry = new WeakMap<IBaseEditor, CollabState>();

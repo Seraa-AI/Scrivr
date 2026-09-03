@@ -11,10 +11,12 @@ import { parseOoxml, findChildren, attr, type OoxmlElement } from "./xml";
 
 const REL_TYPE_IMAGE_SUFFIX = "/relationships/image";
 const REL_TYPE_HYPERLINK_SUFFIX = "/relationships/hyperlink";
+const REL_TYPE_HEADER_SUFFIX = "/relationships/header";
+const REL_TYPE_FOOTER_SUFFIX = "/relationships/footer";
 
 export interface RelationshipEntry {
   id: string;
-  type: "image" | "hyperlink" | "other";
+  type: "image" | "hyperlink" | "header" | "footer" | "other";
   /** Path inside the package — for images, usually `media/imageN.png`. */
   target: string;
   /** `"External"` for hyperlinks; absent for internal refs. */
@@ -56,6 +58,8 @@ export function readRelationshipMap(xml: string | undefined): RelationshipMap {
 function classify(typeUri: string): RelationshipEntry["type"] {
   if (typeUri.endsWith(REL_TYPE_IMAGE_SUFFIX)) return "image";
   if (typeUri.endsWith(REL_TYPE_HYPERLINK_SUFFIX)) return "hyperlink";
+  if (typeUri.endsWith(REL_TYPE_HEADER_SUFFIX)) return "header";
+  if (typeUri.endsWith(REL_TYPE_FOOTER_SUFFIX)) return "footer";
   return "other";
 }
 

@@ -1,17 +1,14 @@
 import type { Editor } from "../Editor";
 import { NodeSelection } from "prosemirror-state";
+import type { SelectionGesture } from "../selection/types";
 import {
   getHandles,
   hitHandle,
   computeNewSize,
 } from "./ResizeController";
+import { normalizeImageAttrs } from "../layout/AnchoredObjects";
+import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
 import {
-  compareAnchoredObjectHitOrder,
-  normalizeImageAttrs,
-} from "../layout/AnchoredObjects";
-import {
-  pageLocalYToGlobalForMetrics,
-  pageStartGlobalForMetrics,
   type PageFlowMetrics,
 } from "../layout/PageMetrics";
 import { dragDebugLog } from "./DragDebugOverlay";
@@ -59,7 +56,7 @@ export interface PointerControllerDeps {
 }
 
 /**
- * PointerController — owns all mouse interaction logic for TileManager.
+ * PointerController — owns all pointer interaction logic for TileManager.
  *
  * Responsibilities:
  *   - Hit testing (text, resize handles, anchored-object bodies)
@@ -82,7 +79,7 @@ export class PointerController {
   private anchoredDrag: {
     docPos: number;
     nodeSize: number;
-    /** Mouse position at drag start, in client coordinates. */
+    /** Pointer position at drag start, in client coordinates. */
     startClientX: number;
     startClientY: number;
     /** Image's painted X at drag start, in page-local coordinates. */
@@ -102,10 +99,10 @@ export class PointerController {
     wrapMode: string;
     /** Image's docPos rect at drag start (for posBelow / posAbove fallback). */
     rect: { x: number; y: number; width: number; height: number; page: number };
-    /** Mouse position relative to the image's top-left at mousedown. */
+    /** Pointer position relative to the image's top-left at pointerdown. */
     grabOffsetX: number;
     grabOffsetY: number;
-    /** Live overlay state — refreshed on mousemove, read by TileManager. */
+    /** Live overlay state — refreshed on pointermove, read by TileManager. */
     overlay: {
       /** Page where the ghost is drawn (= page under the cursor). */
       ghostPage: number;
@@ -116,7 +113,7 @@ export class PointerController {
       caret: { page: number; x: number; y: number; height: number } | null;
       /**
        * True when the cursor is in a region that can't accept a drop (currently
-       * inter-page gaps). Renderer fades the ghost; mouseup commits a no-op.
+       * inter-page gaps). Renderer fades the ghost; pointerup commits a no-op.
        */
       disabled: boolean;
     };
@@ -136,6 +133,8 @@ export class PointerController {
     };
   } | null = null;
 
+  /** Active pointer capture. Null when hover/click handling is idle. */
+  private activePointerId: number | null = null;
   /** Click-count tracking for double/triple-click. */
   private clickCount = 0;
   private lastClickTime = 0;
@@ -143,23 +142,52 @@ export class PointerController {
   private lastClickY = 0;
   /** Word boundaries from double-click — used for word-granularity drag. */
   private wordAnchor: { from: number; to: number } | null = null;
+  /**
+   * An extension-owned drag (e.g. table cell selection) that claimed this
+   * pointerdown via the gesture registry. When set, moves/up/cancel route to it
+   * instead of the built-in text/image handling. Transient — never editor state.
+   */
+  private activeGesture: SelectionGesture | null = null;
+  /**
+   * Cursor currently written to the DOM. Pointer moves fire continuously and
+   * most of them stay inside one region; re-writing the same value on every
+   * one of them is pure style churn.
+   */
+  private appliedCursor: string | null = null;
 
   constructor(private readonly deps: PointerControllerDeps) {}
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  /** Attach mouse event listeners. */
+  /** Attach pointer event listeners. */
   attach(): void {
-    this.deps.tilesContainer.addEventListener("mousedown", this.handleMouseDown);
-    document.addEventListener("mousemove", this.handleMouseMove);
-    document.addEventListener("mouseup", this.handleMouseUp);
+    this.deps.tilesContainer.addEventListener("pointerdown", this.handlePointerDown);
+    document.addEventListener("pointermove", this.handlePointerMove);
+    document.addEventListener("pointerup", this.handlePointerUp);
+    document.addEventListener("pointercancel", this.handlePointerCancel);
   }
 
-  /** Detach mouse event listeners. */
+  /** Detach pointer event listeners. */
   detach(): void {
-    this.deps.tilesContainer.removeEventListener("mousedown", this.handleMouseDown);
-    document.removeEventListener("mousemove", this.handleMouseMove);
-    document.removeEventListener("mouseup", this.handleMouseUp);
+    // Abort an in-flight extension gesture so teardown mid-drag doesn't leak
+    // pointer capture or leave the gesture believing it's still live.
+    const gesture = this.activeGesture;
+    this.activeGesture = null;
+    if (this.activePointerId !== null) {
+      this.releasePointer(this.activePointerId);
+      this.activePointerId = null;
+    }
+    if (gesture) {
+      try {
+        gesture.cancel();
+      } catch {
+        // A broken gesture must not block listener teardown.
+      }
+    }
+    this.deps.tilesContainer.removeEventListener("pointerdown", this.handlePointerDown);
+    document.removeEventListener("pointermove", this.handlePointerMove);
+    document.removeEventListener("pointerup", this.handlePointerUp);
+    document.removeEventListener("pointercancel", this.handlePointerCancel);
   }
 
   /**
@@ -259,7 +287,16 @@ export class PointerController {
   private hitHandleAt(canvasX: number, canvasY: number, page: number) {
     const { editor } = this.deps;
     const sel = this.activeSelection();
-    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image")
+    if (!(sel instanceof NodeSelection)) return null;
+    // Any node is resizable, not just images: its SelectionBehavior must report
+    // the `resize` capability (also gates read-only) and the node must carry
+    // numeric width/height attrs to drive the drag. An extension's node that
+    // draws resize handles + declares `resize: true` gets grab/ghost/commit free.
+    if (!editor.describeSelection(sel).capabilities.resize) return null;
+    if (
+      typeof sel.node.attrs["width"] !== "number" ||
+      typeof sel.node.attrs["height"] !== "number"
+    )
       return null;
     // Step 6: read through editor.getNodeRect so anchored placements come
     // from layout.anchoredObjects (Stage 3 authoritative) and inline images
@@ -285,45 +322,111 @@ export class PointerController {
       if (distToEdge > EDGE_BAND_PX) return null;
     }
 
+    // Resize hit-testing uses the canonical 8-point `getHandles(nodeRect)` grid.
+    // A behavior's `geometry()` paints its grips from the *same* `getHandles`
+    // over the *same* `editor.getNodeRect`, so paint and hit-test share one
+    // source of truth — the contract for `resize: true` is exactly these 8
+    // positions. A behavior that wants bespoke handle geometry can't express it
+    // yet (the emitted `handles` primitives carry no id to drive the drag);
+    // that lands with the resize → standalone gesture-provider refactor.
     return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
   }
 
-  private hitAnchoredAt(canvasX: number, canvasY: number, page: number) {
-    const objects = this.deps.editor.layout.anchoredObjects;
-    if (!objects) return null;
-    const pageObjects = objects
-      .filter((object) => object.page === page)
-      .sort(compareAnchoredObjectHitOrder);
-    for (const object of pageObjects) {
-      if (
-        canvasX >= object.x &&
-        canvasX <= object.x + object.width &&
-        canvasY >= object.y &&
-        canvasY <= object.y + object.height
-      ) {
-        return object;
-      }
-    }
-    return null;
+  /**
+   * Who owns this point — the one answer click routing, hover and drags all
+   * read, so they cannot disagree about it. See `resolvePointOwner`.
+   */
+  private ownerAt(docX: number, docY: number, page: number): PointOwner {
+    const { editor } = this.deps;
+    return resolvePointOwner(docX, docY, page, {
+      anchoredObjects: editor.layout.anchoredObjects ?? [],
+      hasTextAt: (x, y, p) => editor.charMap.hasTextAt(x, y, p),
+      objectRectAt: (x, y, p) => editor.charMap.objectRectAtPoint(x, y, p),
+    });
   }
 
-  // ── Mouse events ────────────────────────────────────────────────────────────
+  /**
+   * The cursor for a hover position: a resize handle's own cursor, `move` over
+   * something draggable, `text` over the page, `default` off it.
+   *
+   * Resize handles sit above ownership — they are chrome painted over the
+   * selected node, not part of the page.
+   */
+  private hoverCursorFor(
+    hit: { docX: number; docY: number; page: number } | null,
+  ): string {
+    if (!hit) return "default";
 
-  private handleMouseDown = (e: MouseEvent): void => {
+    const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
+    if (resizeHit) return resizeHit.cursor;
+
+    return this.ownerAt(hit.docX, hit.docY, hit.page).kind === "text"
+      ? "text"
+      : "move";
+  }
+
+
+  // ── Pointer events ──────────────────────────────────────────────────────────
+
+  private handlePointerDown = (e: PointerEvent): void => {
     e.preventDefault();
-    // Pointer capture analogue. While any drag is in flight, a second
-    // mousedown must NOT re-enter hit-testing — otherwise an accidental
+    // While any drag is in flight, a second pointerdown must NOT re-enter
+    // hit-testing — otherwise an accidental
     // double-click during drag fires two PM transactions, or text selection
-    // resolves at a stale point. Equivalent to setPointerCapture +
-    // pointerdown ignore; we use mouse events so we guard explicitly.
-    if (this.isDragging || this.resizeDrag || this.anchoredDrag || this.inlineImageDrag) {
+    // resolves at a stale point.
+    if (
+      this.activePointerId !== null ||
+      this.isDragging ||
+      this.resizeDrag ||
+      this.anchoredDrag ||
+      this.inlineImageDrag
+    ) {
       return;
     }
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return;
+    this.activePointerId = e.pointerId;
+    this.capturePointer(e.pointerId);
 
     const { page, docX, docY } = hit;
+
+    // Count clicks before resolving a semantic target. Registered gestures get
+    // first refusal for every pointerdown (including Shift/double/triple-click
+    // and points over built-in images); built-in text/image behavior is only the
+    // compatibility fallback when no provider claims the target.
+    const now = Date.now();
+    const CLICK_TIMEOUT = 500;
+    const CLICK_RADIUS = 5;
+    if (
+      now - this.lastClickTime < CLICK_TIMEOUT &&
+      Math.abs(e.clientX - this.lastClickX) < CLICK_RADIUS &&
+      Math.abs(e.clientY - this.lastClickY) < CLICK_RADIUS
+    ) {
+      this.clickCount++;
+    } else {
+      this.clickCount = 1;
+    }
+    this.lastClickTime = now;
+    this.lastClickX = e.clientX;
+    this.lastClickY = e.clientY;
+
+    // Chrome bands are separate editing surfaces, so their activation routing
+    // precedes body hit testing.
+    if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this.clickCount)) return;
+
+    const semanticHit = editor.resolveHitTarget(docX, docY, page);
+    if (semanticHit) {
+      // Pass the authoritative click count — `event.detail` isn't reliable on
+      // pointerdown, so a gesture that treats double/triple-click specially (a
+      // cell gesture defers to word/block selection) needs this instead.
+      const gesture = editor.beginSelectionGesture(semanticHit, e, this.clickCount);
+      if (gesture) {
+        this.activeGesture = gesture;
+        this.isDragging = true;
+        return;
+      }
+    }
 
     // Resize handle — mutation, block in read-only
     const resizeHit = this.hitHandleAt(docX, docY, page);
@@ -353,12 +456,15 @@ export class PointerController {
     // horizontal movement updates `xAlign: "custom"` + `x`; vertical
     // movement updates the docPos. Diagonal drag commits both atomically
     // via Editor.moveAndUpdateNode.
-    const anchoredHit = this.hitAnchoredAt(docX, docY, page);
+    // Resolved once for this pointerdown and reused below, so the anchored and
+    // inline branches cannot reach different conclusions about the same point.
+    const owner = this.ownerAt(docX, docY, page);
+    const anchoredHit = owner.kind === "anchored" ? owner.object : null;
     if (anchoredHit) {
       if (editor.readOnly) return;
       editor.selectNode(anchoredHit.docPos);
-      // Mouse position relative to the image's top-left at mousedown — used
-      // by mousemove to keep the ghost rect anchored to the cursor's grab
+      // Pointer position relative to the image's top-left at pointerdown — used
+      // by pointermove to keep the ghost rect anchored to the cursor's grab
       // point (so the image doesn't snap to the cursor's top-left).
       const grabOffsetX = docX - anchoredHit.x;
       const grabOffsetY = docY - anchoredHit.y;
@@ -394,27 +500,6 @@ export class PointerController {
       return;
     }
 
-    // ── Click-count tracking (double/triple-click) ──────────────────────────
-    const now = Date.now();
-    const CLICK_TIMEOUT = 500;
-    const CLICK_RADIUS = 5;
-    if (
-      now - this.lastClickTime < CLICK_TIMEOUT &&
-      Math.abs(e.clientX - this.lastClickX) < CLICK_RADIUS &&
-      Math.abs(e.clientY - this.lastClickY) < CLICK_RADIUS
-    ) {
-      this.clickCount++;
-    } else {
-      this.clickCount = 1;
-    }
-    this.lastClickTime = now;
-    this.lastClickX = e.clientX;
-    this.lastClickY = e.clientY;
-
-    // Chrome band click — consumed for both activation (double-click) and
-    // cursor positioning (single click when surface is already active).
-    if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this.clickCount)) return;
-
     this.isDragging = true;
     const pos = editor.charMap.posAtCoords(docX, docY, page);
 
@@ -437,7 +522,7 @@ export class PointerController {
     if (!e.shiftKey) {
       // Click physically inside an inline image's rect → select the image.
       if (!editor.readOnly) {
-        const imageHit = editor.charMap.objectRectAtPoint(docX, docY, page);
+        const imageHit = owner.kind === "inlineObject" ? owner.rect : null;
         if (imageHit) {
           editor.selectNode(imageHit.docPos);
           const node = editor.getState().doc.nodeAt(imageHit.docPos);
@@ -473,10 +558,27 @@ export class PointerController {
     }
   };
 
-  private handleMouseMove = (e: MouseEvent): void => {
+  private handlePointerMove = (e: PointerEvent): void => {
+    if (!this.acceptsPointer(e)) return;
+    if (this.activePointerId !== null) e.preventDefault();
     const { editor } = this.deps;
 
-    // Resize drag — buffer pending size; commit only on mouseup
+    // Extension gesture owns the drag — feed it the target under the cursor.
+    if (this.activeGesture) {
+      const h = this.hitTest(e.clientX, e.clientY);
+      const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
+      const point = h ? { page: h.page, docX: h.docX, docY: h.docY } : null;
+      try {
+        this.activeGesture.update(target, e, point);
+      } catch (err) {
+        // A throwing gesture must not lock the pointer for the rest of the session.
+        this.endActiveGesture(e.pointerId);
+        throw err;
+      }
+      return;
+    }
+
+    // Resize drag — buffer pending size; commit only on pointerup
     if (this.resizeDrag) {
       const { handle, startX, startY, startW, startH } = this.resizeDrag;
       const { pageWidth, margins } = editor.layout.pageConfig;
@@ -496,7 +598,7 @@ export class PointerController {
     }
 
     // Anchored-object drag — keep the ghost overlay tracking the cursor and
-    // resolve the live insertion caret. Deltas commit on mouseup; this block
+    // resolve the live insertion caret. Deltas commit on pointerup; this block
     // is paint-only.
     if (this.anchoredDrag) {
       this.updateAnchoredDragOverlay(e);
@@ -519,22 +621,29 @@ export class PointerController {
       return;
     }
 
-    // Hover cursor
+    // Hover cursor — resolved on every move, including moves that leave the
+    // page. Skipping the update when nothing is hit left the last cursor
+    // frozen on screen, so crossing from text to image (or off the page
+    // entirely) kept promising whatever the previous position offered.
     const hit = this.hitTest(e.clientX, e.clientY);
-    if (hit) {
-      const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
-      const anchoredHit =
-        !resizeHit && this.hitAnchoredAt(hit.docX, hit.docY, hit.page);
-      const inlineImageHit =
-        !resizeHit && !anchoredHit
-          ? editor.charMap.objectRectAtPoint(hit.docX, hit.docY, hit.page)
-          : undefined;
-      const cursor = resizeHit ? resizeHit.cursor : anchoredHit || inlineImageHit ? "move" : "text";
-      this.setCursorAll(cursor);
-    }
+    this.setCursorAll(this.hoverCursorFor(hit));
 
     // Text selection drag
     if (!this.isDragging || !hit) return;
+    // Mid-drag in the gap between two pages: hit.gap is true and hit.docY
+    // is clamped to the source page bottom. Letting posAtCoords run on that
+    // would re-collapse the selection's head to end-of-source-page on every
+    // frame of gap traversal. Skip the update — the last valid selection
+    // sticks until the pointer enters real page content again.
+    if (hit.gap) return;
+    // posAtCoords is page-scoped: on a destination page that hasn't been
+    // painted yet, its CharacterMap has no lines, the lookup falls through
+    // to 0, and setSelection(anchor, 0) collapses the selection to doc
+    // start — visually "stuck at the source page" because the destination
+    // half never gets a valid head. Populate the page first, same as the
+    // anchored-object drag handler below.
+    editor.ensurePagePopulated(hit.page);
+
     const pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
 
     // Word-granularity drag (after double-click)
@@ -555,8 +664,26 @@ export class PointerController {
     editor.selection.setSelection(editor.getSelectionSnapshot().anchor, pos);
   };
 
-  private handleMouseUp = (e: MouseEvent): void => {
+  private handlePointerUp = (e: PointerEvent): void => {
+    if (!this.acceptsPointer(e)) return;
+    e.preventDefault();
     const { editor } = this.deps;
+    if (this.activeGesture) {
+      const gesture = this.activeGesture;
+      // Clear first so a throwing finish() can't leave the gesture stuck active.
+      this.activeGesture = null;
+      this.isDragging = false;
+      const h = this.hitTest(e.clientX, e.clientY);
+      const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
+      const point = h ? { page: h.page, docX: h.docX, docY: h.docY } : null;
+      try {
+        gesture.finish(target, e, point);
+      } finally {
+        this.releasePointer(e.pointerId);
+        this.activePointerId = null;
+      }
+      return;
+    }
     if (this.resizeDrag) {
       const { docPos, pendingWidth, pendingHeight } = this.resizeDrag;
       editor.setNodeAttrs(docPos, { width: pendingWidth, height: pendingHeight });
@@ -574,9 +701,67 @@ export class PointerController {
       this.setCursorAll("text");
     }
     this.isDragging = false;
+    this.releasePointer(e.pointerId);
+    this.activePointerId = null;
   };
 
-  private commitInlineImageDrag(e: MouseEvent): void {
+  private handlePointerCancel = (e: PointerEvent): void => {
+    if (!this.acceptsPointer(e)) return;
+    // Reset all state first, then notify the gesture — a throwing cancel() must
+    // not skip teardown.
+    const gesture = this.activeGesture;
+    this.activeGesture = null;
+    this.resizeDrag = null;
+    this.anchoredDrag = null;
+    this.inlineImageDrag = null;
+    this.isDragging = false;
+    this.setCursorAll("text");
+    this.releasePointer(e.pointerId);
+    this.activePointerId = null;
+    this.deps.scheduleUpdate();
+    if (gesture) {
+      try {
+        gesture.cancel();
+      } catch {
+        // Teardown already done; a broken gesture's cancel must not propagate here.
+      }
+    }
+  };
+
+  /** Drop the active gesture and release the pointer (used when a gesture throws). */
+  private endActiveGesture(pointerId: number): void {
+    this.activeGesture = null;
+    this.isDragging = false;
+    this.releasePointer(pointerId);
+    this.activePointerId = null;
+  }
+
+  private acceptsPointer(e: PointerEvent): boolean {
+    return this.activePointerId === null || e.pointerId === this.activePointerId;
+  }
+
+  private capturePointer(pointerId: number): void {
+    const el = this.deps.tilesContainer;
+    if (typeof el.setPointerCapture !== "function") return;
+    try {
+      el.setPointerCapture(pointerId);
+    } catch {
+      // Capture can fail if the pointer is already gone; document listeners
+      // still keep the gesture coherent in tests and older environments.
+    }
+  }
+
+  private releasePointer(pointerId: number): void {
+    const el = this.deps.tilesContainer;
+    if (typeof el.releasePointerCapture !== "function") return;
+    try {
+      el.releasePointerCapture(pointerId);
+    } catch {
+      // Already released/cancelled; nothing else to clean up.
+    }
+  }
+
+  private commitInlineImageDrag(e: PointerEvent): void {
     const { editor } = this.deps;
     if (!this.inlineImageDrag) return;
 
@@ -618,7 +803,7 @@ export class PointerController {
    * Pure no-op when total movement is below a small threshold (treats
    * the gesture as a click). Gap drops mirror the disabled overlay state.
    */
-  private commitAnchoredDrag(e: MouseEvent): void {
+  private commitAnchoredDrag(e: PointerEvent): void {
     const { editor } = this.deps;
     if (!this.anchoredDrag) return;
 
@@ -630,7 +815,7 @@ export class PointerController {
     }
 
     // Drop in inter-page gap → no transaction. The ghost was already shown
-    // disabled during mousemove; commit must mirror that.
+    // disabled during pointermove; commit must mirror that.
     const finalHit = this.hitTest(e.clientX, e.clientY);
     if (finalHit?.gap) {
       dragDebugLog(editor, "gapDrop", {
@@ -818,7 +1003,7 @@ export class PointerController {
     };
   }
 
-  private resolveCrossPageDropYOffset(e: MouseEvent, newDocPos: number): number {
+  private resolveCrossPageDropYOffset(e: PointerEvent, newDocPos: number): number {
     if (!this.anchoredDrag) return 0;
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit || hit.gap) return 0;
@@ -844,20 +1029,30 @@ export class PointerController {
 
   private pageStartGlobal(pageNumber: number): number {
     const layout = this.deps.editor.layout;
-    return pageStartGlobalForMetrics(
-      layout.pageConfig,
-      (page) => this.metricsForPage(page),
-      pageNumber,
-    );
+    const starts = layout.pageStarts;
+    // Pageless is one continuous flow — every page shares the first origin.
+    if (layout.pageConfig.pageless) {
+      return starts?.[0] ?? this.metricsForPage(1).contentTop;
+    }
+
+    const known = starts?.[pageNumber - 1];
+    if (known !== undefined) return known;
+
+    // Past the end of the laid-out range, which a partial layout mid-stream can
+    // produce. Continue from the last known start using the same synthesized
+    // page height metricsForPage() falls back to.
+    const laidOut = starts?.length ?? 0;
+    let y = laidOut > 0 ? starts![laidOut - 1]! : this.metricsForPage(1).contentTop;
+    for (let page = Math.max(laidOut, 1); page < pageNumber; page++) {
+      y += this.metricsForPage(page).contentHeight;
+    }
+    return y;
   }
 
   private pageLocalYToGlobal(pageNumber: number, localY: number): number {
-    const layout = this.deps.editor.layout;
-    return pageLocalYToGlobalForMetrics(
-      layout.pageConfig,
-      (page) => this.metricsForPage(page),
-      pageNumber,
-      localY,
+    return (
+      this.pageStartGlobal(pageNumber) +
+      (localY - this.metricsForPage(pageNumber).contentTop)
     );
   }
 
@@ -893,13 +1088,13 @@ export class PointerController {
    * Returns `null` when the painted Y still resolves to the source
    * paragraph (no structural change needed).
    */
-  private resolveDragTargetDocPos(e: MouseEvent): number | null {
+  private resolveDragTargetDocPos(e: PointerEvent): number | null {
     if (!this.anchoredDrag) return null;
     return this.resolveDragTargetDocPosFrom(e, this.anchoredDrag);
   }
 
   private resolveDragTargetDocPosFrom(
-    e: MouseEvent,
+    e: PointerEvent,
     drag: {
       docPos: number;
       nodeSize: number;
@@ -981,17 +1176,17 @@ export class PointerController {
 
   /**
    * Refresh the live drag overlay state (ghost rect + insertion caret) from
-   * the current mouse position. Paint-only: never mutates layout, never
+   * the current pointer position. Paint-only: never mutates layout, never
    * affects hit testing.
    */
-  private updateAnchoredDragOverlay(e: MouseEvent): void {
+  private updateAnchoredDragOverlay(e: PointerEvent): void {
     if (!this.anchoredDrag) return;
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return;
 
     // Ghost top-left = current cursor minus the grab offset captured at
-    // mousedown. Stays anchored to where the user originally grabbed.
+    // pointerdown. Stays anchored to where the user originally grabbed.
     const ghostX = hit.docX - this.anchoredDrag.grabOffsetX;
     const ghostY = hit.docY - this.anchoredDrag.grabOffsetY;
 
@@ -1038,7 +1233,7 @@ export class PointerController {
     this.setCursorAll("move");
   }
 
-  private updateInlineImageDragOverlay(e: MouseEvent): void {
+  private updateInlineImageDragOverlay(e: PointerEvent): void {
     if (!this.inlineImageDrag) return;
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
@@ -1080,6 +1275,8 @@ export class PointerController {
   }
 
   private setCursorAll(cursor: string): void {
+    if (cursor === this.appliedCursor) return;
+    this.appliedCursor = cursor;
     this.deps.tilesContainer.style.cursor = cursor;
     for (const entry of this.deps.pool) {
       entry.wrapper.style.cursor = cursor;

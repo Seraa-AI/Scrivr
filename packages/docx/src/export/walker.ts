@@ -16,13 +16,14 @@
  * unknown mark is silently absent).
  */
 
-import type { Node, Mark } from "prosemirror-model";
+import type { Node, Mark } from "@scrivr/core/pm";
 import { cssColorToDocxHex } from "@scrivr/core";
 import { xml } from "./xml";
 import type { XmlNode, DocxContext } from "./context";
 import type {
   DocxNodeHandler,
   DocxMarkHandler,
+  DocxRunWrapper,
   DocxNodeMeta,
   DocxRunProps,
 } from "./handlers";
@@ -31,6 +32,8 @@ import { DocxExportError } from "./error";
 export interface WalkerHandlers {
   nodes: Record<string, DocxNodeHandler>;
   marks: Record<string, DocxMarkHandler>;
+  /** Marks that wrap their runs — hyperlinks. See `DocxRunWrapper`. */
+  markWrappers?: Record<string, DocxRunWrapper>;
 }
 
 /** Walk the body of a document — skips the implicit root and returns body content. */
@@ -53,9 +56,11 @@ export function walkNode(
   handlers: WalkerHandlers,
   meta: DocxNodeMeta,
 ): XmlNode[] {
-  // Text nodes own their mark stack — emit a single <w:r> with merged props.
+  // Text nodes own their mark stack — emit a single <w:r> with merged props,
+  // then let any wrapping marks (hyperlinks) enclose it.
   if (node.isText) {
-    return [renderRun(node.text ?? "", mergeMarks(node.marks, ctx, handlers))];
+    const run = renderRun(node.text ?? "", mergeMarks(node.marks, ctx, handlers));
+    return [wrapRun(run, node.marks, ctx, handlers)];
   }
 
   const children: XmlNode[] = [];
@@ -92,6 +97,30 @@ function mergeMarks(
     props = handler(props, mark, ctx);
   }
   return props;
+}
+
+/**
+ * Enclose a run in whatever its wrapping marks produce.
+ *
+ * A mark with no wrapper is not a gap — `mergeMarks` already warned about
+ * marks with no handler at all, and most marks legitimately have nothing to
+ * wrap with.
+ */
+function wrapRun(
+  run: XmlNode,
+  marks: readonly Mark[],
+  ctx: DocxContext,
+  handlers: WalkerHandlers,
+): XmlNode {
+  const wrappers = handlers.markWrappers;
+  if (!wrappers) return run;
+
+  let wrapped = run;
+  for (const mark of marks) {
+    const wrapper = wrappers[mark.type.name];
+    if (wrapper) wrapped = wrapper(wrapped, mark, ctx);
+  }
+  return wrapped;
 }
 
 function renderRun(text: string, props: DocxRunProps): XmlNode {

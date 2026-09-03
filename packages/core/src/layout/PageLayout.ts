@@ -9,8 +9,9 @@ import {
   BlockStyle,
   applyPageFont,
 } from "./FontConfig";
-import { layoutBlock, LayoutBlock, type LayoutBlockKind } from "./BlockLayout";
+import { layoutBlock, LayoutBlock, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
+import { nodeLayout } from "./BlockRegistry";
 import { LineBreaker, type InputSpan, type LayoutLine, type LineSpaceProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
 import {
@@ -23,13 +24,17 @@ import {
 } from "./AnchoredObjects";
 import {
   computePageMetrics,
+  buildPageStarts,
+  createPageGeometry,
   EMPTY_RESOLVED_CHROME,
-  pageStartGlobalForMetrics,
+  type PageGeometry,
   type PageMetrics,
   type ResolvedChrome,
   type PageChromeContribution,
   type PageChromeMeasureInput,
 } from "./PageMetrics";
+import { coerceSectionSettings, isSectionBreak } from "../model/sections";
+import type { SectionBreakType } from "../model/sections";
 import { fitLinesInCapacity } from "./splitLines";
 import { runChromeLoop } from "./aggregateChrome";
 import { parseFont } from "./StyleResolver";
@@ -153,6 +158,14 @@ export interface DocumentLayout {
   /** Per-page metrics, one entry per page. Optional for test fixtures. */
   metrics?: PageMetrics[];
 
+  /**
+   * Global flow Y where each page's content begins — the prefix sum over
+   * `metrics`, aligned with it 1:1. Carried on the layout so hit-testing and
+   * pointer geometry read a page's origin instead of summing the pages before
+   * it on every event.
+   */
+  pageStarts?: number[];
+
   /** Monotonic per-run identity for cache invalidation. Currently aliased to `version`. */
   runId?: number;
   /** Whether the chrome aggregator converged. Always "stable" until iterative contributors exist. */
@@ -218,6 +231,8 @@ export interface MeasureCacheEntry {
   kind: LayoutBlockKind;
   height: number;
   lines: LayoutLine[];
+  /** Cell sub-blocks for `kind: "tableRow"` entries. */
+  cells?: CellSubBlock[];
   spaceBefore: number;
   spaceAfter: number;
   blockType: string;
@@ -267,6 +282,10 @@ export interface FlowBlock {
   kind: LayoutBlockKind;
   /** Measured lines — position-independent (lineHeight only, no absolute Y). */
   lines: LayoutLine[];
+  /** Cell sub-blocks for `kind: "tableRow"` flows (y relative to the row top). */
+  cells?: CellSubBlock[];
+  /** True for a table's last row — drives table bottom-border ownership. */
+  isLastRow?: boolean;
   height: number;
   /** Block style spacing (styleKey-aware, e.g. list_item overrides paragraph). */
   spaceBefore: number;
@@ -283,6 +302,8 @@ export interface FlowBlock {
   inputHash: number;
   /** True when this entry represents a hard page break node. */
   isPageBreak?: true;
+  /** Section-aware page target; absent means an ordinary next-page break. */
+  pageBreakType?: Exclude<SectionBreakType, "continuous">;
   /** True when the block measurement was a cache hit. */
   wasCacheHit: boolean;
   partKind?: "block" | "fragment";
@@ -306,28 +327,146 @@ export interface FlowBlock {
   prevNodePos?: number;
 }
 
-export function assignGlobalY(flows: FlowBlock[], initialY: number): FlowBlock[] {
+/**
+ * Global Y of the start of the first page strictly below `y`. A content bottom
+ * exactly on a page boundary belongs to the page above (it rendered there), so
+ * the break advances one page past it — matching `paginateFlow`, which always
+ * advances exactly one page per forced break.
+ */
+function nextPageStartAfter(
+  geometry: PageGeometry,
+  y: number,
+  breakType: FlowBlock["pageBreakType"],
+): number {
+  let contentPage = geometry.pageAt(y);
+  if (contentPage > 1 && geometry.startOf(contentPage) === y) {
+    contentPage -= 1;
+  }
+  return geometry.startOf(targetPageNumber(contentPage, breakType));
+}
+
+function targetPageNumber(
+  currentPage: number,
+  breakType: FlowBlock["pageBreakType"],
+): number {
+  let target = currentPage + 1;
+  if (breakType === "evenPage" && target % 2 !== 0) target++;
+  if (breakType === "oddPage" && target % 2 === 0) target++;
+  return target;
+}
+
+/**
+ * Advance a flow's continuous start through to its true end `globalY`, modelling
+ * the gaps `paginateFlow` introduces at page bottoms so Stage 2's coordinates
+ * match Stage 4's. A line is atomic: one that would cross the page bottom moves
+ * whole to the next page, leaving an unused gap that a naive `start + height`
+ * ignores. Without this, an anchored object whose anchor sits after a paragraph
+ * that splits across a page boundary is placed on an earlier page than the
+ * paragraph's tail — and overlaps it.
+ *
+ * Uses the same `fitLinesInCapacity` primitive as `paginateFlow` so the
+ * line-fit decision can't diverge. Returns the (possibly page-advanced) start
+ * and the gap-aware end.
+ */
+function advanceFlowGlobalY(
+  flow: FlowBlock,
+  naturalStart: number,
+  pageConfig: PageConfig,
+  geometry: PageGeometry,
+): { startGlobalY: number; endGlobalY: number } {
+  if (flow.isPageBreak && !pageConfig.pageless) {
+    const start = nextPageStartAfter(geometry, naturalStart, flow.pageBreakType);
+    return { startGlobalY: start, endGlobalY: start + flow.height };
+  }
+  if (pageConfig.pageless) {
+    return { startGlobalY: naturalStart, endGlobalY: naturalStart + flow.height };
+  }
+
+  const pageOf = (g: number): number => geometry.pageAt(g);
+  const pageStart = (p: number): number => geometry.startOf(p);
+  const pageBottom = (p: number): number => geometry.bottomOf(p);
+
+  // Atomic blocks (image / hr / tableRow) never split: if the block overflows
+  // its page and fits on a fresh one, it moves whole (the gap). `paginateFlow`
+  // keeps a too-tall block or a first-on-page block where it is.
+  const isAtomic = flow.kind === "leaf" || flow.kind === "tableRow";
+  if (isAtomic || flow.lines.length === 0) {
+    let start = naturalStart;
+    const page = pageOf(start);
+    const atTop = start === pageStart(page);
+    const tooTall = flow.height > geometry.metricsFor(page).contentHeight;
+    if (!atTop && !tooTall && start + flow.height > pageBottom(page)) {
+      start = pageStart(page + 1);
+    }
+    return { startGlobalY: start, endGlobalY: start + flow.height };
+  }
+
+  // Text blocks: place lines page by page; the remainder jumps to the next page
+  // top whenever a line would cross the bottom.
+  let remaining = flow.lines;
+  let cursor = naturalStart;
+  while (remaining.length > 0) {
+    const page = pageOf(cursor);
+    const top = pageStart(page);
+    const available = pageBottom(page) - cursor;
+    let { fitted, rest, fittedHeight } = fitLinesInCapacity(remaining, available);
+    if (fitted.length === 0) {
+      if (cursor === top) {
+        // A line taller than the page — force one to avoid an infinite loop
+        // (mirrors paginateFlow's top-of-page guard).
+        fitted = remaining.slice(0, 1);
+        rest = remaining.slice(1);
+        fittedHeight = remaining[0]!.lineHeight;
+      } else {
+        cursor = pageStart(page + 1);
+        continue;
+      }
+    }
+    cursor += fittedHeight;
+    remaining = rest;
+    if (remaining.length > 0) cursor = pageStart(page + 1);
+  }
+  return { startGlobalY: naturalStart, endGlobalY: cursor };
+}
+
+export function assignGlobalY(
+  flows: FlowBlock[],
+  initialY: number,
+  pageConfig: PageConfig,
+  geometry: PageGeometry,
+): FlowBlock[] {
   let y = initialY;
   let prevSpaceAfter = 0;
 
   return flows.map((flow, index) => {
     const gap = index === 0 ? 0 : collapseMargins(prevSpaceAfter, flow.spaceBefore);
-    const globalY = y + gap;
-    y = globalY + flow.height;
-    prevSpaceAfter = flow.spaceAfter;
-    return { ...flow, globalY, originalGlobalY: globalY };
+    const { startGlobalY, endGlobalY } = advanceFlowGlobalY(
+      flow, y + gap, pageConfig, geometry,
+    );
+    y = endGlobalY;
+    prevSpaceAfter = flow.isPageBreak ? 0 : flow.spaceAfter;
+    return { ...flow, globalY: startGlobalY, originalGlobalY: startGlobalY };
   });
 }
 
-function restampGlobalYFrom(flows: FlowBlock[], startIndex: number): FlowBlock[] {
+function restampGlobalYFrom(
+  flows: FlowBlock[],
+  startIndex: number,
+  pageConfig: PageConfig,
+  geometry: PageGeometry,
+): FlowBlock[] {
   const next = [...flows];
   for (let i = Math.max(1, startIndex); i < next.length; i++) {
     const prev = next[i - 1]!;
     const flow = next[i]!;
-    const prevGlobalY = prev.globalY ?? 0;
-    const gap = collapseMargins(prev.spaceAfter, flow.spaceBefore);
-    const globalY = prevGlobalY + prev.height + gap;
-    next[i] = { ...flow, globalY };
+    const prevEnd = advanceFlowGlobalY(
+      prev, prev.globalY ?? 0, pageConfig, geometry,
+    ).endGlobalY;
+    const gap = prev.isPageBreak ? 0 : collapseMargins(prev.spaceAfter, flow.spaceBefore);
+    const { startGlobalY } = advanceFlowGlobalY(
+      flow, prevEnd + gap, pageConfig, geometry,
+    );
+    next[i] = { ...flow, globalY: startGlobalY };
   }
   return next;
 }
@@ -351,23 +490,55 @@ function getAnchoredObjectAnchors(flow: FlowBlock): AnchorRef[] {
   return anchors;
 }
 
-function pageForGlobalY(pageConfig: PageConfig, metricsFor: (pageNumber: number) => PageMetrics, globalY: number): number {
-  if (pageConfig.pageless) return 1;
-  let pageNumber = 1;
-  while (globalY >= pageStartGlobalForMetrics(pageConfig, metricsFor, pageNumber) + metricsFor(pageNumber).contentHeight) {
-    pageNumber++;
-  }
-  return pageNumber;
-}
-
 function pageLocalYForGlobalY(
-  pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
   pageNumber: number,
   globalY: number,
 ): number {
-  const pageStart = pageStartGlobalForMetrics(pageConfig, metricsFor, pageNumber);
-  return metricsFor(pageNumber).contentTop + (globalY - pageStart);
+  return geometry.metricsFor(pageNumber).contentTop + (globalY - geometry.startOf(pageNumber));
+}
+
+/**
+ * Clamp `placement.page` to the actual page count so downstream consumers
+ * (PDF export, hit-testing, CharacterMap lookup) never reference a page that
+ * doesn't exist. Under extreme inputs (huge image height + dense float
+ * packing + yOffset extremes), the anchored-object solver can decide
+ * `placement.page` based on geometry before pagination finalizes its page
+ * count — if no flow content lands on the geometry-derived page, the page
+ * list truncates and the placement keeps the higher index. The clamp keeps
+ * `placement.y` untouched: the float was already painting off the bottom of
+ * its target page; the visual is no worse, but every consumer that loops
+ * over pages can now trust `placement.page <= layout.pages.length`.
+ *
+ * Applied only to the **final** (non-partial) layout. Partial layouts feed
+ * the next streaming chunk and must keep raw page indices so a placement
+ * that lands on page 4 today survives a chunk-2 layout pass that grows the
+ * page list back to 4 pages — clamping a partial would lose that.
+ *
+ * Returns the original array reference when no clamping was needed so the
+ * common case stays allocation-free.
+ *
+ * @internal — used by `runPipeline`'s finalization. Not part of the
+ * package's public API surface (`@scrivr/core` does not re-export it via
+ * the barrel); exported here only so the internal test file can drive it
+ * directly without re-creating a phantom-page scenario from end-to-end.
+ */
+export function clampPlacementsToPages(
+  placements: AnchoredObjectPlacement[],
+  pageCount: number,
+): AnchoredObjectPlacement[] {
+  if (pageCount === 0) return placements;
+  let needsClamp = false;
+  for (const p of placements) {
+    if (p.page > pageCount) {
+      needsClamp = true;
+      break;
+    }
+  }
+  if (!needsClamp) return placements;
+  return placements.map((p) =>
+    p.page > pageCount ? { ...p, page: pageCount } : p,
+  );
 }
 
 function pageRectsDigest(rects: readonly AnchoredObjectPlacement[] | undefined): string {
@@ -386,57 +557,21 @@ interface PageBarrierProvider {
   localYForGlobalY(pageNumber: number, globalY: number): number;
 }
 
-function createPageBarrierProvider(
-  pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
-): PageBarrierProvider {
-  const pageStartCache = new Map<number, number>();
-  pageStartCache.set(1, metricsFor(1).contentTop);
-
-  const pageStartFor = (pageNumber: number): number => {
-    if (pageConfig.pageless) return metricsFor(1).contentTop;
-    const cached = pageStartCache.get(pageNumber);
-    if (cached !== undefined) return cached;
-
-    let nearestPage = 1;
-    for (const page of pageStartCache.keys()) {
-      if (page < pageNumber && page > nearestPage) nearestPage = page;
-    }
-
-    let y = pageStartCache.get(nearestPage)!;
-    for (let page = nearestPage; page < pageNumber; page++) {
-      y += metricsFor(page).contentHeight;
-      pageStartCache.set(page + 1, y);
-    }
-    return y;
-  };
-
+function createPageBarrierProvider(geometry: PageGeometry): PageBarrierProvider {
   return {
-    pageForGlobalY(globalY: number): number {
-      if (pageConfig.pageless) return 1;
-      let pageNumber = 1;
-      while (globalY >= pageStartFor(pageNumber) + metricsFor(pageNumber).contentHeight) {
-        pageNumber++;
-      }
-      return pageNumber;
-    },
-    pageStartGlobal: pageStartFor,
-    contentBottomLocal(pageNumber: number): number {
-      return metricsFor(pageNumber).contentBottom;
-    },
-    contentHeight(pageNumber: number): number {
-      return metricsFor(pageNumber).contentHeight;
-    },
-    localYForGlobalY(pageNumber: number, globalY: number): number {
-      return metricsFor(pageNumber).contentTop + (globalY - pageStartFor(pageNumber));
-    },
+    pageForGlobalY: (globalY) => geometry.pageAt(globalY),
+    pageStartGlobal: (pageNumber) => geometry.startOf(pageNumber),
+    contentBottomLocal: (pageNumber) => geometry.metricsFor(pageNumber).contentBottom,
+    contentHeight: (pageNumber) => geometry.metricsFor(pageNumber).contentHeight,
+    localYForGlobalY: (pageNumber, globalY) =>
+      pageLocalYForGlobalY(geometry, pageNumber, globalY),
   };
 }
 
 function resolveAnchoredObjects(
   inputFlows: FlowBlock[],
   pageConfig: PageConfig,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
   measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
@@ -447,7 +582,7 @@ function resolveAnchoredObjects(
   const contentX = pageConfig.margins.left;
   const contentRight = pageConfig.pageWidth - pageConfig.margins.right;
   const contentWidth = contentRight - contentX;
-  const barriers = createPageBarrierProvider(pageConfig, metricsFor);
+  const barriers = createPageBarrierProvider(geometry);
   // Phase 4: one ExclusionManager per page, accumulating every square rect.
   // Sequential anchors share the same manager so a flow that overlaps two
   // images on the same page reflows against the union of both rects rather
@@ -475,14 +610,18 @@ function resolveAnchoredObjects(
       let pageNumber = barriers.pageForGlobalY(anchorGlobalY);
       let anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
 
-      // Anchor-push: any wrapping mode whose visual extent overflows its
-      // anchor's page is pushed to the next page (provided the next page
-      // can fit it). This applies uniformly to square / top-bottom /
-      // behind / front. yOffset is intentionally not factored in — the
-      // anchor flow's natural fit decides the page; yOffset only shifts
-      // within the resulting page (and clamps if it would escape).
+      // Anchor-push: a mode that reserves flow space and whose visual extent
+      // overflows its anchor's page moves the anchor flow to the next page
+      // (provided the next page can fit it). yOffset is intentionally not
+      // factored in — the anchor flow's natural fit decides the page; yOffset
+      // only shifts within the resulting page (and clamps if it would escape).
+      //
+      // `behind` and `front` reserve no flow space, so they take no part in
+      // this: pushing their anchor moves text the image never touches, leaving
+      // a hole on the page the reader cannot account for. The clamp below is
+      // what keeps those images on their anchor's page.
       if (
-        wrapMode !== "inline" &&
+        (wrapMode === "square" || wrapMode === "top-bottom") &&
         !pageConfig.pageless &&
         anchorLocalY + height > barriers.contentBottomLocal(pageNumber) &&
         height <= barriers.contentHeight(pageNumber + 1)
@@ -493,7 +632,7 @@ function resolveAnchoredObjects(
           { ...flows[i]!, globalY: pushedGlobalY, solverPushedThisFlow: true },
           ...flows.slice(i + 1),
         ];
-        flows = restampGlobalYFrom(flows, i + 1);
+        flows = restampGlobalYFrom(flows, i + 1, pageConfig, geometry);
         anchorGlobalY = pushedGlobalY;
         pageNumber = barriers.pageForGlobalY(anchorGlobalY);
         anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
@@ -532,7 +671,7 @@ function resolveAnchoredObjects(
             { ...flows[i]!, globalY: stackedAnchorGlobalY, solverPushedThisFlow: true },
             ...flows.slice(i + 1),
           ];
-          flows = restampGlobalYFrom(flows, i + 1);
+          flows = restampGlobalYFrom(flows, i + 1, pageConfig, geometry);
           anchorGlobalY = stackedAnchorGlobalY;
           pageNumber = barriers.pageForGlobalY(anchorGlobalY);
           anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
@@ -549,7 +688,7 @@ function resolveAnchoredObjects(
             { ...flows[i]!, globalY: pushedGlobalY, solverPushedThisFlow: true },
             ...flows.slice(i + 1),
           ];
-          flows = restampGlobalYFrom(flows, i + 1);
+          flows = restampGlobalYFrom(flows, i + 1, pageConfig, geometry);
           anchorGlobalY = pushedGlobalY;
           pageNumber = barriers.pageForGlobalY(anchorGlobalY);
           anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
@@ -628,6 +767,8 @@ function resolveAnchoredObjects(
             contentX,
             contentWidth,
           },
+          pageConfig,
+          geometry,
           measurer,
           fontConfig,
           fontModifiers,
@@ -668,6 +809,8 @@ function resolveAnchoredObjects(
             contentX,
             contentWidth,
           },
+          pageConfig,
+          geometry,
           measurer,
           fontConfig,
           fontModifiers,
@@ -698,6 +841,8 @@ function reflowFlowsAgainstExclusions(
     contentX: number;
     contentWidth: number;
   },
+  pageConfig: PageConfig,
+  geometry: PageGeometry,
   measurer: TextMeasurerLike,
   fontConfig: FontConfig,
   fontModifiers: Map<string, FontModifier> | undefined,
@@ -777,7 +922,7 @@ function reflowFlowsAgainstExclusions(
         nextFlow,
         ...flows.slice(idx + 1),
       ];
-      flows = restampGlobalYFrom(flows, idx + 1);
+      flows = restampGlobalYFrom(flows, idx + 1, pageConfig, geometry);
     } else if (!flow.overlapsWrapZone) {
       flows = [
         ...flows.slice(0, idx),
@@ -942,17 +1087,11 @@ export function runFlowPipeline(
   const contentWidth = pageWidth - margins.left - margins.right;
   const maxBlocks = options.maxBlocks;
 
-  // Per-page metrics with single-entry cache (pages advance sequentially).
-  let cachedMetricsPage = -1;
-  let cachedMetrics: PageMetrics | null = null;
-  const metricsFor = (pageNumber: number): PageMetrics => {
-    if (cachedMetricsPage === pageNumber && cachedMetrics !== null) {
-      return cachedMetrics;
-    }
-    cachedMetrics = computePageMetrics(pageConfig, resolved, pageNumber);
-    cachedMetricsPage = pageNumber;
-    return cachedMetrics;
-  };
+  // Page metrics plus the prefix index over their heights, built once per run.
+  // Every page-position question in the pipeline reads through this, so none of
+  // them re-derive a page start by summing the pages before it.
+  const geometry = createPageGeometry(pageConfig, resolved);
+  const metricsFor = geometry.metricsFor;
 
   // Resumption: restore cursor from prior chunk instead of re-walking the doc.
   const r = options.resumption;
@@ -978,14 +1117,14 @@ export function runFlowPipeline(
   // chunk would resolve as if the chunk's flows started near the document's
   // top — wrong page assignment, wrong wrap decisions.
   const seedGlobalY = r
-    ? pageStartGlobalForMetrics(pageConfig, metricsFor, currentPage.pageNumber)
+    ? geometry.startOf(currentPage.pageNumber)
       + (initY - metricsFor(currentPage.pageNumber).contentTop)
     : metricsFor(1).contentTop;
-  const flowsWithGlobalY = assignGlobalY(flowResult.flows, seedGlobalY);
+  const flowsWithGlobalY = assignGlobalY(flowResult.flows, seedGlobalY, pageConfig, geometry);
   const anchoredFlow = resolveAnchoredObjects(
     flowsWithGlobalY,
     pageConfig,
-    metricsFor,
+    geometry,
     measurer,
     fontConfig,
     fontModifiers,
@@ -1010,7 +1149,7 @@ export function runFlowPipeline(
       : undefined;
 
   const pr = paginateFlow(
-    anchoredFlow.flows, pageConfig, resolved, metricsFor, runId,
+    anchoredFlow.flows, pageConfig, resolved, geometry, runId,
     {
       previousLayout: previousLayoutForPagination,
       measureCache,
@@ -1037,6 +1176,15 @@ export function runFlowPipeline(
       prevPageCount: pr.pages.length,
     };
     const partialPages = [...pr.pages, pr.currentPage];
+    // Intentionally NOT clamped: the partial layout's anchoredObjects gets
+    // carried forward to the next chunk as `previousLayout?.anchoredObjects`,
+    // and earlier chunks are never re-solved. Clamping a partial would
+    // permanently lose a placement's original page — e.g. a placement on
+    // page 4 clamped to partial-page count 2 cannot be restored when the
+    // next chunk grows the layout back to 4 pages. View consumers reading
+    // a partial layout may briefly see placement.page > pages.length during
+    // streaming; that window is bounded by the next chunk arriving, and the
+    // final non-partial layout below is clamped.
     const layout: DocumentLayout = {
       pages: partialPages,
       pageConfig,
@@ -1047,6 +1195,7 @@ export function runFlowPipeline(
         ? pr.y + margins.bottom
         : partialPages.length * pageHeight,
       metrics: pr.metrics,
+      pageStarts: buildPageStarts(pageConfig, pr.metrics),
       runId,
       convergence: "stable",
       iterationCount: 1,
@@ -1056,18 +1205,20 @@ export function runFlowPipeline(
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
+  const clampedFinal = clampPlacementsToPages(mergedPlacements, allPages.length);
   const layout: DocumentLayout = {
     pages: allPages,
     pageConfig,
     version: chunkVersion,
     totalContentHeight: 0,
     metrics: pr.metrics,
+    pageStarts: buildPageStarts(pageConfig, pr.metrics),
     runId,
     convergence: "stable",
     iterationCount: 1,
-    anchoredObjects: mergedPlacements,
+    anchoredObjects: clampedFinal,
   };
-  return { layout, isPartial: false, ...context, y: pr.y, anchoredObjects: mergedPlacements };
+  return { layout, isPartial: false, ...context, y: pr.y, anchoredObjects: clampedFinal };
 }
 
 function runPipelineBody(
@@ -1158,18 +1309,20 @@ export interface PaginateFlowResult {
   metrics: PageMetrics[];
 }
 
-/** Stage 2: assign measured FlowBlocks to pages. All positions read through metricsFor(). */
+/** Stage 2: assign measured FlowBlocks to pages. All positions read through `geometry`. */
 export function paginateFlow(
   flows: FlowBlock[],
   pageConfig: PageConfig,
   resolved: ResolvedChrome,
-  metricsFor: (pageNumber: number) => PageMetrics,
+  geometry: PageGeometry,
   runId: number,
   opts: PaginateFlowOptions,
 ): PaginateFlowResult {
-  // `resolved` is threaded through metricsFor; reserved for future cache checks
-  // keyed off resolved.metricsVersion. Read access today is intentional no-op.
+  // `resolved` is what `geometry` was built from; reserved for future cache
+  // checks keyed off resolved.metricsVersion. Read access today is a no-op.
   void resolved;
+
+  const metricsFor = geometry.metricsFor;
 
   const { previousLayout, measureCache, measurer = new TextMeasurer(), pageless, init } = opts;
   const { margins } = pageConfig;
@@ -1187,15 +1340,32 @@ export function paginateFlow(
 
   // Phase 1b: only valid after we've seen at least one cache miss (= the edit point).
   let seenCacheMiss = false;
+  // A geometrically stable cache hit is not a safe tail boundary when another
+  // changed/new block still exists later in the document. Precompute the
+  // remaining misses so reuse can begin only after the final one.
+  let remainingCacheMisses = flows.reduce(
+    (count, flow) => count + (flow.wasCacheHit ? 0 : 1),
+    0,
+  );
   let earlyTerminated = false;
 
   for (const flow of flows) {
+    // Count down on the same predicate the total was built from, once per flow
+    // and before any branch can `continue` past it. Decrementing inside the
+    // branches instead would let the counter drift from the count that seeded
+    // it the moment either branch's notion of a cache hit changed, and the
+    // stale tail that drift lets through is invisible to every test.
+    if (!flow.wasCacheHit) remainingCacheMisses -= 1;
+
     // ── Hard page break (skipped in pageless mode) ───────────────────────────
     if (flow.isPageBreak && !pageless) {
-      pages.push(currentPage);
-      currentPage = newPage(pages.length + 1);
+      const target = targetPageNumber(currentPage.pageNumber, flow.pageBreakType);
+      while (currentPage.pageNumber < target) {
+        pages.push(currentPage);
+        currentPage = newPage(pages.length + 1);
+        metrics.push(metricsFor(currentPage.pageNumber));
+      }
       y = metricsFor(currentPage.pageNumber).contentTop;
-      metrics.push(metricsFor(currentPage.pageNumber));
       prevSpaceAfter = 0;
       continue;
     }
@@ -1207,8 +1377,7 @@ export function paginateFlow(
     if (!pageless && flow.globalY !== undefined) {
       while (
         flow.globalY >=
-        pageStartGlobalForMetrics(pageConfig, metricsFor, currentPage.pageNumber) +
-          metricsFor(currentPage.pageNumber).contentHeight
+        geometry.bottomOf(currentPage.pageNumber)
       ) {
         pages.push(currentPage);
         currentPage = newPage(pages.length + 1);
@@ -1227,7 +1396,7 @@ export function paginateFlow(
     const naturalY = y + gap;
     const pageLocalGlobalY =
       !pageless && flow.globalY !== undefined
-        ? pageLocalYForGlobalY(pageConfig, metricsFor, currentPage.pageNumber, flow.globalY)
+        ? pageLocalYForGlobalY(geometry, currentPage.pageNumber, flow.globalY)
         : naturalY;
     const firstOnPageNatural = isFirstOnPage && !flow.solverPushedThisFlow;
     const targetY = firstOnPageNatural ? naturalY : Math.max(naturalY, pageLocalGlobalY);
@@ -1235,9 +1404,8 @@ export function paginateFlow(
     const blockWidth = flow.availableWidth;
 
     // Build a positioned LayoutBlock from the FlowBlock measurements.
-    // `cells: []` is attached for tableRow blocks so the LayoutBlock invariant
-    // ("kind === tableRow → cells present") holds in Phase 1; Phase 4 replaces
-    // the empty array with real cell sub-blocks.
+    // `tableRow` blocks carry their cell sub-blocks (y relative to the row top,
+    // x absolute) so the invariant "kind === tableRow → cells present" holds.
     const buildBlock = (x: number, bY: number): LayoutBlock => ({
       kind: flow.kind,
       node,
@@ -1252,7 +1420,8 @@ export function paginateFlow(
       blockType: flow.blockType,
       align: flow.align,
       availableWidth: blockWidth,
-      ...(flow.kind === "tableRow" ? { cells: [] } : {}),
+      ...(flow.kind === "tableRow" ? { cells: flow.cells ?? [] } : {}),
+      ...(flow.isLastRow ? { isLastRow: true } : {}),
     });
 
     const block = normalizeWrappedBlockForPage(
@@ -1487,6 +1656,7 @@ export function paginateFlow(
       previousLayout &&
       canUsePreviousLayoutTail &&
       seenCacheMiss &&
+      remainingCacheMisses === 0 &&
       flow.wasCacheHit &&
       flow.preCachedTargetY !== undefined &&
       flow.preCachedPage !== undefined &&
@@ -1620,6 +1790,7 @@ export function buildBlockFlow(
         hasAnchoredObject: false,
         inputHash: 0,
         isPageBreak: true,
+        ...(item.pageBreakType ? { pageBreakType: item.pageBreakType } : {}),
         wasCacheHit: false,
       });
       continue;
@@ -1642,7 +1813,7 @@ export function buildBlockFlow(
     // Measure — position-independent (targetY=0, page=1 are not stored in entry).
     const entry = resolveBlockEntry(
       node, nodePos, blockX, 0, blockWidth, 1,
-      measurer, fontConfig, fontModifiers, measureCache, inlineRegistry,
+      measurer, fontConfig, fontModifiers, measureCache, inlineRegistry, item.tableColumns,
     );
     const anchorOnlyFlow = isAnchorOnlyFlowEntry(entry);
 
@@ -1651,6 +1822,8 @@ export function buildBlockFlow(
       nodePos,
       kind: entry.kind,
       lines: entry.lines,
+      ...(entry.cells ? { cells: entry.cells } : {}),
+      ...(item.isLastRow ? { isLastRow: true } : {}),
       height: entry.height,
       spaceBefore: anchorOnlyFlow ? 0 : blockStyle.spaceBefore,
       spaceAfter: anchorOnlyFlow ? 0 : blockStyle.spaceAfter,
@@ -1805,6 +1978,7 @@ function normalizeWrappedBlockForPage(
 /** A single item ready for layout — either a plain block or an expanded list item. */
 export interface LayoutItem {
   isPageBreak?: true;
+  pageBreakType?: Exclude<SectionBreakType, "continuous">;
   node: Node;
   nodePos: number;
   /** Extra left indent in px (0 for regular blocks, LIST_INDENT for list items). */
@@ -1817,66 +1991,122 @@ export interface LayoutItem {
    * `list_item` spacing defined in addBlockStyles(), not the paragraph style.
    */
   styleKey?: string;
+  /** Column widths (from the parent table's `grid`) — set on table row items. */
+  tableColumns?: number[];
+  /** True for a table's last row — drives table bottom-border ownership. */
+  isLastRow?: boolean;
 }
 
 const LIST_INDENT = 24; // px — text starts this far right of the margin
 const MARKER_RIGHT_GAP = 6; // px — gap between the marker's right edge and the text
 
 /**
- * Walks the doc's top-level children and returns a flat array of layout items.
- * List container nodes (bulletList, orderedList) are expanded into one item
- * per list item so each renders as an independent LayoutBlock.
+ * Walks the doc's block children and returns a flat array of layout items.
+ *
+ * Each node contributes according to the layout participation its spec
+ * declares (see `NodeLayout`): a `block` node contributes one item, a
+ * `transparent` node contributes none of its own and its children are
+ * collected into the enclosing flow instead.
+ *
+ * Lists and tables are expanded by name ahead of that, because their
+ * expansion is not merely transparent — they carry markers and column widths
+ * down to the items they produce.
  */
 export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutItem[] {
   const items: LayoutItem[] = [];
 
-  doc.forEach((node, offset) => {
-    if (node.type.name === "pageBreak") {
-      items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
-      return;
-    }
+  // `base` is the document position of `parent`'s first child, so a child at
+  // relative `offset` sits at `base + offset`.
+  const walk = (parent: Node, base: number): void => {
+    parent.forEach((node, relOffset) => {
+      const offset = base + relOffset;
 
-    if (node.type.name === "bulletList" || node.type.name === "orderedList") {
-      const isBullet = node.type.name === "bulletList";
-      let itemIndex = (node.attrs["order"] as number) ?? 1;
+      if (node.type.name === "pageBreak") {
+        items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
+        return;
+      }
 
-      node.forEach((listItem, liOffset) => {
-        // nodePos of the paragraph inside this listItem:
-        // offset (before bulletList) + 1 (into bulletList) + liOffset (before listItem) + 1 (into listItem)
-        const paraNodePos = offset + 1 + liOffset + 1;
-        const para = listItem.firstChild;
-        if (!para) return;
+      // A section boundary affects the flow only when the next section must
+      // start on a fresh page. A continuous break is a pure model marker, and
+      // column geometry is read from the derived sections, not from here.
+      if (isSectionBreak(node)) {
+        const breakType = coerceSectionSettings(node.attrs["settings"]).breakType;
+        if (breakType !== "continuous") {
+          items.push({
+            isPageBreak: true,
+            pageBreakType: breakType,
+            node,
+            nodePos: offset,
+            indentLeft: 0,
+          });
+        }
+        return;
+      }
 
-        const marker = isBullet ? "•" : `${itemIndex}.`;
+      if (node.type.name === "bulletList" || node.type.name === "orderedList") {
+        const isBullet = node.type.name === "bulletList";
+        let itemIndex = (node.attrs["order"] as number) ?? 1;
 
-        items.push({
-          node: para,
-          nodePos: paraNodePos,
-          indentLeft: LIST_INDENT,
-          listMarker: marker,
-          styleKey: "list_item",
+        node.forEach((listItem, liOffset) => {
+          // nodePos of the paragraph inside this listItem:
+          // offset (before bulletList) + 1 (into bulletList) + liOffset (before listItem) + 1 (into listItem)
+          const paraNodePos = offset + 1 + liOffset + 1;
+          const para = listItem.firstChild;
+          if (!para) return;
+
+          const marker = isBullet ? "•" : `${itemIndex}.`;
+
+          items.push({
+            node: para,
+            nodePos: paraNodePos,
+            indentLeft: LIST_INDENT,
+            listMarker: marker,
+            styleKey: "list_item",
+          });
+
+          itemIndex++;
         });
+        return;
+      }
 
-        itemIndex++;
-      });
-      return;
-    }
+      if (node.type.name === "table") {
+        // Tables expand into one item per row. Each row lays out as an atomic
+        // (leaf-like) block in v1 — whole row moves to the next page on
+        // overflow, no line-splitting across cells. Phase 4 replaces the
+        // stub row layout with sandboxed per-cell layout.
+        const gridAttr = node.attrs["grid"];
+        const tableColumns = Array.isArray(gridAttr)
+          ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
+          : [];
+        const lastRowIndex = node.childCount - 1;
+        node.forEach((rowNode, rowOffset, rowIndex) => {
+          const rowNodePos = offset + 1 + rowOffset;
+          items.push({
+            node: rowNode,
+            nodePos: rowNodePos,
+            indentLeft: 0,
+            tableColumns,
+            isLastRow: rowIndex === lastRowIndex,
+          });
+        });
+        return;
+      }
 
-    if (node.type.name === "table") {
-      // Tables expand into one item per row. Each row lays out as an atomic
-      // (leaf-like) block in v1 — whole row moves to the next page on
-      // overflow, no line-splitting across cells. Phase 4 replaces the
-      // stub row layout with sandboxed per-cell layout.
-      node.forEach((rowNode, rowOffset) => {
-        const rowNodePos = offset + 1 + rowOffset;
-        items.push({ node: rowNode, nodePos: rowNodePos, indentLeft: 0 });
-      });
-      return;
-    }
+      switch (nodeLayout(node.type).kind) {
+        case "transparent":
+          walk(node, offset + 1);
+          return;
 
-    const blockIndent = (node.attrs["indent"] as number) ?? 0;
-    items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
-  });
+        case "block": {
+          const blockIndent = (node.attrs["indent"] as number) ?? 0;
+          items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
+          return;
+        }
+      }
+    });
+  };
+
+  walk(doc, 0);
 
   return items;
 }
@@ -1906,7 +2136,39 @@ function resolveBlockEntry(
   fontModifiers: Map<string, FontModifier> | undefined,
   measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
   inlineRegistry?: InlineRegistry,
+  tableColumns?: number[],
 ): MeasureCacheEntry {
+  // Table rows bypass the measure cache: their `cells` carry child-block span
+  // docPos values that the cache-hit delta-adjustment path does not rewrite, so
+  // re-measuring fresh each run keeps cell hit-testing correct. Tables are small
+  // relative to body text, so this is cheap.
+  if (node.type.name === "tableRow") {
+    const measured = layoutBlock(node, {
+      nodePos,
+      x: blockX,
+      y: targetY,
+      availableWidth: blockWidth,
+      page: pageNumber,
+      measurer,
+      fontConfig,
+      ...(fontModifiers ? { fontModifiers } : {}),
+      ...(inlineRegistry ? { inlineRegistry } : {}),
+      ...(tableColumns ? { tableColumns } : {}),
+    });
+    return {
+      availableWidth: blockWidth,
+      nodePos,
+      kind: measured.kind,
+      height: measured.height,
+      lines: measured.lines,
+      ...(measured.cells ? { cells: measured.cells } : {}),
+      spaceBefore: measured.spaceBefore,
+      spaceAfter: measured.spaceAfter,
+      blockType: measured.blockType,
+      align: measured.align,
+    };
+  }
+
   const cached = measureCache?.get(node);
   if (cached && cached.availableWidth === blockWidth) {
     const delta = nodePos - cached.nodePos;

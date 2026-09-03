@@ -13,14 +13,38 @@
  *   Phase 3 — addLayoutHandler / addMarkDecorators → wired into BlockRegistry + renderer
  */
 
-import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark } from "prosemirror-model";
-import type { MarkdownSerializerState } from "prosemirror-markdown";
-import type { Command, Plugin, Transaction, EditorState } from "prosemirror-state";
+import type { Extension } from "./Extension";
+
+/**
+ * Named keybinding precedences. Higher wins first refusal for a key.
+ *
+ * The ladder is "most specific context first": a binding only applies inside a
+ * table, then inside a code block, then inside a list, then anywhere. Each
+ * declines by returning `false`, delegating down the chain.
+ *
+ * Extensions may use any number; these names exist so built-ins read as intent
+ * rather than magic constants, and so third parties can slot in relative to
+ * them (e.g. `KeymapPriority.list + 10`).
+ */
+export const KeymapPriority = {
+  /** Bindings that only apply inside a table cell. */
+  table: 400,
+  /** Bindings that only apply inside a code block. */
+  codeBlock: 300,
+  /** Bindings that only apply inside a list item. */
+  list: 200,
+  /** Everything else: block-level and document-wide fallbacks. */
+  default: 100,
+} as const;
+
+import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark, Slice } from "prosemirror-model";
+import type { MarkdownSerializer, MarkdownSerializerState } from "prosemirror-markdown";
+import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
 import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
-import type { BlockStrategy, InlineStrategy } from "../layout/BlockRegistry";
+import type { BlockStrategy, InlineStrategy, NodeLayout } from "../layout/BlockRegistry";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
@@ -28,7 +52,30 @@ import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { SurfaceRegistry } from "../surfaces/SurfaceRegistry";
 import type { ExportContributionMap, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
+import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
+import type { CloneIdMap } from "../model/assignBlockIds";
+import type {
+  SelectionBehavior,
+  HitTester,
+  SelectionGestureProvider,
+  SelectionDescriptor,
+  NodeActionContribution,
+  ResolvedNodeAction,
+} from "../selection/types";
+
+// ── Node spec ─────────────────────────────────────────────────────────────────
+
+/**
+ * A ProseMirror node spec plus the Scrivr-side declarations that go with it.
+ *
+ * `layout` says how the node participates in the visual flow — a dimension
+ * independent of what it means in the document tree. Omit it and the node
+ * behaves as `{ kind: "block" }`, which is what every built-in node relies on.
+ */
+export type ScrivrNodeSpec = NodeSpec & {
+  layout?: NodeLayout;
+};
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
 
@@ -93,8 +140,16 @@ export interface IBaseEditor {
   applyTransaction(tr: Transaction): void;
   /** The merged ProseMirror Schema built from all extensions. */
   readonly schema: Schema;
+  /** Typed old→new identity map produced during document cloning. */
+  readonly cloneIdMap: CloneIdMap | null;
   /** Serialize the full document to Markdown. Used by AiToolkitAPI. */
   getMarkdown(): string;
+  /**
+   * The MarkdownSerializer built from all extensions' serializer rules. Lets
+   * consumers serialize arbitrary nodes/fragments (not just the whole doc) —
+   * e.g. the semantic export lane rendering one block group at a time.
+   */
+  getMarkdownSerializer(): MarkdownSerializer;
   /** Returns the merged markdown parser token map from all extensions. */
   getMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec>;
   /** Parse a markdown string into a ProseMirror document node. */
@@ -118,7 +173,7 @@ export interface IBaseEditor {
    * `Extension` because the manager has no compile-time link from `name`
    * to option shape.
    */
-  findExtension(name: string): import("./Extension").Extension | null;
+  findExtension(name: string): Extension | null;
 }
 
 /**
@@ -134,6 +189,31 @@ export interface IEditor extends IBaseEditor {
   readonly surfaces: SurfaceRegistry;
   /** Register a canvas draw function for the overlay layer. Returns unregister. */
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void;
+  /**
+   * The kind-tagged, capability-carrying view of the active selection. UI reads
+   * this instead of `instanceof`-ing the ProseMirror selection.
+   */
+  getSelectionDescriptor(): SelectionDescriptor;
+  /**
+   * Node actions for the active selection, resolved and filtered against the
+   * current surface state. Used by UI to render node gutters / context menus.
+   */
+  getNodeActions(): ResolvedNodeAction[];
+  /**
+   * Execute a NodeAction by ID against the current selection context.
+   * Throws if the action is not applicable or is currently disabled.
+   */
+  runNodeAction(id: string): Promise<void>;
+  /**
+   * Describe a specific selection (not necessarily the active one). Pass `owner`
+   * when the selection belongs to a surface other than the active one, so it is
+   * resolved against the state/schema that owns it. Defaults to the active
+   * surface.
+   */
+  describeSelection(
+    selection: Selection,
+    owner?: { state: EditorState; surfaceId: string },
+  ): SelectionDescriptor;
   /** Current document layout (lazily recomputed when dirty). */
   get layout(): DocumentLayout;
   /**
@@ -163,10 +243,22 @@ export interface IEditor extends IBaseEditor {
   selectNode(docPos: number): void;
   /** Get screen-space position of a page canvas. Null when not mounted. */
   getPageScreenPosition(page: number): { screenLeft: number; screenTop: number } | null;
+  /**
+   * Scroll so the doc range [from, to] is visible — centered when it fits
+   * the viewport, top-pinned when taller. Completes a partial streamed
+   * layout first if the target lies beyond the laid-out region. Returns
+   * false when the range cannot be located (not mounted, no coords).
+   */
+  scrollRangeIntoView(from: number, to?: number): boolean;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
   redraw(): void;
   /** Invalidate the layout cache and trigger a re-layout on next paint. */
   invalidateLayout(): void;
+  /**
+   * Synchronously complete any streamed partial layout.
+   * Serialization paths should call this before reading `layout.pages`.
+   */
+  ensureFullLayout(): void;
   /**
    * Signal that the editor is (or is no longer) ready to render.
    * Call setReady(false) before a collaborative provider connects to suppress
@@ -191,6 +283,14 @@ export interface IEditor extends IBaseEditor {
   get loadingState(): "syncing" | "rendering" | "ready";
   /** Selection controller — cursor movement, word/line navigation, selection. */
   readonly selection: SelectionController;
+  /**
+   * Cursor blink controller. Use `cursorManager.isVisible` to gate overlay
+   * painting on the current blink phase, and `cursorManager.resetSilent()` to
+   * restart the cycle after a programmatic edit so the caret shows immediately
+   * without an extra repaint. Only exposed on `IEditor` because blink is a
+   * view-layer concern — `ServerEditor` has no cursor.
+   */
+  readonly cursorManager: CursorManager;
 }
 
 /**
@@ -281,6 +381,12 @@ export interface MarkdownSerializerRules {
  *   createNode(match, schema) { return schema.nodes.horizontalRule?.create() ?? null; },
  * }
  */
+/**
+ * Rewrites a pasted slice before it is inserted. Contributed via
+ * `addPasteTransforms`; return the slice unchanged to decline.
+ */
+export type PasteTransform = (slice: Slice) => Slice;
+
 export interface MarkdownBlockRule {
   /** Tested against each trimmed line of pasted text. */
   pattern: RegExp;
@@ -457,6 +563,40 @@ export interface InitialDocContext<Options = object> extends ExtensionContext<Op
   parseMarkdown(text: string): Node;
 }
 
+/**
+ * Runtime context handed to an extension's clone handler. See
+ * `ExtensionConfig.addCloneHandlers`.
+ */
+export interface CloneHandlerContext {
+  /** The document after core `nodeId` re-key on nodes/marks + prior handlers. */
+  doc: Node;
+  /**
+   * old id → new id accumulated so far (core `nodeId` re-keys first, then each
+   * handler in registration order). Read it (`get` / `getByType`) to rewrite
+   * references that point at a nodeId. To add your OWN id space, call
+   * `recordId()` — it keeps the map complete and typed for `getByType()`.
+   */
+  idMap: CloneIdMap;
+  /**
+   * Mint a fresh extension-owned id. Supplying its type and old value also
+   * routes the request through the caller's `clone.generate` function.
+   */
+  newId(typeName?: string, oldId?: string): string;
+  /** Record an extension-owned mapping for typed lookup as `kind: "custom"`. */
+  recordId(typeName: string, oldId: string, newId: string): void;
+  /** The built schema, for constructing replacement nodes/marks. */
+  schema: Schema;
+}
+
+/**
+ * A document-clone participation hook. Runs when an editor is created with
+ * `clone`, AFTER core has re-minted every `nodeId` on nodes and marks. Use it
+ * to re-key id spaces the `nodeId` convention doesn't cover, or to rewrite
+ * references that point at a nodeId. Return a transformed doc, or nothing to
+ * leave it unchanged. Contributed via `addCloneHandlers`.
+ */
+export type CloneHandler = (ctx: CloneHandlerContext) => Node | void;
+
 // ── Extension config (what you pass to Extension.create) ─────────────────────
 
 export interface ExtensionConfig<Options = object> {
@@ -469,7 +609,54 @@ export interface ExtensionConfig<Options = object> {
   // Called with `this = Phase1Context` — options available, schema is not yet built.
 
   /** Contribute ProseMirror node specs. Keys become schema node type names. */
-  addNodes?(this: Phase1Context<Options>): Record<string, NodeSpec>;
+  /**
+   * Precedence for this extension's keybindings. Higher runs first.
+   *
+   * Colliding bindings are **chained**, not overridden: a command returning
+   * `false` means "not applicable here" and delegates to the next binding for
+   * that key. Priority decides who gets first refusal, which is how one key
+   * carries several meanings — Tab is cell navigation inside a table, code
+   * indentation inside a code block, and list indentation inside a list.
+   *
+   * Context-specific handlers outrank general fallbacks. Use `KeymapPriority`
+   * rather than bare numbers. Ties resolve by registration order.
+   *
+   * This is deliberately separate from the extension list's order: that order
+   * already means something for the schema (ProseMirror fills `block+` with the
+   * first registered block type), and one list cannot encode two orderings.
+   *
+   * @default KeymapPriority.default (100)
+   */
+  keymapPriority?: number;
+
+  /**
+   * Sub-extensions this extension is composed of. The manager flattens them
+   * into its own list before any other phase runs, so a bundle never has to
+   * forward its children's contributions by hand — every `add*` hook a child
+   * declares is collected exactly as if the consumer had listed it directly.
+   *
+   * Children resolve in the order returned, immediately after their parent, so
+   * an extension listed after the bundle still layers on top of everything the
+   * bundle brought. Flattening is recursive: a bundle may contain a bundle.
+   *
+   * This is the hook that keeps `StarterKit` honest — without it, each new
+   * contribution seam has to be re-plumbed through the bundle or it silently
+   * vanishes for everyone using the default kit.
+   */
+  addExtensions?(this: Phase1Context<Options>): Extension[];
+
+  /**
+   * Contribute ProseMirror node specs. Keys become schema node type names.
+   *
+   * Alongside the ProseMirror spec, a node declares how it participates in
+   * layout via `layout` (see `NodeLayout`) — a dimension independent of what
+   * the node means in the document tree. A node that occupies its own box is
+   * `{ kind: "block" }` (the default) and registers a painter through
+   * `addLayoutHandlers`. A node that exists structurally but has no visual box
+   * of its own is `{ kind: "transparent" }`: it stays in the tree, and its
+   * children are laid out into the enclosing flow as if it weren't there.
+   */
+  addNodes?(this: Phase1Context<Options>): Record<string, ScrivrNodeSpec>;
 
   /** Contribute ProseMirror mark specs. Keys become schema mark type names. */
   addMarks?(this: Phase1Context<Options>): Record<string, MarkSpec>;
@@ -554,6 +741,14 @@ export interface ExtensionConfig<Options = object> {
    * means in both directions.
    */
   addImports?(this: Phase1Context<Options>): ImportContributionMap;
+
+  /**
+   * Participate in document clone. Return handlers that re-key the extension's
+   * own id spaces (custom attrs/marks the `nodeId` convention doesn't cover) or
+   * rewrite references that point at a nodeId. Handlers run at clone time with
+   * the schema and the accumulated old→new map in context. See `CloneHandler`.
+   */
+  addCloneHandlers?(this: Phase1Context<Options>): CloneHandler[];
 
   // ── Phase 2: Behaviour ──────────────────────────────────────────────────────
   // Called with `this = ExtensionContext` — the built schema is available.
@@ -654,11 +849,53 @@ export interface ExtensionConfig<Options = object> {
   addToolbarItems?(this: Phase1Context<Options>): ToolbarItemSpec[];
 
   /**
+   * Node actions this extension contributes (contextual operations on its nodes).
+   * Actions are registered against a selection kind, evaluated on selection
+   * changes, and exposed via `editor.getNodeActions()`.
+   */
+  addNodeActions?(this: Phase1Context<Options>): NodeActionContribution[];
+
+  /**
+   * Selection behaviors this extension owns — how its selection kind is
+   * described, painted, and dragged. Lets tables, images, and custom nodes
+   * drive selection on their own terms without patching the renderer or pointer
+   * controller. Registered before core built-ins, so an extension can override.
+   */
+  addSelectionBehavior?(this: Phase1Context<Options>): SelectionBehavior[];
+
+  /**
+   * Semantic hit testers — turn a pointer position into a `HitTarget` (e.g. a
+   * table adds a "table-cell" target). Consulted by descending priority; the
+   * pointer controller delegates the gesture based on the winning target.
+   */
+  addHitTester?(this: Phase1Context<Options>): HitTester[];
+
+  /**
+   * Pointer-gesture providers — begin a drag for a `HitTarget` this extension
+   * owns (e.g. cell drag-select). Kept separate from `addSelectionBehavior` so
+   * non-pointer selection kinds need not implement one.
+   */
+  addSelectionGesture?(this: Phase1Context<Options>): SelectionGestureProvider[];
+
+  /**
    * Custom markdown block rules for PasteTransformer.
    * Tried before built-in heading/bullet/ordered rules on each pasted line.
    * Phase 1 — no schema needed at definition time; schema is passed to createNode at runtime.
    */
   addMarkdownRules?(this: Phase1Context<Options>): MarkdownBlockRule[];
+
+  /**
+   * Rewrite pasted content before it enters the document.
+   *
+   * Runs in `PasteTransformer` on the parsed slice, whatever the clipboard
+   * flavour was — this is the engine's equivalent of ProseMirror's
+   * `transformPasted` view prop, which never fires here because Scrivr has no
+   * `EditorView`. Use it for anything that must not survive a copy verbatim:
+   * re-minting identity attrs, stripping host-specific state.
+   *
+   * Transforms run in registration order, each seeing the previous one's output.
+   */
+  addPasteTransforms?(this: Phase1Context<Options>): PasteTransform[];
 
   /**
    * ProseMirror input rules (auto-format while typing).
@@ -748,7 +985,9 @@ export interface ExtensionConfig<Options = object> {
 
 export interface ResolvedExtension {
   name: string;
-  nodes: Record<string, NodeSpec>;
+  /** Resolved keybinding precedence. See `ExtensionConfig.keymapPriority`. */
+  keymapPriority: number;
+  nodes: Record<string, ScrivrNodeSpec>;
   marks: Record<string, MarkSpec>;
   /**
    * Doc-level attribute contributions. See `ExtensionConfig.addDocAttrs`.
@@ -771,6 +1010,8 @@ export interface ResolvedExtension {
   exports: ExportContributionMap;
   /** Format-specific import handler contributions. Empty map when absent. */
   imports: ImportContributionMap;
+  /** Document-clone participation hooks. Empty when absent. */
+  cloneHandlers: CloneHandler[];
   plugins: Plugin[];
   keymap: Record<string, Command>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -784,8 +1025,13 @@ export interface ResolvedExtension {
   markDecorators: Map<string, MarkDecorator>;
   fontModifiers: Map<string, FontModifier>;
   toolbarItems: ToolbarItemSpec[];
+  nodeActions: NodeActionContribution[];
+  selectionBehaviors: SelectionBehavior[];
+  hitTesters: HitTester[];
+  selectionGestures: SelectionGestureProvider[];
   inputHandlers: Record<string, InputHandler>;
   markdownRules: MarkdownBlockRule[];
+  pasteTransforms: PasteTransform[];
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
   markdownSerializerRules: MarkdownSerializerRules;

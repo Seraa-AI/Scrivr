@@ -1,10 +1,12 @@
 import { Extension } from "../Extension";
-import type { Command } from "prosemirror-state";
+import { NodeSelection, type Command } from "prosemirror-state";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { IEditor } from "../types";
+import { getHandles } from "../../renderer/ResizeController";
+import type { SelectionBehavior } from "../../selection/types";
 import type { Node as PmNode } from "prosemirror-model";
 import type { ResolvedTheme } from "../../model/theme";
-import { safeUrl } from "../../model/safeUrl";
+import { safeImageUrl } from "../../model/safeUrl";
 import { getNodeAttrs } from "../../model/getNodeAttrs";
 import {
   xml,
@@ -15,6 +17,89 @@ import {
   type DocxNodeHandler,
   type XmlNode,
 } from "../../exports/docx";
+import type { SemanticNodeHandler } from "../../exports/semantic";
+
+// ── HTML placement round-trip ─────────────────────────────────────────────────
+
+/**
+ * How an image's placement attrs cross an HTML boundary — copy to the clipboard
+ * and paste back, or any other `toDOM`/`parseDOM` trip.
+ *
+ * `<img>` has no native spelling for wrapping or anchoring, so these ride as
+ * `data-*` attributes. One declaration drives both directions: a placement attr
+ * added here round-trips, and there is no second list to forget to update.
+ *
+ * `src`/`alt`/`width`/`height` are handled separately — they map to real `<img>`
+ * attributes and carry the URL-safety gate. `nodeId` is deliberately absent: a
+ * pasted image is a new node and gets a fresh identity.
+ */
+const PLACEMENT_TEXT_ATTRS = {
+  wrapMode: "data-wrap-mode",
+  positionMode: "data-position-mode",
+  xAlign: "data-x-align",
+  verticalAlign: "data-vertical-align",
+} as const;
+
+/**
+ * The values each placement attr may hold. Pasted HTML is foreign input, and
+ * layout dispatches on these by identity — `PageLayout` treats any `wrapMode`
+ * that is not `"inline"` as an anchored object — so an unrecognised string
+ * would enter the document as an out-of-enum value that no wrap branch handles.
+ * A value outside its set is dropped, falling back to the schema default.
+ */
+const PLACEMENT_TEXT_VALUES: Record<
+  keyof typeof PLACEMENT_TEXT_ATTRS,
+  readonly string[]
+> = {
+  wrapMode: ["inline", "square", "top-bottom", "behind", "front"],
+  positionMode: ["move-with-text"],
+  xAlign: ["left", "center", "right", "custom"],
+  verticalAlign: ["baseline", "top", "middle", "bottom"],
+};
+
+const PLACEMENT_NUMBER_ATTRS = {
+  x: "data-x",
+  yOffset: "data-y-offset",
+  zIndex: "data-z-index",
+  margin: "data-margin",
+} as const;
+
+/** Placement attrs that describe a distance and cannot be negative. */
+const NON_NEGATIVE_PLACEMENT_ATTRS: readonly string[] = ["margin"];
+
+/** Placement attrs as DOM attributes. Null-valued attrs (e.g. an unset custom x) are omitted. */
+function writePlacementAttrs(node: PmNode): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [attr, domAttr] of Object.entries(PLACEMENT_TEXT_ATTRS)) {
+    const value = node.attrs[attr];
+    if (typeof value === "string") out[domAttr] = value;
+  }
+  for (const [attr, domAttr] of Object.entries(PLACEMENT_NUMBER_ATTRS)) {
+    const value = node.attrs[attr];
+    if (typeof value === "number") out[domAttr] = String(value);
+  }
+  return out;
+}
+
+/** Placement attrs read back off an element. Absent, unparseable, or out-of-range ones fall through to the schema defaults. */
+function readPlacementAttrs(dom: Element): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [attr, domAttr] of Object.entries(PLACEMENT_TEXT_ATTRS)) {
+    const value = dom.getAttribute(domAttr);
+    if (value === null) continue;
+    const allowed = PLACEMENT_TEXT_VALUES[attr as keyof typeof PLACEMENT_TEXT_ATTRS];
+    if (allowed.includes(value)) out[attr] = value;
+  }
+  for (const [attr, domAttr] of Object.entries(PLACEMENT_NUMBER_ATTRS)) {
+    const value = dom.getAttribute(domAttr);
+    if (value === null) continue;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) continue;
+    if (parsed < 0 && NON_NEGATIVE_PLACEMENT_ATTRS.includes(attr)) continue;
+    out[attr] = parsed;
+  }
+  return out;
+}
 
 // ── Image cache ───────────────────────────────────────────────────────────────
 
@@ -136,9 +221,9 @@ function insertImage(): Command {
 
     const raw = window.prompt("Image URL:", "https://");
     // Ingestion-time URL validation — see model/safeUrl.ts. Rejects
-    // javascript:, data:, vbscript:, file:, and any non-allowlisted
-    // scheme before the node lands in the document.
-    const src = safeUrl(raw);
+    // javascript:, vbscript:, file:, and any non-allowlisted scheme before
+    // the node lands in the document; inline raster data URLs are allowed.
+    const src = safeImageUrl(raw);
     if (src === null) return false;
 
     // Insert inline at the current cursor position (inside the paragraph)
@@ -215,7 +300,6 @@ async function fetchImageBytes(src: string): Promise<Uint8Array | null> {
 
 interface DocxImageRecord {
   src: string;
-  relId: string;
   filename: string;
   width: number;
   height: number;
@@ -243,8 +327,19 @@ function collectImageSrcs(doc: PmNode): string[] {
   return Array.from(seen);
 }
 
-async function imageOnBeforeDocxExport(ctx: DocxContext): Promise<void> {
-  const doc = ctx.editor.getState().doc;
+/**
+ * Fetch every image in `doc`, register the bytes as `word/media/*`, and record
+ * `{src → filename}` in the shared map so the sync `image` handler can emit a
+ * `<w:drawing>` for it. Media is a document-global pool (deduped by src), but
+ * the *relationship* is allocated later, at emit time, into whichever OPC part
+ * references the image — so this pre-pass deliberately does NOT touch rels.
+ *
+ * Exported so contributions that render their own sub-documents (headers,
+ * footers, footnotes) can prepare their images through the same fetch/sniff
+ * path from their own async `onBeforeExport`, without the Image extension
+ * knowing those surfaces exist.
+ */
+export async function prepareDocxImages(ctx: DocxContext, doc: PmNode): Promise<void> {
   const srcs = collectImageSrcs(doc);
   if (srcs.length === 0) return;
 
@@ -266,10 +361,13 @@ async function imageOnBeforeDocxExport(ctx: DocxContext): Promise<void> {
       }
       const { contentType, ext } = sniffImageContentType(bytes);
       const filename = ctx.media.add({ data: bytes, contentType, ext });
-      const relId = ctx.rels.addImage(filename);
-      map.set(src, { src, relId, filename, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+      map.set(src, { src, filename, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
     }),
   );
+}
+
+async function imageOnBeforeDocxExport(ctx: DocxContext): Promise<void> {
+  await prepareDocxImages(ctx, ctx.editor.getState().doc);
 }
 
 const NS_WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
@@ -430,10 +528,13 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
   const width = readPositiveInt(node.attrs["width"], record.width);
   const height = readPositiveInt(node.attrs["height"], record.height);
   const wrapMode = readString(node.attrs["wrapMode"]) ?? "inline";
+  // Allocate the relationship into the OPC part currently being walked (body,
+  // header, footer…) — rels are part-scoped, media is not.
+  const relId = ctx.rels.addImage(record.filename);
 
   if (wrapMode === "inline") {
     return xml("w:r", undefined, [
-      buildInlineDrawing(ctx, record.filename, record.relId, width, height),
+      buildInlineDrawing(ctx, record.filename, relId, width, height),
     ]);
   }
 
@@ -446,14 +547,64 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
   if (typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
 
   return xml("w:r", undefined, [
-    buildAnchoredDrawing(ctx, record.filename, record.relId, width, height, anchor),
+    buildAnchoredDrawing(ctx, record.filename, relId, width, height, anchor),
   ]);
 };
 
 // ── Extension ─────────────────────────────────────────────────────────────────
 
+/**
+ * Image selection: a resizable, draggable object. The outline + 8 resize grips
+ * come from geometry primitives; the pointer controller grants grab/ghost/commit
+ * to any selection whose descriptor reports `resize`. This is the template an
+ * extension follows to make its own node resizable.
+ */
+const imageSelectionBehavior: SelectionBehavior<NodeSelection> = {
+  kind: "image",
+  matches: (s): s is NodeSelection =>
+    s instanceof NodeSelection && s.node.type.name === "image",
+  describe: (s, ctx) => ({
+    kind: "image",
+    surfaceId: ctx.surfaceId,
+    empty: false,
+    capabilities: {
+      copy: true,
+      cut: !ctx.readOnly,
+      delete: !ctx.readOnly,
+      formatText: false,
+      drag: !ctx.readOnly,
+      resize: !ctx.readOnly,
+    },
+    anchor: s.anchor,
+    head: s.head,
+    from: s.from,
+    to: s.to,
+  }),
+  geometry: (s, ctx) => {
+    const r = ctx.nodeRectAt(s.from);
+    if (!r || r.page !== ctx.page) return [];
+    const rect = { x: r.x, y: r.y, width: r.width, height: r.height };
+    return [
+      { type: "outline", rect, width: 1.5, role: "affordance" },
+      {
+        type: "handles",
+        handles: getHandles(r.x, r.y, r.width, r.height).map((h) => ({
+          x: h.hx,
+          y: h.hy,
+          cursor: h.cursor,
+        })),
+        role: "affordance",
+      },
+    ];
+  },
+};
+
 export const Image = Extension.create({
   name: "image",
+
+  addSelectionBehavior() {
+    return [imageSelectionBehavior];
+  },
 
   addNodes() {
     return {
@@ -466,6 +617,8 @@ export const Image = Extension.create({
           width: { default: 200 },
           height: { default: 200 },
           nodeId: { default: null },
+          /** Internal identity while an asynchronously pasted image is resolving. */
+          pendingPasteId: { default: null },
           /** Vertical alignment within the line box — matches InlineObjectVerticalAlign */
           verticalAlign: { default: "baseline" },
           // ── Anchored-object attrs (current model) ─────────────────────────
@@ -502,7 +655,7 @@ export const Image = Extension.create({
               // from getAttrs drops the matched element) rather than store
               // a node that paints nothing or, worse, navigates somewhere
               // dangerous when a future DOM mirror renders it.
-              const src = safeUrl(dom.getAttribute("src"));
+              const src = safeImageUrl(dom.getAttribute("src"));
               if (src === null) return false;
               return {
                 src,
@@ -513,6 +666,7 @@ export const Image = Extension.create({
                 height: dom.getAttribute("height")
                   ? parseInt(dom.getAttribute("height")!)
                   : 200,
+                ...readPlacementAttrs(dom),
               };
             },
           },
@@ -521,7 +675,13 @@ export const Image = Extension.create({
           const { src, alt, width, height } = getNodeAttrs(node, "image");
           return [
             "img",
-            { src, alt, width: String(width), height: String(height) },
+            {
+              src,
+              alt,
+              width: String(width),
+              height: String(height),
+              ...writePlacementAttrs(node),
+            },
           ];
         },
       },
@@ -562,12 +722,34 @@ export const Image = Extension.create({
     ];
   },
 
+  addNodeActions() {
+    return [
+      {
+        kind: "image",
+        actions: [
+          {
+            id: "image.placeholder",
+            label: "Placeholder Action",
+            run: () => {
+              // Placeholder for React migration
+            },
+          },
+        ],
+      },
+    ];
+  },
+
   addExports() {
+    // Image is inline (lives in a paragraph), so the walker classifies an
+    // image-only paragraph as type:"image" (see Paragraph). This handler is
+    // here for forward-compat if an image ever surfaces as a top-level block.
+    const semanticHandler: SemanticNodeHandler = () => ({ type: "image" });
     return {
       docx: {
         onBeforeExport: imageOnBeforeDocxExport,
         nodes: { image: imageDocxHandler },
       },
+      semantic: { nodes: { image: semanticHandler } },
     };
   },
 

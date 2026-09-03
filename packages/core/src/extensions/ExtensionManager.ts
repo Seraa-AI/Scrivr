@@ -1,6 +1,7 @@
 import { Schema } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { keymap } from "prosemirror-keymap";
+import { chainCommands } from "prosemirror-commands";
 import { inputRules } from "prosemirror-inputrules";
 import type { Plugin, Command } from "prosemirror-state";
 import type { Node as ProseMirrorNode, AttributeSpec, NodeSpec, MarkSpec } from "prosemirror-model";
@@ -12,12 +13,15 @@ import type {
   ToolbarItemSpec,
   InputHandler,
   MarkdownBlockRule,
+  PasteTransform,
   MarkdownParserTokenSpec,
   MarkdownSerializerRules,
   MarkdownNodeSerializer,
   MarkdownMarkSerializer,
+  CloneHandler,
 } from "./types";
 import type { IBaseEditor, IEditor } from "./types";
+import type { SelectionBehavior, HitTester, SelectionGestureProvider, NodeActionContribution } from "../selection/types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
 import type { PageConfig } from "../layout/PageLayout";
@@ -99,6 +103,42 @@ function mergeContributions<T>(
 function specsOf<T>(target: Map<string, Contribution<T>>): Record<string, T> {
   const out: Record<string, T> = {};
   for (const [key, { spec }] of target) out[key] = spec;
+  return out;
+}
+
+/**
+ * Expand every extension that declares `addExtensions()` into a flat list:
+ * each parent is followed immediately by its children, depth-first.
+ *
+ * Everything downstream — schema build, keymap, commands, layout handlers,
+ * clone handlers, and every seam added later — then sees a bundle's children
+ * as ordinary extensions. That is the whole point: a bundle can never drop a
+ * contribution it forgot to forward, because it does not forward anything.
+ *
+ * Parent-before-children keeps the composition rule consumers already rely on:
+ * anything listed after a bundle still layers on top of everything inside it.
+ */
+export function flattenExtensions(extensions: Extension[]): Extension[] {
+  const out: Extension[] = [];
+  const seen = new Set<Extension>();
+
+  const visit = (ext: Extension): void => {
+    // Guards against a bundle that (directly or transitively) lists itself.
+    // Without this the recursion never terminates and the failure surfaces as
+    // a stack overflow far from the misconfigured extension.
+    if (seen.has(ext)) {
+      console.warn(
+        `[ExtensionManager] Extension "${ext.name}" appears more than once in the extension tree; ` +
+          `the duplicate is ignored. Check for a bundle that includes itself or a doubly-listed extension.`,
+      );
+      return;
+    }
+    seen.add(ext);
+    out.push(ext);
+    for (const child of ext.children()) visit(child);
+  };
+
+  for (const ext of extensions) visit(ext);
   return out;
 }
 
@@ -187,7 +227,7 @@ function buildSchemaFromPhase1(contribs: Phase1SchemaContributions): Schema {
  *   const schema = getSchema([StarterKit]);
  */
 export function getSchema(extensions: Extension[]): Schema {
-  return buildSchemaFromPhase1(collectPhase1SchemaContributions(extensions));
+  return buildSchemaFromPhase1(collectPhase1SchemaContributions(flattenExtensions(extensions)));
 }
 
 /**
@@ -215,15 +255,18 @@ export class ExtensionManager {
   private readonly docAttrOwners: Record<string, string>;
 
   constructor(extensions: Extension[]) {
-    this.extensions = extensions;
+    // Phase 0: expand bundles. From here on there are no bundles, only
+    // extensions — every later phase treats a StarterKit child exactly like an
+    // extension the consumer listed themselves.
+    this.extensions = flattenExtensions(extensions);
 
     // Phase 1: build schema and capture doc-attr ownership in one pass.
-    const phase1 = collectPhase1SchemaContributions(extensions);
+    const phase1 = collectPhase1SchemaContributions(this.extensions);
     this.schema = buildSchemaFromPhase1(phase1);
     this.docAttrOwners = phase1.docAttrOwners;
 
     // Phase 2+: resolve everything else with the built schema in context
-    this.resolved = extensions.map((ext) => ext.resolve(this.schema));
+    this.resolved = this.extensions.map((ext) => ext.resolve(this.schema));
   }
 
   /**
@@ -250,8 +293,14 @@ export class ExtensionManager {
    * shape.
    */
   findExtension(name: string): Extension | null {
-    for (const ext of this.extensions) {
-      if (ext.name === name) return ext;
+    // Last match wins, matching how every other contribution resolves: a name
+    // listed after a bundle overrides the bundle's own copy. `[StarterKit,
+    // Heading.configure({levels:[1]})]` must resolve to the caller's Heading,
+    // not the kit's — the kit's child is registered under the same name and
+    // comes first.
+    for (let i = this.extensions.length - 1; i >= 0; i--) {
+      const ext = this.extensions[i];
+      if (ext && ext.name === name) return ext;
     }
     return null;
   }
@@ -376,11 +425,42 @@ export class ExtensionManager {
    * Used by the Editor to dispatch key events without a ProseMirror EditorView.
    */
   buildKeymap(): Record<string, Command> {
-    const bindings = new Map<string, Contribution<Command>>();
-    for (const ext of this.resolved) {
-      mergeContributions(bindings, ext.keymap, ext.name, "Keymap", "warn");
+    // Keybindings compose; they don't override. A ProseMirror command returning
+    // `false` declares "not applicable here" and delegates to the next binding
+    // for that key — that is how one key carries several meanings: Tab is cell
+    // navigation in a table, code indentation in a code block, and list
+    // indentation in a list. Last-wins would keep one meaning and silently
+    // delete the rest.
+    //
+    // Precedence comes from `keymapPriority`, NOT from the extension list's
+    // order. That order already means something else — ProseMirror fills
+    // `block+` with the first registered block type — and one list cannot
+    // encode two orderings. Only keymap contributions are sorted here; schema
+    // and command collisions keep their own semantics.
+    interface KeyBinding {
+      command: Command;
+      priority: number;
+      /** Registration index — the stable tie-break within a priority. */
+      index: number;
+      owner: string;
     }
-    return specsOf(bindings);
+    const byKey = new Map<string, KeyBinding[]>();
+
+    this.resolved.forEach((ext, index) => {
+      for (const [key, command] of Object.entries(ext.keymap)) {
+        const list = byKey.get(key) ?? [];
+        list.push({ command, priority: ext.keymapPriority, index, owner: ext.name });
+        byKey.set(key, list);
+      }
+    });
+
+    const merged: Record<string, Command> = {};
+    for (const [key, bindings] of byKey) {
+      bindings.sort((a, b) => b.priority - a.priority || a.index - b.index);
+      const commands = bindings.map((b) => b.command);
+      merged[key] = commands.length === 1 ? commands[0]! : chainCommands(...commands);
+    }
+    return merged;
   }
 
   /**
@@ -451,6 +531,15 @@ export class ExtensionManager {
    */
   getImportContributions(): ImportContributionMap[] {
     return this.resolved.map((ext) => ext.imports);
+  }
+
+  /**
+   * Clone participation hooks from all extensions, in registration order.
+   * BaseEditor runs these after the core nodeId re-key when cloning a document,
+   * so extensions can re-key their own id spaces or rewrite nodeId references.
+   */
+  getCloneHandlers(): CloneHandler[] {
+    return this.resolved.flatMap((ext) => ext.cloneHandlers);
   }
 
   /**
@@ -533,6 +622,34 @@ export class ExtensionManager {
   }
 
   /**
+   * Node actions from all extensions, in registration order.
+   */
+  buildNodeActions(): NodeActionContribution[] {
+    return this.resolved.flatMap((ext) => ext.nodeActions);
+  }
+
+  /**
+   * Selection behaviors from all extensions, in registration order. The Editor
+   * appends core built-ins after these and a default fallback last, so an
+   * extension's behavior wins for its own selection kind.
+   */
+  buildSelectionBehaviors(): SelectionBehavior[] {
+    return this.resolved.flatMap((ext) => ext.selectionBehaviors);
+  }
+
+  /** Semantic hit testers from all extensions, sorted by descending priority. */
+  buildHitTesters(): HitTester[] {
+    return this.resolved
+      .flatMap((ext) => ext.hitTesters)
+      .sort((a, b) => b.priority - a.priority);
+  }
+
+  /** Pointer-gesture providers from all extensions, in registration order. */
+  buildSelectionGestures(): SelectionGestureProvider[] {
+    return this.resolved.flatMap((ext) => ext.selectionGestures);
+  }
+
+  /**
    * Returns the merged input handler map from all extensions.
    * Later extensions override earlier ones on key conflicts.
    */
@@ -550,6 +667,14 @@ export class ExtensionManager {
    */
   buildMarkdownRules(): MarkdownBlockRule[] {
     return this.resolved.flatMap((ext) => ext.markdownRules);
+  }
+
+  /**
+   * All paste transforms from all extensions, in registration order.
+   * Passed to PasteTransformer, which applies them to every parsed slice.
+   */
+  buildPasteTransforms(): PasteTransform[] {
+    return this.resolved.flatMap((ext) => ext.pasteTransforms);
   }
 
   /**

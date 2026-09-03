@@ -1,5 +1,5 @@
-import { Node as PMNode } from "prosemirror-model";
-import { EditorState } from "prosemirror-state";
+import { Node as PMNode } from "@scrivr/core/pm";
+import { EditorState } from "@scrivr/core/pm";
 
 import { ChangeSet } from "./ChangeSet";
 import { getMarkTrackedData, getNodeTrackedData } from "./helpers";

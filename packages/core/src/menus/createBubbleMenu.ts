@@ -15,6 +15,7 @@
  */
 import type { IEditor } from "../extensions/types";
 import type { EditorState } from "prosemirror-state";
+import { CellSelection } from "../table/cellSelection";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
@@ -54,7 +55,7 @@ export function createBubbleMenu(editor: IEditor, options: BubbleMenuOptions): (
   let visible = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const shouldShow = options.shouldShow ?? defaultShouldShow;
+  const shouldShow = options.shouldShow ?? defaultBubbleMenuShouldShow;
 
   function update() {
     const state = editor.getState();
@@ -106,10 +107,14 @@ export function createBubbleMenu(editor: IEditor, options: BubbleMenuOptions): (
   };
 }
 
-function defaultShouldShow(state: EditorState): boolean {
+/** Default bubble-menu visibility: a non-empty *text* selection. */
+export function defaultBubbleMenuShouldShow(state: EditorState): boolean {
   const { selection, doc } = state;
   const { empty, from, to } = selection;
   if (empty) return false;
+  // A cell range is not a text selection — it shows a table toolbar, not the
+  // text bubble (Google-Docs style), even though its head cell holds text.
+  if (selection instanceof CellSelection) return false;
   // Confirm there is actual text in the selection (not just a node selection)
   return doc.textBetween(from, to).length > 0;
 }

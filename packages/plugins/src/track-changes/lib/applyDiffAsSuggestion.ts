@@ -30,10 +30,10 @@
  *                   > 0.7 → full rewrite, offer "Accept rewrite" button
  */
 
-import type { Schema } from "prosemirror-model";
-import type { EditorState, Transaction } from "prosemirror-state";
+import type { Schema } from "@scrivr/core/pm";
+import type { EditorState, Transaction } from "@scrivr/core/pm";
 
-import { findNodeById } from "../../ai-toolkit/UniqueId";
+import { findNodeById } from "@scrivr/core";
 import {
   addTrackIdIfDoesntExist,
   createNewDeleteAttrs,
@@ -65,7 +65,7 @@ import { skipTracking, TrackChangesAction, setAction } from "../actions";
  * Deletions are applied in reverse position order so earlier positions remain
  * stable as we go.
  */
-function clearAuthorPendingMarks(
+export function clearAuthorPendingMarks(
   tr: Transaction,
   nodeFrom: number,
   nodeTo: number,

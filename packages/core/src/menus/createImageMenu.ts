@@ -1,7 +1,8 @@
 /**
  * createImageMenu — framework-agnostic controller for an image toolbar popover.
  *
- * Shows when the editor has a NodeSelection on an image node.
+ * Shows when the active selection's descriptor kind is "image" (the kind the
+ * Image extension's SelectionBehavior reports).
  * Passes the image node, its doc position, and a viewport DOMRect to the
  * callbacks so the consumer can render resize / wrapping / margin controls.
  *
@@ -21,7 +22,6 @@
  *     },
  *   });
  */
-import { NodeSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import type { IEditor } from "../extensions/types";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
@@ -60,16 +60,18 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
   let rafId: number | null = null;
 
   function update() {
-    const state = editor.getState();
-    const sel = state.selection;
+    const actions = editor.getNodeActions();
+    const descriptor = editor.getSelectionDescriptor();
+    const state = editor.surfaces.activeSurface?.state ?? editor.getState();
+    const docPos = descriptor.from;
+    const node = state.doc.nodeAt(docPos);
 
-    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") {
+    // If there are no actions for this node, or the node doesn't exist, hide the menu.
+    if (actions.length === 0 || !node) {
       if (visible) { visible = false; lastDocPos = -1; onHide(); }
       return;
     }
 
-    const docPos = sel.from;
-    const node = sel.node;
     const rect = editor.getNodeViewportRect(docPos);
     if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
       if (visible) { visible = false; lastDocPos = -1; onHide(); }

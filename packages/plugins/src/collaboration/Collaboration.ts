@@ -17,7 +17,7 @@
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Extension } from "@scrivr/core";
-import type { IEditor } from "@scrivr/core";
+import type { IBaseEditor } from "@scrivr/core";
 import { YBinding } from "./YBinding";
 import type { DocAttrEnvelope } from "./YBinding";
 import { collaborationRegistry } from "./collaborationState";
@@ -43,6 +43,17 @@ interface InstanceState {
   binding: YBinding | null; // set in onEditorReady, null until then
 }
 const instanceState = new WeakMap<object, InstanceState>();
+
+/**
+ * `setReady` suppresses layout/paint during Y.js initial sync — a view-only
+ * concern on the browser `Editor`. Headless `ServerEditor` has no `setReady`
+ * (and no paint to suppress), so skip it there.
+ */
+function setReadyIfSupported(editor: IBaseEditor, ready: boolean): void {
+  if ("setReady" in editor && typeof editor.setReady === "function") {
+    editor.setReady(ready);
+  }
+}
 
 export const Collaboration = Extension.create<CollaborationOptions>({
   name: "collaboration",
@@ -98,12 +109,11 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     };
   },
 
-  onViewReady(editor: IEditor) {
-    // Today Collaboration's runtime depends on `setReady(false/true)` to
-    // suppress layout/paint during Y.js initial sync — that's view-only.
-    // The Y binding itself is engine-state work and could move to
-    // `onEditorReady`; splitting the two is a follow-up so headless
-    // ServerEditor collaboration becomes a first-class case.
+  onEditorReady(editor: IBaseEditor) {
+    // Engine-state work (Y binding + provider) runs here so headless
+    // `ServerEditor` collaboration is a first-class case — `onViewReady` never
+    // fires without a view. `YBinding` already depends only on `IBaseEditor`.
+    // The `setReady` layout/paint suppression is view-only and guarded below.
     const inst = instanceState.get(this.options);
     if (!inst) return;
 
@@ -119,7 +129,8 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     // Hundreds of typeObserver events will fire during initial sync — without
     // this, each one triggers a full layout+paint, causing O(N²) total work.
     // setReady(true) in onSynced does one fast chunked layout of the final doc.
-    editor.setReady(false);
+    // No-op headless (ServerEditor has no view to suppress).
+    setReadyIfSupported(editor, false);
 
     const binding = new YBinding(editor, ydoc, type, attrsMap);
     inst.binding = binding;
@@ -132,7 +143,7 @@ export const Collaboration = Extension.create<CollaborationOptions>({
       token: this.options.token ?? null,
       onSynced: () => {
         binding.markSynced();
-        editor.setReady(true);
+        setReadyIfSupported(editor, true);
       },
       ...(this.options.onConnect ? { onConnect: this.options.onConnect } : {}),
       ...(this.options.onDisconnect

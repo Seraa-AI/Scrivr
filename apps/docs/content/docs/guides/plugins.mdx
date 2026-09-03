@@ -49,6 +49,35 @@ addKeymap() {
 },
 ```
 
+Bindings for the same key **chain** rather than override. Returning `false` means "not
+applicable here" and delegates to the next binding, which is how one key carries several
+meanings — `Tab` navigates cells inside a table, indents inside a code block, and sinks a list
+item inside a list.
+
+### `keymapPriority`
+
+Decides which binding gets first refusal for a key. Higher runs first; the default is
+`KeymapPriority.default` (100), and equal priorities fall back to registration order.
+
+```ts
+import { Extension, KeymapPriority } from '@scrivr/core';
+
+Extension.create({
+  name: 'myTableThing',
+  keymapPriority: KeymapPriority.table, // 400 — only applies inside a table
+  addKeymap() {
+    return { Tab: myCellCommand };
+  },
+});
+```
+
+Give context-specific handlers a higher priority than general fallbacks. The built-in ladder is
+`table` (400) → `codeBlock` (300) → `list` (200) → `default` (100); slot your own in relative to
+those (e.g. `KeymapPriority.list + 10`).
+
+This is deliberately independent of where an extension sits in the `extensions` array: that
+order already decides the schema's default block type, and one ordering cannot serve both.
+
 ---
 
 ### `addCommands`
@@ -75,25 +104,60 @@ After registration: `editor.commands.insertArrow()`.
 
 ### `addProseMirrorPlugins`
 
-Contributes low-level ProseMirror plugins for event handling or decorations.
+Contributes low-level ProseMirror plugins — plugin state, and transactions derived from other
+transactions.
 
 ```ts
 addProseMirrorPlugins() {
   return [
     new Plugin({
-      props: {
-        handleKeyDown(view, event) {
-          if (event.key === 'Tab') {
-            // custom tab handling
-            return true; // mark as handled
-          }
-          return false;
-        },
+      key: new PluginKey('myPlugin'),
+      state: {
+        init: () => ({ count: 0 }),
+        apply: (tr, value) => (tr.docChanged ? { count: value.count + 1 } : value),
+      },
+      // Enforce a document invariant after every change.
+      appendTransaction(transactions, oldState, newState) {
+        if (!transactions.some((tr) => tr.docChanged)) return null;
+        // ...return a transaction, or null to decline
+        return null;
       },
     }),
   ];
 },
 ```
+
+<Callout type="warn">
+  **`Plugin.spec.view()` and plugin `props` never run.** They are `prosemirror-view` hooks, and
+  Scrivr paints to canvas — there is no `EditorView` to call them. A plugin that puts its logic in
+  `view()`, `props.handleKeyDown`, `props.transformPasted` or `props.decorations` is silently
+  inert, and its tests pass because they call the function directly.
+
+  Use `appendTransaction` for document invariants, [`addKeymap`](#addkeymap) for keys,
+  [`addPasteTransforms`](#addpastetransforms) for paste, and `editor.addOverlayRenderHandler`
+  (from [`onEditorReady`](#oneditorready)) for anything you would have drawn with decorations.
+</Callout>
+
+---
+
+### `addPasteTransforms`
+
+Rewrites pasted content before it enters the document. `PasteTransformer` applies these to the
+parsed slice whatever the clipboard flavour was — HTML or markdown — so a transform sees the
+content exactly once.
+
+```ts
+addPasteTransforms() {
+  return [
+    (slice) => remintIdentityAttrs(slice),
+  ];
+},
+```
+
+Use it for anything that must not survive a copy verbatim: re-minting identity attributes so a
+pasted node is a new instance rather than a duplicate of the original, or stripping state that
+only made sense in the document it came from. Transforms run in registration order, each seeing
+the previous one's output; return the slice unchanged to decline.
 
 ---
 
@@ -168,10 +232,25 @@ editor.commands.sayHello();
 
 ## Composing sub-extensions
 
-To bundle multiple extensions into one, implement the schema/behaviour hooks for each member
-directly, or call `.resolve()` on each sub-extension and merge the results. This is the pattern
-`StarterKit` uses internally — it aggregates all built-in extensions by resolving and merging
-their `nodes`, `marks`, `keymap`, `commands`, etc. into a single `Extension.create()` config.
+To bundle multiple extensions into one, return them from `addExtensions()`. The editor flattens
+the bundle into its own extension list, so every hook a member declares is collected exactly as
+if it had been listed directly:
+
+```ts
+const MyKit = Extension.create({
+  name: 'myKit',
+
+  addExtensions() {
+    const extensions = [MyExtensionA];
+    if (this.options.b !== false) extensions.push(MyExtensionB.configure(this.options.b));
+    return extensions;
+  },
+});
+```
+
+This is what `StarterKit` does. Note that a bundle should **not** forward its members'
+contributions by hand — a bundle that re-merges `nodes`, `marks`, `keymap` and friends itself
+silently drops any hook added after it was last edited.
 
 For most use cases, simply pass multiple extensions to the `extensions` array in `EditorOptions`
 rather than building an aggregator extension:

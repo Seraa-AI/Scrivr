@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 import { unzipSync, strFromU8 } from "fflate";
-import { ServerEditor, Extension, StarterKit } from "@scrivr/core";
+import { ServerEditor, Extension, StarterKit, SourcedBlockExtension } from "@scrivr/core";
 import { exportDocx, exportDocxBytes } from "./export";
 import { DocxExportError } from "./error";
 import { xml } from "./xml";
@@ -81,6 +81,56 @@ describe("exportDocx", () => {
     expect(result).toHaveProperty("diagnostics");
     expect(result.bytes).toBeInstanceOf(Uint8Array);
     expect(Array.isArray(result.diagnostics)).toBe(true);
+  });
+
+  it("exports paragraph/heading alignment as <w:jc>", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1, align: "center" }, content: [{ type: "text", text: "Title" }] },
+        { type: "paragraph", attrs: { align: "right" }, content: [{ type: "text", text: "Right" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Default" }] },
+      ],
+    });
+    const bytes = await exportDocxBytes(editor);
+    const doc = readZip(bytes)["word/document.xml"]!;
+    expect(doc).toContain('<w:jc w:val="center"/>');
+    expect(doc).toContain('<w:jc w:val="right"/>');
+    // The default (left) paragraph gets no jc — exactly one jc-bearing paragraph
+    // besides the centered heading.
+    expect((doc.match(/<w:jc /g) ?? []).length).toBe(2);
+  });
+
+  it("exports a table at full text-area width (pct 100%), not the raw grid px", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    editor.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { layout: "fixed", grid: [100, 100] },
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }] },
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const bytes = await exportDocxBytes(editor);
+    const doc = readZip(bytes)["word/document.xml"]!;
+    // Full width so Word fits the table to the page (matches the canvas), rather
+    // than rendering the small raw grid-px sum.
+    expect(doc).toContain('w:type="pct"');
+    expect(doc).toContain('w:w="5000"');
+    expect(doc).not.toContain('w:type="auto"');
+    expect(doc).toContain("<w:tblGrid>");
   });
 
   it("produces a valid OPC package with all required parts", async () => {
@@ -355,5 +405,152 @@ describe("exportDocx — determinism", () => {
     const a = await exportDocxBytes(editor, { overrides });
     const b = await exportDocxBytes(editor, { overrides });
     expect(a).toEqual(b);
+  });
+});
+
+describe("exportDocx — sourced blocks", () => {
+  function editorWith(resourceId: string): ServerEditor {
+    return new ServerEditor({
+      extensions: [StarterKit, SourcedBlockExtension],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "sourcedBlock",
+            attrs: {
+              instanceId: "src_1",
+              kind: "clause",
+              resourceId,
+              versionId: "v1",
+              baseHash: "abc123",
+              baseNormalizer: 1,
+            },
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: "Indemnity clause" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+  }
+
+  async function documentXml(editor: ServerEditor): Promise<string> {
+    const bytes = await exportDocxBytes(editor);
+    return strFromU8(unzipSync(bytes)["word/document.xml"]!);
+  }
+
+  it("carries provenance in the content control's w:tag", async () => {
+    const editor = editorWith("cl_456");
+    const xmlText = await documentXml(editor);
+    expect(xmlText).toContain("scrivr:sourcedBlock:");
+    expect(xmlText).toContain("resourceId=cl_456");
+    expect(xmlText).toContain("Indemnity clause");
+  });
+
+  it("drops the control rather than emitting a w:tag Word would reject", async () => {
+    // ST_String caps w:tag/@w:val at 255 characters.
+    const editor = editorWith("cl_" + "x".repeat(300));
+    const { diagnostics } = await exportDocx(editor);
+
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        level: "warning",
+        code: "sourced-block-tag-too-long",
+        nodeType: "sourcedBlock",
+      }),
+    );
+
+    // The content survives — only the source link is lost.
+    const xmlText = await documentXml(editor);
+    expect(xmlText).toContain("Indemnity clause");
+    expect(xmlText).not.toContain("scrivr:sourcedBlock:");
+  });
+});
+
+describe("exportDocx — hyperlinks", () => {
+  function editorWithLink(href: string): ServerEditor {
+    return new ServerEditor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "see " },
+              {
+                type: "text",
+                text: "the terms",
+                marks: [{ type: "link", attrs: { href } }],
+              },
+              { type: "text", text: " for detail" },
+            ],
+          },
+        ],
+      },
+    });
+  }
+
+  async function partsOf(editor: ServerEditor): Promise<Record<string, string>> {
+    const bytes = await exportDocxBytes(editor);
+    const entries = unzipSync(bytes);
+    const out: Record<string, string> = {};
+    for (const [path, data] of Object.entries(entries)) out[path] = strFromU8(data);
+    return out;
+  }
+
+  it("emits a w:hyperlink around the linked runs, with a relationship", async () => {
+    const editor = editorWithLink("https://example.com/terms");
+    const parts = await partsOf(editor);
+
+    const document = parts["word/document.xml"]!;
+    const rels = parts["word/_rels/document.xml.rels"]!;
+
+    const relId = /<w:hyperlink w:r:id="([^"]+)"|<w:hyperlink r:id="([^"]+)"/.exec(document);
+    expect(relId).not.toBeNull();
+    const id = relId![1] ?? relId![2]!;
+
+    // The link text is inside the hyperlink element, the surrounding text is not.
+    expect(document).toMatch(new RegExp(`<w:hyperlink [^>]*${id}[^>]*>.*?the terms.*?</w:hyperlink>`));
+    expect(document).toContain("see ");
+    expect(document).toContain(" for detail");
+
+    // The relationship exists and points outside the package.
+    expect(rels).toContain(`Id="${id}"`);
+    expect(rels).toContain("https://example.com/terms");
+    expect(rels).toContain('TargetMode="External"');
+  });
+
+  it("no longer warns that the link mark is unsupported", async () => {
+    const { diagnostics } = await exportDocx(editorWithLink("https://example.com"));
+    expect(
+      diagnostics.filter((d) => d.code === "unsupported-mark" && d.markType === "link"),
+    ).toEqual([]);
+  });
+
+  it("styles the link so a reader recognises it", async () => {
+    const parts = await partsOf(editorWithLink("https://example.com"));
+    expect(parts["word/styles.xml"]).toContain("Hyperlink");
+  });
+
+  it("leaves a link with no href as plain styled text rather than a dangling relationship", async () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "bare", marks: [{ type: "link", attrs: { href: "" } }] }],
+          },
+        ],
+      },
+    });
+    const parts = await partsOf(editor);
+    expect(parts["word/document.xml"]).not.toContain("<w:hyperlink");
+    expect(parts["word/document.xml"]).toContain("bare");
   });
 });

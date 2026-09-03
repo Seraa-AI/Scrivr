@@ -1,4 +1,4 @@
-import { EditorState, Transaction } from "prosemirror-state";
+import { EditorState, Transaction } from "@scrivr/core/pm";
 import {
   AddMarkStep,
   AddNodeMarkStep,
@@ -9,7 +9,7 @@ import {
   ReplaceAroundStep,
   ReplaceStep,
   Step,
-} from "prosemirror-transform";
+} from "@scrivr/core/pm";
 
 import { TrTrackingContext } from "../types";
 import { processChangeSteps } from "./processReplaceStep";
@@ -22,6 +22,7 @@ import { createNewPendingAttrs, genId, getNodeTrackedData } from "../helpers";
 import { fixAndSetSelectionAfterTracking } from "./fixAndSetSelectionAfterTracking";
 import { updateChangeAttrs } from "./updateAttributes";
 import { diffChangeSteps } from "../lib/structuralChange";
+import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
 import { isSetNodeMarkupStep } from "../step-trackers/qualifiers";
 import { trackReplaceAroundStep } from "../step-trackers/trackReplaceAroundStep";
 import { trackSetNodeMarkupStep } from "../step-trackers/trackSetNodeMarkupStep";
@@ -163,8 +164,14 @@ export function trackTransaction(
           oldState.schema,
         );
       }
+      // Fuse this tracked mark with same-author/same-attrs neighbours so a run
+      // built from several edits stays one change (as typing already does).
+      mergeTrackedMarks(step.from, newTr.doc, newTr, oldState.schema);
+      mergeTrackedMarks(step.to, newTr.doc, newTr, oldState.schema);
     } else if (step instanceof RemoveMarkStep) {
       trackRemoveMarkStep(step, emptyAttrs, newTr, tr.docs[i]!);
+      mergeTrackedMarks(step.from, newTr.doc, newTr, oldState.schema);
+      mergeTrackedMarks(step.to, newTr.doc, newTr, oldState.schema);
     } else if (step instanceof RemoveNodeMarkStep) {
       trackRemoveNodeMarkStep(step, emptyAttrs, newTr, tr.docs[i]!);
     } else if (step instanceof AddNodeMarkStep) {

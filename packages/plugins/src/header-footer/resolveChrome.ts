@@ -6,7 +6,7 @@
  * header/footer heights don't depend on flow content layout.
  */
 
-import type { Node } from "prosemirror-model";
+import type { Node } from "@scrivr/core/pm";
 import {
   runMiniPipeline,
   type DocumentLayout,
@@ -33,6 +33,8 @@ export interface ResolvedHeaderFooter {
     defaultFooter?: SlotLayout | undefined;
     firstPageHeader?: SlotLayout | undefined;
     firstPageFooter?: SlotLayout | undefined;
+    evenPageHeader?: SlotLayout | undefined;
+    evenPageFooter?: SlotLayout | undefined;
   };
   policy: HeaderFooterPolicy;
   /** Fallback marginTop from pageConfig — used when definition.marginTop is not set. */
@@ -117,6 +119,12 @@ export function resolveChrome(
       firstPageFooter: policy.differentFirstPage
         ? measureSlot(policy.firstPageFooter, input, activeEditingGap)
         : undefined,
+      evenPageHeader: policy.differentOddEven
+        ? measureSlot(policy.evenPageHeader, input, activeEditingGap)
+        : undefined,
+      evenPageFooter: policy.differentOddEven
+        ? measureSlot(policy.evenPageFooter, input, activeEditingGap)
+        : undefined,
     },
   };
 
@@ -124,6 +132,7 @@ export function resolveChrome(
     const def = resolveSlot(policy, { pageNumber }, "header");
     if (!def) return undefined;
     if (def === policy.firstPageHeader) return resolved.slots.firstPageHeader;
+    if (def === policy.evenPageHeader) return resolved.slots.evenPageHeader;
     return resolved.slots.defaultHeader;
   };
 
@@ -131,6 +140,7 @@ export function resolveChrome(
     const def = resolveSlot(policy, { pageNumber }, "footer");
     if (!def) return undefined;
     if (def === policy.firstPageFooter) return resolved.slots.firstPageFooter;
+    if (def === policy.evenPageFooter) return resolved.slots.evenPageFooter;
     return resolved.slots.defaultFooter;
   };
 
@@ -158,12 +168,12 @@ export function resolveChrome(
   // uses the first-page slot and pages 2+ use the default slot — both must
   // exist. Without this, the missing slot returns topForPage=0, and
   // replacesTopMargin causes contentTop=0 (body flush to page edge).
-  const hasHeader = policy.differentFirstPage
-    ? !!(policy.defaultHeader && policy.firstPageHeader)
-    : !!policy.defaultHeader;
-  const hasFooter = policy.differentFirstPage
-    ? !!(policy.defaultFooter && policy.firstPageFooter)
-    : !!policy.defaultFooter;
+  const hasHeader = !!policy.defaultHeader &&
+    (!policy.differentFirstPage || !!policy.firstPageHeader) &&
+    (!policy.differentOddEven || !!policy.evenPageHeader);
+  const hasFooter = !!policy.defaultFooter &&
+    (!policy.differentFirstPage || !!policy.firstPageFooter) &&
+    (!policy.differentOddEven || !!policy.evenPageFooter);
 
   return {
     topForPage: headerTopForPage,

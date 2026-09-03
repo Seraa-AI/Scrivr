@@ -1,4 +1,5 @@
 import type { Schema } from "prosemirror-model";
+import { KeymapPriority } from "./types";
 import type {
   ExtensionConfig,
   ExtensionContext,
@@ -49,8 +50,22 @@ export class Extension<Options extends object = object> {
    * @example
    * Heading.configure({ levels: [1, 2, 3] })
    */
-  configure(options: Partial<Options>): Extension<Options> {
+  configure(options?: Partial<Options>): Extension<Options> {
     return new Extension(this.config, { ...this.options, ...options });
+  }
+
+  /**
+   * Sub-extensions declared via `addExtensions()`, already configured by this
+   * extension's own options. Returns a fresh array; empty for a leaf extension.
+   *
+   * Read by the manager during flattening, before any resolution phase — the
+   * children then take part in every phase on equal footing with top-level
+   * extensions.
+   */
+  children(): Extension[] {
+    const { config, name, options } = this;
+    const p1: Phase1Context<Options> = { name, options };
+    return config.addExtensions?.call(p1) ?? [];
   }
 
   /**
@@ -70,6 +85,7 @@ export class Extension<Options extends object = object> {
 
     return {
       name,
+      keymapPriority: config.keymapPriority ?? KeymapPriority.default,
       // Phase 1: called with p1 so addNodes/addMarks/addDocAttrs can access this.options
       nodes: config.addNodes?.call(p1) ?? {},
       marks: config.addMarks?.call(p1) ?? {},
@@ -92,6 +108,9 @@ export class Extension<Options extends object = object> {
       // Phase 1 — format-specific import contributions collected by format
       // packages at import time (e.g. importDocx walks addImports().docx contributions).
       imports: config.addImports?.call(p1) ?? {},
+      // Phase 1 — clone participation hooks; BaseEditor runs them after the core
+      // nodeId re-key when an editor is created with `clone`.
+      cloneHandlers: config.addCloneHandlers?.call(p1) ?? [],
       // Phase 2: only when schema is available
       plugins: schema ? (config.addProseMirrorPlugins?.call(p2) ?? []) : [],
       ...(schema && config.addInitialDoc
@@ -111,8 +130,13 @@ export class Extension<Options extends object = object> {
       markDecorators: new Map(Object.entries(config.addMarkDecorators?.call(p1) ?? {})),
       fontModifiers: config.addFontModifiers?.call(p1) ?? new Map(),
       toolbarItems: config.addToolbarItems?.call(p1) ?? [],
+      nodeActions: config.addNodeActions?.call(p1) ?? [],
+      selectionBehaviors: config.addSelectionBehavior?.call(p1) ?? [],
+      hitTesters: config.addHitTester?.call(p1) ?? [],
+      selectionGestures: config.addSelectionGesture?.call(p1) ?? [],
       inputHandlers: config.addInputHandlers?.call(p1) ?? {},
       markdownRules: config.addMarkdownRules?.call(p1) ?? [],
+      pasteTransforms: config.addPasteTransforms?.call(p1) ?? [],
       inputRules: schema ? (config.addInputRules?.call(p2) ?? []) : [],
       markdownParserTokens: config.addMarkdownParserTokens?.call(p1) ?? {},
       markdownSerializerRules: config.addMarkdownSerializerRules?.call(p1) ?? {},

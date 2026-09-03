@@ -5,11 +5,27 @@
  * so tests run without a real Editor or DOM.
  */
 
-import { describe, it, expect } from "vitest";
-import { Schema } from "prosemirror-model";
+import { describe, it, expect, vi } from "vitest";
+import { Schema } from "@scrivr/core/pm";
 import zlib from "node:zlib";
-import { buildPdf } from "../index";
-import type { DocumentLayout, LayoutBlock, LayoutLine } from "@scrivr/core";
+import { PDFDocument } from "pdf-lib";
+import { buildPdf as buildPdfWithEditor, exportToPdf, type PdfExportOptions } from "../index";
+import {
+  CharacterMap,
+  CursorManager,
+  SelectionController,
+  ServerEditor,
+  StarterKit,
+  SurfaceRegistry,
+} from "@scrivr/core";
+import type { DocumentLayout, IEditor, LayoutBlock, LayoutLine, Selection } from "@scrivr/core";
+
+// buildPdf now requires an editor (it collects PDF handlers from extensions).
+// A ServerEditor satisfies the contract; table is enabled so the table handler
+// is available to the synthetic table layouts below.
+const exportEditor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+const buildPdf = (layout: DocumentLayout, options?: PdfExportOptions) =>
+  buildPdfWithEditor(layout, exportEditor, options);
 
 // ── Minimal schema ────────────────────────────────────────────────────────────
 
@@ -18,6 +34,8 @@ const schema = new Schema({
     doc: { content: "block+" },
     paragraph: { group: "block", content: "inline*" },
     horizontalRule: { group: "block" },
+    tableRow: { group: "block", content: "tableCell+" },
+    tableCell: { content: "block+" },
     image: {
       group: "block",
       attrs: { src: { default: "" }, width: { default: 100 }, height: { default: 100 } },
@@ -96,6 +114,51 @@ function hrBlock(y = MARGIN + 100): LayoutBlock {
   };
 }
 
+function imageObjectLine(src: string): LayoutLine {
+  return {
+    spans: [
+      {
+        kind: "object",
+        node: schema.nodes.image!.create({ src, width: 32, height: 24 }),
+        x: 0,
+        width: 32,
+        height: 24,
+        docPos: 10,
+        verticalAlign: "baseline",
+      },
+    ],
+    width: 32,
+    lineHeight: 28,
+    ascent: 24,
+    descent: 4,
+    cursorHeight: 20,
+    textAscent: 16,
+    xHeight: 8,
+  };
+}
+
+function tableRowWithCellImage(src: string): LayoutBlock {
+  const cellNode = schema.nodes.tableCell!.create(null, [schema.nodes.paragraph!.create()]);
+  const rowNode = schema.nodes.tableRow!.create(null, [cellNode]);
+  const child = paragraphBlock([imageObjectLine(src)], MARGIN + 4);
+  return {
+    kind: "tableRow",
+    node: rowNode,
+    nodePos: 0,
+    x: MARGIN,
+    y: MARGIN,
+    width: 120,
+    height: 40,
+    lines: [],
+    cells: [{ cellPos: 1, x: MARGIN, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [child] }],
+    spaceBefore: 0,
+    spaceAfter: 0,
+    blockType: "tableRow",
+    align: "left",
+    availableWidth: AVAIL_W,
+  };
+}
+
 function makeLayout(
   blocks: LayoutBlock[],
   anchoredObjects: DocumentLayout["anchoredObjects"] = [],
@@ -108,6 +171,111 @@ function makeLayout(
     anchoredObjects,
     fragments: [],
   };
+}
+
+function makePagedLayout(pageCount: number): DocumentLayout {
+  return {
+    pages: Array.from({ length: pageCount }, (_, index) => ({
+      pageNumber: index + 1,
+      blocks: [paragraphBlock([textLine(`Page ${index + 1}`)])],
+    })),
+    pageConfig: PAGE_CONFIG,
+    version: 1,
+    totalContentHeight: PAGE_H * pageCount,
+    fragments: [],
+  };
+}
+
+class ExportPdfEditorDouble extends ServerEditor implements IEditor {
+  readonly surfaces = new SurfaceRegistry();
+  readonly cursorManager = new CursorManager(() => {});
+  readonly selection: SelectionController;
+  ensureFullLayoutCalls = 0;
+  private currentLayout: DocumentLayout;
+  private readonly completeLayout: DocumentLayout;
+  private readonly charMap = new CharacterMap();
+
+  constructor(initialLayout: DocumentLayout, completeLayout: DocumentLayout) {
+    super({ extensions: [StarterKit.configure({ table: true })] });
+    this.currentLayout = initialLayout;
+    this.completeLayout = completeLayout;
+    this.selection = new SelectionController({
+      getState: () => this.getState(),
+      dispatch: (tr) => this.applyTransaction(tr),
+      ensureLayout: () => {},
+      getCharMap: () => this.charMap,
+      focus: () => {},
+    });
+  }
+
+  get layout(): DocumentLayout {
+    return this.currentLayout;
+  }
+
+  ensureFullLayout(): void {
+    this.ensureFullLayoutCalls++;
+    this.currentLayout = this.completeLayout;
+  }
+
+  addOverlayRenderHandler(): () => void {
+    return () => {};
+  }
+
+  getSelectionDescriptor() {
+    return this.describeSelection(this.getState().selection);
+  }
+
+  describeSelection(selection: Selection) {
+    const s = selection;
+    return {
+      kind: "text",
+      surfaceId: "body",
+      empty: s.empty,
+      capabilities: { copy: !s.empty, cut: !s.empty, delete: !s.empty, formatText: true, drag: false, resize: false },
+      anchor: s.anchor,
+      head: s.head,
+      from: s.from,
+      to: s.to,
+    };
+  }
+
+  getNodeActions() {
+    return [];
+  }
+
+  async runNodeAction() {}
+
+  getViewportRect(): DOMRect | null {
+    return null;
+  }
+
+  getNodeViewportRect(): DOMRect | null {
+    return null;
+  }
+
+  getScrollContainerRect(): DOMRect | null {
+    return null;
+  }
+
+  selectNode(): void {}
+
+  getPageScreenPosition(): { screenLeft: number; screenTop: number } | null {
+    return null;
+  }
+
+  scrollRangeIntoView(): boolean {
+    return false;
+  }
+
+  redraw(): void {}
+
+  invalidateLayout(): void {}
+
+  setReady(): void {}
+
+  override get loadingState(): "syncing" | "rendering" | "ready" {
+    return this.currentLayout.isPartial ? "rendering" : "ready";
+  }
 }
 
 // ── PDF inspection helpers ────────────────────────────────────────────────────
@@ -133,6 +301,20 @@ function decompressStreams(bytes: Uint8Array): string {
   }
   return chunks.join("\n");
 }
+
+describe("exportToPdf", () => {
+  it("forces a complete layout before serializing pages", async () => {
+    const partialLayout: DocumentLayout = { ...makePagedLayout(1), isPartial: true };
+    const completeLayout = makePagedLayout(3);
+    const editor = new ExportPdfEditorDouble(partialLayout, completeLayout);
+
+    const bytes = await exportToPdf(editor);
+    const pdf = await PDFDocument.load(bytes);
+
+    expect(editor.ensureFullLayoutCalls).toBe(1);
+    expect(pdf.getPageCount()).toBe(3);
+  });
+});
 
 /**
  * Decode the hex strings that pdf-lib uses for text operators.
@@ -244,6 +426,21 @@ describe("buildPdf", () => {
       paragraphBlock([textLine("Below the rule")], MARGIN + 150),
     ]);
     await expect(buildPdf(layout)).resolves.toBeInstanceOf(Uint8Array);
+  });
+
+  it("collects image assets nested inside table cell blocks", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock: typeof fetch = vi.fn(async () =>
+      new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+    );
+    globalThis.fetch = fetchMock;
+    try {
+      const src = "https://example.test/cell-image.png";
+      await buildPdf(makeLayout([tableRowWithCellImage(src)]));
+      expect(fetchMock).toHaveBeenCalledWith(src);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("handles segment-positioned lines", async () => {

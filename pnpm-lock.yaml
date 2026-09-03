@@ -44,6 +44,9 @@ importers:
       '@floating-ui/dom':
         specifier: ^1.7.6
         version: 1.7.6
+      '@scrivr/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@scrivr/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -83,6 +86,9 @@ importers:
       lucide-react:
         specifier: ^1.6.0
         version: 1.7.0(react@19.2.4)
+      next-themes:
+        specifier: 0.4.6
+        version: 0.4.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react:
         specifier: ^19.2.4
         version: 19.2.4
@@ -146,6 +152,31 @@ importers:
         specifier: ^5.4.0
         version: 5.9.3
 
+  packages/ai:
+    dependencies:
+      '@scrivr/core':
+        specifier: workspace:*
+        version: link:../core
+      '@scrivr/export-semantic':
+        specifier: workspace:*
+        version: link:../export-semantic
+      '@scrivr/plugins':
+        specifier: workspace:*
+        version: link:../plugins
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@25.5.0)(@vitest/ui@2.1.9)(happy-dom@20.8.4)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.46.1)
+
   packages/core:
     dependencies:
       '@floating-ui/dom':
@@ -207,9 +238,6 @@ importers:
       '@scrivr/core':
         specifier: workspace:*
         version: link:../core
-      prosemirror-model:
-        specifier: ^1.25.4
-        version: 1.25.4
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
@@ -243,10 +271,6 @@ importers:
         version: 2.1.9(@types/node@25.5.0)(@vitest/ui@2.1.9)(happy-dom@20.8.4)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.46.1)
 
   packages/export-markdown:
-    dependencies:
-      prosemirror-markdown:
-        specifier: ^1.13.4
-        version: 1.13.4
     devDependencies:
       '@scrivr/core':
         specifier: workspace:*
@@ -273,9 +297,6 @@ importers:
       '@scrivr/core':
         specifier: workspace:*
         version: link:../core
-      prosemirror-model:
-        specifier: ^1.25.4
-        version: 1.25.4
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
@@ -286,33 +307,45 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@25.5.0)(@vitest/ui@2.1.9)(happy-dom@20.8.4)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.46.1)
 
+  packages/export-semantic:
+    devDependencies:
+      '@scrivr/core':
+        specifier: workspace:*
+        version: link:../core
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@25.5.0)(@vitest/ui@2.1.9)(happy-dom@20.8.4)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.46.1)
+
   packages/plugins:
     dependencies:
       '@scrivr/core':
         specifier: workspace:*
         version: link:../core
-      prosemirror-commands:
-        specifier: ^1.6.0
-        version: 1.7.1
-      prosemirror-keymap:
-        specifier: ^1.2.0
-        version: 1.2.3
+      prosemirror-model:
+        specifier: '>=1.0.0'
+        version: 1.25.4
+      prosemirror-state:
+        specifier: '>=1.0.0'
+        version: 1.4.4
     devDependencies:
       '@hocuspocus/provider':
         specifier: ^3.4.4
         version: 3.4.4(y-protocols@1.0.7(yjs@13.6.30))(yjs@13.6.30)
-      prosemirror-history:
-        specifier: ^1.5.0
-        version: 1.5.0
-      prosemirror-model:
-        specifier: ^1.25.4
-        version: 1.25.4
-      prosemirror-state:
-        specifier: ^1.4.4
-        version: 1.4.4
-      prosemirror-transform:
-        specifier: ^1.11.0
-        version: 1.11.0
+      '@scrivr/docx':
+        specifier: workspace:*
+        version: link:../docx
+      '@scrivr/export-semantic':
+        specifier: workspace:*
+        version: link:../export-semantic
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.2
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
@@ -338,6 +371,9 @@ importers:
         specifier: ^18.0.0
         version: 18.3.1(react@18.3.1)
     devDependencies:
+      '@scrivr/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@scrivr/core':
         specifier: workspace:*
         version: link:../core

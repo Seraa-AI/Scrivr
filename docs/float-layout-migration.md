@@ -138,7 +138,7 @@ Four bug fixes on top of the migration:
 | Float clipping | TileManager.ts | `overflow: hidden` on page tile wrappers. Prevents float images from bleeding past page edges. |
 | Cursor on float-only pages | CharacterMap.ts | `nearestLineOrAdjacent` searches adjacent pages when the clicked page has no text lines. |
 | Orphaned narrow lines | PageLayout.ts | `clearOrphanedConstraints` reverts constrained line widths on continuation blocks where no float exists on that page. |
-| Enter after float | Paragraph.ts | `cursorIsAfterFloat` adjusts the split point so float anchors land in the lower block after Enter. |
+| Enter after float | Paragraph.ts | `cursorIsAfterFloat` adjusted the split point so float anchors land in the lower block after Enter. **No longer present** — the function is absent from the code and from git history; whatever shipped was lost or never landed. Enter at a float anchor is handled instead by `splitBlockInheritAttrs` declining to split when an anchored object is selected. |
 
 ---
 

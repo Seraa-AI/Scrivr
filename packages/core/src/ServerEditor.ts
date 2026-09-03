@@ -10,6 +10,7 @@ import {
   type ResolvedTheme,
 } from "./model/theme";
 import { normalizeDocument } from "./model/normalizeDocument";
+import type { RecloneOptions } from "./model/assignBlockIds";
 
 export interface ServerEditorOptions {
   /**
@@ -25,6 +26,13 @@ export interface ServerEditorOptions {
    * `DefaultContent`).
    */
   content?: string | Record<string, unknown>;
+  /**
+   * Clone mode. When set, the initial document is deep-copied into a fresh
+   * `nodeId` space and the old→new mapping is exposed via `cloneIdMap`. Pass a
+   * `RecloneOptions` object to control which nodes/marks re-key and what the new
+   * ids are. See `BaseEditorOptions.clone`.
+   */
+  clone?: boolean | RecloneOptions;
   /**
    * Theme accepted for type parity with the browser `Editor`. ServerEditor
    * never paints, so theme is stored but unused. Values containing `var(...)`
@@ -73,8 +81,8 @@ export class ServerEditor extends BaseEditor {
    */
   private readonly resolvedTheme: ResolvedTheme;
 
-  constructor({ extensions = [StarterKit], content, theme }: ServerEditorOptions = {}) {
-    super({ extensions, ...(content ? { content } : {}) });
+  constructor({ extensions = [StarterKit], content, clone = false, theme }: ServerEditorOptions = {}) {
+    super({ extensions, clone, ...(content ? { content } : {}) });
     if (theme && themeContainsCssVars(theme)) {
       console.warn(
         "[ServerEditor] theme contains var(--...) values that cannot be resolved without a DOM. " +
@@ -99,6 +107,18 @@ export class ServerEditor extends BaseEditor {
     this.fireEditorReady();
   }
 
+  /**
+   * A headless read/emit surface never fabricates identity on load. Loading the
+   * same `contentJSON` must be deterministic — stamping random `nodeId`s here
+   * would churn ids on every server run (breaking chunk identity, causing
+   * duplicate chunk sets). Persisted ids are preserved; absent ones fall back
+   * deterministically in the emitter. Server-side edits still get stable ids
+   * from `UniqueId`.
+   */
+  protected override assignsBlockIdsOnLoad(): boolean {
+    return false;
+  }
+
   /** The current input theme (may contain literal colors only on the server). */
   getTheme(): EditorTheme {
     return this.theme;
@@ -121,11 +141,14 @@ export class ServerEditor extends BaseEditor {
    * loading a fresh document. Call `subscribe` callbacks manually if needed.
    */
   setContent(json: Record<string, unknown>): void {
-    // Ingestion-time normalization — URL allow-list, table repair,
-    // block-ID assignment, fingerprint, warnings. Same pipeline as the
-    // base constructor; `lastNormalizeResult` (inherited from BaseEditor)
-    // is refreshed so consumers can inspect what was repaired.
-    const result = normalizeDocument(json, { schema: this.manager.schema });
+    // Ingestion-time normalization — URL allow-list, table repair, fingerprint,
+    // warnings. Same pipeline as the base constructor. Block-ID assignment is
+    // OFF on this read/emit surface (see assignsBlockIdsOnLoad): a headless load
+    // preserves persisted ids and never fabricates non-deterministic ones.
+    const result = normalizeDocument(json, {
+      schema: this.manager.schema,
+      assignIds: false,
+    });
     this.lastNormalizeResultValue = result;
     this.editorState = EditorState.create({
       schema: this.manager.schema,

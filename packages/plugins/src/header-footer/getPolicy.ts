@@ -3,7 +3,7 @@
  * Used by both the HeaderFooter extension and the HeaderFooterController.
  */
 
-import type { Node } from "prosemirror-model";
+import type { Node } from "@scrivr/core/pm";
 import type { IBaseEditor } from "@scrivr/core";
 import type { HeaderFooterPolicy } from "./types";
 
