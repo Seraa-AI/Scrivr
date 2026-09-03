@@ -14,7 +14,7 @@ pnpm install          # Install all deps
 pnpm build            # Build all packages (tsup, ESM only)
 pnpm test             # Run all tests (turbo)
 pnpm typecheck        # Type-check all packages
-pnpm dev              # Start demo app
+pnpm dev              # Start the docs app (hosts the playground at /playground)
 
 # Per-package (preferred for development)
 cd packages/core && npx vitest run                        # Run all core tests
@@ -52,7 +52,7 @@ Four-layer design:
 - `CharacterMap` — glyph index mapping doc positions ↔ canvas coordinates (used for click hit-testing and cursor placement); uses **char-level span ranges**, not node ranges, so binary search finds the correct page for split paragraphs
 
 **Renderer (`renderer/`)**
-- `ViewManager` — DOM bridge: creates page `<div>`s, manages 2 canvases per page (content + overlay), virtual scrolling via `IntersectionObserver`, mouse events
+- `TileManager` — DOM bridge for both paged and pageless modes: recycles a fixed pool of tiles (2 canvases each — content + overlay) as the user scrolls, so tile count follows the viewport rather than the document. Scroll listener + `ResizeObserver`; pointer handling lives in `PointerController`
 - `PageRenderer` — paints one `LayoutPage` onto its canvas; populates `CharacterMap` on first paint
 - `OverlayRenderer` — cursor and selection rendering; extend via `addOverlayRenderHandler`
 - `CursorManager` — 530ms blink timer
@@ -75,9 +75,9 @@ Four-layer design:
 ### React Adapter (`packages/react/src/`)
 
 React is a thin shell. The engine owns layout and rendering.
-- `useInscribeEditor` — creates and manages `Editor` lifecycle
-- `Inscribe` — mounts `ViewManager` in `useEffect`
-- `useInscribeState` — subscribes to editor state without importing ProseMirror directly
+- `useScrivrEditor` — creates and manages `Editor` lifecycle
+- `Scrivr` — mounts `TileManager` in `useEffect`
+- `useScrivrState` (exported as `useEditorState`) — subscribes to editor state without importing ProseMirror directly
 
 ### Plugins (`packages/plugins/src/`)
 - **Collaboration** — Yjs + HocusPocus provider
@@ -91,13 +91,13 @@ React is a thin shell. The engine owns layout and rendering.
 ## Test Setup
 
 - Environment: `happy-dom` (core), `node` (plugins)
-- `vitest.setup.ts` calls `mockCanvas()` which stubs `HTMLCanvasElement.measureText` to return deterministic widths — required for all layout tests
-- 459+ tests in core across 17 test files
+- `vitest.setup.ts` wires **real** Skia font metrics (`@napi-rs/canvas`) into `getContext("2d")`. Measurement is never mocked — see `createMeasurer()` / `createTestEditor()` in `src/test-utils.ts`
+- **Text measures differently on different machines.** Linux CI fonts are not macOS fonts, so a string can wrap to a different number of lines there. Never assert a layout value that depends on wrap count, and never assert a real-font width tighter than ~1px. Assert relationships between measured values (`float.y === anchor.y`) or derive the expected value from the same measurer the code uses
+- ~1590 tests in core across ~90 test files
 
 ## Key Conventions
 
 - **No `as` type assertions.** Never use `as X` to narrow types. Write runtime predicate/guard functions that validate shape and return typed values. A single `as` inside a guard (after an `in`/`typeof` check) is acceptable — scattered `as` casts at call sites are not. Use `satisfies` when validating a value matches a type without widening. Module augmentation (`Commands`, `NodeAttributes`) should make consumer casts unnecessary.
-- `PageView.tsx` is deprecated — `ViewManager.ts` is the active renderer
 - Match Word/Google Docs/Pages conventions for cursor behavior, shortcuts, paste, formatting by default
 - Layout pipeline is being refactored toward explicit named stages (`buildBlockFlow` → `applyFloatLayout` → `paginateFlow` → `buildFragments`) — follow this pattern when touching `PageLayout.ts`
 - Float y-delta pushes long paragraphs past `pageBottom` → split at boundary (`splitBlockAtBoundary`), do not move wholesale

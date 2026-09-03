@@ -29,8 +29,19 @@ import { createMeasurer } from "../test-utils";
  * Not an assertion suite — a stopwatch for issue #161.
  *
  * Reports the cost of one interaction against a fully laid-out document, as a
- * function of document size, so the linear terms in the pipeline show up as
- * numbers rather than as a reading of the code.
+ * function of document size, so the terms in the pipeline show up as numbers
+ * rather than as a reading of the code.
+ *
+ * Skipped unless `SCRIVR_TRACE=1`. It asserts nothing, so running it in CI buys
+ * no protection — it only prints tables and spends time. The standing guard is
+ * `pageGeometryScaling.test.ts`, which counts geometry queries instead of
+ * milliseconds and therefore survives a slow or busy machine.
+ *
+ *     SCRIVR_TRACE=1 npx vitest run src/layout/pipelineTrace.test.ts
+ *
+ * Wall-clock numbers from this file are only meaningful on an idle machine.
+ * Measured 2026-09-02: the same code ranged 42ms to 436ms across six runs
+ * while an editor indexer was busy in the background.
  */
 
 const schema = getSchema([StarterKit]);
@@ -342,7 +353,7 @@ function pressurePagination(blocks: number): {
  */
 const FRAME_BUDGET_MS = 16.7;
 
-describe("pipeline trace (issue #161)", () => {
+describe.skipIf(!process.env["SCRIVR_TRACE"])("pipeline trace (issue #161)", () => {
   it(
     "sweeps document size to find where interaction leaves the frame budget",
     () => {
