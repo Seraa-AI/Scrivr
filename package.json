@@ -15,7 +15,7 @@
     "url": "https://github.com/Seraa-AI/Scrivr/issues"
   },
   "scripts": {
-    "dev": "turbo dev --filter=@scrivr/demo",
+    "dev": "turbo dev --filter=@scrivr/docs",
     "dev:docs": "turbo dev --filter=@scrivr/docs --filter=@scrivr/server",
     "server": "turbo dev --filter=@scrivr/server",
     "build": "turbo build --filter='./packages/**'",
