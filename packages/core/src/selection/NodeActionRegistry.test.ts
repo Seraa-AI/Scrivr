@@ -1,4 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
+// Imported through the package barrel on purpose: this is the contract a
+// consumer writes their own actions against, and `tsc` fails here the moment
+// one stops being exported.
+import type {
+  NodeAction as PublicNodeAction,
+  NodeActionContribution as PublicNodeActionContribution,
+  NodeActionContext as PublicNodeActionContext,
+  ResolvedNodeAction as PublicResolvedNodeAction,
+} from "../index";
 import { NodeActionRegistry } from "./NodeActionRegistry";
 import type { NodeActionContext, NodeActionContribution } from "./types";
 
@@ -93,3 +102,11 @@ describe("NodeActionRegistry", () => {
     expect(ids).toEqual(["v", "w", "x", "y", "z"]);
   });
 });
+
+/** The node-action contract, as a consumer sees it. */
+export type PublicNodeActionSurface = [
+  PublicNodeAction,
+  PublicNodeActionContribution,
+  PublicNodeActionContext,
+  PublicResolvedNodeAction,
+];

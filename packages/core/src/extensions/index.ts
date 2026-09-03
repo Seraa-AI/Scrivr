@@ -72,6 +72,13 @@ export type {
   CloneHandler,
   CloneHandlerContext,
 } from "./types";
+// Node actions: the contract an extension contributes and a UI renders.
+export type {
+  NodeAction,
+  NodeActionContribution,
+  NodeActionContext,
+  ResolvedNodeAction,
+} from "../selection/types";
 export type {
   GestureContext,
   HitTarget,
