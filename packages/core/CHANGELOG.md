@@ -4,6 +4,29 @@
 
 ### Patch Changes
 
+- **An anchored float no longer keeps a position its anchor has left**
+
+  A square or top-bottom float carves a wrap zone, and that zone reflows every
+  block it overlaps — including blocks *above* the float's own anchor. Growing
+  one of those restamps the anchor, and the float's position had already been
+  recorded, so the image painted one line above the paragraph it belongs to,
+  overlapping the paragraph before it. It depended on whether the reflow changed
+  a preceding block's height, so it appeared at some paragraph lengths and not
+  others, and on CI it read as a flaky layout test.
+
+  Placement and reflow now converge instead of running in order: the float is
+  re-placed against the anchor's settled position and its zone moves with it,
+  repeating until the anchor stops moving.
+
+  Convergence needed one semantic decision. A zone reaching above its anchor on
+  the strength of its *margin* alone has no fixed point — the block above grows,
+  the anchor drops, the zone follows it off that block, the block shrinks back,
+  and the two positions alternate forever. The image rectangle is treated as a
+  hard constraint and still reflows whatever it genuinely covers, so a float
+  pulled up by a negative `yOffset` wraps the paragraph above it as before; only
+  the courtesy margin yields where it would otherwise decide the anchor's own
+  position.
+
 - 58c97b9: **The node-action contract is importable**
 
   `addNodeActions()` shipped without its types reachable, so an extension could

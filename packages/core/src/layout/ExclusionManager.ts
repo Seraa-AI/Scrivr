@@ -81,6 +81,16 @@ export class ExclusionManager {
   }
 
   /**
+   * Drop every rect contributed by one anchor, so its zone can be re-added at
+   * a corrected position. A float whose wrap zone moved its own anchor has to
+   * be re-placed, and leaving the old rect behind would exclude a band the
+   * image no longer occupies.
+   */
+  removeRectsFor(docPos: number): void {
+    this.rects = this.rects.filter((rect) => rect.docPos !== docPos);
+  }
+
+  /**
    * Returns all horizontal text opportunities at absoluteY after subtracting
    * active exclusion rectangles from the content area.
    *
