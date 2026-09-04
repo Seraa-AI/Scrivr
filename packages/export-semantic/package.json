@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/export-semantic",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "description": "SemanticUnit chunk emitter for Scrivr documents — AI-ready units for RAG",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",

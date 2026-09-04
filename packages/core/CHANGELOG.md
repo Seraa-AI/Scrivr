@@ -1,5 +1,126 @@
 # @scrivr/core
 
+## 1.0.20
+
+### Patch Changes
+
+- 58c97b9: **The node-action contract is importable**
+
+  `addNodeActions()` shipped without its types reachable, so an extension could
+  contribute actions but could not name what it was contributing: a helper like
+  `function canCompare(ctx: NodeActionContext)` was unwriteable without
+  re-declaring the type, and a UI rendering `editor.getNodeActions()` had no name
+  for what it received.
+
+  - **`@scrivr/core`** — `NodeAction`, `NodeActionContribution`,
+    `NodeActionContext` and `ResolvedNodeAction` are now exported.
+  - **`@scrivr/core`** — `NodeActionContext.node` used an inline
+    `import("prosemirror-model").Node` type; now a top-level import, matching the
+    rest of the file.
+
+- 5d962d5: **Geometry knows which layout it describes, and publication cannot hand out a
+  mixed one**
+
+  Coordinates only mean something next to the pixels they were computed for. The
+  `CharacterMap` is rebuilt on every layout pass while the canvas beneath it keeps
+  whatever paint last landed, and nothing tied the two together — so a caret could
+  be placed from one layout onto a canvas painted from another, landing where the
+  text used to be.
+
+  The dispatch path could hand out that mismatch directly. Applying a transaction
+  notified subscribers _before_ marking the layout stale, so anything woken by an
+  edit read the new document alongside the previous layout. That pair is not
+  detectably wrong from the outside: the charmap's generation matches the stale
+  layout it came from, so the geometry looks coherent while describing text that
+  has already moved.
+
+  - **`@scrivr/core`** — `CharacterMap` carries the layout version that populated
+    it, stamped in the one function every layout assignment routes through and
+    reset when the map is cleared. The overlay refuses to draw when that
+    generation disagrees with the version the tile actually painted. An active
+    surface is exempt, since its charmap is populated by its own paint hook with
+    no layout version behind it.
+  - **`@scrivr/core`** — the view dispatch marks the layout stale before applying
+    the transaction, so every `update` handler and subscriber observes a new
+    document together with a layout that knows it is out of date. Reading
+    `editor.layout` from a handler now recomputes rather than returning the
+    previous pass.
+
+- 6ae5713: Index page geometry instead of recomputing it per block. Page starts are now
+  held in a prefix sum (`createPageGeometry`), so locating the page for a flow
+  position is a binary search rather than a scan whose every step ran another
+  scan. Editing a large document no longer slows down as the page count grows:
+  on a 250-page document a caret move drops from ~1017ms to ~6ms and typing from
+  ~1008ms to ~15ms, keeping interaction inside a single frame.
+
+  A finished layout now carries `pageStarts` alongside `metrics`, so hit-testing
+  and pointer geometry read a page's origin instead of summing the pages before
+  it on every event.
+
+  Breaking, though only for direct users of the layout internals:
+
+  - `paginateFlow` takes a `PageGeometry` in place of a bare `metricsFor` callback.
+  - `pageStartGlobalForMetrics` and `pageLocalYToGlobalForMetrics` are removed.
+    Both walked the pages before the one asked about. Read `layout.pageStarts`
+    for a finished layout, or use `PageGeometry` during a layout run.
+
+- 0136058: **Who owns a point**
+
+  A question the browser answers for a DOM editor and this one has to answer for
+  itself. It was being re-derived per call site, so fixing one place kept leaving
+  the others wrong.
+
+  A `behind` image took every click inside its rectangle, text included — so
+  clicking a word that sat over one selected the image, and the next Enter split
+  the document at the image's anchor: the text never moved, the keypress read as
+  ignored, and an empty paragraph accumulated on every press. `resolvePointOwner()`
+  now decides once, in reverse paint order — the order the page was drawn in,
+  with `zIndex` ordering objects only within a paint layer — and click routing,
+  hover and drags all read that answer.
+
+  Ownership also distinguishes _painted_ text from _claimed_ space. A line's box
+  runs the full content width however short its text is, so a one-word paragraph
+  claimed hundreds of pixels of blank space. That space is still the line's for
+  caret placement — clicking past a short line puts the caret at its end — but it
+  is not text, and it no longer out-ranks an image sitting in the gap. Hover
+  follows the same rule, so the cursor stops offering a caret where the reader
+  sees a picture.
+
+  - **`@scrivr/core`** — `resolvePointOwner()`; `CharacterMap.hasTextAt()` keyed
+    to the painted glyph run; hover cursor resolved from ownership; Enter with an
+    anchored object selected does nothing rather than splitting at its anchor; a
+    `behind`/`front` float no longer pushes its own anchor paragraph to the next
+    page.
+
+- 5d962d5: **A tile records a version only if it painted that version**
+
+  Painting a page from a layout that has already been replaced puts stale pixels
+  on screen, so a paint that sees the layout move under it should abandon. It
+  abandoned silently, though, and `TileManager` stamped the tile's
+  `lastPaintedVersion` either way. A tile that believes it painted a version it
+  never drew will not repaint until something unrelated moves it, so the reader
+  sees an edit go missing.
+
+  Abandoning late was its own problem: `setupCanvas` assigns `canvas.width` /
+  `canvas.height`, and assigning either dimension clears the backing bitmap even
+  when the value is unchanged. A paint that bailed after that point had already
+  blanked the tile — the reader looked at an empty page rather than a stale one.
+
+  - **`@scrivr/core`** — both painters admit a candidate before touching either
+    canvas and reject a stale one outright; past that point the paint runs
+    synchronously to completion. `renderPage` reports whether it painted, and
+    `TileManager` stamps `lastPaintedVersion` / `lastRenderGeneration` only on a
+    completed paint, so an abandoned page is retried on the next update. Pageless
+    tiles, which previously had no staleness check at all, now follow the same
+    contract.
+
+  Behaviour is unchanged when paints succeed, which is the normal path.
+
+- 32ad7e7: Prevent incremental pagination from reusing a previous layout tail before all
+  changed blocks in the current document have been processed. Paragraph splits
+  after tables or other stable blocks now repaint immediately instead of drawing
+  stale pre-edit content.
+
 ## 1.0.19
 
 ### Patch Changes

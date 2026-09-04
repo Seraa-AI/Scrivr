@@ -1,5 +1,19 @@
 # @scrivr/react
 
+## 1.0.20
+
+### Patch Changes
+
+- Updated dependencies [58c97b9]
+- Updated dependencies [5d962d5]
+- Updated dependencies [6ae5713]
+- Updated dependencies [0136058]
+- Updated dependencies [5d962d5]
+- Updated dependencies [32ad7e7]
+  - @scrivr/core@1.0.20
+  - @scrivr/ai@1.0.20
+  - @scrivr/plugins@1.0.20
+
 ## 1.0.19
 
 ### Patch Changes
