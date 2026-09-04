@@ -12,8 +12,9 @@ A `behind` image took every click inside its rectangle, text included — so
 clicking a word that sat over one selected the image, and the next Enter split
 the document at the image's anchor: the text never moved, the keypress read as
 ignored, and an empty paragraph accumulated on every press. `resolvePointOwner()`
-now decides once, by z-order, and click routing, hover and drags all read that
-answer.
+now decides once, in reverse paint order — the order the page was drawn in,
+with `zIndex` ordering objects only within a paint layer — and click routing,
+hover and drags all read that answer.
 
 Ownership also distinguishes *painted* text from *claimed* space. A line's box
 runs the full content width however short its text is, so a one-word paragraph
