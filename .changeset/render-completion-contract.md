@@ -1,13 +1,5 @@
 ---
 "@scrivr/core": patch
-"@scrivr/ai": patch
-"@scrivr/docx": patch
-"@scrivr/export": patch
-"@scrivr/export-markdown": patch
-"@scrivr/export-pdf": patch
-"@scrivr/export-semantic": patch
-"@scrivr/plugins": patch
-"@scrivr/react": patch
 ---
 
 **A tile records a version only if it painted that version**
