@@ -1648,6 +1648,30 @@ describe("runPipeline — float image wrapping", () => {
     expect(floatB.y).toBeCloseTo(anchorBlock.y, 1);
   });
 
+  it("float Y reconciliation: holds at every anchor-paragraph height", () => {
+    // The invariant above is not a property of one word count. A float's own
+    // wrap zone can reflow the paragraph above it, which restamps the anchor
+    // after the placement was recorded — so it breaks precisely when the
+    // reflow changes a preceding block's height. Sweeping the word count
+    // walks through both cases on any machine's font metrics, where a single
+    // count only samples whichever one that machine happens to land in.
+    const { schema, fontConfig } = buildStarterKitContext();
+    const measurer = createMeasurer();
+    for (const words of [5, 10, 15, 20, 25, 30, 35, 45, 55]) {
+      const imgA = schema.nodes["image"]!.create({ src: "", width: 200, height: 80, wrappingMode: "square-right" });
+      const imgB = schema.nodes["image"]!.create({ src: "", width: 200, height: 80, wrappingMode: "square-left" });
+      const para1 = schema.node("paragraph", null, [imgA, schema.text("word ".repeat(words).trim())]);
+      const para2 = schema.node("paragraph", null, [imgB, schema.text("anchor text")]);
+      const layout = runPipeline(
+        schema.node("doc", null, [para1, para2]),
+        { pageConfig: defaultPageConfig, fontConfig, measurer },
+      );
+      const floatB = layout.anchoredObjects!.find((f) => f.node === imgB)!;
+      const anchorBlock = layout.pages.flatMap((p) => p.blocks).find((b) => b.node === para2)!;
+      expect(floatB.y, `${words} words`).toBeCloseTo(anchorBlock.y, 1);
+    }
+  });
+
   it("float stacking past page bottom: overflowed float moves to next page", () => {
     // Regression: two square-left floats with height > half the page.
     // After Fix 1 stacks float2 below float1, candidateY + height > pageBottom.

@@ -568,6 +568,14 @@ function createPageBarrierProvider(geometry: PageGeometry): PageBarrierProvider 
   };
 }
 
+/**
+ * How many times a float may be re-placed while its own wrap zone keeps
+ * moving its anchor. Convergence is the normal case and takes one extra pass;
+ * the cap only bounds a zone that oscillates between two positions, where the
+ * last placement still agrees with the anchor it was computed from.
+ */
+const MAX_ANCHOR_SETTLE_PASSES = 4;
+
 function resolveAnchoredObjects(
   inputFlows: FlowBlock[],
   pageConfig: PageConfig,
@@ -695,117 +703,124 @@ function resolveAnchoredObjects(
         }
       }
 
-      // Apply yOffset and clamp into the anchor's page so the image stays on
-      // the same page as its anchor. `clamped` is surfaced on the placement
-      // for Phase 2's drag overlay (visual stickiness at the boundary).
-      const desiredGlobalY = anchorGlobalY + yOffset;
-      let paintedGlobalY = desiredGlobalY;
-      let clamped = false;
-      if (!pageConfig.pageless) {
-        const pageStart = barriers.pageStartGlobal(pageNumber);
-        const pageEnd = pageStart + Math.max(0, barriers.contentHeight(pageNumber) - height);
-        if (paintedGlobalY < pageStart) {
-          paintedGlobalY = pageStart;
-          clamped = paintedGlobalY !== desiredGlobalY;
-        } else if (paintedGlobalY > pageEnd) {
-          paintedGlobalY = pageEnd;
-          clamped = paintedGlobalY !== desiredGlobalY;
+      // Placement is a pure function of where the anchor sits, so it can be
+      // recomputed when the anchor moves. The clamp keeps the image on its
+      // anchor's page; `clamped` is surfaced for Phase 2's drag overlay
+      // (visual stickiness at the boundary).
+      const placeAt = (
+        atAnchorGlobalY: number,
+        atPage: number,
+      ): AnchoredObjectPlacement => {
+        const desiredGlobalY = atAnchorGlobalY + yOffset;
+        let paintedGlobalY = desiredGlobalY;
+        let clamped = false;
+        if (!pageConfig.pageless) {
+          const pageStart = barriers.pageStartGlobal(atPage);
+          const pageEnd = pageStart + Math.max(0, barriers.contentHeight(atPage) - height);
+          if (paintedGlobalY < pageStart) {
+            paintedGlobalY = pageStart;
+            clamped = paintedGlobalY !== desiredGlobalY;
+          } else if (paintedGlobalY > pageEnd) {
+            paintedGlobalY = pageEnd;
+            clamped = paintedGlobalY !== desiredGlobalY;
+          }
         }
-      }
-      const paintedLocalY = barriers.localYForGlobalY(pageNumber, paintedGlobalY);
-
-      placements.push({
-        docPos: anchor.docPos,
-        page: pageNumber,
-        x,
-        y: paintedLocalY,
-        width,
-        height,
-        wrapMode,
-        zIndex: attrs.zIndex,
-        node: anchor.node,
-        anchorGlobalY,
-        anchorPage: pageNumber,
-        globalY: paintedGlobalY,
-        ...(clamped ? { clamped: true } : {}),
-      });
-
-      // Square: emit a wrap zone constraint at the *painted* rectangle so
-      // text wraps the image's actual position, not its anchor flow row.
-      // Subsequent paragraphs that fall within the zone get their lines narrowed.
-      // The rect is added to the page's shared ExclusionManager so the next
-      // square anchor on this page reflows flows against the *union* of all
-      // rects added so far — multi-image overlap on the same flow compounds
-      // segments rather than overwriting each other.
-      if (wrapMode === "square") {
-        let exclusions = exclusionsByPage.get(pageNumber);
-        if (!exclusions) {
-          exclusions = new ExclusionManager();
-          exclusionsByPage.set(pageNumber, exclusions);
-        }
-        const margin = attrs.margin;
-        const pageStart = barriers.pageStartGlobal(pageNumber);
-        const pageEnd = pageStart + barriers.contentHeight(pageNumber);
-        const zoneTop = Math.max(pageStart, paintedGlobalY - margin);
-        const zoneBottom = Math.min(pageEnd, paintedGlobalY + height + margin);
-        exclusions.addRect({
-          page: pageNumber,
-          x: x - margin,
-          right: x + width + margin,
-          y: zoneTop,
-          bottom: zoneBottom,
-          side: "left",
+        return {
           docPos: anchor.docPos,
-        });
-        flows = reflowFlowsAgainstExclusions(
-          flows,
-          exclusions,
-          {
-            pageNumber,
-            zoneTop,
-            zoneBottom,
-            contentX,
-            contentWidth,
-          },
-          pageConfig,
-          geometry,
-          measurer,
-          fontConfig,
-          fontModifiers,
-          inlineRegistry,
-        );
+          page: atPage,
+          x,
+          y: barriers.localYForGlobalY(atPage, paintedGlobalY),
+          width,
+          height,
+          wrapMode,
+          zIndex: attrs.zIndex,
+          node: anchor.node,
+          anchorGlobalY: atAnchorGlobalY,
+          anchorPage: atPage,
+          globalY: paintedGlobalY,
+          ...(clamped ? { clamped: true } : {}),
+        };
+      };
+
+      let placement = placeAt(anchorGlobalY, pageNumber);
+
+      // `behind` and `front` carve no wrap zone, so nothing downstream can
+      // move their anchor and the first placement is already final.
+      if (wrapMode !== "square" && wrapMode !== "top-bottom") {
+        placements.push(placement);
         continue;
       }
 
-      // Top-bottom: reserve vertical flow through the same exclusion path as
-      // square wrap. A full-width rect makes LineBreaker skip lines in this
-      // Y band, so there is no separate synthetic FlowBlock for the image.
-      if (wrapMode === "top-bottom") {
-        let exclusions = exclusionsByPage.get(pageNumber);
+      // A wrap zone reflows every block it overlaps, including blocks *above*
+      // its own anchor. Growing one of those restamps the anchor, so a
+      // placement recorded before the reflow describes a position the anchor
+      // no longer has — the image paints a line above the text it belongs to.
+      //
+      // The reflow is what settles the anchor, so the two have to converge
+      // rather than run in order: re-place against where the anchor landed,
+      // move the zone with it, and reflow again until it stops moving. Each
+      // pass reflows the union of the zone it replaces and the new one, so a
+      // block the zone has moved off gets its full width back.
+      const margin = attrs.margin;
+      let vacatedTop: number | undefined;
+      let vacatedBottom: number | undefined;
+      for (let pass = 0; ; pass++) {
+        const zonePage = placement.page;
+        let exclusions = exclusionsByPage.get(zonePage);
         if (!exclusions) {
           exclusions = new ExclusionManager();
-          exclusionsByPage.set(pageNumber, exclusions);
+          exclusionsByPage.set(zonePage, exclusions);
         }
-        const margin = attrs.margin;
-        const pageStart = barriers.pageStartGlobal(pageNumber);
-        const pageEnd = pageStart + barriers.contentHeight(pageNumber);
-        const zoneTop = Math.max(pageStart, paintedGlobalY - margin);
-        const zoneBottom = Math.min(pageEnd, paintedGlobalY + height + margin);
-        exclusions.addFullWidthRect({
-          page: pageNumber,
-          y: zoneTop,
-          bottom: zoneBottom,
-          contentX,
-          contentWidth,
-          docPos: anchor.docPos,
-        });
+        const pageStart = barriers.pageStartGlobal(zonePage);
+        const pageEnd = pageStart + barriers.contentHeight(zonePage);
+        // The zone may not reach above the anchor on the strength of its
+        // margin alone. Blocks above the anchor are what fix the anchor's own
+        // position, so letting the margin band narrow them makes the anchor
+        // depend on a float that depends on the anchor: the block grows, the
+        // anchor drops, the zone follows it off the block, the block shrinks
+        // back. That configuration has no fixed point — it oscillates.
+        //
+        // The image rectangle is a hard constraint and still reflows whatever
+        // it genuinely covers, so a float pulled up by a negative yOffset wraps
+        // the paragraph above it as before. Only the courtesy gap yields.
+        const zoneTop = Math.max(
+          pageStart,
+          placement.globalY - margin,
+          Math.min(placement.globalY, anchorGlobalY),
+        );
+        const zoneBottom = Math.min(pageEnd, placement.globalY + height + margin);
+
+        // Square carves a side zone at the image's painted rectangle; top-bottom
+        // reserves the whole Y band. Both go through the page's shared manager
+        // so a later anchor reflows against the union of every rect on the page.
+        if (wrapMode === "square") {
+          exclusions.addRect({
+            page: zonePage,
+            x: x - margin,
+            right: x + width + margin,
+            y: zoneTop,
+            bottom: zoneBottom,
+            side: "left",
+            docPos: anchor.docPos,
+          });
+        } else {
+          exclusions.addFullWidthRect({
+            page: zonePage,
+            y: zoneTop,
+            bottom: zoneBottom,
+            contentX,
+            contentWidth,
+            docPos: anchor.docPos,
+          });
+        }
+
         flows = reflowFlowsAgainstExclusions(
           flows,
           exclusions,
           {
-            pageNumber,
-            zoneTop,
-            zoneBottom,
+            pageNumber: zonePage,
+            zoneTop: vacatedTop === undefined ? zoneTop : Math.min(zoneTop, vacatedTop),
+            zoneBottom: vacatedBottom === undefined ? zoneBottom : Math.max(zoneBottom, vacatedBottom),
             contentX,
             contentWidth,
           },
@@ -816,7 +831,19 @@ function resolveAnchoredObjects(
           fontModifiers,
           inlineRegistry,
         );
+
+        const settledAnchorGlobalY = flows[i]!.globalY ?? 0;
+        if (settledAnchorGlobalY === anchorGlobalY || pass >= MAX_ANCHOR_SETTLE_PASSES) break;
+
+        exclusions.removeRectsFor(anchor.docPos);
+        vacatedTop = zoneTop;
+        vacatedBottom = zoneBottom;
+        anchorGlobalY = settledAnchorGlobalY;
+        pageNumber = barriers.pageForGlobalY(anchorGlobalY);
+        placement = placeAt(anchorGlobalY, pageNumber);
       }
+
+      placements.push(placement);
     }
   }
 
