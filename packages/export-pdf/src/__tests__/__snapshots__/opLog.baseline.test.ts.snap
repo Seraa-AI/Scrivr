@@ -1,0 +1,796 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`baseline — anchored objects > an unresolved image draws its placeholder 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Body text",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "borderColor": "rgb(0.8, 0.8, 0.8)",
+    "borderWidth": 1,
+    "color": "rgb(0.961, 0.961, 0.961)",
+    "height": 60,
+    "op": "rect",
+    "page": 0,
+    "width": 90,
+    "x": 75,
+    "y": 384,
+  },
+]
+`;
+
+exports[`baseline — anchored objects > behind-text wrap paints in its own pass 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "borderColor": "rgb(0.8, 0.8, 0.8)",
+    "borderWidth": 1,
+    "color": "rgb(0.961, 0.961, 0.961)",
+    "height": 60,
+    "op": "rect",
+    "page": 0,
+    "width": 90,
+    "x": 75,
+    "y": 384,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Body text",
+    "x": 54,
+    "y": 526.5,
+  },
+]
+`;
+
+exports[`baseline — mark rendering > an explicit colour with a link — the colour wins for text, not for the underline 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0.863, 0.149, 0.149)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Marked",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "color": "rgb(0, 0.4, 0.8)",
+    "end": {
+      "x": 94.5,
+      "y": 524.7,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 524.7,
+    },
+    "thickness": 0.75,
+  },
+]
+`;
+
+exports[`baseline — mark rendering > colour 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0.863, 0.149, 0.149)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Marked",
+    "x": 54,
+    "y": 526.5,
+  },
+]
+`;
+
+exports[`baseline — mark rendering > every decoration at once 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0.145, 0.388, 0.922)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Marked",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "color": "rgb(0.996, 0.941, 0.541)",
+    "height": 13.2,
+    "op": "rect",
+    "opacity": 0.4,
+    "page": 0,
+    "width": 40.5,
+    "x": 54,
+    "y": 524.1,
+  },
+  {
+    "color": "rgb(0.145, 0.388, 0.922)",
+    "end": {
+      "x": 94.5,
+      "y": 524.7,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 524.7,
+    },
+    "thickness": 0.75,
+  },
+  {
+    "color": "rgb(0.145, 0.388, 0.922)",
+    "end": {
+      "x": 94.5,
+      "y": 530.1,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 530.1,
+    },
+    "thickness": 0.75,
+  },
+]
+`;
+
+exports[`baseline — mark rendering > highlight — the rectangle lands after the text 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Marked",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "color": "rgb(0.996, 0.941, 0.541)",
+    "height": 13.2,
+    "op": "rect",
+    "opacity": 0.4,
+    "page": 0,
+    "width": 40.5,
+    "x": 54,
+    "y": 524.1,
+  },
+]
+`;
+
+exports[`baseline — mark rendering > link 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0.4, 0.8)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Marked",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "color": "rgb(0, 0.4, 0.8)",
+    "end": {
+      "x": 94.5,
+      "y": 524.7,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 524.7,
+    },
+    "thickness": 0.75,
+  },
+]
+`;
+
+exports[`baseline — mark rendering > link and underline together draw two lines 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0.4, 0.8)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Marked",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "color": "rgb(0, 0.4, 0.8)",
+    "end": {
+      "x": 94.5,
+      "y": 524.7,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 524.7,
+    },
+    "thickness": 0.75,
+  },
+  {
+    "color": "rgb(0, 0.4, 0.8)",
+    "end": {
+      "x": 94.5,
+      "y": 524.7,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 524.7,
+    },
+    "thickness": 0.75,
+  },
+]
+`;
+
+exports[`baseline — mark rendering > strikethrough 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Marked",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "end": {
+      "x": 94.5,
+      "y": 530.1,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 530.1,
+    },
+    "thickness": 0.75,
+  },
+]
+`;
+
+exports[`baseline — mark rendering > underline 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Marked",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "end": {
+      "x": 94.5,
+      "y": 524.7,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 524.7,
+    },
+    "thickness": 0.75,
+  },
+]
+`;
+
+exports[`baseline — node rendering > a table row, shaded and merged 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0.933, 0.933, 0.933)",
+    "height": 30,
+    "op": "rect",
+    "opacity": 1,
+    "page": 0,
+    "width": 180,
+    "x": 54,
+    "y": 510,
+  },
+  {
+    "color": "rgb(0.612, 0.639, 0.686)",
+    "end": {
+      "x": 54,
+      "y": 510,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 540,
+    },
+    "thickness": 0.75,
+  },
+  {
+    "color": "rgb(0.612, 0.639, 0.686)",
+    "end": {
+      "x": 234,
+      "y": 540,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 540,
+    },
+    "thickness": 0.75,
+  },
+  {
+    "color": "rgb(0.612, 0.639, 0.686)",
+    "end": {
+      "x": 234,
+      "y": 510,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 510,
+    },
+    "thickness": 0.75,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Cell",
+    "x": 54,
+    "y": 472.5,
+  },
+  {
+    "color": "rgb(0.612, 0.639, 0.686)",
+    "end": {
+      "x": 234,
+      "y": 510,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 234,
+      "y": 540,
+    },
+    "thickness": 0.75,
+  },
+  {
+    "color": "rgb(0.612, 0.639, 0.686)",
+    "end": {
+      "x": 324,
+      "y": 510,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 234,
+      "y": 510,
+    },
+    "thickness": 0.75,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Cell",
+    "x": 54,
+    "y": 472.5,
+  },
+  {
+    "color": "rgb(0.612, 0.639, 0.686)",
+    "end": {
+      "x": 324,
+      "y": 510,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 324,
+      "y": 540,
+    },
+    "thickness": 0.75,
+  },
+]
+`;
+
+exports[`baseline — node rendering > codeBlock 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Courier)",
+    "op": "text",
+    "page": 0,
+    "size": 10.5,
+    "value": "const x = 1;",
+    "x": 54,
+    "y": 526.5,
+  },
+]
+`;
+
+exports[`baseline — node rendering > content continuing onto a second page 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Page one",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 1,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 1,
+    "size": 12,
+    "value": "Page two",
+    "x": 54,
+    "y": 526.5,
+  },
+]
+`;
+
+exports[`baseline — node rendering > heading 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica-Bold)",
+    "op": "text",
+    "page": 0,
+    "size": 18,
+    "value": "Title",
+    "x": 54,
+    "y": 526.5,
+  },
+]
+`;
+
+exports[`baseline — node rendering > horizontalRule 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0.796, 0.835, 0.882)",
+    "end": {
+      "x": 405,
+      "y": 531,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 531,
+    },
+    "thickness": 1.125,
+  },
+]
+`;
+
+exports[`baseline — node rendering > listItem with a marker 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "First",
+    "x": 54,
+    "y": 526.5,
+  },
+]
+`;
+
+exports[`baseline — node rendering > paragraph 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Hello world",
+    "x": 54,
+    "y": 526.5,
+  },
+]
+`;
+
+exports[`baseline — text placement > a positioned line, as a float wrap produces 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Wrapped",
+    "x": 144,
+    "y": 526.5,
+  },
+]
+`;
+
+exports[`baseline — text placement > centred 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Centred",
+    "x": 205.875,
+    "y": 526.5,
+  },
+]
+`;
+
+exports[`baseline — text placement > several lines in one block 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "One",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Two",
+    "x": 54,
+    "y": 508.5,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Three",
+    "x": 54,
+    "y": 490.5,
+  },
+]
+`;
+
+exports[`baseline — the page itself > an empty document still paints the page background 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+]
+`;
