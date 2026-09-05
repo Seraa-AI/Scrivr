@@ -174,7 +174,11 @@ Object merging destroys exactly the two things that are observable today:
   (`:171`). Merged into one `color` field, that distinction is gone.
 - **Multiplicity.** A span carrying both `link` and `underline` draws **two**
   lines (`:166-178`, non-exclusive `if`s). A merged `underline?: boolean` draws
-  one.
+  one. Note the two are the *same* line drawn twice — a linked span's text
+  colour is already the link colour, so the plain underline lands exactly on the
+  link's. Only the count is observable there, not the order; underline plus
+  strikethrough is the pair where order shows. Both are pinned in the Phase 0
+  baseline.
 
 The painter resolves the contributions and owns all geometry.
 
