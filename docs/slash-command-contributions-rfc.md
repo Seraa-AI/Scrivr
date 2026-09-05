@@ -92,7 +92,7 @@ interface SlashCommandContribution {
 
 Two fields rather than one async function, deliberately.
 
-`NodeAction.isAvailable` is documented as *"PURE and SYNCHRONOUS — it is called
+`NodeAction.when` is documented as *"PURE and SYNCHRONOUS — it is called
 for every registered action on every selection change, during render. No I/O."*
 That contract is right and worth keeping. A library search is I/O by nature, so
 folding it into the same field would either weaken the sync guarantee for
