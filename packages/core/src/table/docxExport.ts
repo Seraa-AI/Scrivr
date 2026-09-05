@@ -112,7 +112,7 @@ const cellHandler: DocxNodeHandler = (node, children) => {
 };
 
 /** Node handlers for `Table.addExports().docx.nodes`. */
-export const tableDocxHandlers: Record<string, DocxNodeHandler> = {
+export const tableDocxExportHandlers: Record<string, DocxNodeHandler> = {
   table: tableHandler,
   tableRow: tableRowHandler,
   tableCell: cellHandler,

@@ -62,10 +62,24 @@ export function createDocxImportContext(
     rels: {
       resolveHyperlink,
     },
-    // Defaults — `importDocx` assigns the real section refs + part walker once
-    // the OPC package and handlers are available (same pattern as resolveImage).
+    // Defaults — `importDocx` assigns the real section refs, part walker and
+    // block walker once the OPC package and handlers are available (same
+    // pattern as resolveImage).
     section: { headers: [], footers: [], titlePg: false, evenAndOdd: false },
     walkPart: () => null,
+    // Reading nested blocks needs the handler set, which a context built on its
+    // own does not have. Answering with an empty list would drop the caller's
+    // content without saying so.
+    walkBlocks: (blocks) => {
+      if (blocks.length > 0) {
+        diagnostics.push({
+          level: "warning",
+          code: "walk-blocks-unavailable",
+          message: "walkBlocks was called on a context that importDocx has not prepared — no blocks were read",
+        });
+      }
+      return [];
+    },
     shared: {
       // Contained generic cast — Map stores unknown, caller owns the type.
       getOrInit<T>(key: string, init: () => T): T {

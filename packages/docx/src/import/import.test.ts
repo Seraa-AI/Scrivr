@@ -737,22 +737,27 @@ describe("importDocx — extension dispatch", () => {
   });
 });
 
-describe("importDocx — a table a file claims is enormous", () => {
-  /** Rebuild an exported document with `body` spliced in before its sectPr. */
-  async function docWithBody(body: string): Promise<Uint8Array> {
-    const editor = new ServerEditor({ content: "anchor" });
-    const bytes = await exportDocxBytes(editor);
-    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
-    const entries = unzipSync(bytes);
-    const original = strFromU8(entries["word/document.xml"]!);
-    const swapped = original.replace("<w:sectPr", body + "<w:sectPr");
-    const rebuilt: Record<string, Uint8Array> = {};
-    for (const [path, data] of Object.entries(entries)) {
-      rebuilt[path] = path === "word/document.xml" ? strToU8(swapped) : data;
-    }
-    return zipSync(rebuilt);
+/** Rebuild an exported document with `body` spliced in before its sectPr. */
+async function docWithBody(body: string): Promise<Uint8Array> {
+  const editor = new ServerEditor({ content: "anchor" });
+  const bytes = await exportDocxBytes(editor);
+  const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+  const entries = unzipSync(bytes);
+  const original = strFromU8(entries["word/document.xml"]!);
+  const swapped = original.replace("<w:sectPr", body + "<w:sectPr");
+  const rebuilt: Record<string, Uint8Array> = {};
+  for (const [path, data] of Object.entries(entries)) {
+    rebuilt[path] = path === "word/document.xml" ? strToU8(swapped) : data;
   }
+  return zipSync(rebuilt);
+}
 
+const ONE_TABLE =
+  `<w:tbl><w:tblGrid><w:gridCol w:w="1440"/><w:gridCol w:w="1440"/></w:tblGrid>` +
+  `<w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>` +
+  `<w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc></w:tr></w:tbl>`;
+
+describe("importDocx — a table a file claims is enormous", () => {
   // Every column a span claims becomes a real cell in every row once the grid
   // is padded, so an unbounded span is a document that cannot be opened.
   it("bounds a cell span rather than allocating what the file asks for", async () => {
@@ -774,5 +779,54 @@ describe("importDocx — a table a file claims is enormous", () => {
     });
     expect(cells).toBeGreaterThan(0);
     expect(cells).toBeLessThanOrEqual(64);
+  });
+});
+
+describe("importDocx — tables are the Table extension's to read", () => {
+  // Parity guard for the move: the same table, read the same way, before and
+  // after ownership changed hands.
+  it("reads a table when the extension that owns tables is loaded", async () => {
+    const importer = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    const { doc } = await importDocx(importer, await docWithBody(ONE_TABLE));
+
+    const cells: string[] = [];
+    doc.descendants((node) => {
+      if (node.type.name === "tableCell") cells.push(node.textContent);
+      return true;
+    });
+    expect(cells).toEqual(["A", "B"]);
+  });
+
+  // Tables are opt-in, so a kit without them has no reader for the block. It
+  // is reported and dropped, the way any unclaimed block is.
+  it("reports the table it cannot read when the extension is absent", async () => {
+    const importer = new ServerEditor();
+    const { doc, diagnostics } = await importDocx(importer, await docWithBody(ONE_TABLE));
+
+    let tables = 0;
+    doc.descendants((node) => {
+      if (node.type.name === "table") tables += 1;
+      return true;
+    });
+    expect(tables).toBe(0);
+    expect(diagnostics.map((d) => d.code)).toContain("unsupported-block");
+  });
+
+  // An unclaimed table is content the file had and the document will not, so
+  // a caller who asked to hear about that hears about it. Enabling the Table
+  // extension — or the default "drop" policy — imports as before.
+  it("refuses the import under `unsupported: \"throw\"` when nothing can read the table", async () => {
+    const importer = new ServerEditor();
+    await expect(
+      importDocx(importer, await docWithBody(ONE_TABLE), { unsupported: "throw" }),
+    ).rejects.toBeInstanceOf(DocxImportError);
+  });
+
+  it("imports under the same policy once the extension is loaded", async () => {
+    const importer = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    const { doc } = await importDocx(importer, await docWithBody(ONE_TABLE), {
+      unsupported: "throw",
+    });
+    expect(doc.textContent).toContain("A");
   });
 });

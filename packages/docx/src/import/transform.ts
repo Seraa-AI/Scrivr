@@ -43,18 +43,31 @@ export function transformToProseMirror(
   ctx: DocxImportContext,
   handlers: ResolvedImportHandlers,
 ): PmNode {
-  const blocks: PmNode[] = [];
-  for (const block of model.blocks) {
-    const result = transformBlock(block, ctx, handlers);
-    if (Array.isArray(result)) blocks.push(...result);
-    else if (result) blocks.push(result);
-  }
+  const blocks = [...ctx.walkBlocks(model.blocks)];
   // Schemas typically require at least one block child in `doc`.
   if (blocks.length === 0) {
     const para = ctx.schema.nodes["paragraph"];
     if (para) blocks.push(para.create());
   }
   return ctx.schema.topNodeType.create(null, blocks);
+}
+
+/**
+ * The recursion a contribution reaches through `ctx.walkBlocks`. It lives here
+ * because it has to re-enter this module's dispatch, and `importDocx` installs
+ * it as soon as the handler set exists — before the lifecycle hooks, so a
+ * contribution can walk blocks from `onBeforeImport` like it can `walkPart`.
+ */
+export function createBlockWalker(
+  ctx: DocxImportContext,
+  handlers: ResolvedImportHandlers,
+): (blocks: readonly DocxBlock[]) => PmNode[] {
+  return (blocks) => blocks.flatMap((block) => asNodes(transformBlock(block, ctx, handlers)));
+}
+
+function asNodes(result: PmNode | PmNode[] | null): PmNode[] {
+  if (Array.isArray(result)) return result;
+  return result ? [result] : [];
 }
 
 function transformBlock(
@@ -76,26 +89,15 @@ function transformBlock(
     return fallbackParagraph(block, content, ctx);
   }
 
-  // List construction is structural — package-handled, not extension-
-  // dispatched. The List extension owns the export side (numPr precompute
-  // + numbering def registration) but on import the work is just
-  // bulletList/orderedList/listItem schema construction, which doesn't
-  // benefit from per-extension customization.
+  // A registered `list` handler is ignored: reading one is just
+  // bulletList/orderedList/listItem construction, with nothing per-extension
+  // to decide. (Export differs — the List extension owns numPr there.)
   if (block.type === "list") {
     return buildListNode(block, ctx, handlers);
   }
 
-  // Tables, like lists, are structural nested blocks — package-handled so the
-  // recursion has the handler set, rather than extension-dispatched.
-  if (block.type === "table") {
-    return buildTableNode(block, ctx, handlers);
-  }
-
   if (block.type === "sdt") {
-    const contentNodes = block.content.flatMap((b) => {
-      const res = transformBlock(b, ctx, handlers);
-      return Array.isArray(res) ? res : res ? [res] : [];
-    });
+    const contentNodes = ctx.walkBlocks(block.content);
     
     const blockHandler = handlers.blocks["sdt"];
     if (blockHandler) {
@@ -129,71 +131,12 @@ function buildListNode(
   }
   const itemNodes: PmNode[] = [];
   for (const item of block.items) {
-    const itemChildren: PmNode[] = [];
-    for (const child of item.content) {
-      const result = transformBlock(child, ctx, handlers);
-      if (Array.isArray(result)) itemChildren.push(...result);
-      else if (result) itemChildren.push(result);
-    }
+    const itemChildren = ctx.walkBlocks(item.content);
     if (itemChildren.length === 0) continue;
     itemNodes.push(listItemType.create(null, itemChildren));
   }
   if (itemNodes.length === 0) return null;
   return listType.create(null, itemNodes);
-}
-
-function buildTableNode(
-  block: DocxBlock & { type: "table" },
-  ctx: DocxImportContext,
-  handlers: ResolvedImportHandlers,
-): PmNode | null {
-  const tableType = ctx.schema.nodes["table"];
-  const rowType = ctx.schema.nodes["tableRow"];
-  const cellType = ctx.schema.nodes["tableCell"];
-  const paragraphType = ctx.schema.nodes["paragraph"];
-  if (!tableType || !rowType || !cellType || !paragraphType) {
-    ctx.diagnostics.warn({
-      code: "schema-missing-table",
-      message: "Schema has no `table` / `tableRow` / `tableCell` — table dropped",
-      nodeType: "table",
-    });
-    return null;
-  }
-  const headerType = ctx.schema.nodes["tableHeader"] ?? cellType;
-
-  const rowNodes: PmNode[] = [];
-  for (const row of block.rows) {
-    // A DOCX header row (w:tblHeader) carries no th/td distinction; reconstruct
-    // its cells as `tableHeader` so the round trip recovers header semantics.
-    const useHeaderCells = row.repeatHeader && headerType !== cellType;
-    const cellNodes: PmNode[] = [];
-    for (const cell of row.cells) {
-      const cellChildren: PmNode[] = [];
-      for (const child of cell.content) {
-        const result = transformBlock(child, ctx, handlers);
-        if (Array.isArray(result)) cellChildren.push(...result);
-        else if (result) cellChildren.push(result);
-      }
-      // `block+` requires at least one child.
-      if (cellChildren.length === 0) cellChildren.push(paragraphType.create());
-
-      const attrs: Record<string, unknown> = {};
-      if (cell.gridSpan > 1) attrs.gridSpan = cell.gridSpan;
-      if (cell.vMerge !== "none") attrs.vMerge = cell.vMerge;
-      if (cell.background) attrs.background = cell.background;
-
-      const type = useHeaderCells ? headerType : cellType;
-      cellNodes.push(type.create(Object.keys(attrs).length > 0 ? attrs : null, cellChildren));
-    }
-    if (cellNodes.length === 0) continue;
-
-    const rowAttrs = row.repeatHeader ? { repeatHeader: true } : null;
-    rowNodes.push(rowType.create(rowAttrs, cellNodes));
-  }
-  if (rowNodes.length === 0) return null;
-
-  const tableAttrs = block.grid.length > 0 ? { grid: block.grid } : null;
-  return tableType.create(tableAttrs, rowNodes);
 }
 
 function transformInlines(

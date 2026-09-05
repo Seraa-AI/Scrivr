@@ -38,6 +38,7 @@ import { reconstructLists } from "./lists";
 import { readRelationshipMap } from "./relationships";
 import { buildImageResolver } from "./media";
 import {
+  createBlockWalker,
   transformToProseMirror,
   type ResolvedImportHandlers,
 } from "./transform";
@@ -120,6 +121,9 @@ export async function importDocx(
       ...sectionRefs,
       evenAndOdd: readEvenAndOddHeaders(pkg.readText("word/settings.xml")),
     };
+    // Installed with the handler set, before the lifecycle hooks below, so a
+    // contribution can walk blocks from `onBeforeImport` as it can `walkPart`.
+    ctx.walkBlocks = createBlockWalker(ctx, handlers);
     ctx.walkPart = (relId: string): PmNode | null => {
       const rel = rels.get(relId);
       if (!rel) {

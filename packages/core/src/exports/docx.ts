@@ -562,6 +562,15 @@ export interface DocxImportContext {
    * resulting `Node`.
    */
   walkPart(relId: string): PmNode | null;
+  /**
+   * Transform nested blocks through the same handlers as the body. A
+   * contribution that owns a container — a table owning its cells — reads its
+   * children with this, so each child is still read by whichever extension
+   * owns it rather than by the container's own idea of what a paragraph is.
+   *
+   * Available from `onBeforeImport` onwards, like `walkPart`.
+   */
+  walkBlocks(blocks: readonly DocxBlock[]): PmNode[];
   shared: {
     getOrInit<T>(key: string, init: () => T): T;
     get<T>(key: string): T | undefined;
