@@ -134,3 +134,30 @@ export function tableRowBlock(): LayoutBlock {
     isLastRow: true,
   } as unknown as LayoutBlock;
 }
+
+/**
+ * A layout carrying a chrome payload, for the chrome dispatch lane.
+ *
+ * Chrome is the one lane where "how it looks" and "where it goes" are coupled —
+ * the pipeline decides the band's position and repetition, the contributor
+ * decides what fills it — so the baseline records both halves.
+ */
+export function layoutWithChrome(
+  chromeName: string,
+  payload: unknown,
+  pageCount = 1,
+): DocumentLayout {
+  const base = layout(
+    Array.from({ length: pageCount }, () => [block("paragraph", [textLine("Body")])]),
+  );
+  return {
+    ...base,
+    chromePayloads: { [chromeName]: payload },
+    metrics: Array.from({ length: pageCount }, () => ({
+      contentTop: 72,
+      contentBottom: 720,
+      headerTop: 36,
+      footerTop: 736,
+    })),
+  } as unknown as DocumentLayout;
+}
