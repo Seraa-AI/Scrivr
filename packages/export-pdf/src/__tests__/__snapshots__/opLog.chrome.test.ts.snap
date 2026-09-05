@@ -1,0 +1,33 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`baseline — the chrome lane > draws chrome alongside the body 1`] = `
+[
+  {
+    "color": "rgb(1, 1, 1)",
+    "height": 594,
+    "op": "rect",
+    "page": 0,
+    "width": 459,
+    "x": 0,
+    "y": 0,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Body",
+    "x": 54,
+    "y": 526.5,
+  },
+  {
+    "height": 6,
+    "op": "rect",
+    "page": 0,
+    "width": 100,
+    "x": 0,
+    "y": 10,
+  },
+]
+`;
