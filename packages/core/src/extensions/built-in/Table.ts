@@ -20,7 +20,8 @@ import {
   tableCellWashHandler,
 } from "../../table/cellSelectionSeam";
 import { renderTableRowPdf } from "../../table/pdfExport";
-import { tableDocxHandlers } from "../../table/docxExport";
+import { tableDocxExportHandlers } from "../../table/docxExport";
+import { tableDocxImportHandlers } from "../../table/docxImport";
 import { tableSemanticHandler } from "../../table/semanticExport";
 import { expandRowSpans } from "../../table/clipboardHtml";
 import {
@@ -366,9 +367,15 @@ export const Table = Extension.create({
     // walker dispatches table/tableRow/tableCell/tableHeader through these.
     return {
       pdf: { nodes: { tableRow: renderTableRowPdf } },
-      docx: { nodes: tableDocxHandlers },
+      docx: { nodes: tableDocxExportHandlers },
       semantic: { nodes: { table: tableSemanticHandler } },
     };
+  },
+
+  // Turning a parsed `<w:tbl>` into nodes, the inverse of `addExports`'s docx
+  // half: a kit without tables has no table to read a file into.
+  addImports() {
+    return { docx: { blocks: tableDocxImportHandlers } };
   },
 
   addLayoutHandlers() {
