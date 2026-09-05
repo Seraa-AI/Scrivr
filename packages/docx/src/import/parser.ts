@@ -37,6 +37,9 @@ import type {
 } from "@scrivr/core";
 import { emuToPx, twipsToPx } from "@scrivr/core";
 
+/** Matches the bound the paste path applies in `@scrivr/core`. */
+const MAX_GRID_SPAN = 64;
+
 /**
  * Minimal diagnostics sink — same shape `DocxImportContext.diagnostics`
  * exposes, but accepted as a standalone arg so parser tests can supply a
@@ -341,7 +344,10 @@ function parseTableCell(tc: OoxmlElement, diag: ParserDiagnostics): DocxTableCel
     const gridSpanEl = findChild(tcPr, "w:gridSpan");
     if (gridSpanEl) {
       const span = Number(attr(gridSpanEl, "w:val"));
-      if (Number.isInteger(span) && span >= 1) gridSpan = span;
+      // Every column a span claims becomes a real cell in every row once the
+      // grid is padded, so a file claiming 100000 of them would be opened as a
+      // document of empty cells. Word's own limit is 63 columns.
+      if (Number.isInteger(span) && span >= 1) gridSpan = Math.min(span, MAX_GRID_SPAN);
     }
 
     const vm = findChild(tcPr, "w:vMerge");

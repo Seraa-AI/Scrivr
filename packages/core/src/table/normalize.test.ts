@@ -134,7 +134,7 @@ describe("normalizeTables — gridSpan", () => {
     expect(c.attrs["gridSpan"]).toBe(1);
   });
 
-  it("clamps a non-integer gridSpan to 1 (defensive)", () => {
+  it("clamps a negative gridSpan to 1", () => {
     const badCell = schema.nodes["tableCell"]!.create(
       { gridSpan: -3, vMerge: "none" },
       schema.nodes["paragraph"]!.create(),
@@ -144,6 +144,20 @@ describe("normalizeTables — gridSpan", () => {
     expect(tr).not.toBeNull();
     const c = findTable(tr.doc)!.firstChild!.firstChild!;
     expect(c.attrs["gridSpan"]).toBe(1);
+  });
+
+  // The layout engine floors a fractional span, so the document is made to
+  // agree with it rather than losing the column the reader already counts.
+  it("stores the floor of a fractional gridSpan", () => {
+    const badCell = schema.nodes["tableCell"]!.create(
+      { gridSpan: 2.7, vMerge: "none" },
+      schema.nodes["paragraph"]!.create(),
+    );
+    const doc = docWithTable(schema, table(schema, [100, 100], [row(schema, [badCell])]));
+    const tr = normalizeTables(stateOf(doc))!;
+    expect(tr).not.toBeNull();
+    const c = findTable(tr.doc)!.firstChild!.firstChild!;
+    expect(c.attrs["gridSpan"]).toBe(2);
   });
 });
 

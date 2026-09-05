@@ -14,6 +14,7 @@ import type {
   InputHandler,
   MarkdownBlockRule,
   PasteTransform,
+  PasteHtmlTransform,
   MarkdownParserTokenSpec,
   MarkdownSerializerRules,
   MarkdownNodeSerializer,
@@ -675,6 +676,15 @@ export class ExtensionManager {
    */
   buildPasteTransforms(): PasteTransform[] {
     return this.resolved.flatMap((ext) => ext.pasteTransforms);
+  }
+
+  /**
+   * All paste HTML transforms from all extensions, in registration order.
+   * Passed to PasteTransformer, which runs them on pasted markup before it
+   * is parsed.
+   */
+  buildPasteHtmlTransforms(): PasteHtmlTransform[] {
+    return this.resolved.flatMap((ext) => ext.pasteHtmlTransforms);
   }
 
   /**

@@ -69,9 +69,11 @@ interface StarterKitOptions {
   sections?: false;
   image?: false;
   /**
-   * Tables are an opt-in preview while the layout/render/export pipeline
-   * is filled in (Phases 2–4 of `docs/tables.md`). Default is `false` —
-   * pass `true` to register the Table schema/commands/placeholder render.
+   * Tables are opt-in. They lay out, render, hit-test, and round-trip through
+   * PDF, DOCX, and the clipboard; cell merge/split commands are still missing,
+   * so a kit that enables them is enabling a feature with a known gap. Default
+   * is `false` — pass `true` to register the Table schema, commands, and
+   * rendering.
    *
    * @example
    * StarterKit.configure({ table: true })

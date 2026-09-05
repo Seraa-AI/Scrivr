@@ -12,6 +12,7 @@ import type {
   MarkdownBlockRule,
   MarkdownParserTokenSpec,
   PasteTransform,
+  PasteHtmlTransform,
 } from "../extensions/types";
 import { insertText } from "../model/commands";
 import { recloneDocumentIds } from "../model/assignBlockIds";
@@ -52,6 +53,12 @@ export interface PasteTransformerOptions {
    * inserted. Collected by `ExtensionManager.buildPasteTransforms()`.
    */
   pasteTransforms?: PasteTransform[];
+
+  /**
+   * Extension-contributed rewrites, applied to pasted markup before it is
+   * parsed. Collected by `ExtensionManager.buildPasteHtmlTransforms()`.
+   */
+  pasteHtmlTransforms?: PasteHtmlTransform[];
 }
 
 /** A synchronous reservation followed by asynchronous image resolution. */
@@ -308,6 +315,7 @@ export class PasteTransformer {
     div.innerHTML = html;
     const recorded = readSliceData(div);
     cleanPastedHtml(div);
+    for (const transform of this.options.pasteHtmlTransforms ?? []) transform(div);
 
     // Use parse() (not parseSlice) so we get a complete document; openness is
     // decided below. parseSlice guesses openStart:1 for all block-level content,
@@ -871,13 +879,31 @@ function buildWordList(items: WordListItem[], doc: Document): HTMLElement {
 
 /** HTML cleanup */
 
+/** Elements that carry text rather than structure — see the strip rule below. */
+const INLINE_TAGS = new Set([
+  "span",
+  "b",
+  "strong",
+  "i",
+  "em",
+  "u",
+  "s",
+  "strike",
+  "font",
+  "a",
+  "small",
+  "big",
+  "sub",
+  "sup",
+  "code",
+  "mark",
+]);
+
 /**
  * Normalise pasted HTML before handing it to the ProseMirror DOMParser.
  *
- * Handles:
- *  - Google Docs: unwraps the outer `<b id="docs-internal-guid-…">` shell
- *    (font-weight:normal wrapper that carries no semantic weight)
- *  - Non-breaking spaces (\u00A0) → regular spaces so word-joining works
+ * Each step below says what it is undoing and which source emits it; the list
+ * is not repeated here, because a partial enumeration ages into a false one.
  */
 export function cleanPastedHtml(root: HTMLElement): void {
   // Strip non-content elements — Google Docs includes a <style> block with
@@ -910,8 +936,12 @@ export function cleanPastedHtml(root: HTMLElement): void {
   // Strip CSS properties that are always default/noise — they create spurious
   // marks (color, fontSize, etc.) that pollute the parsed document.
   root.querySelectorAll("[style]").forEach((el) => {
-    const s = (el as HTMLElement).style;
-    s.removeProperty("background-color");
+    if (!(el instanceof HTMLElement)) return;
+    const s = el.style;
+    // Only on the text-carrying elements this rule was written for. A block's
+    // background is its own — a table cell's fill is document content — while
+    // the one a pasted `<span>` drags along is an artefact of its old page.
+    if (INLINE_TAGS.has(el.tagName.toLowerCase())) s.removeProperty("background-color");
     s.removeProperty("font-variant");
     s.removeProperty("white-space"); // pre/pre-wrap from Google Docs
     if (s.textDecoration === "none") s.removeProperty("text-decoration");

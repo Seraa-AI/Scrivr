@@ -736,3 +736,43 @@ describe("importDocx — extension dispatch", () => {
     expect(foundControlContent).toBe(true);
   });
 });
+
+describe("importDocx — a table a file claims is enormous", () => {
+  /** Rebuild an exported document with `body` spliced in before its sectPr. */
+  async function docWithBody(body: string): Promise<Uint8Array> {
+    const editor = new ServerEditor({ content: "anchor" });
+    const bytes = await exportDocxBytes(editor);
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const entries = unzipSync(bytes);
+    const original = strFromU8(entries["word/document.xml"]!);
+    const swapped = original.replace("<w:sectPr", body + "<w:sectPr");
+    const rebuilt: Record<string, Uint8Array> = {};
+    for (const [path, data] of Object.entries(entries)) {
+      rebuilt[path] = path === "word/document.xml" ? strToU8(swapped) : data;
+    }
+    return zipSync(rebuilt);
+  }
+
+  // Every column a span claims becomes a real cell in every row once the grid
+  // is padded, so an unbounded span is a document that cannot be opened.
+  it("bounds a cell span rather than allocating what the file asks for", async () => {
+    const bytes = await docWithBody(
+      `<w:tbl><w:tblGrid><w:gridCol w:w="1000"/></w:tblGrid>` +
+        `<w:tr><w:tc><w:tcPr><w:gridSpan w:val="100000"/></w:tcPr>` +
+        `<w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc></w:tr></w:tbl>`,
+    );
+    const importer = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    const { doc } = await importDocx(importer, bytes);
+
+    let cells = 0;
+    doc.descendants((node) => {
+      if (node.type.name === "tableCell" || node.type.name === "tableHeader") {
+        cells += 1;
+        expect(node.attrs["gridSpan"]).toBeLessThanOrEqual(64);
+      }
+      return true;
+    });
+    expect(cells).toBeGreaterThan(0);
+    expect(cells).toBeLessThanOrEqual(64);
+  });
+});

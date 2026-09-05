@@ -16,16 +16,7 @@ import type {
   TableCell,
   TableCellsRow,
 } from "../exports/semantic";
-
-function readGridSpan(cell: Node): number {
-  const raw = cell.attrs["gridSpan"];
-  return typeof raw === "number" && raw >= 1 ? raw : 1;
-}
-
-function readVMerge(cell: Node): TableCell["vMerge"] {
-  const raw = cell.attrs["vMerge"];
-  return raw === "restart" || raw === "continue" ? raw : "none";
-}
+import { cellGridSpan, cellVMerge } from "./attrs";
 
 export const tableSemanticHandler: SemanticNodeHandler = (node, ctx) => {
   const rows: TableCellsRow[] = [];
@@ -34,8 +25,8 @@ export const tableSemanticHandler: SemanticNodeHandler = (node, ctx) => {
   node.forEach((row) => {
     const cells: TableCell[] = [];
     row.forEach((cell) => {
-      const gridSpan = readGridSpan(cell);
-      const vMerge = readVMerge(cell);
+      const gridSpan = cellGridSpan(cell);
+      const vMerge = cellVMerge(cell);
       const changes = ctx.toChanges(cell);
       const attrs = ctx.attrsOf(cell);
       const spans = ctx.toSpans(cell);

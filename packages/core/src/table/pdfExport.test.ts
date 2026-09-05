@@ -11,14 +11,26 @@ interface DrawnLine {
   start: { x: number; y: number };
   end: { x: number; y: number };
 }
+interface DrawnRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: unknown;
+  opacity: number;
+}
 function fakeCtx() {
   const lines: DrawnLine[] = [];
+  const rects: DrawnRect[] = [];
   const textBlocks: Array<{ y: number }> = [];
   const ctx = {
     layout: { pageConfig: { pageHeight: 1000 } },
     page: {
       drawLine(opts: { start: { x: number; y: number }; end: { x: number; y: number } }) {
         lines.push({ start: opts.start, end: opts.end });
+      },
+      drawRectangle(opts: DrawnRect) {
+        rects.push(opts);
       },
     },
     draw: {
@@ -27,7 +39,7 @@ function fakeCtx() {
       },
     },
   };
-  return { ctx, lines, textBlocks };
+  return { ctx, lines, rects, textBlocks };
 }
 
 const schema = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] }).getState().schema;
@@ -187,6 +199,82 @@ function pdfNodeHandler(contribs: ReadonlyArray<unknown>, nodeType: string): unk
   }
   return undefined;
 }
+
+describe("renderTableRowPdf — cell shading", () => {
+  it.each([
+    ["red", 1, { type: "RGB", red: 1, green: 0, blue: 0 }],
+    ["rgba(0, 0, 0, .5)", .5, { type: "RGB", red: 0, green: 0, blue: 0 }],
+  ])("exports %s with its opacity", (background, opacity, color) => {
+    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background, blocks: [] };
+    const { ctx, rects } = fakeCtx();
+    renderTableRowPdf(tableRowBlock(rowNode([{}]), [cell], true), ctx);
+    expect(rects).toHaveLength(1);
+    expect(rects[0]).toMatchObject({ color, opacity });
+  });
+
+  it.each(["rgba(0, 0, 0, 0)", "transparent", "#0000"])("omits the invisible fill %s", (background) => {
+    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background, blocks: [] };
+    const { ctx, rects, lines } = fakeCtx();
+    renderTableRowPdf(tableRowBlock(rowNode([{}]), [cell], true), ctx);
+    expect(rects).toEqual([]);
+    expect(lines.length).toBeGreaterThan(0);
+  });
+  it("fills a shaded cell with its own colour", () => {
+    const node = rowNode([{}]);
+    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "none", background: "rgb(238, 238, 238)", blocks: [] };
+    const { ctx, rects } = fakeCtx();
+
+    renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
+
+    expect(rects).toHaveLength(1);
+    // pdf-lib measures from the lower-left corner, in points.
+    expect(rects[0]).toMatchObject({
+      x: 50 * 0.75,
+      width: 120 * 0.75,
+      height: 40 * 0.75,
+      color: { type: "RGB", red: 238 / 255, green: 238 / 255, blue: 238 / 255 },
+    });
+  });
+
+  it("reads the hex spelling of a fill as readily as the rgb one", () => {
+    const node = rowNode([{}]);
+    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background: "#eeeeee", blocks: [] };
+    const { ctx, rects } = fakeCtx();
+
+    renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
+
+    expect(rects[0]?.color).toEqual({ type: "RGB", red: 238 / 255, green: 238 / 255, blue: 238 / 255 });
+  });
+
+  it("draws nothing for an unshaded cell", () => {
+    const node = rowNode([{}]);
+    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background: null, blocks: [] };
+    const { ctx, rects } = fakeCtx();
+
+    renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
+
+    expect(rects).toEqual([]);
+  });
+
+  // The fill is the cell's own; a border drawn under it would disappear.
+  it("fills before it strokes", () => {
+    const node = rowNode([{}]);
+    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background: "#000000", blocks: [] };
+    const order: string[] = [];
+    const ctx = {
+      layout: { pageConfig: { pageHeight: 1000 } },
+      page: {
+        drawLine: () => void order.push("line"),
+        drawRectangle: () => void order.push("rect"),
+      },
+      draw: { lines: () => undefined },
+    };
+
+    renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
+
+    expect(order[0]).toBe("rect");
+  });
+});
 
 describe("Table extension — PDF export contribution", () => {
   it("contributes a tableRow PDF node handler via addExports", () => {

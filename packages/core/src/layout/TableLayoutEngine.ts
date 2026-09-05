@@ -21,6 +21,7 @@
  * concern handled by `TableRowStrategy`.
  */
 import type { Node } from "prosemirror-model";
+import { cellBackground, cellGridSpan, cellVMerge } from "../table/attrs";
 import { layoutBlock, type LayoutBlock, type CellSubBlock } from "./BlockLayout";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { FontConfig } from "./FontConfig";
@@ -49,22 +50,6 @@ export interface TableRowLayoutContext {
   fontConfig?: FontConfig;
   fontModifiers?: Map<string, FontModifier>;
   inlineRegistry?: InlineRegistry;
-}
-
-function readGridSpan(cell: Node): number {
-  const v = cell.attrs["gridSpan"];
-  if (typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v >= 1) return v;
-  return 1;
-}
-
-function readVMerge(cell: Node): "none" | "restart" | "continue" {
-  const v = cell.attrs["vMerge"];
-  return v === "restart" || v === "continue" ? v : "none";
-}
-
-function readBackground(cell: Node): string | null {
-  const v = cell.attrs["background"];
-  return typeof v === "string" && v.length > 0 ? v : null;
 }
 
 function columnWidth(columns: number[], index: number): number {
@@ -100,7 +85,7 @@ export function layoutTableRowCells(
   let col = 0;
 
   rowNode.forEach((cellNode, offsetInRow) => {
-    const span = readGridSpan(cellNode);
+    const span = cellGridSpan(cellNode);
     const cellX = ctx.x + (columnX[col] ?? col * DEFAULT_COLUMN_WIDTH);
 
     let cellWidth = 0;
@@ -141,8 +126,8 @@ export function layoutTableRowCells(
       y: 0, // cell top aligns with the row top
       width: cellWidth,
       height: cellHeight,
-      vMerge: readVMerge(cellNode),
-      background: readBackground(cellNode),
+      vMerge: cellVMerge(cellNode),
+      background: cellBackground(cellNode),
       blocks,
     });
 

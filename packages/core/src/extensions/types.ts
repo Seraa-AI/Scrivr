@@ -387,6 +387,12 @@ export interface MarkdownSerializerRules {
  */
 export type PasteTransform = (slice: Slice) => Slice;
 
+/**
+ * Rewrites pasted HTML in place, before it is parsed into a slice. Contributed
+ * via `addPasteHtmlTransforms`; leave the tree untouched to decline.
+ */
+export type PasteHtmlTransform = (root: HTMLElement) => void;
+
 export interface MarkdownBlockRule {
   /** Tested against each trimmed line of pasted text. */
   pattern: RegExp;
@@ -898,6 +904,19 @@ export interface ExtensionConfig<Options = object> {
   addPasteTransforms?(this: Phase1Context<Options>): PasteTransform[];
 
   /**
+   * Rewrite pasted HTML before it is parsed.
+   *
+   * The slice-level `addPasteTransforms` runs after parsing, which is too late
+   * for markup whose meaning lives in the tree shape — a `rowspan` says which
+   * cells the row below does not have, and once parsed that row is merely
+   * short. Use this for structure that has to be restated before ProseMirror
+   * reads it; use `addPasteTransforms` for everything else.
+   *
+   * Transforms run in registration order, each seeing the previous one's edits.
+   */
+  addPasteHtmlTransforms?(this: Phase1Context<Options>): PasteHtmlTransform[];
+
+  /**
    * ProseMirror input rules (auto-format while typing).
    * Collected by ExtensionManager and wrapped in a single inputRules() plugin.
    * Phase 2 — schema is available via this.schema.
@@ -1032,6 +1051,7 @@ export interface ResolvedExtension {
   inputHandlers: Record<string, InputHandler>;
   markdownRules: MarkdownBlockRule[];
   pasteTransforms: PasteTransform[];
+  pasteHtmlTransforms: PasteHtmlTransform[];
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
   markdownSerializerRules: MarkdownSerializerRules;

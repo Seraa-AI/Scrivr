@@ -1921,3 +1921,69 @@ describe("Editor — doc start/end navigation", () => {
     cleanup();
   });
 });
+
+// ── Paste HTML transforms ────────────────────────────────────────────────────
+
+describe("Editor — pasted HTML reaches extension transforms", () => {
+  function pasteInto(container: HTMLElement, html: string) {
+    const ta = container.querySelector("textarea")!;
+    const event = new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: new DataTransfer(),
+    });
+    event.clipboardData!.setData("text/html", html);
+    ta.dispatchEvent(event);
+  }
+
+  // The wiring from ExtensionManager to PasteTransformer is one line in the
+  // Editor. Driving a real paste is what makes deleting it fail out loud,
+  // rather than every test passing its own transforms in by hand.
+  it("runs an extension's paste HTML transform on a real paste", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const Rewriter = Extension.create({
+      name: "htmlRewriter",
+      addPasteHtmlTransforms() {
+        return [
+          (root: HTMLElement) => {
+            for (const em of root.querySelectorAll("em")) em.textContent = "rewritten";
+          },
+        ];
+      },
+    });
+
+    const editor = createTestEditor({ extensions: [StarterKit, Rewriter] });
+    editor.mount(container);
+
+    pasteInto(container, "<p><em>original</em></p>");
+    expect(editor.getState().doc.textContent).toContain("rewritten");
+
+    editor.destroy();
+    container.remove();
+  });
+
+  it("expands a pasted table's rowspan into the cells the schema models", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })] });
+    editor.mount(container);
+
+    pasteInto(
+      container,
+      `<table><tbody><tr><td rowspan="2">Tall</td><td>X</td></tr><tr><td>Y</td></tr></tbody></table>`,
+    );
+
+    const merges: string[] = [];
+    editor.getState().doc.descendants((node) => {
+      if (node.type.name === "tableCell") merges.push(String(node.attrs["vMerge"]));
+      return true;
+    });
+    expect(merges).toEqual(["restart", "none", "continue", "none"]);
+
+    editor.destroy();
+    container.remove();
+  });
+});

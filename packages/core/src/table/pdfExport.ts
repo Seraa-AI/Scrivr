@@ -7,11 +7,14 @@
  * pull a rendering library into core). The export pipeline passes its real
  * `PdfContext`; the runtime guard narrows to the fields used here.
  *
- * Mirrors the canvas `TableRowStrategy`: per cell, draw borders (top suppressed
- * for a vMerge continuation so a vertical merge reads as one cell) then render
- * each child block's text via `ctx.draw.lines` at its absolute y.
+ * Mirrors the canvas `TableRowStrategy`: per cell, fill the shading, draw
+ * borders (top suppressed for a vMerge continuation so a vertical merge reads
+ * as one cell), then render each child block's text via `ctx.draw.lines` at its
+ * absolute y — fill before stroke, so a border sits on top of its own cell's
+ * shading rather than under it.
  */
 import type { LayoutBlock } from "../layout/BlockLayout";
+import { parseCssColor } from "../model/cssColor";
 
 /** 1 CSS pixel = 0.75 PDF points (96dpi → 72dpi). */
 const PT_PER_PX = 72 / 96;
@@ -28,6 +31,14 @@ interface PdfContextLike {
   layout: { pageConfig: { pageHeight: number } };
   page: {
     drawLine(opts: { start: PdfPoint; end: PdfPoint; thickness: number; color: unknown }): void;
+    drawRectangle(opts: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      color: unknown;
+      opacity: number;
+    }): void;
   };
   draw: { lines(block: LayoutBlock, ctx: unknown): void };
 }
@@ -62,6 +73,20 @@ export function renderTableRowPdf(block: LayoutBlock, ctx: unknown): void {
     const rx = (cell.x + cell.width) * PT_PER_PX;
     const ty = flipY(block.y + cell.y);
     const by = flipY(block.y + cell.y + cell.height);
+
+    const fill = cell.background === null ? null : parseCssColor(cell.background);
+    if (fill !== null && fill.alpha > 0) {
+      // pdf-lib measures a rectangle from its lower-left corner.
+      ctx.page.drawRectangle({
+        x: lx,
+        y: by,
+        width: rx - lx,
+        height: ty - by,
+        color: { type: "RGB", red: fill.r / 255, green: fill.g / 255, blue: fill.b / 255 },
+        opacity: fill.alpha,
+      });
+    }
+
     stroke({ x: lx, y: ty }, { x: lx, y: by });
     if (cell.vMerge !== "continue") stroke({ x: lx, y: ty }, { x: rx, y: ty });
     if (isLastRow) stroke({ x: lx, y: by }, { x: rx, y: by });

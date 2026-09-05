@@ -260,14 +260,17 @@ describe("exportDocx", () => {
     expect(documentXml).not.toContain("<w:highlight");
   });
 
-  it("converts rgba() to hex w:shd fill", async () => {
+  // DOCX shading carries no alpha, and a document with no background is read
+  // on a white page — so a translucent highlight is written as what the reader
+  // sees rather than at full strength.
+  it("composites a translucent highlight onto the page for w:shd", async () => {
     const editor = new ServerEditor({
       extensions: [StarterKit.configure({ highlight: { color: "rgba(255, 220, 0, 0.4)", multicolor: true } })],
     });
     highlightedDoc(editor, "marked", "rgba(255, 220, 0, 0.4)");
     const { bytes } = await exportDocx(editor);
     const documentXml = readZip(bytes)["word/document.xml"]!;
-    expect(documentXml).toContain('w:fill="FFDC00"');
+    expect(documentXml).toContain('w:fill="FFF199"');
   });
 
   it("converts CSS rgb() text color marks to DOCX hex colors", async () => {
@@ -552,5 +555,25 @@ describe("exportDocx — hyperlinks", () => {
     const parts = await partsOf(editor);
     expect(parts["word/document.xml"]).not.toContain("<w:hyperlink");
     expect(parts["word/document.xml"]).toContain("bare");
+  });
+});
+
+
+describe("table fill export", () => {
+  it.each([
+    ["red", "FF0000"],
+    ["rebeccapurple", "663399"],
+    ["rgba(0,0,0,.5)", "808080"],
+    ["#00000080", "7F7F7F"],
+    ["rgba(0,0,0,0)", null],
+  ])("exports %s as opaque DOCX shading", async (background, fill) => {
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    editor.setContent({ type: "doc", content: [{ type: "table", attrs: { grid: [100] }, content: [
+      { type: "tableRow", content: [{ type: "tableCell", attrs: { background }, content: [{ type: "paragraph" }] }] },
+    ] }] });
+    const document = readZip(await exportDocxBytes(editor))["word/document.xml"]!;
+    if (fill === null) expect(document).not.toContain("<w:shd");
+    else expect(document).toContain(`w:fill="${fill}"`);
+    editor.destroy();
   });
 });
