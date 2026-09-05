@@ -37,22 +37,10 @@ interface PdfContextLike {
       width: number;
       height: number;
       color: unknown;
+      opacity: number;
     }): void;
   };
   draw: { lines(block: LayoutBlock, ctx: unknown): void };
-}
-
-/** A cell's stored fill as pdf-lib's `rgb()` shape, or null when it has none. */
-function fillColor(background: string | null): unknown {
-  if (background === null) return null;
-  const colour = parseCssColor(background);
-  if (!colour) return null;
-  return {
-    type: "RGB",
-    red: colour.r / 255,
-    green: colour.g / 255,
-    blue: colour.b / 255,
-  };
 }
 
 function isPdfContext(value: unknown): value is PdfContextLike {
@@ -86,15 +74,16 @@ export function renderTableRowPdf(block: LayoutBlock, ctx: unknown): void {
     const ty = flipY(block.y + cell.y);
     const by = flipY(block.y + cell.y + cell.height);
 
-    const fill = fillColor(cell.background);
-    if (fill !== null) {
+    const fill = cell.background === null ? null : parseCssColor(cell.background);
+    if (fill !== null && fill.alpha > 0) {
       // pdf-lib measures a rectangle from its lower-left corner.
       ctx.page.drawRectangle({
         x: lx,
         y: by,
         width: rx - lx,
         height: ty - by,
-        color: fill,
+        color: { type: "RGB", red: fill.r / 255, green: fill.g / 255, blue: fill.b / 255 },
+        opacity: fill.alpha,
       });
     }
 

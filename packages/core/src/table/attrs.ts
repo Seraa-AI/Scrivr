@@ -1,4 +1,5 @@
 import type { Node } from "prosemirror-model";
+import { parseCssColor } from "../model/cssColor";
 
 /**
  * The values each cell attr may hold. They live here, with the node layer that
@@ -50,10 +51,26 @@ export function cellVAlign(cell: Node): CellVAlign {
   return typeof value === "string" && isVAlign(value) ? value : "top";
 }
 
-/** The cell's fill, or null when it has none. */
+/**
+ * The cell's fill, or null when it has none.
+ *
+ * A fill reaches the model from paste, DOCX import, collab, and `setContent`,
+ * and only one of those is gated on the way in. It is gated here instead, at
+ * the point every lane reads it: canvas assigns it straight to `fillStyle`,
+ * where an unpaintable value is a silent no-op that leaves the previous cell's
+ * colour on the brush, and the exporters need to resolve it anyway.
+ */
 export function cellBackground(cell: Node): string | null {
   const value = cell.attrs["background"];
-  return typeof value === "string" && value.trim() !== "" ? value : null;
+  if (typeof value !== "string") return null;
+  const colour = parseCssColor(value);
+  return colour === null || colour.alpha === 0 ? null : value;
+}
+
+/** The same gate, for a fill still on its way in from markup. */
+export function storableFill(value: string): string | null {
+  const colour = parseCssColor(value);
+  return colour === null || colour.alpha === 0 ? null : value;
 }
 
 /** The table's column widths in CSS px, or an empty grid when unset. */

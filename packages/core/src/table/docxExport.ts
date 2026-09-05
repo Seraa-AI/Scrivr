@@ -15,8 +15,8 @@
  * only wrap structure. Word requires every `<w:tc>` to end in a block-level
  * element; our cells always hold paragraphs, so that holds.
  */
-import { parseCssColor, toHex6 } from "../model/cssColor";
-import { cellGridSpan, cellVMerge } from "./attrs";
+import { compositeColor, parseCssColor, toHex6 } from "../model/cssColor";
+import { cellBackground, cellGridSpan, cellVMerge } from "./attrs";
 import type { Node } from "prosemirror-model";
 import { xml, pxToTwips, type DocxNodeHandler, type XmlNode } from "../exports/docx";
 
@@ -24,15 +24,17 @@ const BORDER_SIZE = "4"; // eighths of a point → 0.5pt, matching the canvas ha
 const BORDER_COLOR = "9CA3AF"; // neutral gray, same as TableRowStrategy.
 
 /**
- * DOCX shading takes six hex digits, while a cell's fill is stored in whatever
- * spelling the browser's CSSOM produced — `rgb(...)` in Chrome, a hex triple
- * elsewhere. Parsing rather than pattern-matching keeps the fill from being
- * dropped on the browsers that normalise.
+ * DOCX shading takes six hex digits, while a cell's fill is whatever CSS
+ * literal its source wrote — a name, a hex triple, `rgb(...)`, with or without
+ * alpha. Resolving it is what keeps those from being dropped.
  */
-function readHexFill(value: unknown): string | null {
-  if (typeof value !== "string") return null;
+function readHexFill(value: string | null): string | null {
+  if (value === null) return null;
   const colour = parseCssColor(value);
-  return colour ? toHex6(colour).toUpperCase() : null;
+  if (!colour || colour.alpha === 0) return null;
+  // DOCX cell shading has no alpha; these documents use an unshaded white page.
+  const opaque = compositeColor(colour, { r: 255, g: 255, b: 255 });
+  return toHex6(opaque).toUpperCase();
 }
 
 /** Single-line borders on every edge so the table reads like the canvas grid. */
@@ -100,7 +102,7 @@ const cellHandler: DocxNodeHandler = (node, children) => {
   if (vMerge === "restart") props.push(xml("w:vMerge", { "w:val": "restart" }));
   else if (vMerge === "continue") props.push(xml("w:vMerge"));
 
-  const fill = readHexFill(node.attrs["background"]);
+  const fill = readHexFill(cellBackground(node));
   if (fill) props.push(xml("w:shd", { "w:val": "clear", "w:color": "auto", "w:fill": fill }));
 
   const tcChildren: XmlNode[] = [];

@@ -12,9 +12,11 @@ import {
   type PDFImage,
 } from "pdf-lib";
 import {
+  compositeColor,
   computeAlignmentOffset,
   computeJustifySpaceBonus,
   countSpaces,
+  parseCssColor as parseColorLiteral,
   type DocumentLayout,
   type LayoutPage,
   type LayoutBlock,
@@ -350,49 +352,29 @@ function extractColor(
 ): ReturnType<typeof rgb> {
   const colorMark = marks?.find((m) => m.name === "color");
   const colorVal = colorMark?.attrs["color"];
-  if (typeof colorVal === "string") return parseHexColor(colorVal);
+  if (typeof colorVal === "string") return parseCssColor(colorVal);
   if (marks?.some((m) => m.name === "link")) return parseCssColor(theme.link);
   return defaultTextColor;
 }
 
-/** Parse "#rrggbb" or "#rgb" → pdf-lib rgb(). Falls back to black. */
-export function parseHexColor(hex: string): ReturnType<typeof rgb> {
-  const clean = hex.replace("#", "");
-  if (clean.length === 3) {
-    const [a, b, c] = clean.split("") as [string, string, string];
-    return rgb(
-      parseInt(a + a, 16) / 255,
-      parseInt(b + b, 16) / 255,
-      parseInt(c + c, 16) / 255,
-    );
-  }
-  if (clean.length === 6) {
-    return rgb(
-      parseInt(clean.slice(0, 2), 16) / 255,
-      parseInt(clean.slice(2, 4), 16) / 255,
-      parseInt(clean.slice(4, 6), 16) / 255,
-    );
-  }
-  return rgb(0, 0, 0);
-}
-
 /**
- * Parse any CSS color literal (`#hex`, `#rgb`, `rgb(...)`, `rgba(...)`) into a
- * pdf-lib `rgb()` color. Used for resolving theme tokens that callers may pass
- * in any of these forms. Falls back to black on unrecognized input.
+ * Any CSS color literal → a pdf-lib `rgb()`, black when the value is not a
+ * color. The document decides the spelling, not this exporter: a `color` mark
+ * stores whatever the author or the source page declared, so names, `hsl()`,
+ * and space-separated syntax all arrive here. Resolving is `@scrivr/core`'s
+ * job — one vocabulary for PDF, DOCX, and the canvas.
+ *
+ * PDF has no alpha on a text fill, so a translucent color is composited onto
+ * the page the exporter paints, which `defaultPdfTheme` keeps white.
  */
 export function parseCssColor(value: string): ReturnType<typeof rgb> {
-  const trimmed = value.trim();
-  if (trimmed.startsWith("#")) return parseHexColor(trimmed);
-  const rgbMatch = /^rgba?\(([^)]+)\)$/.exec(trimmed);
-  if (rgbMatch) {
-    const parts = rgbMatch[1]!.split(",").map((p) => p.trim());
-    const r = parseFloat(parts[0] ?? "0");
-    const g = parseFloat(parts[1] ?? "0");
-    const b = parseFloat(parts[2] ?? "0");
-    if ([r, g, b].every(Number.isFinite)) {
-      return rgb(r / 255, g / 255, b / 255);
-    }
-  }
-  return rgb(0, 0, 0);
+  const colour = parseColorLiteral(value);
+  if (colour === null) return rgb(0, 0, 0);
+  const opaque = compositeColor(colour, { r: 255, g: 255, b: 255 });
+  return rgb(opaque.r / 255, opaque.g / 255, opaque.b / 255);
+}
+
+/** @deprecated Use `parseCssColor`, which reads every spelling, not only hex. */
+export function parseHexColor(hex: string): ReturnType<typeof rgb> {
+  return parseCssColor(hex);
 }

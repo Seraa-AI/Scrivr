@@ -64,10 +64,11 @@ function expandGroup(rows: HTMLElement[]): void {
       next += 1;
 
       const rowSpan = readRowSpan(cell, rows.length - index);
+      // The expansion states the merge. A leftover rowspan would restate one
+      // that was clamped away — a span longer than the group it sits in.
+      cell.removeAttribute("rowspan");
       if (rowSpan > 1) {
         cell.setAttribute("data-vmerge", "restart");
-        // The expansion has said everything `rowspan` was saying.
-        cell.removeAttribute("rowspan");
         covered.set(column, { remaining: rowSpan - 1, master: cell });
       }
       column += readGridSpan(cell);

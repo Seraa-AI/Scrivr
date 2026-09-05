@@ -53,16 +53,19 @@ describe("readGridSpan", () => {
 });
 
 describe("readRowSpan", () => {
+  it.each(["0", "65", "100000"])("bounds rowspan=%s by existing rows, not columns", (value) => {
+    expect(readRowSpan(el(`<td rowspan="${value}">x</td>`), 65)).toBe(65);
+  });
   it("reads rowspan", () => {
-    expect(readRowSpan(el(`<td rowspan="4">x</td>`))).toBe(4);
+    expect(readRowSpan(el(`<td rowspan="4">x</td>`), 10)).toBe(4);
   });
 
   it("defaults to 1 when absent", () => {
-    expect(readRowSpan(el(`<td>x</td>`))).toBe(1);
+    expect(readRowSpan(el(`<td>x</td>`), 10)).toBe(1);
   });
 
-  it.each(["0", "-1", "nope"])("falls back to 1 for %o", (value) => {
-    expect(readRowSpan(el(`<td rowspan="${value}">x</td>`))).toBe(1);
+  it.each(["-1", "nope"])("falls back to 1 for %o", (value) => {
+    expect(readRowSpan(el(`<td rowspan="${value}">x</td>`), 10)).toBe(1);
   });
 });
 

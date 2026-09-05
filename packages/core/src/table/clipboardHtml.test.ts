@@ -248,7 +248,7 @@ describe("expandRowSpans — row groups", () => {
     </table>`);
     expandRowSpans(el);
     expect(grid(el)).toEqual([
-      ["H:restart", "h2"],
+      ["H", "h2"],
       ["a", "b"],
       ["c", "d"],
     ]);

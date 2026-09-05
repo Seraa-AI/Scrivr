@@ -12,6 +12,7 @@
 
 import type { Node as PmNode, Mark as PmMark, Schema } from "prosemirror-model";
 import type { IBaseEditor } from "../extensions/types";
+import { compositeColor, parseCssColor, toHex6 } from "../model/cssColor";
 
 // ── XML ─────────────────────────────────────────────────────────────────────
 
@@ -72,38 +73,20 @@ export function docxHighlightName(value: string): string | null {
   return HIGHLIGHT_BY_LOWER.get(value.trim().toLowerCase()) ?? null;
 }
 
-/** Convert common CSS color strings to DOCX's 6-char uppercase hex form. */
+/**
+ * Convert a CSS color to DOCX's 6-char uppercase hex form, or null when the
+ * value is not a color. DOCX has no alpha, so a translucent color is
+ * composited onto the white page a document without a background presents.
+ */
 export function cssColorToDocxHex(value: string): string | null {
-  const v = value.trim();
-  const six = /^#?([0-9a-f]{6})$/i.exec(v);
-  if (six?.[1]) return six[1].toUpperCase();
-
-  const three = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(v);
-  if (three) {
-    return (
-      three[1]! + three[1]! + three[2]! + three[2]! + three[3]! + three[3]!
-    ).toUpperCase();
-  }
-
-  const rgb = /^rgba?\(([^)]+)\)$/i.exec(v);
-  if (!rgb?.[1]) return null;
-
-  const channels = rgb[1]
-    .split(",")
-    .slice(0, 3)
-    .map((s) => Number(s.trim()));
-  if (channels.length !== 3 || channels.some((n) => !Number.isFinite(n))) {
-    return null;
-  }
-
-  return channels
-    .map((n) =>
-      Math.max(0, Math.min(255, Math.round(n)))
-        .toString(16)
-        .padStart(2, "0")
-        .toUpperCase(),
-    )
-    .join("");
+  // This helper sits on the format boundary and is used from both sides, so it
+  // also reads DOCX's own spelling: six hex digits with no leading `#`, which
+  // is what `w:color` and `w:shd` carry back in.
+  const trimmed = value.trim();
+  const literal = /^[0-9a-f]{6}$/i.test(trimmed) ? `#${trimmed}` : trimmed;
+  const colour = parseCssColor(literal);
+  if (colour === null || colour.alpha === 0) return null;
+  return toHex6(compositeColor(colour, { r: 255, g: 255, b: 255 })).toUpperCase();
 }
 
 // ── Run / paragraph property bags ───────────────────────────────────────────

@@ -467,6 +467,11 @@ Goal: paste/copy common tables.
 `hMerge` is still unread on paste: horizontal merges arrive as `gridSpan`, which
 is what both Word and HTML actually state.
 
+A cell's fill is read through one parser (`model/cssColor.ts`) wherever it
+crosses a boundary — paste, canvas, PDF, DOCX — so a colour the document keeps
+is a colour every lane can write. A syntax that parser does not resolve is
+refused on the way in rather than stored and dropped at export.
+
 `hAlign` and `vAlign` round-trip through the clipboard but nothing else reads
 them yet — cell alignment is not applied by the canvas layout and is emitted by
 neither the PDF nor the DOCX exporter. Storing them keeps a pasted table's

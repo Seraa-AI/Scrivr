@@ -1,5 +1,7 @@
 ---
 "@scrivr/core": patch
+"@scrivr/docx": patch
+"@scrivr/export-pdf": patch
 ---
 
 Copy a table, and get a table back. Pasting one used to keep the rows and cells
@@ -43,3 +45,33 @@ cell per row first, and collapsed back to `rowspan` on the way out.
   browser gave it. Only six hex digits were accepted, while Chrome's CSSOM
   hands back `rgb(...)`, so a pasted fill was kept on screen and dropped from
   the file.
+
+- **`@scrivr/core`** — vertical merges are bounded by the rows their row group
+  actually has, independently of the column allocation limit, so a merge longer
+  than 64 rows survives a copy. Span attributes are read the way HTML parses a
+  non-negative integer, so `rowspan="1e3"` is one row rather than the whole
+  group.
+- **`@scrivr/core`** — one parser now says what a CSS colour means, wherever a
+  colour crosses a boundary. It resolves named colours, `hsl()`, space-separated
+  syntax and alpha without a DOM, so a document exported on a server means the
+  same thing as one exported in a browser.
+- **`@scrivr/core`** — a cell fill is validated once, where every lane reads it,
+  rather than only on the paste path. A fill arriving from DOCX import, collab
+  or `setContent` can no longer reach the canvas as an unpaintable value, which
+  used to leave the previous cell's colour on the brush and paint two cells the
+  same.
+- **`@scrivr/core`** — text colour survives DOCX export whatever its spelling.
+  `cssColorToDocxHex` read hex and comma-form `rgb()` only, so a `color: red`
+  mark — the literal a paste keeps — was dropped with a diagnostic while a cell
+  filled `red` exported correctly in the same document.
+- **`@scrivr/export-pdf`** — a text colour that is not hex no longer exports as
+  black, and no longer crashes the export. `parseHexColor("red")` produced `NaN`
+  channels, which pdf-lib throws on; both PDF colour helpers now read the same
+  literals the rest of the editor does. `parseHexColor` is deprecated in favour
+  of `parseCssColor`.
+- **`@scrivr/docx`** — a cell span a file claims is bounded on import, as it
+  already was on paste. A `<w:gridSpan w:val="100000"/>` would otherwise become
+  a real cell in every row of the document when the grid was padded.
+- **`@scrivr/core`** — a translucent colour is composited onto the page for
+  formats that have no alpha, instead of being written at full strength. A 40%
+  yellow highlight exports as the colour a reader sees.

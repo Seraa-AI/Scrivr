@@ -1,6 +1,6 @@
 import type { DOMOutputSpec } from "prosemirror-model";
 import type { CellHAlign, CellVAlign, CellVMerge } from "./attrs";
-import { isHAlign, isVAlign, isVMerge } from "./attrs";
+import { isHAlign, isVAlign, isVMerge, storableFill } from "./attrs";
 
 /**
  * The HTML attribute layer for table nodes — one module owning both directions
@@ -19,31 +19,15 @@ import { isHAlign, isVAlign, isVMerge } from "./attrs";
 
 
 /**
- * Upper bound on a single cell's span. Every column a span claims becomes a
- * real cell in every row once the integrity pass pads the grid, so a pasted
- * `colspan="100000"` would otherwise materialise a document of empty cells.
- * Word's own limit is 63 columns; a document that means more than this does
- * not exist, while markup that says so does.
+ * Upper bound on the columns one cell may claim. Every column a span claims
+ * becomes a real cell in every row once the integrity pass pads the grid
+ * (`normalize.ts`), so `colspan="100000"` would otherwise materialise a
+ * document of empty cells. Word's own limit is 63 columns.
+ *
+ * Rows need no such bound: a vertical merge can only cover rows that already
+ * exist, so `readRowSpan` clamps to its row group instead.
  */
-const MAX_SPAN = 64;
-
-/**
- * CSS functions that stand in for a value resolved elsewhere. They are valid
- * syntax, so the parser keeps them, but what they resolve to is decided by a
- * stylesheet, an attribute, or the environment — none of which travel with a
- * pasted cell, and one of which (`url`) is a fetch.
- */
-const SUBSTITUTION = /\b(?:var|url|env|attr|image|image-set|cross-fade)\s*\(/i;
-
-/** CSS keywords that mean "no colour of my own" — the same as an unset fill. */
-const NON_COLOURS = new Set([
-  "transparent",
-  "inherit",
-  "initial",
-  "unset",
-  "revert",
-  "currentcolor",
-]);
+const MAX_COLUMN_SPAN = 64;
 
 /** True for a table cell element — `td` or `th`. */
 export function isCell(el: Element): el is HTMLElement {
@@ -55,33 +39,31 @@ export function isCell(el: Element): el is HTMLElement {
 // ── Reading ───────────────────────────────────────────────────────────────────
 
 /**
- * Reads a span attribute. `zero` is what a `0` means for this attribute: HTML
- * reads it as "every remaining row of the group" for `rowspan`, while `colspan`
- * has no such rule and falls back to one column.
+ * Read a span attribute the way HTML parses a non-negative integer: an optional
+ * `+`, then the digits it starts with, and nothing else. `2px` is 2, `1e3` is 1,
+ * and anything with no leading digit — `.5`, `-1`, `nope` — is one span.
+ *
+ * `0` is returned as written, because it means different things for rows and
+ * columns and only the caller knows which it is holding.
  */
-function readSpanAttr(el: Element, name: string, zero: number): number {
+function readSpanAttr(el: Element, name: string): number {
   const raw = el.getAttribute(name);
   if (raw === null) return 1;
-  const parsed = Number.parseFloat(raw.trim());
-  if (!Number.isFinite(parsed)) return 1;
-  const span = Math.floor(parsed);
-  if (span === 0) return Math.max(1, zero);
-  if (span < 1) return 1;
-  return Math.min(span, MAX_SPAN);
+  const digits = /^\+?(\d+)/.exec(raw.trim());
+  if (!digits) return 1;
+  const span = Number.parseInt(digits[1]!, 10);
+  return Number.isFinite(span) ? span : 1;
 }
 
-/** `colspan` → the cell's `gridSpan`. */
+/** `colspan` allocates columns, so it has an independent allocation limit. */
 export function readGridSpan(el: Element): number {
-  return readSpanAttr(el, "colspan", 1);
+  return Math.min(Math.max(1, readSpanAttr(el, "colspan")), MAX_COLUMN_SPAN);
 }
 
-/**
- * `rowspan` → how many rows the cell covers. The caller turns a span above 1
- * into `vMerge: "restart"` plus continuation cells in the rows below, and tells
- * us how many rows are left in the group so `rowspan="0"` can mean all of them.
- */
-export function readRowSpan(el: Element, rowsLeftInGroup = 1): number {
-  return readSpanAttr(el, "rowspan", rowsLeftInGroup);
+/** A vertical merge can cover only existing rows in its own row group. */
+export function readRowSpan(el: Element, rowsLeftInGroup: number): number {
+  const span = readSpanAttr(el, "rowspan");
+  return span === 0 ? rowsLeftInGroup : Math.min(span, rowsLeftInGroup);
 }
 
 /**
@@ -136,31 +118,6 @@ export function cellVMergeAttrs(vMerge: CellVMerge): Record<string, string> {
   return vMerge === "none" ? {} : { "data-vmerge": vMerge };
 }
 
-/**
- * The colour a browser would paint for this value, or null when it would paint
- * nothing.
- *
- * The CSS parser decides, rather than a pattern that merely looks colour-shaped:
- * `hotpinkish` matches every regex a hand-written name check would use, and an
- * unpaintable value is worse than none, because assigning it to `fillStyle` is
- * a silent no-op that leaves the previous cell's colour in place. The parser
- * also hands back one canonical spelling for every lane downstream — canvas,
- * PDF and DOCX — instead of whatever the source happened to write.
- *
- * It cannot judge a substitution function, which is valid syntax whose value
- * lives somewhere the pasted cell does not, so those are refused first.
- */
-function paintableColour(value: string, doc: Document): string | null {
-  const trimmed = value.trim();
-  if (trimmed === "" || NON_COLOURS.has(trimmed.toLowerCase())) return null;
-  if (SUBSTITUTION.test(trimmed)) return null;
-
-  const probe = doc.createElement("span");
-  probe.style.backgroundColor = trimmed;
-  const parsed = probe.style.backgroundColor.trim();
-  return parsed === "" ? null : parsed;
-}
-
 /** `background-color` / `bgcolor` → the cell's fill, or null when it has none. */
 export function readCellBackground(el: HTMLElement): string | null {
   const shorthand = el.style.background.trim();
@@ -170,8 +127,7 @@ export function readCellBackground(el: HTMLElement): string | null {
 
   const styled = el.style.backgroundColor.trim();
   const candidate = styled !== "" ? styled : readStyledValue(el, shorthand, "bgcolor");
-  if (candidate === null) return null;
-  return paintableColour(candidate, el.ownerDocument);
+  return candidate === null ? null : storableFill(candidate);
 }
 
 /**
@@ -262,12 +218,12 @@ function widthsOf(elements: Iterable<Element>): number[] {
 }
 
 /**
- * `<col span>` — how many columns one `<col>` describes. HTML reads `0` as the
- * rest of the colgroup, which needs a column count nobody has yet, so it reads
- * as the one column the element certainly describes.
+ * `<col span>` allocates columns just like a cell's `colspan`. HTML reads a
+ * span of `0` as the rest of the colgroup, which needs a column count nobody
+ * has at parse time, so it describes the one column it certainly does.
  */
 function readColSpan(col: Element): number {
-  return readSpanAttr(col, "span", 1);
+  return Math.min(Math.max(1, readSpanAttr(col, "span")), MAX_COLUMN_SPAN);
 }
 
 // ── Emitting ──────────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ interface DrawnRect {
   width: number;
   height: number;
   color: unknown;
+  opacity: number;
 }
 function fakeCtx() {
   const lines: DrawnLine[] = [];
@@ -200,6 +201,24 @@ function pdfNodeHandler(contribs: ReadonlyArray<unknown>, nodeType: string): unk
 }
 
 describe("renderTableRowPdf — cell shading", () => {
+  it.each([
+    ["red", 1, { type: "RGB", red: 1, green: 0, blue: 0 }],
+    ["rgba(0, 0, 0, .5)", .5, { type: "RGB", red: 0, green: 0, blue: 0 }],
+  ])("exports %s with its opacity", (background, opacity, color) => {
+    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background, blocks: [] };
+    const { ctx, rects } = fakeCtx();
+    renderTableRowPdf(tableRowBlock(rowNode([{}]), [cell], true), ctx);
+    expect(rects).toHaveLength(1);
+    expect(rects[0]).toMatchObject({ color, opacity });
+  });
+
+  it.each(["rgba(0, 0, 0, 0)", "transparent", "#0000"])("omits the invisible fill %s", (background) => {
+    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background, blocks: [] };
+    const { ctx, rects, lines } = fakeCtx();
+    renderTableRowPdf(tableRowBlock(rowNode([{}]), [cell], true), ctx);
+    expect(rects).toEqual([]);
+    expect(lines.length).toBeGreaterThan(0);
+  });
   it("fills a shaded cell with its own colour", () => {
     const node = rowNode([{}]);
     const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "none", background: "rgb(238, 238, 238)", blocks: [] };

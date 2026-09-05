@@ -376,4 +376,24 @@ describe("clipboard round-trip — tables", () => {
 
     expect(tableShape(pasted)).toEqual(tableShape(original.doc));
   });
+
+  // A merge covers rows, which are not bounded by the column allocation limit.
+  it("preserves a vertical merge longer than the column allocation limit", () => {
+    const { schema, plugins, transformer } = tableContext();
+    const rows = Array.from({ length: 65 }, (_, index) =>
+      schema.nodes["tableRow"]!.create(null, [
+        schema.nodes["tableCell"]!.create(
+          { vMerge: index === 0 ? "restart" : "continue" },
+          para(schema, index === 0 ? "Tall" : ""),
+        ),
+        schema.nodes["tableCell"]!.create(null, para(schema, `Row ${index}`)),
+      ]),
+    );
+    const table = schema.nodes["table"]!.create({ grid: [200, 100] }, rows);
+    const original = stateWith(schema, plugins, [table]);
+    const data = copy(select(original, 0, original.doc.content.size), schema);
+    const pasted = paste(transformer, stateWith(schema, plugins, [para(schema, "")]), data);
+
+    expect(tableShape(pasted)).toEqual(tableShape(original.doc));
+  });
 });
