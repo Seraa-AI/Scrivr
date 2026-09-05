@@ -15,24 +15,24 @@
  * only wrap structure. Word requires every `<w:tc>` to end in a block-level
  * element; our cells always hold paragraphs, so that holds.
  */
+import { parseCssColor, toHex6 } from "../model/cssColor";
+import { cellGridSpan, cellVMerge } from "./attrs";
 import type { Node } from "prosemirror-model";
 import { xml, pxToTwips, type DocxNodeHandler, type XmlNode } from "../exports/docx";
 
 const BORDER_SIZE = "4"; // eighths of a point → 0.5pt, matching the canvas hairline.
 const BORDER_COLOR = "9CA3AF"; // neutral gray, same as TableRowStrategy.
 
-function readNumber(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function readVMerge(value: unknown): "none" | "restart" | "continue" {
-  return value === "restart" || value === "continue" ? value : "none";
-}
-
+/**
+ * DOCX shading takes six hex digits, while a cell's fill is stored in whatever
+ * spelling the browser's CSSOM produced — `rgb(...)` in Chrome, a hex triple
+ * elsewhere. Parsing rather than pattern-matching keeps the fill from being
+ * dropped on the browsers that normalise.
+ */
 function readHexFill(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const hex = value.startsWith("#") ? value.slice(1) : value;
-  return /^[0-9a-fA-F]{6}$/.test(hex) ? hex.toUpperCase() : null;
+  const colour = parseCssColor(value);
+  return colour ? toHex6(colour).toUpperCase() : null;
 }
 
 /** Single-line borders on every edge so the table reads like the canvas grid. */
@@ -58,7 +58,7 @@ function gridFromTable(node: Node): number[] {
   // gridSpans) and split evenly so Word still gets a `<w:tblGrid>`.
   const firstRow = node.firstChild;
   let cols = 0;
-  firstRow?.forEach((cell) => (cols += readNumber(cell.attrs["gridSpan"], 1)));
+  firstRow?.forEach((cell) => (cols += cellGridSpan(cell)));
   return Array.from({ length: Math.max(cols, 1) }, () => 100);
 }
 
@@ -93,10 +93,10 @@ const tableRowHandler: DocxNodeHandler = (node, children) => {
 const cellHandler: DocxNodeHandler = (node, children) => {
   const props: XmlNode[] = [];
 
-  const gridSpan = readNumber(node.attrs["gridSpan"], 1);
+  const gridSpan = cellGridSpan(node);
   if (gridSpan > 1) props.push(xml("w:gridSpan", { "w:val": String(gridSpan) }));
 
-  const vMerge = readVMerge(node.attrs["vMerge"]);
+  const vMerge = cellVMerge(node);
   if (vMerge === "restart") props.push(xml("w:vMerge", { "w:val": "restart" }));
   else if (vMerge === "continue") props.push(xml("w:vMerge"));
 

@@ -12,7 +12,10 @@ editor that produced it.
 Table markup now translates in both directions. `gridSpan`, column widths,
 horizontal and vertical alignment, and cell fill are read on paste and written
 on copy, so a table pasted from Word or Google Docs keeps its shape, and one
-copied out of Scrivr arrives in them as the table it was.
+copied out of Scrivr arrives in them as the table it was — bar `hMerge`, which
+neither Word nor HTML states separately from a span, and cell alignment, which
+round-trips through the clipboard but is not yet honoured by layout, PDF, or
+DOCX.
 
 Vertical merges needed the translation to happen before parsing. HTML omits the
 cells a `rowspan` covers, while the schema keeps a real cell per row — and once
@@ -31,4 +34,12 @@ cell per row first, and collapsed back to `rowspan` on the way out.
   accepted into the model: `url(...)`, `var(...)`, and other non-colour values
   are dropped rather than stored.
 - **`@scrivr/core`** — the integrity pass now stores the `gridSpan` readers
-  already derive, so a fractional span becomes its floor rather than 1.
+  already derive, so a fractional span becomes its floor rather than 1. Every
+  reader now derives it in one place, so the layout, the exporters, and the
+  table map can no longer disagree about what a malformed span means.
+- **`@scrivr/core`** — cell shading is exported to PDF, which drew borders and
+  text but never a fill.
+- **`@scrivr/core`** — cell shading survives DOCX export whatever spelling the
+  browser gave it. Only six hex digits were accepted, while Chrome's CSSOM
+  hands back `rgb(...)`, so a pasted fill was kept on screen and dropped from
+  the file.

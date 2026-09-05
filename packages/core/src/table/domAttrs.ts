@@ -1,4 +1,6 @@
 import type { DOMOutputSpec } from "prosemirror-model";
+import type { CellHAlign, CellVAlign, CellVMerge } from "./attrs";
+import { isHAlign, isVAlign, isVMerge } from "./attrs";
 
 /**
  * The HTML attribute layer for table nodes — one module owning both directions
@@ -15,18 +17,23 @@ import type { DOMOutputSpec } from "prosemirror-model";
  * clipboard, which means Word, Google Docs, or an arbitrary web page.
  */
 
-export const VALID_HALIGNS = ["left", "center", "right", "justify"] as const;
-export const VALID_VALIGNS = ["top", "center", "bottom"] as const;
-export const VALID_VMERGE = ["none", "restart", "continue"] as const;
-
-export type CellHAlign = (typeof VALID_HALIGNS)[number];
-export type CellVAlign = (typeof VALID_VALIGNS)[number];
 
 /**
- * Upper bound on a single cell's span. A pasted `colspan="100000"` would
- * otherwise have the integrity pass pad every row out to match it.
+ * Upper bound on a single cell's span. Every column a span claims becomes a
+ * real cell in every row once the integrity pass pads the grid, so a pasted
+ * `colspan="100000"` would otherwise materialise a document of empty cells.
+ * Word's own limit is 63 columns; a document that means more than this does
+ * not exist, while markup that says so does.
  */
-const MAX_SPAN = 1000;
+const MAX_SPAN = 64;
+
+/**
+ * CSS functions that stand in for a value resolved elsewhere. They are valid
+ * syntax, so the parser keeps them, but what they resolve to is decided by a
+ * stylesheet, an attribute, or the environment — none of which travel with a
+ * pasted cell, and one of which (`url`) is a fetch.
+ */
+const SUBSTITUTION = /\b(?:var|url|env|attr|image|image-set|cross-fade)\s*\(/i;
 
 /** CSS keywords that mean "no colour of my own" — the same as an unset fill. */
 const NON_COLOURS = new Set([
@@ -36,37 +43,45 @@ const NON_COLOURS = new Set([
   "unset",
   "revert",
   "currentcolor",
-  "none",
-  "auto",
 ]);
 
-const HEX_COLOUR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
-const FUNCTIONAL_COLOUR = /^(?:rgb|rgba|hsl|hsla)\([\d\s.,%/+-]*\)$/i;
-const NAMED_COLOUR = /^[a-z]{3,20}$/i;
+/** True for a table cell element — `td` or `th`. */
+export function isCell(el: Element): el is HTMLElement {
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName.toLowerCase();
+  return tag === "td" || tag === "th";
+}
 
 // ── Reading ───────────────────────────────────────────────────────────────────
 
-function readSpanAttr(el: HTMLElement, name: string): number {
+/**
+ * Reads a span attribute. `zero` is what a `0` means for this attribute: HTML
+ * reads it as "every remaining row of the group" for `rowspan`, while `colspan`
+ * has no such rule and falls back to one column.
+ */
+function readSpanAttr(el: Element, name: string, zero: number): number {
   const raw = el.getAttribute(name);
   if (raw === null) return 1;
   const parsed = Number.parseFloat(raw.trim());
   if (!Number.isFinite(parsed)) return 1;
   const span = Math.floor(parsed);
+  if (span === 0) return Math.max(1, zero);
   if (span < 1) return 1;
   return Math.min(span, MAX_SPAN);
 }
 
 /** `colspan` → the cell's `gridSpan`. */
-export function readGridSpan(el: HTMLElement): number {
-  return readSpanAttr(el, "colspan");
+export function readGridSpan(el: Element): number {
+  return readSpanAttr(el, "colspan", 1);
 }
 
 /**
  * `rowspan` → how many rows the cell covers. The caller turns a span above 1
- * into `vMerge: "restart"` plus continuation cells in the rows below.
+ * into `vMerge: "restart"` plus continuation cells in the rows below, and tells
+ * us how many rows are left in the group so `rowspan="0"` can mean all of them.
  */
-export function readRowSpan(el: HTMLElement): number {
-  return readSpanAttr(el, "rowspan");
+export function readRowSpan(el: Element, rowsLeftInGroup = 1): number {
+  return readSpanAttr(el, "rowspan", rowsLeftInGroup);
 }
 
 /**
@@ -79,16 +94,6 @@ function readStyledValue(el: HTMLElement, styleValue: string, attrName: string):
   const attr = el.getAttribute(attrName);
   const trimmed = attr === null ? "" : attr.trim();
   return trimmed === "" ? null : trimmed;
-}
-
-function isHAlign(value: string): value is CellHAlign {
-  const candidates: readonly string[] = VALID_HALIGNS;
-  return candidates.includes(value);
-}
-
-function isVAlign(value: string): value is CellVAlign {
-  const candidates: readonly string[] = VALID_VALIGNS;
-  return candidates.includes(value);
 }
 
 /** `text-align` / `align` → the cell's `hAlign`, or null to keep the default. */
@@ -109,21 +114,15 @@ export function readCellVAlign(el: HTMLElement): CellVAlign | null {
   return isVAlign(lower) ? lower : null;
 }
 
-export type CellVMerge = (typeof VALID_VMERGE)[number];
-
-function isVMerge(value: string): value is CellVMerge {
-  const candidates: readonly string[] = VALID_VMERGE;
-  return candidates.includes(value);
-}
-
 /**
  * `data-vmerge` → the cell's vertical-merge role.
  *
  * HTML has no attribute for "this cell is covered by the one above" — it simply
- * omits the covered cells and puts `rowspan` on the survivor. Scrivr keeps a
- * real cell per row, so a marker carries the role between the two shapes:
- * expanding `rowspan` writes it, and a copy of Scrivr's own markup reads it
- * back without the reader having to re-derive the merge from the table map.
+ * omits the covered cells and puts `rowspan` on the survivor. The marker
+ * carries the role across that gap within a single paste: `expandRowSpans`
+ * writes it and `parseCellAttrs` reads it. It never leaves the editor —
+ * `collapseRowSpans` strips it and states the merge as `rowspan` instead, so
+ * markup on the clipboard is markup any editor understands.
  */
 export function readCellVMerge(el: HTMLElement): CellVMerge {
   const raw = el.getAttribute("data-vmerge");
@@ -138,19 +137,28 @@ export function cellVMergeAttrs(vMerge: CellVMerge): Record<string, string> {
 }
 
 /**
- * True when the value is a colour this editor can paint. A cell fill is only
- * ever painted, so anything that would resolve to a fetch (`url(...)`) or to
- * another value (`var(...)`) is not a colour for our purposes.
+ * The colour a browser would paint for this value, or null when it would paint
+ * nothing.
+ *
+ * The CSS parser decides, rather than a pattern that merely looks colour-shaped:
+ * `hotpinkish` matches every regex a hand-written name check would use, and an
+ * unpaintable value is worse than none, because assigning it to `fillStyle` is
+ * a silent no-op that leaves the previous cell's colour in place. The parser
+ * also hands back one canonical spelling for every lane downstream — canvas,
+ * PDF and DOCX — instead of whatever the source happened to write.
+ *
+ * It cannot judge a substitution function, which is valid syntax whose value
+ * lives somewhere the pasted cell does not, so those are refused first.
  */
-function isColour(value: string): boolean {
+function paintableColour(value: string, doc: Document): string | null {
   const trimmed = value.trim();
-  if (trimmed === "") return false;
-  if (NON_COLOURS.has(trimmed.toLowerCase())) return false;
-  return (
-    HEX_COLOUR.test(trimmed) ||
-    FUNCTIONAL_COLOUR.test(trimmed) ||
-    NAMED_COLOUR.test(trimmed)
-  );
+  if (trimmed === "" || NON_COLOURS.has(trimmed.toLowerCase())) return null;
+  if (SUBSTITUTION.test(trimmed)) return null;
+
+  const probe = doc.createElement("span");
+  probe.style.backgroundColor = trimmed;
+  const parsed = probe.style.backgroundColor.trim();
+  return parsed === "" ? null : parsed;
 }
 
 /** `background-color` / `bgcolor` → the cell's fill, or null when it has none. */
@@ -163,7 +171,7 @@ export function readCellBackground(el: HTMLElement): string | null {
   const styled = el.style.backgroundColor.trim();
   const candidate = styled !== "" ? styled : readStyledValue(el, shorthand, "bgcolor");
   if (candidate === null) return null;
-  return isColour(candidate) ? candidate : null;
+  return paintableColour(candidate, el.ownerDocument);
 }
 
 /**
@@ -188,7 +196,8 @@ function readColWidth(col: Element): number | null {
 
   const measure = /^(\d+(?:\.\d+)?)\s*([a-z]*)$/i.exec(raw.trim());
   if (!measure) return null;
-  const scale = UNIT_PX[measure[2]!.toLowerCase()];
+  const unit = measure[2]!.toLowerCase();
+  const scale = Object.hasOwn(UNIT_PX, unit) ? UNIT_PX[unit] : undefined;
   if (scale === undefined) return null;
 
   const width = Number.parseFloat(measure[1]!) * scale;
@@ -202,41 +211,74 @@ function readColWidth(col: Element): number | null {
  * relative grid reads as unset and the layout falls back to uniform columns.
  */
 export function readTableGrid(el: HTMLElement): number[] {
-  const colgroup = el.querySelector("colgroup");
-  if (colgroup) return widthsOf(colgroup.querySelectorAll("col"));
+  const cols = ownColumns(el);
+  if (cols.length > 0) return widthsOf(cols);
 
   // Word states column widths on the cells of each row rather than in a
   // colgroup. The first row describes the grid — but only when no cell in it
   // spans, since one width across several columns cannot be split honestly.
-  const firstRow = el.querySelector("tr");
+  const firstRow = ownRows(el)[0];
   if (!firstRow) return [];
-  const cells = Array.from(firstRow.children).filter((child) => {
-    const tag = child.tagName.toLowerCase();
-    return tag === "td" || tag === "th";
-  });
-  if (cells.some((cell) => cell instanceof HTMLElement && readGridSpan(cell) > 1)) return [];
+  const cells = Array.from(firstRow.children).filter(isCell);
+  if (cells.some((cell) => readGridSpan(cell) > 1)) return [];
   return widthsOf(cells);
 }
 
-/** All-or-nothing: a grid describing only some columns misaligns the rest. */
+/**
+ * The `<col>` elements describing this table's columns. A nested table's
+ * columns describe a cell's content, not the table around it, so only
+ * colgroups the table owns are read.
+ */
+function ownColumns(el: HTMLElement): Element[] {
+  const cols: Element[] = [];
+  for (const child of el.children) {
+    if (child.tagName.toLowerCase() !== "colgroup") continue;
+    for (const col of child.children) {
+      if (col.tagName.toLowerCase() === "col") cols.push(col);
+    }
+  }
+  return cols;
+}
+
+/** This table's own rows, skipping any belonging to a table inside a cell. */
+function ownRows(el: HTMLElement): Element[] {
+  return Array.from(el.querySelectorAll("tr")).filter((row) => row.closest("table") === el);
+}
+
+/**
+ * The width each column is given, all or nothing: a grid describing only some
+ * columns misaligns the rest. A `<col>` carrying a `span` describes that many
+ * columns, all the same width.
+ */
 function widthsOf(elements: Iterable<Element>): number[] {
   const grid: number[] = [];
   for (const element of elements) {
     const width = readColWidth(element);
     if (width === null) return [];
-    grid.push(width);
+    const columns = element.tagName.toLowerCase() === "col" ? readColSpan(element) : 1;
+    for (let i = 0; i < columns; i++) grid.push(width);
   }
   return grid;
 }
 
+/**
+ * `<col span>` — how many columns one `<col>` describes. HTML reads `0` as the
+ * rest of the colgroup, which needs a column count nobody has yet, so it reads
+ * as the one column the element certainly describes.
+ */
+function readColSpan(col: Element): number {
+  return readSpanAttr(col, "span", 1);
+}
+
 // ── Emitting ──────────────────────────────────────────────────────────────────
 
-/** `gridSpan` + covered rows → `colspan`/`rowspan`, omitting HTML's defaults. */
-export function cellSpanAttrs(gridSpan: number, rowSpan: number): Record<string, string> {
-  const attrs: Record<string, string> = {};
-  if (gridSpan > 1) attrs["colspan"] = String(gridSpan);
-  if (rowSpan > 1) attrs["rowspan"] = String(rowSpan);
-  return attrs;
+/**
+ * `gridSpan` → `colspan`, omitting HTML's default of one column. `rowspan` has
+ * no counterpart here: a cell cannot see the rows it covers, so
+ * `collapseRowSpans` writes it where the whole table is in view.
+ */
+export function cellColspanAttrs(gridSpan: number): Record<string, string> {
+  return gridSpan > 1 ? { colspan: String(gridSpan) } : {};
 }
 
 export interface CellPresentation {

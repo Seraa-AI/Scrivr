@@ -1,4 +1,4 @@
-import { readGridSpan, readRowSpan } from "./domAttrs";
+import { isCell, readGridSpan, readRowSpan } from "./domAttrs";
 
 /**
  * Translates table markup between the clipboard's shape and the schema's, in
@@ -10,6 +10,10 @@ import { readGridSpan, readRowSpan } from "./domAttrs";
  * once ProseMirror has read the markup, the covered rows are simply short, and
  * which columns they were short by is no longer recoverable. Copy closes it in
  * reverse, so what leaves the editor is markup any editor understands.
+ *
+ * A merge belongs to one row group. HTML does not let a `rowspan` escape its
+ * `thead`/`tbody`/`tfoot`, and browsers clamp one that tries, so each group is
+ * translated on its own.
  */
 
 interface Occupancy {
@@ -21,26 +25,21 @@ interface Occupancy {
 
 /** Expands every `rowspan` in `root` into explicit continuation cells. */
 export function expandRowSpans(root: HTMLElement): void {
-  for (const table of root.querySelectorAll("table")) {
-    expandTable(table);
+  for (const table of tablesIn(root)) {
+    for (const rows of rowGroups(table)) expandGroup(rows);
   }
 }
 
-function expandTable(table: HTMLElement): void {
-  // A nested table's rows belong to it, not to the table around it.
-  const rows = Array.from(table.querySelectorAll("tr")).filter(
-    (row) => row.closest("table") === table,
-  );
-
+function expandGroup(rows: HTMLElement[]): void {
   // Column index → the merge currently covering it.
   const covered = new Map<number, Occupancy>();
 
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const cells = Array.from(row.children).filter(isCell);
     let column = 0;
     let next = 0;
 
-    while (next < cells.length || covered.size > 0) {
+    for (;;) {
       const occupancy = covered.get(column);
       if (occupancy) {
         row.insertBefore(continuationOf(occupancy.master), cells[next] ?? null);
@@ -52,10 +51,19 @@ function expandTable(table: HTMLElement): void {
       }
 
       const cell = cells[next];
-      if (!cell) break;
+      if (!cell) {
+        // The row ran out of cells, but a merge may still cover a column
+        // further right. A ragged row is legal HTML, and the covered slot is
+        // where it always was — so stand the row's missing slots up rather
+        // than dropping the merge or hanging the continuation off the end.
+        const ahead = nextCoveredColumn(covered, column);
+        if (ahead === undefined) break;
+        for (; column < ahead; column++) row.appendChild(fillerLike(row));
+        continue;
+      }
       next += 1;
 
-      const rowSpan = readRowSpan(cell);
+      const rowSpan = readRowSpan(cell, rows.length - index);
       if (rowSpan > 1) {
         cell.setAttribute("data-vmerge", "restart");
         // The expansion has said everything `rowspan` was saying.
@@ -67,6 +75,15 @@ function expandTable(table: HTMLElement): void {
   }
 }
 
+/** The leftmost column at or right of `from` that a merge still covers. */
+function nextCoveredColumn(covered: Map<number, Occupancy>, from: number): number | undefined {
+  let found: number | undefined;
+  for (const column of covered.keys()) {
+    if (column >= from && (found === undefined || column < found)) found = column;
+  }
+  return found;
+}
+
 /**
  * Collapses continuation cells back into `rowspan`, the only vertical merge
  * other editors understand. The continuation cells are removed: they exist to
@@ -74,32 +91,33 @@ function expandTable(table: HTMLElement): void {
  * displays.
  */
 export function collapseRowSpans(root: HTMLElement): void {
-  for (const table of root.querySelectorAll("table")) {
-    collapseTable(table);
+  for (const table of tablesIn(root)) {
+    for (const rows of rowGroups(table)) collapseGroup(rows);
   }
 }
 
-function collapseTable(table: HTMLElement): void {
-  const rows = Array.from(table.querySelectorAll("tr")).filter(
-    (row) => row.closest("table") === table,
-  );
+interface OpenMerge {
+  master: HTMLElement;
+  rows: number;
+}
 
+function collapseGroup(rows: HTMLElement[]): void {
   // Column index → the merge still collecting continuations below it.
-  const open = new Map<number, { master: HTMLElement; rows: number }>();
+  const open = new Map<number, OpenMerge>();
 
   for (const row of rows) {
     let column = 0;
     for (const cell of Array.from(row.children).filter(isCell)) {
       const span = readGridSpan(cell);
-      const merge = cell.getAttribute("data-vmerge");
+      const role = cell.getAttribute("data-vmerge");
       cell.removeAttribute("data-vmerge");
 
-      if (merge === "continue") {
-        const master = open.get(column);
+      if (role === "continue") {
+        const merge = open.get(column);
         // A continuation whose master is outside the copied range is a cell in
         // its own right — the range starts partway down someone else's merge.
-        if (master) {
-          master.rows += 1;
+        if (merge) {
+          merge.rows += 1;
           cell.remove();
           column += span;
           continue;
@@ -116,21 +134,48 @@ function collapseTable(table: HTMLElement): void {
   for (const merge of open.values()) closeMerge(merge);
 }
 
-function closeMerge(merge: { master: HTMLElement; rows: number } | undefined): void {
+function closeMerge(merge: OpenMerge | undefined): void {
   if (merge && merge.rows > 1) merge.master.setAttribute("rowspan", String(merge.rows));
 }
 
-function isCell(el: Element): el is HTMLElement {
-  if (!(el instanceof HTMLElement)) return false;
-  const tag = el.tagName.toLowerCase();
-  return tag === "td" || tag === "th";
+/** Every table under `root`, including `root` itself when it is one. */
+function tablesIn(root: HTMLElement): HTMLElement[] {
+  const tables: HTMLElement[] = Array.from(root.querySelectorAll("table"));
+  if (root.tagName.toLowerCase() === "table") tables.unshift(root);
+  return tables;
+}
+
+/**
+ * The table's own rows, split into row groups in document order. A nested
+ * table's rows belong to it, not to the table around it.
+ */
+function rowGroups(table: HTMLElement): HTMLElement[][] {
+  const groups = new Map<Element, HTMLElement[]>();
+  for (const row of table.querySelectorAll("tr")) {
+    if (row.closest("table") !== table) continue;
+    const group = row.closest("thead, tbody, tfoot") ?? table;
+    const rows = groups.get(group);
+    if (rows) rows.push(row);
+    else groups.set(group, [row]);
+  }
+  return Array.from(groups.values());
 }
 
 /** An empty cell standing in the same columns as the merge it continues. */
 function continuationOf(master: HTMLElement): HTMLElement {
-  const cell = master.ownerDocument.createElement(master.tagName.toLowerCase());
+  const cell = emptyCellLike(master);
   cell.setAttribute("data-vmerge", "continue");
   const span = master.getAttribute("colspan");
   if (span !== null) cell.setAttribute("colspan", span);
   return cell;
+}
+
+/** An empty cell of the same kind as the row's other cells. */
+function fillerLike(row: HTMLElement): HTMLElement {
+  const sibling = Array.from(row.children).find(isCell);
+  return sibling ? emptyCellLike(sibling) : row.ownerDocument.createElement("td");
+}
+
+function emptyCellLike(model: HTMLElement): HTMLElement {
+  return model.ownerDocument.createElement(model.tagName.toLowerCase());
 }

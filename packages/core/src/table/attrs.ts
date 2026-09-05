@@ -1,6 +1,16 @@
 import type { Node } from "prosemirror-model";
-import type { CellHAlign, CellVAlign, CellVMerge } from "./domAttrs";
-import { VALID_HALIGNS, VALID_VALIGNS } from "./domAttrs";
+
+/**
+ * The values each cell attr may hold. They live here, with the node layer that
+ * owns the attrs, and the DOM layer reads them when translating markup.
+ */
+export const VALID_HALIGNS = ["left", "center", "right", "justify"] as const;
+export const VALID_VALIGNS = ["top", "center", "bottom"] as const;
+export const VALID_VMERGE = ["none", "restart", "continue"] as const;
+
+export type CellHAlign = (typeof VALID_HALIGNS)[number];
+export type CellVAlign = (typeof VALID_VALIGNS)[number];
+export type CellVMerge = (typeof VALID_VMERGE)[number];
 
 /**
  * Node-attr readers for table nodes — the counterpart to `domAttrs`, which
@@ -25,18 +35,19 @@ export function cellGridSpan(cell: Node): number {
 /** The cell's vertical-merge role. */
 export function cellVMerge(cell: Node): CellVMerge {
   const value = cell.attrs["vMerge"];
-  if (value === "restart" || value === "continue") return value;
-  return "none";
+  return typeof value === "string" && isVMerge(value) ? value : "none";
 }
 
+/** The cell's horizontal alignment; "left" when unset or unrecognised. */
 export function cellHAlign(cell: Node): CellHAlign {
   const value = cell.attrs["hAlign"];
-  return typeof value === "string" ? asHAlign(value) : "left";
+  return typeof value === "string" && isHAlign(value) ? value : "left";
 }
 
+/** The cell's vertical alignment; "top" when unset or unrecognised. */
 export function cellVAlign(cell: Node): CellVAlign {
   const value = cell.attrs["vAlign"];
-  return typeof value === "string" ? asVAlign(value) : "top";
+  return typeof value === "string" && isVAlign(value) ? value : "top";
 }
 
 /** The cell's fill, or null when it has none. */
@@ -56,14 +67,19 @@ export function tableGrid(table: Node): number[] {
   return grid;
 }
 
-// Matching against the valid list is what narrows a bare string to the union —
-// kept here so each reader above stays a single line.
-function asHAlign(value: string): CellHAlign {
-  for (const candidate of VALID_HALIGNS) if (candidate === value) return candidate;
-  return "left";
+// One narrowing per union, shared with the DOM layer so a value added to a
+// list above is recognised everywhere at once.
+export function isHAlign(value: string): value is CellHAlign {
+  const candidates: readonly string[] = VALID_HALIGNS;
+  return candidates.includes(value);
 }
 
-function asVAlign(value: string): CellVAlign {
-  for (const candidate of VALID_VALIGNS) if (candidate === value) return candidate;
-  return "top";
+export function isVAlign(value: string): value is CellVAlign {
+  const candidates: readonly string[] = VALID_VALIGNS;
+  return candidates.includes(value);
+}
+
+export function isVMerge(value: string): value is CellVMerge {
+  const candidates: readonly string[] = VALID_VMERGE;
+  return candidates.includes(value);
 }

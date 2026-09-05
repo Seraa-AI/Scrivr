@@ -5,6 +5,10 @@ import type { Node } from "prosemirror-model";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
 import { PasteTransformer } from "./PasteTransformer";
+// Imported through the package barrel on purpose: this is the contract an
+// extension writes its transforms against, and `tsc` fails here the moment it
+// stops being exported.
+import type { PasteHtmlTransform } from "../index";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -16,8 +20,9 @@ function pasteHtml(html: string): Node {
   const clipboardData = {
     getData: (type: string) => (type === "text/html" ? html : ""),
   } as DataTransfer;
+  const htmlTransforms: PasteHtmlTransform[] = manager.buildPasteHtmlTransforms();
   const transformer = new PasteTransformer(schema, [], {}, {
-    pasteHtmlTransforms: manager.buildPasteHtmlTransforms(),
+    pasteHtmlTransforms: htmlTransforms,
     pasteTransforms: manager.buildPasteTransforms(),
   });
   const tr = transformer.transform(clipboardData, state);

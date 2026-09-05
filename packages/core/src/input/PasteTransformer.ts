@@ -879,19 +879,32 @@ function buildWordList(items: WordListItem[], doc: Document): HTMLElement {
 
 /** HTML cleanup */
 
+/** Elements that carry text rather than structure — see the strip rule below. */
+const INLINE_TAGS = new Set([
+  "span",
+  "b",
+  "strong",
+  "i",
+  "em",
+  "u",
+  "s",
+  "strike",
+  "font",
+  "a",
+  "small",
+  "big",
+  "sub",
+  "sup",
+  "code",
+  "mark",
+]);
+
 /**
  * Normalise pasted HTML before handing it to the ProseMirror DOMParser.
  *
- * Handles:
- *  - Google Docs: unwraps the outer `<b id="docs-internal-guid-…">` shell
- *    (font-weight:normal wrapper that carries no semantic weight)
- *  - Non-breaking spaces (\u00A0) → regular spaces so word-joining works
+ * Each step below says what it is undoing and which source emits it; the list
+ * is not repeated here, because a partial enumeration ages into a false one.
  */
-function isTableCell(el: Element): boolean {
-  const tag = el.tagName.toLowerCase();
-  return tag === "td" || tag === "th";
-}
-
 export function cleanPastedHtml(root: HTMLElement): void {
   // Strip non-content elements — Google Docs includes a <style> block with
   // generated CSS classes (.c0 { font-size:11pt; … }) that don't map to our schema.
@@ -925,9 +938,10 @@ export function cleanPastedHtml(root: HTMLElement): void {
   root.querySelectorAll("[style]").forEach((el) => {
     if (!(el instanceof HTMLElement)) return;
     const s = el.style;
-    // A table cell's fill is document content, not the incidental background a
-    // pasted text span carries around.
-    if (!isTableCell(el)) s.removeProperty("background-color");
+    // Only on the text-carrying elements this rule was written for. A block's
+    // background is its own — a table cell's fill is document content — while
+    // the one a pasted `<span>` drags along is an artefact of its old page.
+    if (INLINE_TAGS.has(el.tagName.toLowerCase())) s.removeProperty("background-color");
     s.removeProperty("font-variant");
     s.removeProperty("white-space"); // pre/pre-wrap from Google Docs
     if (s.textDecoration === "none") s.removeProperty("text-decoration");

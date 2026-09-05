@@ -2,6 +2,7 @@ import { Selection, TextSelection } from "prosemirror-state";
 import type { Command, EditorState } from "prosemirror-state";
 import type { Node, NodeType } from "prosemirror-model";
 import { getTableMap, type Rect, type TableMap } from "./TableMap";
+import { cellGridSpan, tableGrid } from "./attrs";
 
 /**
  * Structural table commands: add/delete row, add/delete column, and cell
@@ -45,20 +46,6 @@ function isCell(node: Node): boolean {
   return node.type.name === "tableCell" || node.type.name === "tableHeader";
 }
 
-function readGridSpan(cell: Node): number {
-  const v = cell.attrs["gridSpan"];
-  if (typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v >= 1) return v;
-  return 1;
-}
-
-function readGrid(table: Node): number[] {
-  const v = table.attrs["grid"];
-  if (!Array.isArray(v)) return [];
-  const out: number[] = [];
-  for (const x of v) if (typeof x === "number" && Number.isFinite(x)) out.push(x);
-  return out;
-}
-
 /** Slot lookup that tolerates `noUncheckedIndexedAccess`; `-1` = empty slot. */
 function slotAt(map: TableMap, row: number, col: number): number {
   return map.map[row * map.width + col] ?? -1;
@@ -82,7 +69,7 @@ function maxPhysicalColumns(table: Node): number {
   table.forEach((rowNode) => {
     let w = 0;
     rowNode.forEach((cell) => {
-      w += readGridSpan(cell);
+      w += cellGridSpan(cell);
     });
     if (w > max) max = w;
   });
@@ -95,7 +82,7 @@ function physicalCellColumn(rowNode: Node, rowPos: number, cellPos: number): num
   for (let i = 0; i < rowNode.childCount; i++) {
     const cell = rowNode.child(i);
     if (pos === cellPos) return col;
-    col += readGridSpan(cell);
+    col += cellGridSpan(cell);
     pos += cell.nodeSize;
   }
   return null;
@@ -273,7 +260,7 @@ function deleteRowCommand(): Command {
             if (promoteCols.has(col)) {
               tr = tr.setNodeMarkup(pos, undefined, { ...cell.attrs, vMerge: "restart" });
             }
-            col += readGridSpan(cell);
+            col += cellGridSpan(cell);
             pos += cell.nodeSize;
           }
         }
@@ -317,7 +304,7 @@ function addColumnCommand(after: boolean): Command {
       let placed = false;
       for (let i = 0; i < rowNode.childCount; i++) {
         const cell = rowNode.child(i);
-        const span = readGridSpan(cell);
+        const span = cellGridSpan(cell);
         if (insertCol > col && insertCol < col + span) {
           grows.push({ pos: cellPos, cell });
           placed = true;
@@ -341,7 +328,7 @@ function addColumnCommand(after: boolean): Command {
     let tr = state.tr;
     // Size-stable markup first, so the original positions stay valid.
     for (const g of grows) {
-      tr = tr.setNodeMarkup(g.pos, undefined, { ...g.cell.attrs, gridSpan: readGridSpan(g.cell) + 1 });
+      tr = tr.setNodeMarkup(g.pos, undefined, { ...g.cell.attrs, gridSpan: cellGridSpan(g.cell) + 1 });
     }
     // Inserts descending so earlier inserts don't shift later positions.
     inserts.sort((a, b) => b.pos - a.pos);
@@ -352,7 +339,7 @@ function addColumnCommand(after: boolean): Command {
     // can be shorter than the grid width (e.g. a table parsed from HTML before
     // the integrity plugin extends it); splicing a short grid would land the
     // new width in the wrong column once per-column widths can differ.
-    const grid = readGrid(table);
+    const grid = tableGrid(table);
     while (grid.length < ctx.map.width) grid.push(DEFAULT_COLUMN_WIDTH);
     const newGrid = [...grid.slice(0, insertCol), DEFAULT_COLUMN_WIDTH, ...grid.slice(insertCol)];
     tr = tr.setNodeMarkup(tablePos, undefined, { ...table.attrs, grid: newGrid });
@@ -388,7 +375,7 @@ function deleteColumnCommand(): Command {
       let cellPos = rowStart + 1;
       for (let i = 0; i < rowNode.childCount; i++) {
         const cell = rowNode.child(i);
-        const span = readGridSpan(cell);
+        const span = cellGridSpan(cell);
         if (delCol >= col && delCol < col + span) {
           if (span > 1) shrinks.push({ pos: cellPos, cell });
           else deletions.push({ from: cellPos, to: cellPos + cell.nodeSize });
@@ -401,12 +388,12 @@ function deleteColumnCommand(): Command {
 
     let tr = state.tr;
     for (const s of shrinks) {
-      tr = tr.setNodeMarkup(s.pos, undefined, { ...s.cell.attrs, gridSpan: readGridSpan(s.cell) - 1 });
+      tr = tr.setNodeMarkup(s.pos, undefined, { ...s.cell.attrs, gridSpan: cellGridSpan(s.cell) - 1 });
     }
     deletions.sort((a, b) => b.from - a.from);
     for (const d of deletions) tr = tr.delete(d.from, d.to);
     // Pad to the real column count before removing the slot (see addColumn).
-    const grid = readGrid(table);
+    const grid = tableGrid(table);
     while (grid.length < map.width) grid.push(DEFAULT_COLUMN_WIDTH);
     const newGrid = [...grid.slice(0, delCol), ...grid.slice(delCol + 1)];
     tr = tr.setNodeMarkup(tablePos, undefined, { ...table.attrs, grid: newGrid });

@@ -467,6 +467,12 @@ Goal: paste/copy common tables.
 `hMerge` is still unread on paste: horizontal merges arrive as `gridSpan`, which
 is what both Word and HTML actually state.
 
+`hAlign` and `vAlign` round-trip through the clipboard but nothing else reads
+them yet — cell alignment is not applied by the canvas layout and is emitted by
+neither the PDF nor the DOCX exporter. Storing them keeps a pasted table's
+intent rather than discarding it, but rendering them is Phase 9 work, and until
+then a cell's alignment is preserved rather than honoured.
+
 ### Phase 8 — Markdown And DOCX Export
 
 Goal: extra export targets beyond the PDF parity that landed in Phase 4.

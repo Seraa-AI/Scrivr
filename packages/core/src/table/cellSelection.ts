@@ -4,6 +4,7 @@ import { Fragment, Slice } from "prosemirror-model";
 import type { Node, ResolvedPos } from "prosemirror-model";
 import type { Mappable } from "prosemirror-transform";
 import { getTableMap, type Rect, type TableMap } from "./TableMap";
+import { cellGridSpan } from "./attrs";
 
 /**
  * Cell selection geometry + the `CellSelection` class.
@@ -50,12 +51,6 @@ function isCellType(name: string): boolean {
   return name === "tableCell" || name === "tableHeader";
 }
 
-function readGridSpan(cell: Node): number {
-  const v = cell.attrs["gridSpan"];
-  if (typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v >= 1) return v;
-  return 1;
-}
-
 /** Grid (row, physical column) of the cell at `cellOffset`, or null. */
 function locateCell(table: Node, cellOffset: number): { row: number; col: number } | null {
   let rowStart = 0; // offset of each row node, relative to table content start
@@ -67,7 +62,7 @@ function locateCell(table: Node, cellOffset: number): { row: number; col: number
       for (let i = 0; i < rowNode.childCount; i++) {
         const cell = rowNode.child(i);
         if (cellPos === cellOffset) return { row: r, col };
-        col += readGridSpan(cell);
+        col += cellGridSpan(cell);
         cellPos += cell.nodeSize;
       }
       return null;
@@ -269,7 +264,7 @@ export class CellSelection extends Selection {
       const cells: Node[] = [];
       let col = 0;
       rowNode.forEach((cellNode) => {
-        const span = readGridSpan(cellNode);
+        const span = cellGridSpan(cellNode);
         if (col >= rect.left && col + span <= rect.right) cells.push(cellNode);
         col += span;
       });

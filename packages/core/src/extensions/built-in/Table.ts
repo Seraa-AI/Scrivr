@@ -24,16 +24,13 @@ import { tableDocxHandlers } from "../../table/docxExport";
 import { tableSemanticHandler } from "../../table/semanticExport";
 import { expandRowSpans } from "../../table/clipboardHtml";
 import {
-  VALID_HALIGNS,
-  VALID_VALIGNS,
-  VALID_VMERGE,
   readGridSpan,
   readCellHAlign,
   readCellVAlign,
   readCellBackground,
   readTableGrid,
   readCellVMerge,
-  cellSpanAttrs,
+  cellColspanAttrs,
   cellPresentationAttrs,
   cellVMergeAttrs,
   tableColgroupSpec,
@@ -75,18 +72,9 @@ function uniformGrid(cols: number): number[] {
   return Array.from({ length: cols }, () => DEFAULT_COLUMN_WIDTH);
 }
 
-/**
- * A tag rule always parses an element; the string form of `getAttrs` belongs to
- * style rules, which these specs don't use.
- */
-function asElement(dom: HTMLElement | string): HTMLElement | null {
-  return typeof dom === "string" ? null : dom;
-}
-
 /** Read the persisted block id off a parsed DOM node (see model/assignBlockIds). */
-function parseNodeId(dom: HTMLElement | string): { nodeId: string | null } {
-  const el = asElement(dom);
-  return { nodeId: el?.getAttribute("data-node-id") ?? null };
+function parseNodeId(el: HTMLElement): { nodeId: string | null } {
+  return { nodeId: el.getAttribute("data-node-id") ?? null };
 }
 
 /** Emit `data-node-id` when the node carries one, so the id survives serialize. */
@@ -98,9 +86,7 @@ function nodeIdAttrs(node: Node): Record<string, string> {
 }
 
 /** Read a pasted table's own attrs — its id and, when present, its column widths. */
-function parseTableAttrs(dom: HTMLElement | string): Record<string, unknown> | false {
-  const el = asElement(dom);
-  if (!el) return false;
+function parseTableAttrs(el: HTMLElement): Record<string, unknown> {
   return { ...parseNodeId(el), grid: readTableGrid(el) };
 }
 
@@ -109,9 +95,7 @@ function parseTableAttrs(dom: HTMLElement | string): Record<string, unknown> | f
  * cannot see the rows it covers, so `expandRowSpans` rewrites the markup into
  * one cell per row before parsing, leaving a `data-vmerge` marker behind.
  */
-function parseCellAttrs(dom: HTMLElement | string): Record<string, unknown> | false {
-  const el = asElement(dom);
-  if (!el) return false;
+function parseCellAttrs(el: HTMLElement): Record<string, unknown> {
   return {
     ...parseNodeId(el),
     gridSpan: readGridSpan(el),
@@ -126,9 +110,7 @@ function parseCellAttrs(dom: HTMLElement | string): Record<string, unknown> | fa
 function cellDomAttrs(node: Node): Record<string, string> {
   return {
     ...nodeIdAttrs(node),
-    // A cell knows its own columns but not its rows: the clipboard serializer
-    // supplies `rowspan` where it can see the whole table.
-    ...cellSpanAttrs(cellGridSpan(node), 1),
+    ...cellColspanAttrs(cellGridSpan(node)),
     ...cellVMergeAttrs(cellVMerge(node)),
     ...cellPresentationAttrs({
       hAlign: cellHAlign(node),
@@ -479,7 +461,7 @@ function flattenCellText(cell: Node): string {
 }
 
 // Re-exports so consumers can validate attr shapes without re-deriving them.
-export { VALID_HALIGNS, VALID_VALIGNS, VALID_VMERGE };
+export { VALID_HALIGNS, VALID_VALIGNS, VALID_VMERGE } from "../../table/attrs";
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {

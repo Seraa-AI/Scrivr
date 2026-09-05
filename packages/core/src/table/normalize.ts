@@ -10,7 +10,8 @@ import { cellGridSpan, cellVMerge, tableGrid } from "./attrs";
  * render.
  *
  * Rules applied (fixed-point loop):
- *   - A cell's stored `gridSpan` is replaced by the one readers derive from it.
+ *   - Malformed cell gridSpan (0, -2, 2.7) → the value every reader derives
+ *     from it: its floor, and at least 1.
  *   - `vMerge: "continue"` cells with no preceding restart → reset to "none".
  *   - `table.grid` shorter than the widest row → extend with default widths.
  *   - Rows narrower than `table.grid` → pad with empty cells.
@@ -74,8 +75,8 @@ function repairCellAttrs(tr: Transaction): Transaction {
 
   tr.doc.descendants((node, pos) => {
     if (node.type.name !== "tableCell" && node.type.name !== "tableHeader") return true;
-    // Readers coerce a malformed span (0, -2, 2.7, "two") to a usable one;
-    // this writes that value back so the document says what the layout does.
+    // Writing the coerced value back is what keeps the document saying what
+    // the layout, the exporters and the table map all already read.
     const span = cellGridSpan(node);
     if (node.attrs["gridSpan"] !== span) {
       fixes.push({ pos, type: node.type, attrs: { ...node.attrs, gridSpan: span } });

@@ -7,7 +7,7 @@ import {
   readCellBackground,
   readTableGrid,
   readCellVMerge,
-  cellSpanAttrs,
+  cellColspanAttrs,
   cellVMergeAttrs,
   cellPresentationAttrs,
   tableColgroupSpec,
@@ -48,7 +48,7 @@ describe("readGridSpan", () => {
   });
 
   it("caps an absurd span so one cell cannot allocate an unbounded grid", () => {
-    expect(readGridSpan(el(`<td colspan="100000">x</td>`))).toBe(1000);
+    expect(readGridSpan(el(`<td colspan="100000">x</td>`))).toBe(64);
   });
 });
 
@@ -157,6 +157,23 @@ describe("readCellBackground", () => {
     expect(readCellBackground(el(`<td bgcolor="rebeccapurple">x</td>`))).toBe("rebeccapurple");
   });
 
+  // An unpaintable value is worse than none: assigning it to `fillStyle` is a
+  // silent no-op, so the cell would be painted in whatever colour was set last
+  // — its neighbour's.
+  it.each(["hotpinkish", "notacolour", "fixed", "reddish"])(
+    "rejects the colour-shaped non-colour %o",
+    (value) => {
+      expect(readCellBackground(el(`<td bgcolor="${value}">x</td>`))).toBeNull();
+    },
+  );
+
+  it.each(["rgb(1, 2, 3)", "hsl(200, 50%, 40%)", "#abc", "#aabbcc", "rebeccapurple"])(
+    "accepts the colour %o",
+    (value) => {
+      expect(readCellBackground(el(`<td bgcolor="${value}">x</td>`))).not.toBeNull();
+    },
+  );
+
   it("returns null when absent", () => {
     expect(readCellBackground(el(`<td>x</td>`))).toBeNull();
   });
@@ -244,6 +261,19 @@ describe("readTableGrid", () => {
     ).toEqual([320, 120]);
   });
 
+  // `<col span="2">` describes two columns, not one.
+  it("repeats a width across the columns its col spans", () => {
+    expect(
+      readTableGrid(el(`<table><colgroup><col span="2" width="80"><col width="160"></colgroup></table>`)),
+    ).toEqual([80, 80, 160]);
+  });
+
+  it("reads a span of zero as the single column it describes", () => {
+    expect(
+      readTableGrid(el(`<table><colgroup><col span="0" width="80"><col width="160"></colgroup></table>`)),
+    ).toEqual([80, 160]);
+  });
+
   it("returns an empty grid for a font-relative width", () => {
     expect(
       readTableGrid(el(`<table><colgroup><col style="width: 20em"><col style="width: 10em"></colgroup></table>`)),
@@ -257,15 +287,52 @@ describe("readTableGrid", () => {
   });
 });
 
-// ── Emitting ──────────────────────────────────────────────────────────────────
+// A nested table is a cell's content, not a description of the table around it.
+describe("readTableGrid — nested tables", () => {
+  function outer(html: string): HTMLElement {
+    const holder = document.createElement("div");
+    holder.innerHTML = html;
+    const table = holder.querySelector("table");
+    if (!(table instanceof HTMLElement)) throw new Error("no table");
+    return table;
+  }
 
-describe("cellSpanAttrs", () => {
-  it("emits both spans", () => {
-    expect(cellSpanAttrs(2, 3)).toEqual({ colspan: "2", rowspan: "3" });
+  it("ignores a nested table's colgroup", () => {
+    expect(
+      readTableGrid(outer(`<table><tbody><tr><td width="300">
+        <table><colgroup><col width="50"><col width="60"></colgroup>
+        <tbody><tr><td>a</td><td>b</td></tr></tbody></table>
+      </td></tr></tbody></table>`)),
+    ).toEqual([300]);
   });
 
-  it("omits spans of one, which are the HTML default", () => {
-    expect(cellSpanAttrs(1, 1)).toEqual({});
+  it("ignores a nested table's first row", () => {
+    expect(
+      readTableGrid(outer(`<table><tbody><tr><td>
+        <table><tbody><tr><td width="50">a</td><td width="60">b</td></tr></tbody></table>
+      </td></tr></tbody></table>`)),
+    ).toEqual([]);
+  });
+
+  it("still reads the outer table's own colgroup", () => {
+    expect(
+      readTableGrid(outer(`<table><colgroup><col width="300"></colgroup><tbody><tr><td>
+        <table><colgroup><col width="50"><col width="60"></colgroup>
+        <tbody><tr><td>a</td><td>b</td></tr></tbody></table>
+      </td></tr></tbody></table>`)),
+    ).toEqual([300]);
+  });
+});
+
+// ── Emitting ──────────────────────────────────────────────────────────────────
+
+describe("cellColspanAttrs", () => {
+  it("emits the span", () => {
+    expect(cellColspanAttrs(2)).toEqual({ colspan: "2" });
+  });
+
+  it("omits a span of one, which is the HTML default", () => {
+    expect(cellColspanAttrs(1)).toEqual({});
   });
 });
 

@@ -236,3 +236,115 @@ describe("collapseRowSpans", () => {
     expect(grid(returned)).toEqual(grid(expanded));
   });
 });
+
+// ── Row groups ────────────────────────────────────────────────────────────────
+
+describe("expandRowSpans — row groups", () => {
+  // HTML forbids a rowspan escaping its row group, and every browser clamps it.
+  it("does not carry a header merge into the body", () => {
+    const el = root(`<table>
+      <thead><tr><th rowspan="3">H</th><th>h2</th></tr></thead>
+      <tbody><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></tbody>
+    </table>`);
+    expandRowSpans(el);
+    expect(grid(el)).toEqual([
+      ["H:restart", "h2"],
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+  });
+
+  it("expands a merge inside the body normally", () => {
+    const el = root(`<table>
+      <thead><tr><th>h1</th><th>h2</th></tr></thead>
+      <tbody><tr><td rowspan="2">Tall</td><td>b</td></tr><tr><td>d</td></tr></tbody>
+    </table>`);
+    expandRowSpans(el);
+    expect(grid(el)).toEqual([
+      ["h1", "h2"],
+      ["Tall:restart", "b"],
+      ["·:continue", "d"],
+    ]);
+  });
+});
+
+describe("collapseRowSpans — row groups", () => {
+  it("does not emit a rowspan that crosses a row group", () => {
+    const el = root(`<table>
+      <thead><tr><th data-vmerge="restart">H</th><th>h2</th></tr></thead>
+      <tbody><tr><td data-vmerge="continue"></td><td>b</td></tr></tbody>
+    </table>`);
+    collapseRowSpans(el);
+    expect(el.querySelector("th")?.hasAttribute("rowspan")).toBe(false);
+    expect(grid(el)).toEqual([
+      ["H", "h2"],
+      ["·", "b"],
+    ]);
+  });
+});
+
+// ── Short rows ────────────────────────────────────────────────────────────────
+
+describe("expandRowSpans — rows shorter than the grid", () => {
+  // A ragged row is legal HTML; the merge still covers its column.
+  it("continues a merge past a row that runs out of cells first", () => {
+    const el = root(`<table><tbody>
+      <tr><td>a</td><td>b</td><td rowspan="2">C</td></tr>
+      <tr><td>x</td></tr>
+      <tr><td>p</td><td>q</td><td>r</td></tr>
+    </tbody></table>`);
+    expandRowSpans(el);
+    expect(grid(el)).toEqual([
+      ["a", "b", "C:restart"],
+      ["x", "·", "·:continue"],
+      ["p", "q", "r"],
+    ]);
+  });
+
+  it("does not leak an unconsumed merge into a later row", () => {
+    const el = root(`<table><tbody>
+      <tr><td>a</td><td rowspan="2">B</td></tr>
+      <tr></tr>
+      <tr><td>p</td><td>q</td></tr>
+    </tbody></table>`);
+    expandRowSpans(el);
+    expect(grid(el)).toEqual([
+      ["a", "B:restart"],
+      ["·", "·:continue"],
+      ["p", "q"],
+    ]);
+  });
+});
+
+// ── rowspan="0" ───────────────────────────────────────────────────────────────
+
+describe("expandRowSpans — rowspan of zero", () => {
+  // Zero means "to the end of this row group" — browsers and Word honour it.
+  it("covers every remaining row of the group", () => {
+    const el = root(`<table><tbody>
+      <tr><td rowspan="0">A</td><td>B</td></tr>
+      <tr><td>C</td></tr>
+      <tr><td>D</td></tr>
+    </tbody></table>`);
+    expandRowSpans(el);
+    expect(grid(el)).toEqual([
+      ["A:restart", "B"],
+      ["·:continue", "C"],
+      ["·:continue", "D"],
+    ]);
+  });
+
+  // "The rest of this group" is no rows at all when the group is one row, so
+  // the cell is not merged with anything and must not be marked as if it were.
+  it("covers nothing when its group has no further rows", () => {
+    const el = root(`<table>
+      <thead><tr><th rowspan="0">H</th><th>h2</th></tr></thead>
+      <tbody><tr><td>a</td><td>b</td></tr></tbody>
+    </table>`);
+    expandRowSpans(el);
+    expect(grid(el)).toEqual([
+      ["H", "h2"],
+      ["a", "b"],
+    ]);
+  });
+});
