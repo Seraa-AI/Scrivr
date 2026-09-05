@@ -27,6 +27,27 @@ still load-bearing under the current model.
 
 ## Open items
 
+### Extension surface
+
+#### Slash command contributions (P1, next release)
+
+**What.** Let an extension declare what `/` offers, the way it already
+declares toolbar items and node actions: `addSlashCommands()` returning
+static `items` and/or an async `resolve(query, signal)`, read back via
+`getSlashCommands()` / `resolveSlashCommands()`. Plus
+`insertSourcedBlockFromSource({ kind, resourceId, versionId })`, without
+which a menu entry cannot be inert data. Full design in
+`docs/slash-command-contributions-rfc.md`.
+
+**Why.** `createSlashMenu` takes every item from the host, so an
+extension that owns something insertable cannot say so. The first
+consumer of sourced blocks had to thread a callback through four layers,
+duplicate `SourceProvider.search`, and rebuild the content that
+`provider.fetch` already returns. `SourceProvider.search` has never been
+called by anything, in this repo or theirs — this is the feature it was
+written for. `sourced-blocks-rfc.md` §10 predicted this gap and said the
+absorbing RFC should be written; this is it.
+
 ### Correctness & coverage
 
 #### Behind/front Word-aligned tests (was #16, P1)
