@@ -1,5 +1,14 @@
 # @scrivr/export-markdown
 
+## 1.0.21
+
+### Patch Changes
+
+- Updated dependencies [d04f392]
+- Updated dependencies [a6e9938]
+- Updated dependencies [f2d7bbe]
+  - @scrivr/core@1.0.21
+
 ## 1.0.20
 
 ### Patch Changes
