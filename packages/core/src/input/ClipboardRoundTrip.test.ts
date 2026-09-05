@@ -315,3 +315,65 @@ describe("recorded slice openness is untrusted input", () => {
     expect(doc.textContent).toContain("x");
   });
 });
+
+// ── Tables ───────────────────────────────────────────────────────────────────
+
+describe("clipboard round-trip — tables", () => {
+  function tableContext() {
+    const manager = new ExtensionManager([StarterKit.configure({ table: true })]);
+    const schema = manager.schema;
+    const plugins = manager.buildPlugins();
+    const transformer = new PasteTransformer(
+      schema,
+      manager.buildMarkdownRules(),
+      manager.buildMarkdownParserTokens(),
+      { pasteHtmlTransforms: manager.buildPasteHtmlTransforms() },
+    );
+    return { schema, plugins, transformer };
+  }
+
+  /** Each cell as `text/gridSpan/vMerge`, one entry per row. */
+  function tableShape(doc: PMNode): string[][] {
+    const rows: string[][] = [];
+    doc.descendants((node) => {
+      if (node.type.name !== "tableRow") return true;
+      const cells: string[] = [];
+      node.forEach((cell) => {
+        cells.push(`${cell.textContent}/${cell.attrs["gridSpan"]}/${cell.attrs["vMerge"]}`);
+      });
+      rows.push(cells);
+      return false;
+    });
+    return rows;
+  }
+
+  function mergedTable(schema: Schema): PMNode {
+    const cell = (text: string, attrs: Record<string, unknown> = {}) =>
+      schema.nodes["tableCell"]!.create(attrs, para(schema, text));
+    const row = (kids: PMNode[]) => schema.nodes["tableRow"]!.create(null, kids);
+    return schema.nodes["table"]!.create({ grid: [200, 100] }, [
+      row([cell("Tall", { vMerge: "restart" }), cell("X")]),
+      row([cell("", { vMerge: "continue" }), cell("Y")]),
+    ]);
+  }
+
+  it("copies a merged table out as rowspan, the merge other editors read", () => {
+    const { schema, plugins } = tableContext();
+    const state = stateWith(schema, plugins, [mergedTable(schema)]);
+    const html = copy(select(state, 0, state.doc.content.size), schema)["text/html"] ?? "";
+
+    expect(html).toContain(`rowspan="2"`);
+    expect(html).not.toContain("data-vmerge");
+  });
+
+  it("pastes its own merged table back unchanged", () => {
+    const { schema, plugins, transformer } = tableContext();
+    const original = stateWith(schema, plugins, [mergedTable(schema)]);
+    const data = copy(select(original, 0, original.doc.content.size), schema);
+
+    const empty = stateWith(schema, plugins, [para(schema, "")]);
+    const pasted = paste(transformer, empty, data);
+
+    expect(tableShape(pasted)).toEqual(tableShape(original.doc));
+  });
+});

@@ -12,6 +12,7 @@ import type {
   MarkdownBlockRule,
   MarkdownParserTokenSpec,
   PasteTransform,
+  PasteHtmlTransform,
 } from "../extensions/types";
 import { insertText } from "../model/commands";
 import { recloneDocumentIds } from "../model/assignBlockIds";
@@ -52,6 +53,12 @@ export interface PasteTransformerOptions {
    * inserted. Collected by `ExtensionManager.buildPasteTransforms()`.
    */
   pasteTransforms?: PasteTransform[];
+
+  /**
+   * Extension-contributed rewrites, applied to pasted markup before it is
+   * parsed. Collected by `ExtensionManager.buildPasteHtmlTransforms()`.
+   */
+  pasteHtmlTransforms?: PasteHtmlTransform[];
 }
 
 /** A synchronous reservation followed by asynchronous image resolution. */
@@ -308,6 +315,7 @@ export class PasteTransformer {
     div.innerHTML = html;
     const recorded = readSliceData(div);
     cleanPastedHtml(div);
+    for (const transform of this.options.pasteHtmlTransforms ?? []) transform(div);
 
     // Use parse() (not parseSlice) so we get a complete document; openness is
     // decided below. parseSlice guesses openStart:1 for all block-level content,
@@ -879,6 +887,11 @@ function buildWordList(items: WordListItem[], doc: Document): HTMLElement {
  *    (font-weight:normal wrapper that carries no semantic weight)
  *  - Non-breaking spaces (\u00A0) → regular spaces so word-joining works
  */
+function isTableCell(el: Element): boolean {
+  const tag = el.tagName.toLowerCase();
+  return tag === "td" || tag === "th";
+}
+
 export function cleanPastedHtml(root: HTMLElement): void {
   // Strip non-content elements — Google Docs includes a <style> block with
   // generated CSS classes (.c0 { font-size:11pt; … }) that don't map to our schema.
@@ -910,8 +923,11 @@ export function cleanPastedHtml(root: HTMLElement): void {
   // Strip CSS properties that are always default/noise — they create spurious
   // marks (color, fontSize, etc.) that pollute the parsed document.
   root.querySelectorAll("[style]").forEach((el) => {
-    const s = (el as HTMLElement).style;
-    s.removeProperty("background-color");
+    if (!(el instanceof HTMLElement)) return;
+    const s = el.style;
+    // A table cell's fill is document content, not the incidental background a
+    // pasted text span carries around.
+    if (!isTableCell(el)) s.removeProperty("background-color");
     s.removeProperty("font-variant");
     s.removeProperty("white-space"); // pre/pre-wrap from Google Docs
     if (s.textDecoration === "none") s.removeProperty("text-decoration");

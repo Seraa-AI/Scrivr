@@ -2,7 +2,7 @@ import { DOMSerializer } from "prosemirror-model";
 import type { Schema, Slice } from "prosemirror-model";
 import type { EditorState } from "prosemirror-state";
 import { CellSelection } from "../table/cellSelection";
-import { getTableMap } from "../table/TableMap";
+import { collapseRowSpans } from "../table/clipboardHtml";
 
 /**
  * Records how deeply the copied slice was open at each end, so a paste back into
@@ -46,14 +46,16 @@ export function serializeSelectionToHtml(
     `${slice.openStart} ${slice.openEnd} []`,
   );
   container.appendChild(serializer.serializeFragment(slice.content));
+  // Any table in the slice states its merges as attrs; the clipboard states
+  // them as `rowspan`, which is what another editor will read.
+  collapseRowSpans(container);
   return container.outerHTML;
 }
 
 /**
- * Serialize a rectangular cell slice with explicit span attributes. Table
- * nodes deliberately have a minimal `toDOM`, and a cell's `rowspan` is derived
- * from the table map rather than stored on that node, so the generic serializer
- * cannot preserve merged-cell structure by itself.
+ * Serialize a rectangular cell slice as a standalone table. The cells carry
+ * their merge role as an attr, which `collapseRowSpans` turns into the
+ * `rowspan` other editors read.
  */
 function serializeCellSelectionToHtml(
   selection: CellSelection,
@@ -62,34 +64,10 @@ function serializeCellSelectionToHtml(
   const tableNode = selection.content().content.firstChild;
   if (!tableNode || tableNode.type.name !== "table") return "";
 
-  const map = getTableMap(tableNode);
-  const table = document.createElement("table");
-  const body = document.createElement("tbody");
-  table.appendChild(body);
-
-  for (let row = 0; row < map.height; row++) {
-    const tr = document.createElement("tr");
-    for (let col = 0; col < map.width; col++) {
-      const offset = map.map[row * map.width + col];
-      if (offset == null || offset < 0) continue;
-      const rect = map.findCell(offset);
-      // A merged cell occupies multiple grid slots; emit its master once.
-      if (rect.top !== row || rect.left !== col) continue;
-      const cellNode = tableNode.nodeAt(offset);
-      if (!cellNode) continue;
-
-      const cell = document.createElement(cellNode.type.name === "tableHeader" ? "th" : "td");
-      const colspan = rect.right - rect.left;
-      const rowspan = rect.bottom - rect.top;
-      if (colspan > 1) cell.setAttribute("colspan", String(colspan));
-      if (rowspan > 1) cell.setAttribute("rowspan", String(rowspan));
-      cell.appendChild(serializer.serializeFragment(cellNode.content));
-      tr.appendChild(cell);
-    }
-    body.appendChild(tr);
-  }
-
-  return table.outerHTML;
+  const container = document.createElement("div");
+  container.appendChild(serializer.serializeNode(tableNode));
+  collapseRowSpans(container);
+  return container.innerHTML;
 }
 
 /**

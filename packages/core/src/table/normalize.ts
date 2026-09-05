@@ -1,6 +1,7 @@
 import { EditorState, Plugin, type Transaction } from "prosemirror-state";
 import type { Node, NodeType, Schema } from "prosemirror-model";
 import { COLLAB_SYNC_META } from "../extensions/built-in/UniqueId";
+import { cellGridSpan, cellVMerge, tableGrid } from "./attrs";
 
 /**
  * Document-validity normalisation for tables. Run from
@@ -9,7 +10,7 @@ import { COLLAB_SYNC_META } from "../extensions/built-in/UniqueId";
  * render.
  *
  * Rules applied (fixed-point loop):
- *   - Cells with `gridSpan < 1` → clamp to 1.
+ *   - A cell's stored `gridSpan` is replaced by the one readers derive from it.
  *   - `vMerge: "continue"` cells with no preceding restart → reset to "none".
  *   - `table.grid` shorter than the widest row → extend with default widths.
  *   - Rows narrower than `table.grid` → pad with empty cells.
@@ -66,16 +67,18 @@ export function normalizeTables(state: EditorState): Transaction | null {
   return tr.docChanged ? tr : null;
 }
 
-// ── Rule 1: clamp cell.attrs.gridSpan to ≥ 1 ─────────────────────────────────
+// ── Rule 1: store the gridSpan every reader already sees ─────────────────────
 
 function repairCellAttrs(tr: Transaction): Transaction {
   const fixes: Array<{ pos: number; type: NodeType; attrs: Record<string, unknown> }> = [];
 
   tr.doc.descendants((node, pos) => {
     if (node.type.name !== "tableCell" && node.type.name !== "tableHeader") return true;
-    const span = node.attrs["gridSpan"];
-    if (typeof span !== "number" || !Number.isFinite(span) || !Number.isInteger(span) || span < 1) {
-      fixes.push({ pos, type: node.type, attrs: { ...node.attrs, gridSpan: 1 } });
+    // Readers coerce a malformed span (0, -2, 2.7, "two") to a usable one;
+    // this writes that value back so the document says what the layout does.
+    const span = cellGridSpan(node);
+    if (node.attrs["gridSpan"] !== span) {
+      fixes.push({ pos, type: node.type, attrs: { ...node.attrs, gridSpan: span } });
     }
     return true;
   });
@@ -100,8 +103,8 @@ function repairBrokenVMerge(tr: Transaction): Transaction {
 
       rowNode.forEach((cellNode, cellOffsetInRow) => {
         const cellPos = tablePos + 1 + rowOffset + 1 + cellOffsetInRow;
-        const span = readGridSpan(cellNode);
-        const vMerge = readVMerge(cellNode);
+        const span = cellGridSpan(cellNode);
+        const vMerge = cellVMerge(cellNode);
 
         if (vMerge === "continue") {
           const above = prevRowVMerge[col];
@@ -138,11 +141,11 @@ function extendGridToMaxRow(tr: Transaction): Transaction {
   tr.doc.descendants((tableNode, tablePos) => {
     if (tableNode.type.name !== "table") return true;
 
-    const grid = readGrid(tableNode);
+    const grid = tableGrid(tableNode);
     let maxRowWidth = 0;
     tableNode.forEach((rowNode) => {
       let w = 0;
-      rowNode.forEach((cellNode) => { w += readGridSpan(cellNode); });
+      rowNode.forEach((cellNode) => { w += cellGridSpan(cellNode); });
       if (w > maxRowWidth) maxRowWidth = w;
     });
 
@@ -172,7 +175,7 @@ function padRowsToGrid(tr: Transaction): Transaction {
   tr.doc.descendants((tableNode, tablePos) => {
     if (tableNode.type.name !== "table") return true;
 
-    const grid = readGrid(tableNode);
+    const grid = tableGrid(tableNode);
     if (grid.length === 0) return false; // wait for extendGridToMaxRow next pass
 
     const cellType = tableNode.type.schema.nodes["tableCell"];
@@ -181,7 +184,7 @@ function padRowsToGrid(tr: Transaction): Transaction {
 
     tableNode.forEach((rowNode, rowOffset) => {
       let rowWidth = 0;
-      rowNode.forEach((cellNode) => { rowWidth += readGridSpan(cellNode); });
+      rowNode.forEach((cellNode) => { rowWidth += cellGridSpan(cellNode); });
       if (rowWidth >= grid.length) return;
 
       const need = grid.length - rowWidth;
@@ -202,26 +205,6 @@ function padRowsToGrid(tr: Transaction): Transaction {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function readGrid(table: Node): number[] {
-  const v = table.attrs["grid"];
-  if (!Array.isArray(v)) return [];
-  const out: number[] = [];
-  for (const x of v) if (typeof x === "number" && Number.isFinite(x)) out.push(x);
-  return out;
-}
-
-function readGridSpan(cell: Node): number {
-  const v = cell.attrs["gridSpan"];
-  if (typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v >= 1) return v;
-  return 1;
-}
-
-function readVMerge(cell: Node): "none" | "restart" | "continue" {
-  const v = cell.attrs["vMerge"];
-  if (v === "restart" || v === "continue") return v;
-  return "none";
-}
 
 /**
  * ProseMirror plugin that runs `normalizeTables` on every transaction whose

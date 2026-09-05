@@ -448,14 +448,24 @@ follow in 6b.
   filled (only the master's row) — cosmetic, revisited with merge/split in 6b.
 - A real ProseMirror `Selection` subclass for the range stays deferred to Phase 9.
 
-### Phase 7 — Clipboard Round Trip
+### Phase 7 — Clipboard Round Trip — **landed**
 
 Goal: paste/copy common tables.
 
-1. Add table support to `ClipboardSerializer`.
-2. Add table rules to `PasteTransformer`.
-3. Preserve `grid`, `gridSpan`, `vMerge`, `hAlign`, and `vAlign`.
-4. Tests with simple HTML, GDocs-like HTML, and Word-like HTML.
+1. ~~Add table support to `ClipboardSerializer`.~~ Serialization runs through
+   the node specs; `collapseRowSpans` restates vertical merges as `rowspan` on
+   the way out. The hand-rolled cell-selection markup is gone with it.
+2. ~~Add table rules to `PasteTransformer`.~~ Via a new `addPasteHtmlTransforms()`
+   extension hook — `rowspan` has to be expanded into one cell per row *before*
+   parsing, since a parsed row is merely short and cannot say which columns it
+   is short by. The slice-level `addPasteTransforms()` runs too late for that.
+3. ~~Preserve `grid`, `gridSpan`, `vMerge`, `hAlign`, and `vAlign`.~~ Plus cell
+   `background`. Column widths are read from a `<colgroup>` or, as Word writes
+   them, from the first row's cells, in any absolute CSS unit.
+4. ~~Tests with simple HTML, GDocs-like HTML, and Word-like HTML.~~
+
+`hMerge` is still unread on paste: horizontal merges arrive as `gridSpan`, which
+is what both Word and HTML actually state.
 
 ### Phase 8 — Markdown And DOCX Export
 

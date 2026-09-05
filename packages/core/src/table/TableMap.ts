@@ -1,4 +1,5 @@
 import type { Node } from "prosemirror-model";
+import { cellGridSpan, cellVMerge, tableGrid } from "./attrs";
 
 /**
  * TableMap — a grid view of a `table` node. Used by the layout engine, hit
@@ -67,7 +68,7 @@ export function getTableMap(table: Node): TableMap {
 
 /** Build a TableMap fresh, bypassing the cache. Exposed for tests. */
 export function buildTableMap(table: Node): TableMap {
-  const grid = readGridAttr(table);
+  const grid = tableGrid(table);
   const height = table.childCount;
   const width = computeWidth(table, grid);
 
@@ -84,8 +85,8 @@ export function buildTableMap(table: Node): TableMap {
       if (col >= width) return;
 
       const cellOffset = rowOffset + 1 + cellOffsetInRow;
-      const gridSpan = readGridSpan(cellNode);
-      const vMerge = readVMerge(cellNode);
+      const gridSpan = cellGridSpan(cellNode);
+      const vMerge = cellVMerge(cellNode);
 
       if (vMerge === "continue" && rowIdx > 0) {
         const above = map[(rowIdx - 1) * width + col] ?? -1;
@@ -158,37 +159,15 @@ export function buildTableMap(table: Node): TableMap {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function readGridAttr(table: Node): number[] {
-  const raw = table.attrs["grid"];
-  if (!Array.isArray(raw)) return [];
-  const out: number[] = [];
-  for (const item of raw) {
-    if (typeof item === "number" && Number.isFinite(item)) out.push(item);
-  }
-  return out;
-}
-
 function computeWidth(table: Node, grid: number[]): number {
   if (grid.length > 0) return grid.length;
   let width = 0;
   table.forEach((rowNode) => {
     let rowWidth = 0;
-    rowNode.forEach((cellNode) => { rowWidth += readGridSpan(cellNode); });
+    rowNode.forEach((cellNode) => { rowWidth += cellGridSpan(cellNode); });
     if (rowWidth > width) width = rowWidth;
   });
   return width;
-}
-
-function readGridSpan(cell: Node): number {
-  const v = cell.attrs["gridSpan"];
-  if (typeof v === "number" && Number.isFinite(v) && v >= 1) return Math.floor(v);
-  return 1;
-}
-
-function readVMerge(cell: Node): "none" | "restart" | "continue" {
-  const v = cell.attrs["vMerge"];
-  if (v === "restart" || v === "continue") return v;
-  return "none";
 }
 
 function extendRect(

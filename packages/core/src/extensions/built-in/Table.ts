@@ -22,6 +22,30 @@ import {
 import { renderTableRowPdf } from "../../table/pdfExport";
 import { tableDocxHandlers } from "../../table/docxExport";
 import { tableSemanticHandler } from "../../table/semanticExport";
+import { expandRowSpans } from "../../table/clipboardHtml";
+import {
+  VALID_HALIGNS,
+  VALID_VALIGNS,
+  VALID_VMERGE,
+  readGridSpan,
+  readCellHAlign,
+  readCellVAlign,
+  readCellBackground,
+  readTableGrid,
+  readCellVMerge,
+  cellSpanAttrs,
+  cellPresentationAttrs,
+  cellVMergeAttrs,
+  tableColgroupSpec,
+} from "../../table/domAttrs";
+import {
+  cellBackground,
+  cellGridSpan,
+  cellHAlign,
+  cellVAlign,
+  cellVMerge,
+  tableGrid,
+} from "../../table/attrs";
 
 /**
  * Table extension.
@@ -37,34 +61,81 @@ import { tableSemanticHandler } from "../../table/semanticExport";
  *   - `tableEditingGuards()` — editing-UX layer: Tab/Shift-Tab cell navigation
  *     (Tab past the last cell appends a row), Backspace/Delete cell-boundary
  *     guards, and paste distribution into a multi-cell selection.
+ *   - HTML clipboard round trip: spans, column widths, alignment, and fill
+ *     survive a copy in either direction, including to and from Word.
  *
  * What is intentionally deferred:
- *   - Persisted cell selection (drag-select + overlay) and merge/split — Phase 6.
- *     Cross-cell selection is currently derived from a spanning text selection.
- *   - HTML paste round-trip (Phase 7), Markdown export (Phase 8).
+ *   - Cell merge/split commands — Phase 6.
+ *   - Markdown export — Phase 8.
  */
 
 const DEFAULT_COLUMN_WIDTH = 100; // CSS px — uniform default; resizing arrives in Phase 9.
-
-const VALID_HALIGNS = ["left", "center", "right", "justify"] as const;
-const VALID_VALIGNS = ["top", "center", "bottom"] as const;
-const VALID_VMERGE = ["none", "restart", "continue"] as const;
 
 function uniformGrid(cols: number): number[] {
   return Array.from({ length: cols }, () => DEFAULT_COLUMN_WIDTH);
 }
 
+/**
+ * A tag rule always parses an element; the string form of `getAttrs` belongs to
+ * style rules, which these specs don't use.
+ */
+function asElement(dom: HTMLElement | string): HTMLElement | null {
+  return typeof dom === "string" ? null : dom;
+}
+
 /** Read the persisted block id off a parsed DOM node (see model/assignBlockIds). */
 function parseNodeId(dom: HTMLElement | string): { nodeId: string | null } {
-  const el = dom as HTMLElement;
-  return { nodeId: el.getAttribute("data-node-id") ?? null };
+  const el = asElement(dom);
+  return { nodeId: el?.getAttribute("data-node-id") ?? null };
 }
 
 /** Emit `data-node-id` when the node carries one, so the id survives serialize. */
 function nodeIdAttrs(node: Node): Record<string, string> {
   const attrs: Record<string, string> = {};
-  if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
+  const nodeId = node.attrs["nodeId"];
+  if (typeof nodeId === "string" && nodeId !== "") attrs["data-node-id"] = nodeId;
   return attrs;
+}
+
+/** Read a pasted table's own attrs — its id and, when present, its column widths. */
+function parseTableAttrs(dom: HTMLElement | string): Record<string, unknown> | false {
+  const el = asElement(dom);
+  if (!el) return false;
+  return { ...parseNodeId(el), grid: readTableGrid(el) };
+}
+
+/**
+ * Read a pasted cell's attrs. `rowspan` is deliberately not read here: a cell
+ * cannot see the rows it covers, so `expandRowSpans` rewrites the markup into
+ * one cell per row before parsing, leaving a `data-vmerge` marker behind.
+ */
+function parseCellAttrs(dom: HTMLElement | string): Record<string, unknown> | false {
+  const el = asElement(dom);
+  if (!el) return false;
+  return {
+    ...parseNodeId(el),
+    gridSpan: readGridSpan(el),
+    vMerge: readCellVMerge(el),
+    hAlign: readCellHAlign(el) ?? "left",
+    vAlign: readCellVAlign(el) ?? "top",
+    background: readCellBackground(el),
+  };
+}
+
+/** Emit a cell's structure and presentation so another editor reads it back. */
+function cellDomAttrs(node: Node): Record<string, string> {
+  return {
+    ...nodeIdAttrs(node),
+    // A cell knows its own columns but not its rows: the clipboard serializer
+    // supplies `rowspan` where it can see the whole table.
+    ...cellSpanAttrs(cellGridSpan(node), 1),
+    ...cellVMergeAttrs(cellVMerge(node)),
+    ...cellPresentationAttrs({
+      hAlign: cellHAlign(node),
+      vAlign: cellVAlign(node),
+      background: cellBackground(node),
+    }),
+  };
 }
 
 // ── Schema ────────────────────────────────────────────────────────────────────
@@ -82,11 +153,12 @@ function tableSpec(): NodeSpec {
       grid: { default: [] as number[] },
       nodeId: { default: null },
     },
-    parseDOM: [{ tag: "table", getAttrs: parseNodeId }],
+    parseDOM: [{ tag: "table", getAttrs: parseTableAttrs }],
     toDOM(node) {
-      // Phase 1 keeps DOM serialization minimal — the canvas renderer is
-      // authoritative. HTML paste round-trip lands in Phase 7.
-      return ["table", nodeIdAttrs(node), ["tbody", 0]];
+      const colgroup = tableColgroupSpec(tableGrid(node));
+      return colgroup
+        ? ["table", nodeIdAttrs(node), colgroup, ["tbody", 0]]
+        : ["table", nodeIdAttrs(node), ["tbody", 0]];
     },
   };
 }
@@ -125,9 +197,9 @@ function tableCellSpec(): NodeSpec {
     content: "block+",
     isolating: true,
     attrs: cellAttrs(),
-    parseDOM: [{ tag: "td", getAttrs: parseNodeId }],
+    parseDOM: [{ tag: "td", getAttrs: parseCellAttrs }],
     toDOM(node) {
-      return ["td", nodeIdAttrs(node), 0];
+      return ["td", cellDomAttrs(node), 0];
     },
   };
 }
@@ -137,9 +209,9 @@ function tableHeaderSpec(): NodeSpec {
     content: "block+",
     isolating: true,
     attrs: cellAttrs(),
-    parseDOM: [{ tag: "th", getAttrs: parseNodeId }],
+    parseDOM: [{ tag: "th", getAttrs: parseCellAttrs }],
     toDOM(node) {
-      return ["th", nodeIdAttrs(node), 0];
+      return ["th", cellDomAttrs(node), 0];
     },
   };
 }
@@ -282,6 +354,13 @@ export const Table = Extension.create({
 
   addSelectionGesture() {
     return [cellSelectionGesture];
+  },
+
+  // Pasted markup states a vertical merge as `rowspan` on one cell; the schema
+  // states it as a cell per row. Restating it before the parse is the only
+  // point where the covered rows can still be identified.
+  addPasteHtmlTransforms() {
+    return [expandRowSpans];
   },
 
   onViewReady(editor: IEditor) {
