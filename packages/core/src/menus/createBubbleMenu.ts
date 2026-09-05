@@ -34,6 +34,10 @@ export interface BubbleMenuOptions extends BubbleMenuCallbacks {
    * Override visibility logic. Return true to show, false to hide.
    * Default: show when there is a non-empty text selection.
    */
+  /**
+   * Replaces the default rule rather than extending it. To widen it, compose:
+   * `shouldShow: (s) => myCase(s) || defaultBubbleMenuShouldShow(s)`.
+   */
   shouldShow?: (state: EditorState) => boolean;
   /**
    * Debounce delay in ms. Prevents flickering when the selection changes

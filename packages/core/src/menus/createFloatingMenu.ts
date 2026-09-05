@@ -29,6 +29,10 @@ export interface FloatingMenuOptions extends FloatingMenuCallbacks {
    * Override visibility logic.
    * Default: show when cursor is in an empty root-level text block.
    */
+  /**
+   * Replaces the default rule rather than extending it. To widen it, compose:
+   * `shouldShow: (s) => myCase(s) || defaultFloatingMenuShouldShow(s)`.
+   */
   shouldShow?: (state: EditorState) => boolean;
   /**
    * Accessor returning the popover's root DOM element (or null if unmounted).
