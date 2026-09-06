@@ -2,7 +2,7 @@
 import "./augmentation";
 
 export { PdfExport } from "./PdfExport";
-export type { PdfHandlers, PdfNodeHandler, PdfMarkHandler, PdfChromeHandler, PdfSpanStyle } from "./augmentation";
+export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 export type { PdfContext, PdfFontRegistry, PdfDrawHelpers } from "./context";
 export { createPdfDrawSurface } from "./surface";
 export type { PdfResourceTable, SurfaceDeps } from "./surface";
@@ -30,7 +30,7 @@ export type {
   PdfTextOp,
 } from "@scrivr/core";
 
-import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
+import { PDFDocument, type PDFPage, type PDFImage, type PDFFont } from "pdf-lib";
 import type {
   IEditor,
   IBaseEditor,
@@ -41,13 +41,15 @@ import type {
 import { compareAnchoredObjectPaintOrder, defaultPdfTheme } from "@scrivr/core";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
+import type { LayoutPage, PdfHandlerContext, PdfMarkStyler } from "@scrivr/core";
 import type { PdfContext } from "./context";
 import {
   embedStandardFonts,
   embedCustomFonts,
   createFontRegistry,
 } from "./fonts";
-import { defaultNodeHandlers, defaultMarkHandlers } from "./defaults";
+import { defaultNodeHandlers } from "./defaults";
+import { createPdfDrawSurface } from "./surface";
 
 /** Public types */
 
@@ -115,6 +117,7 @@ export async function buildPdf(
 ): Promise<Uint8Array> {
   // ── Phase 1: Collect handlers ──────────────────────────────────────────
   const nodeHandlers: Record<string, PdfNodeHandler> = { ...defaultNodeHandlers };
+  const markStylers: Record<string, PdfMarkStyler> = {};
   const chromeHandlers: Record<string, PdfChromeHandler<unknown>> = {};
   const lifecycleHooks: {
     before: Array<(ctx: PdfContext) => void | Promise<void>>;
@@ -125,6 +128,7 @@ export async function buildPdf(
     const pdfContrib = contrib.pdf;
     if (!pdfContrib) continue;
     if (pdfContrib.nodes) Object.assign(nodeHandlers, pdfContrib.nodes);
+    if (pdfContrib.marks) Object.assign(markStylers, pdfContrib.marks);
     if (pdfContrib.chrome) Object.assign(chromeHandlers, pdfContrib.chrome);
     if (pdfContrib.onBeforeExport) lifecycleHooks.before.push(pdfContrib.onBeforeExport);
     if (pdfContrib.onAfterExport) lifecycleHooks.after.push(pdfContrib.onAfterExport);
@@ -149,12 +153,60 @@ export async function buildPdf(
   let currentPage: PDFPage = null!;
   const getPage = () => currentPage;
 
+  // The core-owned context a mark styler is handed. Built once — `page` reads
+  // the loop's current page, the way `getPage` does for pdf-lib's.
+  let currentLayoutPage: LayoutPage = layout.pages[0]!;
+  const fontHandles = new Map<string, PDFFont>();
+  const imageHandles = new Map<string, PDFImage | null>();
+
+  const surface = createPdfDrawSurface({
+    getPage,
+    pageHeightPt,
+    resources: {
+      font: (handle) => fontHandles.get(handle.id) ?? fontRegistry.fallback,
+      image: (handle) => imageHandles.get(handle.id) ?? null,
+    },
+    theme: {
+      get imagePlaceholderBg() { return resolvedTheme.imagePlaceholderBg; },
+      get imagePlaceholderBorder() { return resolvedTheme.imagePlaceholderBorder; },
+    },
+    drawBlock: (block) => {
+      const handler = nodeHandlers[block.node.type.name];
+      if (handler) handler(block, ctx);
+    },
+  });
+
+  const handlerContext: PdfHandlerContext = {
+    draw: surface,
+    layout,
+    get page() { return currentLayoutPage; },
+    get theme() { return resolvedTheme; },
+    fonts: {
+      resolve: (cssFont) => {
+        const font = fontRegistry.resolve(cssFont);
+        fontHandles.set(cssFont, font);
+        return { id: cssFont };
+      },
+      fallback: { id: "__fallback__" },
+    },
+    images: {
+      get: (src) => {
+        const image = imageCache.get(src);
+        if (!image) return null;
+        imageHandles.set(src, image);
+        return { id: src, width: image.width, height: image.height };
+      },
+    },
+    editor,
+  };
+
   const draw = createDrawHelpers(
     getPage,
     pageHeightPt,
     fontRegistry,
     nodeHandlers,
-    defaultMarkHandlers,
+    markStylers,
+    () => handlerContext,
   );
 
   // Resolve PDF theme: defaults are always print-ready; caller's `theme`
@@ -193,6 +245,7 @@ export async function buildPdf(
     const pageNumber = i + 1;
 
     currentPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
+    currentLayoutPage = layoutPage;
     ctx.page = currentPage;
     ctx.layoutPage = layoutPage;
 

@@ -63,7 +63,16 @@ export const Strikethrough = Extension.create({
 
   addExports() {
     const handler: DocxMarkHandler = (props) => ({ ...props, strike: true });
-    return { docx: { marks: { strikethrough: handler } } };
+    return {
+      pdf: {
+        marks: {
+          strikethrough: () => ({
+            decorations: [{ kind: "strikethrough", color: "text", source: "strikethrough" }],
+          }),
+        },
+      },
+      docx: { marks: { strikethrough: handler } },
+    };
   },
 
   addImports() {

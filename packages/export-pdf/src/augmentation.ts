@@ -6,42 +6,11 @@
 import type { LayoutBlock, LayoutPage } from "@scrivr/core";
 import type { PDFFont } from "pdf-lib";
 import type { PdfContext } from "./context";
-
-/**
- * Style modifiers returned by mark handlers, applied during line rendering.
- *
- * @deprecated Never connected — the painter is fed an empty mark table and
- * hard-codes the five mark behaviours instead. `PdfMarkContribution` in
- * `@scrivr/core` replaces it: a list of contributions rather than one merged
- * object, so an explicit colour can beat a link's text fill without also
- * taking over its underline. Do not implement this one.
- */
-export interface PdfSpanStyle {
-  font?: PDFFont;
-  color?: { r: number; g: number; b: number };
-  underline?: boolean;
-  strikethrough?: boolean;
-  backgroundColor?: { r: number; g: number; b: number; opacity?: number };
-}
+import type { PdfMarkStyler } from "@scrivr/core";
 
 /** Draw a block (or inline atom) onto a PDF page. */
 export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfContext) => void;
 
-/**
- * Return style modifiers for a mark during span iteration.
- *
- * @deprecated See `PdfSpanStyle`. Superseded by `PdfMarkStyler` in
- * `@scrivr/core`.
- */
-export type PdfMarkHandler = (
-  mark: { name: string; attrs: Record<string, unknown> },
-  ctx: PdfContext,
-) => PdfSpanStyle;
-
-/**
- * Draw chrome (headers, footers, footnote bands) onto a PDF page.
- * Generic parameter P is the plugin-specific payload type.
- */
 export type PdfChromeHandler<P = unknown> = (
   layoutPage: LayoutPage,
   payload: P,
@@ -51,8 +20,11 @@ export type PdfChromeHandler<P = unknown> = (
 export interface PdfHandlers {
   /** Per-block drawing + inline atom dispatch table, keyed by node.type.name. */
   nodes?: Record<string, PdfNodeHandler>;
-  /** Per-mark inline styling, keyed by mark.type.name. */
-  marks?: Record<string, PdfMarkHandler>;
+  /**
+   * Per-mark inline styling, keyed by mark.type.name. A styler returns what
+   * the mark contributes; the painter owns every baseline and width.
+   */
+  marks?: Record<string, PdfMarkStyler>;
   /** Per-page chrome, keyed by chrome contributor name. */
   chrome?: Record<string, PdfChromeHandler<unknown>>;
   /** Runs once before page iteration. Async allowed. */

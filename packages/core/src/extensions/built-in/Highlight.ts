@@ -7,6 +7,8 @@ import {
   type DocxMarkHandler,
   type DocxMarkTransform,
 } from "../../exports/docx";
+import { parseCssColor } from "../../model/cssColor";
+import type { PdfMarkStyler } from "../../exports/pdf";
 
 interface HighlightOptions {
   /** Default highlight color. Default: "rgba(255, 220, 0, 0.4)" */
@@ -26,6 +28,18 @@ interface HighlightOptions {
  * font string. Highlight needs one because it draws a colored rectangle
  * BEHIND the text — something StyleResolver cannot express.
  */
+
+/**
+ * Painted after the text at the alpha the canvas uses, so a highlight reads as
+ * a wash over the words rather than a block behind them.
+ */
+const pdfHighlightStyle = (fallback: string): PdfMarkStyler => (mark) => {
+  const raw = mark.attrs["color"];
+  const colour = parseCssColor(typeof raw === "string" && raw ? raw : fallback);
+  if (!colour) return {};
+  return { backgrounds: [{ color: { ...colour, alpha: 0.4 }, phase: "afterText" }] };
+};
+
 export const Highlight = Extension.create<HighlightOptions>({
   name: "highlight",
 
@@ -130,7 +144,10 @@ export const Highlight = Extension.create<HighlightOptions>({
       // Unparseable — fall back to the canonical yellow so something paints.
       return { ...props, highlight: "yellow" };
     };
-    return { docx: { marks: { highlight: handler } } };
+    return {
+      pdf: { marks: { highlight: pdfHighlightStyle(fallback) } },
+      docx: { marks: { highlight: handler } },
+    };
   },
 
   addImports() {

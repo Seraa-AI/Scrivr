@@ -5,6 +5,8 @@ import {
   type DocxMarkHandler,
   type DocxMarkTransform,
 } from "../../exports/docx";
+import { parseCssColor } from "../../model/cssColor";
+import type { PdfMarkStyler } from "../../exports/pdf";
 
 interface ColorOptions {
   /** Preset color swatches shown in the toolbar (CSS color strings). */
@@ -23,6 +25,18 @@ const DEFAULT_COLORS = ["#1e293b", "#dc2626", "#2563eb", "#16a34a", "#9333ea", "
  *   setColor(color: string)  — applies the color mark to the selection
  *   unsetColor()             — removes the color mark from the selection
  */
+
+/**
+ * An explicit colour is the strongest claim on a span's text fill — the painter
+ * ranks `"color"` above a link's own contribution.
+ */
+const pdfColorStyle: PdfMarkStyler = (mark) => {
+  const raw = mark.attrs["color"];
+  if (typeof raw !== "string" || raw.length === 0) return {};
+  const colour = parseCssColor(raw);
+  return colour ? { foreground: { color: colour, source: "color" } } : {};
+};
+
 export const Color = Extension.create<ColorOptions>({
   name: "color",
 
@@ -101,7 +115,10 @@ export const Color = Extension.create<ColorOptions>({
       });
       return props;
     };
-    return { docx: { marks: { color: handler } } };
+    return {
+      pdf: { marks: { color: pdfColorStyle } },
+      docx: { marks: { color: handler } },
+    };
   },
 
   addImports() {
@@ -116,7 +133,10 @@ export const Color = Extension.create<ColorOptions>({
       if (!t) return null;
       return t.create({ color: `#${val}` });
     };
-    return { docx: { marks: { color: handler } } };
+    return {
+      pdf: { marks: { color: pdfColorStyle } },
+      docx: { marks: { color: handler } },
+    };
   },
 
   addToolbarItems() {
