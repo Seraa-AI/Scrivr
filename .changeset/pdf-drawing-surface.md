@@ -1,5 +1,6 @@
 ---
 "@scrivr/core": patch
+"@scrivr/export-pdf": patch
 ---
 
 **Core owns the PDF drawing contract**
@@ -19,5 +20,10 @@ tell them when they drifted.
 - **`@scrivr/core`** — the surface can draw a nested block through the export's
   own dispatch, so a handler that owns a container renders its children without
   deciding what they look like.
+- **`@scrivr/export-pdf`** — `createPdfDrawSurface` implements the contract over
+  pdf-lib, and the package re-exports core's types so a handler names them
+  without importing two packages. `PdfSpanStyle` and `PdfMarkHandler` are
+  deprecated: they were never connected, and `PdfMarkContribution` replaces
+  them.
 
 No handler has moved yet and no rendering changes.

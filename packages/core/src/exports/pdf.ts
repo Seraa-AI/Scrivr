@@ -1,6 +1,6 @@
 import type { DocumentLayout, LayoutPage } from "../layout/PageLayout";
 import type { LayoutBlock } from "../layout/BlockLayout";
-import type { Rgb } from "../model/cssColor";
+import type { Rgb, Rgba } from "../model/cssColor";
 import type { ResolvedTheme } from "../model/theme";
 import type { IBaseEditor } from "../extensions/types";
 
@@ -21,7 +21,10 @@ import type { IBaseEditor } from "../extensions/types";
  * - **Coordinates** are layout pixels, top-down, exactly as `LayoutBlock` gives
  *   them. The exporter converts to points and flips the axis.
  * - **Colours** are `Rgb`, the same type the canvas, DOCX and PDF lanes already
- *   resolve to via `model/cssColor`.
+ *   resolve to via `model/cssColor`. A drawing op names `opacity` separately
+ *   from its colour because PDF carries alpha as graphics state rather than in
+ *   the fill itself; a mark contribution, which states intent rather than an
+ *   operation, uses `Rgba`.
  * - **Fonts and images** are opaque handles. A handler asks for one by the CSS
  *   font string layout already resolved, or by `src`, and passes it back. It
  *   never holds the backend's object.
@@ -88,7 +91,7 @@ export interface PdfLineOp {
 }
 
 export interface PdfRectOp extends PdfBox {
-  /** Omit for an unfilled rectangle. */
+  /** Omit for an unfilled rectangle — a border-only box, or nothing at all. */
   color?: Rgb;
   opacity?: number;
   border?: { color: Rgb; widthPx: number };
@@ -143,8 +146,25 @@ export interface PdfHandlerContext {
   readonly editor: IBaseEditor;
 }
 
-/** Draw one block, or one inline atom, onto the page. */
+/**
+ * Draw one block, or one inline atom, onto the page.
+ *
+ * Not yet dispatched. The exporter still collects `PdfNodeHandler` from
+ * `@scrivr/export-pdf`, which hands a handler pdf-lib's context; this is the
+ * core-owned shape those handlers move to. Write `PdfNodeHandler` today.
+ */
 export type PdfBlockHandler = (block: LayoutBlock, ctx: PdfHandlerContext) => void;
+
+/**
+ * The mark a style came from, by mark name.
+ *
+ * The painter arbitrates on it: an explicit `color` beats a link's text fill,
+ * while the link still owns the colour of its own underline. It is a name and
+ * not a priority number because a number lets two extensions escalate against
+ * each other and leaves the arbitration living nowhere. A name the painter's
+ * rule does not know contributes at the lowest precedence.
+ */
+export type PdfMarkSource = string;
 
 /**
  * The style a mark contributes to a span. Declarative on purpose: the painter
@@ -157,13 +177,13 @@ export type PdfBlockHandler = (block: LayoutBlock, ctx: PdfHandlerContext) => vo
  */
 export interface PdfMarkContribution {
   /** Text fill. `source` decides precedence when two marks both claim it. */
-  foreground?: { color: Rgb; source: string };
-  backgrounds?: Array<{ color: Rgb; opacity?: number; phase: PdfPaintPhase }>;
+  foreground?: { color: Rgb; source: PdfMarkSource };
+  backgrounds?: Array<{ color: Rgba; phase: PdfPaintPhase }>;
   decorations?: Array<{
     kind: "underline" | "strikethrough";
     /** A colour, or `"text"` to follow whatever the span's fill resolved to. */
     color: Rgb | "text";
-    source: string;
+    source: PdfMarkSource;
   }>;
 }
 

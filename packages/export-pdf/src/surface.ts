@@ -1,5 +1,6 @@
 import { rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import type {
+  LayoutBlock,
   PdfBox,
   PdfDrawSurface,
   PdfFontHandle,
@@ -10,8 +11,7 @@ import type {
   PdfTextOp,
   Rgb,
 } from "@scrivr/core";
-import type { LayoutBlock } from "@scrivr/core";
-import { compositeColor, parseCssColor } from "@scrivr/core";
+import { PT_PER_PX, parseCssColor } from "./context";
 
 /**
  * The pdf-lib implementation of core's drawing surface.
@@ -21,9 +21,6 @@ import { compositeColor, parseCssColor } from "@scrivr/core";
  * objects a handle stands for. A handler upstream works in layout pixels with
  * `Rgb`, and never learns any of it.
  */
-
-/** 1 CSS pixel = 0.75 PDF points (96dpi → 72dpi). */
-const PT_PER_PX = 72 / 96;
 
 /** Flip from top-left (layout) to bottom-left (PDF) coordinate space. */
 function flipY(yPx: number, pageHeightPt: number): number {
@@ -53,19 +50,8 @@ export interface SurfaceDeps {
   drawBlock(block: LayoutBlock): void;
 }
 
-/**
- * A theme colour as pdf-lib wants it. PDF has no alpha on a fill, so a
- * translucent token is composited onto the page it is painted on.
- */
-function themeColor(value: string): ReturnType<typeof rgb> {
-  const colour = parseCssColor(value);
-  if (!colour) return rgb(0, 0, 0);
-  const opaque = compositeColor(colour, { r: 255, g: 255, b: 255 });
-  return rgb(opaque.r / 255, opaque.g / 255, opaque.b / 255);
-}
-
 export function createPdfDrawSurface(deps: SurfaceDeps): PdfDrawSurface {
-  const { getPage, pageHeightPt, resources, theme } = deps;
+  const { getPage, pageHeightPt, resources, theme, drawBlock } = deps;
 
   /** pdf-lib omits an opacity of 1 rather than writing a redundant ExtGState. */
   const alpha = (opacity: number | undefined): { opacity?: number } =>
@@ -94,6 +80,10 @@ export function createPdfDrawSurface(deps: SurfaceDeps): PdfDrawSurface {
     },
 
     rect(op: PdfRectOp): void {
+      // An unfilled, unbordered rectangle is invisible, and pdf-lib fills one
+      // black when neither `color` nor `borderColor` is a key on the options
+      // bag. So it never reaches pdf-lib.
+      if (!op.color && !op.border) return;
       getPage().drawRectangle({
         x: op.x * PT_PER_PX,
         // A rectangle is measured from its lower-left corner once flipped.
@@ -129,14 +119,17 @@ export function createPdfDrawSurface(deps: SurfaceDeps): PdfDrawSurface {
         y: flipY(box.y + box.height, pageHeightPt),
         width: box.width * PT_PER_PX,
         height: box.height * PT_PER_PX,
-        color: themeColor(theme.imagePlaceholderBg),
-        borderColor: themeColor(theme.imagePlaceholderBorder),
+        color: parseCssColor(theme.imagePlaceholderBg),
+        borderColor: parseCssColor(theme.imagePlaceholderBorder),
+        // A hairline in points, matching what the exporter draws today. Note
+        // it is not `1 * PT_PER_PX` like every other width here, so a caller
+        // spelling this box as `rect` would get a thinner border.
         borderWidth: 1,
       });
     },
 
     block(block: LayoutBlock): void {
-      deps.drawBlock(block);
+      drawBlock(block);
     },
   };
 }

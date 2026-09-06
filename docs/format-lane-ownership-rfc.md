@@ -126,7 +126,7 @@ New file `packages/core/src/exports/pdf.ts` defines:
 - **Block dispatch**: the capability described in §4, so a handler can render
   its children without knowing who owns them.
 
-The type is `PdfDrawingSurface`, and it stays PDF-named on purpose. Nothing in
+The type ships as `PdfDrawSurface`, and it stays PDF-named on purpose. Nothing in
 the primitive list is especially PDF-specific, so a generic `DrawingSurface`
 would read as a promise that canvas will use it too — a promise this RFC
 explicitly declines to make. If canvas and PDF converge later, the common
@@ -161,9 +161,9 @@ part that a flat `PdfSpanStyle` cannot survive:
 
 ```ts
 interface PdfMarkContribution {
-  foreground?: { color: Rgb; source: MarkSource };
-  backgrounds?: Array<{ color: Rgba; phase: PaintPhase }>;
-  decorations?: Array<{ kind: "underline" | "strikethrough"; color: Rgb | "text"; source: MarkSource }>;
+  foreground?: { color: Rgb; source: PdfMarkSource };
+  backgrounds?: Array<{ color: Rgba; phase: PdfPaintPhase }>;
+  decorations?: Array<{ kind: "underline" | "strikethrough"; color: Rgb | "text"; source: PdfMarkSource }>;
 }
 ```
 
@@ -198,7 +198,7 @@ the text under a 40% wash instead of over it, changing every highlighted
 document. The contract therefore names the phase explicitly:
 
 ```ts
-type PaintPhase = "beforeText" | "afterText";
+type PdfPaintPhase = "beforeText" | "afterText";
 ```
 
 `beforeText`/`afterText` rather than `under`/`over`, because *under what?* — the

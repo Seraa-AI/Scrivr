@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import type { LayoutBlock, PdfFontHandle, PdfImageHandle } from "@scrivr/core";
 import { createPdfDrawSurface } from "../surface";
+import { block, textLine } from "./fixtures";
 import { recordDrawOps } from "./opLog";
 
 /**
@@ -167,6 +168,40 @@ describe("the drawing surface produces what the raw calls produce", () => {
 });
 
 describe("what the surface refuses to leak", () => {
+  it("draws nothing for a rectangle with neither fill nor border", async () => {
+    const h = await harness();
+    const ops = await recordDrawOps(async () =>
+      h.surface.rect({ x: 0, y: 0, width: 10, height: 10 }),
+    );
+
+    // pdf-lib fills a rectangle black when neither `color` nor `borderColor` is
+    // a key on the options bag, so an invisible box must not reach it at all.
+    expect(ops).toEqual([]);
+  });
+
+  it("still draws a border-only box when the fill is omitted", async () => {
+    const { surfaceOps, rawOps } = await bothWays(
+      ({ surface }) =>
+        surface.rect({
+          x: 0,
+          y: 0,
+          width: 10,
+          height: 10,
+          border: { color: { r: 0, g: 0, b: 0 }, widthPx: 1 },
+        }),
+      (page) =>
+        page.drawRectangle({
+          x: 0,
+          y: flipY(10),
+          width: 10 * PT_PER_PX,
+          height: 10 * PT_PER_PX,
+          borderColor: rgb(0, 0, 0),
+          borderWidth: PT_PER_PX,
+        }),
+    );
+    expect(surfaceOps).toEqual(rawOps);
+  });
+
   it("writes no opacity when a draw is opaque", async () => {
     const h = await harness();
     const ops = await recordDrawOps(async () => {
@@ -188,12 +223,12 @@ describe("what the surface refuses to leak", () => {
 
   it("routes a block back through the export's dispatch rather than drawing it", async () => {
     const h = await harness();
-    const block = { blockType: "paragraph" } as unknown as LayoutBlock;
-    const ops = await recordDrawOps(async () => h.surface.block(block));
+    const child = block("paragraph", [textLine("Child")]);
+    const ops = await recordDrawOps(async () => h.surface.block(child));
 
     // The surface has no opinion about what a paragraph looks like; it hands
     // the block to whoever owns it.
-    expect(h.drawnBlocks).toEqual([block]);
+    expect(h.drawnBlocks).toEqual([child]);
     expect(ops).toEqual([]);
   });
 });

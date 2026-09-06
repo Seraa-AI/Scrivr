@@ -4,6 +4,31 @@ import "./augmentation";
 export { PdfExport } from "./PdfExport";
 export type { PdfHandlers, PdfNodeHandler, PdfMarkHandler, PdfChromeHandler, PdfSpanStyle } from "./augmentation";
 export type { PdfContext, PdfFontRegistry, PdfDrawHelpers } from "./context";
+export { createPdfDrawSurface } from "./surface";
+export type { PdfResourceTable, SurfaceDeps } from "./surface";
+
+/**
+ * Core owns the drawing vocabulary; this package implements it over pdf-lib.
+ * Re-exported so a handler can name the contract it draws against without
+ * importing two packages to do it.
+ */
+export type {
+  PdfBlockHandler,
+  PdfBox,
+  PdfDrawSurface,
+  PdfFontHandle,
+  PdfHandlerContext,
+  PdfImageHandle,
+  PdfImageOp,
+  PdfLineOp,
+  PdfMarkContribution,
+  PdfMarkSource,
+  PdfMarkStyler,
+  PdfPaintPhase,
+  PdfPoint,
+  PdfRectOp,
+  PdfTextOp,
+} from "@scrivr/core";
 
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
 import type {
