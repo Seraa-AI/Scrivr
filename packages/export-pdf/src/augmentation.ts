@@ -7,7 +7,15 @@ import type { LayoutBlock, LayoutPage } from "@scrivr/core";
 import type { PDFFont } from "pdf-lib";
 import type { PdfContext } from "./context";
 
-/** Style modifiers returned by mark handlers, applied during line rendering. */
+/**
+ * Style modifiers returned by mark handlers, applied during line rendering.
+ *
+ * @deprecated Never connected — the painter is fed an empty mark table and
+ * hard-codes the five mark behaviours instead. `PdfMarkContribution` in
+ * `@scrivr/core` replaces it: a list of contributions rather than one merged
+ * object, so an explicit colour can beat a link's text fill without also
+ * taking over its underline. Do not implement this one.
+ */
 export interface PdfSpanStyle {
   font?: PDFFont;
   color?: { r: number; g: number; b: number };
@@ -19,7 +27,12 @@ export interface PdfSpanStyle {
 /** Draw a block (or inline atom) onto a PDF page. */
 export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfContext) => void;
 
-/** Return style modifiers for a mark during span iteration. */
+/**
+ * Return style modifiers for a mark during span iteration.
+ *
+ * @deprecated See `PdfSpanStyle`. Superseded by `PdfMarkStyler` in
+ * `@scrivr/core`.
+ */
 export type PdfMarkHandler = (
   mark: { name: string; attrs: Record<string, unknown> },
   ctx: PdfContext,
