@@ -11,6 +11,7 @@ import {
   type PDFFont,
   type PDFImage,
 } from "pdf-lib";
+import type { PdfHandlerContext, PdfMarkStyler, Rgb } from "@scrivr/core";
 import {
   compositeColor,
   computeAlignmentOffset,
@@ -24,7 +25,7 @@ import {
   type IBaseEditor,
   type ResolvedTheme,
 } from "@scrivr/core";
-import type { PdfNodeHandler, PdfMarkHandler, PdfSpanStyle } from "./augmentation";
+import type { PdfNodeHandler } from "./augmentation";
 
 /** 1 CSS pixel = 0.75 PDF points (96dpi → 72dpi) */
 export const PT_PER_PX = 72 / 96;
@@ -81,6 +82,11 @@ export interface PdfDrawHelpers {
 
 // ── Flip helper ──────────────────────────────────────────────────────────────
 
+/** A core `Rgb` as pdf-lib wants it. */
+function toPdfColor(color: Rgb): ReturnType<typeof rgb> {
+  return rgb(color.r / 255, color.g / 255, color.b / 255);
+}
+
 /** Flip from top-left (layout) to bottom-left (PDF) coordinate space. */
 function flipY(yPx: number, pageHeightPt: number): number {
   return pageHeightPt - yPx * PT_PER_PX;
@@ -93,7 +99,8 @@ export function createDrawHelpers(
   pageHeightPt: number,
   fontRegistry: PdfFontRegistry,
   nodeHandlers: Record<string, PdfNodeHandler>,
-  markHandlers: Record<string, PdfMarkHandler>,
+  markStylers: Record<string, PdfMarkStyler>,
+  getHandlerContext: () => PdfHandlerContext,
 ): PdfDrawHelpers {
   function drawImage(
     image: PDFImage,
@@ -144,6 +151,18 @@ export function createDrawHelpers(
     }
   }
 
+  /**
+   * Paint what a span's marks contribute.
+   *
+   * Every number here — where an underline sits, how thick it is, how tall a
+   * highlight is — stays on this side. A mark says *what* it contributes; the
+   * painter decides where that lands, so a highlight extension never learns
+   * what a baseline is.
+   *
+   * Marks are painted in the order the span carries them, not grouped by kind.
+   * That ordering is observable: a span marked highlight-then-underline draws
+   * its rectangle first, and reversing the marks reverses the drawing.
+   */
   function drawDecorations(
     span: {
       font: string;
@@ -154,6 +173,8 @@ export function createDrawHelpers(
     baselineY: number,
     theme: ResolvedTheme,
     effectiveTextColor: ReturnType<typeof rgb>,
+    stylers: Record<string, PdfMarkStyler>,
+    handlerCtx: PdfHandlerContext,
   ): void {
     if (!span.marks) return;
     const page = getPage();
@@ -163,40 +184,37 @@ export function createDrawHelpers(
     const x1 = spanAbsX * PT_PER_PX;
     const x2 = x1 + span.width * PT_PER_PX;
 
+    /** Where each decoration sits relative to the baseline. */
+    const decorationY = (kind: "underline" | "strikethrough"): number =>
+      flipY(
+        kind === "underline" ? baselineY + fontSize * 0.15 : baselineY - fontSize * 0.3,
+        pageHeightPt,
+      );
+
     for (const mark of span.marks) {
-      if (mark.name === "underline" || mark.name === "link") {
-        // Underline follows the effective text color so colored text gets a
-        // matching underline. Link uses theme.link explicitly.
-        const lineColor =
-          mark.name === "link" ? parseCssColor(theme.link) : effectiveTextColor;
+      const styler = stylers[mark.name];
+      if (!styler) continue;
+      const contribution = styler(mark, handlerCtx);
+
+      for (const decoration of contribution.decorations ?? []) {
+        const y = decorationY(decoration.kind);
         page.drawLine({
-          start: { x: x1, y: flipY(baselineY + fontSize * 0.15, pageHeightPt) },
-          end: { x: x2, y: flipY(baselineY + fontSize * 0.15, pageHeightPt) },
+          start: { x: x1, y },
+          end: { x: x2, y },
           thickness,
-          color: lineColor,
+          color:
+            decoration.color === "text" ? effectiveTextColor : toPdfColor(decoration.color),
         });
       }
-      if (mark.name === "strikethrough") {
-        page.drawLine({
-          start: { x: x1, y: flipY(baselineY - fontSize * 0.3, pageHeightPt) },
-          end: { x: x2, y: flipY(baselineY - fontSize * 0.3, pageHeightPt) },
-          thickness,
-          color: effectiveTextColor,
-        });
-      }
-      if (mark.name === "highlight") {
-        const highlightColor = parseHexColor(
-          typeof mark.attrs["color"] === "string"
-            ? mark.attrs["color"]
-            : "#fef08a",
-        );
+
+      for (const background of contribution.backgrounds ?? []) {
         page.drawRectangle({
           x: x1,
           y: flipY(baselineY + fontSize * 0.2, pageHeightPt),
           width: span.width * PT_PER_PX,
           height: fontSize * 1.1 * PT_PER_PX,
-          color: highlightColor,
-          opacity: 0.4,
+          color: toPdfColor(background.color),
+          ...(background.color.alpha === 1 ? {} : { opacity: background.color.alpha }),
         });
       }
     }
@@ -296,7 +314,7 @@ export function createDrawHelpers(
 
         const fontSize = extractFontSizePx(span.font);
         const font = fontRegistry.resolve(span.font);
-        const color = extractColor(span.marks, ctx.theme, themeDefaultText);
+        const color = extractColor(span.marks, themeDefaultText, markStylers, getHandlerContext());
 
         page.drawText(text, {
           x: spanAbsX * PT_PER_PX,
@@ -306,7 +324,7 @@ export function createDrawHelpers(
           color,
         });
 
-        drawDecorations(span, spanAbsX, baselineY, ctx.theme, color);
+        drawDecorations(span, spanAbsX, baselineY, ctx.theme, color, markStylers, getHandlerContext());
 
         spacesBeforeSpan += countSpaces(span.text);
       }
@@ -345,16 +363,33 @@ export function sanitizeForWinAnsi(text: string): string {
  * mark falls through to `theme.link`; everything else gets `theme.defaultText`
  * (passed in pre-resolved to avoid re-parsing per span).
  */
+/**
+ * Which mark wins a span's text fill, strongest first.
+ *
+ * A name rather than a number each styler picks: a number lets two extensions
+ * escalate against one another and leaves the arbitration living nowhere. A
+ * source this rule does not name contributes at the lowest precedence, so an
+ * unknown mark can supply a fill but never take one.
+ */
+const FOREGROUND_PRECEDENCE = ["color", "link"];
+
 function extractColor(
   marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
-  theme: ResolvedTheme,
   defaultTextColor: ReturnType<typeof rgb>,
+  stylers: Record<string, PdfMarkStyler>,
+  handlerCtx: PdfHandlerContext,
 ): ReturnType<typeof rgb> {
-  const colorMark = marks?.find((m) => m.name === "color");
-  const colorVal = colorMark?.attrs["color"];
-  if (typeof colorVal === "string") return parseCssColor(colorVal);
-  if (marks?.some((m) => m.name === "link")) return parseCssColor(theme.link);
-  return defaultTextColor;
+  let winner: { color: Rgb; rank: number } | null = null;
+
+  for (const mark of marks ?? []) {
+    const foreground = stylers[mark.name]?.(mark, handlerCtx).foreground;
+    if (!foreground) continue;
+    const named = FOREGROUND_PRECEDENCE.indexOf(foreground.source);
+    const rank = named === -1 ? FOREGROUND_PRECEDENCE.length : named;
+    if (!winner || rank < winner.rank) winner = { color: foreground.color, rank };
+  }
+
+  return winner ? toPdfColor(winner.color) : defaultTextColor;
 }
 
 /**

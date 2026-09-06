@@ -3,6 +3,8 @@ import { xml, type DocxMarkHandler, type DocxRunWrapper } from "../../exports/do
 import type { MarkDecorator, SpanRect } from "../types";
 import { safeUrl } from "../../model/safeUrl";
 import { getMarkAttrs } from "../../model/getNodeAttrs";
+import { parseCssColor } from "../../model/cssColor";
+import type { PdfMarkStyler } from "../../exports/pdf";
 
 /**
  * Link — inline hyperlink via the `link` mark.
@@ -17,6 +19,19 @@ import { getMarkAttrs } from "../../model/getNodeAttrs";
  *   setLink()    — prompts for URL then applies the link mark to selection
  *   unsetLink()  — removes the link mark from the selection
  */
+
+/**
+ * A link claims the text fill — which an explicit `color` mark outranks — and
+ * the colour of its own underline, which it keeps either way.
+ */
+const pdfLinkStyle: PdfMarkStyler = (_mark, ctx) => {
+  const colour = parseCssColor(ctx.theme.link) ?? { r: 0, g: 0, b: 0, alpha: 1 };
+  return {
+    foreground: { color: colour, source: "link" },
+    decorations: [{ kind: "underline", color: colour, source: "link" }],
+  };
+};
+
 export const Link = Extension.create({
   name: "link",
 
@@ -186,7 +201,10 @@ export const Link = Extension.create({
       return xml("w:hyperlink", { "r:id": ctx.rels.addHyperlink(href) }, [run]);
     };
 
-    return { docx: { marks: { link: style }, markWrappers: { link: wrap } } };
+    return {
+      pdf: { marks: { link: pdfLinkStyle } },
+      docx: { marks: { link: style }, markWrappers: { link: wrap } },
+    };
   },
 });
 

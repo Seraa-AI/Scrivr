@@ -64,7 +64,16 @@ export const Underline = Extension.create({
 
   addExports() {
     const handler: DocxMarkHandler = (props) => ({ ...props, underline: true });
-    return { docx: { marks: { underline: handler } } };
+    return {
+      pdf: {
+        marks: {
+          underline: () => ({
+            decorations: [{ kind: "underline", color: "text", source: "underline" }],
+          }),
+        },
+      },
+      docx: { marks: { underline: handler } },
+    };
   },
 
   addImports() {
