@@ -165,8 +165,10 @@ export function createFontRegistry(
   standardFonts: FontCache,
   customFonts: Map<string, PDFFont>,
 ): PdfFontRegistry {
+  const embedded = new Set(customFonts.values());
   return {
     resolve: (cssFont: string) => resolveFont(cssFont, standardFonts, customFonts),
+    isUnicode: (font: PDFFont) => embedded.has(font),
     fallback: standardFonts["normal"]!,
   };
 }
