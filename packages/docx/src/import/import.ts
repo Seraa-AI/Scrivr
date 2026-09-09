@@ -24,6 +24,7 @@ import type {
   DocxImports,
   IBaseEditor,
   DocxDiagnostic,
+  DocxImportContext,
 } from "@scrivr/core";
 import { readDocxPackage, resolveOpcTarget } from "./opc";
 import { parseOoxml, findChild, attr } from "./xml";
@@ -47,6 +48,7 @@ import {
   type DocxImportOptions,
 } from "./context";
 import { DocxImportError } from "./error";
+import { createCanvasFontAvailability } from "./fontAvailability";
 
 export interface DocxImportResult {
   doc: PmNode;
@@ -204,6 +206,10 @@ export async function importDocx(
       doc = await hook(doc, ctx);
     }
 
+    const fontAvailability =
+      options.fontAvailability ?? createCanvasFontAvailability();
+    if (fontAvailability) reportUnavailableFonts(doc, fontAvailability, ctx);
+
     const finalDiagnostics = ctx.diagnostics.list();
     if (ctx.options.unsupported === "throw") {
       // Mirrors export-side semantics: any content the importer couldn't
@@ -310,3 +316,49 @@ function collectLifecycleHooks(
 }
 
 export type { DocxImportOptions };
+
+
+/**
+ * Every font family the document names, from inline `fontFamily` marks and
+ * from block attributes alike. A family is named once and repeated thousands
+ * of times, so callers get the distinct set.
+ */
+function collectNamedFamilies(doc: PmNode): Set<string> {
+  const families = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value === "string" && value.length > 0) families.add(value);
+  };
+  doc.descendants((node) => {
+    add(node.attrs["fontFamily"]);
+    for (const mark of node.marks) {
+      if (mark.type.name === "fontFamily") add(mark.attrs["family"]);
+    }
+  });
+  return families;
+}
+
+/**
+ * Warn about fonts the document asks for that this environment cannot draw.
+ *
+ * Word laid the document out in these faces; we will lay it out in whatever
+ * the environment substitutes, which measures differently. Nothing downstream
+ * can detect that on its own, because by then the substitution has already
+ * been folded into the geometry.
+ */
+function reportUnavailableFonts(
+  doc: PmNode,
+  isAvailable: (family: string) => boolean,
+  ctx: DocxImportContext,
+): void {
+  for (const family of collectNamedFamilies(doc)) {
+    if (isAvailable(family)) continue;
+    ctx.diagnostics.warn({
+      code: "unavailable-font",
+      message:
+        `The document is written in "${family}", which is not available here. ` +
+        "Text will be drawn in a substitute face with different metrics, so " +
+        "lines will not break where they do in Word.",
+      markType: "fontFamily",
+    });
+  }
+}

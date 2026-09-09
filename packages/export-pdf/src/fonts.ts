@@ -14,6 +14,15 @@ import type { PdfFontRegistry } from "./context";
 
 export type FontVariant = "normal" | "bold" | "italic" | "boldItalic";
 export type FontFamily = "serif" | "sans" | "mono";
+
+/** A font the document named that the exporter could not embed. */
+export interface FontSubstitution {
+  family: string;
+  weight: "normal" | "bold";
+  style: "normal" | "italic";
+  /** The standard font drawn in its place. */
+  substitute: FontFamily;
+}
 export type FontCache = Record<string, PDFFont>;
 
 export interface PdfExportFontOptions {
@@ -74,18 +83,22 @@ export function extractCssFamilyName(cssFont: string): string {
   return first;
 }
 
-/**
- * Walk the layout, collect all unique (family, weight, style) combos, call
- * fontResolver for each, and embed those that return bytes.
- */
-export async function embedCustomFonts(
-  pdfDoc: PDFDocument,
-  layout: DocumentLayout,
-  fontResolver: NonNullable<PdfExportFontOptions["fontResolver"]>,
-): Promise<Map<string, PDFFont>> {
-  pdfDoc.registerFontkit(fontkit);
+/** A distinct font the document asks for by name. */
+export interface FontCombo {
+  family: string;
+  weight: "normal" | "bold";
+  style: "normal" | "italic";
+  /** A CSS font string that produced this combo, kept for its generic hint. */
+  cssFont: string;
+}
 
-  const combos = new Map<string, { family: string; weight: "normal" | "bold"; style: "normal" | "italic" }>();
+/**
+ * Every uniquely named (family, weight, style) the layout asks for, keyed as
+ * `family:weight:style`. Spans naming only a generic family are skipped —
+ * nothing was requested, so nothing can be substituted for it.
+ */
+export function collectFontCombos(layout: DocumentLayout): Map<string, FontCombo> {
+  const combos = new Map<string, FontCombo>();
 
   const visitFont = (cssFont: string) => {
     const family = extractCssFamilyName(cssFont);
@@ -94,7 +107,7 @@ export async function embedCustomFonts(
     const weight: "normal" | "bold" = /bold|[789]\d\d/.test(lower) ? "bold" : "normal";
     const style: "normal" | "italic" = /italic|oblique/.test(lower) ? "italic" : "normal";
     const key = `${family}:${weight}:${style}`;
-    if (!combos.has(key)) combos.set(key, { family, weight, style });
+    if (!combos.has(key)) combos.set(key, { family, weight, style, cssFont });
   };
 
   for (const page of layout.pages) {
@@ -106,6 +119,20 @@ export async function embedCustomFonts(
       }
     }
   }
+
+  return combos;
+}
+
+/**
+ * Call fontResolver for each requested combo and embed those that return bytes.
+ * Combos absent from the result are the ones that will be substituted.
+ */
+export async function embedCustomFonts(
+  pdfDoc: PDFDocument,
+  combos: Map<string, FontCombo>,
+  fontResolver: NonNullable<PdfExportFontOptions["fontResolver"]>,
+): Promise<Map<string, PDFFont>> {
+  pdfDoc.registerFontkit(fontkit);
 
   const result = new Map<string, PDFFont>();
 
@@ -123,6 +150,18 @@ export async function embedCustomFonts(
   );
 
   return result;
+}
+
+/**
+ * The standard font a named family falls back to when nothing was embedded for
+ * it. Read by both `resolveFont` and substitution reporting so the PDF and the
+ * report can never disagree about what was actually used.
+ */
+export function standardFamilyFor(cssFont: string): FontFamily {
+  const lower = cssFont.toLowerCase();
+  if (/georgia|times|serif/.test(lower) && !/sans-serif/.test(lower)) return "serif";
+  if (/courier|mono|code/.test(lower)) return "mono";
+  return "sans";
 }
 
 /** Resolve a CSS font string to the best available PDFFont. */
@@ -143,10 +182,7 @@ export function resolveFont(
     if (custom) return custom;
   }
 
-  let stdFamily: FontFamily = "sans";
-  if (/georgia|times|serif/.test(lower) && !/sans-serif/.test(lower))
-    stdFamily = "serif";
-  else if (/courier|mono|code/.test(lower)) stdFamily = "mono";
+  const stdFamily = standardFamilyFor(cssFont);
 
   const variant: FontVariant =
     isBold && isItalic
@@ -165,8 +201,10 @@ export function createFontRegistry(
   standardFonts: FontCache,
   customFonts: Map<string, PDFFont>,
 ): PdfFontRegistry {
+  const embedded = new Set(customFonts.values());
   return {
     resolve: (cssFont: string) => resolveFont(cssFont, standardFonts, customFonts),
+    isUnicode: (font: PDFFont) => embedded.has(font),
     fallback: standardFonts["normal"]!,
   };
 }

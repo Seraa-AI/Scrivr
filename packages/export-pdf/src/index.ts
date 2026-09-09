@@ -4,8 +4,9 @@ import "./augmentation";
 export { PdfExport } from "./PdfExport";
 export type { PdfHandlers, PdfNodeHandler, PdfMarkHandler, PdfChromeHandler, PdfSpanStyle } from "./augmentation";
 export type { PdfContext, PdfFontRegistry, PdfDrawHelpers } from "./context";
+export type { FontSubstitution, FontFamily } from "./fonts";
 
-import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
+import { PDFDocument, type PDFPage, type PDFImage, type PDFFont } from "pdf-lib";
 import type {
   IEditor,
   IBaseEditor,
@@ -20,7 +21,10 @@ import type { PdfContext } from "./context";
 import {
   embedStandardFonts,
   embedCustomFonts,
+  collectFontCombos,
   createFontRegistry,
+  standardFamilyFor,
+  type FontSubstitution,
 } from "./fonts";
 import { defaultNodeHandlers, defaultMarkHandlers } from "./defaults";
 
@@ -37,6 +41,15 @@ export interface PdfExportOptions {
     weight: "normal" | "bold",
     style: "normal" | "italic",
   ) => Promise<ArrayBuffer | null>;
+  /**
+   * Called once for each named font the document uses that could not be
+   * embedded — `fontResolver` returned nothing for it, or was never supplied.
+   * That text is drawn in `substitute` instead, whose metrics are not the ones
+   * the layout was measured against, so lines will not break where the canvas
+   * broke them. Generic families (`sans-serif`, `monospace`) are not reported:
+   * no specific face was asked for.
+   */
+  onFontSubstitution?: (info: FontSubstitution) => void;
   /**
    * Optional theme override. Shallow-merged over the print-ready
    * `defaultPdfTheme`. The PDF default ignores the canvas theme entirely —
@@ -113,9 +126,23 @@ export async function buildPdf(
   const pdfDoc = await PDFDocument.create();
 
   const standardFonts = await embedStandardFonts(pdfDoc);
+  const requestedFonts = collectFontCombos(layout);
   const customFonts = options?.fontResolver
-    ? await embedCustomFonts(pdfDoc, layout, options.fontResolver)
-    : new Map();
+    ? await embedCustomFonts(pdfDoc, requestedFonts, options.fontResolver)
+    : new Map<string, PDFFont>();
+
+  const reportSubstitution = options?.onFontSubstitution;
+  if (reportSubstitution) {
+    for (const [key, combo] of requestedFonts) {
+      if (customFonts.has(key)) continue;
+      reportSubstitution({
+        family: combo.family,
+        weight: combo.weight,
+        style: combo.style,
+        substitute: standardFamilyFor(combo.cssFont),
+      });
+    }
+  }
 
   const fontRegistry = createFontRegistry(standardFonts, customFonts);
   const imageCache = await embedImages(pdfDoc, layout);

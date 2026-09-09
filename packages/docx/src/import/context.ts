@@ -26,6 +26,16 @@ export interface DocxImportOptions {
    *     uploads.
    */
   media?: DocxMediaSink;
+  /**
+   * Reports whether a font family can actually be drawn here. Import uses it
+   * to warn about documents naming fonts this environment will silently
+   * substitute — the layout is then measured against a face the author never
+   * chose, and every consumer of that layout inherits the discrepancy.
+   *
+   * Defaults to a canvas measurement probe in the browser. On the server there
+   * is no font system to ask, so nothing is reported rather than guessed.
+   */
+  fontAvailability?: (family: string) => boolean;
 }
 
 export interface CreateDocxImportContextInput extends DocxImportOptions {

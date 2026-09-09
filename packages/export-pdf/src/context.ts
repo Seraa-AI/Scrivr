@@ -57,6 +57,11 @@ export interface PdfContext {
 export interface PdfFontRegistry {
   /** Resolve a CSS font shorthand string to a PDFFont. */
   resolve(cssFont: string): PDFFont;
+  /**
+   * True when `font` is an embedded face carrying its own glyphs. Standard
+   * fonts encode WinAnsi only, so their text must be sanitized before drawing.
+   */
+  isUnicode(font: PDFFont): boolean;
   /** Fallback font (Helvetica normal). */
   fallback: PDFFont;
 }
@@ -215,7 +220,7 @@ export function createDrawHelpers(
       const fontSize = extractFontSizePx(
         (firstSpan?.kind === "text" ? firstSpan.font : undefined) ?? "12px sans-serif",
       );
-      page.drawText(block.listMarker, {
+      page.drawText(sanitizeForWinAnsi(block.listMarker), {
         x: block.listMarkerX * PT_PER_PX,
         y: flipY(block.y + firstLine.ascent, pageHeightPt),
         size: fontSize * PT_PER_PX,
@@ -288,14 +293,16 @@ export function createDrawHelpers(
 
         if (span.kind !== "text") continue;
 
-        const text = sanitizeForWinAnsi(span.text);
+        const font = fontRegistry.resolve(span.font);
+        const text = fontRegistry.isUnicode(font)
+          ? stripInvisible(span.text)
+          : sanitizeForWinAnsi(span.text);
         if (!text) {
           spacesBeforeSpan += countSpaces(span.text);
           continue;
         }
 
         const fontSize = extractFontSizePx(span.font);
-        const font = fontRegistry.resolve(span.font);
         const color = extractColor(span.marks, ctx.theme, themeDefaultText);
 
         page.drawText(text, {
@@ -329,15 +336,32 @@ export function extractFontSizePx(cssFont: string): number {
   return match?.[1] !== undefined ? parseFloat(match[1]) : 12;
 }
 
+/** Characters that carry no ink, so no font needs to be asked about them. */
+const INVISIBLE = /[\u200b\u200c\u200d\u00ad\ufeff]/g;
+
 /**
- * Remove characters that WinAnsi encoding cannot represent.
- * WinAnsi covers U+0020–U+00FF plus Windows-1252 extras: smart quotes,
- * em/en dash, bullet, ellipsis, trademark, etc. (U+2000–U+203A range).
+ * The repertoire of pdf-lib's standard fonts: ASCII, the printable upper half
+ * of Latin-1, and the scattered codepoints Windows-1252 maps into 0x80-0x9F.
+ * Written out rather than approximated by a range because both directions of
+ * error are costly - too wide and `drawText` throws mid-export, too narrow and
+ * legitimate text (currency, guillemets) is silently replaced with "?".
+ * `fontFallback.test.ts` holds this to what the encoder actually accepts.
+ */
+const NOT_WIN_ANSI =
+  /[^\u0020-\u007e\u00a0-\u00ff\u0152\u0153\u0160\u0161\u0178\u017d\u017e\u0192\u02c6\u02dc\u2013\u2014\u2018-\u201a\u201c-\u201e\u2020-\u2022\u2026\u2030\u2039\u203a\u20ac\u2122]/g;
+
+export function stripInvisible(text: string): string {
+  return text.replace(INVISIBLE, "");
+}
+
+/**
+ * Reduce text to what a standard PDF font can encode.
+ *
+ * Only for standard fonts. An embedded font carries its own glyphs, and
+ * running this over it would destroy the very text it was embedded to render.
  */
 export function sanitizeForWinAnsi(text: string): string {
-  return text
-    .replace(/[\u200b\u200c\u200d\u00ad\ufeff]/g, "") // zero-width / invisible
-    .replace(/[^\u0020-\u00ff\u0100-\u02dc\u2013-\u2026\u2030\u2039\u203a\u2122]/g, "?");
+  return stripInvisible(text).replace(NOT_WIN_ANSI, "?");
 }
 
 /**

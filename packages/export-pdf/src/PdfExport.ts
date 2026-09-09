@@ -17,10 +17,42 @@
 import { Extension } from "@scrivr/core";
 import type { IEditor, ResolvedTheme } from "@scrivr/core";
 import { exportToPdf } from "./index";
+import type { FontSubstitution, PdfExportFontOptions } from "./fonts";
 
 interface PdfExportOptions {
   /** Downloaded file name (without .pdf). Default: "document" */
   filename?: string;
+  /**
+   * Supplies font bytes so the PDF can embed the face the page was laid out
+   * with. Without it, any font the document names is drawn in a standard font
+   * whose metrics differ, and `onFontSubstitution` reports that it happened.
+   */
+  fontResolver?: PdfExportFontOptions["fontResolver"];
+  /**
+   * Called after an export that had to substitute at least one font, with
+   * every substitution it made. Apps use this to tell the user their PDF does
+   * not match the page they are looking at. Defaults to a console warning, so
+   * the mismatch is never silent.
+   *
+   * Configure-time rather than per-call: how an app reports this is a property
+   * of the app, not of the button press.
+   */
+  onFontSubstitution?: (substitutions: FontSubstitution[]) => void;
+}
+
+/**
+ * The page was measured against whatever face the browser substituted for the
+ * missing font; the PDF is drawn in a standard font with different metrics.
+ * Nothing downstream can reconcile the two, so the least we owe the user is to
+ * say it happened.
+ */
+function warnAboutSubstitutions(substitutions: FontSubstitution[]): void {
+  const families = [...new Set(substitutions.map((s) => s.family))].join(", ");
+  console.warn(
+    `[PdfExport] Could not embed: ${families}. The PDF uses a standard font ` +
+      `with different metrics, so text may not break or fit as it does on the ` +
+      "page. Pass `fontResolver` to supply the real font bytes.",
+  );
 }
 
 /** Per-call options accepted by `editor.commands.exportPdf({...})`. */
@@ -62,11 +94,18 @@ export const PdfExport = Extension.create<PdfExportOptions>({
           const { editor } = inst;
           const filename =
             callOptions?.filename ?? this.options.filename ?? "document";
-          exportToPdf(
-            editor,
-            callOptions?.theme ? { theme: callOptions.theme } : undefined,
-          )
+          const reportSubstitutions =
+            this.options.onFontSubstitution ?? warnAboutSubstitutions;
+          const substitutions: FontSubstitution[] = [];
+          exportToPdf(editor, {
+            ...(callOptions?.theme ? { theme: callOptions.theme } : {}),
+            ...(this.options.fontResolver
+              ? { fontResolver: this.options.fontResolver }
+              : {}),
+            onFontSubstitution: (info) => substitutions.push(info),
+          })
             .then((bytes) => {
+              if (substitutions.length > 0) reportSubstitutions(substitutions);
               const blob = new Blob([bytes.buffer as ArrayBuffer], {
                 type: "application/pdf",
               });

@@ -12,8 +12,9 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
 import type { EditorStateContext, EditorTheme } from "@scrivr/react";
-import { PdfExport } from "@scrivr/export-pdf";
+import { PdfExport, type FontSubstitution } from "@scrivr/export-pdf";
 import { DocxExport, DocxImport } from "@scrivr/docx";
+import type { DocxDiagnostic } from "@scrivr/core";
 import {
   Collaboration,
   CollaborationCursor,
@@ -42,6 +43,7 @@ import { env } from "../lib/env";
 import {
   ChevronLeft,
   FileText,
+  TriangleAlert,
   History,
   MessageSquareText,
   Moon,
@@ -135,6 +137,47 @@ const identity = USE_COLLAB
     }
   : null;
 
+/**
+ * What an export substituted and what an import lost are both invisible in the
+ * result, so both belong on screen. The extension list is built once at module
+ * scope; one subscriber slot bridges it to the header, which is enough because
+ * the playground mounts a single editor.
+ */
+interface DocumentNotice {
+  kind: "font" | "import";
+  summary: string;
+  detail: string;
+}
+
+let publishNotices: ((notices: DocumentNotice[]) => void) | null = null;
+
+const reportFontSubstitutions = (subs: FontSubstitution[]) => {
+  const families = [...new Set(subs.map((sub) => sub.family))];
+  publishNotices?.([
+    {
+      kind: "font",
+      summary:
+        families.length === 1
+          ? `${families[0]} substituted`
+          : `${families.length} fonts substituted`,
+      detail:
+        `The last PDF export could not embed ${families.join(", ")}, so it was ` +
+        "drawn in a standard font. That font measures differently from the one " +
+        "on screen, so the PDF will not break lines where the page does.",
+    },
+  ]);
+};
+
+const reportImportDiagnostics = (diagnostics: DocxDiagnostic[]) => {
+  publishNotices?.(
+    diagnostics.map((d) => ({
+      kind: "import" as const,
+      summary: d.code,
+      detail: `${d.level}: ${d.message}`,
+    })),
+  );
+};
+
 const EXTENSIONS =
   USE_COLLAB && identity
     ? [
@@ -144,9 +187,12 @@ const EXTENSIONS =
           user: { name: identity.userName, color: identity.userColor },
         }),
         HeaderFooter,
-        PdfExport.configure({ filename: identity.room }),
+        PdfExport.configure({
+          filename: identity.room,
+          onFontSubstitution: reportFontSubstitutions,
+        }),
         DocxExport.configure({ filename: identity.room }),
-        DocxImport,
+        DocxImport.configure({ onDiagnostics: reportImportDiagnostics }),
         TrackChanges.configure({
           userID: identity.userName,
           canAcceptReject: true,
@@ -158,9 +204,12 @@ const EXTENSIONS =
     : [
         StarterKit.configure({ table: true }),
         HeaderFooter,
-        PdfExport.configure({ filename: "scrivr-demo" }),
+        PdfExport.configure({
+          filename: "scrivr-demo",
+          onFontSubstitution: reportFontSubstitutions,
+        }),
         DocxExport.configure({ filename: "scrivr-demo" }),
-        DocxImport,
+        DocxImport.configure({ onDiagnostics: reportImportDiagnostics }),
         TrackChanges.configure({ userID: "demo-user", canAcceptReject: true }),
         CitationHighlight,
         ...(AI_ENABLED ? [AiToolkit] : []),
@@ -200,6 +249,14 @@ export function Playground() {
     AI_ENABLED ? "ai" : "changes",
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [notices, setNotices] = useState<DocumentNotice[]>([]);
+
+  useEffect(() => {
+    publishNotices = setNotices;
+    return () => {
+      publishNotices = null;
+    };
+  }, []);
 
   const { isDark, toggle: toggleDark } = useDarkMode();
 
@@ -287,10 +344,26 @@ export function Playground() {
           </div>
         </div>
 
-        <div className="hidden shrink-0 items-center lg:flex">
+        <div className="hidden shrink-0 items-center gap-1.5 lg:flex">
           <StatusPill icon={<FileText size={12} strokeWidth={2} />}>
             Page {pageInfo.current} of {pageInfo.total}
           </StatusPill>
+          {notices.length > 0 && (
+            <span
+              title={notices.map((n) => n.detail).join("\n\n")}
+              onClick={() => setNotices([])}
+              className="cursor-pointer"
+            >
+              <StatusPill
+                tone="accent"
+                icon={<TriangleAlert size={12} strokeWidth={2} />}
+              >
+                {notices.length === 1
+                  ? notices[0]!.summary
+                  : `${notices.length} document notices`}
+              </StatusPill>
+            </span>
+          )}
         </div>
 
         <div className="flex min-w-0 flex-[1.3] items-center justify-end gap-1.5">

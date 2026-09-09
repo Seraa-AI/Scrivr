@@ -17,13 +17,13 @@
  * content. On the server, call `importDocx(editor, bytes)` directly — it
  * returns the parsed `Node` plus the diagnostics list.
  *
- * Diagnostics from the import run are logged via `console.warn` for
- * visibility during dogfooding. Apps that want to surface them in the UI
- * should call `importDocx` directly and read `result.diagnostics`.
+ * Diagnostics from the import run go to `onDiagnostics`, which defaults to
+ * `console.warn` so a lossy import is never silent. Apps that want them on
+ * screen pass their own handler.
  */
 
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor } from "@scrivr/core";
+import type { IBaseEditor, DocxDiagnostic } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import { importDocx as runImportDocx } from "./import";
 import type { DocxImportOptions } from "./import";
@@ -38,6 +38,16 @@ interface DocxImportExtensionOptions {
    * Default: `"data-url"`.
    */
   media?: DocxImportOptions["media"];
+  /**
+   * Called after every import that produced diagnostics. DOCX import is
+   * lossy by nature, and the losses are invisible in the result — a
+   * substituted font or a dropped node looks like a clean document. Defaults
+   * to a console warning per diagnostic.
+   *
+   * Configure-time rather than per-call: how an app reports this is a
+   * property of the app, not of the button press.
+   */
+  onDiagnostics?: (diagnostics: DocxDiagnostic[]) => void;
 }
 
 /** Per-call options for `editor.commands.importDocxFromFile({...})`. */
@@ -92,10 +102,10 @@ export const DocxImport = Extension.create<DocxImportExtensionOptions>({
                   bytes,
                   opts,
                 );
-                for (const d of diagnostics) {
-                  const prefix = `[DocxImport] ${d.level}: ${d.code}`;
-                  const suffix = d.nodeType ? ` (${d.nodeType})` : "";
-                  console.warn(`${prefix}${suffix} — ${d.message}`);
+                if (diagnostics.length > 0) {
+                  (this.options.onDiagnostics ?? warnAboutDiagnostics)(
+                    diagnostics,
+                  );
                 }
                 replaceDocument(editor, doc);
               })
@@ -129,6 +139,14 @@ export const DocxImport = Extension.create<DocxImportExtensionOptions>({
     };
   },
 });
+
+/** What an import loses is worth saying even when no app is listening. */
+function warnAboutDiagnostics(diagnostics: DocxDiagnostic[]): void {
+  for (const d of diagnostics) {
+    const suffix = d.nodeType ? ` (${d.nodeType})` : "";
+    console.warn(`[DocxImport] ${d.level}: ${d.code}${suffix} — ${d.message}`);
+  }
+}
 
 function resolveOptions(
   call: ImportDocxCallOptions | undefined,
@@ -207,8 +225,8 @@ declare module "@scrivr/core" {
     docxImport: {
       /**
        * Open a file picker and import the chosen `.docx` into the editor.
-       * Diagnostics from the run are logged via `console.warn`. For
-       * programmatic access to diagnostics or server-side import, call
+       * Diagnostics from the run go to the extension's `onDiagnostics`
+       * (console by default). For server-side import, call
        * `importDocx(editor, bytes)` directly.
        */
       importDocxFromFile: (options?: ImportDocxCallOptions) => ReturnType;
