@@ -57,6 +57,18 @@ const shiftedBy = (ops: DrawOp[], dx: number): DrawOp[] =>
 const recoloured = (ops: DrawOp[]): DrawOp[] =>
   ops.map((op) => (op["color"] === undefined ? op : { ...op, color: "rgb(0.5, 0.5, 0.5)" }));
 
+/** Moves every annotation's hit area, leaving the paint where it was. */
+const hitAreasMovedBy = (ops: DrawOp[], dx: number): DrawOp[] =>
+  ops.map((op) =>
+    op.op === "annot" && Array.isArray(op["rect"])
+      ? { ...op, rect: op["rect"].map((n, i) => (i % 2 === 0 && typeof n === "number" ? n + dx : n)) }
+      : op,
+  );
+
+/** Drops where each annotation points, leaving its rectangle intact. */
+const untargeted = (ops: DrawOp[]): DrawOp[] =>
+  ops.map((op) => (op.op === "annot" ? { ...op, uri: "" } : op));
+
 describe("the op log notices what a migration could break", () => {
   it("a highlight moved before the text it covers", async () => {
     const ops = await marked([{ name: "highlight", attrs: { color: "#fef08a" } }]);
@@ -102,6 +114,17 @@ describe("the op log notices what a migration could break", () => {
   it("a changed colour", async () => {
     const ops = await marked([{ name: "color", attrs: { color: "#dc2626" } }]);
     expect(recoloured(ops)).not.toEqual(ops);
+  });
+
+  it("a link's hit area moved off the text it covers", async () => {
+    const ops = await marked([{ name: "link", attrs: { href: "https://example.com" } }]);
+    expect(ops.some((op) => op.op === "annot")).toBe(true);
+    expect(hitAreasMovedBy(ops, 2)).not.toEqual(ops);
+  });
+
+  it("a link that stopped pointing anywhere", async () => {
+    const ops = await marked([{ name: "link", attrs: { href: "https://example.com" } }]);
+    expect(untargeted(ops)).not.toEqual(ops);
   });
 });
 

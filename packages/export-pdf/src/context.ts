@@ -6,6 +6,7 @@
 
 import {
   rgb,
+  PDFHexString,
   type PDFDocument,
   type PDFPage,
   type PDFFont,
@@ -17,6 +18,7 @@ import {
   computeJustifySpaceBonus,
   countSpaces,
   parseCssColor as parseColorLiteral,
+  safeUrl,
   type DocumentLayout,
   type LayoutPage,
   type LayoutBlock,
@@ -250,10 +252,54 @@ export function createDrawHelpers(
       const baselineY = lineY + line.ascent;
       const pdfBaseline = flipY(baselineY, pageHeightPt);
 
+      // Formatting changes split one anchor across spans; adjacent spans with
+      // the same target merge so a bolded word inside a link does not become
+      // its own hit area. Adjacent, not merely same-target: a float divides a
+      // line into segments, and text flowing either side of one must not be
+      // joined across the hole the float sits in.
+      let linkRun: LinkRun | null = null;
+      const flushLinkRun = (): void => {
+        if (linkRun) {
+          addLinkAnnotation(ctx.doc, page, linkRun.href, {
+            x0: linkRun.x0 * PT_PER_PX,
+            x1: linkRun.x1 * PT_PER_PX,
+            y0: flipY(baselineY + line.descent, pageHeightPt),
+            // textAscent, not ascent: an inline object taller than the text
+            // inflates the line box, and a hit area sized from that would
+            // cover the object sitting above the link.
+            y1: flipY(baselineY - line.textAscent, pageHeightPt),
+          });
+        }
+        linkRun = null;
+      };
+
       let spacesBeforeSpan = 0;
       for (const span of line.spans) {
         const spanAbsX =
           block.x + lineOffsetX + span.x + spacesBeforeSpan * spaceBonus;
+
+        // Object spans have no marks, so an inline image inside an anchor
+        // ends the run rather than continuing it.
+        const href = span.kind === "text" ? linkHref(span.marks) : null;
+        const continues =
+          href !== null &&
+          linkRun !== null &&
+          linkRun.href === href &&
+          span.x <= linkRun.rawEnd + ADJACENT_EPSILON;
+        if (continues && linkRun !== null) {
+          linkRun.x1 = spanAbsX + span.width;
+          linkRun.rawEnd = span.x + span.width;
+        } else {
+          flushLinkRun();
+          if (href !== null) {
+            linkRun = {
+              href,
+              x0: spanAbsX,
+              x1: spanAbsX + span.width,
+              rawEnd: span.x + span.width,
+            };
+          }
+        }
 
         // Inline atom dispatch — look up nodeHandlers for object spans
         if (span.kind === "object") {
@@ -317,6 +363,7 @@ export function createDrawHelpers(
 
         spacesBeforeSpan += countSpaces(span.text);
       }
+      flushLinkRun();
       lineY += line.lineHeight;
     }
   }
@@ -329,6 +376,81 @@ export function createDrawHelpers(
 }
 
 // ── Shared utilities ─────────────────────────────────────────────────────────
+
+/** One anchor's horizontal extent on a single line, in layout pixels. */
+interface LinkRun {
+  href: string;
+  x0: number;
+  x1: number;
+  /**
+   * Where the run ends before alignment and justification are applied.
+   * Adjacency has to be judged in that frame: the painted gap between two
+   * spans grows with the justification bonus, while an actual hole in the
+   * line does not.
+   */
+  rawEnd: number;
+}
+
+/** Sub-pixel slack, so measurement noise does not read as a hole in the line. */
+const ADJACENT_EPSILON = 0.5;
+
+/** Schemes a viewer can act on with no base URL to resolve against. */
+const FOLLOWABLE_TARGET = /^(?:https?|mailto|tel):/i;
+
+/**
+ * The link target for a span. Safety is `safeUrl` — the gate ingestion already
+ * applies, so there is one answer to "is this URL safe" rather than one per
+ * sink. Followability is a separate question it does not answer.
+ */
+function linkHref(
+  marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
+): string | null {
+  const link = marks?.find((m) => m.name === "link");
+  const url = link ? safeUrl(link.attrs["href"]) : null;
+  return url !== null && FOLLOWABLE_TARGET.test(url) ? url : null;
+}
+
+/**
+ * Make a rectangle clickable. `Border: [0,0,0]` because the link underline is
+ * already painted; viewers would otherwise draw their own box over it.
+ */
+function addLinkAnnotation(
+  pdfDoc: PDFDocument,
+  page: PDFPage,
+  href: string,
+  rect: { x0: number; x1: number; y0: number; y1: number },
+): void {
+  if (rect.x1 <= rect.x0 || rect.y1 <= rect.y0) return;
+  const annotation = pdfDoc.context.obj({
+    Type: "Annot",
+    Subtype: "Link",
+    Rect: [rect.x0, rect.y0, rect.x1, rect.y1],
+    Border: [0, 0, 0],
+    A: {
+      Type: "Action",
+      S: "URI",
+      URI: encodePdfUri(href),
+    },
+  });
+  page.node.addAnnot(pdfDoc.context.register(annotation));
+}
+
+/** Not legal in a URI, and readers truncate the target where one appears. */
+const SPACE = 0x20;
+
+/** URI actions carry ASCII bytes; hex strings keep PDF delimiters literal. */
+function encodePdfUri(href: string): PDFHexString {
+  // TextEncoder, not encodeURIComponent: the latter throws on a lone surrogate
+  // and would re-escape the `%` and separators an href already carries.
+  const asciiHref = Array.from(new TextEncoder().encode(href), (byte) =>
+    byte > 0x7f || byte === SPACE
+      ? `%${byte.toString(16).toUpperCase().padStart(2, "0")}`
+      : String.fromCharCode(byte),
+  ).join("");
+  return PDFHexString.of(
+    Array.from(asciiHref, (char) => char.charCodeAt(0).toString(16).padStart(2, "0")).join(""),
+  );
+}
 
 /** Extract font size from CSS font shorthand: "bold italic 14px Georgia" → 14 */
 export function extractFontSizePx(cssFont: string): number {
