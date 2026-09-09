@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { PDFDocument, PDFName, PDFArray, PDFDict, PDFString } from "pdf-lib";
+import { PDFDocument, PDFName, PDFArray, PDFDict, PDFString, PDFHexString } from "pdf-lib";
 import { buildPdf as buildPdfWithEditor } from "../index";
 import { exportEditor, textLine, block, onePage } from "./fixtures";
 import type { DocumentLayout, LayoutLine } from "@scrivr/core";
@@ -32,7 +32,7 @@ async function linksIn(bytes: Uint8Array): Promise<Link[]> {
       const uri = action instanceof PDFDict ? action.lookup(PDFName.of("URI")) : undefined;
       const rect = annot.lookup(PDFName.of("Rect"));
       out.push({
-        uri: uri instanceof PDFString ? uri.asString() : "",
+        uri: uri instanceof PDFString || uri instanceof PDFHexString ? uri.decodeText() : "",
         rect: rect instanceof PDFArray ? rect.asArray().map((n) => Number(n.toString())) : [],
       });
     }
@@ -46,6 +46,18 @@ const oneLink = (href: string) =>
   onePage([block("paragraph", [textLine("click me", { marks: linkMark(href) })], { y: 100 })]);
 
 describe("link annotations", () => {
+  it.each([
+    ["https://example.com/a)b", "https://example.com/a)b"],
+    ["https://example.com/a(b", "https://example.com/a(b"],
+    ["https://example.com/a\\b", "https://example.com/a\\b"],
+    ["https://example.com/東京", "https://example.com/%E6%9D%B1%E4%BA%AC"],
+    ["https://example.com/%E6%9D%B1?q=a%20b&next=/c#part", "https://example.com/%E6%9D%B1?q=a%20b&next=/c#part"],
+  ])("round-trips the URI %s", async (href, expected) => {
+    const links = await linksIn(await buildPdf(oneLink(href)));
+    expect(links).toHaveLength(1);
+    expect(links[0]!.uri).toBe(expected);
+  });
+
   it("emits a clickable annotation for a link mark", async () => {
     const links = await linksIn(await buildPdf(oneLink("https://example.com/a")));
     expect(links).toHaveLength(1);

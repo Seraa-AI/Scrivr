@@ -6,7 +6,7 @@
 
 import {
   rgb,
-  PDFString,
+  PDFHexString,
   type PDFDocument,
   type PDFPage,
   type PDFFont,
@@ -400,10 +400,24 @@ function addLinkAnnotation(
     A: {
       Type: "Action",
       S: "URI",
-      URI: PDFString.of(href),
+      URI: encodePdfUri(href),
     },
   });
   page.node.addAnnot(pdfDoc.context.register(annotation));
+}
+
+/** URI actions carry ASCII bytes; hex strings keep PDF delimiters literal. */
+function encodePdfUri(href: string): PDFHexString {
+  // Encode Unicode as UTF-8 percent escapes while preserving existing escapes
+  // and URI separators. TextEncoder also handles unpaired surrogates safely.
+  const uri = Array.from(new TextEncoder().encode(href), (byte) =>
+    byte > 0x7f
+      ? `%${byte.toString(16).toUpperCase().padStart(2, "0")}`
+      : String.fromCharCode(byte),
+  ).join("");
+  return PDFHexString.of(
+    Array.from(uri, (char) => char.charCodeAt(0).toString(16).padStart(2, "0")).join(""),
+  );
 }
 
 /** Extract font size from CSS font shorthand: "bold italic 14px Georgia" → 14 */
