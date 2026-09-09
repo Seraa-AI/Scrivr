@@ -1,4 +1,13 @@
-import { PDFPage, PDFPageLeaf, PDFName, PDFArray, PDFDict, PDFString, PDFHexString } from "pdf-lib";
+import {
+  PDFPage,
+  PDFPageLeaf,
+  PDFName,
+  PDFArray,
+  PDFDict,
+  PDFNumber,
+  PDFString,
+  PDFHexString,
+} from "pdf-lib";
 
 /**
  * Records every drawing call an export makes, in order, as data.
@@ -7,7 +16,7 @@ import { PDFPage, PDFPageLeaf, PDFName, PDFArray, PDFDict, PDFString, PDFHexStri
  * and compression all move without any pixel moving. What actually defines the
  * rendering is which primitives were drawn, with what values, in what order —
  * so that is what this records, at the boundary where the exporter meets
- * pdf-lib. Anything that reaches the page goes through one of these four
+ * pdf-lib. Anything *painted* on the page goes through one of these four
  * methods, including the paths that bypass handler dispatch.
  *
  * Annotations reach the page through a different door than paint —
@@ -20,7 +29,7 @@ import { PDFPage, PDFPageLeaf, PDFName, PDFArray, PDFDict, PDFString, PDFHexStri
  * requires the log to change.
  */
 
-/** One recorded drawing call. Field names mirror pdf-lib's options. */
+/** One recorded op — a draw call or an annotation. Fields mirror pdf-lib's. */
 export interface DrawOp {
   op: "text" | "line" | "rect" | "image" | "annot";
   /** Which page received it — ops are recorded across pages in call order. */
@@ -49,7 +58,7 @@ const OP_NAMES: Record<(typeof PAGE_METHODS)[number], DrawOp["op"]> = {
 };
 
 /**
- * Runs `exportFn` with every page draw call recorded. Restores pdf-lib
+ * Runs `exportFn` with every draw call and annotation recorded. Restores pdf-lib
  * afterwards, including when the export throws.
  */
 export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<DrawOp[]> {
@@ -57,16 +66,14 @@ export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<D
   const pages = new Map<object, number>();
   const images = new Map<object, string>();
 
-  // Counted separately from `pages.size`: a page is keyed twice, by itself and
-  // by its leaf, so the map's size is not the number of pages seen.
-  let pagesSeen = 0;
+  // Keyed by the page's leaf, which is what both paint and annotations can
+  // reach: `drawText` and friends go through the PDFPage, `addAnnot` through
+  // the leaf directly.
   const pageIndex = (page: object): number => {
     const known = pages.get(page);
     if (known !== undefined) return known;
-    const next = pagesSeen++;
+    const next = pages.size;
     pages.set(page, next);
-    // Annotations arrive on the page's leaf dict, so it indexes to the same page.
-    if (page instanceof PDFPage) pages.set(page.node, next);
     return next;
   };
 
@@ -115,7 +122,7 @@ export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<D
           ? { value: describe(first), ...fields(describe(second) ?? {}) }
           : fields(describe(first) ?? {});
 
-      ops.push({ op: OP_NAMES[name], page: pageIndex(this), ...described });
+      ops.push({ op: OP_NAMES[name], page: pageIndex(this.node), ...described });
       return Reflect.apply(call, this, args);
     });
   }
@@ -127,7 +134,7 @@ export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<D
     function (this: PDFPageLeaf, ref: Parameters<PDFPageLeaf["addAnnot"]>[0]) {
       ops.push({
         op: "annot",
-        page: pages.get(this) ?? pageIndex(this),
+        page: pageIndex(this),
         ...describeAnnotation(this.context.lookup(ref)),
       });
       return Reflect.apply(originalAddAnnot, this, [ref]);
@@ -172,7 +179,9 @@ function describeAnnotation(annotation: unknown): Record<string, unknown> {
     subtype: subtype instanceof PDFName ? subtype.asString() : "?",
     rect:
       rect instanceof PDFArray
-        ? rect.asArray().map((n) => normalizeDrawNumber(Number(n.toString())))
+        ? rect.asArray().map((n) =>
+            n instanceof PDFNumber ? normalizeDrawNumber(n.asNumber()) : NaN,
+          )
         : [],
     ...(uri instanceof PDFString || uri instanceof PDFHexString
       ? { uri: uri.decodeText() }

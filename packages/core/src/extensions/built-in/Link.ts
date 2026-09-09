@@ -197,28 +197,38 @@ export const Link = Extension.create({
   addImports() {
     // The mirror of `addExports`' wrapper: the parser turns `<w:hyperlink>`
     // into a `hyperlink` mark carrying the relationship id, and the target
-    // itself lives in the part's rels. Without this the mark reached Stage 2
-    // unclaimed, so every imported link arrived as ordinary text and the only
-    // trace was an `unsupported-mark` diagnostic no UI surfaces.
+    // itself lives in the part's rels. Without this the mark arrived with no
+    // handler, so every link in an imported file became ordinary text.
     const handler: DocxMarkTransform = (mark, ctx) => {
       const attrs = mark.attrs ?? {};
       const relId = attrs["relId"];
       const anchor = attrs["anchor"];
-      const target =
-        typeof relId === "string"
-          ? ctx.rels.resolveHyperlink(relId)
-          : // `w:anchor` is a bookmark inside the document; a fragment is the
-            // nearest thing the schema can hold, and it round-trips.
-            typeof anchor === "string" && anchor.length > 0
-            ? `#${anchor}`
-            : undefined;
 
-      // Same gate as every other ingestion path — a .docx is untrusted input,
-      // and this is where its URLs enter the document.
-      const href = safeUrl(target);
-      if (href === null) return null;
+      // Word writes both for an external link into a fragment and resolves
+      // them as `target#anchor`. Branch on the resolved target rather than on
+      // `relId`, so a relationship that does not resolve falls through to the
+      // anchor instead of losing that too.
+      const target =
+        typeof relId === "string" ? ctx.rels.resolveHyperlink(relId) : undefined;
+      const fragment =
+        typeof anchor === "string" && anchor.length > 0 ? `#${anchor}` : "";
+      const raw = target !== undefined ? `${target}${fragment}` : fragment;
+
+      // A .docx is untrusted input and its rels are an ingestion path like
+      // paste, so the same gate applies here.
+      const href = raw.length > 0 ? safeUrl(raw) : null;
       const type = ctx.schema.marks["link"];
-      return type ? type.create({ href }) : null;
+      if (href === null || !type) {
+        // The file had a link and the import cannot keep it. Saying so is the
+        // difference between a lossy import and an invisible one.
+        ctx.diagnostics.warn({
+          code: "unsupported-mark",
+          message: `Hyperlink dropped — no usable target (${raw || "none recorded"})`,
+          markType: "hyperlink",
+        });
+        return null;
+      }
+      return type.create({ href });
     };
 
     return { docx: { marks: { hyperlink: handler } } };

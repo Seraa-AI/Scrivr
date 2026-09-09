@@ -261,10 +261,10 @@ export function createDrawHelpers(
           addLinkAnnotation(ctx.doc, page, linkRun.href, {
             x0: linkRun.x0 * PT_PER_PX,
             x1: linkRun.x1 * PT_PER_PX,
+            y0: flipY(baselineY + line.descent, pageHeightPt),
             // textAscent, not ascent: an inline object taller than the text
             // inflates the line box, and a hit area sized from that would
             // cover the object sitting above the link.
-            y0: flipY(baselineY + line.descent, pageHeightPt),
             y1: flipY(baselineY - line.textAscent, pageHeightPt),
           });
         }
@@ -276,8 +276,8 @@ export function createDrawHelpers(
         const spanAbsX =
           block.x + lineOffsetX + span.x + spacesBeforeSpan * spaceBonus;
 
-        // Object spans carry no marks yet (LayoutSpan), so an inline image
-        // inside an anchor ends the run rather than continuing it.
+        // Object spans have no marks, so an inline image inside an anchor
+        // ends the run rather than continuing it.
         const href = span.kind === "text" ? linkHref(span.marks) : null;
         if (href !== null && linkRun !== null && linkRun.href === href) {
           linkRun.x1 = spanAbsX + span.width;
@@ -375,15 +375,9 @@ interface LinkRun {
 const FOLLOWABLE_TARGET = /^(?:https?|mailto|tel):/i;
 
 /**
- * The link target for a span: safe to follow, and resolvable once the file
- * has left this app.
- *
- * Safety is `safeUrl`, the gate ingestion already applies — one answer to
- * "is this URL safe", not one per sink. Resolvability is a second question
- * `safeUrl` does not answer: it admits fragments and relative paths, which
- * are fine to store but meaningless in a downloaded PDF, where there is no
- * base URL. Emitting those leaves a hand cursor over text that does nothing,
- * which is worse than styling the text and promising nothing.
+ * The link target for a span. Safety is `safeUrl` — the gate ingestion already
+ * applies, so there is one answer to "is this URL safe" rather than one per
+ * sink. Followability is a separate question it does not answer.
  */
 function linkHref(
   marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
@@ -418,7 +412,7 @@ function addLinkAnnotation(
   page.node.addAnnot(pdfDoc.context.register(annotation));
 }
 
-/** The one ASCII byte a URI cannot carry: readers truncate the target at it. */
+/** Not legal in a URI, and readers truncate the target where one appears. */
 const SPACE = 0x20;
 
 /** URI actions carry ASCII bytes; hex strings keep PDF delimiters literal. */

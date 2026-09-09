@@ -18,8 +18,3 @@ without a base URL. `safeUrl` admits fragments and relative paths, which are
 safe to store but resolve to nothing in a downloaded PDF; annotating them
 would put a hand cursor over text that does not navigate. Only `http`,
 `https`, `mailto` and `tel` targets are annotated.
-
-The op-log baseline now records annotations. They reach the page through
-`addAnnot` rather than a `draw*` call, so the harness that gates the
-format-lane migration could not see them, and a change that dropped a link's
-clickability would have passed it clean.
