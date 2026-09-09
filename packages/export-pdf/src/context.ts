@@ -261,8 +261,11 @@ export function createDrawHelpers(
           addLinkAnnotation(ctx.doc, page, linkRun.href, {
             x0: linkRun.x0 * PT_PER_PX,
             x1: linkRun.x1 * PT_PER_PX,
+            // textAscent, not ascent: an inline object taller than the text
+            // inflates the line box, and a hit area sized from that would
+            // cover the object sitting above the link.
             y0: flipY(baselineY + line.descent, pageHeightPt),
-            y1: flipY(baselineY - line.ascent, pageHeightPt),
+            y1: flipY(baselineY - line.textAscent, pageHeightPt),
           });
         }
         linkRun = null;
@@ -415,12 +418,15 @@ function addLinkAnnotation(
   page.node.addAnnot(pdfDoc.context.register(annotation));
 }
 
+/** The one ASCII byte a URI cannot carry: readers truncate the target at it. */
+const SPACE = 0x20;
+
 /** URI actions carry ASCII bytes; hex strings keep PDF delimiters literal. */
 function encodePdfUri(href: string): PDFHexString {
   // TextEncoder, not encodeURIComponent: the latter throws on a lone surrogate
   // and would re-escape the `%` and separators an href already carries.
   const asciiHref = Array.from(new TextEncoder().encode(href), (byte) =>
-    byte > 0x7f
+    byte > 0x7f || byte === SPACE
       ? `%${byte.toString(16).toUpperCase().padStart(2, "0")}`
       : String.fromCharCode(byte),
   ).join("");

@@ -127,7 +127,7 @@ export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<D
     function (this: PDFPageLeaf, ref: Parameters<PDFPageLeaf["addAnnot"]>[0]) {
       ops.push({
         op: "annot",
-        page: pages.get(this) ?? pagesSeen,
+        page: pages.get(this) ?? pageIndex(this),
         ...describeAnnotation(this.context.lookup(ref)),
       });
       return Reflect.apply(originalAddAnnot, this, [ref]);

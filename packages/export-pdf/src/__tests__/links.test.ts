@@ -61,6 +61,7 @@ describe("link annotations", () => {
     ["https://example.com/a)b", "https://example.com/a)b"],
     ["https://example.com/a(b", "https://example.com/a(b"],
     ["https://example.com/a\\b", "https://example.com/a\\b"],
+    ["https://example.com/a b", "https://example.com/a%20b"],
     ["https://example.com/東京", "https://example.com/%E6%9D%B1%E4%BA%AC"],
     ["https://example.com/%E6%9D%B1?q=a%20b&next=/c#part", "https://example.com/%E6%9D%B1?q=a%20b&next=/c#part"],
   ])("round-trips the URI %s", async (href, expected) => {
@@ -149,6 +150,30 @@ describe("link annotations", () => {
       await buildPdf(onePage([block("paragraph", [line], { y: 100 })])),
     );
     expect(links.map((l) => l.uri).sort()).toEqual(["https://a.example", "https://b.example"]);
+  });
+
+  it("sizes the hit area to the text, not to a line an image inflated", async () => {
+    // A baseline-aligned inline object taller than the text inflates
+    // `line.ascent`; the link's clickable box must still be the text's.
+    const linked = { name: "link", attrs: { href: "https://example.com" } };
+    const inflated: LayoutLine = {
+      spans: [
+        { kind: "text", text: "link", font: "16px Helvetica", x: 0, width: 40, docPos: 0, marks: [linked] },
+      ],
+      width: 40,
+      lineHeight: 120,
+      ascent: 100, // an image on this line pushed the line box up
+      descent: 6,
+      cursorHeight: 20,
+      textAscent: 18,
+      xHeight: 8,
+    };
+    const links = await linksIn(
+      await buildPdf(onePage([block("paragraph", [inflated], { y: 100 })])),
+    );
+    const height = links[0]!.rect[3]! - links[0]!.rect[1]!;
+    // (textAscent 18 + descent 6) * 0.75 pt/px — not (100 + 6) * 0.75.
+    expect(height).toBeCloseTo(18, 5);
   });
 
   it("annotates each line of a link that wrapped", async () => {
