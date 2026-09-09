@@ -1,5 +1,132 @@
 # @scrivr/core
 
+## 1.0.21
+
+### Patch Changes
+
+- d04f392: **The menu visibility defaults are exported, so a consumer can widen a rule
+  instead of replacing it**
+
+  `shouldShow` is all-or-nothing: passing one replaces the built-in rule rather
+  than extending it, and the built-in rule was not reachable. A consumer that
+  needs the bubble menu to stay open for one extra case — a capture form inside
+  the popover — had to re-implement "not empty, not a cell selection, has text"
+  from our source. That copy is correct only until this repo changes how cell
+  selection works, and then it diverges silently, in the consumer's build, with
+  nothing to catch it.
+
+  - **`@scrivr/core`** — `defaultBubbleMenuShouldShow` and
+    `defaultFloatingMenuShouldShow` are exported, so widening reads as
+    `shouldShow: (s) => capturing || defaultBubbleMenuShouldShow(s)` and keeps
+    tracking the default.
+  - **`@scrivr/core`** — the `shouldShow` option documents that it replaces
+    rather than extends, and names the default to compose with. The behaviour was
+    never obvious from the type, which is how the copy happened.
+
+- a6e9938: Copy a table, and get a table back. Pasting one used to keep the rows and cells
+  and drop everything that made it a particular table: `colspan` and `rowspan`
+  collapsed to single cells, column widths, alignment, and cell shading were all
+  discarded, and a Word table's merges arrived as ragged rows. Scrivr's own copies
+  came back the same way, so a table could not survive a round trip through the
+  editor that produced it.
+
+  Table markup now translates in both directions. `gridSpan`, column widths,
+  horizontal and vertical alignment, and cell fill are read on paste and written
+  on copy, so a table pasted from Word or Google Docs keeps its shape, and one
+  copied out of Scrivr arrives in them as the table it was — bar `hMerge`, which
+  neither Word nor HTML states separately from a span, and cell alignment, which
+  round-trips through the clipboard but is not yet honoured by layout, PDF, or
+  DOCX.
+
+  Vertical merges needed the translation to happen before parsing. HTML omits the
+  cells a `rowspan` covers, while the schema keeps a real cell per row — and once
+  ProseMirror has read the markup, a covered row is merely short, with no way to
+  tell which columns it is short by. Pasted markup is therefore rewritten into one
+  cell per row first, and collapsed back to `rowspan` on the way out.
+
+  - **`@scrivr/core`** — new extension hook `addPasteHtmlTransforms()`, for
+    rewriting pasted HTML before it is parsed. The existing `addPasteTransforms()`
+    runs on the parsed slice, which is too late for markup whose meaning lives in
+    the tree shape. `PasteHtmlTransform` is exported alongside `PasteTransform`.
+  - **`@scrivr/core`** — a table cell's `background-color` survives paste. Pasted
+    styles are stripped of incidental background colours, which was right for text
+    spans and wrong for a cell, whose fill is document content.
+  - **`@scrivr/core`** — a cell's fill is only ever painted, so only a colour is
+    accepted into the model: `url(...)`, `var(...)`, and other non-colour values
+    are dropped rather than stored.
+  - **`@scrivr/core`** — the integrity pass now stores the `gridSpan` readers
+    already derive, so a fractional span becomes its floor rather than 1. Every
+    reader now derives it in one place, so the layout, the exporters, and the
+    table map can no longer disagree about what a malformed span means.
+  - **`@scrivr/core`** — cell shading is exported to PDF, which drew borders and
+    text but never a fill.
+  - **`@scrivr/core`** — cell shading survives DOCX export whatever spelling the
+    browser gave it. Only six hex digits were accepted, while Chrome's CSSOM
+    hands back `rgb(...)`, so a pasted fill was kept on screen and dropped from
+    the file.
+
+  - **`@scrivr/core`** — vertical merges are bounded by the rows their row group
+    actually has, independently of the column allocation limit, so a merge longer
+    than 64 rows survives a copy. Span attributes are read the way HTML parses a
+    non-negative integer, so `rowspan="1e3"` is one row rather than the whole
+    group.
+  - **`@scrivr/core`** — one parser now says what a CSS colour means, wherever a
+    colour crosses a boundary. It resolves named colours, `hsl()`, space-separated
+    syntax and alpha without a DOM, so a document exported on a server means the
+    same thing as one exported in a browser.
+  - **`@scrivr/core`** — a cell fill is validated once, where every lane reads it,
+    rather than only on the paste path. A fill arriving from DOCX import, collab
+    or `setContent` can no longer reach the canvas as an unpaintable value, which
+    used to leave the previous cell's colour on the brush and paint two cells the
+    same.
+  - **`@scrivr/core`** — text colour survives DOCX export whatever its spelling.
+    `cssColorToDocxHex` read hex and comma-form `rgb()` only, so a `color: red`
+    mark — the literal a paste keeps — was dropped with a diagnostic while a cell
+    filled `red` exported correctly in the same document.
+  - **`@scrivr/export-pdf`** — a text colour that is not hex no longer exports as
+    black, and no longer crashes the export. `parseHexColor("red")` produced `NaN`
+    channels, which pdf-lib throws on; both PDF colour helpers now read the same
+    literals the rest of the editor does. `parseHexColor` is deprecated in favour
+    of `parseCssColor`.
+  - **`@scrivr/docx`** — a cell span a file claims is bounded on import, as it
+    already was on paste. A `<w:gridSpan w:val="100000"/>` would otherwise become
+    a real cell in every row of the document when the grid was padded.
+  - **`@scrivr/core`** — a translucent colour is composited onto the page for
+    formats that have no alpha, instead of being written at full strength. A 40%
+    yellow highlight exports as the colour a reader sees.
+
+- f2d7bbe: **A table's DOCX import moves to the extension that owns tables**
+
+  Turning a parsed `<w:tbl>` into nodes was built into `@scrivr/docx`, while
+  writing one lived on the Table extension. Both directions describe the same
+  thing — what a table _is_ — so splitting them meant no single place answered the
+  question, and an extension that could not read a file into the nodes it defines
+  looked like a feature that was never built.
+
+  `Table.addImports()` now contributes the block handler, next to the
+  `addExports()` it already had. Parsing the OOXML into an intermediate block
+  stays in `@scrivr/docx`, as it does for every other node.
+
+  - **`@scrivr/core`** — `DocxImportContext` gains `walkBlocks(blocks)`, which
+    transforms nested blocks through the same handlers as the body. A contribution
+    owning a container node needs it: a table's cells hold ordinary blocks, and
+    each of those belongs to whichever extension owns it, not to the table. This
+    is what kept tables in the package before — the recursion needed the handler
+    set, and a block transform had no way to ask for it.
+  - **`@scrivr/docx`** — a table in a file opened by an editor without the Table
+    extension is now reported as an unclaimed block (`unsupported-block`) and
+    dropped, the same as any other block nothing has registered for. It previously
+    reported `schema-missing-table` from the package's own table reader.
+
+    This changes what `unsupported: "throw"` does with such a file. A table the
+    document will not contain is content the file had and the import lost, so a
+    caller who asked to be told now is: the import rejects instead of quietly
+    dropping the table. Enabling the Table extension, or the default `"drop"`
+    policy, imports exactly as before.
+
+  - **`@scrivr/docx`** — `buildListNode` reads its items through the same
+    `walkBlocks`, so one rule states how a container's children are read.
+
 ## 1.0.20
 
 ### Patch Changes
@@ -7,7 +134,7 @@
 - **An anchored float no longer keeps a position its anchor has left**
 
   A square or top-bottom float carves a wrap zone, and that zone reflows every
-  block it overlaps — including blocks *above* the float's own anchor. Growing
+  block it overlaps — including blocks _above_ the float's own anchor. Growing
   one of those restamps the anchor, and the float's position had already been
   recorded, so the image painted one line above the paragraph it belongs to,
   overlapping the paragraph before it. It depended on whether the reflow changed
@@ -19,7 +146,7 @@
   repeating until the anchor stops moving.
 
   Convergence needed one semantic decision. A zone reaching above its anchor on
-  the strength of its *margin* alone has no fixed point — the block above grows,
+  the strength of its _margin_ alone has no fixed point — the block above grows,
   the anchor drops, the zone follows it off that block, the block shrinks back,
   and the two positions alternate forever. The image rectangle is treated as a
   hard constraint and still reflows whatever it genuinely covers, so a float
