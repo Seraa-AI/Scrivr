@@ -254,7 +254,9 @@ export function createDrawHelpers(
 
       // Formatting changes split one anchor across spans; adjacent spans with
       // the same target merge so a bolded word inside a link does not become
-      // its own hit area.
+      // its own hit area. Adjacent, not merely same-target: a float divides a
+      // line into segments, and text flowing either side of one must not be
+      // joined across the hole the float sits in.
       let linkRun: LinkRun | null = null;
       const flushLinkRun = (): void => {
         if (linkRun) {
@@ -279,12 +281,23 @@ export function createDrawHelpers(
         // Object spans have no marks, so an inline image inside an anchor
         // ends the run rather than continuing it.
         const href = span.kind === "text" ? linkHref(span.marks) : null;
-        if (href !== null && linkRun !== null && linkRun.href === href) {
+        const continues =
+          href !== null &&
+          linkRun !== null &&
+          linkRun.href === href &&
+          span.x <= linkRun.rawEnd + ADJACENT_EPSILON;
+        if (continues && linkRun !== null) {
           linkRun.x1 = spanAbsX + span.width;
+          linkRun.rawEnd = span.x + span.width;
         } else {
           flushLinkRun();
           if (href !== null) {
-            linkRun = { href, x0: spanAbsX, x1: spanAbsX + span.width };
+            linkRun = {
+              href,
+              x0: spanAbsX,
+              x1: spanAbsX + span.width,
+              rawEnd: span.x + span.width,
+            };
           }
         }
 
@@ -369,7 +382,17 @@ interface LinkRun {
   href: string;
   x0: number;
   x1: number;
+  /**
+   * Where the run ends before alignment and justification are applied.
+   * Adjacency has to be judged in that frame: the painted gap between two
+   * spans grows with the justification bonus, while an actual hole in the
+   * line does not.
+   */
+  rawEnd: number;
 }
+
+/** Sub-pixel slack, so measurement noise does not read as a hole in the line. */
+const ADJACENT_EPSILON = 0.5;
 
 /** Schemes a viewer can act on with no base URL to resolve against. */
 const FOLLOWABLE_TARGET = /^(?:https?|mailto|tel):/i;

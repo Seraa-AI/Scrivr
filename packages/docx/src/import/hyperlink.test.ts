@@ -160,6 +160,15 @@ describe("hyperlink import", () => {
     ).resolves.toBeDefined();
   });
 
+  it("keeps a link that only loses its target from failing the whole import", async () => {
+    // Losing a target is not content the importer failed to model — it is one
+    // it modelled and refused. A strict caller should still get the document.
+    const bytes = await docxWithHyperlink('r:id="rMissing"', []);
+    await expect(
+      importDocx(new ServerEditor(), bytes, { unsupported: "throw" }),
+    ).resolves.toBeDefined();
+  });
+
   it("drops a hostile target rather than importing it", async () => {
     // A .docx is untrusted input; its rels are an ingestion path like any other.
     const editor = new ServerEditor();

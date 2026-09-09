@@ -176,6 +176,36 @@ describe("link annotations", () => {
     expect(height).toBeCloseTo(18, 5);
   });
 
+  it("does not span the hole a float leaves in a line", async () => {
+    // A float splits a line into segments, so link text either side of it
+    // arrives as two spans with a gap between. Joining them would put a hit
+    // area over the image sitting in the gap.
+    const href = "https://example.com";
+    const linked = { name: "link", attrs: { href } };
+    const segmented: LayoutLine = {
+      spans: [
+        { kind: "text", text: "left", font: "16px Helvetica", x: 0, width: 60, docPos: 0, marks: [linked] },
+        // 200px of float sits between; the next segment starts well past it.
+        { kind: "text", text: "right", font: "16px Helvetica", x: 260, width: 60, docPos: 5, marks: [linked] },
+      ],
+      width: 320,
+      lineHeight: 24,
+      ascent: 18,
+      descent: 6,
+      cursorHeight: 20,
+      textAscent: 18,
+      xHeight: 8,
+    };
+    const links = await linksIn(
+      await buildPdf(onePage([block("paragraph", [segmented], { y: 100 })])),
+    );
+    expect(links).toHaveLength(2);
+    // Neither rectangle reaches across the gap.
+    for (const link of links) {
+      expect(link.rect[2]! - link.rect[0]!).toBeLessThan(60);
+    }
+  });
+
   it("annotates each line of a link that wrapped", async () => {
     const href = "https://example.com";
     const wrapped = block(

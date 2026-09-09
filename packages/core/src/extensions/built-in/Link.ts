@@ -219,11 +219,18 @@ export const Link = Extension.create({
       const href = raw.length > 0 ? safeUrl(raw) : null;
       const type = ctx.schema.marks["link"];
       if (href === null || !type) {
-        // The file had a link and the import cannot keep it. Saying so is the
-        // difference between a lossy import and an invisible one.
+        // Deliberately not `unsupported-mark`: that code is in the fatal set,
+        // so a `file://` share or a dangling rel — both ordinary in real
+        // documents — would abort an `unsupported: "throw"` import over a lost
+        // target while the text itself came through intact.
         ctx.diagnostics.warn({
-          code: "unsupported-mark",
-          message: `Hyperlink dropped — no usable target (${raw || "none recorded"})`,
+          code: "hyperlink-dropped",
+          // Names the relationship, not the target: a refused target is a
+          // string we kept out of the document, and this message can end up
+          // rendered in an app's error surface.
+          message: `Hyperlink dropped — no usable target${
+            typeof relId === "string" ? ` for ${relId}` : ""
+          }`,
           markType: "hyperlink",
         });
         return null;
