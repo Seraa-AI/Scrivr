@@ -6,6 +6,7 @@
 
 import {
   rgb,
+  PDFString,
   type PDFDocument,
   type PDFPage,
   type PDFFont,
@@ -17,6 +18,7 @@ import {
   computeJustifySpaceBonus,
   countSpaces,
   parseCssColor as parseColorLiteral,
+  safeUrl,
   type DocumentLayout,
   type LayoutPage,
   type LayoutBlock,
@@ -250,10 +252,39 @@ export function createDrawHelpers(
       const baselineY = lineY + line.ascent;
       const pdfBaseline = flipY(baselineY, pageHeightPt);
 
+      // A link is one target the reader clicks, but the layout may have split
+      // it across spans wherever formatting changed mid-anchor. Runs are
+      // accumulated across the line and flushed as one rectangle per target,
+      // so a bolded word inside a link does not become its own hit area.
+      let linkRun: LinkRun | null = null;
+      const flushLinkRun = (run: LinkRun | null): null => {
+        if (run) {
+          addLinkAnnotation(ctx.doc, page, run.href, {
+            x0: run.x0 * PT_PER_PX,
+            x1: run.x1 * PT_PER_PX,
+            y0: flipY(baselineY + line.descent, pageHeightPt),
+            y1: flipY(baselineY - line.ascent, pageHeightPt),
+          });
+        }
+        return null;
+      };
+
       let spacesBeforeSpan = 0;
       for (const span of line.spans) {
         const spanAbsX =
           block.x + lineOffsetX + span.x + spacesBeforeSpan * spaceBonus;
+
+        // `safeUrl` is the same gate ingestion applies, reused rather than
+        // reimplemented: a PDF annotation is one more sink for a hostile href.
+        const href = span.kind === "text" ? linkHref(span.marks) : null;
+        if (href !== null && linkRun !== null && linkRun.href === href) {
+          linkRun.x1 = spanAbsX + span.width;
+        } else {
+          linkRun = flushLinkRun(linkRun);
+          if (href !== null) {
+            linkRun = { href, x0: spanAbsX, x1: spanAbsX + span.width };
+          }
+        }
 
         // Inline atom dispatch — look up nodeHandlers for object spans
         if (span.kind === "object") {
@@ -317,6 +348,7 @@ export function createDrawHelpers(
 
         spacesBeforeSpan += countSpaces(span.text);
       }
+      linkRun = flushLinkRun(linkRun);
       lineY += line.lineHeight;
     }
   }
@@ -329,6 +361,50 @@ export function createDrawHelpers(
 }
 
 // ── Shared utilities ─────────────────────────────────────────────────────────
+
+/** One anchor's horizontal extent on a single line, in layout pixels. */
+interface LinkRun {
+  href: string;
+  x0: number;
+  x1: number;
+}
+
+/** The link target for a span, or null when it has none or it is not safe. */
+function linkHref(
+  marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
+): string | null {
+  const link = marks?.find((m) => m.name === "link");
+  return link ? safeUrl(link.attrs["href"]) : null;
+}
+
+/**
+ * Make a rectangle clickable.
+ *
+ * A link that only looks like a link is a rendering of a link, not a link —
+ * so the anchor becomes a real PDF annotation rather than blue underlined
+ * text. `Border: [0,0,0]` because the underline is already painted; viewers
+ * would otherwise draw their own box on top.
+ */
+function addLinkAnnotation(
+  pdfDoc: PDFDocument,
+  page: PDFPage,
+  href: string,
+  rect: { x0: number; x1: number; y0: number; y1: number },
+): void {
+  if (rect.x1 <= rect.x0) return;
+  const annotation = pdfDoc.context.obj({
+    Type: "Annot",
+    Subtype: "Link",
+    Rect: [rect.x0, rect.y0, rect.x1, rect.y1],
+    Border: [0, 0, 0],
+    A: {
+      Type: "Action",
+      S: "URI",
+      URI: PDFString.of(href),
+    },
+  });
+  page.node.addAnnot(pdfDoc.context.register(annotation));
+}
 
 /** Extract font size from CSS font shorthand: "bold italic 14px Georgia" → 14 */
 export function extractFontSizePx(cssFont: string): number {
