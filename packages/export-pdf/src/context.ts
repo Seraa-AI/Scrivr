@@ -252,21 +252,20 @@ export function createDrawHelpers(
       const baselineY = lineY + line.ascent;
       const pdfBaseline = flipY(baselineY, pageHeightPt);
 
-      // A link is one target the reader clicks, but the layout may have split
-      // it across spans wherever formatting changed mid-anchor. Runs are
-      // accumulated across the line and flushed as one rectangle per target,
-      // so a bolded word inside a link does not become its own hit area.
+      // Formatting changes split one anchor across spans; adjacent spans with
+      // the same target merge so a bolded word inside a link does not become
+      // its own hit area.
       let linkRun: LinkRun | null = null;
-      const flushLinkRun = (run: LinkRun | null): null => {
-        if (run) {
-          addLinkAnnotation(ctx.doc, page, run.href, {
-            x0: run.x0 * PT_PER_PX,
-            x1: run.x1 * PT_PER_PX,
+      const flushLinkRun = (): void => {
+        if (linkRun) {
+          addLinkAnnotation(ctx.doc, page, linkRun.href, {
+            x0: linkRun.x0 * PT_PER_PX,
+            x1: linkRun.x1 * PT_PER_PX,
             y0: flipY(baselineY + line.descent, pageHeightPt),
             y1: flipY(baselineY - line.ascent, pageHeightPt),
           });
         }
-        return null;
+        linkRun = null;
       };
 
       let spacesBeforeSpan = 0;
@@ -274,13 +273,13 @@ export function createDrawHelpers(
         const spanAbsX =
           block.x + lineOffsetX + span.x + spacesBeforeSpan * spaceBonus;
 
-        // `safeUrl` is the same gate ingestion applies, reused rather than
-        // reimplemented: a PDF annotation is one more sink for a hostile href.
+        // Object spans carry no marks yet (LayoutSpan), so an inline image
+        // inside an anchor ends the run rather than continuing it.
         const href = span.kind === "text" ? linkHref(span.marks) : null;
         if (href !== null && linkRun !== null && linkRun.href === href) {
           linkRun.x1 = spanAbsX + span.width;
         } else {
-          linkRun = flushLinkRun(linkRun);
+          flushLinkRun();
           if (href !== null) {
             linkRun = { href, x0: spanAbsX, x1: spanAbsX + span.width };
           }
@@ -348,7 +347,7 @@ export function createDrawHelpers(
 
         spacesBeforeSpan += countSpaces(span.text);
       }
-      linkRun = flushLinkRun(linkRun);
+      flushLinkRun();
       lineY += line.lineHeight;
     }
   }
@@ -369,21 +368,31 @@ interface LinkRun {
   x1: number;
 }
 
-/** The link target for a span, or null when it has none or it is not safe. */
+/** Schemes a viewer can act on with no base URL to resolve against. */
+const FOLLOWABLE_TARGET = /^(?:https?|mailto|tel):/i;
+
+/**
+ * The link target for a span: safe to follow, and resolvable once the file
+ * has left this app.
+ *
+ * Safety is `safeUrl`, the gate ingestion already applies — one answer to
+ * "is this URL safe", not one per sink. Resolvability is a second question
+ * `safeUrl` does not answer: it admits fragments and relative paths, which
+ * are fine to store but meaningless in a downloaded PDF, where there is no
+ * base URL. Emitting those leaves a hand cursor over text that does nothing,
+ * which is worse than styling the text and promising nothing.
+ */
 function linkHref(
   marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
 ): string | null {
   const link = marks?.find((m) => m.name === "link");
-  return link ? safeUrl(link.attrs["href"]) : null;
+  const url = link ? safeUrl(link.attrs["href"]) : null;
+  return url !== null && FOLLOWABLE_TARGET.test(url) ? url : null;
 }
 
 /**
- * Make a rectangle clickable.
- *
- * A link that only looks like a link is a rendering of a link, not a link —
- * so the anchor becomes a real PDF annotation rather than blue underlined
- * text. `Border: [0,0,0]` because the underline is already painted; viewers
- * would otherwise draw their own box on top.
+ * Make a rectangle clickable. `Border: [0,0,0]` because the link underline is
+ * already painted; viewers would otherwise draw their own box over it.
  */
 function addLinkAnnotation(
   pdfDoc: PDFDocument,
@@ -391,7 +400,7 @@ function addLinkAnnotation(
   href: string,
   rect: { x0: number; x1: number; y0: number; y1: number },
 ): void {
-  if (rect.x1 <= rect.x0) return;
+  if (rect.x1 <= rect.x0 || rect.y1 <= rect.y0) return;
   const annotation = pdfDoc.context.obj({
     Type: "Annot",
     Subtype: "Link",
@@ -408,15 +417,15 @@ function addLinkAnnotation(
 
 /** URI actions carry ASCII bytes; hex strings keep PDF delimiters literal. */
 function encodePdfUri(href: string): PDFHexString {
-  // Encode Unicode as UTF-8 percent escapes while preserving existing escapes
-  // and URI separators. TextEncoder also handles unpaired surrogates safely.
-  const uri = Array.from(new TextEncoder().encode(href), (byte) =>
+  // TextEncoder, not encodeURIComponent: the latter throws on a lone surrogate
+  // and would re-escape the `%` and separators an href already carries.
+  const asciiHref = Array.from(new TextEncoder().encode(href), (byte) =>
     byte > 0x7f
       ? `%${byte.toString(16).toUpperCase().padStart(2, "0")}`
       : String.fromCharCode(byte),
   ).join("");
   return PDFHexString.of(
-    Array.from(uri, (char) => char.charCodeAt(0).toString(16).padStart(2, "0")).join(""),
+    Array.from(asciiHref, (char) => char.charCodeAt(0).toString(16).padStart(2, "0")).join(""),
   );
 }
 

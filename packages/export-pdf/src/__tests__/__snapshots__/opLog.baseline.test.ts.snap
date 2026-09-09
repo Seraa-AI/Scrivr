@@ -105,6 +105,18 @@ exports[`baseline — mark rendering > an explicit colour with a link — the co
     },
     "thickness": 0.75,
   },
+  {
+    "op": "annot",
+    "page": 0,
+    "rect": [
+      54,
+      522,
+      94.5,
+      540,
+    ],
+    "subtype": "/Link",
+    "uri": "https://example.com",
+  },
 ]
 `;
 
@@ -263,6 +275,18 @@ exports[`baseline — mark rendering > link 1`] = `
     },
     "thickness": 0.75,
   },
+  {
+    "op": "annot",
+    "page": 0,
+    "rect": [
+      54,
+      522,
+      94.5,
+      540,
+    ],
+    "subtype": "/Link",
+    "uri": "https://example.com",
+  },
 ]
 `;
 
@@ -314,6 +338,18 @@ exports[`baseline — mark rendering > link and underline together draw two line
       "y": 524.7,
     },
     "thickness": 0.75,
+  },
+  {
+    "op": "annot",
+    "page": 0,
+    "rect": [
+      54,
+      522,
+      94.5,
+      540,
+    ],
+    "subtype": "/Link",
+    "uri": "https://example.com",
   },
 ]
 `;

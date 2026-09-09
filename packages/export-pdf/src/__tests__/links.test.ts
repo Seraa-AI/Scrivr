@@ -4,7 +4,15 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { PDFDocument, PDFName, PDFArray, PDFDict, PDFString, PDFHexString } from "pdf-lib";
+import {
+  PDFDocument,
+  PDFName,
+  PDFArray,
+  PDFDict,
+  PDFString,
+  PDFHexString,
+  PDFNumber,
+} from "pdf-lib";
 import { buildPdf as buildPdfWithEditor } from "../index";
 import { exportEditor, textLine, block, onePage } from "./fixtures";
 import type { DocumentLayout, LayoutLine } from "@scrivr/core";
@@ -33,7 +41,10 @@ async function linksIn(bytes: Uint8Array): Promise<Link[]> {
       const rect = annot.lookup(PDFName.of("Rect"));
       out.push({
         uri: uri instanceof PDFString || uri instanceof PDFHexString ? uri.decodeText() : "",
-        rect: rect instanceof PDFArray ? rect.asArray().map((n) => Number(n.toString())) : [],
+        rect:
+          rect instanceof PDFArray
+            ? rect.asArray().map((n) => (n instanceof PDFNumber ? n.asNumber() : NaN))
+            : [],
       });
     }
   }
@@ -58,12 +69,6 @@ describe("link annotations", () => {
     expect(links[0]!.uri).toBe(expected);
   });
 
-  it("emits a clickable annotation for a link mark", async () => {
-    const links = await linksIn(await buildPdf(oneLink("https://example.com/a")));
-    expect(links).toHaveLength(1);
-    expect(links[0]!.uri).toBe("https://example.com/a");
-  });
-
   it("gives the annotation the extent of the linked text", async () => {
     const links = await linksIn(await buildPdf(oneLink("https://example.com")));
     const [x0, y0, x1, y1] = links[0]!.rect;
@@ -83,6 +88,25 @@ describe("link annotations", () => {
     // eslint-disable-next-line no-script-url
     expect(await linksIn(await buildPdf(oneLink("javascript:alert(1)")))).toEqual([]);
   });
+
+  it("follows mailto: and tel:", async () => {
+    expect((await linksIn(await buildPdf(oneLink("mailto:a@b.com"))))[0]?.uri).toBe(
+      "mailto:a@b.com",
+    );
+    expect((await linksIn(await buildPdf(oneLink("tel:+15551234"))))[0]?.uri).toBe(
+      "tel:+15551234",
+    );
+  });
+
+  // A downloaded PDF has no base URL, so these resolve to nothing. An
+  // annotation over them would put a hand cursor on text that does not
+  // navigate — worse than leaving the text merely styled.
+  it.each(["#section-2", "/about", "foo.html", "//cdn.example/x"])(
+    "emits no annotation for the unresolvable target %s",
+    async (href) => {
+      expect(await linksIn(await buildPdf(oneLink(href)))).toEqual([]);
+    },
+  );
 
   it("merges spans of one anchor into a single annotation", async () => {
     // Same href, split across spans the way a bolded word inside a link is.
