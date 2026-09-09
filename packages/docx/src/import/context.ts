@@ -36,6 +36,18 @@ export interface DocxImportOptions {
    * is no font system to ask, so nothing is reported rather than guessed.
    */
   fontAvailability?: (family: string) => boolean;
+  /**
+   * What to do with a font this environment cannot draw.
+   *
+   *   - `"keep"` (default) — retain the family name. Matches Word, which
+   *     substitutes for display but never rewrites the author's choice, and
+   *     keeps a round-trip back to DOCX lossless. The renderer substitutes,
+   *     so layout is measured against a face the author did not pick.
+   *   - `"strip"` — drop the font so the text inherits the document default.
+   *     Every lane then resolves the same face, so an export matches the page.
+   *     The original name is gone and a round-trip cannot recover it.
+   */
+  unavailableFonts?: "keep" | "strip";
 }
 
 export interface CreateDocxImportContextInput extends DocxImportOptions {

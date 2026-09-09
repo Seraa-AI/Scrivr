@@ -39,6 +39,11 @@ interface DocxImportExtensionOptions {
    */
   media?: DocxImportOptions["media"];
   /**
+   * What to do with a font this environment cannot draw. See
+   * `DocxImportOptions.unavailableFonts`. Default: `"keep"`.
+   */
+  unavailableFonts?: DocxImportOptions["unavailableFonts"];
+  /**
    * Called after every import that produced diagnostics. DOCX import is
    * lossy by nature, and the losses are invisible in the result — a
    * substituted font or a dropped node looks like a clean document. Defaults
@@ -55,6 +60,7 @@ interface ImportDocxCallOptions {
   unsupported?: DocxImportOptions["unsupported"];
   fidelity?: DocxImportOptions["fidelity"];
   media?: DocxImportOptions["media"];
+  unavailableFonts?: DocxImportOptions["unavailableFonts"];
 }
 
 interface InstanceState {
@@ -159,6 +165,8 @@ function resolveOptions(
   if (fidelity !== undefined) out.fidelity = fidelity;
   const media = call?.media ?? ext.media;
   if (media !== undefined) out.media = media;
+  const unavailableFonts = call?.unavailableFonts ?? ext.unavailableFonts;
+  if (unavailableFonts !== undefined) out.unavailableFonts = unavailableFonts;
   return out;
 }
 

@@ -192,7 +192,13 @@ const EXTENSIONS =
           onFontSubstitution: reportFontSubstitutions,
         }),
         DocxExport.configure({ filename: identity.room }),
-        DocxImport.configure({ onDiagnostics: reportImportDiagnostics }),
+        DocxImport.configure({
+          onDiagnostics: reportImportDiagnostics,
+          // The playground has no font pipeline, so a font it cannot draw
+          // would be measured as a substitute and exported as a third face.
+          // Falling back to the document default keeps every lane agreeing.
+          unavailableFonts: "strip",
+        }),
         TrackChanges.configure({
           userID: identity.userName,
           canAcceptReject: true,
@@ -209,7 +215,13 @@ const EXTENSIONS =
           onFontSubstitution: reportFontSubstitutions,
         }),
         DocxExport.configure({ filename: "scrivr-demo" }),
-        DocxImport.configure({ onDiagnostics: reportImportDiagnostics }),
+        DocxImport.configure({
+          onDiagnostics: reportImportDiagnostics,
+          // The playground has no font pipeline, so a font it cannot draw
+          // would be measured as a substitute and exported as a third face.
+          // Falling back to the document default keeps every lane agreeing.
+          unavailableFonts: "strip",
+        }),
         TrackChanges.configure({ userID: "demo-user", canAcceptReject: true }),
         CitationHighlight,
         ...(AI_ENABLED ? [AiToolkit] : []),

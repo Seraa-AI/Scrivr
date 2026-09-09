@@ -20,3 +20,10 @@ families the browser will substitute.
 `DocxImport` gains an `onDiagnostics` option, called once per import that
 produced any. It defaults to the console warning the extension already emitted,
 so apps that wire nothing keep today's behaviour.
+
+Adds `unavailableFonts: "keep" | "strip"`. The default, `"keep"`, matches Word:
+substitute for display, never rewrite the author's choice, and round-trip back
+to DOCX losslessly. `"strip"` drops the unavailable family so the text inherits
+the document default, which every lane then resolves to the same face — an
+export finally matches the page. It is destructive and says so: the requested
+name is gone and a round-trip writes the fallback.

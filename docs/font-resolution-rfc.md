@@ -209,6 +209,27 @@ These are open. Listing them rather than assuming them.
   but it narrows the failure rather than removing it; licensing is a real
   constraint.
 
+## The stripping policy, and why it is not the fix
+
+`@scrivr/docx` now offers `unavailableFonts: "strip"`, which drops a family the
+environment cannot draw so the text inherits the document default. It works,
+and for a reason worth stating: the default is `"Arial, sans-serif"`, which the
+PDF lane resolves to Helvetica, and Arial and Helvetica share advance widths by
+design. Both lanes land on the same metrics and the divergence disappears.
+
+That is a real fix for the symptom and the wrong shape for the problem.
+Stripping is resolution performed **once, eagerly, and destructively** — it
+achieves agreement between lanes by deleting the thing they disagreed about.
+The author's font is gone, a round-trip writes the fallback, and a reader who
+does have Aptos never gets it back. Word does not do this, and neither should
+our default.
+
+The proposal below is the same operation performed continuously and
+non-destructively: resolve, record, and let every lane read the same answer.
+Once that exists, stripping collapses into a one-line policy on top of it
+rather than a separate mechanism — which is the test of whether the seam is in
+the right place.
+
 ## What this does not solve
 
 - **Font licensing and embedding rights.** Having bytes is not permission to

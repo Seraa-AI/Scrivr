@@ -19,7 +19,7 @@
  * layout, just the schema + extensions.
  */
 
-import type { Node as PmNode } from "@scrivr/core/pm";
+import { Fragment, type Node as PmNode } from "@scrivr/core/pm";
 import type {
   DocxImports,
   IBaseEditor,
@@ -208,7 +208,11 @@ export async function importDocx(
 
     const fontAvailability =
       options.fontAvailability ?? createCanvasFontAvailability();
-    if (fontAvailability) reportUnavailableFonts(doc, fontAvailability, ctx);
+    if (fontAvailability) {
+      const strip = options.unavailableFonts === "strip";
+      reportUnavailableFonts(doc, fontAvailability, ctx, strip);
+      if (strip) doc = stripFonts(doc, (f) => !fontAvailability(f));
+    }
 
     const finalDiagnostics = ctx.diagnostics.list();
     if (ctx.options.unsupported === "throw") {
@@ -349,16 +353,57 @@ function reportUnavailableFonts(
   doc: PmNode,
   isAvailable: (family: string) => boolean,
   ctx: DocxImportContext,
+  stripped: boolean,
 ): void {
   for (const family of collectNamedFamilies(doc)) {
     if (isAvailable(family)) continue;
     ctx.diagnostics.warn({
       code: "unavailable-font",
-      message:
-        `The document is written in "${family}", which is not available here. ` +
-        "Text will be drawn in a substitute face with different metrics, so " +
-        "lines will not break where they do in Word.",
+      message: stripped
+        ? `The document is written in "${family}", which is not available ` +
+          "here. It has been replaced with the document's default font so " +
+          "that exports match what is on screen; the original name is not " +
+          "kept."
+        : `The document is written in "${family}", which is not available ` +
+          "here. Text will be drawn in a substitute face with different " +
+          "metrics, so lines will not break where they do in Word.",
       markType: "fontFamily",
     });
   }
+}
+
+/**
+ * Remove the fonts this environment cannot draw, so the text falls back to the
+ * document default and every lane resolves the same face.
+ *
+ * Destructive by design: the requested family is gone, and an export back to
+ * DOCX writes the fallback. That is the trade `unavailableFonts: "strip"` makes
+ * — a document that renders consistently everywhere, in place of one that
+ * remembers a font nothing here can show.
+ */
+function stripFonts(node: PmNode, isUnavailable: (family: string) => boolean): PmNode {
+  const named = (value: unknown): value is string =>
+    typeof value === "string" && value.length > 0;
+
+  const marks = node.marks.filter(
+    (mark) =>
+      mark.type.name !== "fontFamily" ||
+      !named(mark.attrs["family"]) ||
+      !isUnavailable(mark.attrs["family"]),
+  );
+
+  if (node.isText) {
+    return marks.length === node.marks.length ? node : node.mark(marks);
+  }
+
+  const children: PmNode[] = [];
+  node.content.forEach((child) => children.push(stripFonts(child, isUnavailable)));
+
+  const family = node.attrs["fontFamily"];
+  const attrs =
+    named(family) && isUnavailable(family)
+      ? { ...node.attrs, fontFamily: null }
+      : node.attrs;
+
+  return node.type.create(attrs, Fragment.fromArray(children), marks);
 }
