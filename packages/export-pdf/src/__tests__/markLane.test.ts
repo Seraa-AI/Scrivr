@@ -61,3 +61,34 @@ describe("a mark an extension owns", () => {
     expect(ops.some((op) => op.op === "rect" && op["opacity"] === 0.25)).toBe(false);
   });
 });
+
+describe("a built-in mark declared by its own extension", () => {
+  const highlighted = (attrs: Record<string, unknown>) =>
+    onePage([
+      block("paragraph", [textLine("lit", { marks: [{ name: "highlight", attrs }] })]),
+    ]);
+
+  const editor = new ServerEditor({ extensions: [StarterKit] });
+
+  it("highlights in the colour the extension configures, not one the exporter invented", async () => {
+    // Highlight's own default is rgba(255, 220, 0, 0.4) — the colour the
+    // canvas paints. The exporter used to hardcode a different yellow, so the
+    // same document highlighted differently depending on where you looked.
+    const ops = await recordDrawOps(() => buildPdf(highlighted({}), editor));
+    const rect = ops.find((op) => op.op === "rect" && op["opacity"] === 0.4);
+    expect(rect?.["color"]).toBe("rgb(1, 0.863, 0)");
+  });
+
+  it("reads an alpha in the colour as the opacity", async () => {
+    const ops = await recordDrawOps(() =>
+      buildPdf(highlighted({ color: "rgba(255, 0, 0, 0.25)" }), editor),
+    );
+    const rect = ops.find((op) => op.op === "rect" && op["opacity"] === 0.25);
+    expect(rect?.["color"]).toBe("rgb(1, 0, 0)");
+  });
+
+  it("keeps an opaque colour readable rather than painting over the words", async () => {
+    const ops = await recordDrawOps(() => buildPdf(highlighted({ color: "#fef08a" }), editor));
+    expect(ops.some((op) => op.op === "rect" && op["opacity"] === 0.4)).toBe(true);
+  });
+});

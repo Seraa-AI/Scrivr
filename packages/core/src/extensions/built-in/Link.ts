@@ -8,6 +8,7 @@ import {
 import type { MarkDecorator, SpanRect } from "../types";
 import { safeUrl } from "../../model/safeUrl";
 import { getMarkAttrs } from "../../model/getNodeAttrs";
+import type { PdfMarkHandler } from "../../exports/pdf";
 
 /**
  * Link — inline hyperlink via the `link` mark.
@@ -194,7 +195,19 @@ export const Link = Extension.create({
       return xml("w:hyperlink", { "r:id": ctx.rels.addHyperlink(href) }, [run]);
     };
 
-    return { docx: { marks: { link: style }, markWrappers: { link: wrap } } };
+    // Blue because it is a link, not because anyone chose blue — so an
+    // explicit colour wins for the text. The underline stays link-blue either
+    // way, matching what the canvas draws.
+    const pdf: PdfMarkHandler = (_mark, ctx) => ({
+      defaultColor: ctx.theme.link,
+      underline: true,
+      underlineColor: ctx.theme.link,
+    });
+
+    return {
+      docx: { marks: { link: style }, markWrappers: { link: wrap } },
+      pdf: { marks: { link: pdf } },
+    };
   },
 
   addImports() {

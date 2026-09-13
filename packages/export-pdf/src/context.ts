@@ -19,6 +19,8 @@ import {
   countSpaces,
   parseCssColor as parseColorLiteral,
   safeUrl,
+  type PdfMarkHandler,
+  type PdfSpanStyle,
   type DocumentLayout,
   type LayoutPage,
   type LayoutBlock,
@@ -26,7 +28,7 @@ import {
   type IBaseEditor,
   type ResolvedTheme,
 } from "@scrivr/core";
-import type { PdfNodeHandler, PdfMarkHandler, PdfSpanStyle } from "./augmentation";
+import type { PdfNodeHandler } from "./augmentation";
 
 /** 1 CSS pixel = 0.75 PDF points (96dpi → 72dpi) */
 export const PT_PER_PX = 72 / 96;

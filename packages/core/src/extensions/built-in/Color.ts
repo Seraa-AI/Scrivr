@@ -5,6 +5,7 @@ import {
   type DocxMarkHandler,
   type DocxMarkTransform,
 } from "../../exports/docx";
+import type { PdfMarkHandler } from "../../exports/pdf";
 
 interface ColorOptions {
   /** Preset color swatches shown in the toolbar (CSS color strings). */
@@ -101,7 +102,17 @@ export const Color = Extension.create<ColorOptions>({
       });
       return props;
     };
-    return { docx: { marks: { color: handler } } };
+    // The colour the author picked, so it outranks any a mark supplies for
+    // being what it is — a link's blue loses to this.
+    const pdf: PdfMarkHandler = (mark) => {
+      const value = mark.attrs["color"];
+      return typeof value === "string" ? { color: value } : {};
+    };
+
+    return {
+      docx: { marks: { color: handler } },
+      pdf: { marks: { color: pdf } },
+    };
   },
 
   addImports() {

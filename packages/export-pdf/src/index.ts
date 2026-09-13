@@ -2,11 +2,16 @@
 import "./augmentation";
 
 export { PdfExport } from "./PdfExport";
-export type { PdfHandlers, PdfNodeHandler, PdfMarkHandler, PdfChromeHandler, PdfSpanStyle } from "./augmentation";
+export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentation";
+// The mark lane's contract lives in core so an extension can describe its
+// mark without depending on this package; re-exported for consumers already
+// importing it from here.
+export type { PdfMarkHandler, PdfSpanStyle, PdfSpanMark, PdfMarkContext } from "@scrivr/core";
 export type { PdfContext, PdfFontRegistry, PdfDrawHelpers } from "./context";
 
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
 import type {
+  PdfMarkHandler,
   IEditor,
   IBaseEditor,
   DocumentLayout,
@@ -14,7 +19,7 @@ import type {
   ResolvedTheme,
 } from "@scrivr/core";
 import { compareAnchoredObjectPaintOrder, defaultPdfTheme } from "@scrivr/core";
-import type { PdfNodeHandler, PdfMarkHandler, PdfChromeHandler } from "./augmentation";
+import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
 import type { PdfContext } from "./context";
 import {

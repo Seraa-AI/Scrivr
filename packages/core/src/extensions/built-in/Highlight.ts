@@ -7,6 +7,8 @@ import {
   type DocxMarkHandler,
   type DocxMarkTransform,
 } from "../../exports/docx";
+import type { PdfMarkHandler } from "../../exports/pdf";
+import { parseCssColor } from "../../model/cssColor";
 
 interface HighlightOptions {
   /** Default highlight color. Default: "rgba(255, 220, 0, 0.4)" */
@@ -130,7 +132,27 @@ export const Highlight = Extension.create<HighlightOptions>({
       // Unparseable — fall back to the canonical yellow so something paints.
       return { ...props, highlight: "yellow" };
     };
-    return { docx: { marks: { highlight: handler } } };
+    // Painted over the text rather than behind it, the way a highlighter
+    // works; the renderer keeps that ordering. An alpha in the colour is the
+    // author asking for transparency, so it becomes the opacity — otherwise a
+    // highlight is 40%, which is what keeps the words underneath readable.
+    const pdf: PdfMarkHandler = (mark) => {
+      const css =
+        typeof mark.attrs["color"] === "string" ? mark.attrs["color"] : this.options.color;
+      const parsed = parseCssColor(css);
+      if (!parsed) return {};
+      return {
+        backgroundColor: {
+          color: `rgb(${parsed.r}, ${parsed.g}, ${parsed.b})`,
+          opacity: parsed.alpha < 1 ? parsed.alpha : 0.4,
+        },
+      };
+    };
+
+    return {
+      docx: { marks: { highlight: handler } },
+      pdf: { marks: { highlight: pdf } },
+    };
   },
 
   addImports() {

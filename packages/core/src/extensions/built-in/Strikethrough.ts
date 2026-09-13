@@ -2,6 +2,7 @@ import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
+import type { PdfMarkHandler } from "../../exports/pdf";
 
 export const Strikethrough = Extension.create({
   name: "strikethrough",
@@ -63,7 +64,11 @@ export const Strikethrough = Extension.create({
 
   addExports() {
     const handler: DocxMarkHandler = (props) => ({ ...props, strike: true });
-    return { docx: { marks: { strikethrough: handler } } };
+    const pdf: PdfMarkHandler = () => ({ strikethrough: true });
+    return {
+      docx: { marks: { strikethrough: handler } },
+      pdf: { marks: { strikethrough: pdf } },
+    };
   },
 
   addImports() {
