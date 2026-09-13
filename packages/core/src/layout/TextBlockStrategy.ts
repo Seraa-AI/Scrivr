@@ -119,7 +119,6 @@ export const TextBlockStrategy: BlockStrategy = {
           width: run.totalWidth,
           ascent: line.ascent,
           descent: line.descent,
-          markAttrs: {} as Record<string, unknown>,
         };
 
         // Decorators painting along the text (underline, strikethrough) read

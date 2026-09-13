@@ -11,6 +11,8 @@
 import { describe, it, expect } from "vitest";
 import { resolveSpanFill } from "./resolveSpanFill";
 import { defaultEditorTheme } from "../model/theme";
+import { ExtensionManager } from "../extensions/ExtensionManager";
+import { StarterKit } from "../extensions/StarterKit";
 import type { MarkDecorator, SpanRect } from "../extensions/types";
 
 const theme = defaultEditorTheme;
@@ -59,5 +61,28 @@ describe("resolveSpanFill", () => {
 
   it("ignores marks nothing decorates", () => {
     expect(fill([{ name: "bold", attrs: {} }, linkMark])).toBe(theme.link);
+  });
+});
+
+describe("the real StarterKit marks", () => {
+  // The stubs above prove the resolver. This proves the extensions are wired
+  // to it the way they claim: swap Link back to `decorateFill` and the first
+  // case here goes blue.
+  const decorators = new ExtensionManager([StarterKit]).buildMarkDecorators();
+
+  const realFill = (marks: Array<{ name: string; attrs: Record<string, unknown> }>) =>
+    resolveSpanFill(marks, decorators, rect, theme);
+
+  it("paints a coloured link in the author's colour", () => {
+    // Schema rank emits [color, link]; the old last-wins loop painted blue.
+    expect(realFill([colorMark, linkMark])).toBe("#dc2626");
+  });
+
+  it("still paints an uncoloured link in the link colour", () => {
+    expect(realFill([linkMark])).toBe(theme.link);
+  });
+
+  it("leaves text with neither mark alone", () => {
+    expect(realFill([{ name: "bold", attrs: {} }])).toBe(theme.defaultText);
   });
 });

@@ -190,11 +190,34 @@ export function createDrawHelpers(
   }
 
   /**
-   * Paint what the marks add around the glyphs. Runs after the text, so a
-   * highlight reads as a highlighter over the words rather than a box behind
-   * them.
+   * Paint what sits behind the glyphs, before they are drawn — the order the
+   * canvas uses, and the only one where an opaque highlight still leaves its
+   * text readable.
    */
-  function drawDecorations(
+  function drawSpanBackgrounds(
+    span: { font: string; width: number },
+    styles: PdfSpanStyle[],
+    spanAbsX: number,
+    baselineY: number,
+  ): void {
+    const page = getPage();
+    const fontSize = extractFontSizePx(span.font);
+    for (const style of styles) {
+      if (!style.backgroundColor) continue;
+      const fill = parseFill(style.backgroundColor.color);
+      page.drawRectangle({
+        x: spanAbsX * PT_PER_PX,
+        y: flipY(baselineY + fontSize * 0.2, pageHeightPt),
+        width: span.width * PT_PER_PX,
+        height: fontSize * 1.1 * PT_PER_PX,
+        color: fill.color,
+        opacity: style.backgroundColor.opacity ?? fill.opacity,
+      });
+    }
+  }
+
+  /** Paint what runs along the glyphs, after them: underline, strikethrough. */
+  function drawSpanRules(
     span: { font: string; width: number },
     styles: PdfSpanStyle[],
     spanAbsX: number,
@@ -226,16 +249,6 @@ export function createDrawHelpers(
         );
       }
       if (style.strikethrough) rule(baselineY - fontSize * 0.3, effectiveTextColor);
-      if (style.backgroundColor) {
-        page.drawRectangle({
-          x: x1,
-          y: flipY(baselineY + fontSize * 0.2, pageHeightPt),
-          width: span.width * PT_PER_PX,
-          height: fontSize * 1.1 * PT_PER_PX,
-          color: parseCssColor(style.backgroundColor.color),
-          opacity: style.backgroundColor.opacity ?? 1,
-        });
-      }
     }
   }
 
@@ -382,6 +395,8 @@ export function createDrawHelpers(
         const styles = styleSpan(span.marks, ctx);
         const color = resolveFill(styles, themeDefaultText);
 
+        drawSpanBackgrounds(span, styles, spanAbsX, baselineY);
+
         page.drawText(text, {
           x: spanAbsX * PT_PER_PX,
           y: pdfBaseline,
@@ -390,7 +405,7 @@ export function createDrawHelpers(
           color,
         });
 
-        drawDecorations(span, styles, spanAbsX, baselineY, color);
+        drawSpanRules(span, styles, spanAbsX, baselineY, color);
 
         spacesBeforeSpan += countSpaces(span.text);
       }
@@ -532,6 +547,23 @@ export function parseCssColor(value: string): ReturnType<typeof rgb> {
   if (colour === null) return rgb(0, 0, 0);
   const opaque = compositeColor(colour, { r: 255, g: 255, b: 255 });
   return rgb(opaque.r / 255, opaque.g / 255, opaque.b / 255);
+}
+
+/**
+ * A fill and the transparency its CSS spelling carried. `parseCssColor`
+ * flattens alpha against white, which is right for text on a page and wrong
+ * for something painted over it — pdf-lib takes opacity separately.
+ */
+export function parseFill(value: string): {
+  color: ReturnType<typeof rgb>;
+  opacity: number;
+} {
+  const parsed = parseColorLiteral(value);
+  if (parsed === null) return { color: rgb(0, 0, 0), opacity: 1 };
+  return {
+    color: rgb(parsed.r / 255, parsed.g / 255, parsed.b / 255),
+    opacity: parsed.alpha,
+  };
 }
 
 /** @deprecated Use `parseCssColor`, which reads every spelling, not only hex. */

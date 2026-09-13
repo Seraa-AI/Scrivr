@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import { Extension, ServerEditor, StarterKit } from "@scrivr/core";
 import { buildPdf } from "../index";
-import { recordDrawOps } from "./opLog";
+import { recordDrawOps, type DrawOp } from "./opLog";
 import { block, onePage, textLine } from "./fixtures";
 
 const Shouty = Extension.create({
@@ -52,6 +52,18 @@ describe("a mark an extension owns", () => {
 
   it("does nothing when the extension is absent", async () => {
     const editor = new ServerEditor({ extensions: [StarterKit] });
+
+  /**
+   * The highlight rect, which is the one drawn immediately before the text it
+   * sits behind. Every page also opens with a full-page background rect, and
+   * finding that one instead is an easy way to write a test that proves
+   * nothing.
+   */
+  const highlightRect = (ops: DrawOp[]) => {
+    const textAt = ops.findIndex((op) => op.op === "text");
+    const before = ops[textAt - 1];
+    return before?.op === "rect" ? before : undefined;
+  };
     const ops = await record(editor);
 
     const text = ops.find((op) => op.op === "text" && op["value"] === "loud");
@@ -70,25 +82,45 @@ describe("a built-in mark declared by its own extension", () => {
 
   const editor = new ServerEditor({ extensions: [StarterKit] });
 
+  /**
+   * The highlight rect, which is the one drawn immediately before the text it
+   * sits behind. Every page also opens with a full-page background rect, and
+   * finding that one instead is an easy way to write a test that proves
+   * nothing.
+   */
+  const highlightRect = (ops: DrawOp[]) => {
+    const textAt = ops.findIndex((op) => op.op === "text");
+    const before = ops[textAt - 1];
+    return before?.op === "rect" ? before : undefined;
+  };
+
   it("highlights in the colour the extension configures, not one the exporter invented", async () => {
     // Highlight's own default is rgba(255, 220, 0, 0.4) — the colour the
     // canvas paints. The exporter used to hardcode a different yellow, so the
     // same document highlighted differently depending on where you looked.
     const ops = await recordDrawOps(() => buildPdf(highlighted({}), editor));
-    const rect = ops.find((op) => op.op === "rect" && op["opacity"] === 0.4);
+    const rect = highlightRect(ops);
     expect(rect?.["color"]).toBe("rgb(1, 0.863, 0)");
+    expect(rect?.["opacity"]).toBe(0.4);
+  });
+
+  it("carries an empty colour attribute back to the configured default", async () => {
+    const ops = await recordDrawOps(() => buildPdf(highlighted({ color: "" }), editor));
+    expect(highlightRect(ops)?.["color"]).toBe("rgb(1, 0.863, 0)");
   });
 
   it("reads an alpha in the colour as the opacity", async () => {
     const ops = await recordDrawOps(() =>
       buildPdf(highlighted({ color: "rgba(255, 0, 0, 0.25)" }), editor),
     );
-    const rect = ops.find((op) => op.op === "rect" && op["opacity"] === 0.25);
+    const rect = highlightRect(ops);
     expect(rect?.["color"]).toBe("rgb(1, 0, 0)");
+    expect(rect?.["opacity"]).toBe(0.25);
   });
 
-  it("keeps an opaque colour readable rather than painting over the words", async () => {
+  it("paints an opaque highlight behind the words rather than over them", async () => {
     const ops = await recordDrawOps(() => buildPdf(highlighted({ color: "#fef08a" }), editor));
-    expect(ops.some((op) => op.op === "rect" && op["opacity"] === 0.4)).toBe(true);
+    // Opaque, because behind the glyphs there is nothing to see through.
+    expect(highlightRect(ops)?.["opacity"]).toBe(1);
   });
 });

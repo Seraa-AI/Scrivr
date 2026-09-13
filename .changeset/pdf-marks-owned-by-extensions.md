@@ -3,23 +3,21 @@
 "@scrivr/export-pdf": patch
 ---
 
-Each mark now declares how it looks in a PDF, on the extension that defines it.
+Each mark declares how it looks in a PDF, on the extension that defines it.
 
 Colour, link, underline, strikethrough and highlight were rendered by name in
-the exporter's shared context. A kit that dropped one of those extensions still
-carried its rendering; a kit that added a mark of its own got nothing. Each is
-now a `pdf` lane on its own extension, next to the `docx` lane already there.
+the exporter. A kit that dropped one of those extensions still carried its
+rendering; a kit that added a mark of its own got nothing. Each now has a `pdf`
+lane beside its `docx` one.
 
-The contract moved to `@scrivr/core` (`PdfSpanStyle`, `PdfMarkHandler`) so an
-extension can describe its mark without depending on `@scrivr/export-pdf` — a
-cycle — and so the shape is type-checked rather than accepted blindly. Nothing
-in it names pdf-lib: a handler says what a mark means, and the renderer keeps
-deciding where the ink goes. Both types are still importable from
-`@scrivr/export-pdf`.
+The contract (`PdfSpanStyle`, `PdfMarkHandler`) moved to `@scrivr/core` so an
+extension can describe its mark without depending on `@scrivr/export-pdf`, and
+so a handler that names the type gets its shape checked. Nothing in the
+contract names pdf-lib. Both types remain importable from either package, and
+their shape differs from the one `@scrivr/export-pdf` published previously —
+colours are CSS strings now.
 
-Fixes a highlight that differed between lanes. `Highlight` configures
-`rgba(255, 220, 0, 0.4)` and the canvas paints it; the exporter hardcoded a
-different yellow, so the same document highlighted differently depending on
-where you looked. The extension now supplies its own colour to both, and an
-alpha in the colour becomes the opacity instead of being flattened against
-white and then dimmed a second time.
+**Highlights change colour.** `Highlight` configures `rgba(255, 220, 0, 0.4)`
+and the canvas painted it, while the exporter hardcoded a different yellow. The
+extension now supplies one colour to both, and an alpha in a highlight colour
+becomes its opacity instead of being flattened and then dimmed again.

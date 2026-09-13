@@ -102,13 +102,14 @@ describe("baseline — mark rendering", () => {
     expect(await record(withMarks([{ name: "strikethrough", attrs: {} }]))).toMatchSnapshot();
   });
 
-  it("highlight — the rectangle lands after the text", async () => {
+  it("highlight — the rectangle lands before the text it sits behind", async () => {
     const ops = await record(withMarks([{ name: "highlight", attrs: { color: "#fef08a" } }]));
     expect(ops).toMatchSnapshot();
-    // Stated as its own assertion because the whole mark contract in the RFC
-    // turns on this ordering, and a snapshot alone would let it change quietly.
+    // Stated as its own assertion because a snapshot alone would let it change
+    // quietly, and painting a highlight over its own text erases the words —
+    // which is why the canvas uses decoratePre for the same mark.
     const kinds = ops.map((op) => op.op);
-    expect(kinds.indexOf("rect", kinds.indexOf("text"))).toBeGreaterThan(kinds.indexOf("text"));
+    expect(kinds.indexOf("rect")).toBeLessThan(kinds.indexOf("text"));
   });
 
   it("link", async () => {

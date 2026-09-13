@@ -360,12 +360,10 @@ export function drawBlock(
         width: run.totalWidth,
         ascent: line.ascent,
         descent: line.descent,
-        markAttrs: {} as Record<string, unknown>,
       };
 
-      // Resolve the effective text color first — color marks win, theme
-      // default falls through. Decorators that paint along the text
-      // (underline, strikethrough) read this so they follow the actual ink.
+      // Decorators painting along the text (underline, strikethrough) read
+      // this so they follow the actual ink.
       const effectiveTextColor = resolveSpanFill(
         span.marks,
         markDecorators,

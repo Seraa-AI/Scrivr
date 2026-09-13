@@ -28,7 +28,10 @@ export interface PdfSpanStyle {
   /** Underline in this colour instead of following the text. */
   underlineColor?: string;
   strikethrough?: boolean;
-  /** Painted over the text, as a highlighter would be. */
+  /**
+   * Painted behind the glyphs, so an opaque colour still leaves its text
+   * readable. Omit `opacity` to let the colour's own alpha carry it.
+   */
   backgroundColor?: { color: string; opacity?: number };
 }
 
