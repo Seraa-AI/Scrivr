@@ -1,5 +1,236 @@
 # @scrivr/export-pdf
 
+## 1.0.21
+
+### Patch Changes
+
+- ddedb24: A PDF handler draws in layout pixels, without pdf-lib.
+
+  `ctx.draw` gains `text`, `line` and `rect` beside `lines`. A rect can carry a
+  `border`, so a handler no longer reaches for pdf-lib to outline one; a rect
+  asking for neither a fill nor a border draws nothing, where pdf-lib would have
+  filled it black. Every coordinate is
+  layout pixels from the page's top-left and every colour is `Rgb`; the surface
+  converts to points and flips the axis, so a handler does neither. Out-of-range
+  channels and opacities are clamped rather than failing the export, and text is
+  reduced to what the resolved font can encode — a handler cannot do that itself,
+  since a font handle names a family rather than what the format made of it.
+
+  The built-in handlers, the table row renderer, the anchored-object painter and
+  the header/footer tokens all draw through it now; none of them reference pdf-lib or carry their own copy of
+  the conversion. Drawn output is unchanged, except that two greys are now
+  exactly `#9ca3af` instead of hand-transcribed approximations of it.
+
+  **Breaking for a handler that draws.** `ctx.draw.image(image, rect)` becomes
+  `ctx.draw.image({ x, y, width, height, image: { src } })`, taking a `src` the
+  document embedded rather than a pdf-lib object. `ctx.draw.imagePlaceholder(box,
+theme)` loses its second argument — the placeholder is painted from the
+  export's own palette now, so an anchored image and a block image on a page no
+  longer disagree about grey.
+
+  The spans, list markers and link annotations inside `draw.lines` still convert
+  inline; they hold resolved pdf-lib fonts and colours that the surface's
+  vocabulary deliberately cannot express.
+
+- ace9a88: Make PDF handler dispatch independent of object prototypes across mark, node,
+  and chrome contributions. Only own entries register handlers; later extensions
+  override earlier ones, and prototype-like names work as ordinary keys.
+
+  Validate mark styles before drawing. Invalid or unsupported colors no longer
+  turn highlights opaque black or override valid text colors. Invalid background
+  opacity skips that background while other valid style properties still apply.
+  Mark callbacks receive their declared theme-only context.
+
+- ace9a88: A highlight is painted behind its text in a PDF, not over it.
+
+  The exporter drew a mark's background after the glyphs and relied on it being
+  translucent enough to read through. The canvas does the opposite and says why
+  — _"Using pre (not post) so the text sits on top of the highlight. If we used
+  post, the highlight would cover the text."_ — so an opaque highlight was legible
+  on screen and erased its own words in the export.
+
+  Backgrounds now paint first. Opacity means one thing again: the transparency
+  the author asked for, taken from the colour's own alpha unless a handler states
+  one. Highlight no longer has to compensate for a paint order it cannot see, and
+  a mark declaring an opaque background gets an opaque background instead of a
+  blank rectangle where its text used to be.
+
+- ca32553: Make exported links clickable.
+
+  A link mark was painted in the theme's link colour and underlined, and that was
+  all — the exported PDF carried no annotations, so nothing in it could be
+  followed. Anchors now become real `Link` annotations with a `URI` action.
+
+  Adjacent spans with the same target are merged across a line, so a link whose
+  formatting changes mid-anchor (a bolded word inside it) stays one hit area
+  rather than several, and a link that wrapped gets one annotation per line.
+
+  Targets pass `safeUrl` — the gate the editor applies on ingestion, rather than
+  a second URL policy for this sink — and must additionally be followable
+  without a base URL. `safeUrl` admits fragments and relative paths, which are
+  safe to store but resolve to nothing in a downloaded PDF; annotating them
+  would put a hand cursor over text that does not navigate. Only `http`,
+  `https`, `mailto` and `tel` targets are annotated.
+
+- ace9a88: A mark declares where it points, so clickability is owned by the extension too.
+
+  Link styling moved onto the `Link` extension, but the exporter still found the
+  target by looking for a mark literally named `link`. A kit that renamed the
+  mark, or shipped a second link-like one — a citation, a cross-reference — got
+  the blue and the underline and no clickable area, which is the by-name
+  knowledge the migration exists to remove, surviving in the lane where it is
+  hardest to notice.
+
+  `PdfSpanStyle` gains `link`. Targets are still checked at the boundary rather
+  than trusted from a handler: `safeUrl` for safety, and a scheme a reader can
+  follow without a base URL, so a fragment or relative path is dropped instead of
+  becoming a hit area that goes nowhere.
+
+- ace9a88: An extension can style its own mark in a PDF.
+
+  `PdfHandlers.marks` was declared but never collected or dispatched, so a mark
+  from outside the built-in set could not appear in an export at all. Marks are
+  now dispatched once per mark, per span.
+
+  `PdfSpanStyle` changes shape: colours are CSS strings rather than pdf-lib
+  triples, and it gains `defaultColor` for a colour a mark supplies by being what
+  it is, which loses to an authored `color`. Although the old lane was inert,
+  consumer code may already use its published types and needs migration. See
+  `docs/export-extensibility.md` for the type and context changes. This is a
+  patch release under the beta release policy.
+
+  No built-in mark's rendering changes here. The highlight default changes in the
+  sibling note below.
+
+- ace9a88: Each mark declares how it looks in a PDF, on the extension that defines it.
+
+  Colour, link, underline, strikethrough and highlight were rendered by name in
+  the exporter. A kit that dropped one of those extensions still carried its
+  rendering; a kit that added a mark of its own got nothing. Each now has a `pdf`
+  lane beside its `docx` one.
+
+  The contract (`PdfSpanStyle`, `PdfMarkHandler`) moved to `@scrivr/core` so an
+  extension can describe its mark without depending on `@scrivr/export-pdf`, and
+  so a handler that names the type gets its shape checked. Nothing in the
+  contract names pdf-lib. Both types remain importable from either package, and
+  their shape differs from the one `@scrivr/export-pdf` published previously —
+  colours are CSS strings now.
+
+  **Highlights change colour.** `Highlight` configures `rgba(255, 220, 0, 0.4)`
+  and the canvas painted it, while the exporter hardcoded a different yellow. The
+  extension now supplies one colour to both, and an alpha in a highlight colour
+  becomes its opacity instead of being flattened and then dimmed again.
+
+- ddedb24: Apply drawing-surface opacity to both fill and stroke for rectangles and
+  missing-image placeholders. An operation with zero opacity no longer leaves
+  a visible border when it draws a rectangle or an image cannot be resolved.
+- 85ee711: Fix the WinAnsi allowlist, which was wrong in both directions.
+
+  It admitted all of Latin Extended-A, none of which the standard PDF fonts can
+  encode, so a document containing `Ł`, `ň`, `ş` or `ő` aborted the entire export
+  with `WinAnsi cannot encode`. It also excluded characters that _are_ encodable
+  — most visibly the euro sign, silently replaced with `?`. The allowlist is now
+  the exact repertoire pdf-lib's encoder accepts, and a test reads that
+  repertoire back out of the encoder so the two cannot drift apart.
+
+  Text is no longer reduced to WinAnsi when it will be drawn in an embedded font.
+  Sanitizing ran before font resolution, so supplying a Unicode font via
+  `fontResolver` still produced `????` — the text was destroyed before anyone
+  knew a capable font was available. Resolution now happens first and only
+  standard-font text is reduced. List markers are sanitized too; they are always
+  drawn in the standard fallback and were not guarded at all.
+
+  `PdfFontRegistry` gains an `isUnicode(font)` method, which the resolution-first
+  ordering needs. Additive for callers; breaking only for code that implements
+  the interface itself.
+
+- a6e9938: Copy a table, and get a table back. Pasting one used to keep the rows and cells
+  and drop everything that made it a particular table: `colspan` and `rowspan`
+  collapsed to single cells, column widths, alignment, and cell shading were all
+  discarded, and a Word table's merges arrived as ragged rows. Scrivr's own copies
+  came back the same way, so a table could not survive a round trip through the
+  editor that produced it.
+
+  Table markup now translates in both directions. `gridSpan`, column widths,
+  horizontal and vertical alignment, and cell fill are read on paste and written
+  on copy, so a table pasted from Word or Google Docs keeps its shape, and one
+  copied out of Scrivr arrives in them as the table it was — bar `hMerge`, which
+  neither Word nor HTML states separately from a span, and cell alignment, which
+  round-trips through the clipboard but is not yet honoured by layout, PDF, or
+  DOCX.
+
+  Vertical merges needed the translation to happen before parsing. HTML omits the
+  cells a `rowspan` covers, while the schema keeps a real cell per row — and once
+  ProseMirror has read the markup, a covered row is merely short, with no way to
+  tell which columns it is short by. Pasted markup is therefore rewritten into one
+  cell per row first, and collapsed back to `rowspan` on the way out.
+
+  - **`@scrivr/core`** — new extension hook `addPasteHtmlTransforms()`, for
+    rewriting pasted HTML before it is parsed. The existing `addPasteTransforms()`
+    runs on the parsed slice, which is too late for markup whose meaning lives in
+    the tree shape. `PasteHtmlTransform` is exported alongside `PasteTransform`.
+  - **`@scrivr/core`** — a table cell's `background-color` survives paste. Pasted
+    styles are stripped of incidental background colours, which was right for text
+    spans and wrong for a cell, whose fill is document content.
+  - **`@scrivr/core`** — a cell's fill is only ever painted, so only a colour is
+    accepted into the model: `url(...)`, `var(...)`, and other non-colour values
+    are dropped rather than stored.
+  - **`@scrivr/core`** — the integrity pass now stores the `gridSpan` readers
+    already derive, so a fractional span becomes its floor rather than 1. Every
+    reader now derives it in one place, so the layout, the exporters, and the
+    table map can no longer disagree about what a malformed span means.
+  - **`@scrivr/core`** — cell shading is exported to PDF, which drew borders and
+    text but never a fill.
+  - **`@scrivr/core`** — cell shading survives DOCX export whatever spelling the
+    browser gave it. Only six hex digits were accepted, while Chrome's CSSOM
+    hands back `rgb(...)`, so a pasted fill was kept on screen and dropped from
+    the file.
+
+  - **`@scrivr/core`** — vertical merges are bounded by the rows their row group
+    actually has, independently of the column allocation limit, so a merge longer
+    than 64 rows survives a copy. Span attributes are read the way HTML parses a
+    non-negative integer, so `rowspan="1e3"` is one row rather than the whole
+    group.
+  - **`@scrivr/core`** — one parser now says what a CSS colour means, wherever a
+    colour crosses a boundary. It resolves named colours, `hsl()`, space-separated
+    syntax and alpha without a DOM, so a document exported on a server means the
+    same thing as one exported in a browser.
+  - **`@scrivr/core`** — a cell fill is validated once, where every lane reads it,
+    rather than only on the paste path. A fill arriving from DOCX import, collab
+    or `setContent` can no longer reach the canvas as an unpaintable value, which
+    used to leave the previous cell's colour on the brush and paint two cells the
+    same.
+  - **`@scrivr/core`** — text colour survives DOCX export whatever its spelling.
+    `cssColorToDocxHex` read hex and comma-form `rgb()` only, so a `color: red`
+    mark — the literal a paste keeps — was dropped with a diagnostic while a cell
+    filled `red` exported correctly in the same document.
+  - **`@scrivr/export-pdf`** — a text colour that is not hex no longer exports as
+    black, and no longer crashes the export. `parseHexColor("red")` produced `NaN`
+    channels, which pdf-lib throws on; both PDF colour helpers now read the same
+    literals the rest of the editor does. `parseHexColor` is deprecated in favour
+    of `parseCssColor`.
+  - **`@scrivr/docx`** — a cell span a file claims is bounded on import, as it
+    already was on paste. A `<w:gridSpan w:val="100000"/>` would otherwise become
+    a real cell in every row of the document when the grid was padded.
+  - **`@scrivr/core`** — a translucent colour is composited onto the page for
+    formats that have no alpha, instead of being written at full strength. A 40%
+    yellow highlight exports as the colour a reader sees.
+
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ca32553]
+- Updated dependencies [d04f392]
+- Updated dependencies [b15c7ea]
+- Updated dependencies [ddedb24]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ddedb24]
+- Updated dependencies [a6e9938]
+- Updated dependencies [f2d7bbe]
+  - @scrivr/core@1.0.21
+
 ## 1.0.20
 
 ### Patch Changes
