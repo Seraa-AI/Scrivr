@@ -264,7 +264,16 @@ interface FontProvider {
 }
 ```
 
-and `defaultRequest()` names a resource Scrivr or the application actually has.
+and `defaultRequest()` names a resource the **application** supplies. Scrivr
+does not bundle a typeface: a font baked into a library is a decision consumers
+cannot undo, and it would put a licence and a few hundred kilobytes per weight
+into a package whose point is being embeddable.
+
+That makes it a breaking change, and it should be documented as one rather than
+softened. An editor constructed with no font resource has no honest default —
+it must say so loudly rather than quietly asking the host, which is the failure
+this RFC is about. The demo app carries a working configuration to start from,
+and the migration note should point at it rather than describe it.
 The browser receives those bytes through `FontFace`; the PDF exporter embeds the
 same bytes. A generic family is a last-resort *rendering* policy, not a default.
 
@@ -379,7 +388,12 @@ would flip a single `_dirty` boolean and re-lay the document.
 
 ## Phases
 
+0. **Require it** — the default becomes an app-supplied resource. Breaking, and
+   documented as such, with the demo app as the configuration to copy. Nothing
+   resolves implicitly after this.
 1. **Own it** — `FontProvider` on `Editor`; inventory, resolution, invalidation.
+   Resolution runs as a pass over the document's distinct requests *before*
+   layout, so measurement never asks a question the provider has not answered.
    Report substitutions at import and first layout. No behaviour change; the
    invisible failure becomes visible and correctly owned.
 2. **Record it** — thread `FontResolution` onto layout spans. Still no
@@ -412,11 +426,26 @@ would publish storage as contract under the 1.x compat policy.
 
 **Does substitution block an export?** No — but an export must not knowingly
 break the invariant either, and "warn, then paint something else" is the bug
-this RFC exists to remove. If the PDF lane cannot obtain the measured face it
-resolves again to one it can embed and **lays out against that face**. The
-document is untouched; the output is approximate against the author's
-typography and exactly correct within itself. Two diagnostics, because they are
-different situations:
+this RFC exists to remove.
+
+The resolution is to do the work **before entering the layout path**, not to
+discover a divergence afterwards and lay out a second time. A document's font
+requests are knowable without measuring anything: walk it, collect the distinct
+`FontKey`s, resolve them all against the inventory — applying the consumer's
+own constraint, which for an export means *portable* — and only then measure.
+An export whose resolutions all match the editor's reuses the editor's layout,
+which is the common case. One whose constraint changes an answer lays out once,
+against the set it chose up front. There is no re-measure-after-discovery
+because there is no discovery.
+
+This is also how OOXML does it. `word/fontTable.xml` declares every font a
+document uses, with the panose, family, pitch and charset metadata a renderer
+needs to substitute, plus optional embedded font parts — and Word reads it
+before rendering rather than learning about fonts run by run. The declared
+inventory is separate from the runs that reference it, which is the same split
+as request-versus-resource.
+
+Two diagnostics, because they are different situations:
 
 - `font-substituted` — internally correct, differs from what was requested.
 - `font-unreproducible` — a lane that cannot satisfy the invariant at all.
@@ -456,6 +485,27 @@ values never register anything — they are requests.
 - **Ship a default font bundle** — orthogonal and defensible later (phase 4),
   but it narrows the failure rather than removing it, and licensing is a real
   constraint.
+
+## The font table we throw away
+
+`@scrivr/docx` neither reads nor writes `word/fontTable.xml`. Neither direction
+is harmless.
+
+On import, Word hands us the substitution metadata for every font in the file —
+panose classification, family, pitch, charset — which is the closest thing to a
+machine-readable answer to "what should stand in for this". The document that
+prompted this RFC declared Aptos there, and we discarded it before deciding
+what to substitute. A provider that reads it can pick a fallback by
+classification rather than by the exporter's `/georgia|times|serif/` guess.
+
+On export we emit no font table at all. Word tolerates that, but a document we
+wrote carries no record of what it was set in — so the round trip loses the one
+part that would let the next reader resolve it the way we did.
+
+Reading it belongs with Phase 1 (it is inventory), writing it with whatever
+phase gives the DOCX lane resolutions to write down. Neither is on the critical
+path for the PDF bug, and both are the difference between resolving from
+evidence and resolving from a regex.
 
 ## What this does not solve
 
