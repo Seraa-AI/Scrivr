@@ -166,6 +166,34 @@ exports[`baseline — mark rendering > every decoration at once 1`] = `
     "y": 526.5,
   },
   {
+    "color": "rgb(0.145, 0.388, 0.922)",
+    "end": {
+      "x": 94.5,
+      "y": 524.7,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 524.7,
+    },
+    "thickness": 0.75,
+  },
+  {
+    "color": "rgb(0.145, 0.388, 0.922)",
+    "end": {
+      "x": 94.5,
+      "y": 530.1,
+    },
+    "op": "line",
+    "page": 0,
+    "start": {
+      "x": 54,
+      "y": 530.1,
+    },
+    "thickness": 0.75,
+  },
+  {
     "color": "rgb(0.996, 0.941, 0.541)",
     "height": 13.2,
     "op": "rect",
@@ -174,34 +202,6 @@ exports[`baseline — mark rendering > every decoration at once 1`] = `
     "width": 40.5,
     "x": 54,
     "y": 524.1,
-  },
-  {
-    "color": "rgb(0.145, 0.388, 0.922)",
-    "end": {
-      "x": 94.5,
-      "y": 524.7,
-    },
-    "op": "line",
-    "page": 0,
-    "start": {
-      "x": 54,
-      "y": 524.7,
-    },
-    "thickness": 0.75,
-  },
-  {
-    "color": "rgb(0.145, 0.388, 0.922)",
-    "end": {
-      "x": 94.5,
-      "y": 530.1,
-    },
-    "op": "line",
-    "page": 0,
-    "start": {
-      "x": 54,
-      "y": 530.1,
-    },
-    "thickness": 0.75,
   },
 ]
 `;

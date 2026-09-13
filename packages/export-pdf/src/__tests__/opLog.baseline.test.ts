@@ -132,12 +132,16 @@ describe("baseline — mark rendering", () => {
     expect(ops.filter((op) => op.op === "line")).toHaveLength(2);
   });
 
+  // Mark order here is the order ProseMirror actually produces — schema rank,
+  // which puts `color` before `link`. A fixture ordered the other way records
+  // a span no document can contain, and would let an order-sensitive change
+  // pass while real documents moved.
   it("an explicit colour with a link — the colour wins for text, not for the underline", async () => {
     expect(
       await record(
         withMarks([
-          { name: "link", attrs: { href: "https://example.com" } },
           { name: "color", attrs: { color: "#dc2626" } },
+          { name: "link", attrs: { href: "https://example.com" } },
         ]),
       ),
     ).toMatchSnapshot();
@@ -147,9 +151,9 @@ describe("baseline — mark rendering", () => {
     expect(
       await record(
         withMarks([
-          { name: "highlight", attrs: { color: "#fef08a" } },
           { name: "underline", attrs: {} },
           { name: "strikethrough", attrs: {} },
+          { name: "highlight", attrs: { color: "#fef08a" } },
           { name: "color", attrs: { color: "#2563eb" } },
         ]),
       ),
