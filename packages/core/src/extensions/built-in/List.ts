@@ -15,6 +15,7 @@ import {
   type XmlNode,
 } from "../../exports/docx";
 import type { SemanticNodeHandler } from "../../exports/semantic";
+import type { DocxBlockTransform } from "../../exports/docx";
 
 // ── DOCX export internals ───────────────────────────────────────────────────
 
@@ -220,6 +221,37 @@ export const List = Extension.create({
         isActive: (_marks, blockType) => blockType === "orderedList",
       },
     ];
+  },
+
+  // The inverse of `addExports`' numbering: a `<w:numPr>` on a run of
+  // paragraphs is a list, and turning that back into nested nodes is this
+  // extension's business because it is this extension that declares them. The
+  // walker reads each item's children through `ctx.walkBlocks`, so whatever
+  // owns a paragraph or a table inside a list item still renders it.
+  addImports() {
+    const handler: DocxBlockTransform = (block, _content, ctx) => {
+      if (block.type !== "list") return null;
+      const listTypeName = block.listType === "bullet" ? "bulletList" : "orderedList";
+      const listType = ctx.schema.nodes[listTypeName];
+      const listItemType = ctx.schema.nodes["listItem"];
+      if (!listType || !listItemType) {
+        ctx.diagnostics.warn({
+          code: "schema-missing-list",
+          message: `Schema has no \`${listTypeName}\` / \`listItem\` — list dropped`,
+        });
+        return null;
+      }
+
+      const items: PmNode[] = [];
+      for (const item of block.items) {
+        const children = ctx.walkBlocks(item.content);
+        if (children.length === 0) continue;
+        items.push(listItemType.create(null, children));
+      }
+      return items.length === 0 ? null : listType.create(null, items);
+    };
+
+    return { docx: { blocks: { list: handler } } };
   },
 
   addExports() {
