@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 import { Extension, ServerEditor, StarterKit } from "@scrivr/core";
+import { PDFDocument, PDFDict, PDFName, PDFNumber } from "pdf-lib";
 import { buildPdf } from "../index";
 import { PT_PER_PX } from "../context";
 import type { PdfNodeHandler } from "../augmentation";
@@ -34,6 +35,46 @@ const Ruler = Extension.create({
       },
     };
   },
+});
+
+describe.each(["border-only rectangle", "filled rectangle", "missing image"])("%s opacity", kind => {
+  it.each([
+    [0, 0], [0.4, 0.4], [1, 1], [-1, 0], [2, 1], [NaN, 0], [undefined, 1],
+  ])("applies %s to both fill and stroke", async (opacity, expected) => {
+    const handler: PdfNodeHandler = (_block, ctx) => {
+      const box = {
+        x: 20, y: 20, width: 40, height: 40,
+        ...(opacity === undefined ? {} : { opacity }),
+      };
+      if (kind === "missing image") {
+        ctx.draw.image({ ...box, image: { src: "missing" } });
+      } else {
+        ctx.draw.rect({
+          ...box,
+          border: { color: { r: 255, g: 0, b: 0 }, widthPx: 2 },
+          ...(kind === "filled rectangle" ? { color: { r: 0, g: 0, b: 255 } } : {}),
+        });
+      }
+    };
+    const Shape = Extension.create({
+      name: "shape",
+      addExports: () => ({ pdf: { nodes: { horizontalRule: handler } } }),
+    });
+    const editor = new ServerEditor({ extensions: [StarterKit, Shape] });
+    const pdf = await PDFDocument.load(await buildPdf(ruled, editor));
+    // Check the saved graphics state, not just the options sent to pdf-lib:
+    // `ca` controls fill/image alpha, while `CA` independently controls stroke.
+    const resources = pdf.getPages()[0]!.node.Resources()!;
+    const states = resources.lookupMaybe(PDFName.of("ExtGState"), PDFDict);
+    const alphas = (states?.entries() ?? []).map(([, value]) => {
+      const state = pdf.context.lookup(value, PDFDict);
+      return {
+        fill: state.lookupMaybe(PDFName.of("ca"), PDFNumber)?.asNumber() ?? 1,
+        stroke: state.lookupMaybe(PDFName.of("CA"), PDFNumber)?.asNumber() ?? 1,
+      };
+    });
+    expect(alphas).toEqual(opacity === undefined ? [] : [{ fill: expected, stroke: expected }]);
+  });
 });
 
 const ruled = onePage([block("horizontalRule", [], { y: 0 })]);

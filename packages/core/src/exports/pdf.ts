@@ -136,12 +136,14 @@ export interface PdfLineOp {
 export interface PdfRectOp extends PdfBox {
   /** Omit to leave the box unfilled. With no border either, nothing is drawn. */
   color?: Rgb;
+  /** Opacity of both the fill and border. Omit for opaque. */
   opacity?: number;
   border?: { color: Rgb; widthPx: number };
 }
 
 export interface PdfImageOp extends PdfBox {
   image: PdfImageHandle;
+  /** Opacity of the image, or the entire placeholder when it cannot be resolved. */
   opacity?: number;
 }
 

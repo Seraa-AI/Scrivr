@@ -117,6 +117,13 @@ export function createDrawHelpers(
   const alpha = (opacity: number | undefined) =>
     opacity === undefined ? {} : { opacity: clamp01(opacity) };
 
+  // A surface op has one opacity for the entire shape. pdf-lib separates
+  // non-stroking alpha from stroking alpha for rectangles.
+  const shapeAlpha = (opacity: number | undefined) =>
+    opacity === undefined
+      ? {}
+      : { opacity: clamp01(opacity), borderOpacity: clamp01(opacity) };
+
   function drawText(op: PdfTextOp): void {
     // The same guard the span path applies. A handler cannot apply it itself —
     // a font handle names a family, it does not say what the format made of it
@@ -163,7 +170,7 @@ export function createDrawHelpers(
             borderColor: toPdfColor(op.border.color),
             borderWidth: op.border.widthPx * PT_PER_PX,
           }),
-      ...alpha(op.opacity),
+      ...shapeAlpha(op.opacity),
     });
   }
 
@@ -193,7 +200,7 @@ export function createDrawHelpers(
       color: parseCssColor(theme.imagePlaceholderBg),
       borderColor: parseCssColor(theme.imagePlaceholderBorder),
       borderWidth: 1,
-      ...alpha(opacity),
+      ...shapeAlpha(opacity),
     });
   }
 
