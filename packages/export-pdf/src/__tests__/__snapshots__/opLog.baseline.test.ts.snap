@@ -156,6 +156,16 @@ exports[`baseline — mark rendering > every decoration at once 1`] = `
     "y": 0,
   },
   {
+    "color": "rgb(0.996, 0.941, 0.541)",
+    "height": 13.2,
+    "op": "rect",
+    "opacity": 1,
+    "page": 0,
+    "width": 40.5,
+    "x": 54,
+    "y": 524.1,
+  },
+  {
     "color": "rgb(0.145, 0.388, 0.922)",
     "font": "font(Helvetica)",
     "op": "text",
@@ -164,16 +174,6 @@ exports[`baseline — mark rendering > every decoration at once 1`] = `
     "value": "Marked",
     "x": 54,
     "y": 526.5,
-  },
-  {
-    "color": "rgb(0.996, 0.941, 0.541)",
-    "height": 13.2,
-    "op": "rect",
-    "opacity": 0.4,
-    "page": 0,
-    "width": 40.5,
-    "x": 54,
-    "y": 524.1,
   },
   {
     "color": "rgb(0.145, 0.388, 0.922)",
@@ -206,7 +206,7 @@ exports[`baseline — mark rendering > every decoration at once 1`] = `
 ]
 `;
 
-exports[`baseline — mark rendering > highlight — the rectangle lands after the text 1`] = `
+exports[`baseline — mark rendering > highlight — the rectangle lands before the text it sits behind 1`] = `
 [
   {
     "color": "rgb(1, 1, 1)",
@@ -218,6 +218,16 @@ exports[`baseline — mark rendering > highlight — the rectangle lands after t
     "y": 0,
   },
   {
+    "color": "rgb(0.996, 0.941, 0.541)",
+    "height": 13.2,
+    "op": "rect",
+    "opacity": 1,
+    "page": 0,
+    "width": 40.5,
+    "x": 54,
+    "y": 524.1,
+  },
+  {
     "color": "rgb(0, 0, 0)",
     "font": "font(Helvetica)",
     "op": "text",
@@ -226,16 +236,6 @@ exports[`baseline — mark rendering > highlight — the rectangle lands after t
     "value": "Marked",
     "x": 54,
     "y": 526.5,
-  },
-  {
-    "color": "rgb(0.996, 0.941, 0.541)",
-    "height": 13.2,
-    "op": "rect",
-    "opacity": 0.4,
-    "page": 0,
-    "width": 40.5,
-    "x": 54,
-    "y": 524.1,
   },
 ]
 `;

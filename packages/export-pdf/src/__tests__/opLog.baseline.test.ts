@@ -102,13 +102,14 @@ describe("baseline — mark rendering", () => {
     expect(await record(withMarks([{ name: "strikethrough", attrs: {} }]))).toMatchSnapshot();
   });
 
-  it("highlight — the rectangle lands after the text", async () => {
+  it("highlight — the rectangle lands before the text it sits behind", async () => {
     const ops = await record(withMarks([{ name: "highlight", attrs: { color: "#fef08a" } }]));
     expect(ops).toMatchSnapshot();
-    // Stated as its own assertion because the whole mark contract in the RFC
-    // turns on this ordering, and a snapshot alone would let it change quietly.
+    // Stated as its own assertion because a snapshot alone would let it change
+    // quietly, and painting a highlight over its own text erases the words —
+    // which is why the canvas uses decoratePre for the same mark.
     const kinds = ops.map((op) => op.op);
-    expect(kinds.indexOf("rect", kinds.indexOf("text"))).toBeGreaterThan(kinds.indexOf("text"));
+    expect(kinds.indexOf("rect")).toBeLessThan(kinds.indexOf("text"));
   });
 
   it("link", async () => {
@@ -132,12 +133,16 @@ describe("baseline — mark rendering", () => {
     expect(ops.filter((op) => op.op === "line")).toHaveLength(2);
   });
 
+  // Mark order here is the order ProseMirror actually produces — schema rank,
+  // which puts `color` before `link`. A fixture ordered the other way records
+  // a span no document can contain, and would let an order-sensitive change
+  // pass while real documents moved.
   it("an explicit colour with a link — the colour wins for text, not for the underline", async () => {
     expect(
       await record(
         withMarks([
-          { name: "link", attrs: { href: "https://example.com" } },
           { name: "color", attrs: { color: "#dc2626" } },
+          { name: "link", attrs: { href: "https://example.com" } },
         ]),
       ),
     ).toMatchSnapshot();
@@ -147,9 +152,9 @@ describe("baseline — mark rendering", () => {
     expect(
       await record(
         withMarks([
-          { name: "highlight", attrs: { color: "#fef08a" } },
           { name: "underline", attrs: {} },
           { name: "strikethrough", attrs: {} },
+          { name: "highlight", attrs: { color: "#fef08a" } },
           { name: "color", attrs: { color: "#2563eb" } },
         ]),
       ),

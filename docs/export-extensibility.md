@@ -32,6 +32,11 @@ If Scrivr is a framework — and the multi-surface architecture is committing to
 | **Handler signatures** | Format-specific, defined by format packages | Fundamentally different: PDF works on `LayoutBlock` + drawing primitives, Markdown walks PM tree + emits strings, docx walks PM tree + emits XML builders. Forcing a unified signature would be an over-abstraction. |
 | **Type safety** | Module augmentation on `FormatHandlers` interface, same pattern as the existing `Commands` lane | Core stays format-agnostic; format packages each contribute a typed slot. `ExportContribution` becomes a discriminated union keyed by format string. |
 | **Default handlers location** | Format packages ship defaults for the **core schema** (paragraph, heading, bold, italic, list, etc.). User/plugin extensions ship handlers for their **own custom** nodes. | Core extensions stay export-agnostic — they don't import `pdf-lib` or `docx` types. Format packages already know the core schema and can provide sensible defaults. |
+
+> **Superseded.** Built-in nodes and marks now declare their own format lanes; a
+> handler living outside the extension that defines the node is a violation even
+> when it works. The handler *types* stay in core so an extension never imports a
+> format package, which is what makes the reversal possible.
 | **Chrome contributions** | Separate hooks: `addPageChrome` for canvas paint, `addExports` for format output. Chrome is a named slot within format handlers. | Canvas and format concerns have different context types, lifecycles, and entry points. Unifying them would require a lowest-common-denominator abstraction that fits neither. |
 | **Docx scope** | Not in this design, its own PR later | docx is legitimately complex (OOXML schema, field codes, style definitions). Don't scope creep. |
 | **API style** | Standalone functions: `exportPdf(editor, options)`, `exportMarkdown(editor, options)` | No runtime registration, no side-effecty imports, explicit and discoverable. `editor.export.pdf()` style wrapper can be added later as a convenience. |
@@ -1349,3 +1354,51 @@ Then the chart's node handler calls `ctx.draw.image(ctx.images.get(\`chart:${id}
 - Memory `feedback_pdf_parity.md` — the rule this design operationalizes. Memory needs updating to reflect the new mechanism (plugin ships handlers, not "edit the export package").
 - Memory `project_pdf_inline_objects.md` — pending image rendering work; follows this pattern.
 - Current code: `packages/export/src/pdf/` is the source of defaults for M2.
+
+
+## Superseded: mark handlers
+
+The `PdfSpanStyle` and `defaultPdfMarkHandlers` shapes described above are no
+longer what ships.
+
+Mark styling is declared by the extension that defines the mark, and the
+contract lives in `@scrivr/core` (`exports/pdf.ts`) so an extension never
+imports a format package. Colours are CSS strings rather than pdf-lib triples,
+`defaultColor` marks a colour a mark supplies for being what it is — losing to
+an authored `color` — and a handler describes meaning only: the renderer owns
+thickness, offsets, and paint order.
+
+`defaultMarkHandlers` in `@scrivr/export-pdf` is empty by design. A kit without
+Highlight has no highlight to render, and nothing in the format package
+pretends otherwise.
+
+### Beta migration for PDF mark extensions
+
+Beta releases use patch versions even when their public types change. Existing
+PDF mark contributions need these changes:
+
+- Replace `color: { r: 1, g: 0, b: 0 }` with `color: "rgb(255, 0, 0)"`.
+- Replace `backgroundColor: { r: 1, g: 0, b: 0, opacity: 0.4 }` with
+  `backgroundColor: { color: "rgb(255, 0, 0)", opacity: 0.4 }`.
+- Remove `font: PDFFont`. Font changes belong in the extension's layout/font
+  resolution, so text measurement and PDF drawing use the same font. There is
+  no mark-style font override.
+- Type mark callbacks against `PdfMarkContext`, which exposes only `theme`.
+  Node/chrome handlers and export lifecycle hooks retain `PdfContext` for
+  drawing and document resources. Mark handlers return style data; they do not
+  draw or mutate the PDF document.
+
+`PdfMarkHandler` and `PdfSpanStyle` remain importable from `@scrivr/export-pdf`
+and are also exported by `@scrivr/core`. The old handler table was never
+dispatched, but its published types could still be used by consumers.
+
+Handler contributions contain own enumerable entries. Later extensions replace
+earlier handlers with the same name. Unknown names are ignored for marks and
+retain the existing warning behavior for blocks; prototype names have no special
+meaning. A handler can explicitly register any string name.
+
+The renderer validates mark styles before drawing. Unsupported colors, including
+unresolved CSS variables, do not override earlier valid declarations or theme
+defaults. An invalid background color skips that background. Explicit background
+opacity replaces the color's alpha and must be finite and between zero and one;
+otherwise that background is skipped. Other valid style properties still apply.

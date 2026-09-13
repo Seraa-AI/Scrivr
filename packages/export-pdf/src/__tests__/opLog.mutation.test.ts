@@ -23,16 +23,16 @@ const marked = (marks: Array<{ name: string; attrs: Record<string, unknown> }>) 
     buildPdf(onePage([block("paragraph", [textLine("Marked", { marks })])]), exportEditor),
   );
 
-/** Moves a rect drawn straight after text to straight before it. */
+/** Moves a rect drawn straight before text to straight after it. */
 function flipPaintPhase(ops: DrawOp[]): DrawOp[] {
   const out = [...ops];
   for (let i = 1; i < out.length; i++) {
-    if (out[i]!.op === "rect" && out[i - 1]!.op === "text") {
+    if (out[i]!.op === "text" && out[i - 1]!.op === "rect") {
       [out[i - 1], out[i]] = [out[i]!, out[i - 1]!];
       return out;
     }
   }
-  throw new Error("fixture drew no rect after text — nothing to flip");
+  throw new Error("fixture drew no rect before text — nothing to flip");
 }
 
 /** Reverses a run of consecutive decoration lines. */
@@ -70,7 +70,7 @@ const untargeted = (ops: DrawOp[]): DrawOp[] =>
   ops.map((op) => (op.op === "annot" ? { ...op, uri: "" } : op));
 
 describe("the op log notices what a migration could break", () => {
-  it("a highlight moved before the text it covers", async () => {
+  it("a highlight moved on top of the text it sits behind", async () => {
     const ops = await marked([{ name: "highlight", attrs: { color: "#fef08a" } }]);
     expect(flipPaintPhase(ops)).not.toEqual(ops);
   });

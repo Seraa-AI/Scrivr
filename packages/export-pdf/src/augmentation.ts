@@ -3,27 +3,11 @@
  * Imported for its side-effect at the entry point of @scrivr/export-pdf.
  */
 
-import type { LayoutBlock, LayoutPage } from "@scrivr/core";
-import type { PDFFont } from "pdf-lib";
+import type { LayoutBlock, LayoutPage, PdfMarkHandler } from "@scrivr/core";
 import type { PdfContext } from "./context";
-
-/** Style modifiers returned by mark handlers, applied during line rendering. */
-export interface PdfSpanStyle {
-  font?: PDFFont;
-  color?: { r: number; g: number; b: number };
-  underline?: boolean;
-  strikethrough?: boolean;
-  backgroundColor?: { r: number; g: number; b: number; opacity?: number };
-}
 
 /** Draw a block (or inline atom) onto a PDF page. */
 export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfContext) => void;
-
-/** Return style modifiers for a mark during span iteration. */
-export type PdfMarkHandler = (
-  mark: { name: string; attrs: Record<string, unknown> },
-  ctx: PdfContext,
-) => PdfSpanStyle;
 
 /**
  * Draw chrome (headers, footers, footnote bands) onto a PDF page.

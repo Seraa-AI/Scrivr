@@ -7,6 +7,7 @@ import {
   type DocxMarkHandler,
   type DocxMarkTransform,
 } from "../../exports/docx";
+import type { PdfMarkHandler } from "../../exports/pdf";
 
 interface HighlightOptions {
   /** Default highlight color. Default: "rgba(255, 220, 0, 0.4)" */
@@ -130,7 +131,25 @@ export const Highlight = Extension.create<HighlightOptions>({
       // Unparseable — fall back to the canonical yellow so something paints.
       return { ...props, highlight: "yellow" };
     };
-    return { docx: { marks: { highlight: handler } } };
+    // Same guard as the DOCX lane above: an empty attr is not a colour.
+    // The colour goes over as written, alpha and all — the exporter paints the
+    // highlight behind the glyphs, so transparency is the author's to choose
+    // rather than something a lane has to invent to stay readable.
+    const pdfMark: PdfMarkHandler = (mark) => {
+      const raw = mark.attrs["color"];
+      // Same guard as the DOCX lane above: an empty attr is not a colour. A
+      // colour that is set but unreadable is left to the boundary, which drops
+      // it rather than inventing one — DOCX substitutes because OOXML must name
+      // a value, and nothing here has to.
+      const chosen =
+        typeof raw === "string" && raw.length > 0 ? raw : this.options.color;
+      return { backgroundColor: { color: chosen } };
+    };
+
+    return {
+      docx: { marks: { highlight: handler } },
+      pdf: { marks: { highlight: pdfMark } },
+    };
   },
 
   addImports() {

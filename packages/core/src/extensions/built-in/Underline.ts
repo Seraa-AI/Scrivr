@@ -2,6 +2,7 @@ import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
 import type { MarkDecorator, SpanRect } from "../types";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
+import type { PdfMarkHandler } from "../../exports/pdf";
 
 export const Underline = Extension.create({
   name: "underline",
@@ -64,7 +65,11 @@ export const Underline = Extension.create({
 
   addExports() {
     const handler: DocxMarkHandler = (props) => ({ ...props, underline: true });
-    return { docx: { marks: { underline: handler } } };
+    const pdfMark: PdfMarkHandler = () => ({ underline: true });
+    return {
+      docx: { marks: { underline: handler } },
+      pdf: { marks: { underline: pdfMark } },
+    };
   },
 
   addImports() {

@@ -18,7 +18,7 @@ import {
   computeJustifySpaceBonus,
   countSpaces,
   parseCssColor as parseColorLiteral,
-  safeUrl,
+  type PdfMarkHandler,
   type DocumentLayout,
   type LayoutPage,
   type LayoutBlock,
@@ -26,7 +26,8 @@ import {
   type IBaseEditor,
   type ResolvedTheme,
 } from "@scrivr/core";
-import type { PdfNodeHandler, PdfMarkHandler, PdfSpanStyle } from "./augmentation";
+import type { PdfNodeHandler } from "./augmentation";
+import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
 /** 1 CSS pixel = 0.75 PDF points (96dpi → 72dpi) */
 export const PT_PER_PX = 72 / 96;
@@ -99,8 +100,8 @@ export function createDrawHelpers(
   getPage: () => PDFPage,
   pageHeightPt: number,
   fontRegistry: PdfFontRegistry,
-  nodeHandlers: Record<string, PdfNodeHandler>,
-  markHandlers: Record<string, PdfMarkHandler>,
+  nodeHandlers: ReadonlyMap<string, PdfNodeHandler>,
+  markHandlers: ReadonlyMap<string, PdfMarkHandler>,
 ): PdfDrawHelpers {
   function drawImage(
     image: PDFImage,
@@ -151,61 +152,99 @@ export function createDrawHelpers(
     }
   }
 
-  function drawDecorations(
-    span: {
-      font: string;
-      width: number;
-      marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
-    },
+  /**
+   * Ask each mark on the span what it does, in the order the marks arrive.
+   * A mark with no handler contributes nothing rather than being guessed at.
+   */
+  function spanStyles(
+    marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
+    ctx: PdfContext,
+  ): ResolvedPdfSpanStyle[] {
+    if (!marks) return [];
+    const out: ResolvedPdfSpanStyle[] = [];
+    for (const mark of marks) {
+      const handler = markHandlers.get(mark.name);
+      if (handler) out.push(resolvePdfSpanStyle(handler(mark, { theme: ctx.theme })));
+    }
+    return out;
+  }
+
+  /**
+   * The colour the text is actually painted in. An authored colour beats one a
+   * mark supplies for being what it is, so a coloured link keeps its colour —
+   * the cascade OOXML applies, and what the canvas resolves to.
+   */
+  function resolveFill(
+    styles: ResolvedPdfSpanStyle[],
+    fallback: ReturnType<typeof rgb>,
+  ): ReturnType<typeof rgb> {
+    let authored: ReturnType<typeof rgb> | undefined;
+    let defaulted: ReturnType<typeof rgb> | undefined;
+    for (const style of styles) {
+      if (style.color !== undefined) authored = style.color;
+      if (style.defaultColor !== undefined) defaulted = style.defaultColor;
+    }
+    return authored ?? defaulted ?? fallback;
+  }
+
+  /**
+   * Paint what sits behind the glyphs, before they are drawn — the order the
+   * canvas uses, and the only one where an opaque highlight still leaves its
+   * text readable.
+   */
+  function drawSpanBackgrounds(
+    span: { font: string; width: number },
+    styles: ResolvedPdfSpanStyle[],
     spanAbsX: number,
     baselineY: number,
-    theme: ResolvedTheme,
+  ): void {
+    const page = getPage();
+    const fontSize = extractFontSizePx(span.font);
+    for (const style of styles) {
+      if (!style.backgroundColor) continue;
+      const fill = style.backgroundColor;
+      page.drawRectangle({
+        x: spanAbsX * PT_PER_PX,
+        y: flipY(baselineY + fontSize * 0.2, pageHeightPt),
+        width: span.width * PT_PER_PX,
+        height: fontSize * 1.1 * PT_PER_PX,
+        color: fill.color,
+        opacity: fill.opacity,
+      });
+    }
+  }
+
+  /** Paint what runs along the glyphs, after them: underline, strikethrough. */
+  function drawSpanRules(
+    span: { font: string; width: number },
+    styles: ResolvedPdfSpanStyle[],
+    spanAbsX: number,
+    baselineY: number,
     effectiveTextColor: ReturnType<typeof rgb>,
   ): void {
-    if (!span.marks) return;
+    if (styles.length === 0) return;
     const page = getPage();
 
     const fontSize = extractFontSizePx(span.font);
     const thickness = Math.max(1, fontSize * 0.06) * PT_PER_PX;
     const x1 = spanAbsX * PT_PER_PX;
     const x2 = x1 + span.width * PT_PER_PX;
+    const rule = (y: number, color: ReturnType<typeof rgb>) =>
+      page.drawLine({
+        start: { x: x1, y: flipY(y, pageHeightPt) },
+        end: { x: x2, y: flipY(y, pageHeightPt) },
+        thickness,
+        color,
+      });
 
-    for (const mark of span.marks) {
-      if (mark.name === "underline" || mark.name === "link") {
-        // Underline follows the effective text color so colored text gets a
-        // matching underline. Link uses theme.link explicitly.
-        const lineColor =
-          mark.name === "link" ? parseCssColor(theme.link) : effectiveTextColor;
-        page.drawLine({
-          start: { x: x1, y: flipY(baselineY + fontSize * 0.15, pageHeightPt) },
-          end: { x: x2, y: flipY(baselineY + fontSize * 0.15, pageHeightPt) },
-          thickness,
-          color: lineColor,
-        });
-      }
-      if (mark.name === "strikethrough") {
-        page.drawLine({
-          start: { x: x1, y: flipY(baselineY - fontSize * 0.3, pageHeightPt) },
-          end: { x: x2, y: flipY(baselineY - fontSize * 0.3, pageHeightPt) },
-          thickness,
-          color: effectiveTextColor,
-        });
-      }
-      if (mark.name === "highlight") {
-        const highlightColor = parseHexColor(
-          typeof mark.attrs["color"] === "string"
-            ? mark.attrs["color"]
-            : "#fef08a",
+    for (const style of styles) {
+      if (style.underline) {
+        rule(
+          baselineY + fontSize * 0.15,
+          style.underlineColor ?? effectiveTextColor,
         );
-        page.drawRectangle({
-          x: x1,
-          y: flipY(baselineY + fontSize * 0.2, pageHeightPt),
-          width: span.width * PT_PER_PX,
-          height: fontSize * 1.1 * PT_PER_PX,
-          color: highlightColor,
-          opacity: 0.4,
-        });
       }
+      if (style.strikethrough) rule(baselineY - fontSize * 0.3, effectiveTextColor);
     }
   }
 
@@ -277,10 +316,18 @@ export function createDrawHelpers(
       for (const span of line.spans) {
         const spanAbsX =
           block.x + lineOffsetX + span.x + spacesBeforeSpan * spaceBonus;
+        const styles = spanStyles(span.kind === "text" ? span.marks : undefined, ctx);
 
         // Object spans have no marks, so an inline image inside an anchor
-        // ends the run rather than continuing it.
-        const href = span.kind === "text" ? linkHref(span.marks) : null;
+        // ends the run rather than continuing it. The last mark to name a
+        // target wins, the same way the last one to name a colour does.
+        const href =
+          span.kind === "text"
+            ? (styles.reduce<string | undefined>(
+                (found, style) => style.link ?? found,
+                undefined,
+              ) ?? null)
+            : null;
         const continues =
           href !== null &&
           linkRun !== null &&
@@ -314,7 +361,7 @@ export function createDrawHelpers(
             }
           } else {
             // Non-image inline atom — dispatch to handler if one exists
-            const handler = nodeHandlers[span.node.type.name];
+            const handler = nodeHandlers.get(span.node.type.name);
             if (handler) {
               const objY = computeObjectRenderY(lineY, line, span);
               // Inline atoms render as a one-shot leaf block inside the host
@@ -349,7 +396,9 @@ export function createDrawHelpers(
         }
 
         const fontSize = extractFontSizePx(span.font);
-        const color = extractColor(span.marks, ctx.theme, themeDefaultText);
+        const color = resolveFill(styles, themeDefaultText);
+
+        drawSpanBackgrounds(span, styles, spanAbsX, baselineY);
 
         page.drawText(text, {
           x: spanAbsX * PT_PER_PX,
@@ -359,7 +408,7 @@ export function createDrawHelpers(
           color,
         });
 
-        drawDecorations(span, spanAbsX, baselineY, ctx.theme, color);
+        drawSpanRules(span, styles, spanAbsX, baselineY, color);
 
         spacesBeforeSpan += countSpaces(span.text);
       }
@@ -393,22 +442,6 @@ interface LinkRun {
 
 /** Sub-pixel slack, so measurement noise does not read as a hole in the line. */
 const ADJACENT_EPSILON = 0.5;
-
-/** Schemes a viewer can act on with no base URL to resolve against. */
-const FOLLOWABLE_TARGET = /^(?:https?|mailto|tel):/i;
-
-/**
- * The link target for a span. Safety is `safeUrl` — the gate ingestion already
- * applies, so there is one answer to "is this URL safe" rather than one per
- * sink. Followability is a separate question it does not answer.
- */
-function linkHref(
-  marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
-): string | null {
-  const link = marks?.find((m) => m.name === "link");
-  const url = link ? safeUrl(link.attrs["href"]) : null;
-  return url !== null && FOLLOWABLE_TARGET.test(url) ? url : null;
-}
 
 /**
  * Make a rectangle clickable. `Border: [0,0,0]` because the link underline is
@@ -484,23 +517,6 @@ export function stripInvisible(text: string): string {
  */
 export function sanitizeForWinAnsi(text: string): string {
   return stripInvisible(text).replace(NOT_WIN_ANSI, "?");
-}
-
-/**
- * Extract text fill color from marks. User-applied `color` mark wins; link
- * mark falls through to `theme.link`; everything else gets `theme.defaultText`
- * (passed in pre-resolved to avoid re-parsing per span).
- */
-function extractColor(
-  marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
-  theme: ResolvedTheme,
-  defaultTextColor: ReturnType<typeof rgb>,
-): ReturnType<typeof rgb> {
-  const colorMark = marks?.find((m) => m.name === "color");
-  const colorVal = colorMark?.attrs["color"];
-  if (typeof colorVal === "string") return parseCssColor(colorVal);
-  if (marks?.some((m) => m.name === "link")) return parseCssColor(theme.link);
-  return defaultTextColor;
 }
 
 /**

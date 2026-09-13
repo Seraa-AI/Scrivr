@@ -9,6 +9,7 @@ import { computeObjectRenderY } from "../layout/LineBreaker";
 import type { TextMeasurerLike } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
 import type { MarkDecorator } from "../extensions/types";
+import { resolveSpanFill } from "../layout/resolveSpanFill";
 import type { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { PageChromeContribution, PageMetrics } from "../layout/PageMetrics";
 import { defaultEditorTheme, type ResolvedTheme } from "../model/theme";
@@ -359,22 +360,17 @@ export function drawBlock(
         width: run.totalWidth,
         ascent: line.ascent,
         descent: line.descent,
-        markAttrs: {} as Record<string, unknown>,
       };
 
-      // Resolve the effective text color first — color marks win, theme
-      // default falls through. Decorators that paint along the text
-      // (underline, strikethrough) read this so they follow the actual ink.
-      let effectiveTextColor = theme.defaultText;
-      if (markDecorators && span.marks) {
-        for (const markInfo of span.marks) {
-          const dec = markDecorators.get(markInfo.name);
-          if (dec?.decorateFill) {
-            const override = dec.decorateFill({ ...spanRect, markAttrs: markInfo.attrs }, theme);
-            if (override !== undefined) effectiveTextColor = override;
-          }
-        }
-      }
+      // Decorators painting along the text (underline, strikethrough) read
+      // this so they follow the actual ink.
+      const effectiveTextColor = resolveSpanFill(
+        span.marks,
+        markDecorators,
+        spanRect,
+        theme,
+        ctx,
+      );
 
       // decoratePre for all marks
       if (markDecorators && span.marks) {
