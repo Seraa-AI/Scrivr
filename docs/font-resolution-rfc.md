@@ -269,8 +269,11 @@ does not bundle a typeface: a font baked into a library is a decision consumers
 cannot undo, and it would put a licence and a few hundred kilobytes per weight
 into a package whose point is being embeddable.
 
-That makes it a breaking change, and it should be documented as one rather than
-softened. An editor constructed with no font resource has no honest default —
+Shipping one permissively licensed fallback was considered and declined: it
+makes `new Editor()` work out of the box, and it makes every consumer carry a
+typeface they did not choose and cannot remove, for a default that should be
+theirs. That makes this a breaking change, and it should be documented as one
+rather than softened. An editor constructed with no font resource has no honest default —
 it must say so loudly rather than quietly asking the host, which is the failure
 this RFC is about. The demo app carries a working configuration to start from,
 and the migration note should point at it rather than describe it.
@@ -318,31 +321,77 @@ resource, and resolves with `portable: false` — which is exactly the signal
 export needs to resolve again before laying itself out.
 
 ```ts
+import { fonts, interRegular } from "@acme/fonts";
+
 const editor = new Editor({
   fonts: new DefaultFontProvider({
     default: interRegular,
-    resources: [interRegular, interBold, acmeLegal],
+    resources: fonts,
   }),
 });
 ```
+
+`resources` is a catalogue, not a download. A package hands over descriptors;
+Scrivr fetches the three faces the open document actually uses.
 
 The common case should not require a font pipeline, so `DefaultFontProvider`
 handles inventory, loading and resolution. The interface behind it is what an
 organisation with its own typography implements:
 
 ```ts
+interface FontResolutionConstraints {
+  /** The result must be usable outside this environment. */
+  portable?: boolean;
+  /** The result's licence must permit embedding it in an export. */
+  embeddable?: boolean;
+}
+
 interface FontProvider {
   defaultRequest(): FontRequest;
-  resolve(request: FontRequest): Promise<FontResolution>;
-  getResource(resolution: FontResolution): Promise<FontResource | null>;
-  subscribe?(listener: (change: FontInventoryChange) => void): () => void;
+  resolve(
+    request: FontRequest,
+    constraints?: FontResolutionConstraints,
+  ): Promise<FontResolution>;
+  subscribe?(listener: (change: FontProviderChange) => void): () => void;
 }
 ```
 
-Registration is asynchronous — bytes are fetched, metadata inspected, a
-`FontFace` added and awaited — and defaults to `loading: "lazy"`, so a resource
-is paid for when something first resolves to it. Completion emits an inventory
-change, which is what drives the targeted re-layout in §8.
+A resolution carries its resource, so there is one way to reach it and no
+second call that could disagree. The consumer's requirement is an argument
+rather than a rule it is expected to know: canvas asks `resolve(request)`, an
+export asks `resolve(request, { portable: true, embeddable: true })`, and
+"resolve again under different implicit rules" stops being something a lane has
+to remember.
+
+**Registration is eager; acquiring bytes is not.** Registering adds a
+descriptor to the inventory and fetches nothing — a font package can hand over
+five hundred faces for the price of five hundred objects. The first resolution
+that selects one calls `bytes()`, registers the result through `FontFace`, and
+caches it. Eager loading is an option, not the default.
+
+That distinction matters because a resource that is registered but unloaded is
+already *known to exist*; what changes when it loads is not the inventory but
+the resource's state. Modelling that separately is what lets invalidation be
+narrow:
+
+```ts
+type FontResourceState = "registered" | "loading" | "loaded" | "failed";
+
+interface FontProviderChange {
+  key: FontKey;
+  reason: "resource-added" | "resource-loaded" | "resource-failed" | "resource-removed";
+}
+```
+
+| reason | what it can change |
+|---|---|
+| `resource-added` | a request may now resolve differently |
+| `resource-loaded` | a request resolved by substitution may now resolve exactly |
+| `resource-failed` | an expected resolution needs a fallback |
+| `resource-removed` | an exact resolution may no longer hold |
+
+Calling all four "the inventory changed" would make §8 re-measure for things
+that cannot have moved.
 
 **Registering is not requesting.** A document saying `fontFamily: "Aptos"`
 creates a request and changes no inventory; `fonts.register(...)` changes the
@@ -438,8 +487,9 @@ which is the common case. One whose constraint changes an answer lays out once,
 against the set it chose up front. There is no re-measure-after-discovery
 because there is no discovery.
 
-This is also how OOXML does it. `word/fontTable.xml` declares every font a
-document uses, with the panose, family, pitch and charset metadata a renderer
+OOXML uses a similar separation, and it is worth borrowing rather than
+claiming as a precedent — a runtime provider does more than a static part.
+`word/fontTable.xml` declares every font a document uses, with the panose, family, pitch and charset metadata a renderer
 needs to substitute, plus optional embedded font parts — and Word reads it
 before rendering rather than learning about fonts run by run. The declared
 inventory is separate from the runs that reference it, which is the same split
