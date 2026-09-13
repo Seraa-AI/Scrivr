@@ -498,11 +498,14 @@ the caller inferring it from the geometry afterwards. This is a closer fit to
 the async work is now unambiguously outside that path rather than notionally
 ahead of it.
 
-### Phase 2 — not started
+### Phase 2 — shipped
 
-Two findings from scoping it, recorded before building the wrong thing.
+Layout resolves at `resolveFont`'s two call sites in `BlockLayout`, measures
+the resolved family, and records which answer it used. `DocumentLayout` carries
+the interned table; a span carries the id. Empty and absent respectively when
+the editor has no provider, so an application that supplies none is unaffected.
 
-**"Still no behaviour change" cannot hold.** The proposal says phase 2 interns
+**"Still no behaviour change" did not hold, as expected.** The proposal says phase 2 interns
 resolutions and changes nothing. But a span records the face it was *measured*
 in, and measurement uses the CSS string handed to `ctx.font` — so attaching a
 resolution while still measuring the requested family records an answer layout
@@ -514,13 +517,17 @@ differently — correctly, and only if it has one. An editor with no provider
 resolves nothing and is unaffected, so the change is opt-in rather than
 breaking.
 
-**The threading is the real cost.** Spans are built in `extractSpans`
-(`BlockLayout.ts`), reached through a chain of positional parameters that is
-already seven long — `fontModifiers`, `measurer` and `inlineRegistry` all
-arrived the same way. A resolver would be the eighth, and would also have to
-travel from `Editor` through `LayoutCoordinator` and `PageLayoutOptions` to get
-there. The font work did not create that chain, and should probably not be what
-grows it.
+**The threading was the real cost, and it was paid rather than added to.**
+`buildBlockFlow` took nine positional parameters, `resolveAnchoredObjects` and
+`reflowFlowsAgainstExclusions` seven each — and five were the same threaded
+dependencies in all three. A resolver would have been the tenth. They take a
+`MeasureContext` now, so this dependency cost a field rather than a parameter
+in three signatures, and the next one is free.
+
+**A family sometimes has to be quoted.** Substituting a resolved family into a
+CSS shorthand produces a string handed to `ctx.font`, and an invalid shorthand
+is *ignored* rather than rejected — leaving whatever the previous span set. A
+name that is not a sequence of CSS identifiers is quoted before substitution.
 
 ## Decisions (locked)
 

@@ -1,4 +1,5 @@
 import type { Node } from "prosemirror-model";
+import type { FontResolutionId } from "../fonts/layoutResolver";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { CharacterMap } from "./CharacterMap";
 import { normalizeFont } from "./StyleResolver";
@@ -39,6 +40,12 @@ export type InputSpan =
       docPos: number;
       /** Mark info for canvas decorators (underline, strikethrough, highlight) */
       marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
+      /**
+       * Which resolution this span was measured under. Opaque — the layout's
+       * table owns the answer, so a consumer reproducing this geometry reads
+       * the face that produced it rather than re-deriving one.
+       */
+      resolution?: FontResolutionId;
     }
   | {
       kind: "object";

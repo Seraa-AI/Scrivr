@@ -1,4 +1,6 @@
 import type { Node } from "prosemirror-model";
+import { createLayoutFontResolver } from "../fonts/layoutResolver";
+import type { FontProvider } from "../fonts/types";
 import { TextSelection } from "prosemirror-state";
 import { CharacterMap } from "./CharacterMap";
 import { runPipeline } from "./PageLayout";
@@ -28,6 +30,8 @@ export interface LayoutCoordinatorOptions {
   fontConfig: FontConfig;
   measurer: TextMeasurerLike;
   fontModifiers: Map<string, FontModifier>;
+  /** Answers font requests. Absent when the application supplied no provider. */
+  fonts?: FontProvider | null;
   /** Returns the current ProseMirror document — read at layout time so the
    *  coordinator always operates on the latest doc without needing per-call args. */
   getDoc: () => Node;
@@ -500,6 +504,7 @@ export class LayoutCoordinator {
       measurer: this.opts.measurer,
       fontModifiers: this.opts.fontModifiers,
       measureCache: this.measureCache,
+      ...(this.opts.fonts ? { fonts: createLayoutFontResolver(this.opts.fonts) } : {}),
       ...(contribs.length > 0 ? { pageChromeContributions: contribs } : {}),
       ...(opts.previousVersion !== undefined
         ? { previousVersion: opts.previousVersion }

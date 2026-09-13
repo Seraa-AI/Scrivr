@@ -521,6 +521,7 @@ export class Editor extends BaseEditor implements IEditor {
 			fontConfig: this.fontConfig,
 			measurer: this.measurer,
 			fontModifiers: this.fontModifiers,
+			fonts: this.fonts,
 			getDoc: () => this.editorState.doc,
 			getHead: () => this.editorState.selection.head,
 			onUpdate: () => this.notifyListeners(),

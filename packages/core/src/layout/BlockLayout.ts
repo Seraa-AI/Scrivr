@@ -1,4 +1,5 @@
 import { Node } from "prosemirror-model";
+import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { InlineRegistry } from "./BlockRegistry";
@@ -205,6 +206,8 @@ function createHiddenAnchorLine(spans: InputSpan[]): LayoutLine {
 }
 
 export interface BlockLayoutOptions {
+  /** Answers what face a span is measured in. Absent when no provider. */
+  fonts?: LayoutFontResolver;
   /** Absolute doc position of this node — used to resolve child positions */
   nodePos: number;
   /** Left edge in CSS pixels (the page's left margin) */
@@ -447,15 +450,12 @@ export function layoutBlock(
       : blockStyle.align;
 
   // ── 1. Extract spans ──────────────────────────────────────────────────────
-  const spans = extractSpans(
-    node,
-    nodePos,
-    baseFont,
-    fontConfig,
-    fontModifiers,
-    measurer,
-    inlineRegistry,
-  );
+  const spans = extractSpans(node, nodePos, baseFont, {
+    ...(fontModifiers ? { fontModifiers } : {}),
+    ...(measurer ? { measurer } : {}),
+    ...(inlineRegistry ? { inlineRegistry } : {}),
+    ...(options.fonts ? { fonts: options.fonts } : {}),
+  });
 
   // ── 2. Empty node fallback ────────────────────────────────────────────────
   // An empty paragraph (or one containing only hardBreak nodes) has no
@@ -701,26 +701,35 @@ export function layoutBlock(
  *   - nodePos + 1 is inside the node (after the opening token)
  *   - nodePos + 1 + offset is the absolute position of a child at `offset`
  */
+interface ExtractSpansContext {
+  fontModifiers?: Map<string, FontModifier>;
+  measurer?: TextMeasurerLike;
+  inlineRegistry?: InlineRegistry;
+  fonts?: LayoutFontResolver;
+}
+
 function extractSpans(
   node: Node,
   nodePos: number,
   baseFont: string,
-  _fontConfig: FontConfig,
-  fontModifiers?: Map<string, FontModifier>,
-  measurer?: TextMeasurerLike,
-  inlineRegistry?: InlineRegistry,
+  ctx: ExtractSpansContext,
 ): InputSpan[] {
+  const { fontModifiers, measurer, inlineRegistry, fonts } = ctx;
   const spans: InputSpan[] = [];
 
   node.forEach((child, offset) => {
     const childDocPos = nodePos + 1 + offset;
 
     if (child.isText && child.text) {
-      const font = resolveFont(baseFont, child.marks, fontModifiers);
+      const requested = resolveFont(baseFont, child.marks, fontModifiers);
+      // Measure the face that was resolved, not the one that was asked for —
+      // a span recording an answer it was not measured in is the whole bug.
+      const answered = fonts?.resolve(requested);
       spans.push({
         kind: "text",
         text: child.text,
-        font,
+        font: answered?.font ?? requested,
+        ...(answered ? { resolution: answered.resolution } : {}),
         docPos: childDocPos,
         marks: child.marks.map((m) => ({
           name: m.type.name,
@@ -787,8 +796,12 @@ function extractSpans(
         if (measurer && inlineRegistry) {
           const strategy = inlineRegistry.get(child.type.name);
           if (strategy?.measure) {
-            const font = resolveFont(baseFont, child.marks, fontModifiers);
-            const measured = strategy.measure(child, font, measurer);
+            const requested = resolveFont(baseFont, child.marks, fontModifiers);
+            const measured = strategy.measure(
+              child,
+              fonts?.resolve(requested).font ?? requested,
+              measurer,
+            );
             objWidth = measured.width;
             objHeight = measured.height;
           }

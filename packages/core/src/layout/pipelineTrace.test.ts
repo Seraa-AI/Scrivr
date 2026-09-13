@@ -178,7 +178,7 @@ function trace(blocks: number): Row {
   };
 
   const runFlow = (cache: WeakMap<Node, MeasureCacheEntry>) =>
-    buildBlockFlow(items, 0, flowConfig, fontConfig, measurer, new Map(), cache);
+    buildBlockFlow(items, 0, flowConfig, { measurer, fontConfig, fontModifiers: new Map(), measureCache: cache });
 
   // Cold: nothing reusable. Warm: every block a measure-cache hit — the steady
   // state an unchanged keystroke actually sees.
@@ -262,10 +262,7 @@ function pressurePagination(blocks: number): {
     items,
     0,
     flowConfig,
-    fontConfig,
-    measurer,
-    new Map(),
-    cache,
+    { measurer, fontConfig, fontModifiers: new Map(), measureCache: cache },
   );
 
   let metricsForCalls = 0;
