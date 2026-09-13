@@ -529,6 +529,60 @@ CSS shorthand produces a string handed to `ctx.font`, and an invalid shorthand
 is *ignored* rather than rejected — leaving whatever the previous span set. A
 name that is not a sequence of CSS identifiers is quoted before substitution.
 
+### Phase 3 — shipped
+
+The PDF stops deriving a face from the family name. `exportToPdf` resolves the
+document's requests under `{ portable: true, embeddable: true }` before layout
+is reached, reporting anything it could not honour through `onFontShortfall`.
+`buildPdf` embeds the resources in `layout.fontResolutions` and keys them by
+resolution id; a span picks its face by the id it carries. The name-based guess
+survives only where nothing resolved anything — no provider, an unembeddable
+licence, or bytes that would not embed — so an application supplying no
+provider is unaffected.
+
+`PdfExportOptions.fontResolver` is deprecated rather than removed. It resolves
+bytes by family name at export time, which is precisely how a PDF comes to
+embed a face the layout never measured; it is still honoured, and consulted
+only after the layout's own resolutions.
+
+**Phase 2 shipped three gaps, and all three were inert rather than wrong.**
+Nothing downstream could observe the recording, which is why the phase looked
+complete:
+
+- `Editor` never accepted `fonts`. `BaseEditor` and `ServerEditor` did, but the
+  browser editor's own options interface omitted it and its constructor
+  destructure dropped it — so the whole lane was unreachable from the main
+  consumer.
+- `MeasureContext` carried the resolver and none of the three `layoutBlock`
+  calls forwarded it, so blocks were measured without one. `resolveBlockEntry`
+  still took the twelve-positional-parameter list `MeasureContext` had replaced
+  everywhere else; it takes the context now.
+- `DocumentLayout.fontResolutions` was declared and never populated — nothing
+  called `table()`. The pipeline publishes it now.
+
+**The resolver's lifetime is the measure cache's, not the run's.** It was built
+per pipeline run. A span records its resolution as an id into that resolver's
+table, and the measure cache hands cached spans back on later runs without
+re-measuring — so ids minted by one run pointed into a table rebuilt empty by
+the next. It is created once, with the coordinator.
+
+**An id names a face, not a family.** The interning key was
+`family|source|portable`, which gave regular and bold Arial one id and one
+answer — and would have had the exporter embed one set of bytes for both, every
+bold run painted from the regular face. The key now includes the resource and
+the requested weight and style, encoded rather than joined on a separator: a
+resource id is whatever the application called it, so it can contain the
+separator, and its absence has to stay distinguishable from an id that happens
+to be the empty string.
+
+**What phase 3 does not do.** Canvas resolves with no constraints and the
+export resolves with two, so the two can disagree — a face that is registered
+but unembeddable is measured on screen and cannot go in the file. The export
+reports the shortfall and falls back for those spans rather than re-laying-out
+the document under its own constraints, which would change pagination. The
+`fontResolver` option and the header/footer chrome text are the two paths still
+choosing a face by name.
+
 ## Decisions (locked)
 
 **Does layout re-measure when a font loads late?** Yes — when the *resolution*

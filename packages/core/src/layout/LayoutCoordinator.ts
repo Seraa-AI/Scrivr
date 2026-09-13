@@ -1,5 +1,6 @@
 import type { Node } from "prosemirror-model";
 import { createLayoutFontResolver } from "../fonts/layoutResolver";
+import type { LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontProvider } from "../fonts/types";
 import { TextSelection } from "prosemirror-state";
 import { CharacterMap } from "./CharacterMap";
@@ -81,6 +82,15 @@ export class LayoutCoordinator {
 
   private readonly populatedPages = new Set<number>();
   private readonly measureCache = new WeakMap<Node, MeasureCacheEntry>();
+  /**
+   * One resolver for the coordinator's lifetime, not one per run.
+   *
+   * A span records its resolution as an id into this resolver's table, and the
+   * measure cache hands those spans back on later runs without re-measuring.
+   * A resolver rebuilt per run would start numbering again, so the ids on
+   * cached spans would point into a table that no longer describes them.
+   */
+  private readonly fontResolver: LayoutFontResolver | null;
 
   /**
    * O(1) page lookup by page number.
@@ -101,6 +111,7 @@ export class LayoutCoordinator {
 
   constructor(opts: LayoutCoordinatorOptions) {
     this.opts = opts;
+    this.fontResolver = opts.fonts ? createLayoutFontResolver(opts.fonts) : null;
 
     performance.mark("scrivr:layout-initial-start");
     this.layout = this.runLayout({
@@ -504,7 +515,7 @@ export class LayoutCoordinator {
       measurer: this.opts.measurer,
       fontModifiers: this.opts.fontModifiers,
       measureCache: this.measureCache,
-      ...(this.opts.fonts ? { fonts: createLayoutFontResolver(this.opts.fonts) } : {}),
+      ...(this.fontResolver ? { fonts: this.fontResolver } : {}),
       ...(contribs.length > 0 ? { pageChromeContributions: contribs } : {}),
       ...(opts.previousVersion !== undefined
         ? { previousVersion: opts.previousVersion }

@@ -87,6 +87,8 @@ export type LayoutSpan =
       /** ProseMirror doc position of the first character */
       docPos: number;
       marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
+      /** The face this span was measured in. Carried from its input span. */
+      resolution?: FontResolutionId;
     }
   | {
       kind: "object";
@@ -474,6 +476,7 @@ export class LineBreaker {
           width: wordWidth,
           docPos: word.docPos,
           ...(word.marks !== undefined ? { marks: word.marks } : {}),
+          ...(word.resolution !== undefined ? { resolution: word.resolution } : {}),
         });
       }
 
@@ -557,6 +560,7 @@ export class LineBreaker {
         font: word.font,
         docPos: word.docPos + chunkStart,
         ...(word.marks !== undefined ? { marks: word.marks } : {}),
+        ...(word.resolution !== undefined ? { resolution: word.resolution } : {}),
       });
       startSeg = endSeg + 1;
     }
@@ -682,6 +686,7 @@ interface TextToken {
   font: string;
   docPos: number;
   marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
+  resolution?: FontResolutionId;
 }
 
 interface ObjectToken {
@@ -789,6 +794,7 @@ function tokenise(spans: InputSpan[]): Token[] {
         font: span.font,
         docPos: span.docPos + offset,
         ...(span.marks !== undefined ? { marks: span.marks } : {}),
+        ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
       });
       offset += part.length;
     }

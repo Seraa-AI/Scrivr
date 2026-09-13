@@ -82,6 +82,24 @@ describe("resolving a span's font for measurement", () => {
     expect(r.resolve("14px Aptos").font).toBe('14px "Acme 2.0 Sans"');
   });
 
+  it("gives each weight of a family its own id and its own bytes", () => {
+    // One id per family would hand an exporter a single answer for the whole
+    // family, and it would embed one set of bytes for both — every bold run
+    // in the document painted from the regular face.
+    const p = new DefaultFontProvider({
+      default: resource("App Sans"),
+      resources: [resource("Inter", 400), resource("Inter", 700)],
+    });
+    const r = createLayoutFontResolver(p);
+
+    const plain = r.resolve("14px Inter");
+    const bold = r.resolve("bold 14px Inter");
+
+    expect(bold.resolution).not.toBe(plain.resolution);
+    expect(r.table().get(plain.resolution)?.resource?.id).toBe("Inter-400");
+    expect(r.table().get(bold.resolution)?.resource?.id).toBe("Inter-700");
+  });
+
   it("gives an export a different answer than the screen", () => {
     const p = provider([], ["Aptos"]);
     const screen = createLayoutFontResolver(p);

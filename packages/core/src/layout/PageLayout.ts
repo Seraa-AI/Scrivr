@@ -591,7 +591,7 @@ function resolveAnchoredObjects(
   geometry: PageGeometry,
   ctx: MeasureContext,
 ): { flows: FlowBlock[]; placements: AnchoredObjectPlacement[] } {
-  const { measurer, fontConfig, fontModifiers, inlineRegistry } = ctx;
+  const { measurer, fontConfig, fontModifiers, inlineRegistry, fonts } = ctx;
   let flows = inputFlows;
   const placements: AnchoredObjectPlacement[] = [];
   const contentX = pageConfig.margins.left;
@@ -876,7 +876,7 @@ function reflowFlowsAgainstExclusions(
   geometry: PageGeometry,
   ctx: MeasureContext,
 ): FlowBlock[] {
-  const { measurer, fontConfig, fontModifiers, inlineRegistry } = ctx;
+  const { measurer, fontConfig, fontModifiers, inlineRegistry, fonts } = ctx;
   let flows = inputFlows;
   const zoneTop = zone.zoneTop;
   const zoneBottom = zone.zoneBottom;
@@ -934,6 +934,7 @@ function reflowFlowsAgainstExclusions(
       ...(fontModifiers ? { fontModifiers } : {}),
       lineSpaceProvider,
       ...(inlineRegistry ? { inlineRegistry } : {}),
+      ...(fonts ? { fonts } : {}),
     });
 
     const nextFlow: FlowBlock = {
@@ -1313,11 +1314,15 @@ function runPipelineBody(
   const fp = chromeResult.flow;
 
   // Propagate aggregator outcome + payloads into the layout returned to callers.
+  // The resolver accumulated an answer per face while measuring; publishing it
+  // here is what lets a consumer reproduce this geometry from the faces it was
+  // actually built from rather than from the family names it asked for.
   const layoutWithChrome: DocumentLayout = {
     ...fp.layout,
     convergence: chromeResult.convergence,
     iterationCount: chromeResult.iterationCount,
     chromePayloads: chromeResult.chromePayloads,
+    ...(options.fonts ? { fontResolutions: options.fonts.table() } : {}),
   };
 
   if (fp.isPartial) return layoutWithChrome;
@@ -1864,8 +1869,7 @@ export function buildBlockFlow(
 
     // Measure — position-independent (targetY=0, page=1 are not stored in entry).
     const entry = resolveBlockEntry(
-      node, nodePos, blockX, 0, blockWidth, 1,
-      measurer, fontConfig, fontModifiers, measureCache, inlineRegistry, item.tableColumns,
+      node, nodePos, blockX, 0, blockWidth, 1, ctx, item.tableColumns,
     );
     const anchorOnlyFlow = isAnchorOnlyFlowEntry(entry);
 
@@ -1976,6 +1980,7 @@ function rebreakWrappedLinesWithoutExclusions(
           font: span.font,
           docPos: span.docPos,
           ...(span.marks !== undefined ? { marks: span.marks } : {}),
+          ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
         });
       } else {
         spans.push({
@@ -2183,13 +2188,10 @@ function resolveBlockEntry(
   targetY: number,
   blockWidth: number,
   pageNumber: number,
-  measurer: TextMeasurerLike,
-  fontConfig: FontConfig,
-  fontModifiers: Map<string, FontModifier> | undefined,
-  measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
-  inlineRegistry?: InlineRegistry,
+  ctx: MeasureContext,
   tableColumns?: number[],
 ): MeasureCacheEntry {
+  const { measurer, fontConfig, fontModifiers, measureCache, inlineRegistry, fonts } = ctx;
   // Table rows bypass the measure cache: their `cells` carry child-block span
   // docPos values that the cache-hit delta-adjustment path does not rewrite, so
   // re-measuring fresh each run keeps cell hit-testing correct. Tables are small
@@ -2205,6 +2207,7 @@ function resolveBlockEntry(
       fontConfig,
       ...(fontModifiers ? { fontModifiers } : {}),
       ...(inlineRegistry ? { inlineRegistry } : {}),
+      ...(fonts ? { fonts } : {}),
       ...(tableColumns ? { tableColumns } : {}),
     });
     return {
@@ -2249,6 +2252,7 @@ function resolveBlockEntry(
     fontConfig,
     ...(fontModifiers ? { fontModifiers } : {}),
     ...(inlineRegistry ? { inlineRegistry } : {}),
+    ...(fonts ? { fonts } : {}),
   });
 
   const entry: MeasureCacheEntry = {

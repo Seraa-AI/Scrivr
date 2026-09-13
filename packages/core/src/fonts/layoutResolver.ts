@@ -50,7 +50,7 @@ export function createLayoutFontResolver(
 ): LayoutFontResolver {
   const byFont = new Map<string, { font: string; resolution: FontResolutionId }>();
   const byId = new Map<FontResolutionId, FontResolution>();
-  const idByFamily = new Map<string, FontResolutionId>();
+  const idByFace = new Map<string, FontResolutionId>();
 
   return {
     resolve(cssFont) {
@@ -64,11 +64,26 @@ export function createLayoutFontResolver(
       );
 
       const family = resolution.resolved.family;
-      const key = `${family}|${resolution.resolved.source}|${resolution.resolved.portable}`;
-      let id = idByFamily.get(key);
+      // Identity is the face, not the family. Bold and regular Arial resolve
+      // to one family name and two sets of bytes; interning on the name alone
+      // would hand an exporter one id for both and let it embed the wrong
+      // weight for half the document.
+      // Encoded rather than joined on a separator: a resource id is whatever
+      // the application called it, so it can contain the separator, and its
+      // absence has to stay distinguishable from an id that happens to be "".
+      const { weight, style } = resolution.request;
+      const key = JSON.stringify([
+        resolution.resource?.id ?? null,
+        family,
+        resolution.resolved.source,
+        resolution.resolved.portable,
+        weight,
+        style,
+      ]);
+      let id = idByFace.get(key);
       if (id === undefined) {
         id = byId.size;
-        idByFamily.set(key, id);
+        idByFace.set(key, id);
         byId.set(id, resolution);
       }
 

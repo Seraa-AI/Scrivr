@@ -27,6 +27,7 @@ import {
   type PdfTextOp,
   type Rgb,
   type DocumentLayout,
+  type FontResolutionId,
   type LayoutPage,
   type LayoutBlock,
   type LayoutLine,
@@ -73,8 +74,13 @@ export interface PdfContext {
 }
 
 export interface PdfFontRegistry {
-  /** Resolve a CSS font shorthand string to a PDFFont. */
-  resolve(cssFont: string): PDFFont;
+  /**
+   * Pick the PDFFont for a span. `resolution` is the id the layout recorded
+   * when it measured — pass it whenever the span carries one, so the PDF
+   * paints the face the geometry came from instead of guessing a second time
+   * from the family name.
+   */
+  resolve(cssFont: string, resolution?: FontResolutionId): PDFFont;
   /**
    * True when `font` is an embedded face carrying its own glyphs. Standard
    * fonts encode WinAnsi only, so their text must be sanitized before drawing.
@@ -459,7 +465,7 @@ export function createDrawHelpers(
 
         if (span.kind !== "text") continue;
 
-        const font = fontRegistry.resolve(span.font);
+        const font = fontRegistry.resolve(span.font, span.resolution);
         const text = fontRegistry.isUnicode(font)
           ? stripInvisible(span.text)
           : sanitizeForWinAnsi(span.text);

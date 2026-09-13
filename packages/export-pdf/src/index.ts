@@ -33,20 +33,43 @@ import type {
   AnchoredObjectPlacement,
   ResolvedTheme,
 } from "@scrivr/core";
-import { compareAnchoredObjectPaintOrder, defaultPdfTheme } from "@scrivr/core";
+import type { FontResolutionConstraints, FontShortfall } from "@scrivr/core";
+import {
+  compareAnchoredObjectPaintOrder,
+  defaultPdfTheme,
+  prepareDocumentFonts,
+} from "@scrivr/core";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
 import type { PdfContext, PdfDrawHelpers } from "./context";
 import {
   embedStandardFonts,
   embedCustomFonts,
+  embedResolvedFonts,
   createFontRegistry,
 } from "./fonts";
 import { defaultNodeHandlers, defaultMarkHandlers } from "./defaults";
 
 /** Public types */
 
+/**
+ * A PDF has to carry its typefaces with it. A face this machine merely happens
+ * to have is no use inside the file, and one whose licence forbids embedding
+ * must not go in it — so the export asks under both conditions rather than
+ * taking whatever the screen settled for.
+ */
+const PDF_FONT_CONSTRAINTS: FontResolutionConstraints = {
+  portable: true,
+  embeddable: true,
+};
+
 export interface PdfExportOptions {
+  /**
+   * Called when the document asks for faces this editor could not honour under
+   * the conditions a PDF imposes. Reporting, not failure: the export proceeds
+   * with what it resolved to.
+   */
+  onFontShortfall?: (shortfalls: FontShortfall[]) => void;
   /**
    * Called once per unique (family, weight, style) combination found in the
    * document. Return the font file bytes to embed it; return null to fall back
@@ -82,6 +105,18 @@ export async function exportToPdf(
   editor: IEditor,
   options?: PdfExportOptions,
 ): Promise<Uint8Array> {
+  // Ask before anything is measured. Which faces the export can carry is a
+  // question about the geometry, not about the painting, so it has to be
+  // settled on the way in — afterwards there is nothing left to decide.
+  if (editor.fonts) {
+    const shortfalls = await prepareDocumentFonts(
+      editor.getState().doc,
+      editor.fonts,
+      PDF_FONT_CONSTRAINTS,
+    );
+    if (shortfalls.length > 0) options?.onFontShortfall?.(shortfalls);
+  }
+
   editor.ensureFullLayout();
   const layout = editor.layout;
   if (layout.isPartial) {
@@ -147,8 +182,9 @@ export async function buildPdf(
   const customFonts = options?.fontResolver
     ? await embedCustomFonts(pdfDoc, layout, options.fontResolver)
     : new Map();
+  const resolvedFonts = await embedResolvedFonts(pdfDoc, layout);
 
-  const fontRegistry = createFontRegistry(standardFonts, customFonts);
+  const fontRegistry = createFontRegistry(standardFonts, customFonts, resolvedFonts);
   const imageCache = await embedImages(pdfDoc, layout);
 
   // Mutable page ref — updated per page in the loop. Draw helpers read lazily.

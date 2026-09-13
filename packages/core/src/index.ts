@@ -28,7 +28,15 @@ export * from "./surfaces";
 export * from "./exports/docx";
 export * from "./exports/pdf";
 export * from "./fonts/types";
-export { DefaultFontProvider } from "./fonts/DefaultFontProvider";
+export {
+  DefaultFontProvider,
+  type DefaultFontProviderOptions,
+} from "./fonts/DefaultFontProvider";
+export {
+  createLayoutFontResolver,
+  type FontResolutionId,
+  type LayoutFontResolver,
+} from "./fonts/layoutResolver";
 export {
   collectFontRequests,
   prepareDocumentFonts,

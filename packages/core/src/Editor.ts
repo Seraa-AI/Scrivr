@@ -16,6 +16,7 @@ import type { Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
+import type { FontProvider } from "./fonts/types";
 import { CursorManager } from "./renderer/CursorManager";
 import { SelectionRegistry } from "./selection/SelectionRegistry";
 import {
@@ -223,6 +224,12 @@ export interface EditorOptions {
 	 * deterministic test canvas, or platform-native measurement service.
 	 */
 	textMeasurer?: TextMeasurerLike;
+	/**
+	 * Which typefaces this editor may measure and paint in. Without one the
+	 * editor asks the host for whatever the family name happens to mean there,
+	 * and no lane can say what it got — so an export has to guess a second time.
+	 */
+	fonts?: FontProvider;
 }
 
 /**eant to ask is if you approve the plan so that we can transition out of "Brainstorm" mode. If you are happy with the plan as written in that document, just give me the green light, and I will create our task.md checklist and begin writing the code!
@@ -410,12 +417,14 @@ export class Editor extends BaseEditor implements IEditor {
 		theme,
 		themeRoot,
 		textMeasurer,
+		fonts,
 	}: EditorOptions) {
 		// BaseEditor handles: manager, state, commands, storage, event emitter
 		super({
 			extensions,
 			clone,
 			...(content !== undefined ? { content } : {}),
+			...(fonts ? { fonts } : {}),
 		});
 
 		// ── Theme ──────────────────────────────────────────────────────────────
