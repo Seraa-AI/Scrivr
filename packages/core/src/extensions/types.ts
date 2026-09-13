@@ -14,6 +14,7 @@
  */
 
 import type { Extension } from "./Extension";
+import type { FontProvider } from "../fonts/types";
 
 /**
  * Named keybinding precedences. Higher wins first refusal for a key.
@@ -113,6 +114,8 @@ export type OverlayRenderHandler = (
  * only fires it in browser `Editor`, so no runtime guard or cast is needed.
  */
 export interface IBaseEditor {
+  /** Where font requests are answered, or null when none was supplied. */
+  readonly fonts: FontProvider | null;
   /** Subscribe to all editor notifications (state change, focus, cursor tick). */
   subscribe(listener: () => void): () => void;
   /** Subscribe to a typed editor event. Returns an unsubscribe function. */

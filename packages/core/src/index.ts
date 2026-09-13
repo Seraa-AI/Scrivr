@@ -27,6 +27,13 @@ export * from "./menus";
 export * from "./surfaces";
 export * from "./exports/docx";
 export * from "./exports/pdf";
+export * from "./fonts/types";
+export { DefaultFontProvider } from "./fonts/DefaultFontProvider";
+export {
+  collectFontRequests,
+  prepareDocumentFonts,
+  type FontShortfall,
+} from "./fonts/collectFontRequests";
 export * from "./exports/semantic";
 /** ProseMirror's built-in DocAttrStep — prefer `tr.setDocAttribute(name, value)`. */
 export { DocAttrStep } from "prosemirror-transform";

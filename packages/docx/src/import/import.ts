@@ -20,6 +20,7 @@
  */
 
 import type { Node as PmNode } from "@scrivr/core/pm";
+import { prepareDocumentFonts } from "@scrivr/core";
 import type {
   DocxImports,
   IBaseEditor,
@@ -202,6 +203,24 @@ export async function importDocx(
 
     for (const hook of lifecycleHooks.onImportComplete) {
       doc = await hook(doc, ctx);
+    }
+
+    // A .docx states its typography, and the editor either has those faces or
+    // does not. Asking before anything is measured is the only point at which
+    // the answer is still cheap to act on.
+    if (editor.fonts) {
+      for (const shortfall of await prepareDocumentFonts(doc, editor.fonts)) {
+        ctx.diagnostics.warn({
+          code: "font-substituted",
+          message:
+            `The document asks for "${shortfall.request.family}" and this editor ` +
+            `resolved "${shortfall.resolved}"` +
+            (shortfall.portable
+              ? ". Text will be measured and drawn in that face."
+              : " — a face this environment has but cannot hand to an export."),
+          markType: "fontFamily",
+        });
+      }
     }
 
     const finalDiagnostics = ctx.diagnostics.list();
