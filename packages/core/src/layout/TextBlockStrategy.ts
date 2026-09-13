@@ -2,6 +2,7 @@ import type { CharacterMap } from "./CharacterMap";
 import { isHiddenAnchorLine, type LayoutBlock } from "./BlockLayout";
 import { computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
 import { computeObjectRenderY } from "./LineBreaker";
+import { resolveSpanFill } from "./resolveSpanFill";
 import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
 
 /**
@@ -121,19 +122,14 @@ export const TextBlockStrategy: BlockStrategy = {
           markAttrs: {} as Record<string, unknown>,
         };
 
-        // Resolve effective text color first (color marks win, theme default
-        // falls through). Decorators painting along text (underline,
-        // strikethrough) read this so they follow the actual ink color.
-        let effectiveTextColor = theme.defaultText;
-        if (markDecorators && span.marks) {
-          for (const markInfo of span.marks) {
-            const dec = markDecorators.get(markInfo.name);
-            if (dec?.decorateFill) {
-              const override = dec.decorateFill({ ...spanRect, markAttrs: markInfo.attrs }, theme);
-              if (override !== undefined) effectiveTextColor = override;
-            }
-          }
-        }
+        // Decorators painting along the text (underline, strikethrough) read
+        // this so they follow the actual ink.
+        const effectiveTextColor = resolveSpanFill(
+          span.marks,
+          markDecorators,
+          spanRect,
+          theme,
+        );
 
         if (markDecorators && span.marks) {
           for (const markInfo of span.marks) {

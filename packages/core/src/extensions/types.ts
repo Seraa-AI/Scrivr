@@ -494,13 +494,22 @@ export interface MarkDecorator {
    * Returns a CSS color string to use as fillStyle when drawing this span's text,
    * or undefined to keep the default. Called before decoratePre, so the
    * effectiveTextColor passed to decoratePre/decoratePost reflects this
-   * decorator's choice. Multiple marks on the same span may implement this;
-   * the last non-undefined value wins.
+   * decorator's choice. This is the *authored* colour: it beats any
+   * `decorateDefaultFill` on the same span. Between two authored fills the
+   * last non-undefined value wins.
    *
    * Receives `theme` so decorators that map to a theme token (Link → theme.link)
    * can resolve at paint time without capturing the editor instance.
    */
   decorateFill?(rect: SpanRect, theme: ResolvedTheme): string | undefined;
+  /**
+   * The colour this mark gives a span when nobody chose one — a link's blue,
+   * say. Loses to any `decorateFill`, whatever order the marks arrive in, so
+   * a coloured link keeps its colour. Implement this rather than
+   * `decorateFill` when the colour expresses what the mark *is* rather than
+   * what the author picked.
+   */
+  decorateDefaultFill?(rect: SpanRect, theme: ResolvedTheme): string | undefined;
   decoratePost?(
     ctx: CanvasRenderingContext2D,
     rect: SpanRect,

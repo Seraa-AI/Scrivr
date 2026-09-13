@@ -12,8 +12,9 @@ import { getMarkAttrs } from "../../model/getNodeAttrs";
 /**
  * Link — inline hyperlink via the `link` mark.
  *
- * Canvas rendering: blue text + blue underline via MarkDecorator.
- * The fill color is returned by decorateFill, the underline by decoratePost.
+ * Canvas rendering: blue text + blue underline via MarkDecorator. The fill
+ * is a default (decorateDefaultFill), so an explicit colour mark overrides it;
+ * the underline stays link-blue, drawn by decoratePost.
  *
  * The `setLink` command prompts for a URL via window.prompt so the toolbar
  * button works without needing a separate dialog component.
@@ -114,7 +115,9 @@ export const Link = Extension.create({
 
   addMarkDecorators() {
     const decorator: MarkDecorator = {
-      decorateFill(_rect, theme) {
+      // Semantic, not authored: a link is blue because it is a link, so a
+      // colour the author actually chose takes precedence over it.
+      decorateDefaultFill(_rect, theme) {
         return theme.link;
       },
       decoratePost(ctx, rect, theme, _effectiveTextColor) {
