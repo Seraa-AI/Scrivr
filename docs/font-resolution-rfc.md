@@ -109,15 +109,19 @@ ownership and `yOffset` is placement; here, the **mark is the request** and
 
 ## The invariant
 
-> The face used to **measure** a glyph run is the face used to **paint** it, in
-> every lane that reproduces our geometry.
->
-> If a lane cannot obtain that face, the document must be **re-measured**
-> against a face every lane can obtain — never silently painted in another.
+> Every glyph run has a **request**.
+> Every measured glyph run has a **resolution**.
+> Every geometry-preserving renderer consumes that resolution.
+> Where Scrivr owns the resource, every such renderer consumes the same **bytes**.
+> If the requested resource cannot be shared by those renderers, resolution
+> selects a shareable fallback **before measurement**, without altering the
+> durable request.
 
-The second clause matters: it makes degrading a *legitimate resolution of the
-invariant* rather than a workaround, provided it happens at resolution time
-and not by rewriting the document.
+The last clause is what makes degrading legitimate rather than a workaround: it
+happens at resolution time, ahead of measurement, and the document is never
+rewritten. A lane that cannot obtain the measured face does not warn and paint
+something else — it resolves again, to a face it can obtain, and measures
+against that.
 
 And the rule that makes the design decidable:
 
@@ -133,24 +137,60 @@ everywhere" both look defensible; with it, exactly one lane is broken.
 
 ### 1. Resolution becomes a value
 
+Weight and style are part of a font's identity, not decoration on top of a
+family — `Inter 400` and `Inter 700` are different resources. Keying on family
+alone solves family resolution and reproduces the same bug for bold and italic
+a release later.
+
 ```ts
-interface FontRequest {
-  family: string;              // "Aptos" — what the document asked for
-  weight: "normal" | "bold";
+interface FontKey {
+  family: string;
+  weight: number;
   style: "normal" | "italic";
+  stretch?: string;
+}
+
+interface FontRequest extends FontKey {
   size: number;
 }
 
 interface FontResolution {
   request: FontRequest;
-  /** The face actually used. Never a request — always something that exists. */
-  resolved: { family: string; source: "requested" | "substituted" | "generic" };
-  /** Present when the environment can hand over the bytes. */
-  bytes?: () => Promise<ArrayBuffer | null>;
+  resolved: {
+    family: string;
+    source: "requested" | "substituted" | "default" | "generic";
+    /**
+     * False when the face exists only because this environment happens to
+     * have it. A lane that must reproduce the geometry elsewhere cannot use
+     * such a resolution and has to resolve again.
+     */
+    portable: boolean;
+  };
+  resource?: FontResource;
 }
 ```
 
-`source: "substituted"` is the fact the system is currently missing entirely.
+`source` and `portable` are the two facts the system is missing entirely today.
+
+Spans do not carry this object. A document has thousands of runs and a handful
+of distinct resolutions, so layout interns them and a span carries the id:
+
+```ts
+interface LayoutSpan {
+  font: string;
+  resolution: FontResolutionId;
+}
+
+interface DocumentLayout {
+  fontResolutions: ReadonlyMap<FontResolutionId, FontResolution>;
+}
+```
+
+That keeps the storage representation out of the 1.x public surface — an
+extension reading `LayoutSpan` gets an opaque id, not a contract — and gives
+the PDF exporter a natural cache key for embedding. If extensions later need to
+inspect a resolution, that becomes a deliberate read-only accessor rather than
+a shape we published by accident.
 
 ### 2. A `FontProvider`, owned by the editor
 
@@ -206,7 +246,117 @@ policy above achieves the same consistency and keeps the request.
 If a user genuinely wants their document normalized, that is an explicit
 command producing an explicit transaction — not a side effect of opening a file.
 
-### 6. Invalidation
+### 6. The default font is a request too
+
+Text with no `fontFamily` mark is not "unstyled" — it carries the document's
+default, and that default is a `FontRequest` like any other. Today it is
+`"Arial, sans-serif"`, handed to the host to resolve however it likes, which is
+the same implicit resolution this RFC exists to remove. One machine answers it
+differently from another, and Scrivr holds no bytes for the answer, so the PDF
+lane can never be exact about it.
+
+So the provider owns the default:
+
+```ts
+interface FontProvider {
+  defaultRequest(): FontRequest;
+  resolve(request: FontRequest): FontResolution;
+}
+```
+
+and `defaultRequest()` names a resource Scrivr or the application actually has.
+The browser receives those bytes through `FontFace`; the PDF exporter embeds the
+same bytes. A generic family is a last-resort *rendering* policy, not a default.
+
+That gives a hierarchy where only the last rung is degraded:
+
+| | Request | Outcome |
+|---|---|---|
+| 1 | requested, resource supplied | exact |
+| 2 | requested, app-known resource | exact once loaded |
+| 3 | requested, resource unavailable | Scrivr-owned fallback, reported |
+| 4 | no resource at all | host generic — degraded, diagnostic |
+
+An imported document keeps both facts: `request.family === "Aptos"` while
+`resolution.family === "Scrivr Default"`. Nothing is rewritten, and the
+divergence is legible rather than inferred from a measurement.
+
+### 7. Callers supply fonts, as resources rather than names
+
+An API that takes a family name and hopes the host has it recreates the
+ambiguity this RFC removes. What a caller supplies is a **resource**, or
+something that can produce one:
+
+```ts
+interface FontResource extends FontKey {
+  id: string;
+  bytes(): Promise<ArrayBuffer>;
+  format?: "woff2" | "woff" | "ttf" | "otf";
+  /** Holding the bytes is not permission to embed them. */
+  embedding?: { allowed: boolean; source?: "font-metadata" | "caller" };
+}
+```
+
+A URL is not a second architecture — it is a convenient way to obtain the same
+resource, normalized to bytes on first use and cached. Bytes and URL both yield
+a portable resource: the browser gets it through `FontFace`, the PDF exporter
+embeds the same bytes, and both lanes measure the same metal.
+
+A locally installed font is a different thing wearing the same word. The
+browser can render Arial without Scrivr owning Arial, and there is no portable
+way to take those bytes to a PDF. So it registers as a candidate, not a
+resource, and resolves with `portable: false` — which is exactly the signal
+export needs to resolve again before laying itself out.
+
+```ts
+const editor = new Editor({
+  fonts: new DefaultFontProvider({
+    default: interRegular,
+    resources: [interRegular, interBold, acmeLegal],
+  }),
+});
+```
+
+The common case should not require a font pipeline, so `DefaultFontProvider`
+handles inventory, loading and resolution. The interface behind it is what an
+organisation with its own typography implements:
+
+```ts
+interface FontProvider {
+  defaultRequest(): FontRequest;
+  resolve(request: FontRequest): Promise<FontResolution>;
+  getResource(resolution: FontResolution): Promise<FontResource | null>;
+  subscribe?(listener: (change: FontInventoryChange) => void): () => void;
+}
+```
+
+Registration is asynchronous — bytes are fetched, metadata inspected, a
+`FontFace` added and awaited — and defaults to `loading: "lazy"`, so a resource
+is paid for when something first resolves to it. Completion emits an inventory
+change, which is what drives the targeted re-layout in §8.
+
+**Registering is not requesting.** A document saying `fontFamily: "Aptos"`
+creates a request and changes no inventory; `fonts.register(...)` changes the
+inventory and names no document. The two words name the two halves of the
+thesis, and the API should never blur them:
+
+```text
+DOCUMENT                    ENVIRONMENT
+"Aptos"                     Aptos bytes
+   │                             │
+FontRequest                FontResource
+   └──────────────┬──────────────┘
+                  ▼
+             FontProvider
+                  ▼
+            FontResolution
+```
+
+This supersedes `PdfExportOptions.fontResolver`, which asks a per-export
+callback for bytes by family name and tells the canvas nothing — the shape that
+lets PDF embed a face canvas never measured.
+
+### 8. Invalidation
 
 | | |
 |---|---|
@@ -219,7 +369,7 @@ Closes `todo_font_loading_detection`, and wants `todo_typed_layout_invalidation`
 as its partner — "the font arrived" is precisely the typed reason that today
 would flip a single `_dirty` boolean and re-lay the document.
 
-### 7. What must never know about what
+### 9. What must never know about what
 
 - `LineBreaker` never learns about availability; it consumes measurements.
 - PDF never re-derives resolution; it reads it.
@@ -239,19 +389,56 @@ would flip a single `_dirty` boolean and re-lay the document.
 4. **Supply it** *(optional)* — a default resolver that fetches common
    families, so the bytes tier is the normal case rather than the lucky one.
 
-## Decisions to lock before building
+## Decisions (locked)
 
-- **Does layout re-measure when a font loads late?** Invalidation exists; the
-  policy does not.
-- **Is `FontResolution` public API?** It would appear on `LayoutSpan`, which
-  extensions read, and would then fall under the 1.x compat policy.
-- **Does substitution block an export?** Proposal: never block, always report.
-  A wrong-metrics PDF the user was warned about beats no PDF.
-- **Per-span or per-run resolution?** Per-span matches how `font` already
-  travels; a document-level table is smaller but adds an indirection per read.
-- **Does canvas accept supplied bytes too?** It must, for the bytes tier to
-  mean anything — otherwise PDF embeds a face canvas never measured, which is
-  the same bug pointing the other way.
+**Does layout re-measure when a font loads late?** Yes — when the *resolution*
+changes, not when a font event fires. Geometry is a function of the resolved
+face, so a block measured against a fallback whose request later resolves to
+the real thing is holding geometry that no longer matches. A font arriving that
+nothing requested changes nothing and invalidates nothing. Font loading is not
+the source of truth; the provider's answer is.
+
+**What happens if a font is still loading when an export starts?** The export
+takes a resolution snapshot: settle what is already loading, resolve every
+request, freeze those resolutions, measure against them, and hand the same
+resolutions and bytes to the renderer. A font that arrives mid-export does not
+move the ground underneath it — it can invalidate the editor afterwards, and
+that export stays internally consistent.
+
+**Is `FontResolution` public API?** Not initially. `LayoutSpan` carries an
+opaque `FontResolutionId` and the layout snapshot holds the table (§1). The
+concept is settled; the representation is not, and putting it on `LayoutSpan`
+would publish storage as contract under the 1.x compat policy.
+
+**Does substitution block an export?** No — but an export must not knowingly
+break the invariant either, and "warn, then paint something else" is the bug
+this RFC exists to remove. If the PDF lane cannot obtain the measured face it
+resolves again to one it can embed and **lays out against that face**. The
+document is untouched; the output is approximate against the author's
+typography and exactly correct within itself. Two diagnostics, because they are
+different situations:
+
+- `font-substituted` — internally correct, differs from what was requested.
+- `font-unreproducible` — a lane that cannot satisfy the invariant at all.
+  Reserved; the built-in PDF exporter should never emit it.
+
+**Per-span or per-run resolution?** Logically per run, physically interned.
+Resolution depends on family × weight × style — and later stretch and variation
+axes — so it belongs to the unit whose text is measured, but the object is
+stored once (§1).
+
+**Does canvas accept supplied bytes?** Yes, and this is the load-bearing one.
+The claim is stronger than "both lanes agree on a name": **both lanes consume
+the same font resource**. Supplied bytes become a `FontFace` for measurement
+and the same bytes are embedded on export. Without this, supplying a font makes
+things worse — PDF embeds a face the canvas never measured, which is this bug
+pointing the other way.
+
+**Can callers supply fonts?** Yes, as resources (§7). Bytes or a fetchable URL,
+normalized to bytes and portable to both lanes. A locally installed font
+registers as a *candidate*, not a resource: it resolves with `portable: false`,
+which an export treats as grounds to resolve again. Document `fontFamily`
+values never register anything — they are requests.
 
 ## Alternatives considered
 
