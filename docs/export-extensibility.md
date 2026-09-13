@@ -626,6 +626,14 @@ The cost of single-table dispatch is one small branch in the default paragraph l
 
 ### 5.6 `ctx.draw.image()` and the Y-axis flip
 
+> **Superseded.** A node handler draws through `ctx.draw`, which works in layout
+> pixels and core `Rgb`: `text({ text, x, baselineY, sizePx, font: { cssFont }, color })`,
+> `line({ from, to, thicknessPx, color })`, `rect({ x, y, width, height, color?, border? })`,
+> `image({ x, y, width, height, image: { src } })`, `imagePlaceholder(box)` and
+> `lines(block, ctx)`. There is no `rectangle`, no `y` on a text op, and colours are
+> 0-255 channels rather than pdf-lib's `rgb()`.
+
+
 pdf-lib uses a **bottom-up** Y coordinate system (origin at bottom-left, y increases upward). Scrivr's layout uses a **top-down** Y system (origin at top-left, y increases downward, matching canvas). Every handler drawing to pdf-lib has to flip Y, and getting this wrong is the single most common PDF bug.
 
 `ctx.draw.image(image, rect)` and its siblings (`ctx.draw.rectangle`, `ctx.draw.text`, `ctx.draw.lines`) take **Scrivr-flavored top-down rects** and handle the flip internally. Handlers pass `{ x, y, width, height }` in layout coordinates and get correct PDF output without ever seeing `pdf-lib`'s coordinate convention.
@@ -1298,6 +1306,14 @@ Type-only imports get erased at compile time — they don't create a runtime dep
 No forced installs, no bundled `pdf-lib` for non-PDF users, no handlers silently missing from exports. The dependency graph matches the feature graph.
 
 ### 12.4 Image rendering — `ctx.draw.image()` + inline atom dispatch
+
+> **Superseded.** A node handler draws through `ctx.draw`, which works in layout
+> pixels and core `Rgb`: `text({ text, x, baselineY, sizePx, font: { cssFont }, color })`,
+> `line({ from, to, thicknessPx, color })`, `rect({ x, y, width, height, color?, border? })`,
+> `image({ x, y, width, height, image: { src } })`, `imagePlaceholder(box)` and
+> `lines(block, ctx)`. There is no `rectangle`, no `y` on a text op, and colours are
+> 0-255 channels rather than pdf-lib's `rgb()`.
+
 
 **Decision**: image rendering is fully resolved by combining two mechanisms already specified:
 

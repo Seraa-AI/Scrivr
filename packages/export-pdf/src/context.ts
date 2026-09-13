@@ -36,9 +36,13 @@ import {
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
-/** Keeps an out-of-range channel or opacity from failing the whole export. */
+/**
+ * Keeps an out-of-range channel or opacity from failing the whole export.
+ * Only NaN gets a verdict of its own: everything else, Infinity included,
+ * clamps toward the end it overshot, so "too big" never reads as "zero".
+ */
 const clamp01 = (value: number): number =>
-  Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+  Number.isNaN(value) ? 0 : Math.min(1, Math.max(0, value));
 
 /** 1 CSS pixel = 0.75 PDF points (96dpi → 72dpi) */
 export const PT_PER_PX = 72 / 96;
@@ -106,20 +110,17 @@ export function createDrawHelpers(
   nodeHandlers: ReadonlyMap<string, PdfNodeHandler>,
   markHandlers: ReadonlyMap<string, PdfMarkHandler>,
 ): PdfDrawHelpers {
-  /**
-   * Core speaks in 0-255 channels; pdf-lib wants 0-1. Clamped rather than
-   * asserted: a handler computing a tint arithmetically should not lose the
-   * whole document to a range error naming pdf-lib's internal parameter.
-   */
+  /** Core speaks in 0-255 channels; pdf-lib wants 0-1. */
   const toPdfColor = (color: Rgb) =>
     rgb(clamp01(color.r / 255), clamp01(color.g / 255), clamp01(color.b / 255));
 
   const alpha = (opacity: number | undefined) =>
     opacity === undefined ? {} : { opacity: clamp01(opacity) };
 
-  // A surface op has one opacity for the entire shape. pdf-lib separates
-  // non-stroking alpha from stroking alpha for rectangles.
-  const shapeAlpha = (opacity: number | undefined) =>
+  // A surface op carries one opacity for the whole shape, but pdf-lib keeps
+  // non-stroking alpha apart from stroking alpha — so anything with a border
+  // has to set both or its outline stays opaque.
+  const alphaWithBorder = (opacity: number | undefined) =>
     opacity === undefined
       ? {}
       : { opacity: clamp01(opacity), borderOpacity: clamp01(opacity) };
@@ -170,7 +171,7 @@ export function createDrawHelpers(
             borderColor: toPdfColor(op.border.color),
             borderWidth: op.border.widthPx * PT_PER_PX,
           }),
-      ...shapeAlpha(op.opacity),
+      ...alphaWithBorder(op.opacity),
     });
   }
 
@@ -200,7 +201,7 @@ export function createDrawHelpers(
       color: parseCssColor(theme.imagePlaceholderBg),
       borderColor: parseCssColor(theme.imagePlaceholderBorder),
       borderWidth: 1,
-      ...shapeAlpha(opacity),
+      ...alphaWithBorder(opacity),
     });
   }
 
@@ -322,8 +323,8 @@ export function createDrawHelpers(
 
   function drawLines(block: LayoutBlock, ctx: PdfContext): void {
     const page = getPage();
-    const themeListMarker = parseCssColor(ctx.theme.listMarker);
-    const themeDefaultText = parseCssColor(ctx.theme.defaultText);
+    const themeListMarker = parseCssColor(theme.listMarker);
+    const themeDefaultText = parseCssColor(theme.defaultText);
 
     // Draw list marker if present.
     const firstLine = block.lines[0];

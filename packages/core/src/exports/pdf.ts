@@ -130,6 +130,7 @@ export interface PdfLineOp {
   /** Stroke width in layout pixels. */
   thicknessPx: number;
   color: Rgb;
+  /** Opacity of the stroke. Omit for opaque. */
   opacity?: number;
 }
 

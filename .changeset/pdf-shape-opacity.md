@@ -1,6 +1,7 @@
 ---
 "@scrivr/core": patch
 "@scrivr/export-pdf": patch
+"@scrivr/plugins": patch
 ---
 
 Apply drawing-surface opacity to both fill and stroke for rectangles and

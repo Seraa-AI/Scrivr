@@ -1,19 +1,23 @@
 ---
 "@scrivr/core": patch
 "@scrivr/export-pdf": patch
+"@scrivr/plugins": patch
 ---
 
 A PDF handler draws in layout pixels, without pdf-lib.
 
-`ctx.draw` gains `text`, `line` and `rect` beside `lines`. Every coordinate is
+`ctx.draw` gains `text`, `line` and `rect` beside `lines`. A rect can carry a
+`border`, so a handler no longer reaches for pdf-lib to outline one; a rect
+asking for neither a fill nor a border draws nothing, where pdf-lib would have
+filled it black. Every coordinate is
 layout pixels from the page's top-left and every colour is `Rgb`; the surface
 converts to points and flips the axis, so a handler does neither. Out-of-range
 channels and opacities are clamped rather than failing the export, and text is
 reduced to what the resolved font can encode — a handler cannot do that itself,
 since a font handle names a family rather than what the format made of it.
 
-The built-in handlers, the table row renderer and the header/footer tokens all
-draw through it now; none of them reference pdf-lib or carry their own copy of
+The built-in handlers, the table row renderer, the anchored-object painter and
+the header/footer tokens all draw through it now; none of them reference pdf-lib or carry their own copy of
 the conversion. Drawn output is unchanged, except that two greys are now
 exactly `#9ca3af` instead of hand-transcribed approximations of it.
 

@@ -1,6 +1,9 @@
 /**
  * The drawing surface, as a handler meets it.
  *
+ * Also that a shape's single opacity reaches fill and stroke alike, so a
+ * transparent box leaves no visible outline behind it.
+ *
  * A handler works in layout pixels measured from the page's top-left and in
  * `Rgb`, and never performs the conversion to points or the flip to a
  * bottom-left origin. These assert the surface does both, because a handler
@@ -13,6 +16,7 @@ import { PDFDocument, PDFDict, PDFName, PDFNumber } from "pdf-lib";
 import { buildPdf } from "../index";
 import { PT_PER_PX } from "../context";
 import type { PdfNodeHandler } from "../augmentation";
+import type { PdfTextOp } from "@scrivr/core";
 import { recordDrawOps } from "./opLog";
 import { block, onePage, PAGE_CONFIG } from "./fixtures";
 
@@ -39,7 +43,7 @@ const Ruler = Extension.create({
 
 describe.each(["border-only rectangle", "filled rectangle", "missing image"])("%s opacity", kind => {
   it.each([
-    [0, 0], [0.4, 0.4], [1, 1], [-1, 0], [2, 1], [NaN, 0], [undefined, 1],
+    [0, 0], [0.4, 0.4], [1, 1], [-1, 0], [2, 1], [Infinity, 1], [-Infinity, 0], [NaN, 0], [undefined, 1],
   ])("applies %s to both fill and stroke", async (opacity, expected) => {
     const handler: PdfNodeHandler = (_block, ctx) => {
       const box = {
@@ -103,4 +107,47 @@ describe("the drawing surface", () => {
     expect(rule?.["color"]).toBe("rgb(0.796, 0.835, 0.882)");
   });
 
+});
+
+describe("text drawn through the surface", () => {
+  const drawing = (op: Partial<PdfTextOp> & { text: string }) => {
+    const handler: PdfNodeHandler = (_block, ctx) =>
+      ctx.draw.text({
+        x: 10,
+        baselineY: 20,
+        sizePx: 12,
+        font: { cssFont: "12px sans-serif" },
+        color: { r: 0, g: 0, b: 0 },
+        ...op,
+      });
+    const Writer = Extension.create({
+      name: "writer",
+      addExports: () => ({ pdf: { nodes: { horizontalRule: handler } } }),
+    });
+    return recordDrawOps(() =>
+      buildPdf(ruled, new ServerEditor({ extensions: [StarterKit, Writer] })),
+    );
+  };
+
+  it("reduces text to what the resolved font can encode", async () => {
+    // A generic family resolves to a standard face, which encodes WinAnsi
+    // only. A handler cannot know that — a font handle names a family, not
+    // what the exporter made of it — so an unencodable glyph must not take
+    // the whole document down with it.
+    const ops = await drawing({ text: "a → b" });
+    expect(ops.find((op) => op.op === "text")?.["value"]).toBe("a ? b");
+  });
+
+  it("draws nothing for text that would leave no ink", async () => {
+    const ops = await drawing({ text: "\u200b" });
+    expect(ops.some((op) => op.op === "text")).toBe(false);
+  });
+
+  it("places the run at its baseline, converted and flipped", async () => {
+    const ops = await drawing({ text: "x" });
+    const text = ops.find((op) => op.op === "text");
+    expect(text?.["x"]).toBe(10 * PT_PER_PX);
+    expect(text?.["y"]).toBe(PAGE_CONFIG.pageHeight * PT_PER_PX - 20 * PT_PER_PX);
+    expect(text?.["size"]).toBe(12 * PT_PER_PX);
+  });
 });

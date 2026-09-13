@@ -42,13 +42,11 @@ export const defaultNodeHandlers: Record<string, PdfNodeHandler> = {
   },
   image: (block, ctx) => {
     const src = block.node.attrs["src"];
-    ctx.draw.image({
-      x: block.x,
-      y: block.y,
-      width: block.width,
-      height: block.height,
-      image: { src: typeof src === "string" ? src : "" },
-    });
+    const box = { x: block.x, y: block.y, width: block.width, height: block.height };
+    // Says the missing case by name rather than leaning on an empty `src`
+    // failing to resolve somewhere downstream.
+    if (typeof src !== "string" || src.length === 0) return ctx.draw.imagePlaceholder(box);
+    ctx.draw.image({ ...box, image: { src } });
   },
 };
 
