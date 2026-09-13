@@ -151,59 +151,87 @@ export function createDrawHelpers(
     }
   }
 
+  /**
+   * Ask each mark on the span what it does, in the order the marks arrive.
+   * A mark with no handler contributes nothing rather than being guessed at.
+   */
+  function styleSpan(
+    marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
+    ctx: PdfContext,
+  ): PdfSpanStyle[] {
+    if (!marks) return [];
+    const out: PdfSpanStyle[] = [];
+    for (const mark of marks) {
+      const handler = markHandlers[mark.name];
+      if (handler) out.push(handler(mark, ctx));
+    }
+    return out;
+  }
+
+  /**
+   * The colour the text is actually painted in. An authored colour beats one a
+   * mark supplies for being what it is, so a coloured link keeps its colour —
+   * the cascade OOXML applies, and what the canvas resolves to.
+   */
+  function resolveFill(
+    styles: PdfSpanStyle[],
+    fallback: ReturnType<typeof rgb>,
+  ): ReturnType<typeof rgb> {
+    let authored: string | undefined;
+    let semantic: string | undefined;
+    for (const style of styles) {
+      if (style.color !== undefined) authored = style.color;
+      if (style.defaultColor !== undefined) semantic = style.defaultColor;
+    }
+    const chosen = authored ?? semantic;
+    return chosen === undefined ? fallback : parseCssColor(chosen);
+  }
+
+  /**
+   * Paint what the marks add around the glyphs. Runs after the text, so a
+   * highlight reads as a highlighter over the words rather than a box behind
+   * them.
+   */
   function drawDecorations(
-    span: {
-      font: string;
-      width: number;
-      marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
-    },
+    span: { font: string; width: number },
+    styles: PdfSpanStyle[],
     spanAbsX: number,
     baselineY: number,
-    theme: ResolvedTheme,
     effectiveTextColor: ReturnType<typeof rgb>,
   ): void {
-    if (!span.marks) return;
+    if (styles.length === 0) return;
     const page = getPage();
 
     const fontSize = extractFontSizePx(span.font);
     const thickness = Math.max(1, fontSize * 0.06) * PT_PER_PX;
     const x1 = spanAbsX * PT_PER_PX;
     const x2 = x1 + span.width * PT_PER_PX;
+    const rule = (y: number, color: ReturnType<typeof rgb>) =>
+      page.drawLine({
+        start: { x: x1, y: flipY(y, pageHeightPt) },
+        end: { x: x2, y: flipY(y, pageHeightPt) },
+        thickness,
+        color,
+      });
 
-    for (const mark of span.marks) {
-      if (mark.name === "underline" || mark.name === "link") {
-        // Underline follows the effective text color so colored text gets a
-        // matching underline. Link uses theme.link explicitly.
-        const lineColor =
-          mark.name === "link" ? parseCssColor(theme.link) : effectiveTextColor;
-        page.drawLine({
-          start: { x: x1, y: flipY(baselineY + fontSize * 0.15, pageHeightPt) },
-          end: { x: x2, y: flipY(baselineY + fontSize * 0.15, pageHeightPt) },
-          thickness,
-          color: lineColor,
-        });
-      }
-      if (mark.name === "strikethrough") {
-        page.drawLine({
-          start: { x: x1, y: flipY(baselineY - fontSize * 0.3, pageHeightPt) },
-          end: { x: x2, y: flipY(baselineY - fontSize * 0.3, pageHeightPt) },
-          thickness,
-          color: effectiveTextColor,
-        });
-      }
-      if (mark.name === "highlight") {
-        const highlightColor = parseHexColor(
-          typeof mark.attrs["color"] === "string"
-            ? mark.attrs["color"]
-            : "#fef08a",
+    for (const style of styles) {
+      if (style.underline) {
+        rule(
+          baselineY + fontSize * 0.15,
+          style.underlineColor === undefined
+            ? effectiveTextColor
+            : parseCssColor(style.underlineColor),
         );
+      }
+      if (style.strikethrough) rule(baselineY - fontSize * 0.3, effectiveTextColor);
+      if (style.backgroundColor) {
         page.drawRectangle({
           x: x1,
           y: flipY(baselineY + fontSize * 0.2, pageHeightPt),
           width: span.width * PT_PER_PX,
           height: fontSize * 1.1 * PT_PER_PX,
-          color: highlightColor,
-          opacity: 0.4,
+          color: parseCssColor(style.backgroundColor.color),
+          opacity: style.backgroundColor.opacity ?? 1,
         });
       }
     }
@@ -349,7 +377,8 @@ export function createDrawHelpers(
         }
 
         const fontSize = extractFontSizePx(span.font);
-        const color = extractColor(span.marks, ctx.theme, themeDefaultText);
+        const styles = styleSpan(span.marks, ctx);
+        const color = resolveFill(styles, themeDefaultText);
 
         page.drawText(text, {
           x: spanAbsX * PT_PER_PX,
@@ -359,7 +388,7 @@ export function createDrawHelpers(
           color,
         });
 
-        drawDecorations(span, spanAbsX, baselineY, ctx.theme, color);
+        drawDecorations(span, styles, spanAbsX, baselineY, color);
 
         spacesBeforeSpan += countSpaces(span.text);
       }
@@ -484,23 +513,6 @@ export function stripInvisible(text: string): string {
  */
 export function sanitizeForWinAnsi(text: string): string {
   return stripInvisible(text).replace(NOT_WIN_ANSI, "?");
-}
-
-/**
- * Extract text fill color from marks. User-applied `color` mark wins; link
- * mark falls through to `theme.link`; everything else gets `theme.defaultText`
- * (passed in pre-resolved to avoid re-parsing per span).
- */
-function extractColor(
-  marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
-  theme: ResolvedTheme,
-  defaultTextColor: ReturnType<typeof rgb>,
-): ReturnType<typeof rgb> {
-  const colorMark = marks?.find((m) => m.name === "color");
-  const colorVal = colorMark?.attrs["color"];
-  if (typeof colorVal === "string") return parseCssColor(colorVal);
-  if (marks?.some((m) => m.name === "link")) return parseCssColor(theme.link);
-  return defaultTextColor;
 }
 
 /**

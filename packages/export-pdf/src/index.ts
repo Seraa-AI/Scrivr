@@ -14,7 +14,7 @@ import type {
   ResolvedTheme,
 } from "@scrivr/core";
 import { compareAnchoredObjectPaintOrder, defaultPdfTheme } from "@scrivr/core";
-import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
+import type { PdfNodeHandler, PdfMarkHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
 import type { PdfContext } from "./context";
 import {
@@ -90,6 +90,7 @@ export async function buildPdf(
 ): Promise<Uint8Array> {
   // ── Phase 1: Collect handlers ──────────────────────────────────────────
   const nodeHandlers: Record<string, PdfNodeHandler> = { ...defaultNodeHandlers };
+  const markHandlers: Record<string, PdfMarkHandler> = { ...defaultMarkHandlers };
   const chromeHandlers: Record<string, PdfChromeHandler<unknown>> = {};
   const lifecycleHooks: {
     before: Array<(ctx: PdfContext) => void | Promise<void>>;
@@ -100,6 +101,7 @@ export async function buildPdf(
     const pdfContrib = contrib.pdf;
     if (!pdfContrib) continue;
     if (pdfContrib.nodes) Object.assign(nodeHandlers, pdfContrib.nodes);
+    if (pdfContrib.marks) Object.assign(markHandlers, pdfContrib.marks);
     if (pdfContrib.chrome) Object.assign(chromeHandlers, pdfContrib.chrome);
     if (pdfContrib.onBeforeExport) lifecycleHooks.before.push(pdfContrib.onBeforeExport);
     if (pdfContrib.onAfterExport) lifecycleHooks.after.push(pdfContrib.onAfterExport);
@@ -129,7 +131,7 @@ export async function buildPdf(
     pageHeightPt,
     fontRegistry,
     nodeHandlers,
-    defaultMarkHandlers,
+    markHandlers,
   );
 
   // Resolve PDF theme: defaults are always print-ready; caller's `theme`

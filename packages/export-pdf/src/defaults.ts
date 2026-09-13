@@ -5,7 +5,7 @@
  */
 
 import { rgb } from "pdf-lib";
-import type { PdfNodeHandler } from "./augmentation";
+import type { PdfMarkHandler, PdfNodeHandler } from "./augmentation";
 import type { PdfContext } from "./context";
 import { PT_PER_PX, parseHexColor } from "./context";
 
@@ -75,4 +75,35 @@ export const defaultNodeHandlers: Record<string, PdfNodeHandler> = {
  * in when extensions need to contribute custom mark rendering. Exported empty
  * for forward compatibility.
  */
-export const defaultMarkHandlers: Record<string, never> = {};
+/**
+ * What the built-in marks do to a span.
+ *
+ * These live here rather than on their extensions only until each one declares
+ * its own lane; the shapes are what an extension would return.
+ */
+export const defaultMarkHandlers: Record<string, PdfMarkHandler> = {
+  color: (mark) => {
+    const value = mark.attrs["color"];
+    return typeof value === "string" ? { color: value } : {};
+  },
+
+  // Blue because it is a link, not because anyone picked blue — so a colour
+  // mark on the same span wins for the text. The underline stays link-blue
+  // either way, which is what the canvas draws.
+  link: (_mark, ctx) => ({
+    defaultColor: ctx.theme.link,
+    underline: true,
+    underlineColor: ctx.theme.link,
+  }),
+
+  underline: () => ({ underline: true }),
+
+  strikethrough: () => ({ strikethrough: true }),
+
+  highlight: (mark) => ({
+    backgroundColor: {
+      color: typeof mark.attrs["color"] === "string" ? mark.attrs["color"] : "#fef08a",
+      opacity: 0.4,
+    },
+  }),
+};

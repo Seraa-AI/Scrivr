@@ -7,19 +7,36 @@ import type { LayoutBlock, LayoutPage } from "@scrivr/core";
 import type { PDFFont } from "pdf-lib";
 import type { PdfContext } from "./context";
 
-/** Style modifiers returned by mark handlers, applied during line rendering. */
+/**
+ * What a mark does to the span it covers. Colours are CSS strings — the same
+ * spelling the canvas uses — so an extension can describe its mark without
+ * depending on pdf-lib or on how a colour is composited for print.
+ *
+ * A handler says what a mark means, never where the ink goes: thickness and
+ * offsets stay with the renderer, so every mark's underline sits on the same
+ * line.
+ */
 export interface PdfSpanStyle {
-  font?: PDFFont;
-  color?: { r: number; g: number; b: number };
+  /** A colour the author chose. Beats any `defaultColor` on the same span. */
+  color?: string;
+  /**
+   * The colour this mark gives a span for being what it is — a link's blue.
+   * Loses to an authored `color`, whatever order the marks arrive in.
+   */
+  defaultColor?: string;
   underline?: boolean;
+  /** Underline in this colour instead of following the text. */
+  underlineColor?: string;
   strikethrough?: boolean;
-  backgroundColor?: { r: number; g: number; b: number; opacity?: number };
+  /** Painted over the text, as a highlighter would be. */
+  backgroundColor?: { color: string; opacity?: number };
+  font?: PDFFont;
 }
 
 /** Draw a block (or inline atom) onto a PDF page. */
 export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfContext) => void;
 
-/** Return style modifiers for a mark during span iteration. */
+/** What this mark does to a span. Called once per mark, per span. */
 export type PdfMarkHandler = (
   mark: { name: string; attrs: Record<string, unknown> },
   ctx: PdfContext,
