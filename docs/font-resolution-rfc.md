@@ -470,6 +470,34 @@ would make the bytes tier the normal case by making Scrivr own typefaces, which
 is the boundary above. The application brings them; what the phases build is
 the guarantee that both lanes then consume the same ones.
 
+## What shipped
+
+Updated as each phase lands. Where the code and the proposal above disagree,
+this section says so rather than the proposal being quietly rewritten to match.
+
+### Phase 1 — in progress
+
+- `packages/core/src/fonts/` — `FontKey`, `FontRequest`, `FontResource`,
+  `FontResolution`, `FontResolutionConstraints`, `FontProviderChange`,
+  `FontProvider`, and `DefaultFontProvider`.
+
+**Deviation: `resolve` is synchronous.** The proposal has
+`resolve(request, constraints): Promise<FontResolution>`. It cannot be — layout
+is reached through `get layout()`, a synchronous property getter, so nothing on
+the measurement path can await. Resolution is therefore two calls:
+
+```ts
+prepare(requests, constraints?): Promise<void>   // ahead of measurement, may fetch
+resolve(request, constraints?): FontResolution   // what is known now, never blocks
+```
+
+`prepare` is the pre-layout pass. `resolve` always answers: a request `prepare`
+never saw resolves to the default and reports `source: "default"`, rather than
+the caller inferring it from the geometry afterwards. This is a closer fit to
+"the work happens before the layout path" than the async signature was, since
+the async work is now unambiguously outside that path rather than notionally
+ahead of it.
+
 ## Decisions (locked)
 
 **Does layout re-measure when a font loads late?** Yes — when the *resolution*
