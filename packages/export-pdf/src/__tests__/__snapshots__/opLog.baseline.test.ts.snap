@@ -442,6 +442,7 @@ exports[`baseline — node rendering > a table row, shaded and merged 1`] = `
     "y": 0,
   },
   {
+    "borderOpacity": 1,
     "color": "rgb(0.933, 0.933, 0.933)",
     "height": 30,
     "op": "rect",

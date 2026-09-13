@@ -18,26 +18,18 @@
  * doc JSON).
  */
 
-import type { LayoutBlock } from "@scrivr/core";
+import type { LayoutBlock, PdfDrawSurface, Rgb } from "@scrivr/core";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./tokenStrategies";
 
-/** Minimal shape of the PDF context — avoids importing from @scrivr/export-pdf. */
+/** What these handlers need of the context the export pipeline hands them. */
 interface PdfContextLike {
   layout: {
     pages: Array<{ pageNumber: number }>;
-    pageConfig: { pageHeight: number; margins: { top: number; bottom: number } };
     metrics?: Array<{ headerTop: number; headerHeight: number; footerTop: number; footerHeight: number }>;
   };
-  page: { drawText(text: string, opts: { x: number; y: number; size: number; font: unknown; color: unknown }): void };
-  fonts: { resolve(cssFont: string): unknown; fallback: unknown };
-  draw: {
-    lines(
-      block: { x: number; y: number; width: number; availableWidth: number; lines: unknown[]; [k: string]: unknown },
-      ctx: unknown,
-    ): void;
-  };
+  draw: PdfDrawSurface & { lines(block: LayoutBlock, ctx: unknown): void };
   x: number;
   y: number;
   width: number;
@@ -48,9 +40,23 @@ function isResolvedPayload(value: unknown): value is ResolvedHeaderFooter {
   return "policy" in value && "slots" in value;
 }
 
+/**
+ * A token only draws, so it asks for only what it dereferences. Demanding the
+ * band's fields here would turn a draw-only context into a silent no-op.
+ */
+function isDrawContext(value: unknown): value is { draw: PdfContextLike["draw"] } {
+  return typeof value === "object" && value !== null && "draw" in value;
+}
+
+/** The band additionally reads the layout and writes its own origin back. */
 function isPdfContext(value: unknown): value is PdfContextLike {
-  if (typeof value !== "object" || value === null) return false;
-  return "layout" in value && "draw" in value;
+  return (
+    isDrawContext(value) &&
+    "layout" in value &&
+    "x" in value &&
+    "y" in value &&
+    "width" in value
+  );
 }
 
 /**
@@ -107,41 +113,37 @@ function renderBand(
 
 // ── PDF node handlers for token inline atoms ─────────────────────────────────
 
-const PT_PER_PX = 72 / 96;
+/** #9ca3af — the same grey the table borders use. */
+const TOKEN_COLOR: Rgb = { r: 156, g: 163, b: 175 };
+const TOKEN_SIZE_PX = 10;
 
-function flipY(yPx: number, pageHeightPt: number): number {
-  return pageHeightPt - yPx * PT_PER_PX;
-}
-
-function drawTokenOnPdf(text: string, block: LayoutBlock, ctx: PdfContextLike): void {
-  const pageHeightPt = ctx.layout.pageConfig.pageHeight * PT_PER_PX;
-  const font = ctx.fonts.fallback;
-  const size = 10 * PT_PER_PX;
-  ctx.page.drawText(text, {
-    x: block.x * PT_PER_PX,
-    y: flipY(block.y + block.height, pageHeightPt),
-    size,
-    font,
-    // Structural match for pdf-lib's RGB color without importing the library
-    color: { type: "RGB", red: 0.61, green: 0.64, blue: 0.69 },
+function drawTokenOnPdf(text: string, block: LayoutBlock, ctx: { draw: PdfContextLike["draw"] }): void {
+  ctx.draw.text({
+    text,
+    x: block.x,
+    baselineY: block.y + block.height,
+    sizePx: TOKEN_SIZE_PX,
+    // A generic family, so the exporter resolves its standard sans face.
+    font: { cssFont: `${TOKEN_SIZE_PX}px sans-serif` },
+    color: TOKEN_COLOR,
   });
 }
 
 /** PDF node handler for pageNumber token. */
 export function renderPageNumberPdf(block: LayoutBlock, ctx: unknown): void {
-  if (!isPdfContext(ctx)) return;
+  if (!isDrawContext(ctx)) return;
   drawTokenOnPdf(String(getCurrentPageNumber()), block, ctx);
 }
 
 /** PDF node handler for totalPages token. */
 export function renderTotalPagesPdf(block: LayoutBlock, ctx: unknown): void {
-  if (!isPdfContext(ctx)) return;
+  if (!isDrawContext(ctx)) return;
   drawTokenOnPdf(String(getCurrentTotalPages()), block, ctx);
 }
 
 /** PDF node handler for date token. */
 export function renderDatePdf(block: LayoutBlock, ctx: unknown): void {
-  if (!isPdfContext(ctx)) return;
+  if (!isDrawContext(ctx)) return;
   const frozen = block.node.attrs["frozen"];
   const parsed = typeof frozen === "string" ? new Date(frozen) : new Date();
   const now = isNaN(parsed.getTime()) ? new Date() : parsed;

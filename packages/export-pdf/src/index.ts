@@ -6,7 +6,22 @@ export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentati
 // The mark lane's contract lives in core so an extension can describe its
 // mark without depending on this package; re-exported for consumers already
 // importing it from here.
-export type { PdfMarkHandler, PdfSpanStyle, PdfSpanMark, PdfMarkContext } from "@scrivr/core";
+export type {
+  PdfMarkHandler,
+  PdfSpanStyle,
+  PdfSpanMark,
+  PdfMarkContext,
+  PdfDrawSurface,
+  PdfPoint,
+  PdfBox,
+  PdfTextOp,
+  PdfLineOp,
+  PdfRectOp,
+  PdfImageOp,
+  PdfFontHandle,
+  PdfImageHandle,
+  Rgb,
+} from "@scrivr/core";
 export type { PdfContext, PdfFontRegistry, PdfDrawHelpers } from "./context";
 
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
@@ -21,7 +36,7 @@ import type {
 import { compareAnchoredObjectPaintOrder, defaultPdfTheme } from "@scrivr/core";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
-import type { PdfContext } from "./context";
+import type { PdfContext, PdfDrawHelpers } from "./context";
 import {
   embedStandardFonts,
   embedCustomFonts,
@@ -140,18 +155,21 @@ export async function buildPdf(
   let currentPage: PDFPage = null!;
   const getPage = () => currentPage;
 
+  // Resolved before the draw helpers, which paint the image placeholder from it.
+  // Defaults are always print-ready; the caller's `theme` option (literal
+  // colours only) shallow-merges over them. `editor.theme` is deliberately
+  // ignored so a dark canvas still produces a printable PDF.
+  const resolvedTheme: ResolvedTheme = { ...defaultPdfTheme, ...(options?.theme ?? {}) };
+
   const draw = createDrawHelpers(
     getPage,
     pageHeightPt,
     fontRegistry,
+    resolvedTheme,
+    imageCache,
     nodeHandlers,
     markHandlers,
   );
-
-  // Resolve PDF theme: defaults are always print-ready; caller's `theme`
-  // option (literal colors only) shallow-merges over them. We deliberately
-  // ignore `editor.theme` so a dark canvas still produces a printable PDF.
-  const resolvedTheme: ResolvedTheme = { ...defaultPdfTheme, ...(options?.theme ?? {}) };
 
   // ── Phase 3: Build context shell ───────────────────────────────────────
   const ctx: PdfContext = {
@@ -203,7 +221,7 @@ export async function buildPdf(
       .sort(compareAnchoredObjectPaintOrder);
     for (const object of pageObjects) {
       if (object.wrapMode === "behind") {
-        drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache, resolvedTheme);
+        drawPdfAnchoredObject(draw, object);
       }
     }
 
@@ -228,7 +246,7 @@ export async function buildPdf(
     // Anchored objects in front of (or alongside) blocks
     for (const object of pageObjects) {
       if (object.wrapMode !== "behind") {
-        drawPdfAnchoredObject(currentPage, object, pageHeightPt, imageCache, resolvedTheme);
+        drawPdfAnchoredObject(draw, object);
       }
     }
 
@@ -253,36 +271,13 @@ export async function buildPdf(
 // ── Anchored-object rendering (not dispatched — part of core pipeline) ──────
 
 function drawPdfAnchoredObject(
-  page: PDFPage,
+  draw: PdfDrawHelpers,
   object: AnchoredObjectPlacement,
-  pageHeightPt: number,
-  imageCache: Map<string, PDFImage | null>,
-  theme: ResolvedTheme,
 ): void {
-  const src = object.node.attrs["src"] as string | undefined;
-  const x = object.x * PT_PER_PX;
-  const y = flipY(object.y + object.height, pageHeightPt);
-  const w = object.width * PT_PER_PX;
-  const h = object.height * PT_PER_PX;
-
-  if (src) {
-    const image = imageCache.get(src);
-    if (image) {
-      page.drawImage(image, { x, y, width: w, height: h });
-      return;
-    }
-  }
-
-  // Placeholder for missing/failed images — themed to match canvas behaviour.
-  page.drawRectangle({
-    x,
-    y,
-    width: w,
-    height: h,
-    borderColor: parseCssColor(theme.imagePlaceholderBorder),
-    borderWidth: 1,
-    color: parseCssColor(theme.imagePlaceholderBg),
-  });
+  const src = object.node.attrs["src"];
+  const box = { x: object.x, y: object.y, width: object.width, height: object.height };
+  if (typeof src !== "string" || src.length === 0) return draw.imagePlaceholder(box);
+  draw.image({ ...box, image: { src } });
 }
 
 // ── Image embedding ──────────────────────────────────────────────────────────
@@ -392,10 +387,4 @@ async function embedImages(
   );
 
   return result;
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function flipY(yPx: number, pageHeightPt: number): number {
-  return pageHeightPt - yPx * PT_PER_PX;
 }

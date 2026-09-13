@@ -1,5 +1,6 @@
 /**
- * The PDF mark lane's contract.
+ * What an extension declares about PDF output: how its marks look, and the
+ * primitives its node handlers draw with.
  *
  * It lives in core, as the DOCX handler types do, so an extension can describe
  * what its mark looks like in an export without depending on
@@ -13,6 +14,7 @@
  */
 
 import type { ResolvedTheme } from "../model/theme";
+import type { Rgb } from "../model/cssColor";
 
 /**
  * What a mark on a span is asking for. Colours must be supported CSS literals
@@ -77,3 +79,85 @@ export type PdfMarkHandler = (
   mark: PdfSpanMark,
   ctx: PdfMarkContext,
 ) => PdfSpanStyle;
+
+// ── Drawing ─────────────────────────────────────────────────────────────────
+
+/**
+ * Names a font by the CSS shorthand layout measured with. The exporter resolves
+ * it, falling back to a standard face when it has no bytes for that family.
+ */
+export interface PdfFontHandle {
+  readonly cssFont: string;
+}
+
+/**
+ * Names an image by its `src`. A `src` the exporter never embedded draws the
+ * placeholder rather than nothing, so a broken image still occupies its space.
+ */
+export interface PdfImageHandle {
+  readonly src: string;
+}
+
+/** A point in layout pixels, measured from the page's top-left. */
+export interface PdfPoint {
+  x: number;
+  y: number;
+}
+
+/** A box in layout pixels, measured from the page's top-left. */
+export interface PdfBox extends PdfPoint {
+  width: number;
+  height: number;
+}
+
+export interface PdfTextOp {
+  text: string;
+  /** Left edge of the run. */
+  x: number;
+  /** Baseline, not top: a line's y plus its ascent. */
+  baselineY: number;
+  /** Font size in layout pixels. */
+  sizePx: number;
+  font: PdfFontHandle;
+  color: Rgb;
+  /** 0–1. Omit for opaque. */
+  opacity?: number;
+}
+
+export interface PdfLineOp {
+  from: PdfPoint;
+  to: PdfPoint;
+  /** Stroke width in layout pixels. */
+  thicknessPx: number;
+  color: Rgb;
+  /** Opacity of the stroke. Omit for opaque. */
+  opacity?: number;
+}
+
+export interface PdfRectOp extends PdfBox {
+  /** Omit to leave the box unfilled. With no border either, nothing is drawn. */
+  color?: Rgb;
+  /** Opacity of both the fill and border. Omit for opaque. */
+  opacity?: number;
+  border?: { color: Rgb; widthPx: number };
+}
+
+export interface PdfImageOp extends PdfBox {
+  image: PdfImageHandle;
+  /** Opacity of the image, or the entire placeholder when it cannot be resolved. */
+  opacity?: number;
+}
+
+/**
+ * The primitives a handler draws with. Every coordinate is layout pixels,
+ * top-down; the implementation owns the conversion to PDF points and the flip
+ * to a bottom-left origin, so a handler never performs either.
+ */
+export interface PdfDrawSurface {
+  text(op: PdfTextOp): void;
+  line(op: PdfLineOp): void;
+  rect(op: PdfRectOp): void;
+  image(op: PdfImageOp): void;
+  /** The box drawn in place of an image that could not be resolved. */
+  imagePlaceholder(box: PdfBox): void;
+}

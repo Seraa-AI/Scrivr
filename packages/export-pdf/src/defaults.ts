@@ -1,13 +1,10 @@
 /**
- * Default PDF export handlers for the core schema.
- * These cover all built-in node and mark types. Extensions only need to
- * handle their own custom types — core schema is covered here.
+ * Default PDF node handlers for the core schema. Marks are declared by the
+ * extensions that define them.
  */
 
-import { rgb } from "pdf-lib";
 import type { PdfNodeHandler } from "./augmentation";
 import type { PdfMarkHandler } from "@scrivr/core";
-import { PT_PER_PX } from "./context";
 
 export const defaultNodeHandlers: Record<string, PdfNodeHandler> = {
   paragraph: (block, ctx) => {
@@ -35,37 +32,21 @@ export const defaultNodeHandlers: Record<string, PdfNodeHandler> = {
   },
 
   horizontalRule: (block, ctx) => {
-    const midY = block.y + block.height / 2;
-    const x1 = block.x * PT_PER_PX;
-    const x2 = (block.x + block.availableWidth) * PT_PER_PX;
-    const pageHeightPt = ctx.layout.pageConfig.pageHeight * PT_PER_PX;
-    const y = pageHeightPt - midY * PT_PER_PX;
-    ctx.page.drawLine({
-      start: { x: x1, y },
-      end: { x: x2, y },
-      thickness: 1.5 * PT_PER_PX,
-      color: rgb(0.796, 0.835, 0.882), // #cbd5e1
+    const y = block.y + block.height / 2;
+    ctx.draw.line({
+      from: { x: block.x, y },
+      to: { x: block.x + block.availableWidth, y },
+      thicknessPx: 1.5,
+      color: { r: 203, g: 213, b: 225 },
     });
   },
-
   image: (block, ctx) => {
-    const src = block.node.attrs["src"] as string | undefined;
-    const image = src ? ctx.images.get(src) ?? null : null;
-    if (image) {
-      ctx.draw.image(image, {
-        x: block.x,
-        y: block.y,
-        width: block.width,
-        height: block.height,
-      });
-    } else {
-      ctx.draw.imagePlaceholder({
-        x: block.x,
-        y: block.y,
-        width: block.width,
-        height: block.height,
-      });
-    }
+    const src = block.node.attrs["src"];
+    const box = { x: block.x, y: block.y, width: block.width, height: block.height };
+    // Says the missing case by name rather than leaning on an empty `src`
+    // failing to resolve somewhere downstream.
+    if (typeof src !== "string" || src.length === 0) return ctx.draw.imagePlaceholder(box);
+    ctx.draw.image({ ...box, image: { src } });
   },
 };
 

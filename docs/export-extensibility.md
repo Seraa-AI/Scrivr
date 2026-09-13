@@ -626,6 +626,14 @@ The cost of single-table dispatch is one small branch in the default paragraph l
 
 ### 5.6 `ctx.draw.image()` and the Y-axis flip
 
+> **Superseded.** A node handler draws through `ctx.draw`, which works in layout
+> pixels and core `Rgb`: `text({ text, x, baselineY, sizePx, font: { cssFont }, color })`,
+> `line({ from, to, thicknessPx, color })`, `rect({ x, y, width, height, color?, border? })`,
+> `image({ x, y, width, height, image: { src } })`, `imagePlaceholder(box)` and
+> `lines(block, ctx)`. There is no `rectangle`, no `y` on a text op, and colours are
+> 0-255 channels rather than pdf-lib's `rgb()`.
+
+
 pdf-lib uses a **bottom-up** Y coordinate system (origin at bottom-left, y increases upward). Scrivr's layout uses a **top-down** Y system (origin at top-left, y increases downward, matching canvas). Every handler drawing to pdf-lib has to flip Y, and getting this wrong is the single most common PDF bug.
 
 `ctx.draw.image(image, rect)` and its siblings (`ctx.draw.rectangle`, `ctx.draw.text`, `ctx.draw.lines`) take **Scrivr-flavored top-down rects** and handle the flip internally. Handlers pass `{ x, y, width, height }` in layout coordinates and get correct PDF output without ever seeing `pdf-lib`'s coordinate convention.
@@ -1299,6 +1307,14 @@ No forced installs, no bundled `pdf-lib` for non-PDF users, no handlers silently
 
 ### 12.4 Image rendering — `ctx.draw.image()` + inline atom dispatch
 
+> **Superseded.** A node handler draws through `ctx.draw`, which works in layout
+> pixels and core `Rgb`: `text({ text, x, baselineY, sizePx, font: { cssFont }, color })`,
+> `line({ from, to, thicknessPx, color })`, `rect({ x, y, width, height, color?, border? })`,
+> `image({ x, y, width, height, image: { src } })`, `imagePlaceholder(box)` and
+> `lines(block, ctx)`. There is no `rectangle`, no `y` on a text op, and colours are
+> 0-255 channels rather than pdf-lib's `rgb()`.
+
+
 **Decision**: image rendering is fully resolved by combining two mechanisms already specified:
 
 1. **`ctx.draw.image(image, rect)` helper** (§5.6) — takes top-down layout rects and handles the Y-axis flip for pdf-lib internally. Handlers never touch pdf-lib's bottom-up coordinate system directly.
@@ -1402,3 +1418,21 @@ unresolved CSS variables, do not override earlier valid declarations or theme
 defaults. An invalid background color skips that background. Explicit background
 opacity replaces the color's alpha and must be finite and between zero and one;
 otherwise that background is skipped. Other valid style properties still apply.
+
+## Superseded: the drawing API
+
+`ctx.draw.image(pdfImage, rect)` and the pdf-lib types described above are no
+longer what ships.
+
+A node handler draws through `ctx.draw`, which offers `text`, `line`, `rect`,
+`image`, `imagePlaceholder` and `lines`. Every coordinate is layout pixels
+measured from the page's top-left and every colour is `Rgb` with 0-255
+channels; the surface owns the conversion to points and the flip to a
+bottom-left origin, so a handler performs neither and no two handlers can
+disagree about how.
+
+`image` takes a box and a handle naming a `src` the document already embedded —
+`ctx.draw.image({ x, y, width, height, image: { src } })`. A `src` the exporter
+never embedded draws the placeholder rather than nothing, so a broken image
+still occupies its space. The contract types live in `@scrivr/core` and are
+re-exported from `@scrivr/export-pdf`.

@@ -19,6 +19,13 @@ import {
   countSpaces,
   parseCssColor as parseColorLiteral,
   type PdfMarkHandler,
+  type PdfBox,
+  type PdfDrawSurface,
+  type PdfImageOp,
+  type PdfLineOp,
+  type PdfRectOp,
+  type PdfTextOp,
+  type Rgb,
   type DocumentLayout,
   type LayoutPage,
   type LayoutBlock,
@@ -28,6 +35,14 @@ import {
 } from "@scrivr/core";
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
+
+/**
+ * Keeps an out-of-range channel or opacity from failing the whole export.
+ * Only NaN gets a verdict of its own: everything else, Infinity included,
+ * clamps toward the end it overshot, so "too big" never reads as "zero".
+ */
+const clamp01 = (value: number): number =>
+  Number.isNaN(value) ? 0 : Math.min(1, Math.max(0, value));
 
 /** 1 CSS pixel = 0.75 PDF points (96dpi → 72dpi) */
 export const PT_PER_PX = 72 / 96;
@@ -69,22 +84,12 @@ export interface PdfFontRegistry {
   fallback: PDFFont;
 }
 
-export interface PdfDrawHelpers {
+export interface PdfDrawHelpers extends PdfDrawSurface {
   /**
    * Draw all lines of a block, including list markers, text spans with mark
    * decorations, and inline atom dispatch. This is the main rendering workhorse.
    */
   lines(block: LayoutBlock, ctx: PdfContext): void;
-  /** Draw an image at layout coordinates (handles Y-flip). */
-  image(image: PDFImage, rect: { x: number; y: number; width: number; height: number }): void;
-  /**
-   * Draw a placeholder rectangle for missing images. Pass `theme` to color
-   * the placeholder against the active PDF theme; omit for the legacy default.
-   */
-  imagePlaceholder(
-    rect: { x: number; y: number; width: number; height: number },
-    theme?: ResolvedTheme,
-  ): void;
 }
 
 // ── Flip helper ──────────────────────────────────────────────────────────────
@@ -100,35 +105,103 @@ export function createDrawHelpers(
   getPage: () => PDFPage,
   pageHeightPt: number,
   fontRegistry: PdfFontRegistry,
+  theme: ResolvedTheme,
+  images: ReadonlyMap<string, PDFImage | null>,
   nodeHandlers: ReadonlyMap<string, PdfNodeHandler>,
   markHandlers: ReadonlyMap<string, PdfMarkHandler>,
 ): PdfDrawHelpers {
-  function drawImage(
-    image: PDFImage,
-    rect: { x: number; y: number; width: number; height: number },
-  ): void {
-    getPage().drawImage(image, {
-      x: rect.x * PT_PER_PX,
-      y: flipY(rect.y + rect.height, pageHeightPt),
-      width: rect.width * PT_PER_PX,
-      height: rect.height * PT_PER_PX,
+  /** Core speaks in 0-255 channels; pdf-lib wants 0-1. */
+  const toPdfColor = (color: Rgb) =>
+    rgb(clamp01(color.r / 255), clamp01(color.g / 255), clamp01(color.b / 255));
+
+  const alpha = (opacity: number | undefined) =>
+    opacity === undefined ? {} : { opacity: clamp01(opacity) };
+
+  // A surface op carries one opacity for the whole shape, but pdf-lib keeps
+  // non-stroking alpha apart from stroking alpha — so anything with a border
+  // has to set both or its outline stays opaque.
+  const alphaWithBorder = (opacity: number | undefined) =>
+    opacity === undefined
+      ? {}
+      : { opacity: clamp01(opacity), borderOpacity: clamp01(opacity) };
+
+  function drawText(op: PdfTextOp): void {
+    // The same guard the span path applies. A handler cannot apply it itself —
+    // a font handle names a family, it does not say what the format made of it
+    // — so the one layer holding both the resolved font and the text does it.
+    const font = fontRegistry.resolve(op.font.cssFont);
+    const text = fontRegistry.isUnicode(font)
+      ? stripInvisible(op.text)
+      : sanitizeForWinAnsi(op.text);
+    if (!text) return;
+
+    getPage().drawText(text, {
+      x: op.x * PT_PER_PX,
+      y: flipY(op.baselineY, pageHeightPt),
+      size: op.sizePx * PT_PER_PX,
+      font,
+      color: toPdfColor(op.color),
+      ...alpha(op.opacity),
     });
   }
 
-  function drawImagePlaceholder(
-    rect: { x: number; y: number; width: number; height: number },
-    theme?: ResolvedTheme,
-  ): void {
-    const borderColor = theme ? parseCssColor(theme.imagePlaceholderBorder) : rgb(0.88, 0.91, 0.94);
-    const fillColor = theme ? parseCssColor(theme.imagePlaceholderBg) : rgb(0.95, 0.96, 0.98);
+  function drawLine(op: PdfLineOp): void {
+    getPage().drawLine({
+      start: { x: op.from.x * PT_PER_PX, y: flipY(op.from.y, pageHeightPt) },
+      end: { x: op.to.x * PT_PER_PX, y: flipY(op.to.y, pageHeightPt) },
+      thickness: op.thicknessPx * PT_PER_PX,
+      color: toPdfColor(op.color),
+      ...alpha(op.opacity),
+    });
+  }
+
+  function drawRect(op: PdfRectOp): void {
+    // pdf-lib fills black when neither a colour nor a border is named, so an
+    // op that asks for neither has to be refused here rather than passed on.
+    if (op.color === undefined && op.border === undefined) return;
     getPage().drawRectangle({
-      x: rect.x * PT_PER_PX,
-      y: flipY(rect.y + rect.height, pageHeightPt),
-      width: rect.width * PT_PER_PX,
-      height: rect.height * PT_PER_PX,
-      borderColor,
+      x: op.x * PT_PER_PX,
+      y: flipY(op.y + op.height, pageHeightPt),
+      width: op.width * PT_PER_PX,
+      height: op.height * PT_PER_PX,
+      ...(op.color === undefined ? {} : { color: toPdfColor(op.color) }),
+      ...(op.border === undefined
+        ? {}
+        : {
+            borderColor: toPdfColor(op.border.color),
+            borderWidth: op.border.widthPx * PT_PER_PX,
+          }),
+      ...alphaWithBorder(op.opacity),
+    });
+  }
+
+  function drawImage(op: PdfImageOp): void {
+    const image = images.get(op.image.src) ?? null;
+    if (!image) return drawImagePlaceholder(op, op.opacity);
+    getPage().drawImage(image, {
+      x: op.x * PT_PER_PX,
+      y: flipY(op.y + op.height, pageHeightPt),
+      width: op.width * PT_PER_PX,
+      height: op.height * PT_PER_PX,
+      ...alpha(op.opacity),
+    });
+  }
+
+  /**
+   * Stands in for an image that could not be drawn, so a broken one still
+   * occupies its space. Painted from the export's own palette: an anchored
+   * image and a block image on the same page should not disagree about grey.
+   */
+  function drawImagePlaceholder(box: PdfBox, opacity?: number): void {
+    getPage().drawRectangle({
+      x: box.x * PT_PER_PX,
+      y: flipY(box.y + box.height, pageHeightPt),
+      width: box.width * PT_PER_PX,
+      height: box.height * PT_PER_PX,
+      color: parseCssColor(theme.imagePlaceholderBg),
+      borderColor: parseCssColor(theme.imagePlaceholderBorder),
       borderWidth: 1,
-      color: fillColor,
+      ...alphaWithBorder(opacity),
     });
   }
 
@@ -250,8 +323,8 @@ export function createDrawHelpers(
 
   function drawLines(block: LayoutBlock, ctx: PdfContext): void {
     const page = getPage();
-    const themeListMarker = parseCssColor(ctx.theme.listMarker);
-    const themeDefaultText = parseCssColor(ctx.theme.defaultText);
+    const themeListMarker = parseCssColor(theme.listMarker);
+    const themeDefaultText = parseCssColor(theme.defaultText);
 
     // Draw list marker if present.
     const firstLine = block.lines[0];
@@ -351,13 +424,13 @@ export function createDrawHelpers(
         // Inline atom dispatch — look up nodeHandlers for object spans
         if (span.kind === "object") {
           if (span.node.type.name === "image" && span.width > 0 && span.height > 0) {
-            const src = span.node.attrs["src"] as string | undefined;
-            const image = src ? ctx.images.get(src) : null;
+            const src = span.node.attrs["src"];
             const objY = computeObjectRenderY(lineY, line, span);
-            if (image) {
-              drawImage(image, { x: spanAbsX, y: objY, width: span.width, height: span.height });
+            const box = { x: spanAbsX, y: objY, width: span.width, height: span.height };
+            if (typeof src === "string") {
+              drawImage({ ...box, image: { src } });
             } else {
-              drawImagePlaceholder({ x: spanAbsX, y: objY, width: span.width, height: span.height });
+              drawImagePlaceholder(box);
             }
           } else {
             // Non-image inline atom — dispatch to handler if one exists
@@ -419,6 +492,9 @@ export function createDrawHelpers(
 
   return {
     lines: drawLines,
+    text: drawText,
+    line: drawLine,
+    rect: drawRect,
     image: drawImage,
     imagePlaceholder: drawImagePlaceholder,
   };
