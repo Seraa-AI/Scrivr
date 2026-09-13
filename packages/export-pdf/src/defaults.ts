@@ -7,8 +7,7 @@
 import { rgb } from "pdf-lib";
 import type { PdfNodeHandler } from "./augmentation";
 import type { PdfMarkHandler } from "@scrivr/core";
-import type { PdfContext } from "./context";
-import { PT_PER_PX, parseHexColor } from "./context";
+import { PT_PER_PX } from "./context";
 
 export const defaultNodeHandlers: Record<string, PdfNodeHandler> = {
   paragraph: (block, ctx) => {
@@ -70,12 +69,6 @@ export const defaultNodeHandlers: Record<string, PdfNodeHandler> = {
   },
 };
 
-/**
- * Default mark handlers are not used for M2 — mark decoration logic stays in
- * draw.lines() for exact backward compatibility. Mark handlers will be wired
- * in when extensions need to contribute custom mark rendering. Exported empty
- * for forward compatibility.
- */
 /**
  * No built-in mark styling lives here. Each mark is declared by the extension
  * that defines it, so a kit without Highlight has no highlight to render and

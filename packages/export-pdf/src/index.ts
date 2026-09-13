@@ -93,10 +93,13 @@ export async function buildPdf(
   editor: IBaseEditor,
   options?: PdfExportOptions,
 ): Promise<Uint8Array> {
+  // Only own contribution entries enter these registries. Every string is a
+  // valid key, including names shared with Object.prototype. Later extensions
+  // override earlier registrations in all three lanes.
   // ── Phase 1: Collect handlers ──────────────────────────────────────────
-  const nodeHandlers: Record<string, PdfNodeHandler> = { ...defaultNodeHandlers };
-  const markHandlers: Record<string, PdfMarkHandler> = { ...defaultMarkHandlers };
-  const chromeHandlers: Record<string, PdfChromeHandler<unknown>> = {};
+  const nodeHandlers = new Map<string, PdfNodeHandler>(Object.entries(defaultNodeHandlers));
+  const markHandlers = new Map<string, PdfMarkHandler>(Object.entries(defaultMarkHandlers));
+  const chromeHandlers = new Map<string, PdfChromeHandler<unknown>>();
   const lifecycleHooks: {
     before: Array<(ctx: PdfContext) => void | Promise<void>>;
     after: Array<(ctx: PdfContext) => void | Promise<void>>;
@@ -105,9 +108,15 @@ export async function buildPdf(
   for (const contrib of editor.getExportContributions()) {
     const pdfContrib = contrib.pdf;
     if (!pdfContrib) continue;
-    if (pdfContrib.nodes) Object.assign(nodeHandlers, pdfContrib.nodes);
-    if (pdfContrib.marks) Object.assign(markHandlers, pdfContrib.marks);
-    if (pdfContrib.chrome) Object.assign(chromeHandlers, pdfContrib.chrome);
+    for (const [name, handler] of Object.entries(pdfContrib.nodes ?? {})) {
+      nodeHandlers.set(name, handler);
+    }
+    for (const [name, handler] of Object.entries(pdfContrib.marks ?? {})) {
+      markHandlers.set(name, handler);
+    }
+    for (const [name, handler] of Object.entries(pdfContrib.chrome ?? {})) {
+      chromeHandlers.set(name, handler);
+    }
     if (pdfContrib.onBeforeExport) lifecycleHooks.before.push(pdfContrib.onBeforeExport);
     if (pdfContrib.onAfterExport) lifecycleHooks.after.push(pdfContrib.onAfterExport);
   }
@@ -200,7 +209,7 @@ export async function buildPdf(
 
     // Block dispatch
     for (const block of layoutPage.blocks) {
-      const handler = nodeHandlers[block.node.type.name];
+      const handler = nodeHandlers.get(block.node.type.name);
       if (handler) {
         ctx.x = block.x;
         ctx.y = block.y;
@@ -224,8 +233,10 @@ export async function buildPdf(
     }
 
     // Chrome handlers (headers, footers, etc.)
-    for (const [chromeName, chromeHandler] of Object.entries(chromeHandlers)) {
-      const payload = layout.chromePayloads?.[chromeName];
+    for (const [chromeName, chromeHandler] of chromeHandlers) {
+      const payload = layout.chromePayloads && Object.hasOwn(layout.chromePayloads, chromeName)
+        ? layout.chromePayloads[chromeName]
+        : undefined;
       chromeHandler(layoutPage, payload, ctx);
     }
   }

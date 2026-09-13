@@ -53,17 +53,6 @@ describe("a mark an extension owns", () => {
   it("does nothing when the extension is absent", async () => {
     const editor = new ServerEditor({ extensions: [StarterKit] });
 
-  /**
-   * The highlight rect, which is the one drawn immediately before the text it
-   * sits behind. Every page also opens with a full-page background rect, and
-   * finding that one instead is an easy way to write a test that proves
-   * nothing.
-   */
-  const highlightRect = (ops: DrawOp[]) => {
-    const textAt = ops.findIndex((op) => op.op === "text");
-    const before = ops[textAt - 1];
-    return before?.op === "rect" ? before : undefined;
-  };
     const ops = await record(editor);
 
     const text = ops.find((op) => op.op === "text" && op["value"] === "loud");

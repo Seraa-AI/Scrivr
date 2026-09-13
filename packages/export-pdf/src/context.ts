@@ -20,7 +20,6 @@ import {
   parseCssColor as parseColorLiteral,
   safeUrl,
   type PdfMarkHandler,
-  type PdfSpanStyle,
   type DocumentLayout,
   type LayoutPage,
   type LayoutBlock,
@@ -29,6 +28,7 @@ import {
   type ResolvedTheme,
 } from "@scrivr/core";
 import type { PdfNodeHandler } from "./augmentation";
+import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
 /** 1 CSS pixel = 0.75 PDF points (96dpi → 72dpi) */
 export const PT_PER_PX = 72 / 96;
@@ -101,8 +101,8 @@ export function createDrawHelpers(
   getPage: () => PDFPage,
   pageHeightPt: number,
   fontRegistry: PdfFontRegistry,
-  nodeHandlers: Record<string, PdfNodeHandler>,
-  markHandlers: Record<string, PdfMarkHandler>,
+  nodeHandlers: ReadonlyMap<string, PdfNodeHandler>,
+  markHandlers: ReadonlyMap<string, PdfMarkHandler>,
 ): PdfDrawHelpers {
   function drawImage(
     image: PDFImage,
@@ -160,12 +160,12 @@ export function createDrawHelpers(
   function styleSpan(
     marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
     ctx: PdfContext,
-  ): PdfSpanStyle[] {
+  ): ResolvedPdfSpanStyle[] {
     if (!marks) return [];
-    const out: PdfSpanStyle[] = [];
+    const out: ResolvedPdfSpanStyle[] = [];
     for (const mark of marks) {
-      const handler = markHandlers[mark.name];
-      if (handler) out.push(handler(mark, ctx));
+      const handler = markHandlers.get(mark.name);
+      if (handler) out.push(resolvePdfSpanStyle(handler(mark, { theme: ctx.theme })));
     }
     return out;
   }
@@ -176,17 +176,16 @@ export function createDrawHelpers(
    * the cascade OOXML applies, and what the canvas resolves to.
    */
   function resolveFill(
-    styles: PdfSpanStyle[],
+    styles: ResolvedPdfSpanStyle[],
     fallback: ReturnType<typeof rgb>,
   ): ReturnType<typeof rgb> {
-    let authored: string | undefined;
-    let semantic: string | undefined;
+    let authored: ReturnType<typeof rgb> | undefined;
+    let semantic: ReturnType<typeof rgb> | undefined;
     for (const style of styles) {
       if (style.color !== undefined) authored = style.color;
       if (style.defaultColor !== undefined) semantic = style.defaultColor;
     }
-    const chosen = authored ?? semantic;
-    return chosen === undefined ? fallback : parseCssColor(chosen);
+    return authored ?? semantic ?? fallback;
   }
 
   /**
@@ -196,7 +195,7 @@ export function createDrawHelpers(
    */
   function drawSpanBackgrounds(
     span: { font: string; width: number },
-    styles: PdfSpanStyle[],
+    styles: ResolvedPdfSpanStyle[],
     spanAbsX: number,
     baselineY: number,
   ): void {
@@ -204,14 +203,14 @@ export function createDrawHelpers(
     const fontSize = extractFontSizePx(span.font);
     for (const style of styles) {
       if (!style.backgroundColor) continue;
-      const fill = parseFill(style.backgroundColor.color);
+      const fill = style.backgroundColor;
       page.drawRectangle({
         x: spanAbsX * PT_PER_PX,
         y: flipY(baselineY + fontSize * 0.2, pageHeightPt),
         width: span.width * PT_PER_PX,
         height: fontSize * 1.1 * PT_PER_PX,
         color: fill.color,
-        opacity: style.backgroundColor.opacity ?? fill.opacity,
+        opacity: fill.opacity,
       });
     }
   }
@@ -219,7 +218,7 @@ export function createDrawHelpers(
   /** Paint what runs along the glyphs, after them: underline, strikethrough. */
   function drawSpanRules(
     span: { font: string; width: number },
-    styles: PdfSpanStyle[],
+    styles: ResolvedPdfSpanStyle[],
     spanAbsX: number,
     baselineY: number,
     effectiveTextColor: ReturnType<typeof rgb>,
@@ -243,9 +242,7 @@ export function createDrawHelpers(
       if (style.underline) {
         rule(
           baselineY + fontSize * 0.15,
-          style.underlineColor === undefined
-            ? effectiveTextColor
-            : parseCssColor(style.underlineColor),
+          style.underlineColor ?? effectiveTextColor,
         );
       }
       if (style.strikethrough) rule(baselineY - fontSize * 0.3, effectiveTextColor);
@@ -357,7 +354,7 @@ export function createDrawHelpers(
             }
           } else {
             // Non-image inline atom — dispatch to handler if one exists
-            const handler = nodeHandlers[span.node.type.name];
+            const handler = nodeHandlers.get(span.node.type.name);
             if (handler) {
               const objY = computeObjectRenderY(lineY, line, span);
               // Inline atoms render as a one-shot leaf block inside the host
@@ -547,23 +544,6 @@ export function parseCssColor(value: string): ReturnType<typeof rgb> {
   if (colour === null) return rgb(0, 0, 0);
   const opaque = compositeColor(colour, { r: 255, g: 255, b: 255 });
   return rgb(opaque.r / 255, opaque.g / 255, opaque.b / 255);
-}
-
-/**
- * A fill and the transparency its CSS spelling carried. `parseCssColor`
- * flattens alpha against white, which is right for text on a page and wrong
- * for something painted over it — pdf-lib takes opacity separately.
- */
-export function parseFill(value: string): {
-  color: ReturnType<typeof rgb>;
-  opacity: number;
-} {
-  const parsed = parseColorLiteral(value);
-  if (parsed === null) return { color: rgb(0, 0, 0), opacity: 1 };
-  return {
-    color: rgb(parsed.r / 255, parsed.g / 255, parsed.b / 255),
-    opacity: parsed.alpha,
-  };
 }
 
 /** @deprecated Use `parseCssColor`, which reads every spelling, not only hex. */

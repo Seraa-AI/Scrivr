@@ -14,7 +14,12 @@
 
 import type { ResolvedTheme } from "../model/theme";
 
-/** What a mark on a span is asking for. Colours are CSS, as on the canvas. */
+/**
+ * What a mark on a span is asking for. Colours must be supported CSS literals
+ * (named, hex, RGB or HSL). Unsupported/invalid declarations are ignored;
+ * they do not override earlier valid colours or theme defaults. CSS variables
+ * must be resolved by the extension before returning a style.
+ */
 export interface PdfSpanStyle {
   /** A colour the author chose. Beats any `defaultColor` on the same span. */
   color?: string;
@@ -30,7 +35,9 @@ export interface PdfSpanStyle {
   strikethrough?: boolean;
   /**
    * Painted behind the glyphs, so an opaque colour still leaves its text
-   * readable. Omit `opacity` to let the colour's own alpha carry it.
+   * readable. Omit `opacity` to let the colour's own alpha carry it. An explicit
+   * opacity replaces that alpha and must be finite and in [0, 1]; otherwise
+   * this background is ignored. An unsupported colour also skips the background.
    */
   backgroundColor?: { color: string; opacity?: number };
 }
@@ -42,8 +49,8 @@ export interface PdfSpanMark {
 }
 
 /**
- * What a mark handler is given. The full export context satisfies this, so a
- * handler can be written against the smallest thing it actually needs.
+ * What a mark handler is given. Drawing and document resources are confined to
+ * node/chrome handlers and lifecycle hooks; mark handlers return style data.
  */
 export interface PdfMarkContext {
   theme: ResolvedTheme;
