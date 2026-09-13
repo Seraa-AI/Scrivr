@@ -53,11 +53,13 @@ describe("the drawing surface", () => {
     expect(rule?.["thickness"]).toBe(2 * PT_PER_PX);
   });
 
-  it("draws the built-in rule through the same surface", async () => {
-    // horizontalRule used to do the flip and name pdf-lib's rgb itself.
+  it("draws the built-in rule in exactly the colour it names", async () => {
+    // Asserting the value, not that a line appeared — the old painter drew a
+    // line too, so op kind alone cannot tell the two implementations apart.
     const editor = new ServerEditor({ extensions: [StarterKit] });
     const ops = await recordDrawOps(() => buildPdf(ruled, editor));
-    expect(ops.some((op) => op.op === "line")).toBe(true);
+    const rule = ops.find((op) => op.op === "line");
+    expect(rule?.["color"]).toBe("rgb(0.796, 0.835, 0.882)");
   });
 
 });

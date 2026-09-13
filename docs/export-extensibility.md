@@ -1402,3 +1402,21 @@ unresolved CSS variables, do not override earlier valid declarations or theme
 defaults. An invalid background color skips that background. Explicit background
 opacity replaces the color's alpha and must be finite and between zero and one;
 otherwise that background is skipped. Other valid style properties still apply.
+
+## Superseded: the drawing API
+
+`ctx.draw.image(pdfImage, rect)` and the pdf-lib types described above are no
+longer what ships.
+
+A node handler draws through `ctx.draw`, which offers `text`, `line`, `rect`,
+`image`, `imagePlaceholder` and `lines`. Every coordinate is layout pixels
+measured from the page's top-left and every colour is `Rgb` with 0-255
+channels; the surface owns the conversion to points and the flip to a
+bottom-left origin, so a handler performs neither and no two handlers can
+disagree about how.
+
+`image` takes a box and a handle naming a `src` the document already embedded —
+`ctx.draw.image({ x, y, width, height, image: { src } })`. A `src` the exporter
+never embedded draws the placeholder rather than nothing, so a broken image
+still occupies its space. The contract types live in `@scrivr/core` and are
+re-exported from `@scrivr/export-pdf`.

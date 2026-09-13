@@ -1,7 +1,6 @@
 /**
- * Default PDF export handlers for the core schema.
- * These cover all built-in node and mark types. Extensions only need to
- * handle their own custom types — core schema is covered here.
+ * Default PDF node handlers for the core schema. Marks are declared by the
+ * extensions that define them.
  */
 
 import type { PdfNodeHandler } from "./augmentation";
@@ -43,12 +42,13 @@ export const defaultNodeHandlers: Record<string, PdfNodeHandler> = {
   },
   image: (block, ctx) => {
     const src = block.node.attrs["src"];
-    const box = { x: block.x, y: block.y, width: block.width, height: block.height };
-    if (typeof src === "string") {
-      ctx.draw.image({ ...box, image: { src } });
-    } else {
-      ctx.draw.imagePlaceholder(box);
-    }
+    ctx.draw.image({
+      x: block.x,
+      y: block.y,
+      width: block.width,
+      height: block.height,
+      image: { src: typeof src === "string" ? src : "" },
+    });
   },
 };
 

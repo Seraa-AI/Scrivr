@@ -6,7 +6,21 @@ export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentati
 // The mark lane's contract lives in core so an extension can describe its
 // mark without depending on this package; re-exported for consumers already
 // importing it from here.
-export type { PdfMarkHandler, PdfSpanStyle, PdfSpanMark, PdfMarkContext } from "@scrivr/core";
+export type {
+  PdfMarkHandler,
+  PdfSpanStyle,
+  PdfSpanMark,
+  PdfMarkContext,
+  PdfDrawSurface,
+  PdfPoint,
+  PdfBox,
+  PdfTextOp,
+  PdfLineOp,
+  PdfRectOp,
+  PdfImageOp,
+  PdfFontHandle,
+  PdfImageHandle,
+} from "@scrivr/core";
 export type { PdfContext, PdfFontRegistry, PdfDrawHelpers } from "./context";
 
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
@@ -140,19 +154,21 @@ export async function buildPdf(
   let currentPage: PDFPage = null!;
   const getPage = () => currentPage;
 
+  // Resolved before the draw helpers, which paint the image placeholder from it.
+  // Defaults are always print-ready; the caller's `theme` option (literal
+  // colours only) shallow-merges over them. `editor.theme` is deliberately
+  // ignored so a dark canvas still produces a printable PDF.
+  const resolvedTheme: ResolvedTheme = { ...defaultPdfTheme, ...(options?.theme ?? {}) };
+
   const draw = createDrawHelpers(
     getPage,
     pageHeightPt,
     fontRegistry,
+    resolvedTheme,
     imageCache,
     nodeHandlers,
     markHandlers,
   );
-
-  // Resolve PDF theme: defaults are always print-ready; caller's `theme`
-  // option (literal colors only) shallow-merges over them. We deliberately
-  // ignore `editor.theme` so a dark canvas still produces a printable PDF.
-  const resolvedTheme: ResolvedTheme = { ...defaultPdfTheme, ...(options?.theme ?? {}) };
 
   // ── Phase 3: Build context shell ───────────────────────────────────────
   const ctx: PdfContext = {

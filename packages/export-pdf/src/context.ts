@@ -36,6 +36,10 @@ import {
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
+/** Keeps an out-of-range channel or opacity from failing the whole export. */
+const clamp01 = (value: number): number =>
+  Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+
 /** 1 CSS pixel = 0.75 PDF points (96dpi → 72dpi) */
 export const PT_PER_PX = 72 / 96;
 
@@ -97,21 +101,39 @@ export function createDrawHelpers(
   getPage: () => PDFPage,
   pageHeightPt: number,
   fontRegistry: PdfFontRegistry,
+  theme: ResolvedTheme,
   images: ReadonlyMap<string, PDFImage | null>,
   nodeHandlers: ReadonlyMap<string, PdfNodeHandler>,
   markHandlers: ReadonlyMap<string, PdfMarkHandler>,
 ): PdfDrawHelpers {
-  /** Core speaks in 0-255 channels; pdf-lib wants 0-1. */
-  const toPdfColor = (color: Rgb) => rgb(color.r / 255, color.g / 255, color.b / 255);
+  /**
+   * Core speaks in 0-255 channels; pdf-lib wants 0-1. Clamped rather than
+   * asserted: a handler computing a tint arithmetically should not lose the
+   * whole document to a range error naming pdf-lib's internal parameter.
+   */
+  const toPdfColor = (color: Rgb) =>
+    rgb(clamp01(color.r / 255), clamp01(color.g / 255), clamp01(color.b / 255));
+
+  const alpha = (opacity: number | undefined) =>
+    opacity === undefined ? {} : { opacity: clamp01(opacity) };
 
   function drawText(op: PdfTextOp): void {
-    getPage().drawText(op.text, {
+    // The same guard the span path applies. A handler cannot apply it itself —
+    // a font handle names a family, it does not say what the format made of it
+    // — so the one layer holding both the resolved font and the text does it.
+    const font = fontRegistry.resolve(op.font.cssFont);
+    const text = fontRegistry.isUnicode(font)
+      ? stripInvisible(op.text)
+      : sanitizeForWinAnsi(op.text);
+    if (!text) return;
+
+    getPage().drawText(text, {
       x: op.x * PT_PER_PX,
       y: flipY(op.baselineY, pageHeightPt),
       size: op.sizePx * PT_PER_PX,
-      font: fontRegistry.resolve(op.font.cssFont),
+      font,
       color: toPdfColor(op.color),
-      ...(op.opacity === undefined ? {} : { opacity: op.opacity }),
+      ...alpha(op.opacity),
     });
   }
 
@@ -121,44 +143,57 @@ export function createDrawHelpers(
       end: { x: op.to.x * PT_PER_PX, y: flipY(op.to.y, pageHeightPt) },
       thickness: op.thicknessPx * PT_PER_PX,
       color: toPdfColor(op.color),
-      ...(op.opacity === undefined ? {} : { opacity: op.opacity }),
+      ...alpha(op.opacity),
     });
   }
 
   function drawRect(op: PdfRectOp): void {
+    // pdf-lib fills black when neither a colour nor a border is named, so an
+    // op that asks for neither has to be refused here rather than passed on.
+    if (op.color === undefined && op.border === undefined) return;
     getPage().drawRectangle({
       x: op.x * PT_PER_PX,
       y: flipY(op.y + op.height, pageHeightPt),
       width: op.width * PT_PER_PX,
       height: op.height * PT_PER_PX,
       ...(op.color === undefined ? {} : { color: toPdfColor(op.color) }),
-      ...(op.opacity === undefined ? {} : { opacity: op.opacity }),
+      ...(op.border === undefined
+        ? {}
+        : {
+            borderColor: toPdfColor(op.border.color),
+            borderWidth: op.border.widthPx * PT_PER_PX,
+          }),
+      ...alpha(op.opacity),
     });
   }
 
   function drawImage(op: PdfImageOp): void {
     const image = images.get(op.image.src) ?? null;
-    if (!image) return drawImagePlaceholder(op);
+    if (!image) return drawImagePlaceholder(op, op.opacity);
     getPage().drawImage(image, {
       x: op.x * PT_PER_PX,
       y: flipY(op.y + op.height, pageHeightPt),
       width: op.width * PT_PER_PX,
       height: op.height * PT_PER_PX,
-      ...(op.opacity === undefined ? {} : { opacity: op.opacity }),
+      ...alpha(op.opacity),
     });
   }
 
-  function drawImagePlaceholder(rect: PdfBox, theme?: ResolvedTheme): void {
-    const borderColor = theme ? parseCssColor(theme.imagePlaceholderBorder) : rgb(0.88, 0.91, 0.94);
-    const fillColor = theme ? parseCssColor(theme.imagePlaceholderBg) : rgb(0.95, 0.96, 0.98);
+  /**
+   * Stands in for an image that could not be drawn, so a broken one still
+   * occupies its space. Painted from the export's own palette: an anchored
+   * image and a block image on the same page should not disagree about grey.
+   */
+  function drawImagePlaceholder(box: PdfBox, opacity?: number): void {
     getPage().drawRectangle({
-      x: rect.x * PT_PER_PX,
-      y: flipY(rect.y + rect.height, pageHeightPt),
-      width: rect.width * PT_PER_PX,
-      height: rect.height * PT_PER_PX,
-      borderColor,
+      x: box.x * PT_PER_PX,
+      y: flipY(box.y + box.height, pageHeightPt),
+      width: box.width * PT_PER_PX,
+      height: box.height * PT_PER_PX,
+      color: parseCssColor(theme.imagePlaceholderBg),
+      borderColor: parseCssColor(theme.imagePlaceholderBorder),
       borderWidth: 1,
-      color: fillColor,
+      ...alpha(opacity),
     });
   }
 

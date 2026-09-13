@@ -23,17 +23,21 @@ function fakeCtx() {
   const lines: DrawnLine[] = [];
   const rects: DrawnRect[] = [];
   const textBlocks: Array<{ y: number }> = [];
+  // Ops are recorded in layout pixels, which is what a handler now speaks.
+  // The conversion to points and the flip belong to the surface and are
+  // tested where they live.
   const ctx = {
     layout: { pageConfig: { pageHeight: 1000 } },
-    page: {
-      drawLine(opts: { start: { x: number; y: number }; end: { x: number; y: number } }) {
-        lines.push({ start: opts.start, end: opts.end });
-      },
-      drawRectangle(opts: DrawnRect) {
-        rects.push(opts);
-      },
-    },
     draw: {
+      line(op: { from: { x: number; y: number }; to: { x: number; y: number } }) {
+        lines.push({ start: op.from, end: op.to });
+      },
+      rect(op: DrawnRect) {
+        rects.push(op);
+      },
+      text: () => {},
+      image: () => {},
+      imagePlaceholder: () => {},
       lines(block: LayoutBlock) {
         textBlocks.push({ y: block.y });
       },
@@ -202,8 +206,8 @@ function pdfNodeHandler(contribs: ReadonlyArray<unknown>, nodeType: string): unk
 
 describe("renderTableRowPdf — cell shading", () => {
   it.each([
-    ["red", 1, { type: "RGB", red: 1, green: 0, blue: 0 }],
-    ["rgba(0, 0, 0, .5)", .5, { type: "RGB", red: 0, green: 0, blue: 0 }],
+    ["red", 1, { r: 255, g: 0, b: 0 }],
+    ["rgba(0, 0, 0, .5)", .5, { r: 0, g: 0, b: 0 }],
   ])("exports %s with its opacity", (background, opacity, color) => {
     const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background, blocks: [] };
     const { ctx, rects } = fakeCtx();
@@ -227,12 +231,12 @@ describe("renderTableRowPdf — cell shading", () => {
     renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
 
     expect(rects).toHaveLength(1);
-    // pdf-lib measures from the lower-left corner, in points.
+    // Layout pixels from the cell's own top-left; the surface does the rest.
     expect(rects[0]).toMatchObject({
-      x: 50 * 0.75,
-      width: 120 * 0.75,
-      height: 40 * 0.75,
-      color: { type: "RGB", red: 238 / 255, green: 238 / 255, blue: 238 / 255 },
+      x: 50,
+      width: 120,
+      height: 40,
+      color: { r: 238, g: 238, b: 238 },
     });
   });
 
@@ -243,7 +247,7 @@ describe("renderTableRowPdf — cell shading", () => {
 
     renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
 
-    expect(rects[0]?.color).toEqual({ type: "RGB", red: 238 / 255, green: 238 / 255, blue: 238 / 255 });
+    expect(rects[0]?.color).toEqual({ r: 238, g: 238, b: 238 });
   });
 
   it("draws nothing for an unshaded cell", () => {
@@ -263,11 +267,14 @@ describe("renderTableRowPdf — cell shading", () => {
     const order: string[] = [];
     const ctx = {
       layout: { pageConfig: { pageHeight: 1000 } },
-      page: {
-        drawLine: () => void order.push("line"),
-        drawRectangle: () => void order.push("rect"),
+      draw: {
+        line: () => void order.push("line"),
+        rect: () => void order.push("rect"),
+        text: () => {},
+        image: () => {},
+        imagePlaceholder: () => {},
+        lines: () => undefined,
       },
-      draw: { lines: () => undefined },
     };
 
     renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);

@@ -1,5 +1,6 @@
 /**
- * The PDF mark lane's contract.
+ * What an extension declares about PDF output: how its marks look, and the
+ * primitives its node handlers draw with.
  *
  * It lives in core, as the DOCX handler types do, so an extension can describe
  * what its mark looks like in an export without depending on
@@ -82,14 +83,17 @@ export type PdfMarkHandler = (
 // ── Drawing ─────────────────────────────────────────────────────────────────
 
 /**
- * A font the exporter has already resolved. Opaque on purpose: a handler names
- * the font layout measured against and never learns what the format made of it.
+ * Names a font by the CSS shorthand layout measured with. The exporter resolves
+ * it, falling back to a standard face when it has no bytes for that family.
  */
 export interface PdfFontHandle {
   readonly cssFont: string;
 }
 
-/** An image the exporter has already embedded. Opaque for the same reason. */
+/**
+ * Names an image by its `src`. A `src` the exporter never embedded draws the
+ * placeholder rather than nothing, so a broken image still occupies its space.
+ */
 export interface PdfImageHandle {
   readonly src: string;
 }
@@ -110,10 +114,7 @@ export interface PdfTextOp {
   text: string;
   /** Left edge of the run. */
   x: number;
-  /**
-   * The text's baseline, not its top — the line a reader would rule under it.
-   * Layout gives a block's top and its ascent; the baseline is their sum.
-   */
+  /** Baseline, not top: a line's y plus its ascent. */
   baselineY: number;
   /** Font size in layout pixels. */
   sizePx: number;
@@ -133,9 +134,10 @@ export interface PdfLineOp {
 }
 
 export interface PdfRectOp extends PdfBox {
-  /** Omit for an unfilled rectangle. */
+  /** Omit to leave the box unfilled. With no border either, nothing is drawn. */
   color?: Rgb;
   opacity?: number;
+  border?: { color: Rgb; widthPx: number };
 }
 
 export interface PdfImageOp extends PdfBox {
