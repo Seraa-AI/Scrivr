@@ -498,6 +498,30 @@ the caller inferring it from the geometry afterwards. This is a closer fit to
 the async work is now unambiguously outside that path rather than notionally
 ahead of it.
 
+### Phase 2 — not started
+
+Two findings from scoping it, recorded before building the wrong thing.
+
+**"Still no behaviour change" cannot hold.** The proposal says phase 2 interns
+resolutions and changes nothing. But a span records the face it was *measured*
+in, and measurement uses the CSS string handed to `ctx.font` — so attaching a
+resolution while still measuring the requested family records an answer layout
+did not honour. That is the lie this document exists to remove, one layer in.
+
+For the record to be true, layout has to measure the *resolved* family. Which
+means canvas stops silently substituting, and an editor with a provider renders
+differently — correctly, and only if it has one. An editor with no provider
+resolves nothing and is unaffected, so the change is opt-in rather than
+breaking.
+
+**The threading is the real cost.** Spans are built in `extractSpans`
+(`BlockLayout.ts`), reached through a chain of positional parameters that is
+already seven long — `fontModifiers`, `measurer` and `inlineRegistry` all
+arrived the same way. A resolver would be the eighth, and would also have to
+travel from `Editor` through `LayoutCoordinator` and `PageLayoutOptions` to get
+there. The font work did not create that chain, and should probably not be what
+grows it.
+
 ## Decisions (locked)
 
 **Does layout re-measure when a font loads late?** Yes — when the *resolution*
