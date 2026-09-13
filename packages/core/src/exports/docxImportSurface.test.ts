@@ -7,6 +7,8 @@ import type {
   DocxBlockTransform,
   DocxImportContext,
   DocxImports,
+  DocxMark,
+  DocxMarkTransform,
 } from "../index";
 
 describe("the DOCX import contract a consumer writes against", () => {
@@ -22,5 +24,20 @@ describe("the DOCX import contract a consumer writes against", () => {
 
     const contribution: DocxImports = { blocks: { sdt: handler } };
     expect(contribution.blocks?.["sdt"]).toBe(handler);
+  });
+
+  it("is enough to author a mark handler that resolves a relationship", () => {
+    // The shape `Link` uses: a run property whose real target lives in the
+    // part's rels rather than in the mark itself.
+    const handler: DocxMarkTransform = (mark: DocxMark, ctx: DocxImportContext) => {
+      const relId = mark.attrs?.["relId"];
+      const target =
+        typeof relId === "string" ? ctx.rels.resolveHyperlink(relId) : undefined;
+      const type = ctx.schema.marks["link"];
+      return target !== undefined && type ? type.create({ href: target }) : null;
+    };
+
+    const contribution: DocxImports = { marks: { hyperlink: handler } };
+    expect(contribution.marks?.["hyperlink"]).toBe(handler);
   });
 });

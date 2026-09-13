@@ -1,4 +1,13 @@
-import { PDFPage } from "pdf-lib";
+import {
+  PDFPage,
+  PDFPageLeaf,
+  PDFName,
+  PDFArray,
+  PDFDict,
+  PDFNumber,
+  PDFString,
+  PDFHexString,
+} from "pdf-lib";
 
 /**
  * Records every drawing call an export makes, in order, as data.
@@ -7,8 +16,12 @@ import { PDFPage } from "pdf-lib";
  * and compression all move without any pixel moving. What actually defines the
  * rendering is which primitives were drawn, with what values, in what order —
  * so that is what this records, at the boundary where the exporter meets
- * pdf-lib. Anything that reaches the page goes through one of these four
+ * pdf-lib. Anything *painted* on the page goes through one of these four
  * methods, including the paths that bypass handler dispatch.
+ *
+ * Annotations reach the page through a different door than paint —
+ * `page.node.addAnnot`, not a `draw*` call — so they are recorded separately.
+ * Without that the gate cannot see a link that stopped being clickable.
  *
  * The log is the baseline every migration phase is gated on, so it has to have
  * the resolution to notice a reordered decoration or a dropped opacity. That is
@@ -16,9 +29,9 @@ import { PDFPage } from "pdf-lib";
  * requires the log to change.
  */
 
-/** One recorded drawing call. Field names mirror pdf-lib's options. */
+/** One recorded op — a draw call or an annotation. Fields mirror pdf-lib's. */
 export interface DrawOp {
-  op: "text" | "line" | "rect" | "image";
+  op: "text" | "line" | "rect" | "image" | "annot";
   /** Which page received it — ops are recorded across pages in call order. */
   page: number;
   [field: string]: unknown;
@@ -45,7 +58,7 @@ const OP_NAMES: Record<(typeof PAGE_METHODS)[number], DrawOp["op"]> = {
 };
 
 /**
- * Runs `exportFn` with every page draw call recorded. Restores pdf-lib
+ * Runs `exportFn` with every draw call and annotation recorded. Restores pdf-lib
  * afterwards, including when the export throws.
  */
 export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<DrawOp[]> {
@@ -53,6 +66,9 @@ export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<D
   const pages = new Map<object, number>();
   const images = new Map<object, string>();
 
+  // Keyed by the page's leaf, which is what both paint and annotations can
+  // reach: `drawText` and friends go through the PDFPage, `addAnnot` through
+  // the leaf directly.
   const pageIndex = (page: object): number => {
     const known = pages.get(page);
     if (known !== undefined) return known;
@@ -106,10 +122,24 @@ export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<D
           ? { value: describe(first), ...fields(describe(second) ?? {}) }
           : fields(describe(first) ?? {});
 
-      ops.push({ op: OP_NAMES[name], page: pageIndex(this), ...described });
+      ops.push({ op: OP_NAMES[name], page: pageIndex(this.node), ...described });
       return Reflect.apply(call, this, args);
     });
   }
+
+  const originalAddAnnot = PDFPageLeaf.prototype.addAnnot;
+  Reflect.set(
+    PDFPageLeaf.prototype,
+    "addAnnot",
+    function (this: PDFPageLeaf, ref: Parameters<PDFPageLeaf["addAnnot"]>[0]) {
+      ops.push({
+        op: "annot",
+        page: pageIndex(this),
+        ...describeAnnotation(this.context.lookup(ref)),
+      });
+      return Reflect.apply(originalAddAnnot, this, [ref]);
+    },
+  );
 
   try {
     await exportFn();
@@ -117,6 +147,7 @@ export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<D
     for (const [name, original] of originals) {
       Reflect.set(PDFPage.prototype, name, original);
     }
+    Reflect.set(PDFPageLeaf.prototype, "addAnnot", originalAddAnnot);
   }
 
   return ops;
@@ -131,4 +162,29 @@ function fields(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
     : {};
+}
+
+/**
+ * An annotation by what it promises the reader: its kind, where it can be
+ * clicked, and where it goes. The object graph around it is pdf-lib's
+ * bookkeeping and would only make the baseline churn.
+ */
+function describeAnnotation(annotation: unknown): Record<string, unknown> {
+  if (!(annotation instanceof PDFDict)) return { subtype: "?" };
+  const subtype = annotation.lookup(PDFName.of("Subtype"));
+  const rect = annotation.lookup(PDFName.of("Rect"));
+  const action = annotation.lookup(PDFName.of("A"));
+  const uri = action instanceof PDFDict ? action.lookup(PDFName.of("URI")) : undefined;
+  return {
+    subtype: subtype instanceof PDFName ? subtype.asString() : "?",
+    rect:
+      rect instanceof PDFArray
+        ? rect.asArray().map((n) =>
+            n instanceof PDFNumber ? normalizeDrawNumber(n.asNumber()) : NaN,
+          )
+        : [],
+    ...(uri instanceof PDFString || uri instanceof PDFHexString
+      ? { uri: uri.decodeText() }
+      : {}),
+  };
 }

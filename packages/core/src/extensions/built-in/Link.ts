@@ -1,5 +1,10 @@
 import { Extension } from "../Extension";
-import { xml, type DocxMarkHandler, type DocxRunWrapper } from "../../exports/docx";
+import {
+  xml,
+  type DocxMarkHandler,
+  type DocxRunWrapper,
+  type DocxMarkTransform,
+} from "../../exports/docx";
 import type { MarkDecorator, SpanRect } from "../types";
 import { safeUrl } from "../../model/safeUrl";
 import { getMarkAttrs } from "../../model/getNodeAttrs";
@@ -187,6 +192,53 @@ export const Link = Extension.create({
     };
 
     return { docx: { marks: { link: style }, markWrappers: { link: wrap } } };
+  },
+
+  addImports() {
+    // The mirror of `addExports`' wrapper: the parser turns `<w:hyperlink>`
+    // into a `hyperlink` mark carrying the relationship id, and the target
+    // itself lives in the part's rels. Without this the mark arrived with no
+    // handler, so every link in an imported file became ordinary text.
+    const handler: DocxMarkTransform = (mark, ctx) => {
+      const attrs = mark.attrs ?? {};
+      const relId = attrs["relId"];
+      const anchor = attrs["anchor"];
+
+      // Word writes both for an external link into a fragment and resolves
+      // them as `target#anchor`. Branch on the resolved target rather than on
+      // `relId`, so a relationship that does not resolve falls through to the
+      // anchor instead of losing that too.
+      const target =
+        typeof relId === "string" ? ctx.rels.resolveHyperlink(relId) : undefined;
+      const fragment =
+        typeof anchor === "string" && anchor.length > 0 ? `#${anchor}` : "";
+      const raw = target !== undefined ? `${target}${fragment}` : fragment;
+
+      // A .docx is untrusted input and its rels are an ingestion path like
+      // paste, so the same gate applies here.
+      const href = raw.length > 0 ? safeUrl(raw) : null;
+      const type = ctx.schema.marks["link"];
+      if (href === null || !type) {
+        // Deliberately not `unsupported-mark`: that code is in the fatal set,
+        // so a `file://` share or a dangling rel — both ordinary in real
+        // documents — would abort an `unsupported: "throw"` import over a lost
+        // target while the text itself came through intact.
+        ctx.diagnostics.warn({
+          code: "hyperlink-dropped",
+          // Names the relationship, not the target: a refused target is a
+          // string we kept out of the document, and this message can end up
+          // rendered in an app's error surface.
+          message: `Hyperlink dropped — no usable target${
+            typeof relId === "string" ? ` for ${relId}` : ""
+          }`,
+          markType: "hyperlink",
+        });
+        return null;
+      }
+      return type.create({ href });
+    };
+
+    return { docx: { marks: { hyperlink: handler } } };
   },
 });
 
