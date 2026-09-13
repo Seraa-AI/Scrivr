@@ -144,6 +144,7 @@ export async function buildPdf(
     getPage,
     pageHeightPt,
     fontRegistry,
+    imageCache,
     nodeHandlers,
     markHandlers,
   );

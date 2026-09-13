@@ -13,6 +13,7 @@
  */
 
 import type { ResolvedTheme } from "../model/theme";
+import type { Rgb } from "../model/cssColor";
 
 /**
  * What a mark on a span is asking for. Colours must be supported CSS literals
@@ -77,3 +78,81 @@ export type PdfMarkHandler = (
   mark: PdfSpanMark,
   ctx: PdfMarkContext,
 ) => PdfSpanStyle;
+
+// ── Drawing ─────────────────────────────────────────────────────────────────
+
+/**
+ * A font the exporter has already resolved. Opaque on purpose: a handler names
+ * the font layout measured against and never learns what the format made of it.
+ */
+export interface PdfFontHandle {
+  readonly cssFont: string;
+}
+
+/** An image the exporter has already embedded. Opaque for the same reason. */
+export interface PdfImageHandle {
+  readonly src: string;
+}
+
+/** A point in layout pixels, measured from the page's top-left. */
+export interface PdfPoint {
+  x: number;
+  y: number;
+}
+
+/** A box in layout pixels, measured from the page's top-left. */
+export interface PdfBox extends PdfPoint {
+  width: number;
+  height: number;
+}
+
+export interface PdfTextOp {
+  text: string;
+  /** Left edge of the run. */
+  x: number;
+  /**
+   * The text's baseline, not its top — the line a reader would rule under it.
+   * Layout gives a block's top and its ascent; the baseline is their sum.
+   */
+  baselineY: number;
+  /** Font size in layout pixels. */
+  sizePx: number;
+  font: PdfFontHandle;
+  color: Rgb;
+  /** 0–1. Omit for opaque. */
+  opacity?: number;
+}
+
+export interface PdfLineOp {
+  from: PdfPoint;
+  to: PdfPoint;
+  /** Stroke width in layout pixels. */
+  thicknessPx: number;
+  color: Rgb;
+  opacity?: number;
+}
+
+export interface PdfRectOp extends PdfBox {
+  /** Omit for an unfilled rectangle. */
+  color?: Rgb;
+  opacity?: number;
+}
+
+export interface PdfImageOp extends PdfBox {
+  image: PdfImageHandle;
+  opacity?: number;
+}
+
+/**
+ * The primitives a handler draws with. Every coordinate is layout pixels,
+ * top-down; the implementation owns the conversion to PDF points and the flip
+ * to a bottom-left origin, so a handler never performs either.
+ */
+export interface PdfDrawSurface {
+  text(op: PdfTextOp): void;
+  line(op: PdfLineOp): void;
+  rect(op: PdfRectOp): void;
+  image(op: PdfImageOp): void;
+  /** The box drawn in place of an image that could not be resolved. */
+  imagePlaceholder(box: PdfBox): void;
+}

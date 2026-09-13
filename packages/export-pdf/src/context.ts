@@ -19,6 +19,13 @@ import {
   countSpaces,
   parseCssColor as parseColorLiteral,
   type PdfMarkHandler,
+  type PdfBox,
+  type PdfDrawSurface,
+  type PdfImageOp,
+  type PdfLineOp,
+  type PdfRectOp,
+  type PdfTextOp,
+  type Rgb,
   type DocumentLayout,
   type LayoutPage,
   type LayoutBlock,
@@ -69,22 +76,12 @@ export interface PdfFontRegistry {
   fallback: PDFFont;
 }
 
-export interface PdfDrawHelpers {
+export interface PdfDrawHelpers extends PdfDrawSurface {
   /**
    * Draw all lines of a block, including list markers, text spans with mark
    * decorations, and inline atom dispatch. This is the main rendering workhorse.
    */
   lines(block: LayoutBlock, ctx: PdfContext): void;
-  /** Draw an image at layout coordinates (handles Y-flip). */
-  image(image: PDFImage, rect: { x: number; y: number; width: number; height: number }): void;
-  /**
-   * Draw a placeholder rectangle for missing images. Pass `theme` to color
-   * the placeholder against the active PDF theme; omit for the legacy default.
-   */
-  imagePlaceholder(
-    rect: { x: number; y: number; width: number; height: number },
-    theme?: ResolvedTheme,
-  ): void;
 }
 
 // ── Flip helper ──────────────────────────────────────────────────────────────
@@ -100,25 +97,58 @@ export function createDrawHelpers(
   getPage: () => PDFPage,
   pageHeightPt: number,
   fontRegistry: PdfFontRegistry,
+  images: ReadonlyMap<string, PDFImage | null>,
   nodeHandlers: ReadonlyMap<string, PdfNodeHandler>,
   markHandlers: ReadonlyMap<string, PdfMarkHandler>,
 ): PdfDrawHelpers {
-  function drawImage(
-    image: PDFImage,
-    rect: { x: number; y: number; width: number; height: number },
-  ): void {
-    getPage().drawImage(image, {
-      x: rect.x * PT_PER_PX,
-      y: flipY(rect.y + rect.height, pageHeightPt),
-      width: rect.width * PT_PER_PX,
-      height: rect.height * PT_PER_PX,
+  /** Core speaks in 0-255 channels; pdf-lib wants 0-1. */
+  const toPdfColor = (color: Rgb) => rgb(color.r / 255, color.g / 255, color.b / 255);
+
+  function drawText(op: PdfTextOp): void {
+    getPage().drawText(op.text, {
+      x: op.x * PT_PER_PX,
+      y: flipY(op.baselineY, pageHeightPt),
+      size: op.sizePx * PT_PER_PX,
+      font: fontRegistry.resolve(op.font.cssFont),
+      color: toPdfColor(op.color),
+      ...(op.opacity === undefined ? {} : { opacity: op.opacity }),
     });
   }
 
-  function drawImagePlaceholder(
-    rect: { x: number; y: number; width: number; height: number },
-    theme?: ResolvedTheme,
-  ): void {
+  function drawLine(op: PdfLineOp): void {
+    getPage().drawLine({
+      start: { x: op.from.x * PT_PER_PX, y: flipY(op.from.y, pageHeightPt) },
+      end: { x: op.to.x * PT_PER_PX, y: flipY(op.to.y, pageHeightPt) },
+      thickness: op.thicknessPx * PT_PER_PX,
+      color: toPdfColor(op.color),
+      ...(op.opacity === undefined ? {} : { opacity: op.opacity }),
+    });
+  }
+
+  function drawRect(op: PdfRectOp): void {
+    getPage().drawRectangle({
+      x: op.x * PT_PER_PX,
+      y: flipY(op.y + op.height, pageHeightPt),
+      width: op.width * PT_PER_PX,
+      height: op.height * PT_PER_PX,
+      ...(op.color === undefined ? {} : { color: toPdfColor(op.color) }),
+      ...(op.opacity === undefined ? {} : { opacity: op.opacity }),
+    });
+  }
+
+  function drawImage(op: PdfImageOp): void {
+    const image = images.get(op.image.src) ?? null;
+    if (!image) return drawImagePlaceholder(op);
+    getPage().drawImage(image, {
+      x: op.x * PT_PER_PX,
+      y: flipY(op.y + op.height, pageHeightPt),
+      width: op.width * PT_PER_PX,
+      height: op.height * PT_PER_PX,
+      ...(op.opacity === undefined ? {} : { opacity: op.opacity }),
+    });
+  }
+
+  function drawImagePlaceholder(rect: PdfBox, theme?: ResolvedTheme): void {
     const borderColor = theme ? parseCssColor(theme.imagePlaceholderBorder) : rgb(0.88, 0.91, 0.94);
     const fillColor = theme ? parseCssColor(theme.imagePlaceholderBg) : rgb(0.95, 0.96, 0.98);
     getPage().drawRectangle({
@@ -351,13 +381,13 @@ export function createDrawHelpers(
         // Inline atom dispatch — look up nodeHandlers for object spans
         if (span.kind === "object") {
           if (span.node.type.name === "image" && span.width > 0 && span.height > 0) {
-            const src = span.node.attrs["src"] as string | undefined;
-            const image = src ? ctx.images.get(src) : null;
+            const src = span.node.attrs["src"];
             const objY = computeObjectRenderY(lineY, line, span);
-            if (image) {
-              drawImage(image, { x: spanAbsX, y: objY, width: span.width, height: span.height });
+            const box = { x: spanAbsX, y: objY, width: span.width, height: span.height };
+            if (typeof src === "string") {
+              drawImage({ ...box, image: { src } });
             } else {
-              drawImagePlaceholder({ x: spanAbsX, y: objY, width: span.width, height: span.height });
+              drawImagePlaceholder(box);
             }
           } else {
             // Non-image inline atom — dispatch to handler if one exists
@@ -419,6 +449,9 @@ export function createDrawHelpers(
 
   return {
     lines: drawLines,
+    text: drawText,
+    line: drawLine,
+    rect: drawRect,
     image: drawImage,
     imagePlaceholder: drawImagePlaceholder,
   };
