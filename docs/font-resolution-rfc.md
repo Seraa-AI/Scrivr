@@ -447,21 +447,28 @@ would flip a single `_dirty` boolean and re-lay the document.
 1. **Own it** — `FontProvider` on `Editor`; inventory, resolution,
    invalidation, and the default as an app-supplied resource. Resolution runs
    as a pass over the document's distinct requests *before* layout, so
-   measurement never asks a question the provider has not answered.
+   measurement never asks a question the provider has not answered. Reads
+   `fontTable.xml` on import, since that is inventory. Substitutions are
+   reported at import and at first layout.
 
-   The break and the machinery ship together on purpose: requiring a default
-   before anything consumes one would be a migration that buys nothing, and
-   shipping the provider while the default still asks the host would leave the
-   hole the rest of this document is about. One version, one migration note,
-   the demo app as the configuration to copy.
-   Report substitutions at import and first layout. No behaviour change; the
-   invisible failure becomes visible and correctly owned.
-2. **Record it** — thread `FontResolution` onto layout spans. Still no
-   behaviour change; makes phase 3 possible.
-3. **Honour it** — PDF reads the resolution and the bytes instead of
-   re-deriving. This is where the exported document stops lying.
-4. **Supply it** *(optional)* — a default resolver that fetches common
-   families, so the bytes tier is the normal case rather than the lucky one.
+   Nothing renders differently yet — the invisible failure becomes visible and
+   correctly owned. The break and the machinery ship together on purpose:
+   requiring a default before anything consumes one is a migration that buys
+   nothing, and shipping the provider while the default still asks the host
+   leaves the hole this document is about. One version, one migration note, the
+   demo app as the configuration to copy.
+
+2. **Record it** — layout interns its resolutions and a span carries the id.
+   Still no behaviour change; it is what makes phase 3 expressible.
+
+3. **Honour it** — the PDF lane resolves with `{ portable, embeddable }` and
+   embeds the resource it was given, instead of re-deriving a family name. This
+   is where an exported document stops lying about what it was measured in.
+
+There is no phase that ships fonts. A resolver that fetched common families
+would make the bytes tier the normal case by making Scrivr own typefaces, which
+is the boundary above. The application brings them; what the phases build is
+the guarantee that both lanes then consume the same ones.
 
 ## Decisions (locked)
 
