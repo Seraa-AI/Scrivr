@@ -89,13 +89,6 @@ function transformBlock(
     return fallbackParagraph(block, content, ctx);
   }
 
-  // A registered `list` handler is ignored: reading one is just
-  // bulletList/orderedList/listItem construction, with nothing per-extension
-  // to decide. (Export differs — the List extension owns numPr there.)
-  if (block.type === "list") {
-    return buildListNode(block, ctx, handlers);
-  }
-
   if (block.type === "sdt") {
     const contentNodes = ctx.walkBlocks(block.content);
     
@@ -112,31 +105,6 @@ function transformBlock(
   const blockHandler = handlers.blocks[block.type];
   if (blockHandler) return blockHandler(block, [], ctx);
   return fallbackBlock(block, ctx);
-}
-
-function buildListNode(
-  block: DocxBlock & { type: "list" },
-  ctx: DocxImportContext,
-  handlers: ResolvedImportHandlers,
-): PmNode | null {
-  const listTypeName = block.listType === "bullet" ? "bulletList" : "orderedList";
-  const listType = ctx.schema.nodes[listTypeName];
-  const listItemType = ctx.schema.nodes["listItem"];
-  if (!listType || !listItemType) {
-    ctx.diagnostics.warn({
-      code: "schema-missing-list",
-      message: `Schema has no \`${listTypeName}\` / \`listItem\` — list dropped`,
-    });
-    return null;
-  }
-  const itemNodes: PmNode[] = [];
-  for (const item of block.items) {
-    const itemChildren = ctx.walkBlocks(item.content);
-    if (itemChildren.length === 0) continue;
-    itemNodes.push(listItemType.create(null, itemChildren));
-  }
-  if (itemNodes.length === 0) return null;
-  return listType.create(null, itemNodes);
 }
 
 function transformInlines(
