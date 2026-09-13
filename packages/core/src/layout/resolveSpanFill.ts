@@ -29,13 +29,13 @@ export function resolveSpanFill(
   if (!decorators || !marks) return theme.defaultText;
 
   let authored: string | undefined;
-  let semantic: string | undefined;
+  let defaulted: string | undefined;
   for (const mark of marks) {
     const decorator = decorators.get(mark.name);
     if (!decorator) continue;
     const withAttrs: SpanRect = { ...rect, markAttrs: mark.attrs };
     authored = decorator.decorateFill?.(withAttrs, theme) ?? authored;
-    semantic = decorator.decorateDefaultFill?.(withAttrs, theme) ?? semantic;
+    defaulted = decorator.decorateDefaultFill?.(withAttrs, theme) ?? defaulted;
   }
-  return authored ?? semantic ?? theme.defaultText;
+  return authored ?? defaulted ?? theme.defaultText;
 }

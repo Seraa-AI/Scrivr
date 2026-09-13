@@ -64,10 +64,10 @@ export const Strikethrough = Extension.create({
 
   addExports() {
     const handler: DocxMarkHandler = (props) => ({ ...props, strike: true });
-    const pdf: PdfMarkHandler = () => ({ strikethrough: true });
+    const pdfMark: PdfMarkHandler = () => ({ strikethrough: true });
     return {
       docx: { marks: { strikethrough: handler } },
-      pdf: { marks: { strikethrough: pdf } },
+      pdf: { marks: { strikethrough: pdfMark } },
     };
   },
 

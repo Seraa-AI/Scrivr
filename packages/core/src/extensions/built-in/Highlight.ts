@@ -137,9 +137,13 @@ export const Highlight = Extension.create<HighlightOptions>({
     // rather than something a lane has to invent to stay readable.
     const pdfMark: PdfMarkHandler = (mark) => {
       const raw = mark.attrs["color"];
-      const value =
+      // Same guard as the DOCX lane above: an empty attr is not a colour. A
+      // colour that is set but unreadable is left to the boundary, which drops
+      // it rather than inventing one — DOCX substitutes because OOXML must name
+      // a value, and nothing here has to.
+      const chosen =
         typeof raw === "string" && raw.length > 0 ? raw : this.options.color;
-      return { backgroundColor: { color: value } };
+      return { backgroundColor: { color: chosen } };
     };
 
     return {

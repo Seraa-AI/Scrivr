@@ -1,4 +1,4 @@
-import { compositeColor, parseCssColor, type PdfSpanStyle } from "@scrivr/core";
+import { compositeColor, parseCssColor, safeUrl, type PdfSpanStyle } from "@scrivr/core";
 import { rgb, type RGB } from "pdf-lib";
 
 /** Renderer-owned values. Invalid declarations never reach drawing helpers. */
@@ -9,6 +9,22 @@ export interface ResolvedPdfSpanStyle {
   underlineColor?: RGB;
   strikethrough: boolean;
   backgroundColor?: { color: RGB; opacity: number };
+  link?: string;
+}
+
+/** Schemes a viewer can act on with no base URL to resolve against. */
+const FOLLOWABLE_TARGET = /^(?:https?|mailto|tel):/i;
+
+/**
+ * A target worth making clickable. Safety is `safeUrl`, the gate ingestion
+ * already applies, so there is one answer to "is this URL safe" rather than
+ * one per sink. Followability is a separate question it does not answer: a
+ * downloaded file has no base URL, and a hit area over text that goes nowhere
+ * is worse than text that never promised to.
+ */
+function parseLink(value: unknown): string | undefined {
+  const url = safeUrl(value);
+  return url !== null && FOLLOWABLE_TARGET.test(url) ? url : undefined;
 }
 
 function parseFill(value: unknown): { color: RGB; opacity: number } | undefined {
@@ -45,8 +61,10 @@ export function resolvePdfSpanStyle(style: PdfSpanStyle): ResolvedPdfSpanStyle {
       ? { ...backgroundColor, opacity }
       : undefined;
   }
+  const link = parseLink(style.link);
   return {
     ...(color ? { color } : {}),
+    ...(link ? { link } : {}),
     ...(defaultColor ? { defaultColor } : {}),
     ...(underlineColor ? { underlineColor } : {}),
     ...(backgroundColor ? { backgroundColor } : {}),

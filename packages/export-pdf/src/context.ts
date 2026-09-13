@@ -18,7 +18,6 @@ import {
   computeJustifySpaceBonus,
   countSpaces,
   parseCssColor as parseColorLiteral,
-  safeUrl,
   type PdfMarkHandler,
   type DocumentLayout,
   type LayoutPage,
@@ -157,7 +156,7 @@ export function createDrawHelpers(
    * Ask each mark on the span what it does, in the order the marks arrive.
    * A mark with no handler contributes nothing rather than being guessed at.
    */
-  function styleSpan(
+  function spanStyles(
     marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
     ctx: PdfContext,
   ): ResolvedPdfSpanStyle[] {
@@ -180,12 +179,12 @@ export function createDrawHelpers(
     fallback: ReturnType<typeof rgb>,
   ): ReturnType<typeof rgb> {
     let authored: ReturnType<typeof rgb> | undefined;
-    let semantic: ReturnType<typeof rgb> | undefined;
+    let defaulted: ReturnType<typeof rgb> | undefined;
     for (const style of styles) {
       if (style.color !== undefined) authored = style.color;
-      if (style.defaultColor !== undefined) semantic = style.defaultColor;
+      if (style.defaultColor !== undefined) defaulted = style.defaultColor;
     }
-    return authored ?? semantic ?? fallback;
+    return authored ?? defaulted ?? fallback;
   }
 
   /**
@@ -317,10 +316,18 @@ export function createDrawHelpers(
       for (const span of line.spans) {
         const spanAbsX =
           block.x + lineOffsetX + span.x + spacesBeforeSpan * spaceBonus;
+        const styles = spanStyles(span.kind === "text" ? span.marks : undefined, ctx);
 
         // Object spans have no marks, so an inline image inside an anchor
-        // ends the run rather than continuing it.
-        const href = span.kind === "text" ? linkHref(span.marks) : null;
+        // ends the run rather than continuing it. The last mark to name a
+        // target wins, the same way the last one to name a colour does.
+        const href =
+          span.kind === "text"
+            ? (styles.reduce<string | undefined>(
+                (found, style) => style.link ?? found,
+                undefined,
+              ) ?? null)
+            : null;
         const continues =
           href !== null &&
           linkRun !== null &&
@@ -389,7 +396,6 @@ export function createDrawHelpers(
         }
 
         const fontSize = extractFontSizePx(span.font);
-        const styles = styleSpan(span.marks, ctx);
         const color = resolveFill(styles, themeDefaultText);
 
         drawSpanBackgrounds(span, styles, spanAbsX, baselineY);
@@ -436,22 +442,6 @@ interface LinkRun {
 
 /** Sub-pixel slack, so measurement noise does not read as a hole in the line. */
 const ADJACENT_EPSILON = 0.5;
-
-/** Schemes a viewer can act on with no base URL to resolve against. */
-const FOLLOWABLE_TARGET = /^(?:https?|mailto|tel):/i;
-
-/**
- * The link target for a span. Safety is `safeUrl` — the gate ingestion already
- * applies, so there is one answer to "is this URL safe" rather than one per
- * sink. Followability is a separate question it does not answer.
- */
-function linkHref(
-  marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
-): string | null {
-  const link = marks?.find((m) => m.name === "link");
-  const url = link ? safeUrl(link.attrs["href"]) : null;
-  return url !== null && FOLLOWABLE_TARGET.test(url) ? url : null;
-}
 
 /**
  * Make a rectangle clickable. `Border: [0,0,0]` because the link underline is

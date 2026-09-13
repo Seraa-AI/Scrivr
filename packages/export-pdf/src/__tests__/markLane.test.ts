@@ -113,3 +113,54 @@ describe("a built-in mark declared by its own extension", () => {
     expect(highlightRect(ops)?.["opacity"]).toBe(1);
   });
 });
+
+describe("a mark that points somewhere", () => {
+  // The renderer used to find the target by looking for a mark literally named
+  // "link". A kit that renames the mark, or ships a second link-like one, got
+  // the blue and the underline and no clickable area at all.
+  const Citation = Extension.create({
+    name: "citation",
+    addExports() {
+      return {
+        pdf: {
+          marks: {
+            citation: (mark: { attrs: Record<string, unknown> }) => {
+              const src = mark.attrs["src"];
+              return typeof src === "string" ? { link: src } : {};
+            },
+          },
+        },
+      };
+    },
+  });
+
+  const cited = (attrs: Record<string, unknown>) =>
+    onePage([
+      block("paragraph", [textLine("see", { marks: [{ name: "citation", attrs }] })]),
+    ]);
+
+  it("is clickable without being called link", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, Citation] });
+    const ops = await recordDrawOps(() =>
+      buildPdf(cited({ src: "https://example.com/paper" }), editor),
+    );
+    expect(ops.filter((op) => op.op === "annot")).toHaveLength(1);
+    expect(ops.find((op) => op.op === "annot")?.["uri"]).toBe("https://example.com/paper");
+  });
+
+  it("is not clickable when its extension is absent", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit] });
+    const ops = await recordDrawOps(() =>
+      buildPdf(cited({ src: "https://example.com/paper" }), editor),
+    );
+    expect(ops.filter((op) => op.op === "annot")).toHaveLength(0);
+  });
+
+  it("refuses a target a reader could not follow", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, Citation] });
+    for (const src of ["javascript:alert(1)", "#section-2", "/about"]) {
+      const ops = await recordDrawOps(() => buildPdf(cited({ src }), editor));
+      expect(ops.filter((op) => op.op === "annot")).toHaveLength(0);
+    }
+  });
+});

@@ -104,14 +104,14 @@ export const Color = Extension.create<ColorOptions>({
     };
     // The colour the author picked, so it outranks any a mark supplies for
     // being what it is — a link's blue loses to this.
-    const pdf: PdfMarkHandler = (mark) => {
+    const pdfMark: PdfMarkHandler = (mark) => {
       const value = mark.attrs["color"];
       return typeof value === "string" ? { color: value } : {};
     };
 
     return {
       docx: { marks: { color: handler } },
-      pdf: { marks: { color: pdf } },
+      pdf: { marks: { color: pdfMark } },
     };
   },
 

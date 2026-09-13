@@ -40,6 +40,15 @@ export interface PdfSpanStyle {
    * this background is ignored. An unsupported colour also skips the background.
    */
   backgroundColor?: { color: string; opacity?: number };
+  /**
+   * Where this mark points. The span becomes clickable in the exported file.
+   *
+   * A reader following it has no base URL, so a target that only resolves
+   * against one — a fragment, a relative path — is dropped rather than turned
+   * into a hit area that does nothing. Targets are re-checked at the boundary
+   * whatever the extension supplies.
+   */
+  link?: string;
 }
 
 /** One mark as it reaches an export, already flattened onto a span. */
@@ -56,7 +65,14 @@ export interface PdfMarkContext {
   theme: ResolvedTheme;
 }
 
-/** What this mark does to a span. Called once per mark, per span. */
+/**
+ * What this mark does to a span. Called once per mark, per span.
+ *
+ * A mark with no handler contributes nothing, silently — unlike an unclaimed
+ * block, which warns. Weight, slant, size and family already travel in the
+ * span's font string, so `bold` and its kin legitimately have no lane to
+ * declare, and warning about them would bury the case that matters.
+ */
 export type PdfMarkHandler = (
   mark: PdfSpanMark,
   ctx: PdfMarkContext,

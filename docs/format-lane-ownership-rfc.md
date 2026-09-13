@@ -206,6 +206,28 @@ list will grow (selection, annotation overlays) and the names should keep saying
 what they order against. The migration preserves `afterText`. Whether that is
 the *right* rendering is a separate question with its own before/after.
 
+> **Amended — what shipped.** A flat `PdfSpanStyle` carries multiplicity (one
+> style per mark, so `link` + `underline` still draws two rules) and provenance
+> (`color` beats `defaultColor`), so the claim above that a flat shape could not
+> survive those is disproved. `PaintPhase` did **not** ship.
+>
+> The 40% wash this section worried about was the symptom, not the constraint.
+> Painting a background after the glyphs is what forced a highlight to be
+> translucent at all, and it erased its own text whenever it was not — the
+> canvas has always used `decoratePre` and says why on the line that does it. So
+> `backgroundColor` is defined as *behind the glyphs*, unconditionally, and
+> opacity went back to meaning the transparency an author asked for.
+>
+> A `phase` becomes worth adding when a mark genuinely needs to paint over text
+> and cannot say so. None does today, and a field nothing sets is a lane nobody
+> maintains.
+>
+> Also shipped beyond this section: the contract lives in `@scrivr/core`, because
+> an extension cannot import a format package, and the `pdf` key is unchecked
+> inside core — a handler needs a type to name. And `link` is part of the style,
+> so an extension owns whether its mark is clickable instead of the renderer
+> matching on the name `"link"`.
+
 ## 4. Decision — ownership is a dispatch property, not a file location
 
 Moving thirteen behaviours into extensions does not establish the rule, because
