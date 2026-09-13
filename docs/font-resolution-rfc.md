@@ -43,6 +43,13 @@ That yields a ladder, and only the top rung is harmonization:
 the bytes tier the supported path, and to make the lesser tiers *explicitly
 labelled* rather than silently assumed.
 
+Which sets the boundary for everything below: **Scrivr ships the engine, never
+the fonts.** It owns resolution, inventory, loading, invalidation and the
+guarantee that both lanes consume one resource. It does not own a typeface, and
+a default it picked would be a typeface every consumer carries and cannot
+remove. An application brings the fonts; Scrivr is what stops them being
+resolved twice, differently.
+
 ## Evidence
 
 A real MSA (Aptos, 135 blocks, 25,641 characters) imports with **zero
@@ -437,12 +444,16 @@ would flip a single `_dirty` boolean and re-lay the document.
 
 ## Phases
 
-0. **Require it** — the default becomes an app-supplied resource. Breaking, and
-   documented as such, with the demo app as the configuration to copy. Nothing
-   resolves implicitly after this.
-1. **Own it** — `FontProvider` on `Editor`; inventory, resolution, invalidation.
-   Resolution runs as a pass over the document's distinct requests *before*
-   layout, so measurement never asks a question the provider has not answered.
+1. **Own it** — `FontProvider` on `Editor`; inventory, resolution,
+   invalidation, and the default as an app-supplied resource. Resolution runs
+   as a pass over the document's distinct requests *before* layout, so
+   measurement never asks a question the provider has not answered.
+
+   The break and the machinery ship together on purpose: requiring a default
+   before anything consumes one would be a migration that buys nothing, and
+   shipping the provider while the default still asks the host would leave the
+   hole the rest of this document is about. One version, one migration note,
+   the demo app as the configuration to copy.
    Report substitutions at import and first layout. No behaviour change; the
    invisible failure becomes visible and correctly owned.
 2. **Record it** — thread `FontResolution` onto layout spans. Still no
