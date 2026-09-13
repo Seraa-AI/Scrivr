@@ -206,7 +206,15 @@ list will grow (selection, annotation overlays) and the names should keep saying
 what they order against. The migration preserves `afterText`. Whether that is
 the *right* rendering is a separate question with its own before/after.
 
-> **Amended — what shipped.** A flat `PdfSpanStyle` carries multiplicity (one
+> **Amended — what shipped, and how.** This section was not consulted before the
+> contract below it was replaced. The implementation was written from the code,
+> the difference was noticed by review afterwards, and this note was added last.
+> A spec rewritten to match what was built has stopped being a spec, so the
+> sequence is recorded here rather than smoothed over: what follows is a
+> post-hoc justification that happens to hold, not a decision taken against the
+> design on this page.
+>
+> A flat `PdfSpanStyle` carries multiplicity (one
 > style per mark, so `link` + `underline` still draws two rules) and provenance
 > (`color` beats `defaultColor`), so the claim above that a flat shape could not
 > survive those is disproved. `PaintPhase` did **not** ship.
@@ -227,6 +235,12 @@ the *right* rendering is a separate question with its own before/after.
 > inside core — a handler needs a type to name. And `link` is part of the style,
 > so an extension owns whether its mark is clickable instead of the renderer
 > matching on the name `"link"`.
+>
+> **Still outstanding.** Only the *mark* lane is free of pdf-lib. Node and chrome
+> handlers still receive a context carrying pdf-lib's own types, so the title of
+> this RFC is half true. The drawing surface that closes it — layout pixels and
+> plain `Rgb` in, the unit conversion and axis flip behind it — was written
+> before the work above and has not landed.
 
 ## 4. Decision — ownership is a dispatch property, not a file location
 
