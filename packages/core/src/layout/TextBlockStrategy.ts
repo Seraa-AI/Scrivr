@@ -128,6 +128,7 @@ export const TextBlockStrategy: BlockStrategy = {
           markDecorators,
           spanRect,
           theme,
+          ctx,
         );
 
         if (markDecorators && span.marks) {

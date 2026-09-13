@@ -8,6 +8,28 @@ interface SpanMark {
 }
 
 /**
+ * Ask the actual drawing context which colours it supports. Invalid fillStyle
+ * assignments retain the old value, so two different sentinels distinguish a
+ * rejected declaration from a valid colour equal to the first sentinel.
+ * Preserve the caller's fill, including gradients/patterns. Do not cache:
+ * context-dependent colours can resolve differently on another canvas.
+ */
+function acceptsColor(ctx: CanvasRenderingContext2D, value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const previous = ctx.fillStyle;
+  try {
+    ctx.fillStyle = "#000000";
+    ctx.fillStyle = value;
+    if (ctx.fillStyle !== "#000000") return true;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = value;
+    return ctx.fillStyle !== "#ffffff";
+  } finally {
+    ctx.fillStyle = previous;
+  }
+}
+
+/**
  * The colour a span's text is actually painted in.
  *
  * Two kinds of mark want a say and they are not equal. A colour mark is an
@@ -25,6 +47,7 @@ export function resolveSpanFill(
   decorators: Map<string, MarkDecorator> | undefined,
   rect: Omit<SpanRect, "markAttrs">,
   theme: ResolvedTheme,
+  ctx: CanvasRenderingContext2D,
 ): string {
   if (!decorators || !marks) return theme.defaultText;
 
@@ -34,8 +57,10 @@ export function resolveSpanFill(
     const decorator = decorators.get(mark.name);
     if (!decorator) continue;
     const withAttrs: SpanRect = { ...rect, markAttrs: mark.attrs };
-    authored = decorator.decorateFill?.(withAttrs, theme) ?? authored;
-    defaulted = decorator.decorateDefaultFill?.(withAttrs, theme) ?? defaulted;
+    const authoredCandidate = decorator.decorateFill?.(withAttrs, theme);
+    const defaultCandidate = decorator.decorateDefaultFill?.(withAttrs, theme);
+    if (acceptsColor(ctx, authoredCandidate)) authored = authoredCandidate;
+    if (acceptsColor(ctx, defaultCandidate)) defaulted = defaultCandidate;
   }
   return authored ?? defaulted ?? theme.defaultText;
 }

@@ -369,6 +369,7 @@ export function drawBlock(
         markDecorators,
         spanRect,
         theme,
+        ctx,
       );
 
       // decoratePre for all marks

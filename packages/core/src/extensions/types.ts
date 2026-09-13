@@ -496,7 +496,8 @@ export interface MarkDecorator {
    * effectiveTextColor passed to decoratePre/decoratePost reflects this
    * decorator's choice. This is the *authored* colour: it beats any
    * `decorateDefaultFill` on the same span. Between two authored fills the
-   * last non-undefined value wins.
+   * last colour accepted by the drawing context wins. Invalid colours are
+   * ignored so they cannot suppress a valid default or inherit stale ink.
    *
    * Receives `theme` so decorators that map to a theme token (Link → theme.link)
    * can resolve at paint time without capturing the editor instance.
@@ -507,7 +508,7 @@ export interface MarkDecorator {
    * say. Loses to any `decorateFill`, whatever order the marks arrive in, so
    * a coloured link keeps its colour. Implement this rather than
    * `decorateFill` when the colour expresses what the mark *is* rather than
-   * what the author picked.
+   * what the author picked. Invalid colours are ignored, as for decorateFill.
    */
   decorateDefaultFill?(rect: SpanRect, theme: ResolvedTheme): string | undefined;
   decoratePost?(
