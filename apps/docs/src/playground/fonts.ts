@@ -6,15 +6,23 @@
  * that one inventory. This file is the shape an application is expected to
  * copy.
  *
- * The bytes are a real dependency (`@fontsource/inter`) rather than a family
- * name, because a name is a request the browser answers differently on every
- * machine, and a PDF cannot embed a request.
+ * The bytes are a real dependency rather than a family name, because a name is
+ * a request the browser answers differently on every machine, and a PDF cannot
+ * embed a request.
+ *
+ * These are `inter-ui`'s unsubsetted files rather than the per-script subsets
+ * `@fontsource` publishes. The web's usual arrangement — one file per script,
+ * chosen by `unicode-range` — assumes the browser picks per character, but a
+ * face here is one set of bytes that has to serve both measurement and
+ * embedding. A Latin-only file makes a document that turns out to contain
+ * Cyrillic render in something nobody chose. One file per face, every script
+ * in it, costs ~110 KB and removes the question.
  */
 import { DefaultFontProvider, type FontResource } from "@scrivr/react";
-import regular from "@fontsource/inter/files/inter-latin-400-normal.woff2?url";
-import italic from "@fontsource/inter/files/inter-latin-400-italic.woff2?url";
-import bold from "@fontsource/inter/files/inter-latin-700-normal.woff2?url";
-import boldItalic from "@fontsource/inter/files/inter-latin-700-italic.woff2?url";
+import regular from "inter-ui/web/Inter-Regular.woff2?url";
+import italic from "inter-ui/web/Inter-Italic.woff2?url";
+import bold from "inter-ui/web/Inter-Bold.woff2?url";
+import boldItalic from "inter-ui/web/Inter-BoldItalic.woff2?url";
 
 /**
  * Fetched on first use, not at module load: a descriptor costs nothing until
@@ -49,9 +57,10 @@ const inter = {
 };
 
 /**
- * Unstyled text resolves to `default`. Anything a document names that is not
- * in `resources` resolves to it too, and the editor reports the substitution
- * rather than quietly rendering something else.
+ * Unstyled text resolves to `default`. A family this inventory does not hold
+ * resolves to the nearest weight and slant of the default's family, so a
+ * document set in Aptos keeps its bold headings — and the editor reports the
+ * substitution rather than quietly rendering something else.
  */
 export const playgroundFonts = new DefaultFontProvider({
   default: inter.regular,

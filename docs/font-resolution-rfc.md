@@ -626,9 +626,23 @@ today must still split when one of them is registered tomorrow.
 
 **The adapter and the demo.** `useScrivrEditor` accepted no `fonts` option, so
 the React lane had the same hole `Editor` did. The docs playground now supplies
-an Inter inventory from `@fontsource/inter`, which is the worked example the
-guide points at: an application owns its typefaces, and Scrivr owns the
-resolution.
+an Inter inventory, which is the worked example the guide points at: an
+application owns its typefaces, and Scrivr owns the resolution.
+
+**A face is one set of bytes, which decides how a font is packaged.** The
+playground first used `@fontsource`'s per-script subsets, the arrangement the
+web normally uses: one file per script, chosen by `unicode-range`. That assumes
+the browser picks a file per character. It cannot here — the same bytes have to
+measure on canvas and embed in a PDF, and an exporter has no per-character
+choice to make. The Latin subset holds 231 glyphs, so a document that turned
+out to contain Cyrillic would have rendered in something nobody chose. The
+playground uses `inter-ui`'s unsubsetted files instead: ~110 KB and 2852 glyphs
+per face, verified by exporting Latin, Latin Extended, Cyrillic, Greek and
+Vietnamese and reading the characters back out of the PDF's ToUnicode map.
+
+Supporting per-script files properly would mean a face composed of several
+sources plus script-aware run splitting in the exporter. That is a real
+feature, not a packaging detail, and nothing has asked for it.
 
 ## Decisions (locked)
 

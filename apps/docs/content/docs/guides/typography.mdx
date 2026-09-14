@@ -20,9 +20,9 @@ A `DefaultFontProvider` needs a default face and, usually, the other weights and
 
 ```ts title="fonts.ts"
 import { DefaultFontProvider, type FontResource } from "@scrivr/react";
-import regular from "@fontsource/inter/files/inter-latin-400-normal.woff2?url";
-import bold from "@fontsource/inter/files/inter-latin-700-normal.woff2?url";
-import italic from "@fontsource/inter/files/inter-latin-400-italic.woff2?url";
+import regular from "inter-ui/web/Inter-Regular.woff2?url";
+import bold from "inter-ui/web/Inter-Bold.woff2?url";
+import italic from "inter-ui/web/Inter-Italic.woff2?url";
 
 const face = (
 	id: string,
@@ -60,6 +60,22 @@ That is the whole setup. The editor installs the bytes in its measurement backen
 	to the nearest face in the family — with no bold registered, bold text is
 	drawn in the regular weight rather than synthesised.
 </Callout>
+
+### Pick a file that covers the scripts you accept
+
+Most font packages publish one file per script, selected in CSS by
+`unicode-range`. That arrangement assumes the browser picks a file per
+*character*, which it cannot do here: a face is one set of bytes, and those
+same bytes have to serve measurement and embedding alike.
+
+A Latin-only file holds around 230 glyphs. Paste Cyrillic or Greek into a
+document using it and those characters have no glyph — on canvas the browser
+quietly substitutes something else, and in a PDF they are drawn as blanks.
+
+So prefer an unsubsetted file per face. `inter-ui` publishes Inter that way:
+~110 KB per face, about 2 850 glyphs, covering Latin, Latin Extended, Greek,
+Cyrillic and Vietnamese in one file. The faces are fetched only when something
+resolves to them, so the catalogue costs nothing until it is used.
 
 ---
 
