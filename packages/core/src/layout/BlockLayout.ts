@@ -800,17 +800,20 @@ function extractSpans(
         let objWidth = typeof w === "number" ? w : 200;
         let objHeight = typeof h === "number" ? h : 200;
 
+        // The face this atom sits in. An atom has no text of its own, so it
+        // inherits the run's — and a renderer that paints it needs the same
+        // one the box was reserved against, whichever side of the export it is
+        // on. Recorded on the span rather than re-derived from the family name.
+        const requested = resolveFont(baseFont, child.marks, fontModifiers);
+        const answered = fonts?.resolve(requested);
+        const atomFont = answered?.font ?? requested;
+
         // If an InlineStrategy provides measure(), use it for dynamic sizing.
         // Tokens (pageNumber, totalPages, date) use this to size based on font.
         if (measurer && inlineRegistry) {
           const strategy = inlineRegistry.get(child.type.name);
           if (strategy?.measure) {
-            const requested = resolveFont(baseFont, child.marks, fontModifiers);
-            const measured = strategy.measure(
-              child,
-              fonts?.resolve(requested).font ?? requested,
-              measurer,
-            );
+            const measured = strategy.measure(child, atomFont, measurer);
             objWidth = measured.width;
             objHeight = measured.height;
           }
@@ -822,6 +825,8 @@ function extractSpans(
           docPos: childDocPos,
           width: objWidth,
           height: objHeight,
+          font: atomFont,
+          ...(answered ? { resolution: answered.resolution } : {}),
           verticalAlign,
         });
       }

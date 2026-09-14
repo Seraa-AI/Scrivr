@@ -40,6 +40,7 @@ export {
 export {
   collectFontRequests,
   prepareDocumentFonts,
+  resolvedKeyOf,
   type FontShortfall,
 } from "./fonts/collectFontRequests";
 export * from "./exports/semantic";

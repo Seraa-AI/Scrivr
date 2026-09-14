@@ -180,7 +180,7 @@ describe("what an export asks the provider for", () => {
     expect(onFontShortfall).toHaveBeenCalledWith([
       expect.objectContaining({
         request: expect.objectContaining({ family: "Aptos" }),
-        resolved: "App Sans",
+        resolved: expect.objectContaining({ family: "App Sans" }),
         source: "default",
       }),
     ]);

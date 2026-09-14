@@ -108,7 +108,7 @@ describe("preparing a document's fonts", () => {
     const shortfalls = await prepareDocumentFonts(docWith("Aptos"), provider());
     expect(shortfalls).toHaveLength(1);
     expect(shortfalls[0]).toMatchObject({
-      resolved: "App Sans",
+      resolved: expect.objectContaining({ family: "App Sans" }),
       source: "default",
       portable: true,
     });

@@ -57,6 +57,16 @@ export type InputSpan =
       height: number;
       /** ProseMirror doc position of this node */
       docPos: number;
+      /**
+       * The face this atom was measured against, and the resolution naming it.
+       *
+       * An inline atom has no text of its own, but an `InlineStrategy` sizes it
+       * from a font and a renderer draws it in one. Recording that here is what
+       * lets a PDF handler paint the atom in the face the box was reserved for,
+       * instead of naming a family and hoping.
+       */
+      font?: string;
+      resolution?: FontResolutionId;
       /** Vertical alignment within the line — sourced from the node's verticalAlign attr */
       verticalAlign: InlineObjectVerticalAlign;
     }
@@ -97,6 +107,9 @@ export type LayoutSpan =
       width: number;
       height: number;
       docPos: number;
+      /** The face this atom was measured against. Carried from its input span. */
+      font?: string;
+      resolution?: FontResolutionId;
       verticalAlign: InlineObjectVerticalAlign;
     };
 
@@ -464,6 +477,8 @@ export class LineBreaker {
           width: word.width,
           height: word.height,
           docPos: word.docPos,
+          ...(word.font !== undefined ? { font: word.font } : {}),
+          ...(word.resolution !== undefined ? { resolution: word.resolution } : {}),
           verticalAlign: word.verticalAlign,
         });
       } else {
@@ -692,6 +707,8 @@ interface TextToken {
 interface ObjectToken {
   kind: "object";
   node: Node;
+  font?: string;
+  resolution?: FontResolutionId;
   width: number;
   height: number;
   docPos: number;
@@ -774,6 +791,8 @@ function tokenise(spans: InputSpan[]): Token[] {
         width: span.width,
         height: span.height,
         docPos: span.docPos,
+        ...(span.font !== undefined ? { font: span.font } : {}),
+        ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
         verticalAlign: span.verticalAlign,
       });
       continue;

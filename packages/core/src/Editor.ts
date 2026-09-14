@@ -19,7 +19,7 @@ import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import type { ActiveFontFamily, FontProvider } from "./fonts/types";
 import type { FontResolutionId } from "./fonts/layoutResolver";
-import type { FontShortfall } from "./fonts/collectFontRequests";
+import { resolvedKeyOf, type FontShortfall } from "./fonts/collectFontRequests";
 import { primaryFamily } from "./fonts/layoutResolver";
 import { DEFAULT_FONT_FAMILY } from "./layout/FontConfig";
 import { CursorManager } from "./renderer/CursorManager";
@@ -281,7 +281,7 @@ function documentShortfalls(layout: DocumentLayout): readonly FontShortfall[] {
 		if (resolved.source === "requested" && resolved.portable) continue;
 		missed.push({
 			request,
-			resolved: resolved.family,
+			resolved: resolvedKeyOf(entry),
 			source: resolved.source,
 			portable: resolved.portable,
 		});

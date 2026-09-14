@@ -1,15 +1,40 @@
 import type { Node as PmNode } from "prosemirror-model";
-import type { FontKey, FontProvider, FontRequest } from "./types";
+import type { FontKey, FontProvider, FontRequest, FontResolution } from "./types";
 
 /** A face whose answer is worth telling somebody about. */
 export interface FontShortfall {
   request: FontKey;
-  /** What it resolved to. */
-  resolved: string;
+  /**
+   * The face that answered, as a whole key rather than a family name.
+   *
+   * A family alone cannot say what was lost. An inventory holding one weight
+   * of a family answers a request for its bold with its regular, and Scrivr
+   * does not synthesize one — so the only difference between "your document is
+   * in a different typeface" and "your headings are no longer bold" is the
+   * weight and style, and reporting the family throws both away.
+   */
+  resolved: FontKey;
   /** How that answer was reached, unchanged from the resolution. */
   source: "requested" | "substituted" | "default" | "generic";
   /** False when the answer only holds in this environment. */
   portable: boolean;
+}
+
+/**
+ * The face an answer landed on. A resource names its own weight and style; an
+ * answer without one is the host's, so the request's are what it will be drawn
+ * at.
+ */
+export function resolvedKeyOf(answer: FontResolution): FontKey {
+  const { resource, request, resolved } = answer;
+  return {
+    family: resolved.family,
+    weight: resource?.weight ?? request.weight,
+    style: resource?.style ?? request.style,
+    ...(resource?.stretch ?? request.stretch
+      ? { stretch: resource?.stretch ?? request.stretch }
+      : {}),
+  };
 }
 
 const keyOf = (key: FontKey): string =>
@@ -75,12 +100,13 @@ export async function prepareDocumentFonts(
 
   const shortfalls: FontShortfall[] = [];
   for (const request of requests) {
-    const { resolved } = provider.resolve(request, constraints);
+    const answer = provider.resolve(request, constraints);
+    const { resolved } = answer;
     // The face asked for, portably: nothing to say.
     if (resolved.source === "requested" && resolved.portable) continue;
     shortfalls.push({
       request,
-      resolved: resolved.family,
+      resolved: resolvedKeyOf(answer),
       source: resolved.source,
       portable: resolved.portable,
     });

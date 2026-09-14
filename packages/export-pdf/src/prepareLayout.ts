@@ -1,5 +1,5 @@
 import { PDFDocument, type PDFFont } from "pdf-lib";
-import { createLayoutFontResolver, type IEditor, type FontRequest, type FontResolution, type FontShortfall, type FontResource, type TextMeasurerLike } from "@scrivr/core";
+import { createLayoutFontResolver, resolvedKeyOf, type IEditor, type FontRequest, type FontResolution, type FontShortfall, type FontResource, type TextMeasurerLike } from "@scrivr/core";
 import { createFontRegistry, embedFaces, embedStandardFonts, resolveFont } from "./fonts";
 import { sanitizeForWinAnsi, stripInvisible } from "./context";
 
@@ -47,7 +47,7 @@ export async function preparePdfLayout(editor: IEditor) {
     }
     snapshots.set(key(request), snapshot);
     if (answer.resolved.source !== "requested" || !answer.resolved.portable) {
-      shortfalls.push({ request, resolved: answer.resolved.family, source: answer.resolved.source, portable: answer.resolved.portable });
+      shortfalls.push({ request, resolved: resolvedKeyOf(answer), source: answer.resolved.source, portable: answer.resolved.portable });
     }
   }
   // One embedder for both export paths, so licence and parse failures are

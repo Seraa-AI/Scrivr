@@ -25,6 +25,7 @@ import {
   type PdfLineOp,
   type PdfRectOp,
   type PdfTextOp,
+  type PdfFontHandle,
   type Rgb,
   type DocumentLayout,
   type FontResolutionId,
@@ -62,6 +63,13 @@ export interface PdfContext {
   fonts: PdfFontRegistry;
   images: Map<string, PDFImage | null>;
   draw: PdfDrawHelpers;
+  /**
+   * The face the layout measured this block in, present when the block is an
+   * inline atom. A handler drawing its own text should use it rather than
+   * naming a family: the box around it was reserved against this face, and on
+   * canvas the atom is painted in it.
+   */
+  font?: PdfFontHandle;
   /** The editor whose export contributions were collected (a ServerEditor suffices). */
   editor: IBaseEditor;
   /**
@@ -135,7 +143,7 @@ export function createDrawHelpers(
     // The same guard the span path applies. A handler cannot apply it itself —
     // a font handle names a family, it does not say what the format made of it
     // — so the one layer holding both the resolved font and the text does it.
-    const font = fontRegistry.resolve(op.font.cssFont);
+    const font = fontRegistry.resolve(op.font.cssFont, op.font.resolution);
     const text = fontRegistry.isUnicode(font)
       ? stripInvisible(op.text)
       : sanitizeForWinAnsi(op.text);
@@ -465,7 +473,22 @@ export function createDrawHelpers(
                 height: span.height,
                 lines: [],
               };
-              const atomCtx = { ...ctx, x: spanAbsX, y: objY, width: span.width };
+              const atomCtx: PdfContext = {
+                ...ctx,
+                x: spanAbsX,
+                y: objY,
+                width: span.width,
+                ...(span.font !== undefined
+                  ? {
+                      font: {
+                        cssFont: span.font,
+                        ...(span.resolution !== undefined
+                          ? { resolution: span.resolution }
+                          : {}),
+                      },
+                    }
+                  : {}),
+              };
               handler(atomBlock, atomCtx);
             }
           }

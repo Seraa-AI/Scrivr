@@ -57,9 +57,30 @@ That is the whole setup. The editor installs the bytes in its measurement backen
 
 <Callout type="info">
 	Register every weight and slant you care about. A request for bold resolves
-	to the nearest face in the family — with no bold registered, bold text is
-	drawn in the regular weight rather than synthesised.
+	to the nearest face in the family, and with no bold registered the text is
+	drawn in the regular weight.
 </Callout>
+
+### Why bold is not synthesised
+
+Word and most browsers fake a missing bold by thickening the regular face.
+Scrivr does not, and the reason is the one this whole model exists for.
+
+A browser's synthetic bold **widens the advance** of every glyph. A PDF's
+equivalent — stroking the outline — leaves the advance unchanged. So a document
+measured against a faked bold on canvas and painted with a faked bold in a PDF
+would disagree about where every subsequent character goes, which is exactly
+the overlapping-text failure that a shared inventory removes.
+
+Since no two engines fake it the same way, the engine reports instead of
+guessing. `resolved` is a whole face, not a family name, so an application can
+tell the two cases apart:
+
+```ts
+const [missed] = editor.fontSubstitutions;
+missed.request.weight; // 700 — the document asked for bold
+missed.resolved.weight; // 400 — it was drawn in the regular
+```
 
 ### Pick a file that covers the scripts you accept
 
@@ -90,7 +111,9 @@ const shortfalls = await prepareDocumentFonts(doc, fonts, {
 	portable: true,
 	embeddable: true,
 });
-// [{ request: { family: "Aptos", weight: 700 }, resolved: "Inter", source: "default" }]
+// [{ request:  { family: "Aptos", weight: 700 },
+//    resolved: { family: "Inter", weight: 400 },
+//    source: "default" }]
 ```
 
 DOCX import runs this for you and raises a `font-substituted` diagnostic per face, so you can tell the user their contract is no longer set in Aptos rather than letting them discover it.

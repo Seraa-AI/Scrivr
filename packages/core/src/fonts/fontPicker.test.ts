@@ -111,7 +111,7 @@ describe("what the editor reports about substitution", () => {
     expect(editor.fontSubstitutions).toHaveLength(1);
     expect(editor.fontSubstitutions[0]).toMatchObject({
       request: { family: "Aptos" },
-      resolved: "Inter",
+      resolved: { family: "Inter" },
       source: "default",
     });
   });
@@ -126,7 +126,7 @@ describe("what the editor reports about substitution", () => {
     editor.ensureFullLayout();
 
     const [missed] = editor.fontSubstitutions;
-    expect(missed?.resolved).toBe("Inter");
+    expect(missed?.resolved.family).toBe("Inter");
     expect(editor.getActiveFontFamily().resolved).toBe("Inter");
   });
 
@@ -194,6 +194,34 @@ describe("what the editor reports about substitution", () => {
     const editor = withProvider(schema.node("doc", null, [schema.node("paragraph")]));
 
     expect(editor.getActiveFontFamily().requested).toBe("Arial");
+  });
+
+  it("says which face answered, not just which family", async () => {
+    // Scrivr does not synthesize a weight it was not given, so an inventory
+    // holding one weight answers bold with regular. Reporting the family alone
+    // cannot tell "your document is in a different typeface" from "your
+    // headings are no longer bold".
+    const editor = createTestEditor({
+      textMeasurer: createInstallingMeasurer(),
+      fonts: new DefaultFontProvider({ default: resource("Inter") }),
+      content: schema
+        .node("doc", null, [
+          schema.node("paragraph", null, [
+            schema.text("Retainer", [
+              schema.marks["fontFamily"]!.create({ family: "Inter" }),
+              schema.marks["bold"]!.create(),
+            ]),
+          ]),
+        ])
+        .toJSON(),
+    });
+    editor.ensureFullLayout();
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    editor.ensureFullLayout();
+
+    const [missed] = editor.fontSubstitutions;
+    expect(missed?.request).toMatchObject({ family: "Inter", weight: 700 });
+    expect(missed?.resolved).toMatchObject({ family: "Inter", weight: 400 });
   });
 
   it("says nothing was substituted when no provider was supplied", () => {

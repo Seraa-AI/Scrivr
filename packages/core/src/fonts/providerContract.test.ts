@@ -82,6 +82,6 @@ describe("a provider that answers with a new object each time", () => {
     // measured against whatever the host makes of the family name.
     const span = editor.layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
     expect(span?.kind === "text" && span.font).toContain("TestFace");
-    expect(editor.fontSubstitutions[0]?.resolved).toBe("Inter");
+    expect(editor.fontSubstitutions[0]?.resolved.family).toBe("Inter");
   }, 30_000);
 });

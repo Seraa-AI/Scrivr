@@ -1991,6 +1991,8 @@ function rebreakWrappedLinesWithoutExclusions(
           width: span.width,
           height: span.height,
           docPos: span.docPos,
+          ...(span.font !== undefined ? { font: span.font } : {}),
+          ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
           verticalAlign: span.verticalAlign,
         });
       }

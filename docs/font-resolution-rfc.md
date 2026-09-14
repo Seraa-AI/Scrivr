@@ -587,10 +587,15 @@ clause in a different typeface from the clause. Both now take the face of the
 line they belong to; the document exports with one face throughout.
 
 The lesson is about coverage, not about tables: a lane that spans opt into is a
-lane every new drawing path silently opts out of. The remaining opt-out is the
-drawing surface — `PdfFontHandle` names a family and carries no resolution — so
-a handler drawing its own text still chooses by name. It has one caller today
-(header/footer tokens), which is why it was left rather than fixed blind.
+lane every new drawing path silently opts out of.
+
+**The drawing surface was the last opt-out, and it was the same defect.** An
+inline atom is measured against a font and the span recorded none, so a handler
+painting one had to name a family — the header and footer tokens named
+`10px sans-serif` while the canvas drew them in the run's resolved face at the
+run's size. An object span now carries the face it was measured against, as a
+text span does, and the atom's context hands it to the handler as a
+`PdfFontHandle` carrying its resolution. No handler has to name a family.
 
 **What phase 3 does not do.** Canvas resolves with no constraints and the
 export resolves with two, so the two can disagree — a face that is registered
@@ -693,6 +698,26 @@ No UI ships in core. Whether a substitution is a badge, a banner or nothing is
 a decision about what an application is for, and the two consumers we can name
 would answer it differently. The `Aptos → Inter` treatment in the playground is
 one application's choice, not a component.
+
+### Synthetic bold — decided against
+
+An inventory holding one weight of a family answers a request for its bold with
+its regular, and nothing fakes the difference. Word and every browser do fake
+it, so this is a deliberate divergence from the convention this project
+otherwise follows.
+
+It cannot be done consistently. A browser's synthetic bold widens each glyph's
+advance; the PDF equivalent strokes the outline and leaves the advance
+unchanged. A document measured against one and painted with the other disagrees
+about where every following character sits — the overlapping-text failure this
+document opens by describing, reintroduced on purpose. No two engines fake a
+weight the same way, so there is no version of this that holds the invariant.
+
+The engine reports instead. `FontShortfall.resolved` is a whole `FontKey`
+rather than a family name, so "your document is in a different typeface" and
+"your headings are no longer bold" are distinguishable by the consumer that has
+to phrase it. The provider already prefers the nearest weight in the family, so
+this only arises for an inventory that has no such face at all.
 
 ## Decisions (locked)
 

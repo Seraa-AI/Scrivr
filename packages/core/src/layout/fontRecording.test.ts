@@ -111,6 +111,30 @@ describe("a laid-out document's font record", () => {
     }
   });
 
+  it("records the face an inline atom was measured against", () => {
+    // An atom has no text of its own, but its box was reserved against a font
+    // and a renderer has to paint it in the same one. A PDF handler with no
+    // face on the span has to name a family, which is the guess this lane
+    // exists to remove.
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [
+        schema.text("Fee ", [schema.marks["fontFamily"]!.create({ family: "Aptos" })]),
+        schema.node("image", { src: "data:image/png;base64,iVBORw0KGgo=", width: 10, height: 10 }),
+      ]),
+    ]);
+    const objects = layoutOf(doc)
+      .pages.flatMap((page) => page.blocks)
+      .flatMap((block) => block.lines)
+      .flatMap((line) => line.spans)
+      .filter((span) => span.kind === "object");
+
+    expect(objects.length).toBeGreaterThan(0);
+    for (const span of objects) {
+      expect(span.kind === "object" && span.font).toContain("App Sans");
+      expect(span.kind === "object" && span.resolution).toBeDefined();
+    }
+  });
+
   it("claims nothing when the editor has no provider", () => {
     const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })], content: schema.node("doc", null, [aptos("Fees")]).toJSON() });
     editor.ensureFullLayout();

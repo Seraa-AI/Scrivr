@@ -20,7 +20,7 @@
  */
 
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { prepareDocumentFonts } from "@scrivr/core";
+import { prepareDocumentFonts, type FontKey } from "@scrivr/core";
 import type {
   DocxImports,
   IBaseEditor,
@@ -67,6 +67,13 @@ export interface DocxImportCallOptions extends DocxImportOptions {
  *   const { doc, diagnostics } = await importDocx(editor, bytes);
  *   editor.setContent(doc.toJSON());
  */
+/** A face as a person would name it: "Inter", or "Inter Bold Italic". */
+function describeFace(face: FontKey): string {
+  const weight = face.weight >= 600 ? " Bold" : face.weight <= 300 ? " Light" : "";
+  const style = face.style === "italic" ? " Italic" : "";
+  return `${face.family}${weight}${style}`;
+}
+
 export async function importDocx(
   editor: IBaseEditor,
   bytes: Uint8Array,
@@ -214,7 +221,7 @@ export async function importDocx(
           code: "font-substituted",
           message:
             `The document asks for "${shortfall.request.family}" and this editor ` +
-            `resolved "${shortfall.resolved}"` +
+            `resolved "${describeFace(shortfall.resolved)}"` +
             (shortfall.portable
               ? ". Text will be measured and drawn in that face."
               : " — a face this environment has but cannot hand to an export."),
