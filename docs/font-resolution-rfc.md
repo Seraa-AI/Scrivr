@@ -540,10 +540,11 @@ survives only where nothing resolved anything — no provider, an unembeddable
 licence, or bytes that would not embed — so an application supplying no
 provider is unaffected.
 
-`PdfExportOptions.fontResolver` is deprecated rather than removed. It resolves
+`PdfExportOptions.fontResolver` is **removed**, a breaking change. It resolves
 bytes by family name at export time, which is precisely how a PDF comes to
-embed a face the layout never measured; it is still honoured, and consulted
-only after the layout's own resolutions.
+embed a face the layout never measured. Keeping it deprecated would have left
+that door open for the sake of an option that contradicts the model; an
+application that used it supplies a `FontProvider` instead.
 
 **Phase 2 shipped three gaps, and all three were inert rather than wrong.**
 Nothing downstream could observe the recording, which is why the phase looked
@@ -575,13 +576,27 @@ resource id is whatever the application called it, so it can contain the
 separator, and its absence has to stay distinguishable from an id that happens
 to be the empty string.
 
+**Running a real contract found two more paths outside the lane.** A ten-page
+DOCX set in Aptos exported with 3510 glyphs from the embedded face and 187 from
+a standard one. The 187 were table cells: `layoutTableRowCells` never received
+the resolver, so cell text was measured in the family nobody owned and painted
+in Helvetica — the original bug, alive inside tables long after body text was
+fixed. List markers had the same shape for a different reason: the marker was
+pinned to `fontRegistry.fallback`, which would put the number of a numbered
+clause in a different typeface from the clause. Both now take the face of the
+line they belong to; the document exports with one face throughout.
+
+The lesson is about coverage, not about tables: a lane that spans opt into is a
+lane every new drawing path silently opts out of. The remaining opt-out is the
+drawing surface — `PdfFontHandle` names a family and carries no resolution — so
+a handler drawing its own text still chooses by name. It has one caller today
+(header/footer tokens), which is why it was left rather than fixed blind.
+
 **What phase 3 does not do.** Canvas resolves with no constraints and the
 export resolves with two, so the two can disagree — a face that is registered
 but unembeddable is measured on screen and cannot go in the file. The export
 reports the shortfall and falls back for those spans rather than re-laying-out
-the document under its own constraints, which would change pagination. The
-`fontResolver` option and the header/footer chrome text are the two paths still
-choosing a face by name.
+the document under its own constraints, which would change pagination.
 
 ## Decisions (locked)
 

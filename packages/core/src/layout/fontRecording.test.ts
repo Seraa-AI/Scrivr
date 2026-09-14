@@ -17,7 +17,7 @@ import { createTestEditor } from "../test-utils";
 import { getSchema } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
 
-const schema = getSchema([StarterKit]);
+const schema = getSchema([StarterKit.configure({ table: true })]);
 
 const resource = (family: string, weight = 400): FontResource => ({
   id: `${family}-${weight}`,
@@ -36,7 +36,7 @@ const aptos = (text: string): Node =>
   ]);
 
 function layoutOf(doc: Node) {
-  const editor = createTestEditor({ content: doc.toJSON(), fonts: fonts() });
+  const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })], content: doc.toJSON(), fonts: fonts() });
   editor.ensureFullLayout();
   return editor.layout;
 }
@@ -84,8 +84,35 @@ describe("a laid-out document's font record", () => {
     ).toBe(true);
   });
 
+  it("carries the resolution into table cells", () => {
+    // Cell text is document text. It reached the PDF measured in the family
+    // nobody owned and painted in a standard face — the original bug, alive
+    // inside tables long after the body text was fixed.
+    const cell = (text: string) =>
+      schema.node("tableCell", null, [aptos(text)]);
+    const doc = schema.node("doc", null, [
+      schema.node("table", null, [
+        schema.node("tableRow", null, [cell("Effective Date"), cell("Fees")]),
+      ]),
+    ]);
+
+    const spans = layoutOf(doc)
+      .pages.flatMap((page) => page.blocks)
+      .flatMap((row) => row.cells ?? [])
+      .flatMap((c) => c.blocks ?? [])
+      .flatMap((b) => b.lines ?? [])
+      .flatMap((l) => l.spans)
+      .filter((span) => span.kind === "text" && span.text.trim().length > 0);
+
+    expect(spans.length).toBeGreaterThan(0);
+    for (const span of spans) {
+      expect(span.kind === "text" && span.font).toContain("App Sans");
+      expect(span.kind === "text" && span.resolution).toBeDefined();
+    }
+  });
+
   it("claims nothing when the editor has no provider", () => {
-    const editor = createTestEditor({ content: schema.node("doc", null, [aptos("Fees")]).toJSON() });
+    const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })], content: schema.node("doc", null, [aptos("Fees")]).toJSON() });
     editor.ensureFullLayout();
 
     expect(editor.layout.fontResolutions?.size ?? 0).toBe(0);

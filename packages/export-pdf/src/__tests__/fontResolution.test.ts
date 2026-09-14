@@ -53,25 +53,19 @@ describe("choosing the face a span is painted in", () => {
   it("uses the face the layout measured, not the one the name suggests", () => {
     const measured = standard["mono_normal"]!;
     // The CSS string says Georgia, which the name-based guess maps to Times.
-    const font = resolveFont(
-      "14px Georgia",
-      standard,
-      new Map(),
-      new Map([[0, measured]]),
-      0,
-    );
+    const font = resolveFont("14px Georgia", standard, new Map([[0, measured]]), 0);
     expect(font).toBe(measured);
     expect(font).not.toBe(standard["serif_normal"]);
   });
 
   it("falls back to the name when the span carries no resolution", () => {
-    expect(resolveFont("14px Georgia", standard, new Map(), new Map(), undefined))
+    expect(resolveFont("14px Georgia", standard, new Map(), undefined))
       .toBe(standard["serif_normal"]);
   });
 
   it("falls back to the name when the resolution could not be embedded", () => {
     // An id with no entry in the map is a face whose bytes never made it in.
-    expect(resolveFont("14px Georgia", standard, new Map(), new Map(), 7))
+    expect(resolveFont("14px Georgia", standard, new Map(), 7))
       .toBe(standard["serif_normal"]);
   });
 });

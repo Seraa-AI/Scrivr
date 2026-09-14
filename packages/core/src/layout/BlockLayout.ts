@@ -351,7 +351,7 @@ export function layoutTableRow(
   node: Node,
   options: BlockLayoutOptions,
 ): LayoutBlock {
-  const { nodePos, x, y, availableWidth, page, measurer, fontConfig, fontModifiers, inlineRegistry, tableColumns } = options;
+  const { nodePos, x, y, availableWidth, page, measurer, fontConfig, fontModifiers, inlineRegistry, fonts, tableColumns } = options;
 
   const columns =
     tableColumns && tableColumns.length > 0
@@ -368,6 +368,7 @@ export function layoutTableRow(
     ...(fontConfig ? { fontConfig } : {}),
     ...(fontModifiers ? { fontModifiers } : {}),
     ...(inlineRegistry ? { inlineRegistry } : {}),
+    ...(fonts ? { fonts } : {}),
   });
 
   return {

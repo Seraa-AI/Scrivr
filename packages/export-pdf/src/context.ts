@@ -335,12 +335,21 @@ export function createDrawHelpers(
     // Draw list marker if present.
     const firstLine = block.lines[0];
     if (block.listMarker && block.listMarkerX !== undefined && firstLine) {
-      const markerFont = fontRegistry.fallback;
+      // A marker labels its line, so it takes that line's face as well as its
+      // size. Pinning it to the fallback puts the number of a numbered clause
+      // in a different typeface from the clause.
       const firstSpan = firstLine.spans[0];
+      const markerFont =
+        firstSpan?.kind === "text"
+          ? fontRegistry.resolve(firstSpan.font, firstSpan.resolution)
+          : fontRegistry.fallback;
       const fontSize = extractFontSizePx(
         (firstSpan?.kind === "text" ? firstSpan.font : undefined) ?? "12px sans-serif",
       );
-      page.drawText(sanitizeForWinAnsi(block.listMarker), {
+      const markerText = fontRegistry.isUnicode(markerFont)
+        ? stripInvisible(block.listMarker)
+        : sanitizeForWinAnsi(block.listMarker);
+      page.drawText(markerText, {
         x: block.listMarkerX * PT_PER_PX,
         y: flipY(block.y + firstLine.ascent, pageHeightPt),
         size: fontSize * PT_PER_PX,

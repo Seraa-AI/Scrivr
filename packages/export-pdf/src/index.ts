@@ -44,7 +44,6 @@ import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
 import type { PdfContext, PdfDrawHelpers } from "./context";
 import {
   embedStandardFonts,
-  embedCustomFonts,
   embedResolvedFonts,
   createFontRegistry,
 } from "./fonts";
@@ -70,16 +69,6 @@ export interface PdfExportOptions {
    * with what it resolved to.
    */
   onFontShortfall?: (shortfalls: FontShortfall[]) => void;
-  /**
-   * Called once per unique (family, weight, style) combination found in the
-   * document. Return the font file bytes to embed it; return null to fall back
-   * to the nearest standard font (Helvetica / Times / Courier).
-   */
-  fontResolver?: (
-    family: string,
-    weight: "normal" | "bold",
-    style: "normal" | "italic",
-  ) => Promise<ArrayBuffer | null>;
   /**
    * Optional theme override. Shallow-merged over the print-ready
    * `defaultPdfTheme`. The PDF default ignores the canvas theme entirely —
@@ -179,12 +168,8 @@ export async function buildPdf(
   const pdfDoc = await PDFDocument.create();
 
   const standardFonts = await embedStandardFonts(pdfDoc);
-  const customFonts = options?.fontResolver
-    ? await embedCustomFonts(pdfDoc, layout, options.fontResolver)
-    : new Map();
   const resolvedFonts = await embedResolvedFonts(pdfDoc, layout);
-
-  const fontRegistry = createFontRegistry(standardFonts, customFonts, resolvedFonts);
+  const fontRegistry = createFontRegistry(standardFonts, resolvedFonts);
   const imageCache = await embedImages(pdfDoc, layout);
 
   // Mutable page ref — updated per page in the loop. Draw helpers read lazily.
