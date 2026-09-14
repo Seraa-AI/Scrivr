@@ -100,6 +100,17 @@ describe("resolving a span's font for measurement", () => {
     expect(r.table().get(bold.resolution)?.resource?.id).toBe("Inter-700");
   });
 
+  it("asks for the family, not the whole fallback list", () => {
+    // "Arial, sans-serif" is one request and a chain of host fallbacks. An
+    // application that registered "Arial" has answered it; asking for the
+    // literal list matches nothing and silently lands on the default.
+    const r = createLayoutFontResolver(provider(["Arial"]));
+    const answer = r.resolve("14px Arial, sans-serif");
+
+    expect(r.table().get(answer.resolution)?.resolved.source).toBe("requested");
+    expect(r.table().get(answer.resolution)?.resolved.family).toBe("Arial");
+  });
+
   it("gives an export a different answer than the screen", () => {
     const p = provider([], ["Aptos"]);
     const screen = createLayoutFontResolver(p);

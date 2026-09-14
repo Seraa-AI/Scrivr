@@ -599,6 +599,37 @@ its own constrained snapshot and re-layouts from that snapshot, so pagination
 and painting remain internally consistent. It reports any substitution through
 `onFontShortfall`.
 
+### Phase 3 follow-ups — shipped
+
+Running the playground's own configuration against the contract found two more
+faults, both invisible until a real inventory existed.
+
+**The default was a face, not a family.** Falling back went straight to the one
+`default` resource, so a document naming a family nobody owns lost its bold and
+its italic: 3697 glyphs of a contract came out in the regular weight. A
+document that says bold still means bold even when the family is unavailable,
+so the fallback now picks the nearest face in the default's *family*. The
+contract exports as 3107 regular, 568 bold, 22 italic — the same distribution
+it had before any substitution, re-faced.
+
+**A font-family list was treated as one family name.** `parseFont` returns
+everything after the size, so `"Arial, sans-serif"` was asked of the provider
+verbatim and matched nothing registered as `Arial`. The rest of the list is the
+host's fallback chain, which is the decision a provider exists to replace; only
+the primary family is a request.
+
+**Reporting was per size.** Interning on `request.size` gave one answer per
+`(face, size)` pair, so the contract reported thirteen substitutions for five
+faces. Size is a measurement parameter, not part of a face's identity. The
+requested family stays in the key, because two families sharing a fallback
+today must still split when one of them is registered tomorrow.
+
+**The adapter and the demo.** `useScrivrEditor` accepted no `fonts` option, so
+the React lane had the same hole `Editor` did. The docs playground now supplies
+an Inter inventory from `@fontsource/inter`, which is the worked example the
+guide points at: an application owns its typefaces, and Scrivr owns the
+resolution.
+
 ## Decisions (locked)
 
 **Does layout re-measure when a font loads late?** Yes — when the *resolution*

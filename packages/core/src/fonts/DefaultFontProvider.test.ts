@@ -82,6 +82,30 @@ describe("a face the host has but nobody owns", () => {
   });
 });
 
+describe("falling back to the default", () => {
+  it("keeps the weight the document asked for", () => {
+    // A document naming a family nobody owns still means bold where it says
+    // bold. Answering every weight with the one default face renders a
+    // contract's headings in body text.
+    const defaultBold = resource("App Default", 700);
+    const p = new DefaultFontProvider({
+      default: fallback,
+      resources: [defaultBold],
+    });
+    const answer = p.resolve(ask("Aptos", 700));
+
+    expect(answer.resolved.source).toBe("default");
+    expect(answer.resource?.id).toBe(defaultBold.id);
+  });
+
+  it("still answers when the default family has only the one face", () => {
+    const answer = new DefaultFontProvider({ default: fallback }).resolve(ask("Aptos", 700));
+
+    expect(answer.resolved.source).toBe("default");
+    expect(answer.resource?.id).toBe(fallback.id);
+  });
+});
+
 describe("a resource that may not be embedded", () => {
   const licensed = resource("Licensed", 400, { embedding: { allowed: false } });
 

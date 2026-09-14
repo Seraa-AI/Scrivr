@@ -5,6 +5,7 @@ import { createFontRegistry, embedStandardFonts } from "./fonts";
 import { sanitizeForWinAnsi, stripInvisible } from "./context";
 
 const constraints = { portable: true, embeddable: true } as const;
+/** A face, without the size it was asked at — one answer serves every size. */
 const key = (request: FontRequest) => JSON.stringify([request.family, request.weight, request.style, request.stretch]);
 const faceKey = (css: string) => css.replace(/[\d.]+px/, "");
 const fontSize = (css: string) => Number(/([\d.]+)px/.exec(css)?.[1] ?? 14);
@@ -21,7 +22,7 @@ export async function preparePdfLayout(editor: IEditor) {
     defaultRequest: () => provider.defaultRequest(),
     prepare: async () => {},
     resolve: (request, limits) => {
-      discovered.set(JSON.stringify(request), request);
+      discovered.set(key(request), request);
       return provider.resolve(request, limits);
     },
   }, constraints);

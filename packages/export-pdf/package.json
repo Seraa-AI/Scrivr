@@ -53,6 +53,7 @@
     "@scrivr/core": "workspace:*"
   },
   "devDependencies": {
+    "@fontsource/inter": "^5.3.0",
     "@scrivr/core": "workspace:*",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",

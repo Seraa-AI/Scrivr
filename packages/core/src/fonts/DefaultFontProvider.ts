@@ -129,9 +129,7 @@ export class DefaultFontProvider implements FontProvider {
     }
 
     // Prefer the nearest supplied face, and report the changed weight/slant.
-    const sibling = (this.#byFamily.get(familyOf(request.family)) ?? [])
-      .filter(usable)
-      .sort((a, b) => Number(a.style !== request.style) - Number(b.style !== request.style) || Math.abs(a.weight - request.weight) - Math.abs(b.weight - request.weight))[0];
+    const sibling = this.#nearest(request.family, request, usable);
     if (sibling) return this.#answer(request, sibling, "substituted");
 
     // The host can draw it, but nobody can carry it anywhere.
@@ -142,9 +140,14 @@ export class DefaultFontProvider implements FontProvider {
       };
     }
 
-    if (usable(this.#default)) {
-      return this.#answer(request, this.#default, "default");
-    }
+    // Falling back to the default family, not to the one default face: a
+    // document that asks for a bold this application does not own still means
+    // bold, and answering every weight with the regular renders a contract's
+    // headings in body text.
+    const fallback =
+      this.#nearest(this.#default.family, request, usable) ??
+      (usable(this.#default) ? this.#default : undefined);
+    if (fallback) return this.#answer(request, fallback, "default");
 
     // Nothing owned can be used here. The host decides, and the answer says so.
     return {
@@ -156,6 +159,21 @@ export class DefaultFontProvider implements FontProvider {
   subscribe(listener: (change: FontProviderChange) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  }
+
+  /** The face in `family` closest to what was asked for: slant first, then weight. */
+  #nearest(
+    family: string,
+    request: FontRequest,
+    usable: (resource: FontResource) => boolean,
+  ): FontResource | undefined {
+    return (this.#byFamily.get(familyOf(family)) ?? [])
+      .filter(usable)
+      .sort(
+        (a, b) =>
+          Number(a.style !== request.style) - Number(b.style !== request.style) ||
+          Math.abs(a.weight - request.weight) - Math.abs(b.weight - request.weight),
+      )[0];
   }
 
   #answer(

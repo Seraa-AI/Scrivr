@@ -14,6 +14,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { PDFDocument } from "pdf-lib";
 import type { DocumentLayout, FontResource, IEditor } from "@scrivr/core";
 import { DefaultFontProvider, ServerEditor, StarterKit } from "@scrivr/core";
@@ -23,6 +24,19 @@ import { embedStandardFonts, resolveFont, embedResolvedFonts } from "../fonts";
 
 const standard = await embedStandardFonts(await PDFDocument.create());
 
+/**
+ * A real typeface, resolved through node_modules rather than an OS path: these
+ * assertions are about embedding actual font bytes, and a path that only
+ * exists on one developer's platform makes them pass there and nowhere else.
+ */
+const fontPath = createRequire(import.meta.url).resolve(
+  "@fontsource/inter/files/inter-latin-400-normal.woff2",
+);
+const realFontBytes = (): ArrayBuffer => {
+  const b = readFileSync(fontPath);
+  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+};
+
 const resource = (
   id: string,
   overrides: Partial<FontResource> = {},
@@ -31,10 +45,7 @@ const resource = (
   family: id,
   weight: 400,
   style: "normal",
-  bytes: vi.fn(() => {
-    const bytes = readFileSync("/System/Library/Fonts/Supplemental/Courier New.ttf");
-    return Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-  }),
+  bytes: vi.fn(() => Promise.resolve(realFontBytes())),
   ...overrides,
 });
 

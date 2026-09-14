@@ -25,11 +25,22 @@ const BARE_FAMILY = /^[A-Za-z_-][\w-]*(?: [A-Za-z_-][\w-]*)*$/;
 const quoted = (family: string): string =>
   BARE_FAMILY.test(family) ? family : `"${family.replace(/"/g, '\\"')}"`;
 
+/**
+ * The face a CSS font-family list is actually asking for.
+ *
+ * `parseFont` hands back everything after the size, so "Arial, sans-serif"
+ * arrives as one family name and matches nothing an application registered
+ * under "Arial". The rest of the list is the host's fallback chain, which is
+ * the decision a provider exists to make instead.
+ */
+const primaryFamily = (family: string): string =>
+  family.split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") || family;
+
 /** Weight and slant as the CSS shorthand spells them, in the terms a key uses. */
 function requestFrom(cssFont: string, size: number) {
   const parsed = parseFont(cssFont);
   return {
-    family: parsed.family,
+    family: primaryFamily(parsed.family),
     weight: /^\d+$/.test(parsed.weight) ? Number(parsed.weight) : parsed.weight === "bold" ? 700 : 400,
     style: parsed.style === "italic" || parsed.style === "oblique" ? ("italic" as const) : ("normal" as const),
     size,
@@ -76,8 +87,11 @@ export function createLayoutFontResolver(
         family,
         resolution.resolved.source,
         resolution.resolved.portable,
+        // The requested family is part of the identity even when two requests
+        // share an answer today: registering one of them later must split them
+        // rather than silently re-point both. Size is not — it is a
+        // measurement parameter, and every size of a face has one answer.
         resolution.request.family,
-        resolution.request.size,
         resolution.request.stretch,
         weight,
         style,

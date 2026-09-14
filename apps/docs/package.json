@@ -21,6 +21,7 @@
     "@ai-sdk/react": "^3.0.136",
     "@anthropic-ai/sdk": "^0.80.0",
     "@floating-ui/dom": "^1.7.6",
+    "@fontsource/inter": "^5.3.0",
     "@scrivr/ai": "workspace:*",
     "@scrivr/core": "workspace:*",
     "@scrivr/docx": "workspace:*",
