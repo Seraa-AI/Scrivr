@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 import type { Node } from "prosemirror-model";
+import { TextSelection } from "prosemirror-state";
 import { createTestEditor } from "../test-utils";
 import { getSchema } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
@@ -126,7 +127,10 @@ describe("what the editor reports about substitution", () => {
 
   it("reports the family at the selection and the one it is drawn in", () => {
     const editor = withProvider(schema.node("doc", null, [aptos("Retainer")]));
-    editor.commands.selectAll?.();
+    const state = editor.getState();
+    editor.applyTransaction(
+      state.tr.setSelection(TextSelection.create(state.doc, 2, 5)),
+    );
 
     expect(editor.getActiveFontFamily()).toEqual({
       requested: "Aptos",
