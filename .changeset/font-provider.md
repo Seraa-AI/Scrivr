@@ -3,6 +3,10 @@
 "@scrivr/docx": patch
 ---
 
+**Breaking: `IBaseEditor` gains a required `fonts` member.** A consumer with its
+own `IBaseEditor` or `IEditor` implementation must add it; `null` is the value
+for an editor with no inventory.
+
 An editor can be told which fonts it has.
 
 `new Editor({ fonts })` takes a `FontProvider`: an inventory of font resources

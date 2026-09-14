@@ -8,11 +8,11 @@
  * one down.
  *
  * Resolution is split across two calls because layout is synchronous and
- * acquiring bytes is not. `prepare` answers a document's questions ahead of
- * measurement; `resolve` reports what is known now and never blocks. A
- * measurement that asks something `prepare` was never given still gets an
- * answer — the default — and the provider says so, rather than the caller
- * discovering it from the geometry afterwards.
+ * acquiring bytes is not. `resolve` reports what is known now and never
+ * blocks; `prepare` acquires bytes for what a pass has asked for, so the next
+ * pass can answer better. A measurement that asks something `prepare` was
+ * never given still gets an answer — the default — and the provider says so,
+ * rather than the caller discovering it from the geometry afterwards.
  */
 
 /** What makes one face different from another. Weight and style are identity. */
@@ -37,6 +37,12 @@ export interface FontRequest extends FontKey {
  * learning about any of them.
  */
 export interface FontResource extends FontKey {
+  /**
+   * Identity. Two resolutions naming the same `id` are the same face, and the
+   * engine caches installs and embeddings against it — so a provider that
+   * returns a fresh object per call is still understood, as long as the id is
+   * stable. Nothing may be inferred from object identity.
+   */
   id: string;
   bytes(): Promise<ArrayBuffer>;
   format?: "woff2" | "woff" | "ttf" | "otf";
@@ -66,6 +72,19 @@ export interface FontResolution {
     portable: boolean;
   };
   resource?: FontResource;
+  /**
+   * The family name the measurement backend answers to for these bytes, when
+   * it installed them under one of its own.
+   *
+   * Owned bytes are registered under a private name so an operating-system
+   * font of the same family cannot answer instead, which means the string
+   * handed to the measurer is not the family anybody asked for. Only the code
+   * building that string reads this; `resolved.family` stays the name a person
+   * would recognise, because everything else — reporting, a font control, an
+   * exporter — is talking about the typeface, not about how one backend
+   * addresses it.
+   */
+  measuredAs?: string;
 }
 
 /** What a consumer needs of an answer, rather than a rule it must remember. */
@@ -77,8 +96,8 @@ export interface FontResolutionConstraints {
 }
 
 /**
- * Why the answer to a request might have moved. Four reasons rather than one
- * "something changed", because they licence different amounts of re-measuring.
+ * Why the answer to a request might have moved. The reason is informational:
+ * the editor re-prepares identically for all of them, and varies nothing.
  */
 export interface FontProviderChange {
   key: FontKey;
@@ -89,8 +108,9 @@ export interface FontProvider {
   /** The request text carries when nobody styled it. */
   defaultRequest(): FontRequest;
   /**
-   * Answer these ahead of measurement, acquiring whatever bytes that needs.
-   * Called once per layout over the document's distinct requests.
+   * Acquire whatever bytes these need. Called once per layout, over the
+   * requests a first pass has already discovered — so `resolve` is always
+   * asked before `prepare` has ever run, and has to answer anyway.
    */
   prepare(
     requests: readonly FontRequest[],

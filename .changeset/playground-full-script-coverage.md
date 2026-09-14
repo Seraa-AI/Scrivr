@@ -1,5 +1,4 @@
 ---
-"@scrivr/core": patch
 ---
 
 Playground fonts cover every script the demo can be handed

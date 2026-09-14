@@ -1,5 +1,5 @@
 import { Node } from "prosemirror-model";
-import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
+import type { LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { InlineRegistry } from "./BlockRegistry";
@@ -428,6 +428,7 @@ export function layoutBlock(
     fontModifiers,
     lineSpaceProvider,
     inlineRegistry,
+    fonts,
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
@@ -495,10 +496,17 @@ export function layoutBlock(
     };
   }
 
+  // An empty paragraph still has a height, and that height comes from a face.
+  // Measuring the sentinel in the requested family while every filled
+  // paragraph is measured in the resolved one gives blank lines a different
+  // height from the text around them, and makes the caret jump on the first
+  // keystroke.
+  const zwsAnswer = fonts?.resolve(baseFont);
   const zwsSpan: InputSpan = {
     kind: "text",
     text: "​",
-    font: baseFont,
+    font: zwsAnswer?.font ?? baseFont,
+    ...(zwsAnswer ? { resolution: zwsAnswer.resolution } : {}),
     docPos: nodePos + 1,
   };
   const inputSpans: InputSpan[] = hasNonZeroContent ? spans : [zwsSpan];

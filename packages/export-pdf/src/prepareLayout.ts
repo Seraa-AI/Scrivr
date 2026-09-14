@@ -1,7 +1,6 @@
 import { PDFDocument, type PDFFont } from "pdf-lib";
-import fontkit from "@pdf-lib/fontkit";
 import { createLayoutFontResolver, type IEditor, type FontRequest, type FontResolution, type FontShortfall, type FontResource, type TextMeasurerLike } from "@scrivr/core";
-import { createFontRegistry, embedStandardFonts } from "./fonts";
+import { createFontRegistry, embedFaces, embedStandardFonts, resolveFont } from "./fonts";
 import { sanitizeForWinAnsi, stripInvisible } from "./context";
 
 const constraints = { portable: true, embeddable: true } as const;
@@ -31,10 +30,9 @@ export async function preparePdfLayout(editor: IEditor) {
   await provider.prepare(requests, constraints);
 
   const pdfDoc = await PDFDocument.create();
-  pdfDoc.registerFontkit(fontkit);
   const standard = await embedStandardFonts(pdfDoc);
   const snapshots = new Map<string, FontResolution>();
-  const embedded = new Map<string, { resource: FontResource; font: PDFFont }>();
+  const needed = new Map<string, FontResource>();
   const shortfalls: FontShortfall[] = [];
   const answers = requests.map(request => ({ request, answer: provider.resolve(request, constraints) }));
   for (const { request, answer } of answers) {
@@ -44,21 +42,7 @@ export async function preparePdfLayout(editor: IEditor) {
     }
     let snapshot = answer;
     if (resource) {
-      const existing = embedded.get(resource.id);
-      if (existing && existing.resource !== resource) throw new Error(`Conflicting font resource id: ${resource.id}`);
-      if (!existing) {
-        // A resource which cannot embed cannot safely retain its measured geometry.
-        // Stop here, before layout, instead of silently painting a standard face.
-        let bytes: ArrayBuffer;
-        let font: PDFFont;
-        try {
-          bytes = (await resource.bytes()).slice(0);
-          font = await pdfDoc.embedFont(new Uint8Array(bytes));
-        } catch (cause) {
-          throw new Error(`Cannot embed resolved font ${resource.family}`, { cause });
-        }
-        embedded.set(resource.id, { resource, font });
-      }
+      needed.set(resource.id, resource);
       snapshot = { request: { ...request }, resolved: { ...answer.resolved }, resource: { ...resource } };
     }
     snapshots.set(key(request), snapshot);
@@ -66,6 +50,10 @@ export async function preparePdfLayout(editor: IEditor) {
       shortfalls.push({ request, resolved: answer.resolved.family, source: answer.resolved.source, portable: answer.resolved.portable });
     }
   }
+  // One embedder for both export paths, so licence and parse failures are
+  // handled the same way whichever entry point the caller used.
+  const embedded = await embedFaces(pdfDoc, needed.values());
+
   const resolver = createLayoutFontResolver({
     defaultRequest: () => provider.defaultRequest(), prepare: async () => {},
     resolve: request => {
@@ -82,13 +70,14 @@ export async function preparePdfLayout(editor: IEditor) {
     const css = `${request.style === "italic" ? "italic " : ""}${request.weight === 400 ? "" : `${request.weight} `}${request.size}px ${request.family}`;
     const result = resolver.resolve(css);
     const answer = resolver.table().get(result.resolution)!;
-    const font = answer.resource ? embedded.get(answer.resource.id)!.font : createFontRegistry(standard).resolve(result.font);
+    const font = (answer.resource && embedded.get(answer.resource.id))
+      ?? resolveFont(result.font, standard);
     byCss.set(faceKey(result.font), font);
     resolvedFonts.set(result.resolution, font);
   }
   const registry = createFontRegistry(standard, resolvedFonts);
   // Only owned fonts are Unicode fonts; standard faces still require WinAnsi sanitization.
-  const unicode = new Set([...embedded.values()].map(e => e.font));
+  const unicode = new Set(embedded.values());
   registry.isUnicode = font => unicode.has(font);
   const originalResolve = registry.resolve;
   const faceFor = (css: string) => {
@@ -118,7 +107,8 @@ export async function preparePdfLayout(editor: IEditor) {
   const layout = editor.layoutForExport(doc, resolver, measurer);
   // Resolve IDs discovered at other sizes to the same prepared resources.
   for (const [id, answer] of resolver.table()) {
-    if (answer.resource) resolvedFonts.set(id, embedded.get(answer.resource.id)!.font);
+    const font = answer.resource && embedded.get(answer.resource.id);
+    if (font) resolvedFonts.set(id, font);
   }
   return { layout, doc: pdfDoc, fonts: registry, shortfalls };
 }

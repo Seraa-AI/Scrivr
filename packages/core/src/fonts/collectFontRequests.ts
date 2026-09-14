@@ -61,10 +61,9 @@ export function collectFontRequests(
 /**
  * Resolve everything a document asks for, and report what it did not get.
  *
- * Runs before measurement, so the answers are settled by the time geometry
- * depends on them. Reporting is the point of this phase: nothing renders
- * differently, but a document whose typography could not be honoured stops
- * being silent about it.
+ * Acquires the bytes as well as reporting, so a later layout can measure
+ * against them. The reporting is the part a caller acts on: a document whose
+ * typography could not be honoured stops being silent about it.
  */
 export async function prepareDocumentFonts(
   doc: PmNode,

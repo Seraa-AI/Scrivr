@@ -110,9 +110,13 @@ export interface DocumentLayout {
   pageConfig: PageConfig;
   /**
    * Every face this layout measured against, by the id its spans carry.
-   * Empty when the editor has no font provider — nothing was resolved, so
+   * Absent when the editor has no font provider — nothing was resolved, so
    * there is nothing to claim. A consumer reproducing this geometry reads
    * these rather than deriving its own answer from the family names.
+   *
+   * Cumulative for the coordinator's lifetime so ids on cached spans stay
+   * resolvable; it therefore holds faces the document no longer uses. Read
+   * the spans, not this table, to describe the document as it stands.
    */
   fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>;
   /**
@@ -591,7 +595,6 @@ function resolveAnchoredObjects(
   geometry: PageGeometry,
   ctx: MeasureContext,
 ): { flows: FlowBlock[]; placements: AnchoredObjectPlacement[] } {
-  const { measurer, fontConfig, fontModifiers, inlineRegistry, fonts } = ctx;
   let flows = inputFlows;
   const placements: AnchoredObjectPlacement[] = [];
   const contentX = pageConfig.margins.left;
@@ -966,13 +969,10 @@ function reflowFlowsAgainstExclusions(
 }
 
 /**
- * What every measuring stage needs and none of them decide.
+ * What every measuring stage needs and none of them decides.
  *
- * These five travelled as the same four-to-five positional parameters through
- * `buildBlockFlow`, `resolveAnchoredObjects` and
- * `reflowFlowsAgainstExclusions`, which is how `buildBlockFlow` reached nine.
- * Bundling them means the next dependency costs a field rather than another
- * parameter in three signatures — `fonts` is the first to arrive that way.
+ * A bundle rather than a parameter list, so the next dependency costs a field
+ * instead of an argument in three signatures.
  */
 export interface MeasureContext {
   measurer: TextMeasurerLike;

@@ -107,10 +107,15 @@ export function createLayoutFontResolver(
       // name needs it: an invalid shorthand is silently ignored by `ctx.font`,
       // which leaves the previous span's face and produces geometry from a
       // font nobody chose.
+      // Measure under the backend's own name for the bytes when it has one;
+      // the family otherwise. A face carries its own weight and slant, so the
+      // shorthand spells the resource's rather than the request's — asking an
+      // installed regular for bold would have the host synthesize one.
       const face = resolution.resource;
+      const measured = resolution.measuredAs ?? family;
       const font = face
-        ? `${face.style === "italic" ? "italic " : ""}${face.weight === 400 ? "" : `${face.weight} `}${parsed.size} ${quoted(family)}`
-        : substituteFamily(cssFont, quoted(family));
+        ? `${face.style === "italic" ? "italic " : ""}${face.weight === 400 ? "" : `${face.weight} `}${parsed.size} ${quoted(measured)}`
+        : substituteFamily(cssFont, quoted(measured));
       const answer = { font, resolution: id };
       byFont.set(cssFont, answer);
       return answer;

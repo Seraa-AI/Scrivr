@@ -91,16 +91,29 @@ export class LayoutCoordinator {
    * cached spans would point into a table that no longer describes them.
    */
   private fontResolver: LayoutFontResolver | null;
-  private readonly installedFonts = new Map<FontResource, string>();
-  private readonly failedFonts = new Set<FontResource>();
+  /** Keyed by `FontResource.id`: a provider may hand back a fresh object each call. */
+  private readonly installedFonts = new Map<string, string>();
+  private readonly failedFonts = new Set<string>();
   private preparingFonts = false;
   private fontPreparationPending = false;
   private disposed = false;
   private unsubscribeFonts?: () => void;
 
+  /**
+   * The provider's answer, as this measurement backend can actually honour it.
+   *
+   * An answer with no resource is one the provider already settled without
+   * bytes — a system family, or nothing owned at all — and there is nothing
+   * here to install, so it passes through as written. An answer whose bytes
+   * this backend has not installed is the degraded case: the face exists
+   * somewhere but is not what will be measured, and saying so is the point.
+   */
   private canvasResolution(answer: FontResolution): FontResolution {
-    const family = answer.resource && this.installedFonts.get(answer.resource);
-    if (family) return { ...answer, resolved: { ...answer.resolved, family } };
+    if (!answer.resource) return answer;
+
+    const measuredAs = this.installedFonts.get(answer.resource.id);
+    if (measuredAs) return { ...answer, measuredAs };
+
     const { resource: _resource, ...rest } = answer;
     return { ...rest, resolved: { ...answer.resolved, source: "generic", portable: false } };
   }
@@ -123,21 +136,29 @@ export class LayoutCoordinator {
       await this.opts.fonts.prepare(requests);
       for (const request of requests) {
         const resource = this.opts.fonts.resolve(request).resource;
-        if (!resource || this.installedFonts.has(resource) || this.failedFonts.has(resource)) continue;
+        if (!resource || this.installedFonts.has(resource.id) || this.failedFonts.has(resource.id)) continue;
         try {
           const install = this.opts.measurer.installFont;
           if (!install) throw new Error("The measurement backend does not install fonts");
           const family = await install.call(this.opts.measurer, resource);
           if (!family) throw new Error("The measurement backend returned an empty font family");
-          this.installedFonts.set(resource, family);
+          this.installedFonts.set(resource.id, family);
         } catch {
-          this.failedFonts.add(resource);
+          // Retried on the next layout: the backend may gain the face, or the
+          // bytes may become reachable. Until then this resolves as generic.
+          this.failedFonts.add(resource.id);
         }
       }
       if (this.disposed) return;
       const changed = [...this.fontResolver.table().values()].some(old => {
         const current = this.canvasResolution(this.opts.fonts!.resolve(old.request));
-        return current.resource !== old.resource || JSON.stringify(current.resolved) !== JSON.stringify(old.resolved);
+        return (
+          current.resource?.id !== old.resource?.id ||
+          current.measuredAs !== old.measuredAs ||
+          current.resolved.family !== old.resolved.family ||
+          current.resolved.source !== old.resolved.source ||
+          current.resolved.portable !== old.resolved.portable
+        );
       });
       if (changed) {
         this.fontResolver = this.newFontResolver();

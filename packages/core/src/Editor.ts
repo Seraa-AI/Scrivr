@@ -18,6 +18,7 @@ import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import type { ActiveFontFamily, FontProvider } from "./fonts/types";
+import type { FontResolutionId } from "./fonts/layoutResolver";
 import type { FontShortfall } from "./fonts/collectFontRequests";
 import { primaryFamily } from "./fonts/layoutResolver";
 import { DEFAULT_FONT_FAMILY } from "./layout/FontConfig";
@@ -236,21 +237,58 @@ export interface EditorOptions {
 	fonts?: FontProvider;
 }
 
-/**eant to ask is if you approve the plan so that we can transition out of "Brainstorm" mode. If you are happy with the plan as written in that document, just give me the green light, and I will create our task.md checklist and begin writing the code!
-
-
- * Editor — the full browser editor. Extends `BaseEditor` with layout,
- * canvas rendering, input capture, and cursor management.
+/**
+ * Every face the laid-out document asked for and did not get.
  *
- * Usage:
- *   const editor = new Editor({ extensions: [StarterKit], onChange })
- *   editor.mount(containerElement)
- *   editor.destroy()
- *
- *   // Execute commands
- *   editor.commands.toggleBold()
- *   editor.commands.undo()
+ * Read from the spans rather than from the layout's resolution table: that
+ * table accumulates for the life of the coordinator so ids on cached spans stay
+ * resolvable, which means a family the user applied and then undid is still in
+ * it. What a reader wants is the document in front of them.
  */
+function documentShortfalls(layout: DocumentLayout): readonly FontShortfall[] {
+	const table = layout.fontResolutions;
+	if (!table?.size) return [];
+
+	const used = new Set<FontResolutionId>();
+	for (const page of layout.pages) {
+		for (const block of page.blocks) {
+			for (const line of block.lines) {
+				for (const span of line.spans) {
+					if (span.kind === "text" && span.resolution !== undefined) {
+						used.add(span.resolution);
+					}
+				}
+			}
+			for (const cell of block.cells ?? []) {
+				for (const cellBlock of cell.blocks) {
+					for (const line of cellBlock.lines) {
+						for (const span of line.spans) {
+							if (span.kind === "text" && span.resolution !== undefined) {
+								used.add(span.resolution);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	const missed: FontShortfall[] = [];
+	for (const id of used) {
+		const entry = table.get(id);
+		if (!entry) continue;
+		const { request, resolved } = entry;
+		if (resolved.source === "requested" && resolved.portable) continue;
+		missed.push({
+			request,
+			resolved: resolved.family,
+			source: resolved.source,
+			portable: resolved.portable,
+		});
+	}
+	return missed;
+}
+
 /** Distinct families an inventory can render, first occurrence winning. */
 function distinctFamilies(provider: FontProvider | null): readonly string[] {
 	const seen = new Map<string, string>();
@@ -283,7 +321,9 @@ function withAvailableFamilies(
 		args: [family],
 		label: family,
 		title: `Font: ${family}`,
-		labelStyle: { fontFamily: family },
+		// No `labelStyle`: owned bytes are installed under a private name, so
+		// styling a label `font-family: Inter` asks the browser for a family it
+		// does not have and previews every entry in the same fallback.
 		isActive: (activeMarks, blockType, blockAttrs, activeMarkAttrs) =>
 			blockAttrs["fontFamily"] === family ||
 			activeMarkAttrs?.["fontFamily"]?.["family"] === family,
@@ -294,6 +334,19 @@ function withAvailableFamilies(
 	return [...kept.slice(0, firstAt), ...replacements, ...kept.slice(firstAt)];
 }
 
+/**
+ * Editor — the full browser editor. Extends `BaseEditor` with layout,
+ * canvas rendering, input capture, and cursor management.
+ *
+ * Usage:
+ *   const editor = new Editor({ extensions: [StarterKit], onChange })
+ *   editor.mount(containerElement)
+ *   editor.destroy()
+ *
+ *   // Execute commands
+ *   editor.commands.toggleBold()
+ *   editor.commands.undo()
+ */
 export class Editor extends BaseEditor implements IEditor {
 	private readonly onChangeHandler: EditorChangeHandler | undefined;
 	private readonly onFocusChangeHandler:
@@ -979,22 +1032,12 @@ export class Editor extends BaseEditor implements IEditor {
 	 * on every notification.
 	 */
 	get fontSubstitutions(): readonly FontShortfall[] {
-		const { version, fontResolutions } = this.layout;
-		if (this.substitutionsVersion === version) return this.substitutionsCache;
+		const layout = this.layout;
+		if (this.substitutionsVersion === layout.version) return this.substitutionsCache;
 
-		const missed: FontShortfall[] = [];
-		for (const { request, resolved } of fontResolutions?.values() ?? []) {
-			if (resolved.source === "requested" && resolved.portable) continue;
-			missed.push({
-				request,
-				resolved: resolved.family,
-				source: resolved.source,
-				portable: resolved.portable,
-			});
-		}
-		this.substitutionsCache = missed;
-		this.substitutionsVersion = version;
-		return missed;
+		this.substitutionsCache = documentShortfalls(layout);
+		this.substitutionsVersion = layout.version;
+		return this.substitutionsCache;
 	}
 
 	/**

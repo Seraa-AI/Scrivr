@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import type { Node } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
-import { createTestEditor } from "../test-utils";
+import { createInstallingMeasurer, createTestEditor } from "../test-utils";
 import { getSchema } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
 
@@ -86,42 +86,91 @@ describe("what the editor reports about substitution", () => {
       schema.text(text, [schema.marks["fontFamily"]!.create({ family: "Aptos" })]),
     ]);
 
-  const withProvider = (content?: Node) =>
+  const inter = (text: string) =>
+    schema.node("paragraph", null, [
+      schema.text(text, [schema.marks["fontFamily"]!.create({ family: "Inter" })]),
+    ]);
+
+  /** Installs its faces, as a browser would — otherwise every answer is generic. */
+  const withProvider = (content: Node) =>
     createTestEditor({
+      textMeasurer: createInstallingMeasurer(),
       fonts: new DefaultFontProvider({
         default: resource("Inter"),
         resources: [resource("Inter", 700)],
       }),
-      ...(content ? { content: content.toJSON() } : {}),
+      content: content.toJSON(),
     });
 
-  it("lists every face the document asked for and did not get", () => {
+  it("lists every face the document asked for and did not get", async () => {
     const editor = withProvider(schema.node("doc", null, [aptos("Retainer")]));
     editor.ensureFullLayout();
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    editor.ensureFullLayout();
 
-    // Not asserting `source`: it depends on whether this environment could
-    // install the bytes, and a measurement backend with no way to install a
-    // face reports every answer as one it cannot promise.
     expect(editor.fontSubstitutions).toHaveLength(1);
     expect(editor.fontSubstitutions[0]).toMatchObject({
       request: { family: "Aptos" },
       resolved: "Inter",
+      source: "default",
     });
   });
 
-  it("keeps the same array between layouts, so a selector can compare it", () => {
+  it("names the typeface, never the alias it is measured under", async () => {
+    // Owned bytes install under a private name so an OS font of the same
+    // family cannot answer instead. That name is a measurement detail — a
+    // reader told "Aptos became TestFace0" has learned nothing.
+    const editor = withProvider(schema.node("doc", null, [aptos("Retainer")]));
+    editor.ensureFullLayout();
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    editor.ensureFullLayout();
+
+    const [missed] = editor.fontSubstitutions;
+    expect(missed?.resolved).toBe("Inter");
+    expect(editor.getActiveFontFamily().resolved).toBe("Inter");
+  });
+
+  it("returns the same array until the layout changes", () => {
     // A getter that rebuilt its result would re-render every subscriber on
     // every editor notification.
     const editor = withProvider(schema.node("doc", null, [aptos("Retainer")]));
     editor.ensureFullLayout();
+    const first = editor.fontSubstitutions;
 
-    expect(editor.fontSubstitutions).toBe(editor.fontSubstitutions);
+    expect(editor.fontSubstitutions).toBe(first);
+
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.insertText("x", 2));
+    editor.ensureFullLayout();
+    expect(editor.fontSubstitutions).not.toBe(first);
   });
 
-  it("claims nothing when every face was honoured", () => {
-    const editor = withProvider();
+  it("claims nothing when every face was honoured", async () => {
+    const editor = withProvider(schema.node("doc", null, [inter("Retainer")]));
+    editor.ensureFullLayout();
+    for (let i = 0; i < 40; i++) await Promise.resolve();
     editor.ensureFullLayout();
 
+    expect(editor.fontSubstitutions).toEqual([]);
+  });
+
+  it("forgets a face the document no longer uses", async () => {
+    // The resolver's table is cumulative so ids on cached spans stay valid.
+    // Reporting reads the document instead, or a family applied once and
+    // undone is still being complained about at the end of the session.
+    const editor = withProvider(
+      schema.node("doc", null, [aptos("Retainer"), inter("Fees")]),
+    );
+    editor.ensureFullLayout();
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    editor.ensureFullLayout();
+    expect(editor.fontSubstitutions).toHaveLength(1);
+
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.delete(0, state.doc.firstChild!.nodeSize));
+    editor.ensureFullLayout();
+
+    // Only the Inter paragraph is left, and Inter is owned — nothing to report.
     expect(editor.fontSubstitutions).toEqual([]);
   });
 
@@ -142,7 +191,7 @@ describe("what the editor reports about substitution", () => {
   it("strips the fallback list from the document default", () => {
     // "Arial, sans-serif" is one request and a chain of host fallbacks; a
     // control showing the whole list describes something nobody asked for.
-    const editor = withProvider();
+    const editor = withProvider(schema.node("doc", null, [schema.node("paragraph")]));
 
     expect(editor.getActiveFontFamily().requested).toBe("Arial");
   });
