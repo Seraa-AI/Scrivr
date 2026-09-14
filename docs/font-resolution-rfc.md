@@ -644,6 +644,35 @@ Supporting per-script files properly would mean a face composed of several
 sources plus script-aware run splitting in the exporter. That is a real
 feature, not a packaging detail, and nothing has asked for it.
 
+### The picker — shipped
+
+A font control was the last thing still describing an inventory nobody had.
+`FontFamily` declares its presets in phase 1, before an editor exists, so it
+cannot know what the editor it ends up in can render: with a provider holding
+Inter, its six preset families were six names that all resolved to one
+typeface. Meanwhile a `.docx` written in Aptos showed "Aptos" in the control
+while the page was drawn in Inter — a name for a face that was neither present
+nor used.
+
+`FontProvider` gained an optional `inventory()`, and the editor exposes
+`fontFamilies` from it. The family toolbar group is reconciled against that at
+construction, which is the first moment both facts exist; with no provider the
+extension's presets stand, because nothing was claimed and removing them would
+leave the control empty. Enumeration is optional because a provider backed by a
+remote catalogue can resolve a name without being able to list every name it
+would accept.
+
+The document's own family is still shown — it is what the document says, and a
+control that renamed it would lie in the other direction. It is shown as
+`Aptos → Inter`, and no longer styled in the missing family, which had been
+rendering the label in an arbitrary browser fallback and making an absent font
+look present.
+
+**Enumeration exposed a bug in the thing being enumerated.** `systemCandidates`
+were stored lowercased for matching, so `inventory()` offered "courier new" to
+be displayed. The set became a map: lowercase to match on, the caller's
+spelling to show.
+
 ## Decisions (locked)
 
 **Does layout re-measure when a font loads late?** Yes — when the *resolution*

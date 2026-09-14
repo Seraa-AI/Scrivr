@@ -248,6 +248,49 @@ export interface EditorOptions {
  *   editor.commands.toggleBold()
  *   editor.commands.undo()
  */
+/** Distinct families an inventory can render, first occurrence winning. */
+function distinctFamilies(provider: FontProvider | null): readonly string[] {
+	const seen = new Map<string, string>();
+	for (const face of provider?.inventory?.() ?? []) {
+		const key = face.family.toLowerCase();
+		if (!seen.has(key)) seen.set(key, face.family);
+	}
+	return [...seen.values()];
+}
+
+/**
+ * Replace the family group with the families this editor holds.
+ *
+ * An extension's preset list is a guess made before any editor exists. Keeping
+ * it once an inventory is known offers choices that all resolve to the same
+ * face — a picker where five names produce one typeface. With no inventory the
+ * presets are all there is, so they stand.
+ */
+function withAvailableFamilies(
+	items: ToolbarItemSpec[],
+	families: readonly string[],
+): ToolbarItemSpec[] {
+	if (families.length === 0) return items;
+
+	const template = items.find((item) => item.group === "family");
+	if (!template) return items;
+
+	const replacements: ToolbarItemSpec[] = families.map((family) => ({
+		...template,
+		args: [family],
+		label: family,
+		title: `Font: ${family}`,
+		labelStyle: { fontFamily: family },
+		isActive: (activeMarks, blockType, blockAttrs, activeMarkAttrs) =>
+			blockAttrs["fontFamily"] === family ||
+			activeMarkAttrs?.["fontFamily"]?.["family"] === family,
+	}));
+
+	const firstAt = items.indexOf(template);
+	const kept = items.filter((item) => item.group !== "family");
+	return [...kept.slice(0, firstAt), ...replacements, ...kept.slice(firstAt)];
+}
+
 export class Editor extends BaseEditor implements IEditor {
 	private readonly onChangeHandler: EditorChangeHandler | undefined;
 	private readonly onFocusChangeHandler:
@@ -350,8 +393,21 @@ export class Editor extends BaseEditor implements IEditor {
 	/**
 	 * Toolbar item specs from all extensions, in registration order.
 	 * Data-only — no React. Computed once at construction.
+	 *
+	 * Family items are reconciled against the font inventory, because an
+	 * extension declares them before an editor exists and therefore cannot
+	 * know what this one can render.
 	 */
 	readonly toolbarItems: ToolbarItemSpec[];
+
+	/**
+	 * The families this editor can actually set text in, in inventory order.
+	 *
+	 * Empty when no provider was supplied: nothing has been claimed, so nothing
+	 * can be promised. A picker reading this offers choices that resolve to
+	 * themselves rather than choices that all quietly become the default.
+	 */
+	readonly fontFamilies: readonly string[];
 
 	readonly nodeActionRegistry: NodeActionRegistry;
 
@@ -455,7 +511,11 @@ export class Editor extends BaseEditor implements IEditor {
 			textMeasurer ?? new TextMeasurer({ lineHeightMultiplier: 1.2 });
 		this.fontModifiers = this.manager.buildFontModifiers();
 		this.markDecorators = this.manager.buildMarkDecorators();
-		this.toolbarItems = this.manager.buildToolbarItems();
+		this.fontFamilies = distinctFamilies(this.fonts);
+		this.toolbarItems = withAvailableFamilies(
+			this.manager.buildToolbarItems(),
+			this.fontFamilies,
+		);
 		this.nodeActionRegistry = new NodeActionRegistry(
 			this.manager.buildNodeActions(),
 		);

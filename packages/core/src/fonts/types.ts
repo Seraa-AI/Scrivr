@@ -101,5 +101,15 @@ export interface FontProvider {
     request: FontRequest,
     constraints?: FontResolutionConstraints,
   ): FontResolution;
+  /**
+   * The faces this provider can answer with, for a caller that has to show a
+   * choice rather than make one — a font picker, most obviously.
+   *
+   * Optional because enumeration is not always possible: a provider backed by
+   * a remote catalogue may be able to resolve a name without being able to
+   * list every name it would accept. A picker that gets nothing back falls
+   * back to whatever it was configured with.
+   */
+  inventory?(): readonly FontKey[];
   subscribe?(listener: (change: FontProviderChange) => void): () => void;
 }

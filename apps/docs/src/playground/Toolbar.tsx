@@ -124,6 +124,7 @@ export function Toolbar({
             />
           ) : group === "family" ? (
             <FamilySelect
+              editor={editor}
               items={groupMap.get(group)!}
               activeMarkAttrs={activeMarkAttrs}
               blockAttrs={blockAttrs}
@@ -279,12 +280,14 @@ function SizeSelect({
 // ── Family dropdown ────────────────────────────────────────────────────────────
 
 function FamilySelect({
+  editor,
   items,
   activeMarkAttrs,
   blockAttrs,
   defaultFontFamily,
   onCommand,
 }: {
+  editor: Editor | null;
   items: ToolbarItemSpec[];
   activeMarkAttrs: Record<string, Record<string, unknown>>;
   blockAttrs: Record<string, unknown>;
@@ -300,11 +303,27 @@ function FamilySelect({
     defaultFontFamily.split(",")[0]!.trim(); // strip fallback stack
   const value = activeFamily;
 
+  // A document names whatever it was written in, and this editor renders what
+  // it holds. When those differ the control has to say both: showing the
+  // document's name alone claims a typeface nobody is looking at.
+  const offered = items.some((i) => i.args?.[0] === value);
+  const substitute = offered
+    ? undefined
+    : editor?.fonts?.resolve({
+        family: value,
+        weight: 400,
+        style: "normal",
+        size: 14,
+      }).resolved.family;
+
   return (
     <select
-      className="h-[28px] w-[130px] px-1.5 border rounded-md text-xs cursor-pointer outline-none appearance-none"
+      className="h-[28px] w-[150px] px-1.5 border rounded-md text-xs cursor-pointer outline-none appearance-none"
       style={{
-        fontFamily: value,
+        // Only style the label in the family when it is one we actually render.
+        // A missing family falls back to whatever the browser picks, which
+        // makes an unavailable font look like a present one.
+        ...(offered ? { fontFamily: value } : {}),
         background: "var(--app-surface)",
         borderColor: "var(--app-border)",
         color: "var(--app-text)",
@@ -317,9 +336,11 @@ function FamilySelect({
       onMouseDown={(e) => e.stopPropagation()}
       title="Font family"
     >
-      {/* Show custom family (e.g. from pasted content) if not in presets */}
-      {!items.some((i) => i.args?.[0] === value) && (
-        <option value={value} style={{ fontFamily: value }}>{value}</option>
+      {/* The document's own family, when this editor does not hold it. */}
+      {!offered && (
+        <option value={value}>
+          {substitute && substitute !== value ? `${value} → ${substitute}` : value}
+        </option>
       )}
       {items.map((item) => {
         const family = item.args?.[0] as string;

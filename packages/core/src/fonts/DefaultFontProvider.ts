@@ -47,14 +47,17 @@ export class DefaultFontProvider implements FontProvider {
   readonly #default: FontResource;
   readonly #byKey = new Map<string, FontResource>();
   readonly #byFamily = new Map<string, FontResource[]>();
-  readonly #system: ReadonlySet<string>;
+  /** Lowercased name for matching, original spelling for showing. */
+  readonly #system: ReadonlyMap<string, string>;
   readonly #loaded = new Set<string>();
   readonly #failed = new Set<string>();
   readonly #pending = new Map<string, Promise<void>>();
   readonly #listeners = new Set<(change: FontProviderChange) => void>();
 
   constructor(options: DefaultFontProviderOptions) {
-    this.#system = new Set((options.systemCandidates ?? []).map(familyOf));
+    this.#system = new Map(
+      (options.systemCandidates ?? []).map((family) => [familyOf(family), family]),
+    );
     const owned = new Map<string, FontResource>();
     const inputs = new Map<string, FontResource>();
     for (const input of [options.default, ...(options.resources ?? [])]) {
@@ -154,6 +157,29 @@ export class DefaultFontProvider implements FontProvider {
       request,
       resolved: { family: request.family, source: "generic", portable: false },
     };
+  }
+
+  /**
+   * Everything this inventory can render: the faces it owns bytes for, and the
+   * families the host was said to have. A system candidate is offered because
+   * it draws on screen; resolving it under an export's constraints is what
+   * refuses it, and that refusal is reported rather than silent.
+   */
+  inventory(): readonly FontKey[] {
+    const faces: FontKey[] = [...this.#byKey.values()].map(
+      ({ family, weight, style, stretch }) => ({
+        family,
+        weight,
+        style,
+        ...(stretch ? { stretch } : {}),
+      }),
+    );
+    for (const [key, family] of this.#system) {
+      if (!this.#byFamily.has(key)) {
+        faces.push({ family, weight: 400, style: "normal" });
+      }
+    }
+    return faces;
   }
 
   subscribe(listener: (change: FontProviderChange) => void): () => void {
