@@ -1298,6 +1298,8 @@ function runPipelineBody(
     pageConfig,
     measurer: options.measurer,
     fontConfig: resolvedFontConfig,
+    ...(options.fonts ? { fonts: options.fonts } : {}),
+    ...(options.fontModifiers ? { fontModifiers: options.fontModifiers } : {}),
   };
 
   const contributions = options.pageChromeContributions ?? [];
@@ -1322,7 +1324,7 @@ function runPipelineBody(
     convergence: chromeResult.convergence,
     iterationCount: chromeResult.iterationCount,
     chromePayloads: chromeResult.chromePayloads,
-    ...(options.fonts ? { fontResolutions: options.fonts.table() } : {}),
+    ...(options.fonts ? { fontResolutions: new Map(options.fonts.table()) } : {}),
   };
 
   if (fp.isPartial) return layoutWithChrome;

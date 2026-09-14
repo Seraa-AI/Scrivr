@@ -1,7 +1,7 @@
 import type { Node } from "prosemirror-model";
 import { createLayoutFontResolver } from "../fonts/layoutResolver";
 import type { LayoutFontResolver } from "../fonts/layoutResolver";
-import type { FontProvider } from "../fonts/types";
+import type { FontProvider, FontResource, FontResolution } from "../fonts/types";
 import { TextSelection } from "prosemirror-state";
 import { CharacterMap } from "./CharacterMap";
 import { runPipeline } from "./PageLayout";
@@ -81,16 +81,94 @@ export class LayoutCoordinator {
   private cursorPageValue = 1;
 
   private readonly populatedPages = new Set<number>();
-  private readonly measureCache = new WeakMap<Node, MeasureCacheEntry>();
+  private measureCache = new WeakMap<Node, MeasureCacheEntry>();
   /**
-   * One resolver for the coordinator's lifetime, not one per run.
+   * Keep the resolver and measurement cache in the same generation.
    *
    * A span records its resolution as an id into this resolver's table, and the
    * measure cache hands those spans back on later runs without re-measuring.
    * A resolver rebuilt per run would start numbering again, so the ids on
    * cached spans would point into a table that no longer describes them.
    */
-  private readonly fontResolver: LayoutFontResolver | null;
+  private fontResolver: LayoutFontResolver | null;
+  private readonly installedFonts = new Map<FontResource, string>();
+  private readonly failedFonts = new Set<FontResource>();
+  private preparingFonts = false;
+  private fontPreparationPending = false;
+  private disposed = false;
+  private unsubscribeFonts?: () => void;
+
+  private canvasResolution(answer: FontResolution): FontResolution {
+    const family = answer.resource && this.installedFonts.get(answer.resource);
+    if (family) return { ...answer, resolved: { ...answer.resolved, family } };
+    const { resource: _resource, ...rest } = answer;
+    return { ...rest, resolved: { ...answer.resolved, source: "generic", portable: false } };
+  }
+
+  private newFontResolver(): LayoutFontResolver | null {
+    const provider = this.opts.fonts;
+    return provider ? createLayoutFontResolver({
+      defaultRequest: () => provider.defaultRequest(),
+      prepare: (requests, constraints) => provider.prepare(requests, constraints),
+      resolve: (request, constraints) => this.canvasResolution(provider.resolve(request, constraints)),
+    }) : null;
+  }
+
+  private async prepareFonts(): Promise<void> {
+    if (this.disposed || !this.opts.fonts || !this.fontResolver) return;
+    if (this.preparingFonts) { this.fontPreparationPending = true; return; }
+    this.preparingFonts = true;
+    try {
+      const requests = [...this.fontResolver.table().values()].map(r => r.request);
+      await this.opts.fonts.prepare(requests);
+      for (const request of requests) {
+        const resource = this.opts.fonts.resolve(request).resource;
+        if (!resource || this.installedFonts.has(resource) || this.failedFonts.has(resource)) continue;
+        try {
+          const install = this.opts.measurer.installFont;
+          if (!install) throw new Error("The measurement backend does not install fonts");
+          const family = await install.call(this.opts.measurer, resource);
+          if (!family) throw new Error("The measurement backend returned an empty font family");
+          this.installedFonts.set(resource, family);
+        } catch {
+          this.failedFonts.add(resource);
+        }
+      }
+      if (this.disposed) return;
+      const changed = [...this.fontResolver.table().values()].some(old => {
+        const current = this.canvasResolution(this.opts.fonts!.resolve(old.request));
+        return current.resource !== old.resource || JSON.stringify(current.resolved) !== JSON.stringify(old.resolved);
+      });
+      if (changed) {
+        this.fontResolver = this.newFontResolver();
+        this.measureCache = new WeakMap();
+        this.opts.measurer.invalidate();
+        this.cancelIdleLayout();
+        this.dirty = true;
+        this.opts.onUpdate();
+      }
+    } catch {
+      // A custom provider may reject preparation. Keep the honest generic
+      // layout; a later provider notification or layout can retry.
+      this.fontPreparationPending = false;
+    } finally {
+      this.preparingFonts = false;
+      if (this.fontPreparationPending) {
+        this.fontPreparationPending = false;
+        queueMicrotask(() => { void this.prepareFonts(); });
+      }
+    }
+  }
+
+  /** A new, uncached layout for a captured document and an export's measurer. */
+  layoutForExport(doc: Node, fonts: LayoutFontResolver, measurer: TextMeasurerLike = this.opts.measurer): DocumentLayout {
+    return runPipeline(doc, {
+      pageConfig: this.opts.pageConfig, fontConfig: this.opts.fontConfig,
+      measurer, fonts, fontModifiers: this.opts.fontModifiers,
+      pageChromeContributions: this.opts.getPageChromeContributions?.() ?? [],
+      ...(this.opts.inlineRegistry ? { inlineRegistry: this.opts.inlineRegistry } : {}),
+    });
+  }
 
   /**
    * O(1) page lookup by page number.
@@ -111,7 +189,9 @@ export class LayoutCoordinator {
 
   constructor(opts: LayoutCoordinatorOptions) {
     this.opts = opts;
-    this.fontResolver = opts.fonts ? createLayoutFontResolver(opts.fonts) : null;
+    this.fontResolver = this.newFontResolver();
+    const unsubscribe = opts.fonts?.subscribe?.(() => { void this.prepareFonts(); });
+    if (unsubscribe) this.unsubscribeFonts = unsubscribe;
 
     performance.mark("scrivr:layout-initial-start");
     this.layout = this.runLayout({
@@ -377,6 +457,8 @@ export class LayoutCoordinator {
 
   /** Cancel all pending async work. Call from Editor.destroy(). */
   destroy(): void {
+    this.disposed = true;
+    this.unsubscribeFonts?.();
     this.cancelIdleLayout();
   }
 
@@ -509,6 +591,7 @@ export class LayoutCoordinator {
     resumption?: LayoutResumption | null;
   }): DocumentLayout {
     const contribs = this.opts.getPageChromeContributions?.() ?? [];
+    queueMicrotask(() => { void this.prepareFonts(); });
     return runPipeline(this.opts.getDoc(), {
       pageConfig: this.opts.pageConfig,
       fontConfig: this.opts.fontConfig,

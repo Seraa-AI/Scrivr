@@ -42,25 +42,25 @@ describe("resolving a request", () => {
   it("gives back the face that was asked for", () => {
     const answer = provider().resolve(ask("Inter", 700));
     expect(answer.resolved).toEqual({ family: "Inter", source: "requested", portable: true });
-    expect(answer.resource).toBe(interBold);
+    expect(answer.resource?.id).toBe(interBold.id);
   });
 
   it("reaches for another weight of the family before leaving it", () => {
     // 500 is not registered; Inter 400 is closer to the author's intent than
     // a different family would be, so the family is still the one requested.
     const answer = provider().resolve(ask("Inter", 500));
-    expect(answer.resolved.source).toBe("requested");
-    expect(answer.resource).toBe(inter);
+    expect(answer.resolved.source).toBe("substituted");
+    expect(answer.resource?.id).toBe(inter.id);
   });
 
   it("falls to the application's default, and says that is what happened", () => {
     const answer = provider().resolve(ask("Aptos"));
     expect(answer.resolved).toEqual({ family: "App Default", source: "default", portable: true });
-    expect(answer.resource).toBe(fallback);
+    expect(answer.resource?.id).toBe(fallback.id);
   });
 
   it("matches a family whatever case it was written in", () => {
-    expect(provider().resolve(ask("INTER")).resource).toBe(inter);
+    expect(provider().resolve(ask("INTER")).resource?.id).toBe(inter.id);
   });
 });
 
@@ -87,7 +87,7 @@ describe("a resource that may not be embedded", () => {
 
   it("renders on screen", () => {
     const answer = provider({ resources: [licensed] }).resolve(ask("Licensed"));
-    expect(answer.resource).toBe(licensed);
+    expect(answer.resource?.id).toBe(licensed.id);
   });
 
   it("does not reach an export that must embed what it draws", () => {
@@ -140,6 +140,7 @@ describe("preparing a document's fonts", () => {
 
     // A font that will not load is not a reason to lose the document.
     await expect(p.prepare([ask("Broken")])).resolves.toBeUndefined();
-    expect(heard).toEqual(["resource-failed"]);
+    expect(heard).toEqual(["resource-failed", "resource-loaded"]);
+    expect(p.resolve(ask("Broken")).resource?.id).toBe(fallback.id);
   });
 });

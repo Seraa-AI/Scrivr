@@ -1,3 +1,5 @@
+import type { TextMeasurerLike } from "../layout/TextMeasurer";
+import type { LayoutFontResolver } from "../fonts/layoutResolver";
 /**
  * Extension system types.
  *
@@ -262,6 +264,8 @@ export interface IEditor extends IBaseEditor {
    * Serialization paths should call this before reading `layout.pages`.
    */
   ensureFullLayout(): void;
+  /** Build an isolated full layout using the export's resolved faces and metrics. */
+  layoutForExport?(doc: Node, fonts: LayoutFontResolver, measurer?: TextMeasurerLike): DocumentLayout;
   /**
    * Signal that the editor is (or is no longer) ready to render.
    * Call setReady(false) before a collaborative provider connects to suppress

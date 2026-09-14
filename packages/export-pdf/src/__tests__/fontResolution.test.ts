@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { PDFDocument } from "pdf-lib";
 import type { DocumentLayout, FontResource, IEditor } from "@scrivr/core";
 import { DefaultFontProvider, ServerEditor, StarterKit } from "@scrivr/core";
@@ -30,7 +31,10 @@ const resource = (
   family: id,
   weight: 400,
   style: "normal",
-  bytes: vi.fn(() => Promise.resolve(new ArrayBuffer(8))),
+  bytes: vi.fn(() => {
+    const bytes = readFileSync("/System/Library/Fonts/Supplemental/Courier New.ttf");
+    return Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+  }),
   ...overrides,
 });
 
@@ -75,10 +79,7 @@ describe("embedding the faces a layout measured", () => {
     const denied = resource("Restricted", {
       embedding: { allowed: false, source: "font-metadata" },
     });
-    const embedded = await embedResolvedFonts(
-      await PDFDocument.create(),
-      layoutWith(denied),
-    );
+    const embedded = await embedResolvedFonts(await PDFDocument.create(), layoutWith(denied));
 
     expect(denied.bytes).not.toHaveBeenCalled();
     expect(embedded.size).toBe(0);
@@ -101,29 +102,24 @@ describe("embedding the faces a layout measured", () => {
     expect(embedded.size).toBe(0);
   });
 
-  it("survives bytes that will not embed", async () => {
-    // Eight bytes is not a font. The export keeps going; those spans fall
-    // through to a standard face rather than losing the document.
-    const junk = resource("Corrupt");
-    const embedded = await embedResolvedFonts(
-      await PDFDocument.create(),
-      layoutWith(junk),
-    );
-
+  it("rejects bytes that will not embed", async () => {
+    const junk = resource("Corrupt", { bytes: vi.fn(() => Promise.resolve(new ArrayBuffer(8))) });
+    await expect(embedResolvedFonts(await PDFDocument.create(), layoutWith(junk))).rejects.toThrow("Cannot embed font Corrupt");
     expect(junk.bytes).toHaveBeenCalled();
-    expect(embedded.size).toBe(0);
   });
 });
 
 describe("what an export asks the provider for", () => {
   /** A real editor, with only the layout a headless one cannot produce supplied. */
-  const exportable = (editor: ServerEditor, layout: DocumentLayout): IEditor =>
+  const exportable = (editor: ServerEditor, layout: DocumentLayout, family = "Aptos"): IEditor =>
     new Proxy(editor, {
       get: (target, prop) =>
         prop === "layout"
           ? layout
           : prop === "ensureFullLayout"
             ? () => {}
+            : prop === "layoutForExport"
+              ? (_doc: unknown, fonts: { resolve: (css: string) => unknown }) => { fonts.resolve(`14px ${family}`); return layout; }
             : Reflect.get(target, prop),
     }) as unknown as IEditor;
 
@@ -184,7 +180,7 @@ describe("what an export asks the provider for", () => {
     const onFontShortfall = vi.fn();
 
     await exportToPdf(
-      exportable(editor, onePage([block("paragraph", [textLine("Fees")])])),
+      exportable(editor, onePage([block("paragraph", [textLine("Fees")])]), "App Sans"),
       { onFontShortfall },
     );
 

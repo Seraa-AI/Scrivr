@@ -451,8 +451,8 @@ would flip a single `_dirty` boolean and re-lay the document.
    `fontTable.xml` on import, since that is inventory. Substitutions are
    reported at import and at first layout.
 
-   Nothing renders differently yet — the invisible failure becomes visible and
-   correctly owned. The break and the machinery ship together on purpose:
+   The editor now measures against the installed face and reflows when its
+   provider changes the answer. The break and the machinery ship together on purpose:
    requiring a default before anything consumes one is a migration that buys
    nothing, and shipping the provider while the default still asks the host
    leaves the hole this document is about. One version, one migration note, the
@@ -594,9 +594,10 @@ a handler drawing its own text still chooses by name. It has one caller today
 
 **What phase 3 does not do.** Canvas resolves with no constraints and the
 export resolves with two, so the two can disagree — a face that is registered
-but unembeddable is measured on screen and cannot go in the file. The export
-reports the shortfall and falls back for those spans rather than re-laying-out
-the document under its own constraints, which would change pagination.
+but unembeddable is measured on screen and cannot go in the file. Export takes
+its own constrained snapshot and re-layouts from that snapshot, so pagination
+and painting remain internally consistent. It reports any substitution through
+`onFontShortfall`.
 
 ## Decisions (locked)
 

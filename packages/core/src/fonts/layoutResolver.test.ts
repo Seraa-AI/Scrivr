@@ -41,9 +41,9 @@ describe("resolving a span's font for measurement", () => {
     expect(r.resolve("14px Aptos").font).toBe("14px App Sans");
   });
 
-  it("keeps weight and slant while replacing the family", () => {
+  it("uses the resolved resource weight and slant while replacing the family", () => {
     const r = createLayoutFontResolver(provider());
-    expect(r.resolve("italic bold 18px Aptos").font).toBe("italic bold 18px App Sans");
+    expect(r.resolve("italic bold 18px Aptos").font).toBe("18px App Sans");
   });
 
   it("reads bold and italic out of the shorthand as part of the request", () => {
@@ -53,17 +53,17 @@ describe("resolving a span's font for measurement", () => {
     const plain = r.resolve("14px Inter");
     const bold = r.resolve("bold 14px Inter");
     expect(plain.font).toBe("14px Inter");
-    expect(bold.font).toBe("bold 14px Inter");
+    expect(bold.font).toBe("14px Inter");
   });
 
-  it("gives one id to one answer, however many spans ask", () => {
+  it("retains distinct requests even when they currently share a fallback", () => {
     const r = createLayoutFontResolver(provider());
     const a = r.resolve("14px Aptos");
     const b = r.resolve("14px Calibri");
-    // Different requests, same answer — a document's thousands of runs should
-    // not become thousands of resolution objects.
-    expect(a.resolution).toBe(b.resolution);
-    expect(r.table().size).toBe(1);
+    // A provider update may make one requested family available independently.
+    expect(a.resolution).not.toBe(b.resolution);
+    expect(r.table().size).toBe(2);
+    expect(r.resolve("14px Aptos").resolution).toBe(a.resolution);
   });
 
   it("records how each answer was reached", () => {

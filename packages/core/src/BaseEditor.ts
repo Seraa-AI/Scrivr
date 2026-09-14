@@ -6,7 +6,7 @@ import { Node, type Schema } from "prosemirror-model";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
-import type { IBaseEditor } from "./extensions/types";
+import type { IBaseEditor, MarkdownParserTokenSpec } from "./extensions/types";
 import type { ExportContributionMap, ImportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
@@ -389,7 +389,7 @@ export class BaseEditor implements IBaseEditor {
   }
 
   /** Returns the merged markdown parser token map from all extensions. */
-  getMarkdownParserTokens(): Record<string, import("./extensions/types").MarkdownParserTokenSpec> {
+  getMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec> {
     return this.manager.buildMarkdownParserTokens();
   }
 

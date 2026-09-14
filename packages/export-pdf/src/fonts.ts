@@ -75,8 +75,10 @@ export function extractCssFamilyName(cssFont: string): string {
  * second time is what let a document measured in one face be painted in
  * another at those coordinates.
  *
- * A resource whose licence forbids embedding is skipped: its spans fall back
- * to a standard font, which is visibly wrong but lawfully so.
+ * A resource whose licence forbids embedding is absent from this map because
+ * constrained export resolves it to a different face before this function.
+ * A resource that cannot be parsed is an export error: silently switching to a
+ * standard font would invalidate the geometry already measured.
  */
 export async function embedResolvedFonts(
   pdfDoc: PDFDocument,
@@ -104,9 +106,8 @@ export async function embedResolvedFonts(
       try {
         const font = await pdfDoc.embedFont(new Uint8Array(await resource.bytes()));
         for (const id of ids) embedded.set(id, font);
-      } catch {
-        // Bytes that will not embed are not a reason to lose the export. These
-        // spans fall through to a standard font.
+      } catch (cause) {
+        throw new Error(`Cannot embed font ${resource.family}`, { cause });
       }
     }),
   );

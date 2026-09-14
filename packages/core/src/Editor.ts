@@ -1,3 +1,4 @@
+import type { LayoutFontResolver } from "./fonts/layoutResolver";
 import {
 	EditorState,
 	Transaction,
@@ -1020,6 +1021,10 @@ export class Editor extends BaseEditor implements IEditor {
 	 */
 	ensureFullLayout(): void {
 		this.lc.ensureFullLayout();
+	}
+
+	layoutForExport(doc: PmNode, fonts: LayoutFontResolver, measurer?: TextMeasurerLike): DocumentLayout {
+		return this.lc.layoutForExport(doc, fonts, measurer);
 	}
 
 	/**

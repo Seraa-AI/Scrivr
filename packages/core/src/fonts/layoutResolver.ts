@@ -28,11 +28,10 @@ const quoted = (family: string): string =>
 /** Weight and slant as the CSS shorthand spells them, in the terms a key uses. */
 function requestFrom(cssFont: string, size: number) {
   const parsed = parseFont(cssFont);
-  const lower = cssFont.toLowerCase();
   return {
     family: parsed.family,
-    weight: /bold|[789]\d\d/.test(lower) ? 700 : 400,
-    style: /italic|oblique/.test(lower) ? ("italic" as const) : ("normal" as const),
+    weight: /^\d+$/.test(parsed.weight) ? Number(parsed.weight) : parsed.weight === "bold" ? 700 : 400,
+    style: parsed.style === "italic" || parsed.style === "oblique" ? ("italic" as const) : ("normal" as const),
     size,
   };
 }
@@ -77,6 +76,9 @@ export function createLayoutFontResolver(
         family,
         resolution.resolved.source,
         resolution.resolved.portable,
+        resolution.request.family,
+        resolution.request.size,
+        resolution.request.stretch,
         weight,
         style,
       ]);
@@ -91,7 +93,11 @@ export function createLayoutFontResolver(
       // name needs it: an invalid shorthand is silently ignored by `ctx.font`,
       // which leaves the previous span's face and produces geometry from a
       // font nobody chose.
-      const answer = { font: substituteFamily(cssFont, quoted(family)), resolution: id };
+      const face = resolution.resource;
+      const font = face
+        ? `${face.style === "italic" ? "italic " : ""}${face.weight === 400 ? "" : `${face.weight} `}${parsed.size} ${quoted(family)}`
+        : substituteFamily(cssFont, quoted(family));
+      const answer = { font, resolution: id };
       byFont.set(cssFont, answer);
       return answer;
     },
