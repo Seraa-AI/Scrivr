@@ -33,7 +33,7 @@ const quoted = (family: string): string =>
  * under "Arial". The rest of the list is the host's fallback chain, which is
  * the decision a provider exists to make instead.
  */
-const primaryFamily = (family: string): string =>
+export const primaryFamily = (family: string): string =>
   family.split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") || family;
 
 /** Weight and slant as the CSS shorthand spells them, in the terms a key uses. */

@@ -113,3 +113,20 @@ export interface FontProvider {
   inventory?(): readonly FontKey[];
   subscribe?(listener: (change: FontProviderChange) => void): () => void;
 }
+
+/**
+ * The family in effect at the selection, and the face it is actually drawn in.
+ *
+ * A control showing the document's font needs both: the document names what it
+ * was written in, and the editor renders what it holds. Reporting only the
+ * first claims a typeface nobody is looking at; reporting only the second
+ * rewrites the document in the telling. How loudly to say they differ is the
+ * application's decision, not this one's.
+ */
+export interface ActiveFontFamily {
+  /** What the document asks for, with any CSS fallback list already stripped. */
+  requested: string;
+  /** What it resolved to. Equal to `requested` when the request was honoured. */
+  resolved: string;
+  substituted: boolean;
+}

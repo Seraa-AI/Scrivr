@@ -8,7 +8,12 @@
  */
 
 import { describe, it, expect } from "vitest";
+import type { Node } from "prosemirror-model";
 import { createTestEditor } from "../test-utils";
+import { getSchema } from "../extensions/ExtensionManager";
+import { StarterKit } from "../extensions/StarterKit";
+
+const schema = getSchema([StarterKit]);
 import { DefaultFontProvider } from "./DefaultFontProvider";
 import type { FontResource } from "./types";
 
@@ -71,5 +76,82 @@ describe("the families a picker may offer", () => {
       e.toolbarItems.filter((i) => i.group !== "family").map((i) => i.command);
 
     expect(others(withFonts)).toEqual(others(plain));
+  });
+});
+
+describe("what the editor reports about substitution", () => {
+  const aptos = (text: string) =>
+    schema.node("paragraph", null, [
+      schema.text(text, [schema.marks["fontFamily"]!.create({ family: "Aptos" })]),
+    ]);
+
+  const withProvider = (content?: Node) =>
+    createTestEditor({
+      fonts: new DefaultFontProvider({
+        default: resource("Inter"),
+        resources: [resource("Inter", 700)],
+      }),
+      ...(content ? { content: content.toJSON() } : {}),
+    });
+
+  it("lists every face the document asked for and did not get", () => {
+    const editor = withProvider(schema.node("doc", null, [aptos("Retainer")]));
+    editor.ensureFullLayout();
+
+    // Not asserting `source`: it depends on whether this environment could
+    // install the bytes, and a measurement backend with no way to install a
+    // face reports every answer as one it cannot promise.
+    expect(editor.fontSubstitutions).toHaveLength(1);
+    expect(editor.fontSubstitutions[0]).toMatchObject({
+      request: { family: "Aptos" },
+      resolved: "Inter",
+    });
+  });
+
+  it("keeps the same array between layouts, so a selector can compare it", () => {
+    // A getter that rebuilt its result would re-render every subscriber on
+    // every editor notification.
+    const editor = withProvider(schema.node("doc", null, [aptos("Retainer")]));
+    editor.ensureFullLayout();
+
+    expect(editor.fontSubstitutions).toBe(editor.fontSubstitutions);
+  });
+
+  it("claims nothing when every face was honoured", () => {
+    const editor = withProvider();
+    editor.ensureFullLayout();
+
+    expect(editor.fontSubstitutions).toEqual([]);
+  });
+
+  it("reports the family at the selection and the one it is drawn in", () => {
+    const editor = withProvider(schema.node("doc", null, [aptos("Retainer")]));
+    editor.commands.selectAll?.();
+
+    expect(editor.getActiveFontFamily()).toEqual({
+      requested: "Aptos",
+      resolved: "Inter",
+      substituted: true,
+    });
+  });
+
+  it("strips the fallback list from the document default", () => {
+    // "Arial, sans-serif" is one request and a chain of host fallbacks; a
+    // control showing the whole list describes something nobody asked for.
+    const editor = withProvider();
+
+    expect(editor.getActiveFontFamily().requested).toBe("Arial");
+  });
+
+  it("says nothing was substituted when no provider was supplied", () => {
+    const editor = createTestEditor({
+      content: schema.node("doc", null, [aptos("Retainer")]).toJSON(),
+    });
+
+    expect(editor.getActiveFontFamily()).toEqual({
+      requested: "Aptos",
+      resolved: "Aptos",
+      substituted: false,
+    });
   });
 });

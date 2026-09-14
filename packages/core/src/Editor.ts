@@ -17,7 +17,10 @@ import type { Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
-import type { FontProvider } from "./fonts/types";
+import type { ActiveFontFamily, FontProvider } from "./fonts/types";
+import type { FontShortfall } from "./fonts/collectFontRequests";
+import { primaryFamily } from "./fonts/layoutResolver";
+import { DEFAULT_FONT_FAMILY } from "./layout/FontConfig";
 import { CursorManager } from "./renderer/CursorManager";
 import { SelectionRegistry } from "./selection/SelectionRegistry";
 import {
@@ -408,6 +411,9 @@ export class Editor extends BaseEditor implements IEditor {
 	 * themselves rather than choices that all quietly become the default.
 	 */
 	readonly fontFamilies: readonly string[];
+
+	private substitutionsCache: readonly FontShortfall[] = [];
+	private substitutionsVersion = -1;
 
 	readonly nodeActionRegistry: NodeActionRegistry;
 
@@ -960,6 +966,71 @@ export class Editor extends BaseEditor implements IEditor {
 	get layout(): DocumentLayout {
 		this.lc.ensureLayout();
 		return this.lc.current;
+	}
+
+	/**
+	 * Every face this document asked for and did not get, as laid out.
+	 *
+	 * The same shape DOCX import and PDF export report, from the one place that
+	 * knows continuously rather than at a moment the user may never see. Empty
+	 * when no provider was supplied: nothing was claimed, so nothing was missed.
+	 *
+	 * Memoised per layout so a selector can compare identities and not re-render
+	 * on every notification.
+	 */
+	get fontSubstitutions(): readonly FontShortfall[] {
+		const { version, fontResolutions } = this.layout;
+		if (this.substitutionsVersion === version) return this.substitutionsCache;
+
+		const missed: FontShortfall[] = [];
+		for (const { request, resolved } of fontResolutions?.values() ?? []) {
+			if (resolved.source === "requested" && resolved.portable) continue;
+			missed.push({
+				request,
+				resolved: resolved.family,
+				source: resolved.source,
+				portable: resolved.portable,
+			});
+		}
+		this.substitutionsCache = missed;
+		this.substitutionsVersion = version;
+		return missed;
+	}
+
+	/**
+	 * The family in effect at the selection, and the face it is drawn in.
+	 *
+	 * The precedence — inline mark, then block attr, then the document default —
+	 * is the editor's own rule, so a font control that re-derived it would drift
+	 * from the thing it describes.
+	 */
+	getActiveFontFamily(): ActiveFontFamily {
+		const inline = this.getActiveMarkAttrs()["fontFamily"]?.["family"];
+		const block = this.getBlockInfo().blockAttrs["fontFamily"];
+		const requested = primaryFamily(
+			typeof inline === "string" && inline.length > 0
+				? inline
+				: typeof block === "string" && block.length > 0
+					? block
+					: (this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
+		);
+
+		if (!this.fonts) return { requested, resolved: requested, substituted: false };
+
+		const marks = this.getActiveMarks();
+		const { resolved } = this.fonts.resolve({
+			family: requested,
+			weight: marks.includes("bold") ? 700 : 400,
+			style: marks.includes("italic") ? "italic" : "normal",
+			// Size never changes which face answers; the provider's own is the
+			// one value guaranteed to be meaningful to it.
+			size: this.fonts.defaultRequest().size,
+		});
+		return {
+			requested,
+			resolved: resolved.family,
+			substituted: resolved.family !== requested,
+		};
 	}
 
 	/** True when the editor is in pageless (infinite-scroll) mode. */

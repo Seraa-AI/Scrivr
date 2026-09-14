@@ -673,6 +673,27 @@ were stored lowercased for matching, so `inventory()` offered "courier new" to
 be displayed. The set became a map: lowercase to match on, the caller's
 spelling to show.
 
+### Reporting — shipped
+
+Import reported once and export reported at the end; nothing answered "what is
+this document not getting" in between, although `DocumentLayout.fontResolutions`
+had held the answer since phase 2. `Editor.fontSubstitutions` derives the same
+`FontShortfall` the other two producers emit — one type, three producers, one
+live view rather than a fourth shape. It is memoised on the layout version,
+because a getter that rebuilt its array would re-render every subscriber on
+every notification.
+
+`getActiveFontFamily()` returns the family in effect at the selection with the
+face it is drawn in. The playground had reconstructed the inline-mark →
+block-attr → document-default precedence itself, which is the editor's own rule
+and the same re-derivation this document exists to stop; the control now reads
+it.
+
+No UI ships in core. Whether a substitution is a badge, a banner or nothing is
+a decision about what an application is for, and the two consumers we can name
+would answer it differently. The `Aptos → Inter` treatment in the playground is
+one application's choice, not a component.
+
 ## Decisions (locked)
 
 **Does layout re-measure when a font loads late?** Yes — when the *resolution*

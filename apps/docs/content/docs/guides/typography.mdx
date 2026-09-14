@@ -95,6 +95,37 @@ const shortfalls = await prepareDocumentFonts(doc, fonts, {
 
 DOCX import runs this for you and raises a `font-substituted` diagnostic per face, so you can tell the user their contract is no longer set in Aptos rather than letting them discover it.
 
+### Telling the user, continuously
+
+Import reports once and export reports at the end. For the state in between, the editor answers the same question about the document it is laying out now:
+
+```tsx
+const substituted = useEditorState({
+	editor,
+	selector: (ctx) => ctx.editor.fontSubstitutions,
+});
+```
+
+Same `FontShortfall` shape, memoised per layout so it only changes when the answer does.
+
+For a font control, `getActiveFontFamily()` gives the family in effect at the selection together with the face it is drawn in:
+
+```ts
+editor.getActiveFontFamily();
+// { requested: "Aptos", resolved: "Inter", substituted: true }
+```
+
+The precedence — inline mark, then block attribute, then the document default — is the editor's own rule, so reading it here keeps a control from drifting from the page it describes. `editor.fontFamilies` lists what can be offered.
+
+Scrivr deliberately stops there. Whether a substitution is a badge, a banner, or nothing at all depends on what the application is for, so the engine reports and the application decides.
+
+<Callout type="warn">
+	A measurement backend that cannot install a face — a custom `TextMeasurer`
+	without `installFont`, or an environment with no `FontFace` — reports every
+	answer as one it cannot promise. That is honest rather than pessimistic: it
+	has no way to guarantee the bytes are what is being measured.
+</Callout>
+
 ---
 
 ## Exporting
