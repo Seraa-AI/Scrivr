@@ -64,10 +64,7 @@ function metricLookups(blocks: number): { calls: number; perBlock: number } {
     items,
     0,
     flowConfig,
-    fontConfig,
-    measurer,
-    new Map(),
-    cache,
+    { measurer, fontConfig, fontModifiers: new Map(), measureCache: cache },
   );
 
   // Count every page-geometry question the stage asks, whatever form it takes —

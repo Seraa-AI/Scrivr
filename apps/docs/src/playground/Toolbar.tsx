@@ -124,9 +124,8 @@ export function Toolbar({
             />
           ) : group === "family" ? (
             <FamilySelect
+              editor={editor}
               items={groupMap.get(group)!}
-              activeMarkAttrs={activeMarkAttrs}
-              blockAttrs={blockAttrs}
               defaultFontFamily={defaultFontFamily}
               onCommand={onCommand}
             />
@@ -279,32 +278,31 @@ function SizeSelect({
 // ── Family dropdown ────────────────────────────────────────────────────────────
 
 function FamilySelect({
+  editor,
   items,
-  activeMarkAttrs,
-  blockAttrs,
   defaultFontFamily,
   onCommand,
 }: {
+  editor: Editor | null;
   items: ToolbarItemSpec[];
-  activeMarkAttrs: Record<string, Record<string, unknown>>;
-  blockAttrs: Record<string, unknown>;
   defaultFontFamily: string;
   onCommand: (cmd: string, args?: unknown[]) => void;
 }) {
-  const inlineFamily = activeMarkAttrs["fontFamily"]?.["family"];
-  const blockFamily = blockAttrs["fontFamily"];
-  // Priority: inline mark → block attr → document default
-  const activeFamily =
-    typeof inlineFamily === "string" ? inlineFamily :
-    typeof blockFamily  === "string" ? blockFamily :
-    defaultFontFamily.split(",")[0]!.trim(); // strip fallback stack
-  const value = activeFamily;
+  // The editor owns the inline-mark → block-attr → document-default precedence
+  // and knows what each resolves to, so the control reads it rather than
+  // reconstructing it and drifting from the page it describes.
+  const active = editor?.getActiveFontFamily();
+  const value = active?.requested ?? defaultFontFamily.split(",")[0]!.trim();
+  const offered = items.some((i) => i.args?.[0] === value);
 
   return (
     <select
-      className="h-[28px] w-[130px] px-1.5 border rounded-md text-xs cursor-pointer outline-none appearance-none"
+      className="h-[28px] w-[150px] px-1.5 border rounded-md text-xs cursor-pointer outline-none appearance-none"
       style={{
-        fontFamily: value,
+        // Only style the label in the family when it is one we actually render.
+        // A missing family falls back to whatever the browser picks, which
+        // makes an unavailable font look like a present one.
+        ...(offered ? { fontFamily: value } : {}),
         background: "var(--app-surface)",
         borderColor: "var(--app-border)",
         color: "var(--app-text)",
@@ -317,9 +315,13 @@ function FamilySelect({
       onMouseDown={(e) => e.stopPropagation()}
       title="Font family"
     >
-      {/* Show custom family (e.g. from pasted content) if not in presets */}
-      {!items.some((i) => i.args?.[0] === value) && (
-        <option value={value} style={{ fontFamily: value }}>{value}</option>
+      {/* The document's own family, when this editor does not hold it. The
+          arrow is this app's choice of how to show it; the engine only says
+          that the two differ and what the second one is. */}
+      {!offered && (
+        <option value={value}>
+          {active?.substituted ? `${value} → ${active.resolved}` : value}
+        </option>
       )}
       {items.map((item) => {
         const family = item.args?.[0] as string;

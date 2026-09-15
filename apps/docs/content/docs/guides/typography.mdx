@@ -1,92 +1,210 @@
 ---
 title: Typography & Fonts
-description: How to safely load web fonts for accurate Canvas text measurement.
+description: Give the editor an inventory of typefaces it owns, so canvas measurement and PDF export agree on what the document is set in.
 ---
 
-Because Scrivr renders text manually using the HTML5 `<canvas>` API rather than the DOM, the layout engine heavily relies on accurate font metrics from the browser's `TextMeasurer`.
+Scrivr paints text onto a `<canvas>`, so layout depends on font metrics rather than on the browser laying text out for you. A family name like `Inter` is a **request**: what it resolves to depends on what the machine happens to have installed. That makes it useless on its own — an exporter cannot embed a request, and two machines can disagree about what the document looks like.
 
-This creates a race condition known as the **"Canvas Font Trap."**
-
----
-
-## The Canvas Font Trap
-
-When you use the `<canvas>` API's `measureText()` method, the browser measures the text using the exact font family currently specified in the context context. However:
-
-1. If you specify a custom web font (e.g., from Google Fonts or an `@font-face` declaration).
-2. And that font is **not yet fully loaded** over the network.
-3. The browser will temporarily fallback to a system font (e.g., Arial or Times New Roman).
-4. `measureText()` will return the widths for the **fallback font**.
-
-Because Scrivr's custom layout engine (`PageLayout.ts`) permanently absolute-positions every character and line break based on these initial measurements, your text layout will be completely corrupted once the custom font finally loads.
-
-<Callout type="warn">
-	Never initialize the editor or call `useScrivrEditor` until you can
-	guarantee your application's fonts are fully loaded and ready in the
-	browser.
-</Callout>
-
----
-
-## Safe Initialization with `document.fonts.ready`
-
-The most robust way to sidestep this issue in a web environment is to wrap your editor in a React component that waits for the `document.fonts.ready` Promise to resolve.
-
-### Example Wrapper Component
-
-```tsx title="EditorWrapper.tsx"
-import { useState, useEffect } from "react";
-import { useScrivrEditor } from "@scrivr/react";
-import { Editor } from "./Editor";
-
-export function EditorWrapper() {
-	const [fontsLoaded, setFontsLoaded] = useState(false);
-
-	useEffect(() => {
-		// Wait for all custom fonts declared in CSS/HTML to finish loading
-		document.fonts.ready.then(() => {
-			setFontsLoaded(true);
-		});
-	}, []);
-
-	// Display a fallback UI while fonts are downloading
-	if (!fontsLoaded) {
-		return (
-			<div className="flex items-center justify-center p-10">
-				<p className="text-gray-500 font-mono">Loading typography...</p>
-			</div>
-		);
-	}
-
-	// Safe to mount — TextMeasurer will have 100% accurate metrics
-	return <Editor />;
-}
-```
-
----
-
-## Dynamic Font Loading (FontFace API)
-
-If you are building an advanced editor that allows users to change document fonts on the fly (e.g., selecting "Merriweather" from a dropdown menu), you must explicitly load the font using the `FontFace` API and force the layout engine to recalculate everything.
-
-```ts
-async function changeDocumentFont(editor, fontFamily, fontUrl) {
-	// 1. Fetch and register the new font
-	const font = new FontFace(fontFamily, `url(${fontUrl})`);
-	await font.load();
-	document.fonts.add(font);
-
-	// 2. Update your EditorState or PageConfig with the new font family name
-	// ... (your state management here)
-
-	// 3. Mark the editor as dirty and force a full re-measure
-	editor.dirty = true;
-	editor.ensureLayout();
-}
-```
+So the editor is given an inventory of faces it owns the bytes for. Every lane works from that one answer.
 
 <Callout type="info">
-	When using `editor.ensureLayout()`, Scrivr re-runs `layoutDocument()` and
-	`populateCharMap()`. This guarantees that the spatial index is updated with
-	the new `measureText()` dimensions corresponding to your newly loaded font.
+	Scrivr never bundles a typeface. Fonts are licensed, large, and your
+	choice — the engine is what resolves and records them.
 </Callout>
+
+---
+
+## Supplying a provider
+
+A `DefaultFontProvider` needs a default face and, usually, the other weights and slants of it. Each face is a descriptor: registering it costs nothing until something resolves to it, and only then are its bytes fetched.
+
+```ts title="fonts.ts"
+import { DefaultFontProvider, type FontResource } from "@scrivr/react";
+import regular from "inter-ui/web/Inter-Regular.woff2?url";
+import bold from "inter-ui/web/Inter-Bold.woff2?url";
+import italic from "inter-ui/web/Inter-Italic.woff2?url";
+
+const face = (
+	id: string,
+	url: string,
+	weight: number,
+	style: "normal" | "italic",
+): FontResource => ({
+	id,
+	family: "Inter",
+	weight,
+	style,
+	format: "woff2",
+	// Inter is OFL-licensed, so it may travel inside an exported PDF.
+	embedding: { allowed: true, source: "caller" },
+	bytes: async () => (await fetch(url)).arrayBuffer(),
+});
+
+export const fonts = new DefaultFontProvider({
+	default: face("inter-400", regular, 400, "normal"),
+	resources: [
+		face("inter-700", bold, 700, "normal"),
+		face("inter-400-italic", italic, 400, "italic"),
+	],
+});
+```
+
+```tsx title="Editor.tsx"
+const editor = useScrivrEditor({ extensions: [StarterKit], fonts });
+```
+
+That is the whole setup. The editor installs the bytes in its measurement backend under a private alias, so `measureText` reads *your* face rather than whatever the operating system maps `Inter` to.
+
+<Callout type="info">
+	Register every weight and slant you care about. A request for bold resolves
+	to the nearest face in the family, and with no bold registered the text is
+	drawn in the regular weight.
+</Callout>
+
+### Why bold is not synthesised
+
+Word and most browsers fake a missing bold by thickening the regular face.
+Scrivr does not, and the reason is the one this whole model exists for.
+
+A browser's synthetic bold **widens the advance** of every glyph. A PDF's
+equivalent — stroking the outline — leaves the advance unchanged. So a document
+measured against a faked bold on canvas and painted with a faked bold in a PDF
+would disagree about where every subsequent character goes, which is exactly
+the overlapping-text failure that a shared inventory removes.
+
+Since no two engines fake it the same way, the engine reports instead of
+guessing. `resolved` is a whole face, not a family name, so an application can
+tell the two cases apart:
+
+```ts
+const [missed] = editor.fontSubstitutions;
+missed.request.weight; // 700 — the document asked for bold
+missed.resolved.weight; // 400 — it was drawn in the regular
+```
+
+### Pick a file that covers the scripts you accept
+
+Most font packages publish one file per script, selected in CSS by
+`unicode-range`. That arrangement assumes the browser picks a file per
+*character*, which it cannot do here: a face is one set of bytes, and those
+same bytes have to serve measurement and embedding alike.
+
+A Latin-only file holds around 230 glyphs. Paste Cyrillic or Greek into a
+document using it and those characters have no glyph — on canvas the browser
+quietly substitutes something else, and in a PDF they are drawn as blanks.
+
+So prefer an unsubsetted file per face. `inter-ui` publishes Inter that way:
+~110 KB per face, about 2 850 glyphs, covering Latin, Latin Extended, Greek,
+Cyrillic and Vietnamese in one file. The faces are fetched only when something
+resolves to them, so the catalogue costs nothing until it is used.
+
+---
+
+## What happens to a font you do not own
+
+A document can name anything. A `.docx` written in Word may ask for Aptos, Calibri or Cambria, and an application that registered Inter owns none of them.
+
+Resolution prefers, in order: the exact face asked for, another weight or slant of the same family, then the nearest face in your default's family. It never invents a family name, and it reports which of those happened:
+
+```ts
+const shortfalls = await prepareDocumentFonts(doc, fonts, {
+	portable: true,
+	embeddable: true,
+});
+// [{ request:  { family: "Aptos", weight: 700 },
+//    resolved: { family: "Inter", weight: 400 },
+//    source: "default" }]
+```
+
+DOCX import runs this for you and raises a `font-substituted` diagnostic per face, so you can tell the user their contract is no longer set in Aptos rather than letting them discover it.
+
+### Telling the user, continuously
+
+Import reports once and export reports at the end. For the state in between, the editor answers the same question about the document it is laying out now:
+
+```tsx
+const substituted = useEditorState({
+	editor,
+	selector: (ctx) => ctx.editor.fontSubstitutions,
+});
+```
+
+Same `FontShortfall` shape, memoised per layout so it only changes when the answer does.
+
+For a font control, `getActiveFontFamily()` gives the family in effect at the selection together with the face it is drawn in:
+
+```ts
+editor.getActiveFontFamily();
+// { requested: "Aptos", resolved: "Inter", substituted: true }
+```
+
+The precedence — inline mark, then block attribute, then the document default — is the editor's own rule, so reading it here keeps a control from drifting from the page it describes. `editor.fontFamilies` lists what can be offered.
+
+Scrivr deliberately stops there. Whether a substitution is a badge, a banner, or nothing at all depends on what the application is for, so the engine reports and the application decides.
+
+<Callout type="warn">
+	A measurement backend that cannot install a face — a custom `TextMeasurer`
+	without `installFont`, or an environment with no `FontFace` — reports every
+	answer as one it cannot promise. That is honest rather than pessimistic: it
+	has no way to guarantee the bytes are what is being measured.
+</Callout>
+
+---
+
+## Exporting
+
+`exportToPdf` resolves the document's faces under `{ portable: true, embeddable: true }`, embeds them, and paints the layout the editor already has. The PDF reproduces the page on screen — same line breaks, same pages — and is set in the face it was measured in rather than a base-14 lookalike chosen from the family name.
+
+When the export cannot use what the screen resolved — a face the browser can draw but nobody owns the bytes for, or one whose licence forbids embedding — it lays the document out again against the faces it *can* carry, and reports why. That document may break lines differently from the screen, which is the honest outcome: it is set in different typefaces.
+
+```ts
+await exportToPdf(editor, {
+	onFontShortfall: (faces) => {
+		for (const f of faces) {
+			console.warn(`${f.request.family} exported as ${f.resolved}`);
+		}
+	},
+});
+```
+
+Two constraints shape that answer:
+
+| Constraint | Meaning |
+| --- | --- |
+| `portable` | The face must be usable off this machine. A `systemCandidates` family — one the browser can draw but nobody owns bytes for — is refused. |
+| `embeddable` | The face's licence must permit it to travel inside the file. Set `embedding: { allowed: false }` on a resource that may not. |
+
+A face that resolves but cannot be embedded fails the export rather than silently falling back, because falling back would invalidate the geometry already measured.
+
+---
+
+## Fonts that arrive late
+
+You do **not** need to delay mounting the editor until fonts load. The editor lays out immediately with what it has, prepares the faces in the background, and when an answer changes it drops its measurement cache and reflows. Text may reflow once shortly after mount; it will not be silently mismeasured.
+
+If your application swaps the inventory at runtime, a provider can notify the editor:
+
+```ts
+provider.subscribe((change) => {
+	// "resource-added" | "resource-loaded" | "resource-failed" | "resource-removed"
+});
+```
+
+The editor subscribes on your behalf; implementing `subscribe` on a custom `FontProvider` is what lets a late arrival trigger a reflow.
+
+---
+
+## Custom providers
+
+`FontProvider` is a small interface, so an inventory backed by a font server or a user's uploaded files is a matter of implementing three methods:
+
+```ts
+interface FontProvider {
+	defaultRequest(): FontRequest;
+	prepare(requests, constraints?): Promise<void>; // may fetch; runs before layout
+	resolve(request, constraints?): FontResolution; // never blocks; layout is sync
+	subscribe?(listener): () => void;
+}
+```
+
+`resolve` is synchronous because measurement cannot wait. `prepare` is where acquisition happens, and it is always called before the geometry that depends on it.

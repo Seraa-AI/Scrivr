@@ -9,20 +9,12 @@ import {
   StandardFonts,
   type PDFFont,
 } from "pdf-lib";
-import type { DocumentLayout } from "@scrivr/core";
+import type { DocumentLayout, FontResolutionId, FontResource } from "@scrivr/core";
 import type { PdfFontRegistry } from "./context";
 
 export type FontVariant = "normal" | "bold" | "italic" | "boldItalic";
 export type FontFamily = "serif" | "sans" | "mono";
 export type FontCache = Record<string, PDFFont>;
-
-export interface PdfExportFontOptions {
-  fontResolver?: (
-    family: string,
-    weight: "normal" | "bold",
-    style: "normal" | "italic",
-  ) => Promise<ArrayBuffer | null>;
-}
 
 export async function embedStandardFonts(pdfDoc: PDFDocument): Promise<FontCache> {
   const [
@@ -61,87 +53,107 @@ export async function embedStandardFonts(pdfDoc: PDFDocument): Promise<FontCache
   };
 }
 
-/**
- * Extract the first font family name from a CSS font shorthand string.
- * "bold italic 14px Inter, sans-serif" → "Inter"
- */
-export function extractCssFamilyName(cssFont: string): string {
-  const sizeMatch = cssFont.match(/\d+(?:\.\d+)?px\s+(.*)/i);
-  if (!sizeMatch?.[1]) return "";
-  const first = sizeMatch[1].split(",")[0]?.trim().replace(/['"]/g, "") ?? "";
-  if (/^(sans-serif|serif|monospace|cursive|fantasy|system-ui)$/i.test(first))
-    return "";
-  return first;
-}
 
 /**
- * Walk the layout, collect all unique (family, weight, style) combos, call
- * fontResolver for each, and embed those that return bytes.
+ * Embed the faces the layout actually measured against.
+ *
+ * The layout resolved every span to a face and recorded which one; this walks
+ * that table rather than the family names, so the PDF paints the same
+ * typeface the geometry was computed from. Deriving a font from the name a
+ * second time is what let a document measured in one face be painted in
+ * another at those coordinates.
+ *
+ * Licence and parse policy live in `embedFaces`, so both export paths apply
+ * the same one.
  */
-export async function embedCustomFonts(
+/**
+ * Embed one set of faces, keyed by the id that identifies them.
+ *
+ * The single place bytes become a `PDFFont`, so both export paths agree on
+ * what may go in a file and what happens when it will not parse. A face whose
+ * licence forbids embedding is skipped — it must not travel inside the
+ * document — and its spans fall back to a standard font, which is visibly
+ * wrong but lawfully so. Bytes that will not parse are an error: switching
+ * silently to a standard font would leave every glyph at coordinates measured
+ * from a different typeface, which is the defect this lane exists to remove.
+ */
+export async function embedFaces(
   pdfDoc: PDFDocument,
-  layout: DocumentLayout,
-  fontResolver: NonNullable<PdfExportFontOptions["fontResolver"]>,
+  resources: Iterable<FontResource>,
 ): Promise<Map<string, PDFFont>> {
-  pdfDoc.registerFontkit(fontkit);
-
-  const combos = new Map<string, { family: string; weight: "normal" | "bold"; style: "normal" | "italic" }>();
-
-  const visitFont = (cssFont: string) => {
-    const family = extractCssFamilyName(cssFont);
-    if (!family) return;
-    const lower = cssFont.toLowerCase();
-    const weight: "normal" | "bold" = /bold|[789]\d\d/.test(lower) ? "bold" : "normal";
-    const style: "normal" | "italic" = /italic|oblique/.test(lower) ? "italic" : "normal";
-    const key = `${family}:${weight}:${style}`;
-    if (!combos.has(key)) combos.set(key, { family, weight, style });
-  };
-
-  for (const page of layout.pages) {
-    for (const block of page.blocks) {
-      for (const line of block.lines) {
-        for (const span of line.spans) {
-          if (span.kind === "text") visitFont(span.font);
-        }
-      }
-    }
+  const wanted = new Map<string, FontResource>();
+  for (const resource of resources) {
+    if (resource.embedding?.allowed === false) continue;
+    wanted.set(resource.id, resource);
   }
 
-  const result = new Map<string, PDFFont>();
+  const embedded = new Map<string, PDFFont>();
+  if (wanted.size === 0) return embedded;
 
+  pdfDoc.registerFontkit(fontkit);
   await Promise.all(
-    Array.from(combos.entries()).map(async ([key, { family, weight, style }]) => {
+    [...wanted.values()].map(async (resource) => {
       try {
-        const bytes = await fontResolver(family, weight, style);
-        if (!bytes) return;
-        const font = await pdfDoc.embedFont(new Uint8Array(bytes));
-        result.set(key, font);
-      } catch {
-        // Fall back to standard font for this combo.
+        embedded.set(
+          resource.id,
+          await pdfDoc.embedFont(new Uint8Array(await resource.bytes())),
+        );
+      } catch (cause) {
+        throw new Error(`Cannot embed font ${resource.family}`, { cause });
       }
     }),
   );
-
-  return result;
+  return embedded;
 }
 
-/** Resolve a CSS font string to the best available PDFFont. */
+/**
+ * Embed the faces a layout measured against, keyed by its resolution ids.
+ *
+ * Many ids can name one resource — the same face answering requests for a
+ * weight nobody supplied — so the bytes go in once and every id points at
+ * them.
+ */
+export async function embedResolvedFonts(
+  pdfDoc: PDFDocument,
+  layout: DocumentLayout,
+): Promise<Map<FontResolutionId, PDFFont>> {
+  const resolutions = layout.fontResolutions;
+  const embedded = new Map<FontResolutionId, PDFFont>();
+  if (!resolutions?.size) return embedded;
+
+  const faces = await embedFaces(
+    pdfDoc,
+    [...resolutions.values()].flatMap((r) => (r.resource ? [r.resource] : [])),
+  );
+  for (const [id, { resource }] of resolutions) {
+    const font = resource && faces.get(resource.id);
+    if (font) embedded.set(id, font);
+  }
+  return embedded;
+}
+
+/**
+ * Pick the PDFFont for a span.
+ *
+ * The layout's resolution names the face the geometry was measured from, so
+ * it decides. The standard fonts are a guess from the family name, and the
+ * only option left when nothing resolved anything — no provider, or a licence
+ * that forbids embedding the face that was chosen.
+ */
 export function resolveFont(
   cssFont: string,
   standardFonts: FontCache,
-  customFonts: Map<string, PDFFont>,
+  resolvedFonts?: Map<FontResolutionId, PDFFont>,
+  resolution?: FontResolutionId,
 ): PDFFont {
+  if (resolution !== undefined) {
+    const measured = resolvedFonts?.get(resolution);
+    if (measured) return measured;
+  }
+
   const lower = cssFont.toLowerCase();
   const isBold = /bold|[789]\d\d/.test(lower);
   const isItalic = /italic|oblique/.test(lower);
-
-  if (customFonts.size > 0) {
-    const family = extractCssFamilyName(cssFont);
-    const weight: "normal" | "bold" = isBold ? "bold" : "normal";
-    const style: "normal" | "italic" = isItalic ? "italic" : "normal";
-    const custom = customFonts.get(`${family}:${weight}:${style}`);
-    if (custom) return custom;
-  }
 
   let stdFamily: FontFamily = "sans";
   if (/georgia|times|serif/.test(lower) && !/sans-serif/.test(lower))
@@ -160,14 +172,15 @@ export function resolveFont(
   return standardFonts[`${stdFamily}_${variant}`] ?? standardFonts["normal"]!;
 }
 
-/** Create a PdfFontRegistry from standard + custom font caches. */
+/** Create a PdfFontRegistry from the layout's resolutions and the standard fonts. */
 export function createFontRegistry(
   standardFonts: FontCache,
-  customFonts: Map<string, PDFFont>,
+  resolvedFonts: Map<FontResolutionId, PDFFont> = new Map(),
 ): PdfFontRegistry {
-  const embedded = new Set(customFonts.values());
+  const embedded = new Set(resolvedFonts.values());
   return {
-    resolve: (cssFont: string) => resolveFont(cssFont, standardFonts, customFonts),
+    resolve: (cssFont, resolution) =>
+      resolveFont(cssFont, standardFonts, resolvedFonts, resolution),
     isUnicode: (font: PDFFont) => embedded.has(font),
     fallback: standardFonts["normal"]!,
   };

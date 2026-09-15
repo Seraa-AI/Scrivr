@@ -1,3 +1,5 @@
+import type { FontModifier } from "../extensions/types";
+import type { LayoutFontResolver } from "../fonts/layoutResolver";
 /**
  * Per-page layout metrics — lets chrome contributors (headers, footers,
  * footnotes) reserve vertical space without raw margin arithmetic.
@@ -288,6 +290,8 @@ export interface PageChromeMeasureInput {
   pageConfig: PageConfig;
   measurer: TextMeasurerLike;
   fontConfig: FontConfig;
+  fonts?: LayoutFontResolver;
+  fontModifiers?: Map<string, FontModifier>;
 }
 
 /**

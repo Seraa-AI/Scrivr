@@ -1,4 +1,6 @@
 import { Node } from "prosemirror-model";
+import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
+import type { FontResolution } from "../fonts/types";
 import type { FontModifier } from "../extensions/types";
 import { TextMeasurer, type TextMeasurerLike } from "./TextMeasurer";
 import {
@@ -106,6 +108,17 @@ export interface LayoutFragment {
 export interface DocumentLayout {
   pages: LayoutPage[];
   pageConfig: PageConfig;
+  /**
+   * Every face this layout measured against, by the id its spans carry.
+   * Absent when the editor has no font provider — nothing was resolved, so
+   * there is nothing to claim. A consumer reproducing this geometry reads
+   * these rather than deriving its own answer from the family names.
+   *
+   * Cumulative for the coordinator's lifetime so ids on cached spans stay
+   * resolvable; it therefore holds faces the document no longer uses. Read
+   * the spans, not this table, to describe the document as it stands.
+   */
+  fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>;
   /**
    * Increments on every layout run. PageRenderer checks this before drawing
    * to abort stale renders when the document changes mid-scroll.
@@ -580,10 +593,7 @@ function resolveAnchoredObjects(
   inputFlows: FlowBlock[],
   pageConfig: PageConfig,
   geometry: PageGeometry,
-  measurer: TextMeasurerLike,
-  fontConfig: FontConfig,
-  fontModifiers: Map<string, FontModifier> | undefined,
-  inlineRegistry?: InlineRegistry,
+  ctx: MeasureContext,
 ): { flows: FlowBlock[]; placements: AnchoredObjectPlacement[] } {
   let flows = inputFlows;
   const placements: AnchoredObjectPlacement[] = [];
@@ -826,10 +836,7 @@ function resolveAnchoredObjects(
           },
           pageConfig,
           geometry,
-          measurer,
-          fontConfig,
-          fontModifiers,
-          inlineRegistry,
+          ctx,
         );
 
         const settledAnchorGlobalY = flows[i]!.globalY ?? 0;
@@ -870,11 +877,9 @@ function reflowFlowsAgainstExclusions(
   },
   pageConfig: PageConfig,
   geometry: PageGeometry,
-  measurer: TextMeasurerLike,
-  fontConfig: FontConfig,
-  fontModifiers: Map<string, FontModifier> | undefined,
-  inlineRegistry?: InlineRegistry,
+  ctx: MeasureContext,
 ): FlowBlock[] {
+  const { measurer, fontConfig, fontModifiers, inlineRegistry, fonts } = ctx;
   let flows = inputFlows;
   const zoneTop = zone.zoneTop;
   const zoneBottom = zone.zoneBottom;
@@ -932,6 +937,7 @@ function reflowFlowsAgainstExclusions(
       ...(fontModifiers ? { fontModifiers } : {}),
       lineSpaceProvider,
       ...(inlineRegistry ? { inlineRegistry } : {}),
+      ...(fonts ? { fonts } : {}),
     });
 
     const nextFlow: FlowBlock = {
@@ -962,6 +968,22 @@ function reflowFlowsAgainstExclusions(
   return flows;
 }
 
+/**
+ * What every measuring stage needs and none of them decides.
+ *
+ * A bundle rather than a parameter list, so the next dependency costs a field
+ * instead of an argument in three signatures.
+ */
+export interface MeasureContext {
+  measurer: TextMeasurerLike;
+  fontConfig: FontConfig;
+  fontModifiers?: Map<string, FontModifier>;
+  inlineRegistry?: InlineRegistry;
+  measureCache?: WeakMap<Node, MeasureCacheEntry>;
+  /** Answers what face a span is measured in. Absent when no provider. */
+  fonts?: LayoutFontResolver;
+}
+
 export interface PageLayoutOptions {
   pageConfig: PageConfig;
   measurer: TextMeasurerLike;
@@ -973,6 +995,11 @@ export interface PageLayoutOptions {
   previousVersion?: number;
   /** Optional font modifier map from the ExtensionManager. Enables extensions to declare font effects. */
   fontModifiers?: Map<string, FontModifier>;
+  /**
+   * Answers what face each span is measured in. Supplied by an editor that has
+   * a font provider; absent otherwise, and then nothing resolves.
+   */
+  fonts?: LayoutFontResolver;
   /**
    * Block measurement cache keyed by Node reference.
    * When provided, unchanged blocks (same ProseMirror Node object) skip the
@@ -1132,10 +1159,15 @@ export function runFlowPipeline(
 
   // Stage 1: measure.
   const flowConfig: FlowConfig = { margins, contentWidth };
-  const flowResult = buildBlockFlow(
-    items, startIndex, flowConfig, fontConfig,
-    measurer, fontModifiers, measureCache, maxBlocks, options.inlineRegistry,
-  );
+  const measureCtx: MeasureContext = {
+    measurer,
+    fontConfig,
+    ...(fontModifiers ? { fontModifiers } : {}),
+    ...(measureCache ? { measureCache } : {}),
+    ...(options.inlineRegistry ? { inlineRegistry: options.inlineRegistry } : {}),
+    ...(options.fonts ? { fonts: options.fonts } : {}),
+  };
+  const flowResult = buildBlockFlow(items, startIndex, flowConfig, measureCtx, maxBlocks);
 
   // Stage 2: assign continuous flow coordinates and resolve anchored objects.
   // For resumed chunks, seed globalY at the resumption cursor's continuous
@@ -1152,10 +1184,7 @@ export function runFlowPipeline(
     flowsWithGlobalY,
     pageConfig,
     geometry,
-    measurer,
-    fontConfig,
-    fontModifiers,
-    options.inlineRegistry,
+    measureCtx,
   );
 
   // Merge anchored placements from prior streamed chunks with the current
@@ -1269,6 +1298,8 @@ function runPipelineBody(
     pageConfig,
     measurer: options.measurer,
     fontConfig: resolvedFontConfig,
+    ...(options.fonts ? { fonts: options.fonts } : {}),
+    ...(options.fontModifiers ? { fontModifiers: options.fontModifiers } : {}),
   };
 
   const contributions = options.pageChromeContributions ?? [];
@@ -1285,11 +1316,15 @@ function runPipelineBody(
   const fp = chromeResult.flow;
 
   // Propagate aggregator outcome + payloads into the layout returned to callers.
+  // The resolver accumulated an answer per face while measuring; publishing it
+  // here is what lets a consumer reproduce this geometry from the faces it was
+  // actually built from rather than from the family names it asked for.
   const layoutWithChrome: DocumentLayout = {
     ...fp.layout,
     convergence: chromeResult.convergence,
     iterationCount: chromeResult.iterationCount,
     chromePayloads: chromeResult.chromePayloads,
+    ...(options.fonts ? { fontResolutions: new Map(options.fonts.table()) } : {}),
   };
 
   if (fp.isPartial) return layoutWithChrome;
@@ -1787,13 +1822,10 @@ export function buildBlockFlow(
   items: LayoutItem[],
   startIndex: number,
   config: FlowConfig,
-  fontConfig: FontConfig,
-  measurer: TextMeasurerLike,
-  fontModifiers: Map<string, FontModifier> | undefined,
-  measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
+  ctx: MeasureContext,
   maxBlocks?: number,
-  inlineRegistry?: InlineRegistry,
 ): { flows: FlowBlock[]; reachedCutoff: boolean; cutoffIndex: number } {
+  const { fontConfig, measurer, fontModifiers, measureCache, inlineRegistry } = ctx;
   const { margins, contentWidth } = config;
   const flows: FlowBlock[] = [];
   let processedBlocks = 0;
@@ -1839,8 +1871,7 @@ export function buildBlockFlow(
 
     // Measure — position-independent (targetY=0, page=1 are not stored in entry).
     const entry = resolveBlockEntry(
-      node, nodePos, blockX, 0, blockWidth, 1,
-      measurer, fontConfig, fontModifiers, measureCache, inlineRegistry, item.tableColumns,
+      node, nodePos, blockX, 0, blockWidth, 1, ctx, item.tableColumns,
     );
     const anchorOnlyFlow = isAnchorOnlyFlowEntry(entry);
 
@@ -1951,6 +1982,7 @@ function rebreakWrappedLinesWithoutExclusions(
           font: span.font,
           docPos: span.docPos,
           ...(span.marks !== undefined ? { marks: span.marks } : {}),
+          ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
         });
       } else {
         spans.push({
@@ -1959,6 +1991,8 @@ function rebreakWrappedLinesWithoutExclusions(
           width: span.width,
           height: span.height,
           docPos: span.docPos,
+          ...(span.font !== undefined ? { font: span.font } : {}),
+          ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
           verticalAlign: span.verticalAlign,
         });
       }
@@ -2158,13 +2192,10 @@ function resolveBlockEntry(
   targetY: number,
   blockWidth: number,
   pageNumber: number,
-  measurer: TextMeasurerLike,
-  fontConfig: FontConfig,
-  fontModifiers: Map<string, FontModifier> | undefined,
-  measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
-  inlineRegistry?: InlineRegistry,
+  ctx: MeasureContext,
   tableColumns?: number[],
 ): MeasureCacheEntry {
+  const { measurer, fontConfig, fontModifiers, measureCache, inlineRegistry, fonts } = ctx;
   // Table rows bypass the measure cache: their `cells` carry child-block span
   // docPos values that the cache-hit delta-adjustment path does not rewrite, so
   // re-measuring fresh each run keeps cell hit-testing correct. Tables are small
@@ -2180,6 +2211,7 @@ function resolveBlockEntry(
       fontConfig,
       ...(fontModifiers ? { fontModifiers } : {}),
       ...(inlineRegistry ? { inlineRegistry } : {}),
+      ...(fonts ? { fonts } : {}),
       ...(tableColumns ? { tableColumns } : {}),
     });
     return {
@@ -2224,6 +2256,7 @@ function resolveBlockEntry(
     fontConfig,
     ...(fontModifiers ? { fontModifiers } : {}),
     ...(inlineRegistry ? { inlineRegistry } : {}),
+    ...(fonts ? { fonts } : {}),
   });
 
   const entry: MeasureCacheEntry = {

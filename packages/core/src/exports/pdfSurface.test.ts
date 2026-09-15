@@ -54,7 +54,7 @@ describe("the PDF mark contract an extension writes against", () => {
     };
 
     const from: PdfPoint = { x: 0, y: 10 };
-    const font: PdfFontHandle = { cssFont: "12px sans-serif" };
+    const font: PdfFontHandle = { cssFont: "12px sans-serif", resolution: 0 };
     const image: PdfImageHandle = { src: "a.png" };
 
     surface.text({ text: "hi", x: 0, baselineY: 10, sizePx: 12, font, color: { r: 0, g: 0, b: 0 } });

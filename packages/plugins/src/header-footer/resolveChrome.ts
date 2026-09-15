@@ -57,6 +57,8 @@ function measureSlot(
     pageConfig: input.pageConfig,
     measurer: input.measurer,
     fontConfig: chromeFontConfig,
+    ...(input.fonts ? { fonts: input.fonts } : {}),
+    ...(input.fontModifiers ? { fontModifiers: input.fontModifiers } : {}),
   });
 
   const natural = layout.totalContentHeight ?? 0;
