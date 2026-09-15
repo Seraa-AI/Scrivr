@@ -10,7 +10,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { createCanvas } from "/Users/sirlantei/devProjects/canvas-editor/node_modules/.pnpm/@napi-rs+canvas@1.0.0/node_modules/@napi-rs/canvas/index.js";
+import { createCanvas } from "@napi-rs/canvas";
 import {
   DefaultFontProvider,
   Editor,
