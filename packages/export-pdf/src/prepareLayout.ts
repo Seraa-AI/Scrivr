@@ -47,7 +47,13 @@ export async function preparePdfLayout(editor: IEditor) {
     }
     snapshots.set(key(request), snapshot);
     if (answer.resolved.source !== "requested" || !answer.resolved.portable) {
-      shortfalls.push({ request, resolved: resolvedKeyOf(answer), source: answer.resolved.source, portable: answer.resolved.portable });
+      shortfalls.push({
+        request,
+        resolved: resolvedKeyOf(answer),
+        ...(answer.synthesis ? { synthesis: answer.synthesis } : {}),
+        source: answer.resolved.source,
+        portable: answer.resolved.portable,
+      });
     }
   }
   // One embedder for both export paths, so licence and parse failures are

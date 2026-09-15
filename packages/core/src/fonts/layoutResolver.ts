@@ -108,9 +108,15 @@ export function createLayoutFontResolver(
       // which leaves the previous span's face and produces geometry from a
       // font nobody chose.
       // Measure under the backend's own name for the bytes when it has one;
-      // the family otherwise. A face carries its own weight and slant, so the
-      // shorthand spells the resource's rather than the request's — asking an
-      // installed regular for bold would have the host synthesize one.
+      // the family otherwise.
+      //
+      // The shorthand spells the resource's weight and slant, not the
+      // request's. That is this renderer declining the synthesis the
+      // resolution records — asking the host for a bold it does not have makes
+      // the browser fake one, which widens every advance, while the PDF's
+      // equivalent does not. Until both lanes position glyphs from the same
+      // measurements, faking on one side is a disagreement about where the
+      // next character goes.
       const face = resolution.resource;
       const measured = resolution.measuredAs ?? family;
       const font = face

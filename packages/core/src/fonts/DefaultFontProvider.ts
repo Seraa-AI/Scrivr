@@ -6,6 +6,7 @@ import type {
   FontResolution,
   FontResolutionConstraints,
   FontResource,
+  FontSynthesis,
 } from "./types";
 
 export interface DefaultFontProviderOptions {
@@ -207,10 +208,22 @@ export class DefaultFontProvider implements FontProvider {
     resource: FontResource,
     source: "requested" | "substituted" | "default",
   ): FontResolution {
+    // `#nearest` already preferred the real slant over the real weight, so
+    // whatever remains here is what no owned face supplies.
+    const synthesis: FontSynthesis = {
+      ...(resource.weight !== request.weight
+        ? { weight: { from: resource.weight, to: request.weight } }
+        : {}),
+      ...(resource.style !== request.style
+        ? { style: { from: resource.style, to: request.style } }
+        : {}),
+    };
+
     return {
       request,
       resolved: { family: resource.family, source, portable: true },
       resource,
+      ...(synthesis.weight || synthesis.style ? { synthesis } : {}),
     };
   }
 

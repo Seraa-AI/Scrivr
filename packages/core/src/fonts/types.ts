@@ -53,6 +53,24 @@ export interface FontResource extends FontKey {
 /** Registered is not loaded: a descriptor costs nothing until something wants it. */
 export type FontResourceState = "registered" | "loading" | "loaded" | "failed";
 
+/**
+ * What the physical face does not supply, and the appearance it was asked for.
+ *
+ * Resolution finds the closest face somebody owns and records what is missing;
+ * how — or whether — to make that face satisfy the request is a rendering
+ * decision, and the two renderers can answer it differently. Recorded rather
+ * than left to be derived, because a consumer comparing a request against a
+ * resource is reconstructing a fact the resolver already knew.
+ *
+ * Present only when a resource answered. An answer with no resource has no
+ * physical face to alter, so the host decides the whole appearance.
+ */
+export interface FontSynthesis {
+  /** The face's weight, and the one asked for. */
+  weight?: { from: number; to: number };
+  style?: { from: "normal" | "italic"; to: "normal" | "italic" };
+}
+
 export interface FontResolution {
   request: FontRequest;
   resolved: {
@@ -72,6 +90,8 @@ export interface FontResolution {
     portable: boolean;
   };
   resource?: FontResource;
+  /** What the resource does not supply of what was asked for. */
+  synthesis?: FontSynthesis;
   /**
    * The family name the measurement backend answers to for these bytes, when
    * it installed them under one of its own.

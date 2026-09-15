@@ -706,18 +706,50 @@ its regular, and nothing fakes the difference. Word and every browser do fake
 it, so this is a deliberate divergence from the convention this project
 otherwise follows.
 
-It cannot be done consistently. A browser's synthetic bold widens each glyph's
-advance; the PDF equivalent strokes the outline and leaves the advance
-unchanged. A document measured against one and painted with the other disagrees
-about where every following character sits — the overlapping-text failure this
-document opens by describing, reintroduced on purpose. No two engines fake a
-weight the same way, so there is no version of this that holds the invariant.
+A browser's synthetic bold widens each glyph's advance; the PDF equivalent
+strokes the outline and leaves the advance unchanged. We position text once per
+span — an absolute text matrix, then a plain show-text — so within a run the
+embedded font's advances decide where each character goes. Faking on one side
+therefore leaves a run under-filling the box reserved for it: loose tracking
+across a heading, not colliding paragraphs.
 
-The engine reports instead. `FontShortfall.resolved` is a whole `FontKey`
-rather than a family name, so "your document is in a different typeface" and
-"your headings are no longer bold" are distinguishable by the consumer that has
-to phrase it. The provider already prefers the nearest weight in the family, so
-this only arises for an inventory that has no such face at all.
+**This is a "not yet", not a "cannot".** An earlier draft of this section said
+there was no version that holds the invariant. That is wrong, and the
+counter-example is Word: it synthesizes, and its export survives because it
+writes explicit per-glyph positioning rather than letting the consumer recompute
+advances from the font. The same is open to us — `TJ` with offsets taken from
+our own measurements — and it would buy kerning fidelity and exact
+justification besides. The ordering is positioning first, synthesis after;
+synthesis without it is the part that drifts.
+
+Until then the engine reports rather than guesses. Resolution records what the
+physical face does not supply and rendering decides what to do about it, which
+is the split described under *Resolution records, rendering decides* below.
+
+### Resolution records, rendering decides — shipped
+
+Two algorithms were being run as one. Finding the closest physical face is
+resolution's job; making that face satisfy an appearance it was not designed
+for is rendering's. They had been fused: the layout resolver spelled the
+*resource's* weight and slant into the string it measured with, which is the
+decision "do not synthesize" written into the resolution layer. Nothing
+downstream could see that anything was missing, and the symptom was a helper at
+the reporting boundary reconstructing the gap by diffing the request against
+the resource — a fact the resolver already held.
+
+`FontResolution.synthesis` records it: `{ weight?: {from, to}, style?: {from,
+to} }`, present only when a resource answered, because an answer without one has
+no physical face to alter. The canvas renderer still declines — with a comment
+saying so at the site where it declines, rather than by omission — and the DOCX
+import diagnostic now names what was lost ("No bold face is available, and
+neither is synthesized") instead of only what was chosen.
+
+The face-matching half needed nothing: `#nearest` already penalises a slant
+mismatch before a weight mismatch, so a request for bold italic against a
+family holding regular, italic and semibold resolves to the *italic*. A
+designed italic redraws its glyphs where a faked one shears the upright, so
+keeping the real slant and leaving the weight unmet is the better trade — and
+now the resolution says that is what happened.
 
 ## Decisions (locked)
 

@@ -282,6 +282,7 @@ function documentShortfalls(layout: DocumentLayout): readonly FontShortfall[] {
 		missed.push({
 			request,
 			resolved: resolvedKeyOf(entry),
+			...(entry.synthesis ? { synthesis: entry.synthesis } : {}),
 			source: resolved.source,
 			portable: resolved.portable,
 		});

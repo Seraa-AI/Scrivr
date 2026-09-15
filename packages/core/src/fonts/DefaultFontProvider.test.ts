@@ -106,6 +106,38 @@ describe("falling back to the default", () => {
   });
 });
 
+describe("what a face does not supply", () => {
+  it("records the weight it could not give, rather than leaving it to be inferred", () => {
+    // Every consumer otherwise reconstructs this by diffing the request
+    // against the resource — a fact the resolver already knew.
+    expect(provider().resolve(ask("Inter", 700)).synthesis).toBeUndefined();
+
+    const noBold = new DefaultFontProvider({ default: fallback, resources: [inter] });
+    const missing = noBold.resolve(ask("Inter", 700));
+    expect(missing.resource?.id).toBe(inter.id);
+    expect(missing.synthesis).toEqual({ weight: { from: 400, to: 700 } });
+  });
+
+  it("keeps the real slant and reports only the weight", () => {
+    // A designed italic redraws glyphs; a faked one shears the upright. So the
+    // italic face is preferred even at the wrong weight, and the weight is
+    // what goes unmet.
+    const interItalic: FontResource = {
+      ...resource("Inter", 400),
+      id: "Inter-400-italic",
+      style: "italic",
+    };
+    const p = new DefaultFontProvider({
+      default: fallback,
+      resources: [inter, interBold, interItalic],
+    });
+    const answer = p.resolve({ family: "Inter", weight: 700, style: "italic", size: 14 });
+
+    expect(answer.resource?.id).toBe("Inter-400-italic");
+    expect(answer.synthesis).toEqual({ weight: { from: 400, to: 700 } });
+  });
+});
+
 describe("a resource that may not be embedded", () => {
   const licensed = resource("Licensed", 400, { embedding: { allowed: false } });
 

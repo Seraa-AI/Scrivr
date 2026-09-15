@@ -20,7 +20,7 @@
  */
 
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { prepareDocumentFonts, type FontKey } from "@scrivr/core";
+import { prepareDocumentFonts, type FontKey, type FontSynthesis } from "@scrivr/core";
 import type {
   DocxImports,
   IBaseEditor,
@@ -67,6 +67,22 @@ export interface DocxImportCallOptions extends DocxImportOptions {
  *   const { doc, diagnostics } = await importDocx(editor, bytes);
  *   editor.setContent(doc.toJSON());
  */
+/**
+ * What the chosen face does not supply. Scrivr draws the face it has rather
+ * than thickening or slanting it, so a lost weight or slant is something the
+ * reader will see and should be told about by name.
+ */
+function describeMissing(synthesis: FontSynthesis | undefined): string {
+  if (!synthesis) return "";
+  const lost: string[] = [];
+  if (synthesis.weight && synthesis.weight.to > synthesis.weight.from) lost.push("bold");
+  if (synthesis.weight && synthesis.weight.to < synthesis.weight.from) lost.push("its lighter weight");
+  if (synthesis.style?.to === "italic") lost.push("italic");
+  return lost.length === 0
+    ? ""
+    : ` No ${lost.join(" or ")} face is available, and neither is synthesized.`;
+}
+
 /** A face as a person would name it: "Inter", or "Inter Bold Italic". */
 function describeFace(face: FontKey): string {
   const weight = face.weight >= 600 ? " Bold" : face.weight <= 300 ? " Light" : "";
@@ -224,7 +240,8 @@ export async function importDocx(
             `resolved "${describeFace(shortfall.resolved)}"` +
             (shortfall.portable
               ? ". Text will be measured and drawn in that face."
-              : " — a face this environment has but cannot hand to an export."),
+              : " — a face this environment has but cannot hand to an export.") +
+            describeMissing(shortfall.synthesis),
           markType: "fontFamily",
         });
       }

@@ -1,5 +1,11 @@
 import type { Node as PmNode } from "prosemirror-model";
-import type { FontKey, FontProvider, FontRequest, FontResolution } from "./types";
+import type {
+  FontKey,
+  FontProvider,
+  FontRequest,
+  FontResolution,
+  FontSynthesis,
+} from "./types";
 
 /** A face whose answer is worth telling somebody about. */
 export interface FontShortfall {
@@ -14,6 +20,8 @@ export interface FontShortfall {
    * weight and style, and reporting the family throws both away.
    */
   resolved: FontKey;
+  /** What the chosen face does not supply, when it supplies less than was asked. */
+  synthesis?: FontSynthesis;
   /** How that answer was reached, unchanged from the resolution. */
   source: "requested" | "substituted" | "default" | "generic";
   /** False when the answer only holds in this environment. */
@@ -21,19 +29,24 @@ export interface FontShortfall {
 }
 
 /**
- * The face an answer landed on. A resource names its own weight and style; an
- * answer without one is the host's, so the request's are what it will be drawn
+ * The physical face an answer landed on.
+ *
+ * A resource is that face. An answer without one never reached a physical
+ * face — the host will decide the whole appearance — so the request's own
+ * weight and slant are the only honest description of what it will be drawn
  * at.
  */
 export function resolvedKeyOf(answer: FontResolution): FontKey {
   const { resource, request, resolved } = answer;
+  if (resource) {
+    const { family, weight, style, stretch } = resource;
+    return { family, weight, style, ...(stretch ? { stretch } : {}) };
+  }
   return {
     family: resolved.family,
-    weight: resource?.weight ?? request.weight,
-    style: resource?.style ?? request.style,
-    ...(resource?.stretch ?? request.stretch
-      ? { stretch: resource?.stretch ?? request.stretch }
-      : {}),
+    weight: request.weight,
+    style: request.style,
+    ...(request.stretch ? { stretch: request.stretch } : {}),
   };
 }
 
@@ -107,6 +120,7 @@ export async function prepareDocumentFonts(
     shortfalls.push({
       request,
       resolved: resolvedKeyOf(answer),
+      ...(answer.synthesis ? { synthesis: answer.synthesis } : {}),
       source: resolved.source,
       portable: resolved.portable,
     });
