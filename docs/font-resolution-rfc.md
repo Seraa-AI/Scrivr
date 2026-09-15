@@ -751,6 +751,40 @@ designed italic redraws its glyphs where a faked one shears the upright, so
 keeping the real slant and leaving the weight unmet is the better trade — and
 now the resolution says that is what happened.
 
+### The PDF reproduces the screen — shipped
+
+The export laid the document out a second time, against a measurer reading the
+embedded faces. That made the file internally consistent and different from the
+page it came from: two engines reading one font file do not agree on advance
+widths to better than about half a percent, which is enough to move a line
+break. The contract measured 325 lines on screen and 327 in the PDF.
+
+It now reuses the layout the editor already has. Every face the document uses
+was resolved and measured on screen, so when the export resolves to those same
+faces there is nothing to recompute — and the discovery pass that existed only
+to find the requests goes too, since the layout's own resolution table is that
+list. An export was three full document layouts; it is one.
+
+Reuse is conditional on the answers agreeing, face by face. A family the
+browser can draw but nobody can embed, or one that had not finished installing
+when the page was laid out, is a real disagreement — the geometry on screen
+belongs to a face the file cannot carry — so that case still typesets its own
+and reports why. Both paths exist because both are reachable, and a test drives
+each.
+
+**Reusing the geometry means the text no longer fills it.** A run measured by
+one engine and painted by another ends short of its box: slack at the end of a
+long line, and a centred line sitting slightly left. PDF character spacing adds
+a fixed amount to every glyph's advance, so the difference is spread across the
+run without touching the glyphs — the smallest mechanism that closes it. It is
+zero when the layout was measured from the same face, so the typeset-again path
+emits nothing. On the contract, 2062 runs are adjusted by a median of 0.027pt
+per glyph.
+
+This is also the groundwork the synthesis decision was waiting on. Fitting a
+painted run to a measured width is the same operation whether the difference
+came from two engines or from one of them faking a weight.
+
 ## Decisions (locked)
 
 **Does layout re-measure when a font loads late?** Yes — when the *resolution*

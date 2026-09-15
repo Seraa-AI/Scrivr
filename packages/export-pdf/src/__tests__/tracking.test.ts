@@ -1,0 +1,75 @@
+/**
+ * Fitting a run to the width it was measured to.
+ *
+ * The PDF paints a layout the editor measured with a different engine, and two
+ * engines reading one font file disagree on advance widths by around half a
+ * percent. Left alone, every run ends slightly short of its box.
+ */
+
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { PDFDocument } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import { embedStandardFonts } from "../fonts";
+import { trackingFor, PT_PER_PX } from "../context";
+
+const standard = await embedStandardFonts(await PDFDocument.create());
+const font = standard["sans_normal"]!;
+const TEXT = "Retainer and fees payable under this agreement";
+const SIZE_PT = 14 * PT_PER_PX;
+
+/** What this face makes of the text, in the units a span's width is given in. */
+const naturalPx = font.widthOfTextAtSize(TEXT, SIZE_PT) / PT_PER_PX;
+
+describe("fitting a run to its measured width", () => {
+  it("adjusts nothing when the face agrees with the measurement", () => {
+    expect(trackingFor(naturalPx, TEXT, font, SIZE_PT)).toBe(0);
+  });
+
+  it("spreads the difference across the glyphs", () => {
+    const wider = naturalPx + 2 / PT_PER_PX;
+    const tracking = trackingFor(wider, TEXT, font, SIZE_PT);
+
+    expect(tracking).toBeGreaterThan(0);
+    expect(tracking * [...TEXT].length).toBeCloseTo(2, 5);
+  });
+
+  it("tightens when the face draws wider than the measurement", () => {
+    expect(trackingFor(naturalPx - 1 / PT_PER_PX, TEXT, font, SIZE_PT)).toBeLessThan(0);
+  });
+
+  it("ignores a difference too small to see", () => {
+    // Otherwise every span in the document pays for an operator that moves
+    // nothing.
+    expect(trackingFor(naturalPx + 0.005 / PT_PER_PX, TEXT, font, SIZE_PT)).toBe(0);
+  });
+
+  it("leaves empty text alone", () => {
+    expect(trackingFor(10, "", font, SIZE_PT)).toBe(0);
+  });
+
+  it("counts characters, not code units", async () => {
+    // A surrogate pair is one glyph. Dividing by its two code units would
+    // spread only half the difference and leave the run short.
+    const bytes = readFileSync(
+      createRequire(import.meta.url).resolve(
+        "@fontsource/inter/files/inter-latin-400-normal.woff2",
+      ),
+    );
+    const doc = await PDFDocument.create();
+    doc.registerFontkit(fontkit);
+    const inter = await doc.embedFont(new Uint8Array(bytes));
+
+    const text = "a\u{1D400}b"; // three characters, four code units
+    expect(text.length).toBe(4);
+    expect([...text].length).toBe(3);
+
+    const gapPt = 3;
+    const natural = inter.widthOfTextAtSize(text, SIZE_PT) / PT_PER_PX;
+    const tracking = trackingFor(natural + gapPt / PT_PER_PX, text, inter, SIZE_PT);
+
+    expect(tracking).toBeCloseTo(gapPt / 3, 8);
+    expect(tracking).not.toBeCloseTo(gapPt / 4, 8);
+  });
+});

@@ -7,6 +7,9 @@
 import {
   rgb,
   PDFHexString,
+  PDFNumber,
+  PDFOperator,
+  PDFOperatorNames,
   type PDFDocument,
   type PDFPage,
   type PDFFont,
@@ -508,9 +511,11 @@ export function createDrawHelpers(
 
         const fontSize = extractFontSizePx(span.font);
         const color = resolveFill(styles, themeDefaultText);
+        const tracking = trackingFor(span.width, text, font, fontSize * PT_PER_PX);
 
         drawSpanBackgrounds(span, styles, spanAbsX, baselineY);
 
+        if (tracking !== 0) setCharacterSpacing(page, tracking);
         page.drawText(text, {
           x: spanAbsX * PT_PER_PX,
           y: pdfBaseline,
@@ -518,6 +523,7 @@ export function createDrawHelpers(
           font,
           color,
         });
+        if (tracking !== 0) setCharacterSpacing(page, 0);
 
         drawSpanRules(span, styles, spanAbsX, baselineY, color);
 
@@ -539,6 +545,48 @@ export function createDrawHelpers(
 }
 
 // ── Shared utilities ─────────────────────────────────────────────────────────
+
+/**
+ * The per-glyph adjustment that makes a run fill the width it was measured to.
+ *
+ * Two engines reading one font file do not agree on advance widths to better
+ * than about half a percent, so a run laid out on screen and painted from the
+ * embedded face ends short of the box reserved for it — visible as slack at
+ * the end of a long line, and as a centred line sitting slightly left. PDF
+ * character spacing adds a fixed amount to every glyph's advance, which is the
+ * smallest thing that closes the gap without touching the glyphs themselves.
+ *
+ * Zero when the layout was measured from this same face, so an export that
+ * typeset its own geometry emits nothing.
+ */
+export function trackingFor(
+  measuredPx: number,
+  text: string,
+  font: PDFFont,
+  sizePt: number,
+): number {
+  const glyphs = [...text].length;
+  if (glyphs === 0) return 0;
+  let natural: number;
+  try {
+    natural = font.widthOfTextAtSize(text, sizePt);
+  } catch {
+    // A face that cannot measure this text will not paint it either; leave the
+    // spacing alone rather than guessing an adjustment for it.
+    return 0;
+  }
+  const gap = measuredPx * PT_PER_PX - natural;
+  // Below this the adjustment is invisible and only costs an operator per span.
+  return Math.abs(gap) < 0.01 ? 0 : gap / glyphs;
+}
+
+/** pdf-lib has no helper for `Tc`, though its operator table names it. */
+function setCharacterSpacing(page: PDFPage, amount: number): void {
+  page.pushOperators(
+    PDFOperator.of(PDFOperatorNames.SetCharacterSpacing, [PDFNumber.of(amount)]),
+  );
+}
+
 
 /** One anchor's horizontal extent on a single line, in layout pixels. */
 interface LinkRun {

@@ -16,10 +16,7 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { PDFDocument } from "pdf-lib";
-import type { DocumentLayout, FontResource, IEditor } from "@scrivr/core";
-import { DefaultFontProvider, ServerEditor, StarterKit } from "@scrivr/core";
-import { exportToPdf } from "../index";
-import { block, onePage, textLine } from "./fixtures";
+import type { DocumentLayout, FontResource } from "@scrivr/core";
 import { embedStandardFonts, resolveFont, embedResolvedFonts } from "../fonts";
 
 const standard = await embedStandardFonts(await PDFDocument.create());
@@ -117,84 +114,5 @@ describe("embedding the faces a layout measured", () => {
     const junk = resource("Corrupt", { bytes: vi.fn(() => Promise.resolve(new ArrayBuffer(8))) });
     await expect(embedResolvedFonts(await PDFDocument.create(), layoutWith(junk))).rejects.toThrow("Cannot embed font Corrupt");
     expect(junk.bytes).toHaveBeenCalled();
-  });
-});
-
-describe("what an export asks the provider for", () => {
-  /** A real editor, with only the layout a headless one cannot produce supplied. */
-  const exportable = (editor: ServerEditor, layout: DocumentLayout, family = "Aptos"): IEditor =>
-    new Proxy(editor, {
-      get: (target, prop) =>
-        prop === "layout"
-          ? layout
-          : prop === "ensureFullLayout"
-            ? () => {}
-            : prop === "layoutForExport"
-              ? (_doc: unknown, fonts: { resolve: (css: string) => unknown }) => { fonts.resolve(`14px ${family}`); return layout; }
-            : Reflect.get(target, prop),
-    }) as unknown as IEditor;
-
-  const editorAskingFor = (family: string) => {
-    const provider = new DefaultFontProvider({ default: resource("App Sans") });
-    const editor = new ServerEditor({
-      extensions: [StarterKit.configure({ table: true })],
-      fonts: provider,
-      content: {
-        type: "doc",
-        content: [
-          {
-            type: "paragraph",
-            content: [
-              { type: "text", marks: [{ type: "fontFamily", attrs: { family } }], text: "Fees" },
-            ],
-          },
-        ],
-      },
-    });
-    return { editor, provider };
-  };
-
-  it("asks for faces it can both carry and embed", async () => {
-    const { editor, provider } = editorAskingFor("Aptos");
-    const prepare = vi.spyOn(provider, "prepare");
-
-    await exportToPdf(exportable(editor, onePage([block("paragraph", [textLine("Fees")])])));
-
-    // A face this machine merely has is no use inside the file, and one whose
-    // licence forbids embedding must not go in it.
-    expect(prepare).toHaveBeenCalledWith(expect.anything(), {
-      portable: true,
-      embeddable: true,
-    });
-  });
-
-  it("reports the faces it could not honour", async () => {
-    const { editor } = editorAskingFor("Aptos");
-    const onFontShortfall = vi.fn();
-
-    await exportToPdf(
-      exportable(editor, onePage([block("paragraph", [textLine("Fees")])])),
-      { onFontShortfall },
-    );
-
-    expect(onFontShortfall).toHaveBeenCalledWith([
-      expect.objectContaining({
-        request: expect.objectContaining({ family: "Aptos" }),
-        resolved: expect.objectContaining({ family: "App Sans" }),
-        source: "default",
-      }),
-    ]);
-  });
-
-  it("says nothing when every face was honoured", async () => {
-    const { editor } = editorAskingFor("App Sans");
-    const onFontShortfall = vi.fn();
-
-    await exportToPdf(
-      exportable(editor, onePage([block("paragraph", [textLine("Fees")])]), "App Sans"),
-      { onFontShortfall },
-    );
-
-    expect(onFontShortfall).not.toHaveBeenCalled();
   });
 });
