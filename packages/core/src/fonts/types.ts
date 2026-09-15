@@ -67,8 +67,9 @@ export type FontResourceState = "registered" | "loading" | "loaded" | "failed";
  */
 export interface FontSynthesis {
   /** The face's weight, and the one asked for. */
-  weight?: { from: number; to: number };
-  style?: { from: "normal" | "italic"; to: "normal" | "italic" };
+  weight?: { from: FontKey["weight"]; to: FontKey["weight"] };
+  /** The face's slant, and the one asked for. */
+  style?: { from: FontKey["style"]; to: FontKey["style"] };
 }
 
 export interface FontResolution {

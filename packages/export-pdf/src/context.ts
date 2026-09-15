@@ -123,6 +123,16 @@ export function createDrawHelpers(
   pageHeightPt: number,
   fontRegistry: PdfFontRegistry,
   theme: ResolvedTheme,
+  /**
+   * Whether a run may be stretched to the width the layout recorded for it.
+   *
+   * Only true when the layout was measured against the very faces being
+   * painted, by a different engine. When the face itself differs — a document
+   * measured in Georgia and painted in Times because nobody supplied the bytes
+   * — the width gap is a different typeface, not engine disagreement, and
+   * closing it letterspaces the text instead of setting it.
+   */
+  fitToMeasuredWidth: boolean,
   images: ReadonlyMap<string, PDFImage | null>,
   nodeHandlers: ReadonlyMap<string, PdfNodeHandler>,
   markHandlers: ReadonlyMap<string, PdfMarkHandler>,
@@ -511,7 +521,12 @@ export function createDrawHelpers(
 
         const fontSize = extractFontSizePx(span.font);
         const color = resolveFill(styles, themeDefaultText);
-        const tracking = trackingFor(span.width, text, font, fontSize * PT_PER_PX);
+        // Only when the drawn text is the text that was measured: the
+        // sanitizer may have dropped characters the width still accounts for.
+        const tracking =
+          fitToMeasuredWidth && text === span.text
+            ? trackingFor(span.width, text, font, fontSize * PT_PER_PX)
+            : 0;
 
         drawSpanBackgrounds(span, styles, spanAbsX, baselineY);
 
@@ -549,15 +564,13 @@ export function createDrawHelpers(
 /**
  * The per-glyph adjustment that makes a run fill the width it was measured to.
  *
- * Two engines reading one font file do not agree on advance widths to better
- * than about half a percent, so a run laid out on screen and painted from the
- * embedded face ends short of the box reserved for it — visible as slack at
- * the end of a long line, and as a centred line sitting slightly left. PDF
- * character spacing adds a fixed amount to every glyph's advance, which is the
- * smallest thing that closes the gap without touching the glyphs themselves.
+ * A run measured by one engine and painted by another ends short of its box.
+ * Character spacing adds a fixed amount to every glyph advance, closing the gap
+ * without touching the glyphs.
  *
- * Zero when the layout was measured from this same face, so an export that
- * typeset its own geometry emits nothing.
+ * Zero when the run was measured and painted from the same face, so an export
+ * that typeset its own geometry emits nothing. Not exactly zero when the
+ * sanitizer dropped characters the width was measured with.
  */
 export function trackingFor(
   measuredPx: number,
@@ -577,7 +590,14 @@ export function trackingFor(
   }
   const gap = measuredPx * PT_PER_PX - natural;
   // Below this the adjustment is invisible and only costs an operator per span.
-  return Math.abs(gap) < 0.01 ? 0 : gap / glyphs;
+  if (Math.abs(gap) < 0.01) return 0;
+
+  const perGlyph = gap / glyphs;
+  // Above this the premise is false: two engines reading one face differ by a
+  // fraction of a percent, so a gap this wide means the run was measured in
+  // some other face. Stretching it then crushes or scatters the letters, which
+  // is worse than leaving it short.
+  return Math.abs(perGlyph) > sizePt * 0.02 ? 0 : perGlyph;
 }
 
 /** pdf-lib has no helper for `Tc`, though its operator table names it. */

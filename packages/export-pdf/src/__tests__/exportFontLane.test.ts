@@ -17,6 +17,7 @@ import {
   StarterKit,
   TextMeasurer,
   type FontResource,
+  type TextMeasureContext,
 } from "@scrivr/core";
 import { exportToPdf } from "../index";
 import { preparePdfLayout } from "../prepareLayout";
@@ -31,12 +32,14 @@ HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, id: 
     contexts.set(this, ctx);
   }
   return ctx;
+  // Asserted because `getContext` is overloaded per context id, and a single
+  // implementation cannot satisfy every overload's return type.
 } as typeof HTMLCanvasElement.prototype.getContext;
 
 const require_ = createRequire(import.meta.url);
 const interBytes = (): ArrayBuffer => {
   const b = readFileSync(require_.resolve("@fontsource/inter/files/inter-latin-400-normal.woff2"));
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+  return new Uint8Array(b).buffer;
 };
 
 const face = (overrides: Partial<FontResource> = {}): FontResource => ({
@@ -48,15 +51,26 @@ const face = (overrides: Partial<FontResource> = {}): FontResource => ({
   ...overrides,
 });
 
+/**
+ * The napi context is a structural superset of the two members the measurer
+ * reads. Adapting through a typed parameter keeps the compiler checking that,
+ * where an assertion would stop checking anything.
+ */
+function measureContext(ctx: {
+  font: string;
+  measureText: (text: string) => TextMetrics;
+}): TextMeasureContext {
+  return ctx;
+}
+
 /** A measurer that can install a face, which happy-dom's FontFace cannot. */
-function installingMeasurer() {
-  const base = new TextMeasurer({
+function installingMeasurer(): TextMeasurer {
+  const measurer = new TextMeasurer({
     lineHeightMultiplier: 1.2,
-    context: createCanvas(800, 600).getContext("2d") as never,
+    context: measureContext(createCanvas(800, 600).getContext("2d")),
   });
-  return Object.assign(Object.create(Object.getPrototypeOf(base)) as TextMeasurer, base, {
-    installFont: async () => "InstalledFace",
-  });
+  measurer.installFont = async () => "InstalledFace";
+  return measurer;
 }
 
 const CONTENT = {

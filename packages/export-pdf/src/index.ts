@@ -7,6 +7,7 @@ export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentati
 // mark without depending on this package; re-exported for consumers already
 // importing it from here.
 export type {
+  FontResolutionId,
   PdfMarkHandler,
   PdfSpanStyle,
   PdfSpanMark,
@@ -179,6 +180,7 @@ async function writePdf(
     pageHeightPt,
     fontRegistry,
     resolvedTheme,
+    prepared?.fitToMeasuredWidth ?? false,
     imageCache,
     nodeHandlers,
     markHandlers,

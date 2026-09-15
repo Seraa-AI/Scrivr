@@ -111,11 +111,10 @@ describe("a laid-out document's font record", () => {
     }
   });
 
-  it("records the face an inline atom was measured against", () => {
-    // An atom has no text of its own, but its box was reserved against a font
-    // and a renderer has to paint it in the same one. A PDF handler with no
-    // face on the span has to name a family, which is the guess this lane
-    // exists to remove.
+  it("leaves an atom nothing measures out of the font record", () => {
+    // An image has fixed dimensions and is not set in a face. Resolving one
+    // for it would enter the layout's table and report a substitution for a
+    // typeface nothing is drawn in.
     const doc = schema.node("doc", null, [
       schema.node("paragraph", null, [
         schema.text("Fee ", [schema.marks["fontFamily"]!.create({ family: "Aptos" })]),
@@ -130,8 +129,8 @@ describe("a laid-out document's font record", () => {
 
     expect(objects.length).toBeGreaterThan(0);
     for (const span of objects) {
-      expect(span.kind === "object" && span.font).toContain("App Sans");
-      expect(span.kind === "object" && span.resolution).toBeDefined();
+      expect(span.kind === "object" && span.font).toBeUndefined();
+      expect(span.kind === "object" && span.resolution).toBeUndefined();
     }
   });
 

@@ -1,5 +1,5 @@
 import { Node } from "prosemirror-model";
-import type { LayoutFontResolver } from "../fonts/layoutResolver";
+import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { InlineRegistry } from "./BlockRegistry";
@@ -800,23 +800,26 @@ function extractSpans(
         let objWidth = typeof w === "number" ? w : 200;
         let objHeight = typeof h === "number" ? h : 200;
 
-        // The face this atom sits in. An atom has no text of its own, so it
-        // inherits the run's — and a renderer that paints it needs the same
-        // one the box was reserved against, whichever side of the export it is
-        // on. Recorded on the span rather than re-derived from the family name.
-        const requested = resolveFont(baseFont, child.marks, fontModifiers);
-        const answered = fonts?.resolve(requested);
-        const atomFont = answered?.font ?? requested;
-
-        // If an InlineStrategy provides measure(), use it for dynamic sizing.
-        // Tokens (pageNumber, totalPages, date) use this to size based on font.
-        if (measurer && inlineRegistry) {
-          const strategy = inlineRegistry.get(child.type.name);
-          if (strategy?.measure) {
-            const measured = strategy.measure(child, atomFont, measurer);
-            objWidth = measured.width;
-            objHeight = measured.height;
-          }
+        // An atom sized from a font — a page number, a date — inherits the
+        // run's, and a renderer that paints it needs the same one the box was
+        // reserved against, whichever side of the export it is on. Recorded on
+        // the span rather than re-derived from the family name.
+        //
+        // An atom with fixed dimensions, an image, is not set in a face at all:
+        // resolving one for it would enter the layout's font table and report
+        // a substitution for a typeface nothing is drawn in.
+        const strategy =
+          measurer && inlineRegistry ? inlineRegistry.get(child.type.name) : undefined;
+        let atomFont: string | undefined;
+        let atomResolution: FontResolutionId | undefined;
+        if (strategy?.measure && measurer) {
+          const requested = resolveFont(baseFont, child.marks, fontModifiers);
+          const answered = fonts?.resolve(requested);
+          atomFont = answered?.font ?? requested;
+          atomResolution = answered?.resolution;
+          const measured = strategy.measure(child, atomFont, measurer);
+          objWidth = measured.width;
+          objHeight = measured.height;
         }
 
         spans.push({
@@ -825,8 +828,8 @@ function extractSpans(
           docPos: childDocPos,
           width: objWidth,
           height: objHeight,
-          font: atomFont,
-          ...(answered ? { resolution: answered.resolution } : {}),
+          ...(atomFont !== undefined ? { font: atomFont } : {}),
+          ...(atomResolution !== undefined ? { resolution: atomResolution } : {}),
           verticalAlign,
         });
       }

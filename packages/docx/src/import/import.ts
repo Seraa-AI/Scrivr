@@ -67,29 +67,6 @@ export interface DocxImportCallOptions extends DocxImportOptions {
  *   const { doc, diagnostics } = await importDocx(editor, bytes);
  *   editor.setContent(doc.toJSON());
  */
-/**
- * What the chosen face does not supply. Scrivr draws the face it has rather
- * than thickening or slanting it, so a lost weight or slant is something the
- * reader will see and should be told about by name.
- */
-function describeMissing(synthesis: FontSynthesis | undefined): string {
-  if (!synthesis) return "";
-  const lost: string[] = [];
-  if (synthesis.weight && synthesis.weight.to > synthesis.weight.from) lost.push("bold");
-  if (synthesis.weight && synthesis.weight.to < synthesis.weight.from) lost.push("its lighter weight");
-  if (synthesis.style?.to === "italic") lost.push("italic");
-  return lost.length === 0
-    ? ""
-    : ` No ${lost.join(" or ")} face is available, and neither is synthesized.`;
-}
-
-/** A face as a person would name it: "Inter", or "Inter Bold Italic". */
-function describeFace(face: FontKey): string {
-  const weight = face.weight >= 600 ? " Bold" : face.weight <= 300 ? " Light" : "";
-  const style = face.style === "italic" ? " Italic" : "";
-  return `${face.family}${weight}${style}`;
-}
-
 export async function importDocx(
   editor: IBaseEditor,
   bytes: Uint8Array,
@@ -353,3 +330,28 @@ function collectLifecycleHooks(
 }
 
 export type { DocxImportOptions };
+
+/**
+ * A lost weight or slant, named. Scrivr draws the face it has rather than
+ * thickening or slanting it, so this is something the reader will see.
+ *
+ * Only losses worth a warning: an upright standing in for an italic, but not
+ * an italic standing in for an upright, which no inventory produces on its own.
+ */
+function describeMissing(synthesis: FontSynthesis | undefined): string {
+  if (!synthesis) return "";
+  const lost: string[] = [];
+  if (synthesis.weight) {
+    lost.push(synthesis.weight.to > synthesis.weight.from ? "bolder" : "lighter");
+  }
+  if (synthesis.style?.to === "italic") lost.push("italic");
+  if (lost.length === 0) return "";
+  return ` No ${lost.join(" or ")} face is available, and none is synthesized.`;
+}
+
+/** A face in the three weights a reader recognises: light, regular, bold. */
+function describeFace(face: FontKey): string {
+  const weight = face.weight >= 600 ? " Bold" : face.weight <= 300 ? " Light" : "";
+  const style = face.style === "italic" ? " Italic" : "";
+  return `${face.family}${weight}${style}`;
+}

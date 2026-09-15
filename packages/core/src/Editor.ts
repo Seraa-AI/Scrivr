@@ -19,7 +19,11 @@ import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import type { ActiveFontFamily, FontProvider } from "./fonts/types";
 import type { FontResolutionId } from "./fonts/layoutResolver";
-import { resolvedKeyOf, type FontShortfall } from "./fonts/collectFontRequests";
+import {
+	resolvedKeyOf,
+	usedResolutions,
+	type FontShortfall,
+} from "./fonts/collectFontRequests";
 import { primaryFamily } from "./fonts/layoutResolver";
 import { DEFAULT_FONT_FAMILY } from "./layout/FontConfig";
 import { CursorManager } from "./renderer/CursorManager";
@@ -249,29 +253,7 @@ function documentShortfalls(layout: DocumentLayout): readonly FontShortfall[] {
 	const table = layout.fontResolutions;
 	if (!table?.size) return [];
 
-	const used = new Set<FontResolutionId>();
-	for (const page of layout.pages) {
-		for (const block of page.blocks) {
-			for (const line of block.lines) {
-				for (const span of line.spans) {
-					if (span.kind === "text" && span.resolution !== undefined) {
-						used.add(span.resolution);
-					}
-				}
-			}
-			for (const cell of block.cells ?? []) {
-				for (const cellBlock of cell.blocks) {
-					for (const line of cellBlock.lines) {
-						for (const span of line.spans) {
-							if (span.kind === "text" && span.resolution !== undefined) {
-								used.add(span.resolution);
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+	const used = usedResolutions(layout);
 
 	const missed: FontShortfall[] = [];
 	for (const id of used) {

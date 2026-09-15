@@ -12,6 +12,9 @@ import { createRequire } from "node:module";
 import { PDFDocument } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { embedStandardFonts } from "../fonts";
+import { buildPdf } from "../index";
+import { recordDrawOps } from "./opLog";
+import { block, onePage, textLine, exportEditor } from "./fixtures";
 import { trackingFor, PT_PER_PX } from "../context";
 
 const standard = await embedStandardFonts(await PDFDocument.create());
@@ -45,6 +48,16 @@ describe("fitting a run to its measured width", () => {
     expect(trackingFor(naturalPx + 0.005 / PT_PER_PX, TEXT, font, SIZE_PT)).toBe(0);
   });
 
+  it("refuses a gap too wide to be two engines disagreeing", () => {
+    // Engines reading one face differ by a fraction of a percent. A gap of
+    // several percent of the em means the run was measured in some other face,
+    // and stretching it to fit crushes or scatters the letters — worse than
+    // leaving it short.
+    const wildlyWider = naturalPx * 1.4;
+
+    expect(trackingFor(wildlyWider, TEXT, font, SIZE_PT)).toBe(0);
+  });
+
   it("leaves empty text alone", () => {
     expect(trackingFor(10, "", font, SIZE_PT)).toBe(0);
   });
@@ -65,11 +78,34 @@ describe("fitting a run to its measured width", () => {
     expect(text.length).toBe(4);
     expect([...text].length).toBe(3);
 
-    const gapPt = 3;
+    const gapPt = 0.3;
     const natural = inter.widthOfTextAtSize(text, SIZE_PT) / PT_PER_PX;
     const tracking = trackingFor(natural + gapPt / PT_PER_PX, text, inter, SIZE_PT);
 
     expect(tracking).toBeCloseTo(gapPt / 3, 8);
     expect(tracking).not.toBeCloseTo(gapPt / 4, 8);
   });
+});
+
+describe("when a run may be fitted at all", () => {
+  const trackingOps = (ops: Awaited<ReturnType<typeof recordDrawOps>>) =>
+    ops.filter((op) => op.op === "state" && String(op["value"]).endsWith("Tc"));
+
+  it("leaves a document alone when the face painting it is not the face measured", async () => {
+    // With no provider the layout was measured in whatever the browser made of
+    // the family and is painted in a standard face. The width difference is a
+    // different typeface, not two engines disagreeing, and stretching the run
+    // to close it letterspaces the text rather than setting it.
+    const ops = await recordDrawOps(() =>
+      buildPdf(
+        onePage([
+          block("paragraph", [textLine("Retainer and fees", { font: "16px Georgia" })]),
+          block("paragraph", [textLine("Retainer and fees")]),
+        ]),
+        exportEditor,
+      ),
+    );
+
+    expect(trackingOps(ops)).toEqual([]);
+  }, 30_000);
 });

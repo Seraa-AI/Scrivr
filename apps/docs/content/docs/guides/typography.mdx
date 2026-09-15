@@ -153,7 +153,9 @@ Scrivr deliberately stops there. Whether a substitution is a badge, a banner, or
 
 ## Exporting
 
-`exportToPdf` resolves the document's faces under `{ portable: true, embeddable: true }` **before** any geometry is measured, embeds them, and lays the document out against the embedded faces' own metrics. The PDF is therefore set in the face it was measured in — not in a base-14 lookalike chosen from the family name.
+`exportToPdf` resolves the document's faces under `{ portable: true, embeddable: true }`, embeds them, and paints the layout the editor already has. The PDF reproduces the page on screen — same line breaks, same pages — and is set in the face it was measured in rather than a base-14 lookalike chosen from the family name.
+
+When the export cannot use what the screen resolved — a face the browser can draw but nobody owns the bytes for, or one whose licence forbids embedding — it lays the document out again against the faces it *can* carry, and reports why. That document may break lines differently from the screen, which is the honest outcome: it is set in different typefaces.
 
 ```ts
 await exportToPdf(editor, {

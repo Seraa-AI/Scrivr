@@ -50,7 +50,7 @@ function isFontHandle(value: unknown): value is PdfFontHandle {
     typeof value === "object" &&
     value !== null &&
     "cssFont" in value &&
-    typeof (value as { cssFont: unknown }).cssFont === "string"
+    typeof value.cssFont === "string"
   );
 }
 
@@ -60,7 +60,7 @@ function isDrawContext(
   if (typeof value !== "object" || value === null || !("draw" in value)) return false;
   // `font` is present only for inline atoms, so its absence is not a failure —
   // but a value of the wrong shape is, and would reach pdf-lib as one.
-  return !("font" in value) || isFontHandle((value as { font: unknown }).font);
+  return !("font" in value) || isFontHandle(value.font);
 }
 
 /** The band additionally reads the layout and writes its own origin back. */

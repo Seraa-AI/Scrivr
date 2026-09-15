@@ -1,4 +1,7 @@
 import type { Node as PmNode } from "prosemirror-model";
+import type { DocumentLayout } from "../layout/PageLayout";
+import type { LayoutBlock } from "../layout/BlockLayout";
+import type { FontResolutionId } from "./layoutResolver";
 import type {
   FontKey,
   FontProvider,
@@ -26,6 +29,31 @@ export interface FontShortfall {
   source: "requested" | "substituted" | "default" | "generic";
   /** False when the answer only holds in this environment. */
   portable: boolean;
+}
+
+/**
+ * The resolutions a laid-out document actually draws with.
+ *
+ * A resolver's table accumulates for the life of the coordinator so ids on
+ * cached spans stay resolvable, which means it holds every face the session
+ * ever asked for — a family the user tried in a picker and abandoned is still
+ * in it. A consumer describing the document, or acquiring bytes for it, wants
+ * the faces on the page.
+ */
+export function usedResolutions(layout: DocumentLayout): Set<FontResolutionId> {
+  const used = new Set<FontResolutionId>();
+  const visitBlocks = (blocks: readonly LayoutBlock[]): void => {
+    for (const block of blocks) {
+      for (const line of block.lines) {
+        for (const span of line.spans) {
+          if (span.resolution !== undefined) used.add(span.resolution);
+        }
+      }
+      for (const cell of block.cells ?? []) visitBlocks(cell.blocks);
+    }
+  };
+  for (const page of layout.pages) visitBlocks(page.blocks);
+  return used;
 }
 
 /**

@@ -2,15 +2,24 @@ import { PDFDocument, type PDFFont } from "pdf-lib";
 import {
   createLayoutFontResolver,
   resolvedKeyOf,
+  usedResolutions,
   type FontProvider,
   type FontRequest,
   type FontResolution,
   type FontResource,
+  type FontResolutionId,
   type FontShortfall,
   type IEditor,
   type TextMeasurerLike,
 } from "@scrivr/core";
-import { createFontRegistry, embedFaces, embedStandardFonts, resolveFont } from "./fonts";
+import {
+  createFontRegistry,
+  embedFaces,
+  embedStandardFonts,
+  resolveFont,
+  type FontCache,
+} from "./fonts";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import { sanitizeForWinAnsi, stripInvisible } from "./context";
 
 const constraints = { portable: true, embeddable: true } as const;
@@ -31,9 +40,9 @@ interface PreparedAnswers {
  * Resolve every face a document uses under the conditions a PDF imposes.
  *
  * A provider is free to ignore the constraints it is handed; if it answers with
- * a face that may not be embedded or cannot leave this machine, the export
- * stops. Continuing would mean painting a standard face at coordinates
- * measured from a real one.
+ * a resource that may not be embedded, the export stops rather than painting a
+ * standard face at coordinates measured from a real one. An answer with no
+ * resource at all is a shortfall, not a failure — there is nothing to embed.
  */
 function constrainedAnswers(
   provider: FontProvider,
@@ -78,14 +87,16 @@ function constrainedAnswers(
 /**
  * A registry that paints a span in the face its resolution names.
  *
- * `faceFor` covers the text that reaches the exporter without a resolution —
- * empty lines, and handlers that name a family — by matching the CSS spelling
- * the prepared faces were measured under, size aside.
+ * `byCss` is the typeset-again path's answer for text that arrives without a
+ * resolution — a handler that named a family — matched on the CSS spelling its
+ * prepared faces were measured under, size aside. The reuse path has no such
+ * spellings to match and passes an empty map, so that text falls to a standard
+ * face there.
  */
 function buildRegistry(
-  standard: Awaited<ReturnType<typeof embedStandardFonts>>,
+  standard: FontCache,
   embedded: Map<string, PDFFont>,
-  resolvedFonts: Map<number, PDFFont>,
+  resolvedFonts: Map<FontResolutionId, PDFFont>,
   byCss: Map<string, PDFFont>,
 ) {
   const registry = createFontRegistry(standard, resolvedFonts);
@@ -107,12 +118,12 @@ function buildRegistry(
  * so it has to be computed from them rather than reproduced.
  */
 function retypeset(
-  editor: IEditor,
-  doc: Parameters<NonNullable<IEditor["layoutForExport"]>>[0],
+  layoutForExport: NonNullable<IEditor["layoutForExport"]>,
+  doc: PmNode,
   provider: FontProvider,
   prepared: PreparedAnswers,
   embedded: Map<string, PDFFont>,
-  standard: Awaited<ReturnType<typeof embedStandardFonts>>,
+  standard: FontCache,
 ) {
   const resolver = createLayoutFontResolver(
     {
@@ -128,7 +139,7 @@ function retypeset(
   );
 
   const byCss = new Map<string, PDFFont>();
-  const resolvedFonts = new Map<number, PDFFont>();
+  const resolvedFonts = new Map<FontResolutionId, PDFFont>();
   for (const answer of prepared.byFace.values()) {
     const { request } = answer;
     const css = `${request.style === "italic" ? "italic " : ""}${
@@ -165,7 +176,7 @@ function retypeset(
     invalidate: () => {},
   };
 
-  const layout = editor.layoutForExport!(doc, resolver, measurer);
+  const layout = layoutForExport(doc, resolver, measurer);
   // Sizes the loop above never spelled resolve to the same prepared faces.
   for (const [id, answer] of resolver.table()) {
     const font = answer.resource && embedded.get(answer.resource.id);
@@ -187,11 +198,25 @@ function retypeset(
 export async function preparePdfLayout(editor: IEditor) {
   const provider = editor.fonts;
   if (!provider) throw new Error("Font-aware PDF export requires a font provider");
-  if (!editor.layoutForExport) throw new Error("Font-aware PDF export requires layoutForExport");
 
   editor.ensureFullLayout();
   const onScreen = editor.layout;
-  const measured = [...(onScreen.fontResolutions ?? [])];
+  // The same refusal the no-provider path makes. It used to build its own
+  // layout and so could not inherit a truncated one; reusing the screen's
+  // means it can, and a short PDF is worse than a refused one.
+  if (onScreen.isPartial) {
+    throw new Error(
+      "[exportToPdf] cannot export a partial layout. " +
+        "Upgrade @scrivr/core or call editor.ensureFullLayout() before exporting.",
+    );
+  }
+  // The resolver's table accumulates for the coordinator's life, so it holds
+  // every face the session ever asked for. Acquiring bytes for a family the
+  // user tried and abandoned would embed it, report it as substituted, and
+  // could force the whole document to be typeset again over a font that is not
+  // in it.
+  const inUse = usedResolutions(onScreen);
+  const measured = [...(onScreen.fontResolutions ?? [])].filter(([id]) => inUse.has(id));
 
   const requests = measured.map(([, entry]) => entry.request);
   await provider.prepare(requests, constraints);
@@ -203,31 +228,66 @@ export async function preparePdfLayout(editor: IEditor) {
   // same way whichever entry point the caller used.
   const embedded = await embedFaces(pdfDoc, prepared.resources.values());
 
-  // The screen's answer and the export's, face by face. A face the browser can
-  // draw but nobody can embed, or one that had not finished installing when
-  // the page was laid out, is a genuine disagreement: the geometry on screen
-  // belongs to a face the file cannot carry.
-  const reusable = new Map<number, PDFFont>();
+  // The screen's answer and the export's, face by face, collecting the fonts
+  // for the reuse path as it goes — `every` is the walk, not just the test.
+  // They disagree when the browser drew something the file cannot carry, and
+  // also when a face had not finished installing, where the screen is the one
+  // showing a stand-in. Either way the geometry belongs to a different face
+  // than the file will paint with.
+  const reusable = new Map<FontResolutionId, PDFFont>();
   const agrees = measured.every(([id, entry]) => {
     const answer = prepared.byFace.get(key(entry.request));
     if (answer?.resource?.id !== entry.resource?.id) return false;
+    // Neither side named a face: the screen measured whatever the host made of
+    // the family and the file will paint a standard one. That is not agreement,
+    // it is two different guesses.
+    if (!entry.resource) return false;
     const font = answer?.resource && embedded.get(answer.resource.id);
+    // A face whose bytes never went in cannot paint the geometry it was
+    // measured for. Checked here rather than trusted from the embedder, so the
+    // two do not have to agree about a predicate from opposite ends.
+    if (entry.resource && !font) return false;
     if (font) reusable.set(id, font);
     return true;
   });
 
   if (agrees) {
     const { registry } = buildRegistry(standard, embedded, reusable, new Map());
-    return { layout: onScreen, doc: pdfDoc, fonts: registry, shortfalls: prepared.shortfalls };
+    return {
+      layout: onScreen,
+      doc: pdfDoc,
+      fonts: registry,
+      shortfalls: prepared.shortfalls,
+      // The geometry came from these same faces, read by the browser's engine
+      // rather than this one, so the small disagreement between them may be
+      // closed.
+      fitToMeasuredWidth: true,
+    };
   }
 
+  // Only the typeset-again path needs this: reuse asks the editor for a layout
+  // it already has.
+  // Bound: it reads the editor's own coordinator, so handing the bare function
+  // to another module would call it with no receiver.
+  const layoutForExport = editor.layoutForExport?.bind(editor);
+  if (!layoutForExport) {
+    throw new Error("A PDF for these fonts must be laid out again, which this editor cannot do");
+  }
   const { layout, registry } = retypeset(
-    editor,
+    layoutForExport,
     editor.getState().doc,
     provider,
     prepared,
     embedded,
     standard,
   );
-  return { layout, doc: pdfDoc, fonts: registry, shortfalls: prepared.shortfalls };
+  // This layout was measured against the faces that will paint it, so its
+  // widths are already exact.
+  return {
+    layout,
+    doc: pdfDoc,
+    fonts: registry,
+    shortfalls: prepared.shortfalls,
+    fitToMeasuredWidth: false,
+  };
 }

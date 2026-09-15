@@ -41,6 +41,7 @@ export {
   collectFontRequests,
   prepareDocumentFonts,
   resolvedKeyOf,
+  usedResolutions,
   type FontShortfall,
 } from "./fonts/collectFontRequests";
 export * from "./exports/semantic";
