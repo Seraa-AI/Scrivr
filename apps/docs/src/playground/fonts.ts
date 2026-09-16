@@ -57,6 +57,22 @@ const inter = {
 };
 
 /**
+ * Which faces this playground owns.
+ *
+ * All four by default, so the demo shows real typography. Drop entries to see
+ * what an application with a thinner inventory gets: with `resources: []` the
+ * editor holds one upright regular, and bold and italic text is drawn by
+ * thickening and leaning that face rather than in a designed one. Both the
+ * canvas and an exported PDF do the same thing, and `editor.fontSubstitutions`
+ * reports what was missing.
+ *
+ * `?fonts=regular-only` does exactly that without editing this file.
+ */
+const regularOnly =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("fonts") === "regular-only";
+
+/**
  * Unstyled text resolves to `default`. A family this inventory does not hold
  * resolves to the nearest weight and slant of the default's family, so a
  * document set in Aptos keeps its bold headings — and the editor reports the
@@ -64,5 +80,5 @@ const inter = {
  */
 export const playgroundFonts = new DefaultFontProvider({
   default: inter.regular,
-  resources: [inter.italic, inter.bold, inter.boldItalic],
+  resources: regularOnly ? [] : [inter.italic, inter.bold, inter.boldItalic],
 });

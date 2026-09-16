@@ -10,6 +10,11 @@ import {
   PDFNumber,
   PDFOperator,
   PDFOperatorNames,
+  TextRenderingMode,
+  radians,
+  setLineWidth,
+  setTextRenderingMode,
+  setStrokingRgbColor,
   type PDFDocument,
   type PDFPage,
   type PDFFont,
@@ -38,6 +43,7 @@ import {
   type IBaseEditor,
   type ResolvedTheme,
 } from "@scrivr/core";
+import { SYNTHETIC_ITALIC_SHEAR, emboldenWidth } from "@scrivr/core";
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
@@ -530,14 +536,38 @@ export function createDrawHelpers(
 
         drawSpanBackgrounds(span, styles, spanAbsX, baselineY);
 
+        // The same stand-ins the canvas paints, from the same numbers, so a
+        // weight or slant nobody owns looks the same on both sides and neither
+        // changes an advance width.
+        const synthesis =
+          span.resolution === undefined
+            ? undefined
+            : ctx.layout.fontResolutions?.get(span.resolution)?.synthesis;
+        const sizePt = fontSize * PT_PER_PX;
+        const embolden = emboldenWidth(synthesis, sizePt);
+        const lean = synthesis?.style?.to === "italic" ? SYNTHETIC_ITALIC_SHEAR : 0;
+
         if (tracking !== 0) setCharacterSpacing(page, tracking);
+        if (embolden > 0) {
+          page.pushOperators(
+            setTextRenderingMode(TextRenderingMode.FillAndOutline),
+            setLineWidth(embolden),
+          );
+          page.pushOperators(setStrokingRgbColor(color.red, color.green, color.blue));
+        }
         page.drawText(text, {
           x: spanAbsX * PT_PER_PX,
           y: pdfBaseline,
-          size: fontSize * PT_PER_PX,
+          size: sizePt,
           font,
           color,
+          // A positive ySkew leans the glyph tops to the right, which is the
+          // `x' = x + k·y` shear a designed italic approximates.
+          ...(lean !== 0 ? { ySkew: radians(Math.atan(lean)) } : {}),
         });
+        if (embolden > 0) {
+          page.pushOperators(setTextRenderingMode(TextRenderingMode.Fill));
+        }
         if (tracking !== 0) setCharacterSpacing(page, 0);
 
         drawSpanRules(span, styles, spanAbsX, baselineY, color);

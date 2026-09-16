@@ -1,4 +1,11 @@
 import { LayoutPage, PageConfig } from "../layout/PageLayout";
+import type { FontResolutionId } from "../fonts/layoutResolver";
+import type { FontResolution, FontSynthesis } from "../fonts/types";
+import {
+  SYNTHETIC_ITALIC_SHEAR,
+  emboldenWidth,
+  fontSizeOf,
+} from "../fonts/synthesis";
 import {
   compareAnchoredObjectPaintOrder,
   type AnchoredObjectPlacement,
@@ -18,6 +25,13 @@ export interface RenderPageOptions {
   ctx: CanvasRenderingContext2D;
   page: LayoutPage;
   pageConfig: PageConfig;
+  /**
+   * Every face this layout measured against, so a span can be painted with
+   * whatever its chosen face does not supply — a weight or a slant nobody
+   * owns. Absent when the editor has no font provider, and then nothing is
+   * synthesized.
+   */
+  fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>;
   /**
    * The layout version this render was scheduled for.
    * If it doesn't match currentVersion, the render is aborted.
@@ -62,6 +76,56 @@ export interface RenderPageOptions {
  * Does NOT own the canvas — receives ctx from the caller.
  * Does NOT run layout — receives a pre-computed LayoutPage.
  */
+
+/**
+ * Draw a run, standing in for a weight or a slant no owned face supplies.
+ *
+ * Both techniques leave the advance width alone — stroking thickens a glyph in
+ * place, shearing leans it — so the text still measures as the face it was
+ * measured in, and the PDF can do the same thing to the same widths. Anything
+ * that changed advances would put the two engines back into disagreement about
+ * where the next character goes.
+ *
+ * This is not a designed bold or a designed italic. A real bold redraws the
+ * counters and respaces; a real italic redraws the letterforms. This is the
+ * document's formatting made visible when nobody supplied the face for it.
+ */
+function paintText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  baseline: number,
+  style: { synthesis?: FontSynthesis; sizePx: number; color: string },
+): void {
+  const { synthesis, sizePx, color } = style;
+  const bolder = emboldenWidth(synthesis, sizePx);
+  const lean = synthesis?.style?.to === "italic" ? SYNTHETIC_ITALIC_SHEAR : 0;
+
+  if (bolder === 0 && lean === 0) {
+    ctx.fillText(text, x, baseline);
+    return;
+  }
+
+  ctx.save();
+  if (lean !== 0) {
+    // Shear about the baseline, so the run keeps its origin and only leans.
+    ctx.translate(x, baseline);
+    ctx.transform(1, 0, -lean, 1, 0, 0);
+    ctx.fillText(text, 0, 0);
+    if (bolder > 0) {
+      ctx.lineWidth = bolder;
+      ctx.strokeStyle = color;
+      ctx.strokeText(text, 0, 0);
+    }
+  } else {
+    ctx.fillText(text, x, baseline);
+    ctx.lineWidth = bolder;
+    ctx.strokeStyle = color;
+    ctx.strokeText(text, x, baseline);
+  }
+  ctx.restore();
+}
+
 export function renderPage(options: RenderPageOptions): boolean {
   const {
     ctx,
@@ -74,6 +138,7 @@ export function renderPage(options: RenderPageOptions): boolean {
     map,
     showMarginGuides = false,
     markDecorators,
+    fontResolutions,
     blockRegistry,
     inlineRegistry,
     anchoredObjects,
@@ -143,6 +208,7 @@ export function renderPage(options: RenderPageOptions): boolean {
           ...(blockRegistry ? { blockRegistry } : {}),
           ...(markDecorators ? { markDecorators } : {}),
           ...(inlineRegistry ? { inlineRegistry } : {}),
+          ...(fontResolutions ? { fontResolutions } : {}),
         },
         map,
       );
@@ -157,6 +223,7 @@ export function renderPage(options: RenderPageOptions): boolean {
         theme,
         markDecorators,
         inlineRegistry,
+        fontResolutions,
       );
     }
   }
@@ -272,6 +339,7 @@ export function drawBlock(
   theme: ResolvedTheme,
   markDecorators?: Map<string, MarkDecorator>,
   inlineRegistry?: InlineRegistry,
+  fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>,
 ): number {
   const contentWidth = block.availableWidth;
   // Running Y accumulator — O(n) replacement for the getTotalLineHeight O(n²) reduce.
@@ -389,7 +457,15 @@ export function drawBlock(
 
       ctx.font = span.font;
       ctx.fillStyle = effectiveTextColor;
-      ctx.fillText(span.text, spanX, baseline);
+      const synthesis =
+        span.resolution === undefined
+          ? undefined
+          : fontResolutions?.get(span.resolution)?.synthesis;
+      paintText(ctx, span.text, spanX, baseline, {
+        ...(synthesis ? { synthesis } : {}),
+        sizePx: fontSizeOf(span.font),
+        color: effectiveTextColor,
+      });
 
       // decoratePost for all marks
       if (markDecorators && span.marks) {

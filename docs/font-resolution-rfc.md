@@ -699,7 +699,27 @@ a decision about what an application is for, and the two consumers we can name
 would answer it differently. The `Aptos → Inter` treatment in the playground is
 one application's choice, not a component.
 
-### Synthetic bold — decided against
+### Synthetic bold — shipped, after all
+
+**The section below is superseded and kept for its reasoning.** It argued that
+synthesis could not hold the invariant. That was right about letting the
+browser do it and wrong about doing it ourselves.
+
+A browser's synthetic bold widens every advance and no exporter can reproduce
+it. But thickening a glyph in place and leaning it do not touch advances at
+all — so if the engine synthesizes rather than delegating, both lanes alter the
+same geometry by the same amount and the invariant holds by construction. The
+canvas strokes and shears; the PDF sets fill-and-outline with a line width and
+skews its text matrix. Both read the strength from one module, because two
+copies of the number would be two documents.
+
+`FontSynthesis` was already the record of what to do; this is the doing. Note
+what would have broken had we let the browser fake it instead: the magnitude
+bound added to `trackingFor` rejects a gap of more than a couple of percent of
+the em, which is roughly what browser emboldening produces — the safety net
+from one phase would have blocked the feature from another.
+
+### Synthetic bold — the original argument, superseded
 
 An inventory holding one weight of a family answers a request for its bold with
 its regular, and nothing fakes the difference. Word and every browser do fake

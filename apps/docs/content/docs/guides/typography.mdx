@@ -61,26 +61,33 @@ That is the whole setup. The editor installs the bytes in its measurement backen
 	drawn in the regular weight.
 </Callout>
 
-### Why bold is not synthesised
+### What happens to a weight you do not own
 
-Word and most browsers fake a missing bold by thickening the regular face.
-Scrivr does not, and the reason is the one this whole model exists for.
+A document can ask for bold where your inventory has only a regular. Scrivr
+draws it by **thickening the face it has** — and leans the face for a missing
+italic — rather than setting the heading in body text.
 
-A browser's synthetic bold **widens the advance** of every glyph. A PDF's
-equivalent — stroking the outline — leaves the advance unchanged. So a document
-measured against a faked bold on canvas and painted with a faked bold in a PDF
-would disagree about where every subsequent character goes, which is exactly
-the overlapping-text failure that a shared inventory removes.
+It does this itself rather than asking the browser to, and that is the whole
+trick. A browser's synthetic bold **widens the advance** of every glyph; a
+PDF's equivalent does not. Faking it on one side and not the other puts the two
+back into disagreement about where every following character goes, which is the
+overlapping-text failure a shared inventory removes. Stroking a glyph in place
+and shearing it both leave the advance alone, so the canvas and the exported
+file do the same thing to the same widths.
 
-Since no two engines fake it the same way, the engine reports instead of
-guessing. `resolved` is a whole face, not a family name, so an application can
-tell the two cases apart:
+It is still a stand-in. A designed bold redraws its counters and respaces; a
+designed italic redraws its letterforms. So the substitution is reported too,
+as a whole face rather than a family name, and an application can tell the two
+cases apart:
 
 ```ts
 const [missed] = editor.fontSubstitutions;
-missed.request.weight; // 700 — the document asked for bold
-missed.resolved.weight; // 400 — it was drawn in the regular
+missed.request.weight;  // 700 — the document asked for bold
+missed.resolved.weight; // 400 — it was thickened from the regular
+missed.synthesis;       // { weight: { from: 400, to: 700 } }
 ```
+
+Register the real faces when you can; nothing synthesised matches a drawn one.
 
 ### Pick a file that covers the scripts you accept
 

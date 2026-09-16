@@ -21,6 +21,7 @@ import {
 } from "@scrivr/core";
 import { exportToPdf } from "../index";
 import { preparePdfLayout } from "../prepareLayout";
+import { recordDrawOps } from "./opLog";
 
 // happy-dom ships no 2D context; wire Skia in, as the core setup does.
 const contexts = new WeakMap<HTMLCanvasElement, unknown>();
@@ -146,5 +147,49 @@ describe("the layout a PDF is painted from", () => {
     expect(onFontShortfall).toHaveBeenCalledWith([
       expect.objectContaining({ resolved: expect.objectContaining({ family: "App Sans" }) }),
     ]);
+  }, 30_000);
+});
+
+describe("a weight the inventory does not hold", () => {
+  const bold = { type: "text", marks: [{ type: "bold" }], text: "Retainer" };
+
+  it("is drawn by thickening the face, in the file as on the page", async () => {
+    // The inventory has one upright regular. The document asks for bold, and
+    // nobody owns it — so both lanes thicken what they have rather than one of
+    // them quietly setting the heading in body text.
+    const editor = new Editor({
+      extensions: [StarterKit],
+      fonts: new DefaultFontProvider({ default: face() }),
+      textMeasurer: installingMeasurer(),
+      content: { type: "doc", content: [{ type: "paragraph", content: [bold] }] },
+    });
+    await settled(editor);
+
+    const ops = await recordDrawOps(() => exportToPdf(editor));
+    const state = ops.filter((op) => op.op === "state").map((op) => String(op["value"]));
+
+    // Tr 2 is fill-and-outline; the width is the stroke that stands in for the
+    // weight, and Tr 0 puts the page back to filling.
+    expect(state.some((value) => value.endsWith("2 Tr"))).toBe(true);
+    expect(state.some((value) => value.endsWith("w"))).toBe(true);
+    expect(state.some((value) => value.endsWith("0 Tr"))).toBe(true);
+  }, 30_000);
+
+  it("is left alone when the inventory holds the weight", async () => {
+    const editor = new Editor({
+      extensions: [StarterKit],
+      fonts: new DefaultFontProvider({
+        default: face(),
+        resources: [face({ id: "inter-700", weight: 700 })],
+      }),
+      textMeasurer: installingMeasurer(),
+      content: { type: "doc", content: [{ type: "paragraph", content: [bold] }] },
+    });
+    await settled(editor);
+
+    const ops = await recordDrawOps(() => exportToPdf(editor));
+    const state = ops.filter((op) => op.op === "state").map((op) => String(op["value"]));
+
+    expect(state.some((value) => value.endsWith("Tr"))).toBe(false);
   }, 30_000);
 });
