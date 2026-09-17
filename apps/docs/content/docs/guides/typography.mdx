@@ -157,6 +157,17 @@ editor.fontFamilies;
 
 `portable: false` is a family only this device has: it draws on screen and an export cannot carry it, so its faces are unknown rather than assumed. For an owned family, `faces` says which weights and slants are designed — anything else is drawn by thickening or leaning the nearest one.
 
+The playground registers three families on purpose, because these are the three states a control has to handle:
+
+| family | inventory | what the control says |
+| --- | --- | --- |
+| Inter | regular, italic, bold, bold italic | everything designed |
+| Source Serif 4 | regular, italic, bold | no bold italic — leaned from the bold |
+| JetBrains Mono | regular | bold and italic both drawn from it |
+| Georgia, Courier New | none — `systemCandidates` | this device only; an export substitutes |
+
+Add `?fonts=regular-only` to reduce the inventory to a single face and watch every weight become a stand-in.
+
 Scrivr deliberately stops there. Whether a substitution is a badge, a banner, or nothing at all depends on what the application is for, so the engine reports and the application decides.
 
 <Callout type="warn">

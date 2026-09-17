@@ -19,42 +19,67 @@
  * in it, costs ~110 KB and removes the question.
  */
 import { DefaultFontProvider, type FontResource } from "@scrivr/react";
-import regular from "inter-ui/web/Inter-Regular.woff2?url";
-import italic from "inter-ui/web/Inter-Italic.woff2?url";
-import bold from "inter-ui/web/Inter-Bold.woff2?url";
-import boldItalic from "inter-ui/web/Inter-BoldItalic.woff2?url";
+import interRegular from "inter-ui/web/Inter-Regular.woff2?url";
+import interItalic from "inter-ui/web/Inter-Italic.woff2?url";
+import interBold from "inter-ui/web/Inter-Bold.woff2?url";
+import interBoldItalic from "inter-ui/web/Inter-BoldItalic.woff2?url";
+import serifRegular from "@expo-google-fonts/source-serif-4/400Regular/SourceSerif4_400Regular.ttf?url";
+import serifItalic from "@expo-google-fonts/source-serif-4/400Regular_Italic/SourceSerif4_400Regular_Italic.ttf?url";
+import serifBold from "@expo-google-fonts/source-serif-4/700Bold/SourceSerif4_700Bold.ttf?url";
+import monoRegular from "@expo-google-fonts/jetbrains-mono/400Regular/JetBrainsMono_400Regular.ttf?url";
 
 /**
  * Fetched on first use, not at module load: a descriptor costs nothing until
  * something resolves to it, and the provider caches the acquisition itself.
  */
 const face = (
-  id: string,
+  family: string,
   url: string,
   weight: number,
   style: "normal" | "italic",
+  format: FontResource["format"],
 ): FontResource => ({
-  id,
-  family: "Inter",
+  id: `${family}-${weight}-${style}`,
+  family,
   weight,
   style,
-  format: "woff2",
-  // Inter is SIL Open Font License: embedding it in an exported document is
-  // permitted, and saying so is what lets the PDF lane use it.
+  format,
+  // All three families are SIL Open Font License: embedding them in an
+  // exported document is permitted, and saying so is what lets the PDF lane
+  // use them.
   embedding: { allowed: true, source: "caller" },
   bytes: async () => {
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`Could not load ${id}: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`Could not load ${family} ${weight}: ${response.status}`);
+    }
     return response.arrayBuffer();
   },
 });
 
 const inter = {
-  regular: face("inter-400", regular, 400, "normal"),
-  italic: face("inter-400-italic", italic, 400, "italic"),
-  bold: face("inter-700", bold, 700, "normal"),
-  boldItalic: face("inter-700-italic", boldItalic, 700, "italic"),
+  regular: face("Inter", interRegular, 400, "normal", "woff2"),
+  italic: face("Inter", interItalic, 400, "italic", "woff2"),
+  bold: face("Inter", interBold, 700, "normal", "woff2"),
+  boldItalic: face("Inter", interBoldItalic, 700, "italic", "woff2"),
 };
+
+/**
+ * Three families with deliberately different inventories, because the three
+ * states a font control can be in are what an application has to handle.
+ *
+ * Inter is complete. Source Serif has no bold italic, so a bold run inside an
+ * italic one is leaned from the bold. JetBrains Mono is a code face and has
+ * only its regular, so both bold and italic are drawn from it. The control
+ * says which is which before a heading is set in the wrong one.
+ */
+const sourceSerif = [
+  face("Source Serif 4", serifRegular, 400, "normal", "ttf"),
+  face("Source Serif 4", serifItalic, 400, "italic", "ttf"),
+  face("Source Serif 4", serifBold, 700, "normal", "ttf"),
+];
+
+const jetBrainsMono = [face("JetBrains Mono", monoRegular, 400, "normal", "ttf")];
 
 /**
  * Which faces this playground owns.
@@ -80,5 +105,11 @@ const regularOnly =
  */
 export const playgroundFonts = new DefaultFontProvider({
   default: inter.regular,
-  resources: regularOnly ? [] : [inter.italic, inter.bold, inter.boldItalic],
+  resources: regularOnly
+    ? []
+    : [inter.italic, inter.bold, inter.boldItalic, ...sourceSerif, ...jetBrainsMono],
+  // Families this machine may well have and nobody here owns. They draw on
+  // screen and an export cannot carry them, which is the third state the
+  // control has to show — and the one a user is most likely to trip over.
+  systemCandidates: regularOnly ? [] : ["Georgia", "Courier New"],
 });
