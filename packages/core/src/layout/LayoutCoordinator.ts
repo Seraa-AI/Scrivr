@@ -90,7 +90,7 @@ export class LayoutCoordinator {
    * A resolver rebuilt per run would start numbering again, so the ids on
    * cached spans would point into a table that no longer describes them.
    */
-  private fontResolver: LayoutFontResolver | null;
+  private fontResolverValue: LayoutFontResolver | null;
   /** Keyed by `FontResource.id`: a provider may hand back a fresh object each call. */
   private readonly installedFonts = new Map<string, string>();
   private readonly failedFonts = new Set<string>();
@@ -128,11 +128,11 @@ export class LayoutCoordinator {
   }
 
   private async prepareFonts(): Promise<void> {
-    if (this.disposed || !this.opts.fonts || !this.fontResolver) return;
+    if (this.disposed || !this.opts.fonts || !this.fontResolverValue) return;
     if (this.preparingFonts) { this.fontPreparationPending = true; return; }
     this.preparingFonts = true;
     try {
-      const requests = [...this.fontResolver.table().values()].map(r => r.request);
+      const requests = [...this.fontResolverValue.table().values()].map(r => r.request);
       await this.opts.fonts.prepare(requests);
       for (const request of requests) {
         const resource = this.opts.fonts.resolve(request).resource;
@@ -150,7 +150,7 @@ export class LayoutCoordinator {
         }
       }
       if (this.disposed) return;
-      const changed = [...this.fontResolver.table().values()].some(old => {
+      const changed = [...this.fontResolverValue.table().values()].some(old => {
         const current = this.canvasResolution(this.opts.fonts!.resolve(old.request));
         return (
           current.resource?.id !== old.resource?.id ||
@@ -161,7 +161,7 @@ export class LayoutCoordinator {
         );
       });
       if (changed) {
-        this.fontResolver = this.newFontResolver();
+        this.fontResolverValue = this.newFontResolver();
         this.measureCache = new WeakMap();
         this.opts.measurer.invalidate();
         this.cancelIdleLayout();
@@ -179,6 +179,15 @@ export class LayoutCoordinator {
         queueMicrotask(() => { void this.prepareFonts(); });
       }
     }
+  }
+
+  /**
+   * The resolver this coordinator measures with, for a caller that has to lay
+   * something out the same way — a header being edited, whose geometry must
+   * match the one stored for it.
+   */
+  get fontResolver(): LayoutFontResolver | null {
+    return this.fontResolverValue;
   }
 
   /** A new, uncached layout for a captured document and an export's measurer. */
@@ -210,7 +219,7 @@ export class LayoutCoordinator {
 
   constructor(opts: LayoutCoordinatorOptions) {
     this.opts = opts;
-    this.fontResolver = this.newFontResolver();
+    this.fontResolverValue = this.newFontResolver();
     const unsubscribe = opts.fonts?.subscribe?.(() => { void this.prepareFonts(); });
     if (unsubscribe) this.unsubscribeFonts = unsubscribe;
 
@@ -619,7 +628,7 @@ export class LayoutCoordinator {
       measurer: this.opts.measurer,
       fontModifiers: this.opts.fontModifiers,
       measureCache: this.measureCache,
-      ...(this.fontResolver ? { fonts: this.fontResolver } : {}),
+      ...(this.fontResolverValue ? { fonts: this.fontResolverValue } : {}),
       ...(contribs.length > 0 ? { pageChromeContributions: contribs } : {}),
       ...(opts.previousVersion !== undefined
         ? { previousVersion: opts.previousVersion }

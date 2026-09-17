@@ -2,6 +2,7 @@ import { LayoutPage, PageConfig } from "../layout/PageLayout";
 import type { FontResolutionId } from "../fonts/layoutResolver";
 import type { FontResolution } from "../fonts/types";
 import { fontSizeOf, paintText } from "../fonts/synthesis";
+import type { LayoutFontResolver } from "../fonts/layoutResolver";
 import {
   compareAnchoredObjectPaintOrder,
   type AnchoredObjectPlacement,
@@ -28,6 +29,8 @@ export interface RenderPageOptions {
    * synthesized.
    */
   fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>;
+  /** The resolver this layout was measured with, for chrome that re-lays out. */
+  fontResolver?: LayoutFontResolver;
   /**
    * The layout version this render was scheduled for.
    * If it doesn't match currentVersion, the render is aborted.
@@ -86,6 +89,7 @@ export function renderPage(options: RenderPageOptions): boolean {
     showMarginGuides = false,
     markDecorators,
     fontResolutions,
+    fontResolver,
     blockRegistry,
     inlineRegistry,
     anchoredObjects,
@@ -215,6 +219,7 @@ export function renderPage(options: RenderPageOptions): boolean {
         ...(blockRegistry ? { blockRegistry } : {}),
         ...(inlineRegistry ? { inlineRegistry } : {}),
         ...(fontResolutions ? { fontResolutions } : {}),
+        ...(fontResolver ? { fontResolver } : {}),
       });
     }
   }

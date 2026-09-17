@@ -534,6 +534,7 @@ export class TileManager {
       markDecorators: this.editor.markDecorators,
       showMarginGuides: this.showMarginGuides,
       ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
+      ...(this.editor.fontResolver ? { fontResolver: this.editor.fontResolver } : {}),
       theme: this.editor.getResolvedTheme(),
       ...(this.editor.blockRegistry
         ? { blockRegistry: this.editor.blockRegistry }

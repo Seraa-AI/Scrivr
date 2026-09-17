@@ -326,6 +326,12 @@ export interface PageChromePaintContext {
    * draw. Absent when there is no font provider.
    */
   fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>;
+  /**
+   * The resolver the page was measured with. A contributor that lays its own
+   * content out — a header being edited — has to use this one, or its geometry
+   * and the stored geometry come from different faces.
+   */
+  fontResolver?: LayoutFontResolver;
   pageNumber: number;
   totalPages: number;
   metrics: PageMetrics;

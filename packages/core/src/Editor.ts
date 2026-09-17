@@ -1212,6 +1212,15 @@ export class Editor extends BaseEditor implements IEditor {
 		this.lc.ensureFullLayout();
 	}
 
+	/**
+	 * How this editor turns a font request into a measurement, for anything that
+	 * has to lay content out the same way the page was. `fonts` is the inventory;
+	 * this is the thing that asks it and remembers the answers.
+	 */
+	get fontResolver(): LayoutFontResolver | null {
+		return this.lc.fontResolver;
+	}
+
 	layoutForExport(doc: PmNode, fonts: LayoutFontResolver, measurer?: TextMeasurerLike): DocumentLayout {
 		return this.lc.layoutForExport(doc, fonts, measurer);
 	}
