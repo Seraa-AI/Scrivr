@@ -13,6 +13,8 @@ import {
   TextRenderingMode,
   radians,
   setLineWidth,
+  setLineJoin,
+  LineJoinStyle,
   setTextRenderingMode,
   setStrokingRgbColor,
   type PDFDocument,
@@ -43,7 +45,7 @@ import {
   type IBaseEditor,
   type ResolvedTheme,
 } from "@scrivr/core";
-import { SYNTHETIC_ITALIC_SHEAR, emboldenWidth } from "@scrivr/core";
+import { SYNTHETIC_ITALIC_SHEAR, emboldenWidth, fontSizeOf } from "@scrivr/core";
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
@@ -552,6 +554,9 @@ export function createDrawHelpers(
           page.pushOperators(
             setTextRenderingMode(TextRenderingMode.FillAndOutline),
             setLineWidth(embolden),
+            // Rounded like the canvas, so a sharp apex does not spike in one
+            // lane and not the other.
+            setLineJoin(LineJoinStyle.Round),
           );
           page.pushOperators(setStrokingRgbColor(color.red, color.green, color.blue));
         }
@@ -698,10 +703,8 @@ function encodePdfUri(href: string): PDFHexString {
 }
 
 /** Extract font size from CSS font shorthand: "bold italic 14px Georgia" → 14 */
-export function extractFontSizePx(cssFont: string): number {
-  const match = cssFont.match(/(\d+(?:\.\d+)?)px/);
-  return match?.[1] !== undefined ? parseFloat(match[1]) : 12;
-}
+/** One parser for both lanes, so a shorthand cannot mean two sizes. */
+export const extractFontSizePx = fontSizeOf;
 
 /** Characters that carry no ink, so no font needs to be asked about them. */
 const INVISIBLE = /[\u200b\u200c\u200d\u00ad\ufeff]/g;

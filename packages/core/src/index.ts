@@ -28,11 +28,7 @@ export * from "./surfaces";
 export * from "./exports/docx";
 export * from "./exports/pdf";
 export * from "./fonts/types";
-export {
-  SYNTHETIC_ITALIC_SHEAR,
-  emboldenWidth,
-  fontSizeOf,
-} from "./fonts/synthesis";
+export { SYNTHETIC_ITALIC_SHEAR, emboldenWidth, fontSizeOf } from "./fonts/synthesis";
 export {
   DefaultFontProvider,
   type DefaultFontProviderOptions,

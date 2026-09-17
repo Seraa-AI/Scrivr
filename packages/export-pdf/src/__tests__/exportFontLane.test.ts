@@ -171,8 +171,36 @@ describe("a weight the inventory does not hold", () => {
     // Tr 2 is fill-and-outline; the width is the stroke that stands in for the
     // weight, and Tr 0 puts the page back to filling.
     expect(state.some((value) => value.endsWith("2 Tr"))).toBe(true);
-    expect(state.some((value) => value.endsWith("w"))).toBe(true);
+    // The operand matters: `endsWith("w")` would also accept `Tw`, which is
+    // word spacing and has nothing to do with a stroke.
+    expect(state.some((value) => /^[\d.]+ w$/.test(value))).toBe(true);
     expect(state.some((value) => value.endsWith("0 Tr"))).toBe(true);
+  }, 30_000);
+
+  it("leans the run when nothing owns the slant", async () => {
+    // The PDF's half of the italic stand-in: a skewed text matrix, which is
+    // the same shear the canvas applies and leaves advances alone.
+    const editor = new Editor({
+      extensions: [StarterKit],
+      fonts: new DefaultFontProvider({ default: face() }),
+      textMeasurer: installingMeasurer(),
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", marks: [{ type: "italic" }], text: "Retainer" }],
+          },
+        ],
+      },
+    });
+    await settled(editor);
+
+    const ops = await recordDrawOps(() => exportToPdf(editor));
+    const leaned = ops.filter((op) => op.op === "text" && op["ySkew"] !== undefined);
+
+    expect(leaned.length).toBeGreaterThan(0);
+    expect(JSON.stringify(leaned[0]?.["ySkew"])).toContain("0.2");
   }, 30_000);
 
   it("is left alone when the inventory holds the weight", async () => {

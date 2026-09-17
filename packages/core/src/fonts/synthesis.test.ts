@@ -37,10 +37,12 @@ describe("standing in for a weight", () => {
   });
 
   it("stops thickening past the point a counter would fill in", () => {
-    const bold = emboldenWidth({ weight: { from: 400, to: 700 } }, 16);
+    // 850 points of shortfall is nearly three full steps; the clamp holds it
+    // to one and a half, so the stroke cannot close up the letterforms.
+    const oneStep = emboldenWidth({ weight: { from: 400, to: 700 } }, 16);
     const absurd = emboldenWidth({ weight: { from: 100, to: 950 } }, 16);
 
-    expect(absurd).toBeLessThan(bold * 2);
+    expect(absurd).toBeCloseTo(oneStep * 1.5, 10);
   });
 });
 

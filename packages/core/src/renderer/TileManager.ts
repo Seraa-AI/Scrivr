@@ -618,6 +618,7 @@ export class TileManager {
             ...(this.editor.inlineRegistry
               ? { inlineRegistry: this.editor.inlineRegistry }
               : {}),
+            ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
           },
           this.editor.charMap,
         );

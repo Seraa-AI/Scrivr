@@ -19,6 +19,7 @@
  */
 
 import type { LayoutBlock, PdfDrawSurface, PdfFontHandle, Rgb } from "@scrivr/core";
+import { fontSizeOf } from "@scrivr/core";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./tokenStrategies";
@@ -145,17 +146,12 @@ function drawTokenOnPdf(
     text,
     x: block.x,
     baselineY: block.y + block.height,
-    sizePx: extractSizePx(font.cssFont) ?? TOKEN_SIZE_PX,
+    sizePx: fontSizeOf(font.cssFont),
     font,
     color: TOKEN_COLOR,
   });
 }
 
-/** The size a CSS shorthand asks for, so the token is drawn at the measured one. */
-function extractSizePx(cssFont: string): number | undefined {
-  const match = /(\d+(?:\.\d+)?)px/.exec(cssFont);
-  return match?.[1] ? Number.parseFloat(match[1]) : undefined;
-}
 
 /** PDF node handler for pageNumber token. */
 export function renderPageNumberPdf(block: LayoutBlock, ctx: unknown): void {

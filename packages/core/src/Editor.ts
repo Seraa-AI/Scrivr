@@ -291,16 +291,22 @@ function distinctFamilies(provider: FontProvider | null): readonly FontFamilyOpt
 	const byFamily = new Map<string, { family: string; faces: FontKey[]; portable: boolean }>();
 	for (const face of provider.inventory?.() ?? []) {
 		const key = face.family.toLowerCase();
-		// Asked of the thing that decides rather than inferred: a face the
-		// application owns answers a portable request with itself, and one the
-		// host merely has resolves away to something that can travel.
+		// Asked under the conditions an export imposes, not a weaker pair: a
+		// picker that promised a face would survive and then watched the
+		// exporter resolve past it would be the disagreement this lane removes.
 		const portable =
 			provider
-				.resolve({ ...face, size: 14 }, { portable: true })
+				.resolve({ ...face, size: 14 }, { portable: true, embeddable: true })
 				.resolved.family.toLowerCase() === key;
 		const known = byFamily.get(key);
 		if (known) {
-			if (portable) known.faces.push(face);
+			// Any owned face makes the family portable — deciding from the first
+			// one alone would call a family unusable because of the order its
+			// provider happened to list it in.
+			if (portable) {
+				known.faces.push(face);
+				known.portable = true;
+			}
 			continue;
 		}
 		byFamily.set(key, { family: face.family, faces: portable ? [face] : [], portable });

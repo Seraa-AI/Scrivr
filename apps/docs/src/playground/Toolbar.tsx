@@ -290,15 +290,21 @@ function describeFamily(option: FontFamilyOption | undefined): string {
   if (!option.portable) {
     return "Only on this device. An exported file will be set in another face.";
   }
-  const hasBold = option.faces.some((face) => face.weight >= 600);
-  const hasItalic = option.faces.some((face) => face.style === "italic");
+  // Each combination is its own face. Asking "has a bold?" and "has an
+  // italic?" separately calls a family complete when it holds both and not
+  // the one that is both.
+  const holds = (bold: boolean, italic: boolean) =>
+    option.faces.some(
+      (face) => face.weight >= 600 === bold && (face.style === "italic") === italic,
+    );
   const missing = [
-    ...(hasBold ? [] : ["bold"]),
-    ...(hasItalic ? [] : ["italic"]),
+    ...(holds(true, false) ? [] : ["bold"]),
+    ...(holds(false, true) ? [] : ["italic"]),
+    ...(holds(true, true) ? [] : ["bold italic"]),
   ];
   return missing.length === 0
-    ? "Regular, bold and italic available"
-    : `No ${missing.join(" or ")} face — it will be drawn from the regular`;
+    ? "Regular, bold, italic and bold italic available"
+    : `No ${missing.join(" or ")} face — drawn from the nearest one`;
 }
 
 function FamilySelect({

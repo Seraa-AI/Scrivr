@@ -68,10 +68,11 @@ const inter = {
  * Three families with deliberately different inventories, because the three
  * states a font control can be in are what an application has to handle.
  *
- * Inter is complete. Source Serif has no bold italic, so a bold run inside an
- * italic one is leaned from the bold. JetBrains Mono is a code face and has
- * only its regular, so both bold and italic are drawn from it. The control
- * says which is which before a heading is set in the wrong one.
+ * Inter is complete. Source Serif has no bold italic, so a run that is both
+ * keeps the designed italic and has its weight thickened — resolution prefers
+ * the real slant over the real weight. JetBrains Mono is a code face with only
+ * its regular, so bold and italic are both drawn from it. The control says
+ * which is which before a heading is set in the wrong one.
  */
 const sourceSerif = [
   face("Source Serif 4", serifRegular, 400, "normal", "ttf"),
