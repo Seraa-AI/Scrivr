@@ -17,7 +17,12 @@ import type { Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
-import type { ActiveFontFamily, FontProvider } from "./fonts/types";
+import type {
+	ActiveFontFamily,
+	FontFamilyOption,
+	FontKey,
+	FontProvider,
+} from "./fonts/types";
 import type { FontResolutionId } from "./fonts/layoutResolver";
 import {
 	resolvedKeyOf,
@@ -272,14 +277,35 @@ function documentShortfalls(layout: DocumentLayout): readonly FontShortfall[] {
 	return missed;
 }
 
-/** Distinct families an inventory can render, first occurrence winning. */
-function distinctFamilies(provider: FontProvider | null): readonly string[] {
-	const seen = new Map<string, string>();
-	for (const face of provider?.inventory?.() ?? []) {
+/**
+ * The families an inventory can render, each with the faces behind it.
+ *
+ * Grouped rather than flattened to names: a control that knows a family has no
+ * italic, or that nothing owns bytes for it, can say so before the document is
+ * set in it. First spelling of a family wins, so the list reads as the
+ * application wrote it.
+ */
+function distinctFamilies(provider: FontProvider | null): readonly FontFamilyOption[] {
+	if (!provider) return [];
+
+	const byFamily = new Map<string, { family: string; faces: FontKey[]; portable: boolean }>();
+	for (const face of provider.inventory?.() ?? []) {
 		const key = face.family.toLowerCase();
-		if (!seen.has(key)) seen.set(key, face.family);
+		// Asked of the thing that decides rather than inferred: a face the
+		// application owns answers a portable request with itself, and one the
+		// host merely has resolves away to something that can travel.
+		const portable =
+			provider
+				.resolve({ ...face, size: 14 }, { portable: true })
+				.resolved.family.toLowerCase() === key;
+		const known = byFamily.get(key);
+		if (known) {
+			if (portable) known.faces.push(face);
+			continue;
+		}
+		byFamily.set(key, { family: face.family, faces: portable ? [face] : [], portable });
 	}
-	return [...seen.values()];
+	return [...byFamily.values()];
 }
 
 /**
@@ -292,14 +318,14 @@ function distinctFamilies(provider: FontProvider | null): readonly string[] {
  */
 function withAvailableFamilies(
 	items: ToolbarItemSpec[],
-	families: readonly string[],
+	families: readonly FontFamilyOption[],
 ): ToolbarItemSpec[] {
 	if (families.length === 0) return items;
 
 	const template = items.find((item) => item.group === "family");
 	if (!template) return items;
 
-	const replacements: ToolbarItemSpec[] = families.map((family) => ({
+	const replacements: ToolbarItemSpec[] = families.map(({ family }) => ({
 		...template,
 		args: [family],
 		label: family,
@@ -446,7 +472,7 @@ export class Editor extends BaseEditor implements IEditor {
 	 * can be promised. A picker reading this offers choices that resolve to
 	 * themselves rather than choices that all quietly become the default.
 	 */
-	readonly fontFamilies: readonly string[];
+	readonly fontFamilies: readonly FontFamilyOption[];
 
 	private substitutionsCache: readonly FontShortfall[] = [];
 	private substitutionsVersion = -1;

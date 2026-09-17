@@ -171,3 +171,26 @@ export interface ActiveFontFamily {
   resolved: string;
   substituted: boolean;
 }
+
+/**
+ * A family a font control may offer, and what backs it.
+ *
+ * One entry per family rather than per face: bold and italic are marks with
+ * their own controls, so offering "Inter Bold" as a choice would both duplicate
+ * them and name a family no inventory holds.
+ *
+ * `faces` is what the application owns, and is empty for a family only the host
+ * has — nothing is known about such a family's weights, so claiming it has a
+ * regular and nothing else would be worse than saying nothing. `portable` is
+ * the fact worth showing beside it: a host family draws on screen and an export
+ * cannot carry it, which is worth knowing before a contract is set in it.
+ *
+ * Whether a given weight will be a designed face or a thickened stand-in is
+ * `resolve(...).synthesis`, not something to infer from this list.
+ */
+export interface FontFamilyOption {
+  family: string;
+  faces: readonly FontKey[];
+  /** False when nothing owns bytes for it, so an export resolves past it. */
+  portable: boolean;
+}

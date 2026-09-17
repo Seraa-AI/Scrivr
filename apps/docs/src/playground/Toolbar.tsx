@@ -1,5 +1,5 @@
 import type { ToolbarItemSpec } from "@scrivr/core";
-import type { Editor } from "@scrivr/react";
+import type { Editor, FontFamilyOption } from "@scrivr/react";
 import { DEFAULT_FONT_FAMILY } from "@scrivr/react";
 import {
   Bold,
@@ -277,6 +277,30 @@ function SizeSelect({
 
 // ── Family dropdown ────────────────────────────────────────────────────────────
 
+
+/**
+ * What a family can actually do, for the hover text.
+ *
+ * The list is families, not faces — bold and italic have their own buttons —
+ * but knowing a family has no real bold before setting a heading in it is the
+ * difference between a designed weight and a thickened stand-in.
+ */
+function describeFamily(option: FontFamilyOption | undefined): string {
+  if (!option) return "";
+  if (!option.portable) {
+    return "Only on this device. An exported file will be set in another face.";
+  }
+  const hasBold = option.faces.some((face) => face.weight >= 600);
+  const hasItalic = option.faces.some((face) => face.style === "italic");
+  const missing = [
+    ...(hasBold ? [] : ["bold"]),
+    ...(hasItalic ? [] : ["italic"]),
+  ];
+  return missing.length === 0
+    ? "Regular, bold and italic available"
+    : `No ${missing.join(" or ")} face — it will be drawn from the regular`;
+}
+
 function FamilySelect({
   editor,
   items,
@@ -324,10 +348,11 @@ function FamilySelect({
         </option>
       )}
       {items.map((item) => {
-        const family = item.args?.[0] as string;
+        const family = String(item.args?.[0] ?? "");
+        const option = editor?.fontFamilies.find((o) => o.family === family);
         return (
-          <option key={family} value={family} style={{ fontFamily: family }}>
-            {item.label}
+          <option key={family} value={family} title={describeFamily(option)}>
+            {option && !option.portable ? `${family} (this device only)` : family}
           </option>
         );
       })}

@@ -65,6 +65,7 @@ export { DefaultFontProvider } from "@scrivr/core";
 export type {
   ActiveFontFamily,
   DefaultFontProviderOptions,
+  FontFamilyOption,
   FontKey,
   FontSynthesis,
   FontProvider,

@@ -145,7 +145,17 @@ editor.getActiveFontFamily();
 // { requested: "Aptos", resolved: "Inter", substituted: true }
 ```
 
-The precedence — inline mark, then block attribute, then the document default — is the editor's own rule, so reading it here keeps a control from drifting from the page it describes. `editor.fontFamilies` lists what can be offered.
+The precedence — inline mark, then block attribute, then the document default — is the editor's own rule, so reading it here keeps a control from drifting from the page it describes.
+
+`editor.fontFamilies` lists what a picker may offer — **one entry per family, not per face**, because bold and italic are marks with their own controls. Each entry carries what backs it:
+
+```ts
+editor.fontFamilies;
+// [{ family: "Inter", faces: [{ weight: 400 }, { weight: 700 }], portable: true },
+//  { family: "Courier New", faces: [], portable: false }]
+```
+
+`portable: false` is a family only this device has: it draws on screen and an export cannot carry it, so its faces are unknown rather than assumed. For an owned family, `faces` says which weights and slants are designed — anything else is drawn by thickening or leaning the nearest one.
 
 Scrivr deliberately stops there. Whether a substitution is a badge, a banner, or nothing at all depends on what the application is for, so the engine reports and the application decides.
 

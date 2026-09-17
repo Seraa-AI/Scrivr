@@ -38,11 +38,30 @@ describe("the families a picker may offer", () => {
       }),
     });
 
-    expect(editor.fontFamilies).toEqual(["Inter", "Source Serif"]);
+    expect(editor.fontFamilies.map((option) => option.family)).toEqual([
+      "Inter",
+      "Source Serif",
+    ]);
     expect(familyItems(editor).map((item) => item.args?.[0])).toEqual([
       "Inter",
       "Source Serif",
     ]);
+  });
+
+  it("keeps the faces behind each family, so a control can say what it has", () => {
+    // One entry per family — bold and italic are marks with their own controls
+    // — but a control that knows Inter has a real bold and Source Serif does
+    // not can say so before a heading is set in the wrong one.
+    const editor = createTestEditor({
+      fonts: new DefaultFontProvider({
+        default: resource("Inter"),
+        resources: [resource("Inter", 700), resource("Source Serif")],
+      }),
+    });
+
+    const [inter, serif] = editor.fontFamilies;
+    expect(inter?.faces.map((face) => face.weight)).toEqual([400, 700]);
+    expect(serif?.faces.map((face) => face.weight)).toEqual([400]);
   });
 
   it("offers a family the host can draw but nobody owns", () => {
@@ -55,7 +74,17 @@ describe("the families a picker may offer", () => {
       }),
     });
 
-    expect(editor.fontFamilies).toEqual(["Inter", "Courier New"]);
+    expect(editor.fontFamilies.map((option) => option.family)).toEqual([
+      "Inter",
+      "Courier New",
+    ]);
+    // Nothing owns bytes for it, which is what tells a control that choosing it
+    // means the exported document will be set in something else. Its faces are
+    // unknown rather than assumed — the host may well have a bold.
+    const hostOnly = editor.fontFamilies.find((o) => o.family === "Courier New");
+    expect(hostOnly?.portable).toBe(false);
+    expect(hostOnly?.faces).toEqual([]);
+    expect(editor.fontFamilies.find((o) => o.family === "Inter")?.portable).toBe(true);
   });
 
   it("keeps the extension's presets when nothing was claimed", () => {
