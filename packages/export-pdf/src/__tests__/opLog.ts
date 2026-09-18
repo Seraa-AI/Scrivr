@@ -19,6 +19,11 @@ import {
  * pdf-lib. Anything *painted* on the page goes through one of these four
  * methods, including the paths that bypass handler dispatch.
  *
+ * Text state reaches the page through a third door: raw operators pushed
+ * straight onto the content stream. Character spacing changes how a run is set
+ * without changing any `draw*` argument, so a gate blind to it green-lights a
+ * change to how every baseline renders — which is how one shipped.
+ *
  * Annotations reach the page through a different door than paint —
  * `page.node.addAnnot`, not a `draw*` call — so they are recorded separately.
  * Without that the gate cannot see a link that stopped being clickable.
@@ -31,7 +36,7 @@ import {
 
 /** One recorded op — a draw call or an annotation. Fields mirror pdf-lib's. */
 export interface DrawOp {
-  op: "text" | "line" | "rect" | "image" | "annot";
+  op: "text" | "line" | "rect" | "image" | "annot" | "state";
   /** Which page received it — ops are recorded across pages in call order. */
   page: number;
   [field: string]: unknown;
@@ -127,6 +132,21 @@ export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<D
     });
   }
 
+  // Text state, pushed as raw operators rather than through a `draw*` call.
+  // Recorded as the operator's own name and operands so a reader sees what the
+  // content stream received.
+  const originalPush = PDFPage.prototype.pushOperators;
+  Reflect.set(
+    PDFPage.prototype,
+    "pushOperators",
+    function (this: PDFPage, ...operators: Parameters<PDFPage["pushOperators"]>) {
+      for (const operator of operators) {
+        ops.push({ op: "state", page: pageIndex(this.node), value: String(operator).trim() });
+      }
+      return Reflect.apply(originalPush, this, operators);
+    },
+  );
+
   const originalAddAnnot = PDFPageLeaf.prototype.addAnnot;
   Reflect.set(
     PDFPageLeaf.prototype,
@@ -148,6 +168,7 @@ export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<D
       Reflect.set(PDFPage.prototype, name, original);
     }
     Reflect.set(PDFPageLeaf.prototype, "addAnnot", originalAddAnnot);
+    Reflect.set(PDFPage.prototype, "pushOperators", originalPush);
   }
 
   return ops;

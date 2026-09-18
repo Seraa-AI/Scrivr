@@ -7,6 +7,16 @@
 import {
   rgb,
   PDFHexString,
+  PDFNumber,
+  PDFOperator,
+  PDFOperatorNames,
+  TextRenderingMode,
+  radians,
+  setLineWidth,
+  setLineJoin,
+  LineJoinStyle,
+  setTextRenderingMode,
+  setStrokingRgbColor,
   type PDFDocument,
   type PDFPage,
   type PDFFont,
@@ -25,14 +35,17 @@ import {
   type PdfLineOp,
   type PdfRectOp,
   type PdfTextOp,
+  type PdfFontHandle,
   type Rgb,
   type DocumentLayout,
+  type FontResolutionId,
   type LayoutPage,
   type LayoutBlock,
   type LayoutLine,
   type IBaseEditor,
   type ResolvedTheme,
 } from "@scrivr/core";
+import { SYNTHETIC_ITALIC_SHEAR, emboldenWidth, fontSizeOf } from "@scrivr/core";
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
@@ -61,6 +74,13 @@ export interface PdfContext {
   fonts: PdfFontRegistry;
   images: Map<string, PDFImage | null>;
   draw: PdfDrawHelpers;
+  /**
+   * The face the layout measured this block in, present when the block is an
+   * inline atom. A handler drawing its own text should use it rather than
+   * naming a family: the box around it was reserved against this face, and on
+   * canvas the atom is painted in it.
+   */
+  font?: PdfFontHandle;
   /** The editor whose export contributions were collected (a ServerEditor suffices). */
   editor: IBaseEditor;
   /**
@@ -73,8 +93,13 @@ export interface PdfContext {
 }
 
 export interface PdfFontRegistry {
-  /** Resolve a CSS font shorthand string to a PDFFont. */
-  resolve(cssFont: string): PDFFont;
+  /**
+   * Pick the PDFFont for a span. `resolution` is the id the layout recorded
+   * when it measured — pass it whenever the span carries one, so the PDF
+   * paints the face the geometry came from instead of guessing a second time
+   * from the family name.
+   */
+  resolve(cssFont: string, resolution?: FontResolutionId): PDFFont;
   /**
    * True when `font` is an embedded face carrying its own glyphs. Standard
    * fonts encode WinAnsi only, so their text must be sanitized before drawing.
@@ -106,6 +131,16 @@ export function createDrawHelpers(
   pageHeightPt: number,
   fontRegistry: PdfFontRegistry,
   theme: ResolvedTheme,
+  /**
+   * Whether a run may be stretched to the width the layout recorded for it.
+   *
+   * Only true when the layout was measured against the very faces being
+   * painted, by a different engine. When the face itself differs — a document
+   * measured in Georgia and painted in Times because nobody supplied the bytes
+   * — the width gap is a different typeface, not engine disagreement, and
+   * closing it letterspaces the text instead of setting it.
+   */
+  fitToMeasuredWidth: boolean,
   images: ReadonlyMap<string, PDFImage | null>,
   nodeHandlers: ReadonlyMap<string, PdfNodeHandler>,
   markHandlers: ReadonlyMap<string, PdfMarkHandler>,
@@ -129,7 +164,7 @@ export function createDrawHelpers(
     // The same guard the span path applies. A handler cannot apply it itself —
     // a font handle names a family, it does not say what the format made of it
     // — so the one layer holding both the resolved font and the text does it.
-    const font = fontRegistry.resolve(op.font.cssFont);
+    const font = fontRegistry.resolve(op.font.cssFont, op.font.resolution);
     const text = fontRegistry.isUnicode(font)
       ? stripInvisible(op.text)
       : sanitizeForWinAnsi(op.text);
@@ -329,12 +364,21 @@ export function createDrawHelpers(
     // Draw list marker if present.
     const firstLine = block.lines[0];
     if (block.listMarker && block.listMarkerX !== undefined && firstLine) {
-      const markerFont = fontRegistry.fallback;
+      // A marker labels its line, so it takes that line's face as well as its
+      // size. Pinning it to the fallback puts the number of a numbered clause
+      // in a different typeface from the clause.
       const firstSpan = firstLine.spans[0];
+      const markerFont =
+        firstSpan?.kind === "text"
+          ? fontRegistry.resolve(firstSpan.font, firstSpan.resolution)
+          : fontRegistry.fallback;
       const fontSize = extractFontSizePx(
         (firstSpan?.kind === "text" ? firstSpan.font : undefined) ?? "12px sans-serif",
       );
-      page.drawText(sanitizeForWinAnsi(block.listMarker), {
+      const markerText = fontRegistry.isUnicode(markerFont)
+        ? stripInvisible(block.listMarker)
+        : sanitizeForWinAnsi(block.listMarker);
+      page.drawText(markerText, {
         x: block.listMarkerX * PT_PER_PX,
         y: flipY(block.y + firstLine.ascent, pageHeightPt),
         size: fontSize * PT_PER_PX,
@@ -450,7 +494,22 @@ export function createDrawHelpers(
                 height: span.height,
                 lines: [],
               };
-              const atomCtx = { ...ctx, x: spanAbsX, y: objY, width: span.width };
+              const atomCtx: PdfContext = {
+                ...ctx,
+                x: spanAbsX,
+                y: objY,
+                width: span.width,
+                ...(span.font !== undefined
+                  ? {
+                      font: {
+                        cssFont: span.font,
+                        ...(span.resolution !== undefined
+                          ? { resolution: span.resolution }
+                          : {}),
+                      },
+                    }
+                  : {}),
+              };
               handler(atomBlock, atomCtx);
             }
           }
@@ -459,7 +518,7 @@ export function createDrawHelpers(
 
         if (span.kind !== "text") continue;
 
-        const font = fontRegistry.resolve(span.font);
+        const font = fontRegistry.resolve(span.font, span.resolution);
         const text = fontRegistry.isUnicode(font)
           ? stripInvisible(span.text)
           : sanitizeForWinAnsi(span.text);
@@ -470,16 +529,51 @@ export function createDrawHelpers(
 
         const fontSize = extractFontSizePx(span.font);
         const color = resolveFill(styles, themeDefaultText);
+        // Only when the drawn text is the text that was measured: the
+        // sanitizer may have dropped characters the width still accounts for.
+        const tracking =
+          fitToMeasuredWidth && text === span.text
+            ? trackingFor(span.width, text, font, fontSize * PT_PER_PX)
+            : 0;
 
         drawSpanBackgrounds(span, styles, spanAbsX, baselineY);
 
+        // The same stand-ins the canvas paints, from the same numbers, so a
+        // weight or slant nobody owns looks the same on both sides and neither
+        // changes an advance width.
+        const synthesis =
+          span.resolution === undefined
+            ? undefined
+            : ctx.layout.fontResolutions?.get(span.resolution)?.synthesis;
+        const sizePt = fontSize * PT_PER_PX;
+        const embolden = emboldenWidth(synthesis, sizePt);
+        const lean = synthesis?.style?.to === "italic" ? SYNTHETIC_ITALIC_SHEAR : 0;
+
+        if (tracking !== 0) setCharacterSpacing(page, tracking);
+        if (embolden > 0) {
+          page.pushOperators(
+            setTextRenderingMode(TextRenderingMode.FillAndOutline),
+            setLineWidth(embolden),
+            // Rounded like the canvas, so a sharp apex does not spike in one
+            // lane and not the other.
+            setLineJoin(LineJoinStyle.Round),
+          );
+          page.pushOperators(setStrokingRgbColor(color.red, color.green, color.blue));
+        }
         page.drawText(text, {
           x: spanAbsX * PT_PER_PX,
           y: pdfBaseline,
-          size: fontSize * PT_PER_PX,
+          size: sizePt,
           font,
           color,
+          // A positive ySkew leans the glyph tops to the right, which is the
+          // `x' = x + k·y` shear a designed italic approximates.
+          ...(lean !== 0 ? { ySkew: radians(Math.atan(lean)) } : {}),
         });
+        if (embolden > 0) {
+          page.pushOperators(setTextRenderingMode(TextRenderingMode.Fill));
+        }
+        if (tracking !== 0) setCharacterSpacing(page, 0);
 
         drawSpanRules(span, styles, spanAbsX, baselineY, color);
 
@@ -501,6 +595,53 @@ export function createDrawHelpers(
 }
 
 // ── Shared utilities ─────────────────────────────────────────────────────────
+
+/**
+ * The per-glyph adjustment that makes a run fill the width it was measured to.
+ *
+ * A run measured by one engine and painted by another ends short of its box.
+ * Character spacing adds a fixed amount to every glyph advance, closing the gap
+ * without touching the glyphs.
+ *
+ * Zero when the run was measured and painted from the same face, so an export
+ * that typeset its own geometry emits nothing. Not exactly zero when the
+ * sanitizer dropped characters the width was measured with.
+ */
+export function trackingFor(
+  measuredPx: number,
+  text: string,
+  font: PDFFont,
+  sizePt: number,
+): number {
+  const glyphs = [...text].length;
+  if (glyphs === 0) return 0;
+  let natural: number;
+  try {
+    natural = font.widthOfTextAtSize(text, sizePt);
+  } catch {
+    // A face that cannot measure this text will not paint it either; leave the
+    // spacing alone rather than guessing an adjustment for it.
+    return 0;
+  }
+  const gap = measuredPx * PT_PER_PX - natural;
+  // Below this the adjustment is invisible and only costs an operator per span.
+  if (Math.abs(gap) < 0.01) return 0;
+
+  const perGlyph = gap / glyphs;
+  // Above this the premise is false: two engines reading one face differ by a
+  // fraction of a percent, so a gap this wide means the run was measured in
+  // some other face. Stretching it then crushes or scatters the letters, which
+  // is worse than leaving it short.
+  return Math.abs(perGlyph) > sizePt * 0.02 ? 0 : perGlyph;
+}
+
+/** pdf-lib has no helper for `Tc`, though its operator table names it. */
+function setCharacterSpacing(page: PDFPage, amount: number): void {
+  page.pushOperators(
+    PDFOperator.of(PDFOperatorNames.SetCharacterSpacing, [PDFNumber.of(amount)]),
+  );
+}
+
 
 /** One anchor's horizontal extent on a single line, in layout pixels. */
 interface LinkRun {
@@ -562,10 +703,8 @@ function encodePdfUri(href: string): PDFHexString {
 }
 
 /** Extract font size from CSS font shorthand: "bold italic 14px Georgia" → 14 */
-export function extractFontSizePx(cssFont: string): number {
-  const match = cssFont.match(/(\d+(?:\.\d+)?)px/);
-  return match?.[1] !== undefined ? parseFloat(match[1]) : 12;
-}
+/** One parser for both lanes, so a shorthand cannot mean two sizes. */
+export const extractFontSizePx = fontSizeOf;
 
 /** Characters that carry no ink, so no font needs to be asked about them. */
 const INVISIBLE = /[\u200b\u200c\u200d\u00ad\ufeff]/g;

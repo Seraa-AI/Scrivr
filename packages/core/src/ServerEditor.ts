@@ -1,4 +1,5 @@
 import { EditorState } from "prosemirror-state";
+import type { FontProvider } from "./fonts/types";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import { BaseEditor } from "./BaseEditor";
@@ -42,6 +43,12 @@ export interface ServerEditorOptions {
    * `editor.commands.exportPdf({ theme: { ... } })` (typed `Partial<ResolvedTheme>`).
    */
   theme?: EditorTheme;
+  /**
+   * Where font requests are answered. A server export is the case that most
+   * needs one: it has no host font system to fall back on, so without a
+   * provider it cannot say what its text is set in.
+   */
+  fonts?: FontProvider;
 }
 
 /**
@@ -81,8 +88,14 @@ export class ServerEditor extends BaseEditor {
    */
   private readonly resolvedTheme: ResolvedTheme;
 
-  constructor({ extensions = [StarterKit], content, clone = false, theme }: ServerEditorOptions = {}) {
-    super({ extensions, clone, ...(content ? { content } : {}) });
+  constructor({
+    extensions = [StarterKit],
+    content,
+    clone = false,
+    theme,
+    fonts,
+  }: ServerEditorOptions = {}) {
+    super({ extensions, clone, ...(content ? { content } : {}), ...(fonts ? { fonts } : {}) });
     if (theme && themeContainsCssVars(theme)) {
       console.warn(
         "[ServerEditor] theme contains var(--...) values that cannot be resolved without a DOM. " +

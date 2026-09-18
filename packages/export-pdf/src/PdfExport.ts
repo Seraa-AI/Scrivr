@@ -15,23 +15,24 @@
  *   });
  */
 import { Extension } from "@scrivr/core";
-import type { IEditor, ResolvedTheme } from "@scrivr/core";
-import { exportToPdf } from "./index";
+import type { IEditor } from "@scrivr/core";
+import { exportToPdf, type PdfExportOptions } from "./index";
 
-interface PdfExportOptions {
+/** Options the extension itself is configured with. */
+interface PdfExportExtensionOptions {
   /** Downloaded file name (without .pdf). Default: "document" */
   filename?: string;
 }
 
-/** Per-call options accepted by `editor.commands.exportPdf({...})`. */
-interface ExportPdfCallOptions {
+/**
+ * Per-call options accepted by `editor.commands.exportPdf({...})`.
+ *
+ * Everything the export itself accepts, plus the file name the command needs
+ * and the export does not. Listing a subset here is how `onFontShortfall`
+ * became unreachable from the command most applications actually call.
+ */
+interface ExportPdfCallOptions extends PdfExportOptions {
   filename?: string;
-  /**
-   * Theme override. Shallow-merged over the print-ready `defaultPdfTheme`.
-   * Literal CSS colors only — `var(...)` is not supported on this path.
-   * Omit for a print-ready PDF regardless of canvas theme.
-   */
-  theme?: Partial<ResolvedTheme>;
 }
 
 /** Per-instance state — populated in onEditorReady, read in addCommands. */
@@ -40,7 +41,7 @@ interface InstanceState {
 }
 const instanceState = new WeakMap<object, InstanceState>();
 
-export const PdfExport = Extension.create<PdfExportOptions>({
+export const PdfExport = Extension.create<PdfExportExtensionOptions>({
   name: "pdfExport",
 
   defaultOptions: {
@@ -62,10 +63,8 @@ export const PdfExport = Extension.create<PdfExportOptions>({
           const { editor } = inst;
           const filename =
             callOptions?.filename ?? this.options.filename ?? "document";
-          exportToPdf(
-            editor,
-            callOptions?.theme ? { theme: callOptions.theme } : undefined,
-          )
+          const { filename: _filename, ...exportOptions } = callOptions ?? {};
+          exportToPdf(editor, exportOptions)
             .then((bytes) => {
               const blob = new Blob([bytes.buffer as ArrayBuffer], {
                 type: "application/pdf",
