@@ -13,7 +13,7 @@ import type { Node } from "prosemirror-model";
 import type { LayoutSpan } from "./LineBreaker";
 import { DefaultFontProvider } from "../fonts/DefaultFontProvider";
 import type { FontResource } from "../fonts/types";
-import { createTestEditor } from "../test-utils";
+import { createMeasurer, createTestEditor } from "../test-utils";
 import { getSchema } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
 
@@ -49,6 +49,31 @@ const textSpans = (layout: ReturnType<typeof layoutOf>): LayoutSpan[] =>
     .filter((span) => span.kind === "text" && span.text.trim().length > 0);
 
 describe("a laid-out document's font record", () => {
+  it("retries a canvas installation that failed on an earlier layout", async () => {
+    const measurer = createMeasurer();
+    let attempts = 0;
+    measurer.installFont = async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("temporary font backend failure");
+      return "RecoveredFace";
+    };
+    const content = schema.node("doc", null, [aptos("Retainer and fees")]).toJSON();
+    const editor = createTestEditor({ content, fonts: fonts(), textMeasurer: measurer });
+
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const replacement = editor.schema.nodeFromJSON(content);
+    editor.applyTransaction(
+      editor.getState().tr.replaceWith(0, editor.getState().doc.content.size, replacement.content),
+    );
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    editor.ensureFullLayout();
+
+    expect(attempts).toBeGreaterThanOrEqual(2);
+    const installed = [...(editor.layout.fontResolutions?.values() ?? [])]
+      .find((answer) => answer.request.family === "Aptos");
+    expect(installed?.measuredAs).toBe("RecoveredFace");
+  });
+
   it("carries the resolution onto every placed span", () => {
     const layout = layoutOf(schema.node("doc", null, [aptos("Retainer and fees")]));
     const spans = textSpans(layout);

@@ -55,7 +55,7 @@ function constrainedAnswers(
   for (const request of requests) {
     const answer = provider.resolve(request, constraints);
     const { resource, resolved } = answer;
-    if (resource && (resource.embedding?.allowed === false || !resolved.portable)) {
+    if (resource && (resource.embedding?.allowed !== true || !resolved.portable)) {
       throw new Error(`Font provider violated PDF constraints for ${request.family}`);
     }
     if (resource) {

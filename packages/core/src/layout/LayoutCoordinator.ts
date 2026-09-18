@@ -93,7 +93,6 @@ export class LayoutCoordinator {
   private fontResolverValue: LayoutFontResolver | null;
   /** Keyed by `FontResource.id`: a provider may hand back a fresh object each call. */
   private readonly installedFonts = new Map<string, string>();
-  private readonly failedFonts = new Set<string>();
   private preparingFonts = false;
   private fontPreparationPending = false;
   private disposed = false;
@@ -136,7 +135,7 @@ export class LayoutCoordinator {
       await this.opts.fonts.prepare(requests);
       for (const request of requests) {
         const resource = this.opts.fonts.resolve(request).resource;
-        if (!resource || this.installedFonts.has(resource.id) || this.failedFonts.has(resource.id)) continue;
+        if (!resource || this.installedFonts.has(resource.id)) continue;
         try {
           const install = this.opts.measurer.installFont;
           if (!install) throw new Error("The measurement backend does not install fonts");
@@ -146,7 +145,6 @@ export class LayoutCoordinator {
         } catch {
           // Retried on the next layout: the backend may gain the face, or the
           // bytes may become reachable. Until then this resolves as generic.
-          this.failedFonts.add(resource.id);
         }
       }
       if (this.disposed) return;

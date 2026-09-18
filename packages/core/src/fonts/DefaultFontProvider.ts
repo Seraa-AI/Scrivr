@@ -125,7 +125,8 @@ export class DefaultFontProvider implements FontProvider {
     constraints?: FontResolutionConstraints,
   ): FontResolution {
     const usable = (resource: FontResource): boolean =>
-      !this.#failed.has(resource.id) && (constraints?.embeddable !== true || resource.embedding?.allowed !== false);
+      !this.#failed.has(resource.id) &&
+      (constraints?.embeddable !== true || resource.embedding?.allowed === true);
 
     const exact = this.#byKey.get(keyOf(request));
     if (exact && usable(exact)) {

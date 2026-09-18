@@ -23,6 +23,7 @@ const resource = (family: string, weight = 400): FontResource => ({
   family,
   weight,
   style: "normal",
+  embedding: { allowed: true, source: "caller" },
   bytes: () => Promise.resolve(new ArrayBuffer(8)),
 });
 

@@ -27,6 +27,7 @@ const inter = (): FontResource => ({
   family: "Inter",
   weight: 400,
   style: "normal",
+  embedding: { allowed: true, source: "caller" },
   bytes: async () => new Uint8Array(readFileSync(require_.resolve("@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf"))).buffer,
 });
 

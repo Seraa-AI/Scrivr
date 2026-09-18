@@ -18,11 +18,13 @@ So the editor is given an inventory of faces it owns the bytes for. Every lane w
 
 A `DefaultFontProvider` needs a default face and, usually, the other weights and slants of it. Each face is a descriptor: registering it costs nothing until something resolves to it, and only then are its bytes fetched.
 
+Register `.ttf` or `.otf` bytes rather than the smaller `.woff2` the web would prefer. The same bytes serve measurement *and* embedding, and a PDF carries a font program — not a web container wrapped around one. A `.woff2` face is refused at export with an error naming the family.
+
 ```ts title="fonts.ts"
 import { DefaultFontProvider, type FontResource } from "@scrivr/react";
-import regular from "inter-ui/web/Inter-Regular.woff2?url";
-import bold from "inter-ui/web/Inter-Bold.woff2?url";
-import italic from "inter-ui/web/Inter-Italic.woff2?url";
+import regular from "@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf?url";
+import bold from "@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf?url";
+import italic from "@expo-google-fonts/inter/400Regular_Italic/Inter_400Regular_Italic.ttf?url";
 
 const face = (
 	id: string,
@@ -34,7 +36,7 @@ const face = (
 	family: "Inter",
 	weight,
 	style,
-	format: "woff2",
+	format: "ttf",
 	// Inter is OFL-licensed, so it may travel inside an exported PDF.
 	embedding: { allowed: true, source: "caller" },
 	bytes: async () => (await fetch(url)).arrayBuffer(),
@@ -200,7 +202,7 @@ Two constraints shape that answer:
 | Constraint | Meaning |
 | --- | --- |
 | `portable` | The face must be usable off this machine. A `systemCandidates` family — one the browser can draw but nobody owns bytes for — is refused. |
-| `embeddable` | The face's licence must permit it to travel inside the file. Set `embedding: { allowed: false }` on a resource that may not. |
+| `embeddable` | The face's licence must affirmatively permit it to travel inside the file. Set `embedding: { allowed: true }` only when the licence or font metadata grants that permission; omission is treated as unknown and refused. |
 
 A face that resolves but cannot be embedded fails the export rather than silently falling back, because falling back would invalidate the geometry already measured.
 

@@ -51,7 +51,10 @@ export interface FontResource extends FontKey {
    * the same bytes to serve both measurement and export.
    */
   format?: "woff2" | "woff" | "ttf" | "otf";
-  /** Holding bytes is not permission to embed them. */
+  /**
+   * Holding bytes is not permission to embed them. Omission means permission
+   * is unknown and therefore does not satisfy an `embeddable` constraint.
+   */
   embedding?: { allowed: boolean; source?: "font-metadata" | "caller" };
 }
 

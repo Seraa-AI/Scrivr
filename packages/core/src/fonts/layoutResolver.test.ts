@@ -111,6 +111,14 @@ describe("resolving a span's font for measurement", () => {
     expect(r.table().get(answer.resolution)?.resolved.family).toBe("Arial");
   });
 
+  it("keeps a comma inside a quoted family name", () => {
+    const r = createLayoutFontResolver(provider(["ACME, Sans"]));
+    const answer = r.resolve('14px "ACME, Sans", serif');
+
+    expect(r.table().get(answer.resolution)?.resolved.source).toBe("requested");
+    expect(r.table().get(answer.resolution)?.resolved.family).toBe("ACME, Sans");
+  });
+
   it("gives an export a different answer than the screen", () => {
     const p = provider([], ["Aptos"]);
     const screen = createLayoutFontResolver(p);

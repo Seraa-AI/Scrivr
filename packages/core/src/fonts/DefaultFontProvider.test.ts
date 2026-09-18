@@ -20,6 +20,7 @@ const resource = (
   family,
   weight,
   style: "normal",
+  embedding: { allowed: true, source: "caller" },
   bytes: () => Promise.resolve(new ArrayBuffer(8)),
   ...extra,
 });
@@ -151,6 +152,21 @@ describe("a resource that may not be embedded", () => {
       embeddable: true,
     });
     expect(answer.resolved.source).toBe("default");
+  });
+
+  it("requires affirmative permission when embedding was not specified", () => {
+    const unknown: FontResource = {
+      id: "Unknown-400",
+      family: "Unknown",
+      weight: 400,
+      style: "normal",
+      bytes: () => Promise.resolve(new ArrayBuffer(8)),
+    };
+    const answer = provider({ resources: [unknown] }).resolve(ask("Unknown"), {
+      embeddable: true,
+    });
+    expect(answer.resolved.source).toBe("default");
+    expect(answer.resource?.id).toBe(fallback.id);
   });
 });
 

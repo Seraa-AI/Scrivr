@@ -126,27 +126,18 @@ export async function embedStandardFonts(pdfDoc: PDFDocument): Promise<FontCache
 
 
 /**
- * Embed the faces the layout actually measured against.
- *
- * The layout resolved every span to a face and recorded which one; this walks
- * that table rather than the family names, so the PDF paints the same
- * typeface the geometry was computed from. Deriving a font from the name a
- * second time is what let a document measured in one face be painted in
- * another at those coordinates.
- *
- * Licence and parse policy live in `embedFaces`, so both export paths apply
- * the same one.
- */
-/**
  * Embed one set of faces, keyed by the id that identifies them.
  *
  * The single place bytes become a `PDFFont`, so both export paths agree on
- * what may go in a file and what happens when it will not parse. A face whose
- * licence forbids embedding is skipped — it must not travel inside the
- * document — and its spans fall back to a standard font, which is visibly
- * wrong but lawfully so. Bytes that will not parse are an error: switching
- * silently to a standard font would leave every glyph at coordinates measured
- * from a different typeface, which is the defect this lane exists to remove.
+ * what may go in a file. Everything it will not carry is an error rather than
+ * a silent omission - bytes that will not parse, a web container, a face with
+ * no permission to travel - because a face that quietly fails to embed leaves
+ * its glyphs at coordinates measured from a typeface the reader will never
+ * see, which is the defect this lane exists to remove.
+ *
+ * Callers that mean to fall back choose a different face before calling: the
+ * `embeddable` resolution constraint answers with one that may be carried, and
+ * reports the substitution.
  */
 export async function embedFaces(
   pdfDoc: PDFDocument,
@@ -154,7 +145,13 @@ export async function embedFaces(
 ): Promise<Map<string, PDFFont>> {
   const wanted = new Map<string, FontResource>();
   for (const resource of resources) {
-    if (resource.embedding?.allowed === false) continue;
+    if (resource.embedding?.allowed !== true) {
+      throw new Error(
+        `${resource.family} has no permission to be embedded, so a PDF cannot carry it. ` +
+          `Set \`embedding: { allowed: true }\` on the resource when its licence grants that, ` +
+          `or resolve with the \`embeddable\` constraint to be answered with a face that may travel.`,
+      );
+    }
     wanted.set(resource.id, resource);
   }
 

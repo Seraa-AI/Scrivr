@@ -48,6 +48,7 @@ const face = (overrides: Partial<FontResource> = {}): FontResource => ({
   family: "Inter",
   weight: 400,
   style: "normal",
+  embedding: { allowed: true, source: "caller" },
   bytes: async () => interBytes(),
   ...overrides,
 });

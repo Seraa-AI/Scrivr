@@ -79,6 +79,7 @@ describe("fitting a run to its measured width", () => {
           family: "Inter",
           weight: 400,
           style: "normal",
+          embedding: { allowed: true, source: "caller" },
           bytes: async () => new Uint8Array(bytes).buffer,
         },
       ])

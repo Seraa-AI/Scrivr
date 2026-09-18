@@ -42,6 +42,7 @@ const resource = (
   family: id,
   weight: 400,
   style: "normal",
+  embedding: { allowed: true, source: "caller" },
   bytes: vi.fn(() => Promise.resolve(realFontBytes())),
   ...overrides,
 });
@@ -83,14 +84,34 @@ describe("choosing the face a span is painted in", () => {
 });
 
 describe("embedding the faces a layout measured", () => {
-  it("never reads the bytes of a face whose licence forbids embedding", async () => {
+  it("refuses a face whose licence forbids embedding, without reading its bytes", async () => {
     const denied = resource("Restricted", {
       embedding: { allowed: false, source: "font-metadata" },
     });
-    const embedded = await embedResolvedFonts(await PDFDocument.create(), layoutWith(denied));
 
+    // Refused rather than dropped: a face that quietly fails to embed leaves
+    // its glyphs at coordinates measured from a typeface nobody will see.
+    await expect(
+      embedResolvedFonts(await PDFDocument.create(), layoutWith(denied)),
+    ).rejects.toThrow(/Restricted/);
     expect(denied.bytes).not.toHaveBeenCalled();
-    expect(embedded.size).toBe(0);
+  });
+
+  it("refuses a face that never claimed permission to be embedded", async () => {
+    // Built without the key rather than with it undefined: the case is a
+    // resource that never mentioned embedding at all.
+    const unknown: FontResource = {
+      id: "Unclaimed",
+      family: "Unclaimed",
+      weight: 400,
+      style: "normal",
+      bytes: vi.fn(() => Promise.resolve(realFontBytes())),
+    };
+
+    await expect(
+      embedResolvedFonts(await PDFDocument.create(), layoutWith(unknown)),
+    ).rejects.toThrow(/Unclaimed/);
+    expect(unknown.bytes).not.toHaveBeenCalled();
   });
 
   it("reads a face once however many resolutions name it", async () => {

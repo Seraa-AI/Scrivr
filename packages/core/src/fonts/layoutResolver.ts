@@ -33,8 +33,44 @@ const quoted = (family: string): string =>
  * under "Arial". The rest of the list is the host's fallback chain, which is
  * the decision a provider exists to make instead.
  */
-export const primaryFamily = (family: string): string =>
-  family.split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") || family;
+export const primaryFamily = (family: string): string => {
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+  let end = family.length;
+
+  for (let i = 0; i < family.length; i++) {
+    const char = family[i]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === ",") {
+      end = i;
+      break;
+    }
+  }
+
+  const first = family.slice(0, end).trim();
+  const unquoted =
+    first.length >= 2 &&
+    ((first.startsWith('"') && first.endsWith('"')) ||
+      (first.startsWith("'") && first.endsWith("'")))
+      ? first.slice(1, -1)
+      : first;
+  return unquoted.replace(/\\(.)/g, "$1") || family;
+};
 
 /** Weight and slant as the CSS shorthand spells them, in the terms a key uses. */
 function requestFrom(cssFont: string, size: number) {
