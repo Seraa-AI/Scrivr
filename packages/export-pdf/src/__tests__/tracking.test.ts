@@ -10,8 +10,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { PDFDocument } from "pdf-lib";
-import fontkit from "@pdf-lib/fontkit";
-import { embedStandardFonts } from "../fonts";
+import { embedFaces, embedStandardFonts } from "../fonts";
 import { buildPdf } from "../index";
 import { recordDrawOps } from "./opLog";
 import { block, onePage, textLine, exportEditor } from "./fixtures";
@@ -71,8 +70,20 @@ describe("fitting a run to its measured width", () => {
       ),
     );
     const doc = await PDFDocument.create();
-    doc.registerFontkit(fontkit);
-    const inter = await doc.embedFont(new Uint8Array(bytes));
+    // Through the package's own embedder, so the face is measured by the same
+    // fontkit an export would use.
+    const inter = (
+      await embedFaces(doc, [
+        {
+          id: "inter-400",
+          family: "Inter",
+          weight: 400,
+          style: "normal",
+          bytes: async () => new Uint8Array(bytes).buffer,
+        },
+      ])
+    ).get("inter-400");
+    if (!inter) throw new Error("face was not embedded");
 
     const text = "a\u{1D400}b"; // three characters, four code units
     expect(text.length).toBe(4);

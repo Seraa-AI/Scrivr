@@ -3,7 +3,7 @@
  * Extracted from the monolithic exporter to support the handler dispatch pattern.
  */
 
-import fontkit from "@pdf-lib/fontkit";
+import * as fontkit from "fontkit";
 import {
   PDFDocument,
   PDFFont,
@@ -11,6 +11,77 @@ import {
 } from "pdf-lib";
 import type { DocumentLayout, FontResolutionId, FontResource } from "@scrivr/core";
 import type { PdfFontRegistry } from "./context";
+
+/** pdf-lib's fontkit contract, taken from the method that consumes it. */
+type Fontkit = Parameters<PDFDocument["registerFontkit"]>[0];
+type PdfLibFont = ReturnType<Fontkit["create"]>;
+
+/**
+ * fontkit, with the one call pdf-lib makes that v2 renamed.
+ *
+ * pdf-lib drives fontkit v1, whose `Subset.encodeStream()` returned a Node
+ * stream; v2 returns the bytes from `encode()`. Adapting that one method is
+ * what lets this package use v2 - which matters because v1's subsetter
+ * silently drops the outlines of fonts whose `loca` is in the long format,
+ * producing correct advances around blank paper.
+ */
+const subsettingFontkit: Fontkit = {
+  // pdf-lib and fontkit declare the same runtime objects with different types.
+  // Asserted once, here, rather than at each of pdf-lib's call sites.
+  create: (bytes, postscriptName) =>
+    assertPdfLibFont(withStreamedSubset(createFont(bytes, postscriptName))),
+};
+
+/** fontkit's node build carries `create` on the default export, its browser build on the namespace. */
+function createFont(bytes: Uint8Array, postscriptName?: string) {
+  const create = fontkit.create ?? fontkit.default?.create;
+  if (!create) throw new Error("fontkit exposes no create()");
+  return create(bytes, postscriptName);
+}
+
+function assertPdfLibFont(font: object): PdfLibFont {
+  if (!("createSubset" in font)) throw new Error("fontkit returned no font");
+  return font as PdfLibFont;
+}
+
+/** Emits `bytes` to the first `data` handler, then ends. pdf-lib chains `on`. */
+function bytesAsStream(bytes: Uint8Array) {
+  const stream = {
+    on(event: string, handler: (chunk?: Uint8Array) => void) {
+      if (event === "data") handler(bytes);
+      if (event === "end") handler();
+      return stream;
+    },
+  };
+  return stream;
+}
+
+function withStreamedSubset<T extends object>(font: T): T {
+  return new Proxy(font, {
+    get(target, property) {
+      // `target` as the receiver, so fontkit's own lazy properties cache on the
+      // font rather than on the proxy wrapping it.
+      const value = Reflect.get(target, property, target);
+      if (property !== "createSubset" || typeof value !== "function") return value;
+      return () => {
+        const subset: unknown = value.call(target);
+        if (typeof subset !== "object" || subset === null) return subset;
+        return new Proxy(subset, {
+          get(subsetTarget, subsetProperty) {
+            if (subsetProperty !== "encodeStream") {
+              return Reflect.get(subsetTarget, subsetProperty, subsetTarget);
+            }
+            const encode: unknown = Reflect.get(subsetTarget, "encode", subsetTarget);
+            if (typeof encode !== "function") {
+              return Reflect.get(subsetTarget, subsetProperty, subsetTarget);
+            }
+            return () => bytesAsStream(encode.call(subsetTarget));
+          },
+        });
+      };
+    },
+  });
+}
 
 export type FontVariant = "normal" | "bold" | "italic" | "boldItalic";
 export type FontFamily = "serif" | "sans" | "mono";
@@ -90,7 +161,7 @@ export async function embedFaces(
   const embedded = new Map<string, PDFFont>();
   if (wanted.size === 0) return embedded;
 
-  pdfDoc.registerFontkit(fontkit);
+  pdfDoc.registerFontkit(subsettingFontkit);
   await Promise.all(
     [...wanted.values()].map(async (resource) => {
       try {
@@ -102,7 +173,7 @@ export async function embedFaces(
               `Register this face as .ttf or .otf bytes.`,
           );
         }
-        const font = await pdfDoc.embedFont(bytes);
+        const font = await pdfDoc.embedFont(bytes, { subset: true });
         nameEveryGlyph(font);
         embedded.set(resource.id, font);
       } catch (cause) {
@@ -129,90 +200,6 @@ function webFontContainer(bytes: Uint8Array): string | null {
   if (magic === "wOFF") return "WOFF";
   if (magic === "wOF2") return "WOFF2";
   return null;
-}
-
-/** The parts of a fontkit glyph the PDF's widths and text layer are built from. */
-interface GlyphLike {
-  id: number;
-  advanceWidth: number;
-  codePoints: readonly number[];
-}
-
-function isGlyphLike(value: unknown): value is GlyphLike {
-  if (typeof value !== "object" || value === null) return false;
-  if (!("id" in value) || !("advanceWidth" in value) || !("codePoints" in value)) return false;
-  return (
-    typeof value.id === "number" &&
-    typeof value.advanceWidth === "number" &&
-    Array.isArray(value.codePoints)
-  );
-}
-
-/**
- * The glyph list pdf-lib will build this face's widths and text layer from,
- * alongside every glyph fontkit has actually built for it.
- */
-function glyphLedger(font: PDFFont): { listed: GlyphLike[]; built: GlyphLike[] } | null {
-  const embedder = embedderOf(font);
-  if (!embedder) return null;
-  if (!("glyphCache" in embedder) || !("font" in embedder)) return null;
-  const cache: unknown = embedder.glyphCache;
-  if (typeof cache !== "object" || cache === null || !("access" in cache)) return null;
-  if (typeof cache.access !== "function") return null;
-  const listed: unknown = cache.access.call(cache);
-  if (!Array.isArray(listed) || !listed.every(isGlyphLike)) return null;
-
-  const inner: unknown = embedder.font;
-  if (typeof inner !== "object" || inner === null || !("_glyphs" in inner)) return null;
-  const built: unknown = inner._glyphs;
-  if (typeof built !== "object" || built === null) return null;
-  return { listed, built: Object.values(built).filter(isGlyphLike) };
-}
-
-/**
- * Give every glyph the pages actually drew a width and a name, once drawing is
- * over.
- *
- * pdf-lib derives both from the font's cmap, so a glyph that only shaping can
- * reach - every ligature - gets neither, and a reader falls back to a one-em
- * default width for it. Aptos sets `ff` at 0.67em, so `Effective` painted as
- * `Eff ective` and overran the word after it.
- *
- * Embedding a subset would fix it at the source, because a subset is built from
- * the glyphs used rather than the cmap. The bundled subsetter cannot be trusted
- * with that: it silently drops the outlines of fonts whose `loca` is in the
- * long format, leaving correct advances around blank paper. Extending the list
- * pdf-lib is about to read is the narrow fix, and the shaped glyphs carry their
- * own codepoints, so `ff` copies back out as `ff`.
- *
- * Must run after the last text is drawn and before the document is saved, which
- * is when pdf-lib reads the list.
- */
-export function completeEmbeddedFaces(pdfDoc: PDFDocument): void {
-  for (const font of embeddedFontsOf(pdfDoc)) {
-    const ledger = glyphLedger(font);
-    if (!ledger) continue;
-    const listed = new Set(ledger.listed.map((glyph) => glyph.id));
-    let added = false;
-    for (const glyph of ledger.built) {
-      if (listed.has(glyph.id)) continue;
-      ledger.listed.push(glyph);
-      listed.add(glyph.id);
-      added = true;
-    }
-    // pdf-lib reads the list in order, starting a new width range wherever the
-    // ids stop being consecutive.
-    if (added) ledger.listed.sort((a, b) => a.id - b.id);
-  }
-}
-
-/** Every face embedded in this document, which pdf-lib tracks but does not expose. */
-function embeddedFontsOf(pdfDoc: PDFDocument): PDFFont[] {
-  const candidate: unknown = pdfDoc;
-  if (typeof candidate !== "object" || candidate === null) return [];
-  if (!("fonts" in candidate)) return [];
-  const fonts: unknown = candidate.fonts;
-  return Array.isArray(fonts) ? fonts.filter((font) => font instanceof PDFFont) : [];
 }
 
 /** The parts of fontkit's font a cmap walk needs, without depending on it. */

@@ -46,7 +46,6 @@ import {
   embedStandardFonts,
   embedResolvedFonts,
   createFontRegistry,
-  completeEmbeddedFaces,
 } from "./fonts";
 import { defaultNodeHandlers, defaultMarkHandlers } from "./defaults";
 import { preparePdfLayout } from "./prepareLayout";
@@ -281,9 +280,6 @@ async function writePdf(
   }
 
   // ── Phase 7: Save ──────────────────────────────────────────────────────
-  // After the last glyph is drawn, because that is the point at which every
-  // face knows which glyphs it was actually asked to paint.
-  completeEmbeddedFaces(pdfDoc);
   return pdfDoc.save();
 }
 

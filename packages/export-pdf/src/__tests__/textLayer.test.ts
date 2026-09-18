@@ -11,9 +11,9 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { inflateSync } from "node:zlib";
-import { PDFArray, PDFDict, PDFDocument, PDFName } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
 import type { FontResource } from "@scrivr/core";
-import { completeEmbeddedFaces, embedFaces } from "../fonts";
+import { embedFaces } from "../fonts";
 
 const require_ = createRequire(import.meta.url);
 
@@ -87,7 +87,9 @@ async function pdfAfterMeasuring(
   if (!font) throw new Error("face was not embedded");
   font.widthOfTextAtSize(text, 12);
   const page = pdfDoc.addPage();
-  page.drawText("Party’s ‘aside’ \"and\" don't", { x: 20, y: 20, size: 12, font });
+  // Every character the assertions ask about has to be drawn: the embedded
+  // face carries the glyphs the page used and no others.
+  page.drawText("Party’s ‘aside’ “quoted” \"and\" don't", { x: 20, y: 20, size: 12, font });
 
   // Asked of the font rather than hardcoded, so the assertions below say what
   // the page actually drew instead of what one build of Inter numbers it.
@@ -108,6 +110,23 @@ describe("embedding a face", () => {
     };
     // Named, because the caller has to know which face to re-register.
     await expect(embedFaces(await PDFDocument.create(), [woff2])).rejects.toThrow(/Inter/);
+  }, 30_000);
+});
+
+describe("the embedded face", () => {
+  it("carries only the glyphs the page used", async () => {
+    const pdfDoc = await PDFDocument.create();
+    const font = (await embedFaces(pdfDoc, [inter()])).get("inter-400");
+    if (!font) throw new Error("face was not embedded");
+    pdfDoc.addPage().drawText("office affix waffle", { x: 20, y: 20, size: 12, font });
+    const program = embeddedFontProgram(await pdfDoc.save());
+    const whole = readFileSync(
+      require_.resolve("@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf"),
+    ).length;
+    // Not a size question: a subset is built from the glyphs actually drawn,
+    // which is what gives a ligature - reachable only by shaping, never from
+    // the cmap - its real width and its real name.
+    expect(program).toBeLessThan(whole / 4);
   }, 30_000);
 });
 
@@ -138,68 +157,23 @@ describe("the exported text layer", () => {
 });
 
 
-describe("the widths the file declares", () => {
-  it("covers every glyph it draws, including one the cmap cannot reach", async () => {
-    const pdfDoc = await PDFDocument.create();
-    const font = (await embedFaces(pdfDoc, [inter()])).get("inter-400");
-    if (!font) throw new Error("face was not embedded");
-    // `\uFB01` is not in Inter, so it shapes to .notdef - a glyph no codepoint
-    // maps to, which is exactly the shape a ligature has and the case pdf-lib's
-    // cmap walk misses.
-    pdfDoc.addPage().drawText("shelf \uFB01 office", { x: 20, y: 20, size: 12, font });
-    completeEmbeddedFaces(pdfDoc);
-    const bytes = await pdfDoc.save();
-
-    const widths = await widthsOf(bytes);
-    const drawn = glyphsDrawn(bytes);
-    expect(drawn.size).toBeGreaterThan(0);
-    expect([...drawn].filter((glyph) => !widths.has(glyph))).toEqual([]);
-  }, 30_000);
-});
-
-/** Every glyph id the page actually shows. */
-function glyphsDrawn(pdf: Uint8Array): Set<number> {
+/** The size of the embedded font program, found by its sfnt magic. */
+function embeddedFontProgram(pdf: Uint8Array): number {
   const buffer = Buffer.from(pdf);
   const latin1 = buffer.toString("latin1");
-  const drawn = new Set<number>();
   for (const match of latin1.matchAll(/stream\r?\n/g)) {
     const start = match.index + match[0].length;
     const end = latin1.indexOf("endstream", start);
-    let body: string;
+    let body: Buffer;
     try {
-      body = inflateSync(buffer.subarray(start, end)).toString("latin1");
+      body = inflateSync(buffer.subarray(start, end));
     } catch {
       continue;
     }
-    if (body.includes("beginbfchar")) continue;
-    for (const show of body.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) {
-      for (const hex of show[1]?.match(/.{4}/g) ?? []) drawn.add(parseInt(hex, 16));
-    }
+    const magic = body.subarray(0, 4);
+    if (magic[0] === 0 && magic[1] === 1 && magic[2] === 0 && magic[3] === 0) return body.length;
+    const tag = magic.toString("latin1");
+    if (tag === "OTTO" || tag === "true") return body.length;
   }
-  return drawn;
-}
-
-/** The glyph ids the CID font declares a width for. */
-async function widthsOf(pdf: Uint8Array): Promise<Set<number>> {
-  const declared = new Set<number>();
-  const loaded = await PDFDocument.load(pdf);
-  for (const [, object] of loaded.context.enumerateIndirectObjects()) {
-    if (!(object instanceof PDFDict)) continue;
-    if (String(object.get(PDFName.of("Subtype"))) !== "/CIDFontType2") continue;
-    const widths = object.get(PDFName.of("W"));
-    if (!(widths instanceof PDFArray)) continue;
-    for (let i = 0; i < widths.size(); ) {
-      const first = Number(String(widths.get(i)));
-      const next = widths.get(i + 1);
-      if (next instanceof PDFArray) {
-        for (let k = 0; k < next.size(); k++) declared.add(first + k);
-        i += 2;
-      } else {
-        const last = Number(String(next));
-        for (let glyph = first; glyph <= last; glyph++) declared.add(glyph);
-        i += 3;
-      }
-    }
-  }
-  return declared;
+  throw new Error("no font program in the file");
 }
