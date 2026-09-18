@@ -302,9 +302,13 @@ function describeFamily(option: FontFamilyOption | undefined): string {
     ...(holds(false, true) ? [] : ["italic"]),
     ...(holds(true, true) ? [] : ["bold italic"]),
   ];
-  return missing.length === 0
-    ? "Regular, bold, italic and bold italic available"
-    : `No ${missing.join(" or ")} face — drawn from the nearest one`;
+  if (missing.length === 0) return "Regular, bold, italic and bold italic available";
+  // "a or b or c" reads as a stutter; the last item takes the conjunction.
+  const named =
+    missing.length === 1
+      ? missing[0]
+      : `${missing.slice(0, -1).join(", ")} or ${missing[missing.length - 1]}`;
+  return `No ${named} face — drawn from the nearest one`;
 }
 
 function FamilySelect({

@@ -21,8 +21,16 @@ export const SYNTHETIC_ITALIC_SHEAR = 0.2126;
 /** A full weight step, the distance between a regular and a bold. */
 const FULL_WEIGHT_STEP = 300;
 
-/** Stroke width for a full step, as a fraction of the em. */
-const EMBOLDEN_RATIO = 0.028;
+/**
+ * Stroke width for a full weight step, as a fraction of the em.
+ *
+ * Measured rather than chosen: at 64px, Inter's regular stem is 5px and its
+ * bold stem is 10px, and a straddling stroke adds its whole width to a stem.
+ * So a full step is a shade under 0.08em, and this lands a designed bold's
+ * weight rather than the half-measure a smaller number gives — which reads as
+ * regular text beside the real thing.
+ */
+const EMBOLDEN_RATIO = 0.07;
 
 /**
  * The stroke that stands in for the missing weight, in the same units as the
@@ -71,6 +79,11 @@ export function paintText(
   const { synthesis, sizePx, color } = style;
   const bolder = emboldenWidth(synthesis, sizePx);
   const lean = synthesis?.style?.to === "italic" ? SYNTHETIC_ITALIC_SHEAR : 0;
+
+  // Set here rather than left to the caller: a run painted with whatever fill
+  // the context happened to hold is the colour of the last thing drawn, which
+  // is how this arrived as outlined text on a pale ground.
+  ctx.fillStyle = color;
 
   if (bolder === 0 && lean === 0) {
     ctx.fillText(text, x, baseline);
