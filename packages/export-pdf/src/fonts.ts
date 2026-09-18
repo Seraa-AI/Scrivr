@@ -6,8 +6,8 @@
 import fontkit from "@pdf-lib/fontkit";
 import {
   PDFDocument,
+  PDFFont,
   StandardFonts,
-  type PDFFont,
 } from "pdf-lib";
 import type { DocumentLayout, FontResolutionId, FontResource } from "@scrivr/core";
 import type { PdfFontRegistry } from "./context";
@@ -131,6 +131,90 @@ function webFontContainer(bytes: Uint8Array): string | null {
   return null;
 }
 
+/** The parts of a fontkit glyph the PDF's widths and text layer are built from. */
+interface GlyphLike {
+  id: number;
+  advanceWidth: number;
+  codePoints: readonly number[];
+}
+
+function isGlyphLike(value: unknown): value is GlyphLike {
+  if (typeof value !== "object" || value === null) return false;
+  if (!("id" in value) || !("advanceWidth" in value) || !("codePoints" in value)) return false;
+  return (
+    typeof value.id === "number" &&
+    typeof value.advanceWidth === "number" &&
+    Array.isArray(value.codePoints)
+  );
+}
+
+/**
+ * The glyph list pdf-lib will build this face's widths and text layer from,
+ * alongside every glyph fontkit has actually built for it.
+ */
+function glyphLedger(font: PDFFont): { listed: GlyphLike[]; built: GlyphLike[] } | null {
+  const embedder = embedderOf(font);
+  if (!embedder) return null;
+  if (!("glyphCache" in embedder) || !("font" in embedder)) return null;
+  const cache: unknown = embedder.glyphCache;
+  if (typeof cache !== "object" || cache === null || !("access" in cache)) return null;
+  if (typeof cache.access !== "function") return null;
+  const listed: unknown = cache.access.call(cache);
+  if (!Array.isArray(listed) || !listed.every(isGlyphLike)) return null;
+
+  const inner: unknown = embedder.font;
+  if (typeof inner !== "object" || inner === null || !("_glyphs" in inner)) return null;
+  const built: unknown = inner._glyphs;
+  if (typeof built !== "object" || built === null) return null;
+  return { listed, built: Object.values(built).filter(isGlyphLike) };
+}
+
+/**
+ * Give every glyph the pages actually drew a width and a name, once drawing is
+ * over.
+ *
+ * pdf-lib derives both from the font's cmap, so a glyph that only shaping can
+ * reach - every ligature - gets neither, and a reader falls back to a one-em
+ * default width for it. Aptos sets `ff` at 0.67em, so `Effective` painted as
+ * `Eff ective` and overran the word after it.
+ *
+ * Embedding a subset would fix it at the source, because a subset is built from
+ * the glyphs used rather than the cmap. The bundled subsetter cannot be trusted
+ * with that: it silently drops the outlines of fonts whose `loca` is in the
+ * long format, leaving correct advances around blank paper. Extending the list
+ * pdf-lib is about to read is the narrow fix, and the shaped glyphs carry their
+ * own codepoints, so `ff` copies back out as `ff`.
+ *
+ * Must run after the last text is drawn and before the document is saved, which
+ * is when pdf-lib reads the list.
+ */
+export function completeEmbeddedFaces(pdfDoc: PDFDocument): void {
+  for (const font of embeddedFontsOf(pdfDoc)) {
+    const ledger = glyphLedger(font);
+    if (!ledger) continue;
+    const listed = new Set(ledger.listed.map((glyph) => glyph.id));
+    let added = false;
+    for (const glyph of ledger.built) {
+      if (listed.has(glyph.id)) continue;
+      ledger.listed.push(glyph);
+      listed.add(glyph.id);
+      added = true;
+    }
+    // pdf-lib reads the list in order, starting a new width range wherever the
+    // ids stop being consecutive.
+    if (added) ledger.listed.sort((a, b) => a.id - b.id);
+  }
+}
+
+/** Every face embedded in this document, which pdf-lib tracks but does not expose. */
+function embeddedFontsOf(pdfDoc: PDFDocument): PDFFont[] {
+  const candidate: unknown = pdfDoc;
+  if (typeof candidate !== "object" || candidate === null) return [];
+  if (!("fonts" in candidate)) return [];
+  const fonts: unknown = candidate.fonts;
+  return Array.isArray(fonts) ? fonts.filter((font) => font instanceof PDFFont) : [];
+}
+
 /** The parts of fontkit's font a cmap walk needs, without depending on it. */
 interface CmapWalkable {
   characterSet: readonly number[];
@@ -150,15 +234,23 @@ function isGlyphAlias(codePoint: number): boolean {
   );
 }
 
-function cmapWalkable(font: PDFFont): CmapWalkable | null {
-  // Widened first because `embedder` is declared private: the check below is a
-  // runtime one about a shape pdf-lib does not promise, not a cast past the
-  // type system's opinion of it.
+/**
+ * A face's embedder, which pdf-lib declares private. Widened through `unknown`
+ * because the checks that follow are runtime ones about a shape pdf-lib does
+ * not promise, not casts past the type system's opinion of it.
+ */
+function embedderOf(font: PDFFont): object | null {
   const candidate: unknown = font;
   if (typeof candidate !== "object" || candidate === null) return null;
   if (!("embedder" in candidate)) return null;
   const embedder: unknown = candidate.embedder;
   if (typeof embedder !== "object" || embedder === null) return null;
+  return embedder;
+}
+
+function cmapWalkable(font: PDFFont): CmapWalkable | null {
+  const embedder = embedderOf(font);
+  if (!embedder) return null;
   if (!("font" in embedder)) return null;
   const inner: unknown = embedder.font;
   if (typeof inner !== "object" || inner === null) return null;

@@ -11,9 +11,9 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { inflateSync } from "node:zlib";
-import { PDFDocument } from "pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFName } from "pdf-lib";
 import type { FontResource } from "@scrivr/core";
-import { embedFaces } from "../fonts";
+import { completeEmbeddedFaces, embedFaces } from "../fonts";
 
 const require_ = createRequire(import.meta.url);
 
@@ -137,3 +137,69 @@ describe("the exported text layer", () => {
   }, 30_000);
 });
 
+
+describe("the widths the file declares", () => {
+  it("covers every glyph it draws, including one the cmap cannot reach", async () => {
+    const pdfDoc = await PDFDocument.create();
+    const font = (await embedFaces(pdfDoc, [inter()])).get("inter-400");
+    if (!font) throw new Error("face was not embedded");
+    // `\uFB01` is not in Inter, so it shapes to .notdef - a glyph no codepoint
+    // maps to, which is exactly the shape a ligature has and the case pdf-lib's
+    // cmap walk misses.
+    pdfDoc.addPage().drawText("shelf \uFB01 office", { x: 20, y: 20, size: 12, font });
+    completeEmbeddedFaces(pdfDoc);
+    const bytes = await pdfDoc.save();
+
+    const widths = await widthsOf(bytes);
+    const drawn = glyphsDrawn(bytes);
+    expect(drawn.size).toBeGreaterThan(0);
+    expect([...drawn].filter((glyph) => !widths.has(glyph))).toEqual([]);
+  }, 30_000);
+});
+
+/** Every glyph id the page actually shows. */
+function glyphsDrawn(pdf: Uint8Array): Set<number> {
+  const buffer = Buffer.from(pdf);
+  const latin1 = buffer.toString("latin1");
+  const drawn = new Set<number>();
+  for (const match of latin1.matchAll(/stream\r?\n/g)) {
+    const start = match.index + match[0].length;
+    const end = latin1.indexOf("endstream", start);
+    let body: string;
+    try {
+      body = inflateSync(buffer.subarray(start, end)).toString("latin1");
+    } catch {
+      continue;
+    }
+    if (body.includes("beginbfchar")) continue;
+    for (const show of body.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) {
+      for (const hex of show[1]?.match(/.{4}/g) ?? []) drawn.add(parseInt(hex, 16));
+    }
+  }
+  return drawn;
+}
+
+/** The glyph ids the CID font declares a width for. */
+async function widthsOf(pdf: Uint8Array): Promise<Set<number>> {
+  const declared = new Set<number>();
+  const loaded = await PDFDocument.load(pdf);
+  for (const [, object] of loaded.context.enumerateIndirectObjects()) {
+    if (!(object instanceof PDFDict)) continue;
+    if (String(object.get(PDFName.of("Subtype"))) !== "/CIDFontType2") continue;
+    const widths = object.get(PDFName.of("W"));
+    if (!(widths instanceof PDFArray)) continue;
+    for (let i = 0; i < widths.size(); ) {
+      const first = Number(String(widths.get(i)));
+      const next = widths.get(i + 1);
+      if (next instanceof PDFArray) {
+        for (let k = 0; k < next.size(); k++) declared.add(first + k);
+        i += 2;
+      } else {
+        const last = Number(String(next));
+        for (let glyph = first; glyph <= last; glyph++) declared.add(glyph);
+        i += 3;
+      }
+    }
+  }
+  return declared;
+}
