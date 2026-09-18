@@ -51,6 +51,7 @@ export { importDocx } from "./import/import";
 export type { DocxImportResult, DocxImportOptions } from "./import/import";
 
 export { DocxImport } from "./import/DocxImport";
+export { applyImportedDocument } from "./import/applyDocument";
 
 export { DocxImportError } from "./import/error";
 

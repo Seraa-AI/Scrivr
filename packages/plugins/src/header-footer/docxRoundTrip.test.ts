@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { unzipSync, zipSync, strToU8, strFromU8 } from "fflate";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { exportDocx, importDocx } from "@scrivr/docx";
+import { applyImportedDocument, exportDocx, importDocx } from "@scrivr/docx";
 import { HeaderFooter } from "./HeaderFooter";
 import { getHeaderFooterPolicy } from "./getPolicy";
 import type { HeaderFooterContent, HeaderFooterPolicy } from "./types";
@@ -163,5 +163,69 @@ describe("header/footer DOCX round-trip", () => {
     const { bytes } = await exportDocx(out);
     const { doc } = await importDocx(back, bytes);
     expect(getHeaderFooterPolicy(doc)).toBeNull();
+  });
+});
+
+/**
+ * Importing is two steps, and the second one is where the chrome was lost.
+ * `importDocx` reconstructs the policy onto the document it returns; putting
+ * that document into an editor has to carry it across, or a file's headers
+ * parse perfectly and then land nowhere a reader can see.
+ */
+describe("putting an imported document into an editor", () => {
+  it("keeps the header and footer the file described", async () => {
+    const source = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+    source.setContent({
+      type: "doc",
+      attrs: {
+        headerFooter: {
+          enabled: true,
+          differentFirstPage: false,
+          differentOddEven: false,
+          defaultHeader: { content: para("MASTER SERVICES AGREEMENT") },
+          defaultFooter: { content: para("Confidential") },
+        },
+      },
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Body" }] }],
+    });
+    const { bytes } = await exportDocx(source);
+
+    const target = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+    const { doc } = await importDocx(target, bytes);
+    applyImportedDocument(target, doc);
+
+    const policy = getHeaderFooterPolicy(target.getState().doc);
+    expect(policy?.enabled).toBe(true);
+    expect(JSON.stringify(policy?.defaultHeader)).toContain("MASTER SERVICES AGREEMENT");
+    expect(JSON.stringify(policy?.defaultFooter)).toContain("Confidential");
+    // The body still arrives too — the attributes must not cost the content.
+    expect(target.getState().doc.textContent).toContain("Body");
+  });
+
+  it("clears chrome the incoming file does not have", async () => {
+    const plain = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+    plain.setContent({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Plain" }] }],
+    });
+    const { bytes } = await exportDocx(plain);
+
+    const target = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+    target.setContent({
+      type: "doc",
+      attrs: {
+        headerFooter: {
+          enabled: true,
+          differentFirstPage: false,
+          differentOddEven: false,
+          defaultHeader: { content: para("Stale") },
+        },
+      },
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Old" }] }],
+    });
+    const { doc } = await importDocx(target, bytes);
+    applyImportedDocument(target, doc);
+
+    expect(getHeaderFooterPolicy(target.getState().doc)).toBeNull();
   });
 });
