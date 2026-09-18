@@ -27,7 +27,7 @@ const standard = await embedStandardFonts(await PDFDocument.create());
  * exists on one developer's platform makes them pass there and nowhere else.
  */
 const fontPath = createRequire(import.meta.url).resolve(
-  "@fontsource/inter/files/inter-latin-400-normal.woff2",
+  "@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf",
 );
 const realFontBytes = (): ArrayBuffer => {
   const b = readFileSync(fontPath);

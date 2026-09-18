@@ -94,7 +94,15 @@ export async function embedFaces(
   await Promise.all(
     [...wanted.values()].map(async (resource) => {
       try {
-        const font = await pdfDoc.embedFont(new Uint8Array(await resource.bytes()));
+        const bytes = new Uint8Array(await resource.bytes());
+        const container = webFontContainer(bytes);
+        if (container) {
+          throw new Error(
+            `${container} is a web font container, and a PDF can only carry the font program inside it. ` +
+              `Register this face as .ttf or .otf bytes.`,
+          );
+        }
+        const font = await pdfDoc.embedFont(bytes);
         nameEveryGlyph(font);
         embedded.set(resource.id, font);
       } catch (cause) {
@@ -103,6 +111,24 @@ export async function embedFaces(
     }),
   );
   return embedded;
+}
+
+/**
+ * The name of the web font container these bytes are wrapped in, or null when
+ * they are already a font program.
+ *
+ * WOFF and WOFF2 compress a font for the web. fontkit unwraps them, so a face
+ * registered that way measures and shapes correctly and nothing upstream
+ * notices - but pdf-lib writes the bytes it was given straight into
+ * `FontFile2`, where a reader expects the font program itself. The result is a
+ * file that renders as a row of dots in one viewer and as a substituted
+ * typeface in another, at coordinates measured from neither.
+ */
+function webFontContainer(bytes: Uint8Array): string | null {
+  const magic = String.fromCharCode(...bytes.subarray(0, 4));
+  if (magic === "wOFF") return "WOFF";
+  if (magic === "wOF2") return "WOFF2";
+  return null;
 }
 
 /** The parts of fontkit's font a cmap walk needs, without depending on it. */

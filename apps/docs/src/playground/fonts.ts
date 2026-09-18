@@ -17,12 +17,16 @@
  * embedding. A Latin-only file makes a document that turns out to contain
  * Cyrillic render in something nobody chose. One file per face, every script
  * in it, costs ~110 KB and removes the question.
+ *
+ * Every face is `.ttf` rather than the smaller `.woff2` the web would prefer,
+ * because the same bytes are embedded in the exported PDF and a PDF can only
+ * carry a font program, not a web container around one.
  */
 import { DefaultFontProvider, type FontResource } from "@scrivr/react";
-import interRegular from "inter-ui/web/Inter-Regular.woff2?url";
-import interItalic from "inter-ui/web/Inter-Italic.woff2?url";
-import interBold from "inter-ui/web/Inter-Bold.woff2?url";
-import interBoldItalic from "inter-ui/web/Inter-BoldItalic.woff2?url";
+import interRegular from "@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf?url";
+import interItalic from "@expo-google-fonts/inter/400Regular_Italic/Inter_400Regular_Italic.ttf?url";
+import interBold from "@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf?url";
+import interBoldItalic from "@expo-google-fonts/inter/700Bold_Italic/Inter_700Bold_Italic.ttf?url";
 import serifRegular from "@expo-google-fonts/source-serif-4/400Regular/SourceSerif4_400Regular.ttf?url";
 import serifItalic from "@expo-google-fonts/source-serif-4/400Regular_Italic/SourceSerif4_400Regular_Italic.ttf?url";
 import serifBold from "@expo-google-fonts/source-serif-4/700Bold/SourceSerif4_700Bold.ttf?url";
@@ -58,10 +62,10 @@ const face = (
 });
 
 const inter = {
-  regular: face("Inter", interRegular, 400, "normal", "woff2"),
-  italic: face("Inter", interItalic, 400, "italic", "woff2"),
-  bold: face("Inter", interBold, 700, "normal", "woff2"),
-  boldItalic: face("Inter", interBoldItalic, 700, "italic", "woff2"),
+  regular: face("Inter", interRegular, 400, "normal", "ttf"),
+  italic: face("Inter", interItalic, 400, "italic", "ttf"),
+  bold: face("Inter", interBold, 700, "normal", "ttf"),
+  boldItalic: face("Inter", interBoldItalic, 700, "italic", "ttf"),
 };
 
 /**

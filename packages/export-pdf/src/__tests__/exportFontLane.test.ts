@@ -39,7 +39,7 @@ HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, id: 
 
 const require_ = createRequire(import.meta.url);
 const interBytes = (): ArrayBuffer => {
-  const b = readFileSync(require_.resolve("@fontsource/inter/files/inter-latin-400-normal.woff2"));
+  const b = readFileSync(require_.resolve("@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf"));
   return new Uint8Array(b).buffer;
 };
 

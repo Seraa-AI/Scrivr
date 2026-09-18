@@ -27,7 +27,7 @@ const inter = (): FontResource => ({
   family: "Inter",
   weight: 400,
   style: "normal",
-  bytes: async () => new Uint8Array(readFileSync(require_.resolve("inter-ui/web/Inter-Regular.woff2"))).buffer,
+  bytes: async () => new Uint8Array(readFileSync(require_.resolve("@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf"))).buffer,
 });
 
 /**
@@ -63,10 +63,12 @@ function textLayers(pdf: Uint8Array): Map<number, string>[] {
 }
 
 /**
- * Shaping a word whose only quotes are double ones, which in Inter builds the
- * single-quote glyphs as a side effect. That is the whole trigger: fontkit
- * keeps the glyph objects it built first, and one built this way carries no
- * codepoint for pdf-lib to name it by.
+ * Measure `text`, then draw the quotes, and report the resulting text layer.
+ *
+ * The order is the trigger: shaping a word whose only quotes are double ones
+ * builds Inter's single-quote glyphs as a side effect, and fontkit keeps the
+ * glyph objects it built first - so one built that way carries no codepoint
+ * for pdf-lib to name it by.
  */
 function soleTextLayer(pdf: Uint8Array): Map<number, string> {
   const layers = textLayers(pdf);
@@ -76,44 +78,61 @@ function soleTextLayer(pdf: Uint8Array): Map<number, string> {
   return layer;
 }
 
-async function pdfAfterMeasuring(text: string): Promise<Uint8Array> {
+async function pdfAfterMeasuring(
+  text: string,
+): Promise<{ layer: Map<number, string>; idOf: (char: string) => number }> {
   const pdfDoc = await PDFDocument.create();
   const embedded = await embedFaces(pdfDoc, [inter()]);
   const font = embedded.get("inter-400");
   if (!font) throw new Error("face was not embedded");
   font.widthOfTextAtSize(text, 12);
-  pdfDoc.addPage().drawText("Party’s ‘aside’", { x: 20, y: 20, size: 12, font });
-  return pdfDoc.save();
+  const page = pdfDoc.addPage();
+  page.drawText("Party’s ‘aside’ \"and\" don't", { x: 20, y: 20, size: 12, font });
+
+  // Asked of the font rather than hardcoded, so the assertions below say what
+  // the page actually drew instead of what one build of Inter numbers it.
+  const idOf = (char: string): number => {
+    const id = parseInt(font.encodeText(char).toString().slice(1, 5), 16);
+    if (!Number.isFinite(id)) throw new Error(`no glyph for ${char}`);
+    return id;
+  };
+  return { layer: soleTextLayer(await pdfDoc.save()), idOf };
 }
 
-// The ids Inter gives these glyphs.
-const QUOTE_LEFT = 1482;
-const QUOTE_RIGHT = 1483;
-const APOSTROPHE = 1484;
-const QUOTE_DOUBLE_LEFT = 1486;
+describe("embedding a face", () => {
+  it("refuses a web font container rather than writing one into the file", async () => {
+    const woff2: FontResource = {
+      ...inter(),
+      bytes: async () =>
+        new Uint8Array(readFileSync(require_.resolve("inter-ui/web/Inter-Regular.woff2"))).buffer,
+    };
+    // Named, because the caller has to know which face to re-register.
+    await expect(embedFaces(await PDFDocument.create(), [woff2])).rejects.toThrow(/Inter/);
+  }, 30_000);
+});
 
 describe("the exported text layer", () => {
   it("names every glyph it embeds", async () => {
-    const layer = soleTextLayer(await pdfAfterMeasuring("the “services”,"));
+    const { layer } = await pdfAfterMeasuring("the “services”,");
     const unnamed = [...layer].filter(([, text]) => text === "").map(([glyph]) => glyph);
     expect(unnamed).toEqual([]);
   }, 30_000);
 
   it("gives a copied apostrophe back as an apostrophe", async () => {
-    const layer = soleTextLayer(await pdfAfterMeasuring("the “services”,"));
+    const { layer, idOf } = await pdfAfterMeasuring("the “services”,");
     // `’` shares its glyph with `ʼ`, and must still come back as the one the
     // document was written with.
-    expect(layer.get(QUOTE_RIGHT)).toBe("’");
-    expect(layer.get(QUOTE_LEFT)).toBe("‘");
-    expect(layer.get(APOSTROPHE)).toBe("'");
-    expect(layer.get(QUOTE_DOUBLE_LEFT)).toBe("“");
+    for (const char of ["’", "‘", "'", "“", "”"]) {
+      expect(layer.get(idOf(char))).toBe(char);
+    }
   }, 30_000);
 
   it("names glyphs the same way whatever was measured first", async () => {
-    const straightFirst = soleTextLayer(await pdfAfterMeasuring("don't \"do\" it"));
-    const curlyFirst = soleTextLayer(await pdfAfterMeasuring("don’t “do” it"));
-    for (const glyph of [QUOTE_LEFT, QUOTE_RIGHT, APOSTROPHE, QUOTE_DOUBLE_LEFT]) {
-      expect(curlyFirst.get(glyph)).toBe(straightFirst.get(glyph));
+    const straightFirst = await pdfAfterMeasuring("don't \"do\" it");
+    const curlyFirst = await pdfAfterMeasuring("don’t “do” it");
+    for (const char of ["’", "‘", "'", "“"]) {
+      const glyph = straightFirst.idOf(char);
+      expect(curlyFirst.layer.get(glyph)).toBe(straightFirst.layer.get(glyph));
     }
   }, 30_000);
 });

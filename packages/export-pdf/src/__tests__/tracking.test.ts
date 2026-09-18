@@ -67,7 +67,7 @@ describe("fitting a run to its measured width", () => {
     // spread only half the difference and leave the run short.
     const bytes = readFileSync(
       createRequire(import.meta.url).resolve(
-        "@fontsource/inter/files/inter-latin-400-normal.woff2",
+        "@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf",
       ),
     );
     const doc = await PDFDocument.create();

@@ -45,6 +45,11 @@ export interface FontResource extends FontKey {
    */
   id: string;
   bytes(): Promise<ArrayBuffer>;
+  /**
+   * `woff` and `woff2` are web containers: a browser unwraps them, but a PDF
+   * carries a font program and cannot. Register a face as `ttf` or `otf` for
+   * the same bytes to serve both measurement and export.
+   */
   format?: "woff2" | "woff" | "ttf" | "otf";
   /** Holding bytes is not permission to embed them. */
   embedding?: { allowed: boolean; source?: "font-metadata" | "caller" };
