@@ -94,16 +94,81 @@ export async function embedFaces(
   await Promise.all(
     [...wanted.values()].map(async (resource) => {
       try {
-        embedded.set(
-          resource.id,
-          await pdfDoc.embedFont(new Uint8Array(await resource.bytes())),
-        );
+        const font = await pdfDoc.embedFont(new Uint8Array(await resource.bytes()));
+        nameEveryGlyph(font);
+        embedded.set(resource.id, font);
       } catch (cause) {
         throw new Error(`Cannot embed font ${resource.family}`, { cause });
       }
     }),
   );
   return embedded;
+}
+
+/** The parts of fontkit's font a cmap walk needs, without depending on it. */
+interface CmapWalkable {
+  characterSet: readonly number[];
+  glyphForCodePoint(codePoint: number): unknown;
+}
+
+/**
+ * A codepoint that exists to alias a glyph rather than to be typed: modifier
+ * letters, the private use area, presentation forms, variation selectors.
+ */
+function isGlyphAlias(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x02b0 && codePoint <= 0x02ff) ||
+    (codePoint >= 0xe000 && codePoint <= 0xf8ff) ||
+    (codePoint >= 0xfb00 && codePoint <= 0xfdff) ||
+    (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
+  );
+}
+
+function cmapWalkable(font: PDFFont): CmapWalkable | null {
+  // Widened first because `embedder` is declared private: the check below is a
+  // runtime one about a shape pdf-lib does not promise, not a cast past the
+  // type system's opinion of it.
+  const candidate: unknown = font;
+  if (typeof candidate !== "object" || candidate === null) return null;
+  if (!("embedder" in candidate)) return null;
+  const embedder: unknown = candidate.embedder;
+  if (typeof embedder !== "object" || embedder === null) return null;
+  if (!("font" in embedder)) return null;
+  const inner: unknown = embedder.font;
+  if (typeof inner !== "object" || inner === null) return null;
+  if (!("characterSet" in inner) || !("glyphForCodePoint" in inner)) return null;
+  const { characterSet, glyphForCodePoint } = inner;
+  if (!Array.isArray(characterSet)) return null;
+  if (typeof glyphForCodePoint !== "function") return null;
+  return {
+    characterSet,
+    glyphForCodePoint: (codePoint) => glyphForCodePoint.call(inner, codePoint),
+  };
+}
+
+/**
+ * Give every glyph the codepoint it will be named by in the PDF's text layer,
+ * before any text is measured.
+ *
+ * fontkit caches glyph objects by id and keeps whichever one was built first,
+ * codepoints and all. Shaping can build a glyph without any - measuring
+ * `\u201Cquoted\u201D` in Inter is enough to create the single-quote glyphs that
+ * way - and pdf-lib then writes an empty `ToUnicode` entry for it. The glyph
+ * still paints, so the page looks right while copying or searching the text
+ * silently drops the character. Claiming the cache from the cmap first makes
+ * the text layer follow the font rather than whatever happened to be measured
+ * first. Aliases go last, so a glyph shared by several codepoints is named by
+ * the one a reader would type: `\u2019` rather than `\u02BC`.
+ */
+function nameEveryGlyph(font: PDFFont): void {
+  const walkable = cmapWalkable(font);
+  if (!walkable) return;
+  for (const codePoint of walkable.characterSet) {
+    if (!isGlyphAlias(codePoint)) walkable.glyphForCodePoint(codePoint);
+  }
+  for (const codePoint of walkable.characterSet) {
+    if (isGlyphAlias(codePoint)) walkable.glyphForCodePoint(codePoint);
+  }
 }
 
 /**
