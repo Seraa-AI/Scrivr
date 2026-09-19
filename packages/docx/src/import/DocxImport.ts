@@ -24,7 +24,7 @@
 
 import { Extension } from "@scrivr/core";
 import type { IBaseEditor } from "@scrivr/core";
-import type { Node as PmNode } from "@scrivr/core/pm";
+import { applyImportedDocument } from "./applyDocument";
 import { importDocx as runImportDocx } from "./import";
 import type { DocxImportOptions } from "./import";
 
@@ -97,7 +97,7 @@ export const DocxImport = Extension.create<DocxImportExtensionOptions>({
                   const suffix = d.nodeType ? ` (${d.nodeType})` : "";
                   console.warn(`${prefix}${suffix} — ${d.message}`);
                 }
-                replaceDocument(editor, doc);
+                applyImportedDocument(editor, doc);
               })
               .catch((err: unknown) => {
                 console.error("[DocxImport] import failed:", err);
@@ -189,17 +189,6 @@ function openFilePicker(): Promise<File | undefined> {
     document.body.appendChild(input);
     input.click();
   });
-}
-
-/**
- * Replace the editor's entire doc content with `newDoc`. Mirrors the
- * pattern used by the collab YBinding and HeaderFooter surface — a single
- * `replaceWith` against the root range.
- */
-function replaceDocument(editor: IBaseEditor, newDoc: PmNode): void {
-  const state = editor.getState();
-  const tr = state.tr.replaceWith(0, state.doc.content.size, newDoc.content);
-  editor.applyTransaction(tr);
 }
 
 declare module "@scrivr/core" {
