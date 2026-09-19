@@ -1,5 +1,201 @@
 # @scrivr/export-docx
 
+## 1.0.21
+
+### Patch Changes
+
+- ca32553: Import hyperlinks from DOCX.
+
+  `Link` declared how a link is written to a .docx but not how one is read back,
+  so nothing claimed the hyperlink the parser produced. Every link in an imported
+  document arrived as ordinary text — a file round-tripped through Word came back
+  with all of its links flattened, and the only trace was a diagnostic no UI
+  shows.
+
+  `Link.addImports()` now claims it, resolving the relationship through the
+  part's own rels so a link in a header resolves against that header. A target
+  and a `w:anchor` are joined the way Word resolves them (`target#anchor`), an
+  anchor alone becomes a fragment, and a relationship that does not resolve falls
+  back to the anchor rather than losing both. Targets pass `safeUrl`: a .docx is
+  untrusted input and its rels are an ingestion path like paste. A link that
+  cannot be kept is reported rather than silently dropped.
+
+  **Behaviour change for `importDocx`.** An unclaimed hyperlink previously
+  produced an `unsupported-mark` diagnostic, and that code is in the fatal set —
+  so `{ unsupported: "throw" }` rejected _any_ document containing a link.
+  Such documents now import. A link whose target is unusable still reports
+  `unsupported-mark`, so the policy keeps its meaning for real losses.
+
+  An extension that already registered its own `hyperlink` mark transform now
+  collides with the built-in and depends on registration order; an explicit
+  `importDocx(…, { overrides })` still takes precedence.
+
+- 76de760: Keep a DOCX's headers and footers when the import lands in an editor.
+
+  Importing is two steps, and the second one lost them. `importDocx` reconstructs
+  the header/footer policy from the section's references and returns it on
+  `doc.attrs`; putting that document into an editor replaced only the content, so
+  every attribute the import had settled — the chrome, the final section's
+  settings — was parsed correctly and then dropped. A file's headers survived
+  every step but the last.
+
+  `applyImportedDocument(editor, doc)` is now exported, and the
+  `importDocxFromFile` command uses it. Callers who apply an imported document
+  themselves should use it rather than replacing the content directly, which is
+  where the attributes go missing.
+
+- b15c7ea: The List extension reads the lists it writes.
+
+  OOXML has no list element — a list is a run of paragraphs sharing a `<w:numPr>`
+  — and reassembling that nesting lived in `@scrivr/docx` rather than on the
+  extension that declares `bulletList`, `orderedList` and `listItem`. The walker
+  went further than not moving it: a registered `list` handler was skipped
+  outright, so the extension could not have owned this even by declaring it.
+
+  `List.addImports()` owns it now, reading each item's children through
+  `ctx.walkBlocks` so whatever owns a paragraph or a table inside a list item
+  still renders it. Lists were the last node handler living outside its
+  extension.
+
+  **Behaviour change for a kit without lists.** Such a document lost its list
+  content before and still does, but the diagnostic changes from
+  `schema-missing-list` to `unsupported-block`, which is in the fatal set — so
+  `importDocx(…, { unsupported: "throw" })` now rejects a file whose lists cannot
+  be modelled instead of accepting it with the content quietly gone.
+
+- 76de760: Importing a DOCX into a document with track changes on no longer rewrites it as one giant edit.
+
+  A load is not an authored edit, but nothing said so. Track changes saw the
+  whole outgoing document deleted and the whole incoming one inserted, marked
+  both, and produced content a `doc` node cannot hold. `applyImportedDocument`
+  now marks the transaction as a load, on both the generic `initialContent` key
+  and Track Changes' own skip action.
+
+  Track changes also reads that marker off a transaction a plugin appended in
+  response to the load — pagination and collaboration bookkeeping both append
+  one. It was looking for ProseMirror's original under `appendTransaction`;
+  the key is `appendedTransaction`, so it had never found one, and four
+  conditions that consult it had never fired.
+
+- a6e9938: Copy a table, and get a table back. Pasting one used to keep the rows and cells
+  and drop everything that made it a particular table: `colspan` and `rowspan`
+  collapsed to single cells, column widths, alignment, and cell shading were all
+  discarded, and a Word table's merges arrived as ragged rows. Scrivr's own copies
+  came back the same way, so a table could not survive a round trip through the
+  editor that produced it.
+
+  Table markup now translates in both directions. `gridSpan`, column widths,
+  horizontal and vertical alignment, and cell fill are read on paste and written
+  on copy, so a table pasted from Word or Google Docs keeps its shape, and one
+  copied out of Scrivr arrives in them as the table it was — bar `hMerge`, which
+  neither Word nor HTML states separately from a span, and cell alignment, which
+  round-trips through the clipboard but is not yet honoured by layout, PDF, or
+  DOCX.
+
+  Vertical merges needed the translation to happen before parsing. HTML omits the
+  cells a `rowspan` covers, while the schema keeps a real cell per row — and once
+  ProseMirror has read the markup, a covered row is merely short, with no way to
+  tell which columns it is short by. Pasted markup is therefore rewritten into one
+  cell per row first, and collapsed back to `rowspan` on the way out.
+
+  - **`@scrivr/core`** — new extension hook `addPasteHtmlTransforms()`, for
+    rewriting pasted HTML before it is parsed. The existing `addPasteTransforms()`
+    runs on the parsed slice, which is too late for markup whose meaning lives in
+    the tree shape. `PasteHtmlTransform` is exported alongside `PasteTransform`.
+  - **`@scrivr/core`** — a table cell's `background-color` survives paste. Pasted
+    styles are stripped of incidental background colours, which was right for text
+    spans and wrong for a cell, whose fill is document content.
+  - **`@scrivr/core`** — a cell's fill is only ever painted, so only a colour is
+    accepted into the model: `url(...)`, `var(...)`, and other non-colour values
+    are dropped rather than stored.
+  - **`@scrivr/core`** — the integrity pass now stores the `gridSpan` readers
+    already derive, so a fractional span becomes its floor rather than 1. Every
+    reader now derives it in one place, so the layout, the exporters, and the
+    table map can no longer disagree about what a malformed span means.
+  - **`@scrivr/core`** — cell shading is exported to PDF, which drew borders and
+    text but never a fill.
+  - **`@scrivr/core`** — cell shading survives DOCX export whatever spelling the
+    browser gave it. Only six hex digits were accepted, while Chrome's CSSOM
+    hands back `rgb(...)`, so a pasted fill was kept on screen and dropped from
+    the file.
+
+  - **`@scrivr/core`** — vertical merges are bounded by the rows their row group
+    actually has, independently of the column allocation limit, so a merge longer
+    than 64 rows survives a copy. Span attributes are read the way HTML parses a
+    non-negative integer, so `rowspan="1e3"` is one row rather than the whole
+    group.
+  - **`@scrivr/core`** — one parser now says what a CSS colour means, wherever a
+    colour crosses a boundary. It resolves named colours, `hsl()`, space-separated
+    syntax and alpha without a DOM, so a document exported on a server means the
+    same thing as one exported in a browser.
+  - **`@scrivr/core`** — a cell fill is validated once, where every lane reads it,
+    rather than only on the paste path. A fill arriving from DOCX import, collab
+    or `setContent` can no longer reach the canvas as an unpaintable value, which
+    used to leave the previous cell's colour on the brush and paint two cells the
+    same.
+  - **`@scrivr/core`** — text colour survives DOCX export whatever its spelling.
+    `cssColorToDocxHex` read hex and comma-form `rgb()` only, so a `color: red`
+    mark — the literal a paste keeps — was dropped with a diagnostic while a cell
+    filled `red` exported correctly in the same document.
+  - **`@scrivr/export-pdf`** — a text colour that is not hex no longer exports as
+    black, and no longer crashes the export. `parseHexColor("red")` produced `NaN`
+    channels, which pdf-lib throws on; both PDF colour helpers now read the same
+    literals the rest of the editor does. `parseHexColor` is deprecated in favour
+    of `parseCssColor`.
+  - **`@scrivr/docx`** — a cell span a file claims is bounded on import, as it
+    already was on paste. A `<w:gridSpan w:val="100000"/>` would otherwise become
+    a real cell in every row of the document when the grid was padded.
+  - **`@scrivr/core`** — a translucent colour is composited onto the page for
+    formats that have no alpha, instead of being written at full strength. A 40%
+    yellow highlight exports as the colour a reader sees.
+
+- f2d7bbe: **A table's DOCX import moves to the extension that owns tables**
+
+  Turning a parsed `<w:tbl>` into nodes was built into `@scrivr/docx`, while
+  writing one lived on the Table extension. Both directions describe the same
+  thing — what a table _is_ — so splitting them meant no single place answered the
+  question, and an extension that could not read a file into the nodes it defines
+  looked like a feature that was never built.
+
+  `Table.addImports()` now contributes the block handler, next to the
+  `addExports()` it already had. Parsing the OOXML into an intermediate block
+  stays in `@scrivr/docx`, as it does for every other node.
+
+  - **`@scrivr/core`** — `DocxImportContext` gains `walkBlocks(blocks)`, which
+    transforms nested blocks through the same handlers as the body. A contribution
+    owning a container node needs it: a table's cells hold ordinary blocks, and
+    each of those belongs to whichever extension owns it, not to the table. This
+    is what kept tables in the package before — the recursion needed the handler
+    set, and a block transform had no way to ask for it.
+  - **`@scrivr/docx`** — a table in a file opened by an editor without the Table
+    extension is now reported as an unclaimed block (`unsupported-block`) and
+    dropped, the same as any other block nothing has registered for. It previously
+    reported `schema-missing-table` from the package's own table reader.
+
+    This changes what `unsupported: "throw"` does with such a file. A table the
+    document will not contain is content the file had and the import lost, so a
+    caller who asked to be told now is: the import rejects instead of quietly
+    dropping the table. Enabling the Table extension, or the default `"drop"`
+    policy, imports exactly as before.
+
+  - **`@scrivr/docx`** — `buildListNode` reads its items through the same
+    `walkBlocks`, so one rule states how a container's children are read.
+
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ca32553]
+- Updated dependencies [d04f392]
+- Updated dependencies [b15c7ea]
+- Updated dependencies [ddedb24]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ddedb24]
+- Updated dependencies [a6e9938]
+- Updated dependencies [f2d7bbe]
+  - @scrivr/core@1.0.21
+
 ## 1.0.20
 
 ### Patch Changes

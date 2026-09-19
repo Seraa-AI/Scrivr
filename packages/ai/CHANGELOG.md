@@ -1,5 +1,27 @@
 # @scrivr/ai
 
+## 1.0.21
+
+### Patch Changes
+
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ca32553]
+- Updated dependencies [d04f392]
+- Updated dependencies [b15c7ea]
+- Updated dependencies [76de760]
+- Updated dependencies [ddedb24]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ddedb24]
+- Updated dependencies [a6e9938]
+- Updated dependencies [f2d7bbe]
+  - @scrivr/core@1.0.21
+  - @scrivr/plugins@1.0.21
+  - @scrivr/export-semantic@1.0.21
+
 ## 1.0.20
 
 ### Patch Changes
