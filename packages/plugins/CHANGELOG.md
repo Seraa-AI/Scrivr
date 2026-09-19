@@ -1,5 +1,69 @@
 # @scrivr/plugins
 
+## 1.0.21
+
+### Patch Changes
+
+- 76de760: Importing a DOCX into a document with track changes on no longer rewrites it as one giant edit.
+
+  A load is not an authored edit, but nothing said so. Track changes saw the
+  whole outgoing document deleted and the whole incoming one inserted, marked
+  both, and produced content a `doc` node cannot hold. `applyImportedDocument`
+  now marks the transaction as a load, on both the generic `initialContent` key
+  and Track Changes' own skip action.
+
+  Track changes also reads that marker off a transaction a plugin appended in
+  response to the load — pagination and collaboration bookkeeping both append
+  one. It was looking for ProseMirror's original under `appendTransaction`;
+  the key is `appendedTransaction`, so it had never found one, and four
+  conditions that consult it had never fired.
+
+- ddedb24: A PDF handler draws in layout pixels, without pdf-lib.
+
+  `ctx.draw` gains `text`, `line` and `rect` beside `lines`. A rect can carry a
+  `border`, so a handler no longer reaches for pdf-lib to outline one; a rect
+  asking for neither a fill nor a border draws nothing, where pdf-lib would have
+  filled it black. Every coordinate is
+  layout pixels from the page's top-left and every colour is `Rgb`; the surface
+  converts to points and flips the axis, so a handler does neither. Out-of-range
+  channels and opacities are clamped rather than failing the export, and text is
+  reduced to what the resolved font can encode — a handler cannot do that itself,
+  since a font handle names a family rather than what the format made of it.
+
+  The built-in handlers, the table row renderer, the anchored-object painter and
+  the header/footer tokens all draw through it now; none of them reference pdf-lib or carry their own copy of
+  the conversion. Drawn output is unchanged, except that two greys are now
+  exactly `#9ca3af` instead of hand-transcribed approximations of it.
+
+  **Breaking for a handler that draws.** `ctx.draw.image(image, rect)` becomes
+  `ctx.draw.image({ x, y, width, height, image: { src } })`, taking a `src` the
+  document embedded rather than a pdf-lib object. `ctx.draw.imagePlaceholder(box,
+theme)` loses its second argument — the placeholder is painted from the
+  export's own palette now, so an anchored image and a block image on a page no
+  longer disagree about grey.
+
+  The spans, list markers and link annotations inside `draw.lines` still convert
+  inline; they hold resolved pdf-lib fonts and colours that the surface's
+  vocabulary deliberately cannot express.
+
+- ddedb24: Apply drawing-surface opacity to both fill and stroke for rectangles and
+  missing-image placeholders. An operation with zero opacity no longer leaves
+  a visible border when it draws a rectangle or an image cannot be resolved.
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ca32553]
+- Updated dependencies [d04f392]
+- Updated dependencies [b15c7ea]
+- Updated dependencies [ddedb24]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ddedb24]
+- Updated dependencies [a6e9938]
+- Updated dependencies [f2d7bbe]
+  - @scrivr/core@1.0.21
+
 ## 1.0.20
 
 ### Patch Changes
