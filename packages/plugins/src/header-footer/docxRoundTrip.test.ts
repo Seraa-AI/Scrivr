@@ -5,6 +5,8 @@ import { applyImportedDocument, exportDocx, importDocx } from "@scrivr/docx";
 import { HeaderFooter } from "./HeaderFooter";
 import { getHeaderFooterPolicy } from "./getPolicy";
 import type { HeaderFooterContent, HeaderFooterPolicy } from "./types";
+import { TrackChanges } from "../track-changes/TrackChanges";
+import { TrackChangesStatus } from "../track-changes/types";
 
 /**
  * Round-trip: a doc with headers/footers exports to DOCX, then imports back
@@ -227,5 +229,39 @@ describe("putting an imported document into an editor", () => {
     applyImportedDocument(target, doc);
 
     expect(getHeaderFooterPolicy(target.getState().doc)).toBeNull();
+  });
+
+  it("loads as authoritative content when track changes is enabled", async () => {
+    const source = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+    source.setContent({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Imported" }] }],
+    });
+    const { bytes } = await exportDocx(source);
+
+    const target = new ServerEditor({
+      extensions: [
+        StarterKit,
+        HeaderFooter,
+        TrackChanges.configure({ initialStatus: TrackChangesStatus.enabled }),
+      ],
+    });
+    target.setContent({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Old" }] }],
+    });
+    const { doc } = await importDocx(target, bytes);
+    applyImportedDocument(target, doc);
+
+    expect(target.getState().doc.textContent).toBe("Imported");
+    const trackedMarks: string[] = [];
+    target.getState().doc.descendants((node) => {
+      for (const mark of node.marks) {
+        if (mark.type.name === "trackedInsert" || mark.type.name === "trackedDelete") {
+          trackedMarks.push(mark.type.name);
+        }
+      }
+    });
+    expect(trackedMarks).toEqual([]);
   });
 });

@@ -17,7 +17,16 @@ import type { Node as PmNode } from "@scrivr/core/pm";
  */
 export function applyImportedDocument(editor: IBaseEditor, doc: PmNode): void {
   const state = editor.getState();
-  let tr = state.tr.replaceWith(0, state.doc.content.size, doc.content);
+  // Loading a document is not an authored edit. Track-changes consumes this
+  // established metadata to avoid turning the old document into one giant
+  // deletion and the imported document into one giant insertion.
+  let tr = state.tr
+    .replaceWith(0, state.doc.content.size, doc.content)
+    .setMeta("initialContent", true)
+    // This metadata key is Track Changes' public transaction protocol. Keep
+    // it alongside the generic load marker so both the root transaction and
+    // any plugin-appended bookkeeping are unambiguously non-authorial.
+    .setMeta("track-changes-skip-tracking", true);
   for (const [name, value] of Object.entries(doc.attrs)) {
     if (state.doc.attrs[name] === value) continue;
     tr = tr.setDocAttribute(name, value);

@@ -19,7 +19,7 @@ export function trackChanges(
   userID: string,
   skipTrsWithMetas: (PluginKey | string)[],
 ) {
-  const wasAppended = tx.getMeta("appendTransaction") as
+  const wasAppended = tx.getMeta("appendedTransaction") as
     | Transaction
     | undefined;
   const skipMetaUsed = skipTrsWithMetas.some(
@@ -34,7 +34,9 @@ export function trackChanges(
     tx.getMeta("isRemote") !== undefined ||
     tx.getMeta("pointer") !== undefined;
 
-  const isInitialLoad = tx.getMeta("initialContent") === true;
+  const isInitialLoad =
+    tx.getMeta("initialContent") === true ||
+    wasAppended?.getMeta("initialContent") === true;
 
   const isPaginationChange =
     tx.getMeta("inserting") !== undefined ||
