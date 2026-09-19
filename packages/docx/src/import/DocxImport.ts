@@ -24,7 +24,6 @@
 
 import { Extension } from "@scrivr/core";
 import type { IBaseEditor } from "@scrivr/core";
-import type { Node as PmNode } from "@scrivr/core/pm";
 import { applyImportedDocument } from "./applyDocument";
 import { importDocx as runImportDocx } from "./import";
 import type { DocxImportOptions } from "./import";

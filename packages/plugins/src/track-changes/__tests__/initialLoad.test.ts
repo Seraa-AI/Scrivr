@@ -16,6 +16,7 @@ import { describe, it, expect } from "vitest";
 import { EditorState, Plugin } from "@scrivr/core/pm";
 import type { Transaction } from "@scrivr/core/pm";
 import { doc, p, schema } from "./helpers";
+import { TrackChangesAction } from "../actions";
 import { trackChangesPlugin } from "../engine/trackChangesPlugin";
 import { TrackChangesStatus } from "../types";
 
@@ -76,4 +77,14 @@ describe("a document load under track changes", () => {
     expect(after.doc.textContent).toContain("[appended]");
     expect(trackedMarks(after)).toEqual([]);
   });
+});
+
+/**
+ * `@scrivr/docx` sets this key when it applies an imported document, and it
+ * cannot import the constant — depending on this package would point the
+ * dependency the wrong way. The string is the contract between them, so
+ * renaming it here has to fail here rather than quietly stop skipping there.
+ */
+it("keeps the skip action's wire name, which other packages spell out", () => {
+  expect(TrackChangesAction.skipTrack).toBe("track-changes-skip-tracking");
 });
