@@ -682,7 +682,7 @@ function parseOnOff(value: string | undefined): boolean {
   return value !== "false" && value !== "0" && value !== "off";
 }
 
-function parseRunProperties(rPr: OoxmlElement): DocxMark[] {
+export function parseRunProperties(rPr: OoxmlElement): DocxMark[] {
   const marks: DocxMark[] = [];
   for (const child of rPr.children) {
     if (typeof child === "string") continue;

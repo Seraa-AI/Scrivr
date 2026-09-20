@@ -830,3 +830,68 @@ describe("importDocx — tables are the Table extension's to read", () => {
     expect(doc.textContent).toContain("A");
   });
 });
+
+describe("importDocx — run formatting inherited from a style", () => {
+  /**
+   * A real Word file states its typeface once, in `Normal`, and writes runs
+   * with no `<w:rPr>` at all. Swapping both parts of an exported package is
+   * the smallest way to reproduce that shape.
+   */
+  async function buildStyledDoc(): Promise<Uint8Array> {
+    const editor = new ServerEditor({ content: "anchor" });
+    const bytes = await exportDocxBytes(editor);
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const entries = unzipSync(bytes);
+
+    const body = strFromU8(entries["word/document.xml"]!);
+    // One paragraph naming a style and saying nothing about its own runs, and
+    // one that overrides the size directly.
+    const paragraphs =
+      '<w:p><w:pPr><w:pStyle w:val="Quote"/></w:pPr><w:r><w:t>inherits</w:t></w:r></w:p>' +
+      '<w:p><w:pPr><w:pStyle w:val="Quote"/></w:pPr>' +
+      '<w:r><w:rPr><w:sz w:val="40"/></w:rPr><w:t>overrides</w:t></w:r></w:p>';
+    const swappedBody = body.replace("<w:sectPr", paragraphs + "<w:sectPr");
+
+    const styles = strFromU8(entries["word/styles.xml"]!).replace(
+      "</w:styles>",
+      '<w:style w:type="paragraph" w:styleId="Quote">' +
+        '<w:rPr><w:sz w:val="21"/><w:i/></w:rPr>' +
+        "</w:style></w:styles>",
+    );
+
+    const rebuilt: Record<string, Uint8Array> = {};
+    for (const [path, data] of Object.entries(entries)) {
+      rebuilt[path] =
+        path === "word/document.xml" ? strToU8(swappedBody)
+        : path === "word/styles.xml" ? strToU8(styles)
+        : data;
+    }
+    return zipSync(rebuilt);
+  }
+
+  const marksOn = (doc: PmNode, text: string): string[] => {
+    let found: readonly { type: { name: string }; attrs: Record<string, unknown> }[] = [];
+    doc.descendants((node) => {
+      if (node.isText && node.text === text) found = node.marks;
+    });
+    return found.map((m) => m.type.name + (m.attrs["size"] ? `:${String(m.attrs["size"])}` : ""));
+  };
+
+  it("gives a run with no properties of its own the ones its style declares", async () => {
+    const editor = new ServerEditor();
+    const { doc } = await importDocx(editor, await buildStyledDoc());
+
+    // 21 half-points is 10.5pt, which the layout measures in px.
+    expect(marksOn(doc, "inherits")).toContain("italic");
+    expect(marksOn(doc, "inherits").join()).toMatch(/fontSize:14/);
+  });
+
+  it("lets a run override what its style declares", async () => {
+    const editor = new ServerEditor();
+    const { doc } = await importDocx(editor, await buildStyledDoc());
+
+    // The run says 40 half-points — 20pt — and keeps the style's italic.
+    expect(marksOn(doc, "overrides").join()).toMatch(/fontSize:(?!14)/);
+    expect(marksOn(doc, "overrides")).toContain("italic");
+  });
+});

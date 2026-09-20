@@ -528,6 +528,25 @@ export interface DocxImportContext {
     resolveImage(relId: string): string | undefined;
   };
   /**
+   * What `word/styles.xml` says, resolved.
+   *
+   * Word records most formatting once in a style and says nothing on the runs
+   * that use it, so a reader that only looks at `<w:rPr>` loses whatever the
+   * author set through a style — usually including the document's own default
+   * typeface. `runMarks` folds in `docDefaults` and the whole `basedOn`
+   * ancestry; direct run properties layer over its result.
+   *
+   * `raw` is for properties no generic reader can interpret. A table style's
+   * `<w:tblStylePr w:type="band1Horz">` means nothing without knowing which
+   * rows band, so the extension that owns the node reads it here — the same
+   * division as `walkBlocks`, where the container delegates its children to
+   * whoever owns them.
+   */
+  styles: {
+    runMarks(styleId: string | undefined): readonly DocxMark[];
+    raw(styleId: string): unknown;
+  };
+  /**
    * Non-binary OPC relationship lookups (hyperlinks, future external
    * refs). Mirrors the export-side `ctx.rels` shape with `resolve*` in
    * place of `add*`.

@@ -19,6 +19,7 @@
  */
 
 import type { Node as PmNode, Mark as PmMark } from "@scrivr/core/pm";
+import { layer } from "./styles";
 import type {
   DocxBlock,
   DocxImportContext,
@@ -78,8 +79,11 @@ function transformBlock(
   // Paragraph-style override fires first — Heading extension claims
   // `Heading1` / `Heading2` / etc. before the default paragraph transform.
   if (block.type === "paragraph") {
-    const content = transformInlines(block.content, ctx, handlers);
     const styleId = block.attrs.styleId;
+    // The paragraph's style is what its runs inherit. Resolved here rather
+    // than in the parser, because a style chain is a document-wide question
+    // and the parser reads one element at a time.
+    const content = transformInlines(block.content, ctx, handlers, ctx.styles.runMarks(styleId));
     if (styleId) {
       const override = handlers.paragraphStyles[styleId];
       if (override) return override(block, content, ctx);
@@ -111,12 +115,13 @@ function transformInlines(
   inlines: DocxInline[],
   ctx: DocxImportContext,
   handlers: ResolvedImportHandlers,
+  inherited: readonly DocxMark[] = [],
 ): PmNode[] {
   const out: PmNode[] = [];
   for (const item of inlines) {
     if (item.type === "text") {
       if (item.text.length === 0) continue;
-      const marks = transformMarks(item.marks, ctx, handlers);
+      const marks = transformMarks(layer(inherited, item.marks), ctx, handlers);
       out.push(ctx.schema.text(item.text, marks.length > 0 ? marks : undefined));
     } else if (item.type === "hardBreak") {
       const hb = ctx.schema.nodes["hardBreak"];
@@ -130,7 +135,7 @@ function transformInlines(
         });
       }
     } else if (item.type === "image") {
-      const marks = transformMarks(item.marks, ctx, handlers);
+      const marks = transformMarks(layer(inherited, item.marks), ctx, handlers);
       const handler = handlers.inlines["image"];
       if (handler) {
         const node = handler(item, marks, ctx);
@@ -143,7 +148,7 @@ function transformInlines(
         });
       }
     } else if (item.type === "field") {
-      const marks = transformMarks(item.marks, ctx, handlers);
+      const marks = transformMarks(layer(inherited, item.marks), ctx, handlers);
       const handler = handlers.inlines["field"];
       if (handler) {
         const node = handler(item, marks, ctx);
@@ -160,7 +165,7 @@ function transformInlines(
 }
 
 function transformMarks(
-  marks: DocxMark[],
+  marks: readonly DocxMark[],
   ctx: DocxImportContext,
   handlers: ResolvedImportHandlers,
 ): PmMark[] {

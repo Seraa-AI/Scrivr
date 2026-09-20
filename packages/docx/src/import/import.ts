@@ -34,6 +34,7 @@ import {
   isOoxmlOn,
 } from "./parser";
 import { readNumberingMap } from "./numbering";
+import { readStyleSheet } from "./styles";
 import { reconstructLists } from "./lists";
 import { readRelationshipMap } from "./relationships";
 import { buildImageResolver } from "./media";
@@ -112,6 +113,9 @@ export async function importDocx(
     }
 
     const numbering = readNumberingMap(pkg.readText("word/numbering.xml"));
+    // Before the body is transformed: a run's formatting is its style's,
+    // layered under whatever the run says directly.
+    ctx.styles = readStyleSheet(pkg.readText("word/styles.xml"));
 
     // Header/footer support: expose the section references + a part walker so
     // a contribution (HeaderFooter) can reconstruct each part's content
