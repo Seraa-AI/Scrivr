@@ -23,6 +23,7 @@ export type {
   Rgb,
 } from "@scrivr/core";
 export type { PdfContext, PdfFontRegistry, PdfDrawHelpers } from "./context";
+export type { PdfMetadata } from "./metadata";
 
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
 import type {
@@ -43,6 +44,8 @@ import {
   createFontRegistry,
 } from "./fonts";
 import { defaultNodeHandlers, defaultMarkHandlers } from "./defaults";
+import { applyMetadata, type PdfMetadata } from "./metadata";
+import { addHeadingOutline } from "./outline";
 
 /** Public types */
 
@@ -70,6 +73,17 @@ export interface PdfExportOptions {
    * });
    */
   theme?: Partial<ResolvedTheme>;
+  /**
+   * What the file says about itself — title, author, dates. Written to the
+   * PDF's Info dictionary, which is what a viewer's title bar, a desktop
+   * search and a document system all read.
+   */
+  metadata?: PdfMetadata;
+  /**
+   * Build bookmarks from the document's headings. On by default: a reader
+   * opening a long agreement has no way through it but scrolling without them.
+   */
+  outline?: boolean;
 }
 
 /** Public API */
@@ -264,7 +278,11 @@ export async function buildPdf(
     await hook(ctx);
   }
 
-  // ── Phase 7: Save ──────────────────────────────────────────────────────
+  // ── Phase 7: Describe the file, then save ──────────────────────────────
+  // After the pages exist, because a bookmark's destination names the page
+  // object it jumps to.
+  applyMetadata(pdfDoc, options?.metadata);
+  if (options?.outline !== false) addHeadingOutline(pdfDoc, layout);
   return pdfDoc.save();
 }
 

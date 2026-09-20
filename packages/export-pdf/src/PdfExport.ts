@@ -17,6 +17,7 @@
 import { Extension } from "@scrivr/core";
 import type { IEditor, ResolvedTheme } from "@scrivr/core";
 import { exportToPdf } from "./index";
+import type { PdfMetadata } from "./metadata";
 
 interface PdfExportOptions {
   /** Downloaded file name (without .pdf). Default: "document" */
@@ -32,6 +33,11 @@ interface ExportPdfCallOptions {
    * Omit for a print-ready PDF regardless of canvas theme.
    */
   theme?: Partial<ResolvedTheme>;
+  /**
+   * What the file says about itself. `title` defaults to `filename`, since
+   * that is the name the document is being saved under.
+   */
+  metadata?: PdfMetadata;
 }
 
 /** Per-instance state — populated in onEditorReady, read in addCommands. */
@@ -62,10 +68,12 @@ export const PdfExport = Extension.create<PdfExportOptions>({
           const { editor } = inst;
           const filename =
             callOptions?.filename ?? this.options.filename ?? "document";
-          exportToPdf(
-            editor,
-            callOptions?.theme ? { theme: callOptions.theme } : undefined,
-          )
+          // The name the file is saved under is the name the document has.
+          // A caller that knows better passes its own title.
+          exportToPdf(editor, {
+            ...(callOptions?.theme ? { theme: callOptions.theme } : {}),
+            metadata: { title: filename, ...callOptions?.metadata },
+          })
             .then((bytes) => {
               const blob = new Blob([bytes.buffer as ArrayBuffer], {
                 type: "application/pdf",
