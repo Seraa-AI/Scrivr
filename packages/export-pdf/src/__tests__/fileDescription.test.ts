@@ -7,9 +7,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { PDFDocument, PDFName, PDFDict, PDFArray, PDFHexString } from "pdf-lib";
+import { PDFDocument, PDFName, PDFDict, PDFArray, PDFHexString, PDFNumber } from "pdf-lib";
 import { buildPdf } from "../index";
-import { block, onePage, textLine, exportEditor, schema, PAGE_CONFIG } from "./fixtures";
+import { block, onePage, textLine, exportEditor, schema, PAGE_CONFIG, layout, tableRowBlock } from "./fixtures";
+import { PT_PER_PX } from "../context";
 import type { DocumentLayout } from "@scrivr/core";
 
 /** A layout of headings at the given levels, one per page after the first. */
@@ -81,6 +82,78 @@ function readOutline(pdfDoc: PDFDocument): { title: string; children: unknown[] 
 }
 
 describe("bookmarks built from headings", () => {
+  it("counts only the children revealed when a closed branch opens", async () => {
+    const loaded = await PDFDocument.load(await buildPdf(outlineLayout([
+      { level: 1, text: "Agreement" },
+      { level: 2, text: "Definitions" },
+      { level: 3, text: "Affiliate" },
+      { level: 2, text: "Orders" },
+      { level: 1, text: "Schedules" },
+    ]), exportEditor));
+    const root = loaded.catalog.lookup(PDFName.of("Outlines"), PDFDict);
+    const agreement = root.lookup(PDFName.of("First"), PDFDict);
+    const definitions = agreement.lookup(PDFName.of("First"), PDFDict);
+    expect(root.lookup(PDFName.of("Count"), PDFNumber).asNumber()).toBe(2);
+    expect(agreement.lookup(PDFName.of("Count"), PDFNumber).asNumber()).toBe(-2);
+    expect(definitions.lookup(PDFName.of("Count"), PDFNumber).asNumber()).toBe(-1);
+    expect(definitions.lookup(PDFName.of("First"), PDFDict).has(PDFName.of("Count"))).toBe(false);
+  });
+
+  it("bookmarks a split heading once at its start, without merging equal titles", async () => {
+    const first = {
+      ...block("heading", [textLine("Repeated")], { y: 300 }),
+      node: schema.node("heading", { level: 1 }, schema.text("Repeated")),
+      nodePos: 10,
+      continuesOnNextPage: true,
+    };
+    const continuation = { ...first, y: 72, isContinuation: true, continuesOnNextPage: false };
+    const distinct = { ...first, y: 200, nodePos: 30, continuesOnNextPage: false };
+    const loaded = await PDFDocument.load(await buildPdf(
+      layout([[first], [continuation, distinct]]), exportEditor,
+    ));
+    expect(readOutline(loaded).map(item => item.title)).toEqual(["Repeated", "Repeated"]);
+    const root = loaded.catalog.lookup(PDFName.of("Outlines"), PDFDict);
+    const item = root.lookup(PDFName.of("First"), PDFDict);
+    const dest = item.lookup(PDFName.of("Dest"), PDFArray);
+    expect(String(dest.get(0))).toBe(String(loaded.getPage(0).ref));
+    expect(dest.lookup(3, PDFNumber).asNumber()).toBe((PAGE_CONFIG.pageHeight - 300) * PT_PER_PX);
+    const next = item.lookup(PDFName.of("Next"), PDFDict);
+    expect(String(next.lookup(PDFName.of("Dest"), PDFArray).get(0))).toBe(String(loaded.getPage(1).ref));
+    expect(next.has(PDFName.of("Next"))).toBe(false);
+  });
+
+  it("includes table headings in reading order using row-relative coordinates", async () => {
+    const heading = (text: string, level: number, y: number) => ({
+      ...block("heading", [textLine(text)], { y }),
+      node: schema.node("heading", { level }, schema.text(text)),
+    });
+    const row = tableRowBlock();
+    row.y = 180;
+    row.cells = row.cells!.map((cell, index) => ({
+      ...cell,
+      blocks: [heading(index === 0 ? "Left" : "Right", 2, index === 0 ? 12 : 24)],
+    }));
+    const loaded = await PDFDocument.load(await buildPdf(
+      layout([[], [heading("Section", 1, 72), row, heading("Next", 1, 300)]]), exportEditor,
+    ));
+    expect(readOutline(loaded)).toEqual([
+      { title: "Section", children: [
+        { title: "Left", children: [] },
+        { title: "Right", children: [] },
+      ] },
+      { title: "Next", children: [] },
+    ]);
+    const section = loaded.catalog.lookup(PDFName.of("Outlines"), PDFDict)
+      .lookup(PDFName.of("First"), PDFDict);
+    const left = section.lookup(PDFName.of("First"), PDFDict);
+    const right = left.lookup(PDFName.of("Next"), PDFDict);
+    for (const [item, offset] of [[left, 12], [right, 24]] as const) {
+      const dest = item.lookup(PDFName.of("Dest"), PDFArray);
+      expect(String(dest.get(0))).toBe(String(loaded.getPage(1).ref));
+      expect(dest.lookup(3, PDFNumber).asNumber()).toBe((PAGE_CONFIG.pageHeight - 180 - offset) * PT_PER_PX);
+    }
+  });
+
   it("nests a heading under the nearest shallower one before it", async () => {
     const pdf = await buildPdf(
       outlineLayout([

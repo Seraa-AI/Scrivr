@@ -47,9 +47,10 @@ export function addHeadingOutline(pdfDoc: PDFDocument, layout: DocumentLayout): 
     if (children.length > 0) {
       item["First"] = refs[children[0]!]!;
       item["Last"] = refs[children[children.length - 1]!]!;
-      // Negative so the node starts closed: a long agreement should open as
-      // its top-level sections, not as every clause at once.
-      item["Count"] = PDFNumber.of(-countDescendants(index, tree.childrenOf));
+      // Every branch starts closed. Opening this item reveals its immediate
+      // children only; grandchildren remain hidden behind closed children.
+      // PDF Count describes that visible set, not the size of the subtree.
+      item["Count"] = PDFNumber.of(-children.length);
     }
     context.assign(refs[index]!, context.obj(item));
   });
@@ -106,11 +107,6 @@ function nest(headings: readonly OutlineHeading[]) {
   return { roots, childrenOf, parentOf };
 }
 
-function countDescendants(index: number, childrenOf: Map<number, number[]>): number {
-  const children = childrenOf.get(index) ?? [];
-  return children.reduce((total, child) => total + 1 + countDescendants(child, childrenOf), 0);
-}
-
 interface OutlineHeading {
   title: string;
   level: number;
@@ -122,12 +118,23 @@ interface OutlineHeading {
 function collectHeadings(layout: DocumentLayout): OutlineHeading[] {
   const pageHeightPt = layout.pageConfig.pageHeight * PT_PER_PX;
   const headings: OutlineHeading[] = [];
-  layout.pages.forEach((page, pageIndex) => {
-    for (const block of page.blocks) {
-      const heading = headingOf(block);
-      if (heading) headings.push({ ...heading, pageIndex, topPt: pageHeightPt - block.y * PT_PER_PX });
+  const visit = (blocks: readonly LayoutBlock[], pageIndex: number, originY: number): void => {
+    for (const block of blocks) {
+      const pageY = originY + block.y;
+      // Pagination repeats the source node in every visual fragment. Only
+      // its first fragment owns a bookmark; equal titles in distinct source
+      // headings must remain distinct entries.
+      const heading = block.isContinuation ? null : headingOf(block);
+      if (heading) {
+        headings.push({ ...heading, pageIndex, topPt: pageHeightPt - pageY * PT_PER_PX });
+      }
+      // Cell blocks store y relative to their row, including cell padding,
+      // exactly as the table PDF renderer consumes them. Keep document order
+      // through cells and carry the row origin into each nested traversal.
+      for (const cell of block.cells ?? []) visit(cell.blocks, pageIndex, pageY);
     }
-  });
+  };
+  layout.pages.forEach((page, pageIndex) => visit(page.blocks, pageIndex, 0));
   return headings;
 }
 
