@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
-  external: ["@scrivr/core", "pdf-lib", "@pdf-lib/fontkit"],
+  external: ["@scrivr/core", "pdf-lib", "fontkit"],
 });

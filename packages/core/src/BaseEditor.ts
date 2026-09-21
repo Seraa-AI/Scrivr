@@ -1,11 +1,12 @@
 import { EditorState, Transaction } from "prosemirror-state";
+import type { FontProvider } from "./fonts/types";
 import { MarkdownSerializer } from "prosemirror-markdown";
 import { Node, type Schema } from "prosemirror-model";
 
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
-import type { IBaseEditor } from "./extensions/types";
+import type { IBaseEditor, MarkdownParserTokenSpec } from "./extensions/types";
 import type { ExportContributionMap, ImportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
@@ -26,6 +27,13 @@ export interface BaseEditorOptions {
    * Defaults to [StarterKit].
    */
   extensions?: Extension[];
+  /**
+   * Where font requests are answered. Scrivr ships no typeface, so an editor
+   * without one cannot say what its text is set in — resolution falls through
+   * to whatever the host picks, which is exactly the ambiguity a provider
+   * exists to remove. Supply one to make that answer yours.
+   */
+  fonts?: FontProvider;
   /**
    * Optional initial document. Strings are parsed as markdown using the
    * merged token map from all extensions; objects are parsed as ProseMirror
@@ -126,7 +134,16 @@ export class BaseEditor implements IBaseEditor {
    */
   protected runtimeCleanup: Array<() => void> = [];
 
-  constructor({ extensions = [StarterKit], content, clone = false }: BaseEditorOptions = {}) {
+  /** Where font requests are answered, or null when the app supplied nobody. */
+  readonly fonts: FontProvider | null;
+
+  constructor({
+    extensions = [StarterKit],
+    content,
+    clone = false,
+    fonts,
+  }: BaseEditorOptions = {}) {
+    this.fonts = fonts ?? null;
     this.manager = new ExtensionManager(extensions);
 
     const rawInitialDoc =
@@ -372,7 +389,7 @@ export class BaseEditor implements IBaseEditor {
   }
 
   /** Returns the merged markdown parser token map from all extensions. */
-  getMarkdownParserTokens(): Record<string, import("./extensions/types").MarkdownParserTokenSpec> {
+  getMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec> {
     return this.manager.buildMarkdownParserTokens();
   }
 

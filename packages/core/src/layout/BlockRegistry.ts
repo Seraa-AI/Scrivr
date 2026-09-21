@@ -1,4 +1,6 @@
 import type { Node, NodeType } from "prosemirror-model";
+import type { FontResolutionId } from "../fonts/layoutResolver";
+import type { FontResolution } from "../fonts/types";
 import type { CharacterMap } from "./CharacterMap";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { LayoutBlock } from "./BlockLayout";
@@ -93,6 +95,11 @@ export interface BlockRenderContext {
   markDecorators?: Map<string, MarkDecorator>;
   /** Registry for block render strategies, used by composite blocks such as table rows. */
   blockRegistry?: BlockRegistry;
+  /**
+   * Every face this layout measured against, so a run can be painted with what
+   * its chosen face does not supply. Absent when there is no font provider.
+   */
+  fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>;
   /** Registry for inline objects (images, widgets) drawn inside line boxes. */
   inlineRegistry?: InlineRegistry;
   /**

@@ -15,6 +15,7 @@
 
 import type { ResolvedTheme } from "../model/theme";
 import type { Rgb } from "../model/cssColor";
+import type { FontResolutionId } from "../fonts/layoutResolver";
 
 /**
  * What a mark on a span is asking for. Colours must be supported CSS literals
@@ -88,6 +89,14 @@ export type PdfMarkHandler = (
  */
 export interface PdfFontHandle {
   readonly cssFont: string;
+  /**
+   * Which face the layout measured this text in, when it is text the layout
+   * measured. A handler that was handed a font by the context passes this
+   * through untouched; naming a family without it makes the exporter guess,
+   * and a guess is how a document measured in one face comes to be painted in
+   * another.
+   */
+  readonly resolution?: FontResolutionId;
 }
 
 /**

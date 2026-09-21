@@ -1,3 +1,5 @@
+import { installCanvasFont } from "../fonts/canvasFonts";
+import type { FontResource } from "../fonts/types";
 /**
  * TextMeasurer — wraps canvas.measureText() with caching and font metric stability.
  *
@@ -54,6 +56,8 @@ export interface RunMetrics {
  * advanced runtimes and tests that provide their own measurement backend.
  */
 export interface TextMeasurerLike {
+  /** Install these exact bytes in this measurement backend; return its family alias. */
+  installFont?(resource: FontResource): Promise<string>;
   measureWidth(text: string, font: string): number;
   getFontMetrics(font: string): FontMetrics;
   measureRun(text: string, font: string): RunMetrics;
@@ -127,6 +131,9 @@ export interface TextMeasurerOptions {
 }
 
 export class TextMeasurer implements TextMeasurerLike {
+  async installFont(resource: FontResource): Promise<string> {
+    return installCanvasFont(resource);
+  }
   private ctx: TextMeasureContext;
 
   /** font → text → width */

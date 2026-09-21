@@ -1,4 +1,5 @@
 import type { CharacterMap } from "./CharacterMap";
+import { fontSizeOf, paintText } from "../fonts/synthesis";
 import { isHiddenAnchorLine, type LayoutBlock } from "./BlockLayout";
 import { computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
 import { computeObjectRenderY } from "./LineBreaker";
@@ -18,7 +19,8 @@ import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
  */
 export const TextBlockStrategy: BlockStrategy = {
   render(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
-    const { ctx, pageNumber, lineIndexOffset, measurer, markDecorators, inlineRegistry, theme } = renderCtx;
+    const { ctx, pageNumber, lineIndexOffset, measurer, markDecorators, inlineRegistry, theme, fontResolutions } =
+      renderCtx;
     const { lines, x, availableWidth, align } = block;
 
     for (let li = 0; li < lines.length; li++) {
@@ -94,19 +96,34 @@ export const TextBlockStrategy: BlockStrategy = {
         // ── Text span ─────────────────────────────────────────────────────────
         const run = measurer.measureRun(span.text, span.font);
 
+        // What the chosen face does not supply, if anything. Every text block
+        // type paints through here, so this is where a stand-in has to be
+        // drawn — the exporter draws the same one from the same numbers.
+        const synthesis =
+          span.resolution === undefined
+            ? undefined
+            : fontResolutions?.get(span.resolution)?.synthesis;
+        const paint = { sizePx: fontSizeOf(span.font) };
+
         const drawSpan = (fillColor: string) => {
           if (spaceBonus === 0) {
             const spanX = x + lineOffsetX + span.x;
-            ctx.fillStyle = fillColor;
-            ctx.fillText(span.text, spanX, baseline);
+            paintText(ctx, span.text, spanX, baseline, {
+              ...(synthesis ? { synthesis } : {}),
+              ...paint,
+              color: fillColor,
+            });
           } else {
             let spacesWithinSpan = 0;
             for (let ci = 0; ci < span.text.length; ci++) {
               const charX =
                 x + lineOffsetX + span.x + run.charPositions[ci]! +
                 (spacesBeforeSpan + spacesWithinSpan) * spaceBonus;
-              ctx.fillStyle = fillColor;
-              ctx.fillText(span.text[ci]!, charX, baseline);
+              paintText(ctx, span.text[ci]!, charX, baseline, {
+                ...(synthesis ? { synthesis } : {}),
+                ...paint,
+                color: fillColor,
+              });
               if (span.text[ci] === " ") spacesWithinSpan++;
             }
           }

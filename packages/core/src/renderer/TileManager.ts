@@ -533,6 +533,8 @@ export class TileManager {
       map: this.editor.charMap,
       markDecorators: this.editor.markDecorators,
       showMarginGuides: this.showMarginGuides,
+      ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
+      ...(this.editor.fontResolver ? { fontResolver: this.editor.fontResolver } : {}),
       theme: this.editor.getResolvedTheme(),
       ...(this.editor.blockRegistry
         ? { blockRegistry: this.editor.blockRegistry }
@@ -617,6 +619,7 @@ export class TileManager {
             ...(this.editor.inlineRegistry
               ? { inlineRegistry: this.editor.inlineRegistry }
               : {}),
+            ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
           },
           this.editor.charMap,
         );
@@ -631,6 +634,7 @@ export class TileManager {
           theme,
           this.editor.markDecorators,
           this.editor.inlineRegistry,
+          layout.fontResolutions,
         );
       }
     }

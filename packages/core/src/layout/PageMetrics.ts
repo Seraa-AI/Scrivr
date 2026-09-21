@@ -1,3 +1,6 @@
+import type { FontModifier } from "../extensions/types";
+import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
+import type { FontResolution } from "../fonts/types";
 /**
  * Per-page layout metrics — lets chrome contributors (headers, footers,
  * footnotes) reserve vertical space without raw margin arithmetic.
@@ -288,6 +291,8 @@ export interface PageChromeMeasureInput {
   pageConfig: PageConfig;
   measurer: TextMeasurerLike;
   fontConfig: FontConfig;
+  fonts?: LayoutFontResolver;
+  fontModifiers?: Map<string, FontModifier>;
 }
 
 /**
@@ -315,6 +320,18 @@ export interface LayoutIterationContext {
 /** Input passed to every contributor's render() call during content-canvas paint. */
 export interface PageChromePaintContext {
   ctx: CanvasRenderingContext2D;
+  /**
+   * Faces this layout measured against, so chrome text is painted with what
+   * its face does not supply — the same stand-ins the body and the exporter
+   * draw. Absent when there is no font provider.
+   */
+  fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>;
+  /**
+   * The resolver the page was measured with. A contributor that lays its own
+   * content out — a header being edited — has to use this one, or its geometry
+   * and the stored geometry come from different faces.
+   */
+  fontResolver?: LayoutFontResolver;
   pageNumber: number;
   totalPages: number;
   metrics: PageMetrics;
