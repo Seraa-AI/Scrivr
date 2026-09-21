@@ -4,6 +4,7 @@
   "pages": [
     "nodes",
     "interactivity",
+    "typography",
     "viewport",
     "serialization",
     "export",

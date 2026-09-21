@@ -5,7 +5,13 @@ export type { GlyphEntry, LineEntry, CoordsResult, ObjectRectEntry } from "./Cha
 export { resolvePointOwner } from "./pointOwnership";
 export type { PointOwner, PointOwnershipInput } from "./pointOwnership";
 export { TextMeasurer } from "./TextMeasurer";
-export type { FontMetrics, RunMetrics, TextMeasurerLike } from "./TextMeasurer";
+export type {
+  FontMetrics,
+  RunMetrics,
+  TextMeasureContext,
+  TextMeasurerLike,
+  TextMeasurerOptions,
+} from "./TextMeasurer";
 export { LineBreaker } from "./LineBreaker";
 export type { InputSpan, LayoutSpan, LayoutLine, LineSpaceProvider } from "./LineBreaker";
 export { layoutBlock, resolveLeafBlockDimensions, computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";

@@ -15,29 +15,24 @@
  *   });
  */
 import { Extension } from "@scrivr/core";
-import type { IEditor, ResolvedTheme } from "@scrivr/core";
-import { exportToPdf } from "./index";
-import type { PdfMetadata } from "./metadata";
+import type { IEditor } from "@scrivr/core";
+import { exportToPdf, type PdfExportOptions } from "./index";
 
-interface PdfExportOptions {
+/** Options the extension itself is configured with. */
+interface PdfExportExtensionOptions {
   /** Downloaded file name (without .pdf). Default: "document" */
   filename?: string;
 }
 
-/** Per-call options accepted by `editor.commands.exportPdf({...})`. */
-interface ExportPdfCallOptions {
+/**
+ * Per-call options accepted by `editor.commands.exportPdf({...})`.
+ *
+ * Everything the export itself accepts, plus the file name the command needs
+ * and the export does not. Listing a subset here is how `onFontShortfall`
+ * became unreachable from the command most applications actually call.
+ */
+interface ExportPdfCallOptions extends PdfExportOptions {
   filename?: string;
-  /**
-   * Theme override. Shallow-merged over the print-ready `defaultPdfTheme`.
-   * Literal CSS colors only — `var(...)` is not supported on this path.
-   * Omit for a print-ready PDF regardless of canvas theme.
-   */
-  theme?: Partial<ResolvedTheme>;
-  /**
-   * What the file says about itself. `title` defaults to `filename`, since
-   * that is the name the document is being saved under.
-   */
-  metadata?: PdfMetadata;
 }
 
 /** Per-instance state — populated in onEditorReady, read in addCommands. */
@@ -46,7 +41,7 @@ interface InstanceState {
 }
 const instanceState = new WeakMap<object, InstanceState>();
 
-export const PdfExport = Extension.create<PdfExportOptions>({
+export const PdfExport = Extension.create<PdfExportExtensionOptions>({
   name: "pdfExport",
 
   defaultOptions: {
@@ -68,11 +63,12 @@ export const PdfExport = Extension.create<PdfExportOptions>({
           const { editor } = inst;
           const filename =
             callOptions?.filename ?? this.options.filename ?? "document";
+          const { filename: _filename, ...exportOptions } = callOptions ?? {};
           // The name the file is saved under is the name the document has.
           // A caller that knows better passes its own title.
           exportToPdf(editor, {
-            ...(callOptions?.theme ? { theme: callOptions.theme } : {}),
-            metadata: { title: filename, ...callOptions?.metadata },
+            ...exportOptions,
+            metadata: { title: filename, ...exportOptions.metadata },
           })
             .then((bytes) => {
               const blob = new Blob([bytes.buffer as ArrayBuffer], {

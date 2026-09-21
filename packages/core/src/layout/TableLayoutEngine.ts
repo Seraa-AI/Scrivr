@@ -27,6 +27,7 @@ import type { TextMeasurerLike } from "./TextMeasurer";
 import type { FontConfig } from "./FontConfig";
 import type { FontModifier } from "../extensions/types";
 import type { InlineRegistry } from "./BlockRegistry";
+import type { LayoutFontResolver } from "../fonts/layoutResolver";
 
 /** Horizontal cell padding (left + right) in CSS px. */
 export const CELL_PADDING_H = 6;
@@ -50,6 +51,8 @@ export interface TableRowLayoutContext {
   fontConfig?: FontConfig;
   fontModifiers?: Map<string, FontModifier>;
   inlineRegistry?: InlineRegistry;
+  /** Cell text is document text: it resolves its faces like any other block. */
+  fonts?: LayoutFontResolver;
 }
 
 function columnWidth(columns: number[], index: number): number {
@@ -112,6 +115,7 @@ export function layoutTableRowCells(
         ...(ctx.fontConfig ? { fontConfig: ctx.fontConfig } : {}),
         ...(ctx.fontModifiers ? { fontModifiers: ctx.fontModifiers } : {}),
         ...(ctx.inlineRegistry ? { inlineRegistry: ctx.inlineRegistry } : {}),
+        ...(ctx.fonts ? { fonts: ctx.fonts } : {}),
       });
       blocks.push(childBlock);
       relY += childBlock.spaceBefore + childBlock.height + childBlock.spaceAfter;

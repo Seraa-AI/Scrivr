@@ -68,7 +68,8 @@ function paintRowGrid(
 
 export const TableRowStrategy: BlockStrategy = {
   render(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
-    const { ctx, pageNumber, measurer, theme, markDecorators, blockRegistry, inlineRegistry } = renderCtx;
+    const { ctx, pageNumber, measurer, theme, markDecorators, blockRegistry, inlineRegistry, fontResolutions } =
+      renderCtx;
     let lineIndexOffset = renderCtx.lineIndexOffset;
     const cells = block.cells ?? [];
 
@@ -96,6 +97,7 @@ export const TableRowStrategy: BlockStrategy = {
             theme,
             markDecorators,
             inlineRegistry,
+            fontResolutions,
           );
         }
       }

@@ -1,3 +1,4 @@
+import type { LayoutFontResolver } from "./fonts/layoutResolver";
 import {
 	EditorState,
 	Transaction,
@@ -16,6 +17,20 @@ import type { Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
+import type {
+	ActiveFontFamily,
+	FontFamilyOption,
+	FontKey,
+	FontProvider,
+} from "./fonts/types";
+import type { FontResolutionId } from "./fonts/layoutResolver";
+import {
+	resolvedKeyOf,
+	usedResolutions,
+	type FontShortfall,
+} from "./fonts/collectFontRequests";
+import { primaryFamily } from "./fonts/layoutResolver";
+import { DEFAULT_FONT_FAMILY } from "./layout/FontConfig";
 import { CursorManager } from "./renderer/CursorManager";
 import { SelectionRegistry } from "./selection/SelectionRegistry";
 import {
@@ -223,11 +238,118 @@ export interface EditorOptions {
 	 * deterministic test canvas, or platform-native measurement service.
 	 */
 	textMeasurer?: TextMeasurerLike;
+	/**
+	 * Which typefaces this editor may measure and paint in. Without one the
+	 * editor asks the host for whatever the family name happens to mean there,
+	 * and no lane can say what it got — so an export has to guess a second time.
+	 */
+	fonts?: FontProvider;
 }
 
-/**eant to ask is if you approve the plan so that we can transition out of "Brainstorm" mode. If you are happy with the plan as written in that document, just give me the green light, and I will create our task.md checklist and begin writing the code!
+/**
+ * Every face the laid-out document asked for and did not get.
+ *
+ * Read from the spans rather than from the layout's resolution table: that
+ * table accumulates for the life of the coordinator so ids on cached spans stay
+ * resolvable, which means a family the user applied and then undid is still in
+ * it. What a reader wants is the document in front of them.
+ */
+function documentShortfalls(layout: DocumentLayout): readonly FontShortfall[] {
+	const table = layout.fontResolutions;
+	if (!table?.size) return [];
 
+	const used = usedResolutions(layout);
 
+	const missed: FontShortfall[] = [];
+	for (const id of used) {
+		const entry = table.get(id);
+		if (!entry) continue;
+		const { request, resolved } = entry;
+		if (resolved.source === "requested" && resolved.portable) continue;
+		missed.push({
+			request,
+			resolved: resolvedKeyOf(entry),
+			...(entry.synthesis ? { synthesis: entry.synthesis } : {}),
+			source: resolved.source,
+			portable: resolved.portable,
+		});
+	}
+	return missed;
+}
+
+/**
+ * The families an inventory can render, each with the faces behind it.
+ *
+ * Grouped rather than flattened to names: a control that knows a family has no
+ * italic, or that nothing owns bytes for it, can say so before the document is
+ * set in it. First spelling of a family wins, so the list reads as the
+ * application wrote it.
+ */
+function distinctFamilies(provider: FontProvider | null): readonly FontFamilyOption[] {
+	if (!provider) return [];
+
+	const byFamily = new Map<string, { family: string; faces: FontKey[]; portable: boolean }>();
+	for (const face of provider.inventory?.() ?? []) {
+		const key = face.family.toLowerCase();
+		// Asked under the conditions an export imposes, not a weaker pair: a
+		// picker that promised a face would survive and then watched the
+		// exporter resolve past it would be the disagreement this lane removes.
+		const portable =
+			provider
+				.resolve({ ...face, size: 14 }, { portable: true, embeddable: true })
+				.resolved.family.toLowerCase() === key;
+		const known = byFamily.get(key);
+		if (known) {
+			// Any owned face makes the family portable — deciding from the first
+			// one alone would call a family unusable because of the order its
+			// provider happened to list it in.
+			if (portable) {
+				known.faces.push(face);
+				known.portable = true;
+			}
+			continue;
+		}
+		byFamily.set(key, { family: face.family, faces: portable ? [face] : [], portable });
+	}
+	return [...byFamily.values()];
+}
+
+/**
+ * Replace the family group with the families this editor holds.
+ *
+ * An extension's preset list is a guess made before any editor exists. Keeping
+ * it once an inventory is known offers choices that all resolve to the same
+ * face — a picker where five names produce one typeface. With no inventory the
+ * presets are all there is, so they stand.
+ */
+function withAvailableFamilies(
+	items: ToolbarItemSpec[],
+	families: readonly FontFamilyOption[],
+): ToolbarItemSpec[] {
+	if (families.length === 0) return items;
+
+	const template = items.find((item) => item.group === "family");
+	if (!template) return items;
+
+	const replacements: ToolbarItemSpec[] = families.map(({ family }) => ({
+		...template,
+		args: [family],
+		label: family,
+		title: `Font: ${family}`,
+		// No `labelStyle`: owned bytes are installed under a private name, so
+		// styling a label `font-family: Inter` asks the browser for a family it
+		// does not have and previews every entry in the same fallback.
+		isActive: (activeMarks, blockType, blockAttrs, activeMarkAttrs) =>
+			blockAttrs["fontFamily"] === family ||
+			activeMarkAttrs?.["fontFamily"]?.["family"] === family,
+	}));
+
+	const firstAt = items.indexOf(template);
+	const kept = items.filter((item) => item.group !== "family");
+	return [...kept.slice(0, firstAt), ...replacements, ...kept.slice(firstAt)];
+}
+
+/**
  * Editor — the full browser editor. Extends `BaseEditor` with layout,
  * canvas rendering, input capture, and cursor management.
  *
@@ -342,8 +464,24 @@ export class Editor extends BaseEditor implements IEditor {
 	/**
 	 * Toolbar item specs from all extensions, in registration order.
 	 * Data-only — no React. Computed once at construction.
+	 *
+	 * Family items are reconciled against the font inventory, because an
+	 * extension declares them before an editor exists and therefore cannot
+	 * know what this one can render.
 	 */
 	readonly toolbarItems: ToolbarItemSpec[];
+
+	/**
+	 * The families this editor can actually set text in, in inventory order.
+	 *
+	 * Empty when no provider was supplied: nothing has been claimed, so nothing
+	 * can be promised. A picker reading this offers choices that resolve to
+	 * themselves rather than choices that all quietly become the default.
+	 */
+	readonly fontFamilies: readonly FontFamilyOption[];
+
+	private substitutionsCache: readonly FontShortfall[] = [];
+	private substitutionsVersion = -1;
 
 	readonly nodeActionRegistry: NodeActionRegistry;
 
@@ -410,12 +548,14 @@ export class Editor extends BaseEditor implements IEditor {
 		theme,
 		themeRoot,
 		textMeasurer,
+		fonts,
 	}: EditorOptions) {
 		// BaseEditor handles: manager, state, commands, storage, event emitter
 		super({
 			extensions,
 			clone,
 			...(content !== undefined ? { content } : {}),
+			...(fonts ? { fonts } : {}),
 		});
 
 		// ── Theme ──────────────────────────────────────────────────────────────
@@ -445,7 +585,11 @@ export class Editor extends BaseEditor implements IEditor {
 			textMeasurer ?? new TextMeasurer({ lineHeightMultiplier: 1.2 });
 		this.fontModifiers = this.manager.buildFontModifiers();
 		this.markDecorators = this.manager.buildMarkDecorators();
-		this.toolbarItems = this.manager.buildToolbarItems();
+		this.fontFamilies = distinctFamilies(this.fonts);
+		this.toolbarItems = withAvailableFamilies(
+			this.manager.buildToolbarItems(),
+			this.fontFamilies,
+		);
 		this.nodeActionRegistry = new NodeActionRegistry(
 			this.manager.buildNodeActions(),
 		);
@@ -521,6 +665,7 @@ export class Editor extends BaseEditor implements IEditor {
 			fontConfig: this.fontConfig,
 			measurer: this.measurer,
 			fontModifiers: this.fontModifiers,
+			fonts: this.fonts,
 			getDoc: () => this.editorState.doc,
 			getHead: () => this.editorState.selection.head,
 			onUpdate: () => this.notifyListeners(),
@@ -891,6 +1036,61 @@ export class Editor extends BaseEditor implements IEditor {
 		return this.lc.current;
 	}
 
+	/**
+	 * Every face this document asked for and did not get, as laid out.
+	 *
+	 * The same shape DOCX import and PDF export report, from the one place that
+	 * knows continuously rather than at a moment the user may never see. Empty
+	 * when no provider was supplied: nothing was claimed, so nothing was missed.
+	 *
+	 * Memoised per layout so a selector can compare identities and not re-render
+	 * on every notification.
+	 */
+	get fontSubstitutions(): readonly FontShortfall[] {
+		const layout = this.layout;
+		if (this.substitutionsVersion === layout.version) return this.substitutionsCache;
+
+		this.substitutionsCache = documentShortfalls(layout);
+		this.substitutionsVersion = layout.version;
+		return this.substitutionsCache;
+	}
+
+	/**
+	 * The family in effect at the selection, and the face it is drawn in.
+	 *
+	 * The precedence — inline mark, then block attr, then the document default —
+	 * is the editor's own rule, so a font control that re-derived it would drift
+	 * from the thing it describes.
+	 */
+	getActiveFontFamily(): ActiveFontFamily {
+		const inline = this.getActiveMarkAttrs()["fontFamily"]?.["family"];
+		const block = this.getBlockInfo().blockAttrs["fontFamily"];
+		const requested = primaryFamily(
+			typeof inline === "string" && inline.length > 0
+				? inline
+				: typeof block === "string" && block.length > 0
+					? block
+					: (this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
+		);
+
+		if (!this.fonts) return { requested, resolved: requested, substituted: false };
+
+		const marks = this.getActiveMarks();
+		const { resolved } = this.fonts.resolve({
+			family: requested,
+			weight: marks.includes("bold") ? 700 : 400,
+			style: marks.includes("italic") ? "italic" : "normal",
+			// Size never changes which face answers; the provider's own is the
+			// one value guaranteed to be meaningful to it.
+			size: this.fonts.defaultRequest().size,
+		});
+		return {
+			requested,
+			resolved: resolved.family,
+			substituted: resolved.family !== requested,
+		};
+	}
+
 	/** True when the editor is in pageless (infinite-scroll) mode. */
 	get isPageless(): boolean {
 		return this.pageConfig.pageless === true;
@@ -1010,6 +1210,19 @@ export class Editor extends BaseEditor implements IEditor {
 	 */
 	ensureFullLayout(): void {
 		this.lc.ensureFullLayout();
+	}
+
+	/**
+	 * How this editor turns a font request into a measurement, for anything that
+	 * has to lay content out the same way the page was. `fonts` is the inventory;
+	 * this is the thing that asks it and remembers the answers.
+	 */
+	get fontResolver(): LayoutFontResolver | null {
+		return this.lc.fontResolver;
+	}
+
+	layoutForExport(doc: PmNode, fonts: LayoutFontResolver, measurer?: TextMeasurerLike): DocumentLayout {
+		return this.lc.layoutForExport(doc, fonts, measurer);
 	}
 
 	/**

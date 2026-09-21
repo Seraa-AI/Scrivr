@@ -7,6 +7,7 @@ export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentati
 // mark without depending on this package; re-exported for consumers already
 // importing it from here.
 export type {
+  FontResolutionId,
   PdfMarkHandler,
   PdfSpanStyle,
   PdfSpanMark,
@@ -34,16 +35,21 @@ import type {
   AnchoredObjectPlacement,
   ResolvedTheme,
 } from "@scrivr/core";
-import { compareAnchoredObjectPaintOrder, defaultPdfTheme } from "@scrivr/core";
+import type { FontShortfall } from "@scrivr/core";
+import {
+  compareAnchoredObjectPaintOrder,
+  defaultPdfTheme,
+} from "@scrivr/core";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
 import type { PdfContext, PdfDrawHelpers } from "./context";
 import {
   embedStandardFonts,
-  embedCustomFonts,
+  embedResolvedFonts,
   createFontRegistry,
 } from "./fonts";
 import { defaultNodeHandlers, defaultMarkHandlers } from "./defaults";
+import { preparePdfLayout } from "./prepareLayout";
 import { applyMetadata, type PdfMetadata } from "./metadata";
 import { addHeadingOutline } from "./outline";
 
@@ -51,15 +57,11 @@ import { addHeadingOutline } from "./outline";
 
 export interface PdfExportOptions {
   /**
-   * Called once per unique (family, weight, style) combination found in the
-   * document. Return the font file bytes to embed it; return null to fall back
-   * to the nearest standard font (Helvetica / Times / Courier).
+   * Called when the document asks for faces this editor could not honour under
+   * the conditions a PDF imposes. Reporting, not failure: the export proceeds
+   * with what it resolved to.
    */
-  fontResolver?: (
-    family: string,
-    weight: "normal" | "bold",
-    style: "normal" | "italic",
-  ) => Promise<ArrayBuffer | null>;
+  onFontShortfall?: (shortfalls: FontShortfall[]) => void;
   /**
    * Optional theme override. Shallow-merged over the print-ready
    * `defaultPdfTheme`. The PDF default ignores the canvas theme entirely —
@@ -96,6 +98,12 @@ export async function exportToPdf(
   editor: IEditor,
   options?: PdfExportOptions,
 ): Promise<Uint8Array> {
+  if (editor.fonts) {
+    const prepared = await preparePdfLayout(editor);
+    if (prepared.shortfalls.length) options?.onFontShortfall?.(prepared.shortfalls);
+    return writePdf(prepared.layout, editor, options, prepared);
+  }
+
   editor.ensureFullLayout();
   const layout = editor.layout;
   if (layout.isPartial) {
@@ -121,6 +129,15 @@ export async function buildPdf(
   layout: DocumentLayout,
   editor: IBaseEditor,
   options?: PdfExportOptions,
+): Promise<Uint8Array> {
+  return writePdf(layout, editor, options);
+}
+
+async function writePdf(
+  layout: DocumentLayout,
+  editor: IBaseEditor,
+  options?: PdfExportOptions,
+  prepared?: Awaited<ReturnType<typeof preparePdfLayout>>,
 ): Promise<Uint8Array> {
   // Only own contribution entries enter these registries. Every string is a
   // valid key, including names shared with Object.prototype. Later extensions
@@ -155,14 +172,11 @@ export async function buildPdf(
   const pageWidthPt = pageConfig.pageWidth * PT_PER_PX;
   const pageHeightPt = pageConfig.pageHeight * PT_PER_PX;
 
-  const pdfDoc = await PDFDocument.create();
+  const pdfDoc = prepared?.doc ?? await PDFDocument.create();
 
-  const standardFonts = await embedStandardFonts(pdfDoc);
-  const customFonts = options?.fontResolver
-    ? await embedCustomFonts(pdfDoc, layout, options.fontResolver)
-    : new Map();
-
-  const fontRegistry = createFontRegistry(standardFonts, customFonts);
+  const fontRegistry = prepared?.fonts ?? createFontRegistry(
+    await embedStandardFonts(pdfDoc), await embedResolvedFonts(pdfDoc, layout),
+  );
   const imageCache = await embedImages(pdfDoc, layout);
 
   // Mutable page ref — updated per page in the loop. Draw helpers read lazily.
@@ -180,6 +194,7 @@ export async function buildPdf(
     pageHeightPt,
     fontRegistry,
     resolvedTheme,
+    prepared?.fitToMeasuredWidth ?? false,
     imageCache,
     nodeHandlers,
     markHandlers,

@@ -2585,7 +2585,7 @@ describe("buildBlockFlow — Stage 1", () => {
     const measurer = createMeasurer();
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
-    const { flows, reachedCutoff } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
+    const { flows, reachedCutoff } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     expect(flows).toHaveLength(2);
     expect(reachedCutoff).toBe(false);
   });
@@ -2595,7 +2595,7 @@ describe("buildBlockFlow — Stage 1", () => {
     const measurer = createMeasurer();
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
-    const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
+    const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     for (const flow of flows) {
       expect(flow.height).toBeGreaterThan(0);
     }
@@ -2606,9 +2606,7 @@ describe("buildBlockFlow — Stage 1", () => {
     const measurer = createMeasurer();
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
-    const { flows, reachedCutoff, cutoffIndex } = buildBlockFlow(
-      items, 0, cfg, defaultFontConfig, measurer, undefined, undefined, 3,
-    );
+    const { flows, reachedCutoff, cutoffIndex } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig }, 3);
     expect(flows).toHaveLength(3);
     expect(reachedCutoff).toBe(true);
     expect(cutoffIndex).toBe(3);
@@ -2619,7 +2617,7 @@ describe("buildBlockFlow — Stage 1", () => {
     const measurer = createMeasurer();
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
-    const { flows } = buildBlockFlow(items, 2, cfg, defaultFontConfig, measurer, undefined, undefined);
+    const { flows } = buildBlockFlow(items, 2, cfg, { measurer, fontConfig: defaultFontConfig });
     expect(flows).toHaveLength(1);
   });
 
@@ -2628,7 +2626,7 @@ describe("buildBlockFlow — Stage 1", () => {
     const measurer = createMeasurer();
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
-    const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
+    const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     expect(flows).toHaveLength(3);
     expect(flows[1]!.isPageBreak).toBe(true);
     expect(flows[1]!.height).toBe(0);
@@ -2649,7 +2647,7 @@ describe("paginateFlow — Stage 2", () => {
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const cfg = { margins, contentWidth };
-    const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
+    const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     const initPage = { pageNumber: 1, blocks: [] };
     const geometry = makeGeometry();
     const pr = paginateFlow(
@@ -2668,7 +2666,7 @@ describe("paginateFlow — Stage 2", () => {
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
     const cfg = { margins, contentWidth };
-    const { flows } = buildBlockFlow(items, 0, cfg, defaultFontConfig, measurer, undefined, undefined);
+    const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     const initPage = { pageNumber: 1, blocks: [] };
     const geometry = makeGeometry();
     const pr = paginateFlow(
@@ -2686,7 +2684,7 @@ describe("paginateFlow — Stage 2", () => {
     const { margins } = defaultPageConfig;
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
-    const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
+    const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, { measurer, fontConfig: defaultFontConfig });
     const geometry = makeGeometry();
     const pr = paginateFlow(
       flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,
@@ -2714,7 +2712,7 @@ describe("paginateFlow — Stage 2", () => {
     const { margins } = defaultPageConfig;
     const contentWidth = defaultPageConfig.pageWidth - margins.left - margins.right;
     const items = collectLayoutItems(testDoc, defaultFontConfig);
-    const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, defaultFontConfig, measurer, undefined, undefined);
+    const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, { measurer, fontConfig: defaultFontConfig });
     const geometry = makeGeometry();
     const pr = paginateFlow(
       flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1,

@@ -60,4 +60,18 @@ export {
   themeContainsCssVars,
 } from "@scrivr/core";
 export type { EditorTheme, ResolvedTheme } from "@scrivr/core";
+// The font lane, so an app configuring one never has to reach past the adapter.
+export { DefaultFontProvider } from "@scrivr/core";
+export type {
+  ActiveFontFamily,
+  DefaultFontProviderOptions,
+  FontFamilyOption,
+  FontKey,
+  FontSynthesis,
+  FontProvider,
+  FontRequest,
+  FontResource,
+  FontResolution,
+  FontShortfall,
+} from "@scrivr/core";
 export { Collaboration, CollaborationCursor } from "@scrivr/plugins";
