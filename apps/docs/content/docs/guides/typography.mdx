@@ -102,10 +102,11 @@ A Latin-only file holds around 230 glyphs. Paste Cyrillic or Greek into a
 document using it and those characters have no glyph — on canvas the browser
 quietly substitutes something else, and in a PDF they are drawn as blanks.
 
-So prefer an unsubsetted file per face. `inter-ui` publishes Inter that way:
-~110 KB per face, about 2 850 glyphs, covering Latin, Latin Extended, Greek,
-Cyrillic and Vietnamese in one file. The faces are fetched only when something
-resolves to them, so the catalogue costs nothing until it is used.
+So prefer an unsubsetted file per face, in a format a PDF can carry —
+`@expo-google-fonts/inter` publishes Inter as `.ttf` that way, covering Latin,
+Latin Extended, Greek, Cyrillic and Vietnamese in one file per face. The faces
+are fetched only when something resolves to them, so the catalogue costs
+nothing until it is used.
 
 ---
 

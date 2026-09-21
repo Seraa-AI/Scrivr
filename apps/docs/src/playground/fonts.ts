@@ -10,7 +10,7 @@
  * a request the browser answers differently on every machine, and a PDF cannot
  * embed a request.
  *
- * These are `inter-ui`'s unsubsetted files rather than the per-script subsets
+ * These are unsubsetted `.ttf` files rather than the per-script subsets
  * `@fontsource` publishes. The web's usual arrangement — one file per script,
  * chosen by `unicode-range` — assumes the browser picks per character, but a
  * face here is one set of bytes that has to serve both measurement and
