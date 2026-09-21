@@ -25,6 +25,7 @@ import {
   type CitationRange,
 } from "@scrivr/plugins";
 import { AiToolkit } from "@scrivr/ai";
+import { playgroundFonts } from "./fonts";
 import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
 import { FloatingMenuBar } from "./FloatingMenuBar";
@@ -207,6 +208,9 @@ export function Playground() {
     extensions: EXTENSIONS,
     pageConfig: defaultPageConfig,
     theme: PLAYGROUND_THEME,
+    // The editor measures and exports in faces this app owns the bytes for,
+    // so a PDF carries the typeface it was laid out in. See ./fonts.ts.
+    fonts: playgroundFonts,
     // Resolve var(--scrivr-...) against <html> so the existing fumadocs
     // dark-class strategy drives canvas paint without a second toggle.
     themeRoot:

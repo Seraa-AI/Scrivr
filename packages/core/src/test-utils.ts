@@ -51,6 +51,31 @@ export function createMeasurer(): TextMeasurer {
 }
 
 /**
+ * A measurer that can install owned bytes, which the DOM in tests cannot.
+ *
+ * happy-dom ships no `FontFace`, so the real `installFont` always fails and
+ * every resolution degrades to `generic`. A test that wants the path a browser
+ * actually takes — bytes installed, measured under the backend's own name —
+ * has to supply this, or it silently asserts the failure path instead.
+ */
+export function createInstallingMeasurer(): TextMeasurer {
+  const measurer = createMeasurer();
+  const aliases = new Map<string, string>();
+  const installFont = async (resource: { id: string }): Promise<string> => {
+    const existing = aliases.get(resource.id);
+    if (existing) return existing;
+    const alias = `TestFace${aliases.size}`;
+    aliases.set(resource.id, alias);
+    return alias;
+  };
+  return Object.assign(
+    Object.create(Object.getPrototypeOf(measurer)) as TextMeasurer,
+    measurer,
+    { installFont },
+  );
+}
+
+/**
  * Construct a real `Editor` wired to a Skia-backed `TextMeasurer`. Use this
  * — never `new Editor()` directly — in any test that depends on layout,
  * text width, cursor geometry, pagination, tile bounds, or page projection.

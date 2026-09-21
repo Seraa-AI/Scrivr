@@ -1,4 +1,5 @@
 import { Node } from "prosemirror-model";
+import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { InlineRegistry } from "./BlockRegistry";
@@ -205,6 +206,8 @@ function createHiddenAnchorLine(spans: InputSpan[]): LayoutLine {
 }
 
 export interface BlockLayoutOptions {
+  /** Answers what face a span is measured in. Absent when no provider. */
+  fonts?: LayoutFontResolver;
   /** Absolute doc position of this node — used to resolve child positions */
   nodePos: number;
   /** Left edge in CSS pixels (the page's left margin) */
@@ -348,7 +351,7 @@ export function layoutTableRow(
   node: Node,
   options: BlockLayoutOptions,
 ): LayoutBlock {
-  const { nodePos, x, y, availableWidth, page, measurer, fontConfig, fontModifiers, inlineRegistry, tableColumns } = options;
+  const { nodePos, x, y, availableWidth, page, measurer, fontConfig, fontModifiers, inlineRegistry, fonts, tableColumns } = options;
 
   const columns =
     tableColumns && tableColumns.length > 0
@@ -365,6 +368,7 @@ export function layoutTableRow(
     ...(fontConfig ? { fontConfig } : {}),
     ...(fontModifiers ? { fontModifiers } : {}),
     ...(inlineRegistry ? { inlineRegistry } : {}),
+    ...(fonts ? { fonts } : {}),
   });
 
   return {
@@ -424,6 +428,7 @@ export function layoutBlock(
     fontModifiers,
     lineSpaceProvider,
     inlineRegistry,
+    fonts,
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
@@ -447,15 +452,12 @@ export function layoutBlock(
       : blockStyle.align;
 
   // ── 1. Extract spans ──────────────────────────────────────────────────────
-  const spans = extractSpans(
-    node,
-    nodePos,
-    baseFont,
-    fontConfig,
-    fontModifiers,
-    measurer,
-    inlineRegistry,
-  );
+  const spans = extractSpans(node, nodePos, baseFont, {
+    ...(fontModifiers ? { fontModifiers } : {}),
+    ...(measurer ? { measurer } : {}),
+    ...(inlineRegistry ? { inlineRegistry } : {}),
+    ...(options.fonts ? { fonts: options.fonts } : {}),
+  });
 
   // ── 2. Empty node fallback ────────────────────────────────────────────────
   // An empty paragraph (or one containing only hardBreak nodes) has no
@@ -494,10 +496,17 @@ export function layoutBlock(
     };
   }
 
+  // An empty paragraph still has a height, and that height comes from a face.
+  // Measuring the sentinel in the requested family while every filled
+  // paragraph is measured in the resolved one gives blank lines a different
+  // height from the text around them, and makes the caret jump on the first
+  // keystroke.
+  const zwsAnswer = fonts?.resolve(baseFont);
   const zwsSpan: InputSpan = {
     kind: "text",
     text: "​",
-    font: baseFont,
+    font: zwsAnswer?.font ?? baseFont,
+    ...(zwsAnswer ? { resolution: zwsAnswer.resolution } : {}),
     docPos: nodePos + 1,
   };
   const inputSpans: InputSpan[] = hasNonZeroContent ? spans : [zwsSpan];
@@ -701,26 +710,35 @@ export function layoutBlock(
  *   - nodePos + 1 is inside the node (after the opening token)
  *   - nodePos + 1 + offset is the absolute position of a child at `offset`
  */
+interface ExtractSpansContext {
+  fontModifiers?: Map<string, FontModifier>;
+  measurer?: TextMeasurerLike;
+  inlineRegistry?: InlineRegistry;
+  fonts?: LayoutFontResolver;
+}
+
 function extractSpans(
   node: Node,
   nodePos: number,
   baseFont: string,
-  _fontConfig: FontConfig,
-  fontModifiers?: Map<string, FontModifier>,
-  measurer?: TextMeasurerLike,
-  inlineRegistry?: InlineRegistry,
+  ctx: ExtractSpansContext,
 ): InputSpan[] {
+  const { fontModifiers, measurer, inlineRegistry, fonts } = ctx;
   const spans: InputSpan[] = [];
 
   node.forEach((child, offset) => {
     const childDocPos = nodePos + 1 + offset;
 
     if (child.isText && child.text) {
-      const font = resolveFont(baseFont, child.marks, fontModifiers);
+      const requested = resolveFont(baseFont, child.marks, fontModifiers);
+      // Measure the face that was resolved, not the one that was asked for —
+      // a span recording an answer it was not measured in is the whole bug.
+      const answered = fonts?.resolve(requested);
       spans.push({
         kind: "text",
         text: child.text,
-        font,
+        font: answered?.font ?? requested,
+        ...(answered ? { resolution: answered.resolution } : {}),
         docPos: childDocPos,
         marks: child.marks.map((m) => ({
           name: m.type.name,
@@ -782,16 +800,26 @@ function extractSpans(
         let objWidth = typeof w === "number" ? w : 200;
         let objHeight = typeof h === "number" ? h : 200;
 
-        // If an InlineStrategy provides measure(), use it for dynamic sizing.
-        // Tokens (pageNumber, totalPages, date) use this to size based on font.
-        if (measurer && inlineRegistry) {
-          const strategy = inlineRegistry.get(child.type.name);
-          if (strategy?.measure) {
-            const font = resolveFont(baseFont, child.marks, fontModifiers);
-            const measured = strategy.measure(child, font, measurer);
-            objWidth = measured.width;
-            objHeight = measured.height;
-          }
+        // An atom sized from a font — a page number, a date — inherits the
+        // run's, and a renderer that paints it needs the same one the box was
+        // reserved against, whichever side of the export it is on. Recorded on
+        // the span rather than re-derived from the family name.
+        //
+        // An atom with fixed dimensions, an image, is not set in a face at all:
+        // resolving one for it would enter the layout's font table and report
+        // a substitution for a typeface nothing is drawn in.
+        const strategy =
+          measurer && inlineRegistry ? inlineRegistry.get(child.type.name) : undefined;
+        let atomFont: string | undefined;
+        let atomResolution: FontResolutionId | undefined;
+        if (strategy?.measure && measurer) {
+          const requested = resolveFont(baseFont, child.marks, fontModifiers);
+          const answered = fonts?.resolve(requested);
+          atomFont = answered?.font ?? requested;
+          atomResolution = answered?.resolution;
+          const measured = strategy.measure(child, atomFont, measurer);
+          objWidth = measured.width;
+          objHeight = measured.height;
         }
 
         spans.push({
@@ -800,6 +828,8 @@ function extractSpans(
           docPos: childDocPos,
           width: objWidth,
           height: objHeight,
+          ...(atomFont !== undefined ? { font: atomFont } : {}),
+          ...(atomResolution !== undefined ? { resolution: atomResolution } : {}),
           verticalAlign,
         });
       }

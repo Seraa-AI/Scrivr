@@ -1,3 +1,4 @@
+import type { LayoutFontResolver } from "../fonts/layoutResolver";
 /**
  * runMiniPipeline — measurement-only layout pass for mini-documents (headers,
  * footers, footnote bodies). Runs buildBlockFlow + paginateFlow in pageless
@@ -23,6 +24,7 @@ export interface MiniPipelineOptions {
   measurer: TextMeasurerLike;
   fontConfig?: FontConfig;
   fontModifiers?: Map<string, FontModifier>;
+  fonts?: LayoutFontResolver;
 }
 
 /**
@@ -41,6 +43,7 @@ export function runMiniPipeline(
   const plOptions: PageLayoutOptions = {
     pageConfig,
     measurer: options.measurer,
+    ...(options.fonts ? { fonts: options.fonts } : {}),
     ...(options.fontConfig !== undefined && { fontConfig: options.fontConfig }),
     ...(options.fontModifiers !== undefined && { fontModifiers: options.fontModifiers }),
   };
@@ -53,6 +56,7 @@ export function runMiniPipeline(
 
   return {
     pages: [singlePage],
+    ...(options.fonts ? { fontResolutions: new Map(options.fonts.table()) } : {}),
     pageConfig,
     version: 1,
     totalContentHeight: naturalHeight,

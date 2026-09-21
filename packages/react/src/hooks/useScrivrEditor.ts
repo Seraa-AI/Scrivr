@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Editor, StarterKit } from "@scrivr/core";
-import type { Extension, PageConfig, EditorTheme } from "@scrivr/core";
+import type { Extension, PageConfig, EditorTheme, FontProvider } from "@scrivr/core";
 
 export interface UseCanvasEditorOptions {
   /** Extensions to load. Defaults to [StarterKit]. */
@@ -9,6 +9,15 @@ export interface UseCanvasEditorOptions {
   pageConfig?: PageConfig;
   /** When true, the editor blocks all mutations. Default: false. */
   readOnly?: boolean;
+  /**
+   * Which typefaces this editor may measure and paint in.
+   *
+   * Without one the editor asks the browser for whatever a family name means
+   * there, and an export cannot reproduce it — it has no bytes to embed and no
+   * record of what was measured. Supply a `DefaultFontProvider` with at least
+   * a default face; see the docs playground for a worked example.
+   */
+  fonts?: FontProvider;
   /**
    * Initial canvas theme. Each token accepts any CSS color string, including
    * `var(--token)` references that resolve against `themeRoot`. The Editor
@@ -72,6 +81,7 @@ export function useScrivrEditor(
       extensions: opts.extensions ?? [StarterKit],
       ...(opts.pageConfig ? { pageConfig: opts.pageConfig } : {}),
       readOnly: opts.readOnly ?? false,
+      ...(opts.fonts ? { fonts: opts.fonts } : {}),
       ...(opts.theme ? { theme: opts.theme } : {}),
       ...(opts.themeRoot ? { themeRoot: opts.themeRoot } : {}),
       onChange: (state) => {

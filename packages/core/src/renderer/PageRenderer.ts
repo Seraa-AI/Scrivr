@@ -1,4 +1,8 @@
 import { LayoutPage, PageConfig } from "../layout/PageLayout";
+import type { FontResolutionId } from "../fonts/layoutResolver";
+import type { FontResolution } from "../fonts/types";
+import { fontSizeOf, paintText } from "../fonts/synthesis";
+import type { LayoutFontResolver } from "../fonts/layoutResolver";
 import {
   compareAnchoredObjectPaintOrder,
   type AnchoredObjectPlacement,
@@ -18,6 +22,15 @@ export interface RenderPageOptions {
   ctx: CanvasRenderingContext2D;
   page: LayoutPage;
   pageConfig: PageConfig;
+  /**
+   * Every face this layout measured against, so a span can be painted with
+   * whatever its chosen face does not supply — a weight or a slant nobody
+   * owns. Absent when the editor has no font provider, and then nothing is
+   * synthesized.
+   */
+  fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>;
+  /** The resolver this layout was measured with, for chrome that re-lays out. */
+  fontResolver?: LayoutFontResolver;
   /**
    * The layout version this render was scheduled for.
    * If it doesn't match currentVersion, the render is aborted.
@@ -62,6 +75,7 @@ export interface RenderPageOptions {
  * Does NOT own the canvas — receives ctx from the caller.
  * Does NOT run layout — receives a pre-computed LayoutPage.
  */
+
 export function renderPage(options: RenderPageOptions): boolean {
   const {
     ctx,
@@ -74,6 +88,8 @@ export function renderPage(options: RenderPageOptions): boolean {
     map,
     showMarginGuides = false,
     markDecorators,
+    fontResolutions,
+    fontResolver,
     blockRegistry,
     inlineRegistry,
     anchoredObjects,
@@ -143,6 +159,7 @@ export function renderPage(options: RenderPageOptions): boolean {
           ...(blockRegistry ? { blockRegistry } : {}),
           ...(markDecorators ? { markDecorators } : {}),
           ...(inlineRegistry ? { inlineRegistry } : {}),
+          ...(fontResolutions ? { fontResolutions } : {}),
         },
         map,
       );
@@ -157,6 +174,7 @@ export function renderPage(options: RenderPageOptions): boolean {
         theme,
         markDecorators,
         inlineRegistry,
+        fontResolutions,
       );
     }
   }
@@ -200,6 +218,8 @@ export function renderPage(options: RenderPageOptions): boolean {
         ...(markDecorators ? { markDecorators } : {}),
         ...(blockRegistry ? { blockRegistry } : {}),
         ...(inlineRegistry ? { inlineRegistry } : {}),
+        ...(fontResolutions ? { fontResolutions } : {}),
+        ...(fontResolver ? { fontResolver } : {}),
       });
     }
   }
@@ -272,6 +292,7 @@ export function drawBlock(
   theme: ResolvedTheme,
   markDecorators?: Map<string, MarkDecorator>,
   inlineRegistry?: InlineRegistry,
+  fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>,
 ): number {
   const contentWidth = block.availableWidth;
   // Running Y accumulator — O(n) replacement for the getTotalLineHeight O(n²) reduce.
@@ -389,7 +410,15 @@ export function drawBlock(
 
       ctx.font = span.font;
       ctx.fillStyle = effectiveTextColor;
-      ctx.fillText(span.text, spanX, baseline);
+      const synthesis =
+        span.resolution === undefined
+          ? undefined
+          : fontResolutions?.get(span.resolution)?.synthesis;
+      paintText(ctx, span.text, spanX, baseline, {
+        ...(synthesis ? { synthesis } : {}),
+        sizePx: fontSizeOf(span.font),
+        color: effectiveTextColor,
+      });
 
       // decoratePost for all marks
       if (markDecorators && span.marks) {

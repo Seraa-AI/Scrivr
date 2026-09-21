@@ -451,8 +451,8 @@ would flip a single `_dirty` boolean and re-lay the document.
    `fontTable.xml` on import, since that is inventory. Substitutions are
    reported at import and at first layout.
 
-   Nothing renders differently yet — the invisible failure becomes visible and
-   correctly owned. The break and the machinery ship together on purpose:
+   The editor now measures against the installed face and reflows when its
+   provider changes the answer. The break and the machinery ship together on purpose:
    requiring a default before anything consumes one is a migration that buys
    nothing, and shipping the provider while the default still asks the host
    leaves the hole this document is about. One version, one migration note, the
@@ -469,6 +469,341 @@ There is no phase that ships fonts. A resolver that fetched common families
 would make the bytes tier the normal case by making Scrivr own typefaces, which
 is the boundary above. The application brings them; what the phases build is
 the guarantee that both lanes then consume the same ones.
+
+## What shipped
+
+Updated as each phase lands. Where the code and the proposal above disagree,
+this section says so rather than the proposal being quietly rewritten to match.
+
+### Phase 1 — in progress
+
+- `packages/core/src/fonts/` — `FontKey`, `FontRequest`, `FontResource`,
+  `FontResolution`, `FontResolutionConstraints`, `FontProviderChange`,
+  `FontProvider`, and `DefaultFontProvider`.
+
+**Deviation: `resolve` is synchronous.** The proposal has
+`resolve(request, constraints): Promise<FontResolution>`. It cannot be — layout
+is reached through `get layout()`, a synchronous property getter, so nothing on
+the measurement path can await. Resolution is therefore two calls:
+
+```ts
+prepare(requests, constraints?): Promise<void>   // ahead of measurement, may fetch
+resolve(request, constraints?): FontResolution   // what is known now, never blocks
+```
+
+`prepare` is the pre-layout pass. `resolve` always answers: a request `prepare`
+never saw resolves to the default and reports `source: "default"`, rather than
+the caller inferring it from the geometry afterwards. This is a closer fit to
+"the work happens before the layout path" than the async signature was, since
+the async work is now unambiguously outside that path rather than notionally
+ahead of it.
+
+### Phase 2 — shipped
+
+Layout resolves at `resolveFont`'s two call sites in `BlockLayout`, measures
+the resolved family, and records which answer it used. `DocumentLayout` carries
+the interned table; a span carries the id. Empty and absent respectively when
+the editor has no provider, so an application that supplies none is unaffected.
+
+**"Still no behaviour change" did not hold, as expected.** The proposal says phase 2 interns
+resolutions and changes nothing. But a span records the face it was *measured*
+in, and measurement uses the CSS string handed to `ctx.font` — so attaching a
+resolution while still measuring the requested family records an answer layout
+did not honour. That is the lie this document exists to remove, one layer in.
+
+For the record to be true, layout has to measure the *resolved* family. Which
+means canvas stops silently substituting, and an editor with a provider renders
+differently — correctly, and only if it has one. An editor with no provider
+resolves nothing and is unaffected, so the change is opt-in rather than
+breaking.
+
+**The threading was the real cost, and it was paid rather than added to.**
+`buildBlockFlow` took nine positional parameters, `resolveAnchoredObjects` and
+`reflowFlowsAgainstExclusions` seven each — and five were the same threaded
+dependencies in all three. A resolver would have been the tenth. They take a
+`MeasureContext` now, so this dependency cost a field rather than a parameter
+in three signatures, and the next one is free.
+
+**A family sometimes has to be quoted.** Substituting a resolved family into a
+CSS shorthand produces a string handed to `ctx.font`, and an invalid shorthand
+is *ignored* rather than rejected — leaving whatever the previous span set. A
+name that is not a sequence of CSS identifiers is quoted before substitution.
+
+### Phase 3 — shipped
+
+The PDF stops deriving a face from the family name. `exportToPdf` resolves the
+document's requests under `{ portable: true, embeddable: true }` before layout
+is reached, reporting anything it could not honour through `onFontShortfall`.
+`buildPdf` embeds the resources in `layout.fontResolutions` and keys them by
+resolution id; a span picks its face by the id it carries. The name-based guess
+survives only where nothing resolved anything — no provider, an unembeddable
+licence, or bytes that would not embed — so an application supplying no
+provider is unaffected.
+
+`PdfExportOptions.fontResolver` is **removed**, a breaking change. It resolves
+bytes by family name at export time, which is precisely how a PDF comes to
+embed a face the layout never measured. Keeping it deprecated would have left
+that door open for the sake of an option that contradicts the model; an
+application that used it supplies a `FontProvider` instead.
+
+**Phase 2 shipped three gaps, and all three were inert rather than wrong.**
+Nothing downstream could observe the recording, which is why the phase looked
+complete:
+
+- `Editor` never accepted `fonts`. `BaseEditor` and `ServerEditor` did, but the
+  browser editor's own options interface omitted it and its constructor
+  destructure dropped it — so the whole lane was unreachable from the main
+  consumer.
+- `MeasureContext` carried the resolver and none of the three `layoutBlock`
+  calls forwarded it, so blocks were measured without one. `resolveBlockEntry`
+  still took the twelve-positional-parameter list `MeasureContext` had replaced
+  everywhere else; it takes the context now.
+- `DocumentLayout.fontResolutions` was declared and never populated — nothing
+  called `table()`. The pipeline publishes it now.
+
+**The resolver's lifetime is the measure cache's, not the run's.** It was built
+per pipeline run. A span records its resolution as an id into that resolver's
+table, and the measure cache hands cached spans back on later runs without
+re-measuring — so ids minted by one run pointed into a table rebuilt empty by
+the next. It is created once, with the coordinator.
+
+**An id names a face, not a family.** The interning key was
+`family|source|portable`, which gave regular and bold Arial one id and one
+answer — and would have had the exporter embed one set of bytes for both, every
+bold run painted from the regular face. The key now includes the resource and
+the requested weight and style, encoded rather than joined on a separator: a
+resource id is whatever the application called it, so it can contain the
+separator, and its absence has to stay distinguishable from an id that happens
+to be the empty string.
+
+**Running a real contract found two more paths outside the lane.** A ten-page
+DOCX set in Aptos exported with 3510 glyphs from the embedded face and 187 from
+a standard one. The 187 were table cells: `layoutTableRowCells` never received
+the resolver, so cell text was measured in the family nobody owned and painted
+in Helvetica — the original bug, alive inside tables long after body text was
+fixed. List markers had the same shape for a different reason: the marker was
+pinned to `fontRegistry.fallback`, which would put the number of a numbered
+clause in a different typeface from the clause. Both now take the face of the
+line they belong to; the document exports with one face throughout.
+
+The lesson is about coverage, not about tables: a lane that spans opt into is a
+lane every new drawing path silently opts out of.
+
+**The drawing surface was the last opt-out, and it was the same defect.** An
+inline atom is measured against a font and the span recorded none, so a handler
+painting one had to name a family — the header and footer tokens named
+`10px sans-serif` while the canvas drew them in the run's resolved face at the
+run's size. An object span now carries the face it was measured against, as a
+text span does, and the atom's context hands it to the handler as a
+`PdfFontHandle` carrying its resolution. No handler has to name a family.
+
+**What phase 3 does not do.** Canvas resolves with no constraints and the
+export resolves with two, so the two can disagree — a face that is registered
+but unembeddable is measured on screen and cannot go in the file. Export takes
+its own constrained snapshot and re-layouts from that snapshot, so pagination
+and painting remain internally consistent. It reports any substitution through
+`onFontShortfall`.
+
+### Phase 3 follow-ups — shipped
+
+Running the playground's own configuration against the contract found two more
+faults, both invisible until a real inventory existed.
+
+**The default was a face, not a family.** Falling back went straight to the one
+`default` resource, so a document naming a family nobody owns lost its bold and
+its italic: 3697 glyphs of a contract came out in the regular weight. A
+document that says bold still means bold even when the family is unavailable,
+so the fallback now picks the nearest face in the default's *family*. The
+contract exports as 3107 regular, 568 bold, 22 italic — the same distribution
+it had before any substitution, re-faced.
+
+**A font-family list was treated as one family name.** `parseFont` returns
+everything after the size, so `"Arial, sans-serif"` was asked of the provider
+verbatim and matched nothing registered as `Arial`. The rest of the list is the
+host's fallback chain, which is the decision a provider exists to replace; only
+the primary family is a request.
+
+**Reporting was per size.** Interning on `request.size` gave one answer per
+`(face, size)` pair, so the contract reported thirteen substitutions for five
+faces. Size is a measurement parameter, not part of a face's identity. The
+requested family stays in the key, because two families sharing a fallback
+today must still split when one of them is registered tomorrow.
+
+**The adapter and the demo.** `useScrivrEditor` accepted no `fonts` option, so
+the React lane had the same hole `Editor` did. The docs playground now supplies
+an Inter inventory, which is the worked example the guide points at: an
+application owns its typefaces, and Scrivr owns the resolution.
+
+**A face is one set of bytes, which decides how a font is packaged.** The
+playground first used `@fontsource`'s per-script subsets, the arrangement the
+web normally uses: one file per script, chosen by `unicode-range`. That assumes
+the browser picks a file per character. It cannot here — the same bytes have to
+measure on canvas and embed in a PDF, and an exporter has no per-character
+choice to make. The Latin subset holds 231 glyphs, so a document that turned
+out to contain Cyrillic would have rendered in something nobody chose. The
+playground uses `inter-ui`'s unsubsetted files instead: ~110 KB and 2852 glyphs
+per face, verified by exporting Latin, Latin Extended, Cyrillic, Greek and
+Vietnamese and reading the characters back out of the PDF's ToUnicode map.
+
+Supporting per-script files properly would mean a face composed of several
+sources plus script-aware run splitting in the exporter. That is a real
+feature, not a packaging detail, and nothing has asked for it.
+
+### The picker — shipped
+
+A font control was the last thing still describing an inventory nobody had.
+`FontFamily` declares its presets in phase 1, before an editor exists, so it
+cannot know what the editor it ends up in can render: with a provider holding
+Inter, its six preset families were six names that all resolved to one
+typeface. Meanwhile a `.docx` written in Aptos showed "Aptos" in the control
+while the page was drawn in Inter — a name for a face that was neither present
+nor used.
+
+`FontProvider` gained an optional `inventory()`, and the editor exposes
+`fontFamilies` from it. The family toolbar group is reconciled against that at
+construction, which is the first moment both facts exist; with no provider the
+extension's presets stand, because nothing was claimed and removing them would
+leave the control empty. Enumeration is optional because a provider backed by a
+remote catalogue can resolve a name without being able to list every name it
+would accept.
+
+The document's own family is still shown — it is what the document says, and a
+control that renamed it would lie in the other direction. It is shown as
+`Aptos → Inter`, and no longer styled in the missing family, which had been
+rendering the label in an arbitrary browser fallback and making an absent font
+look present.
+
+**Enumeration exposed a bug in the thing being enumerated.** `systemCandidates`
+were stored lowercased for matching, so `inventory()` offered "courier new" to
+be displayed. The set became a map: lowercase to match on, the caller's
+spelling to show.
+
+### Reporting — shipped
+
+Import reported once and export reported at the end; nothing answered "what is
+this document not getting" in between, although `DocumentLayout.fontResolutions`
+had held the answer since phase 2. `Editor.fontSubstitutions` derives the same
+`FontShortfall` the other two producers emit — one type, three producers, one
+live view rather than a fourth shape. It is memoised on the layout version,
+because a getter that rebuilt its array would re-render every subscriber on
+every notification.
+
+`getActiveFontFamily()` returns the family in effect at the selection with the
+face it is drawn in. The playground had reconstructed the inline-mark →
+block-attr → document-default precedence itself, which is the editor's own rule
+and the same re-derivation this document exists to stop; the control now reads
+it.
+
+No UI ships in core. Whether a substitution is a badge, a banner or nothing is
+a decision about what an application is for, and the two consumers we can name
+would answer it differently. The `Aptos → Inter` treatment in the playground is
+one application's choice, not a component.
+
+### Synthetic bold — shipped, after all
+
+**The section below is superseded and kept for its reasoning.** It argued that
+synthesis could not hold the invariant. That was right about letting the
+browser do it and wrong about doing it ourselves.
+
+A browser's synthetic bold widens every advance and no exporter can reproduce
+it. But thickening a glyph in place and leaning it do not touch advances at
+all — so if the engine synthesizes rather than delegating, both lanes alter the
+same geometry by the same amount and the invariant holds by construction. The
+canvas strokes and shears; the PDF sets fill-and-outline with a line width and
+skews its text matrix. Both read the strength from one module, because two
+copies of the number would be two documents.
+
+`FontSynthesis` was already the record of what to do; this is the doing. Note
+what would have broken had we let the browser fake it instead: the magnitude
+bound added to `trackingFor` rejects a gap of more than a couple of percent of
+the em, which is roughly what browser emboldening produces — the safety net
+from one phase would have blocked the feature from another.
+
+### Synthetic bold — the original argument, superseded
+
+An inventory holding one weight of a family answers a request for its bold with
+its regular, and nothing fakes the difference. Word and every browser do fake
+it, so this is a deliberate divergence from the convention this project
+otherwise follows.
+
+A browser's synthetic bold widens each glyph's advance; the PDF equivalent
+strokes the outline and leaves the advance unchanged. We position text once per
+span — an absolute text matrix, then a plain show-text — so within a run the
+embedded font's advances decide where each character goes. Faking on one side
+therefore leaves a run under-filling the box reserved for it: loose tracking
+across a heading, not colliding paragraphs.
+
+**This is a "not yet", not a "cannot".** An earlier draft of this section said
+there was no version that holds the invariant. That is wrong, and the
+counter-example is Word: it synthesizes, and its export survives because it
+writes explicit per-glyph positioning rather than letting the consumer recompute
+advances from the font. The same is open to us — `TJ` with offsets taken from
+our own measurements — and it would buy kerning fidelity and exact
+justification besides. The ordering is positioning first, synthesis after;
+synthesis without it is the part that drifts.
+
+Until then the engine reports rather than guesses. Resolution records what the
+physical face does not supply and rendering decides what to do about it, which
+is the split described under *Resolution records, rendering decides* below.
+
+### Resolution records, rendering decides — shipped
+
+Two algorithms were being run as one. Finding the closest physical face is
+resolution's job; making that face satisfy an appearance it was not designed
+for is rendering's. They had been fused: the layout resolver spelled the
+*resource's* weight and slant into the string it measured with, which is the
+decision "do not synthesize" written into the resolution layer. Nothing
+downstream could see that anything was missing, and the symptom was a helper at
+the reporting boundary reconstructing the gap by diffing the request against
+the resource — a fact the resolver already held.
+
+`FontResolution.synthesis` records it: `{ weight?: {from, to}, style?: {from,
+to} }`, present only when a resource answered, because an answer without one has
+no physical face to alter. The canvas renderer still declines — with a comment
+saying so at the site where it declines, rather than by omission — and the DOCX
+import diagnostic now names what was lost ("No bold face is available, and
+neither is synthesized") instead of only what was chosen.
+
+The face-matching half needed nothing: `#nearest` already penalises a slant
+mismatch before a weight mismatch, so a request for bold italic against a
+family holding regular, italic and semibold resolves to the *italic*. A
+designed italic redraws its glyphs where a faked one shears the upright, so
+keeping the real slant and leaving the weight unmet is the better trade — and
+now the resolution says that is what happened.
+
+### The PDF reproduces the screen — shipped
+
+The export laid the document out a second time, against a measurer reading the
+embedded faces. That made the file internally consistent and different from the
+page it came from: two engines reading one font file do not agree on advance
+widths to better than about half a percent, which is enough to move a line
+break. The contract measured 325 lines on screen and 327 in the PDF.
+
+It now reuses the layout the editor already has. Every face the document uses
+was resolved and measured on screen, so when the export resolves to those same
+faces there is nothing to recompute — and the discovery pass that existed only
+to find the requests goes too, since the layout's own resolution table is that
+list. An export was three full document layouts; it is one.
+
+Reuse is conditional on the answers agreeing, face by face. A family the
+browser can draw but nobody can embed, or one that had not finished installing
+when the page was laid out, is a real disagreement — the geometry on screen
+belongs to a face the file cannot carry — so that case still typesets its own
+and reports why. Both paths exist because both are reachable, and a test drives
+each.
+
+**Reusing the geometry means the text no longer fills it.** A run measured by
+one engine and painted by another ends short of its box: slack at the end of a
+long line, and a centred line sitting slightly left. PDF character spacing adds
+a fixed amount to every glyph's advance, so the difference is spread across the
+run without touching the glyphs — the smallest mechanism that closes it. It is
+zero when the layout was measured from the same face, so the typeset-again path
+emits nothing. On the contract, 2062 runs are adjusted by a median of 0.027pt
+per glyph.
+
+This is also the groundwork the synthesis decision was waiting on. Fitting a
+painted run to a measured width is the same operation whether the difference
+came from two engines or from one of them faking a weight.
 
 ## Decisions (locked)
 

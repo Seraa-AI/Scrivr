@@ -18,7 +18,8 @@
  * doc JSON).
  */
 
-import type { LayoutBlock, PdfDrawSurface, Rgb } from "@scrivr/core";
+import type { LayoutBlock, PdfDrawSurface, PdfFontHandle, Rgb } from "@scrivr/core";
+import { fontSizeOf } from "@scrivr/core";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./tokenStrategies";
@@ -44,8 +45,23 @@ function isResolvedPayload(value: unknown): value is ResolvedHeaderFooter {
  * A token only draws, so it asks for only what it dereferences. Demanding the
  * band's fields here would turn a draw-only context into a silent no-op.
  */
-function isDrawContext(value: unknown): value is { draw: PdfContextLike["draw"] } {
-  return typeof value === "object" && value !== null && "draw" in value;
+/** A font handle, validated rather than assumed — it arrives as `unknown`. */
+function isFontHandle(value: unknown): value is PdfFontHandle {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "cssFont" in value &&
+    typeof value.cssFont === "string"
+  );
+}
+
+function isDrawContext(
+  value: unknown,
+): value is { draw: PdfContextLike["draw"]; font?: PdfFontHandle } {
+  if (typeof value !== "object" || value === null || !("draw" in value)) return false;
+  // `font` is present only for inline atoms, so its absence is not a failure —
+  // but a value of the wrong shape is, and would reach pdf-lib as one.
+  return !("font" in value) || isFontHandle(value.font);
 }
 
 /** The band additionally reads the layout and writes its own origin back. */
@@ -117,17 +133,25 @@ function renderBand(
 const TOKEN_COLOR: Rgb = { r: 156, g: 163, b: 175 };
 const TOKEN_SIZE_PX = 10;
 
-function drawTokenOnPdf(text: string, block: LayoutBlock, ctx: { draw: PdfContextLike["draw"] }): void {
+function drawTokenOnPdf(
+  text: string,
+  block: LayoutBlock,
+  ctx: { draw: PdfContextLike["draw"]; font?: PdfFontHandle },
+): void {
+  // The face the layout measured this token against, which is the one the
+  // canvas paints it in. Naming a family here instead would size the token's
+  // box from one typeface and draw it in another.
+  const font = ctx.font ?? { cssFont: `${TOKEN_SIZE_PX}px sans-serif` };
   ctx.draw.text({
     text,
     x: block.x,
     baselineY: block.y + block.height,
-    sizePx: TOKEN_SIZE_PX,
-    // A generic family, so the exporter resolves its standard sans face.
-    font: { cssFont: `${TOKEN_SIZE_PX}px sans-serif` },
+    sizePx: fontSizeOf(font.cssFont),
+    font,
     color: TOKEN_COLOR,
   });
 }
+
 
 /** PDF node handler for pageNumber token. */
 export function renderPageNumberPdf(block: LayoutBlock, ctx: unknown): void {

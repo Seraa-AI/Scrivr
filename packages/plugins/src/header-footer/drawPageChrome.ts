@@ -101,6 +101,11 @@ function layoutAtBandY(
     },
     measurer: paintCtx.measurer,
     fontConfig: chromeFontConfig,
+    // The same resolver the page was measured with. Without it a header being
+    // edited is measured against the family the document names rather than the
+    // face that will draw it, so its lines reflow and its weight changes the
+    // moment the caret leaves the band.
+    ...(paintCtx.fontResolver ? { fonts: paintCtx.fontResolver } : {}),
   });
 }
 
@@ -113,7 +118,8 @@ function drawBlocksWithOffset(
   blocks: DocumentLayout["pages"][0]["blocks"],
   offsetY: number,
 ): void {
-  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber, theme } = paintCtx;
+  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber, theme, fontResolutions } =
+    paintCtx;
 
   ctx.save();
   ctx.translate(0, offsetY);
@@ -133,6 +139,7 @@ function drawBlocksWithOffset(
           theme,
           ...(markDecorators ? { markDecorators } : {}),
           ...(inlineRegistry ? { inlineRegistry } : {}),
+          ...(fontResolutions ? { fontResolutions } : {}),
         },
         THROWAWAY_CHARMAP,
       );
@@ -140,6 +147,7 @@ function drawBlocksWithOffset(
       lineIndexOffset = drawBlock(
         ctx, block, measurer, THROWAWAY_CHARMAP,
         pageNumber, lineIndexOffset, theme, markDecorators,
+        inlineRegistry, fontResolutions,
       );
     }
   }
@@ -153,7 +161,8 @@ function drawBlocks(
   layout: DocumentLayout,
   charMap: CharacterMap,
 ): void {
-  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber, theme } = paintCtx;
+  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber, theme, fontResolutions } =
+    paintCtx;
   const page = layout.pages[0];
   if (!page) return;
 

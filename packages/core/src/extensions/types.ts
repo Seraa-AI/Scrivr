@@ -1,3 +1,5 @@
+import type { TextMeasurerLike } from "../layout/TextMeasurer";
+import type { LayoutFontResolver } from "../fonts/layoutResolver";
 /**
  * Extension system types.
  *
@@ -14,6 +16,7 @@
  */
 
 import type { Extension } from "./Extension";
+import type { FontProvider } from "../fonts/types";
 
 /**
  * Named keybinding precedences. Higher wins first refusal for a key.
@@ -113,6 +116,8 @@ export type OverlayRenderHandler = (
  * only fires it in browser `Editor`, so no runtime guard or cast is needed.
  */
 export interface IBaseEditor {
+  /** Where font requests are answered, or null when none was supplied. */
+  readonly fonts: FontProvider | null;
   /** Subscribe to all editor notifications (state change, focus, cursor tick). */
   subscribe(listener: () => void): () => void;
   /** Subscribe to a typed editor event. Returns an unsubscribe function. */
@@ -259,6 +264,8 @@ export interface IEditor extends IBaseEditor {
    * Serialization paths should call this before reading `layout.pages`.
    */
   ensureFullLayout(): void;
+  /** Build an isolated full layout using the export's resolved faces and metrics. */
+  layoutForExport?(doc: Node, fonts: LayoutFontResolver, measurer?: TextMeasurerLike): DocumentLayout;
   /**
    * Signal that the editor is (or is no longer) ready to render.
    * Call setReady(false) before a collaborative provider connects to suppress
