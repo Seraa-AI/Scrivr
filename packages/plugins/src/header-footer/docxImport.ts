@@ -32,7 +32,7 @@ const FIELD_TOKEN_NODES: Record<string, string> = {
  * instruction (` PAGE `, ` NUMPAGES `, ` DATE `); the first keyword selects
  * the node. Unknown fields drop (the walker records the diagnostic).
  */
-const fieldInlineHandler: DocxInlineTransform = (inline, _marks, ctx) => {
+const fieldInlineHandler: DocxInlineTransform = (inline, marks, ctx) => {
   if (inline.type !== "field") return null;
   const keyword = inline.instr.trim().split(/\s+/)[0]?.toUpperCase() ?? "";
   const nodeName = FIELD_TOKEN_NODES[keyword];
@@ -44,7 +44,10 @@ const fieldInlineHandler: DocxInlineTransform = (inline, _marks, ctx) => {
     return null;
   }
   const type = ctx.schema.nodes[nodeName];
-  if (type) return type.create();
+  // Carries the run's marks: a page number is set in the footer's own face and
+  // size, and dropping them left it in the editor's defaults beside text that
+  // was not.
+  if (type) return type.create(null, null, marks);
   ctx.diagnostics.warn({
     code: "field-node-missing",
     message: `DOCX field "${keyword}" requires schema node "${nodeName}" — dropped`,

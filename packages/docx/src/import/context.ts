@@ -62,6 +62,10 @@ export function createDocxImportContext(
     rels: {
       resolveHyperlink,
     },
+    // Replaced by `importDocx` once the package is open. A context built on
+    // its own resolves every style to nothing, which is what a document with
+    // no `styles.xml` genuinely means.
+    styles: { runMarks: () => [], raw: () => undefined },
     // Defaults — `importDocx` assigns the real section refs, part walker and
     // block walker once the OPC package and handlers are available (same
     // pattern as resolveImage).
