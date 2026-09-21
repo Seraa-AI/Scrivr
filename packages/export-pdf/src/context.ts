@@ -79,11 +79,13 @@ export interface PdfContext {
    *
    * The one place a block becomes paint. The body loop, a container rendering
    * its children, and a chrome band all call this, so a node is drawn by
-   * whoever owns it no matter where it appears — a rule that only holds if
-   * nothing reproduces the dispatch beside it.
+   * whoever owns it no matter where it appears. An inline atom cannot come
+   * through here — it needs its host line's font on the context — so it shares
+   * the handler lookup rather than reproducing it.
    *
    * Sets `x`/`y`/`width` from each block before handing it over, so a handler
    * reads its own box from the context rather than from wherever it was called.
+   * Restores the caller's box on return, including when a handler throws.
    */
   blocks(blocks: readonly LayoutBlock[]): void;
   /**
@@ -154,7 +156,8 @@ export function createDrawHelpers(
    */
   fitToMeasuredWidth: boolean,
   images: ReadonlyMap<string, PDFImage | null>,
-  nodeHandlers: ReadonlyMap<string, PdfNodeHandler>,
+  /** Shared with the body loop so both report a missing handler the same way. */
+  resolveNodeHandler: (name: string) => PdfNodeHandler | undefined,
   markHandlers: ReadonlyMap<string, PdfMarkHandler>,
 ): PdfDrawHelpers {
   /** Core speaks in 0-255 channels; pdf-lib wants 0-1. */
@@ -477,13 +480,12 @@ export function createDrawHelpers(
           }
         }
 
-        // Inline atom dispatch — look up nodeHandlers for object spans
         if (span.kind === "object") {
           // No branch on the node's name: an inline atom is drawn by whichever
           // extension defines it, exactly as the same node would be in the
           // body. Reproducing one here is how the image case drifted from its
           // own handler.
-          const handler = nodeHandlers.get(span.node.type.name);
+          const handler = resolveNodeHandler(span.node.type.name);
           if (handler) {
             const objY = computeObjectRenderY(lineY, line, span);
             // Inline atoms render as a one-shot leaf block inside the host

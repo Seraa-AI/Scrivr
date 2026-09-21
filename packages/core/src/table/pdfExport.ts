@@ -22,7 +22,7 @@ const BORDER_COLOR: Rgb = { r: 156, g: 163, b: 175 };
 
 /** What this handler needs of the context it is handed. */
 interface PdfContextLike {
-  draw: PdfDrawSurface & { lines(block: LayoutBlock, ctx: unknown): void };
+  draw: PdfDrawSurface;
   /**
    * The pipeline's block dispatch. A cell holds ordinary blocks, and each
    * belongs to whichever extension defines it — the same division the import

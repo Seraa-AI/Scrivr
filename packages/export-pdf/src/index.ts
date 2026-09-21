@@ -43,7 +43,7 @@ import {
 } from "@scrivr/core";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
-import type { PdfContext, PdfDrawHelpers } from "./context";
+import type { PdfContext } from "./context";
 import {
   embedStandardFonts,
   embedResolvedFonts,
@@ -168,6 +168,31 @@ async function writePdf(
     if (pdfContrib.onAfterExport) lifecycleHooks.after.push(pdfContrib.onAfterExport);
   }
 
+  // A block type with no handler is skipped (renders blank). Warn once per type
+  // so the gap is loud rather than silent (e.g. an extension that wasn't enabled
+  // on the editor).
+  const warnedMissing = new Set<string>();
+
+  /**
+   * The one lookup. Both dispatch sites reach a node's handler through it — a
+   * block and the same node as an inline atom — so a missing handler is
+   * reported identically wherever it appears, instead of one path warning and
+   * the other dropping the node in silence.
+   */
+  const resolveNodeHandler = (name: string): PdfNodeHandler | undefined => {
+    const handler = nodeHandlers.get(name);
+    if (handler) return handler;
+    if (!warnedMissing.has(name)) {
+      warnedMissing.add(name);
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[exportPdf] no PDF handler for "${name}" — it will not appear in the PDF. ` +
+          `Ensure the contributing extension is enabled on the editor passed to exportToPdf/buildPdf.`,
+      );
+    }
+    return undefined;
+  };
+
   // ── Phase 2: Build PDF document + assets ───────────────────────────────
   const { pageConfig } = layout;
   const pageWidthPt = pageConfig.pageWidth * PT_PER_PX;
@@ -197,7 +222,7 @@ async function writePdf(
     resolvedTheme,
     prepared?.fitToMeasuredWidth ?? false,
     imageCache,
-    nodeHandlers,
+    resolveNodeHandler,
     markHandlers,
   );
 
@@ -209,20 +234,19 @@ async function writePdf(
    */
   const renderBlocks = (blocks: readonly LayoutBlock[]): void => {
     for (const block of blocks) {
-      const name = block.node.type.name;
-      const handler = nodeHandlers.get(name);
-      if (handler) {
-        ctx.x = block.x;
-        ctx.y = block.y;
-        ctx.width = block.width;
+      const handler = resolveNodeHandler(block.node.type.name);
+      if (!handler) continue;
+      const { x, y, width } = ctx;
+      ctx.x = block.x;
+      ctx.y = block.y;
+      ctx.width = block.width;
+      try {
         handler(block, ctx);
-      } else if (!warnedMissing.has(name)) {
-        warnedMissing.add(name);
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[exportPdf] no PDF handler for "${name}" — it will not appear in the PDF. ` +
-            `Ensure the contributing extension is enabled on the editor passed to exportToPdf/buildPdf.`,
-        );
+      } finally {
+        // Nested dispatch must return the caller's box, even if a child fails.
+        ctx.x = x;
+        ctx.y = y;
+        ctx.width = width;
       }
     }
   };
@@ -249,10 +273,6 @@ async function writePdf(
   }
 
   // ── Phase 5: Walk pages, dispatch handlers ─────────────────────────────
-  // A block type with no handler is skipped (renders blank). Warn once per type
-  // so the gap is loud rather than silent (e.g. an extension that wasn't enabled
-  // on the editor).
-  const warnedMissing = new Set<string>();
   for (let i = 0; i < layout.pages.length; i++) {
     const layoutPage = layout.pages[i]!;
     const pageNumber = i + 1;

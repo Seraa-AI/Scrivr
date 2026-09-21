@@ -213,3 +213,39 @@ describe("header/footer PDF chrome — who draws a block", () => {
     expect(drawnDirectly).toEqual([]);
   });
 });
+
+/**
+ * The guard turns an unusable context into a silent skip. That only works if it
+ * asks for what the band dereferences — the layout and the dispatch. Asking for
+ * more rejects a usable context (no header at all); asking for less lets a
+ * context through to a `TypeError` that takes the whole export down.
+ */
+describe("header/footer PDF chrome — the context it asks for", () => {
+  const payload = {
+    policy: { enabled: true, differentFirstPage: false, differentOddEven: false, defaultHeader: {} },
+    slots: { defaultHeader: slot("HEAD") },
+  };
+
+  it("renders from a context carrying only the layout and the dispatch", () => {
+    const dispatched: string[] = [];
+    const ctx = {
+      layout: { metrics: METRICS, pages: [{ pageNumber: 1 }] },
+      blocks(blocks: ReadonlyArray<{ text?: string }>) {
+        for (const b of blocks) dispatched.push(b.text ?? "?");
+      },
+    };
+    renderHeaderFooterPdf({ pageNumber: 1 }, payload, ctx);
+    expect(dispatched).toEqual(["HEAD"]);
+  });
+
+  it("skips a context with no dispatch instead of throwing", () => {
+    const ctx = {
+      layout: { metrics: METRICS, pages: [{ pageNumber: 1 }] },
+      x: 0,
+      y: 0,
+      width: 0,
+      draw: { lines() {} },
+    };
+    expect(() => renderHeaderFooterPdf({ pageNumber: 1 }, payload, ctx)).not.toThrow();
+  });
+});
