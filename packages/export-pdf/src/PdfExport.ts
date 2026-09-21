@@ -64,7 +64,12 @@ export const PdfExport = Extension.create<PdfExportExtensionOptions>({
           const filename =
             callOptions?.filename ?? this.options.filename ?? "document";
           const { filename: _filename, ...exportOptions } = callOptions ?? {};
-          exportToPdf(editor, exportOptions)
+          // The name the file is saved under is the name the document has.
+          // A caller that knows better passes its own title.
+          exportToPdf(editor, {
+            ...exportOptions,
+            metadata: { title: filename, ...exportOptions.metadata },
+          })
             .then((bytes) => {
               const blob = new Blob([bytes.buffer as ArrayBuffer], {
                 type: "application/pdf",
