@@ -45,6 +45,16 @@ function recordingCtx(
     x: 0,
     y: 0,
     width: 0,
+    // The pipeline dispatches blocks to their owning handler; this stands in
+    // for that, recording what each block's handler would have been handed.
+    blocks(blocks: ReadonlyArray<{ x: number; y: number; width: number; text?: string }>) {
+      for (const b of blocks) {
+        ctx.x = b.x;
+        ctx.y = b.y;
+        ctx.width = b.width;
+        ctx.draw.lines(b);
+      }
+    },
     draw: {
       lines(blockArg: { y: number; text?: string }) {
         drawn.push({
@@ -151,5 +161,55 @@ describe("header/footer PDF chrome — what it draws", () => {
       ctx,
     );
     expect(shared.layout.pages[0]!.blocks[0]!.y).toBe(original);
+  });
+});
+
+/**
+ * A chrome band holds ordinary blocks, and a block is drawn by whichever
+ * extension defines it. When this handler drew them itself, anything that is
+ * not text rendered on the canvas and vanished from the PDF — a horizontal
+ * rule in a header paints from its own handler, and nothing here called it.
+ */
+describe("header/footer PDF chrome — who draws a block", () => {
+  it("hands every block to the pipeline's dispatch, whatever its type", () => {
+    const dispatched: string[] = [];
+    const drawnDirectly: string[] = [];
+    const ctx = {
+      layout: { metrics: METRICS, pages: [{ pageNumber: 1 }, { pageNumber: 2 }] },
+      x: 0,
+      y: 0,
+      width: 0,
+      blocks(blocks: ReadonlyArray<{ blockType?: string }>) {
+        for (const b of blocks) dispatched.push(b.blockType ?? "?");
+      },
+      draw: {
+        lines(block: { blockType?: string }) {
+          drawnDirectly.push(block.blockType ?? "?");
+        },
+      },
+    };
+
+    const band = {
+      layout: {
+        pages: [{ pageNumber: 1, blocks: [
+          { blockType: "paragraph", x: 72, y: 36, width: 468, height: 20, text: "HEAD" },
+          { blockType: "horizontalRule", x: 72, y: 58, width: 468, height: 8 },
+        ] }],
+        pageConfig: { margins: { top: 36 } },
+      },
+    };
+
+    renderHeaderFooterPdf(
+      { pageNumber: 1 },
+      {
+        policy: { enabled: true, differentFirstPage: false, differentOddEven: false, defaultHeader: {} },
+        slots: { defaultHeader: band },
+      },
+      ctx,
+    );
+
+    expect(dispatched).toEqual(["paragraph", "horizontalRule"]);
+    // Nothing is painted beside the dispatch; that parallel path is the defect.
+    expect(drawnDirectly).toEqual([]);
   });
 });

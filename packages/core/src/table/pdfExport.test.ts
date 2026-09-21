@@ -28,6 +28,9 @@ function fakeCtx() {
   // tested where they live.
   const ctx = {
     layout: { pageConfig: { pageHeight: 1000 } },
+    // Stands in for the pipeline dispatch: a cell's children go to their own
+    // handlers, so the row handler no longer draws their text itself.
+    blocks: (bs: readonly LayoutBlock[]) => { for (const b of bs) textBlocks.push({ y: b.y }); },
     draw: {
       line(op: { from: { x: number; y: number }; to: { x: number; y: number } }) {
         lines.push({ start: op.from, end: op.to });
@@ -267,6 +270,7 @@ describe("renderTableRowPdf — cell shading", () => {
     const order: string[] = [];
     const ctx = {
       layout: { pageConfig: { pageHeight: 1000 } },
+      blocks: () => {},
       draw: {
         line: () => void order.push("line"),
         rect: () => void order.push("rect"),

@@ -75,6 +75,18 @@ export interface PdfContext {
   images: Map<string, PDFImage | null>;
   draw: PdfDrawHelpers;
   /**
+   * Render blocks through their owning extension's handler.
+   *
+   * The one place a block becomes paint. The body loop, a container rendering
+   * its children, and a chrome band all call this, so a node is drawn by
+   * whoever owns it no matter where it appears — a rule that only holds if
+   * nothing reproduces the dispatch beside it.
+   *
+   * Sets `x`/`y`/`width` from each block before handing it over, so a handler
+   * reads its own box from the context rather than from wherever it was called.
+   */
+  blocks(blocks: readonly LayoutBlock[]): void;
+  /**
    * The face the layout measured this block in, present when the block is an
    * inline atom. A handler drawing its own text should use it rather than
    * naming a family: the box around it was reserved against this face, and on
@@ -467,51 +479,43 @@ export function createDrawHelpers(
 
         // Inline atom dispatch — look up nodeHandlers for object spans
         if (span.kind === "object") {
-          if (span.node.type.name === "image" && span.width > 0 && span.height > 0) {
-            const src = span.node.attrs["src"];
+          // No branch on the node's name: an inline atom is drawn by whichever
+          // extension defines it, exactly as the same node would be in the
+          // body. Reproducing one here is how the image case drifted from its
+          // own handler.
+          const handler = nodeHandlers.get(span.node.type.name);
+          if (handler) {
             const objY = computeObjectRenderY(lineY, line, span);
-            const box = { x: spanAbsX, y: objY, width: span.width, height: span.height };
-            if (typeof src === "string") {
-              drawImage({ ...box, image: { src } });
-            } else {
-              drawImagePlaceholder(box);
-            }
-          } else {
-            // Non-image inline atom — dispatch to handler if one exists
-            const handler = nodeHandlers.get(span.node.type.name);
-            if (handler) {
-              const objY = computeObjectRenderY(lineY, line, span);
-              // Inline atoms render as a one-shot leaf block inside the host
-              // line — empty `lines` and `kind: "leaf"` keep the dispatched
-              // handler on the leaf code path (e.g. defaults.image).
-              const atomBlock: LayoutBlock = {
-                ...block,
-                kind: "leaf",
-                node: span.node,
-                x: spanAbsX,
-                y: objY,
-                width: span.width,
-                height: span.height,
-                lines: [],
-              };
-              const atomCtx: PdfContext = {
-                ...ctx,
-                x: spanAbsX,
-                y: objY,
-                width: span.width,
-                ...(span.font !== undefined
-                  ? {
-                      font: {
-                        cssFont: span.font,
-                        ...(span.resolution !== undefined
-                          ? { resolution: span.resolution }
-                          : {}),
-                      },
-                    }
-                  : {}),
-              };
-              handler(atomBlock, atomCtx);
-            }
+            // Inline atoms render as a one-shot leaf block inside the host
+            // line — empty `lines` and `kind: "leaf"` keep the dispatched
+            // handler on the leaf code path.
+            const atomBlock: LayoutBlock = {
+              ...block,
+              kind: "leaf",
+              node: span.node,
+              x: spanAbsX,
+              y: objY,
+              width: span.width,
+              height: span.height,
+              lines: [],
+            };
+            const atomCtx: PdfContext = {
+              ...ctx,
+              x: spanAbsX,
+              y: objY,
+              width: span.width,
+              ...(span.font !== undefined
+                ? {
+                    font: {
+                      cssFont: span.font,
+                      ...(span.resolution !== undefined
+                        ? { resolution: span.resolution }
+                        : {}),
+                    },
+                  }
+                : {}),
+            };
+            handler(atomBlock, atomCtx);
           }
           continue;
         }

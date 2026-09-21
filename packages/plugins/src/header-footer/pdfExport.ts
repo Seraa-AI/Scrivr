@@ -31,6 +31,13 @@ interface PdfContextLike {
     metrics?: Array<{ headerTop: number; headerHeight: number; footerTop: number; footerHeight: number }>;
   };
   draw: PdfDrawSurface & { lines(block: LayoutBlock, ctx: unknown): void };
+  /**
+   * The pipeline's block dispatch. A chrome band holds ordinary blocks, so they
+   * are drawn by whoever owns them — the same route the body uses. Drawing them
+   * here instead would mean a node type renders on the page and not in a header,
+   * which is what happened to a horizontal rule.
+   */
+  blocks(blocks: readonly LayoutBlock[]): void;
   x: number;
   y: number;
   width: number;
@@ -117,14 +124,10 @@ function renderBand(
   // Offset to the actual band Y on the page.
   const offsetY = bandY - slot.layout.pageConfig.margins.top;
 
-  for (const block of page.blocks) {
-    // Create an offset copy — don't mutate the stored block
-    const offsetBlock = { ...block, y: block.y + offsetY };
-    pdfCtx.x = offsetBlock.x;
-    pdfCtx.y = offsetBlock.y;
-    pdfCtx.width = offsetBlock.width;
-    pdfCtx.draw.lines(offsetBlock, pdfCtx);
-  }
+  // Offset copies — the stored blocks are not mutated.
+  const banded = page.blocks.map((block) => ({ ...block, y: block.y + offsetY }));
+
+  pdfCtx.blocks(banded);
 }
 
 // ── PDF node handlers for token inline atoms ─────────────────────────────────
