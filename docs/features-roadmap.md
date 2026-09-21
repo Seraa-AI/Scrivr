@@ -751,23 +751,25 @@ Marks via pdf-lib drawing primitives:
 
 #### PDF Custom Font Embedding
 
-**Status:** ✅ Done — `fontResolver?: (family, weight, style) => Promise<ArrayBuffer | null>` option on `exportToPdf` (`packages/export-pdf/src/index.ts:34`). Called once per unique combination, cached per export; returning `null` falls back to the nearest standard font.
+**Status:** ✅ Done — superseded by the `FontProvider` on the editor (`docs/font-resolution-rfc.md`). The export resolves each face under `{ portable, embeddable }` and embeds a subset of the resource the layout measured against, so the file paints the typeface the geometry came from. The old `fontResolver` option on `exportToPdf` was removed: it answered the font question a second time, independently of the canvas, which is what let a document measured in one face be painted in another.
 
 When the document uses a custom font (firm letterhead typeface, specific contract serif), the PDF must embed that font's outlines so text reflows identically when printed or opened on a machine without the font installed.
 
+The application registers its typefaces once, on the editor, and both lanes
+consume the same bytes — the canvas installs them for measurement and the
+export embeds a subset of the very same resource:
+
 ```typescript
-import fontkit from '@pdf-lib/fontkit';
-
-const pdfDoc = await PDFDocument.create();
-pdfDoc.registerFontkit(fontkit);
-
-// Per unique font family:
-const fontBytes = await fontResolver('MyFont', 'normal', 'normal');
-if (fontBytes) {
-  const embeddedFont = await pdfDoc.embedFont(fontBytes);
-  fontMap.set('MyFont normal normal', embeddedFont);
-}
+const editor = new Editor({
+  extensions: [StarterKit],
+  fonts: new DefaultFontProvider({ default: interRegular, resources: [...] }),
+});
 ```
+
+A face must be registered as `.ttf` or `.otf`. A PDF carries a font program,
+not a web container wrapped around one, so a `.woff2` is refused at export.
+Holding bytes is also not permission to embed them: set
+`embedding: { allowed: true }` where the licence grants it.
 
 **API:**
 
@@ -776,22 +778,23 @@ Phase 1 (standard fonts, fully searchable):
 exportToPdf(editor: Editor): Promise<Uint8Array>
 ```
 
-Phase 2 (custom font embedding):
+Phase 2 (custom font embedding) — the editor owns the inventory:
 ```typescript
 exportToPdf(editor: Editor, options?: {
-  fontResolver?: (
-    family: string,
-    weight: 'normal' | 'bold',
-    style: 'normal' | 'italic',
-  ) => Promise<ArrayBuffer | null>;
+  metadata?: PdfMetadata;   // title, author, dates
+  outline?: boolean;        // heading bookmarks, on by default
+  theme?: Partial<ResolvedTheme>;
 }): Promise<Uint8Array>
 ```
 
-The `fontResolver` is called once per unique `(family, weight, style)` combination and the result is cached for the export. When it returns `null`, fall back to the nearest standard font (Helvetica / Times / Courier).
+The export resolves each face the layout measured against under
+`{ portable, embeddable }` and embeds a subset of that resource, so the file
+paints the typeface the geometry came from. Substitutions are reported through
+`onFontShortfall` rather than being discovered in the output.
 
 **Implementation order:**
 1. Switch PDF path from canvas raster to pdf-lib text API — produces searchable PDFs with standard fonts
-2. Add `fontResolver` option — unlocks custom/branded typefaces
+2. Give the editor a `FontProvider`, and let the export embed what the layout measured — unlocks custom/branded typefaces
 3. Handle marks (underline, highlight, color) via pdf-lib drawing primitives
 4. Handle inline images via `pdfDoc.embedPng` / `pdfDoc.embedJpg`
 
@@ -983,7 +986,7 @@ Priority order for Lexa (legal document editing focus):
 **Layer 2 — Professional features (run in parallel where possible):**
 
 9. **PDF export — searchable text layer** (Phase 1: pdf-lib text API, standard fonts)
-10. **PDF custom font embedding** (Phase 2: `fontResolver` for firm typefaces)
+10. **PDF custom font embedding** (Phase 2: a `FontProvider` on the editor, for firm typefaces)
 11. **Automatic Clause / Section Numbering** — the biggest missing legal-grade feature
 12. **Track Changes** — complete multi-author support and review panel; lawyers won't switch from Word without this
 13. **Block-Level Access Control** — after Track Changes stabilises; unlocks template workflows

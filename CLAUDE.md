@@ -85,7 +85,7 @@ React is a thin shell. The engine owns layout and rendering.
 - **Track Changes** — split ranges + `excludes: ""` + `isConflict` flag; spec at `docs/multi-author-tracked-changes.md`
 
 ### Export (`packages/export/src/`)
-- PDF via `pdf-lib` (renders `LayoutPages` directly); inline object image rendering is incomplete
+- PDF via `pdf-lib` (renders `LayoutPages` directly); fonts are embedded as subsets, so a face must be registered as `.ttf`/`.otf` — a PDF cannot carry a `.woff2`
 - Markdown via `prosemirror-markdown`
 
 ## Test Setup

@@ -475,7 +475,7 @@ the guarantee that both lanes then consume the same ones.
 Updated as each phase lands. Where the code and the proposal above disagree,
 this section says so rather than the proposal being quietly rewritten to match.
 
-### Phase 1 — in progress
+### Phase 1 — shipped
 
 - `packages/core/src/fonts/` — `FontKey`, `FontRequest`, `FontResource`,
   `FontResolution`, `FontResolutionConstraints`, `FontProviderChange`,
@@ -604,6 +604,51 @@ its own constrained snapshot and re-layouts from that snapshot, so pagination
 and painting remain internally consistent. It reports any substitution through
 `onFontShortfall`.
 
+### A web container is not a font — shipped
+
+A PDF's `FontFile2` holds a font program. WOFF and WOFF2 are compressed
+containers around one. fontkit unwraps them, so a face registered as `.woff2`
+measured, shaped and mapped correctly and every check upstream passed — while
+the bytes went into the file exactly as they arrived. macOS Preview rendered
+such a document as one dot per glyph; other viewers substituted a typeface and
+set it at coordinates measured from a different one, which is the defect this
+document exists to remove.
+
+`embedFaces` now refuses a WOFF container, naming the family. It went unnoticed
+because the lane's own fixtures were `.woff2`, so the entire suite exercised the
+broken path and nothing ever looked at the font program's first four bytes.
+
+### Subsetting, and the glyphs nobody named — shipped
+
+pdf-lib builds a whole font's `/W` widths and `ToUnicode` map from the cmap, so
+a glyph only shaping can reach — every ligature — got neither. A reader fell
+back to a one-em default width, and Aptos sets `ff` at 0.67em, so "Effective"
+painted as "Eff ective" and overran the word after it.
+
+Embedding a subset fixes it at the source, because a subset is built from the
+glyphs drawn rather than from the cmap. That needs a subsetter that works:
+fontkit v1's silently drops the outlines of fonts whose `loca` is in the long
+format — Inter is one — leaving correct advances around blank paper, which is a
+worse failure than a wide ligature. The package uses **fontkit v2**, adapted at
+the one call pdf-lib makes that v2 renamed. A twelve-page agreement went from
+1.1 MB to 154 KB.
+
+Separately: fontkit caches glyph objects by id and keeps whichever was built
+first, codepoints and all. Shaping can build one with none — measuring a word
+whose only quotes are double ones builds Inter's single-quote glyphs that way —
+and pdf-lib then wrote an empty `ToUnicode` entry for it. The page still
+painted, while copying or searching the text silently dropped every apostrophe.
+Every glyph is now named from the cmap before any text is measured.
+
+### Permission is not possession — shipped
+
+`embedding: { allowed: true }` is what grants embedding; a resource that omits
+`embedding` is unknown, and unknown does not satisfy the `embeddable`
+constraint. A face without permission is **refused**, not quietly swapped:
+`buildPdf` embeds straight from the layout with no constraint, so a dropped
+face left its spans painted in Helvetica at coordinates measured from the real
+typeface — this document's founding defect, in a new place.
+
 ### Phase 3 follow-ups — shipped
 
 Running the playground's own configuration against the contract found two more
@@ -641,9 +686,12 @@ the browser picks a file per character. It cannot here — the same bytes have t
 measure on canvas and embed in a PDF, and an exporter has no per-character
 choice to make. The Latin subset holds 231 glyphs, so a document that turned
 out to contain Cyrillic would have rendered in something nobody chose. The
-playground uses `inter-ui`'s unsubsetted files instead: ~110 KB and 2852 glyphs
-per face, verified by exporting Latin, Latin Extended, Cyrillic, Greek and
-Vietnamese and reading the characters back out of the PDF's ToUnicode map.
+playground moved to unsubsetted files instead, verified by exporting Latin,
+Latin Extended, Cyrillic, Greek and Vietnamese and reading the characters back
+out of the PDF's ToUnicode map. Those were `inter-ui`'s `.woff2` files, which
+turned out to be wrong for a second reason — see "A web container is not a
+font" — so the playground now registers `@expo-google-fonts/inter`'s `.ttf`:
+larger over the wire, and the only packaging both lanes can consume.
 
 Supporting per-script files properly would mean a face composed of several
 sources plus script-aware run splitting in the exporter. That is a real
@@ -894,12 +942,26 @@ values never register anything — they are requests.
 `@scrivr/docx` neither reads nor writes `word/fontTable.xml`. Neither direction
 is harmless.
 
-On import, Word hands us the substitution metadata for every font in the file —
-panose classification, family, pitch, charset — which is the closest thing to a
-machine-readable answer to "what should stand in for this". The document that
-prompted this RFC declared Aptos there, and we discarded it before deciding
-what to substitute. A provider that reads it can pick a fallback by
-classification rather than by the exporter's `/georgia|times|serif/` guess.
+On import, Word hands us substitution metadata — panose classification, family,
+pitch, charset — which is the closest thing to a machine-readable answer to
+"what should stand in for this". A provider that reads it could pick a fallback
+by classification rather than by the exporter's `/georgia|times|serif/` guess.
+
+**Corrected 2026-09-21.** An earlier version of this paragraph said the document
+that prompted this RFC declared Aptos in its font table. It does not. Measured:
+`fontTable.xml` describes Arial, Calibri, Cambria, Courier, Symbol, MS Gothic,
+MS Mincho and Times New Roman; `document.xml` asks for Aptos 295 times and Aptos
+Display 3 times. The overlap is empty — every font described is unused and every
+font used is undescribed, because Word writes this part from the *styles* and
+that document's runs are formatted directly. Reading it would have contributed
+nothing to the bug this RFC exists for.
+
+The document's real default — Aptos at 10.5pt — is declared in `styles.xml`, in
+`Normal`. That part is now read (`ctx.styles`), so the question the font table
+was wanted for is already answered from a source that had it. Whether the font
+table is worth reading at all is an open question, and the sample that suggested
+it was worthless is a generated file: zero editing time, zero words, one
+revision. It cannot speak for documents a person authored in Word.
 
 On export we emit no font table at all. Word tolerates that, but a document we
 wrote carries no record of what it was set in — so the round trip loses the one
