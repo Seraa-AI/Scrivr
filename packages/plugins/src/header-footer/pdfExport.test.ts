@@ -1,37 +1,41 @@
 import { describe, it, expect } from "vitest";
+import { ServerEditor, StarterKit } from "@scrivr/core";
 import type { DocumentLayout, LayoutBlock } from "@scrivr/core";
 import { renderHeaderFooterPdf } from "./pdfExport";
 
 /**
- * What the header/footer chrome handler draws, recorded before the format-lane
- * migration moves chrome onto the shared dispatch.
+ * Which blocks the band hands to the pipeline, and where on the page.
  *
- * This drives the handler with a recording stand-in rather than a real PDF
- * export: what is being characterized is which blocks it hands to the
- * pipeline, and at what position on the page — the two things routing chrome
- * through a different dispatch could silently change.
+ * Driven by a recording stand-in rather than a real export, because block
+ * identity and position are the two things a dispatch change could silently
+ * move.
  */
 
 interface DrawnBlock {
-  blockType: string;
+  nodeType: string;
   x: number;
   y: number;
   width: number;
 }
 
+const schema = new ServerEditor({ extensions: [StarterKit] }).getState().schema;
+
 /**
- * The band hands whole blocks to the pipeline, so what a test can hold it to
- * is which blocks it dispatched and where — identified by `blockType`, which
- * a real block already carries.
+ * A band block carrying a real node: the dispatch reads `block.node.type.name`,
+ * so a fixture without one would pass a shape the production path cannot
+ * survive. Slots are told apart by node type rather than a label for the same
+ * reason — it is what the pipeline actually reads.
  */
-const bandBlock = (blockType: string, y: number): LayoutBlock =>
-  ({ blockType, x: 72, y, width: 468, height: 20 }) as unknown as LayoutBlock;
+function bandBlock(nodeType: string, y: number): LayoutBlock {
+  const node = schema.nodes[nodeType]!.createAndFill()!;
+  return { blockType: nodeType, node, x: 72, y, width: 468, height: 20 } as unknown as LayoutBlock;
+}
 
 /** A slot whose stored layout puts its block at the mini-pipeline's top margin. */
-function slot(blockType: string, marginTop = 36) {
+function slot(nodeType: string, marginTop = 36) {
   return {
     layout: {
-      pages: [{ pageNumber: 1, blocks: [bandBlock(blockType, marginTop)] }],
+      pages: [{ pageNumber: 1, blocks: [bandBlock(nodeType, marginTop)] }],
       pageConfig: { margins: { top: marginTop } },
     },
   };
@@ -72,7 +76,7 @@ function recordingCtx(
     // instead of painting anything itself.
     blocks(blocks: readonly LayoutBlock[]) {
       for (const b of blocks) {
-        drawn.push({ blockType: b.blockType, x: b.x, y: b.y, width: b.width });
+        drawn.push({ nodeType: b.node.type.name, x: b.x, y: b.y, width: b.width });
       }
     },
   };
@@ -88,7 +92,7 @@ describe("header/footer PDF chrome — what it draws", () => {
       { pageNumber: 1 },
       {
         policy: { enabled: true, differentFirstPage: false, differentOddEven: false, defaultHeader: {}, defaultFooter: {} },
-        slots: { defaultHeader: slot("HEAD"), defaultFooter: slot("FOOT") },
+        slots: { defaultHeader: slot("heading"), defaultFooter: slot("paragraph") },
       },
       ctx,
     );
@@ -96,8 +100,8 @@ describe("header/footer PDF chrome — what it draws", () => {
     // The stored layout holds each block at its own top margin; the handler
     // offsets it to the band's position on the real page.
     expect(drawn).toEqual([
-      { blockType: "HEAD", x: 72, y: 36, width: 468 },
-      { blockType: "FOOT", x: 72, y: 736, width: 468 },
+      { nodeType: "heading", x: 72, y: 36, width: 468 },
+      { nodeType: "paragraph", x: 72, y: 736, width: 468 },
     ]);
   });
 
@@ -110,16 +114,16 @@ describe("header/footer PDF chrome — what it draws", () => {
         defaultHeader: {},
         firstPageHeader: {},
       },
-      slots: { defaultHeader: slot("DEFAULT"), firstPageHeader: slot("FIRST") },
+      slots: { defaultHeader: slot("paragraph"), firstPageHeader: slot("heading") },
     };
 
     const first = recordingCtx(METRICS);
     renderHeaderFooterPdf({ pageNumber: 1 }, payload, first.ctx);
-    expect(first.drawn.map((d) => d.blockType)).toEqual(["FIRST"]);
+    expect(first.drawn.map((d) => d.nodeType)).toEqual(["heading"]);
 
     const second = recordingCtx(METRICS);
     renderHeaderFooterPdf({ pageNumber: 2 }, payload, second.ctx);
-    expect(second.drawn.map((d) => d.blockType)).toEqual(["DEFAULT"]);
+    expect(second.drawn.map((d) => d.nodeType)).toEqual(["paragraph"]);
   });
 
   it("draws nothing when the page has no metrics", () => {
@@ -128,7 +132,7 @@ describe("header/footer PDF chrome — what it draws", () => {
       { pageNumber: 1 },
       {
         policy: { enabled: true, differentFirstPage: false, differentOddEven: false, defaultHeader: {} },
-        slots: { defaultHeader: slot("HEAD") },
+        slots: { defaultHeader: slot("paragraph") },
       },
       ctx,
     );
@@ -158,7 +162,7 @@ describe("header/footer PDF chrome — what it draws", () => {
   // The stored block is shared across every page that shows this band, so
   // offsetting it must not write the page's position back into the slot.
   it("does not mutate the stored slot layout", () => {
-    const shared = slot("HEAD");
+    const shared = slot("paragraph");
     const original = shared.layout.pages[0]!.blocks[0]!.y;
     const { ctx } = recordingCtx(METRICS);
     renderHeaderFooterPdf(
@@ -201,6 +205,6 @@ describe("header/footer PDF chrome — who draws a block", () => {
       ctx,
     );
 
-    expect(drawn.map((d) => d.blockType)).toEqual(["paragraph", "horizontalRule"]);
+    expect(drawn.map((d) => d.nodeType)).toEqual(["paragraph", "horizontalRule"]);
   });
 });

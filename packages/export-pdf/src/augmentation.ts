@@ -4,25 +4,27 @@
  */
 
 import type {
-  LayoutBlock,
   LayoutPage,
   PdfMarkHandler,
-  PdfNodeContext,
   PdfNodeHandler,
 } from "@scrivr/core";
 import type { PdfContext } from "./context";
 
 /** Declared by core, so an extension types its handler without depending here. */
-export type { PdfNodeHandler } from "@scrivr/core";
+export type { PdfNodeHandler };
 
 /**
  * Draw chrome (headers, footers, footnote bands) onto a PDF page.
  * Generic parameter P is the plugin-specific payload type.
+ *
+ * Still handed the full context: unlike a node handler, chrome has not been
+ * moved off pdf-lib, and a contributor stamping a watermark reaches `ctx.page`
+ * directly. Narrows to `PdfNodeContext` when the chrome lane moves.
  */
 export type PdfChromeHandler<P = unknown> = (
   layoutPage: LayoutPage,
   payload: P,
-  ctx: PdfNodeContext,
+  ctx: PdfContext,
 ) => void;
 
 export interface PdfHandlers {

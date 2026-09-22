@@ -3,11 +3,13 @@ import "./augmentation";
 
 export { PdfExport } from "./PdfExport";
 export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentation";
-// The mark lane's contract lives in core so an extension can describe its
-// mark without depending on this package; re-exported for consumers already
+// The handler contract lives in core so an extension can describe its node and
+// its mark without depending on this package; re-exported for consumers already
 // importing it from here.
 export type {
   FontResolutionId,
+  PdfNodeContext,
+  PdfBlockDrawSurface,
   PdfMarkHandler,
   PdfSpanStyle,
   PdfSpanMark,

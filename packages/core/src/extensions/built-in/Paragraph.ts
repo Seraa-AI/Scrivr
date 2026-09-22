@@ -93,8 +93,6 @@ function isAnchoredObjectSelected(state: EditorState): boolean {
   return normalizeImageAttrs(selection.node).wrapMode !== "inline";
 }
 
-const paragraphPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
-
 export const splitBlockInheritAttrs: Command = (state, dispatch) => {
   // Enter with a float selected does nothing. The alternative is splitting at
   // the anchor: the visible text stays whole, so the keypress reads as ignored
@@ -117,6 +115,8 @@ export const splitBlockInheritAttrs: Command = (state, dispatch) => {
       }),
   );
 };
+
+const paragraphPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
 /**
  * Paragraph — the default block node.

@@ -1,7 +1,7 @@
 /**
- * PdfContext — the drawing context passed to every PDF export handler.
- * Handlers read layout data and draw via `ctx.draw` helpers (which handle
- * the Y-axis flip from top-down layout coords to pdf-lib's bottom-up system).
+ * The pdf-lib side of the export: the draw helpers, which flip top-down layout
+ * pixels into pdf-lib's bottom-up points, and the context the exporter itself
+ * carries. Handlers are typed against core's `PdfNodeContext`, not this.
  */
 
 import {
@@ -30,21 +30,16 @@ import {
   parseCssColor as parseColorLiteral,
   type PdfMarkHandler,
   type PdfBox,
-  type PdfDrawSurface,
   type PdfBlockDrawSurface,
   type PdfNodeContext,
   type PdfImageOp,
   type PdfLineOp,
   type PdfRectOp,
   type PdfTextOp,
-  type PdfFontHandle,
   type Rgb,
-  type DocumentLayout,
   type FontResolutionId,
-  type LayoutPage,
   type LayoutBlock,
   type LayoutLine,
-  type IBaseEditor,
   type ResolvedTheme,
 } from "@scrivr/core";
 import { SYNTHETIC_ITALIC_SHEAR, emboldenWidth, fontSizeOf } from "@scrivr/core";
@@ -66,8 +61,13 @@ export const PT_PER_PX = 72 / 96;
 
 /**
  * The neutral contract every handler is typed against, plus the pdf-lib values
- * only the exporter itself uses — lifecycle hooks reach the document to write
- * metadata and outlines. No node or chrome handler receives these.
+ * the exporter itself uses — lifecycle hooks reach the document to write
+ * metadata and outlines.
+ *
+ * A node handler is typed against `PdfNodeContext`, so the compiler withholds
+ * these from it. The runtime does not: the pipeline hands every handler this
+ * same object. The narrowing says what a handler may rely on, not what it can
+ * reach.
  */
 export interface PdfContext extends PdfNodeContext {
   doc: PDFDocument;

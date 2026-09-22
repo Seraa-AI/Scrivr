@@ -40,8 +40,6 @@ export interface HeadingLevelSpec {
   spaceAfter: number;
 }
 
-const headingPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
-
 export const HEADING_LEVEL_SPEC: Record<number, HeadingLevelSpec> = {
   1: { size: 28, spaceBefore: 24, spaceAfter: 12 },
   2: { size: 22, spaceBefore: 20, spaceAfter: 10 },
@@ -50,6 +48,8 @@ export const HEADING_LEVEL_SPEC: Record<number, HeadingLevelSpec> = {
   5: { size: 14, spaceBefore: 12, spaceAfter: 4 },
   6: { size: 12, spaceBefore: 10, spaceAfter: 2 },
 };
+
+const headingPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
 export const Heading = Extension.create<HeadingOptions>({
   name: "heading",

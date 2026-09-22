@@ -183,27 +183,23 @@ export interface PdfBlockDrawSurface extends PdfDrawSurface {
   lines(block: LayoutBlock, ctx: PdfNodeContext): void;
 }
 
-/**
- * Draw a block (or inline atom) onto a PDF page. Declared beside the mark
- * handler so an extension can type everything it contributes to a PDF without
- * depending on `@scrivr/export-pdf`.
- */
+/** Draw a block (or inline atom) onto a PDF page. */
 export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfNodeContext) => void;
 
 /**
  * What a node or chrome handler is handed.
  *
- * Declared here so an extension can name the context it draws into without
- * depending on `@scrivr/export-pdf`. The two handlers that live outside the
- * exporter — a table row in core, a header band in plugins — used to restate
- * this shape structurally and re-check it at runtime, which meant one copy
- * could drift from what the pipeline actually passed.
- *
  * Nothing here names pdf-lib. The exporter's own context extends this with the
- * backend values only it needs.
+ * backend values only it needs, so a handler cannot reach the document even by
+ * accident — it draws through `draw` and renders children through `blocks`.
  */
 export interface PdfNodeContext {
   layout: DocumentLayout;
+  /**
+   * The page being painted. Not yet assigned while a pre-export hook runs, so
+   * a handler reached by dispatching from one sees it absent — read it only
+   * from the page walk, which is where every ordinary handler is called.
+   */
   layoutPage: LayoutPage;
   /** Top-left of the current block in page coordinates (top-down). */
   x: number;
@@ -213,9 +209,11 @@ export interface PdfNodeContext {
   /**
    * Render blocks through their owning extension's handler.
    *
-   * The one place a block becomes paint. A container rendering its children
-   * and a chrome band drawing its slot both call this, so a node is drawn by
-   * whoever owns it no matter where it appears.
+   * The one place a block becomes paint. The body loop, a container rendering
+   * its children and a chrome band drawing its slot all call this, so a node is
+   * drawn by whoever owns it no matter where it appears. An inline atom is the
+   * one exception — it needs its host line's font on the context, so it shares
+   * the handler lookup rather than coming through here.
    *
    * Sets `x`/`y`/`width` from each block before handing it over, and restores
    * the caller's box on return, including when a handler throws.

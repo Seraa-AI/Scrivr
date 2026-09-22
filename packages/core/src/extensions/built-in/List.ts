@@ -87,6 +87,8 @@ function makeToggleList(listType: NodeType, itemType: NodeType): Command {
   };
 }
 
+const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
+
 /**
  * List — bullet and ordered list support.
  *
@@ -104,8 +106,6 @@ function makeToggleList(listType: NodeType, itemType: NodeType): Command {
  *   • Bullet list
  *   1. Ordered list
  */
-const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
-
 export const List = Extension.create({
   name: "list",
 

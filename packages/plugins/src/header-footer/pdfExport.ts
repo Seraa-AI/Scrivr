@@ -2,10 +2,11 @@
  * PDF export handler for header/footer chrome bands. Pure render —
  * no layout decisions made here.
  *
- * Draws headers and footers onto each PDF page using the pre-computed
- * mini-layouts that `resolveChrome` produced during the editor's
- * layout pass. Block positions are offset from the stored
- * `margins.top` to the actual band Y on the PDF page; no re-measure.
+ * Places the pre-computed mini-layouts that `resolveChrome` produced during
+ * the editor's layout pass, then hands their blocks to the pipeline's dispatch
+ * so each is drawn by the extension that owns it. Block positions are offset
+ * from the stored `margins.top` to the actual band Y on the page; no
+ * re-measure, and nothing painted here.
  *
  * The editing-gap reservation (`HeaderFooter.configure({
  * activeEditingGap })`) is applied once at layout time inside
