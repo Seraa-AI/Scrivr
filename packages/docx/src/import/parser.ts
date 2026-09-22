@@ -664,8 +664,9 @@ function findDescendant(el: OoxmlElement, name: string): OoxmlElement | undefine
 
 /**
  * `<w:rPr>` children that are toggle properties (on/off booleans).
- * `<w:b w:val="false"/>` means "explicitly NOT bold" — these never
- * become marks, regardless of which extension claims them.
+ * `<w:b w:val="false"/>` means "explicitly NOT bold" — it is carried as an
+ * `off` mark so it can outrank the same formatting coming from a style, and
+ * never becomes an editor mark, whichever extension claims the kind.
  */
 const TOGGLE_RPR_KINDS = new Set([
   "b", "bCs",
@@ -690,14 +691,14 @@ export function parseRunProperties(rPr: OoxmlElement): DocxMark[] {
 
     if (TOGGLE_RPR_KINDS.has(kind)) {
       const val = attr(child, "w:val");
-      // `<w:u w:val="none"/>` explicitly cancels underline; same pattern
-      // for the rest. Skip the mark entirely so Stage 2 never sees a
-      // phantom toggle.
-      if (kind === "u" && val === "none") continue;
-      if (!parseOnOff(val)) continue;
+      // `<w:u w:val="none"/>` explicitly cancels underline; same pattern for
+      // the rest. Carried as an `off` mark rather than dropped, because a
+      // paragraph style may supply the same formatting and this is what
+      // outranks it. Stage 2 resolves it away before making editor marks.
+      const cancelled = (kind === "u" && val === "none") || !parseOnOff(val);
       // Drop the val attr for toggles since "on" is the absence of any
       // value semantically.
-      marks.push({ kind, attrs: {} });
+      marks.push(cancelled ? { kind, attrs: {}, off: true } : { kind, attrs: {} });
       continue;
     }
 

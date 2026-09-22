@@ -8,7 +8,11 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { unzipSync, zipSync, strToU8 } from "fflate";
+import { ServerEditor, StarterKit } from "@scrivr/core";
 import { readStyleSheet, layer } from "./styles";
+import { exportDocxBytes } from "../export/export";
+import { importDocx } from "./import";
 import type { DocxMark } from "@scrivr/core";
 
 const sheet = (body: string) =>
@@ -83,5 +87,52 @@ describe("layering run properties", () => {
     const under: DocxMark[] = [{ kind: "sz", attrs: { val: "21" } }, { kind: "rFonts", attrs: {} }];
     const over: DocxMark[] = [{ kind: "sz", attrs: { val: "16" } }];
     expect(kinds(layer(under, over))).toEqual({ sz: "16", rFonts: true });
+  });
+});
+
+/**
+ * A run can refuse what its style states.
+ *
+ * `<w:b w:val="false"/>` is Word's way of saying "not bold here" — it is not
+ * the absence of an opinion. Once a style can supply bold, dropping the
+ * cancellation at the parser makes the style win and the document imports
+ * bolder than it is.
+ */
+describe("a run that cancels its style's formatting", () => {
+  const STYLES = `<?xml version="1.0"?>
+    <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:style w:type="paragraph" w:styleId="Strong">
+        <w:rPr><w:b/><w:i/><w:u w:val="single"/></w:rPr>
+      </w:style>
+    </w:styles>`;
+
+  const body = (rPr: string) => `<?xml version="1.0"?>
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body><w:p>
+        <w:pPr><w:pStyle w:val="Strong"/></w:pPr>
+        <w:r><w:rPr>${rPr}</w:rPr><w:t>text</w:t></w:r>
+      </w:p></w:body>
+    </w:document>`;
+
+  async function marksOf(rPr: string): Promise<string[]> {
+    const base = await exportDocxBytes(new ServerEditor({ content: "seed" }));
+    const parts = unzipSync(base);
+    parts["word/document.xml"] = strToU8(body(rPr));
+    parts["word/styles.xml"] = strToU8(STYLES);
+    const { doc } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), zipSync(parts));
+    const text = doc.child(0).child(0);
+    return text.marks.map((m) => m.type.name).sort();
+  }
+
+  it("inherits the style's formatting when the run says nothing", async () => {
+    expect(await marksOf("")).toEqual(["bold", "italic", "underline"]);
+  });
+
+  it.each([
+    ['<w:b w:val="false"/>', "bold"],
+    ['<w:i w:val="false"/>', "italic"],
+    ['<w:u w:val="none"/>', "underline"],
+  ])("drops %s, which the style would otherwise supply", async (rPr, cancelled) => {
+    expect(await marksOf(rPr)).not.toContain(cancelled);
   });
 });
