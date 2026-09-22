@@ -187,11 +187,14 @@ export interface PdfBlockDrawSurface extends PdfDrawSurface {
 export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfNodeContext) => void;
 
 /**
- * What a node or chrome handler is handed.
+ * What a node handler is typed against: it paints through `draw` and renders
+ * children through `blocks`.
  *
- * Nothing here names pdf-lib. The exporter's own context extends this with the
- * backend values only it needs, so a handler cannot reach the document even by
- * accident — it draws through `draw` and renders children through `blocks`.
+ * Nothing here names pdf-lib, which is what lets an extension declare a
+ * handler without depending on the exporter. The isolation is the type's, not
+ * the runtime's — the pipeline hands over its own context, which carries the
+ * backend values too. This says what a handler may rely on, not what it can
+ * reach.
  */
 export interface PdfNodeContext {
   layout: DocumentLayout;

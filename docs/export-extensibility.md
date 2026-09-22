@@ -1408,9 +1408,10 @@ PDF mark contributions need these changes:
   resolution, so text measurement and PDF drawing use the same font. There is
   no mark-style font override.
 - Type mark callbacks against `PdfMarkContext`, which exposes only `theme`.
-  Node/chrome handlers and export lifecycle hooks retain `PdfContext` for
-  drawing and document resources. Mark handlers return style data; they do not
-  draw or mutate the PDF document.
+  Mark handlers return style data; they do not draw or mutate the PDF document.
+- Node handlers take `PdfNodeContext` (from `@scrivr/core`) as of Phase 4 —
+  `doc`, `page`, `fonts` and `images` are not on that type. Chrome handlers and
+  the export lifecycle hooks still receive the full `PdfContext`.
 
 `PdfMarkHandler` and `PdfSpanStyle` remain importable from `@scrivr/export-pdf`
 and are also exported by `@scrivr/core`. The old handler table was never
