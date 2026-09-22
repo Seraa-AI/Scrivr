@@ -1,36 +1,63 @@
 import { describe, it, expect } from "vitest";
+import type { DocumentLayout, LayoutBlock } from "@scrivr/core";
 import { renderHeaderFooterPdf } from "./pdfExport";
 
 /**
  * What the header/footer chrome handler draws, recorded before the format-lane
  * migration moves chrome onto the shared dispatch.
  *
- * The handler takes its context through a structural guard, so this drives it
- * with a recording stand-in rather than a real PDF export: what is being
- * characterized is which blocks it hands to `draw.lines`, and at what position
- * on the page — the two things routing chrome through a different dispatch
- * could silently change.
+ * This drives the handler with a recording stand-in rather than a real PDF
+ * export: what is being characterized is which blocks it hands to the
+ * pipeline, and at what position on the page — the two things routing chrome
+ * through a different dispatch could silently change.
  */
 
 interface DrawnBlock {
+  blockType: string;
+  x: number;
   y: number;
-  ctxX: number;
-  ctxY: number;
-  ctxWidth: number;
-  text: string;
+  width: number;
 }
 
-function bandBlock(text: string, y: number) {
-  return { x: 72, y, width: 468, height: 20, text };
-}
+/**
+ * The band hands whole blocks to the pipeline, so what a test can hold it to
+ * is which blocks it dispatched and where — identified by `blockType`, which
+ * a real block already carries.
+ */
+const bandBlock = (blockType: string, y: number): LayoutBlock =>
+  ({ blockType, x: 72, y, width: 468, height: 20 }) as unknown as LayoutBlock;
 
 /** A slot whose stored layout puts its block at the mini-pipeline's top margin. */
-function slot(text: string, marginTop = 36) {
+function slot(blockType: string, marginTop = 36) {
   return {
     layout: {
-      pages: [{ pageNumber: 1, blocks: [bandBlock(text, marginTop)] }],
+      pages: [{ pageNumber: 1, blocks: [bandBlock(blockType, marginTop)] }],
       pageConfig: { margins: { top: marginTop } },
     },
+  };
+}
+
+function documentLayout(
+  metrics: Array<{ headerTop: number; footerTop: number }>,
+  pageCount: number,
+): DocumentLayout {
+  return {
+    // `pages.length` is read to tell a `totalPages` token how many there are.
+    pages: Array.from({ length: pageCount }, (_, i) => ({ pageNumber: i + 1, blocks: [] })),
+    pageConfig: { pageWidth: 612, pageHeight: 792, margins: { top: 72, right: 72, bottom: 72, left: 72 } },
+    version: 1,
+    totalContentHeight: pageCount * 792,
+    metrics: metrics.map((m, i) => ({
+      pageNumber: i + 1,
+      contentTop: 72,
+      contentBottom: 720,
+      contentHeight: 648,
+      contentWidth: 468,
+      headerTop: m.headerTop,
+      footerTop: m.footerTop,
+      headerHeight: 0,
+      footerHeight: 0,
+    })),
   };
 }
 
@@ -40,31 +67,13 @@ function recordingCtx(
 ) {
   const drawn: DrawnBlock[] = [];
   const ctx = {
-    // `pages.length` is read to tell a `totalPages` token how many there are.
-    layout: { metrics, pages: Array.from({ length: pageCount }, (_, i) => ({ pageNumber: i + 1 })) },
-    x: 0,
-    y: 0,
-    width: 0,
-    // The pipeline dispatches blocks to their owning handler; this stands in
-    // for that, recording what each block's handler would have been handed.
-    blocks(blocks: ReadonlyArray<{ x: number; y: number; width: number; text?: string }>) {
+    layout: documentLayout(metrics, pageCount),
+    // Stands in for the pipeline dispatch, which is what the band now calls
+    // instead of painting anything itself.
+    blocks(blocks: readonly LayoutBlock[]) {
       for (const b of blocks) {
-        ctx.x = b.x;
-        ctx.y = b.y;
-        ctx.width = b.width;
-        ctx.draw.lines(b);
+        drawn.push({ blockType: b.blockType, x: b.x, y: b.y, width: b.width });
       }
-    },
-    draw: {
-      lines(blockArg: { y: number; text?: string }) {
-        drawn.push({
-          y: blockArg.y,
-          ctxX: ctx.x,
-          ctxY: ctx.y,
-          ctxWidth: ctx.width,
-          text: blockArg.text ?? "",
-        });
-      },
     },
   };
   return { ctx, drawn };
@@ -87,8 +96,8 @@ describe("header/footer PDF chrome — what it draws", () => {
     // The stored layout holds each block at its own top margin; the handler
     // offsets it to the band's position on the real page.
     expect(drawn).toEqual([
-      { y: 36, ctxX: 72, ctxY: 36, ctxWidth: 468, text: "HEAD" },
-      { y: 736, ctxX: 72, ctxY: 736, ctxWidth: 468, text: "FOOT" },
+      { blockType: "HEAD", x: 72, y: 36, width: 468 },
+      { blockType: "FOOT", x: 72, y: 736, width: 468 },
     ]);
   });
 
@@ -106,11 +115,11 @@ describe("header/footer PDF chrome — what it draws", () => {
 
     const first = recordingCtx(METRICS);
     renderHeaderFooterPdf({ pageNumber: 1 }, payload, first.ctx);
-    expect(first.drawn.map((d) => d.text)).toEqual(["FIRST"]);
+    expect(first.drawn.map((d) => d.blockType)).toEqual(["FIRST"]);
 
     const second = recordingCtx(METRICS);
     renderHeaderFooterPdf({ pageNumber: 2 }, payload, second.ctx);
-    expect(second.drawn.map((d) => d.text)).toEqual(["DEFAULT"]);
+    expect(second.drawn.map((d) => d.blockType)).toEqual(["DEFAULT"]);
   });
 
   it("draws nothing when the page has no metrics", () => {
@@ -172,28 +181,12 @@ describe("header/footer PDF chrome — what it draws", () => {
  */
 describe("header/footer PDF chrome — who draws a block", () => {
   it("hands every block to the pipeline's dispatch, whatever its type", () => {
-    const dispatched: string[] = [];
-    const drawnDirectly: string[] = [];
-    const ctx = {
-      layout: { metrics: METRICS, pages: [{ pageNumber: 1 }, { pageNumber: 2 }] },
-      x: 0,
-      y: 0,
-      width: 0,
-      blocks(blocks: ReadonlyArray<{ blockType?: string }>) {
-        for (const b of blocks) dispatched.push(b.blockType ?? "?");
-      },
-      draw: {
-        lines(block: { blockType?: string }) {
-          drawnDirectly.push(block.blockType ?? "?");
-        },
-      },
-    };
-
+    const { ctx, drawn } = recordingCtx(METRICS, 1);
     const band = {
       layout: {
         pages: [{ pageNumber: 1, blocks: [
-          { blockType: "paragraph", x: 72, y: 36, width: 468, height: 20, text: "HEAD" },
-          { blockType: "horizontalRule", x: 72, y: 58, width: 468, height: 8 },
+          bandBlock("paragraph", 36),
+          bandBlock("horizontalRule", 58),
         ] }],
         pageConfig: { margins: { top: 36 } },
       },
@@ -208,44 +201,6 @@ describe("header/footer PDF chrome — who draws a block", () => {
       ctx,
     );
 
-    expect(dispatched).toEqual(["paragraph", "horizontalRule"]);
-    // Nothing is painted beside the dispatch; that parallel path is the defect.
-    expect(drawnDirectly).toEqual([]);
-  });
-});
-
-/**
- * The guard turns an unusable context into a silent skip. That only works if it
- * asks for what the band dereferences — the layout and the dispatch. Asking for
- * more rejects a usable context (no header at all); asking for less lets a
- * context through to a `TypeError` that takes the whole export down.
- */
-describe("header/footer PDF chrome — the context it asks for", () => {
-  const payload = {
-    policy: { enabled: true, differentFirstPage: false, differentOddEven: false, defaultHeader: {} },
-    slots: { defaultHeader: slot("HEAD") },
-  };
-
-  it("renders from a context carrying only the layout and the dispatch", () => {
-    const dispatched: string[] = [];
-    const ctx = {
-      layout: { metrics: METRICS, pages: [{ pageNumber: 1 }] },
-      blocks(blocks: ReadonlyArray<{ text?: string }>) {
-        for (const b of blocks) dispatched.push(b.text ?? "?");
-      },
-    };
-    renderHeaderFooterPdf({ pageNumber: 1 }, payload, ctx);
-    expect(dispatched).toEqual(["HEAD"]);
-  });
-
-  it("skips a context with no dispatch instead of throwing", () => {
-    const ctx = {
-      layout: { metrics: METRICS, pages: [{ pageNumber: 1 }] },
-      x: 0,
-      y: 0,
-      width: 0,
-      draw: { lines() {} },
-    };
-    expect(() => renderHeaderFooterPdf({ pageNumber: 1 }, payload, ctx)).not.toThrow();
+    expect(drawn.map((d) => d.blockType)).toEqual(["paragraph", "horizontalRule"]);
   });
 });

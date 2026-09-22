@@ -3,11 +3,17 @@
  * Imported for its side-effect at the entry point of @scrivr/export-pdf.
  */
 
-import type { LayoutBlock, LayoutPage, PdfMarkHandler } from "@scrivr/core";
+import type {
+  LayoutBlock,
+  LayoutPage,
+  PdfMarkHandler,
+  PdfNodeContext,
+  PdfNodeHandler,
+} from "@scrivr/core";
 import type { PdfContext } from "./context";
 
-/** Draw a block (or inline atom) onto a PDF page. */
-export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfContext) => void;
+/** Declared by core, so an extension types its handler without depending here. */
+export type { PdfNodeHandler } from "@scrivr/core";
 
 /**
  * Draw chrome (headers, footers, footnote bands) onto a PDF page.
@@ -16,7 +22,7 @@ export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfContext) => void;
 export type PdfChromeHandler<P = unknown> = (
   layoutPage: LayoutPage,
   payload: P,
-  ctx: PdfContext,
+  ctx: PdfNodeContext,
 ) => void;
 
 export interface PdfHandlers {

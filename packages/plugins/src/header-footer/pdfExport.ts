@@ -18,64 +18,21 @@
  * doc JSON).
  */
 
-import type { LayoutBlock, PdfDrawSurface, PdfFontHandle, Rgb } from "@scrivr/core";
+import type { LayoutBlock, PdfNodeContext, Rgb } from "@scrivr/core";
 import { fontSizeOf } from "@scrivr/core";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./tokenStrategies";
 
-/** What the band needs of the context the export pipeline hands it. */
-interface PdfContextLike {
-  layout: {
-    pages: Array<{ pageNumber: number }>;
-    metrics?: Array<{ headerTop: number; headerHeight: number; footerTop: number; footerHeight: number }>;
-  };
-  /**
-   * The pipeline's block dispatch. A chrome band holds ordinary blocks, so they
-   * are drawn by whoever owns them — the same route the body uses. Drawing them
-   * here instead would mean a node type renders on the page and not in a header,
-   * which is what happened to a horizontal rule.
-   */
-  blocks(blocks: readonly LayoutBlock[]): void;
-}
+/** The band reads the layout and dispatches; it never draws anything itself. */
+type BandContext = Pick<PdfNodeContext, "layout" | "blocks">;
 
-/** What a token needs: it paints one string and nothing else. */
-interface PdfDrawContextLike {
-  draw: PdfDrawSurface;
-  font?: PdfFontHandle;
-}
+/** A token paints one string and nothing else. */
+type TokenContext = Pick<PdfNodeContext, "draw" | "font">;
 
 function isResolvedPayload(value: unknown): value is ResolvedHeaderFooter {
   if (typeof value !== "object" || value === null) return false;
   return "policy" in value && "slots" in value;
-}
-
-/** A font handle, validated rather than assumed — it arrives as `unknown`. */
-function isFontHandle(value: unknown): value is PdfFontHandle {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "cssFont" in value &&
-    typeof value.cssFont === "string"
-  );
-}
-
-/**
- * Separate from the band's guard because a token dereferences less. Demanding
- * the band's fields here would turn a usable draw-only context into a no-op.
- */
-function isDrawContext(value: unknown): value is PdfDrawContextLike {
-  if (typeof value !== "object" || value === null || !("draw" in value)) return false;
-  // `font` is present only for inline atoms, so its absence is not a failure —
-  // but a value of the wrong shape is, and would reach pdf-lib as one.
-  return !("font" in value) || isFontHandle(value.font);
-}
-
-/** The band reads the layout and dispatches; it never draws anything itself. */
-function isPdfContext(value: unknown): value is PdfContextLike {
-  if (typeof value !== "object" || value === null) return false;
-  if (!("layout" in value) || !("blocks" in value)) return false;
-  return typeof value.blocks === "function";
 }
 
 /**
@@ -85,11 +42,9 @@ function isPdfContext(value: unknown): value is PdfContextLike {
 export function renderHeaderFooterPdf(
   layoutPage: { pageNumber: number },
   payload: unknown,
-  ctx: unknown,
+  pdfCtx: BandContext,
 ): void {
   if (!isResolvedPayload(payload)) return;
-  if (!isPdfContext(ctx)) return;
-  const pdfCtx = ctx;
   const pageNumber = layoutPage.pageNumber;
   const metrics = pdfCtx.layout.metrics?.[pageNumber - 1];
   if (!metrics) return;
@@ -105,7 +60,7 @@ function renderBand(
   pageNumber: number,
   kind: "header" | "footer",
   bandY: number,
-  pdfCtx: PdfContextLike,
+  pdfCtx: BandContext,
 ): void {
   const slotKey = resolveSlotKey(resolved.policy, pageNumber, kind);
   if (!slotKey) return;
@@ -135,7 +90,7 @@ const TOKEN_SIZE_PX = 10;
 function drawTokenOnPdf(
   text: string,
   block: LayoutBlock,
-  ctx: PdfDrawContextLike,
+  ctx: TokenContext,
 ): void {
   // The face the layout measured this token against, which is the one the
   // canvas paints it in. Naming a family here instead would size the token's
@@ -153,20 +108,17 @@ function drawTokenOnPdf(
 
 
 /** PDF node handler for pageNumber token. */
-export function renderPageNumberPdf(block: LayoutBlock, ctx: unknown): void {
-  if (!isDrawContext(ctx)) return;
+export function renderPageNumberPdf(block: LayoutBlock, ctx: TokenContext): void {
   drawTokenOnPdf(String(getCurrentPageNumber()), block, ctx);
 }
 
 /** PDF node handler for totalPages token. */
-export function renderTotalPagesPdf(block: LayoutBlock, ctx: unknown): void {
-  if (!isDrawContext(ctx)) return;
+export function renderTotalPagesPdf(block: LayoutBlock, ctx: TokenContext): void {
   drawTokenOnPdf(String(getCurrentTotalPages()), block, ctx);
 }
 
 /** PDF node handler for date token. */
-export function renderDatePdf(block: LayoutBlock, ctx: unknown): void {
-  if (!isDrawContext(ctx)) return;
+export function renderDatePdf(block: LayoutBlock, ctx: TokenContext): void {
   const frozen = block.node.attrs["frozen"];
   const parsed = typeof frozen === "string" ? new Date(frozen) : new Date();
   const now = isNaN(parsed.getTime()) ? new Date() : parsed;

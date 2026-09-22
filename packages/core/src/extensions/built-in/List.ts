@@ -1,4 +1,5 @@
 import { wrapInList, splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
+import type { PdfNodeHandler } from "../../exports/pdf";
 import { chainCommands, liftEmptyBlock } from "prosemirror-commands";
 import { splitBlockInheritAttrs } from "./Paragraph";
 import { wrappingInputRule } from "prosemirror-inputrules";
@@ -103,6 +104,8 @@ function makeToggleList(listType: NodeType, itemType: NodeType): Command {
  *   • Bullet list
  *   1. Ordered list
  */
+const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
+
 export const List = Extension.create({
   name: "list",
 
@@ -339,6 +342,13 @@ export const List = Extension.create({
           bulletList: listPassthrough,
           orderedList: listPassthrough,
           listItem: listItemHandler,
+        },
+      },
+      pdf: {
+        nodes: {
+          bulletList: listPdf,
+          orderedList: listPdf,
+          listItem: listPdf,
         },
       },
       semantic: {

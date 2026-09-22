@@ -24,7 +24,9 @@ It is a direction change, not a feature. Nothing here ships until it is agreed.
 | Markdown | core | extensions, via `addMarkdownSerializerRules()` | yes |
 | **PDF** | **`@scrivr/export-pdf`** | **2 extensions** (`Table`, `HeaderFooter`) | **partly — see §4** |
 
-Eight node types and five mark behaviours are implemented inside the PDF
+*The PDF row above is the state this RFC was written against. See **What shipped**.*
+
+Eight node types and five mark behaviours were implemented inside the PDF
 package rather than on the extensions that define those nodes:
 
 - `packages/export-pdf/src/defaults.ts` — `paragraph`, `heading`, `bulletList`,
@@ -41,6 +43,30 @@ neither is this RFC's subject. `hardBreak` is read by the package
 declares no `addImports()` at all, so a `hyperlink` mark is parsed
 (`docx/src/import/parser.ts:438`) and then dropped with an `unsupported-mark`
 diagnostic — a silently lost hyperlink on every DOCX import.
+
+## What shipped
+
+| Phase | Landed | What it changed |
+|---|---|---|
+| **0** | #174, #176 | Op-log harness + characterization fixtures for the body and the chrome lane. Mutation-proven before anything moved |
+| **1** | #185 | `core/src/exports/pdf.ts` — the drawing surface. A handler speaks layout pixels and `Rgb`; it never names pdf-lib |
+| **2** | #183 | Mark lane. `underline`, `link`, `strikethrough`, `highlight` and `color` moved to their extensions; `defaultMarkHandlers` emptied |
+| **3** | #193 | Dispatch repair. Body blocks, chrome bands, table cell children, inline atoms and anchored objects all reach paint through one `ctx.blocks(blocks)`. No handler moved |
+| **4** | *this change* | Node lane. The eight handlers moved to their six extensions and the exporter's defaults were deleted — it now ships none of its own. `PdfNodeContext` and `PdfNodeHandler` moved to core, so both `PdfContextLike` structural copies and their runtime guards are gone |
+| **5** | not started | Enforcement: conformance fixture, `noUnusedParameters`, collection-policy `satisfies`, forbidden-import check in core |
+
+As of Phase 4 the PDF row reads: contract in **core** (`exports/pdf.ts`),
+handlers registered by **8 extensions**, dispatch routes through registration
+**yes**. The exporter owns traversal, placement, page order and asset
+embedding; what a node looks like belongs to whoever defines it.
+
+Still open: the inline atom is a second dispatch call site — it needs its host
+line's font, so it shares the handler lookup rather than calling `ctx.blocks`.
+
+Of the two DOCX gaps noted above, `Link`'s missing `addImports()` was closed in
+#182; `hardBreak` is still read by the package
+(`docx/src/import/transform.ts:126`) rather than by its extension. That one
+belongs to the DOCX lane, not this RFC.
 
 ## Non-goals
 

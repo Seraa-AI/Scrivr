@@ -1,4 +1,5 @@
 import { Extension } from "../Extension";
+import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Command } from "prosemirror-state";
 import { InputRule } from "prosemirror-inputrules";
 import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
@@ -53,6 +54,17 @@ function insertHorizontalRule(): Command {
 }
 
 // ── Extension ─────────────────────────────────────────────────────────────────
+
+/** A rule is a line down the middle of the box the layout reserved for it. */
+const horizontalRulePdf: PdfNodeHandler = (block, ctx) => {
+  const y = block.y + block.height / 2;
+  ctx.draw.line({
+    from: { x: block.x, y },
+    to: { x: block.x + block.availableWidth, y },
+    thicknessPx: 1.5,
+    color: { r: 203, g: 213, b: 225 },
+  });
+};
 
 export const HorizontalRule = Extension.create({
   name: "horizontalRule",
@@ -120,6 +132,7 @@ export const HorizontalRule = Extension.create({
     return {
       docx: { nodes: { horizontalRule: handler } },
       semantic: { nodes: { horizontalRule: semanticHandler } },
+      pdf: { nodes: { horizontalRule: horizontalRulePdf } },
     };
   },
 

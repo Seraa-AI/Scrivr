@@ -208,3 +208,28 @@ describe("PDF missing handler diagnostics", () => {
     warn.mockRestore();
   });
 });
+
+/**
+ * The exporter ships no handlers of its own, so a node appears in the file
+ * only because the extension that defines it said how to draw it. Dropping
+ * that extension has to drop the ink with it, not fall back to something the
+ * exporter kept for itself.
+ */
+describe("PDF node ownership", () => {
+  it("draws a horizontal rule only when its extension is present", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const rule = () => onePage([block("horizontalRule", [])]);
+
+    const withRule = await recordDrawOps(() =>
+      buildPdf(rule(), new ServerEditor({ extensions: [StarterKit] })));
+    const withoutRule = await recordDrawOps(() =>
+      buildPdf(rule(), new ServerEditor({
+        extensions: [StarterKit.configure({ horizontalRule: false })],
+      })));
+
+    expect(withRule.filter(op => op.op === "line")).toHaveLength(1);
+    expect(withoutRule.filter(op => op.op === "line")).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("horizontalRule"));
+    warn.mockRestore();
+  });
+});

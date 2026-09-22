@@ -9,6 +9,7 @@ import {
   type DocxBlockTransform,
 } from "../../exports/docx";
 import type { SemanticNodeHandler } from "../../exports/semantic";
+import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Node as PmNode } from "prosemirror-model";
 import { normalizeImageAttrs } from "../../layout/AnchoredObjects";
 
@@ -91,6 +92,8 @@ function isAnchoredObjectSelected(state: EditorState): boolean {
   if (selection.node.type.name !== "image") return false;
   return normalizeImageAttrs(selection.node).wrapMode !== "inline";
 }
+
+const paragraphPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
 export const splitBlockInheritAttrs: Command = (state, dispatch) => {
   // Enter with a float selected does nothing. The alternative is splitting at
@@ -208,6 +211,7 @@ export const Paragraph = Extension.create({
     return {
       docx: { nodes: { paragraph: handler } },
       semantic: { nodes: { paragraph: semanticHandler } },
+      pdf: { nodes: { paragraph: paragraphPdf } },
     };
   },
 

@@ -1,4 +1,5 @@
 import { setBlockType } from "prosemirror-commands";
+import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
 import type { ToolbarItemSpec } from "../types";
@@ -38,6 +39,8 @@ export interface HeadingLevelSpec {
   /** Space after the paragraph in px. */
   spaceAfter: number;
 }
+
+const headingPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
 export const HEADING_LEVEL_SPEC: Record<number, HeadingLevelSpec> = {
   1: { size: 28, spaceBefore: 24, spaceAfter: 12 },
@@ -181,6 +184,7 @@ export const Heading = Extension.create<HeadingOptions>({
     return {
       docx: { nodes: { heading: headingHandler } },
       semantic: { nodes: { heading: semanticHandler } },
+      pdf: { nodes: { heading: headingPdf } },
     };
   },
 

@@ -1,6 +1,6 @@
 /**
- * What an extension declares about PDF output: how its marks look, and the
- * primitives its node handlers draw with.
+ * What an extension declares about PDF output: how its marks look, the
+ * primitives its node handlers draw with, and the context they are handed.
  *
  * It lives in core, as the DOCX handler types do, so an extension can describe
  * what its mark looks like in an export without depending on
@@ -16,6 +16,9 @@
 import type { ResolvedTheme } from "../model/theme";
 import type { Rgb } from "../model/cssColor";
 import type { FontResolutionId } from "../fonts/layoutResolver";
+import type { LayoutBlock } from "../layout/BlockLayout";
+import type { DocumentLayout, LayoutPage } from "../layout/PageLayout";
+import type { IBaseEditor } from "../extensions/types";
 
 /**
  * What a mark on a span is asking for. Colours must be supported CSS literals
@@ -169,4 +172,64 @@ export interface PdfDrawSurface {
   image(op: PdfImageOp): void;
   /** The box drawn in place of an image that could not be resolved. */
   imagePlaceholder(box: PdfBox): void;
+}
+
+/** The primitives, plus the one helper that paints a whole block's text. */
+export interface PdfBlockDrawSurface extends PdfDrawSurface {
+  /**
+   * Draw every line of a block — its list marker, each text span with its mark
+   * decorations, and the inline atoms sitting in the line.
+   */
+  lines(block: LayoutBlock, ctx: PdfNodeContext): void;
+}
+
+/**
+ * Draw a block (or inline atom) onto a PDF page. Declared beside the mark
+ * handler so an extension can type everything it contributes to a PDF without
+ * depending on `@scrivr/export-pdf`.
+ */
+export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfNodeContext) => void;
+
+/**
+ * What a node or chrome handler is handed.
+ *
+ * Declared here so an extension can name the context it draws into without
+ * depending on `@scrivr/export-pdf`. The two handlers that live outside the
+ * exporter — a table row in core, a header band in plugins — used to restate
+ * this shape structurally and re-check it at runtime, which meant one copy
+ * could drift from what the pipeline actually passed.
+ *
+ * Nothing here names pdf-lib. The exporter's own context extends this with the
+ * backend values only it needs.
+ */
+export interface PdfNodeContext {
+  layout: DocumentLayout;
+  layoutPage: LayoutPage;
+  /** Top-left of the current block in page coordinates (top-down). */
+  x: number;
+  y: number;
+  width: number;
+  draw: PdfBlockDrawSurface;
+  /**
+   * Render blocks through their owning extension's handler.
+   *
+   * The one place a block becomes paint. A container rendering its children
+   * and a chrome band drawing its slot both call this, so a node is drawn by
+   * whoever owns it no matter where it appears.
+   *
+   * Sets `x`/`y`/`width` from each block before handing it over, and restores
+   * the caller's box on return, including when a handler throws.
+   */
+  blocks(blocks: readonly LayoutBlock[]): void;
+  /**
+   * The face the layout measured this block in, present when the block is an
+   * inline atom. A handler drawing its own text should use it rather than
+   * naming a family: the box around it was reserved against this face, and on
+   * canvas the atom is painted in it.
+   */
+  font?: PdfFontHandle;
+  /** The editor whose export contributions were collected. */
+  editor: IBaseEditor;
+  /** Resolved colours every handler paints from. */
+  theme: ResolvedTheme;
 }

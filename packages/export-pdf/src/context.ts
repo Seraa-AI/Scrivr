@@ -31,6 +31,8 @@ import {
   type PdfMarkHandler,
   type PdfBox,
   type PdfDrawSurface,
+  type PdfBlockDrawSurface,
+  type PdfNodeContext,
   type PdfImageOp,
   type PdfLineOp,
   type PdfRectOp,
@@ -62,48 +64,16 @@ export const PT_PER_PX = 72 / 96;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface PdfContext {
+/**
+ * The neutral contract every handler is typed against, plus the pdf-lib values
+ * only the exporter itself uses — lifecycle hooks reach the document to write
+ * metadata and outlines. No node or chrome handler receives these.
+ */
+export interface PdfContext extends PdfNodeContext {
   doc: PDFDocument;
   page: PDFPage;
-  layoutPage: LayoutPage;
-  layout: DocumentLayout;
-  /** Top-left of the current block in page coordinates (top-down). */
-  x: number;
-  y: number;
-  width: number;
   fonts: PdfFontRegistry;
   images: Map<string, PDFImage | null>;
-  draw: PdfDrawHelpers;
-  /**
-   * Render blocks through their owning extension's handler.
-   *
-   * The one place a block becomes paint. The body loop, a container rendering
-   * its children, and a chrome band all call this, so a node is drawn by
-   * whoever owns it no matter where it appears. An inline atom cannot come
-   * through here — it needs its host line's font on the context — so it shares
-   * the handler lookup rather than reproducing it.
-   *
-   * Sets `x`/`y`/`width` from each block before handing it over, so a handler
-   * reads its own box from the context rather than from wherever it was called.
-   * Restores the caller's box on return, including when a handler throws.
-   */
-  blocks(blocks: readonly LayoutBlock[]): void;
-  /**
-   * The face the layout measured this block in, present when the block is an
-   * inline atom. A handler drawing its own text should use it rather than
-   * naming a family: the box around it was reserved against this face, and on
-   * canvas the atom is painted in it.
-   */
-  font?: PdfFontHandle;
-  /** The editor whose export contributions were collected (a ServerEditor suffices). */
-  editor: IBaseEditor;
-  /**
-   * Resolved colors used by every PDF handler. Defaults to the print-ready
-   * `defaultPdfTheme` regardless of the canvas theme; callers opt into a
-   * themed PDF by passing `exportPdf({ theme })` (which is shallow-merged
-   * over `defaultPdfTheme`).
-   */
-  theme: ResolvedTheme;
 }
 
 export interface PdfFontRegistry {
@@ -123,13 +93,8 @@ export interface PdfFontRegistry {
   fallback: PDFFont;
 }
 
-export interface PdfDrawHelpers extends PdfDrawSurface {
-  /**
-   * Draw all lines of a block, including list markers, text spans with mark
-   * decorations, and inline atom dispatch. This is the main rendering workhorse.
-   */
-  lines(block: LayoutBlock, ctx: PdfContext): void;
-}
+/** Core owns this shape; the name stays for consumers importing it from here. */
+export type PdfDrawHelpers = PdfBlockDrawSurface;
 
 // ── Flip helper ──────────────────────────────────────────────────────────────
 
@@ -141,6 +106,7 @@ function flipY(yPx: number, pageHeightPt: number): number {
 // ── Draw helpers implementation ──────────────────────────────────────────────
 
 export function createDrawHelpers(
+  pdfDoc: PDFDocument,
   getPage: () => PDFPage,
   pageHeightPt: number,
   fontRegistry: PdfFontRegistry,
@@ -281,7 +247,7 @@ export function createDrawHelpers(
    */
   function spanStyles(
     marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
-    ctx: PdfContext,
+    ctx: PdfNodeContext,
   ): ResolvedPdfSpanStyle[] {
     if (!marks) return [];
     const out: ResolvedPdfSpanStyle[] = [];
@@ -371,7 +337,7 @@ export function createDrawHelpers(
     }
   }
 
-  function drawLines(block: LayoutBlock, ctx: PdfContext): void {
+  function drawLines(block: LayoutBlock, ctx: PdfNodeContext): void {
     const page = getPage();
     const themeListMarker = parseCssColor(theme.listMarker);
     const themeDefaultText = parseCssColor(theme.defaultText);
@@ -431,7 +397,7 @@ export function createDrawHelpers(
       let linkRun: LinkRun | null = null;
       const flushLinkRun = (): void => {
         if (linkRun) {
-          addLinkAnnotation(ctx.doc, page, linkRun.href, {
+          addLinkAnnotation(pdfDoc, page, linkRun.href, {
             x0: linkRun.x0 * PT_PER_PX,
             x1: linkRun.x1 * PT_PER_PX,
             y0: flipY(baselineY + line.descent, pageHeightPt),
@@ -501,7 +467,7 @@ export function createDrawHelpers(
               height: span.height,
               lines: [],
             };
-            const atomCtx: PdfContext = {
+            const atomCtx: PdfNodeContext = {
               ...ctx,
               x: spanAbsX,
               y: objY,
