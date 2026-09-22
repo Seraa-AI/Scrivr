@@ -33,6 +33,7 @@ import type {
   IBaseEditor,
   DocumentLayout,
   AnchoredObjectPlacement,
+  LayoutBlock,
   ResolvedTheme,
 } from "@scrivr/core";
 import type { FontShortfall } from "@scrivr/core";
@@ -42,7 +43,7 @@ import {
 } from "@scrivr/core";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
-import type { PdfContext, PdfDrawHelpers } from "./context";
+import type { PdfContext } from "./context";
 import {
   embedStandardFonts,
   embedResolvedFonts,
@@ -167,6 +168,31 @@ async function writePdf(
     if (pdfContrib.onAfterExport) lifecycleHooks.after.push(pdfContrib.onAfterExport);
   }
 
+  // A block type with no handler is skipped (renders blank). Warn once per type
+  // so the gap is loud rather than silent (e.g. an extension that wasn't enabled
+  // on the editor).
+  const warnedMissing = new Set<string>();
+
+  /**
+   * The one lookup. Both dispatch sites reach a node's handler through it — a
+   * block and the same node as an inline atom — so a missing handler is
+   * reported identically wherever it appears, instead of one path warning and
+   * the other dropping the node in silence.
+   */
+  const resolveNodeHandler = (name: string): PdfNodeHandler | undefined => {
+    const handler = nodeHandlers.get(name);
+    if (handler) return handler;
+    if (!warnedMissing.has(name)) {
+      warnedMissing.add(name);
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[exportPdf] no PDF handler for "${name}" — it will not appear in the PDF. ` +
+          `Ensure the contributing extension is enabled on the editor passed to exportToPdf/buildPdf.`,
+      );
+    }
+    return undefined;
+  };
+
   // ── Phase 2: Build PDF document + assets ───────────────────────────────
   const { pageConfig } = layout;
   const pageWidthPt = pageConfig.pageWidth * PT_PER_PX;
@@ -196,11 +222,35 @@ async function writePdf(
     resolvedTheme,
     prepared?.fitToMeasuredWidth ?? false,
     imageCache,
-    nodeHandlers,
+    resolveNodeHandler,
     markHandlers,
   );
 
   // ── Phase 3: Build context shell ───────────────────────────────────────
+  /**
+   * The single route from a block to its paint. Defined here because it closes
+   * over the collected handlers, and hung on the context so nested content and
+   * chrome reach the same one rather than each re-deriving it.
+   */
+  const renderBlocks = (blocks: readonly LayoutBlock[]): void => {
+    for (const block of blocks) {
+      const handler = resolveNodeHandler(block.node.type.name);
+      if (!handler) continue;
+      const { x, y, width } = ctx;
+      ctx.x = block.x;
+      ctx.y = block.y;
+      ctx.width = block.width;
+      try {
+        handler(block, ctx);
+      } finally {
+        // Nested dispatch must return the caller's box, even if a child fails.
+        ctx.x = x;
+        ctx.y = y;
+        ctx.width = width;
+      }
+    }
+  };
+
   const ctx: PdfContext = {
     doc: pdfDoc,
     page: null!,
@@ -212,6 +262,7 @@ async function writePdf(
     fonts: fontRegistry,
     images: imageCache,
     draw,
+    blocks: renderBlocks,
     editor,
     theme: resolvedTheme,
   };
@@ -222,10 +273,6 @@ async function writePdf(
   }
 
   // ── Phase 5: Walk pages, dispatch handlers ─────────────────────────────
-  // A block type with no handler is skipped (renders blank). Warn once per type
-  // so the gap is loud rather than silent (e.g. an extension that wasn't enabled
-  // on the editor).
-  const warnedMissing = new Set<string>();
   for (let i = 0; i < layout.pages.length; i++) {
     const layoutPage = layout.pages[i]!;
     const pageNumber = i + 1;
@@ -248,36 +295,16 @@ async function writePdf(
     const pageObjects = (layout.anchoredObjects ?? [])
       .filter((o) => o.page === pageNumber)
       .sort(compareAnchoredObjectPaintOrder);
-    for (const object of pageObjects) {
-      if (object.wrapMode === "behind") {
-        drawPdfAnchoredObject(draw, object);
-      }
-    }
+    ctx.blocks(
+      pageObjects.filter((object) => object.wrapMode === "behind").map(anchoredBlock),
+    );
 
-    // Block dispatch
-    for (const block of layoutPage.blocks) {
-      const handler = nodeHandlers.get(block.node.type.name);
-      if (handler) {
-        ctx.x = block.x;
-        ctx.y = block.y;
-        ctx.width = block.width;
-        handler(block, ctx);
-      } else if (!warnedMissing.has(block.node.type.name)) {
-        warnedMissing.add(block.node.type.name);
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[exportPdf] no PDF handler for "${block.node.type.name}" — it will not appear in the PDF. ` +
-            `Ensure the contributing extension is enabled on the editor passed to exportToPdf/buildPdf.`,
-        );
-      }
-    }
+    ctx.blocks(layoutPage.blocks);
 
     // Anchored objects in front of (or alongside) blocks
-    for (const object of pageObjects) {
-      if (object.wrapMode !== "behind") {
-        drawPdfAnchoredObject(draw, object);
-      }
-    }
+    ctx.blocks(
+      pageObjects.filter((object) => object.wrapMode !== "behind").map(anchoredBlock),
+    );
 
     // Chrome handlers (headers, footers, etc.)
     for (const [chromeName, chromeHandler] of chromeHandlers) {
@@ -301,16 +328,32 @@ async function writePdf(
   return pdfDoc.save();
 }
 
-// ── Anchored-object rendering (not dispatched — part of core pipeline) ──────
+// ── Anchored objects ────────────────────────────────────────────────────────
 
-function drawPdfAnchoredObject(
-  draw: PdfDrawHelpers,
-  object: AnchoredObjectPlacement,
-): void {
-  const src = object.node.attrs["src"];
-  const box = { x: object.x, y: object.y, width: object.width, height: object.height };
-  if (typeof src !== "string" || src.length === 0) return draw.imagePlaceholder(box);
-  draw.image({ ...box, image: { src } });
+/**
+ * An anchored object as the block it is: one leaf, no lines, at its own box.
+ *
+ * The pipeline owns where it sits — that is what `AnchoredObjectPlacement`
+ * settled — and its extension owns what it looks like. Drawing it here instead
+ * meant every anchored object was assumed to be an image, so anything else
+ * anchored would have painted nothing at all.
+ */
+function anchoredBlock(object: AnchoredObjectPlacement): LayoutBlock {
+  return {
+    kind: "leaf",
+    node: object.node,
+    nodePos: object.docPos,
+    x: object.x,
+    y: object.y,
+    width: object.width,
+    height: object.height,
+    lines: [],
+    spaceBefore: 0,
+    spaceAfter: 0,
+    blockType: object.node.type.name,
+    align: "left",
+    availableWidth: object.width,
+  };
 }
 
 // ── Image embedding ──────────────────────────────────────────────────────────

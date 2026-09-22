@@ -24,16 +24,25 @@ import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./tokenStrategies";
 
-/** What these handlers need of the context the export pipeline hands them. */
+/** What the band needs of the context the export pipeline hands it. */
 interface PdfContextLike {
   layout: {
     pages: Array<{ pageNumber: number }>;
     metrics?: Array<{ headerTop: number; headerHeight: number; footerTop: number; footerHeight: number }>;
   };
-  draw: PdfDrawSurface & { lines(block: LayoutBlock, ctx: unknown): void };
-  x: number;
-  y: number;
-  width: number;
+  /**
+   * The pipeline's block dispatch. A chrome band holds ordinary blocks, so they
+   * are drawn by whoever owns them — the same route the body uses. Drawing them
+   * here instead would mean a node type renders on the page and not in a header,
+   * which is what happened to a horizontal rule.
+   */
+  blocks(blocks: readonly LayoutBlock[]): void;
+}
+
+/** What a token needs: it paints one string and nothing else. */
+interface PdfDrawContextLike {
+  draw: PdfDrawSurface;
+  font?: PdfFontHandle;
 }
 
 function isResolvedPayload(value: unknown): value is ResolvedHeaderFooter {
@@ -41,10 +50,6 @@ function isResolvedPayload(value: unknown): value is ResolvedHeaderFooter {
   return "policy" in value && "slots" in value;
 }
 
-/**
- * A token only draws, so it asks for only what it dereferences. Demanding the
- * band's fields here would turn a draw-only context into a silent no-op.
- */
 /** A font handle, validated rather than assumed — it arrives as `unknown`. */
 function isFontHandle(value: unknown): value is PdfFontHandle {
   return (
@@ -55,24 +60,22 @@ function isFontHandle(value: unknown): value is PdfFontHandle {
   );
 }
 
-function isDrawContext(
-  value: unknown,
-): value is { draw: PdfContextLike["draw"]; font?: PdfFontHandle } {
+/**
+ * Separate from the band's guard because a token dereferences less. Demanding
+ * the band's fields here would turn a usable draw-only context into a no-op.
+ */
+function isDrawContext(value: unknown): value is PdfDrawContextLike {
   if (typeof value !== "object" || value === null || !("draw" in value)) return false;
   // `font` is present only for inline atoms, so its absence is not a failure —
   // but a value of the wrong shape is, and would reach pdf-lib as one.
   return !("font" in value) || isFontHandle(value.font);
 }
 
-/** The band additionally reads the layout and writes its own origin back. */
+/** The band reads the layout and dispatches; it never draws anything itself. */
 function isPdfContext(value: unknown): value is PdfContextLike {
-  return (
-    isDrawContext(value) &&
-    "layout" in value &&
-    "x" in value &&
-    "y" in value &&
-    "width" in value
-  );
+  if (typeof value !== "object" || value === null) return false;
+  if (!("layout" in value) || !("blocks" in value)) return false;
+  return typeof value.blocks === "function";
 }
 
 /**
@@ -117,14 +120,10 @@ function renderBand(
   // Offset to the actual band Y on the page.
   const offsetY = bandY - slot.layout.pageConfig.margins.top;
 
-  for (const block of page.blocks) {
-    // Create an offset copy — don't mutate the stored block
-    const offsetBlock = { ...block, y: block.y + offsetY };
-    pdfCtx.x = offsetBlock.x;
-    pdfCtx.y = offsetBlock.y;
-    pdfCtx.width = offsetBlock.width;
-    pdfCtx.draw.lines(offsetBlock, pdfCtx);
-  }
+  // Offset copies — the stored blocks are not mutated.
+  const banded = page.blocks.map((block) => ({ ...block, y: block.y + offsetY }));
+
+  pdfCtx.blocks(banded);
 }
 
 // ── PDF node handlers for token inline atoms ─────────────────────────────────
@@ -136,7 +135,7 @@ const TOKEN_SIZE_PX = 10;
 function drawTokenOnPdf(
   text: string,
   block: LayoutBlock,
-  ctx: { draw: PdfContextLike["draw"]; font?: PdfFontHandle },
+  ctx: PdfDrawContextLike,
 ): void {
   // The face the layout measured this token against, which is the one the
   // canvas paints it in. Naming a family here instead would size the token's

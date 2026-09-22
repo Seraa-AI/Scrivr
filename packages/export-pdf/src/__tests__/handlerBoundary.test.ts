@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Extension, ServerEditor, StarterKit, type PdfMarkHandler } from "@scrivr/core";
 import { buildPdf } from "../index";
-import { block, onePage, textLine } from "./fixtures";
+import { block, onePage, schema, textLine } from "./fixtures";
 import { recordDrawOps } from "./opLog";
 
 const marked = (names: string[]) => onePage([
@@ -65,6 +65,57 @@ describe("PDF contribution registry boundary", () => {
   });
 });
 
+describe("PDF nested block dispatch", () => {
+  it.each([false, true])("restores the parent's box after child dispatch (throws: %s)", async throws => {
+    const parent = block("paragraph", [], { y: 100 });
+    const child = { ...block("heading", [], { y: 120 }), x: 90, width: 100 };
+    const failure = new Error("child rendering failed");
+    const boxes: number[][] = [];
+    let caught: unknown;
+    const Custom = Extension.create({
+      name: "nestedDispatch",
+      addExports: () => ({ pdf: { nodes: {
+        paragraph: (_block, ctx) => {
+          boxes.push([ctx.x, ctx.y, ctx.width]);
+          try {
+            ctx.blocks([child]);
+          } catch (error) {
+            caught = error;
+          }
+          boxes.push([ctx.x, ctx.y, ctx.width]);
+        },
+        heading: (_block, ctx) => {
+          boxes.push([ctx.x, ctx.y, ctx.width]);
+          if (throws) throw failure;
+        },
+      } } }),
+    });
+    const editor = new ServerEditor({ extensions: [StarterKit, Custom] });
+    await buildPdf(onePage([parent]), editor);
+    expect(boxes).toEqual([
+      [parent.x, parent.y, parent.width],
+      [child.x, child.y, child.width],
+      [parent.x, parent.y, parent.width],
+    ]);
+    expect(caught).toBe(throws ? failure : undefined);
+  });
+
+  it("warns rather than crashing when a pre-export hook dispatches an unhandled block", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const Custom = Extension.create({
+      name: "beforeExportDispatch",
+      addExports: () => ({ pdf: {
+        onBeforeExport: ctx => { ctx.blocks([block("pageBreak", [])]); },
+      } }),
+    });
+    const editor = new ServerEditor({ extensions: [StarterKit, Custom] });
+    const layout = onePage([block("paragraph", [textLine("visible")])]);
+    await expect(buildPdf(layout, editor)).resolves.toBeInstanceOf(Uint8Array);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("pageBreak"));
+    warn.mockRestore();
+  });
+});
+
 describe("PDF mark style boundary", () => {
   it.each(["var(--highlight)", "not-a-color", "color(display-p3 1 0 0)"])(
     "skips unsupported highlight %s without hiding text", async color => {
@@ -124,5 +175,36 @@ describe("PDF mark style boundary", () => {
     const ops = await recordDrawOps(() => buildPdf(marked(["custom"]), editor));
     const at = ops.findIndex(op => op.op === "text");
     expect(ops[at - 1]).toMatchObject({ op: "rect", color: "rgb(1, 0, 0)", opacity });
+  });
+});
+
+/**
+ * A node type with no PDF handler is skipped. That is survivable only if it is
+ * reported, and it has to be reported wherever the node appears — an extension
+ * that ships an inline node and forgets its PDF handler otherwise sees it on
+ * the canvas and silently missing from the file.
+ */
+describe("PDF missing handler diagnostics", () => {
+  it.each([
+    ["a block", () => onePage([block("pageBreak", [])])],
+    ["an inline atom", () => {
+      const host = block("paragraph", [textLine("before")]);
+      host.lines[0]!.spans.push({
+        kind: "object",
+        node: schema.nodes["pageBreak"]!.createAndFill()!,
+        docPos: 1,
+        x: 60,
+        width: 10,
+        height: 10,
+        verticalAlign: "baseline",
+      });
+      return onePage([host]);
+    }],
+  ])("warns by name for %s", async (_label, makeLayout) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const editor = new ServerEditor({ extensions: [StarterKit] });
+    await buildPdf(makeLayout(), editor);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("pageBreak"));
+    warn.mockRestore();
   });
 });
