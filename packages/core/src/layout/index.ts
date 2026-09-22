@@ -15,6 +15,7 @@ export type {
 export { LineBreaker } from "./LineBreaker";
 export type { InputSpan, LayoutSpan, LayoutLine, LineSpaceProvider } from "./LineBreaker";
 export { layoutBlock, resolveLeafBlockDimensions, computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
+export { chromeBlocks } from "./chromeBlocks";
 export type { LayoutBlock, BlockLayoutOptions } from "./BlockLayout";
 export { runPipeline, buildFragments, defaultPageConfig, defaultPagelessConfig, collapseMargins } from "./PageLayout";
 export type { PageConfig, LayoutPage, DocumentLayout, PageLayoutOptions, LayoutFragment } from "./PageLayout";

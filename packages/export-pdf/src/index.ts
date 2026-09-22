@@ -38,6 +38,7 @@ import type {
 } from "@scrivr/core";
 import type { FontShortfall } from "@scrivr/core";
 import {
+  chromeBlocks,
   compareAnchoredObjectPaintOrder,
   defaultPdfTheme,
 } from "@scrivr/core";
@@ -414,7 +415,7 @@ async function embedImages(
     }
   };
 
-  const collectFromBlocks = (blocks: DocumentLayout["pages"][0]["blocks"]) => {
+  const collectFromBlocks = (blocks: readonly DocumentLayout["pages"][0]["blocks"][number][]) => {
     for (const block of blocks) {
       collectFromBlock(block);
     }
@@ -425,21 +426,9 @@ async function embedImages(
     collectFromBlocks(page.blocks);
   }
 
-  // Chrome payloads (header/footer mini-layouts may contain inline images)
-  if (layout.chromePayloads) {
-    for (const payload of Object.values(layout.chromePayloads)) {
-      if (typeof payload === "object" && payload !== null && "slots" in payload) {
-        const slots = (payload as { slots: Record<string, { layout?: { pages?: Array<{ blocks: DocumentLayout["pages"][0]["blocks"] }> } }> }).slots;
-        for (const slot of Object.values(slots)) {
-          if (slot?.layout?.pages) {
-            for (const page of slot.layout.pages) {
-              collectFromBlocks(page.blocks);
-            }
-          }
-        }
-      }
-    }
-  }
+  // A header or footer may hold an image of its own, and it is the same walk
+  // core's font lane makes — one reader, so the two cannot drift apart again.
+  collectFromBlocks(chromeBlocks(layout.chromePayloads));
 
   const result = new Map<string, PDFImage | null>();
 
