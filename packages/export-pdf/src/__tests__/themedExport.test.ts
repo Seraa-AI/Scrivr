@@ -11,6 +11,8 @@ import { Schema } from "@scrivr/core/pm";
 import { ServerEditor, StarterKit, defaultPdfTheme } from "@scrivr/core";
 import type { DocumentLayout, LayoutBlock, LayoutLine } from "@scrivr/core";
 import { buildPdf as buildPdfWithEditor, type PdfExportOptions } from "../index";
+import { block, onePage, exportEditor as fixtureEditor } from "./fixtures";
+import { recordDrawOps } from "./opLog";
 
 // buildPdf requires an editor (collects PDF handlers via getExportContributions).
 const exportEditor = new ServerEditor({ extensions: [StarterKit] });
@@ -174,5 +176,39 @@ describe("ServerEditor — theme + var() warning", () => {
     // var() entry was dropped; default fills in.
     expect(resolved.defaultText).toBe("#1e293b");
     warn.mockRestore();
+  });
+});
+
+/**
+ * A horizontal rule is painted from the theme, like every other themed thing.
+ *
+ * It was the one handler that ignored its own token: the export drew the
+ * canvas slate as a literal, so `defaultPdfTheme.hrColor` described a colour
+ * nothing read and `exportPdf({ theme })` could not change a rule.
+ */
+describe("the colour of a horizontal rule", () => {
+  const ruleOps = async (options?: PdfExportOptions) => {
+    const ops = await recordDrawOps(() =>
+      buildPdfWithEditor(onePage([block("horizontalRule", [])]), fixtureEditor, options),
+    );
+    return ops.filter((op) => op.op === "line");
+  };
+
+  it("comes from the print-ready default, not the canvas slate", async () => {
+    const [rule] = await ruleOps();
+    // defaultPdfTheme.hrColor is #999999; the canvas theme's is #cbd5e1.
+    expect(defaultPdfTheme.hrColor).toBe("#999999");
+    expect(rule?.["color"]).toBe("rgb(0.6, 0.6, 0.6)");
+  });
+
+  it("follows a theme the caller passes", async () => {
+    const [rule] = await ruleOps({ theme: { hrColor: "#ff0000" } });
+    expect(rule?.["color"]).toBe("rgb(1, 0, 0)");
+  });
+
+  it("reads an alpha in the colour as the stroke's opacity", async () => {
+    const [rule] = await ruleOps({ theme: { hrColor: "rgba(0, 0, 255, 0.5)" } });
+    expect(rule?.["color"]).toBe("rgb(0, 0, 1)");
+    expect(rule?.["opacity"]).toBe(0.5);
   });
 });
