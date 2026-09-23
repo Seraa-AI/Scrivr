@@ -3,7 +3,7 @@
 "@scrivr/export-pdf": patch
 ---
 
-Embedding a face in a PDF now requires the resource to say so.
+**Breaking: embedding a face in a PDF now requires the resource to say so.**
 
 `embedding: { allowed: true }` is what grants it. A resource that omits
 `embedding` used to be treated as embeddable; it is now treated as unknown, and

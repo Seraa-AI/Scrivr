@@ -4,7 +4,8 @@
 "@scrivr/plugins": patch
 ---
 
-Import the formatting a DOCX states in its styles, not just on its runs.
+**Breaking for what a DOCX import produces:** the formatting a document states
+in its styles is now imported, not just what its runs repeat.
 
 Word records most formatting once, in a style, and says nothing on the runs
 that use it. The importer read only `<w:rPr>`, so everything an author set

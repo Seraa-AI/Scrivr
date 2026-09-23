@@ -13,9 +13,13 @@ lane beside its `docx` one.
 The contract (`PdfSpanStyle`, `PdfMarkHandler`) moved to `@scrivr/core` so an
 extension can describe its mark without depending on `@scrivr/export-pdf`, and
 so a handler that names the type gets its shape checked. Nothing in the
-contract names pdf-lib. Both types remain importable from either package, and
-their shape differs from the one `@scrivr/export-pdf` published previously —
-colours are CSS strings now.
+contract names pdf-lib. Both types remain importable from either package.
+
+**Breaking: a mark handler written against the old types will not compile.**
+`PdfSpanStyle`'s colours are CSS strings rather than pdf-lib triples, and it no
+longer carries `font` — a face belongs to layout, not to a mark. `PdfMarkHandler`
+receives `PdfMarkContext`, which exposes only `theme`, in place of the full
+`PdfContext`: a mark returns style data and never draws.
 
 **Highlights change colour.** `Highlight` configures `rgba(255, 220, 0, 0.4)`
 and the canvas painted it, while the exporter hardcoded a different yellow. The

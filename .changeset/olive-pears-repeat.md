@@ -2,7 +2,7 @@
 "@scrivr/export-pdf": patch
 ---
 
-Refuse to embed a WOFF or WOFF2 face instead of writing one into the PDF.
+**Breaking: a WOFF or WOFF2 face is refused instead of written into the PDF.**
 
 A web font container is not a font program. fontkit unwraps one, so a face
 registered as `.woff2` measured and shaped correctly and nothing upstream
