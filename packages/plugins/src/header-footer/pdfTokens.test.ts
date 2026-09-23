@@ -69,12 +69,4 @@ describe("token rendering in a PDF", () => {
     renderDatePdf(tokenBlock({ frozen: "2020-06-15T00:00:00.000Z" }), ctx);
     expect(ops[0]!.text).toBe(new Date("2020-06-15T00:00:00.000Z").toLocaleDateString());
   });
-
-  it("skips a context it cannot draw through, rather than throwing", () => {
-    // A rejected context cannot also be observed, so what this holds is the
-    // consequence of the guard: no draw call is attempted on something that
-    // has none. Remove the guard and this throws on `ctx.draw.text`.
-    expect(() => renderPageNumberPdf(tokenBlock(), {})).not.toThrow();
-    expect(() => renderPageNumberPdf(tokenBlock(), null)).not.toThrow();
-  });
 });

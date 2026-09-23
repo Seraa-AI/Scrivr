@@ -2,6 +2,13 @@
 
 Status: **design** — the extension seam that lets plugins (first-party or user-defined) contribute export handlers without editing core export code.
 
+> **This is the design of record, not a map of the tree.** The seam shipped, but
+> the built layout differs from the one drawn below — there is no `handlers.ts`,
+> `export.ts` or `defaults.ts` in `@scrivr/export-pdf`. The handler contract
+> lives in `@scrivr/core/src/exports/pdf.ts` and every handler lives on the
+> extension that owns its node. `docs/format-lane-ownership-rfc.md` §"What
+> shipped" records where each piece actually landed.
+
 **Companion docs**:
 - `docs/multi-surface-architecture.md` — the broader architectural frame. Export contributions are the format-land counterpart to `addPageChrome` (canvas-land).
 - `docs/header-footer-plan.md` — the first concrete consumer. The header-footer PDF export flow in that plan's §10 is replaced by the `addExports` mechanism specified here.
@@ -1384,9 +1391,10 @@ imports a format package. Colours are CSS strings rather than pdf-lib triples,
 an authored `color` — and a handler describes meaning only: the renderer owns
 thickness, offsets, and paint order.
 
-`defaultMarkHandlers` in `@scrivr/export-pdf` is empty by design. A kit without
-Highlight has no highlight to render, and nothing in the format package
-pretends otherwise.
+`@scrivr/export-pdf` ships no default handlers at all — for marks or for nodes.
+A kit without Highlight has no highlight to render, and nothing in the format
+package pretends otherwise. (Phase 2 emptied the mark defaults; Phase 4 moved
+the node handlers to their extensions and deleted the file.)
 
 ### Beta migration for PDF mark extensions
 
@@ -1400,9 +1408,10 @@ PDF mark contributions need these changes:
   resolution, so text measurement and PDF drawing use the same font. There is
   no mark-style font override.
 - Type mark callbacks against `PdfMarkContext`, which exposes only `theme`.
-  Node/chrome handlers and export lifecycle hooks retain `PdfContext` for
-  drawing and document resources. Mark handlers return style data; they do not
-  draw or mutate the PDF document.
+  Mark handlers return style data; they do not draw or mutate the PDF document.
+- Node handlers take `PdfNodeContext` (from `@scrivr/core`) as of Phase 4 —
+  `doc`, `page`, `fonts` and `images` are not on that type. Chrome handlers and
+  the export lifecycle hooks still receive the full `PdfContext`.
 
 `PdfMarkHandler` and `PdfSpanStyle` remain importable from `@scrivr/export-pdf`
 and are also exported by `@scrivr/core`. The old handler table was never

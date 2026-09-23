@@ -1,4 +1,5 @@
 import { Extension } from "../Extension";
+import type { PdfNodeHandler } from "../../exports/pdf";
 import { NodeSelection, type Command } from "prosemirror-state";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { IEditor } from "../types";
@@ -599,6 +600,15 @@ const imageSelectionBehavior: SelectionBehavior<NodeSelection> = {
   },
 };
 
+const imagePdf: PdfNodeHandler = (block, ctx) => {
+  const src = block.node.attrs["src"];
+  const box = { x: block.x, y: block.y, width: block.width, height: block.height };
+  // Says the missing case by name rather than leaning on an empty `src`
+  // failing to resolve somewhere downstream.
+  if (typeof src !== "string" || src.length === 0) return ctx.draw.imagePlaceholder(box);
+  ctx.draw.image({ ...box, image: { src } });
+};
+
 export const Image = Extension.create({
   name: "image",
 
@@ -750,6 +760,7 @@ export const Image = Extension.create({
         nodes: { image: imageDocxHandler },
       },
       semantic: { nodes: { image: semanticHandler } },
+      pdf: { nodes: { image: imagePdf } },
     };
   },
 

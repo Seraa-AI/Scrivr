@@ -16,8 +16,8 @@ interface DrawnRect {
   y: number;
   width: number;
   height: number;
-  color: unknown;
-  opacity: number;
+  color?: unknown;
+  opacity?: number;
 }
 function fakeCtx() {
   const lines: DrawnLine[] = [];
@@ -182,12 +182,6 @@ describe("renderTableRowPdf", () => {
     renderTableRowPdf(tableRowBlock(node, [cell]), ctx);
 
     expect(lines).toHaveLength(3); // top suppressed
-  });
-
-  it("does nothing for a non-PDF context (structural guard)", () => {
-    const node = rowNode([{}]);
-    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [childTextBlock(4)] };
-    expect(() => renderTableRowPdf(tableRowBlock(node, [cell]), { not: "a ctx" })).not.toThrow();
   });
 });
 

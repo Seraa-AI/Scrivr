@@ -1,4 +1,5 @@
 import { Extension } from "../Extension";
+import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Command } from "prosemirror-state";
 import { InputRule } from "prosemirror-inputrules";
 import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
@@ -53,6 +54,25 @@ function insertHorizontalRule(): Command {
 }
 
 // ── Extension ─────────────────────────────────────────────────────────────────
+
+/**
+ * A rule is a line down the middle of the box the layout reserved for it —
+ * the same geometry `render` draws on canvas, sharing its thickness.
+ *
+ * The colour does not yet: `render` reads `theme.hrColor` while this is the
+ * editor theme's slate frozen as a literal, so `defaultPdfTheme.hrColor` and
+ * `exportPdf({ theme })` have no effect here. Moving it onto the theme changes
+ * the ink, so it belongs in its own change with its own before/after.
+ */
+const horizontalRulePdf: PdfNodeHandler = (block, ctx) => {
+  const y = block.y + block.height / 2;
+  ctx.draw.line({
+    from: { x: block.x, y },
+    to: { x: block.x + block.availableWidth, y },
+    thicknessPx: HR_THICKNESS,
+    color: { r: 203, g: 213, b: 225 },
+  });
+};
 
 export const HorizontalRule = Extension.create({
   name: "horizontalRule",
@@ -120,6 +140,7 @@ export const HorizontalRule = Extension.create({
     return {
       docx: { nodes: { horizontalRule: handler } },
       semantic: { nodes: { horizontalRule: semanticHandler } },
+      pdf: { nodes: { horizontalRule: horizontalRulePdf } },
     };
   },
 

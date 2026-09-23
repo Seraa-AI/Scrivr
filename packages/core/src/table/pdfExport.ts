@@ -2,9 +2,7 @@
  * PDF export handler for `tableRow` blocks.
  *
  * Draws through `ctx.draw`, the surface core itself declares, so this works in
- * layout pixels and plain `Rgb` and never names a PDF library. The runtime
- * guard is still here because the export pipeline hands handlers an untyped
- * context.
+ * layout pixels and plain `Rgb` and never names a PDF library.
  *
  * Mirrors the canvas `TableRowStrategy`: per cell, fill the shading, draw
  * borders (top suppressed for a vMerge continuation so a vertical merge reads
@@ -14,33 +12,16 @@
  */
 import type { LayoutBlock } from "../layout/BlockLayout";
 import { parseCssColor } from "../model/cssColor";
-import type { PdfDrawSurface, PdfPoint } from "../exports/pdf";
+import type { PdfNodeContext, PdfPoint } from "../exports/pdf";
 import type { Rgb } from "../model/cssColor";
 
 /** #9ca3af */
 const BORDER_COLOR: Rgb = { r: 156, g: 163, b: 175 };
 
-/** What this handler needs of the context it is handed. */
-interface PdfContextLike {
-  draw: PdfDrawSurface;
-  /**
-   * The pipeline's block dispatch. A cell holds ordinary blocks, and each
-   * belongs to whichever extension defines it — the same division the import
-   * side uses when a cell's content is read back with `walkBlocks`. Drawing
-   * them here would make a table cell the one place a node type renders
-   * differently.
-   */
-  blocks(blocks: readonly LayoutBlock[]): void;
-}
-
-function isPdfContext(value: unknown): value is PdfContextLike {
-  if (typeof value !== "object" || value === null) return false;
-  if (!("draw" in value) || !("blocks" in value)) return false;
-  return typeof value.blocks === "function";
-}
-
-export function renderTableRowPdf(block: LayoutBlock, ctx: unknown): void {
-  if (!isPdfContext(ctx)) return;
+export function renderTableRowPdf(
+  block: LayoutBlock,
+  ctx: Pick<PdfNodeContext, "draw" | "blocks">,
+): void {
   const cells = block.cells ?? [];
   if (cells.length === 0) return;
   const isLastRow = block.isLastRow === true;

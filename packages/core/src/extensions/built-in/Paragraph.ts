@@ -9,6 +9,7 @@ import {
   type DocxBlockTransform,
 } from "../../exports/docx";
 import type { SemanticNodeHandler } from "../../exports/semantic";
+import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Node as PmNode } from "prosemirror-model";
 import { normalizeImageAttrs } from "../../layout/AnchoredObjects";
 
@@ -115,6 +116,8 @@ export const splitBlockInheritAttrs: Command = (state, dispatch) => {
   );
 };
 
+const paragraphPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
+
 /**
  * Paragraph — the default block node.
  *
@@ -208,6 +211,7 @@ export const Paragraph = Extension.create({
     return {
       docx: { nodes: { paragraph: handler } },
       semantic: { nodes: { paragraph: semanticHandler } },
+      pdf: { nodes: { paragraph: paragraphPdf } },
     };
   },
 

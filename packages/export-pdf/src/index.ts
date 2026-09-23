@@ -3,11 +3,13 @@ import "./augmentation";
 
 export { PdfExport } from "./PdfExport";
 export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentation";
-// The mark lane's contract lives in core so an extension can describe its
-// mark without depending on this package; re-exported for consumers already
+// The handler contract lives in core so an extension can describe its node and
+// its mark without depending on this package; re-exported for consumers already
 // importing it from here.
 export type {
   FontResolutionId,
+  PdfNodeContext,
+  PdfBlockDrawSurface,
   PdfMarkHandler,
   PdfSpanStyle,
   PdfSpanMark,
@@ -49,7 +51,6 @@ import {
   embedResolvedFonts,
   createFontRegistry,
 } from "./fonts";
-import { defaultNodeHandlers, defaultMarkHandlers } from "./defaults";
 import { preparePdfLayout } from "./prepareLayout";
 import { applyMetadata, type PdfMetadata } from "./metadata";
 import { addHeadingOutline } from "./outline";
@@ -140,12 +141,14 @@ async function writePdf(
   options?: PdfExportOptions,
   prepared?: Awaited<ReturnType<typeof preparePdfLayout>>,
 ): Promise<Uint8Array> {
-  // Only own contribution entries enter these registries. Every string is a
-  // valid key, including names shared with Object.prototype. Later extensions
-  // override earlier registrations in all three lanes.
   // ── Phase 1: Collect handlers ──────────────────────────────────────────
-  const nodeHandlers = new Map<string, PdfNodeHandler>(Object.entries(defaultNodeHandlers));
-  const markHandlers = new Map<string, PdfMarkHandler>(Object.entries(defaultMarkHandlers));
+  // Every handler comes from an extension; the exporter ships none of its own.
+  // A kit without Image has no image to draw and nothing here pretending
+  // otherwise. Only own contribution entries enter these registries — every
+  // string is a valid key, including names shared with Object.prototype — and
+  // later extensions override earlier registrations in all three lanes.
+  const nodeHandlers = new Map<string, PdfNodeHandler>();
+  const markHandlers = new Map<string, PdfMarkHandler>();
   const chromeHandlers = new Map<string, PdfChromeHandler<unknown>>();
   const lifecycleHooks: {
     before: Array<(ctx: PdfContext) => void | Promise<void>>;
@@ -216,6 +219,7 @@ async function writePdf(
   const resolvedTheme: ResolvedTheme = { ...defaultPdfTheme, ...(options?.theme ?? {}) };
 
   const draw = createDrawHelpers(
+    pdfDoc,
     getPage,
     pageHeightPt,
     fontRegistry,

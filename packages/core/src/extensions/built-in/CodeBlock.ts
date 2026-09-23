@@ -1,4 +1,5 @@
 import { Extension } from "../Extension";
+import type { PdfNodeHandler } from "../../exports/pdf";
 import { KeymapPriority } from "../types";
 import { setBlockType } from "prosemirror-commands";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
@@ -105,6 +106,8 @@ function makeToggleCodeBlock(): Command {
 
 // ── Extension ─────────────────────────────────────────────────────────────────
 
+const codeBlockPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
+
 export const CodeBlock = Extension.create<CodeBlockOptions>({
   name: "codeBlock",
 
@@ -187,6 +190,7 @@ export const CodeBlock = Extension.create<CodeBlockOptions>({
     return {
       docx: { nodes: { codeBlock: handler } },
       semantic: { nodes: { codeBlock: semanticHandler } },
+      pdf: { nodes: { codeBlock: codeBlockPdf } },
     };
   },
 

@@ -24,7 +24,9 @@ It is a direction change, not a feature. Nothing here ships until it is agreed.
 | Markdown | core | extensions, via `addMarkdownSerializerRules()` | yes |
 | **PDF** | **`@scrivr/export-pdf`** | **2 extensions** (`Table`, `HeaderFooter`) | **partly — see §4** |
 
-Eight node types and five mark behaviours are implemented inside the PDF
+*The PDF row above is the state this RFC was written against. See **What shipped**.*
+
+Eight node types and five mark behaviours were implemented inside the PDF
 package rather than on the extensions that define those nodes:
 
 - `packages/export-pdf/src/defaults.ts` — `paragraph`, `heading`, `bulletList`,
@@ -37,10 +39,41 @@ package rather than on the extensions that define those nodes:
 
 Two DOCX import gaps are worth recording while inventorying lane health, though
 neither is this RFC's subject. `hardBreak` is read by the package
-(`docx/src/import/transform.ts:153`) rather than by its extension. And `Link`
+(`docx/src/import/transform.ts:126`) rather than by its extension. And `Link`
 declares no `addImports()` at all, so a `hyperlink` mark is parsed
 (`docx/src/import/parser.ts:438`) and then dropped with an `unsupported-mark`
 diagnostic — a silently lost hyperlink on every DOCX import.
+
+## What shipped
+
+| Phase | Landed | What it changed |
+|---|---|---|
+| **0** | #174, #176 | Op-log harness + characterization fixtures for the body and the chrome lane. Mutation-proven before anything moved |
+| **1** | #185 | `core/src/exports/pdf.ts` — the drawing surface. A handler speaks layout pixels and `Rgb`; it never names pdf-lib |
+| **2** | #183 | Mark lane. `underline`, `link`, `strikethrough`, `highlight` and `color` moved to their extensions; `defaultMarkHandlers` emptied |
+| **3** | #193 | Dispatch repair. Body blocks, chrome bands, table cell children, inline atoms and anchored objects all reach paint through one `ctx.blocks(blocks)`. No handler moved |
+| **4** | *this change* | Node lane. The eight handlers moved to their six extensions and the exporter's defaults were deleted — it now ships none of its own. `PdfNodeContext` and `PdfNodeHandler` moved to core, so both `PdfContextLike` structural copies and their runtime guards are gone |
+| **5** | not started | Enforcement: conformance fixture, `noUnusedParameters`, collection-policy `satisfies`, forbidden-import check in core |
+
+As of Phase 4 the PDF row reads: contract in **core** (`exports/pdf.ts`),
+handlers registered by **13 extensions** (8 node, 5 mark), dispatch routes through registration
+**yes**. The exporter owns traversal, placement, page order and asset
+embedding; what a node looks like belongs to whoever defines it.
+
+Still open, and both belong to Phase 5:
+
+- **The registration itself is type-checked nowhere.** `FormatHandlers` is empty
+  inside core and plugins, so `ExportContributionMap` resolves to `{}` there and
+  a `pdf: { nodes: { tableRow: 42 } }` compiles clean in both. Handler *bodies*
+  are checked at their declaration; the declaration→registry hop is not. This
+  predates Phase 4 but now covers eight more registrations.
+- **The inline atom is a second dispatch call site** — it needs its host line's
+  font, so it shares the handler lookup rather than calling `ctx.blocks`.
+
+Of the two DOCX gaps noted above, `Link`'s missing `addImports()` was closed in
+#182; `hardBreak` is still read by the package
+(`docx/src/import/transform.ts:126`) rather than by its extension. That one
+belongs to the DOCX lane, not this RFC.
 
 ## Non-goals
 
@@ -51,8 +84,9 @@ diagnostic — a silently lost hyperlink on every DOCX import.
   except the one exception stated in §7.
 - **Font substitution from an extension.** Layout already resolved the font and
   measured against it; letting export swap it invalidates measured positions.
-- **The remaining DOCX import gaps** (`hardBreak`, and `Link`'s missing
-  `addImports()`). Same principle, different lane, no shared risk — a follow-up.
+- **The remaining DOCX import gap** (`hardBreak` read by the package rather
+  than its extension; `Link`'s was closed in #182). Same principle, different
+  lane, no shared risk — a follow-up.
   Note `list` is *not* one of them: `docx/src/import/transform.ts:92-94` argues
   the case explicitly — reading a list is `bulletList`/`orderedList`/`listItem`
   construction with nothing per-extension to decide. That is a stated decision,
@@ -405,7 +439,7 @@ Each is independently reviewable and shippable.
 | **1** | `core/src/exports/pdf.ts` — the drawing surface; adapter in `@scrivr/export-pdf`; re-export for compatibility. No handler moves | Op-log identical |
 | **2** | Mark lane: collect `marks`, consult them in the painter, move the five behaviours to their extensions | Op-log identical |
 | **3** | Dispatch repair: one block-dispatch capability; inline objects, anchored objects, table children and chrome rendering all route through it. Handlers have not moved yet, so this is pure routing | Op-log identical |
-| **4** | Node lane: move the eight handlers to their six extensions; `defaults.ts` empties. Every route already obeys dispatch, so this is mechanical | Op-log identical |
+| **4** | Node lane: move the eight handlers to their six extensions; `defaults.ts` is deleted. Every route already obeys dispatch, so this is mechanical | Op-log identical |
 | **5** | Enforcement: conformance fixture, `noUnusedParameters`, collection-policy `satisfies`, forbidden-import check in core | Fixture fails when a lane is disconnected by hand |
 
 Phase 4 is where both `PdfContextLike` copies are deleted in favour of the core
@@ -470,7 +504,7 @@ handler, so the op-log is the whole test.
 - `packages/export-pdf/src/augmentation.ts` — re-export core contracts
 - `packages/export-pdf/src/context.ts` — implement the surface; painter consults mark handlers
 - `packages/export-pdf/src/index.ts` — collect `marks`; route dispatch
-- `packages/export-pdf/src/defaults.ts` — empties over Phases 2–3
+- `packages/export-pdf/src/defaults.ts` — empties over Phases 2–3, deleted in Phase 4
 - `packages/core/src/table/pdfExport.ts` — drop `PdfContextLike` for the core contract
 - `packages/core/src/extensions/export.ts` — correct the `{}` comment
 - Six extensions gain `addExports().pdf.nodes`; five gain `.marks`

@@ -361,10 +361,10 @@ export const Table = Extension.create({
   },
 
   addExports() {
-    // PDF parity for canvas-rendered table rows. Registered on the extension
-    // (not in @scrivr/export-pdf defaults) using the structural-context pattern
-    // so core stays free of pdf-lib. DOCX parity ships the same way — the
-    // walker dispatches table/tableRow/tableCell/tableHeader through these.
+    // PDF parity for canvas-rendered table rows, drawn through the contract
+    // core itself declares so none of this names pdf-lib. DOCX parity ships the
+    // same way — the walker dispatches table/tableRow/tableCell/tableHeader
+    // through these.
     return {
       pdf: { nodes: { tableRow: renderTableRowPdf } },
       docx: { nodes: tableDocxExportHandlers },
