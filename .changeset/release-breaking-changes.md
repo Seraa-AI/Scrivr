@@ -75,5 +75,10 @@ warn you, so this does.
   becomes its opacity rather than being flattened and dimmed twice.
 - Two PDF greys are now exactly `#9ca3af` instead of hand-transcribed
   approximations.
+- A horizontal rule prints in `#999999`, the print-ready grey
+  `defaultPdfTheme.hrColor` always declared, rather than the lighter `#cbd5e1`
+  the canvas uses — the handler used to hold that slate as a literal and read
+  no theme at all. Pass `exportPdf({ theme: { hrColor: "#cbd5e1" } })` to keep
+  the previous ink.
 - Text is no longer reduced to WinAnsi when it will be drawn in an embedded
   font, so scripts outside that repertoire survive the export.
