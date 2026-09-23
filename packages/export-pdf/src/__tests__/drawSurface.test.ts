@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { Extension, ServerEditor, StarterKit } from "@scrivr/core";
+import { defaultPdfTheme, Extension, ServerEditor, StarterKit } from "@scrivr/core";
 import { PDFDocument, PDFDict, PDFName, PDFNumber } from "pdf-lib";
 import { buildPdf } from "../index";
 import { PT_PER_PX } from "../context";
@@ -98,13 +98,16 @@ describe("the drawing surface", () => {
     expect(rule?.["thickness"]).toBe(2 * PT_PER_PX);
   });
 
-  it("draws the built-in rule in exactly the colour it names", async () => {
+  it("draws the built-in rule in exactly the colour the theme names", async () => {
     // Asserting the value, not that a line appeared — the old painter drew a
     // line too, so op kind alone cannot tell the two implementations apart.
     const editor = new ServerEditor({ extensions: [StarterKit] });
     const ops = await recordDrawOps(() => buildPdf(ruled, editor));
     const rule = ops.find((op) => op.op === "line");
-    expect(rule?.["color"]).toBe("rgb(0.796, 0.835, 0.882)");
+    // `defaultPdfTheme.hrColor`, #999999 — not the canvas slate this used to
+    // hold as a literal of its own.
+    expect(defaultPdfTheme.hrColor).toBe("#999999");
+    expect(rule?.["color"]).toBe("rgb(0.6, 0.6, 0.6)");
   });
 
 });

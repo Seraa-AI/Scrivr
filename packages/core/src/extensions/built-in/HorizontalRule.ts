@@ -5,6 +5,8 @@ import { InputRule } from "prosemirror-inputrules";
 import type { BlockStrategy, BlockRenderContext } from "../../layout/BlockRegistry";
 import type { CharacterMap } from "../../layout/CharacterMap";
 import type { LayoutBlock } from "../../layout/BlockLayout";
+import { parseCssColor } from "../../model/cssColor";
+import { defaultPdfTheme } from "../../model/theme";
 import {
   xml,
   type DocxNodeHandler,
@@ -56,21 +58,34 @@ function insertHorizontalRule(): Command {
 // ── Extension ─────────────────────────────────────────────────────────────────
 
 /**
+ * The colour the export falls back to when the theme names one it cannot read.
+ * Parsed from the theme rather than written out again, so there is still one
+ * place that decides what a rule looks like.
+ */
+const FALLBACK_RULE = parseCssColor(defaultPdfTheme.hrColor) ?? {
+  r: 0,
+  g: 0,
+  b: 0,
+  alpha: 1,
+};
+
+/**
  * A rule is a line down the middle of the box the layout reserved for it —
- * the same geometry `render` draws on canvas, sharing its thickness.
- *
- * The colour does not yet: `render` reads `theme.hrColor` while this is the
- * editor theme's slate frozen as a literal, so `defaultPdfTheme.hrColor` and
- * `exportPdf({ theme })` have no effect here. Moving it onto the theme changes
- * the ink, so it belongs in its own change with its own before/after.
+ * the same geometry and thickness `render` draws on canvas, and now the same
+ * source for its colour. A themed export asks for a rule through
+ * `theme.hrColor`, so the handler has to read it rather than hold its own.
  */
 const horizontalRulePdf: PdfNodeHandler = (block, ctx) => {
+  const { r, g, b, alpha } = parseCssColor(ctx.theme.hrColor) ?? FALLBACK_RULE;
+  // A fully transparent rule is a rule the theme asked not to see.
+  if (alpha === 0) return;
   const y = block.y + block.height / 2;
   ctx.draw.line({
     from: { x: block.x, y },
     to: { x: block.x + block.availableWidth, y },
     thicknessPx: HR_THICKNESS,
-    color: { r: 203, g: 213, b: 225 },
+    color: { r, g, b },
+    ...(alpha < 1 ? { opacity: alpha } : {}),
   });
 };
 
