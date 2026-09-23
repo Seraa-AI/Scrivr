@@ -2,7 +2,8 @@
 "@scrivr/docx": patch
 ---
 
-Keep a DOCX's headers and footers when the import lands in an editor.
+**Breaking for callers that apply an imported document themselves:** headers
+and footers now survive the step that lands a DOCX in an editor.
 
 Importing is two steps, and the second one lost them. `importDocx` reconstructs
 the header/footer policy from the section's references and returns it on
