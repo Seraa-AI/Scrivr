@@ -437,7 +437,11 @@ describe("buildPdf", () => {
     try {
       const src = "https://example.test/cell-image.png";
       await buildPdf(makeLayout([tableRowWithCellImage(src)]));
-      expect(fetchMock).toHaveBeenCalledWith(src);
+      // The resolver requests a URL under its own limits, not a bare string.
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.objectContaining({ href: src }),
+        expect.objectContaining({ redirect: "manual" }),
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }

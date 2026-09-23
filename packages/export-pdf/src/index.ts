@@ -27,6 +27,7 @@ export type {
 } from "@scrivr/core";
 export type { PdfContext, PdfFontRegistry, PdfDrawHelpers } from "./context";
 export type { PdfMetadata } from "./metadata";
+export type { ImageResolver, ImageBytes } from "./fetchImage";
 
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
 import type {
@@ -40,9 +41,12 @@ import type {
 } from "@scrivr/core";
 import type { FontShortfall } from "@scrivr/core";
 import {
+  chromeBlocks,
   compareAnchoredObjectPaintOrder,
   defaultPdfTheme,
 } from "@scrivr/core";
+import { createDefaultImageResolver } from "./fetchImage";
+import type { ImageResolver } from "./fetchImage";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
 import type { PdfContext } from "./context";
@@ -88,6 +92,25 @@ export interface PdfExportOptions {
    * opening a long agreement has no way through it but scrolling without them.
    */
   outline?: boolean;
+  /**
+   * How an image `src` becomes bytes.
+   *
+   * A document names its own image URLs, so exporting one makes this process
+   * request whatever it names. The built-in resolver refuses anything that is
+   * not a public http(s) address — loopback, private ranges, link-local and
+   * cloud metadata included — and caps the wait, the size and the redirects.
+   *
+   * Supply your own to widen that (internal images on a self-hosted install)
+   * or to narrow it (an allowlist, when the documents are untrusted). Yours is
+   * the whole policy: nothing is checked around it.
+   */
+  resolveImage?: ImageResolver;
+  /**
+   * Called when the built-in resolver refuses a URL the document asked for.
+   * The export continues and draws a placeholder; without this the refusal
+   * looks exactly like a broken link.
+   */
+  onImageRefused?: (src: string, reason: string) => void;
 }
 
 /** Public API */
@@ -206,7 +229,11 @@ async function writePdf(
   const fontRegistry = prepared?.fonts ?? createFontRegistry(
     await embedStandardFonts(pdfDoc), await embedResolvedFonts(pdfDoc, layout),
   );
-  const imageCache = await embedImages(pdfDoc, layout);
+  const imageCache = await embedImages(
+    pdfDoc,
+    layout,
+    options?.resolveImage ?? createDefaultImageResolver(options?.onImageRefused),
+  );
 
   // Mutable page ref — updated per page in the loop. Draw helpers read lazily.
   let currentPage: PDFPage = null!;
@@ -362,34 +389,10 @@ function anchoredBlock(object: AnchoredObjectPlacement): LayoutBlock {
 
 // ── Image embedding ──────────────────────────────────────────────────────────
 
-async function fetchImageBytes(
-  src: string,
-): Promise<{ bytes: Uint8Array; format: "png" | "jpeg" } | null> {
-  try {
-    if (src.startsWith("data:")) {
-      const [header, b64] = src.split(",") as [string, string];
-      const format: "png" | "jpeg" = header.includes("png") ? "png" : "jpeg";
-      const binary = atob(b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      return { bytes, format };
-    }
-
-    const res = await fetch(src);
-    if (!res.ok) return null;
-    const buf = await res.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    const format: "png" | "jpeg" =
-      bytes[0] === 0x89 && bytes[1] === 0x50 ? "png" : "jpeg";
-    return { bytes, format };
-  } catch {
-    return null;
-  }
-}
-
 async function embedImages(
   pdfDoc: PDFDocument,
   layout: DocumentLayout,
+  resolveImage: ImageResolver,
 ): Promise<Map<string, PDFImage | null>> {
   const srcs = new Set<string>();
 
@@ -418,7 +421,7 @@ async function embedImages(
     }
   };
 
-  const collectFromBlocks = (blocks: DocumentLayout["pages"][0]["blocks"]) => {
+  const collectFromBlocks = (blocks: readonly DocumentLayout["pages"][0]["blocks"][number][]) => {
     for (const block of blocks) {
       collectFromBlock(block);
     }
@@ -429,27 +432,15 @@ async function embedImages(
     collectFromBlocks(page.blocks);
   }
 
-  // Chrome payloads (header/footer mini-layouts may contain inline images)
-  if (layout.chromePayloads) {
-    for (const payload of Object.values(layout.chromePayloads)) {
-      if (typeof payload === "object" && payload !== null && "slots" in payload) {
-        const slots = (payload as { slots: Record<string, { layout?: { pages?: Array<{ blocks: DocumentLayout["pages"][0]["blocks"] }> } }> }).slots;
-        for (const slot of Object.values(slots)) {
-          if (slot?.layout?.pages) {
-            for (const page of slot.layout.pages) {
-              collectFromBlocks(page.blocks);
-            }
-          }
-        }
-      }
-    }
-  }
+  // A header or footer may hold an image of its own, and it is the same walk
+  // core's font lane makes — one reader, so the two cannot drift apart again.
+  collectFromBlocks(chromeBlocks(layout.chromePayloads));
 
   const result = new Map<string, PDFImage | null>();
 
   await Promise.all(
     Array.from(srcs).map(async (src) => {
-      const fetched = await fetchImageBytes(src);
+      const fetched = await resolveImage(src);
       if (!fetched) {
         result.set(src, null);
         return;

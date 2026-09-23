@@ -1,6 +1,7 @@
 import type { Node as PmNode } from "prosemirror-model";
 import type { DocumentLayout } from "../layout/PageLayout";
 import type { LayoutBlock } from "../layout/BlockLayout";
+import { chromeBlocks } from "../layout/chromeBlocks";
 import type { FontResolutionId } from "./layoutResolver";
 import type {
   FontKey,
@@ -53,6 +54,8 @@ export function usedResolutions(layout: DocumentLayout): Set<FontResolutionId> {
     }
   };
   for (const page of layout.pages) visitBlocks(page.blocks);
+  // A face used only in a header is still a face the file has to carry.
+  visitBlocks(chromeBlocks(layout.chromePayloads));
   return used;
 }
 

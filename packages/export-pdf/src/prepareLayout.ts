@@ -217,6 +217,12 @@ export async function preparePdfLayout(editor: IEditor) {
   // in it.
   const inUse = usedResolutions(onScreen);
   const measured = [...(onScreen.fontResolutions ?? [])].filter(([id]) => inUse.has(id));
+  // The document these faces were measured for. Preparing them is asynchronous
+  // and the user can keep typing, so everything below works from this snapshot
+  // — reading the editor again afterwards would typeset a later revision
+  // against answers collected for this one, which at best exports a document
+  // nobody asked for and at worst names a face nobody prepared.
+  const measuredDoc = editor.getState().doc;
 
   const requests = measured.map(([, entry]) => entry.request);
   await provider.prepare(requests, constraints);
@@ -275,7 +281,7 @@ export async function preparePdfLayout(editor: IEditor) {
   }
   const { layout, registry } = retypeset(
     layoutForExport,
-    editor.getState().doc,
+    measuredDoc,
     provider,
     prepared,
     embedded,

@@ -222,3 +222,64 @@ describe("a weight the inventory does not hold", () => {
     expect(state.some((value) => value.endsWith("Tr"))).toBe(false);
   }, 30_000);
 });
+
+/**
+ * A PDF is a snapshot. Preparing the faces is asynchronous, and a user can go
+ * on typing while it runs, so the export has to keep painting the document it
+ * measured rather than picking up whatever the editor holds when the await
+ * returns.
+ */
+describe("the document a PDF is painted from", () => {
+  it("is the one measured, not one edited while the fonts loaded", async () => {
+    // A licence that forbids embedding forces the typeset-again path, which is
+    // the one that reads the document back after preparing.
+    const licensed = face({
+      id: "licensed",
+      family: "Licensed",
+      embedding: { allowed: false, source: "caller" },
+    });
+    const provider = new DefaultFontProvider({ default: licensed, resources: [face()] });
+
+    // The editor prepares fonts during its own layout too, so the edit is armed
+    // only for the call the export makes.
+    let editor: Editor | undefined;
+    let armed = false;
+    const prepare = provider.prepare.bind(provider);
+    provider.prepare = async (requests, constraints) => {
+      await prepare(requests, constraints);
+      if (!armed) return;
+      armed = false;
+      // The edit lands inside the await, naming a face nobody prepared.
+      const state = editor!.getState();
+      const family = state.schema.marks["fontFamily"]!.create({ family: "Arial" });
+      editor!.applyTransaction(
+        state.tr.insert(state.doc.content.size - 1, state.schema.text("late", [family])),
+      );
+    };
+
+    editor = new Editor({
+      extensions: [StarterKit],
+      fonts: provider,
+      textMeasurer: installingMeasurer(),
+      content: CONTENT,
+    });
+    await settled(editor);
+
+    const measured = editor.getState().doc;
+    expect(measured.textContent).not.toContain("late");
+
+    armed = true;
+    const prepared = await preparePdfLayout(editor);
+    // The edit really did land, so the export had something to pick up.
+    expect(editor.getState().doc.textContent).toContain("late");
+
+    expect(prepared.layout.pages.length).toBeGreaterThan(0);
+    const painted = prepared.layout.pages
+      .flatMap((page) => page.blocks)
+      .flatMap((block) => block.lines)
+      .flatMap((line) => line.spans)
+      .map((span) => ("text" in span ? span.text : ""))
+      .join("");
+    expect(painted).not.toContain("late");
+  }, 30_000);
+});

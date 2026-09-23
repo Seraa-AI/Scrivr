@@ -171,6 +171,9 @@ function transformMarks(
 ): PmMark[] {
   const out: PmMark[] = [];
   for (const mark of marks) {
+    // The run refused this formatting. It has already outranked whatever the
+    // style offered; there is nothing left to draw.
+    if (mark.off) continue;
     const handler = handlers.marks[mark.kind];
     if (!handler) {
       // Unknown mark kind — drop with diagnostic. Reserved kinds we don't

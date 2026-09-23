@@ -9,7 +9,9 @@
 import { describe, it, expect } from "vitest";
 import { ServerEditor } from "../ServerEditor";
 import { DefaultFontProvider } from "./DefaultFontProvider";
-import { collectFontRequests, prepareDocumentFonts } from "./collectFontRequests";
+import { collectFontRequests, prepareDocumentFonts, usedResolutions } from "./collectFontRequests";
+import type { LayoutBlock } from "../layout/BlockLayout";
+import type { DocumentLayout } from "../layout/PageLayout";
 import type { FontResource } from "./types";
 
 const resource = (family: string, weight = 400, style: "normal" | "italic" = "normal"): FontResource => ({
@@ -133,5 +135,38 @@ describe("preparing a document's fonts", () => {
 
     expect(onScreen[0]?.source).toBe("requested");
     expect(forExport[0]?.source).toBe("default");
+  });
+});
+
+/**
+ * Which faces a finished layout actually paints.
+ *
+ * The exporter prepares exactly these, so a face this misses is a face the
+ * PDF cannot embed — it falls back to a standard font and drops every glyph
+ * that font has no room for, with no shortfall to report it.
+ */
+describe("which faces a layout uses", () => {
+  const blockUsing = (resolution: number) =>
+    ({
+      lines: [{ spans: [{ kind: "text", text: "x", font: "16px Inter", x: 0, width: 10, docPos: 0, resolution }] }],
+    }) as unknown as LayoutBlock;
+
+  const pageOf = (...blocks: LayoutBlock[]) => ({ pageNumber: 1, blocks });
+
+  it("counts a face used only in a header", () => {
+    const header = { layout: { pages: [pageOf(blockUsing(2))] } };
+    const layout = {
+      pages: [pageOf(blockUsing(1))],
+      chromePayloads: { headerFooter: { slots: { defaultHeader: header } } },
+    } as unknown as DocumentLayout;
+
+    expect([...usedResolutions(layout)].sort()).toEqual([1, 2]);
+  });
+
+  it("counts a face used only in a table cell", () => {
+    const row = { lines: [], cells: [{ blocks: [blockUsing(3)] }] } as unknown as LayoutBlock;
+    const layout = { pages: [pageOf(row)] } as unknown as DocumentLayout;
+
+    expect([...usedResolutions(layout)]).toEqual([3]);
   });
 });

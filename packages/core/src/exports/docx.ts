@@ -379,6 +379,15 @@ export function emuToPx(emu: number): number {
 export interface DocxMark {
   kind: string;
   attrs?: Record<string, unknown>;
+  /**
+   * The run said this formatting is off — `<w:b w:val="false"/>`, or
+   * `<w:u w:val="none"/>`. That is a statement, not silence: a style can
+   * supply the same formatting, and only a mark that outranks it can turn it
+   * back off. Dropping it at the parser instead makes the style win.
+   *
+   * Resolved away before editor marks are created; no `PmMark` is made for one.
+   */
+  off?: true;
 }
 
 /**
