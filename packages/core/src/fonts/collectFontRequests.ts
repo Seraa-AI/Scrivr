@@ -97,6 +97,7 @@ const keyOf = (key: FontKey): string =>
 export function collectFontRequests(
   doc: PmNode,
   fallback: FontRequest,
+  options: { maxBlocks?: number } = {},
 ): FontRequest[] {
   const found = new Map<string, FontRequest>();
   const add = (family: unknown, weight: number, style: "normal" | "italic") => {
@@ -105,22 +106,51 @@ export function collectFontRequests(
     found.set(keyOf(request), request);
   };
 
-  doc.descendants((node) => {
-    if (!node.isText) return;
+  const fromText = (node: PmNode, parent: PmNode | null): void => {
     const bold = node.marks.some((m) => m.type.name === "bold");
     const italic = node.marks.some((m) => m.type.name === "italic");
     const weight = bold ? 700 : 400;
     const style = italic ? "italic" : "normal";
 
     const mark = node.marks.find((m) => m.type.name === "fontFamily");
-    if (mark) add(mark.attrs["family"], weight, style);
-    else add(fallback.family, weight, style);
-  });
+    if (mark) {
+      add(mark.attrs["family"], weight, style);
+      return;
+    }
+    // The block's family is the base for every run inside it, so a bold run in
+    // a Georgia paragraph is Georgia bold. Asking for the default family's
+    // bold instead names a face the layout will never resolve, and the one it
+    // does resolve is then never installed.
+    const inherited = parent?.attrs["fontFamily"];
+    add(
+      typeof inherited === "string" && inherited.length > 0 ? inherited : fallback.family,
+      weight,
+      style,
+    );
+  };
 
-  doc.descendants((node) => {
-    if (node.isText) return;
-    add(node.attrs["fontFamily"], 400, "normal");
-  });
+  const fromBlock = (node: PmNode): void => add(node.attrs["fontFamily"], 400, "normal");
+
+  const scan = (root: PmNode): void => {
+    root.descendants((node, _pos, parent) => {
+      if (node.isText) fromText(node, parent);
+      else fromBlock(node);
+    });
+  };
+
+  const { maxBlocks } = options;
+  if (maxBlocks === undefined) {
+    scan(doc);
+  } else {
+    // Only the blocks that will actually be painted. A face used forty pages
+    // down is still installed — by the background pass, which repaints when
+    // it lands — but nothing waits on it to show the first page.
+    for (let i = 0; i < Math.min(maxBlocks, doc.childCount); i++) {
+      const block = doc.child(i);
+      fromBlock(block);
+      scan(block);
+    }
+  }
 
   // A document of nothing but unstyled text still needs its default resolved.
   if (found.size === 0) found.set(keyOf(fallback), fallback);

@@ -553,7 +553,7 @@ export function Playground() {
           )}
         </aside>
 
-        {USE_COLLAB && loadingState === "syncing" && (
+        {loadingState === "syncing" && (
           <div
             className="absolute inset-0 flex items-center justify-center backdrop-blur-sm z-10"
             style={{ background: "color-mix(in srgb, var(--app-bg) 85%, transparent)" }}
@@ -570,7 +570,7 @@ export function Playground() {
                 className="text-[13px] font-medium"
                 style={{ color: "var(--app-text)" }}
               >
-                Connecting…
+                {USE_COLLAB ? "Connecting…" : "Loading fonts…"}
               </span>
             </div>
           </div>

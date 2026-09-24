@@ -19,6 +19,8 @@ import type { FontModifier } from "../extensions/types";
 import type { PageChromeContribution } from "./PageMetrics";
 import { populateCharMap, registeredLineCount } from "./BlockLayout";
 import { spanEndDocPos } from "./LineBreaker";
+import { collectFontRequests } from "../fonts/collectFontRequests";
+import type { FontRequest } from "../fonts/types";
 
 interface FragmentIndexEntry {
   start: number; // first docPos on this line (charStart)
@@ -35,6 +37,12 @@ export interface LayoutCoordinatorOptions {
   fonts?: FontProvider | null;
   /** Returns the current ProseMirror document — read at layout time so the
    *  coordinator always operates on the latest doc without needing per-call args. */
+  /**
+   * Whether the caller's half of the gate starts open. False for a shared
+   * document that has not synced. Passed in rather than corrected afterwards,
+   * so the coordinator never briefly believes a document is showable.
+   */
+  startReady?: boolean;
   getDoc: () => Node;
   /** Returns the current cursor head position — used to identify the cursor page
    *  after every layout pass. Exposed as a callback so external code (e.g. a
@@ -69,6 +77,13 @@ export class LayoutCoordinator {
    */
   private static readonly LAYOUT_CHUNK_SIZE = 50;
 
+  /**
+   * How long the first paint waits for a document's faces. Long enough for a
+   * font file on a slow connection, short enough that a provider which never
+   * answers costs a legible pause rather than an editor that never paints.
+   */
+  private static readonly FONT_WAIT_MS = 2_000;
+
   private readonly opts: LayoutCoordinatorOptions;
 
   private layout: DocumentLayout;
@@ -77,7 +92,20 @@ export class LayoutCoordinator {
   private layoutResumption: LayoutResumption | null = null;
   private partialLayoutBlocks = 0;
   private idleLayoutId: number | null = null;
-  private ready = true;
+  /**
+   * Two things gate showing a document, and both have to be satisfied.
+   *
+   * `collabReady` is the caller's: a shared document is not worth laying out
+   * until it has synced. `fontsReady` is ours: a document laid out before its
+   * faces are installed is measured against whatever the host substitutes, and
+   * swapping to the real faces afterwards re-breaks every line. Waiting is
+   * cheaper than showing the wrong thing and correcting it.
+   */
+  private collabReady: boolean;
+  private fontsReady = true;
+  private get ready(): boolean {
+    return this.collabReady && this.fontsReady;
+  }
   private cursorPageValue = 1;
 
   private readonly populatedPages = new Set<number>();
@@ -93,8 +121,23 @@ export class LayoutCoordinator {
   private fontResolverValue: LayoutFontResolver | null;
   /** Keyed by `FontResource.id`: a provider may hand back a fresh object each call. */
   private readonly installedFonts = new Map<string, string>();
+  /**
+   * Faces this backend answered `null` for — no `FontFace` API, or bytes that
+   * could not be fetched or parsed. A document is not held waiting on
+   * an answer that has already come back empty. A face still installing is in
+   * neither set, so it is still waited for.
+   */
+  private readonly failedFonts = new Set<string>();
+  /** The request set a coalesced preparation should use when it runs. */
+  private pendingPreparation: readonly FontRequest[] | "all" | null = null;
+  /**
+   * The document has reached the screen — `reveal()` ran, or it was already
+   * showable and had nothing to wait for. The font gate never closes again
+   * after this: a document the user is reading is not taken away.
+   */
+  private shownOnce = false;
+  private fontWaitTimer: ReturnType<typeof setTimeout> | null = null;
   private preparingFonts = false;
-  private fontPreparationPending = false;
   private disposed = false;
   private unsubscribeFonts?: () => void;
 
@@ -126,29 +169,156 @@ export class LayoutCoordinator {
     }) : null;
   }
 
-  private async prepareFonts(): Promise<void> {
+  /**
+   * Install whatever these requests resolve to, and publish the set in one go.
+   *
+   * `canvasResolution` reads `installedFonts`, so a set that filled in place
+   * would answer for the faces that had landed and degrade the rest —
+   * measuring one line against two typefaces and placing its runs from both.
+   *
+   * Installed in parallel because the first paint waits on this: awaiting them
+   * one after another spends the whole budget N faces deep. Only ever one
+   * batch at a time — `prepareFonts` serialises them — so a face cannot be
+   * installed twice over.
+   */
+  private async installFaces(requests: readonly FontRequest[]): Promise<boolean> {
+    const provider = this.opts.fonts;
+    if (!provider) return false;
+
+    const wanted = new Map<string, FontResource>();
+    for (const request of requests) {
+      const resource = provider.resolve(request).resource;
+      if (resource && !this.installedFonts.has(resource.id)) wanted.set(resource.id, resource);
+    }
+
+    const installed = await Promise.all(
+      [...wanted].map(async ([id, resource]) => [id, await this.installOne(resource)] as const),
+    );
+
+    if (this.disposed) return false;
+    let landed = false;
+    for (const [id, family] of installed) {
+      // A face the backend cannot give us is remembered, so the next document
+      // that wants it is not held waiting for an answer that will not come.
+      if (family === null) this.failedFonts.add(id);
+      else {
+        this.installedFonts.set(id, family);
+        landed = true;
+      }
+    }
+    return landed;
+  }
+
+  /**
+   * One face into the measurement backend. A failure is an answer, not an
+   * error: the face resolves as generic and is reported by the export lane.
+   */
+  private async installOne(resource: FontResource): Promise<string | null> {
+    try {
+      const install = this.opts.measurer.installFont;
+      if (!install) return null;
+      return (await install.call(this.opts.measurer, resource)) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Every face this document paints, body and chrome.
+   *
+   * The document names most of them and can be read without measuring, which
+   * is what lets them be installed before anything is laid out for the screen.
+   * Only the blocks that will be painted, so a long document is not held on a
+   * face it does not show yet.
+   * The resolver's table adds what only a layout knows — a header's face lives
+   * in a doc attribute, not in the node tree, so a walk of the document alone
+   * would miss it.
+   */
+  private documentFontRequests(): readonly FontRequest[] {
+    const provider = this.opts.fonts;
+    if (!provider) return [];
+    // Scoped to the blocks the first layout actually paints. A family used
+    // further down still installs — the background pass picks it up and the
+    // layout refines — but the first page is not held waiting on it.
+    const fromDocument = collectFontRequests(this.opts.getDoc(), provider.defaultRequest(), {
+      maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
+    });
+    const fromLayout = [...(this.fontResolverValue?.table().values() ?? [])].map((r) => r.request);
+    // Duplicates are free: `installFaces` keys by resource id.
+    return [...fromDocument, ...fromLayout];
+  }
+
+  /**
+   * Hold the document until the faces it is written in are installed.
+   *
+   * Only before it has been revealed. Once it is on screen a missing face is
+   * handled the way it always was — installed in the background, then an
+   * ordinary re-layout — because blocking a document the user is reading is
+   * worse than the swap it avoids.
+   *
+   * Bounded: a provider that never settles must not leave the editor unable to
+   * paint. Past the budget the document is shown against whatever resolved,
+   * which is what it did before this gate existed.
+   */
+  private holdForDocumentFonts(): void {
+    if (this.disposed || this.shownOnce) return;
+    const provider = this.opts.fonts;
+    if (!provider) return;
+
+    const requests = this.documentFontRequests();
+    const missing = requests.some((request) => {
+      const resource = provider.resolve(request).resource;
+      return (
+        !!resource && !this.installedFonts.has(resource.id) && !this.failedFonts.has(resource.id)
+      );
+    });
+    if (!missing) {
+      // Nothing to wait for, so this document is shown without the gate ever
+      // closing and `reveal()` never running. Latch here too, or a later
+      // `setReady(true)` would be free to gate a document already on screen.
+      if (this.ready) this.shownOnce = true;
+      return;
+    }
+
+    // A document can arrive while an earlier one is still being waited for —
+    // a sync landing mid-install. Its faces join the wait rather than being
+    // dropped, and the budget already running still bounds it.
+    if (this.fontsReady) {
+      this.fontsReady = false;
+      this.fontWaitTimer = setTimeout(() => this.openFontGate(), LayoutCoordinator.FONT_WAIT_MS);
+    }
+    void this.prepareFonts(requests);
+  }
+
+  /** Let the document be shown. Idempotent: the wait and its budget race. */
+  private openFontGate(): void {
+    if (this.fontWaitTimer !== null) {
+      clearTimeout(this.fontWaitTimer);
+      this.fontWaitTimer = null;
+    }
+    if (this.disposed || this.fontsReady) return;
+    this.fontsReady = true;
+    this.reveal();
+  }
+
+  private async prepareFonts(only?: readonly FontRequest[]): Promise<void> {
     if (this.disposed || !this.opts.fonts || !this.fontResolverValue) return;
-    if (this.preparingFonts) { this.fontPreparationPending = true; return; }
+    if (this.preparingFonts) {
+      // A document's wait outranks the background pass: never downgrade one.
+      if (only) this.pendingPreparation = only;
+      else if (this.pendingPreparation === null) this.pendingPreparation = "all";
+      return;
+    }
     this.preparingFonts = true;
     try {
-      const requests = [...this.fontResolverValue.table().values()].map(r => r.request);
+      const requests = only ?? [...this.fontResolverValue.table().values()].map(r => r.request);
       await this.opts.fonts.prepare(requests);
-      for (const request of requests) {
-        const resource = this.opts.fonts.resolve(request).resource;
-        if (!resource || this.installedFonts.has(resource.id)) continue;
-        try {
-          const install = this.opts.measurer.installFont;
-          if (!install) throw new Error("The measurement backend does not install fonts");
-          const family = await install.call(this.opts.measurer, resource);
-          if (!family) throw new Error("The measurement backend returned an empty font family");
-          this.installedFonts.set(resource.id, family);
-        } catch {
-          // Retried on the next layout: the backend may gain the face, or the
-          // bytes may become reachable. Until then this resolves as generic.
-        }
-      }
+      const landed = await this.installFaces(requests);
       if (this.disposed) return;
-      const changed = [...this.fontResolverValue.table().values()].some(old => {
+      // A face that landed changes what every run measuring against it is
+      // worth, whether or not the table already reflects it — the table is
+      // rebuilt below, and a fresh one has nothing to compare.
+      const changed = landed || [...this.fontResolverValue.table().values()].some(old => {
         const current = this.canvasResolution(this.opts.fonts!.resolve(old.request));
         return (
           current.resource?.id !== old.resource?.id ||
@@ -162,20 +332,32 @@ export class LayoutCoordinator {
         this.fontResolverValue = this.newFontResolver();
         this.measureCache = new WeakMap();
         this.opts.measurer.invalidate();
-        this.cancelIdleLayout();
-        this.dirty = true;
-        this.opts.onUpdate();
+        // Only when the document is already on screen. If it is still held,
+        // `openFontGate` lays it out and paints it; doing both would lay the
+        // same document out twice.
+        if (this.fontsReady) {
+          this.cancelIdleLayout();
+          this.dirty = true;
+          this.opts.onUpdate();
+        }
       }
     } catch {
       // A custom provider may reject preparation. Keep the honest generic
       // layout; a later provider notification or layout can retry.
-      this.fontPreparationPending = false;
     } finally {
       this.preparingFonts = false;
-      if (this.fontPreparationPending) {
-        this.fontPreparationPending = false;
-        queueMicrotask(() => { void this.prepareFonts(); });
+      // Taken whatever happened above, including a rejection: a set left
+      // queued with nothing to run it would defer the gate with nothing left
+      // to end the wait.
+      const queued = this.pendingPreparation;
+      this.pendingPreparation = null;
+      if (queued !== null) {
+        queueMicrotask(() => { void this.prepareFonts(queued === "all" ? undefined : queued); });
       }
+      // Only another document's wait defers the gate. An ordinary background
+      // pass — the one every layout queues — must not, or the gate never
+      // opens while the editor is in use.
+      if (queued === null || queued === "all") this.openFontGate();
     }
   }
 
@@ -217,6 +399,7 @@ export class LayoutCoordinator {
 
   constructor(opts: LayoutCoordinatorOptions) {
     this.opts = opts;
+    this.collabReady = opts.startReady ?? true;
     this.fontResolverValue = this.newFontResolver();
     const unsubscribe = opts.fonts?.subscribe?.(() => { void this.prepareFonts(); });
     if (unsubscribe) this.unsubscribeFonts = unsubscribe;
@@ -243,6 +426,10 @@ export class LayoutCoordinator {
       this.partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
       this.scheduleIdleLayout();
     }
+
+    // After the first layout, not before it: the resolver's table is what
+    // knows the faces a header uses, and only a layout populates it.
+    this.holdForDocumentFonts();
   }
 
   // ── Public getters ──────────────────────────────────────────────────────────
@@ -447,45 +634,64 @@ export class LayoutCoordinator {
   /**
    * Switch between ready and suppressed (collaborative sync) modes.
    *
-   * `true`  — cancel any stale idle work, run the first layout chunk
-   *            synchronously, notify listeners, then continue in idle chunks.
-   * `false` — cancel idle; suppress future idle layout. Editor.setReady also
-   *            cancels the pending RAF when going false.
+   * The caller's half of the gate; the document's faces are the other. The
+   * layout and paint happen when the last half opens, which may be here or
+   * may be later. `false` also cancels idle layout, and `Editor.setReady`
+   * cancels the pending RAF.
    */
   setReady(ready: boolean): void {
-    this.ready = ready;
-
+    this.collabReady = ready;
     if (ready) {
-      this.cancelIdleLayout();
-      this.partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
-      this.dirty = false;
-      this.charMap.clear();
-      this.populatedPages.clear();
-      this.layout = this.runLayout({
-        previousVersion: this.layout.version,
-        maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
-      });
-      this.layoutIsPartial = this.layout.isPartial ?? false;
-      this.layoutResumption = this.layout.resumption ?? null;
-      this.indexLayout();
-      this.cursorPageValue = this.cursorPageFromLayout();
-      this.ensurePagePopulated(this.cursorPageValue);
-      this.ensurePagePopulated(this.cursorPageValue - 1);
-      this.ensurePagePopulated(this.cursorPageValue + 1);
-      this.opts.onUpdate(); // paint first pages immediately
-
-      if (this.layoutIsPartial) {
-        this.scheduleIdleLayout();
-      }
+      // The document that just synced is not the one this coordinator was
+      // constructed with — an empty placeholder usually — so its faces are
+      // only knowable now, and this is still before the document has been
+      // shown. `holdForDocumentFonts` declines once it has.
+      this.holdForDocumentFonts();
+      this.reveal();
     } else {
       this.cancelIdleLayout();
       this.layoutIsPartial = false;
     }
   }
 
+  /**
+   * Lay the document out and paint it, now that nothing is holding it back.
+   * A no-op while the other gate is still closed, so whichever finishes last
+   * is the one that shows the document.
+   */
+  private reveal(): void {
+    if (!this.ready) return;
+    this.shownOnce = true;
+    this.cancelIdleLayout();
+    this.partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
+    this.dirty = false;
+    this.charMap.clear();
+    this.populatedPages.clear();
+    this.layout = this.runLayout({
+      previousVersion: this.layout.version,
+      maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
+    });
+    this.layoutIsPartial = this.layout.isPartial ?? false;
+    this.layoutResumption = this.layout.resumption ?? null;
+    this.indexLayout();
+    this.cursorPageValue = this.cursorPageFromLayout();
+    this.ensurePagePopulated(this.cursorPageValue);
+    this.ensurePagePopulated(this.cursorPageValue - 1);
+    this.ensurePagePopulated(this.cursorPageValue + 1);
+    this.opts.onUpdate(); // paint first pages immediately
+
+    if (this.layoutIsPartial) {
+      this.scheduleIdleLayout();
+    }
+  }
+
   /** Cancel all pending async work. Call from Editor.destroy(). */
   destroy(): void {
     this.disposed = true;
+    if (this.fontWaitTimer !== null) {
+      clearTimeout(this.fontWaitTimer);
+      this.fontWaitTimer = null;
+    }
     this.unsubscribeFonts?.();
     this.cancelIdleLayout();
   }

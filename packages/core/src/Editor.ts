@@ -188,8 +188,8 @@ export interface EditorOptions {
 	 * When false, all rAF render flushes are suppressed until setReady(true)
 	 * is called. Use this for collaborative documents where a Y.js / HocusPocus
 	 * provider will fire hundreds of typeObserver events during initial sync —
-	 * suppressing flushes means zero layout work during sync, then a single
-	 * full layout + paint once the provider fires its `synced` event.
+	 * suppressing flushes means zero layout work during sync, then one layout
+	 * and paint once the document can be shown.
 	 *
 	 * Example:
 	 *   const editor = new Editor({ startReady: false, ... });
@@ -666,6 +666,7 @@ export class Editor extends BaseEditor implements IEditor {
 			measurer: this.measurer,
 			fontModifiers: this.fontModifiers,
 			fonts: this.fonts,
+			startReady,
 			getDoc: () => this.editorState.doc,
 			getHead: () => this.editorState.selection.head,
 			onUpdate: () => this.notifyListeners(),
@@ -1001,8 +1002,9 @@ export class Editor extends BaseEditor implements IEditor {
 	 * render flushes during the initial Y.js document sync — prevents O(N²)
 	 * layout work while typeObserver fires hundreds of times.
 	 *
-	 * Pass `true` once the provider fires its `synced` event. The editor will
-	 * do a single full layout + paint of the complete document.
+	 * Pass `true` once the provider fires its `synced` event. This is one of two
+	 * gates — the document's faces are the other — and the layout and paint
+	 * follow when the last of them opens.
 	 */
 	setReady(ready: boolean): void {
 		if (!ready && this.rafId !== null) {
@@ -1097,7 +1099,11 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
-	 * Three-phase loading state for collaborative documents.
+	 * Whether the document can be shown yet.
+	 *
+	 * `syncing` — nothing honest to paint: a shared document has not synced, or
+	 * the faces it is written in are still installing. `rendering` — on screen,
+	 * layout still streaming. `ready` — done.
 	 */
 	get loadingState(): "syncing" | "rendering" | "ready" {
 		return this.lc.loadingState;
@@ -1687,7 +1693,9 @@ export class Editor extends BaseEditor implements IEditor {
 	 * Idempotent — calling it multiple times before the frame fires is free.
 	 */
 	private scheduleFlush(): void {
-		if (!this.lc.isReady) return; // suppress during collaborative sync
+		// Suppressed until the document can be shown: synced, and written in
+		// faces that are installed.
+		if (!this.lc.isReady) return;
 		if (this.rafId !== null) return;
 		this.rafId = requestAnimationFrame(() => {
 			this.rafId = null;

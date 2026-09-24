@@ -170,3 +170,70 @@ describe("which faces a layout uses", () => {
     expect([...usedResolutions(layout)]).toEqual([3]);
   });
 });
+
+describe("a family set on the block", () => {
+  it("is asked for at the weights its runs actually use", () => {
+    // The block attribute is the base font for every run inside it, so a bold
+    // run in a Georgia paragraph is Georgia bold — not the default family's
+    // bold, and not Georgia regular. Asking for the wrong pair means the face
+    // the layout resolves was never installed.
+    const doc = docOf({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          attrs: { fontFamily: "Georgia" },
+          content: [text("plain "), text("bold", [{ type: "bold" }])],
+        },
+      ],
+    });
+
+    const asked = collectFontRequests(doc, fallback).map((r) => `${r.family}/${r.weight}`);
+    expect(asked).toContain("Georgia/700");
+  });
+});
+
+describe("scoping to the blocks that will be painted", () => {
+  it("leaves out a family first used further down", () => {
+    // The shape the playground demo has: prose for a few pages, then a
+    // section showing off other families. Holding the first paint on faces
+    // that appear on page five costs a network fetch each for nothing — the
+    // background pass installs them and the layout refines when they land.
+    const plain = Array.from({ length: 140 }, () => para(text("Retainer and fees payable.")));
+    const showcase = ["Georgia", "Courier New"].map((family) =>
+      para(text(family, [{ type: "fontFamily", attrs: { family } }])),
+    );
+    const doc = docOf({ type: "doc", content: [...plain, ...showcase] });
+
+    const families = (rs: ReturnType<typeof collectFontRequests>) =>
+      [...new Set(rs.map((r) => r.family))].sort();
+
+    expect(families(collectFontRequests(doc, fallback))).toEqual([
+      "App Sans",
+      "Courier New",
+      "Georgia",
+    ]);
+    expect(families(collectFontRequests(doc, fallback, { maxBlocks: 100 }))).toEqual(["App Sans"]);
+  });
+
+  it("counts blocks, not the whole subtree, so a scoped walk still sees nested text", () => {
+    const doc = docOf({
+      type: "doc",
+      content: [
+        para(text("plain")),
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [para(text("nested", [{ type: "fontFamily", attrs: { family: "Georgia" } }]))],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(collectFontRequests(doc, fallback, { maxBlocks: 2 }).map((r) => r.family).sort())
+      .toEqual(["App Sans", "Georgia"]);
+  });
+});
