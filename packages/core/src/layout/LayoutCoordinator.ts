@@ -71,6 +71,13 @@ export class LayoutCoordinator {
    */
   private static readonly LAYOUT_CHUNK_SIZE = 50;
 
+  /**
+   * How long the first paint waits for a document's faces. Long enough for a
+   * font file on a slow connection, short enough that a provider which never
+   * answers costs a legible pause rather than an editor that never paints.
+   */
+  private static readonly FONT_WAIT_MS = 2_000;
+
   private readonly opts: LayoutCoordinatorOptions;
 
   private layout: DocumentLayout;
@@ -117,6 +124,11 @@ export class LayoutCoordinator {
    * every layout.
    */
   private readonly attemptedFonts = new Set<string>();
+  /** Installs in flight, by resource id, so two batches share one install. */
+  private readonly installing = new Map<string, Promise<string | null>>();
+  /** The document has been shown once; the font gate never closes again. */
+  private shownOnce = false;
+  private fontWaitTimer: number | null = null;
   private preparingFonts = false;
   private fontPreparationPending = false;
   private disposed = false;
@@ -156,61 +168,138 @@ export class LayoutCoordinator {
    * Each install is a separate await and `installedFonts` is what
    * `canvasResolution` reads, so a set that filled in place would answer for
    * the faces that had landed and degrade the rest — measuring one line
-   * against two typefaces and placing its runs from both. Returns how many
-   * faces are new, which is what tells a caller the resolver has to be rebuilt.
+   * against two typefaces and placing its runs from both.
+   *
+   * Two batches can be in flight at once (the first layout queues one while
+   * the document's own is still running), so a face already being installed is
+   * awaited rather than installed again — the id is what dedupes, because a
+   * provider may hand back a fresh resource object each call.
    */
-  private async installFaces(requests: readonly FontRequest[]): Promise<number> {
+  private async installFaces(requests: readonly FontRequest[]): Promise<boolean> {
     const provider = this.opts.fonts;
-    if (!provider) return 0;
-    const landed = new Map<string, string>();
+    if (!provider) return false;
+
+    const wanted = new Map<string, FontResource>();
     for (const request of requests) {
       const resource = provider.resolve(request).resource;
-      if (!resource || this.installedFonts.has(resource.id)) continue;
-      this.attemptedFonts.add(resource.id);
-      try {
-        const install = this.opts.measurer.installFont;
-        if (!install) throw new Error("The measurement backend does not install fonts");
-        const family = await install.call(this.opts.measurer, resource);
-        if (!family) throw new Error("The measurement backend returned an empty font family");
-        landed.set(resource.id, family);
-      } catch {
-        // Retried on a later layout: the backend may gain the face, or the
-        // bytes may become reachable. Until then this resolves as generic.
-      }
+      if (resource && !this.installedFonts.has(resource.id)) wanted.set(resource.id, resource);
     }
-    if (this.disposed) return 0;
+
+    const landed = new Map<string, string>();
+    for (const [id, resource] of wanted) {
+      let pending = this.installing.get(id);
+      if (!pending) {
+        this.attemptedFonts.add(id);
+        pending = this.installOne(resource);
+        this.installing.set(id, pending);
+        const settled = pending;
+        void settled.finally(() => {
+          if (this.installing.get(id) === settled) this.installing.delete(id);
+        });
+      }
+      const family = await pending;
+      if (family !== null) landed.set(id, family);
+    }
+
+    if (this.disposed) return false;
     for (const [id, family] of landed) this.installedFonts.set(id, family);
-    return landed.size;
+    return landed.size > 0;
   }
 
   /**
-   * Install every face this document asks for, before it is laid out for the
-   * screen.
-   *
-   * The requests come from the document rather than from a layout, so this does
-   * not need the measuring pass that would otherwise have to run first against
-   * faces that are not there yet. A face that cannot be installed resolves as
-   * generic and is reported, which is the answer the lane gives at any other
-   * time.
+   * One face into the measurement backend. A failure is an answer, not an
+   * error: the face resolves as generic and is reported, and a later layout
+   * may find the bytes reachable.
    */
-  private async installDocumentFonts(): Promise<void> {
-    const provider = this.opts.fonts;
+  private async installOne(resource: FontResource): Promise<string | null> {
     try {
-      if (provider) {
-        const requests = collectFontRequests(this.opts.getDoc(), provider.defaultRequest());
-        await provider.prepare(requests);
-        if (await this.installFaces(requests)) {
-          this.fontResolverValue = this.newFontResolver();
-          this.measureCache = new WeakMap();
-          this.opts.measurer.invalidate();
-        }
-      }
-    } finally {
-      if (!this.disposed) {
-        this.fontsReady = true;
-        this.reveal();
-      }
+      const install = this.opts.measurer.installFont;
+      if (!install) return null;
+      return (await install.call(this.opts.measurer, resource)) || null;
+    } catch {
+      return null;
     }
+  }
+
+  /**
+   * Every face this document paints, body and chrome.
+   *
+   * The document names most of them and can be read without measuring, which
+   * is what lets them be installed before anything is laid out for the screen.
+   * The resolver's table adds what only a layout knows — a header's face lives
+   * in a doc attribute, not in the node tree, so a walk of the document alone
+   * would miss it.
+   */
+  private documentFontRequests(): readonly FontRequest[] {
+    const provider = this.opts.fonts;
+    if (!provider) return [];
+    const fromDocument = collectFontRequests(this.opts.getDoc(), provider.defaultRequest());
+    const fromLayout = [...(this.fontResolverValue?.table().values() ?? [])].map((r) => r.request);
+    // Duplicates are free: `installFaces` keys by resource id.
+    return [...fromDocument, ...fromLayout];
+  }
+
+  /**
+   * Hold the document until the faces it is written in are installed.
+   *
+   * Only before it has ever been shown. Once it is on screen a missing face is
+   * handled the way it always was — installed in the background, then a normal
+   * re-layout — because blocking a document the user is already reading, or
+   * throwing its layout away to rebuild from the first chunk, is worse than
+   * the swap it would avoid.
+   *
+   * Bounded: a provider that never settles must not leave the editor unable to
+   * paint. When the wait runs out the document is shown against whatever the
+   * host substitutes.
+   */
+  private holdForDocumentFonts(): void {
+    if (this.disposed || this.shownOnce || !this.fontsReady) return;
+    const provider = this.opts.fonts;
+    if (!provider) return;
+
+    const requests = this.documentFontRequests();
+    const missing = requests.some((request) => {
+      const resource = provider.resolve(request).resource;
+      return (
+        !!resource && !this.installedFonts.has(resource.id) && !this.attemptedFonts.has(resource.id)
+      );
+    });
+    // Nothing to wait for: never report a document as unready for no reason.
+    if (!missing) return;
+
+    this.fontsReady = false;
+    this.fontWaitTimer = setTimeout(
+      () => this.openFontGate(),
+      LayoutCoordinator.FONT_WAIT_MS,
+    ) as unknown as number;
+    void this.installDocumentFonts(requests);
+  }
+
+  private async installDocumentFonts(requests: readonly FontRequest[]): Promise<void> {
+    try {
+      await this.opts.fonts?.prepare(requests);
+      if (await this.installFaces(requests)) {
+        this.fontResolverValue = this.newFontResolver();
+        this.measureCache = new WeakMap();
+        this.opts.measurer.invalidate();
+      }
+    } catch {
+      // A provider may reject. The document is shown against what resolved,
+      // and the shortfall is reported by the export lane as it always was.
+    } finally {
+      this.openFontGate();
+    }
+  }
+
+  /** Let the document be shown. Idempotent: the wait and its timer race. */
+  private openFontGate(): void {
+    if (this.fontWaitTimer !== null) {
+      clearTimeout(this.fontWaitTimer);
+      this.fontWaitTimer = null;
+    }
+    if (this.disposed || this.fontsReady) return;
+    this.fontsReady = true;
+    this.reveal();
   }
 
   private async prepareFonts(): Promise<void> {
@@ -220,21 +309,6 @@ export class LayoutCoordinator {
     try {
       const requests = [...this.fontResolverValue.table().values()].map(r => r.request);
       await this.opts.fonts.prepare(requests);
-      // Installed into a set of its own and published in one go. Each install
-      // is a separate await, and `installedFonts` is what `canvasResolution`
-      // reads, so a set that filled in place would answer for the faces that
-      // had landed and degrade the rest — measuring one line against two
-      // typefaces and placing its runs from both.
-      // A face this document needs has never been tried. Until it is in, every
-      // run that wants it measures against whatever the host substitutes while
-      // the runs beside it are already in the real face — one line, two
-      // typefaces. Hold the document rather than show that. Only the first
-      // attempt waits, so a face that can never install does not hold it.
-      const awaited = requests.some((request) => {
-        const resource = this.opts.fonts?.resolve(request).resource;
-        return !!resource && !this.installedFonts.has(resource.id) && !this.attemptedFonts.has(resource.id);
-      });
-      if (awaited) this.fontsReady = false;
       await this.installFaces(requests);
       if (this.disposed) return;
       const changed = [...this.fontResolverValue.table().values()].some(old => {
@@ -261,10 +335,6 @@ export class LayoutCoordinator {
       this.fontPreparationPending = false;
     } finally {
       this.preparingFonts = false;
-      if (!this.disposed && !this.fontsReady) {
-        this.fontsReady = true;
-        this.reveal();
-      }
       if (this.fontPreparationPending) {
         this.fontPreparationPending = false;
         queueMicrotask(() => { void this.prepareFonts(); });
@@ -314,14 +384,6 @@ export class LayoutCoordinator {
     const unsubscribe = opts.fonts?.subscribe?.(() => { void this.prepareFonts(); });
     if (unsubscribe) this.unsubscribeFonts = unsubscribe;
 
-    // A document's faces are knowable from the document, before anything is
-    // measured, so they are installed before it is shown rather than raced
-    // against the first paint.
-    if (opts.fonts) {
-      this.fontsReady = false;
-      void this.installDocumentFonts();
-    }
-
     performance.mark("scrivr:layout-initial-start");
     this.layout = this.runLayout({
       previousVersion: 0,
@@ -344,6 +406,10 @@ export class LayoutCoordinator {
       this.partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
       this.scheduleIdleLayout();
     }
+
+    // After the first layout, not before it: `reveal()` reads `this.layout`,
+    // and the resolver's table is what knows the faces a header uses.
+    this.holdForDocumentFonts();
   }
 
   // ── Public getters ──────────────────────────────────────────────────────────
@@ -558,12 +624,9 @@ export class LayoutCoordinator {
     if (ready) {
       // The document that just synced is not the one this coordinator was
       // constructed with — an empty placeholder usually — so its faces are
-      // only knowable now. Install them before showing it, for the same
-      // reason as on construction.
-      if (this.opts.fonts) {
-        this.fontsReady = false;
-        void this.installDocumentFonts();
-      }
+      // only knowable now, and this is still before the document has been
+      // shown. `holdForDocumentFonts` declines once it has.
+      this.holdForDocumentFonts();
       this.reveal();
     } else {
       this.cancelIdleLayout();
@@ -578,34 +641,38 @@ export class LayoutCoordinator {
    */
   private reveal(): void {
     if (!this.ready) return;
-    {
-      this.cancelIdleLayout();
-      this.partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
-      this.dirty = false;
-      this.charMap.clear();
-      this.populatedPages.clear();
-      this.layout = this.runLayout({
-        previousVersion: this.layout.version,
-        maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
-      });
-      this.layoutIsPartial = this.layout.isPartial ?? false;
-      this.layoutResumption = this.layout.resumption ?? null;
-      this.indexLayout();
-      this.cursorPageValue = this.cursorPageFromLayout();
-      this.ensurePagePopulated(this.cursorPageValue);
-      this.ensurePagePopulated(this.cursorPageValue - 1);
-      this.ensurePagePopulated(this.cursorPageValue + 1);
-      this.opts.onUpdate(); // paint first pages immediately
+    this.shownOnce = true;
+    this.cancelIdleLayout();
+    this.partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
+    this.dirty = false;
+    this.charMap.clear();
+    this.populatedPages.clear();
+    this.layout = this.runLayout({
+      previousVersion: this.layout.version,
+      maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
+    });
+    this.layoutIsPartial = this.layout.isPartial ?? false;
+    this.layoutResumption = this.layout.resumption ?? null;
+    this.indexLayout();
+    this.cursorPageValue = this.cursorPageFromLayout();
+    this.ensurePagePopulated(this.cursorPageValue);
+    this.ensurePagePopulated(this.cursorPageValue - 1);
+    this.ensurePagePopulated(this.cursorPageValue + 1);
+    this.opts.onUpdate(); // paint first pages immediately
 
-      if (this.layoutIsPartial) {
-        this.scheduleIdleLayout();
-      }
+    if (this.layoutIsPartial) {
+      this.scheduleIdleLayout();
     }
   }
+
 
   /** Cancel all pending async work. Call from Editor.destroy(). */
   destroy(): void {
     this.disposed = true;
+    if (this.fontWaitTimer !== null) {
+      clearTimeout(this.fontWaitTimer);
+      this.fontWaitTimer = null;
+    }
     this.unsubscribeFonts?.();
     this.cancelIdleLayout();
   }

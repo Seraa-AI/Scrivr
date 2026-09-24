@@ -329,6 +329,12 @@ export class TileManager {
   /** Core update loop */
 
   update(): void {
+    // A document that is not ready has nothing honest to paint: either it has
+    // not synced, or the faces it is written in are still installing and every
+    // line would be measured against a substitute and then re-broken. The
+    // coordinator paints through `onUpdate` the moment it is ready.
+    if (this.editor.loadingState === "syncing") return;
+
     const layout = this.editor.layout;
     const sh = this.slotHeight;
 
