@@ -73,17 +73,12 @@ function stagedMeasurer(): {
 } {
   const open = new Map<string, () => void>();
   const installs: string[] = [];
-  const base = createMeasurer();
-  const installFont = async (resource: { id: string }): Promise<string> => {
+  const measurer = createMeasurer();
+  measurer.installFont = async (resource: FontResource): Promise<string> => {
     installs.push(resource.id);
     await new Promise<void>((resolve) => open.set(resource.id, resolve));
     return `TestFace-${resource.id}`;
   };
-  const measurer = Object.assign(
-    Object.create(Object.getPrototypeOf(base)) as TextMeasurer,
-    base,
-    { installFont },
-  );
   return {
     measurer,
     release: (id) => open.get(id)?.(),
@@ -102,11 +97,17 @@ async function flush(): Promise<void> {
  */
 async function drain(staged: { release: (id: string) => void; requested: () => string[] }): Promise<void> {
   for (let i = 0; i < 10; i++) {
+    // Flush first: an install is only requested once preparation has awaited
+    // the provider, so checking before that reads an empty set and gives up.
+    await flush();
     const pending = staged.requested();
     if (pending.length === 0) break;
     for (const id of pending) staged.release(id);
     await flush();
-    if (staged.requested().length === pending.length) break;
+    // Identities, not counts: one install finishing as another starts is
+    // progress, and comparing lengths would read it as a stall.
+    const still = staged.requested();
+    if (still.length === pending.length && still.every((id) => pending.includes(id))) break;
   }
   await flush();
 }
@@ -202,21 +203,22 @@ describe("installing a document's faces", () => {
   });
 });
 
+const LONG = {
+  type: "doc",
+  content: Array.from({ length: 400 }, () => ({
+    type: "paragraph",
+    content: [{ type: "text", text: "Retainer and fees payable under this agreement." }],
+  })),
+};
+
 /**
  * Once it is on screen, a document is never taken away again. A face that
  * turns up later installs in the background and the layout refines; it does
  * not un-ready the editor or throw the layout back to the first chunk.
  */
 describe("a face first needed after the document is shown", () => {
-  const LONG = {
-    type: "doc",
-    content: Array.from({ length: 400 }, () => ({
-      type: "paragraph",
-      content: [{ type: "text", text: "Retainer and fees payable under this agreement." }],
-    })),
-  };
 
-  it("neither un-readies the editor nor collapses the layout", async () => {
+  it("installs it in the background without disturbing the layout", async () => {
     const staged = stagedMeasurer();
     const editor = editorWith(staged.measurer, LONG);
     editor.ensureFullLayout();
@@ -240,6 +242,35 @@ describe("a face first needed after the document is shown", () => {
 
     expect({ state: editor.loadingState, pages: editor.layout.pages.length }).toEqual(before);
     expect(editor.layout.isPartial ?? false).toBe(false);
+
+    editor.destroy();
+  });
+
+  it("is not taken away again when the caller re-opens its own gate", async () => {
+    // A reconnect cycles `setReady`. The document is already on screen, so it
+    // must stay on screen — this is the case that used to put a live document
+    // behind a loading state and rebuild its layout from the first chunk.
+    const staged = stagedMeasurer();
+    const editor = editorWith(staged.measurer, LONG);
+    editor.ensureFullLayout();
+    await drain(staged);
+    editor.ensureFullLayout();
+    const before = { state: editor.loadingState, pages: editor.layout.pages.length };
+    expect(before.state).toBe("ready");
+
+    // A weight the document has never used, then a reconnect.
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.addMark(1, 40, state.schema.marks["bold"]!.create()));
+    editor.setReady(false);
+    editor.setReady(true);
+
+    // `setReady(true)` re-chunks the layout, which is its own documented job.
+    // What must not happen is the font gate closing over a live document.
+    expect(editor.loadingState).not.toBe("syncing");
+
+    await drain(staged);
+    editor.ensureFullLayout();
+    expect({ state: editor.loadingState, pages: editor.layout.pages.length }).toEqual(before);
 
     editor.destroy();
   });
@@ -271,6 +302,36 @@ describe("a provider that never answers", () => {
       await vi.advanceTimersByTimeAsync(3_000);
 
       expect(editor.loadingState).not.toBe("syncing");
+      editor.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+/**
+ * The wait is bounded, and the faces still arrive. Showing the document
+ * against a substitute is the bound doing its job; leaving it there once the
+ * real faces land is not — the re-break would surface later, mid-edit.
+ */
+describe("faces that land after the wait is over", () => {
+  it("are painted without waiting for an unrelated edit", async () => {
+    vi.useFakeTimers();
+    try {
+      const staged = stagedMeasurer();
+      const editor = editorWith(staged.measurer);
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(editor.loadingState).not.toBe("syncing");
+      // Shown against the substitute: the budget ran out, which is allowed.
+      expect(installedIn(fontsInLayout(editor))).toEqual([]);
+
+      for (const id of staged.requested()) staged.release(id);
+      await vi.advanceTimersByTimeAsync(50);
+
+      // No edit, no scroll — the faces alone bring the document to its own.
+      const fonts = fontsInLayout(editor);
+      expect(installedIn(fonts)).toEqual(fonts);
       editor.destroy();
     } finally {
       vi.useRealTimers();

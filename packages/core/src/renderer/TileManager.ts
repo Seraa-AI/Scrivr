@@ -328,13 +328,10 @@ export class TileManager {
 
   /** Core update loop */
 
-  update(): void {
-    // A document that is not ready has nothing honest to paint: either it has
-    // not synced, or the faces it is written in are still installing and every
-    // line would be measured against a substitute and then re-broken. The
-    // coordinator paints through `onUpdate` the moment it is ready.
-    if (this.editor.loadingState === "syncing") return;
+  /** Whether anything has been on screen; gates only the first paint. */
+  private hasPainted = false;
 
+  update(): void {
     const layout = this.editor.layout;
     const sh = this.slotHeight;
 
@@ -362,6 +359,17 @@ export class TileManager {
     const ch = this.containerHeight(layout);
     this.tilesContainer.style.height = `${ch}px`;
     this.tilesContainer.style.width = `${layout.pageConfig.pageWidth}px`;
+
+    // Sized and observed above, but nothing painted yet: unsynced, or still
+    // installing the faces the document is written in, and a tile drawn now
+    // would be measured against a substitute and re-broken. The container
+    // still takes its height, so the page does not jump when it does paint.
+    //
+    // Only ever the first paint — once something has been on screen, scroll
+    // and resize must keep working even while the editor is unready, or the
+    // view freezes under the user.
+    if (!this.hasPainted && this.editor.loadingState === "syncing") return;
+    this.hasPainted = true;
 
     /** Compute visible tile range */
     const total = this.totalTiles(layout);

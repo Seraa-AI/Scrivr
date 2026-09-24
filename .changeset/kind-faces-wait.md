@@ -22,9 +22,10 @@ Three changes:
   state — on construction, and again when a collaborative document syncs,
   because the editor is usually built on an empty placeholder and the real
   document's faces are only knowable at sync.
-- The wait is bounded. A provider that never answers shows the document
-  against what resolved, which is what it did before — a host's font problem
-  must not become an editor that cannot paint.
+- The wait is bounded at two seconds. A provider that never answers shows the
+  document against what resolved, which is what it did before — a host's font
+  problem must not become an editor that cannot paint. Faces arriving after
+  that still repaint when they land, rather than waiting for an unrelated edit.
 
 **Only before the document has ever been shown.** A face first needed later —
 picking a weight the document has not used — installs in the background and
@@ -34,4 +35,6 @@ first chunk.
 
 `"syncing"` therefore now has a second cause for editors that configure a font
 provider. A consumer that renders collaboration copy for that state will show
-it briefly while faces install, with collaboration switched off.
+it briefly while faces install, with collaboration switched off. The editor
+container is still sized during the wait, so nothing shifts when the document
+appears.

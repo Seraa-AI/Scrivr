@@ -740,3 +740,48 @@ describe("TileManager — recording a paint that did not happen", () => {
     setup.cleanup();
   });
 });
+
+/**
+ * Nothing is painted before the editor is ready — unsynced, or still
+ * installing the faces the document is written in, where every line would be
+ * measured against a substitute and then re-broken. The container is still
+ * sized, so the page does not jump when the tiles arrive.
+ */
+describe("painting before the editor is ready", () => {
+  const painted = (tilesContainer: HTMLDivElement) =>
+    Array.from(tilesContainer.children).filter(
+      (el) => (el as HTMLElement).style.display === "block",
+    );
+
+  it("sizes the container but draws no tiles, then draws once ready", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    setup.editor.setReady(false);
+
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
+    expect(painted(tilesContainer)).toHaveLength(0);
+    // Sized anyway: a zero-height container is a layout shift on every load.
+    expect(tilesContainer.style.height).not.toBe("");
+
+    setup.editor.setReady(true);
+    tm.update();
+
+    expect(painted(tilesContainer).length).toBeGreaterThan(0);
+  });
+
+  it("keeps painting once something has been shown, even if it goes unready", () => {
+    // A reconnect must not freeze scrolling under the user.
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    const tilesContainer = setup.container.children[0] as HTMLDivElement;
+    expect(painted(tilesContainer).length).toBeGreaterThan(0);
+
+    setup.editor.setReady(false);
+    tm.update();
+
+    expect(painted(tilesContainer).length).toBeGreaterThan(0);
+  });
+});
