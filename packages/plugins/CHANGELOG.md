@@ -1,5 +1,298 @@
 # @scrivr/plugins
 
+## 1.0.21
+
+### Patch Changes
+
+- b356735: Inline atoms carry the face they were measured in, and a shortfall names a face
+
+  An inline atom — a page-number token, a date — is sized against a font, and the
+  span recorded none. So a PDF handler painting one had to name a family: header
+  and footer tokens were drawn in `10px sans-serif` while the canvas drew them in
+  the surrounding run's resolved face at the run's size, and the box around them
+  was reserved against a third. An object span now carries its face and
+  resolution as a text span does, and the atom's context hands the handler a
+  `PdfFontHandle` carrying it. This was the last path choosing a face by name.
+
+  **Breaking: `FontShortfall.resolved` is a `FontKey`, not a family name.**
+  An inventory holding one weight of a family answers a request for bold with its
+  regular, and Scrivr does not synthesize the difference — a browser's synthetic
+  bold widens each glyph's advance while a PDF's stroked equivalent does not, so
+  faking it would put canvas and PDF back into disagreement about where every
+  following character sits. Reporting the family alone could not distinguish "a
+  different typeface" from "bold was lost"; `resolved.weight` and
+  `resolved.style` now can. `shortfall.resolved` becomes `shortfall.resolved.family`.
+
+  DOCX import diagnostics name the face rather than the family, so a substituted
+  bold reads "Inter Bold" rather than "Inter".
+
+- b356735: A header being edited is measured with the page's own resolver
+
+  The live header and footer path re-lays its content out as you type, and it was
+  handed no font resolver — so it measured against the family the document names
+  rather than the face that draws it. The stored path, which runs the moment the
+  caret leaves the band, does use the resolver. The two therefore disagreed about
+  line breaks, and once missing weights began being synthesized they disagreed
+  about weight too: a bold header went flat while you edited it and thickened
+  when you clicked away.
+
+  `Editor.fontResolver` exposes what the page was measured with, and the chrome
+  paint context carries it so a contributor laying out its own content uses the
+  same one.
+
+- b356735: Font reporting names the typeface, and a resource is identified by its id
+
+  `Editor.fontSubstitutions` reported the private family name the measurement
+  backend installs owned bytes under, so a substitution notice read
+  "Arial → ScrivrFace0" while the font control beside it read "Arial → Inter".
+  A resolution now keeps the real family in `resolved.family` and carries the
+  backend's name separately, where only the code building the measurement string
+  reads it.
+
+  `FontResource` is identified by its `id`, as its name always implied. The
+  editor keyed its install caches on object identity instead, so a provider that
+  built its answer fresh per call — which the interface permits — installed a new
+  face on every layout and never used any of them.
+
+  An answer that never had a resource is no longer downgraded to `generic`. A
+  `systemCandidates` family renders correctly, and reporting it as degraded fired
+  substitution notices for fonts that were drawn exactly as asked.
+
+  Both PDF export paths now embed through one function, so a licence-denied or
+  unparseable face is treated the same whether the caller used `exportToPdf` or
+  `buildPdf`. `editor.commands.exportPdf()` forwards every export option, which
+  `onFontShortfall` previously could not reach through.
+
+  Empty paragraphs resolve their font like any other text, so a blank line is the
+  same height as the text around it. Substitutions are read from the document
+  rather than the resolver's cumulative table, so a family applied and undone
+  stops being reported. `@scrivr/plugins` header and footer slots are measured
+  with the editor's resolved faces and font modifiers.
+
+- b356735: Fit a run to its measured width only when the same face measured it
+
+  Character spacing was applied to every text span, including the path where no
+  `FontProvider` is supplied. There the layout was measured in whatever the
+  browser made of a family name and is painted in a standard face, so the width
+  difference is a different typeface rather than two engines disagreeing —
+  closing it letterspaced the text by up to 15% of the em. Only the path that
+  reuses the screen's layout, where the same bytes measured and paint, may fit a
+  run; and the adjustment is refused outright past a couple of percent, since a
+  gap that wide means the premise is false.
+
+  The export asked for every face the _session_ had resolved rather than the ones
+  the document uses. A family applied and then removed was still fetched,
+  embedded into the file, reported to `onFontShortfall`, and could force the whole
+  document to be typeset again. Both the export and `Editor.fontSubstitutions`
+  now read one walk of the laid-out spans.
+
+  Two resource-less answers no longer count as agreement: neither side named a
+  face, so the screen measured a host font and the file would paint a standard
+  one. That case lays out again, as it did before.
+
+  An inline image no longer interns a font resolution — it has fixed dimensions
+  and is not set in a face, so resolving one reported a substitution for a
+  typeface nothing was drawn in. Atoms sized from a font, such as page-number
+  tokens, still carry theirs.
+
+  Also: the font path refuses a partial layout, as the other path already did;
+  `TextMeasureContext`, `TextMeasurerOptions`, `FontKey`, `FontSynthesis` and
+  `FontResolutionId` are exported from the barrels that already expose types
+  built on them; and the op-log gate records pushed text state, which is why the
+  letterspacing above changed every baseline's rendering without moving a
+  snapshot.
+
+- bc7987e: The PDF exporter ships no node handlers of its own.
+
+  `paragraph`, `heading`, `bulletList`, `orderedList`, `listItem`, `codeBlock`,
+  `horizontalRule` and `image` were drawn by code inside `@scrivr/export-pdf`,
+  so the package that knows nothing about a node decided what it looks like.
+  Each now lives on the extension that defines it, and the exporter's defaults
+  are gone — it owns traversal, placement, page order and asset embedding, and
+  nothing else.
+
+  This is what makes a kit honest. An editor built without `Image` no longer
+  gets an image drawn by a default the exporter kept for itself; the node warns
+  by name and is skipped, the same answer every other lane gives.
+
+  `PdfNodeContext` and `PdfNodeHandler` now live in `@scrivr/core`, beside the
+  `PdfMarkHandler` that was already there. An extension can type everything it
+  contributes to a PDF without depending on the exporter, which is what the two
+  structural `PdfContextLike` copies in core and plugins existed to work around —
+  both are deleted, along with the runtime guards that re-checked their shape by
+  hand. Each handler now asks for exactly what it dereferences: a table row takes
+  `draw` and `blocks`, a header band takes `layout` and `blocks`, a token takes
+  `draw` and `font`.
+
+  **If you wrote your own PDF node handler**, note that it is now handed
+  `PdfNodeContext` rather than `PdfContext`: `doc`, `page`, `fonts` and `images`
+  are no longer on the type. Paint through `ctx.draw.*` and render children
+  through `ctx.blocks()`. Raw pdf-lib access remains available to lifecycle hooks
+  (`onBeforeExport` / `onAfterExport`), which still receive the full
+  `PdfContext`, as do chrome handlers — the chrome lane has not moved yet.
+
+  One caveat on that guarantee: the contribution registry itself is still
+  untyped inside core and plugins, because `FormatHandlers` is empty there. The
+  handler _bodies_ are checked where they are written; wiring one into the wrong
+  lane is not caught until the conformance fixture in Phase 5.
+
+  No handler changed what it draws, so the op-log baselines are untouched.
+
+- 76de760: Importing a DOCX into a document with track changes on no longer rewrites it as one giant edit.
+
+  A load is not an authored edit, but nothing said so. Track changes saw the
+  whole outgoing document deleted and the whole incoming one inserted, marked
+  both, and produced content a `doc` node cannot hold. `applyImportedDocument`
+  now marks the transaction as a load, on both the generic `initialContent` key
+  and Track Changes' own skip action.
+
+  Track changes also reads that marker off a transaction a plugin appended in
+  response to the load — pagination and collaboration bookkeeping both append
+  one. It was looking for ProseMirror's original under `appendTransaction`;
+  the key is `appendedTransaction`, so it had never found one, and four
+  conditions that consult it had never fired.
+
+- 3aa2340: **Breaking for what a DOCX import produces:** the formatting a document states
+  in its styles is now imported, not just what its runs repeat.
+
+  Word records most formatting once, in a style, and says nothing on the runs
+  that use it. The importer read only `<w:rPr>`, so everything an author set
+  through a style was lost. In the agreement this was built against, the
+  document's own typeface — Aptos at 10.5pt — is declared solely in the `Normal`
+  style and not one of its 596 runs repeats it.
+
+  `ctx.styles` on the import context resolves a style through `docDefaults` and
+  its whole `basedOn` ancestry; direct run properties layer over the result, so a
+  run that states something still wins. It fills the slot the context's own
+  documentation had reserved for it.
+
+  `ctx.styles.raw(styleId)` hands back the style element for properties no
+  generic reader can interpret — a table style's `<w:tblStylePr w:type="band1Horz">`
+  means nothing without knowing which rows band — so the extension that owns the
+  node reads them itself, the same division `walkBlocks` already uses for content.
+
+  Also: a page-number field now carries the run's marks. It was created without
+  them, so it stood in the editor's default face beside footer text that did not.
+
+- e2caf29: Every block in a PDF is drawn by the extension that defines it.
+
+  Five paths reached paint without asking who owned the node: the body loop,
+  header and footer bands, table cell children, inline atoms, and anchored
+  objects. Each did its own thing — chrome and table cells drew text directly, so
+  any block type that is not text rendered on the canvas and vanished from the
+  file (a horizontal rule in a header, for one); inline spans branched on the name
+  `"image"` to redraw what the image handler already knew how to draw; and every
+  anchored object was assumed to be an image, so anything else anchored painted a
+  grey placeholder rather than whatever its own handler draws.
+
+  They now share one dispatch, `ctx.blocks(blocks)`. The pipeline still owns
+  traversal, placement and ordering; the extension owns what its node looks like.
+  A node type with no PDF handler is also reported the same way wherever it
+  appears — an inline atom used to be dropped in silence while the same node
+  warned as a block.
+
+  `PdfContext` gains a required `blocks` member. By the versioning policy in
+  docs/export-extensibility.md a mandatory field is a breaking change to the
+  handler API; it ships as a patch while these packages are in beta. Anyone who
+  declares their own structural `PdfContext` shape has to add it.
+
+  No handler moved, so the op-log is unchanged — which is the point: this is
+  routing, and the baselines prove it changed nothing that was already working.
+
+- ddedb24: A PDF handler draws in layout pixels, without pdf-lib.
+
+  `ctx.draw` gains `text`, `line` and `rect` beside `lines`. A rect can carry a
+  `border`, so a handler no longer reaches for pdf-lib to outline one; a rect
+  asking for neither a fill nor a border draws nothing, where pdf-lib would have
+  filled it black. Every coordinate is
+  layout pixels from the page's top-left and every colour is `Rgb`; the surface
+  converts to points and flips the axis, so a handler does neither. Out-of-range
+  channels and opacities are clamped rather than failing the export, and text is
+  reduced to what the resolved font can encode — a handler cannot do that itself,
+  since a font handle names a family rather than what the format made of it.
+
+  The built-in handlers, the table row renderer, the anchored-object painter and
+  the header/footer tokens all draw through it now; none of them reference pdf-lib or carry their own copy of
+  the conversion. Drawn output is unchanged, except that two greys are now
+  exactly `#9ca3af` instead of hand-transcribed approximations of it.
+
+  **Breaking for a handler that draws.** `ctx.draw.image(image, rect)` becomes
+  `ctx.draw.image({ x, y, width, height, image: { src } })`, taking a `src` the
+  document embedded rather than a pdf-lib object. `ctx.draw.imagePlaceholder(box,
+theme)` loses its second argument — the placeholder is painted from the
+  export's own palette now, so an anchored image and a block image on a page no
+  longer disagree about grey.
+
+  The spans, list markers and link annotations inside `draw.lines` still convert
+  inline; they hold resolved pdf-lib fonts and colours that the surface's
+  vocabulary deliberately cannot express.
+
+- ddedb24: Apply drawing-surface opacity to both fill and stroke for rectangles and
+  missing-image placeholders. An operation with zero opacity no longer leaves
+  a visible border when it draws a rectangle or an image cannot be resolved.
+- b356735: Canvas synthesis reaches the text that is actually painted
+
+  The stand-in for a missing weight or slant was wired into `drawBlock`, which
+  `renderPage` only reaches when no block strategy is registered. Every text
+  block type registers one — paragraphs, headings, list items and code blocks all
+  paint through `TextBlockStrategy`, which drew with a plain `fillText`. So bold
+  text with no owned bold face changed nothing on screen while the exported PDF
+  was genuinely bold: the screen-versus-file disagreement the feature exists to
+  remove, pointing the other way. Table cells did synthesize, so one page could
+  show a thickened cell above an unthickened paragraph.
+
+  Header and footer chrome had the same split in a second place: the PDF lane
+  read the resolution table and the canvas lane was never given it.
+  `PageChromePaintContext` carries it now.
+
+  `Editor.fontFamilies` decides `portable` under the conditions an export
+  actually imposes. It asked only for portability, so a face whose licence
+  forbids embedding was offered as though it would survive, and the exporter then
+  resolved past it. A family is also portable if any of its faces is, rather than
+  whichever the provider happened to list first.
+
+  The playground's font control describes each combination rather than testing
+  bold and italic separately — a family holding a bold and an italic but no bold
+  italic was being called complete. Synthetic strokes use a round join in both
+  lanes, so a sharp apex cannot spike at heading sizes.
+
+- Updated dependencies [b356735]
+- Updated dependencies [434a6b3]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [b356735]
+- Updated dependencies [ca32553]
+- Updated dependencies [d04f392]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [7e40b87]
+- Updated dependencies [b15c7ea]
+- Updated dependencies [bc7987e]
+- Updated dependencies [b356735]
+- Updated dependencies [3aa2340]
+- Updated dependencies [e2caf29]
+- Updated dependencies [ddedb24]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ddedb24]
+- Updated dependencies [94eef45]
+- Updated dependencies [ff3ce5c]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [a6e9938]
+- Updated dependencies [f2d7bbe]
+  - @scrivr/core@1.0.21
+
 ## 1.0.20
 
 ### Patch Changes

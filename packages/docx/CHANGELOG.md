@@ -1,5 +1,476 @@
 # @scrivr/export-docx
 
+## 1.0.21
+
+### Patch Changes
+
+- b356735: Inline atoms carry the face they were measured in, and a shortfall names a face
+
+  An inline atom — a page-number token, a date — is sized against a font, and the
+  span recorded none. So a PDF handler painting one had to name a family: header
+  and footer tokens were drawn in `10px sans-serif` while the canvas drew them in
+  the surrounding run's resolved face at the run's size, and the box around them
+  was reserved against a third. An object span now carries its face and
+  resolution as a text span does, and the atom's context hands the handler a
+  `PdfFontHandle` carrying it. This was the last path choosing a face by name.
+
+  **Breaking: `FontShortfall.resolved` is a `FontKey`, not a family name.**
+  An inventory holding one weight of a family answers a request for bold with its
+  regular, and Scrivr does not synthesize the difference — a browser's synthetic
+  bold widens each glyph's advance while a PDF's stroked equivalent does not, so
+  faking it would put canvas and PDF back into disagreement about where every
+  following character sits. Reporting the family alone could not distinguish "a
+  different typeface" from "bold was lost"; `resolved.weight` and
+  `resolved.style` now can. `shortfall.resolved` becomes `shortfall.resolved.family`.
+
+  DOCX import diagnostics name the face rather than the family, so a substituted
+  bold reads "Inter Bold" rather than "Inter".
+
+- ca32553: Import hyperlinks from DOCX.
+
+  `Link` declared how a link is written to a .docx but not how one is read back,
+  so nothing claimed the hyperlink the parser produced. Every link in an imported
+  document arrived as ordinary text — a file round-tripped through Word came back
+  with all of its links flattened, and the only trace was a diagnostic no UI
+  shows.
+
+  `Link.addImports()` now claims it, resolving the relationship through the
+  part's own rels so a link in a header resolves against that header. A target
+  and a `w:anchor` are joined the way Word resolves them (`target#anchor`), an
+  anchor alone becomes a fragment, and a relationship that does not resolve falls
+  back to the anchor rather than losing both. Targets pass `safeUrl`: a .docx is
+  untrusted input and its rels are an ingestion path like paste. A link that
+  cannot be kept is reported rather than silently dropped.
+
+  **Behaviour change for `importDocx`.** An unclaimed hyperlink previously
+  produced an `unsupported-mark` diagnostic, and that code is in the fatal set —
+  so `{ unsupported: "throw" }` rejected _any_ document containing a link.
+  Such documents now import. A link whose target is unusable still reports
+  `unsupported-mark`, so the policy keeps its meaning for real losses.
+
+  An extension that already registered its own `hyperlink` mark transform now
+  collides with the built-in and depends on registration order; an explicit
+  `importDocx(…, { overrides })` still takes precedence.
+
+- b356735: **Breaking: `IBaseEditor` gains a required `fonts` member.** A consumer with its
+  own `IBaseEditor` or `IEditor` implementation must add it; `null` is the value
+  for an editor with no inventory.
+
+  An editor can be told which fonts it has.
+
+  `new Editor({ fonts })` takes a `FontProvider`: an inventory of font resources
+  the application supplies, a default it owns, and the answers to the question
+  "what is this text actually set in". `DefaultFontProvider` covers the common
+  case; the interface behind it is for an application with its own font library.
+
+  A resource is bytes somebody owns, reached through `bytes()` so it can come
+  from a bundler asset, a CDN, an object store or a buffer built at runtime.
+  Registering a catalogue costs nothing — only the faces a document resolves to
+  are fetched, so a package can hand over hundreds of descriptors.
+
+  Resolution answers before anything is measured, and says how it got there:
+  `requested`, `substituted`, `default` or `generic`, and whether the answer is
+  `portable` — false for a face this environment happens to have but nobody can
+  hand to an export. A consumer states what it needs rather than remembering a
+  rule: `resolve(request)` on screen, `resolve(request, { portable: true,
+embeddable: true })` for an export, which is how the two lanes can reach
+  different answers without either one guessing.
+
+  DOCX import is the first consumer. A document states the faces it was written
+  in, and an import now reports the ones this editor cannot honour instead of
+  discovering it later from the geometry. An editor without a provider reports
+  nothing — there is nobody to ask, and inventing an answer is the guess this
+  lane exists to remove.
+
+  Nothing renders differently yet. Layout does not read resolutions, and the PDF
+  exporter still derives its own; that is the next phase.
+
+- b356735: Fit a run to its measured width only when the same face measured it
+
+  Character spacing was applied to every text span, including the path where no
+  `FontProvider` is supplied. There the layout was measured in whatever the
+  browser made of a family name and is painted in a standard face, so the width
+  difference is a different typeface rather than two engines disagreeing —
+  closing it letterspaced the text by up to 15% of the em. Only the path that
+  reuses the screen's layout, where the same bytes measured and paint, may fit a
+  run; and the adjustment is refused outright past a couple of percent, since a
+  gap that wide means the premise is false.
+
+  The export asked for every face the _session_ had resolved rather than the ones
+  the document uses. A family applied and then removed was still fetched,
+  embedded into the file, reported to `onFontShortfall`, and could force the whole
+  document to be typeset again. Both the export and `Editor.fontSubstitutions`
+  now read one walk of the laid-out spans.
+
+  Two resource-less answers no longer count as agreement: neither side named a
+  face, so the screen measured a host font and the file would paint a standard
+  one. That case lays out again, as it did before.
+
+  An inline image no longer interns a font resolution — it has fixed dimensions
+  and is not set in a face, so resolving one reported a substitution for a
+  typeface nothing was drawn in. Atoms sized from a font, such as page-number
+  tokens, still carry theirs.
+
+  Also: the font path refuses a partial layout, as the other path already did;
+  `TextMeasureContext`, `TextMeasurerOptions`, `FontKey`, `FontSynthesis` and
+  `FontResolutionId` are exported from the barrels that already expose types
+  built on them; and the op-log gate records pushed text state, which is why the
+  letterspacing above changed every baseline's rendering without moving a
+  snapshot.
+
+- b356735: A resolution records what the chosen face does not supply
+
+  Finding the closest physical face and deciding how to make it satisfy an
+  appearance it was not designed for are two different jobs, and they had been
+  fused. The layout resolver spelled the resource's own weight and slant into the
+  string it measured with — the decision "do not synthesize", written into the
+  resolution layer — so no renderer could see that anything was missing, and
+  reporting had to reconstruct the gap by diffing the request against the
+  resource.
+
+  `FontResolution.synthesis` now records it as `{ weight?: { from, to }, style?:
+{ from, to } }`, present only when a resource answered. `FontShortfall` carries
+  it through, so a DOCX import diagnostic says "No bold face is available, and
+  neither is synthesized" rather than only naming the face it settled on.
+
+  No rendering change: the canvas renderer still declines to fake a weight,
+  because a browser's synthetic bold widens each glyph's advance and a PDF's
+  stroked equivalent does not. That stays true until both lanes position glyphs
+  from the same measurements.
+
+- 76de760: **Breaking for callers that apply an imported document themselves:** headers
+  and footers now survive the step that lands a DOCX in an editor.
+
+  Importing is two steps, and the second one lost them. `importDocx` reconstructs
+  the header/footer policy from the section's references and returns it on
+  `doc.attrs`; putting that document into an editor replaced only the content, so
+  every attribute the import had settled — the chrome, the final section's
+  settings — was parsed correctly and then dropped. A file's headers survived
+  every step but the last.
+
+  `applyImportedDocument(editor, doc)` is now exported, and the
+  `importDocxFromFile` command uses it. Callers who apply an imported document
+  themselves should use it rather than replacing the content directly, which is
+  where the attributes go missing.
+
+- b15c7ea: The List extension reads the lists it writes.
+
+  OOXML has no list element — a list is a run of paragraphs sharing a `<w:numPr>`
+  — and reassembling that nesting lived in `@scrivr/docx` rather than on the
+  extension that declares `bulletList`, `orderedList` and `listItem`. The walker
+  went further than not moving it: a registered `list` handler was skipped
+  outright, so the extension could not have owned this even by declaring it.
+
+  `List.addImports()` owns it now, reading each item's children through
+  `ctx.walkBlocks` so whatever owns a paragraph or a table inside a list item
+  still renders it. Lists were the last node handler living outside its
+  extension.
+
+  **Behaviour change for a kit without lists.** Such a document lost its list
+  content before and still does, but the diagnostic changes from
+  `schema-missing-list` to `unsupported-block`, which is in the fatal set — so
+  `importDocx(…, { unsupported: "throw" })` now rejects a file whose lists cannot
+  be modelled instead of accepting it with the content quietly gone.
+
+- 76de760: Importing a DOCX into a document with track changes on no longer rewrites it as one giant edit.
+
+  A load is not an authored edit, but nothing said so. Track changes saw the
+  whole outgoing document deleted and the whole incoming one inserted, marked
+  both, and produced content a `doc` node cannot hold. `applyImportedDocument`
+  now marks the transaction as a load, on both the generic `initialContent` key
+  and Track Changes' own skip action.
+
+  Track changes also reads that marker off a transaction a plugin appended in
+  response to the load — pagination and collaboration bookkeeping both append
+  one. It was looking for ProseMirror's original under `appendTransaction`;
+  the key is `appendedTransaction`, so it had never found one, and four
+  conditions that consult it had never fired.
+
+- 3aa2340: **Breaking for what a DOCX import produces:** the formatting a document states
+  in its styles is now imported, not just what its runs repeat.
+
+  Word records most formatting once, in a style, and says nothing on the runs
+  that use it. The importer read only `<w:rPr>`, so everything an author set
+  through a style was lost. In the agreement this was built against, the
+  document's own typeface — Aptos at 10.5pt — is declared solely in the `Normal`
+  style and not one of its 596 runs repeats it.
+
+  `ctx.styles` on the import context resolves a style through `docDefaults` and
+  its whole `basedOn` ancestry; direct run properties layer over the result, so a
+  run that states something still wins. It fills the slot the context's own
+  documentation had reserved for it.
+
+  `ctx.styles.raw(styleId)` hands back the style element for properties no
+  generic reader can interpret — a table style's `<w:tblStylePr w:type="band1Horz">`
+  means nothing without knowing which rows band — so the extension that owns the
+  node reads them itself, the same division `walkBlocks` already uses for content.
+
+  Also: a page-number field now carries the run's marks. It was created without
+  them, so it stood in the editor's default face beside footer text that did not.
+
+- 94eef45: Four ways a document could come out of an export as something other than itself.
+
+  **A font used only in a header was never embedded.** The exporter collected
+  faces from body blocks and table cells, so a face appearing only in a header or
+  footer fell back to a standard PDF font — WinAnsi only, so anything outside
+  that range printed as `?` — and because it was never requested, no shortfall
+  was reported either. The image lane already walked chrome; the font lane did
+  not, and both read one primitive now.
+
+  **An edit during export could change what was exported.** Preparing fonts is
+  asynchronous and the editor kept accepting edits. The font answers came from
+  the layout captured before the await; the re-typeset path read the document
+  back after it. A late edit naming a new face threw `Font request changed during
+PDF layout`; a text-only edit quietly exported a revision nobody asked for. The
+  document is captured with its layout now and the export works from that
+  snapshot.
+
+  **A DOCX run could not refuse its style's formatting.** `<w:b w:val="false"/>`
+  is Word saying "not bold here", and the importer dropped it — which read as
+  silence once styles could supply bold, so the style won and the text imported
+  bold. Italic and underline took the same path. The cancellation is carried
+  through parsing and resolved where editor marks are made.
+
+  **Image fetching is now bounded.** A document names its own image URLs, so
+  exporting one made this process request them — with no destination check, no
+  timeout, no size cap, and redirects followed blindly. On a server that is an
+  SSRF: an untrusted document could reach loopback, a private range, or a cloud
+  metadata endpoint.
+
+  The built-in resolver now refuses anything that is not a public http(s)
+  address, re-checks on every redirect, and caps the wait, the size and the
+  number of hops. **This is a behaviour change**: if your images live on an
+  internal host, pass `resolveImage` to keep fetching them —
+
+  ```ts
+  editor.commands.exportPdf({ resolveImage: async (src) => myFetcher(src) });
+  ```
+
+  `resolveImage` replaces the policy entirely, so it is also the way to be
+  stricter than the default when the documents are untrusted. `onImageRefused`
+  reports what was turned away, since a refusal otherwise looks exactly like a
+  broken link.
+
+- ff3ce5c: **Upgrading from 1.0.20 — every breaking change in one place.**
+
+  This release rebuilt the font lane and moved PDF export onto a contract that
+  core owns, so more of the public surface moved than in any release so far. Each
+  change has its own note below with the reasoning; this is the checklist. All of
+  it ships as `patch` under the beta release policy — the version number does not
+  warn you, so this does.
+
+  **If you register fonts**
+
+  - `IBaseEditor` gains a required `fonts` member. A custom editor implementation
+    has to supply one.
+  - A `FontResource` must now declare `embedding: { allowed: true }` to be
+    embeddable. Omitting it reads as _unknown_ permission, not permission, and
+    `embedFaces` throws naming the family rather than silently substituting.
+  - Faces must be registered as `.ttf` or `.otf`. A `.woff`/`.woff2` is refused:
+    it measured and shaped correctly but went into `FontFile2` as a container,
+    which readers render as dots or silently substitute.
+  - `Editor.fontFamilies` is `readonly FontFamilyOption[]`, not `string[]`.
+  - `FontShortfall.resolved` is a `FontKey`, not a family name.
+  - A CSS font-family list is no longer treated as a single family name.
+
+  **If you wrote a PDF mark handler**
+
+  - `PdfSpanStyle` changed shape: colours are CSS strings rather than pdf-lib
+    triples, and `font` is gone — a face belongs to layout, not to a mark.
+  - `PdfMarkHandler` receives `PdfMarkContext`, which exposes only `theme`,
+    instead of the full `PdfContext`. A mark returns style data; it never draws.
+  - Both types now live in `@scrivr/core` and remain importable from either
+    package.
+
+  **If you wrote a PDF node handler**
+
+  - It receives `PdfNodeContext`, not `PdfContext`: `doc`, `page`, `fonts` and
+    `images` are not on that type. Paint through `ctx.draw.*` and render children
+    through `ctx.blocks()`. Raw pdf-lib access stays on lifecycle hooks
+    (`onBeforeExport` / `onAfterExport`) and on chrome handlers, which still
+    receive the full `PdfContext`.
+  - `PdfContext` gains a required `blocks` member, so anything declaring its own
+    structural `PdfContext` shape must add it.
+  - `ctx.draw.image(image, rect)` becomes
+    `ctx.draw.image({ x, y, width, height, image: { src } })`, and
+    `ctx.draw.imagePlaceholder(box, theme)` loses its second argument.
+  - `PdfDrawSurface` gained members — additive to call, breaking to _implement_.
+
+  **If you call `exportToPdf`**
+
+  - `PdfExportOptions.fontResolver` is removed; the font provider resolves bytes.
+  - Image URLs are now fetched under a policy: only public http(s) destinations,
+    re-checked on every redirect, with caps on wait, size and hops. **If your
+    images live on an internal host, pass `resolveImage`** to keep fetching them.
+    It replaces the policy entirely, so it is equally how to be stricter when the
+    documents are untrusted; `onImageRefused` reports what was turned away.
+
+  **If you import DOCX**
+
+  - Formatting a document states in its _styles_ is now imported, not just what
+    its runs repeat. Documents that previously imported unstyled will change
+    appearance — this is the fix, but it does change output.
+  - `<w:b w:val="false"/>` and friends now cancel formatting a style supplies,
+    where they were previously dropped.
+  - Apply an imported document with `applyImportedDocument(editor, doc)`.
+    Replacing the content directly drops `doc.attrs`, which is where headers,
+    footers and section settings live.
+
+  **Rendering differences you may notice**
+
+  - Highlight uses one colour for canvas and PDF; an alpha in a highlight colour
+    becomes its opacity rather than being flattened and dimmed twice.
+  - Two PDF greys are now exactly `#9ca3af` instead of hand-transcribed
+    approximations.
+  - A horizontal rule prints in `#999999`, the print-ready grey
+    `defaultPdfTheme.hrColor` always declared, rather than the lighter `#cbd5e1`
+    the canvas uses — the handler used to hold that slate as a literal and read
+    no theme at all. Pass `exportPdf({ theme: { hrColor: "#cbd5e1" } })` to keep
+    the previous ink.
+  - Text is no longer reduced to WinAnsi when it will be drawn in an embedded
+    font, so scripts outside that repertoire survive the export.
+
+- a6e9938: Copy a table, and get a table back. Pasting one used to keep the rows and cells
+  and drop everything that made it a particular table: `colspan` and `rowspan`
+  collapsed to single cells, column widths, alignment, and cell shading were all
+  discarded, and a Word table's merges arrived as ragged rows. Scrivr's own copies
+  came back the same way, so a table could not survive a round trip through the
+  editor that produced it.
+
+  Table markup now translates in both directions. `gridSpan`, column widths,
+  horizontal and vertical alignment, and cell fill are read on paste and written
+  on copy, so a table pasted from Word or Google Docs keeps its shape, and one
+  copied out of Scrivr arrives in them as the table it was — bar `hMerge`, which
+  neither Word nor HTML states separately from a span, and cell alignment, which
+  round-trips through the clipboard but is not yet honoured by layout, PDF, or
+  DOCX.
+
+  Vertical merges needed the translation to happen before parsing. HTML omits the
+  cells a `rowspan` covers, while the schema keeps a real cell per row — and once
+  ProseMirror has read the markup, a covered row is merely short, with no way to
+  tell which columns it is short by. Pasted markup is therefore rewritten into one
+  cell per row first, and collapsed back to `rowspan` on the way out.
+
+  - **`@scrivr/core`** — new extension hook `addPasteHtmlTransforms()`, for
+    rewriting pasted HTML before it is parsed. The existing `addPasteTransforms()`
+    runs on the parsed slice, which is too late for markup whose meaning lives in
+    the tree shape. `PasteHtmlTransform` is exported alongside `PasteTransform`.
+  - **`@scrivr/core`** — a table cell's `background-color` survives paste. Pasted
+    styles are stripped of incidental background colours, which was right for text
+    spans and wrong for a cell, whose fill is document content.
+  - **`@scrivr/core`** — a cell's fill is only ever painted, so only a colour is
+    accepted into the model: `url(...)`, `var(...)`, and other non-colour values
+    are dropped rather than stored.
+  - **`@scrivr/core`** — the integrity pass now stores the `gridSpan` readers
+    already derive, so a fractional span becomes its floor rather than 1. Every
+    reader now derives it in one place, so the layout, the exporters, and the
+    table map can no longer disagree about what a malformed span means.
+  - **`@scrivr/core`** — cell shading is exported to PDF, which drew borders and
+    text but never a fill.
+  - **`@scrivr/core`** — cell shading survives DOCX export whatever spelling the
+    browser gave it. Only six hex digits were accepted, while Chrome's CSSOM
+    hands back `rgb(...)`, so a pasted fill was kept on screen and dropped from
+    the file.
+
+  - **`@scrivr/core`** — vertical merges are bounded by the rows their row group
+    actually has, independently of the column allocation limit, so a merge longer
+    than 64 rows survives a copy. Span attributes are read the way HTML parses a
+    non-negative integer, so `rowspan="1e3"` is one row rather than the whole
+    group.
+  - **`@scrivr/core`** — one parser now says what a CSS colour means, wherever a
+    colour crosses a boundary. It resolves named colours, `hsl()`, space-separated
+    syntax and alpha without a DOM, so a document exported on a server means the
+    same thing as one exported in a browser.
+  - **`@scrivr/core`** — a cell fill is validated once, where every lane reads it,
+    rather than only on the paste path. A fill arriving from DOCX import, collab
+    or `setContent` can no longer reach the canvas as an unpaintable value, which
+    used to leave the previous cell's colour on the brush and paint two cells the
+    same.
+  - **`@scrivr/core`** — text colour survives DOCX export whatever its spelling.
+    `cssColorToDocxHex` read hex and comma-form `rgb()` only, so a `color: red`
+    mark — the literal a paste keeps — was dropped with a diagnostic while a cell
+    filled `red` exported correctly in the same document.
+  - **`@scrivr/export-pdf`** — a text colour that is not hex no longer exports as
+    black, and no longer crashes the export. `parseHexColor("red")` produced `NaN`
+    channels, which pdf-lib throws on; both PDF colour helpers now read the same
+    literals the rest of the editor does. `parseHexColor` is deprecated in favour
+    of `parseCssColor`.
+  - **`@scrivr/docx`** — a cell span a file claims is bounded on import, as it
+    already was on paste. A `<w:gridSpan w:val="100000"/>` would otherwise become
+    a real cell in every row of the document when the grid was padded.
+  - **`@scrivr/core`** — a translucent colour is composited onto the page for
+    formats that have no alpha, instead of being written at full strength. A 40%
+    yellow highlight exports as the colour a reader sees.
+
+- f2d7bbe: **A table's DOCX import moves to the extension that owns tables**
+
+  Turning a parsed `<w:tbl>` into nodes was built into `@scrivr/docx`, while
+  writing one lived on the Table extension. Both directions describe the same
+  thing — what a table _is_ — so splitting them meant no single place answered the
+  question, and an extension that could not read a file into the nodes it defines
+  looked like a feature that was never built.
+
+  `Table.addImports()` now contributes the block handler, next to the
+  `addExports()` it already had. Parsing the OOXML into an intermediate block
+  stays in `@scrivr/docx`, as it does for every other node.
+
+  - **`@scrivr/core`** — `DocxImportContext` gains `walkBlocks(blocks)`, which
+    transforms nested blocks through the same handlers as the body. A contribution
+    owning a container node needs it: a table's cells hold ordinary blocks, and
+    each of those belongs to whichever extension owns it, not to the table. This
+    is what kept tables in the package before — the recursion needed the handler
+    set, and a block transform had no way to ask for it.
+  - **`@scrivr/docx`** — a table in a file opened by an editor without the Table
+    extension is now reported as an unclaimed block (`unsupported-block`) and
+    dropped, the same as any other block nothing has registered for. It previously
+    reported `schema-missing-table` from the package's own table reader.
+
+    This changes what `unsupported: "throw"` does with such a file. A table the
+    document will not contain is content the file had and the import lost, so a
+    caller who asked to be told now is: the import rejects instead of quietly
+    dropping the table. Enabling the Table extension, or the default `"drop"`
+    policy, imports exactly as before.
+
+  - **`@scrivr/docx`** — `buildListNode` reads its items through the same
+    `walkBlocks`, so one rule states how a container's children are read.
+
+- Updated dependencies [b356735]
+- Updated dependencies [434a6b3]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [b356735]
+- Updated dependencies [ca32553]
+- Updated dependencies [d04f392]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [7e40b87]
+- Updated dependencies [b15c7ea]
+- Updated dependencies [bc7987e]
+- Updated dependencies [b356735]
+- Updated dependencies [3aa2340]
+- Updated dependencies [e2caf29]
+- Updated dependencies [ddedb24]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ddedb24]
+- Updated dependencies [94eef45]
+- Updated dependencies [ff3ce5c]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [a6e9938]
+- Updated dependencies [f2d7bbe]
+  - @scrivr/core@1.0.21
+
 ## 1.0.20
 
 ### Patch Changes

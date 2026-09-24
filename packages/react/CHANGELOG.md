@@ -1,5 +1,106 @@
 # @scrivr/react
 
+## 1.0.21
+
+### Patch Changes
+
+- b356735: A font picker can say what backs each family
+
+  **Breaking: `Editor.fontFamilies` is `readonly FontFamilyOption[]`, not
+  `readonly string[]`.** `fontFamilies.map((option) => option.family)` restores
+  the old value.
+
+  The inventory knows each family's weights and slants and the list threw all of
+  it away, so a control could offer a family without being able to say whether
+  its bold would be a designed face or a thickened stand-in — or whether an
+  export could carry it at all.
+
+  Each entry is one family, not one face: bold and italic are marks with their
+  own controls, and offering "Inter Bold" as a choice would both duplicate them
+  and name a family no inventory holds. `faces` is what the application owns, and
+  is empty for a family only the host has, since nothing is known about such a
+  family's weights. `portable: false` says an export will resolve past it.
+
+  The playground's font control now marks a host-only family and describes what
+  each family is missing on hover.
+
+- b356735: Font fallback keeps the weight, and the React adapter can be given a provider
+
+  `useScrivrEditor` now accepts `fonts`, and `@scrivr/react` re-exports
+  `DefaultFontProvider` and the font types — the adapter previously had no way to
+  supply an inventory, so every React app fell back to asking the browser.
+
+  Falling back to the default now picks the nearest face in the default's
+  _family_ rather than the single default resource. A document naming a family
+  nobody owns still means bold where it says bold; answering every weight with
+  the regular face rendered a contract's headings in body text.
+
+  A CSS font-family list is no longer treated as one family name:
+  `"Arial, sans-serif"` asked the provider for that literal string and matched
+  nothing registered as `Arial`. The rest of the list is the host's fallback
+  chain, which is the decision a provider replaces.
+
+  Font substitutions are reported once per face rather than once per face and
+  size — a ten-page contract reported thirteen shortfalls for five faces.
+
+- b356735: The editor can say which fonts it is not getting
+
+  DOCX import reported substitutions once and PDF export reported them at the
+  end. Nothing answered the question in between, even though the layout had held
+  the answer since it started recording resolutions.
+
+  `Editor.fontSubstitutions` returns the same `FontShortfall` shape the other two
+  producers emit, derived from the current layout and memoised on its version so
+  a `useEditorState` selector only re-renders when the answer changes.
+
+  `Editor.getActiveFontFamily()` returns `{ requested, resolved, substituted }`
+  for the selection. The inline-mark → block-attr → document-default precedence
+  is the editor's own rule, so a font control reading it cannot drift from the
+  page it describes.
+
+  No UI: whether a substitution is a badge, a banner or nothing depends on what
+  the application is for.
+
+- Updated dependencies [b356735]
+- Updated dependencies [434a6b3]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [b356735]
+- Updated dependencies [ca32553]
+- Updated dependencies [d04f392]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [7e40b87]
+- Updated dependencies [b15c7ea]
+- Updated dependencies [bc7987e]
+- Updated dependencies [76de760]
+- Updated dependencies [b356735]
+- Updated dependencies [3aa2340]
+- Updated dependencies [e2caf29]
+- Updated dependencies [ddedb24]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ddedb24]
+- Updated dependencies [94eef45]
+- Updated dependencies [ff3ce5c]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [a6e9938]
+- Updated dependencies [f2d7bbe]
+  - @scrivr/core@1.0.21
+  - @scrivr/plugins@1.0.21
+  - @scrivr/ai@1.0.21
+
 ## 1.0.20
 
 ### Patch Changes

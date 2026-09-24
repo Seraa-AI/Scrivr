@@ -1,5 +1,46 @@
 # @scrivr/export-markdown
 
+## 1.0.21
+
+### Patch Changes
+
+- Updated dependencies [b356735]
+- Updated dependencies [434a6b3]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [b356735]
+- Updated dependencies [ca32553]
+- Updated dependencies [d04f392]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [7e40b87]
+- Updated dependencies [b15c7ea]
+- Updated dependencies [bc7987e]
+- Updated dependencies [b356735]
+- Updated dependencies [3aa2340]
+- Updated dependencies [e2caf29]
+- Updated dependencies [ddedb24]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ace9a88]
+- Updated dependencies [ddedb24]
+- Updated dependencies [94eef45]
+- Updated dependencies [ff3ce5c]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [b356735]
+- Updated dependencies [a6e9938]
+- Updated dependencies [f2d7bbe]
+  - @scrivr/core@1.0.21
+
 ## 1.0.20
 
 ### Patch Changes
