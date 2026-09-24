@@ -19,6 +19,8 @@ import type { FontModifier } from "../extensions/types";
 import type { PageChromeContribution } from "./PageMetrics";
 import { populateCharMap, registeredLineCount } from "./BlockLayout";
 import { spanEndDocPos } from "./LineBreaker";
+import { collectFontRequests } from "../fonts/collectFontRequests";
+import type { FontRequest } from "../fonts/types";
 
 interface FragmentIndexEntry {
   start: number; // first docPos on this line (charStart)
@@ -77,7 +79,20 @@ export class LayoutCoordinator {
   private layoutResumption: LayoutResumption | null = null;
   private partialLayoutBlocks = 0;
   private idleLayoutId: number | null = null;
-  private ready = true;
+  /**
+   * Two things gate showing a document, and both have to be satisfied.
+   *
+   * `collabReady` is the caller's: a shared document is not worth laying out
+   * until it has synced. `fontsReady` is ours: a document laid out before its
+   * faces are installed is measured against whatever the host substitutes, and
+   * swapping to the real faces afterwards re-breaks every line. Waiting is
+   * cheaper than showing the wrong thing and correcting it.
+   */
+  private collabReady = true;
+  private fontsReady = true;
+  private get ready(): boolean {
+    return this.collabReady && this.fontsReady;
+  }
   private cursorPageValue = 1;
 
   private readonly populatedPages = new Set<number>();
@@ -93,6 +108,15 @@ export class LayoutCoordinator {
   private fontResolverValue: LayoutFontResolver | null;
   /** Keyed by `FontResource.id`: a provider may hand back a fresh object each call. */
   private readonly installedFonts = new Map<string, string>();
+  /**
+   * Faces this backend has already tried to install, whether or not it could.
+   *
+   * The document waits for a face the first time it is asked for. It does not
+   * wait again: a backend with no `FontFace` at all, or bytes that cannot be
+   * fetched, would otherwise hold the document forever and re-enter this on
+   * every layout.
+   */
+  private readonly attemptedFonts = new Set<string>();
   private preparingFonts = false;
   private fontPreparationPending = false;
   private disposed = false;
@@ -126,6 +150,69 @@ export class LayoutCoordinator {
     }) : null;
   }
 
+  /**
+   * Install whatever these requests resolve to, and publish the set in one go.
+   *
+   * Each install is a separate await and `installedFonts` is what
+   * `canvasResolution` reads, so a set that filled in place would answer for
+   * the faces that had landed and degrade the rest — measuring one line
+   * against two typefaces and placing its runs from both. Returns how many
+   * faces are new, which is what tells a caller the resolver has to be rebuilt.
+   */
+  private async installFaces(requests: readonly FontRequest[]): Promise<number> {
+    const provider = this.opts.fonts;
+    if (!provider) return 0;
+    const landed = new Map<string, string>();
+    for (const request of requests) {
+      const resource = provider.resolve(request).resource;
+      if (!resource || this.installedFonts.has(resource.id)) continue;
+      this.attemptedFonts.add(resource.id);
+      try {
+        const install = this.opts.measurer.installFont;
+        if (!install) throw new Error("The measurement backend does not install fonts");
+        const family = await install.call(this.opts.measurer, resource);
+        if (!family) throw new Error("The measurement backend returned an empty font family");
+        landed.set(resource.id, family);
+      } catch {
+        // Retried on a later layout: the backend may gain the face, or the
+        // bytes may become reachable. Until then this resolves as generic.
+      }
+    }
+    if (this.disposed) return 0;
+    for (const [id, family] of landed) this.installedFonts.set(id, family);
+    return landed.size;
+  }
+
+  /**
+   * Install every face this document asks for, before it is laid out for the
+   * screen.
+   *
+   * The requests come from the document rather than from a layout, so this does
+   * not need the measuring pass that would otherwise have to run first against
+   * faces that are not there yet. A face that cannot be installed resolves as
+   * generic and is reported, which is the answer the lane gives at any other
+   * time.
+   */
+  private async installDocumentFonts(): Promise<void> {
+    const provider = this.opts.fonts;
+    try {
+      if (provider) {
+        const requests = collectFontRequests(this.opts.getDoc(), provider.defaultRequest());
+        await provider.prepare(requests);
+        if (await this.installFaces(requests)) {
+          this.fontResolverValue = this.newFontResolver();
+          this.measureCache = new WeakMap();
+          this.opts.measurer.invalidate();
+        }
+      }
+    } finally {
+      if (!this.disposed) {
+        this.fontsReady = true;
+        this.reveal();
+      }
+    }
+  }
+
   private async prepareFonts(): Promise<void> {
     if (this.disposed || !this.opts.fonts || !this.fontResolverValue) return;
     if (this.preparingFonts) { this.fontPreparationPending = true; return; }
@@ -133,20 +220,22 @@ export class LayoutCoordinator {
     try {
       const requests = [...this.fontResolverValue.table().values()].map(r => r.request);
       await this.opts.fonts.prepare(requests);
-      for (const request of requests) {
-        const resource = this.opts.fonts.resolve(request).resource;
-        if (!resource || this.installedFonts.has(resource.id)) continue;
-        try {
-          const install = this.opts.measurer.installFont;
-          if (!install) throw new Error("The measurement backend does not install fonts");
-          const family = await install.call(this.opts.measurer, resource);
-          if (!family) throw new Error("The measurement backend returned an empty font family");
-          this.installedFonts.set(resource.id, family);
-        } catch {
-          // Retried on the next layout: the backend may gain the face, or the
-          // bytes may become reachable. Until then this resolves as generic.
-        }
-      }
+      // Installed into a set of its own and published in one go. Each install
+      // is a separate await, and `installedFonts` is what `canvasResolution`
+      // reads, so a set that filled in place would answer for the faces that
+      // had landed and degrade the rest — measuring one line against two
+      // typefaces and placing its runs from both.
+      // A face this document needs has never been tried. Until it is in, every
+      // run that wants it measures against whatever the host substitutes while
+      // the runs beside it are already in the real face — one line, two
+      // typefaces. Hold the document rather than show that. Only the first
+      // attempt waits, so a face that can never install does not hold it.
+      const awaited = requests.some((request) => {
+        const resource = this.opts.fonts?.resolve(request).resource;
+        return !!resource && !this.installedFonts.has(resource.id) && !this.attemptedFonts.has(resource.id);
+      });
+      if (awaited) this.fontsReady = false;
+      await this.installFaces(requests);
       if (this.disposed) return;
       const changed = [...this.fontResolverValue.table().values()].some(old => {
         const current = this.canvasResolution(this.opts.fonts!.resolve(old.request));
@@ -172,6 +261,10 @@ export class LayoutCoordinator {
       this.fontPreparationPending = false;
     } finally {
       this.preparingFonts = false;
+      if (!this.disposed && !this.fontsReady) {
+        this.fontsReady = true;
+        this.reveal();
+      }
       if (this.fontPreparationPending) {
         this.fontPreparationPending = false;
         queueMicrotask(() => { void this.prepareFonts(); });
@@ -220,6 +313,14 @@ export class LayoutCoordinator {
     this.fontResolverValue = this.newFontResolver();
     const unsubscribe = opts.fonts?.subscribe?.(() => { void this.prepareFonts(); });
     if (unsubscribe) this.unsubscribeFonts = unsubscribe;
+
+    // A document's faces are knowable from the document, before anything is
+    // measured, so they are installed before it is shown rather than raced
+    // against the first paint.
+    if (opts.fonts) {
+      this.fontsReady = false;
+      void this.installDocumentFonts();
+    }
 
     performance.mark("scrivr:layout-initial-start");
     this.layout = this.runLayout({
@@ -453,9 +554,31 @@ export class LayoutCoordinator {
    *            cancels the pending RAF when going false.
    */
   setReady(ready: boolean): void {
-    this.ready = ready;
-
+    this.collabReady = ready;
     if (ready) {
+      // The document that just synced is not the one this coordinator was
+      // constructed with — an empty placeholder usually — so its faces are
+      // only knowable now. Install them before showing it, for the same
+      // reason as on construction.
+      if (this.opts.fonts) {
+        this.fontsReady = false;
+        void this.installDocumentFonts();
+      }
+      this.reveal();
+    } else {
+      this.cancelIdleLayout();
+      this.layoutIsPartial = false;
+    }
+  }
+
+  /**
+   * Lay the document out and paint it, now that nothing is holding it back.
+   * A no-op while the other gate is still closed, so whichever finishes last
+   * is the one that shows the document.
+   */
+  private reveal(): void {
+    if (!this.ready) return;
+    {
       this.cancelIdleLayout();
       this.partialLayoutBlocks = LayoutCoordinator.INITIAL_BLOCKS;
       this.dirty = false;
@@ -477,9 +600,6 @@ export class LayoutCoordinator {
       if (this.layoutIsPartial) {
         this.scheduleIdleLayout();
       }
-    } else {
-      this.cancelIdleLayout();
-      this.layoutIsPartial = false;
     }
   }
 
