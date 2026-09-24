@@ -748,10 +748,10 @@ describe("TileManager — recording a paint that did not happen", () => {
  * sized, so the page does not jump when the tiles arrive.
  */
 describe("painting before the editor is ready", () => {
-  const painted = (tilesContainer: HTMLDivElement) =>
-    Array.from(tilesContainer.children).filter(
-      (el) => (el as HTMLElement).style.display === "block",
-    );
+  const painted = (tilesContainer: HTMLDivElement): HTMLElement[] =>
+    Array.from(tilesContainer.children)
+      .filter((el): el is HTMLElement => el instanceof HTMLElement)
+      .filter((el) => el.style.display === "block");
 
   it("sizes the container but draws no tiles, then draws once ready", () => {
     const setup = makeRendererTestSetup({ scrollParent: true });
@@ -772,16 +772,27 @@ describe("painting before the editor is ready", () => {
   });
 
   it("keeps painting once something has been shown, even if it goes unready", () => {
-    // A reconnect must not freeze scrolling under the user.
+    // A reconnect must not freeze scrolling under the user. Asserted by where
+    // the tiles are, not how many are displayed: an early return leaves the
+    // previous paint in the DOM, so counting `display:block` reads stale
+    // state and passes with the latch removed.
     const setup = makeRendererTestSetup({ scrollParent: true });
     const tm = new TileManager(setup.editor, setup.container);
     tm.update();
     const tilesContainer = setup.container.children[0] as HTMLDivElement;
-    expect(painted(tilesContainer).length).toBeGreaterThan(0);
+    const tops = () => painted(tilesContainer).map((el) => el.style.top).sort();
+    const before = tops();
+    expect(before.length).toBeGreaterThan(0);
 
     setup.editor.setReady(false);
+    Object.defineProperty(setup.scrollParent, "scrollTop", {
+      value: 4000,
+      configurable: true,
+      writable: true,
+    });
     tm.update();
 
-    expect(painted(tilesContainer).length).toBeGreaterThan(0);
+    // Scrolled while unready: the tiles moved, so painting really happened.
+    expect(tops()).not.toEqual(before);
   });
 });

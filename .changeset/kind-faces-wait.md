@@ -22,6 +22,10 @@ Three changes:
   state — on construction, and again when a collaborative document syncs,
   because the editor is usually built on an empty placeholder and the real
   document's faces are only knowable at sync.
+- Only the faces the first paint actually needs. The wait covers the blocks
+  laid out synchronously, not the whole document, so a family first used on
+  page five does not hold page one. It still installs, in the background, and
+  the layout refines when it lands.
 - The wait is bounded at two seconds. A provider that never answers shows the
   document against what resolved, which is what it did before — a host's font
   problem must not become an editor that cannot paint. Faces arriving after
@@ -29,12 +33,14 @@ Three changes:
 
 **Only before the document has ever been shown.** A face first needed later —
 picking a weight the document has not used — installs in the background and
-the layout refines, exactly as before. A live document is never taken away,
-never put behind a loading state, and never has its layout thrown back to the
-first chunk.
+the layout refines, exactly as before. The font gate never takes a live
+document away, never puts one behind a loading state, and never throws its
+layout back to the first chunk. (`setReady(false)` still does all three; that
+is the caller's own gate and is unchanged.)
 
 `"syncing"` therefore now has a second cause for editors that configure a font
 provider. A consumer that renders collaboration copy for that state will show
 it briefly while faces install, with collaboration switched off. The editor
-container is still sized during the wait, so nothing shifts when the document
-appears.
+container is sized during the wait rather than collapsing to zero height,
+though its height is measured against the substitute faces and settles when
+the real ones land.

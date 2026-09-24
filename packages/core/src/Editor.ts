@@ -666,6 +666,7 @@ export class Editor extends BaseEditor implements IEditor {
 			measurer: this.measurer,
 			fontModifiers: this.fontModifiers,
 			fonts: this.fonts,
+			startReady,
 			getDoc: () => this.editorState.doc,
 			getHead: () => this.editorState.selection.head,
 			onUpdate: () => this.notifyListeners(),

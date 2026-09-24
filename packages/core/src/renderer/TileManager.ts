@@ -178,6 +178,8 @@ export function routePageClick(
  */
 export class TileManager {
   private readonly tilesContainer: HTMLDivElement;
+  /** Whether anything has been on screen; gates only the first paint. */
+  private hasPainted = false;
   private scrollParent: HTMLElement | null = null;
   private readonly pool: TileEntry[] = [];
   /** O(1) lookup: tileIndex → pool entry (set when assigned, deleted when released). */
@@ -328,9 +330,6 @@ export class TileManager {
 
   /** Core update loop */
 
-  /** Whether anything has been on screen; gates only the first paint. */
-  private hasPainted = false;
-
   update(): void {
     const layout = this.editor.layout;
     const sh = this.slotHeight;
@@ -360,14 +359,10 @@ export class TileManager {
     this.tilesContainer.style.height = `${ch}px`;
     this.tilesContainer.style.width = `${layout.pageConfig.pageWidth}px`;
 
-    // Sized and observed above, but nothing painted yet: unsynced, or still
-    // installing the faces the document is written in, and a tile drawn now
-    // would be measured against a substitute and re-broken. The container
-    // still takes its height, so the page does not jump when it does paint.
-    //
-    // Only ever the first paint — once something has been on screen, scroll
-    // and resize must keep working even while the editor is unready, or the
-    // view freezes under the user.
+    // Sized and observed above, but nothing painted while the editor has
+    // nothing honest to show. Only ever the first paint: once something has
+    // been on screen, scroll and resize must keep working even while it is
+    // unready, or the view freezes under the user.
     if (!this.hasPainted && this.editor.loadingState === "syncing") return;
     this.hasPainted = true;
 

@@ -274,7 +274,7 @@ export interface IEditor extends IBaseEditor {
    */
   setReady(ready: boolean): void;
   /**
-   * Three-phase loading state. Changes are surfaced via subscribe() so
+   * Whether the document can be shown yet. Changes are surfaced via subscribe() so
    * useEditorState() picks them up automatically:
    *
    *   const loadingState = useEditorState({
@@ -283,7 +283,8 @@ export interface IEditor extends IBaseEditor {
    *     equalityFn: Object.is,
    *   });
    *
-   *  'syncing'   — waiting for collaborative sync (no content yet)
+   *  'syncing'   — nothing honest to paint yet: a shared document has not
+ *                 synced, or the faces it is written in are still installing
    *  'rendering' — first pages visible, idle layout running in background
    *  'ready'     — fully loaded
    */

@@ -112,12 +112,12 @@ async function drain(staged: { release: (id: string) => void; requested: () => s
   await flush();
 }
 
-function editorWith(measurer: TextMeasurer, content: unknown = MIXED_LINE): Editor {
+function editorWith(measurer: TextMeasurer, content: Record<string, unknown> = MIXED_LINE): Editor {
   return new Editor({
     extensions: [StarterKit],
     fonts: new DefaultFontProvider({ default: REGULAR, resources: [BOLD] }),
     textMeasurer: measurer,
-    content: content as Record<string, unknown>,
+    content,
   });
 }
 
@@ -217,7 +217,6 @@ const LONG = {
  * not un-ready the editor or throw the layout back to the first chunk.
  */
 describe("a face first needed after the document is shown", () => {
-
   it("installs it in the background without disturbing the layout", async () => {
     const staged = stagedMeasurer();
     const editor = editorWith(staged.measurer, LONG);
@@ -242,6 +241,8 @@ describe("a face first needed after the document is shown", () => {
 
     expect({ state: editor.loadingState, pages: editor.layout.pages.length }).toEqual(before);
     expect(editor.layout.isPartial ?? false).toBe(false);
+    // And it really did install — otherwise this passes by doing nothing.
+    expect(staged.installs).toContain(BOLD.id);
 
     editor.destroy();
   });
@@ -294,7 +295,7 @@ describe("a provider that never answers", () => {
         extensions: [StarterKit],
         fonts: provider,
         textMeasurer: staged.measurer,
-        content: MIXED_LINE as Record<string, unknown>,
+        content: MIXED_LINE,
       });
 
       expect(editor.loadingState).toBe("syncing");
@@ -332,6 +333,107 @@ describe("faces that land after the wait is over", () => {
       // No edit, no scroll — the faces alone bring the document to its own.
       const fonts = fontsInLayout(editor);
       expect(installedIn(fonts)).toEqual(fonts);
+      editor.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+/**
+ * A document can reach the screen without the gate ever closing — its faces
+ * were already there, or nobody owns them. It is still on screen, so a later
+ * `setReady(true)` must not gate it.
+ */
+describe("a document shown without ever waiting", () => {
+  /** Owns the bold face only; plain text resolves to a host family. */
+  function partialProvider(): DefaultFontProvider {
+    const provider = new DefaultFontProvider({ default: REGULAR, resources: [BOLD] });
+    const inner = provider.resolve.bind(provider);
+    provider.resolve = (request, constraints) => {
+      const answer = inner(request, constraints);
+      if (request.weight >= 700) return answer;
+      // Nothing owned for this one: the host will decide, as a system family.
+      const { resource: _dropped, ...rest } = answer;
+      return { ...rest, resolved: { ...answer.resolved, source: "generic", portable: false } };
+    };
+    return provider;
+  }
+
+  it("is not gated by a later setReady", async () => {
+    const staged = stagedMeasurer();
+    const editor = new Editor({
+      extensions: [StarterKit],
+      fonts: partialProvider(),
+      textMeasurer: staged.measurer,
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "plain" }] }] },
+    });
+    editor.ensureFullLayout();
+    await drain(staged);
+    // Nothing was owned for this document, so it was shown without waiting.
+    expect(editor.loadingState).not.toBe("syncing");
+
+    // Now a weight that *is* owned, then a reconnect.
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.addMark(1, 5, state.schema.marks["bold"]!.create()));
+    editor.ensureFullLayout();
+    editor.setReady(false);
+    editor.setReady(true);
+
+    expect(editor.loadingState).not.toBe("syncing");
+
+    editor.destroy();
+  });
+});
+
+/**
+ * A provider that rejects is an anticipated case, and it must not cost the
+ * whole budget. The rejection happens while a second document is queued
+ * behind it, which is where a dropped request set used to leave the gate shut
+ * with nothing in flight to reopen it.
+ */
+describe("a provider that rejects while a document is queued", () => {
+  it("still prepares the queued document, without burning the budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const staged = stagedMeasurer();
+      const provider = new DefaultFontProvider({ default: REGULAR, resources: [BOLD] });
+      const inner = provider.prepare.bind(provider);
+      let first = true;
+      provider.prepare = async (requests, constraints) => {
+        if (first) {
+          first = false;
+          throw new Error("catalogue unreachable");
+        }
+        return inner(requests, constraints);
+      };
+
+      const editor = new Editor({
+        extensions: [StarterKit],
+        fonts: provider,
+        textMeasurer: staged.measurer,
+        startReady: false,
+        content: { type: "doc", content: [{ type: "paragraph" }] },
+      });
+
+      // The synced document arrives while the first pass is still in flight.
+      const state = editor.getState();
+      editor.applyTransaction(
+        state.tr.replaceWith(0, state.doc.content.size, state.schema.nodeFromJSON(MIXED_LINE).content),
+      );
+      editor.setReady(true);
+
+      await vi.advanceTimersByTimeAsync(10);
+      for (let i = 0; i < 6; i++) {
+        for (const id of staged.requested()) staged.release(id);
+        await vi.advanceTimersByTimeAsync(10);
+      }
+
+      // Well inside the two-second budget: the queued document was prepared
+      // rather than dropped, so nothing is waiting on the timer.
+      expect(editor.loadingState).not.toBe("syncing");
+      expect(staged.installs.length).toBeGreaterThan(0);
+
       editor.destroy();
     } finally {
       vi.useRealTimers();
