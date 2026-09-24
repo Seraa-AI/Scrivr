@@ -764,6 +764,8 @@ describe("painting before the editor is ready", () => {
     expect(painted(tilesContainer)).toHaveLength(0);
     // Sized anyway: a zero-height container is a layout shift on every load.
     expect(tilesContainer.style.height).not.toBe("");
+    // And the scroll parent is found, so anchored popovers can still measure.
+    expect(setup.editor.getScrollContainerRect()).not.toBeNull();
 
     setup.editor.setReady(true);
     tm.update();

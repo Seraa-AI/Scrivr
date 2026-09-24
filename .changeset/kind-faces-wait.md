@@ -38,6 +38,11 @@ document away, never puts one behind a loading state, and never throws its
 layout back to the first chunk. (`setReady(false)` still does all three; that
 is the caller's own gate and is unchanged.)
 
+One shape this does not help: a provider that only knows its resources after
+`prepare()` has fetched a catalogue answers "no resource" up front, so there is
+nothing for the wait to recognise and it does not engage. Those editors behave
+exactly as they did before.
+
 `"syncing"` therefore now has a second cause for editors that configure a font
 provider. A consumer that renders collaboration copy for that state will show
 it briefly while faces install, with collaboration switched off. The editor
