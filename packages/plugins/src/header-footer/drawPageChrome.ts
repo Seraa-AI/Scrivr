@@ -106,6 +106,9 @@ function layoutAtBandY(
     // face that will draw it, so its lines reflow and its weight changes the
     // moment the caret leaves the band.
     ...(paintCtx.fontResolver ? { fonts: paintCtx.fontResolver } : {}),
+    // Same registry the band was measured with, so a token being edited keeps
+    // the width it was reserved and the line does not shift under the caret.
+    ...(paintCtx.inlineRegistry ? { inlineRegistry: paintCtx.inlineRegistry } : {}),
   });
 }
 

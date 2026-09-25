@@ -2,8 +2,9 @@
  * resolveChrome — measures header/footer slots via runMiniPipeline and returns
  * a ChromeContribution with per-page height reservations.
  *
- * Called from addPageChrome().measure(). Always returns stable:true because
- * header/footer heights don't depend on flow content layout.
+ * Called from addPageChrome().measure(). Band height doesn't depend on the
+ * flow, so this converges in one iteration — unless a slot counts pages, which
+ * it can't do before the flow has run once.
  */
 
 import type { Node } from "@scrivr/core/pm";
@@ -17,6 +18,7 @@ import {
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { resolveSlot } from "./resolveSlot";
 import { chromeFontConfig } from "./chromeFontConfig";
+import { setTokenContext } from "./tokenStrategies";
 
 /** Measured layout + reserved height for one header/footer slot. */
 export interface SlotLayout {
@@ -43,6 +45,19 @@ export interface ResolvedHeaderFooter {
   defaultMarginBottom: number;
 }
 
+/** Whether any slot holds a token whose width follows the document's page count. */
+function countsPages(slots: ResolvedHeaderFooter["slots"]): boolean {
+  return Object.values(slots).some((slot) => {
+    if (!slot) return false;
+    let found = false;
+    slot.doc.descendants((node) => {
+      if (node.type.name === "pageNumber" || node.type.name === "totalPages") found = true;
+      return !found;
+    });
+    return found;
+  });
+}
+
 function measureSlot(
   def: HeaderFooterDefinition | undefined,
   input: PageChromeMeasureInput,
@@ -59,6 +74,9 @@ function measureSlot(
     fontConfig: chromeFontConfig,
     ...(input.fonts ? { fonts: input.fonts } : {}),
     ...(input.fontModifiers ? { fontModifiers: input.fontModifiers } : {}),
+    // Without this, tokens fall back to the constant in their node spec and
+    // the glyphs they paint overflow the box reserved for them.
+    ...(input.inlineRegistry ? { inlineRegistry: input.inlineRegistry } : {}),
   });
 
   const natural = layout.totalContentHeight ?? 0;
@@ -105,9 +123,16 @@ function measureSlot(
 export function resolveChrome(
   policy: HeaderFooterPolicy,
   input: PageChromeMeasureInput,
-  _ctx: LayoutIterationContext,
+  ctx: LayoutIterationContext,
   activeEditingGap: number,
 ): ChromeContribution {
+  // Token strategies size digits from this context, which paint also writes as
+  // it draws each page. Seed it from the flow so a measurement answers from the
+  // document, not from whichever page was painted last.
+  const knownPageCount =
+    ctx.currentFlowLayout?.pages.length ?? ctx.previousRunFlowLayout?.pages.length ?? null;
+  setTokenContext(1, knownPageCount ?? 1);
+
   const resolved: ResolvedHeaderFooter = {
     policy,
     defaultMarginTop: input.pageConfig.margins.top,
@@ -191,6 +216,9 @@ export function resolveChrome(
       return def?.marginBottom ?? input.pageConfig.margins.bottom;
     },
     payload: resolved,
-    stable: true,
+    // A page-count token measured against no count is a guess, so ask for the
+    // iteration that has one. Only the first layout of a document pays it —
+    // later runs inherit the count from the previous run.
+    stable: knownPageCount !== null || !countsPages(resolved.slots),
   };
 }

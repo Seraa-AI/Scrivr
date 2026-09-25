@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { runMiniPipeline } from "./runMiniPipeline";
 import { runPipeline, defaultPageConfig, __setRunPipelineDepthForTest } from "./PageLayout";
 import { createMeasurer, paragraph as p, heading, doc } from "../test-utils";
+import { Schema } from "prosemirror-model";
+import { InlineRegistry } from "./BlockRegistry";
 
 describe("runMiniPipeline", () => {
   describe("basic measurement", () => {
@@ -176,5 +178,50 @@ describe("runPipeline recursion guard", () => {
       measurer: createMeasurer(),
     });
     expect(layout.pages).toHaveLength(1);
+  });
+});
+
+/**
+ * A header is laid out by this pipeline, and a header is where inline atoms
+ * that size themselves live — a page number, a date. Without the registry the
+ * mini pipeline cannot ask them how wide they are, so the band reserves
+ * whatever their attrs happen to say and the painted glyphs overflow it.
+ */
+describe("inline atoms in a mini-doc", () => {
+  const badgeSchema = new Schema({
+    nodes: {
+      doc: { content: "block+" },
+      paragraph: { group: "block", content: "inline*" },
+      text: { group: "inline" },
+      badge: { group: "inline", inline: true, atom: true },
+    },
+    marks: {},
+  });
+
+  const miniDoc = badgeSchema.node("doc", null, [
+    badgeSchema.node("paragraph", null, [badgeSchema.nodes["badge"]!.create()]),
+  ]);
+
+  it("measures them with the registry it is handed", () => {
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("badge", {
+      measure: () => ({ width: 24, height: 12 }),
+      render: () => {},
+    });
+
+    const layout = runMiniPipeline(miniDoc, {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+      inlineRegistry,
+    });
+
+    const spans = layout.pages[0]!.blocks
+      .flatMap((b) => b.lines)
+      .flatMap((l) => l.spans)
+      .filter((s) => s.kind === "object");
+
+    expect(spans).toHaveLength(1);
+    expect({ width: spans[0]!.width, height: spans[0]!.height })
+      .toEqual({ width: 24, height: 12 });
   });
 });
