@@ -5,6 +5,7 @@ import {
   populateCharMap,
   resolveLeafBlockDimensions,
 } from "./BlockLayout";
+import { Schema } from "prosemirror-model";
 import { TextBlockStrategy } from "./TextBlockStrategy";
 import { CharacterMap } from "./CharacterMap";
 import type { InlineStrategy } from "./BlockRegistry";
@@ -1678,5 +1679,67 @@ describe("TextBlockStrategy — inline image rendering", () => {
     expect(objectSpans).toHaveLength(1);
     expect(objectSpans[0]!.width).toBe(100);
     expect(objectSpans[0]!.height).toBe(80);
+  });
+});
+
+// ── Inline atoms that size themselves ─────────────────────────────────────────
+//
+// An extension declares an inline node and an `InlineStrategy` to measure and
+// paint it. That declaration is the whole contract — the node should not also
+// have to carry width/height attrs it does not use. `pageNumber` carries
+// `width: 7, height: 10` for exactly this reason and `measure()` overwrites
+// both, which is the workaround this covers.
+
+describe("an inline atom with a strategy but no size attrs", () => {
+  const badgeSchema = new Schema({
+    nodes: {
+      doc: { content: "block+" },
+      paragraph: { group: "block", content: "inline*" },
+      text: { group: "inline" },
+      // No width/height: the strategy measures it.
+      badge: { group: "inline", inline: true, atom: true, attrs: { label: { default: "!" } } },
+    },
+    marks: {},
+  });
+
+  function layoutWithBadge(inlineRegistry?: InlineRegistry) {
+    const badge = badgeSchema.nodes["badge"]!.create({ label: "!" });
+    const para = badgeSchema.node("paragraph", null, [badgeSchema.text("Hi "), badge]);
+    return layoutBlock(para, {
+      nodePos: 0,
+      x: 0,
+      y: 0,
+      availableWidth: 400,
+      page: 1,
+      measurer: createMeasurer(),
+      ...(inlineRegistry ? { inlineRegistry } : {}),
+    });
+  }
+
+  const objectSpans = (block: ReturnType<typeof layoutBlock>) =>
+    block.lines.flatMap((line) => line.spans).filter((span) => span.kind === "object");
+
+  it("is laid out, and takes the size its strategy measures", () => {
+    const registry = new InlineRegistry();
+    registry.register("badge", {
+      measure: () => ({ width: 24, height: 12 }),
+      render: () => {},
+    });
+
+    const spans = objectSpans(layoutWithBadge(registry));
+
+    expect(spans).toHaveLength(1);
+    expect({ width: spans[0]!.width, height: spans[0]!.height }).toEqual({ width: 24, height: 12 });
+  });
+
+  it("is dropped when nothing claims it — no strategy and no size", () => {
+    // The honest outcome for a node nobody owns, but it must be loud: a span
+    // that silently never appears is indistinguishable from a broken renderer.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(objectSpans(layoutWithBadge())).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("badge"));
+
+    warn.mockRestore();
   });
 });
