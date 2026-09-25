@@ -288,3 +288,86 @@ describe("runPipeline recursion guard — unaffected by aggregator loop", () => 
     expect(() => runPipeline(d, buildOptions())).not.toThrow();
   });
 });
+
+/**
+ * A contributor that asks for a second opinion without moving anything.
+ *
+ * A header token that grows a digit wider is the real case: the band reserves
+ * the same height, so the pages the flow would produce are the pages already
+ * in hand. Correctness there costs one more measure(), and it should not also
+ * cost a second pagination of the whole document.
+ */
+describe("runChromeLoop — an iteration that changes no reservation", () => {
+  function unstableOnceContribution(top: number): PageChromeContribution {
+    let measured = 0;
+    return {
+      name: "settles",
+      measure: (): ChromeContribution => {
+        measured += 1;
+        return {
+          topForPage: () => top,
+          bottomForPage: () => 0,
+          stable: measured > 1,
+          payload: { measured },
+        };
+      },
+      render: () => {},
+    };
+  }
+
+  /**
+   * The layout iteration 2 was shown, and the layout the loop returned. Same
+   * object means the pages iteration 1 built were kept; a different one means
+   * the document was laid out again.
+   */
+  function flowsSeenBy(contribution: PageChromeContribution) {
+    const d = doc(...Array.from({ length: 80 }, (_, i) => p(`Block ${i}`)));
+    let shownToIteration2: DocumentLayout | null = null;
+    const watched: PageChromeContribution = {
+      ...contribution,
+      measure: (input: PageChromeMeasureInput, ctx: LayoutIterationContext) => {
+        if (ctx.iteration === 2) shownToIteration2 = ctx.currentFlowLayout;
+        return contribution.measure(input, ctx);
+      },
+    };
+
+    const result = runChromeLoop(d, buildOptions(), [watched], 1, {}, null, buildMeasureInput(d));
+
+    expect(result.iterationCount).toBe(2);
+    return { shownToIteration2, returned: result.flow.layout };
+  }
+
+  it("re-measures without re-paginating", () => {
+    const { shownToIteration2, returned } = flowsSeenBy(unstableOnceContribution(120));
+
+    expect(shownToIteration2).not.toBeNull();
+    expect(returned).toBe(shownToIteration2);
+  });
+
+  it("still re-paginates when the reservation actually moves", () => {
+    const d = doc(...Array.from({ length: 80 }, (_, i) => p(`Block ${i}`)));
+    let measured = 0;
+    const growing: PageChromeContribution = {
+      name: "grows",
+      measure: (): ChromeContribution => {
+        measured += 1;
+        return {
+          topForPage: () => (measured === 1 ? 100 : 300),
+          bottomForPage: () => 0,
+          stable: measured > 1,
+          payload: {},
+        };
+      },
+      render: () => {},
+    };
+
+    const result = runChromeLoop(
+      d, buildOptions(), [growing], 1, {}, null, buildMeasureInput(d),
+    );
+
+    // The taller band is the one the final layout was built against. It adds
+    // to the margin rather than replacing it — replacesTopMargin is unset.
+    expect(result.flow.layout.metrics![0]!.contentTop)
+      .toBe(defaultPageConfig.margins.top + 300);
+  });
+});

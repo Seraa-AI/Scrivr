@@ -159,7 +159,10 @@ describe("resolveChrome", () => {
     expect(contrib.topForPage(2)).toBeGreaterThan(0); // default slot
   });
 
-  it("always returns stable: true", () => {
+  it("converges in one iteration when the header is plain content", () => {
+    // Band height does not depend on the flow, so there is nothing to
+    // re-measure — only a page-count token makes a first layout unstable
+    // (see tokenMeasurement.test.ts).
     const policy: HeaderFooterPolicy = {
       enabled: true,
       differentFirstPage: false,

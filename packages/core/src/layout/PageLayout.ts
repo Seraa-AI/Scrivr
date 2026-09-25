@@ -1300,6 +1300,7 @@ function runPipelineBody(
     fontConfig: resolvedFontConfig,
     ...(options.fonts ? { fonts: options.fonts } : {}),
     ...(options.fontModifiers ? { fontModifiers: options.fontModifiers } : {}),
+    ...(options.inlineRegistry ? { inlineRegistry: options.inlineRegistry } : {}),
   };
 
   const contributions = options.pageChromeContributions ?? [];

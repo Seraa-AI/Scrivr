@@ -762,10 +762,9 @@ function extractSpans(
     // has neither — and is intercepted by name above anyway — so it cannot be
     // mistaken for an object and given a 200px line box.
     //
-    // A strategy alone is enough. Requiring size attrs as well forced an
-    // extension to carry numbers it does not use: `pageNumber` declares
-    // `width: 7, height: 10` purely to get here, and `measure()` overwrites
-    // both a few lines down.
+    // A strategy alone is enough. An atom that measures itself — a page
+    // number, a date — has no size to declare, and demanding one would make it
+    // carry a number `measure()` overwrites a few lines down.
     if (child.isLeaf && !child.isText) {
       const w = child.attrs["width"] as number | null | undefined;
       const h = child.attrs["height"] as number | null | undefined;

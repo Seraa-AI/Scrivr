@@ -26,6 +26,29 @@ import {
 
 const MAX_ITERATIONS = 5;
 
+/**
+ * What a chrome resolution reserves, flattened to numbers.
+ *
+ * Read once, when the resolution is new. A contributor's closures are its own
+ * to write and may answer from state that moves underneath them, so deciding
+ * anything by calling last iteration's closures a second time would be asking
+ * a question about the past and getting an answer about the present.
+ */
+function sampleReservations(resolved: ResolvedChrome, pageCount: number): string {
+  const parts: string[] = [];
+  // Sampled one page past the end: the last iteration's count is a lower
+  // bound, and a band that changes only on a page that does not exist yet
+  // still changes the layout that would create it.
+  for (const name of Object.keys(resolved.contributions).sort()) {
+    const c = resolved.contributions[name]!;
+    parts.push(name, String(c.replacesTopMargin), String(c.replacesBottomMargin));
+    for (let page = 1; page <= pageCount + 1; page++) {
+      parts.push(String(c.topForPage(page)), String(c.bottomForPage(page)));
+    }
+  }
+  return parts.join("|");
+}
+
 export interface ChromeLoopResult {
   /** Final flow pipeline result (pages + metrics; no floats/fragments yet). */
   flow: FlowPipelineResult;
@@ -54,6 +77,7 @@ export function runChromeLoop(
   measureInput: PageChromeMeasureInput,
 ): ChromeLoopResult {
   let currentFlow: FlowPipelineResult | null = null;
+  let previousSample: string | null = null;
   let finalContribs: Record<string, ChromeContribution> = {};
   let prevIterationPayloads: Record<string, unknown> = {};
   let converged = false;
@@ -81,7 +105,20 @@ export function runChromeLoop(
     }
 
     const resolved: ResolvedChrome = { contributions: contribs, metricsVersion: 0 };
-    currentFlow = runFlowPipeline(doc, options, resolved, runId);
+    // Re-paginating against chrome that reserves exactly what it did last
+    // iteration would reproduce the pages already in hand. A contributor that
+    // asked for another look without moving a band — a header token that grew
+    // a digit wider — pays for the measure, not for the document.
+    const sample: string | null =
+      currentFlow === null
+        ? null
+        : sampleReservations(resolved, currentFlow.layout.pages.length);
+    if (sample === null || sample !== previousSample) {
+      currentFlow = runFlowPipeline(doc, options, resolved, runId);
+      // Against the count this pagination produced, which is what the next
+      // iteration will be compared on.
+      previousSample = sampleReservations(resolved, currentFlow.layout.pages.length);
+    }
     finalContribs = contribs;
 
     if (allStable) {

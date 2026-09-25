@@ -15,7 +15,7 @@ import type { IEditor, EditorSurface } from "@scrivr/core";
 import { TextSelection } from "@scrivr/core/pm";
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { getHeaderFooterPolicy } from "./getPolicy";
-import { resolveChrome } from "./resolveChrome";
+import { resolveChrome, isResolvedHeaderFooter } from "./resolveChrome";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { drawPageChrome } from "./drawPageChrome";
 import { pageNumberNode, totalPagesNode, dateNode } from "./tokens";
@@ -150,11 +150,6 @@ function updateHeaderFooterPolicy(
 
   editor.applyTransaction(state.tr.setDocAttribute("headerFooter", nextPolicy));
   return true;
-}
-
-function isResolvedHeaderFooter(value: unknown): value is ResolvedHeaderFooter {
-  if (typeof value !== "object" || value === null) return false;
-  return "policy" in value && "slots" in value;
 }
 
 /**
