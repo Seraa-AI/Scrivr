@@ -755,14 +755,22 @@ function extractSpans(
     }
 
     // Inline non-text leaf node (image, widget, …).
-    // Guard: only nodes with explicit numeric width/height attrs are inline
-    // objects. Structural inline leaves like hardBreak have no size attrs and
-    // must NOT be treated as inline objects — doing so would give them a 200px
-    // height and create huge blank line boxes.
+    //
+    // Something has to claim it: either an `InlineStrategy`, which is an
+    // extension saying it owns how this node is measured and painted, or
+    // explicit numeric width/height attrs. A structural leaf like a hardBreak
+    // has neither — and is intercepted by name above anyway — so it cannot be
+    // mistaken for an object and given a 200px line box.
+    //
+    // A strategy alone is enough. Requiring size attrs as well forced an
+    // extension to carry numbers it does not use: `pageNumber` declares
+    // `width: 7, height: 10` purely to get here, and `measure()` overwrites
+    // both a few lines down.
     if (child.isLeaf && !child.isText) {
       const w = child.attrs["width"] as number | null | undefined;
       const h = child.attrs["height"] as number | null | undefined;
-      if (typeof w === "number" || typeof h === "number") {
+      const claimed = inlineRegistry?.get(child.type.name) !== undefined;
+      if (claimed || typeof w === "number" || typeof h === "number") {
         // Anchored-object anchor span: when the image's resolved wrapMode is
         // anything other than "inline", emit a zero-width/zero-height object
         // span. This keeps the doc position in the line box but contributes
@@ -832,11 +840,30 @@ function extractSpans(
           ...(atomResolution !== undefined ? { resolution: atomResolution } : {}),
           verticalAlign,
         });
+      } else {
+        // Nobody owns it, so there is nothing honest to lay out. Said by name
+        // once: a node that silently never appears is indistinguishable from
+        // a broken renderer, which is how this went unnoticed before.
+        warnUnclaimedInline(child.type.name);
       }
     }
   });
 
   return spans;
+}
+
+/** Node types already reported, so one unclaimed node is not a per-layout log. */
+const warnedUnclaimed = new Set<string>();
+
+function warnUnclaimedInline(nodeType: string): void {
+  if (warnedUnclaimed.has(nodeType)) return;
+  warnedUnclaimed.add(nodeType);
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[scrivr] inline node "${nodeType}" has no InlineStrategy and no width/height ` +
+      `attrs, so it will not be laid out or rendered. Register one with ` +
+      `addInlineHandlers() on the extension that defines it.`,
+  );
 }
 
 /**
