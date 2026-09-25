@@ -3,9 +3,10 @@
  * These only exist in the schema when the HeaderFooter extension is loaded.
  *
  * None of them declares a size. Each is claimed by an `InlineStrategy` in
- * tokenStrategies.ts, which measures the text it is about to draw — the digits
- * of a page count, a formatted date — against the font the band is set in. A
- * constant here could only ever be right for one font and one value.
+ * tokenStrategies.ts, which sizes it against the font the band is set in — a
+ * formatted date by its own text, a page number by the widest digit, so the
+ * box does not twitch between page 8 and page 9. A constant here could only
+ * ever be right for one font and one value.
  */
 
 import type { NodeSpec } from "@scrivr/core/pm";

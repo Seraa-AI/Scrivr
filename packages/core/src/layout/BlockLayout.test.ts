@@ -1686,9 +1686,8 @@ describe("TextBlockStrategy — inline image rendering", () => {
 //
 // An extension declares an inline node and an `InlineStrategy` to measure and
 // paint it. That declaration is the whole contract — the node should not also
-// have to carry width/height attrs it does not use. `pageNumber` carries
-// `width: 7, height: 10` for exactly this reason and `measure()` overwrites
-// both, which is the workaround this covers.
+// have to carry width/height attrs it does not use, because a constant can
+// only ever be right for one font and one value.
 
 describe("an inline atom with a strategy but no size attrs", () => {
   const badgeSchema = new Schema({

@@ -3,18 +3,18 @@
  * Each token renders its actual value (page number, total pages, date)
  * instead of the placeholder text from the node spec.
  *
- * The current page context is set by drawPageChrome before rendering
- * and read by each strategy during render.
- *
- * Each strategy implements measure() for dynamic width calculation during
- * layout. This uses the widest digit (max of 0-9) × digit count for numbers,
- * ensuring stable layout that doesn't thrash when page numbers change.
+ * The page context below is written by whoever is about to ask a token its
+ * size or draw it: resolveChrome once per layout run, canvas and PDF paint
+ * once per page. Both measure() and render() read it.
  */
 
 import type { InlineStrategy, TextMeasurerLike } from "@scrivr/core";
 import type { Node } from "@scrivr/core/pm";
 
-/** Current page context — set before rendering, read by token strategies. */
+/** Node types whose reserved width follows the document's page count. */
+export const PAGE_COUNT_TOKENS: ReadonlySet<string> = new Set(["pageNumber", "totalPages"]);
+
+/** Current page context — set before measuring or painting, read by both. */
 let currentPageNumber = 1;
 let currentTotalPages = 1;
 
@@ -28,9 +28,9 @@ export function getCurrentPageNumber(): number { return currentPageNumber; }
 export function getCurrentTotalPages(): number { return currentTotalPages; }
 
 /**
- * Measure the width of a digit string using the widest digit in the font.
- * Returns a stable width that doesn't change when "1" becomes "2" — only
- * when the digit count changes (e.g. page 9 → page 10).
+ * Width of `digitCount` digits, measured as the widest digit in the font. A
+ * page number sized to its own glyphs would resize as the reader scrolls from
+ * page 8 to 9; sized to the widest digit it only changes when the count does.
  */
 function measureDigitWidth(digitCount: number, font: string, measurer: TextMeasurerLike): number {
   let widest = 0;
@@ -39,6 +39,15 @@ function measureDigitWidth(digitCount: number, font: string, measurer: TextMeasu
     if (run.totalWidth > widest) widest = run.totalWidth;
   }
   return widest * digitCount;
+}
+
+/**
+ * How many digits the highest page number takes. Counted from the number's own
+ * text: `ceil(log10(n))` is one short at every exact power of ten, so a
+ * ten-page document reserved a single digit and painted two.
+ */
+function digitsInPageCount(): number {
+  return String(Math.max(currentTotalPages, 1)).length;
 }
 
 function measureTextWidth(text: string, font: string, measurer: TextMeasurerLike): number {
@@ -71,11 +80,8 @@ export const pageNumberStrategy: InlineStrategy = {
   verticalAlign: "baseline",
 
   measure(_node, font, measurer) {
-    // Reserve width for up to 3 digits (covers 1-999 pages). Uses widest
-    // digit so layout is stable across page number changes.
-    const digits = Math.max(1, Math.ceil(Math.log10(Math.max(currentTotalPages, 2))));
     return {
-      width: measureDigitWidth(Math.max(digits, 1), font, measurer),
+      width: measureDigitWidth(digitsInPageCount(), font, measurer),
       height: fontHeight(font),
     };
   },
@@ -89,9 +95,8 @@ export const totalPagesStrategy: InlineStrategy = {
   verticalAlign: "baseline",
 
   measure(_node, font, measurer) {
-    const digits = Math.max(1, Math.ceil(Math.log10(Math.max(currentTotalPages, 2))));
     return {
-      width: measureDigitWidth(Math.max(digits, 1), font, measurer),
+      width: measureDigitWidth(digitsInPageCount(), font, measurer),
       height: fontHeight(font),
     };
   },

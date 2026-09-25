@@ -18,7 +18,7 @@ import {
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { resolveSlot } from "./resolveSlot";
 import { chromeFontConfig } from "./chromeFontConfig";
-import { setTokenContext } from "./tokenStrategies";
+import { setTokenContext, PAGE_COUNT_TOKENS } from "./tokenStrategies";
 
 /** Measured layout + reserved height for one header/footer slot. */
 export interface SlotLayout {
@@ -45,13 +45,19 @@ export interface ResolvedHeaderFooter {
   defaultMarginBottom: number;
 }
 
+/** Narrows a ChromeContribution payload back to this contributor's own. */
+export function isResolvedHeaderFooter(value: unknown): value is ResolvedHeaderFooter {
+  if (typeof value !== "object" || value === null) return false;
+  return "policy" in value && "slots" in value;
+}
+
 /** Whether any slot holds a token whose width follows the document's page count. */
 function countsPages(slots: ResolvedHeaderFooter["slots"]): boolean {
   return Object.values(slots).some((slot) => {
     if (!slot) return false;
     let found = false;
     slot.doc.descendants((node) => {
-      if (node.type.name === "pageNumber" || node.type.name === "totalPages") found = true;
+      if (PAGE_COUNT_TOKENS.has(node.type.name)) found = true;
       return !found;
     });
     return found;
@@ -74,8 +80,8 @@ function measureSlot(
     fontConfig: chromeFontConfig,
     ...(input.fonts ? { fonts: input.fonts } : {}),
     ...(input.fontModifiers ? { fontModifiers: input.fontModifiers } : {}),
-    // Without this, tokens fall back to the constant in their node spec and
-    // the glyphs they paint overflow the box reserved for them.
+    // Required, not optional: the tokens declare no size of their own, so
+    // without their strategies there is nothing to reserve and they vanish.
     ...(input.inlineRegistry ? { inlineRegistry: input.inlineRegistry } : {}),
   });
 
@@ -128,10 +134,16 @@ export function resolveChrome(
 ): ChromeContribution {
   // Token strategies size digits from this context, which paint also writes as
   // it draws each page. Seed it from the flow so a measurement answers from the
-  // document, not from whichever page was painted last.
-  const knownPageCount =
-    ctx.currentFlowLayout?.pages.length ?? ctx.previousRunFlowLayout?.pages.length ?? null;
-  setTokenContext(1, knownPageCount ?? 1);
+  // document, not from whichever page was painted last. The page number is
+  // inert here — measurement is page-independent and reads only the total.
+  //
+  // Only this run's flow counts as knowing. A remembered count is a starting
+  // guess: the previous run's may predate the edit being laid out, and while a
+  // document streams in it is the count of a partial layout.
+  const verifiedPageCount = ctx.currentFlowLayout?.pages.length ?? null;
+  const assumedPageCount =
+    verifiedPageCount ?? ctx.previousRunFlowLayout?.pages.length ?? 1;
+  setTokenContext(1, assumedPageCount);
 
   const resolved: ResolvedHeaderFooter = {
     policy,
@@ -216,9 +228,10 @@ export function resolveChrome(
       return def?.marginBottom ?? input.pageConfig.margins.bottom;
     },
     payload: resolved,
-    // A page-count token measured against no count is a guess, so ask for the
-    // iteration that has one. Only the first layout of a document pays it —
-    // later runs inherit the count from the previous run.
-    stable: knownPageCount !== null || !countsPages(resolved.slots),
+    // Band height doesn't depend on the flow, so there is normally nothing to
+    // re-measure. A page-count token is the exception: its width follows a
+    // number this run produces, so a measurement made before the flow ran is a
+    // guess and the aggregator is asked for the iteration that can check it.
+    stable: verifiedPageCount !== null || !countsPages(resolved.slots),
   };
 }

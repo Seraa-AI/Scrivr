@@ -293,7 +293,7 @@ export interface PageChromeMeasureInput {
   fontConfig: FontConfig;
   fonts?: LayoutFontResolver;
   fontModifiers?: Map<string, FontModifier>;
-  /** Passed on to runMiniPipeline so a contributor's atoms measure themselves. */
+  /** Contributors forward this to runMiniPipeline so their atoms measure themselves. */
   inlineRegistry?: InlineRegistry;
 }
 

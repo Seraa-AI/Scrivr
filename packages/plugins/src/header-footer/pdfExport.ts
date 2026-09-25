@@ -21,6 +21,7 @@
 
 import type { LayoutBlock, PdfNodeContext, Rgb } from "@scrivr/core";
 import { fontSizeOf } from "@scrivr/core";
+import { isResolvedHeaderFooter } from "./resolveChrome";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./tokenStrategies";
@@ -31,11 +32,6 @@ type BandContext = Pick<PdfNodeContext, "layout" | "blocks">;
 /** A token paints one string and nothing else. */
 type TokenContext = Pick<PdfNodeContext, "draw" | "font">;
 
-function isResolvedPayload(value: unknown): value is ResolvedHeaderFooter {
-  if (typeof value !== "object" || value === null) return false;
-  return "policy" in value && "slots" in value;
-}
-
 /**
  * PDF chrome handler for headerFooter. Called once per page by the export
  * pipeline's chrome dispatch loop.
@@ -45,7 +41,7 @@ export function renderHeaderFooterPdf(
   payload: unknown,
   pdfCtx: BandContext,
 ): void {
-  if (!isResolvedPayload(payload)) return;
+  if (!isResolvedHeaderFooter(payload)) return;
   const pageNumber = layoutPage.pageNumber;
   const metrics = pdfCtx.layout.metrics?.[pageNumber - 1];
   if (!metrics) return;

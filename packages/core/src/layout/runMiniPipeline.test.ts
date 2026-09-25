@@ -184,8 +184,7 @@ describe("runPipeline recursion guard", () => {
 /**
  * A header is laid out by this pipeline, and a header is where inline atoms
  * that size themselves live — a page number, a date. Without the registry the
- * mini pipeline cannot ask them how wide they are, so the band reserves
- * whatever their attrs happen to say and the painted glyphs overflow it.
+ * mini pipeline cannot ask them how wide they are.
  */
 describe("inline atoms in a mini-doc", () => {
   const badgeSchema = new Schema({

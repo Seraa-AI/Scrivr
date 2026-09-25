@@ -28,8 +28,8 @@ export interface MiniPipelineOptions {
   fonts?: LayoutFontResolver;
   /**
    * Strategies for inline atoms that size themselves — a page number, a date.
-   * Without it their spans fall back to whatever width/height attrs they carry,
-   * which is a constant, so the band reserves the same box for "1" and "428".
+   * Required to lay one out: an atom nothing claims and that declares no size
+   * has nothing to reserve, so BlockLayout drops it and warns.
    */
   inlineRegistry?: InlineRegistry;
 }

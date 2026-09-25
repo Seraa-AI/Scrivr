@@ -22,7 +22,7 @@ import {
   type TextMeasurerLike,
 } from "@scrivr/core";
 import { HeaderFooter } from "../HeaderFooter";
-import { resolveChrome, type ResolvedHeaderFooter } from "../resolveChrome";
+import { resolveChrome, isResolvedHeaderFooter } from "../resolveChrome";
 import {
   pageNumberStrategy,
   totalPagesStrategy,
@@ -75,9 +75,12 @@ function headerOf(...nodes: Array<Record<string, unknown>>): HeaderFooterPolicy 
 
 /** A LayoutIterationContext whose flow layout reports `pages` pages. */
 function ctxWithPages(pages: number | null, which: "current" | "previousRun" = "current"): LayoutIterationContext {
-  const layout = pages === null
-    ? null
-    : ({ pages: Array.from({ length: pages }, (_, i) => ({ pageNumber: i + 1, blocks: [] })) } as unknown as DocumentLayout);
+  const layout: DocumentLayout | null = pages === null ? null : {
+    pages: Array.from({ length: pages }, (_, i) => ({ pageNumber: i + 1, blocks: [] })),
+    pageConfig,
+    version: 1,
+    totalContentHeight: 0,
+  };
   return {
     runId: 1,
     iteration: 1,
@@ -96,8 +99,10 @@ function headerSpans(policy: HeaderFooterPolicy, ctx: LayoutIterationContext) {
     ctx,
     0,
   );
-  const payload = contribution.payload as ResolvedHeaderFooter;
-  return (payload.slots.defaultHeader?.layout.pages[0]?.blocks ?? [])
+  if (!isResolvedHeaderFooter(contribution.payload)) {
+    throw new Error("resolveChrome returned a payload it does not own");
+  }
+  return (contribution.payload.slots.defaultHeader?.layout.pages[0]?.blocks ?? [])
     .flatMap((b) => b.lines)
     .flatMap((l) => l.spans)
     .filter((s) => s.kind === "object");
@@ -115,6 +120,22 @@ describe("the width a header token reserves", () => {
     const spans = headerSpans(headerOf({ type: "pageNumber" }), ctxWithPages(428));
 
     expect(spans[0]!.width).toBe(DIGIT_W * 3);
+  });
+
+  // Every one of these is a power of ten, where counting digits with
+  // ceil(log10(n)) comes back one short: a ten-page document reserved a single
+  // digit and painted two.
+  it.each([
+    [9, 1],
+    [10, 2],
+    [99, 2],
+    [100, 3],
+    [999, 3],
+    [1000, 4],
+  ])("reserves %i pages worth of digits (%i)", (pages, digits) => {
+    const spans = headerSpans(headerOf({ type: "pageNumber" }), ctxWithPages(pages));
+
+    expect(spans[0]!.width).toBe(DIGIT_W * digits);
   });
 
   it("fits the date it will actually print", () => {
@@ -139,7 +160,7 @@ describe("the width a header token reserves", () => {
 });
 
 describe("what the header reports about its own stability", () => {
-  it("is unstable on a first layout, where the page count is still a guess", () => {
+  it("is unstable before this run's flow has produced a count", () => {
     const contribution = resolveChrome(
       headerOf({ type: "pageNumber" }),
       { doc, pageConfig, measurer, fontConfig: defaultFontConfig, inlineRegistry: registry },
@@ -150,13 +171,31 @@ describe("what the header reports about its own stability", () => {
     expect(contribution.stable).toBe(false);
   });
 
-  it("is stable once a page count is known", () => {
+  it("is stable once this run's flow has produced one", () => {
     const input = { doc, pageConfig, measurer, fontConfig: defaultFontConfig, inlineRegistry: registry };
 
     expect(resolveChrome(headerOf({ type: "pageNumber" }), input, ctxWithPages(9), 0).stable).toBe(true);
-    expect(
-      resolveChrome(headerOf({ type: "pageNumber" }), input, ctxWithPages(9, "previousRun"), 0).stable,
-    ).toBe(true);
+  });
+
+  it("does not settle for a count remembered from the previous run", () => {
+    // That count predates the edit being laid out, and while a document
+    // streams in it belongs to a partial layout — a 428-page document whose
+    // remembered count is 7 is the original bug, reached by another road.
+    const input = { doc, pageConfig, measurer, fontConfig: defaultFontConfig, inlineRegistry: registry };
+
+    const contribution = resolveChrome(
+      headerOf({ type: "pageNumber" }), input, ctxWithPages(7, "previousRun"), 0,
+    );
+
+    expect(contribution.stable).toBe(false);
+  });
+
+  it("still measures against the remembered count while it has nothing better", () => {
+    // Unstable does not mean unmeasured: iteration 1 has to reserve something,
+    // and last run's count beats assuming one page.
+    const spans = headerSpans(headerOf({ type: "pageNumber" }), ctxWithPages(99, "previousRun"));
+
+    expect(spans[0]!.width).toBe(DIGIT_W * 2);
   });
 
   it("is stable on a first layout when nothing in the header counts pages", () => {
