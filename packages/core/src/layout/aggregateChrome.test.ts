@@ -371,3 +371,49 @@ describe("runChromeLoop — an iteration that changes no reservation", () => {
       .toBe(defaultPageConfig.margins.top + 300);
   });
 });
+
+it("publishes changed band geometry even when body reservations stay fixed", () => {
+  const d = doc(p("body"));
+  const moving: PageChromeContribution = {
+    name: "moving",
+    measure: (_input, ctx) => ({
+      topForPage: () => 120,
+      bottomForPage: () => 100,
+      replacesTopMargin: true,
+      replacesBottomMargin: true,
+      topBandStart: () => ctx.iteration === 1 ? 20 : 40,
+      bottomBandStart: () => ctx.iteration === 1 ? 10 : 30,
+      stable: ctx.iteration > 1,
+    }),
+    render: () => {},
+  };
+  const result = runChromeLoop(d, buildOptions(), [moving], 1, {}, null, buildMeasureInput(d));
+  expect(result.flow.layout.metrics![0]).toMatchObject({
+    contentTop: 120,
+    headerTop: 40,
+    headerHeight: 80,
+    footerHeight: 70,
+  });
+  expect(result.convergence).toBe("stable");
+});
+
+it("lets contributors verify a flow built after they reported stable", () => {
+  const d = doc(...Array.from({ length: 80 }, (_, i) => p(`Block ${i}`)));
+  const counts: Array<number | undefined> = [];
+  const growing: PageChromeContribution = {
+    name: "growing",
+    measure: (_input, ctx) => {
+      counts.push(ctx.currentFlowLayout?.pages.length);
+      return {
+        topForPage: () => ctx.iteration === 1 ? 100 : 500,
+        bottomForPage: () => 0,
+        stable: ctx.currentFlowLayout !== null,
+      };
+    },
+    render: () => {},
+  };
+  const result = runChromeLoop(d, buildOptions(), [growing], 1, {}, null, buildMeasureInput(d));
+  expect(counts).toHaveLength(3);
+  expect(counts[2]).toBeGreaterThan(counts[1]!);
+  expect(counts[2]).toBe(result.flow.layout.pages.length);
+});

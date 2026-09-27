@@ -541,6 +541,7 @@ export class TileManager {
       measurer: this.editor.measurer,
       map: this.editor.charMap,
       markDecorators: this.editor.markDecorators,
+      fontModifiers: this.editor.fontModifiers,
       showMarginGuides: this.showMarginGuides,
       ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
       ...(this.editor.fontResolver ? { fontResolver: this.editor.fontResolver } : {}),

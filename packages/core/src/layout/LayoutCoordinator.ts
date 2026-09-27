@@ -882,10 +882,12 @@ export class LayoutCoordinator {
     this.charMap.clear();
     this.populatedPages.clear();
     performance.mark("scrivr:layout-chunk-start");
-    // Pass resumption so layout continues from the next unprocessed block
-    // rather than restarting from block 0 — O(N) total vs O(N²).
+    // Resume unchanged geometry from the next block. Carry the previous
+    // layout so chrome can seed its count and anchored placements survive
+    // chunk boundaries; the pipeline replays the prefix if geometry changes.
     this.layout = this.runLayout({
       resumption: this.layoutResumption,
+      previousLayout: this.layout,
       maxBlocks: chunkSize,
     });
     performance.mark("scrivr:layout-chunk-end");

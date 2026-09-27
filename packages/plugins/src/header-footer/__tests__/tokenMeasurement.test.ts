@@ -16,11 +16,19 @@ import {
   ServerEditor,
   StarterKit,
   InlineRegistry,
+  BlockRegistry,
+  defaultEditorTheme,
+  type FontModifier,
+  type LayoutBlock,
   defaultFontConfig,
+  runPipeline,
+  type PageLayoutOptions,
   type DocumentLayout,
   type LayoutIterationContext,
   type TextMeasurerLike,
 } from "@scrivr/core";
+import { drawPageChrome } from "../drawPageChrome";
+import { HeaderFooterSurfaceCache } from "../surfaces";
 import { HeaderFooter } from "../HeaderFooter";
 import { resolveChrome, isResolvedHeaderFooter } from "../resolveChrome";
 import {
@@ -204,4 +212,119 @@ describe("what the header reports about its own stability", () => {
 
     expect(resolveChrome(dated, input, ctxWithPages(null), 0).stable).toBe(true);
   });
+});
+
+
+describe("page-count feedback through pagination", () => {
+  // 78px of text plus a 10px digit fits 90px. Two digits wrap the token,
+  // increasing the band height and reducing how much body fits on each page.
+  const policy = headerOf({ type: "text", text: "abcdefghijklm" }, { type: "pageNumber" });
+  const options: PageLayoutOptions = {
+    pageConfig: {
+      ...pageConfig,
+      pageWidth: 110,
+      pageHeight: 150,
+      margins: { top: 10, bottom: 10, left: 10, right: 10 },
+    },
+    measurer,
+    inlineRegistry: registry,
+    pageChromeContributions: [{
+      name: "headerFooter",
+      measure: (input, ctx) => resolveChrome(policy, input, ctx, 0),
+      render: () => {},
+    }],
+  };
+  const body = (count: number) => doc.type.schema.node("doc", null,
+    Array.from({ length: count }, () => doc.type.schema.node("paragraph", null, [
+      doc.type.schema.text("body"),
+    ])),
+  );
+
+  function tokenWidth(layout: DocumentLayout): number | undefined {
+    const payload = layout.chromePayloads?.["headerFooter"];
+    if (!isResolvedHeaderFooter(payload)) throw new Error("Missing header layout");
+    return payload.slots.defaultHeader?.layout.pages[0]?.blocks
+      .flatMap((block) => block.lines).flatMap((line) => line.spans)
+      .find((span) => span.kind === "object")?.width;
+  }
+
+  it("measures against the final count when wrapping crosses another digit boundary", () => {
+    const layout = runPipeline(body(450), options);
+    expect(layout.pages).toHaveLength(100);
+    expect(tokenWidth(layout)).toBe(3 * DIGIT_W);
+    expect(layout.convergence).toBe("stable");
+    expect(layout.iterationCount).toBe(3);
+  });
+
+  it("streams the same body geometry as a full run when tokens wrap between chunks", () => {
+    const d = body(100);
+    const streamedOptions: PageLayoutOptions = { ...options, measureCache: new WeakMap(), maxBlocks: 40 };
+    const first = runPipeline(d, streamedOptions);
+    const snapshot = JSON.stringify(first);
+    const second = runPipeline(d, {
+      ...streamedOptions, previousLayout: first, resumption: first.resumption!,
+    });
+    expect(JSON.stringify(first)).toBe(snapshot);
+    const blocks = second.pages.flatMap((page) => page.blocks);
+    expect(blocks).toHaveLength(80);
+    expect(new Set(blocks.map((block) => block.nodePos)).size).toBe(80);
+    expect(second.resumption?.nextItemIndex).toBe(80);
+
+    const final = runPipeline(d, {
+      ...streamedOptions, previousLayout: second, resumption: second.resumption!,
+    });
+    const fresh = runPipeline(d, options);
+    expect(final.isPartial).toBeUndefined();
+    const positions = (layout: DocumentLayout) => layout.pages.flatMap((page) =>
+      page.blocks.map((block) => [page.pageNumber, block.nodePos, block.y, block.height]),
+    );
+    expect(positions(final)).toEqual(positions(fresh));
+    expect(final.metrics).toEqual(fresh.metrics);
+    expect(final.pageStarts).toEqual(fresh.pageStarts);
+    expect(tokenWidth(final)).toBe(tokenWidth(fresh));
+  });
+});
+
+
+it("keeps token typography and line geometry when a band enters live editing", () => {
+  const policy = headerOf(
+    { type: "text", text: "Page " },
+    { type: "pageNumber", marks: [{ type: "bold" }] },
+  );
+  const modifier: FontModifier = (font) => { font.size = "40px"; };
+  const fontModifiers = new Map([["bold", modifier]]);
+  const contribution = resolveChrome(policy, {
+    doc, pageConfig, measurer, fontConfig: defaultFontConfig,
+    inlineRegistry: registry, fontModifiers,
+  }, ctxWithPages(1), 0);
+  if (!isResolvedHeaderFooter(contribution.payload)) throw new Error("Missing header layout");
+  const resolved = contribution.payload;
+  const slot = resolved.slots.defaultHeader!;
+  const cache = new HeaderFooterSurfaceCache(doc.type.schema);
+  const surface = cache.getOrCreate("defaultHeader", policy.defaultHeader!);
+  const rendered: LayoutBlock[] = [];
+  // Record blocks at the render boundary: this test compares geometry, so the
+  // strategy never accesses the canvas or substitutes for the mini pipeline.
+  const blockRegistry = new BlockRegistry().register("paragraph", {
+    render: (block) => { rendered.push(block); return 0; },
+  });
+  drawPageChrome({
+    ctx: {
+      ctx: new Proxy({} as CanvasRenderingContext2D, { get() { throw new Error("Unexpected raster drawing"); } }),
+      pageNumber: 1, totalPages: 1, pageConfig, payload: resolved,
+      measurer, inlineRegistry: registry, blockRegistry, fontModifiers,
+      theme: defaultEditorTheme,
+      metrics: {
+        pageNumber: 1, contentTop: 150, contentBottom: 900,
+        contentHeight: 750, contentWidth: 624, headerTop: pageConfig.margins.top,
+        headerHeight: slot.reservedHeight, footerTop: 900, footerHeight: 0,
+      },
+    },
+    resolved, activeSurface: surface, activePage: 1,
+  });
+  const stored = slot.layout.pages[0]!.blocks;
+  const token = stored.flatMap((block) => block.lines).flatMap((line) => line.spans)
+    .find((span) => span.kind === "object");
+  expect(token).toMatchObject({ height: 40, font: "40px Arial, sans-serif" });
+  expect(rendered).toEqual(stored);
 });

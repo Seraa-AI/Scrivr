@@ -2986,3 +2986,80 @@ describe("clampPlacementsToPages — phantom-page guard", () => {
     expect(result).toBe(placements);
   });
 });
+
+describe("streamed pagination snapshots", () => {
+  it("can replay a cursor without mutating the earlier result", () => {
+    const d = doc(...Array.from({ length: 100 }, (_, i) => p(`Block ${i}`)));
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks: 40 };
+    const first = runPipeline(d, options);
+    const snapshot = JSON.stringify(first);
+    const second = runPipeline(d, { ...options, resumption: first.resumption! });
+    const replay = runPipeline(d, { ...options, resumption: first.resumption! });
+
+    expect(JSON.stringify(first)).toBe(snapshot);
+    expect(second.pages).toEqual(replay.pages);
+    expect(second.pages.flatMap((page) => page.blocks)).toHaveLength(80);
+    // Unchanged completed pages can be shared; only the growing buffers need copies.
+    expect(second.pages[0]).toBe(first.pages[0]);
+  });
+
+  it("preserves the cursor after pagination throws so the chunk can be retried", () => {
+    const d = doc(...Array.from({ length: 100 }, (_, i) => p(`Block ${i}`)));
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks: 40 };
+    const first = runPipeline(d, options);
+    const snapshot = JSON.stringify(first);
+    expect(() => runPipeline(d, {
+      ...options,
+      resumption: first.resumption!,
+      pageChromeContributions: [{
+        name: "failing",
+        measure: () => ({
+          topForPage: (page) => {
+            if (page > first.pages.length) throw new Error("measurement failed");
+            return 0;
+          },
+          bottomForPage: () => 0,
+          stable: true,
+        }),
+        render: () => {},
+      }],
+    })).toThrow("measurement failed");
+    expect(JSON.stringify(first)).toBe(snapshot);
+    const retry = runPipeline(d, { ...options, resumption: first.resumption! });
+    expect(retry.pages.flatMap((page) => page.blocks)).toHaveLength(80);
+  });
+
+  it.each([1, 7, 40])("matches a full layout when resumed in %i-block chunks", (maxBlocks) => {
+    const d = doc(...Array.from({ length: 100 }, (_, i) =>
+      i === 49 ? pageBreak() : p(`Paragraph ${i}`),
+    ));
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks };
+    let layout = runPipeline(d, options);
+    for (let chunk = 0; layout.isPartial && chunk < 100; chunk++) {
+      layout = runPipeline(d, { ...options, resumption: layout.resumption!, previousLayout: layout });
+    }
+    const fresh = runPipeline(d, { pageConfig: options.pageConfig, measurer: options.measurer });
+    expect(layout.isPartial).toBeUndefined();
+    expect(layout.pages).toEqual(fresh.pages);
+    expect(layout.metrics).toEqual(fresh.metrics);
+  });
+
+  it("replays the consumed prefix when geometry changes, preserving the chunk budget", () => {
+    const d = doc(p("first"), pageBreak(), ...Array.from({ length: 99 }, (_, i) => p(`Block ${i}`)));
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks: 40 };
+    const first = runPipeline(d, options);
+    const changed = {
+      ...options,
+      pageChromeContributions: [{
+        name: "header",
+        measure: () => ({ topForPage: () => 100, bottomForPage: () => 0, stable: true }),
+        render: () => {},
+      }],
+    };
+    const second = runPipeline(d, { ...changed, resumption: first.resumption!, previousLayout: first });
+    const fresh = runPipeline(d, { ...changed, maxBlocks: 80 });
+    expect(second.resumption?.nextItemIndex).toBe(81); // page break is not a block
+    expect(second.pages).toEqual(fresh.pages);
+    expect(second.metrics).toEqual(fresh.metrics);
+  });
+});

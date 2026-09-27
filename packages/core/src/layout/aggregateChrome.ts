@@ -1,6 +1,7 @@
 /**
  * Chrome aggregator loop — runs PageChromeContributions until every one
- * reports stable:true or MAX_ITERATIONS is reached. Zero contributors exit
+ * accepts the current flow and its geometry is unchanged, or MAX_ITERATIONS
+ * is reached. Flow-independent contributors (including zero contributors) exit
  * after iteration 1 with convergence:"stable". Exhaustion accepts the last
  * iteration's layout and flags convergence:"exhausted" for debugging.
  *
@@ -17,6 +18,8 @@ import {
   runFlowPipeline,
 } from "./PageLayout";
 import {
+  createPageGeometry,
+  samePageMetrics,
   type ChromeContribution,
   type ResolvedChrome,
   type LayoutIterationContext,
@@ -26,35 +29,12 @@ import {
 
 const MAX_ITERATIONS = 5;
 
-/**
- * What a chrome resolution reserves, flattened to numbers.
- *
- * Read once, when the resolution is new. A contributor's closures are its own
- * to write and may answer from state that moves underneath them, so deciding
- * anything by calling last iteration's closures a second time would be asking
- * a question about the past and getting an answer about the present.
- */
-function sampleReservations(resolved: ResolvedChrome, pageCount: number): string {
-  const parts: string[] = [];
-  // Sampled one page past the end: the last iteration's count is a lower
-  // bound, and a band that changes only on a page that does not exist yet
-  // still changes the layout that would create it.
-  for (const name of Object.keys(resolved.contributions).sort()) {
-    const c = resolved.contributions[name]!;
-    parts.push(name, String(c.replacesTopMargin), String(c.replacesBottomMargin));
-    for (let page = 1; page <= pageCount + 1; page++) {
-      parts.push(String(c.topForPage(page)), String(c.bottomForPage(page)));
-    }
-  }
-  return parts.join("|");
-}
-
 export interface ChromeLoopResult {
   /** Final flow pipeline result (pages + metrics; no floats/fragments yet). */
   flow: FlowPipelineResult;
   /** Chrome resolution used in the final iteration. */
   resolved: ResolvedChrome;
-  /** "stable" when every contributor reported stable:true; otherwise "exhausted". */
+  /** "stable" when contributors accept the final flow; otherwise "exhausted". */
   convergence: "stable" | "exhausted";
   /** 1..MAX_ITERATIONS. Zero contributors always returns 1. */
   iterationCount: number;
@@ -77,7 +57,6 @@ export function runChromeLoop(
   measureInput: PageChromeMeasureInput,
 ): ChromeLoopResult {
   let currentFlow: FlowPipelineResult | null = null;
-  let previousSample: string | null = null;
   let finalContribs: Record<string, ChromeContribution> = {};
   let prevIterationPayloads: Record<string, unknown> = {};
   let converged = false;
@@ -105,23 +84,25 @@ export function runChromeLoop(
     }
 
     const resolved: ResolvedChrome = { contributions: contribs, metricsVersion: 0 };
-    // Re-paginating against chrome that reserves exactly what it did last
-    // iteration would reproduce the pages already in hand. A contributor that
-    // asked for another look without moving a band — a header token that grew
-    // a digit wider — pays for the measure, not for the document.
-    const sample: string | null =
-      currentFlow === null
-        ? null
-        : sampleReservations(resolved, currentFlow.layout.pages.length);
-    if (sample === null || sample !== previousSample) {
-      currentFlow = runFlowPipeline(doc, options, resolved, runId);
-      // Against the count this pagination produced, which is what the next
-      // iteration will be compared on.
-      previousSample = sampleReservations(resolved, currentFlow.layout.pages.length);
+    // Compare the geometry actually used by pagination, rather than a subset
+    // of contributor inputs. The new geometry memoizes each page's answer;
+    // comparison and pagination therefore consume the same snapshot.
+    const geometry = createPageGeometry(options.pageConfig, resolved);
+    const needsPagination = currentFlow === null ||
+      !currentFlow.layout.metrics?.every((metrics) =>
+        samePageMetrics(metrics, geometry.metricsFor(metrics.pageNumber)),
+      );
+    const hadFlow = currentFlow !== null;
+    if (needsPagination) {
+      currentFlow = runFlowPipeline(doc, options, resolved, runId, geometry);
     }
     finalContribs = contribs;
 
-    if (allStable) {
+    // A contributor can certify the flow it was shown, not a new flow built
+    // after measure() returned. If geometry moved, let every contributor see
+    // the result before accepting convergence. Flow-independent contributors
+    // may still settle on the first pass.
+    if (allStable && (!hadFlow || !needsPagination)) {
       converged = true;
       break;
     }

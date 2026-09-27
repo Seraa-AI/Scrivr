@@ -23,6 +23,9 @@ import {
   type PageConfig,
 } from "../layout/PageLayout";
 
+import { Extension } from "../extensions/Extension";
+import type { FontModifier } from "../extensions/types";
+
 function frag(y: number, height: number): LayoutFragment {
   return { y, height } as LayoutFragment;
 }
@@ -797,4 +800,42 @@ describe("painting before the editor is ready", () => {
     // Scrolled while unready: the tiles moved, so painting really happened.
     expect(tops()).not.toEqual(before);
   });
+});
+
+
+it("gives chrome painting the editor's measurement font modifiers", () => {
+  const measured: Array<Map<string, FontModifier> | undefined> = [];
+  const painted: Array<Map<string, FontModifier> | undefined> = [];
+  const modifier: FontModifier = (font) => { font.size = "40px"; };
+  const extension = Extension.create({
+    name: "chromeTypography",
+    addFontModifiers: () => new Map([["bold", modifier]]),
+    addPageChrome: () => ({
+      name: "chromeTypography",
+      measure: (input) => {
+        measured.push(input.fontModifiers);
+        return {
+          topForPage: () => 60, bottomForPage: () => 0,
+          stable: true, payload: {},
+        };
+      },
+      render: (ctx) => { painted.push(ctx.fontModifiers); },
+    }),
+  });
+  const setup = makeRendererTestSetup({
+    pageCount: 1, scrollParent: true, extraExtensions: [extension],
+  });
+  const tiles = new TileManager(setup.editor, setup.container);
+  try {
+    tiles.update();
+    expect(measured.length).toBeGreaterThan(0);
+    expect(painted.length).toBeGreaterThan(0);
+    expect(setup.editor.fontModifiers.get("bold")).toBe(modifier);
+    for (const modifiers of [...measured, ...painted]) {
+      expect(modifiers).toBe(setup.editor.fontModifiers);
+    }
+  } finally {
+    tiles.destroy();
+    setup.cleanup();
+  }
 });

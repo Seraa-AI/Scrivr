@@ -101,6 +101,7 @@ function layoutAtBandY(
     },
     measurer: paintCtx.measurer,
     fontConfig: chromeFontConfig,
+    ...(paintCtx.fontModifiers ? { fontModifiers: paintCtx.fontModifiers } : {}),
     // The same resolver the page was measured with. Without it a header being
     // edited is measured against the family the document names rather than the
     // face that will draw it, so its lines reflow and its weight changes the

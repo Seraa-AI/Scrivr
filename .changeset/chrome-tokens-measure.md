@@ -29,9 +29,20 @@ Two further fixes to the width itself:
   edit being laid out, and during a streamed load belongs to a partial layout.
 
 To keep that verification cheap, the chrome aggregator no longer re-paginates
-when an iteration reserves exactly what the last one did. A contributor that
-asks for another look without moving a band now pays for the measurement, not
-for the whole document.
+when the computed page geometry is unchanged, including header and footer
+band positions. If measuring tokens wraps a band and changes pagination, the
+contributors see the new flow before the loop accepts convergence.
+
+Streamed layout now resumes from a replayable snapshot of both the paginated
+cursor and continuous-flow cursor. A pass owns its growing page buffers, so
+retries cannot duplicate body blocks. When chrome changes the saved geometry,
+layout replays the consumed prefix while preserving the chunk's progress.
+Completed layout tails are reused only when their geometry still matches.
+
+Chrome painting now receives the editor's font modifiers through the page
+renderer. Live header/footer measurement uses the same modifiers as stored
+measurement, preserving custom token typography and line geometry on entry
+to editing.
 
 **Breaking (schema):** `pageNumber`, `totalPages` and `date` no longer declare
 `width`/`height` attrs — their `InlineStrategy` measures them. Persisted

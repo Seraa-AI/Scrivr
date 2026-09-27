@@ -12,7 +12,7 @@ import { CharacterMap } from "../layout/CharacterMap";
 import { computeObjectRenderY } from "../layout/LineBreaker";
 import type { TextMeasurerLike } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
-import type { MarkDecorator } from "../extensions/types";
+import type { FontModifier, MarkDecorator } from "../extensions/types";
 import { resolveSpanFill } from "../layout/resolveSpanFill";
 import type { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { PageChromeContribution, PageMetrics } from "../layout/PageMetrics";
@@ -31,6 +31,8 @@ export interface RenderPageOptions {
   fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>;
   /** The resolver this layout was measured with, for chrome that re-lays out. */
   fontResolver?: LayoutFontResolver;
+  /** Mark-to-font modifiers for chrome contributors that measure while painting. */
+  fontModifiers?: Map<string, FontModifier>;
   /**
    * The layout version this render was scheduled for.
    * If it doesn't match currentVersion, the render is aborted.
@@ -90,6 +92,7 @@ export function renderPage(options: RenderPageOptions): boolean {
     markDecorators,
     fontResolutions,
     fontResolver,
+    fontModifiers,
     blockRegistry,
     inlineRegistry,
     anchoredObjects,
@@ -220,6 +223,7 @@ export function renderPage(options: RenderPageOptions): boolean {
         ...(inlineRegistry ? { inlineRegistry } : {}),
         ...(fontResolutions ? { fontResolutions } : {}),
         ...(fontResolver ? { fontResolver } : {}),
+        ...(fontModifiers ? { fontModifiers } : {}),
       });
     }
   }

@@ -25,7 +25,7 @@ import {
   type NormalizedImageAttrs,
 } from "./AnchoredObjects";
 import {
-  computePageMetrics,
+  samePageMetrics,
   buildPageStarts,
   createPageGeometry,
   EMPTY_RESOLVED_CHROME,
@@ -197,17 +197,23 @@ export interface DocumentLayout {
 /**
  * Saved cursor state from a partial layout pass.
  * Returned with isPartial:true; passed back as PageLayoutOptions.resumption
- * to resume from the exact item where the previous chunk stopped.
+ * to resume from the exact item where the previous chunk stopped. This is a
+ * replayable snapshot: a flow pass must not mutate its pages or cursor. If
+ * chrome changes its geometry, the consumed prefix is paginated again.
  */
 export interface LayoutResumption {
   /** The flat item list — cached to avoid re-walking the doc. */
   items: LayoutItem[];
   /** Index of the first item that was NOT yet processed. */
   nextItemIndex: number;
+  /** Geometry that placed the saved prefix. Absent on legacy snapshots. */
+  metrics?: readonly PageMetrics[];
   /** Pages completely finished by previous chunks. */
   completedPages: LayoutPage[];
   /** The page currently being built (may have partial blocks). */
   currentPage: LayoutPage;
+  /** Continuous-flow cursor, kept separately from the paginated page cursor. */
+  flowCursor?: { y: number; prevSpaceAfter: number };
   /** Y cursor position on currentPage. */
   currentY: number;
   /** spaceAfter of the last placed block, for margin collapsing. */
@@ -447,12 +453,14 @@ export function assignGlobalY(
   initialY: number,
   pageConfig: PageConfig,
   geometry: PageGeometry,
+  initialSpaceAfter?: number,
 ): FlowBlock[] {
   let y = initialY;
-  let prevSpaceAfter = 0;
+  let prevSpaceAfter = initialSpaceAfter ?? 0;
 
   return flows.map((flow, index) => {
-    const gap = index === 0 ? 0 : collapseMargins(prevSpaceAfter, flow.spaceBefore);
+    const gap = index === 0 && initialSpaceAfter === undefined
+      ? 0 : collapseMargins(prevSpaceAfter, flow.spaceBefore);
     const { startGlobalY, endGlobalY } = advanceFlowGlobalY(
       flow, y + gap, pageConfig, geometry,
     );
@@ -1027,9 +1035,9 @@ export interface PageLayoutOptions {
   maxBlocks?: number;
   /**
    * Resume a chunked layout pass from a previous partial result.
-   * When provided, skips collectLayoutItems() and starts directly from
-   * resumption.nextItemIndex with the saved page/Y cursor state.
-   * Makes each chunk O(chunkSize) instead of O(totalBlocks) — total O(N).
+   * Reuses saved cursors when page geometry is unchanged. If chrome changes
+   * that geometry, replays the consumed prefix plus the requested chunk.
+   * Normal chunks measure only new blocks; replay keeps the same cutoff.
    */
   resumption?: LayoutResumption;
   /**
@@ -1132,6 +1140,7 @@ export function runFlowPipeline(
   options: PageLayoutOptions,
   resolved: ResolvedChrome,
   runId: number,
+  geometry: PageGeometry = createPageGeometry(options.pageConfig, resolved),
 ): FlowPipelineResult {
   const { fontModifiers, measureCache, previousLayout, pageConfig, measurer } = options;
   const baseConfig = options.fontConfig ?? defaultFontConfig;
@@ -1139,23 +1148,34 @@ export function runFlowPipeline(
 
   const { pageWidth, pageHeight, margins } = pageConfig;
   const contentWidth = pageWidth - margins.left - margins.right;
-  const maxBlocks = options.maxBlocks;
+  let maxBlocks = options.maxBlocks;
 
   // Page metrics plus the prefix index over their heights, built once per run.
   // Every page-position question in the pipeline reads through this, so none of
   // them re-derive a page start by summing the pages before it.
-  const geometry = createPageGeometry(pageConfig, resolved);
   const metricsFor = geometry.metricsFor;
 
   // Resumption: restore cursor from prior chunk instead of re-walking the doc.
-  const r = options.resumption;
-  const items = r ? r.items : collectLayoutItems(doc, fontConfig);
+  const saved = options.resumption;
+  const savedMetrics = saved?.metrics;
+  const canResume = saved !== undefined && saved.flowCursor !== undefined && savedMetrics !== undefined &&
+    savedMetrics.every((metrics) => samePageMetrics(metrics, metricsFor(metrics.pageNumber)));
+  const r = canResume ? saved : undefined;
+  if (saved && !canResume && maxBlocks !== undefined) {
+    // Replay the consumed prefix plus this chunk, preserving progress. Page
+    // breaks are layout items but do not count against the block budget.
+    maxBlocks += saved.items.slice(0, saved.nextItemIndex)
+      .filter((item) => !item.isPageBreak).length;
+  }
+  const items = saved ? saved.items : collectLayoutItems(doc, fontConfig);
   const startIndex = r ? r.nextItemIndex : 0;
-  const pages: LayoutPage[] = r ? r.completedPages : [];
-  const currentPage: LayoutPage = r ? r.currentPage : { pageNumber: 1, blocks: [] };
+  const pages: LayoutPage[] = r ? [...r.completedPages] : [];
+  const currentPage: LayoutPage = r
+    ? { ...r.currentPage, blocks: [...r.currentPage.blocks] }
+    : { pageNumber: 1, blocks: [] };
   const initY = r ? r.currentY : metricsFor(1).contentTop;
   const initPrevSpaceAfter = r ? r.prevSpaceAfter : 0;
-  const chunkVersion = r ? r.version : runId;
+  const chunkVersion = saved ? saved.version : runId;
 
   // Stage 1: measure.
   const flowConfig: FlowConfig = { margins, contentWidth };
@@ -1170,16 +1190,13 @@ export function runFlowPipeline(
   const flowResult = buildBlockFlow(items, startIndex, flowConfig, measureCtx, maxBlocks);
 
   // Stage 2: assign continuous flow coordinates and resolve anchored objects.
-  // For resumed chunks, seed globalY at the resumption cursor's continuous
-  // position (= start of currentPage in continuous global-Y space + the page-
-  // local Y the prior chunk left off at). Without this, anchors in a later
-  // chunk would resolve as if the chunk's flows started near the document's
-  // top — wrong page assignment, wrong wrap decisions.
-  const seedGlobalY = r
-    ? geometry.startOf(currentPage.pageNumber)
-      + (initY - metricsFor(currentPage.pageNumber).contentTop)
-    : metricsFor(1).contentTop;
-  const flowsWithGlobalY = assignGlobalY(flowResult.flows, seedGlobalY, pageConfig, geometry);
+  // The flow cursor and the paginated cursor are distinct: pagination may
+  // suppress margins at page boundaries. Reconstructing one from the other
+  // makes a chunk boundary change subsequent positions.
+  const seedGlobalY = r?.flowCursor?.y ?? metricsFor(1).contentTop;
+  const flowsWithGlobalY = assignGlobalY(
+    flowResult.flows, seedGlobalY, pageConfig, geometry, r?.flowCursor?.prevSpaceAfter,
+  );
   const anchoredFlow = resolveAnchoredObjects(
     flowsWithGlobalY,
     pageConfig,
@@ -1200,7 +1217,9 @@ export function runFlowPipeline(
     ? [...carriedPlacements, ...anchoredFlow.placements]
     : anchoredFlow.placements;
   const previousLayoutForPagination =
-    pageRectsDigest(previousLayout?.anchoredObjects) === pageRectsDigest(mergedPlacements)
+    previousLayout && !previousLayout.isPartial &&
+    previousLayout.metrics?.every((metrics) => samePageMetrics(metrics, metricsFor(metrics.pageNumber))) &&
+    pageRectsDigest(previousLayout.anchoredObjects) === pageRectsDigest(mergedPlacements)
       ? previousLayout
       : undefined;
 
@@ -1221,8 +1240,15 @@ export function runFlowPipeline(
   };
 
   if (isPartial) {
+    const lastFlow = anchoredFlow.flows.at(-1);
+    const flowCursor = lastFlow ? {
+      y: advanceFlowGlobalY(lastFlow, lastFlow.globalY ?? seedGlobalY, pageConfig, geometry).endGlobalY,
+      prevSpaceAfter: lastFlow.isPageBreak ? 0 : lastFlow.spaceAfter,
+    } : r?.flowCursor;
     const resumption: LayoutResumption = {
       items,
+      ...(flowCursor ? { flowCursor } : {}),
+      metrics: pr.metrics,
       nextItemIndex: flowResult.cutoffIndex,
       completedPages: pr.pages,
       currentPage: { ...pr.currentPage, blocks: [...pr.currentPage.blocks] },

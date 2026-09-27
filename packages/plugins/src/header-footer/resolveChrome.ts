@@ -2,9 +2,9 @@
  * resolveChrome — measures header/footer slots via runMiniPipeline and returns
  * a ChromeContribution with per-page height reservations.
  *
- * Called from addPageChrome().measure(). Band height doesn't depend on the
- * flow, so this converges in one iteration — unless a slot counts pages, which
- * it can't do before the flow has run once.
+ * Called from addPageChrome().measure(). Page-count tokens can widen and wrap
+ * a band, changing its height and pagination. The aggregator feeds that flow
+ * back until the measured bands and the resulting pages agree.
  */
 
 import type { Node } from "@scrivr/core/pm";
@@ -228,10 +228,9 @@ export function resolveChrome(
       return def?.marginBottom ?? input.pageConfig.margins.bottom;
     },
     payload: resolved,
-    // Band height doesn't depend on the flow, so there is normally nothing to
-    // re-measure. A page-count token is the exception: its width follows a
-    // number this run produces, so a measurement made before the flow ran is a
-    // guess and the aggregator is asked for the iteration that can check it.
+    // This measurement is valid for the flow we were shown. If a wider token
+    // wraps the band and causes new pagination, the aggregator must give us
+    // that new flow before accepting convergence.
     stable: verifiedPageCount !== null || !countsPages(resolved.slots),
   };
 }
