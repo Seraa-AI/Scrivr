@@ -13,7 +13,8 @@ import { describe, it, expect } from "vitest";
 import { renderPage } from "./PageRenderer";
 import { CharacterMap } from "../layout/CharacterMap";
 import { runPipeline, defaultPageConfig } from "../layout/PageLayout";
-import { BlockRegistry } from "../layout/BlockRegistry";
+import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
+import { Schema } from "prosemirror-model";
 import { TextBlockStrategy } from "../layout/TextBlockStrategy";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
@@ -251,4 +252,76 @@ describe("renderPage — reporting whether it painted", () => {
     expect(map.coordsAtPos(1)).toBeNull();
   });
 
+});
+
+/**
+ * An inline atom that sizes itself from a font must be painted in that font.
+ *
+ * A header's page-number token carries no marks, so it is measured in the
+ * band's base font while the text beside it is often marked smaller. The
+ * strategy draws with whatever font the context holds, so unless the renderer
+ * restores the one the box was reserved against, a 14px box ends up holding
+ * 10px digits — and the slack shows up as a gap before the following text.
+ */
+describe("the font an inline atom is painted in", () => {
+  const badgeSchema = new Schema({
+    nodes: {
+      doc: { content: "block+" },
+      paragraph: { group: "block", content: "inline*" },
+      text: { group: "inline" },
+      badge: { group: "inline", inline: true, atom: true },
+    },
+    // The demo's header marks its text 10px and leaves the token unmarked,
+    // which is what makes the two fonts differ in the first place.
+    marks: { small: {} },
+  });
+
+  const fontModifiers = new Map([
+    ["small", (font: { size: string }) => { font.size = "10px"; }],
+  ]);
+
+  it("is the one its box was measured against, not the previous span's", () => {
+    const seen: string[] = [];
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("badge", {
+      measure: (_node, font, measurer) => ({
+        width: measurer.measureRun("8888", font).totalWidth,
+        height: 12,
+      }),
+      render: (ctx) => { seen.push(ctx.font); },
+    });
+
+    const para = badgeSchema.node("paragraph", null, [
+      badgeSchema.text("before ", [badgeSchema.marks["small"]!.create()]),
+      badgeSchema.nodes["badge"]!.create(),
+    ]);
+    const layout = runPipeline(badgeSchema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+      inlineRegistry,
+      fontModifiers,
+    });
+
+    const span = layout.pages[0]!.blocks
+      .flatMap((b) => b.lines)
+      .flatMap((l) => l.spans)
+      .find((s) => s.kind === "object");
+    expect(span?.font).toBeDefined();
+
+    const ctx = makeCtx();
+    ctx.font = "10px Arial";
+    renderPage({
+      ctx,
+      page: layout.pages[0]!,
+      pageConfig: defaultPageConfig,
+      renderVersion: layout.version,
+      currentVersion: () => layout.version,
+      dpr: 1,
+      measurer: createMeasurer(),
+      map: new CharacterMap(),
+      inlineRegistry,
+    });
+
+    expect(seen).toEqual([span!.font]);
+  });
 });

@@ -328,15 +328,19 @@ export function drawBlock(
         // available, then register glyphs with cursorHeight for hit-testing.
         const objX = block.x + lineOffsetX + span.x;
         const objY = computeObjectRenderY(lineY, line, span);
-        inlineRegistry?.get(span.node.type.name)?.render(
-          ctx,
-          objX,
-          objY,
-          span.width,
-          span.height,
-          span.node,
-          theme,
-        );
+        const objectStrategy = inlineRegistry?.get(span.node.type.name);
+        if (objectStrategy) {
+        // An atom sized from a font must be painted in it. BlockLayout
+        // records the font it measured against on the span; without it the
+        // strategy draws in whatever the previous span left on the context,
+        // and the glyphs no longer fill the box reserved for them.
+          if (span.font !== undefined) {
+            ctx.save();
+            ctx.font = span.font;
+          }
+          objectStrategy.render(ctx, objX, objY, span.width, span.height, span.node, theme);
+          if (span.font !== undefined) ctx.restore();
+        }
         map.registerObjectRect({
           docPos: span.docPos,
           x: objX,

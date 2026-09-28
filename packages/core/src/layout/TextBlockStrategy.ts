@@ -58,7 +58,16 @@ export const TextBlockStrategy: BlockStrategy = {
           const objY = computeObjectRenderY(lineY, line, span);
           const strategy = inlineRegistry?.get(span.node.type.name);
           if (strategy) {
+          // An atom sized from a font must be painted in it. BlockLayout
+          // records the font it measured against on the span; without it the
+          // strategy draws in whatever the previous span left on the context,
+          // and the glyphs no longer fill the box reserved for them.
+            if (span.font !== undefined) {
+              ctx.save();
+              ctx.font = span.font;
+            }
             strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme);
+            if (span.font !== undefined) ctx.restore();
           }
           // Store the full visual rect so the overlay can draw resize handles.
           map.registerObjectRect({ docPos: span.docPos, x: spanX, y: objY, width: span.width, height: span.height, page: pageNumber });
