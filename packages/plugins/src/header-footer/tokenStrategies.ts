@@ -14,14 +14,46 @@ import type { Node } from "@scrivr/core/pm";
 /** Node types whose reserved width follows the document's page count. */
 export const PAGE_COUNT_TOKENS: ReadonlySet<string> = new Set(["pageNumber", "totalPages"]);
 
+/**
+ * The token whose width differs from page to page. `totalPages` prints the same
+ * string everywhere, so a band holding only that one needs no arrangements.
+ */
+export const PER_PAGE_TOKEN = "pageNumber";
+
 /** Current page context — set before measuring or painting, read by both. */
 let currentPageNumber = 1;
 let currentTotalPages = 1;
+
+/**
+ * The page number a measurement should reserve room for, while a band is being
+ * arranged for one. Null means nobody is arranging, and the only safe answer is
+ * the widest: a token measured outside a band — one sitting in body text — is
+ * measured once for the whole document and painted on whatever page it lands.
+ */
+let arrangedPageNumber: number | null = null;
 
 /** Call before rendering a page to set the context for token strategies. */
 export function setTokenContext(pageNumber: number, totalPages: number): void {
   currentPageNumber = pageNumber;
   currentTotalPages = totalPages;
+}
+
+/**
+ * Measure `arrange` as though the band were being painted on `pageNumber`.
+ *
+ * Only a band gets an arrangement per page. Everything else must reserve the
+ * widest, so this is a scope rather than a setting — leaving it set would make
+ * the next measurement's width depend on which page was arranged last, and a
+ * token in body text would reflow as the reader scrolls.
+ */
+export function arrangedForPage<T>(pageNumber: number, arrange: () => T): T {
+  const previous = arrangedPageNumber;
+  arrangedPageNumber = pageNumber;
+  try {
+    return arrange();
+  } finally {
+    arrangedPageNumber = previous;
+  }
 }
 
 export function getCurrentPageNumber(): number { return currentPageNumber; }
@@ -45,8 +77,12 @@ function measureDigitWidth(digitCount: number, font: string, measurer: TextMeasu
  * How many digits a number takes. Counted from its own text: `ceil(log10(n))`
  * is one short at every exact power of ten, so a ten-page document reserved a
  * single digit and painted two.
+ *
+ * Exported because the arrangements a band is measured in are keyed by it —
+ * two answers to this would put a page's number in a box built for a different
+ * width.
  */
-function digitsIn(value: number): number {
+export function digitsIn(value: number): number {
   return String(Math.max(value, 1)).length;
 }
 
@@ -79,13 +115,12 @@ function drawTokenText(
 export const pageNumberStrategy: InlineStrategy = {
   verticalAlign: "baseline",
 
-  // Sized from the page being painted, not the document's last page: the band
-  // is arranged once per page-number width, so "2" gets a one-digit box even in
-  // a thousand-page document. Reserving the widest is the caller's job — it
-  // measures with the context set to the highest number.
+  // Sized for the page this band is being arranged for, so "2" gets a one-digit
+  // box even in a thousand-page document. Outside an arrangement there is no
+  // single page to size for, so it reserves the widest the document can reach.
   measure(_node, font, measurer) {
     return {
-      width: measureDigitWidth(digitsIn(currentPageNumber), font, measurer),
+      width: measureDigitWidth(digitsIn(arrangedPageNumber ?? currentTotalPages), font, measurer),
       height: fontHeight(font),
     };
   },

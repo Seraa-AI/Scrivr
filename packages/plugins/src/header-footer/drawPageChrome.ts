@@ -20,7 +20,7 @@ import { slotLayoutForPage } from "./resolveChrome";
 import type { ResolvedHeaderFooter, SlotLayout } from "./resolveChrome";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import { resolveSlotKey } from "./resolveSlot";
-import { setTokenContext } from "./tokenStrategies";
+import { setTokenContext, arrangedForPage } from "./tokenStrategies";
 import { chromeFontConfig } from "./chromeFontConfig";
 
 /** Reusable throwaway CharacterMap for non-cursor pages. Avoids allocating on every paint. */
@@ -98,7 +98,9 @@ function layoutAtBandY(
   paintCtx: PageChromePaintContext,
   bandY: number,
 ): DocumentLayout {
-  return runMiniPipeline(doc, {
+  // Arranged for the page being painted, so a band under the caret keeps the
+  // token width the stored arrangement gave it and the line does not shift.
+  return arrangedForPage(paintCtx.pageNumber, () => runMiniPipeline(doc, {
     pageConfig: {
       ...paintCtx.pageConfig,
       margins: { ...paintCtx.pageConfig.margins, top: bandY },
@@ -114,7 +116,7 @@ function layoutAtBandY(
     // Same registry the band was measured with, so a token being edited keeps
     // the width it was reserved and the line does not shift under the caret.
     ...(paintCtx.inlineRegistry ? { inlineRegistry: paintCtx.inlineRegistry } : {}),
-  });
+  }));
 }
 
 /**

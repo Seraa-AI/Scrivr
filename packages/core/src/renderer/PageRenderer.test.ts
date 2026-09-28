@@ -308,11 +308,17 @@ describe("the font an inline atom is painted in", () => {
       .find((s) => s.kind === "object");
     expect(span?.font).toBeDefined();
 
+    // Through the strategy path — what all body text takes — and through
+    // drawBlock's own object branch, which chrome bands take.
+    const viaStrategy = new BlockRegistry();
+    viaStrategy.register("paragraph", TextBlockStrategy);
+    for (const blockRegistry of [viaStrategy, undefined]) {
     const ctx = makeCtx();
     ctx.font = "10px Arial";
     renderPage({
       ctx,
       page: layout.pages[0]!,
+      ...(blockRegistry ? { blockRegistry } : {}),
       pageConfig: defaultPageConfig,
       renderVersion: layout.version,
       currentVersion: () => layout.version,
@@ -323,5 +329,7 @@ describe("the font an inline atom is painted in", () => {
     });
 
     expect(seen).toEqual([span!.font]);
+    seen.length = 0;
+    }
   });
 });

@@ -18,7 +18,13 @@ import {
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { resolveSlot } from "./resolveSlot";
 import { chromeFontConfig } from "./chromeFontConfig";
-import { setTokenContext, PAGE_COUNT_TOKENS } from "./tokenStrategies";
+import {
+  setTokenContext,
+  arrangedForPage,
+  digitsIn,
+  PAGE_COUNT_TOKENS,
+  PER_PAGE_TOKEN,
+} from "./tokenStrategies";
 
 /** Measured layout + reserved height for one header/footer slot. */
 export interface SlotLayout {
@@ -43,18 +49,14 @@ export interface SlotLayout {
   reservedHeight: number;
 }
 
-/** How many digits a page number takes. */
-export function digitsIn(pageNumber: number): number {
-  return String(Math.max(pageNumber, 1)).length;
-}
-
 /** The arrangement to paint page `pageNumber` with. */
 export function slotLayoutForPage(slot: SlotLayout, pageNumber: number): DocumentLayout {
   if (!slot.byDigits) return slot.layout;
-  // Unreachable while pages are numbered 1..N and only pages in the layout are
-  // painted — the arrangements span exactly that range, streaming included.
-  // Numbering that starts anywhere else (a section restart) would break that,
-  // and this is what keeps the band drawn rather than not drawn.
+  // Reachable when the aggregator exhausts: the accepted payload was measured
+  // against the previous iteration's flow, so a document that grew past a digit
+  // boundary on the last iteration asks for an arrangement nobody measured.
+  // The widest is then a digit short and the number overruns it — the same
+  // overflow as before any of this, and better than a band that does not paint.
   return slot.byDigits.get(digitsIn(pageNumber)) ?? slot.layout;
 }
 
@@ -81,11 +83,11 @@ export function isResolvedHeaderFooter(value: unknown): value is ResolvedHeaderF
   return "policy" in value && "slots" in value;
 }
 
-/** Whether a mini-doc holds a token whose width follows the page count. */
-function holdsPageCountToken(miniDoc: Node): boolean {
+/** Whether a mini-doc holds any node in `types`. */
+function holds(miniDoc: Node, types: ReadonlySet<string>): boolean {
   let found = false;
   miniDoc.descendants((node) => {
-    if (PAGE_COUNT_TOKENS.has(node.type.name)) found = true;
+    if (types.has(node.type.name)) found = true;
     return !found;
   });
   return found;
@@ -93,8 +95,12 @@ function holdsPageCountToken(miniDoc: Node): boolean {
 
 /** Whether any slot holds a token whose width follows the document's page count. */
 function countsPages(slots: ResolvedHeaderFooter["slots"]): boolean {
-  return Object.values(slots).some((slot) => slot !== undefined && holdsPageCountToken(slot.doc));
+  return Object.values(slots).some(
+    (slot) => slot !== undefined && holds(slot.doc, PAGE_COUNT_TOKENS),
+  );
 }
+
+const PER_PAGE_TOKENS: ReadonlySet<string> = new Set([PER_PAGE_TOKEN]);
 
 function measureSlot(
   def: HeaderFooterDefinition | undefined,
@@ -121,19 +127,19 @@ function measureSlot(
   const widest = digitsIn(totalPages);
   // Measured widest-first so `layout` — what the band reserves against — is
   // the tallest arrangement any page can need.
-  setTokenContext(totalPages, totalPages);
-  const layout = arrange();
+  const layout = arrangedForPage(totalPages, arrange);
 
   let byDigits: Map<number, DocumentLayout> | undefined;
-  if (holdsPageCountToken(miniDoc) && widest > 1) {
+  // Only a page number differs from page to page. A band holding just the
+  // total prints one string everywhere, so arranging it repeatedly would
+  // produce identical layouts at the cost of a mini-pipeline apiece.
+  if (widest > 1 && holds(miniDoc, PER_PAGE_TOKENS)) {
     byDigits = new Map([[widest, layout]]);
     for (let digits = 1; digits < widest; digits++) {
       // Any number of this width does: the token reserves widest-digit times
       // digit count, so every number with the same digit count arranges alike.
-      setTokenContext(10 ** (digits - 1), totalPages);
-      byDigits.set(digits, arrange());
+      byDigits.set(digits, arrangedForPage(10 ** (digits - 1), arrange));
     }
-    setTokenContext(totalPages, totalPages);
   }
 
   const natural = layout.totalContentHeight ?? 0;

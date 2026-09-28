@@ -21,6 +21,7 @@ import {
   type FontModifier,
   type LayoutBlock,
   defaultFontConfig,
+  runMiniPipeline,
   runPipeline,
   type PageLayoutOptions,
   type DocumentLayout,
@@ -429,5 +430,65 @@ describe("the box a page number gets on the page it is painted on", () => {
     const slot = slotFor(9);
 
     expect(pageNumberWidth(slotLayoutForPage(slot, 4211))).toBe(pageNumberWidth(slot.layout));
+  });
+});
+
+/**
+ * Only a band is arranged per page. A token anywhere else is measured once for
+ * the whole document and painted wherever it lands, so it has to reserve the
+ * widest number the document can reach — and, crucially, the same width every
+ * time. Sizing it from ambient paint state would make a body token's box depend
+ * on which page was drawn last, so the same document would lay out differently
+ * after a scroll.
+ */
+describe("a page-number token outside a band", () => {
+  const bodySpans = () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, HeaderFooter],
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "pageNumber" }] }],
+      },
+    });
+    return runMiniPipeline(editor.getState().doc, {
+      pageConfig, measurer, inlineRegistry: registry,
+    }).pages[0]!.blocks
+      .flatMap((b) => b.lines)
+      .flatMap((l) => l.spans)
+      .filter((sp) => sp.kind === "object");
+  };
+
+  it("reserves the same width whichever page was painted last", () => {
+    setTokenContext(7, 1040);
+    const afterPage7 = bodySpans()[0]!.width;
+
+    setTokenContext(1039, 1040);
+    const afterPage1039 = bodySpans()[0]!.width;
+
+    expect(afterPage7).toBe(afterPage1039);
+  });
+
+  it("reserves the widest the document can reach", () => {
+    setTokenContext(2, 1040);
+
+    expect(bodySpans()[0]!.width).toBe(DIGIT_W * 4);
+  });
+});
+
+/**
+ * A band holding only the total prints one string on every page, so arranging
+ * it per page-number width would measure the same layout over and over.
+ */
+describe("a band that names only the total", () => {
+  it("is arranged once", () => {
+    const contribution = resolveChrome(
+      headerOf({ type: "text", text: "of " }, { type: "totalPages" }),
+      { doc, pageConfig, measurer, fontConfig: defaultFontConfig, inlineRegistry: registry },
+      ctxWithPages(1040),
+      0,
+    );
+    if (!isResolvedHeaderFooter(contribution.payload)) throw new Error("wrong payload");
+
+    expect(contribution.payload.slots.defaultHeader!.byDigits).toBeUndefined();
   });
 });

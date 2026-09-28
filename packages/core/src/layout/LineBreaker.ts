@@ -189,6 +189,35 @@ export function spanEndDocPos(span: LayoutSpan | InputSpan): number {
  *   "text-top"    — top of object at parent font ascent top (lineY + ascent - textAscent)
  *   "text-bottom" — bottom of object at parent font descent (lineY + ascent + descent - height)
  */
+/**
+ * Paint an inline atom in the font its box was measured against.
+ *
+ * BlockLayout records that font on the span precisely so the renderer does not
+ * have to re-derive it; without this the strategy draws in whatever the
+ * previous span left on the context, and the glyphs stop filling the box.
+ *
+ * Restores through a `finally` rather than save/restore: a strategy comes from
+ * an extension, and one that throws would otherwise leave the canvas a save
+ * deep for the rest of the tile — every later restore popping the wrong state.
+ */
+export function paintInSpanFont(
+  ctx: CanvasRenderingContext2D,
+  font: string | undefined,
+  paint: () => void,
+): void {
+  if (font === undefined) {
+    paint();
+    return;
+  }
+  const previous = ctx.font;
+  ctx.font = font;
+  try {
+    paint();
+  } finally {
+    ctx.font = previous;
+  }
+}
+
 export function computeObjectRenderY(
   lineY: number,
   line: LayoutLine,

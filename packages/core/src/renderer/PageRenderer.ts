@@ -9,7 +9,7 @@ import {
 } from "../layout/AnchoredObjects";
 import { LayoutBlock, computeAlignmentOffset, isHiddenAnchorLine } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
-import { computeObjectRenderY } from "../layout/LineBreaker";
+import { computeObjectRenderY, paintInSpanFont } from "../layout/LineBreaker";
 import type { TextMeasurerLike } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
 import type { FontModifier, MarkDecorator } from "../extensions/types";
@@ -330,16 +330,9 @@ export function drawBlock(
         const objY = computeObjectRenderY(lineY, line, span);
         const objectStrategy = inlineRegistry?.get(span.node.type.name);
         if (objectStrategy) {
-        // An atom sized from a font must be painted in it. BlockLayout
-        // records the font it measured against on the span; without it the
-        // strategy draws in whatever the previous span left on the context,
-        // and the glyphs no longer fill the box reserved for them.
-          if (span.font !== undefined) {
-            ctx.save();
-            ctx.font = span.font;
-          }
-          objectStrategy.render(ctx, objX, objY, span.width, span.height, span.node, theme);
-          if (span.font !== undefined) ctx.restore();
+          paintInSpanFont(ctx, span.font, () => {
+            objectStrategy.render(ctx, objX, objY, span.width, span.height, span.node, theme);
+          });
         }
         map.registerObjectRect({
           docPos: span.docPos,
