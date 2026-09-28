@@ -54,7 +54,9 @@ describe("token rendering in a PDF", () => {
     expect(ops[0]!.x).toBe(100);
     expect(ops[0]!.baselineY).toBe(52);
     expect(ops[0]!.sizePx).toBe(10);
-    expect(ops[0]!.color).toEqual({ r: 156, g: 163, b: 175 });
+    // No colour of its own: the op names none, and the draw surface applies
+    // the document's text colour — the same default canvas resolves to.
+    expect(ops[0]!.color).toBeUndefined();
   });
 
   it("draws the total page count", () => {
@@ -68,5 +70,22 @@ describe("token rendering in a PDF", () => {
     const { ops, ctx } = recordingContext();
     renderDatePdf(tokenBlock({ frozen: "2020-06-15T00:00:00.000Z" }), ctx);
     expect(ops[0]!.text).toBe(new Date("2020-06-15T00:00:00.000Z").toLocaleDateString());
+  });
+});
+
+/**
+ * The token draws in the fill the layout resolved from its marks. Choosing one
+ * here is what made the exported file disagree with the screen about a node
+ * they both had the answer for.
+ */
+describe("what colour a token is drawn in", () => {
+  it("passes the resolved fill straight through", () => {
+    const { ops, ctx } = recordingContext();
+    const resolved = { r: 220, g: 38, b: 38 };
+
+    setTokenContext(2, 9);
+    renderPageNumberPdf(tokenBlock(), { ...ctx, color: resolved });
+
+    expect(ops[0]!.color).toEqual(resolved);
   });
 });

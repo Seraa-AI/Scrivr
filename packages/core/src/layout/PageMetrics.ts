@@ -36,6 +36,26 @@ export interface PageMetrics {
   footerHeight: number;
 }
 
+/**
+ * Whether two pages reserve identical space.
+ *
+ * Layout reuses a saved pagination — a resumed chunk, a cached tail, a chrome
+ * iteration that moved nothing — only when this holds. Every field is named
+ * rather than discovered from the object, so adding one to `PageMetrics` is a
+ * compile error here instead of a comparison that quietly stops checking it.
+ */
+export function samePageMetrics(a: PageMetrics, b: PageMetrics): boolean {
+  return a.pageNumber === b.pageNumber
+    && a.contentTop === b.contentTop
+    && a.contentBottom === b.contentBottom
+    && a.contentHeight === b.contentHeight
+    && a.contentWidth === b.contentWidth
+    && a.headerTop === b.headerTop
+    && a.headerHeight === b.headerHeight
+    && a.footerTop === b.footerTop
+    && a.footerHeight === b.footerHeight;
+}
+
 export type PageFlowMetrics = Pick<PageMetrics, "contentTop" | "contentHeight">;
 
 /**
@@ -178,7 +198,11 @@ export interface ChromeContribution {
   bottomBandStart?: (pageNumber: number) => number;
   /** Opaque state routed back to the contributor at paint time. */
   payload?: unknown;
-  /** True when this contributor's reservations have stabilized. */
+  /**
+   * True when this contribution is valid for currentFlowLayout. On the first
+   * iteration, true declares that it does not need flow feedback. The loop
+   * rechecks contributors if their output causes another pagination.
+   */
   stable: boolean;
   /** Extra pages needed after the last natural page (e.g. footnote overflow). */
   syntheticPages?: number;
@@ -282,8 +306,8 @@ function computeBandStart(
 // ── Page chrome contributor API ─────────────────────────────────────────────
 // Plugins (HeaderFooter, Footnotes, margin notes) implement
 // PageChromeContribution and register it via Extension.addPageChrome(). The
-// aggregator loop in aggregateChrome.ts iterates contributors until every
-// one reports stable:true or MAX_ITERATIONS is reached.
+// aggregator loop in aggregateChrome.ts verifies contributor stability against
+// the resulting page geometry, bounded by MAX_ITERATIONS.
 
 /** Input passed to every contributor's measure() call. */
 export interface PageChromeMeasureInput {
@@ -293,6 +317,8 @@ export interface PageChromeMeasureInput {
   fontConfig: FontConfig;
   fonts?: LayoutFontResolver;
   fontModifiers?: Map<string, FontModifier>;
+  /** Contributors forward this to runMiniPipeline so their atoms measure themselves. */
+  inlineRegistry?: InlineRegistry;
 }
 
 /**
@@ -332,6 +358,8 @@ export interface PageChromePaintContext {
    * and the stored geometry come from different faces.
    */
   fontResolver?: LayoutFontResolver;
+  /** The same mark-to-font modifiers used to measure this layout. */
+  fontModifiers?: Map<string, FontModifier>;
   pageNumber: number;
   totalPages: number;
   metrics: PageMetrics;

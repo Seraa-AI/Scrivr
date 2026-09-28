@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildPageStarts,
   computePageMetrics,
+  samePageMetrics,
   EMPTY_RESOLVED_CHROME,
   type ChromeContribution,
   type PageMetrics,
@@ -277,5 +278,35 @@ describe("buildPageStarts", () => {
 
   it("returns nothing to index for an empty layout", () => {
     expect(buildPageStarts(defaultPageConfig, [])).toEqual([]);
+  });
+});
+
+/**
+ * Two reuse paths gate on this — a resumed chunk and a chrome iteration that
+ * moved nothing — so a false "same" is a page painted at the wrong geometry.
+ */
+describe("samePageMetrics", () => {
+  const metrics: PageMetrics = {
+    pageNumber: 1,
+    contentTop: 96,
+    contentBottom: 960,
+    contentHeight: 864,
+    contentWidth: 624,
+    headerTop: 48,
+    headerHeight: 24,
+    footerTop: 984,
+    footerHeight: 24,
+  };
+
+  it("accepts an identical page", () => {
+    expect(samePageMetrics(metrics, { ...metrics })).toBe(true);
+  });
+
+  // Every field, so a band that moves while reserving the same total is still
+  // seen: headerTop up and headerHeight down leaves contentTop untouched.
+  it.each(Object.keys(metrics))("notices %s differing", (field) => {
+    const moved: PageMetrics = { ...metrics, [field]: metrics[field as keyof PageMetrics] + 1 };
+
+    expect(samePageMetrics(metrics, moved)).toBe(false);
   });
 });

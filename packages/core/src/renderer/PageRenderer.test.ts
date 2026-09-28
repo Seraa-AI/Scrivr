@@ -13,7 +13,10 @@ import { describe, it, expect } from "vitest";
 import { renderPage } from "./PageRenderer";
 import { CharacterMap } from "../layout/CharacterMap";
 import { runPipeline, defaultPageConfig } from "../layout/PageLayout";
-import { BlockRegistry } from "../layout/BlockRegistry";
+import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
+import { Schema } from "prosemirror-model";
+import { defaultEditorTheme } from "../model/theme";
+import type { Mark } from "prosemirror-model";
 import { TextBlockStrategy } from "../layout/TextBlockStrategy";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
@@ -251,4 +254,151 @@ describe("renderPage — reporting whether it painted", () => {
     expect(map.coordsAtPos(1)).toBeNull();
   });
 
+});
+
+/**
+ * An inline atom that sizes itself from a font must be painted in that font.
+ *
+ * A header's page-number token carries no marks, so it is measured in the
+ * band's base font while the text beside it is often marked smaller. The
+ * strategy draws with whatever font the context holds, so unless the renderer
+ * restores the one the box was reserved against, a 14px box ends up holding
+ * 10px digits — and the slack shows up as a gap before the following text.
+ */
+describe("the font an inline atom is painted in", () => {
+  const badgeSchema = new Schema({
+    nodes: {
+      doc: { content: "block+" },
+      paragraph: { group: "block", content: "inline*" },
+      text: { group: "inline" },
+      badge: { group: "inline", inline: true, atom: true },
+    },
+    // The demo's header marks its text 10px and leaves the token unmarked,
+    // which is what makes the two fonts differ in the first place.
+    marks: { small: {} },
+  });
+
+  const fontModifiers = new Map([
+    ["small", (font: { size: string }) => { font.size = "10px"; }],
+  ]);
+
+  it("is the one its box was measured against, not the previous span's", () => {
+    const seen: string[] = [];
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("badge", {
+      measure: (_node, font, measurer) => ({
+        width: measurer.measureRun("8888", font).totalWidth,
+        height: 12,
+      }),
+      render: (ctx) => { seen.push(ctx.font); },
+    });
+
+    const para = badgeSchema.node("paragraph", null, [
+      badgeSchema.text("before ", [badgeSchema.marks["small"]!.create()]),
+      badgeSchema.nodes["badge"]!.create(),
+    ]);
+    const layout = runPipeline(badgeSchema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+      inlineRegistry,
+      fontModifiers,
+    });
+
+    const span = layout.pages[0]!.blocks
+      .flatMap((b) => b.lines)
+      .flatMap((l) => l.spans)
+      .find((s) => s.kind === "object");
+    expect(span?.font).toBeDefined();
+
+    // Through the strategy path — what all body text takes — and through
+    // drawBlock's own object branch, which chrome bands take.
+    const viaStrategy = new BlockRegistry();
+    viaStrategy.register("paragraph", TextBlockStrategy);
+    for (const blockRegistry of [viaStrategy, undefined]) {
+    const ctx = makeCtx();
+    ctx.font = "10px Arial";
+    renderPage({
+      ctx,
+      page: layout.pages[0]!,
+      ...(blockRegistry ? { blockRegistry } : {}),
+      pageConfig: defaultPageConfig,
+      renderVersion: layout.version,
+      currentVersion: () => layout.version,
+      dpr: 1,
+      measurer: createMeasurer(),
+      map: new CharacterMap(),
+      inlineRegistry,
+    });
+
+    expect(seen).toEqual([span!.font]);
+    seen.length = 0;
+    }
+  });
+});
+
+/**
+ * An inline atom has no text for a decorator to colour, so before its marks
+ * reached the renderer a token painted in whatever fill the previous span left
+ * — the body's colour in a footer that holds only a page number, and on a page
+ * whose body painted nothing, the page background.
+ */
+describe("the fill an inline atom is painted in", () => {
+  const markedSchema = new Schema({
+    nodes: {
+      doc: { content: "block+" },
+      paragraph: { group: "block", content: "inline*" },
+      text: { group: "inline" },
+      badge: { group: "inline", inline: true, atom: true },
+    },
+    marks: { tint: { attrs: { color: {} } } },
+  });
+
+  function paintBadge(marks: readonly Mark[]) {
+    const seen: string[] = [];
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("badge", {
+      measure: () => ({ width: 20, height: 12 }),
+      render: (ctx) => { seen.push(String(ctx.fillStyle)); },
+    });
+    const markDecorators = new Map([["tint", {
+      decorateFill: (rect: { markAttrs: Record<string, unknown> }) => String(rect.markAttrs["color"]),
+    }]]);
+
+    const para = markedSchema.node("paragraph", null, [
+      markedSchema.nodes["badge"]!.create(null, null, marks),
+    ]);
+    const layout = runPipeline(markedSchema.node("doc", null, [para]), {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+      inlineRegistry,
+    });
+
+    const ctx = makeCtx();
+    ctx.fillStyle = "#ff00ff";
+    renderPage({
+      ctx,
+      page: layout.pages[0]!,
+      pageConfig: defaultPageConfig,
+      renderVersion: layout.version,
+      currentVersion: () => layout.version,
+      dpr: 1,
+      measurer: createMeasurer(),
+      map: new CharacterMap(),
+      inlineRegistry,
+      markDecorators,
+    });
+    return seen;
+  }
+
+  it("is the one its own marks resolve to", () => {
+    const tint = markedSchema.marks["tint"]!.create({ color: "#336699" });
+
+    expect(paintBadge([tint])).toEqual(["#336699"]);
+  });
+
+  it("takes the theme's text colour when the atom carries no marks", () => {
+    // Never the leftover fill: clearCanvas leaves the page background on the
+    // context, so an unmarked atom on an empty page painted white on white.
+    expect(paintBadge([])).toEqual([defaultEditorTheme.defaultText]);
+  });
 });

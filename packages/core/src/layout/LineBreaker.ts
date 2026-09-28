@@ -4,7 +4,9 @@ import type { TextMeasurerLike } from "./TextMeasurer";
 import type { CharacterMap } from "./CharacterMap";
 import { normalizeFont } from "./StyleResolver";
 import type { AvailableSegment, LineSpace } from "./ExclusionManager";
-
+import type { MarkDecorator } from "../extensions/types";
+import type { ResolvedTheme } from "../model/theme";
+import { resolveSpanFill } from "./resolveSpanFill";
 // ── InputSpan ─────────────────────────────────────────────────────────────────
 
 /**
@@ -67,6 +69,12 @@ export type InputSpan =
        */
       font?: string;
       resolution?: FontResolutionId;
+      /**
+       * The atom's own marks. An atom carries no text for a decorator to
+       * colour, so without these a renderer has nothing to resolve a fill from
+       * and paints it in whatever the span before it left behind.
+       */
+      marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
       /** Vertical alignment within the line — sourced from the node's verticalAlign attr */
       verticalAlign: InlineObjectVerticalAlign;
     }
@@ -110,6 +118,8 @@ export type LayoutSpan =
       /** The face this atom was measured against. Carried from its input span. */
       font?: string;
       resolution?: FontResolutionId;
+      /** The atom's own marks — what a renderer resolves its fill from. */
+      marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
       verticalAlign: InlineObjectVerticalAlign;
     };
 
@@ -189,6 +199,66 @@ export function spanEndDocPos(span: LayoutSpan | InputSpan): number {
  *   "text-top"    — top of object at parent font ascent top (lineY + ascent - textAscent)
  *   "text-bottom" — bottom of object at parent font descent (lineY + ascent + descent - height)
  */
+/**
+ * Paint an inline atom in the font and fill its own marks resolve to.
+ *
+ * An atom has no text of its own, so nothing about it is re-derivable from the
+ * context: BlockLayout records the font its box was measured against and the
+ * marks it carries, and this applies both. Without it a strategy draws in
+ * whatever the previous span left — the wrong size, and a colour belonging to
+ * another run, or on a page whose body painted nothing, the page background.
+ *
+ * Restores through a `finally` rather than save/restore: a strategy comes from
+ * an extension, and one that throws would otherwise leave the canvas a save
+ * deep for the rest of the tile — every later restore popping the wrong state.
+ */
+/**
+ * How an inline atom should be painted: the font its box was measured against,
+ * and the fill its own marks resolve to.
+ *
+ * The fill is always resolved, never inherited. An atom carries no text for a
+ * decorator to colour, so one with no colour of its own takes the theme's text
+ * colour — the same answer its neighbouring text gets — where leaving the
+ * context alone hands it whatever was last set, which on a page whose body
+ * painted nothing is the background `clearCanvas` left.
+ */
+export function atomStyle(
+  span: Extract<LayoutSpan, { kind: "object" }>,
+  x: number,
+  y: number,
+  decorators: Map<string, MarkDecorator> | undefined,
+  theme: ResolvedTheme,
+  ctx: CanvasRenderingContext2D,
+): { font?: string | undefined; fill: string } {
+  return {
+    font: span.font,
+    fill: resolveSpanFill(
+      span.marks,
+      decorators,
+      { x, y: y + span.height, width: span.width, ascent: span.height, descent: 0 },
+      theme,
+      ctx,
+    ),
+  };
+}
+
+export function paintInSpanStyle(
+  ctx: CanvasRenderingContext2D,
+  style: { font?: string | undefined; fill?: string | undefined },
+  paint: () => void,
+): void {
+  const previousFont = ctx.font;
+  const previousFill = ctx.fillStyle;
+  if (style.font !== undefined) ctx.font = style.font;
+  if (style.fill !== undefined) ctx.fillStyle = style.fill;
+  try {
+    paint();
+  } finally {
+    ctx.font = previousFont;
+    ctx.fillStyle = previousFill;
+  }
+}
+
 export function computeObjectRenderY(
   lineY: number,
   line: LayoutLine,
@@ -479,6 +549,7 @@ export class LineBreaker {
           docPos: word.docPos,
           ...(word.font !== undefined ? { font: word.font } : {}),
           ...(word.resolution !== undefined ? { resolution: word.resolution } : {}),
+          ...(word.marks !== undefined ? { marks: word.marks } : {}),
           verticalAlign: word.verticalAlign,
         });
       } else {
@@ -709,6 +780,7 @@ interface ObjectToken {
   node: Node;
   font?: string;
   resolution?: FontResolutionId;
+  marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
   width: number;
   height: number;
   docPos: number;
@@ -793,6 +865,7 @@ function tokenise(spans: InputSpan[]): Token[] {
         docPos: span.docPos,
         ...(span.font !== undefined ? { font: span.font } : {}),
         ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
+        ...(span.marks !== undefined ? { marks: span.marks } : {}),
         verticalAlign: span.verticalAlign,
       });
       continue;

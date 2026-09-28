@@ -2,7 +2,7 @@ import type { CharacterMap } from "./CharacterMap";
 import { fontSizeOf, paintText } from "../fonts/synthesis";
 import { isHiddenAnchorLine, type LayoutBlock } from "./BlockLayout";
 import { computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
-import { computeObjectRenderY } from "./LineBreaker";
+import { atomStyle, computeObjectRenderY, paintInSpanStyle } from "./LineBreaker";
 import { resolveSpanFill } from "./resolveSpanFill";
 import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
 
@@ -58,7 +58,9 @@ export const TextBlockStrategy: BlockStrategy = {
           const objY = computeObjectRenderY(lineY, line, span);
           const strategy = inlineRegistry?.get(span.node.type.name);
           if (strategy) {
-            strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme);
+            paintInSpanStyle(ctx, atomStyle(span, spanX, objY, markDecorators, theme, ctx), () => {
+              strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme);
+            });
           }
           // Store the full visual rect so the overlay can draw resize handles.
           map.registerObjectRect({ docPos: span.docPos, x: spanX, y: objY, width: span.width, height: span.height, page: pageNumber });

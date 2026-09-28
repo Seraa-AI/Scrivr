@@ -16,10 +16,11 @@ import {
   type PageChromePaintContext,
 } from "@scrivr/core";
 import type { Node } from "@scrivr/core/pm";
+import { slotLayoutForPage } from "./resolveChrome";
 import type { ResolvedHeaderFooter, SlotLayout } from "./resolveChrome";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import { resolveSlotKey } from "./resolveSlot";
-import { setTokenContext } from "./tokenStrategies";
+import { setTokenContext, arrangedForPage } from "./tokenStrategies";
 import { chromeFontConfig } from "./chromeFontConfig";
 
 /** Reusable throwaway CharacterMap for non-cursor pages. Avoids allocating on every paint. */
@@ -81,9 +82,12 @@ function drawBandIfPresent(
   } else {
     // Stored path: reuse the pre-computed layout, offset Y to the band position.
     // No runMiniPipeline call — the layout was already computed during measure().
-    const storedPage = slot.layout.pages[0];
+    // Which arrangement depends on how many digits this page's number takes, so
+    // "2" is not painted into a box sized for "1040".
+    const stored = slotLayoutForPage(slot, paintCtx.pageNumber);
+    const storedPage = stored.pages[0];
     if (!storedPage || storedPage.blocks.length === 0) return;
-    const offsetY = bandY - slot.layout.pageConfig.margins.top;
+    const offsetY = bandY - stored.pageConfig.margins.top;
     drawBlocksWithOffset(paintCtx, storedPage.blocks, offsetY);
   }
 }
@@ -94,19 +98,25 @@ function layoutAtBandY(
   paintCtx: PageChromePaintContext,
   bandY: number,
 ): DocumentLayout {
-  return runMiniPipeline(doc, {
+  // Arranged for the page being painted, so a band under the caret keeps the
+  // token width the stored arrangement gave it and the line does not shift.
+  return arrangedForPage(paintCtx.pageNumber, paintCtx.totalPages, () => runMiniPipeline(doc, {
     pageConfig: {
       ...paintCtx.pageConfig,
       margins: { ...paintCtx.pageConfig.margins, top: bandY },
     },
     measurer: paintCtx.measurer,
     fontConfig: chromeFontConfig,
+    ...(paintCtx.fontModifiers ? { fontModifiers: paintCtx.fontModifiers } : {}),
     // The same resolver the page was measured with. Without it a header being
     // edited is measured against the family the document names rather than the
     // face that will draw it, so its lines reflow and its weight changes the
     // moment the caret leaves the band.
     ...(paintCtx.fontResolver ? { fonts: paintCtx.fontResolver } : {}),
-  });
+    // Same registry the band was measured with, so a token being edited keeps
+    // the width it was reserved and the line does not shift under the caret.
+    ...(paintCtx.inlineRegistry ? { inlineRegistry: paintCtx.inlineRegistry } : {}),
+  }));
 }
 
 /**

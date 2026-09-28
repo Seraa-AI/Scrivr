@@ -127,6 +127,10 @@ export function createDrawHelpers(
   markHandlers: ReadonlyMap<string, PdfMarkHandler>,
 ): PdfDrawHelpers {
   /** Core speaks in 0-255 channels; pdf-lib wants 0-1. */
+  /** The atom context speaks the layout's units, so a handler never converts. */
+  const fromPdfColor = (color: ReturnType<typeof rgb>): Rgb =>
+    ({ r: color.red * 255, g: color.green * 255, b: color.blue * 255 });
+
   const toPdfColor = (color: Rgb) =>
     rgb(clamp01(color.r / 255), clamp01(color.g / 255), clamp01(color.b / 255));
 
@@ -156,7 +160,11 @@ export function createDrawHelpers(
       y: flipY(op.baselineY, pageHeightPt),
       size: op.sizePx * PT_PER_PX,
       font,
-      color: toPdfColor(op.color),
+      // An op that names no colour takes the document's, which is the rule
+      // canvas applies — so a handler never has to pick one to draw text.
+      color: op.color === undefined
+        ? parseCssColor(theme.defaultText)
+        : toPdfColor(op.color),
       ...alpha(op.opacity),
     });
   }
@@ -414,7 +422,9 @@ export function createDrawHelpers(
       for (const span of line.spans) {
         const spanAbsX =
           block.x + lineOffsetX + span.x + spacesBeforeSpan * spaceBonus;
-        const styles = spanStyles(span.kind === "text" ? span.marks : undefined, ctx);
+        // Object spans carry their own marks now, so an atom's colour resolves
+        // through the same cascade its neighbours do.
+        const styles = spanStyles(span.marks, ctx);
 
         // Object spans have no marks, so an inline image inside an anchor
         // ends the run rather than continuing it. The last mark to name a
@@ -482,6 +492,11 @@ export function createDrawHelpers(
                     },
                   }
                 : {}),
+              // Always, not only when the atom has marks: `resolveFill` falls
+              // back to the theme, which is the same answer canvas reaches. A
+              // handler left to fill the gap picks its own, and the screen and
+              // the file disagree about the node this context describes.
+              color: fromPdfColor(resolveFill(styles, themeDefaultText)),
             };
             handler(atomBlock, atomCtx);
           }

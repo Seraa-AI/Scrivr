@@ -2,7 +2,7 @@ import type { MarkDecorator, SpanRect } from "../extensions/types";
 import type { ResolvedTheme } from "../model/theme";
 
 /** One mark as it appears on a laid-out span. */
-interface SpanMark {
+export interface SpanMark {
   name: string;
   attrs: Record<string, unknown>;
 }

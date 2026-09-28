@@ -21,6 +21,7 @@
 
 import type { LayoutBlock, PdfNodeContext, Rgb } from "@scrivr/core";
 import { fontSizeOf } from "@scrivr/core";
+import { isResolvedHeaderFooter, slotLayoutForPage } from "./resolveChrome";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./tokenStrategies";
@@ -29,12 +30,7 @@ import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./t
 type BandContext = Pick<PdfNodeContext, "layout" | "blocks">;
 
 /** A token paints one string and nothing else. */
-type TokenContext = Pick<PdfNodeContext, "draw" | "font">;
-
-function isResolvedPayload(value: unknown): value is ResolvedHeaderFooter {
-  if (typeof value !== "object" || value === null) return false;
-  return "policy" in value && "slots" in value;
-}
+type TokenContext = Pick<PdfNodeContext, "draw" | "font" | "color">;
 
 /**
  * PDF chrome handler for headerFooter. Called once per page by the export
@@ -45,7 +41,7 @@ export function renderHeaderFooterPdf(
   payload: unknown,
   pdfCtx: BandContext,
 ): void {
-  if (!isResolvedPayload(payload)) return;
+  if (!isResolvedHeaderFooter(payload)) return;
   const pageNumber = layoutPage.pageNumber;
   const metrics = pdfCtx.layout.metrics?.[pageNumber - 1];
   if (!metrics) return;
@@ -69,12 +65,15 @@ function renderBand(
   const slot = resolved.slots[slotKey];
   if (!slot) return;
 
-  const page = slot.layout.pages[0];
+  // Same arrangement the canvas paints this page with — the band is measured
+  // once for the whole document, so the page number's box is sized per width.
+  const stored = slotLayoutForPage(slot, pageNumber);
+  const page = stored.pages[0];
   if (!page || page.blocks.length === 0) return;
 
   // The stored layout has blocks at margins.top (from runMiniPipeline).
   // Offset to the actual band Y on the page.
-  const offsetY = bandY - slot.layout.pageConfig.margins.top;
+  const offsetY = bandY - stored.pageConfig.margins.top;
 
   // Offset copies — the stored blocks are not mutated.
   const banded = page.blocks.map((block) => ({ ...block, y: block.y + offsetY }));
@@ -84,8 +83,6 @@ function renderBand(
 
 // ── PDF node handlers for token inline atoms ─────────────────────────────────
 
-/** #9ca3af — the same grey the table borders use. */
-const TOKEN_COLOR: Rgb = { r: 156, g: 163, b: 175 };
 const TOKEN_SIZE_PX = 10;
 
 function drawTokenOnPdf(
@@ -103,7 +100,11 @@ function drawTokenOnPdf(
     baselineY: block.y + block.height,
     sizePx: fontSizeOf(font.cssFont),
     font,
-    color: TOKEN_COLOR,
+    // What the token's own marks resolve to, the same fill the canvas paints
+    // it in. Choosing a colour here instead is how the two surfaces came to
+    // disagree about one node; omitting it lets the draw surface apply the
+    // document's text colour, which is the same answer again.
+    ...(ctx.color ? { color: ctx.color } : {}),
   });
 }
 

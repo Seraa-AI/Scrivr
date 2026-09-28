@@ -8,6 +8,7 @@ import type { LayoutFontResolver } from "../fonts/layoutResolver";
 
 import type { Node } from "prosemirror-model";
 import type { FontModifier } from "../extensions/types";
+import type { InlineRegistry } from "./BlockRegistry";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import {
   type PageConfig,
@@ -25,6 +26,12 @@ export interface MiniPipelineOptions {
   fontConfig?: FontConfig;
   fontModifiers?: Map<string, FontModifier>;
   fonts?: LayoutFontResolver;
+  /**
+   * Strategies for inline atoms that size themselves — a page number, a date.
+   * Required to lay one out: an atom nothing claims and that declares no size
+   * has nothing to reserve, so BlockLayout drops it and warns.
+   */
+  inlineRegistry?: InlineRegistry;
 }
 
 /**
@@ -46,6 +53,7 @@ export function runMiniPipeline(
     ...(options.fonts ? { fonts: options.fonts } : {}),
     ...(options.fontConfig !== undefined && { fontConfig: options.fontConfig }),
     ...(options.fontModifiers !== undefined && { fontModifiers: options.fontModifiers }),
+    ...(options.inlineRegistry ? { inlineRegistry: options.inlineRegistry } : {}),
   };
 
   // runId: 0 signals "not a real layout run" — cache layers key off runId === previousLayout.runId.

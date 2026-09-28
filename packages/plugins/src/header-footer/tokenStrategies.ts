@@ -3,20 +3,28 @@
  * Each token renders its actual value (page number, total pages, date)
  * instead of the placeholder text from the node spec.
  *
- * The current page context is set by drawPageChrome before rendering
- * and read by each strategy during render.
- *
- * Each strategy implements measure() for dynamic width calculation during
- * layout. This uses the widest digit (max of 0-9) × digit count for numbers,
- * ensuring stable layout that doesn't thrash when page numbers change.
+ * Painting sets the current page and total. Band measurement supplies its own
+ * scoped page and total, so layout does not inherit another page's paint state.
  */
 
 import type { InlineStrategy, TextMeasurerLike } from "@scrivr/core";
 import type { Node } from "@scrivr/core/pm";
 
-/** Current page context — set before rendering, read by token strategies. */
+/** Node types whose reserved width follows the document's page count. */
+export const PAGE_COUNT_TOKENS: ReadonlySet<string> = new Set(["pageNumber", "totalPages"]);
+
+/**
+ * The token whose width differs from page to page. `totalPages` prints the same
+ * string everywhere, so a band holding only that one needs no arrangements.
+ */
+export const PER_PAGE_TOKEN = "pageNumber";
+
+/** Paint context; also the fallback for tokens measured outside a band. */
 let currentPageNumber = 1;
 let currentTotalPages = 1;
+
+/** A band's measurement inputs, independent of the current paint context. */
+let arrangement: { pageNumber: number; totalPages: number } | null = null;
 
 /** Call before rendering a page to set the context for token strategies. */
 export function setTokenContext(pageNumber: number, totalPages: number): void {
@@ -24,13 +32,28 @@ export function setTokenContext(pageNumber: number, totalPages: number): void {
   currentTotalPages = totalPages;
 }
 
+/**
+ * Measure a band's arrangement with both the page number and document total.
+ * Nested measurements and failures restore the enclosing inputs. Painting
+ * remains independent, even when measurement runs during live editing.
+ */
+export function arrangedForPage<T>(pageNumber: number, totalPages: number, arrange: () => T): T {
+  const previous = arrangement;
+  arrangement = { pageNumber, totalPages };
+  try {
+    return arrange();
+  } finally {
+    arrangement = previous;
+  }
+}
+
 export function getCurrentPageNumber(): number { return currentPageNumber; }
 export function getCurrentTotalPages(): number { return currentTotalPages; }
 
 /**
- * Measure the width of a digit string using the widest digit in the font.
- * Returns a stable width that doesn't change when "1" becomes "2" — only
- * when the digit count changes (e.g. page 9 → page 10).
+ * Width of `digitCount` digits, measured as the widest digit in the font. A
+ * page number sized to its own glyphs would resize as the reader scrolls from
+ * page 8 to 9; sized to the widest digit it only changes when the count does.
  */
 function measureDigitWidth(digitCount: number, font: string, measurer: TextMeasurerLike): number {
   let widest = 0;
@@ -39,6 +62,19 @@ function measureDigitWidth(digitCount: number, font: string, measurer: TextMeasu
     if (run.totalWidth > widest) widest = run.totalWidth;
   }
   return widest * digitCount;
+}
+
+/**
+ * How many digits a number takes. Counted from its own text: `ceil(log10(n))`
+ * is one short at every exact power of ten, so a ten-page document reserved a
+ * single digit and painted two.
+ *
+ * Exported because the arrangements a band is measured in are keyed by it —
+ * two answers to this would put a page's number in a box built for a different
+ * width.
+ */
+export function digitsIn(value: number): number {
+  return String(Math.max(value, 1)).length;
 }
 
 function measureTextWidth(text: string, font: string, measurer: TextMeasurerLike): number {
@@ -70,12 +106,12 @@ function drawTokenText(
 export const pageNumberStrategy: InlineStrategy = {
   verticalAlign: "baseline",
 
+  // Sized for the page this band is being arranged for, so "2" gets a one-digit
+  // box even in a thousand-page document. Outside an arrangement there is no
+  // single page to size for, so it reserves the widest the document can reach.
   measure(_node, font, measurer) {
-    // Reserve width for up to 3 digits (covers 1-999 pages). Uses widest
-    // digit so layout is stable across page number changes.
-    const digits = Math.max(1, Math.ceil(Math.log10(Math.max(currentTotalPages, 2))));
     return {
-      width: measureDigitWidth(Math.max(digits, 1), font, measurer),
+      width: measureDigitWidth(digitsIn(arrangement?.pageNumber ?? currentTotalPages), font, measurer),
       height: fontHeight(font),
     };
   },
@@ -88,10 +124,10 @@ export const pageNumberStrategy: InlineStrategy = {
 export const totalPagesStrategy: InlineStrategy = {
   verticalAlign: "baseline",
 
+  // The total is the same on every page, so this needs no arrangement of its own.
   measure(_node, font, measurer) {
-    const digits = Math.max(1, Math.ceil(Math.log10(Math.max(currentTotalPages, 2))));
     return {
-      width: measureDigitWidth(Math.max(digits, 1), font, measurer),
+      width: measureDigitWidth(digitsIn(arrangement?.totalPages ?? currentTotalPages), font, measurer),
       height: fontHeight(font),
     };
   },
