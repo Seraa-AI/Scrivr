@@ -1,38 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { fnv1aHex, stableStringify } from "./hash";
+import { createHash } from "node:crypto";
+import { sha256Hex } from "./hash";
 
-describe("fnv1aHex", () => {
-  it("is deterministic — same input, same hash", () => {
-    expect(fnv1aHex("hello world")).toBe(fnv1aHex("hello world"));
+describe("sha256Hex", () => {
+  it("matches the published vectors", () => {
+    expect(sha256Hex("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    expect(sha256Hex("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   });
 
-  it("always returns 8 hex chars", () => {
-    for (const s of ["", "a", "hello world", "x".repeat(1000)]) {
-      expect(fnv1aHex(s)).toMatch(/^[0-9a-f]{8}$/);
+  it("agrees with the platform implementation across lengths and scripts", () => {
+    const cases = [
+      "a",
+      "x".repeat(55), // one block short of padding overflow
+      "x".repeat(56), // forces a second block
+      "x".repeat(64),
+      "x".repeat(1000),
+      "The liability limit is USD 122789.",
+      "клаузула • 条項 • بند",
+      "m²  vs  m2",
+    ];
+    for (const value of cases) {
+      expect(sha256Hex(value)).toBe(createHash("sha256").update(value, "utf8").digest("hex"));
     }
-  });
-
-  it("differs for different input", () => {
-    expect(fnv1aHex("clause A")).not.toBe(fnv1aHex("clause B"));
-    // A one-character change flips the hash.
-    expect(fnv1aHex("Indemnification")).not.toBe(fnv1aHex("indemnification"));
-  });
-});
-
-describe("stableStringify", () => {
-  it("is independent of object key order", () => {
-    expect(stableStringify({ a: 1, b: 2 })).toBe(stableStringify({ b: 2, a: 1 }));
-    expect(stableStringify({ x: { p: 1, q: 2 } })).toBe(stableStringify({ x: { q: 2, p: 1 } }));
-  });
-
-  it("preserves array order and distinguishes values", () => {
-    expect(stableStringify([1, 2])).not.toBe(stableStringify([2, 1]));
-    expect(stableStringify({ a: 1 })).not.toBe(stableStringify({ a: 2 }));
-  });
-
-  it("handles primitives and null", () => {
-    expect(stableStringify(null)).toBe("null");
-    expect(stableStringify("hi")).toBe('"hi"');
-    expect(stableStringify(42)).toBe("42");
   });
 });
