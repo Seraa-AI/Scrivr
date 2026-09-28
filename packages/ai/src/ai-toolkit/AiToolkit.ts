@@ -337,11 +337,13 @@ export class AiToolkitAPI {
    * block's current rich hash differs, the edit is skipped as `stale` rather
    * than clobbering newer content.
    *
-   * v1 is suggestions-only; `asSuggestion: false` (direct apply) is reserved.
+   * Always applies as tracked suggestions — an agent's edit is a proposal, and
+   * a reviewer accepts or rejects it. Applying agent output straight into the
+   * document is the `applyAiSuggestion({ mode: "direct" })` lane instead.
    */
   applyRichEdit(
     edits: RichBlockEdit[] | SemanticUnit[],
-    options: { authorID?: string; asSuggestion?: boolean } = {},
+    options: { authorID?: string } = {},
   ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
     const authorID = options.authorID ?? "AI Assistant";
 
@@ -444,7 +446,7 @@ export class AiToolkitAPI {
    */
   applySemanticEdits(
     edits: SemanticEdit[],
-    options: { authorID?: string; asSuggestion?: boolean } = {},
+    options: { authorID?: string } = {},
   ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
     const rich: RichBlockEdit[] = [];
     const structural: StructuralSemanticEdit[] = [];

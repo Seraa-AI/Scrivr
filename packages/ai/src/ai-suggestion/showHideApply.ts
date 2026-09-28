@@ -11,8 +11,11 @@
  */
 
 import type { IBaseEditor } from "@scrivr/core";
+import { spansToFragment } from "@scrivr/core";
+import { Fragment } from "@scrivr/core/pm";
+import type { Mark, Node as PmNode, Schema } from "@scrivr/core/pm";
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import type { AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
+import type { AiOp, AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
 import {
   aiSuggestionPluginKey,
   AI_SUGGESTION_SET,
@@ -78,6 +81,21 @@ export function applyAiSuggestion(
   }
 }
 
+/**
+ * The content an insert op puts in the document — its text, carrying whatever
+ * formatting the op proposed. An op made from plain text proposes none, which
+ * `spansToFragment` renders as an unmarked run.
+ */
+function insertedContent(op: AiOp, schema: Schema, extraMarks: readonly Mark[] = []) {
+  const fragment = spansToFragment([{ text: op.text, marks: op.marks ?? [] }], schema);
+  if (extraMarks.length === 0) return fragment;
+  const marked: PmNode[] = [];
+  fragment.forEach((child) => {
+    marked.push(extraMarks.reduce((node, mark) => node.mark(mark.addToSet(node.marks)), child));
+  });
+  return Fragment.fromArray(marked);
+}
+
 /** Apply by directly writing the proposed text into the doc (no tracking marks). */
 function _applyDirect(
   editor: IBaseEditor,
@@ -125,8 +143,7 @@ function _applyDirect(
       } else if (op.type === "insert") {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         if (range) {
-          const textNode = schema.text(op.text);
-          tr.insert(range.from + insertedChars, textNode);
+          tr.insert(range.from + insertedChars, insertedContent(op, schema));
           insertedChars += op.text.length;
         }
         // acceptedOffset does NOT advance for inserts
@@ -194,7 +211,10 @@ function _applyTracked(
             const dataTracked = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs)) as Record<string, unknown>;
             if (op.groupId) dataTracked["groupId"] = op.groupId;
             const safeText = op.text.replace(/\n/g, " ");
-            tr.insert(range.from + insertedChars, schema.text(safeText, [insertMarkType.create({ dataTracked })]));
+            const content = insertedContent({ ...op, text: safeText }, schema, [
+              insertMarkType.create({ dataTracked }),
+            ]);
+            tr.insert(range.from + insertedChars, content);
             insertedChars += safeText.length;
           }
         }
