@@ -22,7 +22,9 @@ import { findNodeById } from "../ai-toolkit/UniqueId";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
 import { diffText, pairReplacements } from "@scrivr/plugins";
 import type { PairedDiffOp } from "@scrivr/plugins";
-import type { InlineMark, InlineSpan } from "@scrivr/core";
+import type { InlineMark } from "@scrivr/core";
+import type { InlineSpan } from "../schema/edit";
+import { toCoreSpans } from "../ai-toolkit/spans";
 import type { AiSuggestion, AiSuggestionBlock, AiOp } from "./types";
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -37,10 +39,11 @@ export interface ComputeAiSuggestionOptions {
      */
     proposedText?: string;
     /**
-     * The proposed wording as formatting runs. Carries what `proposedText`
-     * cannot: which parts of the new wording are bold, linked, highlighted —
-     * and lets a proposal be about formatting alone, where the words are
-     * unchanged. Takes precedence when both are given.
+     * The proposed wording as formatting runs, in the same vocabulary the edit
+     * protocol validates — so `parseSemanticEdits` output feeds straight in.
+     * Carries what `proposedText` cannot: which parts of the new wording are
+     * bold, linked, highlighted, and lets a proposal be about formatting alone
+     * where the words are unchanged. Takes precedence when both are given.
      */
     proposedSpans?: InlineSpan[];
     /** Optional human-authored summary, e.g. "Simplified tone and removed jargon". */
@@ -65,7 +68,7 @@ function readProposal(block: {
   if (block.proposedSpans) {
     let text = "";
     const marksAt: InlineMark[][] = [];
-    for (const span of block.proposedSpans) {
+    for (const span of toCoreSpans(block.proposedSpans)) {
       text += span.text;
       for (let i = 0; i < span.text.length; i++) marksAt.push(span.marks);
     }

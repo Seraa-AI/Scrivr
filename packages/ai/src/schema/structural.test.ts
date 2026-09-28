@@ -6,7 +6,8 @@
  * shown, not a coordinate it inferred.
  */
 import { describe, expect, it } from "vitest";
-import { SemanticEditSchema, StructuralSemanticEditSchema, parseSemanticEdits } from "./edit";
+// Through the barrel, so an export dropped from `index.ts` fails here.
+import { SemanticEditSchema, StructuralSemanticEditSchema, parseSemanticEdits } from "./index";
 
 const insertBlock = {
   kind: "structural",

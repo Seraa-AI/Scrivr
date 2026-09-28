@@ -12,8 +12,10 @@
  */
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import type { SemanticUnit } from "@scrivr/core";
+import type { InlineSpan, SemanticUnit } from "@scrivr/core";
 import { toSemanticUnits } from "../toSemanticUnits";
+// Imported through the barrel: an export dropped from `index.ts` fails here
+// rather than passing against the module it happens to live in.
 import {
   unitContentHash,
   unitContentKey,
@@ -21,7 +23,7 @@ import {
   unitRichInput,
   semanticPartRichInput,
   semanticPartRichHash,
-} from "../changeDetection";
+} from "../index";
 import { fnv1aHex, stableStringify } from "@scrivr/core";
 
 const para = (nodeId: string, text: string) => ({
@@ -92,7 +94,11 @@ describe("published rich preimages", () => {
 
     expect(fnv1aHex(stableStringify(semanticPartRichInput(part!)))).toBe(semanticPartRichHash(part!));
     // A unit's rich preimage is structured, not a string — the diff lane reads
-    // its spans rather than re-deriving them from text.
-    expect(unitRichInput(list!)).toMatchObject({ type: list!.type, text: list!.text });
+    // its spans rather than re-deriving them from text, and reads them without
+    // asserting its way past the return type.
+    const input = unitRichInput(list!);
+    const spans: InlineSpan[] = input.spans;
+    expect(spans).toEqual(expect.any(Array));
+    expect(input).toMatchObject({ type: list!.type, text: list!.text });
   });
 });

@@ -24,6 +24,12 @@ schema order and an agent emits them in whatever order it wrote them, so a
 literal comparison would read a reordered `[bold, italic]` as a change, and a
 link whose `href` the proposal restates would read as one too.
 
+`proposedSpans` takes the protocol's own inline runs, so `parseSemanticEdits`
+output feeds `computeAiSuggestion` directly. The package publishes one vocabulary
+for inline runs and every public entry point speaks it; a consumer holding
+validated agent output should not have to convert between two spellings of the
+same thing, least of all in a repo that gives it no `as` to do it with.
+
 `applyRichEdit` and `applySemanticEdits` no longer accept `asSuggestion`. It was
 declared on both and read by neither, so `asSuggestion: false` returned
 `applied: true` having applied a tracked suggestion — the opposite of what the

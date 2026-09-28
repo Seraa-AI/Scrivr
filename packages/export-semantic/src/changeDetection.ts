@@ -6,14 +6,34 @@
  * cost instead of document cost. The editor owns the identity (`nodeId`) and
  * the canonical embedding input; the consumer owns storage + the re-embed.
  */
-import { fnv1aHex, stableStringify, type SemanticPart, type SemanticUnit } from "@scrivr/core";
+import {
+  fnv1aHex,
+  stableStringify,
+  type InlineSpan,
+  type SemanticPart,
+  type SemanticUnit,
+  type TableCells,
+} from "@scrivr/core";
 
 /**
- * The canonical value `semanticPartRichHash` covers. Published because the rich
- * diff lane needs the preimage, not only the digest: a digest says a leaf moved,
- * the preimage says which run did.
+ * The canonical value `semanticPartRichHash` covers — every field that makes one
+ * leaf read differently from another. Named rather than anonymous so a consumer
+ * can read `.spans` without asserting its way in.
  */
-export function semanticPartRichInput(part: SemanticPart): Record<string, unknown> {
+export interface SemanticPartRichInput {
+  type: SemanticPart["type"];
+  breadcrumb: string[];
+  text: string;
+  spans: InlineSpan[];
+  attrs: Record<string, unknown>;
+}
+
+/**
+ * The preimage behind `semanticPartRichHash`. Published because the rich diff
+ * lane needs it, not only the digest: a digest says a leaf changed, the preimage
+ * says which run did.
+ */
+export function semanticPartRichInput(part: SemanticPart): SemanticPartRichInput {
   return {
     type: part.type,
     breadcrumb: part.breadcrumb,
@@ -62,11 +82,22 @@ export function unitRichHash(unit: SemanticUnit): string {
   return fnv1aHex(stableStringify(unitRichInput(unit)));
 }
 
+/** The canonical value `unitRichHash` covers. */
+export interface UnitRichInput {
+  type: SemanticUnit["type"];
+  breadcrumb: string[];
+  text: string;
+  spans: InlineSpan[];
+  attrs: Record<string, unknown>;
+  parts: SemanticPartRichInput[] | null;
+  cells: TableCells | null;
+}
+
 /**
- * The canonical value `unitRichHash` covers — structured, not a string, so a
- * consumer reads a unit's runs rather than re-deriving them from `text`.
+ * The preimage behind `unitRichHash` — structured, not a string, so a consumer
+ * reads a unit's runs rather than re-deriving them from `text`.
  */
-export function unitRichInput(unit: SemanticUnit): Record<string, unknown> {
+export function unitRichInput(unit: SemanticUnit): UnitRichInput {
   return {
     type: unit.type,
     breadcrumb: unit.breadcrumb,
@@ -87,8 +118,8 @@ export function unitRichInput(unit: SemanticUnit): Record<string, unknown> {
  * NFKC-normalized with whitespace collapsed.
  *
  * Deliberately narrower than `unitEmbeddingInput`: no breadcrumb, because the
- * same clause sits under a different heading in every agreement that carries it,
- * and no instance id, because `nodeId` is scoped to one document. Whitespace is
+ * same clause sits under a different heading in every agreement that carries it.
+ * Whitespace is
  * collapsed because a clause that survives a DOCX round-trip or a re-wrap is the
  * same clause, and NFKC folds the compatibility forms an importer can introduce.
  *
