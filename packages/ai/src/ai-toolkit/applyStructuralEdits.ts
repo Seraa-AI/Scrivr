@@ -134,10 +134,10 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       return;
     }
     case "deleteTableRow": {
-      const row = resolveAncestor(tr.doc, edit.anchorNodeId, "tableRow");
-      if (!row) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
+      const row = resolveAncestor(tr.doc, edit.nodeId, "tableRow");
+      if (!row) return void rejectOrMiss(tr.doc, edit.nodeId, result);
       tr.delete(row.pos, row.pos + row.node.nodeSize);
-      result.changed.push(edit.anchorNodeId);
+      result.changed.push(edit.nodeId);
       return;
     }
   }

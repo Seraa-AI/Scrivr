@@ -78,7 +78,8 @@ const anchored = { position: EditPositionSchema, anchorNodeId: z.string().min(1)
  * a semantic editor command, not a generic tree mutation: the agent says "a new
  * item after this one", and the engine resolves that to a position.
  *
- * Discriminated on `op` so a malformed member names the op it failed as.
+ * Discriminated on `op` so a malformed edit is reported against the one op it
+ * claimed to be, rather than against all six.
  */
 export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
   structuralOp("insertBlock", { ...anchored, block: SemanticBlockInputSchema }),
@@ -92,7 +93,7 @@ export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
   }),
   structuralOp("deleteListItem", { nodeId: z.string().min(1) }),
   structuralOp("insertTableRow", { ...anchored, cells: z.array(SemanticCellInputSchema).optional() }),
-  structuralOp("deleteTableRow", { anchorNodeId: z.string().min(1) }),
+  structuralOp("deleteTableRow", { nodeId: z.string().min(1) }),
 ]);
 export type StructuralSemanticEdit = z.infer<typeof StructuralSemanticEditSchema>;
 

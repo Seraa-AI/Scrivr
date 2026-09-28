@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { computeAiSuggestion } from "../computeAiSuggestion";
-import { AiTestEditor, doc, p } from "./helpers";
+import { AiTestEditor, doc, p, schema } from "./helpers";
 
 const build = (text: string) => new AiTestEditor(doc(p(text, "p1")));
 
@@ -63,10 +63,48 @@ describe("computeAiSuggestion with spans", () => {
       authorID: "AI Assistant",
     });
     expect(suggestion).not.toBeNull();
+    // The words are unchanged, so the proposal lives entirely on keeps.
+    expect(suggestion!.blocks[0]!.ops.every((o) => o.type === "keep")).toBe(true);
   });
 });
 
+const boldedText = (editor: AiTestEditor) => {
+  let bolded = "";
+  editor.getState().doc.descendants((node) => {
+    if (node.isText && node.marks.some((m) => m.type.name === "bold")) bolded += node.text;
+  });
+  return bolded;
+};
+
 describe("applying a formatted suggestion", () => {
+  it("applies a formatting-only proposal, whose ops are all keeps", () => {
+    const editor = build("Confidential Information");
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedSpans: [{ text: "Confidential Information", marks: [{ type: "bold" }] }] }],
+      authorID: "AI Assistant",
+    })!;
+
+    editor.showSuggestion(suggestion);
+    editor.apply({ mode: "direct" });
+
+    expect(boldedText(editor)).toBe("Confidential Information");
+  });
+
+  it("removes formatting the proposal drops", () => {
+    const editor = new AiTestEditor(doc(
+      schema.node("paragraph", { nodeId: "p1" }, schema.text("Plain now", [schema.marks.bold!.create()])),
+    ));
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedSpans: [{ text: "Plain now", marks: [] }] }],
+      authorID: "AI Assistant",
+    })!;
+
+    editor.showSuggestion(suggestion);
+    editor.apply({ mode: "direct" });
+
+    expect(boldedText(editor)).toBe("");
+  });
+
   it("writes the inserted run with its marks", () => {
     const editor = build("The term means this.");
     const suggestion = computeAiSuggestion(editor.getState(), {
@@ -81,10 +119,6 @@ describe("applying a formatted suggestion", () => {
     editor.showSuggestion(suggestion);
     editor.apply({ mode: "direct" });
 
-    let bolded = "";
-    editor.getState().doc.descendants((node) => {
-      if (node.isText && node.marks.some((m) => m.type.name === "bold")) bolded += node.text;
-    });
-    expect(bolded).toContain("defined");
+    expect(boldedText(editor)).toContain("defined");
   });
 });

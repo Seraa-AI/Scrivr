@@ -87,16 +87,34 @@ function marksMatchBlock(node: PmNode, marksAt: InlineMark[][]): boolean {
     if (!child.isText || !child.text) return;
     const marks = child.marks
       .filter((mark) => mark.type.name !== "trackedInsert" && mark.type.name !== "trackedDelete")
-      .map((mark) => ({ type: mark.type.name }));
+      .map((mark) =>
+        Object.keys(mark.attrs).length > 0
+          ? { type: mark.type.name, attrs: mark.attrs }
+          : { type: mark.type.name },
+      );
     for (let i = 0; i < child.text.length; i++) current.push(marks);
   });
   if (current.length !== marksAt.length) return false;
   return current.every((marks, i) => sameMarks(marks, marksAt[i] ?? []));
 }
 
-/** Two runs read the same way — so they can stay one op. */
-function sameMarks(a: InlineMark[], b: InlineMark[]): boolean {
-  return a.length === b.length && JSON.stringify(a) === JSON.stringify(b);
+/**
+ * Two runs read the same way — so they can stay one op.
+ *
+ * Order-insensitive and attrs-aware, because the two sides come from different
+ * places: document marks arrive in schema order, and an agent emits them in
+ * whatever order it wrote them. Comparing those literally would read a reordered
+ * `[bold, italic]` as a formatting change.
+ */
+function markKey(mark: InlineMark): string {
+  return JSON.stringify([mark.type, mark.attrs ?? null]);
+}
+
+function sameMarks(a: readonly InlineMark[], b: readonly InlineMark[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = a.map(markKey).sort();
+  const right = b.map(markKey).sort();
+  return left.every((key, i) => key === right[i]);
 }
 
 /**

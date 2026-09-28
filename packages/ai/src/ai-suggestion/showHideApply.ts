@@ -12,8 +12,9 @@
 
 import type { IBaseEditor } from "@scrivr/core";
 import { spansToFragment } from "@scrivr/core";
+import type { InlineMark } from "@scrivr/core";
 import { Fragment } from "@scrivr/core/pm";
-import type { Mark, Node as PmNode, Schema } from "@scrivr/core/pm";
+import type { Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import type { AiOp, AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
 import {
@@ -82,6 +83,34 @@ export function applyAiSuggestion(
 }
 
 /**
+ * Make the run at [from, to) read the way `marks` says — adding what the
+ * proposal asks for and removing the formatting it drops. Tracked-change marks
+ * are left alone: they describe the review state of the text, not how it reads.
+ *
+ * A proposal whose wording is unchanged lives entirely on `keep` ops, so this is
+ * the only thing that applies it.
+ */
+function applyRunMarks(
+  tr: Transaction,
+  schema: Schema,
+  from: number,
+  to: number,
+  marks: readonly InlineMark[],
+): void {
+  if (to <= from) return;
+  const proposed = new Map(marks.map((mark) => [mark.type, mark]));
+
+  for (const markType of Object.values(schema.marks)) {
+    if (markType.name === "trackedInsert" || markType.name === "trackedDelete") continue;
+    if (!proposed.has(markType.name)) tr.removeMark(from, to, markType);
+  }
+  for (const [name, mark] of proposed) {
+    const markType = schema.marks[name];
+    if (markType) tr.addMark(from, to, markType.create(mark.attrs ?? null));
+  }
+}
+
+/**
  * The content an insert op puts in the document — its text, carrying whatever
  * formatting the op proposed. An op made from plain text proposes none, which
  * `spansToFragment` renders as an unmarked run.
@@ -124,6 +153,10 @@ function _applyDirect(
       const tokenLen = op.text.length;
 
       if (op.type === "keep") {
+        if (op.marks) {
+          const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
+          if (range) applyRunMarks(tr, schema, range.from + insertedChars, range.to + insertedChars, op.marks);
+        }
         acceptedOffset += tokenLen;
         continue;
       }
@@ -184,6 +217,10 @@ function _applyTracked(
       const tokenLen = op.text.length;
 
       if (op.type === "keep") {
+        if (op.marks) {
+          const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
+          if (range) applyRunMarks(tr, schema, range.from + insertedChars, range.to + insertedChars, op.marks);
+        }
         acceptedOffset += tokenLen;
         continue;
       }

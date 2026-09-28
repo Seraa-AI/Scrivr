@@ -28,6 +28,12 @@ at all, and accepting a suggested table-row deletion left the row behind, empty,
 because only the text inside it had been marked. A schema test now fails if a
 node is added without it.
 
+`deleteTableRow` names its target `nodeId`, matching `deleteBlock` and
+`deleteListItem`. It was `anchorNodeId`, and everywhere else in this protocol an
+anchor is a neighbour you position against rather than the thing being acted on —
+an agent reading the three delete ops together would reasonably have concluded it
+deleted the row beside the one it named.
+
 **Breaking:** `parseRichEdits` is `parseSemanticEdits` and validates the whole
 protocol rather than the inline half — a structural edit fed to the old name was
 rejected as malformed. `applySemanticEdits` no longer returns `unsupported`. The

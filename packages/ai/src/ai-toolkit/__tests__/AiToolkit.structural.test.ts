@@ -1,5 +1,5 @@
 /**
- * Structural edits (RFC Phase 2) applied as tracked suggestions.
+ * Structural edits applied as tracked suggestions.
  *
  * The agent never states a position — it names a neighbour it was shown and
  * says which side. Nothing is applied outright: the engine's own transaction
@@ -163,7 +163,7 @@ describe("table rows", () => {
 
   it("marks a row deleted", () => {
     const { editor, ai } = build(doc());
-    const res = ai.applySemanticEdits([{ kind: "structural", op: "deleteTableRow", anchorNodeId: "c3p" }]);
+    const res = ai.applySemanticEdits([{ kind: "structural", op: "deleteTableRow", nodeId: "c3p" }]);
 
     expect(res.applied).toBe(true);
     const marked = changesOf(editor).find((c) => c.type === "node-change" && c.node.type.name === "tableRow");

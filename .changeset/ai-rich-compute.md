@@ -13,9 +13,16 @@ formatting changes partway is split so that an op always reads one way.
 Two things this makes possible that were not expressible before. A proposal can
 be about formatting alone, where the wording is untouched: every op is a `keep`,
 so the change is found by comparing the formatting the block would end up with
-against the formatting it has. And an accepted insertion now lands with its
-marks — both the direct and the tracked apply build their content the same way,
-so a suggested bold term is bold once accepted instead of quietly flattening.
+against the formatting it has, and applying it sets the marks on the kept run —
+adding what the proposal asks for, removing what it drops, and leaving
+tracked-change marks alone because those describe review state rather than how
+the text reads. And an accepted insertion now lands with its marks, so a
+suggested bold term is bold once accepted instead of quietly flattening.
+
+Marks are compared attrs-aware and order-insensitively. Document marks arrive in
+schema order and an agent emits them in whatever order it wrote them, so a
+literal comparison would read a reordered `[bold, italic]` as a change, and a
+link whose `href` the proposal restates would read as one too.
 
 `applyRichEdit` and `applySemanticEdits` no longer accept `asSuggestion`. It was
 declared on both and read by neither, so `asSuggestion: false` returned

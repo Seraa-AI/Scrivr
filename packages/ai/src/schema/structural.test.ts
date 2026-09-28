@@ -1,5 +1,5 @@
 /**
- * The structural half of the edit protocol (RFC Phase 2).
+ * The structural half of the edit protocol.
  *
  * Every op addresses the document through a stable `nodeId` and a `position`,
  * never an index or a ProseMirror position — the agent names a neighbour it was
@@ -24,14 +24,14 @@ describe("StructuralSemanticEditSchema", () => {
       { kind: "structural", op: "insertListItem", position: "before", anchorNodeId: "li1", item: { spans: [{ text: "Enterprise tier", marks: [] }] } },
       { kind: "structural", op: "deleteListItem", nodeId: "li2" },
       { kind: "structural", op: "insertTableRow", position: "after", anchorNodeId: "c1" },
-      { kind: "structural", op: "deleteTableRow", anchorNodeId: "c2" },
+      { kind: "structural", op: "deleteTableRow", nodeId: "c2" },
     ];
     for (const op of ops) expect(StructuralSemanticEditSchema.safeParse(op).success).toBe(true);
   });
 
-  it("rejects the ops specced for later phases rather than half-applying them", () => {
-    // Move (Phase 3) and column ops (Phase 4) are in the RFC but not built. A
-    // schema that accepted them would report success and change nothing.
+  it("rejects the ops that are designed but not built, rather than half-applying them", () => {
+    // Move and column ops are designed but not built. A schema that accepted
+    // them would report success and change nothing.
     const later: unknown[] = [
       { kind: "structural", op: "moveBlock", nodeId: "p1", position: "after", anchorNodeId: "p2" },
       { kind: "structural", op: "moveListItem", nodeId: "li1", position: "after", anchorNodeId: "li2" },

@@ -1,7 +1,7 @@
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor, IEditor, InlineSpan, SemanticPart, SemanticUnit } from "@scrivr/core";
+import type { IBaseEditor, IEditor, SemanticPart, SemanticUnit } from "@scrivr/core";
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
-import type { InlineSpan as EditInlineSpan, SemanticEdit, StructuralSemanticEdit } from "../schema/edit";
+import type { SemanticEdit, StructuralSemanticEdit } from "../schema/edit";
 import { applyStructuralEdits } from "./applyStructuralEdits";
 import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
@@ -100,12 +100,6 @@ function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUni
   return "nodeIds" in item && Array.isArray(item.nodeIds);
 }
 
-/**
- * Validated spans (zod: `attrs?: T | undefined`) → core `InlineSpan`s
- * (`exactOptionalPropertyTypes`-clean: omit `attrs` when absent). Runtime data
- * is identical; this only reconciles the optional-property types across the
- * zod ↔ core boundary.
- */
 /** A caller-pinned source hash on a unit (optional stale-edit guard). */
 function sourceHashOf(item: SemanticUnit): string | undefined {
   return readStringField(item, "expectedContentHash") ?? readStringField(item, "richHash");
@@ -337,9 +331,9 @@ export class AiToolkitAPI {
    * block's current rich hash differs, the edit is skipped as `stale` rather
    * than clobbering newer content.
    *
-   * Always applies as tracked suggestions — an agent's edit is a proposal, and
-   * a reviewer accepts or rejects it. Applying agent output straight into the
-   * document is the `applyAiSuggestion({ mode: "direct" })` lane instead.
+   * Applies as tracked suggestions wherever TrackChanges is active — an agent's
+   * edit is a proposal, and a reviewer accepts or rejects it. Applying agent
+   * output straight into the document is `applyAiSuggestion({ mode: "direct" })`.
    */
   applyRichEdit(
     edits: RichBlockEdit[] | SemanticUnit[],
@@ -439,10 +433,12 @@ export class AiToolkitAPI {
    * `SemanticEditSchema`) as tracked suggestions.
    *
    * Routes on `kind`: `richText` goes to the leaf merge, structural ops to
-   * `applyStructuralEdits`. Both halves report against the same three outcomes
-   * — `changed`, `notFound`, `rejected` — so a caller reads one answer rather
-   * than two vocabularies. An op the protocol does not define never arrives:
-   * `SemanticEditSchema` is the gate, and it refuses one by name.
+   * `applyStructuralEdits`. Both report into one result; `stale` comes only from
+   * the rich half, which is the only one with a hash to check against.
+   *
+   * `authorID` names the author of the rich half. Structural changes are
+   * attributed by the track-changes author, because the engine assigns them as
+   * it tracks the transaction and takes no per-transaction override.
    */
   applySemanticEdits(
     edits: SemanticEdit[],
