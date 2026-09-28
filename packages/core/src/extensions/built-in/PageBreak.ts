@@ -31,7 +31,7 @@ export const PageBreak = Extension.create({
         group: "block",
         atom: true,
         selectable: false,
-        attrs: { nodeId: { default: null } },
+        attrs: { nodeId: { default: null }, dataTracked: { default: [] } },
         parseDOM: [
           {
             tag: "div.scrivr-page-break",

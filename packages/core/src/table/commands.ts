@@ -2,7 +2,7 @@ import { Selection, TextSelection } from "prosemirror-state";
 import type { Command, EditorState } from "prosemirror-state";
 import type { Node, NodeType } from "prosemirror-model";
 import { getTableMap, type Rect, type TableMap } from "./TableMap";
-import { cellGridSpan, tableGrid } from "./attrs";
+import { cellGridSpan, tableGrid, maxPhysicalColumns } from "./attrs";
 
 /**
  * Structural table commands: add/delete row, add/delete column, and cell
@@ -56,24 +56,6 @@ function rowStartPos(table: Node, tableStart: number, idx: number): number {
   let pos = tableStart;
   for (let i = 0; i < idx; i++) pos += table.child(i).nodeSize;
   return pos;
-}
-
-/**
- * Widest row by summed `gridSpan`. `TableMap.width` trusts `table.attrs.grid`,
- * which can be shorter than the rows actually are before the integrity plugin
- * extends it — so the physical count is the safe basis for "is this really the
- * last column?" decisions that would otherwise delete the whole table.
- */
-function maxPhysicalColumns(table: Node): number {
-  let max = 0;
-  table.forEach((rowNode) => {
-    let w = 0;
-    rowNode.forEach((cell) => {
-      w += cellGridSpan(cell);
-    });
-    if (w > max) max = w;
-  });
-  return max;
 }
 
 function physicalCellColumn(rowNode: Node, rowPos: number, cellPos: number): number | null {

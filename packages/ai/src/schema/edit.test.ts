@@ -3,7 +3,7 @@ import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 import { AiToolkit } from "../ai-toolkit/AiToolkit";
 import { getAiToolkit } from "../ai-toolkit/aiToolkitRegistry";
-import { RichSemanticEditSchema, parseRichEdits } from "./edit";
+import { RichSemanticEditSchema, parseSemanticEdits } from "./edit";
 
 describe("RichSemanticEditSchema", () => {
   const valid = {
@@ -49,20 +49,20 @@ describe("RichSemanticEditSchema", () => {
   });
 });
 
-describe("parseRichEdits", () => {
+describe("parseSemanticEdits", () => {
   it("splits a mixed batch into valid edits and rejections", () => {
-    const { edits, rejected } = parseRichEdits([
+    const { edits, rejected } = parseSemanticEdits([
       { kind: "richText", nodeId: "a", spans: [{ text: "ok", marks: [] }] },
       { kind: "richText" }, // missing nodeId
-      { kind: "structural", nodeId: "c" }, // wrong kind
+      { kind: "structural", nodeId: "c" }, // no `op` — not a structural edit
     ]);
-    expect(edits.map((e) => e.nodeId)).toEqual(["a"]);
+    expect(edits.map((e) => e.kind)).toEqual(["richText"]);
     expect(rejected.map((r) => r.index)).toEqual([1, 2]);
     expect(rejected[0]!.error).toContain("nodeId");
   });
 
   it("rejects non-array input with index -1", () => {
-    const { edits, rejected } = parseRichEdits({ kind: "richText", nodeId: "a" });
+    const { edits, rejected } = parseSemanticEdits({ kind: "richText", nodeId: "a" });
     expect(edits).toHaveLength(0);
     expect(rejected).toEqual([{ index: -1, error: "expected an array of edits" }]);
   });
@@ -77,14 +77,14 @@ describe("parseRichEdits", () => {
     });
     const ai = getAiToolkit(editor)!;
 
-    const { edits, rejected } = parseRichEdits([
+    const { edits, rejected } = parseSemanticEdits([
       { kind: "richText", nodeId: "p1", spans: [{ text: "plain ", marks: [] }, { text: "word", marks: [{ type: "bold" }] }] },
     ]);
     expect(rejected).toHaveLength(0);
 
     const res = ai.applySemanticEdits(edits);
     expect(res.applied).toBe(true);
-    expect(res.unsupported).toEqual([]);
+    expect(res.changed).toEqual(["p1"]);
     const changes = trackChangesPluginKey.getState(editor.getState())?.changeSet.changes ?? [];
     expect(changes.filter((c) => c.type === "mark-change" && c.mark.type.name === "bold")).toHaveLength(1);
     expect(changes.filter((c) => c.type === "text-change")).toHaveLength(0);

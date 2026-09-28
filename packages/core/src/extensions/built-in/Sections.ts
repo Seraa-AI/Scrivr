@@ -36,6 +36,7 @@ export const Sections = Extension.create({
         selectable: false,
         attrs: {
           nodeId: { default: null },
+          dataTracked: { default: [] },
           /**
            * Settings of the section this break terminates. `null` means "the
            * defaults" — writers store only what they changed, matching how a

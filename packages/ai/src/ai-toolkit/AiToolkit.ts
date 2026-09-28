@@ -1,7 +1,9 @@
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor, IEditor, InlineSpan, SemanticPart, SemanticUnit } from "@scrivr/core";
+import type { IBaseEditor, IEditor, SemanticPart, SemanticUnit } from "@scrivr/core";
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
-import type { InlineSpan as EditInlineSpan, SemanticEdit } from "../schema/edit";
+import type { SemanticEdit, StructuralSemanticEdit } from "../schema/edit";
+import { applyStructuralEdits } from "./applyStructuralEdits";
+import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
@@ -96,19 +98,6 @@ export class AiSuggestionsAPI {
 /** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
 function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUnit {
   return "nodeIds" in item && Array.isArray(item.nodeIds);
-}
-
-/**
- * Validated spans (zod: `attrs?: T | undefined`) → core `InlineSpan`s
- * (`exactOptionalPropertyTypes`-clean: omit `attrs` when absent). Runtime data
- * is identical; this only reconciles the optional-property types across the
- * zod ↔ core boundary.
- */
-function toCoreSpans(spans: EditInlineSpan[]): InlineSpan[] {
-  return spans.map((span) => ({
-    text: span.text,
-    marks: span.marks.map((mark) => (mark.attrs !== undefined ? { type: mark.type, attrs: mark.attrs } : { type: mark.type })),
-  }));
 }
 
 /** A caller-pinned source hash on a unit (optional stale-edit guard). */
@@ -342,11 +331,13 @@ export class AiToolkitAPI {
    * block's current rich hash differs, the edit is skipped as `stale` rather
    * than clobbering newer content.
    *
-   * v1 is suggestions-only; `asSuggestion: false` (direct apply) is reserved.
+   * Applies as tracked suggestions wherever TrackChanges is active — an agent's
+   * edit is a proposal, and a reviewer accepts or rejects it. Applying agent
+   * output straight into the document is `applyAiSuggestion({ mode: "direct" })`.
    */
   applyRichEdit(
     edits: RichBlockEdit[] | SemanticUnit[],
-    options: { authorID?: string; asSuggestion?: boolean } = {},
+    options: { authorID?: string } = {},
   ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
     const authorID = options.authorID ?? "AI Assistant";
 
@@ -438,22 +429,24 @@ export class AiToolkitAPI {
   }
 
   /**
-   * Apply zod-validated protocol edits (from `parseRichEdits` /
-   * `SemanticEditSchema`). The typed entry point for the public edit protocol:
-   * parse untrusted agent output, then hand the validated edits here.
+   * Apply zod-validated protocol edits (from `parseSemanticEdits` /
+   * `SemanticEditSchema`) as tracked suggestions.
    *
-   * Phase 1 handles `richText` (inline). Unsupported kinds (the structural ops
-   * specced for later phases) are returned in `unsupported` rather than applied.
+   * Routes on `kind`: `richText` goes to the leaf merge, structural ops to
+   * `applyStructuralEdits`. Both report into one result; `stale` comes only from
+   * the rich half, which is the only one with a hash to check against.
+   *
+   * `authorID` names the author of the rich half. Structural changes are
+   * attributed by the track-changes author, because the engine assigns them as
+   * it tracks the transaction and takes no per-transaction override.
    */
   applySemanticEdits(
     edits: SemanticEdit[],
-    options: { authorID?: string; asSuggestion?: boolean } = {},
-  ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[]; unsupported: string[] } {
+    options: { authorID?: string } = {},
+  ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
     const rich: RichBlockEdit[] = [];
-    const unsupported: string[] = [];
+    const structural: StructuralSemanticEdit[] = [];
     for (const edit of edits) {
-      // Phase 1: only `richText`. Structural ops join `SemanticEdit` in later
-      // phases and route to a dedicated adapter here (→ `unsupported` until then).
       if (edit.kind === "richText") {
         rich.push({
           nodeId: edit.nodeId,
@@ -461,10 +454,30 @@ export class AiToolkitAPI {
           ...(edit.attrs ? { attrs: edit.attrs } : {}),
           ...(edit.expectedContentHash ? { expectedContentHash: edit.expectedContentHash } : {}),
         });
+      } else {
+        structural.push(edit);
       }
     }
-    const result = this.applyRichEdit(rich, options);
-    return { ...result, unsupported };
+
+    const richResult = rich.length > 0
+      ? this.applyRichEdit(rich, options)
+      : { applied: false, changed: [], stale: [], notFound: [], rejected: [] };
+    if (structural.length === 0) return richResult;
+
+    // One transaction for the whole structural batch: one undo step, and one
+    // review unit for the tracked changes it produces.
+    const tr = this.editor.getState().tr;
+    const structuralResult = applyStructuralEdits(tr, structural);
+    const touched = tr.docChanged;
+    if (touched) this.editor.applyTransaction(tr);
+
+    return {
+      applied: richResult.applied || touched,
+      changed: [...richResult.changed, ...structuralResult.changed],
+      stale: richResult.stale,
+      notFound: [...richResult.notFound, ...structuralResult.notFound],
+      rejected: [...richResult.rejected, ...structuralResult.rejected],
+    };
   }
 
   // ── Streaming ──────────────────────────────────────────────────────────────

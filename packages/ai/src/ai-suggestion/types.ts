@@ -3,6 +3,7 @@
  *
  * Shared types for the ai-suggestion module.
  */
+import type { InlineMark } from "@scrivr/core";
 
 /**
  * Font info for rendering ghost text inline.
@@ -27,6 +28,15 @@ export interface AiOp {
   text: string;
   /** groupId links a paired delete+insert into one logical replacement */
   groupId?: string;
+  /**
+   * Formatting the proposed run carries. Present on `insert` and `keep` when the
+   * proposal was made as spans; absent when it was made as plain text, which is
+   * the same statement as "no marks". A run whose formatting changes partway is
+   * split into one op per formatting, so an op always reads one way.
+   *
+   * `delete` ops describe text already in the document and carry none.
+   */
+  marks?: InlineMark[];
 }
 
 /**

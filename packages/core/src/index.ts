@@ -48,3 +48,5 @@ export {
 export * from "./exports/semantic";
 /** ProseMirror's built-in DocAttrStep — prefer `tr.setDocAttribute(name, value)`. */
 export { DocAttrStep } from "prosemirror-transform";
+
+export { tableColumnCount } from "./table/attrs";

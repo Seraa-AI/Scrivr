@@ -16,12 +16,15 @@
  * noise for AI suggestions where the unit of accept/reject is a whole word.
  */
 
-import type { EditorState } from "@scrivr/core/pm";
+import type { EditorState, Node as PmNode, Schema } from "@scrivr/core/pm";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { buildAcceptedTextMap } from "@scrivr/plugins";
+import { buildAcceptedTextMap, isTrackedMark } from "@scrivr/plugins";
 import { diffText, pairReplacements } from "@scrivr/plugins";
 import type { PairedDiffOp } from "@scrivr/plugins";
+import { describeInlineMark, resolveInlineMarks, stableStringify, type InlineMark } from "@scrivr/core";
+import type { InlineSpan } from "../schema/edit";
+import { toCoreSpans } from "../ai-toolkit/spans";
 import type { AiSuggestion, AiSuggestionBlock, AiOp } from "./types";
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -29,10 +32,22 @@ import type { AiSuggestion, AiSuggestionBlock, AiOp } from "./types";
 export interface ComputeAiSuggestionOptions {
   /** One entry per block to rewrite. */
   blocks: Array<{
-    nodeId:       string;
-    proposedText: string;
+    nodeId:        string;
+    /**
+     * The proposed wording as plain text. Equivalent to a single `proposedSpans`
+     * run with no marks — a proposal that says nothing about formatting.
+     */
+    proposedText?: string;
+    /**
+     * The proposed wording as formatting runs, in the same vocabulary the edit
+     * protocol validates — so `parseSemanticEdits` output feeds straight in.
+     * Carries what `proposedText` cannot: which parts of the new wording are
+     * bold, linked, highlighted, and lets a proposal be about formatting alone
+     * where the words are unchanged. Takes precedence when both are given.
+     */
+    proposedSpans?: InlineSpan[];
     /** Optional human-authored summary, e.g. "Simplified tone and removed jargon". */
-    summary?:     string;
+    summary?:      string;
   }>;
   /** Author identifier for the suggestion, e.g. "AI Assistant". */
   authorID: string;
@@ -43,6 +58,89 @@ export interface ComputeAiSuggestionOptions {
 /** Simple unique id — no external dep needed for a suggestion id. */
 function genId(): string {
   return `ai_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+/** The proposed wording and, per character, the formatting it carries. */
+function readProposal(block: {
+  proposedText?: string;
+  proposedSpans?: InlineSpan[];
+}, schema: Schema, node: PmNode): { text: string; marksAt: InlineMark[][] } | null {
+  // `proposedSpans` wins only when it says something. An agent emitting `[]`
+  // alongside `proposedText` means "I have no runs", not "empty this block".
+  if (block.proposedSpans && block.proposedSpans.length > 0) {
+    let text = "";
+    const marksAt: InlineMark[][] = [];
+    for (const span of toCoreSpans(block.proposedSpans)) {
+      const marks = resolveInlineMarks(span.marks, schema, node.type).map(describeInlineMark);
+      text += span.text;
+      for (let i = 0; i < span.text.length; i++) marksAt.push(marks);
+    }
+    return { text, marksAt };
+  }
+  if (block.proposedText === undefined) return null;
+  // Plain text says nothing about formatting, which is the same as no marks.
+  return { text: block.proposedText, marksAt: [] };
+}
+
+/**
+ * Does the block already read the way the proposal asks? Compares the marks the
+ * proposal assigns each character against the marks the block's text carries, so
+ * a proposal that only restates the current formatting is not a suggestion.
+ */
+function marksMatchBlock(node: PmNode, marksAt: InlineMark[][]): boolean {
+  const current: InlineMark[][] = [];
+  node.descendants((child) => {
+    if (!child.isText || !child.text) return;
+    // Tracked-deleted text is not in the accepted text the proposal was diffed
+    // against, so counting it here would make every block under review look
+    // like a formatting change.
+    if (child.marks.some((mark) => mark.type.name === "trackedDelete")) return;
+    const marks = child.marks
+      .filter((mark) => !isTrackedMark(mark.type.name))
+      .map(describeInlineMark);
+    for (let i = 0; i < child.text.length; i++) current.push(marks);
+  });
+  if (current.length !== marksAt.length) return false;
+  return current.every((marks, i) => sameMarks(marks, marksAt[i] ?? []));
+}
+
+/**
+ * Two runs read the same way — so they can stay one op.
+ *
+ * Order-insensitive and attrs-aware, because the two sides come from different
+ * places: document marks arrive in schema order, and an agent emits them in
+ * whatever order it wrote them. Comparing those literally would read a reordered
+ * `[bold, italic]` as a formatting change.
+ */
+function markKey(mark: InlineMark): string {
+  return stableStringify([mark.type, mark.attrs ?? {}]);
+}
+
+function sameMarks(a: readonly InlineMark[], b: readonly InlineMark[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = a.map(markKey).sort();
+  const right = b.map(markKey).sort();
+  return left.every((key, i) => key === right[i]);
+}
+
+/**
+ * Split an op that consumes proposed text wherever its formatting changes, so
+ * every op reads one way. Ops over text already in the document (deletes) and
+ * proposals made as plain text pass through untouched.
+ */
+function splitByMarks(op: AiOp, marksAt: InlineMark[][], offset: number): AiOp[] {
+  if (marksAt.length === 0) return [op];
+  const out: AiOp[] = [];
+  let runStart = 0;
+  for (let i = 1; i <= op.text.length; i++) {
+    const here = marksAt[offset + i] ?? [];
+    const prev = marksAt[offset + i - 1] ?? [];
+    if (i === op.text.length || !sameMarks(here, prev)) {
+      out.push({ ...op, text: op.text.slice(runStart, i), marks: prev });
+      runStart = i;
+    }
+  }
+  return out.length > 0 ? out : [op];
 }
 
 /**
@@ -91,9 +189,12 @@ export function computeAiSuggestion(
   const schema = state.schema;
   const resultBlocks: AiSuggestionBlock[] = [];
 
-  for (const { nodeId, proposedText, summary } of inputBlocks) {
+  for (const block of inputBlocks) {
+    const { nodeId, summary } = block;
     const found = findNodeById(state.doc, nodeId);
-    if (!found) continue;
+    if (!found || !found.node.isTextblock) continue;
+    const proposal = readProposal(block, schema, found.node);
+    if (!proposal) continue;
 
     const { acceptedText } = buildAcceptedTextMap(
       found.node,
@@ -101,16 +202,29 @@ export function computeAiSuggestion(
       schema,
     );
 
-    // No change for this block — skip entirely.
-    if (acceptedText === proposedText) continue;
-
-    const rawOps = diffText(acceptedText, proposedText);
+    const rawOps = diffText(acceptedText, proposal.text);
     const paired = pairReplacements(rawOps);
-    const ops = toDiffOps(paired);
 
-    // Only include the block if it has at least one non-keep op.
-    const hasChange = ops.some((o) => o.type !== "keep");
-    if (!hasChange) continue;
+    // Ops that consume the proposal carry its formatting; a delete describes
+    // text already in the document, so it advances neither.
+    let proposedOffset = 0;
+    const ops: AiOp[] = [];
+    for (const op of toDiffOps(paired)) {
+      if (op.type === "delete") {
+        ops.push(op);
+        continue;
+      }
+      ops.push(...splitByMarks(op, proposal.marksAt, proposedOffset));
+      proposedOffset += op.text.length;
+    }
+
+    // A wording change shows up as a non-keep op. A formatting-only change does
+    // not — every op is a keep — so compare the formatting the block would end
+    // up with against the formatting it has.
+    const hasWordingChange = ops.some((o) => o.type !== "keep");
+    const hasFormattingChange =
+      proposal.marksAt.length > 0 && !marksMatchBlock(found.node, proposal.marksAt);
+    if (!hasWordingChange && !hasFormattingChange) continue;
 
     resultBlocks.push({ nodeId, acceptedText, ops, ...(summary ? { summary } : {}) });
   }

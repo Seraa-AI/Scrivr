@@ -51,4 +51,6 @@ The rich lane now publishes its preimages too — `unitRichInput` and
 `semanticPartRichInput`, the values `unitRichHash` and `semanticPartRichHash`
 already hashed. A digest says a leaf changed; the preimage says which run did,
 which is what a formatting-aware diff needs. Both are extracted from the hash
-functions rather than restated, so the preimage and the digest cannot drift.
+functions rather than restated, so the preimage and the digest cannot drift, and
+both return named types — `UnitRichInput` and `SemanticPartRichInput` — so a
+consumer reads `.spans` rather than asserting its way past the return type.

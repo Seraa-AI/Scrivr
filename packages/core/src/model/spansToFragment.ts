@@ -13,7 +13,7 @@
  *    an unsafe url drops the mark, keeping the text;
  *  - a mark whose attrs `create` throws is dropped, keeping the text.
  */
-import { Fragment, Mark, type Node as PmNode, type Schema } from "prosemirror-model";
+import { Fragment, Mark, type Node as PmNode, type Schema, type NodeType } from "prosemirror-model";
 import type { InlineMark, InlineSpan } from "../exports/semantic";
 import { safeUrl } from "./safeUrl";
 import { stableStringify } from "./hash";
@@ -24,6 +24,8 @@ const URL_ATTRS: Record<string, readonly string[]> = {
 };
 
 export interface SpansToFragmentOptions {
+  /** Destination textblock: marks must be allowed by its content schema. */
+  parentType?: NodeType;
   /** Called once per distinct dropped mark type (unknown type or bad attrs). */
   onWarn?: (message: string) => void;
 }
@@ -46,11 +48,7 @@ export function spansToFragment(
     // Empty runs and the newline sentinel never become text nodes.
     if (span.text === "" || (span.text === "\n" && span.marks.length === 0)) continue;
 
-    const marks: Mark[] = [];
-    for (const inline of span.marks) {
-      const mark = resolveInlineMark(inline, schema, warnOnce);
-      if (mark) marks.push(mark);
-    }
+    const marks = resolveInlineMarks(span.marks, schema, options.parentType, warnOnce);
     nodes.push(schema.text(span.text, marks.length > 0 ? marks : null));
   }
   return Fragment.fromArray(nodes);
@@ -71,13 +69,19 @@ export function resolveInlineMark(
   const warn = (why: string) =>
     onWarn?.(`[resolveInlineMark] dropped mark "${inline.type}": ${why}`);
 
+  if (isTrackedMark(inline.type)) {
+    warn("review metadata is not formatting");
+    return null;
+  }
   const markType = schema.marks[inline.type];
   if (!markType) {
     warn("not in schema");
     return null;
   }
 
-  let attrs = inline.attrs;
+  // Review metadata is engine-owned, even on ordinary formatting marks.
+  const { dataTracked: _review, ...styling } = inline.attrs ?? {};
+  let attrs = styling;
   for (const urlAttr of URL_ATTRS[inline.type] ?? []) {
     if (attrs && attrs[urlAttr] !== undefined) {
       const safe = safeUrl(attrs[urlAttr]);
@@ -109,4 +113,33 @@ export function sameMark(a: InlineMark, b: InlineMark): boolean {
     a.type === b.type &&
     stableStringify(a.attrs ?? {}) === stableStringify(b.attrs ?? {})
   );
+}
+
+/** Review marks never belong to the semantic formatting vocabulary. */
+export function isTrackedMark(name: string): boolean {
+  return name.startsWith("tracked");
+}
+
+/** Canonical semantic description shared by export, comparison, and edits. */
+export function describeInlineMark(mark: Mark): InlineMark {
+  const attrs: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(mark.attrs)) {
+    if (key !== "dataTracked" && value !== null && value !== undefined) attrs[key] = value;
+  }
+  return Object.keys(attrs).length ? { type: mark.type.name, attrs } : { type: mark.type.name };
+}
+
+/** Resolve a semantic mark set with schema ordering, exclusions, and destination rules. */
+export function resolveInlineMarks(
+  inline: readonly InlineMark[],
+  schema: Schema,
+  parentType?: NodeType,
+  onWarn?: (message: string) => void,
+): readonly Mark[] {
+  let marks: readonly Mark[] = [];
+  for (const value of inline) {
+    const mark = resolveInlineMark(value, schema, onWarn);
+    if (mark && (!parentType || parentType.allowsMarkType(mark.type))) marks = mark.addToSet(marks);
+  }
+  return marks;
 }

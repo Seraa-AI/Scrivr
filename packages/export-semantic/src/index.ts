@@ -17,7 +17,7 @@ export {
   unitContentKey,
   diffSemanticUnits,
 } from "./changeDetection";
-export type { SemanticUnitDiff } from "./changeDetection";
+export type { SemanticUnitDiff, UnitRichInput, SemanticPartRichInput } from "./changeDetection";
 export type {
   SemanticUnit,
   SemanticUnitType,

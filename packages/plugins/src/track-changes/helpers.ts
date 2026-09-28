@@ -6,11 +6,14 @@ export function genId(): string {
   return crypto.randomUUID();
 }
 
+import { isTrackedMark } from "@scrivr/core";
+export { isTrackedMark } from "@scrivr/core";
+
 export function isValidTrackableMark(mark: Mark) {
   const spec = mark.type.spec;
   const name = mark.type.name;
   if (
-    !name.startsWith("tracked") &&
+    !isTrackedMark(name) &&
     spec.attrs?.dataTracked &&
     typeof spec.attrs?.dataTracked === "object"
   ) {

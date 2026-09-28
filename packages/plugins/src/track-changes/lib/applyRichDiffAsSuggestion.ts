@@ -28,6 +28,8 @@ import { Fragment, type Mark, type Node as PMNode, type Schema } from "@scrivr/c
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 import {
   findNodeById,
+  describeInlineMark,
+  isTrackedMark,
   resolveInlineMark,
   sameMark,
   spansToFragment,
@@ -93,6 +95,25 @@ export interface RichDiffResult {
 /** Block styling the agent may set in v1. Structural/type edits are v2. */
 const ALLOWED_ATTRS = ["align", "indent", "textIndent"] as const;
 const VALID_ALIGN = new Set(["left", "center", "right", "justify"]);
+
+/**
+ * The block attrs an agent is allowed to set, keeping only well-formed values.
+ *
+ * Agent output is untrusted and its `attrs` is an open record, so this is the
+ * one place that decides what may reach a node. Identity and review bookkeeping
+ * (`nodeId`, `dataTracked`) are not on the list and cannot be: a forged
+ * `nodeId` collides with the ids the protocol addresses by, and forged
+ * `dataTracked` invents a review history.
+ */
+export function pickAgentAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
+  const picked: Record<string, unknown> = {};
+  for (const key of ALLOWED_ATTRS) {
+    if (!(key in attrs)) continue;
+    const value = attrs[key];
+    if (isValidAttr(key, value)) picked[key] = value;
+  }
+  return picked;
+}
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -189,10 +210,8 @@ function applyAttrsChange(
 ): boolean {
   const picked: Record<string, unknown> = {};
   let changed = false;
-  for (const key of ALLOWED_ATTRS) {
-    if (!(key in editAttrs) || !(key in node.attrs)) continue;
-    const next = editAttrs[key];
-    if (!isValidAttr(key, next) || next === node.attrs[key]) continue;
+  for (const [key, next] of Object.entries(pickAgentAttrs(editAttrs))) {
+    if (!(key in node.attrs) || next === node.attrs[key]) continue;
     picked[key] = next;
     changed = true;
   }
@@ -441,17 +460,7 @@ function buildAcceptedRichMap(node: PMNode, nodeStartPos: number, schema: Schema
 
 /** PM marks → formatting `InlineMark`s: drop tracked-change marks + `dataTracked`/null attrs. */
 function formattingMarksOf(marks: readonly Mark[]): InlineMark[] {
-  const out: InlineMark[] = [];
-  for (const mark of marks) {
-    if (mark.type.name.startsWith("tracked")) continue;
-    const attrs: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(mark.attrs)) {
-      if (key === "dataTracked" || value === null || value === undefined) continue;
-      attrs[key] = value;
-    }
-    out.push(Object.keys(attrs).length > 0 ? { type: mark.type.name, attrs } : { type: mark.type.name });
-  }
-  return out;
+  return marks.filter((mark) => !isTrackedMark(mark.type.name)).map(describeInlineMark);
 }
 
 /** Merge consecutive `keep` ops into one so a retained region isn't split per token. */

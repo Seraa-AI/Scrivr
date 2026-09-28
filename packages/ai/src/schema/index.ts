@@ -3,7 +3,11 @@ export {
   InlineSpanSchema,
   RichSemanticEditSchema,
   SemanticEditSchema,
-  parseRichEdits,
+  parseSemanticEdits,
+  EditPositionSchema,
+  SemanticBlockInputSchema,
+  SemanticCellInputSchema,
+  StructuralSemanticEditSchema,
 } from "./edit";
 export type {
   InlineMark,
@@ -11,5 +15,9 @@ export type {
   RichSemanticEdit,
   SemanticEdit,
   RejectedEdit,
-  ParsedRichEdits,
+  ParsedSemanticEdits,
+  EditPosition,
+  SemanticBlockInput,
+  SemanticCellInput,
+  StructuralSemanticEdit,
 } from "./edit";
