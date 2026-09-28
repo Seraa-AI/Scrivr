@@ -55,7 +55,14 @@ separately and closes the gap. A token is sized as widest-digit times digit
 count, so the only thing that changes between pages is how many digits the
 number has; the band is now arranged once per width (four times for a
 thousand-page document) and painting looks the arrangement up. Canvas and PDF
-read the same one. The band still reserves height against the widest.
+read the same one. The band reserves the maximum height across all measured
+arrangements: a narrower token can distribute tall inline objects over more
+lines and need more height than the widest-number arrangement.
+
+Each band measurement scopes both its page number and document total. A total
+pages token therefore measures against the document being laid out, even if
+another document was painted most recently. Nested measurements and exceptions
+restore the enclosing measurement context without changing paint state.
 
 Inline atoms are also painted in the font **and fill** their own marks resolve
 to. An atom carries no text for a decorator to colour, so its marks never

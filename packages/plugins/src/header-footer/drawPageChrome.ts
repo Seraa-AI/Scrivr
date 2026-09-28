@@ -100,7 +100,7 @@ function layoutAtBandY(
 ): DocumentLayout {
   // Arranged for the page being painted, so a band under the caret keeps the
   // token width the stored arrangement gave it and the line does not shift.
-  return arrangedForPage(paintCtx.pageNumber, () => runMiniPipeline(doc, {
+  return arrangedForPage(paintCtx.pageNumber, paintCtx.totalPages, () => runMiniPipeline(doc, {
     pageConfig: {
       ...paintCtx.pageConfig,
       margins: { ...paintCtx.pageConfig.margins, top: bandY },

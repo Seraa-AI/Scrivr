@@ -37,6 +37,9 @@ import {
   totalPagesStrategy,
   dateStrategy,
   setTokenContext,
+  arrangedForPage,
+  getCurrentPageNumber,
+  getCurrentTotalPages,
 } from "../tokenStrategies";
 import type { Node } from "@scrivr/core/pm";
 import type { HeaderFooterPolicy } from "../types";
@@ -416,9 +419,7 @@ describe("the box a page number gets on the page it is painted on", () => {
       .toBeLessThan(textX(slotLayoutForPage(slot, 1040)));
   });
 
-  it("reserves the band against the widest arrangement", () => {
-    // Height comes from the widest number, so a page whose number is shorter
-    // can never need more room than the band already took.
+  it("keeps the widest-number arrangement as the paint fallback", () => {
     const slot = slotFor(1040);
 
     expect(pageNumberWidth(slot.layout)).toBe(DIGIT_W * 4);
@@ -490,5 +491,76 @@ describe("a band that names only the total", () => {
     if (!isResolvedHeaderFooter(contribution.payload)) throw new Error("wrong payload");
 
     expect(contribution.payload.slots.defaultHeader!.byDigits).toBeUndefined();
+  });
+});
+
+
+describe("band measurement owns its page-count inputs", () => {
+  it.each([1, 1040])("ignores a previously painted total of %i", (paintedTotal) => {
+    setTokenContext(7, paintedTotal);
+    const spans = headerSpans(headerOf({ type: "totalPages" }), ctxWithPages(428));
+    expect(spans[0]!.width).toBe(3 * DIGIT_W);
+    expect(getCurrentPageNumber()).toBe(7);
+    expect(getCurrentTotalPages()).toBe(paintedTotal);
+  });
+
+  it("keeps the same total across every page-number arrangement", () => {
+    setTokenContext(1, 1);
+    const contribution = resolveChrome(
+      headerOf({ type: "pageNumber" }, { type: "text", text: " of " }, { type: "totalPages" }),
+      { doc, pageConfig, measurer, fontConfig: defaultFontConfig, inlineRegistry: registry },
+      ctxWithPages(1040), 0,
+    );
+    if (!isResolvedHeaderFooter(contribution.payload)) throw new Error("Missing header");
+    const slot = contribution.payload.slots.defaultHeader!;
+    for (const [digits, layout] of slot.byDigits!) {
+      const spans = layout.pages[0]!.blocks.flatMap((block) => block.lines)
+        .flatMap((line) => line.spans).filter((span) => span.kind === "object");
+      expect(spans.map((span) => span.width)).toEqual([digits * DIGIT_W, 4 * DIGIT_W]);
+    }
+  });
+
+  it("restores the enclosing measurement after a nested failure", () => {
+    const node = doc.type.schema.nodes["totalPages"]!.create();
+    const pageNode = doc.type.schema.nodes["pageNumber"]!.create();
+    const widths = () => [pageNumberStrategy, totalPagesStrategy].map((strategy, i) =>
+      strategy.measure!(i === 0 ? pageNode : node, "14px Arial", measurer).width,
+    );
+    setTokenContext(1, 9);
+    arrangedForPage(2, 428, () => {
+      expect(widths()).toEqual([10, 30]);
+      expect(() => arrangedForPage(100, 1040, () => {
+        expect(widths()).toEqual([30, 40]);
+        throw new Error("measurement failed");
+      })).toThrow("measurement failed");
+      expect(widths()).toEqual([10, 30]);
+    });
+    expect(widths()).toEqual([10, 10]);
+  });
+});
+
+describe("a band's reservation covers every arrangement", () => {
+  it.each(["header", "footer"] as const)("covers the taller narrow-number %s", (kind) => {
+    const definition = headerOf(
+      { type: "text", text: "aa" }, { type: "pageNumber" },
+      { type: "image", attrs: { src: "x", width: 18, height: 40 } },
+      { type: "image", attrs: { src: "y", width: 18, height: 40 } },
+    ).defaultHeader!;
+    const policy: HeaderFooterPolicy = {
+      enabled: true, differentFirstPage: false, differentOddEven: false,
+      [kind === "header" ? "defaultHeader" : "defaultFooter"]: { ...definition, margin: 5 },
+    };
+    const config = { ...pageConfig, pageWidth: 60, margins: { top: 10, bottom: 10, left: 10, right: 10 } };
+    const contribution = resolveChrome(policy, {
+      doc, pageConfig: config, measurer, fontConfig: defaultFontConfig, inlineRegistry: registry,
+    }, ctxWithPages(10), 0);
+    if (!isResolvedHeaderFooter(contribution.payload)) throw new Error("Missing bands");
+    const slot = contribution.payload.slots[kind === "header" ? "defaultHeader" : "defaultFooter"]!;
+    expect(slot.layout.totalContentHeight).toBe(56);
+    expect(slotLayoutForPage(slot, 1).totalContentHeight).toBe(82);
+    expect(slot.reservedHeight).toBe(87);
+    const reservation = kind === "header" ? contribution.topForPage : contribution.bottomForPage;
+    expect(reservation(1)).toBe(97);
+    expect(reservation(10)).toBe(97);
   });
 });

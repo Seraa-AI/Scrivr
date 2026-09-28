@@ -3,9 +3,8 @@
  * Each token renders its actual value (page number, total pages, date)
  * instead of the placeholder text from the node spec.
  *
- * The page context below is written by whoever is about to ask a token its
- * size or draw it: resolveChrome once per layout run, canvas and PDF paint
- * once per page. Both measure() and render() read it.
+ * Painting sets the current page and total. Band measurement supplies its own
+ * scoped page and total, so layout does not inherit another page's paint state.
  */
 
 import type { InlineStrategy, TextMeasurerLike } from "@scrivr/core";
@@ -20,17 +19,12 @@ export const PAGE_COUNT_TOKENS: ReadonlySet<string> = new Set(["pageNumber", "to
  */
 export const PER_PAGE_TOKEN = "pageNumber";
 
-/** Current page context — set before measuring or painting, read by both. */
+/** Paint context; also the fallback for tokens measured outside a band. */
 let currentPageNumber = 1;
 let currentTotalPages = 1;
 
-/**
- * The page number a measurement should reserve room for, while a band is being
- * arranged for one. Null means nobody is arranging, and the only safe answer is
- * the widest: a token measured outside a band — one sitting in body text — is
- * measured once for the whole document and painted on whatever page it lands.
- */
-let arrangedPageNumber: number | null = null;
+/** A band's measurement inputs, independent of the current paint context. */
+let arrangement: { pageNumber: number; totalPages: number } | null = null;
 
 /** Call before rendering a page to set the context for token strategies. */
 export function setTokenContext(pageNumber: number, totalPages: number): void {
@@ -39,20 +33,17 @@ export function setTokenContext(pageNumber: number, totalPages: number): void {
 }
 
 /**
- * Measure `arrange` as though the band were being painted on `pageNumber`.
- *
- * Only a band gets an arrangement per page. Everything else must reserve the
- * widest, so this is a scope rather than a setting — leaving it set would make
- * the next measurement's width depend on which page was arranged last, and a
- * token in body text would reflow as the reader scrolls.
+ * Measure a band's arrangement with both the page number and document total.
+ * Nested measurements and failures restore the enclosing inputs. Painting
+ * remains independent, even when measurement runs during live editing.
  */
-export function arrangedForPage<T>(pageNumber: number, arrange: () => T): T {
-  const previous = arrangedPageNumber;
-  arrangedPageNumber = pageNumber;
+export function arrangedForPage<T>(pageNumber: number, totalPages: number, arrange: () => T): T {
+  const previous = arrangement;
+  arrangement = { pageNumber, totalPages };
   try {
     return arrange();
   } finally {
-    arrangedPageNumber = previous;
+    arrangement = previous;
   }
 }
 
@@ -120,7 +111,7 @@ export const pageNumberStrategy: InlineStrategy = {
   // single page to size for, so it reserves the widest the document can reach.
   measure(_node, font, measurer) {
     return {
-      width: measureDigitWidth(digitsIn(arrangedPageNumber ?? currentTotalPages), font, measurer),
+      width: measureDigitWidth(digitsIn(arrangement?.pageNumber ?? currentTotalPages), font, measurer),
       height: fontHeight(font),
     };
   },
@@ -136,7 +127,7 @@ export const totalPagesStrategy: InlineStrategy = {
   // The total is the same on every page, so this needs no arrangement of its own.
   measure(_node, font, measurer) {
     return {
-      width: measureDigitWidth(digitsIn(currentTotalPages), font, measurer),
+      width: measureDigitWidth(digitsIn(arrangement?.totalPages ?? currentTotalPages), font, measurer),
       height: fontHeight(font),
     };
   },

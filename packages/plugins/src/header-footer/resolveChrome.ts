@@ -19,7 +19,6 @@ import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { resolveSlot } from "./resolveSlot";
 import { chromeFontConfig } from "./chromeFontConfig";
 import {
-  setTokenContext,
   arrangedForPage,
   digitsIn,
   PAGE_COUNT_TOKENS,
@@ -30,7 +29,7 @@ import {
 export interface SlotLayout {
   /** The parsed PM doc node — kept for re-layout at different Y positions during rendering. */
   doc: Node;
-  /** The widest arrangement, and what the band reserves room for. */
+  /** The widest page-number arrangement, used as the fallback for painting. */
   layout: DocumentLayout;
   /**
    * One arrangement per page-number width, keyed by digit count.
@@ -125,9 +124,11 @@ function measureSlot(
   });
 
   const widest = digitsIn(totalPages);
-  // Measured widest-first so `layout` — what the band reserves against — is
-  // the tallest arrangement any page can need.
-  const layout = arrangedForPage(totalPages, arrange);
+  // Keep the widest number as the paint fallback. Its arrangement need not
+  // be tallest: wrapping can distribute tall inline objects across more lines
+  // when the page-number token is narrower.
+  const layout = arrangedForPage(totalPages, totalPages, arrange);
+  let natural = layout.totalContentHeight ?? 0;
 
   let byDigits: Map<number, DocumentLayout> | undefined;
   // Only a page number differs from page to page. A band holding just the
@@ -138,11 +139,12 @@ function measureSlot(
     for (let digits = 1; digits < widest; digits++) {
       // Any number of this width does: the token reserves widest-digit times
       // digit count, so every number with the same digit count arranges alike.
-      byDigits.set(digits, arrangedForPage(10 ** (digits - 1), arrange));
+      const measured = arrangedForPage(10 ** (digits - 1), totalPages, arrange);
+      byDigits.set(digits, measured);
+      natural = Math.max(natural, measured.totalContentHeight ?? 0);
     }
   }
 
-  const natural = layout.totalContentHeight ?? 0;
   // Floor + default in one expression:
   //   def.margin === undefined → margin = activeEditingGap
   //   def.margin >= activeEditingGap → margin = def.margin
