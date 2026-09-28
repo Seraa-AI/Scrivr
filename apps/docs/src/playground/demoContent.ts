@@ -159,7 +159,13 @@ const DEMO_DOC = {
                   ],
                   text: "Page ",
                 },
-                { type: "pageNumber" },
+                {
+                  type: "pageNumber",
+                  marks: [
+                    { type: "fontSize", attrs: { size: 10 } },
+                    { type: "color", attrs: { color: "#9ca3af" } },
+                  ],
+                },
                 {
                   type: "text",
                   marks: [
@@ -168,7 +174,13 @@ const DEMO_DOC = {
                   ],
                   text: " of ",
                 },
-                { type: "totalPages" },
+                {
+                  type: "totalPages",
+                  marks: [
+                    { type: "fontSize", attrs: { size: 10 } },
+                    { type: "color", attrs: { color: "#9ca3af" } },
+                  ],
+                },
               ],
             },
           ],
@@ -191,7 +203,13 @@ const DEMO_DOC = {
                   ],
                   text: "Page ",
                 },
-                { type: "pageNumber" },
+                {
+                  type: "pageNumber",
+                  marks: [
+                    { type: "fontSize", attrs: { size: 10 } },
+                    { type: "color", attrs: { color: "#9ca3af" } },
+                  ],
+                },
                 {
                   type: "text",
                   marks: [
@@ -200,7 +218,13 @@ const DEMO_DOC = {
                   ],
                   text: " of ",
                 },
-                { type: "totalPages" },
+                {
+                  type: "totalPages",
+                  marks: [
+                    { type: "fontSize", attrs: { size: 10 } },
+                    { type: "color", attrs: { color: "#9ca3af" } },
+                  ],
+                },
                 {
                   type: "text",
                   marks: [

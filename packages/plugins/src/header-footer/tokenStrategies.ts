@@ -42,12 +42,12 @@ function measureDigitWidth(digitCount: number, font: string, measurer: TextMeasu
 }
 
 /**
- * How many digits the highest page number takes. Counted from the number's own
- * text: `ceil(log10(n))` is one short at every exact power of ten, so a
- * ten-page document reserved a single digit and painted two.
+ * How many digits a number takes. Counted from its own text: `ceil(log10(n))`
+ * is one short at every exact power of ten, so a ten-page document reserved a
+ * single digit and painted two.
  */
-function digitsInPageCount(): number {
-  return String(Math.max(currentTotalPages, 1)).length;
+function digitsIn(value: number): number {
+  return String(Math.max(value, 1)).length;
 }
 
 function measureTextWidth(text: string, font: string, measurer: TextMeasurerLike): number {
@@ -79,9 +79,13 @@ function drawTokenText(
 export const pageNumberStrategy: InlineStrategy = {
   verticalAlign: "baseline",
 
+  // Sized from the page being painted, not the document's last page: the band
+  // is arranged once per page-number width, so "2" gets a one-digit box even in
+  // a thousand-page document. Reserving the widest is the caller's job — it
+  // measures with the context set to the highest number.
   measure(_node, font, measurer) {
     return {
-      width: measureDigitWidth(digitsInPageCount(), font, measurer),
+      width: measureDigitWidth(digitsIn(currentPageNumber), font, measurer),
       height: fontHeight(font),
     };
   },
@@ -94,9 +98,10 @@ export const pageNumberStrategy: InlineStrategy = {
 export const totalPagesStrategy: InlineStrategy = {
   verticalAlign: "baseline",
 
+  // The total is the same on every page, so this needs no arrangement of its own.
   measure(_node, font, measurer) {
     return {
-      width: measureDigitWidth(digitsInPageCount(), font, measurer),
+      width: measureDigitWidth(digitsIn(currentTotalPages), font, measurer),
       height: fontHeight(font),
     };
   },

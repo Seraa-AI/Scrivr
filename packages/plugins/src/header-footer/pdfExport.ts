@@ -21,7 +21,7 @@
 
 import type { LayoutBlock, PdfNodeContext, Rgb } from "@scrivr/core";
 import { fontSizeOf } from "@scrivr/core";
-import { isResolvedHeaderFooter } from "./resolveChrome";
+import { isResolvedHeaderFooter, slotLayoutForPage } from "./resolveChrome";
 import type { ResolvedHeaderFooter } from "./resolveChrome";
 import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./tokenStrategies";
@@ -65,12 +65,15 @@ function renderBand(
   const slot = resolved.slots[slotKey];
   if (!slot) return;
 
-  const page = slot.layout.pages[0];
+  // Same arrangement the canvas paints this page with — the band is measured
+  // once for the whole document, so the page number's box is sized per width.
+  const stored = slotLayoutForPage(slot, pageNumber);
+  const page = stored.pages[0];
   if (!page || page.blocks.length === 0) return;
 
   // The stored layout has blocks at margins.top (from runMiniPipeline).
   // Offset to the actual band Y on the page.
-  const offsetY = bandY - slot.layout.pageConfig.margins.top;
+  const offsetY = bandY - stored.pageConfig.margins.top;
 
   // Offset copies — the stored blocks are not mutated.
   const banded = page.blocks.map((block) => ({ ...block, y: block.y + offsetY }));

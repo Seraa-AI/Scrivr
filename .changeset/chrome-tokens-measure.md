@@ -47,6 +47,21 @@ renderer. Live header/footer measurement uses the same modifiers as stored
 measurement, preserving custom token typography and line geometry on entry
 to editing.
 
+A band is measured once and painted on every page, so a page number's box used
+to hold the longest number in the document — page 2 of 1040 read "Page 2"
+followed by three digits of nothing, where Word lays each page's header out
+separately and closes the gap. A token is sized as widest-digit times digit
+count, so the only thing that changes between pages is how many digits the
+number has; the band is now arranged once per width (four times for a
+thousand-page document) and painting looks the arrangement up. Canvas and PDF
+read the same one. The band still reserves height against the widest.
+
+Inline atoms are also painted in the font their box was measured against.
+A token carries no marks of its own, so it is measured in the band's base font
+while the text beside it is often marked smaller; the strategies draw with
+whatever font the context holds, so a 14px box was being filled with 10px
+digits.
+
 **Breaking (schema):** `pageNumber`, `totalPages` and `date` no longer declare
 `width`/`height` attrs — their `InlineStrategy` measures them. Persisted
 documents are unaffected, since ProseMirror ignores attrs a spec does not

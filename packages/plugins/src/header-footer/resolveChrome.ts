@@ -24,8 +24,36 @@ import { setTokenContext, PAGE_COUNT_TOKENS } from "./tokenStrategies";
 export interface SlotLayout {
   /** The parsed PM doc node — kept for re-layout at different Y positions during rendering. */
   doc: Node;
+  /** The widest arrangement, and what the band reserves room for. */
   layout: DocumentLayout;
+  /**
+   * One arrangement per page-number width, keyed by digit count.
+   *
+   * A band is measured once and painted on every page, so a page number's box
+   * has to hold the longest number in the document — leaving "2 of 1040" with
+   * three digits of empty space before " of ". Word has no such gap because it
+   * lays each page's header out separately.
+   *
+   * A token is sized as widest-digit times digit count, so the only thing that
+   * moves between pages is how many digits the number has. That makes the
+   * distinct arrangements few enough to measure up front — four for a
+   * thousand-page document — and leaves painting a lookup.
+   */
+  byDigits?: ReadonlyMap<number, DocumentLayout>;
   reservedHeight: number;
+}
+
+/** How many digits a page number takes. */
+export function digitsIn(pageNumber: number): number {
+  return String(Math.max(pageNumber, 1)).length;
+}
+
+/** The arrangement to paint page `pageNumber` with. */
+export function slotLayoutForPage(slot: SlotLayout, pageNumber: number): DocumentLayout {
+  if (!slot.byDigits) return slot.layout;
+  // A streamed document's count is a lower bound, so a late page can want more
+  // digits than were measured. The widest arrangement is the safe fallback.
+  return slot.byDigits.get(digitsIn(pageNumber)) ?? slot.layout;
 }
 
 /** Payload stashed on ChromeContribution and routed to render(). */
@@ -51,30 +79,33 @@ export function isResolvedHeaderFooter(value: unknown): value is ResolvedHeaderF
   return "policy" in value && "slots" in value;
 }
 
+/** Whether a mini-doc holds a token whose width follows the page count. */
+function holdsPageCountToken(miniDoc: Node): boolean {
+  let found = false;
+  miniDoc.descendants((node) => {
+    if (PAGE_COUNT_TOKENS.has(node.type.name)) found = true;
+    return !found;
+  });
+  return found;
+}
+
 /** Whether any slot holds a token whose width follows the document's page count. */
 function countsPages(slots: ResolvedHeaderFooter["slots"]): boolean {
-  return Object.values(slots).some((slot) => {
-    if (!slot) return false;
-    let found = false;
-    slot.doc.descendants((node) => {
-      if (PAGE_COUNT_TOKENS.has(node.type.name)) found = true;
-      return !found;
-    });
-    return found;
-  });
+  return Object.values(slots).some((slot) => slot !== undefined && holdsPageCountToken(slot.doc));
 }
 
 function measureSlot(
   def: HeaderFooterDefinition | undefined,
   input: PageChromeMeasureInput,
   activeEditingGap: number,
+  totalPages: number,
 ): SlotLayout | undefined {
   if (!def) return undefined;
 
   const schema = input.doc.type.schema;
   const miniDoc = schema.nodeFromJSON(def.content);
 
-  const layout = runMiniPipeline(miniDoc, {
+  const arrange = (): DocumentLayout => runMiniPipeline(miniDoc, {
     pageConfig: input.pageConfig,
     measurer: input.measurer,
     fontConfig: chromeFontConfig,
@@ -84,6 +115,24 @@ function measureSlot(
     // without their strategies there is nothing to reserve and they vanish.
     ...(input.inlineRegistry ? { inlineRegistry: input.inlineRegistry } : {}),
   });
+
+  const widest = digitsIn(totalPages);
+  // Measured widest-first so `layout` — what the band reserves against — is
+  // the tallest arrangement any page can need.
+  setTokenContext(totalPages, totalPages);
+  const layout = arrange();
+
+  let byDigits: Map<number, DocumentLayout> | undefined;
+  if (holdsPageCountToken(miniDoc) && widest > 1) {
+    byDigits = new Map([[widest, layout]]);
+    for (let digits = 1; digits < widest; digits++) {
+      // Any number of this width does: the token reserves widest-digit times
+      // digit count, so every number with the same digit count arranges alike.
+      setTokenContext(10 ** (digits - 1), totalPages);
+      byDigits.set(digits, arrange());
+    }
+    setTokenContext(totalPages, totalPages);
+  }
 
   const natural = layout.totalContentHeight ?? 0;
   // Floor + default in one expression:
@@ -103,7 +152,7 @@ function measureSlot(
   // is no per-render override of the gap.
   const margin = Math.max(def.margin ?? activeEditingGap, activeEditingGap);
   const reservedHeight = Math.max(natural + margin, def.minHeight ?? 0);
-  return { doc: miniDoc, layout, reservedHeight };
+  return { doc: miniDoc, layout, ...(byDigits ? { byDigits } : {}), reservedHeight };
 }
 
 /**
@@ -132,41 +181,39 @@ export function resolveChrome(
   ctx: LayoutIterationContext,
   activeEditingGap: number,
 ): ChromeContribution {
-  // Token strategies size digits from this context, which paint also writes as
-  // it draws each page. Seed it from the flow so a measurement answers from the
-  // document, not from whichever page was painted last. The page number is
-  // inert here — measurement is page-independent and reads only the total.
+  // How many pages the document has decides how wide a page-number token can
+  // get, and measureSlot arranges the band once per width from it. Read it from
+  // the flow rather than the token context, which paint rewrites per page as it
+  // draws — otherwise a measurement answers from whichever page was drawn last.
   //
   // Only this run's flow counts as knowing. A remembered count is a starting
   // guess: the previous run's may predate the edit being laid out, and while a
-  // document streams in it is the count of a partial layout.
-  // A streaming chunk's flow is partial, so this count is a lower bound and
-  // the band may reserve a digit too few until the last chunk. Accepted
-  // deliberately: nothing better exists mid-stream, and refusing it would make
-  // every chunk exhaust the aggregator instead of converging in two passes.
+  // document streams in it belongs to a partial layout — a lower bound, so a
+  // late page falls back to the widest arrangement until the final chunk.
+  // Accepted deliberately: nothing better exists mid-stream, and refusing it
+  // would make every chunk exhaust the aggregator instead of converging.
   const verifiedPageCount = ctx.currentFlowLayout?.pages.length ?? null;
   const assumedPageCount =
     verifiedPageCount ?? ctx.previousRunFlowLayout?.pages.length ?? 1;
-  setTokenContext(1, assumedPageCount);
 
   const resolved: ResolvedHeaderFooter = {
     policy,
     defaultMarginTop: input.pageConfig.margins.top,
     defaultMarginBottom: input.pageConfig.margins.bottom,
     slots: {
-      defaultHeader: measureSlot(policy.defaultHeader, input, activeEditingGap),
-      defaultFooter: measureSlot(policy.defaultFooter, input, activeEditingGap),
+      defaultHeader: measureSlot(policy.defaultHeader, input, activeEditingGap, assumedPageCount),
+      defaultFooter: measureSlot(policy.defaultFooter, input, activeEditingGap, assumedPageCount),
       firstPageHeader: policy.differentFirstPage
-        ? measureSlot(policy.firstPageHeader, input, activeEditingGap)
+        ? measureSlot(policy.firstPageHeader, input, activeEditingGap, assumedPageCount)
         : undefined,
       firstPageFooter: policy.differentFirstPage
-        ? measureSlot(policy.firstPageFooter, input, activeEditingGap)
+        ? measureSlot(policy.firstPageFooter, input, activeEditingGap, assumedPageCount)
         : undefined,
       evenPageHeader: policy.differentOddEven
-        ? measureSlot(policy.evenPageHeader, input, activeEditingGap)
+        ? measureSlot(policy.evenPageHeader, input, activeEditingGap, assumedPageCount)
         : undefined,
       evenPageFooter: policy.differentOddEven
-        ? measureSlot(policy.evenPageFooter, input, activeEditingGap)
+        ? measureSlot(policy.evenPageFooter, input, activeEditingGap, assumedPageCount)
         : undefined,
     },
   };

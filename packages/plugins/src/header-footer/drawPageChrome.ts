@@ -16,6 +16,7 @@ import {
   type PageChromePaintContext,
 } from "@scrivr/core";
 import type { Node } from "@scrivr/core/pm";
+import { slotLayoutForPage } from "./resolveChrome";
 import type { ResolvedHeaderFooter, SlotLayout } from "./resolveChrome";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import { resolveSlotKey } from "./resolveSlot";
@@ -81,9 +82,12 @@ function drawBandIfPresent(
   } else {
     // Stored path: reuse the pre-computed layout, offset Y to the band position.
     // No runMiniPipeline call — the layout was already computed during measure().
-    const storedPage = slot.layout.pages[0];
+    // Which arrangement depends on how many digits this page's number takes, so
+    // "2" is not painted into a box sized for "1040".
+    const stored = slotLayoutForPage(slot, paintCtx.pageNumber);
+    const storedPage = stored.pages[0];
     if (!storedPage || storedPage.blocks.length === 0) return;
-    const offsetY = bandY - slot.layout.pageConfig.margins.top;
+    const offsetY = bandY - stored.pageConfig.margins.top;
     drawBlocksWithOffset(paintCtx, storedPage.blocks, offsetY);
   }
 }

@@ -30,13 +30,14 @@ import {
 import { drawPageChrome } from "../drawPageChrome";
 import { HeaderFooterSurfaceCache } from "../surfaces";
 import { HeaderFooter } from "../HeaderFooter";
-import { resolveChrome, isResolvedHeaderFooter } from "../resolveChrome";
+import { resolveChrome, isResolvedHeaderFooter, slotLayoutForPage } from "../resolveChrome";
 import {
   pageNumberStrategy,
   totalPagesStrategy,
   dateStrategy,
   setTokenContext,
 } from "../tokenStrategies";
+import type { Node } from "@scrivr/core/pm";
 import type { HeaderFooterPolicy } from "../types";
 
 const DIGIT_W = 10;
@@ -328,5 +329,105 @@ describe("a band that enters live editing", () => {
       .find((span) => span.kind === "object");
     expect(token).toMatchObject({ height: 40, font: "40px Arial, sans-serif" });
     expect(rendered).toEqual(stored);
+  });
+});
+
+/**
+ * A token is measured in the font its own marks resolve to, so one that lands
+ * bare in a header set in 10px is sized as 14px body text — a box wider than
+ * the glyphs that fill it. `replaceSelectionWith` inherits the marks in force,
+ * which is what keeps that from happening; this pins it.
+ */
+describe("inserting a token into formatted text", () => {
+  it("gives it the marks already in force", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, HeaderFooter],
+      content: {
+        type: "doc",
+        content: [{
+          type: "paragraph",
+          content: [{
+            type: "text",
+            marks: [{ type: "fontSize", attrs: { size: 10 } }],
+            text: "Page ",
+          }],
+        }],
+      },
+    });
+    editor.commands.insertPageNumber();
+
+    const token = findToken(editor.getState().doc);
+    expect(token).toBeDefined();
+    expect(token!.marks.map((m) => m.type.name)).toContain("fontSize");
+  });
+});
+
+function findToken(node: Node): Node | undefined {
+  let found: Node | undefined;
+  node.descendants((child) => {
+    if (child.type.name === "pageNumber") found = child;
+    return found === undefined;
+  });
+  return found;
+}
+
+/**
+ * A band is measured once and painted on every page, so without this the page
+ * number's box holds the longest number in the document and page 2 of 1040
+ * reads "Page 2" followed by three digits of nothing.
+ */
+describe("the box a page number gets on the page it is painted on", () => {
+  const slotFor = (pages: number) => {
+    const contribution = resolveChrome(
+      headerOf({ type: "pageNumber" }, { type: "text", text: " of " }, { type: "totalPages" }),
+      { doc, pageConfig, measurer, fontConfig: defaultFontConfig, inlineRegistry: registry },
+      ctxWithPages(pages),
+      0,
+    );
+    if (!isResolvedHeaderFooter(contribution.payload)) throw new Error("wrong payload");
+    return contribution.payload.slots.defaultHeader!;
+  };
+
+  const pageNumberWidth = (layout: DocumentLayout) =>
+    layout.pages[0]!.blocks
+      .flatMap((b) => b.lines)
+      .flatMap((l) => l.spans)
+      .filter((sp) => sp.kind === "object")[0]!.width;
+
+  it("fits one digit on page 2 of a thousand-page document", () => {
+    const slot = slotFor(1040);
+
+    expect(pageNumberWidth(slotLayoutForPage(slot, 2))).toBe(DIGIT_W);
+    expect(pageNumberWidth(slotLayoutForPage(slot, 12))).toBe(DIGIT_W * 2);
+    expect(pageNumberWidth(slotLayoutForPage(slot, 999))).toBe(DIGIT_W * 3);
+    expect(pageNumberWidth(slotLayoutForPage(slot, 1040))).toBe(DIGIT_W * 4);
+  });
+
+  it("moves what follows the token, so the text closes up behind it", () => {
+    const slot = slotFor(1040);
+    const textX = (layout: DocumentLayout) =>
+      layout.pages[0]!.blocks
+        .flatMap((b) => b.lines)
+        .flatMap((l) => l.spans)
+        .find((sp) => sp.kind === "text")!.x;
+
+    expect(textX(slotLayoutForPage(slot, 2)))
+      .toBeLessThan(textX(slotLayoutForPage(slot, 1040)));
+  });
+
+  it("reserves the band against the widest arrangement", () => {
+    // Height comes from the widest number, so a page whose number is shorter
+    // can never need more room than the band already took.
+    const slot = slotFor(1040);
+
+    expect(pageNumberWidth(slot.layout)).toBe(DIGIT_W * 4);
+  });
+
+  it("falls back to the widest arrangement past the measured count", () => {
+    // A streamed document's count is a lower bound; a later page must not
+    // resolve to no arrangement at all.
+    const slot = slotFor(9);
+
+    expect(pageNumberWidth(slotLayoutForPage(slot, 4211))).toBe(pageNumberWidth(slot.layout));
   });
 });
