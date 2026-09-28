@@ -882,9 +882,12 @@ export class LayoutCoordinator {
     this.charMap.clear();
     this.populatedPages.clear();
     performance.mark("scrivr:layout-chunk-start");
-    // Resume unchanged geometry from the next block. Carry the previous
-    // layout so chrome can seed its count and anchored placements survive
-    // chunk boundaries; the pipeline replays the prefix if geometry changes.
+    // Resume from the next block so each chunk stays O(chunkSize) rather than
+    // O(total). The previous layout lets chrome seed its page count, and lets
+    // carriedPlacements keep earlier chunks' anchored objects — without it they
+    // vanish from rendering and hit-testing mid-stream. Its cached tail is not
+    // reused while partial. If chrome moves the geometry, the pipeline replays
+    // the consumed prefix.
     this.layout = this.runLayout({
       resumption: this.layoutResumption,
       previousLayout: this.layout,

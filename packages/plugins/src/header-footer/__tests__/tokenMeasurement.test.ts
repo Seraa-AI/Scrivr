@@ -286,45 +286,47 @@ describe("page-count feedback through pagination", () => {
 });
 
 
-it("keeps token typography and line geometry when a band enters live editing", () => {
-  const policy = headerOf(
-    { type: "text", text: "Page " },
-    { type: "pageNumber", marks: [{ type: "bold" }] },
-  );
-  const modifier: FontModifier = (font) => { font.size = "40px"; };
-  const fontModifiers = new Map([["bold", modifier]]);
-  const contribution = resolveChrome(policy, {
-    doc, pageConfig, measurer, fontConfig: defaultFontConfig,
-    inlineRegistry: registry, fontModifiers,
-  }, ctxWithPages(1), 0);
-  if (!isResolvedHeaderFooter(contribution.payload)) throw new Error("Missing header layout");
-  const resolved = contribution.payload;
-  const slot = resolved.slots.defaultHeader!;
-  const cache = new HeaderFooterSurfaceCache(doc.type.schema);
-  const surface = cache.getOrCreate("defaultHeader", policy.defaultHeader!);
-  const rendered: LayoutBlock[] = [];
-  // Record blocks at the render boundary: this test compares geometry, so the
-  // strategy never accesses the canvas or substitutes for the mini pipeline.
-  const blockRegistry = new BlockRegistry().register("paragraph", {
-    render: (block) => { rendered.push(block); return 0; },
-  });
-  drawPageChrome({
-    ctx: {
-      ctx: new Proxy({} as CanvasRenderingContext2D, { get() { throw new Error("Unexpected raster drawing"); } }),
-      pageNumber: 1, totalPages: 1, pageConfig, payload: resolved,
-      measurer, inlineRegistry: registry, blockRegistry, fontModifiers,
-      theme: defaultEditorTheme,
-      metrics: {
-        pageNumber: 1, contentTop: 150, contentBottom: 900,
-        contentHeight: 750, contentWidth: 624, headerTop: pageConfig.margins.top,
-        headerHeight: slot.reservedHeight, footerTop: 900, footerHeight: 0,
+describe("a band that enters live editing", () => {
+  it("keeps token typography and line geometry when a band enters live editing", () => {
+    const policy = headerOf(
+      { type: "text", text: "Page " },
+      { type: "pageNumber", marks: [{ type: "bold" }] },
+    );
+    const modifier: FontModifier = (font) => { font.size = "40px"; };
+    const fontModifiers = new Map([["bold", modifier]]);
+    const contribution = resolveChrome(policy, {
+      doc, pageConfig, measurer, fontConfig: defaultFontConfig,
+      inlineRegistry: registry, fontModifiers,
+    }, ctxWithPages(1), 0);
+    if (!isResolvedHeaderFooter(contribution.payload)) throw new Error("Missing header layout");
+    const resolved = contribution.payload;
+    const slot = resolved.slots.defaultHeader!;
+    const cache = new HeaderFooterSurfaceCache(doc.type.schema);
+    const surface = cache.getOrCreate("defaultHeader", policy.defaultHeader!);
+    const rendered: LayoutBlock[] = [];
+    // Record blocks at the render boundary: this test compares geometry, so the
+    // strategy never accesses the canvas or substitutes for the mini pipeline.
+    const blockRegistry = new BlockRegistry().register("paragraph", {
+      render: (block) => { rendered.push(block); return 0; },
+    });
+    drawPageChrome({
+      ctx: {
+        ctx: new Proxy({} as CanvasRenderingContext2D, { get() { throw new Error("Unexpected raster drawing"); } }),
+        pageNumber: 1, totalPages: 1, pageConfig, payload: resolved,
+        measurer, inlineRegistry: registry, blockRegistry, fontModifiers,
+        theme: defaultEditorTheme,
+        metrics: {
+          pageNumber: 1, contentTop: 150, contentBottom: 900,
+          contentHeight: 750, contentWidth: 624, headerTop: pageConfig.margins.top,
+          headerHeight: slot.reservedHeight, footerTop: 900, footerHeight: 0,
+        },
       },
-    },
-    resolved, activeSurface: surface, activePage: 1,
+      resolved, activeSurface: surface, activePage: 1,
+    });
+    const stored = slot.layout.pages[0]!.blocks;
+    const token = stored.flatMap((block) => block.lines).flatMap((line) => line.spans)
+      .find((span) => span.kind === "object");
+    expect(token).toMatchObject({ height: 40, font: "40px Arial, sans-serif" });
+    expect(rendered).toEqual(stored);
   });
-  const stored = slot.layout.pages[0]!.blocks;
-  const token = stored.flatMap((block) => block.lines).flatMap((line) => line.spans)
-    .find((span) => span.kind === "object");
-  expect(token).toMatchObject({ height: 40, font: "40px Arial, sans-serif" });
-  expect(rendered).toEqual(stored);
 });

@@ -3063,3 +3063,48 @@ describe("streamed pagination snapshots", () => {
     expect(second.metrics).toEqual(fresh.metrics);
   });
 });
+
+/**
+ * A layout's `version` is the one key paint and hit-testing share: tiles skip
+ * repainting when it is unchanged, and the charmap stamps itself with it. A
+ * resumed chunk only appends, so pages already painted still match their stamp.
+ * A replay re-paginates those pages, and must say so.
+ */
+describe("the version a streamed chunk publishes", () => {
+  const streamed = () => {
+    const d = doc(p("first"), pageBreak(), ...Array.from({ length: 99 }, (_, i) => p(`Block ${i}`)));
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks: 40 };
+    return { d, options, first: runPipeline(d, options) };
+  };
+
+  const tallHeader = (top: number) => [{
+    name: "header",
+    measure: () => ({ topForPage: () => top, bottomForPage: () => 0, stable: true }),
+    render: () => {},
+  }];
+
+  it("keeps it while the chunk only appends", () => {
+    const { d, options, first } = streamed();
+
+    const next = runPipeline(d, { ...options, resumption: first.resumption!, previousLayout: first });
+
+    expect(next.version).toBe(first.version);
+  });
+
+  it("advances it when the prefix was re-paginated", () => {
+    // Pages 1..n were painted under the old geometry and are about to move.
+    // Republishing the same version leaves those tiles unrepainted while the
+    // charmap follows the new layout — caret and clicks land on stale pixels.
+    const { d, options, first } = streamed();
+
+    const replayed = runPipeline(d, {
+      ...options,
+      resumption: first.resumption!,
+      previousLayout: first,
+      pageChromeContributions: tallHeader(100),
+    });
+
+    expect(replayed.pages[0]!.blocks[0]!.y).not.toBe(first.pages[0]!.blocks[0]!.y);
+    expect(replayed.version).toBeGreaterThan(first.version);
+  });
+});

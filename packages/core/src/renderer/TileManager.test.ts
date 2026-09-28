@@ -802,8 +802,8 @@ describe("painting before the editor is ready", () => {
   });
 });
 
-
-it("gives chrome painting the editor's measurement font modifiers", () => {
+describe("what chrome painting is given", () => {
+  it("gives chrome painting the editor's measurement font modifiers", () => {
   const measured: Array<Map<string, FontModifier> | undefined> = [];
   const painted: Array<Map<string, FontModifier> | undefined> = [];
   const modifier: FontModifier = (font) => { font.size = "40px"; };
@@ -835,7 +835,8 @@ it("gives chrome painting the editor's measurement font modifiers", () => {
       expect(modifiers).toBe(setup.editor.fontModifiers);
     }
   } finally {
-    tiles.destroy();
-    setup.cleanup();
-  }
+      tiles.destroy();
+      setup.cleanup();
+    }
+  });
 });

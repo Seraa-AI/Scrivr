@@ -36,9 +36,24 @@ export interface PageMetrics {
   footerHeight: number;
 }
 
-/** Compare the complete numeric geometry consumed by layout and paint. */
+/**
+ * Whether two pages reserve identical space.
+ *
+ * Layout reuses a saved pagination — a resumed chunk, a cached tail, a chrome
+ * iteration that moved nothing — only when this holds. Every field is named
+ * rather than discovered from the object, so adding one to `PageMetrics` is a
+ * compile error here instead of a comparison that quietly stops checking it.
+ */
 export function samePageMetrics(a: PageMetrics, b: PageMetrics): boolean {
-  return (Object.keys(a) as Array<keyof PageMetrics>).every((key) => a[key] === b[key]);
+  return a.pageNumber === b.pageNumber
+    && a.contentTop === b.contentTop
+    && a.contentBottom === b.contentBottom
+    && a.contentHeight === b.contentHeight
+    && a.contentWidth === b.contentWidth
+    && a.headerTop === b.headerTop
+    && a.headerHeight === b.headerHeight
+    && a.footerTop === b.footerTop
+    && a.footerHeight === b.footerHeight;
 }
 
 export type PageFlowMetrics = Pick<PageMetrics, "contentTop" | "contentHeight">;

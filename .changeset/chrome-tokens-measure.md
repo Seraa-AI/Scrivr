@@ -36,8 +36,11 @@ contributors see the new flow before the loop accepts convergence.
 Streamed layout now resumes from a replayable snapshot of both the paginated
 cursor and continuous-flow cursor. A pass owns its growing page buffers, so
 retries cannot duplicate body blocks. When chrome changes the saved geometry,
-layout replays the consumed prefix while preserving the chunk's progress.
-Completed layout tails are reused only when their geometry still matches.
+layout replays the consumed prefix while preserving the chunk's progress — and
+publishes a new layout version when it does, since pages already painted have
+moved and their tiles must repaint before the caret is drawn against them. A
+partial layout's cached tail is never reused: it has a cutoff rather than a
+tail, and copying from it would truncate the document at the last chunk.
 
 Chrome painting now receives the editor's font modifiers through the page
 renderer. Live header/footer measurement uses the same modifiers as stored

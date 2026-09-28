@@ -140,6 +140,10 @@ export function resolveChrome(
   // Only this run's flow counts as knowing. A remembered count is a starting
   // guess: the previous run's may predate the edit being laid out, and while a
   // document streams in it is the count of a partial layout.
+  // A streaming chunk's flow is partial, so this count is a lower bound and
+  // the band may reserve a digit too few until the last chunk. Accepted
+  // deliberately: nothing better exists mid-stream, and refusing it would make
+  // every chunk exhaust the aggregator instead of converging in two passes.
   const verifiedPageCount = ctx.currentFlowLayout?.pages.length ?? null;
   const assumedPageCount =
     verifiedPageCount ?? ctx.previousRunFlowLayout?.pages.length ?? 1;
