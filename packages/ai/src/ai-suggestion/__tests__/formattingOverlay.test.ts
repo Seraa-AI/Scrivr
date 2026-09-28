@@ -104,3 +104,78 @@ describe("accepting one formatting run", () => {
     expect(boldedText(editor)).toBe("first");
   });
 });
+
+describe("a group is addressed across the whole suggestion", () => {
+  it("does not reuse one group id in two blocks", () => {
+    const editor = new AiTestEditor(doc(p("alpha", "p1"), p("beta", "p2")));
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [
+        { nodeId: "p1", proposedSpans: [{ text: "alpha", marks: [{ type: "bold" }] }] },
+        { nodeId: "p2", proposedSpans: [{ text: "beta", marks: [{ type: "italic" }] }] },
+      ],
+      authorID: "AI Assistant",
+    })!;
+
+    const ids = suggestion.blocks.flatMap((b) => b.ops.filter((o) => o.marks).map((o) => o.groupId));
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+
+    editor.showSuggestion(suggestion);
+    const firstId = suggestion.blocks[0]!.ops.find((o) => o.marks)?.groupId;
+    if (firstId === undefined) throw new Error("expected a formatting group");
+    editor.apply({ mode: "direct", groupId: firstId });
+
+    // Accepting paragraph one must not style paragraph two.
+    expect(boldedText(editor)).toBe("alpha");
+    let italic = "";
+    editor.getState().doc.descendants((node) => {
+      if (node.isText && node.marks.some((m) => m.type.name === "italic")) italic += node.text;
+    });
+    expect(italic).toBe("");
+  });
+});
+
+describe("a settled group stays settled", () => {
+  it("does not re-apply formatting the reader rejected", () => {
+    const editor = new AiTestEditor(doc(p("one two", "p1")));
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedSpans: [
+        { text: "one", marks: [{ type: "bold" }] },
+        { text: " ", marks: [] },
+        { text: "two", marks: [{ type: "bold" }] },
+      ] }],
+      authorID: "AI Assistant",
+    })!;
+
+    editor.showSuggestion(suggestion);
+    const groups = suggestion.blocks[0]!.ops.filter((o) => o.marks).map((o) => o.groupId);
+    const rejected = groups[0];
+    if (rejected === undefined) throw new Error("expected a formatting group");
+
+    editor.reject({ groupId: rejected });
+    editor.apply({ mode: "direct" });
+
+    // "one" was turned down; accepting the rest must not bring it back.
+    expect(boldedText(editor)).toBe("two");
+  });
+});
+
+describe("formatting boundaries the document already has", () => {
+  it("sees a change whose first character already matches", () => {
+    // "al" is bold, "pha" is not. A proposal of plain throughout changes the
+    // run — but its first character already reads plain.
+    const editor = new AiTestEditor(doc(
+      schema.node("paragraph", { nodeId: "p1" }, [
+        schema.text("al"),
+        schema.text("pha", [bold()]),
+      ]),
+    ));
+
+    const suggestion = proposal(editor, [{ text: "alpha", marks: [] }]);
+    expect(suggestion).not.toBeNull();
+
+    editor.showSuggestion(suggestion);
+    editor.apply({ mode: "direct" });
+    expect(boldedText(editor)).toBe("");
+  });
+});

@@ -50,6 +50,12 @@ export interface AiSuggestionBlock {
   /** The ordered list of diff operations for this block */
   ops: AiOp[];
   /**
+   * Groups the reader has already accepted or rejected. A resolved group is
+   * finished — apply and reject both skip it, so accepting the rest of a
+   * suggestion cannot re-apply something already turned down.
+   */
+  resolvedGroups?: string[];
+  /**
    * Optional human-authored summary for this block's change.
    * e.g. "Simplified tone and removed jargon"
    * When present, UIs should prefer this over the auto-derived label.

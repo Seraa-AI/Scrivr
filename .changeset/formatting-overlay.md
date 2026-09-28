@@ -19,6 +19,20 @@ Each such run gets its own `groupId`, so formatting is accepted the way a word
 swap is: one run at a time, scoped to the text that run spoke about. Accepting a
 word swap still touches no formatting, because it is a different group.
 
+A group id carries the block it belongs to. Groups are addressed across the
+whole suggestion, so numbering them per block meant accepting a run in one
+paragraph applied a different run in another.
+
+A group the reader has settled is recorded on the block and skipped by every
+later pass, so rejecting one proposal and then accepting the rest no longer
+re-applies the thing that was turned down — which was true of word swaps too,
+not only formatting.
+
+Runs are split at the formatting boundaries the *document* already has, as well
+as the ones the proposal introduces. ProseMirror lets formatting change inside a
+word, so judging a run by its first character hid any change that began after
+it: half-bold "alpha" restated as plain looked like no change at all.
+
 New: a `format` render instruction and `renderFormatHighlight`, drawn as a solid
 underline beneath the run — distinct from the dashed red of a deletion, because
 this text is staying and only its appearance is in question. A wrapped run draws

@@ -75,8 +75,13 @@ export function applyAiSuggestion(
     _applyTracked(editor, affectedBlocks, groupId);
   }
 
+  if (groupId) {
+    retireGroup(editor, ps.suggestion, groupId);
+    return;
+  }
+
   // Remove accepted block(s) from the suggestion; clear when none remain
-  if (!groupId) {
+  {
     const remaining = blockId
       ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
       : [];
@@ -124,6 +129,28 @@ function applyRunMarks(
 }
 
 /**
+ * Retire a group the reader has finished with.
+ *
+ * Applying or rejecting one group leaves the rest of the suggestion live, so
+ * the resolved group has to be recorded somewhere — otherwise "accept all"
+ * later re-applies formatting the reader already turned down, and re-offers
+ * work already done.
+ */
+function retireGroup(editor: IBaseEditor, suggestion: AiSuggestion, groupId: string): void {
+  const blocks = suggestion.blocks.map((block) =>
+    block.ops.some((op) => op.groupId === groupId)
+      ? { ...block, resolvedGroups: [...(block.resolvedGroups ?? []), groupId] }
+      : block,
+  );
+  showAiSuggestion(editor, { ...suggestion, blocks });
+}
+
+/** Ops the reader has already settled are no longer part of the proposal. */
+function isResolved(block: AiSuggestionBlock, op: AiOp): boolean {
+  return op.groupId !== undefined && (block.resolvedGroups ?? []).includes(op.groupId);
+}
+
+/**
  * Apply the formatting a proposal asks for on the text it keeps.
  *
  * Its own transaction, before any text moves, so every range resolves against
@@ -161,7 +188,7 @@ function applyKeepFormatting(
     let acceptedOffset = 0;
     for (const op of block.ops) {
       if (op.type === "insert") continue;
-      if (op.type === "keep" && op.marks && (!groupId || op.groupId === groupId)) {
+      if (op.type === "keep" && op.marks && (!groupId || op.groupId === groupId) && !isResolved(block, op)) {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
         if (range) {
           applyRunMarks(tr, schema, range.from, range.to, op.marks);
@@ -225,7 +252,7 @@ function _applyDirect(
         continue;
       }
 
-      if (groupId && op.groupId !== groupId) {
+      if ((groupId && op.groupId !== groupId) || isResolved(block, op)) {
         if (op.type === "delete") acceptedOffset += tokenLen;
         continue;
       }
@@ -286,7 +313,7 @@ function _applyTracked(
         continue;
       }
 
-      if (groupId && op.groupId !== groupId) {
+      if ((groupId && op.groupId !== groupId) || isResolved(block, op)) {
         if (op.type === "delete") acceptedOffset += tokenLen;
         continue;
       }
@@ -373,7 +400,7 @@ export function rejectAiSuggestion(
         continue;
       }
 
-      if (groupId && op.groupId !== groupId) {
+      if ((groupId && op.groupId !== groupId) || isResolved(block, op)) {
         if (op.type === "delete") acceptedOffset += tokenLen;
         continue;
       }
@@ -417,8 +444,13 @@ export function rejectAiSuggestion(
   setAction(tr, TrackChangesAction.refreshChanges, true);
   editor.applyTransaction(tr);
 
+  if (groupId) {
+    retireGroup(editor, ps.suggestion, groupId);
+    return;
+  }
+
   // Remove rejected block(s) from the suggestion; clear when none remain
-  if (!groupId) {
+  {
     const remaining = blockId
       ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
       : [];

@@ -118,23 +118,25 @@ export const AiSuggestion = Extension.create<AiSuggestionOptions>({
         ctx.lineTo(stripeX, bottom - 3);
         ctx.stroke();
 
-        // ── Dashed red underlines for deleted text ─────────────────────────
-        if (block.ops.some((op) => op.type === "delete")) {
-          const { map } = buildAcceptedTextMap(
-            found.node,
-            found.pos,
-            state.schema,
-          );
+        // ── Per-run decoration: deletions, and formatting on retained text ──
+        // Asking for the instructions unconditionally is the point: the builder
+        // decides which ops draw. Gating on one op type here is how a
+        // formatting-only proposal — which has no deletion by definition —
+        // used to render as nothing but the margin stripe.
+        const { map } = buildAcceptedTextMap(
+          found.node,
+          found.pos,
+          state.schema,
+        );
 
-          const instructions = buildOpRenderInstructions(
-            block.ops,
-            map,
-            charMap,
-            pageNumber,
-          );
+        const instructions = buildOpRenderInstructions(
+          block.ops,
+          map,
+          charMap,
+          pageNumber,
+        );
 
-          renderInstructions(ctx, instructions, charMap, isActive);
-        }
+        renderInstructions(ctx, instructions, charMap, isActive);
 
         ctx.restore();
       }

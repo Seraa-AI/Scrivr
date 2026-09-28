@@ -120,6 +120,24 @@ function sameMarks(a: readonly InlineMark[], b: readonly InlineMark[]): boolean 
 }
 
 /**
+ * Split a keep again wherever the formatting it *currently* carries changes, so
+ * each piece can be judged against a single existing formatting.
+ */
+function splitByCurrentMarks(op: AiOp, current: InlineMark[][], offset: number): AiOp[] {
+  const out: AiOp[] = [];
+  let runStart = 0;
+  for (let i = 1; i <= op.text.length; i++) {
+    const here = current[offset + i] ?? [];
+    const prev = current[offset + i - 1] ?? [];
+    if (i === op.text.length || !sameMarks(here, prev)) {
+      out.push({ ...op, text: op.text.slice(runStart, i) });
+      runStart = i;
+    }
+  }
+  return out.length > 0 ? out : [op];
+}
+
+/**
  * Split an op that consumes proposed text wherever its formatting changes, so
  * every op reads one way. Ops over text already in the document (deletes) and
  * proposals made as plain text pass through untouched.
@@ -215,21 +233,32 @@ export function computeAiSuggestion(
         continue;
       }
       for (const part of splitByMarks(op, proposal.marksAt, proposedOffset)) {
-        // On a keep, `marks` means "the formatting here changes" — the run is
-        // already in the document, so restating what it already reads as is not
-        // a proposal. Every reader of an op depends on that: the overlay draws
-        // one, the apply writes one, and a card counts one.
-        const unchanged =
-          part.type === "keep" && part.marks && sameMarks(part.marks, current[acceptedOffset] ?? []);
-        if (part.type === "keep" && part.marks && !unchanged) {
-          // Its own group, so a reader can accept this run's formatting the way
-          // they accept a word swap. Scoped to the run, which is the only text
-          // the proposal spoke about here.
-          ops.push({ ...part, groupId: `fmt_${formatGroups++}` });
-        } else {
-          ops.push(unchanged ? { type: "keep", text: part.text } : part);
+        if (part.type !== "keep" || !part.marks) {
+          ops.push(part);
+          if (part.type === "keep") acceptedOffset += part.text.length;
+          continue;
         }
-        if (part.type === "keep") acceptedOffset += part.text.length;
+        // A keep was split where the *proposal's* formatting changes. The
+        // document's own formatting changes at its own boundaries — "alpha"
+        // can be half bold — so split again there before deciding, or a run
+        // whose first character already matches hides the rest of the change.
+        for (const run of splitByCurrentMarks(part, current, acceptedOffset)) {
+          // On a keep, `marks` means "the formatting here changes": the run is
+          // already in the document, so restating what it already reads as is
+          // not a proposal. Every reader depends on that — the overlay draws
+          // one, the apply writes one, a card counts one.
+          const unchanged = sameMarks(run.marks ?? [], current[acceptedOffset] ?? []);
+          ops.push(
+            unchanged
+              // Its own group, so a reader accepts this run's formatting the way
+              // they accept a word swap, scoped to the text it spoke about. The
+              // id carries the block, because a group is addressed across the
+              // whole suggestion and every block would otherwise start at zero.
+              ? { type: "keep", text: run.text }
+              : { ...run, groupId: `fmt_${nodeId}_${formatGroups++}` },
+          );
+          acceptedOffset += run.text.length;
+        }
       }
       proposedOffset += op.text.length;
     }
