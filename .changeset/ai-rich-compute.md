@@ -19,6 +19,24 @@ tracked-change marks alone because those describe review state rather than how
 the text reads. And an accepted insertion now lands with its marks, so a
 suggested bold term is bold once accepted instead of quietly flattening.
 
+Formatting is applied in its own transaction before any text moves, so every
+range resolves against the document the suggestion was computed from. Tracked
+mode leaves that transaction tracked — a formatting change has its own tracked
+representation, and the engine builds it from an ordinary mark step, so a
+reviewer rejects proposed formatting exactly as they reject proposed words.
+Writing it inside the skip-tracked transaction would have made it permanent and
+unreviewable, which is the one thing the tracked lane exists to prevent.
+
+Accepting a single replacement group applies no formatting at all. A keep's
+marks describe the whole block, and applying them removes what the proposal
+omits — so doing that for one group would strip the reader's own formatting from
+text that group never spoke about.
+
+Agent-supplied marks on retained text go through `resolveInlineMark`, the same
+seam inserted text already used. Retained text is not a softer target: a
+`javascript:` href was being sanitized on an inserted run and written on a kept
+one, and a `link` sent without its required `href` threw out of the accept.
+
 Marks are compared attrs-aware and order-insensitively. Document marks arrive in
 schema order and an agent emits them in whatever order it wrote them, so a
 literal comparison would read a reordered `[bold, italic]` as a change, and a

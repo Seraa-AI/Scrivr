@@ -122,3 +122,72 @@ describe("applying a formatted suggestion", () => {
     expect(boldedText(editor)).toContain("defined");
   });
 });
+
+describe("what a proposal is allowed to do to the document", () => {
+  it("drops an unsafe link rather than writing it", () => {
+    const editor = build("click here");
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedSpans: [
+        { text: "click here", marks: [{ type: "link", attrs: { href: "javascript:alert(1)" } }] },
+      ] }],
+      authorID: "AI Assistant",
+    })!;
+
+    editor.showSuggestion(suggestion);
+    editor.apply({ mode: "direct" });
+
+    let linked = 0;
+    editor.getState().doc.descendants((node) => {
+      if (node.isText && node.marks.some((m) => m.type.name === "link")) linked += 1;
+    });
+    // Retained text is not a softer target than inserted text.
+    expect(linked).toBe(0);
+  });
+
+  it("survives a mark the agent sent without its required attrs", () => {
+    const editor = build("a term");
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedSpans: [{ text: "a term", marks: [{ type: "link" }] }] }],
+      authorID: "AI Assistant",
+    })!;
+
+    editor.showSuggestion(suggestion);
+    // `link` declares href with no default — building it unguarded throws.
+    expect(() => editor.apply({ mode: "direct" })).not.toThrow();
+  });
+
+  it("keeps the wording when spans are empty and text was given", () => {
+    const editor = build("Original.");
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedText: "Replacement.", proposedSpans: [] }],
+      authorID: "AI Assistant",
+    });
+
+    editor.showSuggestion(suggestion);
+    editor.apply({ mode: "direct" });
+    // `spans: []` is "I have no runs", not "empty this block".
+    expect(editor.getState().doc.textContent).toBe("Replacement.");
+  });
+
+  it("applies no formatting when only one replacement group is accepted", () => {
+    const editor = new AiTestEditor(doc(
+      schema.node("paragraph", { nodeId: "p1" }, schema.text("keep this word", [schema.marks.bold!.create()])),
+    ));
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedSpans: [
+        { text: "keep this ", marks: [] },
+        { text: "term", marks: [] },
+      ] }],
+      authorID: "AI Assistant",
+    })!;
+
+    editor.showSuggestion(suggestion);
+    const groupId = suggestion.blocks[0]!.ops.find((o) => o.type !== "keep")?.groupId;
+    if (groupId === undefined) throw new Error("expected a replacement group");
+    editor.apply({ mode: "direct", groupId });
+
+    // Accepting one word swap must not strip the reader's own formatting from
+    // text that swap never spoke about.
+    expect(boldedText(editor)).toContain("keep this");
+  });
+});

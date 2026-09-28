@@ -17,6 +17,7 @@ export {
 } from "./helpers";
 export { createChangePopover } from "./createChangePopover";
 export type { ChangePopoverInfo, ChangePopoverCallbacks } from "./createChangePopover";
+export { isTrackedMark } from "./helpers";
 export { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 export { findChanges } from "./findChanges";
 export { applyChanges } from "./applyChanges";
@@ -46,6 +47,6 @@ export type {
 
 // Rich (leaf-based) semantic edits → tracked suggestions. The write-side merge
 // primitive @scrivr/ai's applyRichEdit drives.
-export { applyRichDiffAsSuggestion } from "./lib/applyRichDiffAsSuggestion";
+export { applyRichDiffAsSuggestion, pickAgentAttrs } from "./lib/applyRichDiffAsSuggestion";
 export type { RichBlockEdit, RichDiffOptions, RichDiffResult } from "./lib/applyRichDiffAsSuggestion";
 export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";

@@ -11,7 +11,7 @@
  */
 
 import type { IBaseEditor } from "@scrivr/core";
-import { spansToFragment } from "@scrivr/core";
+import { resolveInlineMark, spansToFragment } from "@scrivr/core";
 import type { InlineMark } from "@scrivr/core";
 import { Fragment } from "@scrivr/core/pm";
 import type { Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
@@ -22,7 +22,7 @@ import {
   AI_SUGGESTION_SET,
 } from "./AiSuggestionPlugin";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
-import { skipTracking, TrackChangesAction, setAction } from "@scrivr/plugins";
+import { isTrackedMark, skipTracking, TrackChangesAction, setAction } from "@scrivr/plugins";
 import {
   addTrackIdIfDoesntExist,
   createNewDeleteAttrs,
@@ -67,6 +67,8 @@ export function applyAiSuggestion(
     affectedBlocks = affectedBlocks.filter((b) => b.nodeId === blockId);
   }
 
+  applyKeepFormatting(editor, affectedBlocks, groupId, mode !== "direct");
+
   if (mode === "direct") {
     _applyDirect(editor, affectedBlocks, groupId);
   } else {
@@ -98,16 +100,75 @@ function applyRunMarks(
   marks: readonly InlineMark[],
 ): void {
   if (to <= from) return;
-  const proposed = new Map(marks.map((mark) => [mark.type, mark]));
+
+  // Agent-supplied marks go through the same seam as inserted text: an unsafe
+  // url or an unbuildable mark is dropped rather than written. Retained text is
+  // not a softer target than inserted text.
+  const resolved = new Map<string, Mark>();
+  for (const mark of marks) {
+    const real = resolveInlineMark(mark, schema);
+    if (real) resolved.set(real.type.name, real);
+  }
 
   for (const markType of Object.values(schema.marks)) {
-    if (markType.name === "trackedInsert" || markType.name === "trackedDelete") continue;
-    if (!proposed.has(markType.name)) tr.removeMark(from, to, markType);
+    if (isTrackedMark(markType.name)) continue;
+    if (!resolved.has(markType.name)) tr.removeMark(from, to, markType);
   }
-  for (const [name, mark] of proposed) {
-    const markType = schema.marks[name];
-    if (markType) tr.addMark(from, to, markType.create(mark.attrs ?? null));
+  for (const mark of resolved.values()) tr.addMark(from, to, mark);
+}
+
+/**
+ * Apply the formatting a proposal asks for on the text it keeps.
+ *
+ * Its own transaction, before any text moves, so every range resolves against
+ * the document the suggestion was computed from. Tracked mode dispatches it
+ * *unskipped* — a formatting change has its own tracked representation, and the
+ * engine produces it from an ordinary mark step, so a reviewer can reject the
+ * formatting exactly as they reject the words. Direct mode skips tracking,
+ * which is what direct means.
+ *
+ * Accepting one replacement group applies no formatting at all: a keep's marks
+ * describe the whole block, and `applyRunMarks` removes what the proposal
+ * omits, so running it for a single group would strip the reader's own
+ * formatting from text that group never spoke about.
+ */
+function applyKeepFormatting(
+  editor: IBaseEditor,
+  blocks: AiSuggestionBlock[],
+  groupId: string | undefined,
+  tracked: boolean,
+): void {
+  if (groupId) return;
+
+  const state = editor.getState();
+  const schema = state.schema;
+  const resolved = blocks.flatMap((block) => {
+    const found = findNodeById(state.doc, block.nodeId);
+    return found ? [{ block, found }] : [];
+  });
+  resolved.sort((a, b) => b.found.pos - a.found.pos);
+
+  const tr = state.tr;
+  let touched = false;
+  for (const { block, found } of resolved) {
+    const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
+    let acceptedOffset = 0;
+    for (const op of block.ops) {
+      if (op.type === "insert") continue;
+      if (op.type === "keep" && op.marks) {
+        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
+        if (range) {
+          applyRunMarks(tr, schema, range.from, range.to, op.marks);
+          touched = true;
+        }
+      }
+      acceptedOffset += op.text.length;
+    }
   }
+
+  if (!touched) return;
+  if (!tracked) skipTracking(tr);
+  editor.applyTransaction(tr);
 }
 
 /**
@@ -153,10 +214,6 @@ function _applyDirect(
       const tokenLen = op.text.length;
 
       if (op.type === "keep") {
-        if (op.marks) {
-          const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
-          if (range) applyRunMarks(tr, schema, range.from + insertedChars, range.to + insertedChars, op.marks);
-        }
         acceptedOffset += tokenLen;
         continue;
       }
@@ -176,8 +233,9 @@ function _applyDirect(
       } else if (op.type === "insert") {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         if (range) {
-          tr.insert(range.from + insertedChars, insertedContent(op, schema));
-          insertedChars += op.text.length;
+          const content = insertedContent(op, schema);
+          tr.insert(range.from + insertedChars, content);
+          insertedChars += content.size;
         }
         // acceptedOffset does NOT advance for inserts
       }
@@ -217,10 +275,6 @@ function _applyTracked(
       const tokenLen = op.text.length;
 
       if (op.type === "keep") {
-        if (op.marks) {
-          const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
-          if (range) applyRunMarks(tr, schema, range.from + insertedChars, range.to + insertedChars, op.marks);
-        }
         acceptedOffset += tokenLen;
         continue;
       }
@@ -252,7 +306,7 @@ function _applyTracked(
               insertMarkType.create({ dataTracked }),
             ]);
             tr.insert(range.from + insertedChars, content);
-            insertedChars += safeText.length;
+            insertedChars += content.size;
           }
         }
         // acceptedOffset does NOT advance for inserts

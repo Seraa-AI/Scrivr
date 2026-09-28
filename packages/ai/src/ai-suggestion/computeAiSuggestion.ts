@@ -19,7 +19,7 @@
 import type { EditorState, Node as PmNode } from "@scrivr/core/pm";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { buildAcceptedTextMap } from "@scrivr/plugins";
+import { buildAcceptedTextMap, isTrackedMark } from "@scrivr/plugins";
 import { diffText, pairReplacements } from "@scrivr/plugins";
 import type { PairedDiffOp } from "@scrivr/plugins";
 import type { InlineMark } from "@scrivr/core";
@@ -65,7 +65,9 @@ function readProposal(block: {
   proposedText?: string;
   proposedSpans?: InlineSpan[];
 }): { text: string; marksAt: InlineMark[][] } | null {
-  if (block.proposedSpans) {
+  // `proposedSpans` wins only when it says something. An agent emitting `[]`
+  // alongside `proposedText` means "I have no runs", not "empty this block".
+  if (block.proposedSpans && block.proposedSpans.length > 0) {
     let text = "";
     const marksAt: InlineMark[][] = [];
     for (const span of toCoreSpans(block.proposedSpans)) {
@@ -88,8 +90,12 @@ function marksMatchBlock(node: PmNode, marksAt: InlineMark[][]): boolean {
   const current: InlineMark[][] = [];
   node.descendants((child) => {
     if (!child.isText || !child.text) return;
+    // Tracked-deleted text is not in the accepted text the proposal was diffed
+    // against, so counting it here would make every block under review look
+    // like a formatting change.
+    if (child.marks.some((mark) => mark.type.name === "trackedDelete")) return;
     const marks = child.marks
-      .filter((mark) => mark.type.name !== "trackedInsert" && mark.type.name !== "trackedDelete")
+      .filter((mark) => !isTrackedMark(mark.type.name))
       .map((mark) =>
         Object.keys(mark.attrs).length > 0
           ? { type: mark.type.name, attrs: mark.attrs }

@@ -28,6 +28,18 @@ at all, and accepting a suggested table-row deletion left the row behind, empty,
 because only the text inside it had been marked. A schema test now fails if a
 node is added without it.
 
+`insertBlock` and `deleteBlock` act on the document's own flow and now refuse an
+id that resolves inside a list or a table. They used to climb to the top-level
+ancestor, so `deleteBlock` on a list item's paragraph — the natural way to say
+"remove this clause", since the agent is shown leaves — marked the entire list
+deleted and reported success. `deleteListItem` and `deleteTableRow` are how
+those are reached.
+
+Attributes an agent supplies pass the same gate the rich lane already applies,
+now shared rather than re-derived. An open `attrs` record reaching the document
+let agent output write `nodeId` — colliding with the ids the protocol addresses
+by — and `dataTracked`, forging a review history.
+
 `deleteTableRow` names its target `nodeId`, matching `deleteBlock` and
 `deleteListItem`. It was `anchorNodeId`, and everywhere else in this protocol an
 anchor is a neighbour you position against rather than the thing being acted on —

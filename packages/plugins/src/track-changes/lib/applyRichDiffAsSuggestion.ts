@@ -94,6 +94,25 @@ export interface RichDiffResult {
 const ALLOWED_ATTRS = ["align", "indent", "textIndent"] as const;
 const VALID_ALIGN = new Set(["left", "center", "right", "justify"]);
 
+/**
+ * The block attrs an agent is allowed to set, keeping only well-formed values.
+ *
+ * Agent output is untrusted and its `attrs` is an open record, so this is the
+ * one place that decides what may reach a node. Identity and review bookkeeping
+ * (`nodeId`, `dataTracked`) are not on the list and cannot be: a forged
+ * `nodeId` collides with the ids the protocol addresses by, and forged
+ * `dataTracked` invents a review history.
+ */
+export function pickAgentAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
+  const picked: Record<string, unknown> = {};
+  for (const key of ALLOWED_ATTRS) {
+    if (!(key in attrs)) continue;
+    const value = attrs[key];
+    if (isValidAttr(key, value)) picked[key] = value;
+  }
+  return picked;
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export function applyRichDiffAsSuggestion(
@@ -189,10 +208,8 @@ function applyAttrsChange(
 ): boolean {
   const picked: Record<string, unknown> = {};
   let changed = false;
-  for (const key of ALLOWED_ATTRS) {
-    if (!(key in editAttrs) || !(key in node.attrs)) continue;
-    const next = editAttrs[key];
-    if (!isValidAttr(key, next) || next === node.attrs[key]) continue;
+  for (const [key, next] of Object.entries(pickAgentAttrs(editAttrs))) {
+    if (!(key in node.attrs) || next === node.attrs[key]) continue;
     picked[key] = next;
     changed = true;
   }

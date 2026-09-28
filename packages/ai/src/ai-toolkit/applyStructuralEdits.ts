@@ -11,6 +11,7 @@
  * agent sees leaves, so ops that act on a container climb to it.
  */
 import { findNodeById, spansToFragment } from "@scrivr/core";
+import { pickAgentAttrs } from "@scrivr/plugins";
 import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 
 import type { SemanticBlockInput, SemanticCellInput, StructuralSemanticEdit } from "../schema/edit";
@@ -43,20 +44,24 @@ function resolveAncestor(
   return null;
 }
 
-/** The top-level block containing `nodeId` — what `insertBlock` sits beside. */
+/**
+ * The block `nodeId` names, but only when it is a block of the document itself.
+ *
+ * `insertBlock` and `deleteBlock` act on the document's own flow. An id that
+ * resolves inside a list or a table is not that, and climbing to the container
+ * would turn "delete this clause" into deleting the whole table — so a nested id
+ * is refused, and `deleteListItem` / `deleteTableRow` are how those are reached.
+ */
 function resolveTopLevel(doc: PmNode, nodeId: string): { node: PmNode; pos: number } | null {
   const found = findNodeById(doc, nodeId);
   if (!found) return null;
-  const $pos = doc.resolve(found.pos);
-  return $pos.depth === 0
-    ? found
-    : { node: $pos.node(1), pos: $pos.before(1) };
+  return doc.resolve(found.pos).depth === 0 ? found : null;
 }
 
 function buildBlock(schema: Schema, block: SemanticBlockInput): PmNode | null {
   const type = schema.nodes[block.type];
   if (!type) return null;
-  const attrs = { ...block.attrs, ...(block.level !== undefined ? { level: block.level } : {}) };
+  const attrs = { ...pickAgentAttrs(block.attrs ?? {}), ...(block.level !== undefined ? { level: block.level } : {}) };
   return type.createAndFill(attrs, spansToFragment(toCoreSpans(block.spans ?? []), schema));
 }
 
@@ -65,7 +70,7 @@ function buildCell(schema: Schema, cell: SemanticCellInput | undefined): PmNode 
   const paragraph = schema.nodes["paragraph"];
   if (!cellType || !paragraph) return null;
   const content = paragraph.createAndFill({}, spansToFragment(toCoreSpans(cell?.spans ?? []), schema));
-  return content ? cellType.createAndFill(cell?.attrs ?? {}, content) : null;
+  return content ? cellType.createAndFill(pickAgentAttrs(cell?.attrs ?? {}), content) : null;
 }
 
 /**
@@ -79,7 +84,7 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
   switch (edit.op) {
     case "insertBlock": {
       const anchor = resolveTopLevel(tr.doc, edit.anchorNodeId);
-      if (!anchor) return void result.notFound.push(edit.anchorNodeId);
+      if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
       const node = buildBlock(schema, edit.block);
       if (!node) return void result.rejected.push(edit.anchorNodeId);
       tr.insert(edit.position === "before" ? anchor.pos : anchor.pos + anchor.node.nodeSize, node);
@@ -88,7 +93,7 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
     }
     case "deleteBlock": {
       const target = resolveTopLevel(tr.doc, edit.nodeId);
-      if (!target) return void result.notFound.push(edit.nodeId);
+      if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
       tr.delete(target.pos, target.pos + target.node.nodeSize);
       result.changed.push(edit.nodeId);
       return;
@@ -99,7 +104,10 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       const itemType = schema.nodes["listItem"];
       const paragraph = schema.nodes["paragraph"];
       if (!itemType || !paragraph) return void result.rejected.push(edit.anchorNodeId);
-      const body = paragraph.createAndFill(edit.item.attrs ?? {}, spansToFragment(toCoreSpans(edit.item.spans), schema));
+      const body = paragraph.createAndFill(
+        pickAgentAttrs(edit.item.attrs ?? {}),
+        spansToFragment(toCoreSpans(edit.item.spans), schema),
+      );
       const node = body && itemType.createAndFill({}, body);
       if (!node) return void result.rejected.push(edit.anchorNodeId);
       tr.insert(edit.position === "before" ? item.pos : item.pos + item.node.nodeSize, node);

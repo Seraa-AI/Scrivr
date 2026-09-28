@@ -171,6 +171,61 @@ describe("table rows", () => {
   });
 });
 
+describe("ops that act on the document's own flow", () => {
+  const nested = () => [{
+    type: "bulletList", attrs: { nodeId: "list" },
+    content: [listItem("li1", "li1p", "Starter"), listItem("li2", "li2p", "Pro")],
+  }];
+
+  it("refuses to delete a list through a leaf inside it", () => {
+    const { editor, ai } = build(nested());
+    const res = ai.applySemanticEdits([{ kind: "structural", op: "deleteBlock", nodeId: "li2p" }]);
+
+    // Climbing to the container would turn "delete this clause" into deleting
+    // the whole list. `deleteListItem` is how that leaf is reached.
+    expect(res.applied).toBe(false);
+    expect(res.rejected).toEqual(["li2p"]);
+    expect(editor.getState().doc.child(0).childCount).toBe(2);
+  });
+
+  it("refuses to insert beside a leaf inside a table", () => {
+    const { editor, ai } = build([{
+      type: "table", attrs: { nodeId: "t" },
+      content: [{ type: "tableRow", attrs: { nodeId: "r1" }, content: [cell("c1", "c1p", "Fee")] }],
+    }]);
+    const res = ai.applySemanticEdits([{
+      kind: "structural", op: "insertBlock", position: "after", anchorNodeId: "c1p",
+      block: { type: "paragraph", spans: [{ text: "Stray.", marks: [] }] },
+    }]);
+
+    expect(res.applied).toBe(false);
+    expect(res.rejected).toEqual(["c1p"]);
+    expect(editor.getState().doc.childCount).toBe(1);
+  });
+});
+
+describe("attrs an agent supplies", () => {
+  it("cannot write identity or review bookkeeping", () => {
+    const { editor, ai } = build([para("p1", "First.")]);
+    ai.applySemanticEdits([{
+      kind: "structural", op: "insertBlock", position: "after", anchorNodeId: "p1",
+      block: {
+        type: "paragraph",
+        attrs: { nodeId: "p1", dataTracked: [{ id: "forged", operation: "insert" }], align: "center" },
+        spans: [{ text: "Second.", marks: [] }],
+      },
+    }]);
+
+    const added = editor.getState().doc.child(1);
+    // A forged nodeId would collide with the id the protocol addresses by; a
+    // forged dataTracked would invent a review history.
+    expect(added.attrs["nodeId"]).not.toBe("p1");
+    expect(added.attrs["dataTracked"]).not.toContainEqual(expect.objectContaining({ id: "forged" }));
+    // A styling attr the agent may legitimately set still lands.
+    expect(added.attrs["align"]).toBe("center");
+  });
+});
+
 describe("mixed batches", () => {
   it("applies rich and structural edits together", () => {
     const { editor, ai } = build([para("p1", "First."), para("p2", "Second.")]);
