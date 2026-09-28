@@ -96,7 +96,7 @@ export const HorizontalRule = Extension.create({
     return {
       horizontalRule: {
         group: "block",
-        attrs: { nodeId: { default: null } },
+        attrs: { nodeId: { default: null }, dataTracked: { default: [] } },
         parseDOM: [
           {
             tag: "hr",

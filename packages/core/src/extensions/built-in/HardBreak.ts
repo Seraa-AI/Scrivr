@@ -59,6 +59,7 @@ export const HardBreak = Extension.create<HardBreakOptions>({
         group: "inline",
         inline: true,
         selectable: false,
+        attrs: { dataTracked: { default: [] } },
         parseDOM: [{ tag: "br" }],
         toDOM: () => ["br"],
       },

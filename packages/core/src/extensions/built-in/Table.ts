@@ -135,6 +135,11 @@ function tableSpec(): NodeSpec {
       layout: { default: "fixed" },
       grid: { default: [] as number[] },
       nodeId: { default: null },
+      // Tracked-change bookkeeping, as every other block node declares it. A
+      // table node that cannot hold it is invisible to node-level tracking:
+      // a suggested row deletion marks only the text inside, and accepting it
+      // empties the row instead of removing it.
+      dataTracked: { default: [] },
     },
     parseDOM: [{ tag: "table", getAttrs: parseTableAttrs }],
     toDOM(node) {
@@ -153,6 +158,7 @@ function tableRowSpec(): NodeSpec {
       repeatHeader: { default: false },
       allowBreakAcrossPages: { default: false },
       nodeId: { default: null },
+      dataTracked: { default: [] },
     },
     parseDOM: [{ tag: "tr", getAttrs: parseNodeId }],
     toDOM(node) {
@@ -172,6 +178,7 @@ function cellAttrs(): NonNullable<NodeSpec["attrs"]> {
     margins: { default: null },
     borders: { default: null },
     nodeId: { default: null },
+    dataTracked: { default: [] },
   };
 }
 
