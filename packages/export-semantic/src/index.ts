@@ -10,7 +10,11 @@ export {
   unitEmbeddingInput,
   unitContentHash,
   unitRichHash,
+  unitRichInput,
   semanticPartRichHash,
+  semanticPartRichInput,
+  unitAlignmentInput,
+  unitContentKey,
   diffSemanticUnits,
 } from "./changeDetection";
 export type { SemanticUnitDiff } from "./changeDetection";

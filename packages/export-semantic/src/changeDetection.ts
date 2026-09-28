@@ -8,7 +8,12 @@
  */
 import { fnv1aHex, stableStringify, type SemanticPart, type SemanticUnit } from "@scrivr/core";
 
-function richPartValue(part: SemanticPart): Record<string, unknown> {
+/**
+ * The canonical value `semanticPartRichHash` covers. Published because the rich
+ * diff lane needs the preimage, not only the digest: a digest says a leaf moved,
+ * the preimage says which run did.
+ */
+export function semanticPartRichInput(part: SemanticPart): Record<string, unknown> {
   return {
     type: part.type,
     breadcrumb: part.breadcrumb,
@@ -20,7 +25,7 @@ function richPartValue(part: SemanticPart): Record<string, unknown> {
 
 /** Formatting-aware hash for one editable leaf nested inside a container unit. */
 export function semanticPartRichHash(part: SemanticPart): string {
-  return fnv1aHex(stableStringify(richPartValue(part)));
+  return fnv1aHex(stableStringify(semanticPartRichInput(part)));
 }
 
 /**
@@ -54,21 +59,59 @@ export function unitContentHash(unit: SemanticUnit): string {
  * document?". Deterministic — `stableStringify` makes it independent of key order.
  */
 export function unitRichHash(unit: SemanticUnit): string {
-  return fnv1aHex(
-    stableStringify({
-      type: unit.type,
-      breadcrumb: unit.breadcrumb,
-      text: unit.text,
-      spans: unit.spans ?? [],
-      attrs: unit.attrs ?? {},
-      // Lists and other containers expose their editable textblocks through
-      // parts. Include them so a formatting-only leaf edit is observable.
-      parts: unit.parts?.map(richPartValue) ?? null,
-      // Table rich state lives in cells, not top-level text/spans/attrs — a cell
-      // alignment/merge/header edit is invisible without this.
-      cells: unit.cells ?? null,
-    }),
-  );
+  return fnv1aHex(stableStringify(unitRichInput(unit)));
+}
+
+/**
+ * The canonical value `unitRichHash` covers — structured, not a string, so a
+ * consumer reads a unit's runs rather than re-deriving them from `text`.
+ */
+export function unitRichInput(unit: SemanticUnit): Record<string, unknown> {
+  return {
+    type: unit.type,
+    breadcrumb: unit.breadcrumb,
+    text: unit.text,
+    spans: unit.spans ?? [],
+    attrs: unit.attrs ?? {},
+    // Lists and other containers expose their editable textblocks through
+    // parts. Include them so a formatting-only leaf edit is observable.
+    parts: unit.parts?.map(semanticPartRichInput) ?? null,
+    // Table rich state lives in cells, not top-level text/spans/attrs — a cell
+    // alignment/merge/header edit is invisible without this.
+    cells: unit.cells ?? null,
+  };
+}
+
+/**
+ * The canonical clause text for cross-document matching — the unit's own text,
+ * NFKC-normalized with whitespace collapsed.
+ *
+ * Deliberately narrower than `unitEmbeddingInput`: no breadcrumb, because the
+ * same clause sits under a different heading in every agreement that carries it,
+ * and no instance id, because `nodeId` is scoped to one document. Whitespace is
+ * collapsed because a clause that survives a DOCX round-trip or a re-wrap is the
+ * same clause, and NFKC folds the compatibility forms an importer can introduce.
+ *
+ * Covers the unit's text as emitted. A grouped heading-led unit carries its
+ * heading in `text`, so cross-document alignment emits with `groupBlocks: false`
+ * — then a heading is its own unit and a clause is keyed on the clause alone.
+ */
+export function unitAlignmentInput(unit: SemanticUnit): string {
+  return unit.text.normalize("NFKC").replace(/\s+/gu, " ").trim();
+}
+
+/**
+ * Content-addressed key for a unit — equal across documents when the clause
+ * text is the same. The counterpart to `unit.id`, which addresses one instance:
+ * a corpus indexes by both, the instance id to find this block again and the
+ * content key to find everywhere else the clause appears.
+ *
+ * Not a similarity measure. Two clauses differing by one word get unrelated
+ * keys, by design — near-duplicate scoring is a separate question, and one a
+ * hash is the wrong tool for.
+ */
+export function unitContentKey(unit: SemanticUnit): string {
+  return fnv1aHex(unitAlignmentInput(unit));
 }
 
 export interface SemanticUnitDiff {
