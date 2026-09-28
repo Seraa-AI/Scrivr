@@ -1742,3 +1742,39 @@ describe("an inline atom with a strategy but no size attrs", () => {
     warn.mockRestore();
   });
 });
+
+
+/**
+ * An atom carries no text for a decorator to colour, so its own marks are the
+ * only thing a renderer can resolve a fill from. They travel on the span
+ * beside the font, by the same routes.
+ */
+describe("an inline atom's marks", () => {
+  it("are recorded on its span", () => {
+    const schema = new Schema({
+      nodes: {
+        doc: { content: "block+" },
+        paragraph: { group: "block", content: "inline*" },
+        text: { group: "inline" },
+        badge: { group: "inline", inline: true, atom: true },
+      },
+      marks: { tint: { attrs: { color: {} } } },
+    });
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("badge", { measure: () => ({ width: 20, height: 12 }), render: () => {} });
+
+    const tint = schema.marks["tint"]!.create({ color: "#336699" });
+    const para = schema.node("paragraph", null, [
+      schema.text("wrapping text that runs on for a while so the line breaks somewhere"),
+      schema.nodes["badge"]!.create(null, null, [tint]),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 200, page: 1,
+      measurer: createMeasurer(), inlineRegistry,
+    });
+
+    const objectSpans = block.lines.flatMap((l) => l.spans).filter((sp) => sp.kind === "object");
+    expect(objectSpans).toHaveLength(1);
+    expect(objectSpans[0]!.marks).toEqual([{ name: "tint", attrs: { color: "#336699" } }]);
+  });
+});

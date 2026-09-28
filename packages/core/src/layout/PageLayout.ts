@@ -2067,6 +2067,10 @@ function rebreakWrappedLinesWithoutExclusions(
           docPos: span.docPos,
           ...(span.font !== undefined ? { font: span.font } : {}),
           ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
+          // Marks travel with the font, or an atom loses the fill it resolves
+          // from when a block is re-broken — its colour would then depend on
+          // whether its page happened to hold the float.
+          ...(span.marks !== undefined ? { marks: span.marks } : {}),
           verticalAlign: span.verticalAlign,
         });
       }

@@ -83,8 +83,6 @@ function renderBand(
 
 // ── PDF node handlers for token inline atoms ─────────────────────────────────
 
-/** #9ca3af — where the token carries no colour of its own to resolve. */
-const TOKEN_COLOR: Rgb = { r: 156, g: 163, b: 175 };
 const TOKEN_SIZE_PX = 10;
 
 function drawTokenOnPdf(
@@ -104,8 +102,9 @@ function drawTokenOnPdf(
     font,
     // What the token's own marks resolve to, the same fill the canvas paints
     // it in. Choosing a colour here instead is how the two surfaces came to
-    // disagree about one node.
-    color: ctx.color ?? TOKEN_COLOR,
+    // disagree about one node; omitting it lets the draw surface apply the
+    // document's text colour, which is the same answer again.
+    ...(ctx.color ? { color: ctx.color } : {}),
   });
 }
 

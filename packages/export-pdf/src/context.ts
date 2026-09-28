@@ -127,8 +127,7 @@ export function createDrawHelpers(
   markHandlers: ReadonlyMap<string, PdfMarkHandler>,
 ): PdfDrawHelpers {
   /** Core speaks in 0-255 channels; pdf-lib wants 0-1. */
-  // pdf-lib works in 0..1, the layout and the canvas in 0..255. The atom
-  // context speaks the layout's units so a handler never has to know which.
+  /** The atom context speaks the layout's units, so a handler never converts. */
   const fromPdfColor = (color: ReturnType<typeof rgb>): Rgb =>
     ({ r: color.red * 255, g: color.green * 255, b: color.blue * 255 });
 
@@ -161,7 +160,11 @@ export function createDrawHelpers(
       y: flipY(op.baselineY, pageHeightPt),
       size: op.sizePx * PT_PER_PX,
       font,
-      color: toPdfColor(op.color),
+      // An op that names no colour takes the document's, which is the rule
+      // canvas applies — so a handler never has to pick one to draw text.
+      color: op.color === undefined
+        ? parseCssColor(theme.defaultText)
+        : toPdfColor(op.color),
       ...alpha(op.opacity),
     });
   }
@@ -489,9 +492,11 @@ export function createDrawHelpers(
                     },
                   }
                 : {}),
-              ...(span.marks !== undefined && span.marks.length > 0
-                ? { color: fromPdfColor(resolveFill(styles, themeDefaultText)) }
-                : {}),
+              // Always, not only when the atom has marks: `resolveFill` falls
+              // back to the theme, which is the same answer canvas reaches. A
+              // handler left to fill the gap picks its own, and the screen and
+              // the file disagree about the node this context describes.
+              color: fromPdfColor(resolveFill(styles, themeDefaultText)),
             };
             handler(atomBlock, atomCtx);
           }

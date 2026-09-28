@@ -1,6 +1,7 @@
 ---
 "@scrivr/core": patch
 "@scrivr/plugins": patch
+"@scrivr/export-pdf": patch
 ---
 
 Header and footer tokens now reserve the space they actually paint.
@@ -64,6 +65,13 @@ background on a page whose body painted nothing — while PDF chose a colour of
 its own. Object spans now carry their marks, both surfaces resolve through the
 same cascade, and an atom with no colour of its own takes the theme's text
 colour rather than a leftover.
+
+New surface for this: `PdfNodeContext` carries `color` — the fill an atom's
+marks resolved to, in the layout's 0-255 channels — so a PDF node handler
+passes it through instead of choosing one. `PdfTextOp.color` is now optional
+and defaults to the document's text colour, which is the rule canvas already
+applies, so no handler has to name a colour to draw text. Inline atom spans
+carry their `marks`.
 
 The font half of the same defect:
 A token carries no marks of its own, so it is measured in the band's base font

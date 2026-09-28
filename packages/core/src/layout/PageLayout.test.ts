@@ -3108,3 +3108,4 @@ describe("the version a streamed chunk publishes", () => {
     expect(replayed.version).toBeGreaterThan(first.version);
   });
 });
+

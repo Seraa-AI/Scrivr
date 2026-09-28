@@ -4,7 +4,9 @@ import type { TextMeasurerLike } from "./TextMeasurer";
 import type { CharacterMap } from "./CharacterMap";
 import { normalizeFont } from "./StyleResolver";
 import type { AvailableSegment, LineSpace } from "./ExclusionManager";
-
+import type { MarkDecorator } from "../extensions/types";
+import type { ResolvedTheme } from "../model/theme";
+import { resolveSpanFill } from "./resolveSpanFill";
 // ── InputSpan ─────────────────────────────────────────────────────────────────
 
 /**
@@ -210,6 +212,36 @@ export function spanEndDocPos(span: LayoutSpan | InputSpan): number {
  * an extension, and one that throws would otherwise leave the canvas a save
  * deep for the rest of the tile — every later restore popping the wrong state.
  */
+/**
+ * How an inline atom should be painted: the font its box was measured against,
+ * and the fill its own marks resolve to.
+ *
+ * The fill is always resolved, never inherited. An atom carries no text for a
+ * decorator to colour, so one with no colour of its own takes the theme's text
+ * colour — the same answer its neighbouring text gets — where leaving the
+ * context alone hands it whatever was last set, which on a page whose body
+ * painted nothing is the background `clearCanvas` left.
+ */
+export function atomStyle(
+  span: Extract<LayoutSpan, { kind: "object" }>,
+  x: number,
+  y: number,
+  decorators: Map<string, MarkDecorator> | undefined,
+  theme: ResolvedTheme,
+  ctx: CanvasRenderingContext2D,
+): { font?: string | undefined; fill: string } {
+  return {
+    font: span.font,
+    fill: resolveSpanFill(
+      span.marks,
+      decorators,
+      { x, y: y + span.height, width: span.width, ascent: span.height, descent: 0 },
+      theme,
+      ctx,
+    ),
+  };
+}
+
 export function paintInSpanStyle(
   ctx: CanvasRenderingContext2D,
   style: { font?: string | undefined; fill?: string | undefined },

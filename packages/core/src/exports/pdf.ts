@@ -131,7 +131,8 @@ export interface PdfTextOp {
   /** Font size in layout pixels. */
   sizePx: number;
   font: PdfFontHandle;
-  color: Rgb;
+  /** Omit to take the document's text colour — the same default canvas uses. */
+  color?: Rgb;
   /** 0–1. Omit for opaque. */
   opacity?: number;
 }
@@ -230,10 +231,11 @@ export interface PdfNodeContext {
    */
   font?: PdfFontHandle;
   /**
-   * The fill the atom's own marks resolve to, present when the block is an
-   * inline atom. A handler drawing its own text should use it rather than
-   * choosing a colour: on canvas the atom is painted in this, and a handler
-   * that picks its own makes the two surfaces disagree about the same node.
+   * The fill the atom's own marks resolve to — always present when the block
+   * is an inline atom, falling back to the document's text colour just as
+   * canvas does. A handler drawing its own text should pass this straight
+   * through: picking a colour here is how the screen and the file came to
+   * disagree about one node.
    */
   color?: Rgb;
   /** The editor whose export contributions were collected. */
