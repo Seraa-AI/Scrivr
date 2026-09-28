@@ -1,4 +1,5 @@
 ---
+"@scrivr/core": patch
 "@scrivr/export-semantic": patch
 ---
 
@@ -15,6 +16,26 @@ normalized with whitespace collapsed, so a clause that has been through a DOCX
 round-trip or re-wrapped still keys the same. It is a companion to `unit.id`,
 not a replacement: a corpus indexes by both — the instance id to find this block
 again, the content key to find everywhere else the clause appears.
+
+The key is SHA-256, added to `@scrivr/core` as `sha256Hex` — sync and
+dependency-free, because `crypto.subtle` is async and Node's `crypto` is absent
+in the browser, and an identity key computable on only one side of the wire is
+not an identity key. The existing `fnv1aHex` stays where it belongs: it compares
+a block against one prior value of itself, where 32 bits is ample. A corpus key
+is compared against every key already held, so collisions follow the birthday
+bound rather than luck — two fee clauses differing only in an amount collide
+readily at 32 bits — and these documents arrive from counterparties, who are in
+a position to aim for one.
+
+It is still only a key. A hash cannot prove equality, so a corpus that acts on a
+match — merging records, discarding an upload — confirms it by comparing
+`unitAlignmentInput`, which is published for that purpose.
+
+NFKC normalization is a deliberate loss of distinction, not just cleanup. It
+folds the compatibility forms an importer introduces — ligatures, full-width
+Latin, non-breaking spaces — and in doing so makes `m²` and `m2` the same text.
+That is the right trade for matching a clause across formats and the wrong basis
+for asserting two documents are byte-identical.
 
 It is not a similarity measure. Two clauses differing by a word get unrelated
 keys, by design; near-duplicate scoring is a separate question and a hash is the

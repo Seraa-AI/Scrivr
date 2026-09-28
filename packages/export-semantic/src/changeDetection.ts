@@ -8,6 +8,7 @@
  */
 import {
   fnv1aHex,
+  sha256Hex,
   stableStringify,
   type InlineSpan,
   type SemanticPart,
@@ -119,9 +120,14 @@ export function unitRichInput(unit: SemanticUnit): UnitRichInput {
  *
  * Deliberately narrower than `unitEmbeddingInput`: no breadcrumb, because the
  * same clause sits under a different heading in every agreement that carries it.
- * Whitespace is
- * collapsed because a clause that survives a DOCX round-trip or a re-wrap is the
- * same clause, and NFKC folds the compatibility forms an importer can introduce.
+ * Whitespace is collapsed because a clause that survives a DOCX round-trip or a
+ * re-wrap is the same clause.
+ *
+ * NFKC is a deliberate loss of distinction, not just cleanup: it folds
+ * compatibility forms an importer introduces — ligatures, full-width Latin,
+ * non-breaking spaces — and in doing so makes `m²` and `m2` the same text. That
+ * is the right trade for matching one clause against another across formats; it
+ * is the wrong basis for asserting two documents are byte-identical.
  *
  * Covers the unit's text as emitted. A grouped heading-led unit carries its
  * heading in `text`, so cross-document alignment emits with `groupBlocks: false`
@@ -137,12 +143,24 @@ export function unitAlignmentInput(unit: SemanticUnit): string {
  * a corpus indexes by both, the instance id to find this block again and the
  * content key to find everywhere else the clause appears.
  *
- * Not a similarity measure. Two clauses differing by one word get unrelated
- * keys, by design — near-duplicate scoring is a separate question, and one a
- * hash is the wrong tool for.
+ * SHA-256, not the `fnv1aHex` the version hashes use. Those compare a block
+ * against one prior value of itself, where 32 bits is ample. This one is
+ * compared against every key a corpus holds, so collisions are governed by the
+ * birthday bound rather than by luck — two unrelated fee clauses differing only
+ * in an amount collide readily at 32 bits — and the documents arrive from
+ * counterparties, who are in a position to aim for one. A key that merges two
+ * different clauses merges two different obligations.
+ *
+ * Still only a key. A hash cannot prove equality, and a corpus that acts on a
+ * match — merging records, discarding an upload — must confirm it by comparing
+ * `unitAlignmentInput`, which is published for exactly that.
+ *
+ * Not a similarity measure either. Two clauses differing by one word get
+ * unrelated keys, by design — near-duplicate scoring is a separate question,
+ * and one a hash is the wrong tool for.
  */
 export function unitContentKey(unit: SemanticUnit): string {
-  return fnv1aHex(unitAlignmentInput(unit));
+  return sha256Hex(unitAlignmentInput(unit));
 }
 
 export interface SemanticUnitDiff {

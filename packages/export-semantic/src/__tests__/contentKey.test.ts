@@ -24,7 +24,7 @@ import {
   semanticPartRichInput,
   semanticPartRichHash,
 } from "../index";
-import { fnv1aHex, stableStringify } from "@scrivr/core";
+import { fnv1aHex, sha256Hex, stableStringify } from "@scrivr/core";
 
 const para = (nodeId: string, text: string) => ({
   type: "paragraph",
@@ -76,9 +76,23 @@ describe("unitContentKey", () => {
     const [, u] = emit([heading("h", 1, "Terms"), para("p", CLAUSE)]);
 
     expect(unitContentKey(u!)).toBe(unitContentKey(u!));
-    expect(unitContentKey(u!)).toBe(fnv1aHex(unitAlignmentInput(u!)));
+    expect(unitContentKey(u!)).toBe(sha256Hex(unitAlignmentInput(u!)));
     // The alignment preimage is the clause alone — no heading path.
     expect(unitAlignmentInput(u!)).not.toContain("Terms");
+  });
+});
+
+describe("the key's collision surface", () => {
+  it("separates clauses a 32-bit hash merges", () => {
+    // These two collide under fnv1a — different obligations, one bucket. A
+    // corpus acting on that match discards a materially different clause.
+    const a = "The liability limit is USD 122789.";
+    const b = "The liability limit is USD 339192.";
+    expect(fnv1aHex(a)).toBe(fnv1aHex(b));
+
+    const [ua] = emit([para("p-a", a)]);
+    const [ub] = emit([para("p-b", b)]);
+    expect(unitContentKey(ua!)).not.toBe(unitContentKey(ub!));
   });
 });
 

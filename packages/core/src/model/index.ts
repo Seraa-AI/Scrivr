@@ -16,7 +16,7 @@ export type { SpansToFragmentOptions } from "./spansToFragment";
 export { sanitizeDocUrls } from "./sanitizeDocUrls";
 export { dropPendingPlaceholders } from "./dropPendingPlaceholders";
 export { assignBlockIds, planBlockIdAssignments, recloneDocumentIds } from "./assignBlockIds";
-export { fnv1aHex, stableStringify } from "./hash";
+export { fnv1aHex, sha256Hex, stableStringify } from "./hash";
 export type {
   AssignBlockIdsOptions,
   BlockIdAssignment,
