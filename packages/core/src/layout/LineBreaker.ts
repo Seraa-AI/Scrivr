@@ -67,6 +67,12 @@ export type InputSpan =
        */
       font?: string;
       resolution?: FontResolutionId;
+      /**
+       * The atom's own marks. An atom carries no text for a decorator to
+       * colour, so without these a renderer has nothing to resolve a fill from
+       * and paints it in whatever the span before it left behind.
+       */
+      marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
       /** Vertical alignment within the line — sourced from the node's verticalAlign attr */
       verticalAlign: InlineObjectVerticalAlign;
     }
@@ -110,6 +116,8 @@ export type LayoutSpan =
       /** The face this atom was measured against. Carried from its input span. */
       font?: string;
       resolution?: FontResolutionId;
+      /** The atom's own marks — what a renderer resolves its fill from. */
+      marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
       verticalAlign: InlineObjectVerticalAlign;
     };
 
@@ -190,31 +198,32 @@ export function spanEndDocPos(span: LayoutSpan | InputSpan): number {
  *   "text-bottom" — bottom of object at parent font descent (lineY + ascent + descent - height)
  */
 /**
- * Paint an inline atom in the font its box was measured against.
+ * Paint an inline atom in the font and fill its own marks resolve to.
  *
- * BlockLayout records that font on the span precisely so the renderer does not
- * have to re-derive it; without this the strategy draws in whatever the
- * previous span left on the context, and the glyphs stop filling the box.
+ * An atom has no text of its own, so nothing about it is re-derivable from the
+ * context: BlockLayout records the font its box was measured against and the
+ * marks it carries, and this applies both. Without it a strategy draws in
+ * whatever the previous span left — the wrong size, and a colour belonging to
+ * another run, or on a page whose body painted nothing, the page background.
  *
  * Restores through a `finally` rather than save/restore: a strategy comes from
  * an extension, and one that throws would otherwise leave the canvas a save
  * deep for the rest of the tile — every later restore popping the wrong state.
  */
-export function paintInSpanFont(
+export function paintInSpanStyle(
   ctx: CanvasRenderingContext2D,
-  font: string | undefined,
+  style: { font?: string | undefined; fill?: string | undefined },
   paint: () => void,
 ): void {
-  if (font === undefined) {
-    paint();
-    return;
-  }
-  const previous = ctx.font;
-  ctx.font = font;
+  const previousFont = ctx.font;
+  const previousFill = ctx.fillStyle;
+  if (style.font !== undefined) ctx.font = style.font;
+  if (style.fill !== undefined) ctx.fillStyle = style.fill;
   try {
     paint();
   } finally {
-    ctx.font = previous;
+    ctx.font = previousFont;
+    ctx.fillStyle = previousFill;
   }
 }
 
@@ -508,6 +517,7 @@ export class LineBreaker {
           docPos: word.docPos,
           ...(word.font !== undefined ? { font: word.font } : {}),
           ...(word.resolution !== undefined ? { resolution: word.resolution } : {}),
+          ...(word.marks !== undefined ? { marks: word.marks } : {}),
           verticalAlign: word.verticalAlign,
         });
       } else {
@@ -738,6 +748,7 @@ interface ObjectToken {
   node: Node;
   font?: string;
   resolution?: FontResolutionId;
+  marks?: Array<{ name: string; attrs: Record<string, unknown> }>;
   width: number;
   height: number;
   docPos: number;
@@ -822,6 +833,7 @@ function tokenise(spans: InputSpan[]): Token[] {
         docPos: span.docPos,
         ...(span.font !== undefined ? { font: span.font } : {}),
         ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
+        ...(span.marks !== undefined ? { marks: span.marks } : {}),
         verticalAlign: span.verticalAlign,
       });
       continue;

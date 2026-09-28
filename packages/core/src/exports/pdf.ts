@@ -229,6 +229,13 @@ export interface PdfNodeContext {
    * canvas the atom is painted in it.
    */
   font?: PdfFontHandle;
+  /**
+   * The fill the atom's own marks resolve to, present when the block is an
+   * inline atom. A handler drawing its own text should use it rather than
+   * choosing a colour: on canvas the atom is painted in this, and a handler
+   * that picks its own makes the two surfaces disagree about the same node.
+   */
+  color?: Rgb;
   /** The editor whose export contributions were collected. */
   editor: IBaseEditor;
   /** Resolved colours every handler paints from. */

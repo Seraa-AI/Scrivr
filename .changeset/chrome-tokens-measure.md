@@ -56,7 +56,16 @@ number has; the band is now arranged once per width (four times for a
 thousand-page document) and painting looks the arrangement up. Canvas and PDF
 read the same one. The band still reserves height against the widest.
 
-Inline atoms are also painted in the font their box was measured against.
+Inline atoms are also painted in the font **and fill** their own marks resolve
+to. An atom carries no text for a decorator to colour, so its marks never
+reached the renderer: canvas painted it in whatever fill the previous span left
+— the body's colour in a footer holding only a page number, and the page
+background on a page whose body painted nothing — while PDF chose a colour of
+its own. Object spans now carry their marks, both surfaces resolve through the
+same cascade, and an atom with no colour of its own takes the theme's text
+colour rather than a leftover.
+
+The font half of the same defect:
 A token carries no marks of its own, so it is measured in the band's base font
 while the text beside it is often marked smaller; the strategies draw with
 whatever font the context holds, so a 14px box was being filled with 10px

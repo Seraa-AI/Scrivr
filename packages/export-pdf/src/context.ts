@@ -127,6 +127,11 @@ export function createDrawHelpers(
   markHandlers: ReadonlyMap<string, PdfMarkHandler>,
 ): PdfDrawHelpers {
   /** Core speaks in 0-255 channels; pdf-lib wants 0-1. */
+  // pdf-lib works in 0..1, the layout and the canvas in 0..255. The atom
+  // context speaks the layout's units so a handler never has to know which.
+  const fromPdfColor = (color: ReturnType<typeof rgb>): Rgb =>
+    ({ r: color.red * 255, g: color.green * 255, b: color.blue * 255 });
+
   const toPdfColor = (color: Rgb) =>
     rgb(clamp01(color.r / 255), clamp01(color.g / 255), clamp01(color.b / 255));
 
@@ -414,7 +419,9 @@ export function createDrawHelpers(
       for (const span of line.spans) {
         const spanAbsX =
           block.x + lineOffsetX + span.x + spacesBeforeSpan * spaceBonus;
-        const styles = spanStyles(span.kind === "text" ? span.marks : undefined, ctx);
+        // Object spans carry their own marks now, so an atom's colour resolves
+        // through the same cascade its neighbours do.
+        const styles = spanStyles(span.marks, ctx);
 
         // Object spans have no marks, so an inline image inside an anchor
         // ends the run rather than continuing it. The last mark to name a
@@ -481,6 +488,9 @@ export function createDrawHelpers(
                         : {}),
                     },
                   }
+                : {}),
+              ...(span.marks !== undefined && span.marks.length > 0
+                ? { color: fromPdfColor(resolveFill(styles, themeDefaultText)) }
                 : {}),
             };
             handler(atomBlock, atomCtx);

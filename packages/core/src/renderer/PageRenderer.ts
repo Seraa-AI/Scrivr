@@ -9,10 +9,10 @@ import {
 } from "../layout/AnchoredObjects";
 import { LayoutBlock, computeAlignmentOffset, isHiddenAnchorLine } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
-import { computeObjectRenderY, paintInSpanFont } from "../layout/LineBreaker";
+import { computeObjectRenderY, paintInSpanStyle } from "../layout/LineBreaker";
 import type { TextMeasurerLike } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
-import type { FontModifier, MarkDecorator } from "../extensions/types";
+import type { FontModifier, MarkDecorator, SpanRect } from "../extensions/types";
 import { resolveSpanFill } from "../layout/resolveSpanFill";
 import type { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { PageChromeContribution, PageMetrics } from "../layout/PageMetrics";
@@ -286,6 +286,24 @@ function drawFloat(
  * @returns updated offset (lineIndexOffset + block.lines.length) for the
  *          next block to continue from.
  */
+/**
+ * The fill an inline atom paints in.
+ *
+ * Always resolved, never inherited. An atom with no colour of its own falls
+ * back to the theme's text colour, the same answer its neighbouring text gets
+ * — whereas leaving the context alone hands it whatever was last set, which on
+ * a page whose body painted nothing is the background `clearCanvas` left.
+ */
+function atomFill(
+  marks: Array<{ name: string; attrs: Record<string, unknown> }> | undefined,
+  decorators: Map<string, MarkDecorator> | undefined,
+  theme: ResolvedTheme,
+  ctx: CanvasRenderingContext2D,
+  rect: Omit<SpanRect, "markAttrs">,
+): string {
+  return resolveSpanFill(marks, decorators, rect, theme, ctx);
+}
+
 export function drawBlock(
   ctx: CanvasRenderingContext2D,
   block: LayoutBlock,
@@ -330,7 +348,17 @@ export function drawBlock(
         const objY = computeObjectRenderY(lineY, line, span);
         const objectStrategy = inlineRegistry?.get(span.node.type.name);
         if (objectStrategy) {
-          paintInSpanFont(ctx, span.font, () => {
+          const style = {
+            font: span.font,
+            fill: atomFill(span.marks, markDecorators, theme, ctx, {
+              x: objX,
+              y: objY + span.height,
+              width: span.width,
+              ascent: span.height,
+              descent: 0,
+            }),
+          };
+          paintInSpanStyle(ctx, style, () => {
             objectStrategy.render(ctx, objX, objY, span.width, span.height, span.node, theme);
           });
         }

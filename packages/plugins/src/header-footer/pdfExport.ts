@@ -30,7 +30,7 @@ import { setTokenContext, getCurrentPageNumber, getCurrentTotalPages } from "./t
 type BandContext = Pick<PdfNodeContext, "layout" | "blocks">;
 
 /** A token paints one string and nothing else. */
-type TokenContext = Pick<PdfNodeContext, "draw" | "font">;
+type TokenContext = Pick<PdfNodeContext, "draw" | "font" | "color">;
 
 /**
  * PDF chrome handler for headerFooter. Called once per page by the export
@@ -83,7 +83,7 @@ function renderBand(
 
 // ── PDF node handlers for token inline atoms ─────────────────────────────────
 
-/** #9ca3af — the same grey the table borders use. */
+/** #9ca3af — where the token carries no colour of its own to resolve. */
 const TOKEN_COLOR: Rgb = { r: 156, g: 163, b: 175 };
 const TOKEN_SIZE_PX = 10;
 
@@ -102,7 +102,10 @@ function drawTokenOnPdf(
     baselineY: block.y + block.height,
     sizePx: fontSizeOf(font.cssFont),
     font,
-    color: TOKEN_COLOR,
+    // What the token's own marks resolve to, the same fill the canvas paints
+    // it in. Choosing a colour here instead is how the two surfaces came to
+    // disagree about one node.
+    color: ctx.color ?? TOKEN_COLOR,
   });
 }
 

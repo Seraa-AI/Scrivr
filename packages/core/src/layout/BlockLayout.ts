@@ -837,6 +837,13 @@ function extractSpans(
           height: objHeight,
           ...(atomFont !== undefined ? { font: atomFont } : {}),
           ...(atomResolution !== undefined ? { resolution: atomResolution } : {}),
+          // Same shape a text span carries, so a fill resolves the same way.
+          ...(child.marks.length > 0 ? {
+            marks: child.marks.map((m) => ({
+              name: m.type.name,
+              attrs: m.attrs as Record<string, unknown>,
+            })),
+          } : {}),
           verticalAlign,
         });
       } else {
