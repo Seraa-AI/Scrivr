@@ -51,6 +51,7 @@ export {
   renderDeleteHighlight,
   renderInsertMarker,
   buildOpRenderInstructions,
+  renderFormatHighlight,
   renderInstructions,
 } from "./renderAiSuggestionOps";
 export type {

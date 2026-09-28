@@ -28,6 +28,13 @@ export interface SuggestionGroupInfo {
   replacedText: string;
   /** The replacement text being proposed. Empty string for pure deletions. */
   insertedText: string;
+  /**
+   * Set when the group proposes formatting rather than wording — the run whose
+   * appearance changes, with its words unchanged. A UI that renders
+   * `replacedText → insertedText` has nothing to show for one of these and
+   * should describe the formatting instead.
+   */
+  formattedText?: string;
   /** The suggestion this group belongs to (for apply/reject calls). */
   suggestion: AiSuggestion;
   /** Whether this block's acceptedText has drifted from the live document. */
@@ -56,7 +63,7 @@ export interface SuggestionPopoverCallbacks {
 function buildGroupRanges(
   ops: AiOp[],
   map: ReturnType<typeof buildAcceptedTextMap>["map"],
-): Map<string, { from: number; to: number; replacedText: string; insertedText: string }> {
+): Map<string, { from: number; to: number; replacedText: string; insertedText: string; formattedText?: string }> {
   const groups = new Map<string, {
     deleteFrom: number; deleteTo: number; deleteText: string;
     insertText: string;
@@ -64,10 +71,20 @@ function buildGroupRanges(
     insertAnchor: number | null;
   }>();
 
+  const formatted = new Map<string, { from: number; to: number; formattedText: string }>();
   let acceptedOffset = 0;
 
   for (const op of ops) {
     if (op.type === "keep") {
+      // A keep carrying marks is a formatting proposal on text that stays. It
+      // has a group of its own so a reader can accept it, and it anchors over
+      // the run itself — there is no replaced or inserted text to point at.
+      if (op.marks && op.groupId) {
+        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
+        if (range) {
+          formatted.set(op.groupId, { from: range.from, to: range.to, formattedText: op.text });
+        }
+      }
       acceptedOffset += op.text.length;
       continue;
     }
@@ -105,7 +122,19 @@ function buildGroupRanges(
     }
   }
 
-  const result = new Map<string, { from: number; to: number; replacedText: string; insertedText: string }>();
+  const result = new Map<string, {
+    from: number; to: number; replacedText: string; insertedText: string; formattedText?: string;
+  }>();
+
+  for (const [groupId, fmt] of formatted) {
+    result.set(groupId, {
+      from: fmt.from,
+      to: fmt.to,
+      replacedText: "",
+      insertedText: "",
+      formattedText: fmt.formattedText,
+    });
+  }
 
   for (const [groupId, g] of groups) {
     let from: number;
@@ -165,7 +194,7 @@ export function createSuggestionPopover(
     const schema = state.schema;
 
     // Find the first group whose doc range contains the cursor.
-    let found: { groupId: string; from: number; to: number; replacedText: string; insertedText: string; isStale: boolean } | null = null;
+    let found: { groupId: string; from: number; to: number; replacedText: string; insertedText: string; formattedText?: string; isStale: boolean } | null = null;
 
     outer: for (const block of suggestion.blocks) {
       const nodeFound = findNodeById(state.doc, block.nodeId);
@@ -184,7 +213,7 @@ export function createSuggestionPopover(
       if (groupRanges.size === 0) continue;
 
       let bestGroupId: string | null = null;
-      let bestRange: { from: number; to: number; replacedText: string; insertedText: string } | null = null;
+      let bestRange: { from: number; to: number; replacedText: string; insertedText: string; formattedText?: string } | null = null;
       let bestDist = Infinity;
 
       for (const [gId, range] of groupRanges) {
@@ -224,6 +253,7 @@ export function createSuggestionPopover(
       groupId:      found.groupId,
       replacedText: found.replacedText,
       insertedText: found.insertedText,
+      ...(found.formattedText !== undefined ? { formattedText: found.formattedText } : {}),
       suggestion,
       isStale:      found.isStale,
     };

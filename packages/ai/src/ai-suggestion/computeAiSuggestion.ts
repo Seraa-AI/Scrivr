@@ -83,25 +83,21 @@ function readProposal(block: {
 }
 
 /**
- * Does the block already read the way the proposal asks? Compares the marks the
- * proposal assigns each character against the marks the block's text carries, so
- * a proposal that only restates the current formatting is not a suggestion.
+ * The formatting each character of the accepted text already carries.
+ *
+ * Accepted text is what the proposal was diffed against, so tracked-deleted
+ * text is skipped here too — counting it would misalign every offset on a block
+ * under review.
  */
-function marksMatchBlock(node: PmNode, marksAt: InlineMark[][]): boolean {
+function currentMarksAt(node: PmNode): InlineMark[][] {
   const current: InlineMark[][] = [];
   node.descendants((child) => {
     if (!child.isText || !child.text) return;
-    // Tracked-deleted text is not in the accepted text the proposal was diffed
-    // against, so counting it here would make every block under review look
-    // like a formatting change.
     if (child.marks.some((mark) => mark.type.name === "trackedDelete")) return;
-    const marks = child.marks
-      .filter((mark) => !isTrackedMark(mark.type.name))
-      .map(describeInlineMark);
+    const marks = child.marks.filter((mark) => !isTrackedMark(mark.type.name)).map(describeInlineMark);
     for (let i = 0; i < child.text.length; i++) current.push(marks);
   });
-  if (current.length !== marksAt.length) return false;
-  return current.every((marks, i) => sameMarks(marks, marksAt[i] ?? []));
+  return current;
 }
 
 /**
@@ -207,24 +203,41 @@ export function computeAiSuggestion(
 
     // Ops that consume the proposal carry its formatting; a delete describes
     // text already in the document, so it advances neither.
+    const current = currentMarksAt(found.node);
+    let formatGroups = 0;
     let proposedOffset = 0;
+    let acceptedOffset = 0;
     const ops: AiOp[] = [];
     for (const op of toDiffOps(paired)) {
       if (op.type === "delete") {
         ops.push(op);
+        acceptedOffset += op.text.length;
         continue;
       }
-      ops.push(...splitByMarks(op, proposal.marksAt, proposedOffset));
+      for (const part of splitByMarks(op, proposal.marksAt, proposedOffset)) {
+        // On a keep, `marks` means "the formatting here changes" — the run is
+        // already in the document, so restating what it already reads as is not
+        // a proposal. Every reader of an op depends on that: the overlay draws
+        // one, the apply writes one, and a card counts one.
+        const unchanged =
+          part.type === "keep" && part.marks && sameMarks(part.marks, current[acceptedOffset] ?? []);
+        if (part.type === "keep" && part.marks && !unchanged) {
+          // Its own group, so a reader can accept this run's formatting the way
+          // they accept a word swap. Scoped to the run, which is the only text
+          // the proposal spoke about here.
+          ops.push({ ...part, groupId: `fmt_${formatGroups++}` });
+        } else {
+          ops.push(unchanged ? { type: "keep", text: part.text } : part);
+        }
+        if (part.type === "keep") acceptedOffset += part.text.length;
+      }
       proposedOffset += op.text.length;
     }
 
-    // A wording change shows up as a non-keep op. A formatting-only change does
-    // not — every op is a keep — so compare the formatting the block would end
-    // up with against the formatting it has.
-    const hasWordingChange = ops.some((o) => o.type !== "keep");
-    const hasFormattingChange =
-      proposal.marksAt.length > 0 && !marksMatchBlock(found.node, proposal.marksAt);
-    if (!hasWordingChange && !hasFormattingChange) continue;
+    // A wording change shows up as a non-keep op; a formatting change shows up
+    // as a keep that carries marks. One derivation, read off the ops themselves,
+    // so what the overlay draws and what the apply writes cannot disagree.
+    if (!ops.some((o) => o.type !== "keep" || o.marks)) continue;
 
     resultBlocks.push({ nodeId, acceptedText, ops, ...(summary ? { summary } : {}) });
   }

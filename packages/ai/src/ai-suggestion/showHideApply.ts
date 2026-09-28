@@ -133,10 +133,10 @@ function applyRunMarks(
  * formatting exactly as they reject the words. Direct mode skips tracking,
  * which is what direct means.
  *
- * Accepting one replacement group applies no formatting at all: a keep's marks
- * describe the whole block, and `applyRunMarks` removes what the proposal
- * omits, so running it for a single group would strip the reader's own
- * formatting from text that group never spoke about.
+ * A formatting keep carries its own `groupId`, so accepting one group applies
+ * exactly that run's formatting — `applyRunMarks` removes what the proposal
+ * omits, and the run is the only text that group spoke about. Accepting a
+ * word-swap group touches no formatting, because it is a different group.
  */
 function applyKeepFormatting(
   editor: IBaseEditor,
@@ -144,7 +144,7 @@ function applyKeepFormatting(
   groupId: string | undefined,
   tracked: boolean,
 ): void {
-  if (groupId || (tracked && !trackChangesPluginKey.getState(editor.getState()))) return;
+  if (tracked && !trackChangesPluginKey.getState(editor.getState())) return;
 
   const state = editor.getState();
   const schema = state.schema;
@@ -161,7 +161,7 @@ function applyKeepFormatting(
     let acceptedOffset = 0;
     for (const op of block.ops) {
       if (op.type === "insert") continue;
-      if (op.type === "keep" && op.marks) {
+      if (op.type === "keep" && op.marks && (!groupId || op.groupId === groupId)) {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
         if (range) {
           applyRunMarks(tr, schema, range.from, range.to, op.marks);
