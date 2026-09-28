@@ -51,8 +51,10 @@ export function digitsIn(pageNumber: number): number {
 /** The arrangement to paint page `pageNumber` with. */
 export function slotLayoutForPage(slot: SlotLayout, pageNumber: number): DocumentLayout {
   if (!slot.byDigits) return slot.layout;
-  // A streamed document's count is a lower bound, so a late page can want more
-  // digits than were measured. The widest arrangement is the safe fallback.
+  // Unreachable while pages are numbered 1..N and only pages in the layout are
+  // painted — the arrangements span exactly that range, streaming included.
+  // Numbering that starts anywhere else (a section restart) would break that,
+  // and this is what keeps the band drawn rather than not drawn.
   return slot.byDigits.get(digitsIn(pageNumber)) ?? slot.layout;
 }
 

@@ -424,8 +424,8 @@ describe("the box a page number gets on the page it is painted on", () => {
   });
 
   it("falls back to the widest arrangement past the measured count", () => {
-    // A streamed document's count is a lower bound; a later page must not
-    // resolve to no arrangement at all.
+    // No page today numbers past the count — but section-restart numbering
+    // would, and asking for an arrangement nobody measured must still paint.
     const slot = slotFor(9);
 
     expect(pageNumberWidth(slotLayoutForPage(slot, 4211))).toBe(pageNumberWidth(slot.layout));
