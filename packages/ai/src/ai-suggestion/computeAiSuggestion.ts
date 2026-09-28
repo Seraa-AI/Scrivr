@@ -16,13 +16,13 @@
  * noise for AI suggestions where the unit of accept/reject is a whole word.
  */
 
-import type { EditorState, Node as PmNode } from "@scrivr/core/pm";
+import type { EditorState, Node as PmNode, Schema } from "@scrivr/core/pm";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { buildAcceptedTextMap, isTrackedMark } from "@scrivr/plugins";
 import { diffText, pairReplacements } from "@scrivr/plugins";
 import type { PairedDiffOp } from "@scrivr/plugins";
-import type { InlineMark } from "@scrivr/core";
+import { describeInlineMark, resolveInlineMarks, stableStringify, type InlineMark } from "@scrivr/core";
 import type { InlineSpan } from "../schema/edit";
 import { toCoreSpans } from "../ai-toolkit/spans";
 import type { AiSuggestion, AiSuggestionBlock, AiOp } from "./types";
@@ -64,15 +64,16 @@ function genId(): string {
 function readProposal(block: {
   proposedText?: string;
   proposedSpans?: InlineSpan[];
-}): { text: string; marksAt: InlineMark[][] } | null {
+}, schema: Schema, node: PmNode): { text: string; marksAt: InlineMark[][] } | null {
   // `proposedSpans` wins only when it says something. An agent emitting `[]`
   // alongside `proposedText` means "I have no runs", not "empty this block".
   if (block.proposedSpans && block.proposedSpans.length > 0) {
     let text = "";
     const marksAt: InlineMark[][] = [];
     for (const span of toCoreSpans(block.proposedSpans)) {
+      const marks = resolveInlineMarks(span.marks, schema, node.type).map(describeInlineMark);
       text += span.text;
-      for (let i = 0; i < span.text.length; i++) marksAt.push(span.marks);
+      for (let i = 0; i < span.text.length; i++) marksAt.push(marks);
     }
     return { text, marksAt };
   }
@@ -96,11 +97,7 @@ function marksMatchBlock(node: PmNode, marksAt: InlineMark[][]): boolean {
     if (child.marks.some((mark) => mark.type.name === "trackedDelete")) return;
     const marks = child.marks
       .filter((mark) => !isTrackedMark(mark.type.name))
-      .map((mark) =>
-        Object.keys(mark.attrs).length > 0
-          ? { type: mark.type.name, attrs: mark.attrs }
-          : { type: mark.type.name },
-      );
+      .map(describeInlineMark);
     for (let i = 0; i < child.text.length; i++) current.push(marks);
   });
   if (current.length !== marksAt.length) return false;
@@ -116,7 +113,7 @@ function marksMatchBlock(node: PmNode, marksAt: InlineMark[][]): boolean {
  * `[bold, italic]` as a formatting change.
  */
 function markKey(mark: InlineMark): string {
-  return JSON.stringify([mark.type, mark.attrs ?? null]);
+  return stableStringify([mark.type, mark.attrs ?? {}]);
 }
 
 function sameMarks(a: readonly InlineMark[], b: readonly InlineMark[]): boolean {
@@ -194,10 +191,10 @@ export function computeAiSuggestion(
 
   for (const block of inputBlocks) {
     const { nodeId, summary } = block;
-    const proposal = readProposal(block);
-    if (!proposal) continue;
     const found = findNodeById(state.doc, nodeId);
-    if (!found) continue;
+    if (!found || !found.node.isTextblock) continue;
+    const proposal = readProposal(block, schema, found.node);
+    if (!proposal) continue;
 
     const { acceptedText } = buildAcceptedTextMap(
       found.node,

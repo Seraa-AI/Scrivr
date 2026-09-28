@@ -2,6 +2,7 @@ import { EditorState, Plugin, PluginKey, Transaction } from "@scrivr/core/pm";
 
 import {
   getAction,
+  suggestionIntent,
   hasAction,
   setAction,
   TrackChangesAction,
@@ -37,15 +38,14 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
     },
     appendTransaction(trs, oldState, newState) {
       const pluginState = trackChangesPluginKey.getState(newState);
-      const shouldSkipTracking =
-        !pluginState ||
-        pluginState.status === TrackChangesStatus.disabled;
+      if (!pluginState) return null;
+      const shouldSkipTracking = pluginState.status === TrackChangesStatus.disabled;
 
-      if (shouldSkipTracking && !pluginState?.canAcceptReject) {
+      if (shouldSkipTracking && !pluginState.canAcceptReject && !trs.some(suggestionIntent)) {
         return null;
       }
 
-      const { userID, changeSet } = pluginState!;
+      const { userID, changeSet } = pluginState;
       let createdTr: Transaction = newState.tr,
         docChanged = false;
 
@@ -92,9 +92,9 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
             oldState,
           );
           docChanged = true;
-        } else if (!shouldSkipTracking) {
+        } else if (!shouldSkipTracking || suggestionIntent(tx)) {
           createdTr =
-            trackChanges(tx, createdTr, oldState, userID, skipTrsWithMetas) ??
+            trackChanges(tx, createdTr, oldState, suggestionIntent(tx)?.authorID ?? userID, skipTrsWithMetas) ??
             createdTr;
         }
         docChanged = docChanged || tx.docChanged;

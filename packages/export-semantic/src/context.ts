@@ -1,3 +1,4 @@
+import { describeInlineMark } from "@scrivr/core";
 import type {
   IBaseEditor,
   InlineMark,
@@ -46,16 +47,6 @@ function physicalColumns(table: PmNode): number {
   return max;
 }
 
-/** Describe a mark as `{ type, attrs? }`, dropping null attrs and `dataTracked`. */
-function describeMark(mark: PmMark): InlineMark {
-  const attrs: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(mark.attrs)) {
-    if (key === "dataTracked" || value === null || value === undefined) continue;
-    attrs[key] = value;
-  }
-  return Object.keys(attrs).length > 0 ? { type: mark.type.name, attrs } : { type: mark.type.name };
-}
-
 /**
  * Formatting marks on a run — every mark EXCEPT those the semantic seam handles
  * (i.e. tracked changes, surfaced separately in `changes`). Order is the node's
@@ -65,7 +56,7 @@ function formattingMarks(
   marks: readonly PmMark[],
   markHandlers: Record<string, SemanticMarkHandler>,
 ): InlineMark[] {
-  return marks.filter((m) => !(m.type.name in markHandlers)).map(describeMark);
+  return marks.filter((m) => !(m.type.name in markHandlers)).map(describeInlineMark);
 }
 
 /** A block's non-default styling attrs, or undefined when it carries none. */

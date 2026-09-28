@@ -11,7 +11,7 @@
  */
 
 import type { IBaseEditor } from "@scrivr/core";
-import { resolveInlineMark, spansToFragment } from "@scrivr/core";
+import { resolveInlineMarks, describeInlineMark, sameMark, spansToFragment } from "@scrivr/core";
 import type { InlineMark } from "@scrivr/core";
 import { Fragment } from "@scrivr/core/pm";
 import type { Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
@@ -22,7 +22,7 @@ import {
   AI_SUGGESTION_SET,
 } from "./AiSuggestionPlugin";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
-import { isTrackedMark, skipTracking, TrackChangesAction, setAction } from "@scrivr/plugins";
+import { isTrackedMark, skipTracking, trackAsSuggestion, trackChangesPluginKey, TrackChangesAction, setAction } from "@scrivr/plugins";
 import {
   addTrackIdIfDoesntExist,
   createNewDeleteAttrs,
@@ -101,20 +101,26 @@ function applyRunMarks(
 ): void {
   if (to <= from) return;
 
-  // Agent-supplied marks go through the same seam as inserted text: an unsafe
-  // url or an unbuildable mark is dropped rather than written. Retained text is
-  // not a softer target than inserted text.
-  const resolved = new Map<string, Mark>();
-  for (const mark of marks) {
-    const real = resolveInlineMark(mark, schema);
-    if (real) resolved.set(real.type.name, real);
-  }
-
-  for (const markType of Object.values(schema.marks)) {
-    if (isTrackedMark(markType.name)) continue;
-    if (!resolved.has(markType.name)) tr.removeMark(from, to, markType);
-  }
-  for (const mark of resolved.values()) tr.addMark(from, to, mark);
+  // Resolve against each destination textblock, and compare semantic marks so
+  // unchanged formatting keeps its existing review records. Inline atoms and
+  // text pending deletion are not characters in the accepted-text proposal.
+  tr.doc.nodesBetween(from, to, (node, pos, parent) => {
+    if (!node.isText || node.marks.some((mark) => mark.type.name === "trackedDelete")) return;
+    const desired = resolveInlineMarks(marks, schema, parent?.type);
+    const start = Math.max(from, pos);
+    const end = Math.min(to, pos + node.nodeSize);
+    const current = node.marks.filter((mark) => !isTrackedMark(mark.type.name));
+    for (const mark of current) {
+      if (!desired.some((next) => sameMark(describeInlineMark(mark), describeInlineMark(next)))) {
+        tr.removeMark(start, end, mark);
+      }
+    }
+    for (const mark of desired) {
+      if (!current.some((prev) => sameMark(describeInlineMark(prev), describeInlineMark(mark)))) {
+        tr.addMark(start, end, mark);
+      }
+    }
+  });
 }
 
 /**
@@ -122,7 +128,7 @@ function applyRunMarks(
  *
  * Its own transaction, before any text moves, so every range resolves against
  * the document the suggestion was computed from. Tracked mode dispatches it
- * *unskipped* — a formatting change has its own tracked representation, and the
+ * with explicit suggestion intent — a formatting change has its own tracked representation, and the
  * engine produces it from an ordinary mark step, so a reviewer can reject the
  * formatting exactly as they reject the words. Direct mode skips tracking,
  * which is what direct means.
@@ -138,7 +144,7 @@ function applyKeepFormatting(
   groupId: string | undefined,
   tracked: boolean,
 ): void {
-  if (groupId) return;
+  if (groupId || (tracked && !trackChangesPluginKey.getState(editor.getState()))) return;
 
   const state = editor.getState();
   const schema = state.schema;
@@ -166,8 +172,9 @@ function applyKeepFormatting(
     }
   }
 
-  if (!touched) return;
-  if (!tracked) skipTracking(tr);
+  if (!touched || !tr.docChanged) return;
+  if (tracked) trackAsSuggestion(tr, "ai:assistant");
+  else skipTracking(tr);
   editor.applyTransaction(tr);
 }
 

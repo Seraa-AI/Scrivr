@@ -261,3 +261,60 @@ describe("mixed batches", () => {
   });
 });
 
+
+describe("structural destination contracts", () => {
+  it("filters formatting against the destination schema without aborting neighbouring edits", () => {
+    const { editor, ai } = build([para("p1", "First.")]);
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "insertBlock", position: "after", anchorNodeId: "p1", block: { type: "codeBlock", spans: [{ text: "code", marks: [{ type: "bold" }] }] } },
+      { kind: "structural", op: "insertBlock", position: "before", anchorNodeId: "p1", block: { type: "paragraph", spans: [{ text: "also", marks: [] }] } },
+    ]);
+    expect(result.rejected).toEqual([]);
+    expect(textOf(editor)).toContain("code");
+    expect(textOf(editor)).toContain("also");
+    expect(() => editor.getState().doc.check()).not.toThrow();
+  });
+
+  it.each<[number[]]>([[[]], [[100]], [[100, 100]]])("uses physical spans as well as grid width: %j", (grid) => {
+    const mergedCell = { ...cell("c", "cp", "merged"), attrs: { nodeId: "c", gridSpan: 2 } };
+    const { editor, ai } = build([{ type: "table", attrs: { nodeId: "t", grid }, content: [{ type: "tableRow", attrs: { nodeId: "r" }, content: [mergedCell] }] }, para("tail", "tail")]);
+    const result = ai.applySemanticEdits([{ kind: "structural", op: "insertTableRow", anchorNodeId: "cp", position: "after", cells: [
+      { spans: [{ text: "A", marks: [] }] }, { spans: [{ text: "B", marks: [] }] },
+    ] }]);
+    expect(result.rejected).toEqual([]);
+    const row = editor.getState().doc.firstChild!.child(1);
+    expect(row.childCount).toBe(2);
+    expect(row.textContent).toBe("AB");
+    expect(() => editor.getState().doc.check()).not.toThrow();
+  });
+
+  it("rejects excess cells without truncating them or aborting other edits", () => {
+    const { editor, ai } = build([{ type: "table", attrs: { nodeId: "t", grid: [100] }, content: [{ type: "tableRow", attrs: { nodeId: "r" }, content: [cell("c", "cp", "one")] }] }, para("tail", "tail")]);
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "insertTableRow", anchorNodeId: "cp", position: "after", cells: [{ spans: [{ text: "A", marks: [] }] }, { spans: [{ text: "B", marks: [] }] }] },
+      { kind: "structural", op: "insertBlock", anchorNodeId: "tail", position: "after", block: { type: "paragraph", spans: [{ text: "valid", marks: [] }] } },
+    ]);
+    expect(result.rejected).toEqual(["cp"]);
+    expect(result.changed).toEqual(["tail"]);
+    expect(editor.getState().doc.firstChild!.childCount).toBe(1);
+    expect(textOf(editor)).toContain("valid");
+  });
+
+  it.each(["accepted", "rejected"] as const)("can resolve deletion of the final list item as %s", (status) => {
+    const { editor, ai } = build([{ type: "bulletList", attrs: { nodeId: "list" }, content: [listItem("li", "p", "only")] }, para("tail", "tail")]);
+    ai.applySemanticEdits([{ kind: "structural", op: "deleteListItem", nodeId: "p" }]);
+    expect(changesOf(editor).some(c => c.type === "node-change" && c.node.type.name === "bulletList")).toBe(true);
+    editor.commands.setChangeStatuses(status, changesOf(editor).map(c => c.id));
+    expect(editor.getState().doc.firstChild!.type.name).toBe(status === "accepted" ? "paragraph" : "bulletList");
+    expect(editor.getState().doc.textContent).toBe(status === "accepted" ? "tail" : "onlytail");
+    expect(() => editor.getState().doc.check()).not.toThrow();
+  });
+
+  it.each(["accepted", "rejected"] as const)("can resolve deletion of the final table row as %s", (status) => {
+    const { editor, ai } = build([{ type: "table", attrs: { nodeId: "t", grid: [100] }, content: [{ type: "tableRow", attrs: { nodeId: "r" }, content: [cell("c", "cp", "one")] }] }, para("tail", "tail")]);
+    ai.applySemanticEdits([{ kind: "structural", op: "deleteTableRow", nodeId: "cp" }]);
+    editor.commands.setChangeStatuses(status, changesOf(editor).map(c => c.id));
+    expect(editor.getState().doc.firstChild!.type.name).toBe(status === "accepted" ? "paragraph" : "table");
+    expect(editor.getState().doc.textContent).toBe(status === "accepted" ? "tail" : "onetail");
+  });
+});

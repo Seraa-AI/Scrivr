@@ -27,6 +27,7 @@ export {
   getAction,
   hasAction,
   skipTracking,
+  trackAsSuggestion,
   TrackChangesAction,
 } from "./actions";
 export type { TrackChangesActionParams } from "./actions";

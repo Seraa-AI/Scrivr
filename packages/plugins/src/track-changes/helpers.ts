@@ -6,16 +6,8 @@ export function genId(): string {
   return crypto.randomUUID();
 }
 
-/**
- * Is this mark review bookkeeping rather than formatting?
- *
- * By name, because that is what makes a mark part of the review lane — spelling
- * the two current ones out instead would silently treat a third as formatting,
- * to be stripped off text and counted as a styling change.
- */
-export function isTrackedMark(markName: string): boolean {
-  return markName.startsWith("tracked");
-}
+import { isTrackedMark } from "@scrivr/core";
+export { isTrackedMark } from "@scrivr/core";
 
 export function isValidTrackableMark(mark: Mark) {
   const spec = mark.type.spec;

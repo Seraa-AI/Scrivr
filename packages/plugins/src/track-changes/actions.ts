@@ -3,6 +3,7 @@ import { Transaction } from "@scrivr/core/pm";
 import { CHANGE_STATUS, StructureAttrs, TrackChangesStatus } from "./types";
 
 export enum TrackChangesAction {
+  suggest = "track-changes-suggest",
   skipTrack = "track-changes-skip-tracking",
   setUserID = "track-changes-set-user-id",
   setPluginStatus = "track-changes-set-track-status",
@@ -14,6 +15,7 @@ export enum TrackChangesAction {
 }
 
 export type TrackChangesActionParams = {
+  [TrackChangesAction.suggest]: { authorID: string };
   [TrackChangesAction.skipTrack]: boolean;
   [TrackChangesAction.setUserID]: string;
   [TrackChangesAction.setPluginStatus]: TrackChangesStatus;
@@ -57,3 +59,14 @@ export const skipTracking = (tr: Transaction) =>
 
 export const isIndentationAction = (action: ReturnType<typeof getAction>) =>
   action === "indent" || action === "unindent";
+
+/** Explicit proposal intent is independent of automatic tracking of user edits. */
+export function trackAsSuggestion(tr: Transaction, authorID: string): Transaction {
+  return setAction(tr, TrackChangesAction.suggest, { authorID });
+}
+
+/** Appended normalization steps belong to the same proposal as their root transaction. */
+export function suggestionIntent(tr: Transaction): { authorID: string } | undefined {
+  const root = tr.getMeta("appendedTransaction") as Transaction | undefined;
+  return getAction(tr, TrackChangesAction.suggest) ?? (root && getAction(root, TrackChangesAction.suggest));
+}

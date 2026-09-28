@@ -117,3 +117,14 @@ describe("sameMark", () => {
     ).toBe(false);
   });
 });
+
+describe("semantic formatting boundary", () => {
+  it("honours the destination's mark restrictions and normalizes duplicate marks", () => {
+    const s = schema();
+    const spans = [{ text: "code", marks: [{ type: "bold" }, { type: "bold" }] }];
+    const plain = spansToFragment(spans, s, { parentType: s.nodes.codeBlock! });
+    expect(runsOf(plain)).toEqual([{ text: "code", marks: [] }]);
+    expect(() => s.nodes.codeBlock!.createChecked(null, plain)).not.toThrow();
+    expect(runsOf(spansToFragment(spans, s))).toEqual([{ text: "code", marks: ["bold"] }]);
+  });
+});

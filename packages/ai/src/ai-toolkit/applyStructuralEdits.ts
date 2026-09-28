@@ -10,9 +10,10 @@
  * container (a `listItem`) or the leaf inside it (the item's paragraph) — the
  * agent sees leaves, so ops that act on a container climb to it.
  */
-import { findNodeById, spansToFragment } from "@scrivr/core";
+import { findNodeById, spansToFragment, tableColumnCount } from "@scrivr/core";
 import { pickAgentAttrs } from "@scrivr/plugins";
-import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
+import type { Fragment, Node as PmNode, NodeType, Schema, Transaction } from "@scrivr/core/pm";
+import type { InlineSpan } from "@scrivr/core";
 
 import type { SemanticBlockInput, SemanticCellInput, StructuralSemanticEdit } from "../schema/edit";
 import { toCoreSpans } from "./spans";
@@ -62,15 +63,29 @@ function buildBlock(schema: Schema, block: SemanticBlockInput): PmNode | null {
   const type = schema.nodes[block.type];
   if (!type) return null;
   const attrs = { ...pickAgentAttrs(block.attrs ?? {}), ...(block.level !== undefined ? { level: block.level } : {}) };
-  return type.createAndFill(attrs, spansToFragment(toCoreSpans(block.spans ?? []), schema));
+  return type.createAndFill(attrs, spansToFragment(toCoreSpans(block.spans ?? []), schema, { parentType: type }));
 }
 
 function buildCell(schema: Schema, cell: SemanticCellInput | undefined): PmNode | null {
   const cellType = schema.nodes["tableCell"];
   const paragraph = schema.nodes["paragraph"];
   if (!cellType || !paragraph) return null;
-  const content = paragraph.createAndFill({}, spansToFragment(toCoreSpans(cell?.spans ?? []), schema));
+  const content = paragraph.createAndFill({}, spansToFragment(toCoreSpans(cell?.spans ?? []), schema, { parentType: paragraph }));
   return content ? cellType.createAndFill(pickAgentAttrs(cell?.attrs ?? {}), content) : null;
+}
+
+/**
+ * Deleting the last required child removes its list/table container. Letting
+ * PM fit an empty slice inside `listItem+` / `tableRow+` invents a replacement
+ * child, which changes the operation from deletion to clearing its content.
+ */
+function deleteContainerChild(tr: Transaction, target: { node: PmNode; pos: number }): void {
+  const $pos = tr.doc.resolve(target.pos);
+  if ($pos.depth > 0 && $pos.parent.childCount === 1) {
+    tr.delete($pos.before(), $pos.after());
+  } else {
+    tr.delete(target.pos, target.pos + target.node.nodeSize);
+  }
 }
 
 /**
@@ -106,7 +121,7 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       if (!itemType || !paragraph) return void result.rejected.push(edit.anchorNodeId);
       const body = paragraph.createAndFill(
         pickAgentAttrs(edit.item.attrs ?? {}),
-        spansToFragment(toCoreSpans(edit.item.spans), schema),
+        spansToFragment(toCoreSpans(edit.item.spans), schema, { parentType: paragraph }),
       );
       const node = body && itemType.createAndFill({}, body);
       if (!node) return void result.rejected.push(edit.anchorNodeId);
@@ -117,7 +132,7 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
     case "deleteListItem": {
       const item = resolveAncestor(tr.doc, edit.nodeId, "listItem");
       if (!item) return void rejectOrMiss(tr.doc, edit.nodeId, result);
-      tr.delete(item.pos, item.pos + item.node.nodeSize);
+      deleteContainerChild(tr, item);
       result.changed.push(edit.nodeId);
       return;
     }
@@ -126,11 +141,13 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       if (!row) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
       const rowType = schema.nodes["tableRow"];
       if (!rowType) return void result.rejected.push(edit.anchorNodeId);
-      // The anchor row sets the width: a row with fewer cells than its
-      // neighbours is a broken table, and the agent counting columns correctly
-      // is not something to rely on.
+      const table = tr.doc.resolve(row.pos).parent;
+      if (table.type.name !== "table") return void result.rejected.push(edit.anchorNodeId);
+      const width = tableColumnCount(table);
+      // Padding is lossless; truncation is not. Validate before adding any steps.
+      if ((edit.cells?.length ?? 0) > width) return void result.rejected.push(edit.anchorNodeId);
       const cells: PmNode[] = [];
-      for (let i = 0; i < row.node.childCount; i++) {
+      for (let i = 0; i < width; i++) {
         const built = buildCell(schema, edit.cells?.[i]);
         if (!built) return void result.rejected.push(edit.anchorNodeId);
         cells.push(built);
@@ -144,7 +161,7 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
     case "deleteTableRow": {
       const row = resolveAncestor(tr.doc, edit.nodeId, "tableRow");
       if (!row) return void rejectOrMiss(tr.doc, edit.nodeId, result);
-      tr.delete(row.pos, row.pos + row.node.nodeSize);
+      deleteContainerChild(tr, row);
       result.changed.push(edit.nodeId);
       return;
     }

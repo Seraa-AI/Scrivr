@@ -28,6 +28,8 @@ import { Fragment, type Mark, type Node as PMNode, type Schema } from "@scrivr/c
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 import {
   findNodeById,
+  describeInlineMark,
+  isTrackedMark,
   resolveInlineMark,
   sameMark,
   spansToFragment,
@@ -458,17 +460,7 @@ function buildAcceptedRichMap(node: PMNode, nodeStartPos: number, schema: Schema
 
 /** PM marks → formatting `InlineMark`s: drop tracked-change marks + `dataTracked`/null attrs. */
 function formattingMarksOf(marks: readonly Mark[]): InlineMark[] {
-  const out: InlineMark[] = [];
-  for (const mark of marks) {
-    if (mark.type.name.startsWith("tracked")) continue;
-    const attrs: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(mark.attrs)) {
-      if (key === "dataTracked" || value === null || value === undefined) continue;
-      attrs[key] = value;
-    }
-    out.push(Object.keys(attrs).length > 0 ? { type: mark.type.name, attrs } : { type: mark.type.name });
-  }
-  return out;
+  return marks.filter((mark) => !isTrackedMark(mark.type.name)).map(describeInlineMark);
 }
 
 /** Merge consecutive `keep` ops into one so a retained region isn't split per token. */
