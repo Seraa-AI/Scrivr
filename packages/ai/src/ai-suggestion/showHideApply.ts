@@ -16,10 +16,12 @@ import type { InlineMark } from "@scrivr/core";
 import { Fragment } from "@scrivr/core/pm";
 import type { Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 import { findNodeById } from "../ai-toolkit/UniqueId";
+import { isResolved } from "./liveOps";
 import type { AiOp, AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
 import {
   aiSuggestionPluginKey,
   AI_SUGGESTION_SET,
+  AI_SUGGESTION_RESOLVE,
 } from "./AiSuggestionPlugin";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
 import { isTrackedMark, skipTracking, trackAsSuggestion, trackChangesPluginKey, TrackChangesAction, setAction } from "@scrivr/plugins";
@@ -81,12 +83,10 @@ export function applyAiSuggestion(
   }
 
   // Remove accepted block(s) from the suggestion; clear when none remain
-  {
-    const remaining = blockId
-      ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
-      : [];
-    showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
-  }
+  const remaining = blockId
+    ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
+    : [];
+  showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
 }
 
 /**
@@ -139,15 +139,16 @@ function applyRunMarks(
 function retireGroup(editor: IBaseEditor, suggestion: AiSuggestion, groupId: string): void {
   const blocks = suggestion.blocks.map((block) =>
     block.ops.some((op) => op.groupId === groupId)
-      ? { ...block, resolvedGroups: [...(block.resolvedGroups ?? []), groupId] }
+      ? { ...block, resolvedGroups: [...new Set([...(block.resolvedGroups ?? []), groupId])] }
       : block,
   );
-  showAiSuggestion(editor, { ...suggestion, blocks });
-}
-
-/** Ops the reader has already settled are no longer part of the proposal. */
-function isResolved(block: AiSuggestionBlock, op: AiOp): boolean {
-  return op.groupId !== undefined && (block.resolvedGroups ?? []).includes(op.groupId);
+  // Dispatched as a resolve, not as a new suggestion: the reader is still
+  // reading this one, and replacing it wholesale clears the active block and
+  // blanks the rest of the overlay until the caret happens to move.
+  const tr = editor.getState().tr;
+  tr.setMeta(AI_SUGGESTION_RESOLVE, { payload: { ...suggestion, blocks } });
+  skipTracking(tr);
+  editor.applyTransaction(tr);
 }
 
 /**
@@ -450,10 +451,8 @@ export function rejectAiSuggestion(
   }
 
   // Remove rejected block(s) from the suggestion; clear when none remain
-  {
-    const remaining = blockId
-      ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
-      : [];
-    showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
-  }
+  const remaining = blockId
+    ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
+    : [];
+  showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
 }

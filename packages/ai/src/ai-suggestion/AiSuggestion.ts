@@ -20,6 +20,7 @@ import { Extension } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
+import { liveOps } from "./liveOps";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
 
 import {
@@ -50,28 +51,19 @@ export interface AiSuggestionOptions {
   renderMode: AiSuggestionRenderMode;
 }
 
-export const AiSuggestion = Extension.create<AiSuggestionOptions>({
-  name: "aiSuggestion",
 
-  defaultOptions: {
-    renderMode: "active-only",
-  },
-
-  addProseMirrorPlugins() {
-    return [aiSuggestionPlugin];
-  },
-
-  onViewReady(editor: IEditor) {
-    const cleanups: Array<() => void> = [];
-
-    const { renderMode } = this.options;
-
-    // "none" — app handles all rendering; skip registering a handler entirely.
-    if (renderMode === "none") {
-      return () => { for (const c of cleanups) c(); };
-    }
-
-    const handler: OverlayRenderHandler = (
+/**
+ * What the overlay draws for the current suggestion.
+ *
+ * A named unit rather than a closure inside `onViewReady`, because the decision
+ * it makes per block — whether there is anything to draw at all — is the part
+ * worth testing, and testing it should not require a live view.
+ */
+export function createSuggestionOverlayHandler(
+  editor: IEditor,
+  renderMode: AiSuggestionOptions["renderMode"],
+): OverlayRenderHandler {
+  return (
       ctx,
       pageNumber,
       pageConfig,
@@ -130,7 +122,7 @@ export const AiSuggestion = Extension.create<AiSuggestionOptions>({
         );
 
         const instructions = buildOpRenderInstructions(
-          block.ops,
+          liveOps(block),
           map,
           charMap,
           pageNumber,
@@ -141,6 +133,31 @@ export const AiSuggestion = Extension.create<AiSuggestionOptions>({
         ctx.restore();
       }
     };
+
+}
+
+export const AiSuggestion = Extension.create<AiSuggestionOptions>({
+  name: "aiSuggestion",
+
+  defaultOptions: {
+    renderMode: "active-only",
+  },
+
+  addProseMirrorPlugins() {
+    return [aiSuggestionPlugin];
+  },
+
+  onViewReady(editor: IEditor) {
+    const cleanups: Array<() => void> = [];
+
+    const { renderMode } = this.options;
+
+    // "none" — app handles all rendering; skip registering a handler entirely.
+    if (renderMode === "none") {
+      return () => { for (const c of cleanups) c(); };
+    }
+
+    const handler = createSuggestionOverlayHandler(editor, renderMode);
 
     const unregister = editor.addOverlayRenderHandler(handler);
     cleanups.push(unregister);

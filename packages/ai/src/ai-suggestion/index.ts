@@ -15,6 +15,7 @@ export {
   aiSuggestionPlugin,
   aiSuggestionPluginKey,
   AI_SUGGESTION_SET,
+  AI_SUGGESTION_RESOLVE,
   AI_SUGGESTION_SET_STALE,
   AI_SUGGESTION_SET_HOVER,
   AI_SUGGESTION_SET_ACTIVE,
@@ -57,5 +58,6 @@ export {
 export type {
   InsertRenderInstruction,
   DeleteRenderInstruction,
+  FormatRenderInstruction,
   RenderInstruction,
 } from "./renderAiSuggestionOps";

@@ -39,7 +39,6 @@ export interface FormatRenderInstruction {
   type:  "format";
   from:  number;
   to:    number;
-  color: string;
   page:  number;
 }
 
@@ -142,18 +141,21 @@ export function renderFormatHighlight(
   ctx.strokeStyle = isActive ? "rgba(99, 102, 241, 0.7)" : "rgba(99, 102, 241, 0.3)";
   ctx.lineWidth = isActive ? 2 : 1;
 
-  // One stroke per contiguous run of glyphs on a line, so a wrapped run does
-  // not draw a rule across the gap between its lines.
+  // One stroke per line, so a wrapped run does not rule across the gap between
+  // its lines. Grouped by `lineY`, not `y`: glyphs on one line differ in `y`
+  // whenever their sizes differ, so a run holding a smaller word would break
+  // into disjoint stubs at different heights. The rule sits under the tallest
+  // glyph on the line so it stays straight across mixed sizes.
   let start = 0;
   for (let i = 1; i <= glyphs.length; i++) {
     const prev = glyphs[i - 1]!;
     const next = glyphs[i];
-    const broken = !next || next.y !== prev.y;
-    if (!broken) continue;
-    const first = glyphs[start]!;
+    if (next && next.lineY === prev.lineY) continue;
+    const run = glyphs.slice(start, i);
+    const baseline = Math.max(...run.map((g) => g.y + g.height)) - 0.5;
     ctx.beginPath();
-    ctx.moveTo(first.x, first.y + first.height - 0.5);
-    ctx.lineTo(prev.x + prev.width, prev.y + prev.height - 0.5);
+    ctx.moveTo(run[0]!.x, baseline);
+    ctx.lineTo(prev.x + prev.width, baseline);
     ctx.stroke();
     start = i;
   }
@@ -171,7 +173,6 @@ export function buildOpRenderInstructions(
 ): RenderInstruction[] {
   const INSERT_COLOR = "#6366f1"; // indigo-500
   const DELETE_COLOR = "#dc2626"; // red-600
-  const FORMAT_COLOR = "#6366f1"; // indigo-500 — a change, not a removal
 
   const instructions: RenderInstruction[] = [];
   let acceptedOffset = 0;
@@ -190,7 +191,6 @@ export function buildOpRenderInstructions(
             type:  "format",
             from:  startEntry.docPos,
             to:    endEntry.docPos + 1,
-            color: FORMAT_COLOR,
             page:  pageNumber,
           });
         }

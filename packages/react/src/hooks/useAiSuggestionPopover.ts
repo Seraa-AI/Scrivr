@@ -80,6 +80,12 @@ export function useAiSuggestionPopover(
     rootRef: ref,
     isReplacement: !!(info?.replacedText && info.insertedText),
     isPureInsert: !info?.replacedText && !!info?.insertedText,
+    /**
+     * The group changes how text reads rather than what it says. Neither
+     * `replacedText` nor `insertedText` describes it — both are empty — so a
+     * preview keyed on them alone shows an empty card.
+     */
+    isFormatting: !!info?.formattedText,
     accept,
     acceptAll,
     reject,

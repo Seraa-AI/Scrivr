@@ -94,9 +94,11 @@ describe("diffText", () => {
 
   it("simple word replacement: 'foo' → 'bar'", () => {
     const ops = diffText("foo", "bar");
+    // The insert carries where it sits in the proposal; the delete describes
+    // text that exists only in the document, so it carries nothing.
     expect(ops).toEqual([
       { type: "delete", text: "foo" },
-      { type: "insert", text: "bar" },
+      { type: "insert", text: "bar", proposedOffset: 0 },
     ]);
   });
 

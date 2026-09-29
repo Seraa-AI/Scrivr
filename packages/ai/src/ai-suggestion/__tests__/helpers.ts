@@ -118,3 +118,12 @@ export class AiTestEditor extends ServerEditor {
     rejectAiSuggestion(this, options);
   }
 }
+
+/** Text carrying a given mark — how a reader would see a formatting change. */
+export function markedText(editor: ServerEditor, markName: string): string {
+  let out = "";
+  editor.getState().doc.descendants((node) => {
+    if (node.isText && node.marks.some((m) => m.type.name === markName)) out += node.text;
+  });
+  return out;
+}

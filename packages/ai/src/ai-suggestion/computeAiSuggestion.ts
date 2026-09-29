@@ -165,16 +165,22 @@ function splitByMarks(op: AiOp, marksAt: InlineMark[][], offset: number): AiOp[]
  * generated groupId so the API surface is uniform — every non-keep op can be
  * individually accepted or rejected via groupId.
  */
-function toDiffOps(pairedOps: PairedDiffOp[]): AiOp[] {
-  return pairedOps.map((op, i): AiOp => {
-    if (op.type === "keep") return { type: "keep", text: op.text };
-    // Use the existing groupId from pairReplacements, or generate a unique one
-    // for standalone ops that weren't paired (no matching insert/delete nearby).
-    const gid = op.groupId ?? `solo_${i}`;
-    if (op.type === "delete")
-      return { type: "delete", text: op.text, groupId: gid };
-    return { type: "insert", text: op.text, groupId: gid };
-  });
+/**
+ * One diff op as a suggestion op. `proposedOffset` stays behind: it is diff
+ * bookkeeping the caller needs while building, not something a suggestion
+ * carries into storage.
+ *
+ * `nodeId` prefixes the generated ids because a group is addressed across the
+ * whole suggestion, and an index into one block's ops repeats in every block.
+ */
+function toDiffOp(op: PairedDiffOp, i: number, nodeId: string): AiOp {
+  if (op.type === "keep") return { type: "keep", text: op.text };
+  // Use the existing groupId from pairReplacements, or generate a unique one
+  // for standalone ops that weren't paired (no matching insert/delete nearby).
+  const gid = `${nodeId}_${op.groupId ?? `solo_${i}`}`;
+  if (op.type === "delete")
+    return { type: "delete", text: op.text, groupId: gid };
+  return { type: "insert", text: op.text, groupId: gid };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -219,19 +225,24 @@ export function computeAiSuggestion(
     const rawOps = diffText(acceptedText, proposal.text);
     const paired = pairReplacements(rawOps);
 
-    // Ops that consume the proposal carry its formatting; a delete describes
-    // text already in the document, so it advances neither.
+    // Two cursors: one into the document's accepted text, which deletes and
+    // keeps consume, and one into the proposal, which keeps and inserts consume.
     const current = currentMarksAt(found.node);
     let formatGroups = 0;
-    let proposedOffset = 0;
     let acceptedOffset = 0;
     const ops: AiOp[] = [];
-    for (const op of toDiffOps(paired)) {
+    for (const [i, raw] of paired.entries()) {
+      const op = toDiffOp(raw, i, nodeId);
       if (op.type === "delete") {
         ops.push(op);
         acceptedOffset += op.text.length;
         continue;
       }
+      // Where this op sits in the proposal comes from the op itself. Counting
+      // as we walk would be wrong: `pairReplacements` emits in document order,
+      // which is what applying a diff needs and is not the order the proposal
+      // reads in, so a counted offset lands on the wrong words.
+      const proposedOffset = raw.proposedOffset ?? 0;
       for (const part of splitByMarks(op, proposal.marksAt, proposedOffset)) {
         if (part.type !== "keep" || !part.marks) {
           ops.push(part);
@@ -250,17 +261,19 @@ export function computeAiSuggestion(
           const unchanged = sameMarks(run.marks ?? [], current[acceptedOffset] ?? []);
           ops.push(
             unchanged
-              // Its own group, so a reader accepts this run's formatting the way
-              // they accept a word swap, scoped to the text it spoke about. The
-              // id carries the block, because a group is addressed across the
-              // whole suggestion and every block would otherwise start at zero.
+              // Restating what a run already reads as is not a proposal: no
+              // marks, and no group to accept.
               ? { type: "keep", text: run.text }
+              // Its own group, so a reader accepts this run's formatting the
+              // way they accept a word swap, scoped to the text it spoke
+              // about. The id carries the block, because a group is addressed
+              // across the whole suggestion and every block would otherwise
+              // start numbering at zero.
               : { ...run, groupId: `fmt_${nodeId}_${formatGroups++}` },
           );
           acceptedOffset += run.text.length;
         }
       }
-      proposedOffset += op.text.length;
     }
 
     // A wording change shows up as a non-keep op; a formatting change shows up

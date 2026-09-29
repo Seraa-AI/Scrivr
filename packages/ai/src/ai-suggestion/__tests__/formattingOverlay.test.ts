@@ -10,7 +10,7 @@ import { CharacterMap } from "@scrivr/core";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
 import { computeAiSuggestion } from "../computeAiSuggestion";
 import { buildOpRenderInstructions } from "../renderAiSuggestionOps";
-import { AiTestEditor, doc, p, schema } from "./helpers";
+import { AiTestEditor, doc, markedText, p, schema } from "./helpers";
 import type { AiOp } from "../types";
 
 const bold = () => schema.marks.bold!.create();
@@ -23,14 +23,6 @@ const proposal = (editor: AiTestEditor, spans: { text: string; marks: { type: st
 
 const opsOf = (editor: AiTestEditor, spans: { text: string; marks: { type: string }[] }[]): AiOp[] =>
   proposal(editor, spans)?.blocks[0]?.ops ?? [];
-
-const boldedText = (editor: AiTestEditor) => {
-  let out = "";
-  editor.getState().doc.descendants((node) => {
-    if (node.isText && node.marks.some((m) => m.type.name === "bold")) out += node.text;
-  });
-  return out;
-};
 
 describe("a keep's marks mean the formatting there changes", () => {
   it("carries marks only on the run whose formatting differs", () => {
@@ -69,17 +61,24 @@ describe("the overlay", () => {
 
     const format = instructions.filter((i) => i.type === "format");
     expect(format).toHaveLength(1);
-    // Anchored over "and", the run whose appearance is in question.
-    expect(format[0]!.to - format[0]!.from).toBe("and".length);
+    // Anchored over "and" itself — a highlight of the right length over the
+    // wrong words would read as correct.
+    const { from, to } = format[0]!;
+    expect(state.doc.textBetween(from, to)).toBe("and");
   });
 
-  it("draws nothing for a keep the proposal leaves alone", () => {
-    const editor = new AiTestEditor(doc(p("untouched", "p1")));
+  it("draws nothing for a run the proposal restates unchanged", () => {
+    // The proposal covers this run and asks for exactly what it already reads
+    // as, so compute strips its marks and the overlay has nothing to say.
+    const editor = new AiTestEditor(doc(
+      schema.node("paragraph", { nodeId: "p1" }, schema.text("already bold", [bold()])),
+    ));
+    const ops = opsOf(editor, [{ text: "already bold", marks: [{ type: "bold" }] }]);
+    expect(ops).toEqual([]);
+
     const state = editor.getState();
     const { map } = buildAcceptedTextMap(state.doc.child(0), 0, state.schema);
-    const ops: AiOp[] = [{ type: "keep", text: "untouched" }];
-
-    expect(buildOpRenderInstructions(ops, map, new CharacterMap(), 0)).toEqual([]);
+    expect(buildOpRenderInstructions([{ type: "keep", text: "already bold" }], map, new CharacterMap(), 0)).toEqual([]);
   });
 });
 
@@ -101,7 +100,7 @@ describe("accepting one formatting run", () => {
     if (first === undefined) throw new Error("expected a formatting group");
     editor.apply({ mode: "direct", groupId: first });
 
-    expect(boldedText(editor)).toBe("first");
+    expect(markedText(editor, "bold")).toBe("first");
   });
 });
 
@@ -126,7 +125,7 @@ describe("a group is addressed across the whole suggestion", () => {
     editor.apply({ mode: "direct", groupId: firstId });
 
     // Accepting paragraph one must not style paragraph two.
-    expect(boldedText(editor)).toBe("alpha");
+    expect(markedText(editor, "bold")).toBe("alpha");
     let italic = "";
     editor.getState().doc.descendants((node) => {
       if (node.isText && node.marks.some((m) => m.type.name === "italic")) italic += node.text;
@@ -156,14 +155,14 @@ describe("a settled group stays settled", () => {
     editor.apply({ mode: "direct" });
 
     // "one" was turned down; accepting the rest must not bring it back.
-    expect(boldedText(editor)).toBe("two");
+    expect(markedText(editor, "bold")).toBe("two");
   });
 });
 
 describe("formatting boundaries the document already has", () => {
   it("sees a change whose first character already matches", () => {
-    // "al" is bold, "pha" is not. A proposal of plain throughout changes the
-    // run — but its first character already reads plain.
+    // "al" is plain and "pha" is bold, so a proposal of plain throughout does
+    // change the run — while its first character already reads plain.
     const editor = new AiTestEditor(doc(
       schema.node("paragraph", { nodeId: "p1" }, [
         schema.text("al"),
@@ -176,6 +175,6 @@ describe("formatting boundaries the document already has", () => {
 
     editor.showSuggestion(suggestion);
     editor.apply({ mode: "direct" });
-    expect(boldedText(editor)).toBe("");
+    expect(markedText(editor, "bold")).toBe("");
   });
 });

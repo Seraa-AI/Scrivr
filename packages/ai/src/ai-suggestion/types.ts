@@ -26,13 +26,20 @@ export type AiOpType = "keep" | "insert" | "delete";
 export interface AiOp {
   type: AiOpType;
   text: string;
-  /** groupId links a paired delete+insert into one logical replacement */
+  /**
+   * One addressable unit of the proposal — a paired delete+insert that together
+   * replace a phrase, or a single keep whose formatting changes. Accepting or
+   * rejecting a group settles exactly that unit.
+   */
   groupId?: string;
   /**
-   * Formatting the proposed run carries. Present on `insert` and `keep` when the
-   * proposal was made as spans; absent when it was made as plain text, which is
-   * the same statement as "no marks". A run whose formatting changes partway is
-   * split into one op per formatting, so an op always reads one way.
+   * On an `insert`, the formatting the new text carries; absent means unmarked.
+   *
+   * On a `keep`, the formatting *changes here* — the run stays, and this is what
+   * it should read as. Absent means the run already reads that way and nothing
+   * is being proposed for it, so an unmarked keep must not be treated as "make
+   * this plain". A run is split wherever either side's formatting changes, so an
+   * op always describes one formatting.
    *
    * `delete` ops describe text already in the document and carry none.
    */

@@ -34,10 +34,23 @@
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Where in the proposed text this op's content came from.
+ *
+ * `keep` and `insert` consume the proposal, so they carry it; `delete`
+ * describes text that exists only in the document, so it has none.
+ *
+ * Stated by the producer because it cannot be recovered downstream:
+ * `pairReplacements` reorders its output into document order, which is what a
+ * consumer applying the diff needs and is not the order the proposal reads in.
+ * A consumer counting as it walks would land on the wrong words.
+ */
+type ProposedSource = { proposedOffset?: number };
+
 export type DiffOp =
-  | { type: "keep";   text: string }
-  | { type: "delete"; text: string }
-  | { type: "insert"; text: string };
+  | ({ type: "keep";   text: string } & ProposedSource)
+  | ({ type: "delete"; text: string } & ProposedSource)
+  | ({ type: "insert"; text: string } & ProposedSource);
 
 /**
  * A DiffOp extended with an optional groupId.
@@ -92,11 +105,17 @@ export function diffText(
   const lenA = tokA.length;
   const lenB = tokB.length;
 
+  // Unchanged text is the answer without a diff, and it has to be checked
+  // before the size guard below: a formatting-only proposal restates the text
+  // exactly, and answering "delete everything, insert everything" for two
+  // identical strings rewrites every character to change none of them.
+  if (a === b) return a.length > 0 ? [{ type: "keep", text: a, proposedOffset: 0 }] : [];
+
   // Fast path: O(n×m) guard — avoids quadratic blowup on long paragraphs.
   if (lenA * lenB > LCS_MAX_CELLS) {
     const ops: DiffOp[] = [];
     if (lenA > 0) ops.push({ type: "delete", text: a });
-    if (lenB > 0) ops.push({ type: "insert", text: b });
+    if (lenB > 0) ops.push({ type: "insert", text: b, proposedOffset: 0 });
     return ops;
   }
 
@@ -131,7 +150,18 @@ export function diffText(
     }
   }
 
-  return ops.reverse();
+  ops.reverse();
+
+  // Stamp each op with where its text sits in the proposal. Done here, in
+  // emission order, because this is the last point at which that order is the
+  // proposal's own.
+  let proposedOffset = 0;
+  for (const op of ops) {
+    if (op.type === "delete") continue;
+    op.proposedOffset = proposedOffset;
+    proposedOffset += op.text.length;
+  }
+  return ops;
 }
 
 /**
@@ -234,9 +264,12 @@ export function pairReplacements(ops: DiffOp[], lookAheadTokens = 5): PairedDiff
       } else {
         // keep
         if (k < lastDeleteInGroup) {
-          // Sandwiched — absorb: mark old text as deleted, re-insert it in target
+          // Sandwiched — absorb: mark old text as deleted, re-insert it in
+          // target. The re-insert is the same proposed text the keep was, so it
+          // keeps the keep's place in the proposal; the delete describes the
+          // document copy and carries none.
           delPhase.push({ type: "delete", text: op.text, groupId: gid });
-          insPhase.push({ type: "insert", text: op.text, groupId: gid });
+          insPhase.push({ ...op, type: "insert", groupId: gid });
         } else {
           // Boundary separator — stays as a plain keep (no groupId)
           keepPhase.push({ ...op });
@@ -244,10 +277,21 @@ export function pairReplacements(ops: DiffOp[], lookAheadTokens = 5): PairedDiff
       }
     }
 
-    // Output: all deletes first, then boundary keeps, then all inserts.
-    // This ensures applyDiffAsSuggestion processes the full deleted range
-    // before inserting the replacement, giving correct offset tracking.
-    output.push(...delPhase, ...keepPhase, ...insPhase);
+    // Deletes first, so a consumer applying the diff clears the whole deleted
+    // range before writing the replacement into it — that is what keeps its
+    // document-side offsets correct.
+    //
+    // What follows consumes the proposal, and is emitted in the proposal's own
+    // order. Absorbing a sandwiched keep turns it into a re-insert, and that
+    // re-insert can belong *before* a boundary keep: "alpha beta gamma delta"
+    // → "beta delta epsilon" re-inserts "beta" at the start of the proposal.
+    // Emitting every insert after every keep put it after "delta", so applying
+    // the diff produced " deltabeta epsilon" — the ops no longer described the
+    // proposal they were built from.
+    const proposalOrder = [...keepPhase, ...insPhase].sort(
+      (x, y) => (x.proposedOffset ?? 0) - (y.proposedOffset ?? 0),
+    );
+    output.push(...delPhase, ...proposalOrder);
     i = lastNonKeepIdx + 1;
   }
 
