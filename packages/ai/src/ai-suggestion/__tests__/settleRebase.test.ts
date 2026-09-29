@@ -144,6 +144,35 @@ describe("a rejected proposal", () => {
   });
 });
 
+describe("a document that moved under the proposal", () => {
+  it("does not turn the reader's own edit into a proposed deletion", () => {
+    const editor = new AiTestEditor(doc(p("one two", "p1")));
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedSpans: [
+        { text: "one", marks: [{ type: "bold" }] },
+        { text: " ", marks: [] },
+        { text: "two", marks: [{ type: "italic" }] },
+      ] }],
+      authorID: "AI Assistant",
+    })!;
+    editor.showSuggestion(suggestion);
+
+    // The reader rewrites the first word while the proposal is on screen.
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.insertText("NEW", 1, 1 + "one".length));
+    const afterEdit = editor.getState().doc.textContent;
+
+    // Then rejects one of the formatting proposals.
+    editor.reject({ groupId: groupsOf(suggestion, "format")[0]! });
+
+    // The remaining ops describe text that is no longer there. Rebuilding from
+    // them would propose restoring "one" over the reader's "NEW" — and accepting
+    // the rest would then write it back.
+    editor.apply({ mode: "direct" });
+    expect(editor.getState().doc.textContent).toBe(afterEdit);
+  });
+});
+
 describe("an accept that writes nothing", () => {
   it("does not rebase as though it had", () => {
     // Tracked mode on an editor with no TrackChanges extension: there is no

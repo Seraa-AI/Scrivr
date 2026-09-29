@@ -16,6 +16,8 @@
  */
 import type { IBaseEditor, InlineMark } from "@scrivr/core";
 
+import { buildAcceptedTextMap } from "@scrivr/plugins";
+
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { computeAiSuggestion } from "./computeAiSuggestion";
 import type { AiSuggestion, AiSuggestionBlock } from "./types";
@@ -101,6 +103,28 @@ function remainingProposal(
 }
 
 /**
+ * The text the block would hold if the settled group — and nothing else — had
+ * been applied to it.
+ *
+ * Compared against what the document actually holds, this is how a rebase tells
+ * "the reader settled a group" from "the reader settled a group *and* typed".
+ */
+function expectedAfterSettle(
+  block: AiSuggestionBlock,
+  settledGroupId: string,
+  accepted: boolean,
+): string {
+  let text = "";
+  for (const op of block.ops) {
+    const applied = op.groupId === settledGroupId && accepted;
+    if (op.type === "keep") text += op.text;
+    else if (op.type === "delete") { if (!applied) text += op.text; }
+    else if (applied) text += op.text;
+  }
+  return text;
+}
+
+/**
  * Re-express a suggestion against the document a settled group left behind.
  *
  * Returns the suggestion with this block's proposal rebuilt, the block dropped
@@ -125,6 +149,20 @@ export function rebaseAfterSettle(
   // left to propose about it, so it goes rather than keeping a card that
   // points nowhere and a settled group that could be applied again.
   if (!block || !found) return others.length > 0 ? { ...suggestion, blocks: others } : null;
+
+  // A proposal's ops describe the text as it was when the proposal was made.
+  // If the document has moved for any reason other than this settlement — the
+  // reader typed, a collaborator edited — those ops describe text that is no
+  // longer there, and rebuilding from them proposes putting it back: the
+  // reader's own edit comes back as a suggested deletion, wearing a freshly
+  // refreshed `acceptedText` that makes it look current.
+  //
+  // Nothing here can map the remaining intent through an edit it never saw, so
+  // the honest answer is that this proposal is spent. The reader asks again.
+  const { acceptedText: liveText } = buildAcceptedTextMap(found.node, found.pos, state.schema);
+  if (liveText !== expectedAfterSettle(block, settledGroupId, accepted)) {
+    return others.length > 0 ? { ...suggestion, blocks: others } : null;
+  }
 
   const spans = remainingProposal(block, settledGroupId, accepted, currentMarksAt(found.node));
   const rebuilt = computeAiSuggestion(state, {

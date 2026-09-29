@@ -32,7 +32,13 @@ so two paragraphs with a change at the same position shared an id, and settling
 one settled the other.
 
 Settling one group re-expresses what is left of the proposal against the
-document that group left behind. A suggestion's ops are offsets into the block's
+document that group left behind — but only when that document is the one the
+settlement produced. If it moved for any other reason, the reader typed or a
+collaborator edited, the remaining ops describe text that is no longer there and
+rebuilding from them proposes putting it back: the reader's own edit returns as
+a suggested deletion, wearing a refreshed `acceptedText` that makes it look
+current. Nothing can map an intent through an edit it never saw, so the proposal
+is spent and the block is dropped. The reader asks again. A suggestion's ops are offsets into the block's
 text as it was when the suggestion was computed, so accepting or rejecting one
 group invalidated every remaining op: the next accept landed on the wrong
 characters, or past the end of the old text, where it silently did nothing —
