@@ -16,7 +16,7 @@ import type { InlineMark } from "@scrivr/core";
 import { Fragment } from "@scrivr/core/pm";
 import type { Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { isResolved } from "./liveOps";
+import { rebaseAfterSettle } from "./rebase";
 import type { AiOp, AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
 import {
   aiSuggestionPluginKey,
@@ -78,7 +78,7 @@ export function applyAiSuggestion(
   }
 
   if (groupId) {
-    retireGroup(editor, ps.suggestion, groupId);
+    settleGroup(editor, ps.suggestion, groupId, true);
     return;
   }
 
@@ -129,24 +129,30 @@ function applyRunMarks(
 }
 
 /**
- * Retire a group the reader has finished with.
+ * Record that a group is finished, by re-expressing what is left of the
+ * suggestion against the document the group left behind.
  *
- * Applying or rejecting one group leaves the rest of the suggestion live, so
- * the resolved group has to be recorded somewhere — otherwise "accept all"
- * later re-applies formatting the reader already turned down, and re-offers
- * work already done.
+ * Not by marking it settled and stepping over it: the remaining ops are offsets
+ * into the text as it was before, so the next accept would land on the wrong
+ * characters or past the end and quietly do nothing.
+ *
+ * Dispatched as a resolve rather than a new suggestion — the reader is still
+ * reading this one, and replacing it wholesale clears the active block and
+ * blanks the rest of the overlay until the caret happens to move.
  */
-function retireGroup(editor: IBaseEditor, suggestion: AiSuggestion, groupId: string): void {
-  const blocks = suggestion.blocks.map((block) =>
-    block.ops.some((op) => op.groupId === groupId)
-      ? { ...block, resolvedGroups: [...new Set([...(block.resolvedGroups ?? []), groupId])] }
-      : block,
-  );
-  // Dispatched as a resolve, not as a new suggestion: the reader is still
-  // reading this one, and replacing it wholesale clears the active block and
-  // blanks the rest of the overlay until the caret happens to move.
+function settleGroup(
+  editor: IBaseEditor,
+  suggestion: AiSuggestion,
+  groupId: string,
+  accepted: boolean,
+): void {
+  const owner = suggestion.blocks.find((block) => block.ops.some((op) => op.groupId === groupId));
+  const next = owner
+    ? rebaseAfterSettle(editor, suggestion, owner.nodeId, groupId, accepted)
+    : suggestion;
+
   const tr = editor.getState().tr;
-  tr.setMeta(AI_SUGGESTION_RESOLVE, { payload: { ...suggestion, blocks } });
+  tr.setMeta(AI_SUGGESTION_RESOLVE, { payload: next });
   skipTracking(tr);
   editor.applyTransaction(tr);
 }
@@ -189,7 +195,7 @@ function applyKeepFormatting(
     let acceptedOffset = 0;
     for (const op of block.ops) {
       if (op.type === "insert") continue;
-      if (op.type === "keep" && op.marks && (!groupId || op.groupId === groupId) && !isResolved(block, op)) {
+      if (op.type === "keep" && op.marks && (!groupId || op.groupId === groupId)) {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
         if (range) {
           applyRunMarks(tr, schema, range.from, range.to, op.marks);
@@ -253,7 +259,7 @@ function _applyDirect(
         continue;
       }
 
-      if ((groupId && op.groupId !== groupId) || isResolved(block, op)) {
+      if (groupId && op.groupId !== groupId) {
         if (op.type === "delete") acceptedOffset += tokenLen;
         continue;
       }
@@ -314,7 +320,7 @@ function _applyTracked(
         continue;
       }
 
-      if ((groupId && op.groupId !== groupId) || isResolved(block, op)) {
+      if (groupId && op.groupId !== groupId) {
         if (op.type === "delete") acceptedOffset += tokenLen;
         continue;
       }
@@ -401,7 +407,7 @@ export function rejectAiSuggestion(
         continue;
       }
 
-      if ((groupId && op.groupId !== groupId) || isResolved(block, op)) {
+      if (groupId && op.groupId !== groupId) {
         if (op.type === "delete") acceptedOffset += tokenLen;
         continue;
       }
@@ -446,7 +452,7 @@ export function rejectAiSuggestion(
   editor.applyTransaction(tr);
 
   if (groupId) {
-    retireGroup(editor, ps.suggestion, groupId);
+    settleGroup(editor, ps.suggestion, groupId, false);
     return;
   }
 

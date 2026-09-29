@@ -80,6 +80,6 @@ describe("a group belongs to the block it came from", () => {
     // p2's proposal is untouched and still live.
     expect(editor.getState().doc.child(1).textContent).toBe("one three");
     const after = editor.suggestionState?.suggestion?.blocks.find((b) => b.nodeId === "p2");
-    expect(after?.resolvedGroups ?? []).toEqual([]);
+    expect(after?.ops.some((o) => o.type !== "keep")).toBe(true);
   });
 });

@@ -22,7 +22,6 @@ import {
 import { applyAiSuggestion, rejectAiSuggestion } from "./showHideApply";
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import type { AiSuggestionBlock, AiOp, AiSuggestionPluginState } from "./types";
-import { liveOps } from "./liveOps";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -109,7 +108,7 @@ function deriveCard(
   isActive: boolean,
   isHovered: boolean,
 ): AiSuggestionCardData {
-  const ops = liveOps(block);
+  const ops = block.ops;
   const hasInsert = ops.some((o: AiOp) => o.type === "insert");
   const hasDelete = ops.some((o: AiOp) => o.type === "delete");
   // A keep carrying marks proposes formatting on text that stays, so a block

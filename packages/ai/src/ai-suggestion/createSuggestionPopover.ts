@@ -14,7 +14,6 @@ import type { IEditor } from "@scrivr/core";
 import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContainer } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { liveOps } from "./liveOps";
 import { buildAcceptedTextMap, acceptedRangeToDocRange } from "@scrivr/plugins";
 import { aiSuggestionPluginKey } from "./AiSuggestionPlugin";
 import type { AiSuggestion, AiOp } from "./types";
@@ -210,7 +209,7 @@ export function createSuggestionPopover(
       const blockEnd   = nodeFound.pos + nodeFound.node.nodeSize;
       if (head < blockStart || head > blockEnd) continue;
 
-      const groupRanges = buildGroupRanges(liveOps(block), map);
+      const groupRanges = buildGroupRanges(block.ops, map);
       if (groupRanges.size === 0) continue;
 
       let bestGroupId: string | null = null;

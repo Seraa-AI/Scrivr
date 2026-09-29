@@ -31,11 +31,24 @@ Generated group ids carry their block. They were an index into one block's ops,
 so two paragraphs with a change at the same position shared an id, and settling
 one settled the other.
 
-`resolvedGroups` is read through one `liveOps(block)` by everything that draws,
-offers or applies a proposal, so a settled group stops drawing its underline and
-stops offering a card whose accept did nothing. Settling dispatches its own
-`AI_SUGGESTION_RESOLVE` rather than replacing the suggestion, which used to
-clear the active block and blank the rest of the overlay until the caret moved.
+Settling one group re-expresses what is left of the proposal against the
+document that group left behind. A suggestion's ops are offsets into the block's
+text as it was when the suggestion was computed, so accepting or rejecting one
+group invalidated every remaining op: the next accept landed on the wrong
+characters, or past the end of the old text, where it silently did nothing —
+accept a rewrite, then accept the formatting alongside it, and the formatting
+never arrived.
+
+Marking a group settled and stepping over it does not fix that, because the
+offsets are still the old ones. So there is no settled-group bookkeeping at all
+now: the outcome is known where the group is settled, the remaining proposal is
+rebuilt there, and a settled group simply no longer exists. A block with nothing
+left to propose is removed, and a suggestion with no blocks left is cleared —
+an empty proposal used to be reported as a deletion of the whole paragraph.
+
+Settling dispatches `AI_SUGGESTION_RESOLVE` rather than replacing the
+suggestion, which used to clear the active block and blank the rest of the
+overlay until the caret moved.
 
 A card can say `kind: "format"`; a formatting proposal was reported as a
 deletion labelled with the paragraph's own text. The popover describes it

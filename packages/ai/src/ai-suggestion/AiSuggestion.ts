@@ -20,7 +20,6 @@ import { Extension } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { liveOps } from "./liveOps";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
 
 import {
@@ -122,7 +121,7 @@ export function createSuggestionOverlayHandler(
         );
 
         const instructions = buildOpRenderInstructions(
-          liveOps(block),
+          block.ops,
           map,
           charMap,
           pageNumber,
