@@ -247,7 +247,8 @@ function applyInlineChange(
 
   // Nothing to do when text and every char's mark set already match.
   const rawOps = diffText(acceptedText, proposedText);
-  // diffText emits one keep op per token. Merge adjacent keeps so a formatting
+  // diffText emits keeps per token (or one whole-text keep when nothing
+  // changed). Merge adjacent keeps so a formatting
   // change over a retained region is emitted as ONE mark-add (one tracking id)
   // spanning the whole region — correct even when the region is interleaved
   // with a pending trackedInsert that stops the text nodes from fusing.

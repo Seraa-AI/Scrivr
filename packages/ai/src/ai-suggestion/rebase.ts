@@ -64,8 +64,6 @@ function remainingProposal(
     const rejected = settled && !accepted;
 
     if (op.type === "keep") {
-      // A live formatting proposal keeps its marks; anything else takes the
-      // document's, so it reads as unchanged.
       // A live formatting proposal states its own marks for the whole run;
       // anything else wears the document's, boundaries included.
       if (op.marks && !settled) push(op.text, op.marks);

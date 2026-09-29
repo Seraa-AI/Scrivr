@@ -143,3 +143,34 @@ describe("a rejected proposal", () => {
     expect(cards).toEqual([]);
   });
 });
+
+describe("an accept that writes nothing", () => {
+  it("does not rebase as though it had", () => {
+    // Tracked mode on an editor with no TrackChanges extension: there is no
+    // tracked mark to write with, so the accept cannot land. Rebasing anyway
+    // walks the rest of the proposal past characters that are still there, and
+    // reads each run's formatting from the wrong ones.
+    const editor = new AiTestEditor(
+      doc(schema.node("paragraph", { nodeId: "p1" }, [
+        schema.text("alpha "),
+        schema.text("omega", [schema.marks.bold!.create()]),
+      ])),
+      "u1",
+      { trackChanges: false },
+    );
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedText: "x omega" }],
+      authorID: "AI Assistant",
+    })!;
+
+    editor.showSuggestion(suggestion);
+    editor.apply({ mode: "tracked", groupId: groupsOf(suggestion, "text")[0]! });
+
+    expect(editor.getState().doc.textContent).toBe("alpha omega");
+    // No formatting was ever proposed, so none may appear — the reader's bold
+    // must not become something they are asked to strip.
+    const rest = live(editor);
+    expect(rest?.blocks[0]?.ops.filter((op) => op.type === "keep" && op.marks) ?? []).toEqual([]);
+    expect(markedText(editor, "bold")).toBe("omega");
+  });
+});

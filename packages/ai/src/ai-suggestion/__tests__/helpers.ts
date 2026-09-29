@@ -82,14 +82,18 @@ const AiSuggestionTestExtension = Extension.create({
  * `showAiSuggestion` / `applyAiSuggestion` / `rejectAiSuggestion`.
  */
 export class AiTestEditor extends ServerEditor {
-  constructor(initialDoc: PmNode, authorID = "user1") {
+  /**
+   * `trackChanges: false` drops the extension entirely — the shape a host that
+   * uses the suggestion lane without review gets, where a tracked apply has no
+   * tracked mark to write with.
+   */
+  constructor(initialDoc: PmNode, authorID = "user1", options: { trackChanges?: boolean } = {}) {
     super({
       extensions: [
         StarterKit,
-        TrackChanges.configure({
-          userID: authorID,
-          initialStatus: TrackChangesStatus.enabled,
-        }),
+        ...(options.trackChanges === false
+          ? []
+          : [TrackChanges.configure({ userID: authorID, initialStatus: TrackChangesStatus.enabled })]),
         AiSuggestionTestExtension,
       ],
       content: initialDoc.toJSON() as Record<string, unknown>,

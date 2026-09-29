@@ -1,14 +1,14 @@
 /**
  * What a diff op knows about where it came from.
  *
- * `pairReplacements` deliberately reorders its output — all deletes, then
- * boundary keeps, then all inserts — so that a consumer applying the diff
- * processes a whole deleted range before inserting its replacement. That
- * ordering is correct for the document side and says nothing about the
- * proposal side, so a consumer that needs to know *where in the proposed text*
- * an op came from cannot recover it by counting as it walks.
+ * `pairReplacements` hoists a group's deletes ahead of the text that replaces
+ * them, so a consumer applying the diff clears a whole deleted range before
+ * writing into it. That is correct for the document side, and it means a
+ * consumer counting proposal characters as it walks the emitted ops drifts at
+ * every replacement.
  *
- * So each op that consumes proposed text carries the offset it was built from.
+ * So each op that consumes proposed text carries the offset it was built from,
+ * stamped where the order still is the proposal's own.
  */
 import { describe, expect, it } from "vitest";
 import { diffText, expandCharLevel, pairReplacements } from "./diffText";

@@ -73,6 +73,14 @@ export function applyAiSuggestion(
     affectedBlocks = affectedBlocks.filter((b) => b.nodeId === blockId);
   }
 
+  // What the document held before, so settling can tell "applied" from
+  // "attempted". An accept that wrote nothing — tracked mode without the
+  // TrackChanges extension, or a block the reader has since edited out from
+  // under the proposal — must leave the group pending rather than retire it:
+  // rebasing on the assumption text moved, when it did not, walks the rest of
+  // the proposal across characters that are still there.
+  const before = editor.getState().doc;
+
   applyKeepFormatting(editor, affectedBlocks, groupId, mode !== "direct");
 
   if (mode === "direct") {
@@ -82,7 +90,7 @@ export function applyAiSuggestion(
   }
 
   if (groupId) {
-    settleGroup(editor, ps.suggestion, groupId, true);
+    if (editor.getState().doc !== before) settleGroup(editor, ps.suggestion, groupId, true);
     return;
   }
 
