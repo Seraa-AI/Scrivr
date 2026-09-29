@@ -23,11 +23,6 @@ A group id carries the block it belongs to. Groups are addressed across the
 whole suggestion, so numbering them per block meant accepting a run in one
 paragraph applied a different run in another.
 
-A group the reader has settled is recorded on the block and skipped by every
-later pass, so rejecting one proposal and then accepting the rest no longer
-re-applies the thing that was turned down — which was true of word swaps too,
-not only formatting.
-
 Runs are split at the formatting boundaries the *document* already has, as well
 as the ones the proposal introduces. ProseMirror lets formatting change inside a
 word, so judging a run by its first character hid any change that began after

@@ -33,7 +33,7 @@ export const AI_SUGGESTION_SET_ACTIVE = "aiSuggestion:setActive";
  * active block there blanks the overlay for everything else in it, and nothing
  * restores it until the caret moves, which accepting formatting does not do.
  */
-export const AI_SUGGESTION_RESOLVE    = "aiSuggestion:resolve";
+export const AI_SUGGESTION_SETTLE    = "aiSuggestion:settle";
 
 const EMPTY_STATE: AiSuggestionPluginState = {
   suggestion:    null,
@@ -63,12 +63,12 @@ export const aiSuggestionPlugin = new Plugin<AiSuggestionPluginState>({
         };
       }
 
-      // Handle AI_SUGGESTION_RESOLVE — the suggestion changes, the view does not.
-      const resolved = tr.getMeta(AI_SUGGESTION_RESOLVE) as
-        | { payload: AiSuggestionPluginState["suggestion"] }
+      // Handle AI_SUGGESTION_SETTLE — the suggestion changes, the view does not.
+      const settled = tr.getMeta(AI_SUGGESTION_SETTLE) as
+        | { value: AiSuggestionPluginState["suggestion"] }
         | undefined;
-      if (resolved !== undefined) {
-        return { ...prev, suggestion: resolved.payload };
+      if (settled !== undefined) {
+        return { ...prev, suggestion: settled.value };
       }
 
       // Handle AI_SUGGESTION_SET_STALE

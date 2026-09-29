@@ -21,7 +21,7 @@ import type { AiOp, AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, R
 import {
   aiSuggestionPluginKey,
   AI_SUGGESTION_SET,
-  AI_SUGGESTION_RESOLVE,
+  AI_SUGGESTION_SETTLE,
 } from "./AiSuggestionPlugin";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
 import { isTrackedMark, skipTracking, trackAsSuggestion, trackChangesPluginKey, TrackChangesAction, setAction } from "@scrivr/plugins";
@@ -49,6 +49,10 @@ export function showAiSuggestion(editor: IBaseEditor, suggestion: AiSuggestion |
 
 /**
  * Apply the current AI suggestion to the document.
+ *
+ * Applying a single `groupId` rebuilds the rest of the suggestion against the
+ * resulting document, so an `AiSuggestion` held across the call is superseded —
+ * read the current one back from plugin state.
  *
  * mode "direct"  — writes the proposed text directly into the document.
  * mode "tracked" — records changes as tracked insert/delete marks.
@@ -129,14 +133,10 @@ function applyRunMarks(
 }
 
 /**
- * Record that a group is finished, by re-expressing what is left of the
- * suggestion against the document the group left behind.
+ * Record that a group is finished — see `rebaseAfterSettle` for why that means
+ * rebuilding the rest of the proposal rather than marking it done.
  *
- * Not by marking it settled and stepping over it: the remaining ops are offsets
- * into the text as it was before, so the next accept would land on the wrong
- * characters or past the end and quietly do nothing.
- *
- * Dispatched as a resolve rather than a new suggestion — the reader is still
+ * Dispatched as a settle rather than as a new suggestion: the reader is still
  * reading this one, and replacing it wholesale clears the active block and
  * blanks the rest of the overlay until the caret happens to move.
  */
@@ -152,7 +152,7 @@ function settleGroup(
     : suggestion;
 
   const tr = editor.getState().tr;
-  tr.setMeta(AI_SUGGESTION_RESOLVE, { payload: next });
+  tr.setMeta(AI_SUGGESTION_SETTLE, { value: next });
   skipTracking(tr);
   editor.applyTransaction(tr);
 }

@@ -26,9 +26,9 @@ function recordingContext() {
   return { ctx, strokes };
 }
 
-const glyph = (x: number, lineY: number, over: Partial<GlyphEntry> = {}): GlyphEntry => ({
-  docPos: 0, x, y: lineY, width: 10, height: 12, lineY, page: 0, ...over,
-} as GlyphEntry);
+const glyph = (x: number, lineY: number, y = lineY, height = 12): GlyphEntry => ({
+  docPos: 0, x, y, lineY, width: 10, height, page: 0, lineIndex: 0,
+});
 
 describe("renderFormatHighlight", () => {
   it("draws one rule per line, not one across the gap between them", () => {
@@ -48,9 +48,9 @@ describe("renderFormatHighlight", () => {
     // Same line; the smaller glyph sits lower and is shorter, so its `y`
     // differs while its `lineY` does not.
     const glyphs = [
-      glyph(0, 100, { height: 14 }),
-      glyph(10, 100, { y: 104, height: 9 }),
-      glyph(20, 100, { height: 14 }),
+      glyph(0, 100, 100, 14),
+      glyph(10, 100, 104, 9),
+      glyph(20, 100, 100, 14),
     ];
 
     renderFormatHighlight(ctx as unknown as CanvasRenderingContext2D, glyphs, false);

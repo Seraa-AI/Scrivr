@@ -15,38 +15,21 @@
  * here, so nothing has to be recorded and consulted later.
  */
 import type { IBaseEditor, InlineMark } from "@scrivr/core";
-import { buildAcceptedTextMap, isTrackedMark } from "@scrivr/plugins";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { describeInlineMark } from "@scrivr/core";
 import { computeAiSuggestion } from "./computeAiSuggestion";
 import type { AiSuggestion, AiSuggestionBlock } from "./types";
 import type { InlineSpan } from "../schema/edit";
-import type { Node as PmNode } from "@scrivr/core/pm";
-
-/** The formatting each character of the block's accepted text now carries. */
-function currentMarksAt(node: PmNode): InlineMark[][] {
-  const marks: InlineMark[][] = [];
-  node.descendants((child) => {
-    if (!child.isText || !child.text) return;
-    if (child.marks.some((mark) => mark.type.name === "trackedDelete")) return;
-    const described = child.marks.filter((m) => !isTrackedMark(m.type.name)).map(describeInlineMark);
-    for (let i = 0; i < child.text.length; i++) marks.push(described);
-  });
-  return marks;
-}
+import { currentMarksAt, sameMarks } from "./marks";
 
 /**
  * What the agent still wants this block to read as, in the document's terms.
  *
- * Walks the settled block's ops against the text the document now holds. Each
- * op is one of three things: text the document still has (so the walk advances
- * over it), text the document no longer has, or text it does not have yet.
- * Which of those an op is depends on whether its group was the one settled and
- * on how it was settled — an accepted delete is gone, a rejected one stayed.
- *
  * Runs that are not part of a live proposal carry the document's own formatting,
- * so re-diffing sees no change in them rather than proposing to strip it.
+ * so re-diffing sees no change in them rather than proposing to strip it. That
+ * formatting is read per character, not once per run: the document can change
+ * formatting inside a word, and a run that took its first character's marks
+ * would ask to strip every other formatting it spanned.
  */
 function remainingProposal(
   block: AiSuggestionBlock,
@@ -57,9 +40,23 @@ function remainingProposal(
   const spans: InlineSpan[] = [];
   let docCursor = 0;
 
-  const take = (length: number): InlineMark[] => docMarks[docCursor] ?? [];
   const push = (text: string, marks: InlineMark[]) => {
     if (text.length > 0) spans.push({ text, marks });
+  };
+
+  /**
+   * Emit `text` wearing the formatting the document gives it, split wherever
+   * that formatting changes — which can happen inside a word.
+   */
+  const pushAsDocumentReads = (text: string, at: number) => {
+    let runStart = 0;
+    for (let i = 1; i <= text.length; i++) {
+      const here = docMarks[at + i] ?? [];
+      const prev = docMarks[at + i - 1] ?? [];
+      if (i < text.length && sameMarks(here, prev)) continue;
+      push(text.slice(runStart, i), prev);
+      runStart = i;
+    }
   };
 
   for (const op of block.ops) {
@@ -69,8 +66,10 @@ function remainingProposal(
     if (op.type === "keep") {
       // A live formatting proposal keeps its marks; anything else takes the
       // document's, so it reads as unchanged.
-      const marks = op.marks && !settled ? op.marks : take(op.text.length);
-      push(op.text, marks);
+      // A live formatting proposal states its own marks for the whole run;
+      // anything else wears the document's, boundaries included.
+      if (op.marks && !settled) push(op.text, op.marks);
+      else pushAsDocumentReads(op.text, docCursor);
       docCursor += op.text.length;
       continue;
     }
@@ -78,7 +77,7 @@ function remainingProposal(
     if (op.type === "delete") {
       if (rejected) {
         // The reader kept this text, so it is in the document and stays.
-        push(op.text, take(op.text.length));
+        pushAsDocumentReads(op.text, docCursor);
         docCursor += op.text.length;
       } else if (!settled) {
         // Still proposed for removal: present in the document, absent from the
@@ -92,7 +91,7 @@ function remainingProposal(
     if (rejected) continue;               // turned down, never written
     if (settled) {
       // Accepted: the document has it now.
-      push(op.text, take(op.text.length));
+      pushAsDocumentReads(op.text, docCursor);
       docCursor += op.text.length;
     } else {
       // Still proposed: not in the document yet, so it brings its own marks.
@@ -121,15 +120,27 @@ export function rebaseAfterSettle(
   const block = suggestion.blocks.find((b) => b.nodeId === nodeId);
   const state = editor.getState();
   const found = block ? findNodeById(state.doc, block.nodeId) : null;
-  if (!block || !found) return suggestion;
+  const others = suggestion.blocks.filter((b) => b.nodeId !== nodeId);
 
-  const proposedSpans = remainingProposal(block, settledGroupId, accepted, currentMarksAt(found.node));
+  // The block is no longer in the document — removed by this edit, by a
+  // collaborator, or by an undo. There is nothing to rebase onto and nothing
+  // left to propose about it, so it goes rather than keeping a card that
+  // points nowhere and a settled group that could be applied again.
+  if (!block || !found) return others.length > 0 ? { ...suggestion, blocks: others } : null;
+
+  const spans = remainingProposal(block, settledGroupId, accepted, currentMarksAt(found.node));
   const rebuilt = computeAiSuggestion(state, {
-    blocks: [{ nodeId: block.nodeId, proposedSpans, ...(block.summary ? { summary: block.summary } : {}) }],
+    blocks: [{
+      nodeId: block.nodeId,
+      // No spans left means the remainder empties the block — which is a
+      // proposal, not the absence of one. Said as text, because empty spans
+      // read on the other side as "the agent said nothing".
+      ...(spans.length > 0 ? { proposedSpans: spans } : { proposedText: "" }),
+      ...(block.summary ? { summary: block.summary } : {}),
+    }],
     authorID: suggestion.author ?? "AI Assistant",
   });
 
-  const others = suggestion.blocks.filter((b) => b.nodeId !== nodeId);
   const next = rebuilt?.blocks[0];
   const blocks = next ? [...others, next] : others;
   if (blocks.length === 0) return null;

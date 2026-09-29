@@ -27,9 +27,9 @@ export interface AiOp {
   type: AiOpType;
   text: string;
   /**
-   * One addressable unit of the proposal — a paired delete+insert that together
-   * replace a phrase, or a single keep whose formatting changes. Accepting or
-   * rejecting a group settles exactly that unit.
+   * One addressable unit of the proposal: a paired delete+insert replacing a
+   * phrase, a lone insert or delete with no pair, or a keep whose formatting
+   * changes. Accepting or rejecting a group settles exactly that unit.
    */
   groupId?: string;
   /**

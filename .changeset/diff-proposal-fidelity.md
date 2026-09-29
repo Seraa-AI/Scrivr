@@ -50,6 +50,11 @@ Settling dispatches `AI_SUGGESTION_RESOLVE` rather than replacing the
 suggestion, which used to clear the active block and blank the rest of the
 overlay until the caret moved.
 
+`AiSuggestionCardData.kind` gains `"format"`. Additive for a consumer that
+switches with a default, but a consumer narrowing exhaustively against `never`
+will stop compiling until it handles the new member — which is the point of
+writing it that way.
+
 A card can say `kind: "format"`; a formatting proposal was reported as a
 deletion labelled with the paragraph's own text. The popover describes it
 through `formattedText` instead of rendering an empty replaced→inserted pair.

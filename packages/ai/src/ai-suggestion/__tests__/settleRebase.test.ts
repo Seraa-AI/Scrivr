@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { computeAiSuggestion } from "../computeAiSuggestion";
 import { subscribeToAiSuggestions } from "../subscribeToAiSuggestions";
-import { AiTestEditor, doc, markedText, p } from "./helpers";
+import { AiTestEditor, doc, markedText, p, schema } from "./helpers";
 import type { AiSuggestion } from "../types";
 
 const groupsOf = (suggestion: AiSuggestion, pick: "text" | "format") =>
@@ -76,6 +76,34 @@ describe("settling one group", () => {
 
     // Nothing is left to propose, so there is no suggestion left to show.
     expect(live(editor)).toBeNull();
+  });
+});
+
+describe("formatting the reader already had", () => {
+  it("survives a rebase, including where it changes inside a word", () => {
+    // "al" is plain and "pha" is bold — one word, two formattings, which is
+    // where a run that took its first character's marks would go wrong.
+    const editor = new AiTestEditor(doc(
+      schema.node("paragraph", { nodeId: "p1" }, [
+        schema.text("al"),
+        schema.text("pha", [schema.marks.bold!.create()]),
+        schema.text(" beta"),
+      ]),
+    ));
+
+    // The proposal says nothing about formatting and touches the other word.
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedText: "alpha BETA" }],
+      authorID: "AI Assistant",
+    })!;
+
+    editor.showSuggestion(suggestion);
+    editor.apply({ mode: "direct", groupId: groupsOf(suggestion, "text")[0]! });
+
+    // Rebasing must not invent a proposal to strip what the reader wrote.
+    const rest = live(editor);
+    expect(rest?.blocks[0]?.ops.filter((op) => op.type === "keep" && op.marks) ?? []).toEqual([]);
+    expect(markedText(editor, "bold")).toBe("pha");
   });
 });
 

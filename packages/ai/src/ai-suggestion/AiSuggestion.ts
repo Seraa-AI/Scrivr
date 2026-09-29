@@ -17,7 +17,7 @@
  */
 
 import { Extension } from "@scrivr/core";
-import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
+import type { IBaseEditor, IEditor, OverlayRenderHandler } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
@@ -59,8 +59,8 @@ export interface AiSuggestionOptions {
  * worth testing, and testing it should not require a live view.
  */
 export function createSuggestionOverlayHandler(
-  editor: IEditor,
-  renderMode: AiSuggestionOptions["renderMode"],
+  editor: IBaseEditor,
+  renderMode: Exclude<AiSuggestionRenderMode, "none">,
 ): OverlayRenderHandler {
   return (
       ctx,

@@ -11,7 +11,7 @@
  * So each op that consumes proposed text carries the offset it was built from.
  */
 import { describe, expect, it } from "vitest";
-import { diffText, pairReplacements } from "./diffText";
+import { diffText, expandCharLevel, pairReplacements } from "./diffText";
 
 const CLAUSE = "Neither party shall be liable for any indirect loss.";
 
@@ -19,8 +19,10 @@ describe("proposedOffset", () => {
   it("points at the text the op was built from", () => {
     const proposed = "beta delta epsilon";
     for (const op of diffText("alpha beta gamma delta", proposed)) {
+      // The type says a delete has no proposal offset; this says the value
+      // agrees with the type.
       if (op.type === "delete") {
-        expect(op.proposedOffset).toBeUndefined();
+        expect("proposedOffset" in op).toBe(false);
         continue;
       }
       expect(op.proposedOffset).toBeDefined();
@@ -65,6 +67,33 @@ describe("the quadratic guard still protects genuinely different long text", () 
     const ops = diffText(a, b);
 
     expect(ops.map((op) => op.type)).toEqual(["delete", "insert"]);
-    expect(ops[1]!.proposedOffset).toBe(0);
+    const insert = ops[1];
+    expect(insert?.type).toBe("insert");
+    if (insert?.type !== "insert") throw new Error("expected an insert");
+    expect(insert.proposedOffset).toBe(0);
+  });
+});
+
+describe("character-level expansion", () => {
+  it("never reports an offset measured from the token it re-diffed", () => {
+    // Expansion re-diffs one word pair, so an offset it produced would be
+    // counted from that word and point into a different one. An op that still
+    // carries an offset must still be telling the truth about the proposal.
+    const proposed = "the indemnity clause";
+    const ops = expandCharLevel(
+      pairReplacements(diffText("the indemnification clause", proposed)),
+    );
+
+    let expandedOps = 0;
+    for (const op of ops) {
+      if (op.type === "delete") continue;
+      if (!("proposedOffset" in op) || op.proposedOffset === undefined) {
+        expandedOps += 1;
+        continue;
+      }
+      expect(proposed.slice(op.proposedOffset, op.proposedOffset + op.text.length)).toBe(op.text);
+    }
+    // The case does expand, so the assertion above is not vacuous.
+    expect(expandedOps).toBeGreaterThan(0);
   });
 });
