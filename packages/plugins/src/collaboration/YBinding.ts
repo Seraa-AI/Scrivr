@@ -41,6 +41,13 @@ import { COLLAB_SYNC_META, type IBaseEditor } from "@scrivr/core";
  * Today's PM→Y dedup uses `lastWrittenValue` (structural equality); the
  * envelope shape is forward-compatibility for richer dedup if we need it.
  */
+/**
+ * Name of the map holding doc attrs, beside the content fragment in the same
+ * `Y.Doc`. Named because it is a wire contract: the live binding, a host seeding
+ * a room from stored content, and a host reading one back must all agree on it.
+ */
+export const DOC_ATTRS_MAP_NAME = "prose_doc_attrs";
+
 export interface DocAttrEnvelope<T = unknown> {
   localSeq: number;
   value: T;

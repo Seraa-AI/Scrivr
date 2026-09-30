@@ -19,7 +19,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Extension } from "@scrivr/core";
 import type { IBaseEditor } from "@scrivr/core";
 import { YBinding } from "./YBinding";
-import type { DocAttrEnvelope } from "./YBinding";
+import { DOC_ATTRS_MAP_NAME, type DocAttrEnvelope } from "./YBinding";
 import { collaborationRegistry } from "./collaborationState";
 
 interface CollaborationOptions {
@@ -122,7 +122,7 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     // Sibling map for doc-level attrs (e.g. headerFooter policy). Lives next
     // to the content fragment on the same Y.Doc so a single update batch can
     // carry both content and attr changes atomically.
-    const attrsMap = ydoc.getMap<DocAttrEnvelope>("prose_doc_attrs");
+    const attrsMap = ydoc.getMap<DocAttrEnvelope>(DOC_ATTRS_MAP_NAME);
     const { url = "ws://localhost:1234", name = "default" } = this.options;
 
     // Suppress all layout/paint flushes while Y.js syncs the document.

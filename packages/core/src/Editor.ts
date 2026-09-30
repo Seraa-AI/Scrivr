@@ -1,4 +1,6 @@
 import type { LayoutFontResolver } from "./fonts/layoutResolver";
+import { resolveActiveFontSize } from "./fonts/activeFontSize";
+import { getBlockStyle } from "./layout/FontConfig";
 import {
 	EditorState,
 	Transaction,
@@ -508,7 +510,6 @@ export class Editor extends BaseEditor implements IEditor {
 	 * Inline object registry built from all extensions.
 	 * Pass to renderPage — maps node type names to InlineStrategy instances.
 	 */
-	readonly inlineRegistry: InlineRegistry;
 
 	/**
 	 * Page chrome contributions from all extensions (headers, footers, etc.).
@@ -603,7 +604,6 @@ export class Editor extends BaseEditor implements IEditor {
 		this.hitTesters = this.manager.buildHitTesters();
 		this.selectionGestures = this.manager.buildSelectionGestures();
 		this.blockRegistry = this.manager.buildBlockRegistry();
-		this.inlineRegistry = this.manager.buildInlineRegistry();
 		this.pageChromeContributions =
 			this.manager.getPageChromeContributions();
 
@@ -1091,6 +1091,25 @@ export class Editor extends BaseEditor implements IEditor {
 			resolved: resolved.family,
 			substituted: resolved.family !== requested,
 		};
+	}
+
+	/**
+	 * The size in effect at the selection, in px.
+	 *
+	 * The counterpart to `getActiveFontFamily`: inline mark first, then the size
+	 * the block style renders at. Always a number, because a control needs a
+	 * value to show and every run has a size even when no mark states one — so a
+	 * caller reading the `fontSize` mark itself sees `undefined` over text the
+	 * document plainly draws at a size.
+	 */
+	getActiveFontSize(): number {
+		const inline = this.getActiveMarkAttrs()["fontSize"]?.["size"];
+		const { blockType, blockAttrs } = this.getBlockInfo();
+		const level = blockAttrs["level"];
+		return resolveActiveFontSize(
+			typeof inline === "number" ? inline : undefined,
+			getBlockStyle(this.fontConfig, blockType, typeof level === "number" ? level : undefined),
+		);
 	}
 
 	/** True when the editor is in pageless (infinite-scroll) mode. */

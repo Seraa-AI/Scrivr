@@ -1,4 +1,5 @@
 import { Node } from "prosemirror-model";
+import { parseFontSizePx } from "../fonts/activeFontSize";
 import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
@@ -16,11 +17,6 @@ import { resolveFont, substituteFamily, parseFont } from "./StyleResolver";
 import { layoutTableRowCells } from "./TableLayoutEngine";
 
 /** Extracts px size from a CSS font string like "bold 14px Georgia, serif". Returns null if not found. */
-function parseFontSizePx(font: string): number | null {
-  const m = font.match(/(\d+(?:\.\d+)?)px/);
-  return m ? parseFloat(m[1]!) : null;
-}
-
 /**
  * Resolves the rendered height and block spacing for a leaf block node.
  *

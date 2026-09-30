@@ -1,5 +1,6 @@
 import { EditorState, Transaction } from "prosemirror-state";
 import type { FontProvider } from "./fonts/types";
+import type { InlineRegistry } from "./layout/BlockRegistry";
 import { MarkdownSerializer } from "prosemirror-markdown";
 import { Node, type Schema } from "prosemirror-model";
 
@@ -82,6 +83,19 @@ export interface BaseEditorOptions {
 export class BaseEditor implements IBaseEditor {
   protected readonly manager: ExtensionManager;
   /**
+   * Inline node strategies, by node type name.
+   *
+   * On the base editor rather than the view, because measuring an inline atom is
+   * layout and not paint. An atom that sizes itself from a font can only do so
+   * if whatever lays it out can reach its strategy, and a headless caller had no
+   * registry to pass — so the atom took its declared size, the span carried no
+   * resolved face, and a headless render disagreed with the browser.
+   *
+   * `InlineStrategy.render` takes a canvas context and stays browser-only. The
+   * split is the point: the box is layout, the paint is a surface.
+   */
+  readonly inlineRegistry: InlineRegistry;
+  /**
    * The root editor's state.
    *
    * Root-is-identity invariant (load-bearing): this field MUST always
@@ -145,6 +159,7 @@ export class BaseEditor implements IBaseEditor {
   }: BaseEditorOptions = {}) {
     this.fonts = fonts ?? null;
     this.manager = new ExtensionManager(extensions);
+    this.inlineRegistry = this.manager.buildInlineRegistry();
 
     const rawInitialDoc =
       typeof content === "string"
