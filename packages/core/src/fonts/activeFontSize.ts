@@ -9,7 +9,7 @@
  * `getBlockInfo()` returns the block's attrs, and `PageConfig` carries a family
  * and no size.
  */
-import type { BlockStyle } from "../layout/FontConfig";
+import { defaultFontConfig, type BlockStyle } from "../layout/FontConfig";
 
 /**
  * Size a block style renders at, from its font shorthand.
@@ -19,25 +19,26 @@ import type { BlockStyle } from "../layout/FontConfig";
  * the value the text is drawn at come from one place.
  */
 export function parseFontSizePx(font: string): number | null {
-  const match = font.match(/(\d+(?:\.\d+)?)px/);
-  return match ? parseFloat(match[1]!) : null;
+  const [, size] = font.match(/(\d+(?:\.\d+)?)px/) ?? [];
+  return size === undefined ? null : parseFloat(size);
 }
 
-/** Size used when neither a mark nor the block style names one. */
-export const DEFAULT_FONT_SIZE_PX = 14;
+/**
+ * Size used when neither a mark nor the block style names one — read from the
+ * default paragraph style, because that is what such a run is actually drawn at.
+ * Derived rather than restated so the two cannot drift.
+ */
+export const DEFAULT_FONT_SIZE_PX =
+  parseFontSizePx(defaultFontConfig["paragraph"]?.font ?? "") ?? 14;
 
 /**
  * The size at a position: the inline mark's if it has one, otherwise the size
- * the block style renders at.
+ * the block style renders at. Always a number — a control needs a value to show.
  *
- * Always a number. A control needs a value to show, and "unset" over text with
- * a visible size is the thing this exists to prevent.
+ * A non-positive mark size is treated as absent: `fontSize` carries a px number,
+ * and zero is not a size a run renders at.
  */
-export function resolveActiveFontSize(
-  markSize: number | undefined,
-  blockStyle: BlockStyle | null | undefined,
-): number {
+export function resolveActiveFontSize(markSize: number | undefined, blockStyle: BlockStyle): number {
   if (typeof markSize === "number" && markSize > 0) return markSize;
-  const fromStyle = blockStyle ? parseFontSizePx(blockStyle.font) : null;
-  return fromStyle ?? DEFAULT_FONT_SIZE_PX;
+  return parseFontSizePx(blockStyle.font) ?? DEFAULT_FONT_SIZE_PX;
 }

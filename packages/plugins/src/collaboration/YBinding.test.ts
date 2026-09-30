@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as Y from "yjs";
 import { TextSelection } from "@scrivr/core/pm";
 import { ServerEditor, Extension, StarterKit } from "@scrivr/core";
-import { YBinding } from "./YBinding";
+import { DOC_ATTRS_MAP_NAME, YBinding } from "./YBinding";
 import type { DocAttrEnvelope } from "./YBinding";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ function makePeer(options: PeerOptions = {}): {
   });
   const ydoc = new Y.Doc();
   const type = ydoc.getXmlFragment("prosemirror");
-  const attrsMap = ydoc.getMap<DocAttrEnvelope>("prose_doc_attrs");
+  const attrsMap = ydoc.getMap<DocAttrEnvelope>(DOC_ATTRS_MAP_NAME);
   const binding = new YBinding(editor, ydoc, type, attrsMap);
   binding.bind();
   return { editor, ydoc, type, attrsMap, binding };
@@ -106,7 +106,7 @@ describe("YBinding — markSynced cursor placement", () => {
 
     const ydoc      = new Y.Doc();
     const type      = ydoc.getXmlFragment("prosemirror");
-    const attrsMap  = ydoc.getMap<DocAttrEnvelope>("prose_doc_attrs");
+    const attrsMap  = ydoc.getMap<DocAttrEnvelope>(DOC_ATTRS_MAP_NAME);
     const binding   = new YBinding(editor, ydoc, type, attrsMap);
     binding.bind();
 
@@ -123,7 +123,7 @@ describe("YBinding — markSynced cursor placement", () => {
 
     const ydoc      = new Y.Doc();
     const type      = ydoc.getXmlFragment("prosemirror");
-    const attrsMap  = ydoc.getMap<DocAttrEnvelope>("prose_doc_attrs");
+    const attrsMap  = ydoc.getMap<DocAttrEnvelope>(DOC_ATTRS_MAP_NAME);
     const binding   = new YBinding(editor, ydoc, type, attrsMap);
     binding.bind();
 
@@ -149,7 +149,7 @@ describe("YBinding — markSynced cursor placement", () => {
 
     const ydoc      = new Y.Doc();
     const type      = ydoc.getXmlFragment("prosemirror");
-    const attrsMap  = ydoc.getMap<DocAttrEnvelope>("prose_doc_attrs");
+    const attrsMap  = ydoc.getMap<DocAttrEnvelope>(DOC_ATTRS_MAP_NAME);
     const binding   = new YBinding(editor, ydoc, type, attrsMap);
     binding.bind();
     binding.markSynced();

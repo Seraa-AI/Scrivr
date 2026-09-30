@@ -16,7 +16,6 @@ import {
 import { resolveFont, substituteFamily, parseFont } from "./StyleResolver";
 import { layoutTableRowCells } from "./TableLayoutEngine";
 
-/** Extracts px size from a CSS font string like "bold 14px Georgia, serif". Returns null if not found. */
 /**
  * Resolves the rendered height and block spacing for a leaf block node.
  *

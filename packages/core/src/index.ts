@@ -50,4 +50,4 @@ export * from "./exports/semantic";
 export { DocAttrStep } from "prosemirror-transform";
 
 export { tableColumnCount } from "./table/attrs";
-export { resolveActiveFontSize, parseFontSizePx, DEFAULT_FONT_SIZE_PX } from "./fonts/activeFontSize";
+export { resolveActiveFontSize, DEFAULT_FONT_SIZE_PX } from "./fonts/activeFontSize";

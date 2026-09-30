@@ -17,7 +17,7 @@ import type {
 } from "./extensions/types";
 import type { Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
-import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
+import { BlockRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import type {
 	ActiveFontFamily,
@@ -505,11 +505,6 @@ export class Editor extends BaseEditor implements IEditor {
 	 * Pass to renderPage — maps node type names to BlockStrategy instances.
 	 */
 	readonly blockRegistry: BlockRegistry;
-
-	/**
-	 * Inline object registry built from all extensions.
-	 * Pass to renderPage — maps node type names to InlineStrategy instances.
-	 */
 
 	/**
 	 * Page chrome contributions from all extensions (headers, footers, etc.).
@@ -1094,21 +1089,21 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
-	 * The size in effect at the selection, in px.
-	 *
-	 * The counterpart to `getActiveFontFamily`: inline mark first, then the size
-	 * the block style renders at. Always a number, because a control needs a
-	 * value to show and every run has a size even when no mark states one — so a
-	 * caller reading the `fontSize` mark itself sees `undefined` over text the
-	 * document plainly draws at a size.
+	 * The size in effect at the selection, in px — the counterpart to
+	 * `getActiveFontFamily`. Inline `fontSize` mark if present, else the size the
+	 * block style renders at. Always a number.
 	 */
 	getActiveFontSize(): number {
 		const inline = this.getActiveMarkAttrs()["fontSize"]?.["size"];
-		const { blockType, blockAttrs } = this.getBlockInfo();
-		const level = blockAttrs["level"];
+		// The textblock the cursor is in, not `getBlockInfo()`'s depth-1
+		// ancestor: layout styles the leaf, so a heading inside a table cell is
+		// styled as a heading while its depth-1 node is the table — which has no
+		// style of its own and would fall through to `paragraph`.
+		const block = this.getActiveState().selection.$from.parent;
+		const level = block.attrs["level"];
 		return resolveActiveFontSize(
 			typeof inline === "number" ? inline : undefined,
-			getBlockStyle(this.fontConfig, blockType, typeof level === "number" ? level : undefined),
+			getBlockStyle(this.fontConfig, block.type.name, typeof level === "number" ? level : undefined),
 		);
 	}
 

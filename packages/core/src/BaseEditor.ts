@@ -83,16 +83,13 @@ export interface BaseEditorOptions {
 export class BaseEditor implements IBaseEditor {
   protected readonly manager: ExtensionManager;
   /**
-   * Inline node strategies, by node type name.
+   * Inline node strategies, by node type name. Pass to `renderPage`.
    *
    * On the base editor rather than the view, because measuring an inline atom is
-   * layout and not paint. An atom that sizes itself from a font can only do so
-   * if whatever lays it out can reach its strategy, and a headless caller had no
-   * registry to pass — so the atom took its declared size, the span carried no
-   * resolved face, and a headless render disagreed with the browser.
-   *
-   * `InlineStrategy.render` takes a canvas context and stays browser-only. The
-   * split is the point: the box is layout, the paint is a surface.
+   * layout and not paint: an atom that sizes itself from a font can only do so
+   * if whatever lays it out reaches its strategy, headless included.
+   * `InlineStrategy.render` takes a canvas context and stays browser-only — the
+   * box is layout, the paint is a surface.
    */
   readonly inlineRegistry: InlineRegistry;
   /**

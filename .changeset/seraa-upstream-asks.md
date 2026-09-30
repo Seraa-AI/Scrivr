@@ -15,18 +15,26 @@ representation in a `Y.XmlFragment` at all. A `.docx` imported with a header los
 it the first time the document was opened, and the save after wrote the schema's
 nulls over the import.
 
-A pair of functions rather than an exported envelope type, so a caller does not
-have to know the values are wrapped or that `localSeq` is a dedup hint it has no
-business setting. Seeding carries only attrs the reader's extensions declare,
+Seed before the room is live or after it has synced, never in between: the
+"leave what the room holds alone" check reads the local `Y.Doc`, which knows
+nothing of a server value still in flight, and Yjs settles two concurrent sets by
+client id rather than by which is newer. Seeding carries only attrs the reader's
+extensions declare — which means the editor supplying those names must carry the
+extensions that own them — 
 skips null values — every document offers one for every declared key, and writing
 those syncs an absence over a real policy — and leaves keys the room already
 holds alone, since the room may have been restored from cache before the
-projection was consulted. `DOC_ATTRS_MAP_NAME` is exported and now has one owner
-rather than being spelled in three places.
+projection was consulted. `DOC_ATTRS_MAP_NAME` and `isDocAttrEnvelope` are both exported and both now have
+one owner: the map was named in three places, and the shape had a second, looser
+check that accepted envelopes the live sync refuses — so a value the editors
+ignored was being persisted as real state and resurrected on every load.
 
 **`getActiveFontSize()`.** The counterpart to `getActiveFontFamily`, resolving
 inline mark then block style the way the family resolves through mark, attr and
-page config. A size control previously had to read the `fontSize` mark itself and
+page config. Styled from the textblock the cursor is in rather than its top-level
+ancestor, so a heading inside a table cell reports a heading's size — the
+ancestor is the table, which has no style of its own. The playground's size
+control reads it instead of re-deriving the rule with a hardcoded default. A size control previously had to read the `fontSize` mark itself and
 got `undefined` for every run without one — which is most runs, since a run with
 no mark still renders at the block style's size — so the control showed "unset"
 over text the document plainly draws at a size. Always returns a number, because

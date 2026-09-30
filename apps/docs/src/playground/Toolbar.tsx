@@ -118,7 +118,7 @@ export function Toolbar({
           {group === "size" ? (
             <SizeSelect
               items={groupMap.get(group)!}
-              activeMarkAttrs={activeMarkAttrs}
+              editor={editor}
               defaultFontSize={defaultFontSize}
               onCommand={onCommand}
             />
@@ -233,18 +233,19 @@ function ButtonLabel({ item }: { item: ToolbarItemSpec }) {
 
 function SizeSelect({
   items,
-  activeMarkAttrs,
+  editor,
   defaultFontSize,
   onCommand,
 }: {
   items: ToolbarItemSpec[];
-  activeMarkAttrs: Record<string, Record<string, unknown>>;
+  editor: Editor | null;
   defaultFontSize: number;
   onCommand: (cmd: string, args?: unknown[]) => void;
 }) {
-  const markSize = activeMarkAttrs["fontSize"]?.["size"];
-  // Fall back to document default size when no explicit mark is set.
-  const activeSize = typeof markSize === "number" ? markSize : defaultFontSize;
+  // The editor resolves this — mark, then block style — so the control shows the
+  // size the text is actually drawn at rather than a default for every unmarked
+  // run. `defaultFontSize` remains only for the moment before an editor exists.
+  const activeSize = editor ? editor.getActiveFontSize() : defaultFontSize;
   const value = String(activeSize);
   const presetValues = new Set(items.map((i) => String(i.args?.[0])));
   const hasCustomSize = !presetValues.has(value);

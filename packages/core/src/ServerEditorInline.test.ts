@@ -1,19 +1,16 @@
 /**
  * An inline atom has to be able to size itself headlessly.
  *
- * Layout reaches an inline node's strategy through a registry the caller
- * supplies. The registry lived on `Editor` only, so a `ServerEditor` had nothing
- * to pass: `measure()` never ran, the span carried no resolved face, and a PDF
- * node handler that draws its own text was handed no font to draw it in — the
- * correct response to which is to refuse. A headless render and a browser render
- * of the same document disagreed, and the atoms that size themselves from a
- * font were exactly the ones that could not work.
+ * Layout reaches a strategy through a registry the caller supplies, so a
+ * headless caller needs one to pass.
  */
 import { describe, expect, it } from "vitest";
 import { ServerEditor } from "./ServerEditor";
 import { StarterKit } from "./extensions/StarterKit";
 import { Extension } from "./extensions/Extension";
-import type { InlineStrategy } from "./layout/BlockRegistry";
+// Through the barrel, because a consumer implementing a strategy has to be
+// able to name the type.
+import type { IBaseEditor, InlineStrategy } from "./index";
 
 /**
  * An atom that sizes itself from the font it will be drawn in, the way a
@@ -52,11 +49,15 @@ describe("ServerEditor", () => {
 
     const strategy = editor.inlineRegistry.get("sizedAtom");
     expect(strategy).toBeDefined();
-    // The same strategy the browser would measure with, not a stand-in — and it
-    // answers from the font, which is the whole reason it must be reachable.
+    // It answers from the font, which is the whole reason it must be reachable.
     const measurer = { measureText: () => ({ width: 0 }) } as never;
     expect(strategy?.measure?.({} as never, "14px Georgia", measurer)).toEqual({ width: 42, height: 12 });
     expect(strategy?.measure?.({} as never, "24px Georgia", measurer)).toEqual({ width: 84, height: 12 });
+  });
+
+  it("offers the registry on the base contract, which is what a headless caller holds", () => {
+    const editor: IBaseEditor = new ServerEditor({ extensions: [StarterKit, Sized], content: doc });
+    expect(editor.inlineRegistry.get("sizedAtom")).toBeDefined();
   });
 
   it("has an empty registry rather than none when no extension declares one", () => {
