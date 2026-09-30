@@ -244,11 +244,13 @@ function SizeSelect({
 }) {
   // The editor resolves this — mark, then block style — so the control shows the
   // size the text is actually drawn at rather than a default for every unmarked
-  // run. `defaultFontSize` remains only for the moment before an editor exists.
+  // run. `null` means the selection spans more than one size: the box goes blank
+  // rather than naming one of them, which is what Word and Docs do and what
+  // stops a reader confirming a value that would resize the rest.
   const activeSize = editor ? editor.getActiveFontSize() : defaultFontSize;
-  const value = String(activeSize);
+  const value = activeSize === null ? "" : String(activeSize);
   const presetValues = new Set(items.map((i) => String(i.args?.[0])));
-  const hasCustomSize = !presetValues.has(value);
+  const hasCustomSize = value !== "" && !presetValues.has(value);
 
   return (
     <select
@@ -266,6 +268,7 @@ function SizeSelect({
       onMouseDown={(e) => e.stopPropagation()}
       title="Font size"
     >
+      {activeSize === null && <option value="" />}
       {hasCustomSize && <option value={value}>{value}</option>}
       {items.map((item) => (
         <option key={String(item.args?.[0])} value={String(item.args?.[0])}>

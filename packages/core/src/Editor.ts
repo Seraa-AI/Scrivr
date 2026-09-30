@@ -1093,18 +1093,40 @@ export class Editor extends BaseEditor implements IEditor {
 	 * `getActiveFontFamily`. Inline `fontSize` mark if present, else the size the
 	 * block style renders at. Always a number.
 	 */
-	getActiveFontSize(): number {
-		const inline = this.getActiveMarkAttrs()["fontSize"]?.["size"];
-		// The textblock the cursor is in, not `getBlockInfo()`'s depth-1
-		// ancestor: layout styles the leaf, so a heading inside a table cell is
-		// styled as a heading while its depth-1 node is the table — which has no
-		// style of its own and would fall through to `paragraph`.
-		const block = this.getActiveState().selection.$from.parent;
-		const level = block.attrs["level"];
-		return resolveActiveFontSize(
-			typeof inline === "number" ? inline : undefined,
-			getBlockStyle(this.fontConfig, block.type.name, typeof level === "number" ? level : undefined),
-		);
+	getActiveFontSize(): number | null {
+		const state = this.getActiveState();
+		const { from, to, empty, $from } = state.selection;
+
+		/** The size a run is drawn at: its own mark, else the style of its block. */
+		const sizeOf = (markSize: unknown, block: PmNode): number => {
+			const level = block.attrs["level"];
+			return resolveActiveFontSize(
+				typeof markSize === "number" ? markSize : undefined,
+				// The textblock itself, not a depth-1 ancestor: layout styles the
+				// leaf, so a heading inside a table cell is styled as a heading
+				// while its ancestor is the table, which has no style of its own.
+				getBlockStyle(this.fontConfig, block.type.name, typeof level === "number" ? level : undefined),
+			);
+		};
+
+		if (empty) {
+			return sizeOf(this.getActiveMarkAttrs()["fontSize"]?.["size"], $from.parent);
+		}
+
+		// Every run in the range, not the first: a selection covering a 24px run
+		// and an unmarked one has no single size, and naming either invites the
+		// reader to confirm it and resize the other.
+		let answer: number | null = null;
+		let mixed = false;
+		state.doc.nodesBetween(from, to, (node, _pos, parent) => {
+			if (mixed || !node.isText || !parent) return !mixed;
+			const mark = node.marks.find((m) => m.type.name === "fontSize");
+			const size = sizeOf(mark?.attrs["size"], parent);
+			if (answer === null) answer = size;
+			else if (answer !== size) mixed = true;
+			return !mixed;
+		});
+		return mixed ? null : answer;
 	}
 
 	/** True when the editor is in pageless (infinite-scroll) mode. */

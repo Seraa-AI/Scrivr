@@ -66,6 +66,12 @@ describe("Editor.getActiveFontSize", () => {
   const editorWith = (content: Record<string, unknown>) =>
     createTestEditor({ extensions: [StarterKit], content });
 
+  const over = (editor: ReturnType<typeof createTestEditor>, from: number, to: number) => {
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, from, to)));
+    return editor.getActiveFontSize();
+  };
+
   const at = (editor: ReturnType<typeof createTestEditor>, pos: number) => {
     const state = editor.getState();
     editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, pos)));
@@ -81,8 +87,8 @@ describe("Editor.getActiveFontSize", () => {
       ],
     });
 
-    const heading = at(editor, 3);
-    const body = at(editor, editor.getState().doc.child(0).nodeSize + 3);
+    const heading = at(editor, 3)!;
+    const body = at(editor, editor.getState().doc.child(0).nodeSize + 3)!;
 
     // Both are real sizes, and a heading is larger than its body — which is the
     // thing a caller reading the mark alone could not see at all.
@@ -116,7 +122,57 @@ describe("Editor.getActiveFontSize", () => {
     });
     // A heading is a heading wherever it sits; the table has no style of its own
     // and would otherwise answer with the paragraph's.
-    expect(inCell).toBeGreaterThan(at(plain, 3));
+    expect(inCell).not.toBeNull();
+    expect(inCell!).toBeGreaterThan(at(plain, 3)!);
+  });
+
+  it("says nothing when the selection spans more than one size", () => {
+    const editor = editorWith({
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [
+          { type: "text", text: "big", marks: [{ type: "fontSize", attrs: { size: 24 } }] },
+          { type: "text", text: " plain" },
+        ],
+      }],
+    });
+
+    // Each run on its own reports its own size.
+    expect(over(editor, 1, 4)).toBe(24);
+    const plainRun = over(editor, 4, 10);
+    expect(plainRun).not.toBeNull();
+    expect(plainRun!).toBeGreaterThan(0);
+    // Across both there is no single answer, and naming one of them invites the
+    // reader to confirm it and resize the other.
+    expect(over(editor, 1, 10)).toBeNull();
+  });
+
+  it("answers when every run in the selection agrees", () => {
+    const editor = editorWith({
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [
+          { type: "text", text: "one", marks: [{ type: "fontSize", attrs: { size: 20 } }] },
+          { type: "text", text: " two", marks: [{ type: "fontSize", attrs: { size: 20 } }] },
+        ],
+      }],
+    });
+
+    expect(over(editor, 1, 8)).toBe(20);
+  });
+
+  it("says nothing across blocks whose styles differ", () => {
+    const editor = editorWith({
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Title" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Body" }] },
+      ],
+    });
+
+    expect(over(editor, 1, 12)).toBeNull();
   });
 
   it("prefers a size the run's own mark states", () => {

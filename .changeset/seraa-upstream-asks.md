@@ -33,8 +33,13 @@ ignored was being persisted as real state and resurrected on every load.
 inline mark then block style the way the family resolves through mark, attr and
 page config. Styled from the textblock the cursor is in rather than its top-level
 ancestor, so a heading inside a table cell reports a heading's size — the
-ancestor is the table, which has no style of its own. The playground's size
-control reads it instead of re-deriving the rule with a hardcoded default. A size control previously had to read the `fontSize` mark itself and
+ancestor is the table, which has no style of its own.
+
+Returns `null` when the selection spans more than one size. Answering from the
+first run would name a size the rest of the selection is not drawn at, and a
+reader confirming it resizes everything else — so the control goes blank, which
+is what Word and Google Docs do. The playground reads this instead of
+re-deriving the rule with a hardcoded default, and blanks its box accordingly. A size control previously had to read the `fontSize` mark itself and
 got `undefined` for every run without one — which is most runs, since a run with
 no mark still renders at the block style's size — so the control showed "unset"
 over text the document plainly draws at a size. Always returns a number, because
