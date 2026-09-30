@@ -82,14 +82,18 @@ const AiSuggestionTestExtension = Extension.create({
  * `showAiSuggestion` / `applyAiSuggestion` / `rejectAiSuggestion`.
  */
 export class AiTestEditor extends ServerEditor {
-  constructor(initialDoc: PmNode, authorID = "user1") {
+  /**
+   * `trackChanges: false` drops the extension entirely — the shape a host that
+   * uses the suggestion lane without review gets, where a tracked apply has no
+   * tracked mark to write with.
+   */
+  constructor(initialDoc: PmNode, authorID = "user1", options: { trackChanges?: boolean } = {}) {
     super({
       extensions: [
         StarterKit,
-        TrackChanges.configure({
-          userID: authorID,
-          initialStatus: TrackChangesStatus.enabled,
-        }),
+        ...(options.trackChanges === false
+          ? []
+          : [TrackChanges.configure({ userID: authorID, initialStatus: TrackChangesStatus.enabled })]),
         AiSuggestionTestExtension,
       ],
       content: initialDoc.toJSON() as Record<string, unknown>,
@@ -117,4 +121,13 @@ export class AiTestEditor extends ServerEditor {
   reject(options?: RejectAiSuggestionOptions): void {
     rejectAiSuggestion(this, options);
   }
+}
+
+/** Text carrying a given mark — how a reader would see a formatting change. */
+export function markedText(editor: ServerEditor, markName: string): string {
+  let out = "";
+  editor.getState().doc.descendants((node) => {
+    if (node.isText && node.marks.some((m) => m.type.name === markName)) out += node.text;
+  });
+  return out;
 }

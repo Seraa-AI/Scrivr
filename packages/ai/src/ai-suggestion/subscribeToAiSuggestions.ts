@@ -42,8 +42,11 @@ export interface AiSuggestionCardData {
    * UIs can use this to show richer context ("Simplified tone and removed jargon").
    */
   summary: string | undefined;
-  /** Semantic kind: "rewrite" | "insert" | "delete" */
-  kind: "rewrite" | "insert" | "delete";
+  /**
+   * What the proposal does: rewrites the wording, adds to it, removes from it,
+   * or changes how it reads without touching a word.
+   */
+  kind: "rewrite" | "insert" | "delete" | "format";
   /** True when the document has changed since the suggestion was set. */
   isStale: boolean;
   /** True when the cursor is inside this block. */
@@ -105,18 +108,25 @@ function deriveCard(
   isActive: boolean,
   isHovered: boolean,
 ): AiSuggestionCardData {
-  const hasInsert = block.ops.some((o: AiOp) => o.type === "insert");
-  const hasDelete = block.ops.some((o: AiOp) => o.type === "delete");
+  const ops = block.ops;
+  const hasInsert = ops.some((o: AiOp) => o.type === "insert");
+  const hasDelete = ops.some((o: AiOp) => o.type === "delete");
+  // A keep carrying marks proposes formatting on text that stays, so a block
+  // can propose something while having neither an insert nor a delete.
+  const formatted = ops.filter((o: AiOp) => o.type === "keep" && o.marks);
 
   let autoLabel: string;
   let kind: AiSuggestionCardData["kind"];
 
-  if (hasInsert && hasDelete) {
+  if (!hasInsert && !hasDelete && formatted.length > 0) {
+    kind = "format";
+    autoLabel = truncate(formatted.map((o: AiOp) => o.text).join(" ").trim(), 36) || "Formatting";
+  } else if (hasInsert && hasDelete) {
     kind = "rewrite";
     autoLabel = truncate(block.acceptedText.trim(), 36) || "Rewrite";
   } else if (hasInsert) {
     kind = "insert";
-    const text = block.ops
+    const text = ops
       .filter((o: AiOp) => o.type === "insert")
       .map((o: AiOp) => o.text)
       .join(" ")

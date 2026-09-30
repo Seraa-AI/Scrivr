@@ -15,6 +15,7 @@ export {
   aiSuggestionPlugin,
   aiSuggestionPluginKey,
   AI_SUGGESTION_SET,
+  AI_SUGGESTION_SETTLE,
   AI_SUGGESTION_SET_STALE,
   AI_SUGGESTION_SET_HOVER,
   AI_SUGGESTION_SET_ACTIVE,
@@ -51,10 +52,12 @@ export {
   renderDeleteHighlight,
   renderInsertMarker,
   buildOpRenderInstructions,
+  renderFormatHighlight,
   renderInstructions,
 } from "./renderAiSuggestionOps";
 export type {
   InsertRenderInstruction,
   DeleteRenderInstruction,
+  FormatRenderInstruction,
   RenderInstruction,
 } from "./renderAiSuggestionOps";

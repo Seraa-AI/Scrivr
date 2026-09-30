@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { computeAiSuggestion } from "../computeAiSuggestion";
-import { AiTestEditor, doc, p, schema } from "./helpers";
+import { AiTestEditor, doc, markedText, p, schema } from "./helpers";
 
 const build = (text: string) => new AiTestEditor(doc(p(text, "p1")));
 
@@ -68,14 +68,6 @@ describe("computeAiSuggestion with spans", () => {
   });
 });
 
-const boldedText = (editor: AiTestEditor) => {
-  let bolded = "";
-  editor.getState().doc.descendants((node) => {
-    if (node.isText && node.marks.some((m) => m.type.name === "bold")) bolded += node.text;
-  });
-  return bolded;
-};
-
 describe("applying a formatted suggestion", () => {
   it("applies a formatting-only proposal, whose ops are all keeps", () => {
     const editor = build("Confidential Information");
@@ -87,7 +79,7 @@ describe("applying a formatted suggestion", () => {
     editor.showSuggestion(suggestion);
     editor.apply({ mode: "direct" });
 
-    expect(boldedText(editor)).toBe("Confidential Information");
+    expect(markedText(editor, "bold")).toBe("Confidential Information");
   });
 
   it("removes formatting the proposal drops", () => {
@@ -102,7 +94,7 @@ describe("applying a formatted suggestion", () => {
     editor.showSuggestion(suggestion);
     editor.apply({ mode: "direct" });
 
-    expect(boldedText(editor)).toBe("");
+    expect(markedText(editor, "bold")).toBe("");
   });
 
   it("writes the inserted run with its marks", () => {
@@ -119,7 +111,7 @@ describe("applying a formatted suggestion", () => {
     editor.showSuggestion(suggestion);
     editor.apply({ mode: "direct" });
 
-    expect(boldedText(editor)).toContain("defined");
+    expect(markedText(editor, "bold")).toContain("defined");
   });
 });
 
@@ -188,6 +180,6 @@ describe("what a proposal is allowed to do to the document", () => {
 
     // Accepting one word swap must not strip the reader's own formatting from
     // text that swap never spoke about.
-    expect(boldedText(editor)).toContain("keep this");
+    expect(markedText(editor, "bold")).toContain("keep this");
   });
 });

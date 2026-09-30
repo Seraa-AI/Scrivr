@@ -17,7 +17,7 @@
  */
 
 import { Extension } from "@scrivr/core";
-import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
+import type { IBaseEditor, IEditor, OverlayRenderHandler } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
@@ -50,28 +50,19 @@ export interface AiSuggestionOptions {
   renderMode: AiSuggestionRenderMode;
 }
 
-export const AiSuggestion = Extension.create<AiSuggestionOptions>({
-  name: "aiSuggestion",
 
-  defaultOptions: {
-    renderMode: "active-only",
-  },
-
-  addProseMirrorPlugins() {
-    return [aiSuggestionPlugin];
-  },
-
-  onViewReady(editor: IEditor) {
-    const cleanups: Array<() => void> = [];
-
-    const { renderMode } = this.options;
-
-    // "none" — app handles all rendering; skip registering a handler entirely.
-    if (renderMode === "none") {
-      return () => { for (const c of cleanups) c(); };
-    }
-
-    const handler: OverlayRenderHandler = (
+/**
+ * What the overlay draws for the current suggestion.
+ *
+ * A named unit rather than a closure inside `onViewReady`, because the decision
+ * it makes per block — whether there is anything to draw at all — is the part
+ * worth testing, and testing it should not require a live view.
+ */
+export function createSuggestionOverlayHandler(
+  editor: IBaseEditor,
+  renderMode: Exclude<AiSuggestionRenderMode, "none">,
+): OverlayRenderHandler {
+  return (
       ctx,
       pageNumber,
       pageConfig,
@@ -118,27 +109,54 @@ export const AiSuggestion = Extension.create<AiSuggestionOptions>({
         ctx.lineTo(stripeX, bottom - 3);
         ctx.stroke();
 
-        // ── Dashed red underlines for deleted text ─────────────────────────
-        if (block.ops.some((op) => op.type === "delete")) {
-          const { map } = buildAcceptedTextMap(
-            found.node,
-            found.pos,
-            state.schema,
-          );
+        // ── Per-run decoration: deletions, and formatting on retained text ──
+        // Asking for the instructions unconditionally is the point: the builder
+        // decides which ops draw. Gating on one op type here is how a
+        // formatting-only proposal — which has no deletion by definition —
+        // used to render as nothing but the margin stripe.
+        const { map } = buildAcceptedTextMap(
+          found.node,
+          found.pos,
+          state.schema,
+        );
 
-          const instructions = buildOpRenderInstructions(
-            block.ops,
-            map,
-            charMap,
-            pageNumber,
-          );
+        const instructions = buildOpRenderInstructions(
+          block.ops,
+          map,
+          charMap,
+          pageNumber,
+        );
 
-          renderInstructions(ctx, instructions, charMap, isActive);
-        }
+        renderInstructions(ctx, instructions, charMap, isActive);
 
         ctx.restore();
       }
     };
+
+}
+
+export const AiSuggestion = Extension.create<AiSuggestionOptions>({
+  name: "aiSuggestion",
+
+  defaultOptions: {
+    renderMode: "active-only",
+  },
+
+  addProseMirrorPlugins() {
+    return [aiSuggestionPlugin];
+  },
+
+  onViewReady(editor: IEditor) {
+    const cleanups: Array<() => void> = [];
+
+    const { renderMode } = this.options;
+
+    // "none" — app handles all rendering; skip registering a handler entirely.
+    if (renderMode === "none") {
+      return () => { for (const c of cleanups) c(); };
+    }
+
+    const handler = createSuggestionOverlayHandler(editor, renderMode);
 
     const unregister = editor.addOverlayRenderHandler(handler);
     cleanups.push(unregister);

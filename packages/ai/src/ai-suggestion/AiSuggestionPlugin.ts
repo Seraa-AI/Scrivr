@@ -24,6 +24,16 @@ export const AI_SUGGESTION_SET        = "aiSuggestion:set";
 export const AI_SUGGESTION_SET_STALE  = "aiSuggestion:setStale";
 export const AI_SUGGESTION_SET_HOVER  = "aiSuggestion:setHover";
 export const AI_SUGGESTION_SET_ACTIVE = "aiSuggestion:setActive";
+/**
+ * One group of the current suggestion has been settled.
+ *
+ * Distinct from `AI_SUGGESTION_SET`, which means "a different suggestion
+ * arrived" and resets what the reader was looking at. Settling a group is the
+ * reader acting *within* the suggestion they are already reading — clearing the
+ * active block there blanks the overlay for everything else in it, and nothing
+ * restores it until the caret moves, which accepting formatting does not do.
+ */
+export const AI_SUGGESTION_SETTLE    = "aiSuggestion:settle";
 
 const EMPTY_STATE: AiSuggestionPluginState = {
   suggestion:    null,
@@ -51,6 +61,14 @@ export const aiSuggestionPlugin = new Plugin<AiSuggestionPluginState>({
           hoverBlockId:  null,
           activeBlockId: null,
         };
+      }
+
+      // Handle AI_SUGGESTION_SETTLE — the suggestion changes, the view does not.
+      const settled = tr.getMeta(AI_SUGGESTION_SETTLE) as
+        | { value: AiSuggestionPluginState["suggestion"] }
+        | undefined;
+      if (settled !== undefined) {
+        return { ...prev, suggestion: settled.value };
       }
 
       // Handle AI_SUGGESTION_SET_STALE

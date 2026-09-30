@@ -16,6 +16,7 @@ import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContai
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { buildAcceptedTextMap, acceptedRangeToDocRange } from "@scrivr/plugins";
 import { aiSuggestionPluginKey } from "./AiSuggestionPlugin";
+import { buildGroupRanges, type GroupRange } from "./groupRanges";
 import type { AiSuggestion, AiOp } from "./types";
 
 /**
@@ -28,6 +29,13 @@ export interface SuggestionGroupInfo {
   replacedText: string;
   /** The replacement text being proposed. Empty string for pure deletions. */
   insertedText: string;
+  /**
+   * Set when the group proposes formatting rather than wording — the run whose
+   * appearance changes, with its words unchanged. A UI that renders
+   * `replacedText → insertedText` has nothing to show for one of these and
+   * should describe the formatting instead.
+   */
+  formattedText?: string;
   /** The suggestion this group belongs to (for apply/reject calls). */
   suggestion: AiSuggestion;
   /** Whether this block's acceptedText has drifted from the live document. */
@@ -49,85 +57,6 @@ export interface SuggestionPopoverCallbacks {
   getPopoverElement?: () => HTMLElement | null;
 }
 
-/**
- * Walk a block's ops and collect from/to doc positions for each unique groupId.
- * Returns a map of groupId → { from, to } covering all ops in that group.
- */
-function buildGroupRanges(
-  ops: AiOp[],
-  map: ReturnType<typeof buildAcceptedTextMap>["map"],
-): Map<string, { from: number; to: number; replacedText: string; insertedText: string }> {
-  const groups = new Map<string, {
-    deleteFrom: number; deleteTo: number; deleteText: string;
-    insertText: string;
-    hasInsert: boolean;
-    insertAnchor: number | null;
-  }>();
-
-  let acceptedOffset = 0;
-
-  for (const op of ops) {
-    if (op.type === "keep") {
-      acceptedOffset += op.text.length;
-      continue;
-    }
-
-    const groupId = op.groupId;
-    if (!groupId) {
-      if (op.type === "delete") acceptedOffset += op.text.length;
-      continue;
-    }
-
-    if (!groups.has(groupId)) {
-      groups.set(groupId, {
-        deleteFrom: Infinity, deleteTo: -Infinity,
-        deleteText: "", insertText: "", hasInsert: false, insertAnchor: null,
-      });
-    }
-    const g = groups.get(groupId)!;
-
-    if (op.type === "delete") {
-      const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
-      if (range) {
-        g.deleteFrom = Math.min(g.deleteFrom, range.from);
-        g.deleteTo   = Math.max(g.deleteTo,   range.to);
-      }
-      g.deleteText += op.text;
-      acceptedOffset += op.text.length;
-    } else {
-      // insert — anchor at current acceptedOffset
-      if (!g.hasInsert) {
-        const anchor = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
-        g.insertAnchor = anchor?.from ?? null;
-      }
-      g.insertText += op.text;
-      g.hasInsert = true;
-    }
-  }
-
-  const result = new Map<string, { from: number; to: number; replacedText: string; insertedText: string }>();
-
-  for (const [groupId, g] of groups) {
-    let from: number;
-    let to: number;
-    if (g.deleteFrom !== Infinity) {
-      from = g.deleteFrom;
-      to   = g.deleteTo === -Infinity ? from : g.deleteTo;
-    } else {
-      // Pure insert — use the anchor doc position
-      from = g.insertAnchor ?? 0;
-      to   = from;
-    }
-    result.set(groupId, {
-      from,
-      to,
-      replacedText: g.deleteText,
-      insertedText: g.insertText,
-    });
-  }
-
-  return result;
-}
 
 /**
  * Create a headless AI suggestion popover controller.
@@ -165,7 +94,7 @@ export function createSuggestionPopover(
     const schema = state.schema;
 
     // Find the first group whose doc range contains the cursor.
-    let found: { groupId: string; from: number; to: number; replacedText: string; insertedText: string; isStale: boolean } | null = null;
+    let found: (GroupRange & { groupId: string; isStale: boolean }) | null = null;
 
     outer: for (const block of suggestion.blocks) {
       const nodeFound = findNodeById(state.doc, block.nodeId);
@@ -184,7 +113,7 @@ export function createSuggestionPopover(
       if (groupRanges.size === 0) continue;
 
       let bestGroupId: string | null = null;
-      let bestRange: { from: number; to: number; replacedText: string; insertedText: string } | null = null;
+      let bestRange: GroupRange | null = null;
       let bestDist = Infinity;
 
       for (const [gId, range] of groupRanges) {
@@ -224,6 +153,7 @@ export function createSuggestionPopover(
       groupId:      found.groupId,
       replacedText: found.replacedText,
       insertedText: found.insertedText,
+      ...(found.formattedText !== undefined ? { formattedText: found.formattedText } : {}),
       suggestion,
       isStale:      found.isStale,
     };

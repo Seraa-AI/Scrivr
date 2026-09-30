@@ -19,13 +19,14 @@
 import type { EditorState, Node as PmNode, Schema } from "@scrivr/core/pm";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { buildAcceptedTextMap, isTrackedMark } from "@scrivr/plugins";
+import { buildAcceptedTextMap } from "@scrivr/plugins";
 import { diffText, pairReplacements } from "@scrivr/plugins";
 import type { PairedDiffOp } from "@scrivr/plugins";
 import { describeInlineMark, resolveInlineMarks, stableStringify, type InlineMark } from "@scrivr/core";
 import type { InlineSpan } from "../schema/edit";
 import { toCoreSpans } from "../ai-toolkit/spans";
 import type { AiSuggestion, AiSuggestionBlock, AiOp } from "./types";
+import { currentMarksAt, sameMarks } from "./marks";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -83,44 +84,21 @@ function readProposal(block: {
 }
 
 /**
- * Does the block already read the way the proposal asks? Compares the marks the
- * proposal assigns each character against the marks the block's text carries, so
- * a proposal that only restates the current formatting is not a suggestion.
+ * Split a keep again wherever the formatting it *currently* carries changes, so
+ * each piece can be judged against a single existing formatting.
  */
-function marksMatchBlock(node: PmNode, marksAt: InlineMark[][]): boolean {
-  const current: InlineMark[][] = [];
-  node.descendants((child) => {
-    if (!child.isText || !child.text) return;
-    // Tracked-deleted text is not in the accepted text the proposal was diffed
-    // against, so counting it here would make every block under review look
-    // like a formatting change.
-    if (child.marks.some((mark) => mark.type.name === "trackedDelete")) return;
-    const marks = child.marks
-      .filter((mark) => !isTrackedMark(mark.type.name))
-      .map(describeInlineMark);
-    for (let i = 0; i < child.text.length; i++) current.push(marks);
-  });
-  if (current.length !== marksAt.length) return false;
-  return current.every((marks, i) => sameMarks(marks, marksAt[i] ?? []));
-}
-
-/**
- * Two runs read the same way — so they can stay one op.
- *
- * Order-insensitive and attrs-aware, because the two sides come from different
- * places: document marks arrive in schema order, and an agent emits them in
- * whatever order it wrote them. Comparing those literally would read a reordered
- * `[bold, italic]` as a formatting change.
- */
-function markKey(mark: InlineMark): string {
-  return stableStringify([mark.type, mark.attrs ?? {}]);
-}
-
-function sameMarks(a: readonly InlineMark[], b: readonly InlineMark[]): boolean {
-  if (a.length !== b.length) return false;
-  const left = a.map(markKey).sort();
-  const right = b.map(markKey).sort();
-  return left.every((key, i) => key === right[i]);
+function splitByCurrentMarks(op: AiOp, current: InlineMark[][], offset: number): AiOp[] {
+  const out: AiOp[] = [];
+  let runStart = 0;
+  for (let i = 1; i <= op.text.length; i++) {
+    const here = current[offset + i] ?? [];
+    const prev = current[offset + i - 1] ?? [];
+    if (i === op.text.length || !sameMarks(here, prev)) {
+      out.push({ ...op, text: op.text.slice(runStart, i) });
+      runStart = i;
+    }
+  }
+  return out.length > 0 ? out : [op];
 }
 
 /**
@@ -144,23 +122,21 @@ function splitByMarks(op: AiOp, marksAt: InlineMark[][], offset: number): AiOp[]
 }
 
 /**
- * Convert PairedDiffOp[] (from diffText + pairReplacements) to AiOp[].
+ * One diff op as a suggestion op. `proposedOffset` stays behind: it is diff
+ * bookkeeping the caller needs while building, not something a suggestion
+ * carries into storage.
  *
- * pairReplacements assigns a groupId to paired delete+insert ops. Standalone
- * deletes or inserts (no natural pair within the look-ahead window) get a
- * generated groupId so the API surface is uniform — every non-keep op can be
- * individually accepted or rejected via groupId.
+ * `nodeId` prefixes the generated ids because a group is addressed across the
+ * whole suggestion, and an index into one block's ops repeats in every block.
  */
-function toDiffOps(pairedOps: PairedDiffOp[]): AiOp[] {
-  return pairedOps.map((op, i): AiOp => {
-    if (op.type === "keep") return { type: "keep", text: op.text };
-    // Use the existing groupId from pairReplacements, or generate a unique one
-    // for standalone ops that weren't paired (no matching insert/delete nearby).
-    const gid = op.groupId ?? `solo_${i}`;
-    if (op.type === "delete")
-      return { type: "delete", text: op.text, groupId: gid };
-    return { type: "insert", text: op.text, groupId: gid };
-  });
+function toDiffOp(op: PairedDiffOp, i: number, nodeId: string): AiOp {
+  if (op.type === "keep") return { type: "keep", text: op.text };
+  // Use the existing groupId from pairReplacements, or generate a unique one
+  // for standalone ops that weren't paired (no matching insert/delete nearby).
+  const gid = `${nodeId}_${op.groupId ?? `solo_${i}`}`;
+  if (op.type === "delete")
+    return { type: "delete", text: op.text, groupId: gid };
+  return { type: "insert", text: op.text, groupId: gid };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -170,9 +146,8 @@ function toDiffOps(pairedOps: PairedDiffOp[]): AiOp[] {
  *
  * @param state    Current editor state (read-only — not mutated).
  * @param options  Blocks to rewrite and the author ID.
- * @returns        A serializable AiSuggestion, or null if no meaningful changes
- *                 were found (every proposed text is identical to the current
- *                 accepted text).
+ * @returns        A serializable AiSuggestion, or null when the proposal
+ *                 matches the document in both words and formatting.
  *
  * @example
  * const suggestion = computeAiSuggestion(editor.getState(), {
@@ -205,26 +180,53 @@ export function computeAiSuggestion(
     const rawOps = diffText(acceptedText, proposal.text);
     const paired = pairReplacements(rawOps);
 
-    // Ops that consume the proposal carry its formatting; a delete describes
-    // text already in the document, so it advances neither.
-    let proposedOffset = 0;
+    // Two cursors: one into the document's accepted text, which deletes and
+    // keeps consume, and one into the proposal, which keeps and inserts consume.
+    const current = currentMarksAt(found.node);
+    let formatGroups = 0;
+    let acceptedOffset = 0;
     const ops: AiOp[] = [];
-    for (const op of toDiffOps(paired)) {
+    for (const [i, raw] of paired.entries()) {
+      const op = toDiffOp(raw, i, nodeId);
       if (op.type === "delete") {
         ops.push(op);
+        acceptedOffset += op.text.length;
         continue;
       }
-      ops.push(...splitByMarks(op, proposal.marksAt, proposedOffset));
-      proposedOffset += op.text.length;
+      // Where this op sits in the proposal comes from the op itself. Counting
+      // as we walk would be wrong: `pairReplacements` emits in document order,
+      // which is what applying a diff needs and is not the order the proposal
+      // reads in, so a counted offset lands on the wrong words.
+      const proposedOffset = raw.type === "delete" ? 0 : raw.proposedOffset ?? 0;
+      for (const part of splitByMarks(op, proposal.marksAt, proposedOffset)) {
+        if (part.type !== "keep" || !part.marks) {
+          ops.push(part);
+          if (part.type === "keep") acceptedOffset += part.text.length;
+          continue;
+        }
+        // A keep was split where the *proposal's* formatting changes. The
+        // document's own formatting changes at its own boundaries — "alpha"
+        // can be half bold — so split again there before deciding, or a run
+        // whose first character already matches hides the rest of the change.
+        for (const run of splitByCurrentMarks(part, current, acceptedOffset)) {
+          const unchanged = sameMarks(run.marks ?? [], current[acceptedOffset] ?? []);
+          ops.push(
+            unchanged
+              // Restating what a run already reads as is not a proposal.
+              ? { type: "keep", text: run.text }
+              // Its own group, so a reader accepts this run's formatting the
+              // way they accept a word swap, scoped to the text it spoke about.
+              : { ...run, groupId: `fmt_${nodeId}_${formatGroups++}` },
+          );
+          acceptedOffset += run.text.length;
+        }
+      }
     }
 
-    // A wording change shows up as a non-keep op. A formatting-only change does
-    // not — every op is a keep — so compare the formatting the block would end
-    // up with against the formatting it has.
-    const hasWordingChange = ops.some((o) => o.type !== "keep");
-    const hasFormattingChange =
-      proposal.marksAt.length > 0 && !marksMatchBlock(found.node, proposal.marksAt);
-    if (!hasWordingChange && !hasFormattingChange) continue;
+    // A wording change shows up as a non-keep op; a formatting change shows up
+    // as a keep that carries marks. One derivation, read off the ops themselves,
+    // so what the overlay draws and what the apply writes cannot disagree.
+    if (!ops.some((o) => o.type !== "keep" || o.marks)) continue;
 
     resultBlocks.push({ nodeId, acceptedText, ops, ...(summary ? { summary } : {}) });
   }

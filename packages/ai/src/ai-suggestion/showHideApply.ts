@@ -16,10 +16,12 @@ import type { InlineMark } from "@scrivr/core";
 import { Fragment } from "@scrivr/core/pm";
 import type { Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 import { findNodeById } from "../ai-toolkit/UniqueId";
+import { rebaseAfterSettle } from "./rebase";
 import type { AiOp, AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
 import {
   aiSuggestionPluginKey,
   AI_SUGGESTION_SET,
+  AI_SUGGESTION_SETTLE,
 } from "./AiSuggestionPlugin";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
 import { isTrackedMark, skipTracking, trackAsSuggestion, trackChangesPluginKey, TrackChangesAction, setAction } from "@scrivr/plugins";
@@ -48,6 +50,10 @@ export function showAiSuggestion(editor: IBaseEditor, suggestion: AiSuggestion |
 /**
  * Apply the current AI suggestion to the document.
  *
+ * Applying a single `groupId` rebuilds the rest of the suggestion against the
+ * resulting document, so an `AiSuggestion` held across the call is superseded —
+ * read the current one back from plugin state.
+ *
  * mode "direct"  — writes the proposed text directly into the document.
  * mode "tracked" — records changes as tracked insert/delete marks.
  *
@@ -67,6 +73,14 @@ export function applyAiSuggestion(
     affectedBlocks = affectedBlocks.filter((b) => b.nodeId === blockId);
   }
 
+  // What the document held before, so settling can tell "applied" from
+  // "attempted". An accept that wrote nothing — tracked mode without the
+  // TrackChanges extension, or a block the reader has since edited out from
+  // under the proposal — must leave the group pending rather than retire it:
+  // rebasing on the assumption text moved, when it did not, walks the rest of
+  // the proposal across characters that are still there.
+  const before = editor.getState().doc;
+
   applyKeepFormatting(editor, affectedBlocks, groupId, mode !== "direct");
 
   if (mode === "direct") {
@@ -75,13 +89,16 @@ export function applyAiSuggestion(
     _applyTracked(editor, affectedBlocks, groupId);
   }
 
-  // Remove accepted block(s) from the suggestion; clear when none remain
-  if (!groupId) {
-    const remaining = blockId
-      ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
-      : [];
-    showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
+  if (groupId) {
+    if (editor.getState().doc !== before) settleGroup(editor, ps.suggestion, groupId, true);
+    return;
   }
+
+  // Remove accepted block(s) from the suggestion; clear when none remain
+  const remaining = blockId
+    ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
+    : [];
+  showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
 }
 
 /**
@@ -124,6 +141,31 @@ function applyRunMarks(
 }
 
 /**
+ * Record that a group is finished — see `rebaseAfterSettle` for why that means
+ * rebuilding the rest of the proposal rather than marking it done.
+ *
+ * Dispatched as a settle rather than as a new suggestion: the reader is still
+ * reading this one, and replacing it wholesale clears the active block and
+ * blanks the rest of the overlay until the caret happens to move.
+ */
+function settleGroup(
+  editor: IBaseEditor,
+  suggestion: AiSuggestion,
+  groupId: string,
+  accepted: boolean,
+): void {
+  const owner = suggestion.blocks.find((block) => block.ops.some((op) => op.groupId === groupId));
+  const next = owner
+    ? rebaseAfterSettle(editor, suggestion, owner.nodeId, groupId, accepted)
+    : suggestion;
+
+  const tr = editor.getState().tr;
+  tr.setMeta(AI_SUGGESTION_SETTLE, { value: next });
+  skipTracking(tr);
+  editor.applyTransaction(tr);
+}
+
+/**
  * Apply the formatting a proposal asks for on the text it keeps.
  *
  * Its own transaction, before any text moves, so every range resolves against
@@ -133,10 +175,10 @@ function applyRunMarks(
  * formatting exactly as they reject the words. Direct mode skips tracking,
  * which is what direct means.
  *
- * Accepting one replacement group applies no formatting at all: a keep's marks
- * describe the whole block, and `applyRunMarks` removes what the proposal
- * omits, so running it for a single group would strip the reader's own
- * formatting from text that group never spoke about.
+ * A formatting keep carries its own `groupId`, so accepting one group applies
+ * exactly that run's formatting — `applyRunMarks` removes what the proposal
+ * omits, and the run is the only text that group spoke about. Accepting a
+ * word-swap group touches no formatting, because it is a different group.
  */
 function applyKeepFormatting(
   editor: IBaseEditor,
@@ -144,7 +186,7 @@ function applyKeepFormatting(
   groupId: string | undefined,
   tracked: boolean,
 ): void {
-  if (groupId || (tracked && !trackChangesPluginKey.getState(editor.getState()))) return;
+  if (tracked && !trackChangesPluginKey.getState(editor.getState())) return;
 
   const state = editor.getState();
   const schema = state.schema;
@@ -161,7 +203,7 @@ function applyKeepFormatting(
     let acceptedOffset = 0;
     for (const op of block.ops) {
       if (op.type === "insert") continue;
-      if (op.type === "keep" && op.marks) {
+      if (op.type === "keep" && op.marks && (!groupId || op.groupId === groupId)) {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
         if (range) {
           applyRunMarks(tr, schema, range.from, range.to, op.marks);
@@ -417,11 +459,14 @@ export function rejectAiSuggestion(
   setAction(tr, TrackChangesAction.refreshChanges, true);
   editor.applyTransaction(tr);
 
-  // Remove rejected block(s) from the suggestion; clear when none remain
-  if (!groupId) {
-    const remaining = blockId
-      ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
-      : [];
-    showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
+  if (groupId) {
+    settleGroup(editor, ps.suggestion, groupId, false);
+    return;
   }
+
+  // Remove rejected block(s) from the suggestion; clear when none remain
+  const remaining = blockId
+    ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
+    : [];
+  showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
 }
