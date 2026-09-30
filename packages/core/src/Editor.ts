@@ -1062,6 +1062,7 @@ export class Editor extends BaseEditor implements IEditor {
 	getActiveFontFamily(): ActiveFontFamily {
 		const inline = this.getActiveMarkAttrs()["fontFamily"]?.["family"];
 		const block = this.getBlockInfo().blockAttrs["fontFamily"];
+		const mixed = this.selectionSpansMultipleFamilies();
 		const requested = primaryFamily(
 			typeof inline === "string" && inline.length > 0
 				? inline
@@ -1070,7 +1071,7 @@ export class Editor extends BaseEditor implements IEditor {
 					: (this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
 		);
 
-		if (!this.fonts) return { requested, resolved: requested, substituted: false };
+		if (!this.fonts) return { requested, resolved: requested, substituted: false, mixed };
 
 		const marks = this.getActiveMarks();
 		const { resolved } = this.fonts.resolve({
@@ -1085,7 +1086,40 @@ export class Editor extends BaseEditor implements IEditor {
 			requested,
 			resolved: resolved.family,
 			substituted: resolved.family !== requested,
+			mixed,
 		};
+	}
+
+	/**
+	 * Does the selection cover runs that are drawn in different families?
+	 *
+	 * Asked of every run rather than the first: `getActiveMarkAttrs` reports a
+	 * mark only when the whole range carries it and then answers with the first
+	 * match, so one family is named confidently for a range drawn in two.
+	 */
+	private selectionSpansMultipleFamilies(): boolean {
+		const state = this.getActiveState();
+		const { from, to, empty } = state.selection;
+		if (empty) return false;
+
+		let seen: string | null = null;
+		let mixed = false;
+		state.doc.nodesBetween(from, to, (node, _pos, parent) => {
+			if (mixed || !node.isText || !parent) return !mixed;
+			const mark = node.marks.find((m) => m.type.name === "fontFamily")?.attrs["family"];
+			const blockFamily = parent.attrs["fontFamily"];
+			const family = primaryFamily(
+				typeof mark === "string" && mark.length > 0
+					? mark
+					: typeof blockFamily === "string" && blockFamily.length > 0
+						? blockFamily
+						: (this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
+			);
+			if (seen === null) seen = family;
+			else if (seen !== family) mixed = true;
+			return !mixed;
+		});
+		return mixed;
 	}
 
 	/**

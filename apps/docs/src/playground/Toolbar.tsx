@@ -330,8 +330,11 @@ function FamilySelect({
   // and knows what each resolves to, so the control reads it rather than
   // reconstructing it and drifting from the page it describes.
   const active = editor?.getActiveFontFamily();
-  const value = active?.requested ?? defaultFontFamily.split(",")[0]!.trim();
-  const offered = items.some((i) => i.args?.[0] === value);
+  // A selection drawn in more than one family has no single answer, so the box
+  // shows none — the same reason the size box blanks. Naming one of them would
+  // invite the reader to confirm it and restyle the rest.
+  const value = active?.mixed ? "" : active?.requested ?? defaultFontFamily.split(",")[0]!.trim();
+  const offered = value !== "" && items.some((i) => i.args?.[0] === value);
 
   return (
     <select
@@ -356,7 +359,8 @@ function FamilySelect({
       {/* The document's own family, when this editor does not hold it. The
           arrow is this app's choice of how to show it; the engine only says
           that the two differ and what the second one is. */}
-      {!offered && (
+      {value === "" && <option value="" />}
+      {value !== "" && !offered && (
         <option value={value}>
           {active?.substituted ? `${value} → ${active.resolved}` : value}
         </option>

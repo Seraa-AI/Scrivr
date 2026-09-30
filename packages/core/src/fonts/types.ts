@@ -178,6 +178,16 @@ export interface ActiveFontFamily {
   /** What it resolved to. Equal to `requested` when the request was honoured. */
   resolved: string;
   substituted: boolean;
+  /**
+   * The selection spans more than one family, so no single answer describes it.
+   *
+   * `requested` and `resolved` still name the first run's family — a control
+   * that does not read this behaves as it always did — but one that does should
+   * show nothing, the way Word and Google Docs blank a font box over a mixed
+   * selection. Naming one family invites the reader to confirm it and restyle
+   * everything else in the range.
+   */
+  mixed: boolean;
 }
 
 /**

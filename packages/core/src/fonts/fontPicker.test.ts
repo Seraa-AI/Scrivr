@@ -215,6 +215,7 @@ describe("what the editor reports about substitution", () => {
       requested: "Aptos",
       resolved: "Inter",
       substituted: true,
+      mixed: false,
     });
   });
 
@@ -263,6 +264,7 @@ describe("what the editor reports about substitution", () => {
       requested: "Aptos",
       resolved: "Aptos",
       substituted: false,
+      mixed: false,
     });
   });
 });
