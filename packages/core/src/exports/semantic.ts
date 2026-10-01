@@ -38,6 +38,42 @@ export type SemanticRole = "body" | "header" | "footer";
  */
 export type SemanticTextView = "proposed";
 
+/**
+ * One section of the document's outline — the tree the headings imply, which a
+ * flat unit list states only implicitly.
+ *
+ * Derived from the same units, so the same JSON always yields the same
+ * outline: ids come from unit anchors, never from fresh identity.
+ */
+export interface OutlineSection {
+  /** The anchor id of the section's first unit. Stable across reads. */
+  id: string;
+  /** The enclosing section's `id`, or null at the top level. */
+  parentId: string | null;
+  /** The heading's text, or the supplied name for content that precedes one. */
+  heading: string;
+  /**
+   * The heading block's own anchor id — what a citation points at.
+   *
+   * Null for the section covering content before the first heading: there is
+   * no heading block to point at. The absence is the signal, so a caller that
+   * needs a real heading can ask for one without a second flag.
+   */
+  headingNodeId: string | null;
+  /** The heading's level. A section with no heading of its own sits at 1. */
+  level: number;
+  /** Ancestor headings outermost-first, ending with this section's own. */
+  path: string[];
+  /** Index of the section's first unit — the heading itself. */
+  startUnit: number;
+  /**
+   * Index one past the section's last unit. The range is heading-inclusive and
+   * ends where the next section at this level or shallower opens, so an outer
+   * section's range contains its children's.
+   */
+  endUnit: number;
+}
+
 export interface SemanticUnit {
   /** Stable anchor id = `nodeIds[0]`. Always present. */
   id: string;
