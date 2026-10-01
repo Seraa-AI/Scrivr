@@ -96,10 +96,17 @@ export function applyAiSuggestion(
     return applyRange(editor, blockId, range, mode);
   }
 
-  let affectedBlocks = ps.suggestion.blocks;
-  if (blockId) {
-    affectedBlocks = affectedBlocks.filter((b) => b.nodeId === blockId);
-  }
+  // A block the reader has edited since the proposal was computed is refused,
+  // on every path: its ops are offsets into text that has moved, so applying
+  // them writes the model's words into the middle of what is there now. The
+  // others in the batch are unaffected — an edit in one block says nothing
+  // about the rest.
+  const drifted = ps.staleBlockIds;
+  const requested = blockId
+    ? ps.suggestion.blocks.filter((b) => b.nodeId === blockId)
+    : ps.suggestion.blocks;
+  const affectedBlocks = requested.filter((b) => !drifted.has(b.nodeId));
+  if (affectedBlocks.length === 0) return false;
 
   // What the document held before, so settling can tell "applied" from
   // "attempted". An accept that wrote nothing — tracked mode without the
@@ -124,10 +131,11 @@ export function applyAiSuggestion(
     return wrote;
   }
 
-  // Remove accepted block(s) from the suggestion; clear when none remain
-  const remaining = blockId
-    ? ps.suggestion.blocks.filter((b) => b.nodeId !== blockId)
-    : [];
+  // Everything not accepted stays — the blocks this call did not ask for, and
+  // the ones it refused. Clearing those too would lose a proposal the reader
+  // never settled.
+  const accepted = new Set(affectedBlocks.map((b) => b.nodeId));
+  const remaining = ps.suggestion.blocks.filter((b) => !accepted.has(b.nodeId));
   showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
   return editor.getState().doc !== before;
 }
@@ -160,6 +168,9 @@ function applyRange(
   const found = findNodeById(state.doc, blockId);
   if (!found) return false;
   const { acceptedText: liveText } = buildAcceptedTextMap(found.node, found.pos, state.schema);
+  // Two questions, both required: does the block still match its proposal, and
+  // was the caller's span measured against that same text.
+  if (aiSuggestionPluginKey.getState(state)?.staleBlockIds.has(blockId)) return false;
   if (range.acceptedText !== liveText) return false;
 
   const covered = groupsWithin(block.ops, range, liveText.length);

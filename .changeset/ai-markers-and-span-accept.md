@@ -54,6 +54,24 @@ accepted text omits runs pending deletion, so arithmetic on document positions
 was wrong in exactly the tracked-changes documents this serves — and wrong
 silently.
 
+**Drift has one owner, and it is no longer silent.** `staleBlockIds` had two
+production readers — the card's `isStale` and the canvas overlay, which dims a
+stale block — and no writer at all, so both read false for every block forever.
+The plugin now computes it whenever the answer can change: a new suggestion (a
+host can hand over one that was already out of date), a settled one (the rebase
+refreshes each surviving block against the document the settlement left), or an
+edit. Identical answers return the previous state unchanged, so the card
+subscription's identity skip still holds.
+
+Every accept path reads it and refuses a block the reader has edited since the
+proposal was computed — the unscoped block accept, a group accept, and accept-all
+as well as the new span accept. Previously only the span accept checked, so one
+card had a button that refused and a button that wrote the model's words into
+text that had moved: `"The quick fox"` edited to `"!The quick fox"` and then
+accepted produced `"!Theslowk fox"`. Accept-all still applies the blocks that do
+match and leaves the drifted ones pending, because an edit in one block says
+nothing about the rest.
+
 `AiSuggestionCardActions` gains a required `acceptRange`, so a hand-written
 implementation of that interface needs the new member. `applyAiSuggestion` and
 `AiToolkit.apply` returning `boolean` instead of `void` is a widening and breaks
