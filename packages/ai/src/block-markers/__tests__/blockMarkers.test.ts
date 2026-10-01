@@ -9,14 +9,18 @@
 import { describe, it, expect } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TextSelection } from "@scrivr/core/pm";
-import { BlockMarkers } from "../BlockMarkers";
+// Through the package barrel: a host reaches these by name, so one dropped
+// from `index.ts` fails here rather than there.
 import {
+  BlockMarkers,
+  BLOCK_MARKERS_SET,
   setBlockMarkers,
   clearBlockMarkers,
   getBlockMarkers,
   activeBlockMarkers,
-} from "../markers";
-import type { BlockMarker } from "../types";
+  blockMarkersPluginKey,
+  type BlockMarker,
+} from "../../index";
 
 const editorWith = (...texts: string[]) =>
   new ServerEditor({
@@ -164,5 +168,110 @@ describe("activeBlockMarkers", () => {
     caretIn(editor, 0);
 
     expect(activeBlockMarkers(editor).map((m) => m.source)).toEqual(["review", "chat"]);
+  });
+});
+
+describe("a marker whose block contains another marked block", () => {
+  const nested = () =>
+    new ServerEditor({
+      extensions: [StarterKit, BlockMarkers],
+      content: {
+        type: "doc",
+        content: [{
+          type: "bulletList",
+          attrs: { nodeId: "list1" },
+          content: [{
+            type: "listItem",
+            attrs: { nodeId: "item1" },
+            content: [{
+              type: "paragraph",
+              attrs: { nodeId: "para1" },
+              content: [{ type: "text", text: "hello" }],
+            }],
+          }],
+        }],
+      },
+    });
+
+  const caretInParagraph = (editor: ServerEditor) => {
+    const state = editor.getState();
+    let pos = -1;
+    state.doc.descendants((node, at) => {
+      if (node.attrs["nodeId"] === "para1") pos = at;
+    });
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, pos + 2)));
+  };
+
+  it("answers only the innermost block, so the anchor is the text the reader is in", () => {
+    // Every ancestor contains the cursor. Answering all of them left a
+    // paragraph's finding painted at the top of the whole list.
+    const editor = nested();
+    setBlockMarkers(editor, "review", [
+      { nodeId: "list1", kind: "outer", summary: "on the list" },
+      { nodeId: "para1", kind: "inner", summary: "on the paragraph" },
+    ]);
+    caretInParagraph(editor);
+
+    expect(activeBlockMarkers(editor).map((m) => m.kind)).toEqual(["inner"]);
+  });
+
+  it("still answers an ancestor's marker when nothing inside it is marked", () => {
+    const editor = nested();
+    setBlockMarkers(editor, "review", [{ nodeId: "list1", kind: "outer", summary: "on the list" }]);
+    caretInParagraph(editor);
+
+    expect(activeBlockMarkers(editor).map((m) => m.kind)).toEqual(["outer"]);
+  });
+});
+
+describe("a payload the layer does not recognise", () => {
+  const dispatch = (editor: ServerEditor, markers: unknown) => {
+    editor.applyTransaction(
+      editor.getState().tr.setMeta(BLOCK_MARKERS_SET, { source: "evil", markers }),
+    );
+  };
+
+  it("refuses the whole payload rather than applying half of a writer's intent", () => {
+    // `BLOCK_MARKERS_SET` is public, so a host can dispatch it inside its own
+    // transaction, and state typed as markers has to hold markers. All or
+    // nothing: a half-applied set is a set the writer never asked for.
+    const editor = editorWith("a", "b");
+    setBlockMarkers(editor, "review", [marker("b1")]);
+
+    dispatch(editor, [{ source: "evil", nodeId: "b2", kind: "pass", summary: "real" }, 42]);
+
+    expect(getBlockMarkers(editor).map((m) => m.source)).toEqual(["review"]);
+  });
+
+  it("refuses a marker naming no block, which would bind to an unstamped one", () => {
+    // `findNodeById` compares `attrs.nodeId === nodeId`, and a block the
+    // editor never stamped holds `null` — so a null id matched arbitrary text.
+    const editor = editorWith("a");
+
+    dispatch(editor, [{ source: "evil", nodeId: null, kind: "pass", summary: "x" }]);
+
+    expect(getBlockMarkers(editor)).toEqual([]);
+  });
+
+  it("ignores a payload that is not a marker list at all", () => {
+    const editor = editorWith("a");
+    setBlockMarkers(editor, "review", [marker("b1")]);
+    editor.applyTransaction(
+      editor.getState().tr.setMeta(BLOCK_MARKERS_SET, { source: "review", markers: "nope" }),
+    );
+
+    expect(getBlockMarkers(editor)).toHaveLength(1);
+  });
+});
+
+describe("clearing a source that never wrote", () => {
+  it("leaves the layer's state untouched, so nothing repaints", () => {
+    const editor = editorWith("a");
+    setBlockMarkers(editor, "review", [marker("b1")]);
+    const before = blockMarkersPluginKey.getState(editor.getState());
+
+    clearBlockMarkers(editor, "never-wrote");
+
+    expect(blockMarkersPluginKey.getState(editor.getState())).toBe(before);
   });
 });

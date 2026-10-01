@@ -5,7 +5,12 @@ export { buildParagraphContexts } from "./lib/buildParagraphContexts";
 export type { ParagraphContext } from "./lib/buildParagraphContexts";
 export { diffText, pairReplacements } from "./lib/diffText";
 export type { DiffOp, PairedDiffOp } from "./lib/diffText";
-export { buildAcceptedTextMap, acceptedOffsetToDocPos, acceptedRangeToDocRange } from "./lib/acceptedTextMap";
+export {
+  buildAcceptedTextMap,
+  acceptedOffsetToDocPos,
+  acceptedRangeToDocRange,
+  docRangeToAcceptedRange,
+} from "./lib/acceptedTextMap";
 export type { PosMapEntry, AcceptedTextMapResult } from "./lib/acceptedTextMap";
 export { splitRangeForNewMark, applyTrackedDelete, applyTrackedInsert } from "./lib/splitRangeForNewMark";
 // Tracked-attrs builders — consumed by @scrivr/ai's suggestion apply path.

@@ -2,13 +2,8 @@
  * Headless controller for whatever a host paints at a marked block.
  *
  * The same show / move / hide lifecycle `createSuggestionPopover` gives a
- * suggestion group, against the block's own rect — because a finding that
- * proposes no edit still has to be anchored where the reader is looking, and
- * the suggestion overlay has nowhere to put one.
- *
- * Which markers are active is `activeBlockMarkers`, a function of state. This
- * adds only the parts that need a view: the rect, and the subscriptions that
- * keep it following its anchor.
+ * suggestion group, against the block's own rect — a finding that proposes no
+ * edit still has to be anchored where the reader is looking.
  */
 import type { IEditor } from "@scrivr/core";
 import {
@@ -17,8 +12,7 @@ import {
   isAnchorInsideContainer,
 } from "@scrivr/core";
 
-import { findNodeById } from "../ai-toolkit/UniqueId";
-import { activeBlockMarkers } from "./markers";
+import { activeBlockMarkerAnchor } from "./markers";
 import type { PlacedBlockMarker } from "./types";
 
 export interface BlockMarkerOverlayCallbacks {
@@ -51,15 +45,13 @@ export function createBlockMarkerOverlay(
   };
 
   function update() {
-    const active = activeBlockMarkers(editor);
-    if (active.length === 0) return hide();
+    const anchor = activeBlockMarkerAnchor(editor);
+    if (!anchor) return hide();
 
-    // Every active marker is on the block holding the cursor, so they share
-    // an anchor — one rect, and the host decides how to stack them.
-    const found = findNodeById(editor.getState().doc, active[0]!.nodeId);
-    if (!found) return hide();
-
-    const rect = editor.getViewportRect(found.pos, found.pos + found.node.nodeSize);
+    // One block, so one rect — the markers all name it, and the host decides
+    // how to stack them.
+    const { markers: active, node, pos } = anchor;
+    const rect = editor.getViewportRect(pos, pos + node.nodeSize);
     if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
       return hide();
     }

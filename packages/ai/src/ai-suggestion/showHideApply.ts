@@ -17,7 +17,7 @@ import { Fragment } from "@scrivr/core/pm";
 import type { Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { rebaseAfterSettle } from "./rebase";
-import { groupsWithin } from "./groupSpans";
+import { groupsWithin, type AcceptedSpan } from "./groupSpans";
 import type { AiOp, AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
 import {
   aiSuggestionPluginKey,
@@ -72,8 +72,7 @@ export function showAiSuggestion(editor: IBaseEditor, suggestion: AiSuggestion |
  *
  * If `blockId` is provided, only that block's ops are applied.
  * If `groupId` is provided, only ops matching that groupId are applied.
- * If `range` is provided, only the groups it covers whole are applied — see
- * `applyRange`, which handles that case and then returns.
+ * If `range` is provided, only the groups it covers are applied.
  *
  * @returns whether the document changed.
  */
@@ -88,6 +87,11 @@ export function applyAiSuggestion(
   if (range) {
     if (!blockId) {
       throw new Error("applyAiSuggestion: `range` needs a `blockId` to scope to");
+    }
+    if (groupId) {
+      throw new Error(
+        "applyAiSuggestion: pass `range` or `groupId`, not both — they name different things to accept",
+      );
     }
     return applyRange(editor, blockId, range, mode);
   }
@@ -116,7 +120,7 @@ export function applyAiSuggestion(
 
   if (groupId) {
     const wrote = editor.getState().doc !== before;
-    if (wrote) settleGroup(editor, ps.suggestion, groupId, true);
+    if (wrote) settleGroups(editor, ps.suggestion, new Set([groupId]), true);
     return wrote;
   }
 
@@ -131,43 +135,36 @@ export function applyAiSuggestion(
 /**
  * Apply the groups one span of a block's accepted text covers.
  *
- * The span is in the coordinates of the text the proposal was computed
- * against, so the first thing it needs is proof those coordinates still mean
- * what they meant. Reading the block's accepted text out of the live document
- * and comparing is that proof: once the reader has edited the block, the same
- * offsets address different words, and accepting them lands a change on text
- * the model never saw. That is the failure a scoped accept exists to prevent,
- * so a drifted block is refused rather than approximated.
+ * The span's offsets only mean something relative to the text they were
+ * measured against, so the caller states that text and it has to equal what
+ * the block holds now. Comparing the document against `block.acceptedText`
+ * instead would prove nothing: settling rewrites that field to the live text,
+ * so it always matches, and a caller still holding offsets from before an
+ * earlier accept would sail through and edit whichever words now sit at those
+ * numbers. Refused rather than approximated.
  *
- * Each covered group is then settled through the normal single-group path,
- * which rebases the rest of the proposal after every one. Addressing them by
- * id rather than by offset is what makes that safe: the ids were resolved
- * against one snapshot, and each apply moves the text under the next.
+ * Every covered group is applied in one pass and settled as one set. The
+ * rebase has to be told the whole set — see `settleGroups`.
  */
 function applyRange(
   editor: IBaseEditor,
   blockId: string,
-  range: { from: number; to: number },
+  range: AcceptedSpan,
   mode: ApplyAiSuggestionOptions["mode"],
 ): boolean {
   const state = editor.getState();
-  const block = aiSuggestionPluginKey
-    .getState(state)
-    ?.suggestion?.blocks.find((b) => b.nodeId === blockId);
-  if (!block) return false;
+  const suggestion = aiSuggestionPluginKey.getState(state)?.suggestion;
+  const block = suggestion?.blocks.find((b) => b.nodeId === blockId);
+  if (!suggestion || !block) return false;
 
   const found = findNodeById(state.doc, blockId);
   if (!found) return false;
   const { acceptedText: liveText } = buildAcceptedTextMap(found.node, found.pos, state.schema);
-  if (liveText !== block.acceptedText) return false;
+  if (range.acceptedText !== liveText) return false;
 
-  const covered = groupsWithin(block.ops, range);
+  const covered = groupsWithin(block.ops, range, liveText.length);
   if (covered.length === 0) return false;
 
-  // One pass over every covered group rather than a call per group. Each
-  // settle rebases the rest of the proposal onto the document it left behind,
-  // so applying one group at a time would be re-resolving the next group's
-  // ops against text the previous apply had already moved.
   const scope = new Set(covered);
   const before = state.doc;
   applyKeepFormatting(editor, [block], scope, mode !== "direct");
@@ -176,15 +173,7 @@ function applyRange(
 
   if (editor.getState().doc === before) return false;
 
-  // Settled one at a time, against whatever the suggestion has become: the
-  // first rebase re-diffs the whole block, which already drops the groups
-  // this pass satisfied, so a later id may no longer be there to settle.
-  for (const groupId of covered) {
-    const current = aiSuggestionPluginKey.getState(editor.getState())?.suggestion;
-    if (current?.blocks.some((b) => b.ops.some((op) => op.groupId === groupId))) {
-      settleGroup(editor, current, groupId, true);
-    }
-  }
+  settleGroups(editor, suggestion, scope, true);
   return true;
 }
 
@@ -228,22 +217,28 @@ function applyRunMarks(
 }
 
 /**
- * Record that a group is finished — see `rebaseAfterSettle` for why that means
- * rebuilding the rest of the proposal rather than marking it done.
+ * Record that a set of groups is finished — see `rebaseAfterSettle` for why
+ * that means rebuilding the rest of the proposal rather than marking it done.
+ *
+ * A set, not one group: a span-scoped accept writes every group its span
+ * covers in one pass, and the rebase has to be told all of them or it reads
+ * the pass's own writes as reader drift.
  *
  * Dispatched as a settle rather than as a new suggestion: the reader is still
  * reading this one, and replacing it wholesale clears the active block and
  * blanks the rest of the overlay until the caret happens to move.
  */
-function settleGroup(
+function settleGroups(
   editor: IBaseEditor,
   suggestion: AiSuggestion,
-  groupId: string,
+  groupIds: ReadonlySet<string>,
   accepted: boolean,
 ): void {
-  const owner = suggestion.blocks.find((block) => block.ops.some((op) => op.groupId === groupId));
+  const owner = suggestion.blocks.find((block) =>
+    block.ops.some((op) => op.groupId !== undefined && groupIds.has(op.groupId)),
+  );
   const next = owner
-    ? rebaseAfterSettle(editor, suggestion, owner.nodeId, groupId, accepted)
+    ? rebaseAfterSettle(editor, suggestion, owner.nodeId, groupIds, accepted)
     : suggestion;
 
   const tr = editor.getState().tr;
@@ -547,7 +542,7 @@ export function rejectAiSuggestion(
   editor.applyTransaction(tr);
 
   if (groupId) {
-    settleGroup(editor, ps.suggestion, groupId, false);
+    settleGroups(editor, ps.suggestion, new Set([groupId]), false);
     return;
   }
 

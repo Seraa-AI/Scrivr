@@ -67,9 +67,13 @@ export class AiSuggestionsAPI {
    * @param options.mode     "direct" — plain replace. "tracked" — adds track-changes marks.
    * @param options.groupId  Apply only this group; others remain in the overlay.
    * @param options.blockId  Apply only this block; others remain in the overlay.
+   * @param options.range    Apply only within this span of the block's accepted
+   *                         text. Refused if the span is stale — hence the
+   *                         return value.
+   * @returns whether the document changed.
    */
-  apply(options: ApplyAiSuggestionOptions): void {
-    applyAiSuggestion(this.editor, options);
+  apply(options: ApplyAiSuggestionOptions): boolean {
+    return applyAiSuggestion(this.editor, options);
   }
 
   /**

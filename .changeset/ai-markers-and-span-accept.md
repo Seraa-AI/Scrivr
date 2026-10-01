@@ -1,36 +1,60 @@
 ---
 "@scrivr/ai": patch
+"@scrivr/plugins": patch
+"@scrivr/react": patch
 ---
 
 Two things the AI review surface could not express.
 
 **A marker that proposes no edit.** A finding can be a Pass, or a decision a
 person has to make. `computeAiSuggestion` drops a block whose proposed text
-matches what is already there, which is correct — `ai.suggestions` is a diff
-overlay and a finding with no change is not a diff. There was simply no other
-layer, so such a finding existed in the panel and nowhere the reader was
-looking.
+matches what is already there, which is correct — a diff overlay is not where a
+finding with no change belongs — and there was no other layer, so such a
+finding existed in the panel and nowhere the reader was looking.
 
 `BlockMarkers` is that layer. `setBlockMarkers(editor, source, markers)` hangs
 `{ nodeId, kind, summary }` on a block, `getBlockMarkers` reads them,
-`activeBlockMarkers` answers the ones on the block holding the cursor, and
-`createBlockMarkerOverlay` gives them the show / move / hide lifecycle the
-suggestion popover has. Every call names its writer, which is what makes the
-layer additive: several bridges write to the same document surface and none of
-them owns it, so a writer replaces and clears its own markers without erasing
-what the others are saying. Nothing is written to the document and nothing
-enters history — a marker is about a block, not in it — and a marker whose
-block has left the document is dropped on read.
+`activeBlockMarkers` answers the ones on the innermost marked block holding the
+cursor, and `createBlockMarkerOverlay` — with `useBlockMarkerOverlay` in
+`@scrivr/react` — gives them the show / move / hide lifecycle the suggestion
+popover has.
 
-**Accepting a span rather than a block.** `accept(blockId)` applied every op
-the block carried, so a finding scoped to one sentence rewrote the clause
-around it. `applyAiSuggestion` now takes `range`, offsets into the block's
-accepted text, and `actions.acceptRange(blockId, range, mode?)` exposes it.
+Every call names its writer, which is what makes the layer additive: several
+bridges write to the same surface and none owns it, so a writer replaces and
+clears its own markers without erasing what the others say. Nothing is written
+to the document and nothing enters history. A marker whose block has left the
+document is dropped on read, and markers resolve in one pass over the document
+rather than one walk each. `BLOCK_MARKERS_SET` is public, so a payload whose
+markers are not markers is refused whole rather than half-applied.
 
-Only groups the span covers whole are applied: half a replacement is not a
-smaller replacement, so a group the span merely clips is left pending. The
-span is resolved against the live document at accept time — the block's
-accepted text is read back and compared, and a block the reader has edited
-since is refused rather than approximated, because the same offsets now
-address different words than the proposal was about. `applyAiSuggestion`
-returns whether it wrote, so a refusal is visible instead of silent.
+**Accepting a span rather than a block.** `accept(blockId)` applied every op the
+block carried, so a finding scoped to one sentence rewrote the clause around it.
+`applyAiSuggestion` now takes `range`, and `actions.acceptRange(blockId, range,
+mode?)` exposes it. It returns whether it wrote, so a refusal is visible instead
+of silent — including through `AiToolkit.apply`.
+
+`range` carries the accepted text its offsets were measured against, and is
+refused unless the block still holds that text. This is the part that makes a
+scoped accept safe: settling rewrites a block's `acceptedText`, so comparing the
+document against it proves nothing, and a caller still holding offsets from
+before an earlier accept would edit whichever words now sit at those numbers.
+Also refused: a span that is inverted, collapsed, or reaches outside the block.
+
+Only groups the span covers are applied; one it merely clips is left pending. A
+pure insertion is zero-width, so it belongs to the single span that starts at or
+before its point and ends strictly after — otherwise both neighbouring sentences
+claimed it. Every covered group is applied in one pass and settled as one set:
+`rebaseAfterSettle` now takes the set of settled groups, because told one at a
+time it read the pass's own writes as reader drift and discarded the groups the
+span deliberately left pending.
+
+**`docRangeToAcceptedRange`** (`@scrivr/plugins`) converts a document range to
+the accepted-text offsets `range` wants. Only the forward direction existed, and
+accepted text omits runs pending deletion, so arithmetic on document positions
+was wrong in exactly the tracked-changes documents this serves — and wrong
+silently.
+
+`AiSuggestionCardActions` gains a required `acceptRange`, so a hand-written
+implementation of that interface needs the new member. `applyAiSuggestion` and
+`AiToolkit.apply` returning `boolean` instead of `void` is a widening and breaks
+no caller.

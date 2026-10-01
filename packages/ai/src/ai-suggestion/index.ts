@@ -29,8 +29,8 @@ export type { AiSuggestionOptions, AiSuggestionRenderMode } from "./AiSuggestion
 export { showAiSuggestion, applyAiSuggestion, rejectAiSuggestion } from "./showHideApply";
 
 // ── Accepted-text spans ──────────────────────────────────────────────────────
-export { buildGroupSpans, groupsWithin } from "./groupSpans";
-export type { GroupSpan } from "./groupSpans";
+export { groupsWithin } from "./groupSpans";
+export type { GroupSpan, AcceptedSpan } from "./groupSpans";
 
 // ── Compute ───────────────────────────────────────────────────────────────────
 export { computeAiSuggestion } from "./computeAiSuggestion";

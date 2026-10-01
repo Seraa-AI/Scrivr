@@ -10,7 +10,9 @@ export {
   clearBlockMarkers,
   getBlockMarkers,
   activeBlockMarkers,
+  activeBlockMarkerAnchor,
 } from "./markers";
+export type { ActiveBlockMarkers } from "./markers";
 export { createBlockMarkerOverlay } from "./createBlockMarkerOverlay";
 export type { BlockMarkerOverlayCallbacks } from "./createBlockMarkerOverlay";
 export type { BlockMarker, PlacedBlockMarker } from "./types";

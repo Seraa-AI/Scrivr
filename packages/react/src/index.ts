@@ -19,6 +19,7 @@ export { TrackChangesPopover } from "./components/TrackChangesPopover";
 export { useTrackChangesPopover } from "./hooks/useTrackChangesPopover";
 export { AiSuggestionPopover } from "./components/AiSuggestionPopover";
 export { useAiSuggestionPopover } from "./hooks/useAiSuggestionPopover";
+export { useBlockMarkerOverlay } from "./hooks/useBlockMarkerOverlay";
 export type { BubbleMenuProps } from "./components/BubbleMenu";
 export type { FloatingMenuProps } from "./components/FloatingMenu";
 export type { LinkPopoverProps } from "./components/LinkPopover";
