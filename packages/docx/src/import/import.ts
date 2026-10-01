@@ -20,7 +20,7 @@
  */
 
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { prepareDocumentFonts, type FontKey, type FontSynthesis } from "@scrivr/core";
+import { assignBlockIds, prepareDocumentFonts, type FontKey, type FontSynthesis } from "@scrivr/core";
 import type {
   DocxImports,
   IBaseEditor,
@@ -62,6 +62,11 @@ export interface DocxImportCallOptions extends DocxImportOptions {
 
 /**
  * Import a `.docx` file using the editor's schema + extension parsers.
+ *
+ * Blocks come back carrying `nodeId`, so the returned doc is addressable
+ * before it is stored — a caller that never dispatches it into an editor still
+ * gets the ids an editor session would have minted. An editor without
+ * `UniqueId` gets none, the same as when a person types into it.
  *
  * @example
  *   const editor = new ServerEditor();
@@ -208,6 +213,19 @@ export async function importDocx(
     for (const hook of lifecycleHooks.onImportComplete) {
       doc = await hook(doc, ctx);
     }
+
+    // After the hooks, so a contribution's own blocks are addressable too.
+    //
+    // The importer never dispatches, so `UniqueId` — which fires on
+    // transactions — never runs, and every block came back `nodeId: null`.
+    // That fails later and elsewhere: id-less content stores fine, and the ids
+    // get minted per load wherever the doc is next materialised, so two reads
+    // of one unchanged document disagree about what its blocks are called.
+    //
+    // Conditioned on the extension rather than an option. The promise is that
+    // an import matches what an editor session would hold, and a session built
+    // without `UniqueId` mints no ids when a person types into it either.
+    if (editor.findExtension("uniqueId")) doc = assignBlockIds(doc);
 
     // A .docx states its typography, and the editor either has those faces or
     // does not. Asking before anything is measured is the only point at which
