@@ -7,7 +7,7 @@ import type { Node as PmNode, NodeType } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
 import { ListItemStrategy } from "../../layout/ListItemStrategy";
-import type { ToolbarItemSpec } from "../types";
+import type { SlashCommandSpec, ToolbarItemSpec } from "../types";
 import { KeymapPriority } from "../types";
 import {
   xml,
@@ -222,6 +222,25 @@ export const List = Extension.create({
         title: "Ordered list (⌘⇧9)",
         group: "list",
         isActive: (_marks, blockType) => blockType === "orderedList",
+      },
+    ];
+  },
+
+  addSlashCommands(): SlashCommandSpec[] {
+    return [
+      {
+        id: "list/bullet",
+        command: "toggleBulletList",
+        label: "•",
+        title: "Bullet list",
+        description: "Unordered list",
+      },
+      {
+        id: "list/ordered",
+        command: "toggleOrderedList",
+        label: "1.",
+        title: "Ordered list",
+        description: "Numbered list",
       },
     ];
   },

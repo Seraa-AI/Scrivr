@@ -7,7 +7,11 @@ import { Node, type Schema } from "prosemirror-model";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
-import type { IBaseEditor, MarkdownParserTokenSpec } from "./extensions/types";
+import type {
+  IBaseEditor,
+  MarkdownParserTokenSpec,
+  SlashCommandSpec,
+} from "./extensions/types";
 import type { ExportContributionMap, ImportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
@@ -126,6 +130,12 @@ export class BaseEditor implements IBaseEditor {
    * `Commands<ReturnType>` in your extension to get typed entries.
    */
   readonly commands: SafeFlatCommands;
+  /**
+   * The same bound commands, reachable by name. `commands` is a union of
+   * fixed-arity signatures, so spreading an argument list into one does not
+   * type — which is why `runCommand` exists and reads this instead.
+   */
+  private readonly boundCommands: Record<string, (...args: unknown[]) => void> = {};
 
   /**
    * Per-extension storage. Augment `ExtensionStorage` in your extension
@@ -271,6 +281,62 @@ export class BaseEditor implements IBaseEditor {
    */
   findExtension(name: string): Extension | null {
     return this.manager.findExtension(name);
+  }
+
+  /**
+   * Run a command named by a declared spec — a `ToolbarItemSpec` or a
+   * `SlashCommandSpec` — with the arguments it carries.
+   *
+   * Those specs are data: they name a command rather than closing over one, so
+   * the surface that renders them has to dispatch by name. Doing that through
+   * `commands` means spreading `unknown[]` into a union of fixed-arity
+   * signatures, which only typechecks behind a cast — so every such surface
+   * grew its own. This is that dispatch, once, where the loose map already is.
+   *
+   * Unknown names are ignored: a spec can name a command from an extension
+   * this editor was not built with.
+   */
+  runCommand(name: keyof SafeFlatCommands, args: unknown[] = []): void {
+    this.boundCommands[name]?.(...args);
+  }
+
+  /**
+   * Slash-menu entries from every extension, in registration order.
+   *
+   * The listable half of the menu: a host renders these rather than
+   * enumerating the formatting commands itself, so an extension owns the entry
+   * that inserts its own node.
+   */
+  getSlashCommands(): SlashCommandSpec[] {
+    return this.manager.buildSlashCommands();
+  }
+
+  /**
+   * Ask every registered resolver what matches `query` — the entries that have
+   * to be searched rather than listed.
+   *
+   * The signal is checked twice: before the resolvers run, so an abandoned
+   * query costs nothing, and again once they answer, so a resolver that
+   * ignores its own signal still cannot hand back entries for a query the
+   * reader has typed past. Either way the call throws `signal.reason` instead
+   * of resolving, which is what makes a caller holding a result able to trust
+   * that it is current.
+   *
+   * A rejecting resolver rejects the whole call. `getSlashCommands` is
+   * unaffected, so the menu falls back to its listed entries rather than to
+   * nothing.
+   */
+  async resolveSlashCommands(
+    query: string,
+    signal: AbortSignal,
+  ): Promise<SlashCommandSpec[]> {
+    signal.throwIfAborted();
+    const resolvers = this.manager.buildSlashCommandResolvers();
+    if (resolvers.length === 0) return [];
+
+    const found = await Promise.all(resolvers.map((resolve) => resolve(query, signal)));
+    signal.throwIfAborted();
+    return found.flat();
   }
 
   /**
@@ -587,14 +653,13 @@ export class BaseEditor implements IBaseEditor {
 
   private buildCommands(): SafeFlatCommands {
     const rawCommands = this.manager.buildCommands();
-    const bound: Record<string, (...args: unknown[]) => void> = {};
     for (const [name, factory] of Object.entries(rawCommands)) {
-      bound[name] = (...args: unknown[]) => {
+      this.boundCommands[name] = (...args: unknown[]) => {
         if (this.readOnlyValue) return;
         const cmd = factory(...args);
         cmd(this.getActiveState(), (tr) => this.dispatchToActive(tr));
       };
     }
-    return bound as SafeFlatCommands;
+    return this.boundCommands as SafeFlatCommands;
   }
 }

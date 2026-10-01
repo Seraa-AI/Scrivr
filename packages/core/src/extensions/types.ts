@@ -187,6 +187,26 @@ export interface IBaseEditor {
    * to option shape.
    */
   findExtension(name: string): Extension | null;
+  /**
+   * Slash-menu entries from every extension, in registration order.
+   *
+   * The listable half of the menu. Entries that must be searched come from
+   * `resolveSlashCommands` instead.
+   */
+  getSlashCommands(): SlashCommandSpec[];
+  /**
+   * Ask every registered resolver what matches `query`.
+   *
+   * Throws `signal.reason` if the query was abandoned — before the resolvers
+   * run, and again once they answer, so a resolver that ignores its signal
+   * still cannot replace the entries for the query the reader is now on.
+   * A caller that holds the result is holding entries for a live query.
+   *
+   * A rejecting resolver rejects the whole call. The listed entries from
+   * `getSlashCommands` are unaffected, so the menu degrades to those rather
+   * than to nothing.
+   */
+  resolveSlashCommands(query: string, signal: AbortSignal): Promise<SlashCommandSpec[]>;
 }
 
 /**
@@ -463,6 +483,47 @@ export interface ToolbarItemSpec {
     activeMarkAttrs?: Record<string, Record<string, unknown>>
   ) => boolean;
 }
+
+// ── Slash commands ─────────────────────────────────────────────────────────────
+
+/**
+ * An entry in the "/" menu, declared by the extension that owns the node it
+ * inserts. Core data only — no React, no DOM — so any surface can render it.
+ */
+export interface SlashCommandSpec {
+  /**
+   * Stable identity, unique across extensions. A menu keys on this rather than
+   * the title, because two resolved entries can legitimately share a title.
+   */
+  id: string;
+  /**
+   * The command name to call on editor.commands, typed against the augmented
+   * `Commands<ReturnType>` interface the same way `ToolbarItemSpec.command` is.
+   */
+  command: keyof SafeFlatCommands;
+  /** Extra arguments passed verbatim to the command when the entry is chosen. */
+  args?: unknown[];
+  /** Short icon label, e.g. "H1" or "•". */
+  label: string;
+  /** Display name, shown as the entry's heading. */
+  title: string;
+  /** One-line description shown below the title. */
+  description: string;
+}
+
+/**
+ * Answers the entries that have to be searched rather than listed — a clause
+ * library, a document index, anything whose set is not known up front.
+ *
+ * Must honour `signal`: the menu queries as the reader types, so a resolver
+ * still working on an abandoned query should stop. `resolveSlashCommands`
+ * enforces the same thing at its own boundary, so a resolver that ignores the
+ * signal cannot deliver stale entries either way.
+ */
+export type SlashCommandResolver = (
+  query: string,
+  signal: AbortSignal,
+) => Promise<SlashCommandSpec[]>;
 
 // ── Mark decorator ─────────────────────────────────────────────────────────────
 
@@ -881,6 +942,19 @@ export interface ExtensionConfig<Options = object> {
   addToolbarItems?(this: Phase1Context<Options>): ToolbarItemSpec[];
 
   /**
+   * Slash-menu entries this extension contributes — declared where the node is
+   * defined, so the menu that inserts a thing is owned by whoever owns it.
+   * Data only, like `addToolbarItems`.
+   */
+  addSlashCommands?(this: Phase1Context<Options>): SlashCommandSpec[];
+
+  /**
+   * A resolver for slash entries this extension cannot list up front, because
+   * they are searched rather than enumerated. One per extension.
+   */
+  addSlashCommandResolver?(this: Phase1Context<Options>): SlashCommandResolver;
+
+  /**
    * Node actions this extension contributes (contextual operations on its nodes).
    * Actions are registered against a selection kind, evaluated on selection
    * changes, and exposed via `editor.getNodeActions()`.
@@ -1070,6 +1144,9 @@ export interface ResolvedExtension {
   markDecorators: Map<string, MarkDecorator>;
   fontModifiers: Map<string, FontModifier>;
   toolbarItems: ToolbarItemSpec[];
+  slashCommands: SlashCommandSpec[];
+  /** Null when this extension declares no resolver, which is the common case. */
+  slashCommandResolver: SlashCommandResolver | null;
   nodeActions: NodeActionContribution[];
   selectionBehaviors: SelectionBehavior[];
   hitTesters: HitTester[];

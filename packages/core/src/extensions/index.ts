@@ -69,6 +69,8 @@ export type {
   SpanRect,
   FontModifier,
   ToolbarItemSpec,
+  SlashCommandSpec,
+  SlashCommandResolver,
   OverlayRenderHandler,
   CloneHandler,
   CloneHandlerContext,

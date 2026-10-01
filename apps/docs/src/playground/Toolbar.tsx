@@ -1,4 +1,7 @@
 import type { ToolbarItemSpec } from "@scrivr/core";
+
+/** The command half of a spec — the only names a toolbar button can dispatch. */
+type ToolbarCommand = ToolbarItemSpec["command"];
 import type { Editor, FontFamilyOption } from "@scrivr/react";
 import { DEFAULT_FONT_FAMILY } from "@scrivr/react";
 import {
@@ -37,12 +40,6 @@ interface ToolbarProps {
   defaultFontFamily?: string;
   /** Document-level default font size in px — shown when no fontSize mark is active. */
   defaultFontSize?: number;
-}
-
-/** Single cast point: ToolbarItemSpec uses string commands (core extension API). */
-function runCommand(editor: Editor, cmd: string, args?: unknown[]) {
-  const fn = (editor.commands as Record<string, ((...a: unknown[]) => void) | undefined>)[cmd];
-  fn?.(...(args ?? []));
 }
 
 // Map from command name → Lucide icon
@@ -90,8 +87,8 @@ export function Toolbar({
   defaultFontFamily = DEFAULT_FONT_FAMILY,
   defaultFontSize = 14,
 }: ToolbarProps) {
-  const onCommand = (cmd: string, args?: unknown[]) => {
-    if (editor) runCommand(editor, cmd, args);
+  const onCommand = (cmd: ToolbarCommand, args?: unknown[]) => {
+    editor?.runCommand(cmd, args);
   };
   const groupOrder: string[] = [];
   const groupMap = new Map<string, ToolbarItemSpec[]>();
@@ -162,7 +159,7 @@ function ToolbarButton({
 }: {
   item: ToolbarItemSpec;
   active: boolean;
-  onCommand: (cmd: string, args?: unknown[]) => void;
+  onCommand: (cmd: ToolbarCommand, args?: unknown[]) => void;
 }) {
   return (
     <button
@@ -240,7 +237,7 @@ function SizeSelect({
   items: ToolbarItemSpec[];
   editor: Editor | null;
   defaultFontSize: number;
-  onCommand: (cmd: string, args?: unknown[]) => void;
+  onCommand: (cmd: ToolbarCommand, args?: unknown[]) => void;
 }) {
   // The editor resolves this — mark, then block style — so the control shows the
   // size the text is actually drawn at rather than a default for every unmarked
@@ -324,7 +321,7 @@ function FamilySelect({
   editor: Editor | null;
   items: ToolbarItemSpec[];
   defaultFontFamily: string;
-  onCommand: (cmd: string, args?: unknown[]) => void;
+  onCommand: (cmd: ToolbarCommand, args?: unknown[]) => void;
 }) {
   // The editor owns the inline-mark → block-attr → document-default precedence
   // and knows what each resolves to, so the control reads it rather than

@@ -1,6 +1,7 @@
 import { Extension } from "../Extension";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { KeymapPriority } from "../types";
+import type { SlashCommandSpec } from "../types";
 import { setBlockType } from "prosemirror-commands";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
@@ -225,6 +226,18 @@ export const CodeBlock = Extension.create<CodeBlockOptions>({
         title: "Code block (⌥⌘C)",
         group: "insert",
         isActive: (_marks: string[], blockType: string) => blockType === "codeBlock",
+      },
+    ];
+  },
+
+  addSlashCommands(): SlashCommandSpec[] {
+    return [
+      {
+        id: "codeBlock/insert",
+        command: "toggleCodeBlock",
+        label: "<>",
+        title: "Code block",
+        description: "Monospace code block",
       },
     ];
   },

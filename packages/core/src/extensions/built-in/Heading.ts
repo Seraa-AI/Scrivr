@@ -2,7 +2,7 @@ import { setBlockType } from "prosemirror-commands";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
-import type { ToolbarItemSpec } from "../types";
+import type { SlashCommandSpec, ToolbarItemSpec } from "../types";
 import type { BlockStyle } from "../../layout/FontConfig";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import {
@@ -291,7 +291,35 @@ export const Heading = Extension.create<HeadingOptions>({
     });
     return items;
   },
+
+  addSlashCommands(): SlashCommandSpec[] {
+    return [
+      {
+        id: "heading/paragraph",
+        command: "setParagraph",
+        label: "¶",
+        title: "Text",
+        description: "Plain paragraph",
+      },
+      // Driven by the configured levels, like the toolbar items: a kit built
+      // with fewer headings should not offer entries it cannot honour.
+      ...this.options.levels.slice(0, 3).map((level): SlashCommandSpec => ({
+        id: `heading/${level}`,
+        command: `setHeading${level}`,
+        label: `H${level}`,
+        title: `Heading ${level}`,
+        description: HEADING_DESCRIPTIONS[level] ?? `Level ${level} heading`,
+      })),
+    ];
+  },
 });
+
+/** Relative size, which is what a reader picking a heading is choosing between. */
+const HEADING_DESCRIPTIONS: Record<number, string> = {
+  1: "Large section title",
+  2: "Medium section title",
+  3: "Small section title",
+};
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
