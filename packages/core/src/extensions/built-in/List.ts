@@ -7,7 +7,7 @@ import type { Node as PmNode, NodeType } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
 import { ListItemStrategy } from "../../layout/ListItemStrategy";
-import type { SlashCommandSpec, ToolbarItemSpec } from "../types";
+import type { SlashCommandContribution, ToolbarItemSpec } from "../types";
 import { KeymapPriority } from "../types";
 import {
   xml,
@@ -226,23 +226,27 @@ export const List = Extension.create({
     ];
   },
 
-  addSlashCommands(): SlashCommandSpec[] {
-    return [
-      {
-        id: "list/bullet",
-        command: "toggleBulletList",
-        label: "•",
-        title: "Bullet list",
-        description: "Unordered list",
-      },
-      {
-        id: "list/ordered",
-        command: "toggleOrderedList",
-        label: "1.",
-        title: "Ordered list",
-        description: "Numbered list",
-      },
-    ];
+  addSlashCommands(): SlashCommandContribution[] {
+    return [{
+      items: [
+        {
+          id: "list.bullet",
+          label: "Bullet list",
+          description: "Unordered list",
+          group: "lists",
+          order: 10,
+          command: "toggleBulletList",
+        },
+        {
+          id: "list.ordered",
+          label: "Ordered list",
+          description: "Numbered list",
+          group: "lists",
+          order: 20,
+          command: "toggleOrderedList",
+        },
+      ],
+    }];
   },
 
   // The inverse of `addExports`' numbering: a `<w:numPr>` on a run of

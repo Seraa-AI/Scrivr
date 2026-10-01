@@ -3,35 +3,43 @@
 "@scrivr/react": patch
 ---
 
-An extension declares the slash entries that insert its own node.
+An extension declares the slash entries that insert what it owns.
 
 The slash menu hard-coded its formatting entries in the React hook and asked the
 source providers directly, so an extension could not contribute to the menu that
-inserts the thing it owns — a host wanting clause entries had to enumerate the
-commands itself and fetch content by reaching past the extension that owns it.
+inserts its own node — the one contribution of its kind that `addToolbarItems`
+and `addNodeActions` already had.
 
-`addSlashCommands()` declares listable entries where the node is defined, and
-`editor.getSlashCommands()` collects them in registration order. `SlashCommandSpec`
-is data only, like `ToolbarItemSpec`: an id, a command name, args, and the three
-strings a menu renders. The eight built-in entries now come from `Heading`,
+`addSlashCommands()` returns `SlashCommandContribution[]`, each with optional
+`items` (known up front, paints on the first frame) and `resolve` (query-driven
+I/O, the only half that needs a spinner). A list rather than one contribution, so
+an extension fronting several sources gives each its own resolver.
+`getSlashCommands()` and `resolveSlashCommands(query, signal)` read them back,
+merged by `group` then `order` — groups in the order first contributed, so
+renaming one does not reorder the menu.
+
+`SlashCommandSpec` is data only, like `ToolbarItemSpec`: `id`, `label`,
+`description?`, `group?`, `order?`, `command`, `args?`. A command name and
+arguments, never a closure. The eight built-in entries now come from `Heading`,
 `List`, `CodeBlock` and `HorizontalRule`, and the heading entries follow the
 configured `levels` — a kit built with fewer no longer offers entries it cannot
-honour.
+honour. The spec carries no icon, because Scrivr contributes no renderer; the
+React menu keys a glyph off the command name, as the playground toolbar already
+does.
 
-`addSlashCommandResolver()` answers the entries that have to be searched rather
-than listed. `editor.resolveSlashCommands(query, signal)` runs every resolver and
-checks the signal twice: before they start, so an abandoned query costs nothing,
-and again once they answer, so a resolver that ignores its own signal still
-cannot replace the entries for the query the reader has typed past. It throws
-`signal.reason` instead of resolving, which is what lets a caller trust a result
-it is holding. The signal is required, because a caller allowed to omit it is a
-caller allowed to build the bug.
+A resolver that rejects is dropped from the round with a warning and the others
+still answer: one source being down must not empty a menu whose formatting
+entries are fine. `signal` is required, and is checked both before the resolvers
+run and after they answer, so a resolver that ignores it still cannot replace the
+entries for the query the author is now on.
 
-`editor.runCommand(name, args)` dispatches a declared spec's command. These specs
-name a command rather than closing over one, so a surface rendering them has to
-dispatch by name — which through `commands` means spreading `unknown[]` into a
-union of fixed-arity signatures, and only typechecks behind a cast. Every such
-surface grew its own; the playground's is deleted here.
+`insertSourcedBlockFromSource({ kind, resourceId, versionId })` resolves through
+`provider.fetch` and delegates to `insertSourcedBlock`, so a menu entry can be
+identity rather than content — without it the contribution would have to be a
+callback. `SourcedBlockExtension` contributes one resolver per provider, and
+`SourceProvider.search` runs for the first time.
 
-The React `useSlashMenu` reads the editor's entries instead of building its own
-list, and appends resolved ones as the reader types.
+`editor.runCommand(name, args)` dispatches a declared spec by name. Doing that
+through `commands` means spreading `unknown[]` into a union of fixed-arity
+signatures, which only typechecks behind a cast; the playground had grown one and
+it is deleted here.

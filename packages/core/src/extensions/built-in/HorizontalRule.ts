@@ -1,5 +1,5 @@
 import { Extension } from "../Extension";
-import type { SlashCommandSpec } from "../types";
+import type { SlashCommandContribution } from "../types";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Command } from "prosemirror-state";
 import { InputRule } from "prosemirror-inputrules";
@@ -184,16 +184,17 @@ export const HorizontalRule = Extension.create({
     ];
   },
 
-  addSlashCommands(): SlashCommandSpec[] {
-    return [
-      {
-        id: "horizontalRule/insert",
-        command: "insertHorizontalRule",
-        label: "—",
-        title: "Divider",
+  addSlashCommands(): SlashCommandContribution[] {
+    return [{
+      items: [{
+        id: "horizontalRule.insert",
+        label: "Divider",
         description: "Horizontal rule",
-      },
-    ];
+        group: "insert",
+        order: 20,
+        command: "insertHorizontalRule",
+      }],
+    }];
   },
 
   addMarkdownParserTokens() {

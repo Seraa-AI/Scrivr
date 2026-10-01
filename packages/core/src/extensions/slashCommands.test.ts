@@ -1,28 +1,30 @@
 /**
- * An extension declares the slash entries that insert its own node.
+ * An extension declares the slash entries that insert what it owns.
  *
  * The menu used to hard-code its formatting entries and ask the source
  * providers directly, so an extension could not contribute to the menu that
- * inserts the thing it owns.
+ * inserts its own node — the one contribution of its kind that `addToolbarItems`
+ * and `addNodeActions` already had and this did not.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ServerEditor } from "../ServerEditor";
-// Through the barrel: a declared spec is consumed by a host application, so a
-// name dropped from `index.ts` fails here rather than there.
-import type { SlashCommandSpec as ExportedSpec } from "../index";
 import { StarterKit } from "./StarterKit";
 import { Extension } from "./Extension";
-import type { SlashCommandSpec } from "./types";
+// Through the barrel: a host annotates against these, so one dropped from
+// `index.ts` fails here rather than there.
+import type {
+  SlashCommandContribution,
+  SlashCommandSpec,
+} from "../index";
+import { DEFAULT_SLASH_ORDER } from "../index";
 
 const kit = () => new ServerEditor({ extensions: [StarterKit] });
 
-const titles = (specs: readonly SlashCommandSpec[]) => specs.map((s) => s.title);
+const labels = (specs: readonly SlashCommandSpec[]) => specs.map((s) => s.label);
 
 describe("getSlashCommands", () => {
   it("collects what the built-in extensions declare", () => {
-    const got = titles(kit().getSlashCommands());
-
-    expect(got).toEqual(
+    expect(labels(kit().getSlashCommands())).toEqual(
       expect.arrayContaining([
         "Text",
         "Heading 1",
@@ -44,55 +46,122 @@ describe("getSlashCommands", () => {
     }
   });
 
-  it("gives each entry its own id, so a menu can key on it", () => {
+  it("gives each entry its own namespaced id, so a menu can key on it", () => {
     const ids = kit().getSlashCommands().map((s) => s.id);
 
     expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.every((id) => id.includes("."))).toBe(true);
   });
 
   it("includes an entry declared by a consumer's own extension", () => {
     const Clause = Extension.create({
       name: "clause",
-      addSlashCommands(): SlashCommandSpec[] {
+      addSlashCommands(): SlashCommandContribution[] {
         return [{
-          id: "clause/insert",
-          command: "setParagraph",
-          label: "§",
-          title: "Clause",
-          description: "Insert from the clause library",
+          items: [{
+            id: "clause.insert",
+            label: "Clause",
+            description: "Insert from the clause library",
+            command: "setParagraph",
+          }],
         }];
       },
     });
     const editor = new ServerEditor({ extensions: [StarterKit, Clause] });
 
-    expect(titles(editor.getSlashCommands())).toContain("Clause");
+    expect(labels(editor.getSlashCommands())).toContain("Clause");
   });
 
   it("adds nothing for an extension that declares none", () => {
     const Quiet = Extension.create({ name: "quiet" });
     const editor = new ServerEditor({ extensions: [StarterKit, Quiet] });
 
-    expect(titles(editor.getSlashCommands())).toEqual(titles(kit().getSlashCommands()));
+    expect(labels(editor.getSlashCommands())).toEqual(labels(kit().getSlashCommands()));
+  });
+
+  it("takes a contribution that is only a resolver, with no items", () => {
+    const Search = Extension.create({
+      name: "search",
+      addSlashCommands: (): SlashCommandContribution[] => [{ resolve: async () => [] }],
+    });
+    const editor = new ServerEditor({ extensions: [StarterKit, Search] });
+
+    expect(labels(editor.getSlashCommands())).toEqual(labels(kit().getSlashCommands()));
+  });
+});
+
+describe("merging entries", () => {
+  const entry = (
+    id: string,
+    over: Partial<SlashCommandSpec> = {},
+  ): SlashCommandSpec => ({ id, label: id, command: "setParagraph", ...over });
+
+  const editorWith = (...items: SlashCommandSpec[]) =>
+    new ServerEditor({
+      extensions: [
+        Extension.create({
+          name: "host",
+          addSlashCommands: (): SlashCommandContribution[] => [{ items }],
+        }),
+        StarterKit,
+      ],
+    });
+
+  it("sorts by order within a group", () => {
+    const editor = editorWith(
+      entry("c", { group: "g", order: 30 }),
+      entry("a", { group: "g", order: 10 }),
+      entry("b", { group: "g", order: 20 }),
+    );
+
+    expect(labels(editor.getSlashCommands()).slice(0, 3)).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps a group together, in the order it was first contributed", () => {
+    // Not alphabetically: a renamed group would otherwise reorder the menu.
+    const editor = editorWith(
+      entry("zebra-1", { group: "zebra", order: 10 }),
+      entry("alpha-1", { group: "alpha", order: 10 }),
+      entry("zebra-2", { group: "zebra", order: 20 }),
+    );
+
+    expect(labels(editor.getSlashCommands()).slice(0, 3)).toEqual([
+      "zebra-1",
+      "zebra-2",
+      "alpha-1",
+    ]);
+  });
+
+  it("sorts an entry that states no order as if it stated the default", () => {
+    const editor = editorWith(
+      entry("explicit-late", { group: "g", order: DEFAULT_SLASH_ORDER + 1 }),
+      entry("implicit", { group: "g" }),
+      entry("explicit-early", { group: "g", order: DEFAULT_SLASH_ORDER - 1 }),
+    );
+
+    expect(labels(editor.getSlashCommands()).slice(0, 3)).toEqual([
+      "explicit-early",
+      "implicit",
+      "explicit-late",
+    ]);
   });
 });
 
 describe("resolveSlashCommands", () => {
   const searching = (
-    onQuery: (query: string, signal: AbortSignal) => Promise<SlashCommandSpec[]>,
+    ...resolvers: Array<(query: string, signal: AbortSignal) => Promise<SlashCommandSpec[]>>
   ) =>
     Extension.create({
       name: "clauseSearch",
-      addSlashCommandResolver() {
-        return onQuery;
-      },
+      addSlashCommands: (): SlashCommandContribution[] =>
+        resolvers.map((resolve) => ({ resolve })),
     });
 
-  const entry = (title: string): SlashCommandSpec => ({
-    id: `clause/${title}`,
+  const entry = (label: string, over: Partial<SlashCommandSpec> = {}): SlashCommandSpec => ({
+    id: `clause.${label}`,
+    label,
     command: "setParagraph",
-    label: "§",
-    title,
-    description: "From the clause library",
+    ...over,
   });
 
   it("returns what a resolver found for the query", async () => {
@@ -102,7 +171,25 @@ describe("resolveSlashCommands", () => {
 
     const found = await editor.resolveSlashCommands("indemnity", new AbortController().signal);
 
-    expect(titles(found)).toEqual(["indemnity"]);
+    expect(labels(found)).toEqual(["indemnity"]);
+  });
+
+  it("fans out over every resolver one extension contributes", () => {
+    // One extension fronting several sources gives each its own resolver —
+    // which is the shape the clause library needs, one per provider.
+    const editor = new ServerEditor({
+      extensions: [
+        StarterKit,
+        searching(
+          async () => [entry("from-a", { group: "A" })],
+          async () => [entry("from-b", { group: "B" })],
+        ),
+      ],
+    });
+
+    return expect(
+      editor.resolveSlashCommands("x", new AbortController().signal).then(labels),
+    ).resolves.toEqual(["from-a", "from-b"]);
   });
 
   it("is empty when nothing declares a resolver", async () => {
@@ -111,10 +198,65 @@ describe("resolveSlashCommands", () => {
     expect(found).toEqual([]);
   });
 
+  it("drops a resolver that fails and keeps the rest", async () => {
+    // One provider being down must not empty the menu.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const editor = new ServerEditor({
+      extensions: [
+        StarterKit,
+        searching(
+          async () => {
+            throw new Error("library unreachable");
+          },
+          async () => [entry("still-here")],
+        ),
+      ],
+    });
+
+    const found = await editor.resolveSlashCommands("x", new AbortController().signal);
+
+    expect(labels(found)).toEqual(["still-here"]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("leaves the listed entries alone when every resolver fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const editor = new ServerEditor({
+      extensions: [
+        StarterKit,
+        searching(async () => {
+          throw new Error("down");
+        }),
+      ],
+    });
+
+    await expect(
+      editor.resolveSlashCommands("x", new AbortController().signal),
+    ).resolves.toEqual([]);
+    expect(labels(editor.getSlashCommands())).toContain("Text");
+    warn.mockRestore();
+  });
+
+  it("merges resolved entries by group then order", async () => {
+    const editor = new ServerEditor({
+      extensions: [
+        StarterKit,
+        searching(
+          async () => [entry("second", { group: "g", order: 20 })],
+          async () => [entry("first", { group: "g", order: 10 })],
+        ),
+      ],
+    });
+
+    const found = await editor.resolveSlashCommands("x", new AbortController().signal);
+
+    expect(labels(found)).toEqual(["first", "second"]);
+  });
+
   it("refuses to answer an abandoned query", async () => {
     // The menu queries as the reader types. A resolver that ignores its signal
-    // would otherwise hand back entries for a query two keystrokes stale, and
-    // the caller has no way to tell they are stale.
+    // would otherwise hand back entries for a query two keystrokes stale.
     const controller = new AbortController();
     const editor = new ServerEditor({
       extensions: [StarterKit, searching(async () => [entry("late")])],
@@ -131,7 +273,13 @@ describe("resolveSlashCommands", () => {
     const controller = new AbortController();
     controller.abort();
     const editor = new ServerEditor({
-      extensions: [StarterKit, searching(async () => { calls += 1; return []; })],
+      extensions: [
+        StarterKit,
+        searching(async () => {
+          calls += 1;
+          return [];
+        }),
+      ],
     });
 
     await expect(editor.resolveSlashCommands("ind", controller.signal)).rejects.toThrow();
@@ -142,7 +290,13 @@ describe("resolveSlashCommands", () => {
     let seen: AbortSignal | null = null;
     const controller = new AbortController();
     const editor = new ServerEditor({
-      extensions: [StarterKit, searching(async (_q, signal) => { seen = signal; return []; })],
+      extensions: [
+        StarterKit,
+        searching(async (_q, signal) => {
+          seen = signal;
+          return [];
+        }),
+      ],
     });
 
     await editor.resolveSlashCommands("ind", controller.signal);
@@ -167,8 +321,7 @@ describe("runCommand", () => {
 
   it("ignores a command this editor was not built with", () => {
     // Command names are global once a package augments `Commands`, so a spec
-    // can name one whose extension this host did not install. Nothing to run
-    // is not an error — there is simply no such entry here.
+    // can name one whose extension this host did not install.
     const editor = new ServerEditor({
       extensions: [StarterKit.configure({ horizontalRule: false })],
     });
@@ -176,17 +329,5 @@ describe("runCommand", () => {
 
     expect(() => editor.runCommand("insertHorizontalRule")).not.toThrow();
     expect(editor.getState().doc.toJSON()).toEqual(before);
-  });
-
-  it("exports the spec type a host annotates against", () => {
-    const spec: ExportedSpec = {
-      id: "host/entry",
-      command: "setParagraph",
-      label: "¶",
-      title: "Text",
-      description: "Plain paragraph",
-    };
-
-    expect(spec.command).toBe("setParagraph");
   });
 });

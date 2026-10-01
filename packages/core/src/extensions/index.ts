@@ -2,6 +2,7 @@ export { Extension } from "./Extension";
 export { ExtensionManager, getSchema, flattenExtensions } from "./ExtensionManager";
 export { StarterKit } from "./StarterKit";
 export { KeymapPriority } from "./types";
+export { DEFAULT_SLASH_ORDER } from "./types";
 
 // Built-in extensions — individually importable
 export { Document } from "./built-in/Document";
@@ -70,6 +71,7 @@ export type {
   FontModifier,
   ToolbarItemSpec,
   SlashCommandSpec,
+  SlashCommandContribution,
   SlashCommandResolver,
   OverlayRenderHandler,
   CloneHandler,

@@ -7,7 +7,12 @@ import {
 	type EditorState,
 	type Transaction,
 } from "prosemirror-state";
-import type { CloneHandler, IBaseEditor, IEditor } from "../types";
+import type {
+	CloneHandler,
+	IBaseEditor,
+	IEditor,
+	SlashCommandContribution,
+} from "../types";
 import type {
 	NodeActionContext,
 	NodeActionContribution,
@@ -286,12 +291,41 @@ export interface SourcedBlockOptions {
 	providers?: SourceProvider[];
 }
 
+/**
+ * The editor each configured instance belongs to.
+ *
+ * `insertSourcedBlockFromSource` finishes after an await, and the `state` a
+ * command is handed is the one from before it — stale by the time the content
+ * arrives. Keyed by the options object because that is the one per-instance
+ * identity both `onEditorReady` and `addCommands` can see.
+ */
+const editorForOptions = new WeakMap<SourcedBlockOptions, IBaseEditor>();
+
 declare module "@scrivr/core" {
 	interface Commands<ReturnType> {
 		sourcedBlock: {
 			insertSourcedBlock: (options: {
 				kind: string;
 				content: SourceContent;
+			}) => ReturnType;
+			/**
+			 * Insert by identity rather than content, resolving through
+			 * `provider.fetch` — the method whose own comment already promises
+			 * "full content for insertion".
+			 *
+			 * The sibling that takes full content cannot be named by a menu
+			 * entry, because somebody has to fetch before dispatching; that is
+			 * what turns a contribution back into a callback. This one lets
+			 * `{ kind, resourceId, versionId }` be the whole entry.
+			 *
+			 * The fetch is asynchronous, so the insert lands on a later
+			 * transaction. Returns true once the request is under way, not once
+			 * the block is in the document.
+			 */
+			insertSourcedBlockFromSource: (options: {
+				kind: string;
+				resourceId: string;
+				versionId: string;
 			}) => ReturnType;
 			/**
 			 * Record which instances hold a version their source has moved past
@@ -606,7 +640,76 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 						return false;
 					}
 				},
+
+			insertSourcedBlockFromSource:
+				(options: {
+					kind: string;
+					resourceId: string;
+					versionId: string;
+				}) =>
+				() => {
+					const { kind, resourceId, versionId } = options;
+					const provider = (this.options.providers ?? []).find(
+						p => p.kind === kind,
+					);
+					if (!provider) {
+						console.error(
+							`[SourcedBlock] No provider registered for kind "${kind}"`,
+						);
+						return false;
+					}
+					const editor = editorForOptions.get(this.options);
+					if (!editor) return false;
+
+					// Deliberately not awaited: a command is synchronous, and the
+					// insert runs through the content-taking sibling once the
+					// fetch lands, so there is one insertion path rather than two.
+					provider
+						.fetch(resourceId, versionId)
+						.then(content => {
+							editor.runCommand("insertSourcedBlock", [
+								{ kind, content },
+							]);
+						})
+						.catch((error: unknown) => {
+							console.error(
+								`[SourcedBlock] Failed to fetch ${kind} ${resourceId}:`,
+								error,
+							);
+						});
+
+					return true;
+				},
 		};
+	},
+
+	/**
+	 * One resolver per provider, so a query reaches each source's own `search`.
+	 *
+	 * Entries carry identity and a label, never a body: `SourceSearchResult` is
+	 * already `{ resourceId, versionId, label }`, and that only pays off once
+	 * something fetches on select instead of pulling full text for twenty rows
+	 * to render twenty labels.
+	 */
+	addSlashCommands(): SlashCommandContribution[] {
+		return (this.options.providers ?? []).map(provider => ({
+			async resolve(query: string, signal: AbortSignal) {
+				const hits = await provider.search(query, signal);
+				return hits.map(hit => ({
+					id: `${provider.kind}.insert.${hit.resourceId}`,
+					label: hit.label,
+					group: provider.kind.toUpperCase(),
+					command: "insertSourcedBlockFromSource" as const,
+					args: [
+						{
+							kind: provider.kind,
+							resourceId: hit.resourceId,
+							versionId: hit.versionId,
+						},
+					],
+				}));
+			},
+		}));
 	},
 
 	/**
@@ -621,6 +724,10 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 	 * should not fire three writes on open.
 	 */
 	onEditorReady(editor: IBaseEditor) {
+		// Before the early return below: the command path needs this even when
+		// no provider cares about divergence.
+		editorForOptions.set(this.options, editor);
+
 		const providers = this.options.providers ?? [];
 		if (!providers.some(provider => provider.onInstanceChanged)) return;
 

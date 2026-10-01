@@ -2,7 +2,11 @@ import { setBlockType } from "prosemirror-commands";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
-import type { SlashCommandSpec, ToolbarItemSpec } from "../types";
+import type {
+  SlashCommandContribution,
+  SlashCommandSpec,
+  ToolbarItemSpec,
+} from "../types";
 import type { BlockStyle } from "../../layout/FontConfig";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import {
@@ -292,25 +296,29 @@ export const Heading = Extension.create<HeadingOptions>({
     return items;
   },
 
-  addSlashCommands(): SlashCommandSpec[] {
-    return [
-      {
-        id: "heading/paragraph",
-        command: "setParagraph",
-        label: "¶",
-        title: "Text",
-        description: "Plain paragraph",
-      },
-      // Driven by the configured levels, like the toolbar items: a kit built
-      // with fewer headings should not offer entries it cannot honour.
-      ...this.options.levels.slice(0, 3).map((level): SlashCommandSpec => ({
-        id: `heading/${level}`,
-        command: `setHeading${level}`,
-        label: `H${level}`,
-        title: `Heading ${level}`,
-        description: HEADING_DESCRIPTIONS[level] ?? `Level ${level} heading`,
-      })),
-    ];
+  addSlashCommands(): SlashCommandContribution[] {
+    return [{
+      items: [
+        {
+          id: "heading.paragraph",
+          label: "Text",
+          description: "Plain paragraph",
+          group: "blocks",
+          order: 10,
+          command: "setParagraph",
+        },
+        // Driven by the configured levels, like the toolbar items: a kit built
+        // with fewer headings should not offer entries it cannot honour.
+        ...this.options.levels.slice(0, 3).map((level, i): SlashCommandSpec => ({
+          id: `heading.${level}`,
+          label: `Heading ${level}`,
+          description: HEADING_DESCRIPTIONS[level] ?? `Level ${level} heading`,
+          group: "blocks",
+          order: 20 + i * 10,
+          command: `setHeading${level}`,
+        })),
+      ],
+    }];
   },
 });
 

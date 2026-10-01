@@ -188,10 +188,19 @@ export interface IBaseEditor {
    */
   findExtension(name: string): Extension | null;
   /**
-   * Slash-menu entries from every extension, in registration order.
+   * Run a command named by a declared spec — a `ToolbarItemSpec` or a
+   * `SlashCommandSpec` — with the arguments it carries.
    *
-   * The listable half of the menu. Entries that must be searched come from
-   * `resolveSlashCommands` instead.
+   * Those specs are data: they name a command rather than closing over one, so
+   * the surface that renders them dispatches by name. Unknown names are
+   * ignored — a spec can name a command from an extension this editor was not
+   * built with.
+   */
+  runCommand(name: keyof SafeFlatCommands, args?: unknown[]): void;
+  /**
+   * The listable half of the menu, merged by `group` then `order`.
+   *
+   * Entries that must be searched come from `resolveSlashCommands` instead.
    */
   getSlashCommands(): SlashCommandSpec[];
   /**
@@ -202,9 +211,9 @@ export interface IBaseEditor {
    * still cannot replace the entries for the query the reader is now on.
    * A caller that holds the result is holding entries for a live query.
    *
-   * A rejecting resolver rejects the whole call. The listed entries from
-   * `getSlashCommands` are unaffected, so the menu degrades to those rather
-   * than to nothing.
+   * A resolver that rejects is dropped from the round with a warning. One
+   * provider being down must not empty the menu — the formatting commands have
+   * to still be there when the network is not.
    */
   resolveSlashCommands(query: string, signal: AbortSignal): Promise<SlashCommandSpec[]>;
 }
@@ -487,15 +496,22 @@ export interface ToolbarItemSpec {
 // ── Slash commands ─────────────────────────────────────────────────────────────
 
 /**
- * An entry in the "/" menu, declared by the extension that owns the node it
- * inserts. Core data only — no React, no DOM — so any surface can render it.
+ * An entry in the "/" menu, declared by the extension that owns what it
+ * inserts. A command name and arguments, never a closure — the same refusal
+ * `ToolbarItemSpec` makes, and what lets a host sort, filter and render these
+ * without holding editor internals.
  */
 export interface SlashCommandSpec {
-  /**
-   * Stable identity, unique across extensions. A menu keys on this rather than
-   * the title, because two resolved entries can legitimately share a title.
-   */
+  /** Namespaced, stable, unique across extensions — e.g. "clause.insert". */
   id: string;
+  /** The entry's name, as the reader reads it. */
+  label: string;
+  /** Longer text under the label. */
+  description?: string;
+  /** Logical grouping; renderers draw dividers between groups. */
+  group?: string;
+  /** Lower sorts first within a group. Defaults to `DEFAULT_SLASH_ORDER`. */
+  order?: number;
   /**
    * The command name to call on editor.commands, typed against the augmented
    * `Commands<ReturnType>` interface the same way `ToolbarItemSpec.command` is.
@@ -503,27 +519,42 @@ export interface SlashCommandSpec {
   command: keyof SafeFlatCommands;
   /** Extra arguments passed verbatim to the command when the entry is chosen. */
   args?: unknown[];
-  /** Short icon label, e.g. "H1" or "•". */
-  label: string;
-  /** Display name, shown as the entry's heading. */
-  title: string;
-  /** One-line description shown below the title. */
-  description: string;
 }
+
+/** Where a spec sorts within its group when it states no `order`. */
+export const DEFAULT_SLASH_ORDER = 100;
 
 /**
  * Answers the entries that have to be searched rather than listed — a clause
  * library, a document index, anything whose set is not known up front.
  *
- * Must honour `signal`: the menu queries as the reader types, so a resolver
- * still working on an abandoned query should stop. `resolveSlashCommands`
- * enforces the same thing at its own boundary, so a resolver that ignores the
- * signal cannot deliver stale entries either way.
+ * `signal` is required rather than optional: an author typing `conf` issues
+ * four searches, and without cancellation the menu shows whichever response
+ * happens to arrive last.
  */
 export type SlashCommandResolver = (
   query: string,
   signal: AbortSignal,
 ) => Promise<SlashCommandSpec[]>;
+
+/**
+ * What one extension contributes to the slash menu.
+ *
+ * Two fields rather than one async function. `items` is known up front and
+ * paints on the first frame; `resolve` is I/O, and only that half needs a
+ * spinner. Folding them together would push the formatting commands through a
+ * promise for no reason, or weaken the synchronous guarantee the static path
+ * gives a renderer.
+ *
+ * An extension returns a list of these, so one fronting several sources gives
+ * each source its own resolver.
+ */
+export interface SlashCommandContribution {
+  /** Always offered; the host filters them against the query. */
+  items?: SlashCommandSpec[];
+  /** Query-driven. Called as the author types; may be cancelled. */
+  resolve?: SlashCommandResolver;
+}
 
 // ── Mark decorator ─────────────────────────────────────────────────────────────
 
@@ -946,13 +977,8 @@ export interface ExtensionConfig<Options = object> {
    * defined, so the menu that inserts a thing is owned by whoever owns it.
    * Data only, like `addToolbarItems`.
    */
-  addSlashCommands?(this: Phase1Context<Options>): SlashCommandSpec[];
+  addSlashCommands?(this: Phase1Context<Options>): SlashCommandContribution[];
 
-  /**
-   * A resolver for slash entries this extension cannot list up front, because
-   * they are searched rather than enumerated. One per extension.
-   */
-  addSlashCommandResolver?(this: Phase1Context<Options>): SlashCommandResolver;
 
   /**
    * Node actions this extension contributes (contextual operations on its nodes).
@@ -1144,9 +1170,7 @@ export interface ResolvedExtension {
   markDecorators: Map<string, MarkDecorator>;
   fontModifiers: Map<string, FontModifier>;
   toolbarItems: ToolbarItemSpec[];
-  slashCommands: SlashCommandSpec[];
-  /** Null when this extension declares no resolver, which is the common case. */
-  slashCommandResolver: SlashCommandResolver | null;
+  slashCommands: SlashCommandContribution[];
   nodeActions: NodeActionContribution[];
   selectionBehaviors: SelectionBehavior[];
   hitTesters: HitTester[];

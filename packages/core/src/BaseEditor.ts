@@ -12,6 +12,7 @@ import type {
   MarkdownParserTokenSpec,
   SlashCommandSpec,
 } from "./extensions/types";
+import { DEFAULT_SLASH_ORDER } from "./extensions/types";
 import type { ExportContributionMap, ImportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
@@ -301,14 +302,15 @@ export class BaseEditor implements IBaseEditor {
   }
 
   /**
-   * Slash-menu entries from every extension, in registration order.
+   * The listable half of the slash menu, merged by `group` then `order`.
    *
-   * The listable half of the menu: a host renders these rather than
-   * enumerating the formatting commands itself, so an extension owns the entry
-   * that inserts its own node.
+   * A host renders these rather than enumerating the formatting commands
+   * itself, so an extension owns the entry that inserts its own node.
    */
   getSlashCommands(): SlashCommandSpec[] {
-    return this.manager.buildSlashCommands();
+    return sortSlashCommands(
+      this.manager.buildSlashCommands().flatMap((c) => c.items ?? []),
+    );
   }
 
   /**
@@ -319,24 +321,32 @@ export class BaseEditor implements IBaseEditor {
    * query costs nothing, and again once they answer, so a resolver that
    * ignores its own signal still cannot hand back entries for a query the
    * reader has typed past. Either way the call throws `signal.reason` instead
-   * of resolving, which is what makes a caller holding a result able to trust
-   * that it is current.
+   * of resolving, which is what lets a caller trust the result it holds.
    *
-   * A rejecting resolver rejects the whole call. `getSlashCommands` is
-   * unaffected, so the menu falls back to its listed entries rather than to
-   * nothing.
+   * A resolver that rejects is dropped from the round with a warning. One
+   * source being down must not empty a menu whose formatting entries are fine.
    */
   async resolveSlashCommands(
     query: string,
     signal: AbortSignal,
   ): Promise<SlashCommandSpec[]> {
     signal.throwIfAborted();
-    const resolvers = this.manager.buildSlashCommandResolvers();
+    const resolvers = this.manager
+      .buildSlashCommands()
+      .flatMap((c) => (c.resolve ? [c.resolve] : []));
     if (resolvers.length === 0) return [];
 
-    const found = await Promise.all(resolvers.map((resolve) => resolve(query, signal)));
+    const rounds = await Promise.allSettled(
+      resolvers.map((resolve) => resolve(query, signal)),
+    );
     signal.throwIfAborted();
-    return found.flat();
+
+    const found: SlashCommandSpec[] = [];
+    for (const round of rounds) {
+      if (round.status === "fulfilled") found.push(...round.value);
+      else console.warn("[Scrivr] A slash-command resolver failed:", round.reason);
+    }
+    return sortSlashCommands(found);
   }
 
   /**
@@ -662,4 +672,26 @@ export class BaseEditor implements IBaseEditor {
     }
     return this.boundCommands as SafeFlatCommands;
   }
+}
+
+/**
+ * Merge slash entries by `group` then `order`.
+ *
+ * Groups keep the order they were first contributed in — registration order,
+ * which is what puts an extension's own entries where the kit author placed
+ * them — rather than sorting group names alphabetically, which would reorder a
+ * menu whenever a group was renamed.
+ */
+function sortSlashCommands(specs: SlashCommandSpec[]): SlashCommandSpec[] {
+  const groupRank = new Map<string, number>();
+  for (const spec of specs) {
+    const group = spec.group ?? "";
+    if (!groupRank.has(group)) groupRank.set(group, groupRank.size);
+  }
+  return [...specs].sort((a, b) => {
+    const byGroup =
+      (groupRank.get(a.group ?? "") ?? 0) - (groupRank.get(b.group ?? "") ?? 0);
+    if (byGroup !== 0) return byGroup;
+    return (a.order ?? DEFAULT_SLASH_ORDER) - (b.order ?? DEFAULT_SLASH_ORDER);
+  });
 }

@@ -212,3 +212,46 @@ callback threaded through four layers, a hook that duplicates
 `provider.search`, and a content builder that duplicates `provider.fetch`. All
 three delete against this RFC, and `SourceProvider.search` runs for the first
 time.
+
+## What shipped
+
+All of it, as specified, with two details the RFC left open.
+
+`SlashCommandSpec` (`id`, `label`, `description?`, `group?`, `order?`, `command`,
+`args?`), `SlashCommandContribution` (`items?` / `resolve?`), and the Phase-1
+`addSlashCommands()` hook returning a list of contributions — so one extension
+fronting several sources gives each its own resolver. `getSlashCommands()` and
+`resolveSlashCommands(query, signal)` read them back, both merged by `group` then
+`order`.
+
+A resolver that rejects is dropped from the round with a `console.warn` and the
+rest still answer (Decision 5). `signal` is required, and the editor checks it
+twice — before the resolvers run and again after they answer — so a resolver that
+ignores its own signal still cannot deliver entries for a query the author has
+typed past. Abandoning throws `signal.reason`, which is how a caller knows a
+result it holds is current.
+
+`insertSourcedBlockFromSource({ kind, resourceId, versionId })` ships with it
+(Decision 4), resolving through `provider.fetch` and then delegating to
+`insertSourcedBlock` so there is one insertion path. `SourcedBlockExtension`
+contributes one resolver per provider, and `SourceProvider.search` runs for the
+first time. Nothing fetches during a search.
+
+**Two decisions the RFC did not make.**
+
+*Group ordering.* "Merges by `group` then `order`" did not say how groups order
+against each other. They keep the order they were first contributed in —
+registration order — rather than sorting group names, so renaming a group does
+not reorder the menu.
+
+*Where the glyph comes from.* The spec has `label` and `description` and no icon,
+which is right under §5 ("Scrivr contributes no renderer"). The React menu
+therefore keys a glyph off `spec.command`, the same way the playground toolbar
+keys its Lucide icons off `item.command`. An entry whose command is not in that
+map renders without a glyph rather than a wrong one.
+
+`editor.runCommand(name, args)` was added to dispatch a declared spec by name.
+Both `ToolbarItemSpec` and `SlashCommandSpec` name a command rather than closing
+over one, and dispatching by name through `commands` needs a cast — the playground
+had grown one, commented "single cast point". It is deleted; the dispatch lives
+once on `BaseEditor`.

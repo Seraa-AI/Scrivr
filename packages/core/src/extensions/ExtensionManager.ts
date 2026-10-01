@@ -11,8 +11,7 @@ import type {
   ResolvedExtension,
   FontModifier,
   ToolbarItemSpec,
-  SlashCommandSpec,
-  SlashCommandResolver,
+  SlashCommandContribution,
   InputHandler,
   MarkdownBlockRule,
   PasteTransform,
@@ -625,18 +624,10 @@ export class ExtensionManager {
   }
 
   /**
-   * Slash-menu entries from all extensions, in registration order.
+   * Slash-menu contributions from all extensions, in registration order.
    */
-  buildSlashCommands(): SlashCommandSpec[] {
+  buildSlashCommands(): SlashCommandContribution[] {
     return this.resolved.flatMap((ext) => ext.slashCommands);
-  }
-
-  /**
-   * Slash-command resolvers from all extensions, in registration order.
-   * Most extensions declare none.
-   */
-  buildSlashCommandResolvers(): SlashCommandResolver[] {
-    return this.resolved.flatMap((ext) => ext.slashCommandResolver ?? []);
   }
 
   /**
