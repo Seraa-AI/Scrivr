@@ -62,6 +62,46 @@ describe("resolveActiveFontSize", () => {
   });
 });
 
+describe("Editor.getActiveFontFamily", () => {
+  const familyOver = (editor: ReturnType<typeof createTestEditor>, from: number, to: number) => {
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, from, to)));
+    return editor.getActiveFontFamily();
+  };
+
+  const twoFamilies = () =>
+    createTestEditor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [{
+          type: "paragraph",
+          content: [
+            { type: "text", text: "one", marks: [{ type: "fontFamily", attrs: { family: "Georgia" } }] },
+            { type: "text", text: " two", marks: [{ type: "fontFamily", attrs: { family: "Arial" } }] },
+          ],
+        }],
+      },
+    });
+
+  it("reports mixed when the selection spans more than one family", () => {
+    const editor = twoFamilies();
+
+    expect(familyOver(editor, 1, 4).mixed).toBe(false);
+    expect(familyOver(editor, 4, 8).mixed).toBe(false);
+    expect(familyOver(editor, 1, 8).mixed).toBe(true);
+  });
+
+  it("still names a family when mixed, so a reader of the old fields is unchanged", () => {
+    // Additive: `requested`/`resolved` keep answering as they always did, so a
+    // consumer that does not know about `mixed` behaves exactly as before.
+    const mixedSelection = familyOver(twoFamilies(), 1, 8);
+
+    expect(mixedSelection.requested.length).toBeGreaterThan(0);
+    expect(mixedSelection.resolved.length).toBeGreaterThan(0);
+  });
+});
+
 describe("Editor.getActiveFontSize", () => {
   const editorWith = (content: Record<string, unknown>) =>
     createTestEditor({ extensions: [StarterKit], content });
