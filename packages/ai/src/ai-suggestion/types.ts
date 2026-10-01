@@ -95,6 +95,16 @@ export interface ApplyAiSuggestionOptions {
   groupId?: string;
   /** If provided, only apply changes in this block. */
   blockId?: string;
+  /**
+   * Offsets into the block's accepted text, bounding what gets applied —
+   * "accept this sentence", not "accept this block". Requires `blockId`.
+   *
+   * Only groups the span covers whole are applied; one it merely clips is
+   * left pending. The span is checked against the live document at accept
+   * time and refused if the block has drifted, because offsets into a stale
+   * snapshot address different words than the ones the proposal was about.
+   */
+  range?: { from: number; to: number };
   mode: "direct" | "tracked";
 }
 

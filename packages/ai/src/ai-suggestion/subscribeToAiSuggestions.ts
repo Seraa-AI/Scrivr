@@ -59,6 +59,19 @@ export interface AiSuggestionCardData {
 export interface AiSuggestionCardActions {
   /** Accept one block. mode defaults to "tracked". */
   accept(blockId: string, mode?: "tracked" | "direct"): void;
+  /**
+   * Accept only the part of a block one span covers — "accept this sentence",
+   * not "accept this block". Offsets are into the block's accepted text.
+   *
+   * Returns whether anything was applied: a span that covers no whole group,
+   * or a block the reader has edited since the suggestion was written, is
+   * refused rather than approximated.
+   */
+  acceptRange(
+    blockId: string,
+    range: { from: number; to: number },
+    mode?: "tracked" | "direct",
+  ): boolean;
   /** Reject one block. */
   reject(blockId: string): void;
   /** Accept all blocks. mode defaults to "tracked". */
@@ -181,6 +194,9 @@ export function subscribeToAiSuggestions(
   const actions: AiSuggestionCardActions = {
     accept(blockId, mode = "tracked") {
       applyAiSuggestion(editor, { blockId, mode });
+    },
+    acceptRange(blockId, range, mode = "tracked") {
+      return applyAiSuggestion(editor, { blockId, range, mode });
     },
     reject(blockId) {
       rejectAiSuggestion(editor, { blockId });

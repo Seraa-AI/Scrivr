@@ -114,8 +114,8 @@ export class AiTestEditor extends ServerEditor {
     showAiSuggestion(this, suggestion);
   }
 
-  apply(options: ApplyAiSuggestionOptions): void {
-    applyAiSuggestion(this, options);
+  apply(options: ApplyAiSuggestionOptions): boolean {
+    return applyAiSuggestion(this, options);
   }
 
   reject(options?: RejectAiSuggestionOptions): void {

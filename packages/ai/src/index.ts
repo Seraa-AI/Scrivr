@@ -3,10 +3,13 @@
  *
  * The AI toolkit (`AiToolkit`, `getAiToolkit`, `GhostText`, `AiCaret`), the
  * AI-suggestion overlay (`AiSuggestion`, `computeAiSuggestion`, popover +
- * subscription helpers), and the zod-validated semantic edit protocol
- * (`RichSemanticEditSchema`, `parseSemanticEdits`). Builds on `@scrivr/core`,
- * `@scrivr/export-semantic`, and the tracked-merge engine from `@scrivr/plugins`.
+ * subscription helpers), the block-marker layer (`BlockMarkers`,
+ * `setBlockMarkers`) for a finding that proposes no edit, and the
+ * zod-validated semantic edit protocol (`RichSemanticEditSchema`,
+ * `parseSemanticEdits`). Builds on `@scrivr/core`, `@scrivr/export-semantic`,
+ * and the tracked-merge engine from `@scrivr/plugins`.
  */
 export * from "./ai-toolkit";
 export * from "./ai-suggestion";
+export * from "./block-markers";
 export * from "./schema";

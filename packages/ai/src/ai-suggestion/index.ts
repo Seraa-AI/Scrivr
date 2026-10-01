@@ -28,6 +28,10 @@ export type { AiSuggestionOptions, AiSuggestionRenderMode } from "./AiSuggestion
 // ── Commands ─────────────────────────────────────────────────────────────────
 export { showAiSuggestion, applyAiSuggestion, rejectAiSuggestion } from "./showHideApply";
 
+// ── Accepted-text spans ──────────────────────────────────────────────────────
+export { buildGroupSpans, groupsWithin } from "./groupSpans";
+export type { GroupSpan } from "./groupSpans";
+
 // ── Compute ───────────────────────────────────────────────────────────────────
 export { computeAiSuggestion } from "./computeAiSuggestion";
 export type { ComputeAiSuggestionOptions } from "./computeAiSuggestion";
