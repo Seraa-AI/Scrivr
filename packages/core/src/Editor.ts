@@ -1,4 +1,6 @@
 import type { LayoutFontResolver } from "./fonts/layoutResolver";
+import { resolveActiveFontSize } from "./fonts/activeFontSize";
+import { getBlockStyle } from "./layout/FontConfig";
 import {
 	EditorState,
 	Transaction,
@@ -15,7 +17,7 @@ import type {
 } from "./extensions/types";
 import type { Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
-import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
+import { BlockRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import type {
 	ActiveFontFamily,
@@ -505,12 +507,6 @@ export class Editor extends BaseEditor implements IEditor {
 	readonly blockRegistry: BlockRegistry;
 
 	/**
-	 * Inline object registry built from all extensions.
-	 * Pass to renderPage — maps node type names to InlineStrategy instances.
-	 */
-	readonly inlineRegistry: InlineRegistry;
-
-	/**
 	 * Page chrome contributions from all extensions (headers, footers, etc.).
 	 * Passed to renderPage for paint-time dispatch.
 	 */
@@ -603,7 +599,6 @@ export class Editor extends BaseEditor implements IEditor {
 		this.hitTesters = this.manager.buildHitTesters();
 		this.selectionGestures = this.manager.buildSelectionGestures();
 		this.blockRegistry = this.manager.buildBlockRegistry();
-		this.inlineRegistry = this.manager.buildInlineRegistry();
 		this.pageChromeContributions =
 			this.manager.getPageChromeContributions();
 
@@ -1091,6 +1086,47 @@ export class Editor extends BaseEditor implements IEditor {
 			resolved: resolved.family,
 			substituted: resolved.family !== requested,
 		};
+	}
+
+	/**
+	 * The size in effect at the selection, in px — the counterpart to
+	 * `getActiveFontFamily`. Inline `fontSize` mark if present, else the size the
+	 * block style renders at. Always a number.
+	 */
+	getActiveFontSize(): number | null {
+		const state = this.getActiveState();
+		const { from, to, empty, $from } = state.selection;
+
+		/** The size a run is drawn at: its own mark, else the style of its block. */
+		const sizeOf = (markSize: unknown, block: PmNode): number => {
+			const level = block.attrs["level"];
+			return resolveActiveFontSize(
+				typeof markSize === "number" ? markSize : undefined,
+				// The textblock itself, not a depth-1 ancestor: layout styles the
+				// leaf, so a heading inside a table cell is styled as a heading
+				// while its ancestor is the table, which has no style of its own.
+				getBlockStyle(this.fontConfig, block.type.name, typeof level === "number" ? level : undefined),
+			);
+		};
+
+		if (empty) {
+			return sizeOf(this.getActiveMarkAttrs()["fontSize"]?.["size"], $from.parent);
+		}
+
+		// Every run in the range, not the first: a selection covering a 24px run
+		// and an unmarked one has no single size, and naming either invites the
+		// reader to confirm it and resize the other.
+		let answer: number | null = null;
+		let mixed = false;
+		state.doc.nodesBetween(from, to, (node, _pos, parent) => {
+			if (mixed || !node.isText || !parent) return !mixed;
+			const mark = node.marks.find((m) => m.type.name === "fontSize");
+			const size = sizeOf(mark?.attrs["size"], parent);
+			if (answer === null) answer = size;
+			else if (answer !== size) mixed = true;
+			return !mixed;
+		});
+		return mixed ? null : answer;
 	}
 
 	/** True when the editor is in pageless (infinite-scroll) mode. */

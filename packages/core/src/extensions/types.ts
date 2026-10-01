@@ -1,4 +1,5 @@
 import type { TextMeasurerLike } from "../layout/TextMeasurer";
+import type { InlineRegistry } from "../layout/BlockRegistry";
 import type { LayoutFontResolver } from "../fonts/layoutResolver";
 /**
  * Extension system types.
@@ -171,6 +172,13 @@ export interface IBaseEditor {
    * Returned as a fresh array; callers may mutate the result.
    */
   getDocAttrNames(): string[];
+  /**
+   * Inline node strategies, by node type name. On the base contract because
+   * measuring an inline atom is layout, not paint — a headless caller that lays
+   * a document out must be able to reach a strategy, and it holds this interface
+   * rather than the class.
+   */
+  readonly inlineRegistry: InlineRegistry;
   /**
    * Look up a registered extension by name. Returns `null` when the
    * extension is not present. Callers that need typed options should narrow
