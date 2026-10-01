@@ -23,6 +23,7 @@ export * from "./layout";
 export * from "./renderer";
 export * from "./input";
 export * from "./extensions";
+export type { DeferredEditOptions, DeferredEditAbandonment } from "./BaseEditor";
 export * from "./menus";
 export * from "./surfaces";
 export * from "./exports/docx";

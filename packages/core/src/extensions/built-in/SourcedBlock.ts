@@ -1,6 +1,7 @@
 import { Extension } from "../Extension";
 import { fnv1aHex, stableStringify } from "../../model/hash";
 import { Slice, Fragment, Node } from "prosemirror-model";
+import { insertPoint } from "prosemirror-transform";
 import {
 	Plugin,
 	PluginKey,
@@ -291,15 +292,6 @@ export interface SourcedBlockOptions {
 	providers?: SourceProvider[];
 }
 
-/**
- * The editor each configured instance belongs to.
- *
- * `insertSourcedBlockFromSource` finishes after an await, and the `state` a
- * command is handed is the one from before it — stale by the time the content
- * arrives. Keyed by the options object because that is the one per-instance
- * identity both `onEditorReady` and `addCommands` can see.
- */
-const editorForOptions = new WeakMap<SourcedBlockOptions, IBaseEditor>();
 
 declare module "@scrivr/core" {
 	interface Commands<ReturnType> {
@@ -307,6 +299,13 @@ declare module "@scrivr/core" {
 			insertSourcedBlock: (options: {
 				kind: string;
 				content: SourceContent;
+				/**
+				 * Where to put it. Defaults to replacing the selection, which
+				 * is what a direct insertion means. Content that arrived
+				 * asynchronously passes the position it was asked for, because
+				 * by then the selection is somewhere else.
+				 */
+				at?: number;
 			}) => ReturnType;
 			/**
 			 * Insert by identity rather than content, resolving through
@@ -318,9 +317,10 @@ declare module "@scrivr/core" {
 			 * what turns a contribution back into a callback. This one lets
 			 * `{ kind, resourceId, versionId }` be the whole entry.
 			 *
-			 * The fetch is asynchronous, so the insert lands on a later
-			 * transaction. Returns true once the request is under way, not once
-			 * the block is in the document.
+			 * Returns true once the request is under way, not once the block
+			 * is in the document. The insert is abandoned, with a reason, if
+			 * the text it was anchored to is gone, the editor has stopped
+			 * accepting writes, or the editor is destroyed.
 			 */
 			insertSourcedBlockFromSource: (options: {
 				kind: string;
@@ -573,9 +573,9 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				},
 
 			insertSourcedBlock:
-				(options: { kind: string; content: SourceContent }) =>
+				(options: { kind: string; content: SourceContent; at?: number }) =>
 				(state, dispatch) => {
-					const { kind, content } = options;
+					const { kind, content, at } = options;
 					const schema = state.schema;
 
 					try {
@@ -606,7 +606,16 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 								fragment,
 							);
 
-							tr.replaceSelectionWith(blockNode);
+							if (at === undefined) {
+								tr.replaceSelectionWith(blockNode);
+							} else {
+								// Where a block can legally go near `at` — a
+								// raw insert at a text offset would split the
+								// paragraph the position happened to land in.
+								const point = insertPoint(tr.doc, at, blockType);
+								if (point === null) return false;
+								tr.insert(point, blockNode);
+							}
 							dispatch(tr);
 
 							const providers = this.options.providers ?? [];
@@ -658,25 +667,26 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 						);
 						return false;
 					}
-					const editor = editorForOptions.get(this.options);
-					if (!editor) return false;
-
-					// Deliberately not awaited: a command is synchronous, and the
-					// insert runs through the content-taking sibling once the
-					// fetch lands, so there is one insertion path rather than two.
-					provider
-						.fetch(resourceId, versionId)
-						.then(content => {
+					// `deferEdit` owns the three things that go wrong between
+					// asking for content and holding it: the position moves,
+					// the editor may stop accepting writes, and it may be gone.
+					// The insert itself still runs through the content-taking
+					// sibling, so there is one insertion path.
+					const editor = this.editor();
+					editor.deferEdit({
+						work: () => provider.fetch(resourceId, versionId),
+						edit: (content, at) => {
 							editor.runCommand("insertSourcedBlock", [
-								{ kind, content },
+								{ kind, content, at },
 							]);
-						})
-						.catch((error: unknown) => {
+						},
+						onAbandoned: (reason, error) => {
 							console.error(
-								`[SourcedBlock] Failed to fetch ${kind} ${resourceId}:`,
-								error,
+								`[SourcedBlock] Did not insert ${kind} ${resourceId} — ${reason}`,
+								error ?? "",
 							);
-						});
+						},
+					});
 
 					return true;
 				},
@@ -724,10 +734,6 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 	 * should not fire three writes on open.
 	 */
 	onEditorReady(editor: IBaseEditor) {
-		// Before the early return below: the command path needs this even when
-		// no provider cares about divergence.
-		editorForOptions.set(this.options, editor);
-
 		const providers = this.options.providers ?? [];
 		if (!providers.some(provider => provider.onInstanceChanged)) return;
 

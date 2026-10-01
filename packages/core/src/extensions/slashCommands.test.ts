@@ -164,6 +164,9 @@ describe("resolveSlashCommands", () => {
     ...over,
   });
 
+  const entryAt = (label: string, order: number): SlashCommandSpec =>
+    entry(label, { group: "g", order });
+
   it("returns what a resolver found for the query", async () => {
     const editor = new ServerEditor({
       extensions: [StarterKit, searching(async (q) => [entry(q)])],
@@ -220,7 +223,9 @@ describe("resolveSlashCommands", () => {
     warn.mockRestore();
   });
 
-  it("leaves the listed entries alone when every resolver fails", async () => {
+  it("resolves to nothing, rather than rejecting, when every resolver fails", async () => {
+    // Rejecting would be an error state, and a caller cannot tell one from an
+    // abandoned query.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const editor = new ServerEditor({
       extensions: [
@@ -234,8 +239,67 @@ describe("resolveSlashCommands", () => {
     await expect(
       editor.resolveSlashCommands("x", new AbortController().signal),
     ).resolves.toEqual([]);
-    expect(labels(editor.getSlashCommands())).toContain("Text");
+    expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it("drops a resolver that answers with something that is not a list", async () => {
+    // A provider SDK returning `data` from a fetch wrapper lands here. The
+    // spread used to throw inside the method, losing every other resolver's
+    // entries and rejecting a call that should have degraded.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const editor = new ServerEditor({
+      extensions: [
+        StarterKit,
+        searching(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (async () => undefined) as any,
+          async () => [entry("still-here")],
+        ),
+      ],
+    });
+
+    const found = await editor.resolveSlashCommands("x", new AbortController().signal);
+
+    expect(labels(found)).toEqual(["still-here"]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("settles when the query is abandoned, even if a resolver never answers", async () => {
+    // A resolver that ignores its signal would otherwise leave the caller
+    // waiting forever, and retain one chain per keystroke.
+    const controller = new AbortController();
+    const editor = new ServerEditor({
+      extensions: [StarterKit, searching(() => new Promise(() => {}))],
+    });
+
+    const pending = editor.resolveSlashCommands("x", controller.signal);
+    controller.abort();
+
+    await expect(pending).rejects.toThrow();
+  });
+
+  it("sorts an entry whose order is not a real number as if it stated none", async () => {
+    // One broken order used to break transitivity for its whole group, so two
+    // entries that both stated a valid order came out reversed.
+    const editor = new ServerEditor({
+      extensions: [
+        Extension.create({
+          name: "host",
+          addSlashCommands: (): SlashCommandContribution[] => [{
+            items: [
+              entryAt("ten", 10),
+              entryAt("broken", Number.NaN),
+              entryAt("five", 5),
+            ],
+          }],
+        }),
+        StarterKit,
+      ],
+    });
+
+    expect(labels(editor.getSlashCommands()).slice(0, 3)).toEqual(["five", "ten", "broken"]);
   });
 
   it("merges resolved entries by group then order", async () => {

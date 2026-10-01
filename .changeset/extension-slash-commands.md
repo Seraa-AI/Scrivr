@@ -39,6 +39,26 @@ identity rather than content — without it the contribution would have to be a
 callback. `SourcedBlockExtension` contributes one resolver per provider, and
 `SourceProvider.search` runs for the first time.
 
+`editor.deferEdit({ at, work, edit, onAbandoned })` is the seam for async work
+that ends in an edit. It captures a position, maps it through everything that
+happens while the work runs, and abandons with a reason — `anchor-removed`,
+`read-only`, `destroyed`, `failed`, `edit-failed` — rather than writing blind.
+`insertSourcedBlockFromSource` is its first consumer: without it a clause chosen
+from the menu replaced whatever the author had selected while it loaded.
+`insertSourcedBlock` gains an optional `at`, resolved through `insertPoint`.
+
+`ExtensionContext` carries an `editor()` thunk, so a contribution that must act
+after an await can reach the editor it belongs to. Three extensions had each
+invented a `WeakMap` keyed on their options object, which identifies the
+configured extension rather than the editor — one instance shared by two editors
+inserted into the wrong document. `addInitialDoc`'s context no longer inherits
+it, because that phase genuinely runs before an editor exists.
+
+`SlashMenuItem` carries the spec's `id` and `group` through to the renderer, and
+the React menu debounces its searches, clears the previous query's entries up
+front instead of leaving them selectable, and asks no resolver when a host
+supplies its own `items`.
+
 `editor.runCommand(name, args)` dispatches a declared spec by name. Doing that
 through `commands` means spreading `unknown[]` into a union of fixed-arity
 signatures, which only typechecks behind a cast; the playground had grown one and

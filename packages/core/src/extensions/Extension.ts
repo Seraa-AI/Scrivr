@@ -74,14 +74,25 @@ export class Extension<Options extends object = object> {
    * @param schema — the fully built ProseMirror Schema.
    *                 Required for Phase 2 callbacks. Omit during schema-build phase.
    */
-  resolve(schema?: Schema): ResolvedExtension {
+  resolve(schema?: Schema, editor?: () => IBaseEditor): ResolvedExtension {
     const { config, name, options } = this;
 
     // Phase 1 context — options available, schema not yet built
     const p1: Phase1Context<Options> = { name, options };
 
     // Phase 2 context — schema now available
-    const p2: ExtensionContext<Options> = { name, options, schema: schema! };
+    const p2: ExtensionContext<Options> = {
+      name,
+      options,
+      schema: schema!,
+      editor:
+        editor ??
+        (() => {
+          throw new Error(
+            `Extension "${name}": no editor owns this manager, so a contribution cannot reach one`,
+          );
+        }),
+    };
 
     return {
       name,

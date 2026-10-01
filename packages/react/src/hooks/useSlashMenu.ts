@@ -6,16 +6,34 @@ import { useFloatingPosition } from "./useFloatingPosition";
 export interface SlashMenuItem {
   /** Short icon label shown in the menu (e.g. "H1", "•"). */
   label: string;
-  /** Display name (also used as the React key — must be unique in the list). */
+  /** Display name. */
   title: string;
   /** One-line description shown below the title. */
   description: string;
+  /**
+   * Stable identity, used as the React key. An extension's entry carries the
+   * one it declared; a title cannot stand in, because two search hits can
+   * legitimately share a label and the rows would then reconcile onto each
+   * other — the highlight on one and Enter running another.
+   */
+  id?: string;
+  /** Logical grouping. Renderers draw a divider between groups. */
+  group?: string;
   /** Called when the item is selected. Delete-slash logic runs before this. */
   action: () => void;
 }
 
 export interface UseSlashMenuOptions {
+  /**
+   * Replace the entries entirely — the extensions' own are not offered, and
+   * no resolver is asked.
+   */
   items?: SlashMenuItem[] | undefined;
+  /**
+   * How long to wait after a keystroke before asking the resolvers, in ms.
+   * A search is I/O: typing "indemnity" should not be ten requests.
+   */
+  resolveDebounceMs?: number | undefined;
 }
 
 /**
@@ -43,6 +61,8 @@ function toItem(editor: Editor, spec: SlashCommandSpec): SlashMenuItem {
     label: GLYPHS[spec.command] ?? "",
     title: spec.label,
     description: spec.description ?? "",
+    id: spec.id,
+    ...(spec.group !== undefined ? { group: spec.group } : {}),
     action: () => editor.runCommand(spec.command, spec.args),
   };
 }
@@ -52,6 +72,7 @@ export function useSlashMenu(
   options: UseSlashMenuOptions = {},
 ) {
   const itemsProp = options.items;
+  const debounceMs = options.resolveDebounceMs ?? 150;
   const defaultItems = useMemo((): SlashMenuItem[] => {
     // Declared by whoever owns the node each entry inserts, so an application
     // extension's entries appear here without this hook knowing about it.
@@ -89,25 +110,33 @@ export function useSlashMenu(
   }, [filteredItems.length]);
 
   useEffect(() => {
-    if (!editor || !visible) {
+    // A host that supplied its own items owns the whole list, so no resolver
+    // is asked — otherwise "override" would mean "append to".
+    if (!editor || !visible || itemsProp) {
       setResolvedItems([]);
       return;
     }
-    // Aborting on every keystroke is the whole contract: the editor throws
-    // rather than resolving once the signal fires, so an answer that arrives
-    // for a query the reader has typed past can never reach the menu.
+    // Cleared up front, not on the answer: holding the previous query's
+    // entries on screen leaves them selectable, and Enter would insert
+    // something matching a query the reader has already typed past.
+    setResolvedItems([]);
+
     const controller = new AbortController();
-    editor
-      .resolveSlashCommands(query, controller.signal)
-      .then((specs) => setResolvedItems(specs.map((spec) => toItem(editor, spec))))
-      .catch(() => {
-        // Abandoned, or a resolver failed. Either way the listed entries
-        // stand on their own — a search that cannot answer shows nothing
-        // rather than emptying the menu.
-        if (!controller.signal.aborted) setResolvedItems([]);
-      });
-    return () => controller.abort();
-  }, [editor, visible, query]);
+    const timer = setTimeout(() => {
+      editor
+        .resolveSlashCommands(query, controller.signal)
+        .then((specs) => setResolvedItems(specs.map((spec) => toItem(editor, spec))))
+        .catch(() => {
+          // Abandoned, or every resolver failed. The listed entries stand on
+          // their own — a search that cannot answer shows nothing.
+        });
+    }, debounceMs);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [editor, visible, query, itemsProp, debounceMs]);
 
   useEffect(() => {
     if (!editor) return;

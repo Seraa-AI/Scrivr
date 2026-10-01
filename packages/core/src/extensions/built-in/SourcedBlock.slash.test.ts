@@ -6,6 +6,7 @@
  * consumer around the provider and made it duplicate `search` and `fetch`.
  */
 import { describe, expect, it, vi } from "vitest";
+import { TextSelection } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { SourcedBlockExtension, type SourceProvider } from "./SourcedBlock";
@@ -174,5 +175,127 @@ describe("insertSourcedBlockFromSource", () => {
     expect(editor.getState().doc.toJSON()).toEqual(before);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe("where a deferred insert lands", () => {
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /** A provider whose fetch the test releases. */
+  function heldProvider() {
+    let release!: () => void;
+    const p = provider({
+      fetch: () =>
+        new Promise((resolve) => {
+          release = () => resolve(CONTENT);
+        }),
+    });
+    return { provider: p, release: () => release() };
+  }
+
+  const twoParagraphs = {
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: "AAA" }] },
+      { type: "paragraph", content: [{ type: "text", text: "BBB" }] },
+    ],
+  };
+
+  const editorWithDoc = (p: SourceProvider) =>
+    new ServerEditor({
+      extensions: [StarterKit, SourcedBlockExtension.configure({ providers: [p] })],
+      content: twoParagraphs,
+    });
+
+  it("goes where the author asked, not where the caret ended up", async () => {
+    // The clause used to replace whatever the author selected while it loaded.
+    const held = heldProvider();
+    const editor = editorWithDoc(held.provider);
+    // Caret at the end of the first paragraph, where the menu leaves it after
+    // deleting the author's "/clause".
+    let state = editor.getState();
+    editor.applyTransaction(
+      state.tr.setSelection(TextSelection.create(state.doc, state.doc.child(0).nodeSize - 1)),
+    );
+
+    editor.runCommand("insertSourcedBlockFromSource", [
+      { kind: "clause", resourceId: "cl_1", versionId: "v2" },
+    ]);
+
+    // The author selects the second paragraph's text while the fetch is out.
+    state = editor.getState();
+    const bbb = state.doc.child(0).nodeSize + 1;
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, bbb, bbb + 3)));
+    held.release();
+    await settled();
+
+    const text = editor.getState().doc.textContent;
+    expect(text).toContain("AAA");
+    expect(text).toContain("BBB");
+    // Between them, where it was asked for — not after the selection the
+    // author had moved to by the time the fetch landed.
+    expect(text.indexOf("indemnify")).toBeGreaterThan(text.indexOf("AAA"));
+    expect(text.indexOf("indemnify")).toBeLessThan(text.indexOf("BBB"));
+  });
+
+  it("does not insert into an editor that stopped accepting writes", async () => {
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    const held = heldProvider();
+    const editor = editorWithDoc(held.provider);
+
+    editor.runCommand("insertSourcedBlockFromSource", [
+      { kind: "clause", resourceId: "cl_1", versionId: "v2" },
+    ]);
+    editor.setReadOnly(true);
+    held.release();
+    await settled();
+
+    expect(sourcedBlocksIn(editor)).toEqual([]);
+    // Silence is the defect: the author's typed text was already deleted.
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("does not register an instance into an editor that is gone", async () => {
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    let registered = false;
+    const held = heldProvider();
+    const editor = editorWithDoc(
+      provider({ ...held.provider, registerInstance: async () => { registered = true; } }),
+    );
+
+    editor.runCommand("insertSourcedBlockFromSource", [
+      { kind: "clause", resourceId: "cl_1", versionId: "v2" },
+    ]);
+    editor.destroy();
+    held.release();
+    await settled();
+
+    expect(registered).toBe(false);
+    warn.mockRestore();
+  });
+
+  it("inserts into the editor that asked, when one configured extension serves two", async () => {
+    // Keyed on the extension's options, this put the clause in the other
+    // editor and left the one the author used empty.
+    const held = heldProvider();
+    const shared = SourcedBlockExtension.configure({ providers: [held.provider] });
+    const a = new ServerEditor({
+      extensions: [StarterKit, shared],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "A-DOC" }] }] },
+    });
+    const b = new ServerEditor({
+      extensions: [StarterKit, shared],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "B-DOC" }] }] },
+    });
+
+    a.runCommand("insertSourcedBlockFromSource", [
+      { kind: "clause", resourceId: "cl_1", versionId: "v2" },
+    ]);
+    held.release();
+    await settled();
+
+    expect(sourcedBlocksIn(a)).toHaveLength(1);
+    expect(sourcedBlocksIn(b)).toEqual([]);
   });
 });

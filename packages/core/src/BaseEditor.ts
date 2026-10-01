@@ -27,6 +27,41 @@ import {
   type RecloneOptions,
 } from "./model/assignBlockIds";
 
+/** Why a deferred edit never reached the document. */
+export type DeferredEditAbandonment =
+  /** The work rejected. */
+  | "failed"
+  /** The text the edit was anchored to was removed while the work ran. */
+  | "anchor-removed"
+  /** The editor stopped accepting writes before the work finished. */
+  | "read-only"
+  /** The editor was destroyed before the work finished. */
+  | "destroyed"
+  /** The work succeeded and `edit` threw. */
+  | "edit-failed";
+
+export interface DeferredEditOptions<T> {
+  /**
+   * Where the edit belongs, captured now and mapped through everything that
+   * happens while `work` runs. Defaults to the selection head.
+   */
+  at?: number;
+  /** The asynchronous part. */
+  work: () => Promise<T>;
+  /**
+   * Write the result. Called with the anchor as it now stands, and only when
+   * the editor still accepts writes and the anchor survived.
+   */
+  edit: (result: T, at: number) => void;
+  /** Told why, when the edit does not happen. */
+  onAbandoned?: (reason: DeferredEditAbandonment, error?: unknown) => void;
+}
+
+/** A position held across transactions. `pos` is null once its text is gone. */
+interface PendingAnchor {
+  pos: number | null;
+}
+
 export interface BaseEditorOptions {
   /**
    * Extensions that define the schema, plugins, and commands.
@@ -111,6 +146,13 @@ export class BaseEditor implements IBaseEditor {
   protected editorState: EditorState;
 
   private readOnlyValue = false;
+  private destroyed = false;
+  /**
+   * Anchors for edits whose work has not finished. Mapped on every document
+   * change so a deferred edit lands where it was asked for, not where the
+   * caret has since gone.
+   */
+  private readonly pendingAnchors = new Set<PendingAnchor>();
   private readonly listeners = new Set<() => void>();
   /**
    * Outcome of the most recent ingestion-time normalization — either
@@ -132,9 +174,9 @@ export class BaseEditor implements IBaseEditor {
    */
   readonly commands: SafeFlatCommands;
   /**
-   * The same bound commands, reachable by name. `commands` is a union of
-   * fixed-arity signatures, so spreading an argument list into one does not
-   * type — which is why `runCommand` exists and reads this instead.
+   * `commands` under a looser type — the same object, not a copy. Spreading an
+   * argument list into `commands` does not typecheck, because it is a union of
+   * fixed-arity signatures; `runCommand` reads this instead.
    */
   private readonly boundCommands: Record<string, (...args: unknown[]) => void> = {};
 
@@ -166,7 +208,7 @@ export class BaseEditor implements IBaseEditor {
     fonts,
   }: BaseEditorOptions = {}) {
     this.fonts = fonts ?? null;
-    this.manager = new ExtensionManager(extensions);
+    this.manager = new ExtensionManager(extensions, () => this);
     this.inlineRegistry = this.manager.buildInlineRegistry();
 
     const rawInitialDoc =
@@ -298,11 +340,14 @@ export class BaseEditor implements IBaseEditor {
    * this editor was not built with.
    */
   runCommand(name: keyof SafeFlatCommands, args: unknown[] = []): void {
+    // `hasOwn`, not a plain lookup: a name that happens to match something on
+    // Object.prototype would otherwise be invoked rather than ignored.
+    if (!Object.hasOwn(this.boundCommands, name)) return;
     this.boundCommands[name]?.(...args);
   }
 
   /**
-   * The listable half of the slash menu, merged by `group` then `order`.
+   * The listable half of the slash menu, ordered by `group` then `order`.
    *
    * A host renders these rather than enumerating the formatting commands
    * itself, so an extension owns the entry that inserts its own node.
@@ -315,7 +360,7 @@ export class BaseEditor implements IBaseEditor {
 
   /**
    * Ask every registered resolver what matches `query` — the entries that have
-   * to be searched rather than listed.
+   * to be searched rather than listed, ordered the same way.
    *
    * The signal is checked twice: before the resolvers run, so an abandoned
    * query costs nothing, and again once they answer, so a resolver that
@@ -336,15 +381,30 @@ export class BaseEditor implements IBaseEditor {
       .flatMap((c) => (c.resolve ? [c.resolve] : []));
     if (resolvers.length === 0) return [];
 
-    const rounds = await Promise.allSettled(
-      resolvers.map((resolve) => resolve(query, signal)),
-    );
+    // Raced against the signal: `allSettled` waits for the slowest resolver, so
+    // a resolver that ignores its own signal would leave an abandoned query
+    // pending forever — and the caller awaiting it never learns it was
+    // cancelled.
+    const rounds = await Promise.race([
+      Promise.allSettled(resolvers.map((resolve) => resolve(query, signal))),
+      aborted(signal),
+    ]);
     signal.throwIfAborted();
 
     const found: SlashCommandSpec[] = [];
     for (const round of rounds) {
-      if (round.status === "fulfilled") found.push(...round.value);
-      else console.warn("[Scrivr] A slash-command resolver failed:", round.reason);
+      if (round.status === "rejected") {
+        console.warn("[ExtensionManager] A slash-command resolver failed:", round.reason);
+      } else if (Array.isArray(round.value)) {
+        found.push(...round.value);
+      } else {
+        // Answering with something that is not a list is a failure like any
+        // other: degrade to the resolvers that did answer, never to an error.
+        console.warn(
+          "[ExtensionManager] A slash-command resolver answered with something that is not a list:",
+          round.value,
+        );
+      }
     }
     return sortSlashCommands(found);
   }
@@ -600,6 +660,8 @@ export class BaseEditor implements IBaseEditor {
   // ── Lifecycle ────────────────────────────────────────────────────────────────
 
   destroy(): void {
+    this.destroyed = true;
+    this.pendingAnchors.clear();
     this.emit("destroy", undefined as EditorEvents["destroy"]);
     // Tear down in reverse of setup so view cleanup (which may read engine
     // state — Y.Doc bindings, plugin state, subscriptions) runs before the
@@ -621,8 +683,56 @@ export class BaseEditor implements IBaseEditor {
    */
   protected applyState(tr: Transaction): void {
     this.editorState = this.editorState.apply(tr);
+    if (tr.docChanged && this.pendingAnchors.size > 0) {
+      for (const anchor of this.pendingAnchors) {
+        if (anchor.pos === null) continue;
+        const mapped = tr.mapping.mapResult(anchor.pos);
+        anchor.pos = mapped.deleted ? null : mapped.pos;
+      }
+    }
     this.emit("update", { docChanged: tr.docChanged });
     this.notifyListeners();
+  }
+
+  /**
+   * Run asynchronous work and write its result at a position that survives
+   * whatever happens meanwhile.
+   *
+   * Three things go wrong when an extension does this itself, and all three
+   * are silent: the position it captured is stale by the time the answer
+   * arrives, so the write lands on text the author has since selected and
+   * replaces it; the editor may have gone read-only, so the write vanishes
+   * with nothing said; and the editor may be destroyed, so the write lands on
+   * a state nobody will ever save. `onAbandoned` is how a caller learns which.
+   */
+  deferEdit<T>(options: DeferredEditOptions<T>): void {
+    const { at, work, edit, onAbandoned } = options;
+    const anchor: PendingAnchor = {
+      pos: at ?? this.getActiveState().selection.head,
+    };
+    this.pendingAnchors.add(anchor);
+
+    const abandon = (reason: DeferredEditAbandonment, error?: unknown): void => {
+      onAbandoned?.(reason, error);
+    };
+
+    work().then(
+      (result) => {
+        this.pendingAnchors.delete(anchor);
+        if (this.destroyed) return abandon("destroyed");
+        if (this.readOnlyValue) return abandon("read-only");
+        if (anchor.pos === null) return abandon("anchor-removed");
+        try {
+          edit(result, anchor.pos);
+        } catch (error: unknown) {
+          abandon("edit-failed", error);
+        }
+      },
+      (error: unknown) => {
+        this.pendingAnchors.delete(anchor);
+        abandon("failed", error);
+      },
+    );
   }
 
   protected notifyListeners(): void {
@@ -674,24 +784,41 @@ export class BaseEditor implements IBaseEditor {
   }
 }
 
+/** Rejects with the signal's reason the moment it aborts, and never resolves. */
+function aborted(signal: AbortSignal): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}
+
 /**
- * Merge slash entries by `group` then `order`.
+ * Order slash entries by `group`, then `order`.
  *
  * Groups keep the order they were first contributed in — registration order,
  * which is what puts an extension's own entries where the kit author placed
  * them — rather than sorting group names alphabetically, which would reorder a
  * menu whenever a group was renamed.
  */
+/**
+ * A spec's sort position. Anything that is not a real number sorts as if it
+ * stated none: a comparator returning `NaN` reads as "equal to everything",
+ * which breaks the ordering of every sibling rather than just the one entry.
+ */
+function orderOf(spec: SlashCommandSpec): number {
+  return Number.isFinite(spec.order) ? spec.order! : DEFAULT_SLASH_ORDER;
+}
+
 function sortSlashCommands(specs: SlashCommandSpec[]): SlashCommandSpec[] {
   const groupRank = new Map<string, number>();
   for (const spec of specs) {
     const group = spec.group ?? "";
     if (!groupRank.has(group)) groupRank.set(group, groupRank.size);
   }
+  // Every group in `specs` was ranked above, so a lookup always hits.
+  const rank = (spec: SlashCommandSpec): number => groupRank.get(spec.group ?? "") ?? 0;
   return [...specs].sort((a, b) => {
-    const byGroup =
-      (groupRank.get(a.group ?? "") ?? 0) - (groupRank.get(b.group ?? "") ?? 0);
+    const byGroup = rank(a) - rank(b);
     if (byGroup !== 0) return byGroup;
-    return (a.order ?? DEFAULT_SLASH_ORDER) - (b.order ?? DEFAULT_SLASH_ORDER);
+    return orderOf(a) - orderOf(b);
   });
 }

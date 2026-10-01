@@ -45,6 +45,7 @@ import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark, Slice } fro
 import type { MarkdownSerializer, MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
 import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
+import type { DeferredEditOptions } from "../BaseEditor";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
@@ -188,6 +189,17 @@ export interface IBaseEditor {
    */
   findExtension(name: string): Extension | null;
   /**
+   * Run asynchronous work and write its result at a position that survives
+   * whatever happens meanwhile.
+   *
+   * The seam for an extension that must fetch before it can edit. Without it
+   * the position captured at dispatch is stale when the answer arrives — so
+   * the write lands on text the author has since selected, and replaces it —
+   * and a write into a read-only or destroyed editor vanishes or lands on a
+   * state nobody will save. `onAbandoned` says which of those happened.
+   */
+  deferEdit<T>(options: DeferredEditOptions<T>): void;
+  /**
    * Run a command named by a declared spec — a `ToolbarItemSpec` or a
    * `SlashCommandSpec` — with the arguments it carries.
    *
@@ -198,7 +210,7 @@ export interface IBaseEditor {
    */
   runCommand(name: keyof SafeFlatCommands, args?: unknown[]): void;
   /**
-   * The listable half of the menu, merged by `group` then `order`.
+   * The listable half of the menu, ordered by `group` then `order`.
    *
    * Entries that must be searched come from `resolveSlashCommands` instead.
    */
@@ -672,6 +684,20 @@ export interface Phase1Context<Options = object> {
  */
 export interface ExtensionContext<Options = object> extends Phase1Context<Options> {
   readonly schema: Schema;
+  /**
+   * The editor these contributions belong to.
+   *
+   * A thunk, not a value: contexts are built while the editor is still being
+   * constructed, so this is valid inside a command body — which runs later —
+   * and not while `addCommands()` itself is executing.
+   *
+   * Reach for it only when a contribution genuinely needs the editor rather
+   * than the `state` it is handed; the case it exists for is work that
+   * finishes after an await, where the state a command received is stale.
+   * Throws when no editor owns the manager, which is only true in a test that
+   * built one directly.
+   */
+  readonly editor: () => IBaseEditor;
 }
 
 /**
@@ -679,7 +705,8 @@ export interface ExtensionContext<Options = object> extends Phase1Context<Option
  * fully resolved, so the merged markdown parser tokens are available — letting
  * extensions seed the document from markdown without an editor instance.
  */
-export interface InitialDocContext<Options = object> extends ExtensionContext<Options> {
+export interface InitialDocContext<Options = object> extends Phase1Context<Options> {
+  readonly schema: Schema;
   /**
    * Parse a markdown string into a ProseMirror document using the merged token
    * map from all registered extensions. Same algorithm as `editor.parseMarkdown()`.
@@ -978,7 +1005,6 @@ export interface ExtensionConfig<Options = object> {
    * Data only, like `addToolbarItems`.
    */
   addSlashCommands?(this: Phase1Context<Options>): SlashCommandContribution[];
-
 
   /**
    * Node actions this extension contributes (contextual operations on its nodes).
