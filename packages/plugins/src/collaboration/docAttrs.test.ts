@@ -8,7 +8,13 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 // Through the package barrel: this pair exists to be imported by a consuming
 // application, so a name dropped from `index.ts` fails here rather than there.
-import { DOC_ATTRS_MAP_NAME, readDocAttrs, seedDocAttrs } from "../index";
+import {
+  DOC_ATTRS_MAP_NAME,
+  isDocAttrEnvelope,
+  readDocAttrs,
+  seedDocAttrs,
+  type DocAttrEnvelope,
+} from "../index";
 
 const DECLARED = ["headerFooter", "finalSection"] as const;
 const room = () => new Y.Doc();
@@ -90,5 +96,32 @@ describe("readDocAttrs", () => {
     map.set("good", { localSeq: 1, value: { d: 4 } });
 
     expect(readDocAttrs(ydoc)).toEqual({ good: { d: 4 } });
+  });
+});
+
+describe("isDocAttrEnvelope", () => {
+  it("accepts what the live binding writes", () => {
+    const ydoc = room();
+    seedDocAttrs(ydoc, { headerFooter: { a: 1 } }, DECLARED);
+
+    expect(isDocAttrEnvelope(ydoc.getMap(DOC_ATTRS_MAP_NAME).get("headerFooter"))).toBe(true);
+  });
+
+  it("refuses what the live binding refuses", () => {
+    expect(isDocAttrEnvelope({ value: { a: 1 } })).toBe(false);
+    expect(isDocAttrEnvelope({ localSeq: "3", value: { a: 1 } })).toBe(false);
+    expect(isDocAttrEnvelope({ localSeq: Number.NaN, value: { a: 1 } })).toBe(false);
+    expect(isDocAttrEnvelope(null)).toBe(false);
+    expect(isDocAttrEnvelope("not an envelope")).toBe(false);
+  });
+
+  it("narrows to a type the caller can name", () => {
+    // The guard is only useful to a host if the type it narrows to is
+    // importable too — otherwise the value it vouches for cannot be annotated.
+    const raw: unknown = { localSeq: 1, value: { a: 1 } };
+    if (!isDocAttrEnvelope(raw)) throw new Error("expected an envelope");
+    const envelope: DocAttrEnvelope = raw;
+
+    expect(envelope.value).toEqual({ a: 1 });
   });
 });
