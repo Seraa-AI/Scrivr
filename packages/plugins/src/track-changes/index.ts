@@ -10,6 +10,7 @@ export {
   acceptedOffsetToDocPos,
   acceptedRangeToDocRange,
   docRangeToAcceptedRange,
+  acceptedTextMapFor,
 } from "./lib/acceptedTextMap";
 export type { PosMapEntry, AcceptedTextMapResult } from "./lib/acceptedTextMap";
 export { splitRangeForNewMark, applyTrackedDelete, applyTrackedInsert } from "./lib/splitRangeForNewMark";
