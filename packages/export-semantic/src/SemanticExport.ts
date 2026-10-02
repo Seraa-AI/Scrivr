@@ -47,11 +47,6 @@ interface ExportSemanticCallOptions {
   onExport?: (units: SemanticUnit[]) => void;
 }
 
-interface InstanceState {
-  editor: IBaseEditor | null;
-}
-const instanceState = new WeakMap<object, InstanceState>();
-
 export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
   name: "semanticExport",
 
@@ -59,19 +54,12 @@ export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
     filename: "semantic-units",
   },
 
-  // Seed the WeakMap early so addCommands has it via closure.
-  addProseMirrorPlugins() {
-    instanceState.set(this.options, { editor: null });
-    return [];
-  },
-
   addCommands() {
     return {
       exportSemantic:
         (callOptions?: ExportSemanticCallOptions) =>
         (_state, dispatch) => {
-          const inst = instanceState.get(this.options);
-          if (!inst?.editor) return false;
+          const editor = this.editor();
 
           const onExport = callOptions?.onExport;
           if (!onExport && typeof document === "undefined") {
@@ -90,7 +78,7 @@ export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
             const shortBlockMaxChars =
               callOptions?.shortBlockMaxChars ?? this.options.shortBlockMaxChars;
             const units = toSemanticUnits(
-              inst.editor,
+              editor,
               shortBlockMaxChars !== undefined ? { shortBlockMaxChars } : {},
             );
             if (onExport) {
@@ -118,17 +106,6 @@ export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
     ];
   },
 
-  // Layout-free, like DOCX — onEditorReady fires in both browser Editor and
-  // ServerEditor, so the command is available headlessly (the download path
-  // itself still needs a DOM, but `onExport` does not).
-  onEditorReady(editor: IBaseEditor) {
-    const inst = instanceState.get(this.options);
-    if (inst) inst.editor = editor;
-    return () => {
-      const i = instanceState.get(this.options);
-      if (i) i.editor = null;
-    };
-  },
 });
 
 function triggerDownload(units: SemanticUnit[], filename: string): void {

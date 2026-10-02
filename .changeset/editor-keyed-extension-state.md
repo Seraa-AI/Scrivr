@@ -1,30 +1,42 @@
 ---
 "@scrivr/core": patch
 "@scrivr/plugins": patch
+"@scrivr/docx": patch
+"@scrivr/export-pdf": patch
+"@scrivr/export-semantic": patch
 ---
 
-Collaboration state belongs to an editor, not to a configured extension.
+Per-editor state belongs to the editor, not to a configured extension.
 
-`Collaboration` kept its Y binding in a map keyed by its own options object.
-Options identify a *configured extension*, and one of those can serve more than
-one editor — the natural split-view shape is to configure once and mount twice.
-So the second editor's setup overwrote the first's entry, and undo and redo in
-one pane drove the other pane's history.
+Six extensions kept per-editor state in a map keyed by their own options object.
+Options identify a *configured extension*, and one of those can serve several
+editors — configure once, mount twice is the ordinary split-view shape. So the
+second editor overwrote the first's entry, a seeding hook reset it on every
+construction, and teardown nulled it for everyone.
 
-It was worse before that: the entry was seeded per editor, so merely
-constructing the second editor reset it to empty and left the first with no
-binding at all — undo went dead in a pane nobody had touched. Tearing the second
-one down nulled the shared entry too, so closing a pane disarmed its sibling.
+`Collaboration` stored its Y binding that way, read by undo, redo and three
+keymap handlers: undo in one pane drove the other pane's history, building a
+second pane left the first with no binding at all, and closing either pane
+disarmed its sibling. The binding moves into `collaborationRegistry`, which was
+already keyed by the editor and already documented as such.
 
-The binding moves into `collaborationRegistry`, which is already keyed by the
-editor and already documented as such — the cursor extension reads awareness
-from the same entry. One registry with the right identity, rather than two with
-different ones. `CollabState` gains `binding`.
+`PdfExport`, `DocxExport`, `DocxImport` and `SemanticExport` each stored *the
+editor itself* the same way — so `exportPdf` in one pane saved the other pane's
+document, and `importDocxFromFile` **wrote** into it. All four now read
+`this.editor()`, which resolves per editor, so the map, the `InstanceState`
+type, the seeding plugin and the registration hook all delete. `PdfExport` needs
+a browser editor for layout, which is now a runtime check rather than a hook
+that only ran in one.
 
-`Image` carried the same options-keyed map with nothing reading it: its
-`onViewReady` already returns the cleanup it needs, so the map only retained a
-state object per configured instance. Removed.
+`Image` held the same map with nothing reading it — its `onViewReady` already
+returned the cleanup it needed. Removed.
 
-This is the identity bug that put an inserted clause in the wrong document,
-found in review and fixed at the seam last; these were the two remaining
-holders of the pattern.
+`CollabState` gains a required `binding`, and `YBinding` is exported as a type
+so a host reading the registry can name it. Teardown now deletes the editor's
+registry entry instead of mutating a shared one.
+
+One behaviour change worth knowing: these commands reach their editor through
+`this.editor()`, which throws when an `ExtensionManager` was built without one.
+Previously the lookup returned `undefined` and the command returned `false`. No
+production path builds an editorless manager; a test that drives these keymaps
+through a bare manager now throws instead of falling through.

@@ -17,6 +17,7 @@ vi.mock("@hocuspocus/provider", () => ({
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { Collaboration } from "./Collaboration";
 import { collaborationRegistry } from "./collaborationState";
+import { YBinding } from "./YBinding";
 
 describe("Collaboration — headless (ServerEditor)", () => {
   it("wires the Y binding + provider on onEditorReady, with no view", () => {
@@ -88,5 +89,53 @@ describe("Collaboration — one configured extension, two editors", () => {
 
     expect(collaborationRegistry.get(a)?.binding).toBe(bindingA);
     expect(collaborationRegistry.get(b)).toBeUndefined();
+  });
+});
+
+describe("Collaboration — undo routes to the editor that asked", () => {
+  /**
+   * Collect the bindings as they are created. A local edit is not captured by
+   * the undo manager headlessly — nothing calls `markSynced` without a real
+   * provider — so capture is stubbed and the assertion is about *which*
+   * manager the command reached, which is the thing that was wrong.
+   */
+  function bindingsFor(build: () => void): YBinding[] {
+    const created: YBinding[] = [];
+    const original = YBinding.prototype.bind;
+    YBinding.prototype.bind = function patched(this: YBinding) {
+      created.push(this);
+      return original.call(this);
+    };
+    try {
+      build();
+    } finally {
+      YBinding.prototype.bind = original;
+    }
+    return created;
+  }
+
+  it("undoes in the pane that asked, not the one built last", () => {
+    const ext = Collaboration.configure({ url: "ws://test", name: "room-1" });
+    let a!: ServerEditor;
+    const [bindingA, bindingB] = bindingsFor(() => {
+      a = new ServerEditor({
+        content: "hello",
+        extensions: [StarterKit.configure({ history: false }), ext],
+      });
+      new ServerEditor({
+        content: "hello",
+        extensions: [StarterKit.configure({ history: false }), ext],
+      });
+    });
+
+    vi.spyOn(bindingA!.undoManager, "canUndo").mockReturnValue(true);
+    vi.spyOn(bindingB!.undoManager, "canUndo").mockReturnValue(true);
+    const undoA = vi.spyOn(bindingA!.undoManager, "undo").mockReturnValue(null);
+    const undoB = vi.spyOn(bindingB!.undoManager, "undo").mockReturnValue(null);
+
+    a.commands.undo();
+
+    expect(undoA).toHaveBeenCalledTimes(1);
+    expect(undoB).not.toHaveBeenCalled();
   });
 });

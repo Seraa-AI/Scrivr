@@ -15,7 +15,7 @@
  *   });
  */
 import { Extension } from "@scrivr/core";
-import type { IEditor } from "@scrivr/core";
+import type { IBaseEditor, IEditor } from "@scrivr/core";
 import { exportToPdf, type PdfExportOptions } from "./index";
 
 /** Options the extension itself is configured with. */
@@ -35,11 +35,13 @@ interface ExportPdfCallOptions extends PdfExportOptions {
   filename?: string;
 }
 
-/** Per-instance state — populated in onEditorReady, read in addCommands. */
-interface InstanceState {
-  editor: IEditor | null;
+/**
+ * PDF export reads `layout` and `measurer`, which only a browser editor has —
+ * a headless one has no layout pipeline to render from.
+ */
+function isViewEditor(editor: IBaseEditor): editor is IEditor {
+  return "layout" in editor && "measurer" in editor;
 }
-const instanceState = new WeakMap<object, InstanceState>();
 
 export const PdfExport = Extension.create<PdfExportExtensionOptions>({
   name: "pdfExport",
@@ -48,19 +50,12 @@ export const PdfExport = Extension.create<PdfExportExtensionOptions>({
     filename: "document",
   },
 
-  // Seed the WeakMap early so addCommands can reference it via closure.
-  addProseMirrorPlugins() {
-    instanceState.set(this.options, { editor: null });
-    return [];
-  },
-
   addCommands() {
     return {
       exportPdf: (callOptions?: ExportPdfCallOptions) => (_state, dispatch) => {
-        const inst = instanceState.get(this.options);
-        if (!inst?.editor) return false;
+        const editor = this.editor();
+        if (!isViewEditor(editor)) return false;
         if (dispatch) {
-          const { editor } = inst;
           const filename =
             callOptions?.filename ?? this.options.filename ?? "document";
           const { filename: _filename, ...exportOptions } = callOptions ?? {};
@@ -102,19 +97,6 @@ export const PdfExport = Extension.create<PdfExportExtensionOptions>({
     ];
   },
 
-  onViewReady(editor: IEditor) {
-    // PDF export reads `editor.layout` + `editor.measurer` from the
-    // browser editor's live layout pipeline, so the registration that
-    // wires the `exportPdf` command to a concrete editor instance lives
-    // here. A headless PDF export path would need its own document →
-    // layout → PDF pipeline and is out of scope for this hook.
-    const inst = instanceState.get(this.options);
-    if (inst) inst.editor = editor;
-    return () => {
-      const i = instanceState.get(this.options);
-      if (i) i.editor = null;
-    };
-  },
 });
 
 declare module "@scrivr/core" {
