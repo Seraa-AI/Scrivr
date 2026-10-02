@@ -1,5 +1,325 @@
 # @scrivr/ai
 
+## 1.0.22
+
+### Patch Changes
+
+- 44e6423: Two things the AI review surface could not express.
+
+  **A marker that proposes no edit.** A finding can be a Pass, or a decision a
+  person has to make. `computeAiSuggestion` drops a block whose proposed text
+  matches what is already there, which is correct — a diff overlay is not where a
+  finding with no change belongs — and there was no other layer, so such a
+  finding existed in the panel and nowhere the reader was looking.
+
+  `BlockMarkers` is that layer. `setBlockMarkers(editor, source, markers)` hangs
+  `{ nodeId, kind, summary }` on a block, `getBlockMarkers` reads them,
+  `activeBlockMarkers` answers the ones on the innermost marked block holding the
+  cursor, and `createBlockMarkerOverlay` — with `useBlockMarkerOverlay` in
+  `@scrivr/react` — gives them the show / move / hide lifecycle the suggestion
+  popover has.
+
+  Every call names its writer, which is what makes the layer additive: several
+  bridges write to the same surface and none owns it, so a writer replaces and
+  clears its own markers without erasing what the others say. Nothing is written
+  to the document and nothing enters history. A marker whose block has left the
+  document is dropped on read, and markers resolve in one pass over the document
+  rather than one walk each. `BLOCK_MARKERS_SET` is public, so a payload whose
+  markers are not markers is refused whole rather than half-applied.
+
+  **Accepting a span rather than a block.** `accept(blockId)` applied every op the
+  block carried, so a finding scoped to one sentence rewrote the clause around it.
+  `applyAiSuggestion` now takes `range`, and `actions.acceptRange(blockId, range,
+mode?)` exposes it. It returns whether it wrote, so a refusal is visible instead
+  of silent — including through `AiToolkit.apply`.
+
+  `range` carries the accepted text its offsets were measured against, and is
+  refused unless the block still holds that text. This is the part that makes a
+  scoped accept safe: settling rewrites a block's `acceptedText`, so comparing the
+  document against it proves nothing, and a caller still holding offsets from
+  before an earlier accept would edit whichever words now sit at those numbers.
+  Also refused: a span that is inverted, collapsed, or reaches outside the block.
+
+  Only groups the span covers are applied; one it merely clips is left pending. A
+  pure insertion is zero-width, so it belongs to the single span that starts at or
+  before its point and ends strictly after — otherwise both neighbouring sentences
+  claimed it. Every covered group is applied in one pass and settled as one set:
+  `rebaseAfterSettle` now takes the set of settled groups, because told one at a
+  time it read the pass's own writes as reader drift and discarded the groups the
+  span deliberately left pending.
+
+  **`docRangeToAcceptedRange`** (`@scrivr/plugins`) converts a document range to
+  the accepted-text offsets `range` wants. Only the forward direction existed, and
+  accepted text omits runs pending deletion, so arithmetic on document positions
+  was wrong in exactly the tracked-changes documents this serves — and wrong
+  silently.
+
+  **Drift has one owner, and it is no longer silent.** `staleBlockIds` had two
+  production readers — the card's `isStale` and the canvas overlay, which dims a
+  stale block — and no writer at all, so both read false for every block forever.
+  The plugin now computes it whenever the answer can change: a new suggestion (a
+  host can hand over one that was already out of date), a settled one (the rebase
+  refreshes each surviving block against the document the settlement left), or an
+  edit. Identical answers return the previous state unchanged, so the card
+  subscription's identity skip still holds.
+
+  Every accept path reads it and refuses a block the reader has edited since the
+  proposal was computed — the unscoped block accept, a group accept, and accept-all
+  as well as the new span accept. Previously only the span accept checked, so one
+  card had a button that refused and a button that wrote the model's words into
+  text that had moved: `"The quick fox"` edited to `"!The quick fox"` and then
+  accepted produced `"!Theslowk fox"`. Accept-all still applies the blocks that do
+  match and leaves the drifted ones pending, because an edit in one block says
+  nothing about the rest.
+
+  `AiSuggestionCardActions` gains a required `acceptRange`, so a hand-written
+  implementation of that interface needs the new member. `applyAiSuggestion` and
+  `AiToolkit.apply` returning `boolean` instead of `void` is a widening and breaks
+  no caller.
+
+- 297dba9: An AI suggestion can now be about how the text reads, not only what it says.
+
+  `computeAiSuggestion` takes `proposedSpans` alongside `proposedText`. Plain text
+  is the narrow case of the same thing — a proposal that says nothing about
+  formatting, which is the same statement as "no marks" — so there is one path,
+  not two. `AiOp` carries the marks of the run it proposes, and an op whose
+  formatting changes partway is split so that an op always reads one way.
+
+  Two things this makes possible that were not expressible before. A proposal can
+  be about formatting alone, where the wording is untouched: every op is a `keep`,
+  so the change is found by comparing the formatting the block would end up with
+  against the formatting it has, and applying it sets the marks on the kept run —
+  adding what the proposal asks for, removing what it drops, and leaving
+  tracked-change marks alone because those describe review state rather than how
+  the text reads. And an accepted insertion now lands with its marks, so a
+  suggested bold term is bold once accepted instead of quietly flattening.
+
+  Formatting is applied in its own transaction before any text moves, so every
+  range resolves against the document the suggestion was computed from. Tracked
+  mode leaves that transaction tracked — a formatting change has its own tracked
+  representation, and the engine builds it from an ordinary mark step, so a
+  reviewer rejects proposed formatting exactly as they reject proposed words.
+  Writing it inside the skip-tracked transaction would have made it permanent and
+  unreviewable, which is the one thing the tracked lane exists to prevent.
+
+  Accepting a single replacement group applies no formatting at all. A keep's
+  marks describe the whole block, and applying them removes what the proposal
+  omits — so doing that for one group would strip the reader's own formatting from
+  text that group never spoke about.
+
+  Agent-supplied marks on retained text go through `resolveInlineMark`, the same
+  seam inserted text already used. Retained text is not a softer target: a
+  `javascript:` href was being sanitized on an inserted run and written on a kept
+  one, and a `link` sent without its required `href` threw out of the accept.
+
+  Marks are compared attrs-aware and order-insensitively. Document marks arrive in
+  schema order and an agent emits them in whatever order it wrote them, so a
+  literal comparison would read a reordered `[bold, italic]` as a change, and a
+  link whose `href` the proposal restates would read as one too.
+
+  `proposedSpans` takes the protocol's own inline runs, so `parseSemanticEdits`
+  output feeds `computeAiSuggestion` directly. The package publishes one vocabulary
+  for inline runs and every public entry point speaks it; a consumer holding
+  validated agent output should not have to convert between two spellings of the
+  same thing, least of all in a repo that gives it no `as` to do it with.
+
+  `applyRichEdit` and `applySemanticEdits` no longer accept `asSuggestion`. It was
+  declared on both and read by neither, so `asSuggestion: false` returned
+  `applied: true` having applied a tracked suggestion — the opposite of what the
+  caller asked for. Both always apply as suggestions, which is what an agent's
+  edit is; applying agent output straight into the document is the existing
+  `applyAiSuggestion({ mode: "direct" })` lane.
+
+- 297dba9: The AI edit protocol can now change a document's shape, and every node can say
+  what happened to it.
+
+  `applySemanticEdits` handles the six structural ops — `insertBlock`,
+  `deleteBlock`, `insertListItem`, `deleteListItem`, `insertTableRow`,
+  `deleteTableRow` — alongside the inline `richText` edits it already took. Each
+  addresses the document through a `nodeId` the agent was shown plus a side:
+  "an item after this one", never an index or a document position. An id may name
+  a container or the leaf inside it, and ops that act on a container climb to it,
+  because the agent sees leaves.
+
+  Nothing in the adapter marks a change as tracked. The engine already tracks the
+  transactions it sees, so an op's whole job is to resolve an anchor and build a
+  node; a structural batch is one transaction, and so one undo step and one review
+  unit.
+
+  **Every node now declares `dataTracked`.** It was on paragraphs, headings, code
+  blocks and lists, and missing from tables, images, horizontal rules, page breaks,
+  section breaks and hard breaks. A node without it is not rejected by the
+  engine — it is skipped, and the change is either attributed to a neighbour or
+  lost outright. Two consequences were live: inserting an image recorded no change
+  at all, and accepting a suggested table-row deletion left the row behind, empty,
+  because only the text inside it had been marked. A schema test now fails if a
+  node is added without it.
+
+  `insertBlock` and `deleteBlock` act on the document's own flow and now refuse an
+  id that resolves inside a list or a table. They used to climb to the top-level
+  ancestor, so `deleteBlock` on a list item's paragraph — the natural way to say
+  "remove this clause", since the agent is shown leaves — marked the entire list
+  deleted and reported success. `deleteListItem` and `deleteTableRow` are how
+  those are reached.
+
+  Attributes an agent supplies pass the same gate the rich lane already applies,
+  now shared rather than re-derived. An open `attrs` record reaching the document
+  let agent output write `nodeId` — colliding with the ids the protocol addresses
+  by — and `dataTracked`, forging a review history.
+
+  `deleteTableRow` names its target `nodeId`, matching `deleteBlock` and
+  `deleteListItem`. It was `anchorNodeId`, and everywhere else in this protocol an
+  anchor is a neighbour you position against rather than the thing being acted on —
+  an agent reading the three delete ops together would reasonably have concluded it
+  deleted the row beside the one it named.
+
+  **Breaking:** `parseRichEdits` is `parseSemanticEdits` and validates the whole
+  protocol rather than the inline half — a structural edit fed to the old name was
+  rejected as malformed. `applySemanticEdits` no longer returns `unsupported`. The
+  field could never be populated: the union it guarded had one member, and now the
+  schema itself refuses an op it does not define, by name, at parse time. A caller
+  reads `rejected` from the parse instead.
+
+- cc42506: A diff op now says where in the proposal it came from, and the ops reconstruct
+  the proposal they were built from.
+
+  `pairReplacements` emits deletes first so a consumer clears a whole deleted
+  range before writing its replacement — that is what keeps document-side offsets
+  correct, and it stays. What follows consumes the proposal, and is now emitted in
+  the proposal's own order. Absorbing a keep that sits inside a replacement turns
+  it into a re-insert, and that re-insert can belong _before_ a boundary keep:
+  rewriting "alpha beta gamma delta" to "beta delta epsilon" moved "beta" behind
+  "delta" and applied as " deltabeta epsilon". The ops described something the
+  proposal never said.
+
+  Each op that consumes the proposal carries `proposedOffset`, stamped where the
+  order still is the proposal's own. A consumer counting as it walks cannot
+  recover it, because the order it walks is the document's — which is how an
+  agent's bold landed on a word it never named.
+
+  Text that did not change is one keep, however long. The quadratic guard answered
+  "delete everything, insert everything" for two identical strings, so a
+  formatting proposal on a paragraph over ~450 characters — ordinary in a
+  contract — rewrote every character to change none of them, taking comment
+  anchors and existing tracked marks with it.
+
+  Generated group ids carry their block. They were an index into one block's ops,
+  so two paragraphs with a change at the same position shared an id, and settling
+  one settled the other.
+
+  Settling one group re-expresses what is left of the proposal against the
+  document that group left behind — but only when that document is the one the
+  settlement produced. If it moved for any other reason, the reader typed or a
+  collaborator edited, the remaining ops describe text that is no longer there and
+  rebuilding from them proposes putting it back: the reader's own edit returns as
+  a suggested deletion, wearing a refreshed `acceptedText` that makes it look
+  current. Nothing can map an intent through an edit it never saw, so the proposal
+  is spent and the block is dropped. The reader asks again. A suggestion's ops are offsets into the block's
+  text as it was when the suggestion was computed, so accepting or rejecting one
+  group invalidated every remaining op: the next accept landed on the wrong
+  characters, or past the end of the old text, where it silently did nothing —
+  accept a rewrite, then accept the formatting alongside it, and the formatting
+  never arrived.
+
+  Marking a group settled and stepping over it does not fix that, because the
+  offsets are still the old ones. So there is no settled-group bookkeeping at all
+  now: the outcome is known where the group is settled, the remaining proposal is
+  rebuilt there, and a settled group simply no longer exists. A block with nothing
+  left to propose is removed, and a suggestion with no blocks left is cleared —
+  an empty proposal used to be reported as a deletion of the whole paragraph.
+
+  Settling dispatches `AI_SUGGESTION_RESOLVE` rather than replacing the
+  suggestion, which used to clear the active block and blank the rest of the
+  overlay until the caret moved.
+
+  `AiSuggestionCardData.kind` gains `"format"`. Additive for a consumer that
+  switches with a default, but a consumer narrowing exhaustively against `never`
+  will stop compiling until it handles the new member — which is the point of
+  writing it that way.
+
+  A card can say `kind: "format"`; a formatting proposal was reported as a
+  deletion labelled with the paragraph's own text. The popover describes it
+  through `formattedText` instead of rendering an empty replaced→inserted pair.
+  `FormatRenderInstruction` is exported, so a consumer can name the arm it
+  narrows to. The underline groups glyphs by `lineY`, so a run of mixed sizes
+  draws one straight rule rather than disjoint stubs.
+
+- cc42506: A formatting proposal is now something the reader can see, point at and accept.
+
+  Proposing formatting computed and applied correctly and showed nothing. Its
+  words do not change, so it produces no delete strike and no insert caret, and
+  the overlay skipped `keep` ops entirely — the card offered a change that had no
+  mark on the page and no position to anchor to.
+
+  `marks` on a `keep` now means one thing: the formatting _here_ changes. A run the
+  proposal restates unchanged carries none, so a single field answers what the
+  overlay draws, what the apply writes, and what a card counts. That also removes
+  the second derivation of "did the formatting change" — it is read off the ops
+  themselves now, so the preview and the result cannot disagree about it.
+
+  Each such run gets its own `groupId`, so formatting is accepted the way a word
+  swap is: one run at a time, scoped to the text that run spoke about. Accepting a
+  word swap still touches no formatting, because it is a different group.
+
+  A group id carries the block it belongs to. Groups are addressed across the
+  whole suggestion, so numbering them per block meant accepting a run in one
+  paragraph applied a different run in another.
+
+  Runs are split at the formatting boundaries the _document_ already has, as well
+  as the ones the proposal introduces. ProseMirror lets formatting change inside a
+  word, so judging a run by its first character hid any change that began after
+  it: half-bold "alpha" restated as plain looked like no change at all.
+
+  New: a `format` render instruction and `renderFormatHighlight`, drawn as a solid
+  underline beneath the run — distinct from the dashed red of a deletion, because
+  this text is staying and only its appearance is in question. A wrapped run draws
+  one stroke per line rather than a rule across the gap between them.
+  `SuggestionGroupInfo` gains `formattedText`, so a popover rendering
+  `replacedText → insertedText` can tell that a group proposes appearance rather
+  than wording and describe it accordingly.
+
+- 297dba9: Agent-proposed formatting is held to the document's own rules.
+
+  `resolveInlineMark` is the one place that decides what an agent's mark may be,
+  and it now refuses review marks and strips `dataTracked` from the ones it
+  allows. Proposed formatting said how text should read; it could also say who
+  reviewed it and when, which let agent output sign a change as another author.
+
+  Marks are also resolved against the textblock that will hold them. A bold run
+  proposed for a code block — which allows no marks — used to survive until
+  dispatch and then throw, taking the whole batch with it; the words land
+  unstyled instead, which is what the proposal meant.
+
+  Formatting comparison runs on one canonical description (`describeInlineMark`),
+  so bookkeeping a document carries and a proposal does not can no longer read as
+  a difference. Restating a block's existing formatting is not a suggestion.
+
+  Tracked formatting is applied with explicit suggestion intent rather than by
+  relying on the engine's ambient status. `mode: "tracked"` on an editor whose
+  tracking is switched off — the default — wrote formatting permanently, with no
+  review record to reject.
+
+  Table row inserts derive width from the grid and the row's spans rather than
+  counting physical cells, so a row anchored to a merged cell no longer drops the
+  content past the first column. Deleting the last child of a list or table
+  removes the container instead of leaving an empty one behind.
+
+- Updated dependencies [aa8529f]
+- Updated dependencies [44e6423]
+- Updated dependencies [297dba9]
+- Updated dependencies [24eccf9]
+- Updated dependencies [d4fc43d]
+- Updated dependencies [80b90e0]
+- Updated dependencies [cc42506]
+- Updated dependencies [f6ff4a2]
+- Updated dependencies [654c043]
+- Updated dependencies [297dba9]
+- Updated dependencies [490abaf]
+- Updated dependencies [8098340]
+  - @scrivr/core@1.0.22
+  - @scrivr/plugins@1.0.22
+  - @scrivr/export-semantic@1.0.22
+
 ## 1.0.21
 
 ### Patch Changes

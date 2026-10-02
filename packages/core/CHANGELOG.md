@@ -1,5 +1,409 @@
 # @scrivr/core
 
+## 1.0.22
+
+### Patch Changes
+
+- aa8529f: `getActiveFontFamily` can say that a selection is drawn in more than one family.
+
+  It answered from the first run, so a range covering Georgia and Arial named
+  Georgia — confidently, and wrongly for half the text. A reader confirming it from
+  the dropdown restyles everything else in the range, which is the same failure
+  `getActiveFontSize` had.
+
+  `ActiveFontFamily` gains `mixed: boolean`. Additive rather than a new return
+  shape: `requested`, `resolved` and `substituted` keep answering exactly as they
+  did, so a control that does not read `mixed` behaves as before, and one that does
+  shows nothing — the way Word and Google Docs blank a font box over a mixed
+  selection. The playground's family control blanks on it, as its size control
+  already does.
+
+  The only thing an existing consumer can notice is an exact-shape comparison:
+  `toEqual({ requested, resolved, substituted })` now needs the new field. Reading
+  properties is unaffected.
+
+- 297dba9: The AI edit protocol can now change a document's shape, and every node can say
+  what happened to it.
+
+  `applySemanticEdits` handles the six structural ops — `insertBlock`,
+  `deleteBlock`, `insertListItem`, `deleteListItem`, `insertTableRow`,
+  `deleteTableRow` — alongside the inline `richText` edits it already took. Each
+  addresses the document through a `nodeId` the agent was shown plus a side:
+  "an item after this one", never an index or a document position. An id may name
+  a container or the leaf inside it, and ops that act on a container climb to it,
+  because the agent sees leaves.
+
+  Nothing in the adapter marks a change as tracked. The engine already tracks the
+  transactions it sees, so an op's whole job is to resolve an anchor and build a
+  node; a structural batch is one transaction, and so one undo step and one review
+  unit.
+
+  **Every node now declares `dataTracked`.** It was on paragraphs, headings, code
+  blocks and lists, and missing from tables, images, horizontal rules, page breaks,
+  section breaks and hard breaks. A node without it is not rejected by the
+  engine — it is skipped, and the change is either attributed to a neighbour or
+  lost outright. Two consequences were live: inserting an image recorded no change
+  at all, and accepting a suggested table-row deletion left the row behind, empty,
+  because only the text inside it had been marked. A schema test now fails if a
+  node is added without it.
+
+  `insertBlock` and `deleteBlock` act on the document's own flow and now refuse an
+  id that resolves inside a list or a table. They used to climb to the top-level
+  ancestor, so `deleteBlock` on a list item's paragraph — the natural way to say
+  "remove this clause", since the agent is shown leaves — marked the entire list
+  deleted and reported success. `deleteListItem` and `deleteTableRow` are how
+  those are reached.
+
+  Attributes an agent supplies pass the same gate the rich lane already applies,
+  now shared rather than re-derived. An open `attrs` record reaching the document
+  let agent output write `nodeId` — colliding with the ids the protocol addresses
+  by — and `dataTracked`, forging a review history.
+
+  `deleteTableRow` names its target `nodeId`, matching `deleteBlock` and
+  `deleteListItem`. It was `anchorNodeId`, and everywhere else in this protocol an
+  anchor is a neighbour you position against rather than the thing being acted on —
+  an agent reading the three delete ops together would reasonably have concluded it
+  deleted the row beside the one it named.
+
+  **Breaking:** `parseRichEdits` is `parseSemanticEdits` and validates the whole
+  protocol rather than the inline half — a structural edit fed to the old name was
+  rejected as malformed. `applySemanticEdits` no longer returns `unsupported`. The
+  field could never be populated: the union it guarded had one member, and now the
+  schema itself refuses an op it does not define, by name, at parse time. A caller
+  reads `rejected` from the parse instead.
+
+- 24eccf9: An inline node renders because an extension claims it, not because it carries
+  size attributes it does not use.
+
+  Layout decided whether an inline leaf was an object by looking for numeric
+  `width`/`height` attrs. A node with neither produced no span at all — no
+  position in the line, no entry in the character map, no warning. An extension
+  that declared an inline node and an `InlineStrategy` to measure and paint it
+  still got nothing, because the strategy was only consulted _after_ that check
+  had already passed.
+
+  The workaround is in the repo: `pageNumber` declares `width: 7, height: 10`
+  purely to get through the gate, and `measure()` overwrites both immediately.
+  `InlineStrategy.measure`'s own documentation says it lets tokens size
+  themselves "instead of using fixed placeholders" — which the gate made
+  impossible.
+
+  A registered `InlineStrategy` is now enough on its own. Explicit size attrs
+  still work, so nothing that relied on them changes, and structural leaves are
+  unaffected — `hardBreak` is handled by name before this point.
+
+  A leaf that nothing claims is still skipped, because there is nothing honest to
+  lay out, but it now says so once by name rather than disappearing. That silence
+  is how this went unnoticed: the same lane broke once before and images "appeared
+  as blank cursors".
+
+- d4fc43d: Header and footer tokens now reserve the space they actually paint.
+
+  Chrome was measured without an inline registry, so an inline atom in a header
+  fell back to whatever width its node spec declared. `pageNumber` declared 7px:
+  a header read "428" but was laid out as though it read "1", overlapping
+  whatever sat beside it and mispositioning every right-aligned or centred band.
+  The date token was worse — a fixed 60px for a string whose width depends on
+  the locale.
+
+  `MiniPipelineOptions` and `PageChromeMeasureInput` now carry `inlineRegistry`,
+  and `runPipeline` populates it, so a chrome contributor measures its atoms with
+  the same strategies that will paint them. `InlineRegistry` is exported from
+  `@scrivr/core` so an extension can build one.
+
+  Two further fixes to the width itself:
+
+  - Digits were counted with `ceil(log10(n))`, which is one short at every exact
+    power of ten. A ten-page document reserved a single digit and painted two.
+  - The token strategies read the page count from a module context that painting
+    also writes, per page, as it draws. `resolveChrome` now seeds it from the
+    flow layout, so a measurement answers from the document rather than from
+    whichever page was painted last, and reports `stable: false` until it has
+    this run's count — a count remembered from the previous run predates the
+    edit being laid out, and during a streamed load belongs to a partial layout.
+
+  To keep that verification cheap, the chrome aggregator no longer re-paginates
+  when the computed page geometry is unchanged, including header and footer
+  band positions. If measuring tokens wraps a band and changes pagination, the
+  contributors see the new flow before the loop accepts convergence.
+
+  Streamed layout now resumes from a replayable snapshot of both the paginated
+  cursor and continuous-flow cursor. A pass owns its growing page buffers, so
+  retries cannot duplicate body blocks. When chrome changes the saved geometry,
+  layout replays the consumed prefix while preserving the chunk's progress — and
+  publishes a new layout version when it does, since pages already painted have
+  moved and their tiles must repaint before the caret is drawn against them. A
+  partial layout's cached tail is never reused: it has a cutoff rather than a
+  tail, and copying from it would truncate the document at the last chunk.
+
+  Chrome painting now receives the editor's font modifiers through the page
+  renderer. Live header/footer measurement uses the same modifiers as stored
+  measurement, preserving custom token typography and line geometry on entry
+  to editing.
+
+  A band is measured once and painted on every page, so a page number's box used
+  to hold the longest number in the document — page 2 of 1040 read "Page 2"
+  followed by three digits of nothing, where Word lays each page's header out
+  separately and closes the gap. A token is sized as widest-digit times digit
+  count, so the only thing that changes between pages is how many digits the
+  number has; the band is now arranged once per width (four times for a
+  thousand-page document) and painting looks the arrangement up. Canvas and PDF
+  read the same one. The band reserves the maximum height across all measured
+  arrangements: a narrower token can distribute tall inline objects over more
+  lines and need more height than the widest-number arrangement.
+
+  Each band measurement scopes both its page number and document total. A total
+  pages token therefore measures against the document being laid out, even if
+  another document was painted most recently. Nested measurements and exceptions
+  restore the enclosing measurement context without changing paint state.
+
+  Inline atoms are also painted in the font **and fill** their own marks resolve
+  to. An atom carries no text for a decorator to colour, so its marks never
+  reached the renderer: canvas painted it in whatever fill the previous span left
+  — the body's colour in a footer holding only a page number, and the page
+  background on a page whose body painted nothing — while PDF chose a colour of
+  its own. Object spans now carry their marks, both surfaces resolve through the
+  same cascade, and an atom with no colour of its own takes the theme's text
+  colour rather than a leftover.
+
+  New surface for this: `PdfNodeContext` carries `color` — the fill an atom's
+  marks resolved to, in the layout's 0-255 channels — so a PDF node handler
+  passes it through instead of choosing one. `PdfTextOp.color` is now optional
+  and defaults to the document's text colour, which is the rule canvas already
+  applies, so no handler has to name a colour to draw text. Inline atom spans
+  carry their `marks`.
+
+  The font half of the same defect:
+  A token carries no marks of its own, so it is measured in the band's base font
+  while the text beside it is often marked smaller; the strategies draw with
+  whatever font the context holds, so a 14px box was being filled with 10px
+  digits.
+
+  **Breaking (schema):** `pageNumber`, `totalPages` and `date` no longer declare
+  `width`/`height` attrs — their `InlineStrategy` measures them. Persisted
+  documents are unaffected, since ProseMirror ignores attrs a spec does not
+  declare. But `inlineRegistry` is now **required** to lay these tokens out, not
+  merely available: a measurement path that omits it drops them entirely and
+  warns, where it previously reserved a wrong-but-visible box. All in-repo paths
+  pass it; direct callers of `runMiniPipeline` must.
+
+- 80b90e0: A semantic unit can now be recognised in a document it did not come from.
+
+  `unit.id` addresses one block in one document, and `unitContentHash` answers
+  whether that block changed between two versions of the same document — it folds
+  in the breadcrumb for exactly that reason. Neither survives the clause being
+  seen somewhere else, which is the question a corpus asks on ingestion: is this
+  the indemnity I already hold, or a new one?
+
+  `unitContentKey` answers that one. It covers the unit's text alone, NFKC-
+  normalized with whitespace collapsed, so a clause that has been through a DOCX
+  round-trip or re-wrapped still keys the same. It is a companion to `unit.id`,
+  not a replacement: a corpus indexes by both — the instance id to find this block
+  again, the content key to find everywhere else the clause appears.
+
+  The key is SHA-256, added to `@scrivr/core` as `sha256Hex` — sync and
+  dependency-free, because `crypto.subtle` is async and Node's `crypto` is absent
+  in the browser, and an identity key computable on only one side of the wire is
+  not an identity key. The existing `fnv1aHex` stays where it belongs: it compares
+  a block against one prior value of itself, where 32 bits is ample. A corpus key
+  is compared against every key already held, so collisions follow the birthday
+  bound rather than luck — two fee clauses differing only in an amount collide
+  readily at 32 bits — and these documents arrive from counterparties, who are in
+  a position to aim for one.
+
+  It is still only a key. A hash cannot prove equality, so a corpus that acts on a
+  match — merging records, discarding an upload — confirms it by comparing
+  `unitAlignmentInput`, which is published for that purpose.
+
+  NFKC normalization is a deliberate loss of distinction, not just cleanup. It
+  folds the compatibility forms an importer introduces — ligatures, full-width
+  Latin, non-breaking spaces — and in doing so makes `m²` and `m2` the same text.
+  That is the right trade for matching a clause across formats and the wrong basis
+  for asserting two documents are byte-identical.
+
+  It is not a similarity measure. Two clauses differing by a word get unrelated
+  keys, by design; near-duplicate scoring is a separate question and a hash is the
+  wrong tool for it.
+
+  Grouping matters to the answer. A heading and its lede are deliberately one
+  unit, so a grouped unit carries its heading in `text`. Cross-document alignment
+  emits with `groupBlocks: false`, where a heading is its own unit and a clause is
+  keyed on the clause. `unitAlignmentInput` is exported alongside so a consumer
+  can see precisely what the key covers.
+
+  The rich lane now publishes its preimages too — `unitRichInput` and
+  `semanticPartRichInput`, the values `unitRichHash` and `semanticPartRichHash`
+  already hashed. A digest says a leaf changed; the preimage says which run did,
+  which is what a formatting-aware diff needs. Both are extracted from the hash
+  functions rather than restated, so the preimage and the digest cannot drift, and
+  both return named types — `UnitRichInput` and `SemanticPartRichInput` — so a
+  consumer reads `.spans` rather than asserting its way past the return type.
+
+- 654c043: An extension declares the slash entries that insert what it owns.
+
+  The slash menu hard-coded its formatting entries in the React hook and asked the
+  source providers directly, so an extension could not contribute to the menu that
+  inserts its own node — the one contribution of its kind that `addToolbarItems`
+  and `addNodeActions` already had.
+
+  `addSlashCommands()` returns `SlashCommandContribution[]`, each with optional
+  `items` (known up front, paints on the first frame) and `resolve` (query-driven
+  I/O, the only half that needs a spinner). A list rather than one contribution, so
+  an extension fronting several sources gives each its own resolver.
+  `getSlashCommands()` and `resolveSlashCommands(query, signal)` read them back,
+  merged by `group` then `order` — groups in the order first contributed, so
+  renaming one does not reorder the menu.
+
+  `SlashCommandSpec` is data only, like `ToolbarItemSpec`: `id`, `label`,
+  `description?`, `group?`, `order?`, `command`, `args?`. A command name and
+  arguments, never a closure. The eight built-in entries now come from `Heading`,
+  `List`, `CodeBlock` and `HorizontalRule`, and the heading entries follow the
+  configured `levels` — a kit built with fewer no longer offers entries it cannot
+  honour. The spec carries no icon, because Scrivr contributes no renderer; the
+  React menu keys a glyph off the command name, as the playground toolbar already
+  does.
+
+  A resolver that rejects is dropped from the round with a warning and the others
+  still answer: one source being down must not empty a menu whose formatting
+  entries are fine. `signal` is required, and is checked both before the resolvers
+  run and after they answer, so a resolver that ignores it still cannot replace the
+  entries for the query the author is now on.
+
+  `insertSourcedBlockFromSource({ kind, resourceId, versionId })` resolves through
+  `provider.fetch` and delegates to `insertSourcedBlock`, so a menu entry can be
+  identity rather than content — without it the contribution would have to be a
+  callback. `SourcedBlockExtension` contributes one resolver per provider, and
+  `SourceProvider.search` runs for the first time.
+
+  `editor.deferEdit({ at, work, edit, onAbandoned })` is the seam for async work
+  that ends in an edit. It captures a position, maps it through everything that
+  happens while the work runs, and abandons with a reason — `anchor-removed`,
+  `read-only`, `destroyed`, `failed`, `edit-failed` — rather than writing blind.
+  `insertSourcedBlockFromSource` is its first consumer: without it a clause chosen
+  from the menu replaced whatever the author had selected while it loaded.
+  `insertSourcedBlock` gains an optional `at`, resolved through `insertPoint`.
+
+  `ExtensionContext` carries an `editor()` thunk, so a contribution that must act
+  after an await can reach the editor it belongs to. Three extensions had each
+  invented a `WeakMap` keyed on their options object, which identifies the
+  configured extension rather than the editor — one instance shared by two editors
+  inserted into the wrong document. `addInitialDoc`'s context no longer inherits
+  it, because that phase genuinely runs before an editor exists.
+
+  `SlashMenuItem` carries the spec's `id` and `group` through to the renderer, and
+  the React menu debounces its searches, clears the previous query's entries up
+  front instead of leaving them selectable, and asks no resolver when a host
+  supplies its own `items`.
+
+  `editor.runCommand(name, args)` dispatches a declared spec by name. Doing that
+  through `commands` means spreading `unknown[]` into a union of fixed-arity
+  signatures, which only typechecks behind a cast; the playground had grown one and
+  it is deleted here.
+
+- 297dba9: Agent-proposed formatting is held to the document's own rules.
+
+  `resolveInlineMark` is the one place that decides what an agent's mark may be,
+  and it now refuses review marks and strips `dataTracked` from the ones it
+  allows. Proposed formatting said how text should read; it could also say who
+  reviewed it and when, which let agent output sign a change as another author.
+
+  Marks are also resolved against the textblock that will hold them. A bold run
+  proposed for a code block — which allows no marks — used to survive until
+  dispatch and then throw, taking the whole batch with it; the words land
+  unstyled instead, which is what the proposal meant.
+
+  Formatting comparison runs on one canonical description (`describeInlineMark`),
+  so bookkeeping a document carries and a proposal does not can no longer read as
+  a difference. Restating a block's existing formatting is not a suggestion.
+
+  Tracked formatting is applied with explicit suggestion intent rather than by
+  relying on the engine's ambient status. `mode: "tracked"` on an editor whose
+  tracking is switched off — the default — wrote formatting permanently, with no
+  review record to reject.
+
+  Table row inserts derive width from the grid and the row's spans rather than
+  counting physical cells, so a row anchored to a merged cell no longer drops the
+  content past the first column. Deleting the last child of a list or table
+  removes the container instead of leaving an empty one behind.
+
+- 490abaf: `toDocumentOutline` — the section hierarchy the headings imply.
+
+  `toSemanticUnits` answers an ordered flat list, which states the document's
+  structure without describing it. Every consumer that wanted a navigable outline
+  rebuilt one: opening and closing sections on heading level, threading ancestor
+  titles, naming the content that precedes the first real heading. Each of those
+  is a judgement about what a section is, made by a consumer rather than by the
+  editor that owns the structure — so two places could disagree.
+
+  Three rules now live with the editor: content before the first heading is a
+  section and needs a name; a heading closes every open section at its level or
+  deeper; a section's range is heading-inclusive and ends where the next one
+  opens, so an outer section contains its children's range.
+
+  Each `OutlineSection` carries `id`, `parentId`, `heading`, `headingNodeId`,
+  `level`, `path`, and a `startUnit`/`endUnit` range into the same unit list.
+  `headingNodeId` is null exactly when the section covers content preceding the
+  first heading — there is no heading block to anchor a citation to, and the
+  absence says so without a second flag. The name for that section is the
+  `untitledHeading` option, because it is text a reader sees in a language only
+  the host knows.
+
+  Deterministic from the same units: every id is a unit's own anchor, so two
+  reads of an unchanged document return the same sections and a cached chunk
+  anchor keeps resolving. Nesting depth is read from the breadcrumb the walker
+  already threads rather than re-derived from heading levels, so a section's path
+  and its units' breadcrumbs cannot drift apart.
+
+- 8098340: Three capabilities a consuming application could not build on its own.
+
+  **Doc attrs across a storage boundary.** `seedDocAttrs` and `readDocAttrs` move a
+  document's own attributes between a plain `attrs` object and a `Y.Doc`. The live
+  binding already syncs them between peers through a map beside the content
+  fragment, which is the whole answer for a host that persists the `Y.Doc` — but a
+  host that persists a ProseMirror-JSON projection had no route in or out, because
+  both conversions walk the fragment's children and `doc.attrs` has no
+  representation in a `Y.XmlFragment` at all. A `.docx` imported with a header lost
+  it the first time the document was opened, and the save after wrote the schema's
+  nulls over the import.
+
+  Seed before the room is live or after it has synced, never in between: the
+  "leave what the room holds alone" check reads the local `Y.Doc`, which knows
+  nothing of a server value still in flight, and Yjs settles two concurrent sets by
+  client id rather than by which is newer. Seeding carries only attrs the reader's
+  extensions declare — which means the editor supplying those names must carry the
+  extensions that own them —
+  skips null values — every document offers one for every declared key, and writing
+  those syncs an absence over a real policy — and leaves keys the room already
+  holds alone, since the room may have been restored from cache before the
+  projection was consulted. `DOC_ATTRS_MAP_NAME` and `isDocAttrEnvelope` are both exported and both now have
+  one owner: the map was named in three places, and the shape had a second, looser
+  check that accepted envelopes the live sync refuses — so a value the editors
+  ignored was being persisted as real state and resurrected on every load.
+
+  **`getActiveFontSize()`.** The counterpart to `getActiveFontFamily`, resolving
+  inline mark then block style the way the family resolves through mark, attr and
+  page config. Styled from the textblock the cursor is in rather than its top-level
+  ancestor, so a heading inside a table cell reports a heading's size — the
+  ancestor is the table, which has no style of its own.
+
+  Returns `null` when the selection spans more than one size. Answering from the
+  first run would name a size the rest of the selection is not drawn at, and a
+  reader confirming it resizes everything else — so the control goes blank, which
+  is what Word and Google Docs do. The playground reads this instead of
+  re-deriving the rule with a hardcoded default, and blanks its box accordingly. A size control previously had to read the `fontSize` mark itself and
+  got `undefined` for every run without one — which is most runs, since a run with
+  no mark still renders at the block style's size — so the control showed "unset"
+  over text the document plainly draws at a size. Always returns a number, because
+  a control needs a value to show.
+
+  **`inlineRegistry` on `BaseEditor`.** Layout reaches an inline node's strategy
+  through a registry the caller supplies, and the registry lived on `Editor` only —
+  so a `ServerEditor` had nothing to pass. `measure()` never ran, the span carried
+  no resolved face, and a PDF node handler that draws its own text was given no
+  font to draw it in. An atom that sizes itself from a font was exactly the case
+  that could not work headlessly. `InlineStrategy.render` still takes a canvas
+  context and stays browser-only: the box is layout, the paint is a surface.
+
 ## 1.0.21
 
 ### Patch Changes
