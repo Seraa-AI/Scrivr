@@ -5,6 +5,8 @@
 // other extensions rely on. Extensions that WRITE semantic handlers opt in with
 //   import "@scrivr/export-semantic/augment";
 export { toSemanticUnits } from "./toSemanticUnits";
+export { toDocumentOutline } from "./outline";
+export type { DocumentOutlineOptions } from "./outline";
 export { SemanticExport } from "./SemanticExport";
 export {
   unitEmbeddingInput,
@@ -20,6 +22,7 @@ export {
 export type { SemanticUnitDiff, UnitRichInput, SemanticPartRichInput } from "./changeDetection";
 export type {
   SemanticUnit,
+  OutlineSection,
   SemanticUnitType,
   SemanticRole,
   SemanticTextView,
