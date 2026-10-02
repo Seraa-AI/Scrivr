@@ -7,7 +7,12 @@ import { Node, type Schema } from "prosemirror-model";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
-import type { IBaseEditor, MarkdownParserTokenSpec } from "./extensions/types";
+import type {
+  IBaseEditor,
+  MarkdownParserTokenSpec,
+  SlashCommandSpec,
+} from "./extensions/types";
+import { DEFAULT_SLASH_ORDER } from "./extensions/types";
 import type { ExportContributionMap, ImportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
@@ -21,6 +26,41 @@ import {
   type CloneIdMap,
   type RecloneOptions,
 } from "./model/assignBlockIds";
+
+/** Why a deferred edit never reached the document. */
+export type DeferredEditAbandonment =
+  /** The work rejected. */
+  | "failed"
+  /** The text the edit was anchored to was removed while the work ran. */
+  | "anchor-removed"
+  /** The editor stopped accepting writes before the work finished. */
+  | "read-only"
+  /** The editor was destroyed before the work finished. */
+  | "destroyed"
+  /** The work succeeded and `edit` threw. */
+  | "edit-failed";
+
+export interface DeferredEditOptions<T> {
+  /**
+   * Where the edit belongs, captured now and mapped through everything that
+   * happens while `work` runs. Defaults to the selection head.
+   */
+  at?: number;
+  /** The asynchronous part. */
+  work: () => Promise<T>;
+  /**
+   * Write the result. Called with the anchor as it now stands, and only when
+   * the editor still accepts writes and the anchor survived.
+   */
+  edit: (result: T, at: number) => void;
+  /** Told why, when the edit does not happen. */
+  onAbandoned?: (reason: DeferredEditAbandonment, error?: unknown) => void;
+}
+
+/** A position held across transactions. `pos` is null once its text is gone. */
+interface PendingAnchor {
+  pos: number | null;
+}
 
 export interface BaseEditorOptions {
   /**
@@ -106,6 +146,13 @@ export class BaseEditor implements IBaseEditor {
   protected editorState: EditorState;
 
   private readOnlyValue = false;
+  private destroyed = false;
+  /**
+   * Anchors for edits whose work has not finished. Mapped on every document
+   * change so a deferred edit lands where it was asked for, not where the
+   * caret has since gone.
+   */
+  private readonly pendingAnchors = new Set<PendingAnchor>();
   private readonly listeners = new Set<() => void>();
   /**
    * Outcome of the most recent ingestion-time normalization — either
@@ -126,6 +173,12 @@ export class BaseEditor implements IBaseEditor {
    * `Commands<ReturnType>` in your extension to get typed entries.
    */
   readonly commands: SafeFlatCommands;
+  /**
+   * `commands` under a looser type — the same object, not a copy. Spreading an
+   * argument list into `commands` does not typecheck, because it is a union of
+   * fixed-arity signatures; `runCommand` reads this instead.
+   */
+  private readonly boundCommands: Record<string, (...args: unknown[]) => void> = {};
 
   /**
    * Per-extension storage. Augment `ExtensionStorage` in your extension
@@ -155,7 +208,7 @@ export class BaseEditor implements IBaseEditor {
     fonts,
   }: BaseEditorOptions = {}) {
     this.fonts = fonts ?? null;
-    this.manager = new ExtensionManager(extensions);
+    this.manager = new ExtensionManager(extensions, () => this);
     this.inlineRegistry = this.manager.buildInlineRegistry();
 
     const rawInitialDoc =
@@ -271,6 +324,89 @@ export class BaseEditor implements IBaseEditor {
    */
   findExtension(name: string): Extension | null {
     return this.manager.findExtension(name);
+  }
+
+  /**
+   * Run a command named by a declared spec — a `ToolbarItemSpec` or a
+   * `SlashCommandSpec` — with the arguments it carries.
+   *
+   * Those specs are data: they name a command rather than closing over one, so
+   * the surface that renders them has to dispatch by name. Doing that through
+   * `commands` means spreading `unknown[]` into a union of fixed-arity
+   * signatures, which only typechecks behind a cast — so every such surface
+   * grew its own. This is that dispatch, once, where the loose map already is.
+   *
+   * Unknown names are ignored: a spec can name a command from an extension
+   * this editor was not built with.
+   */
+  runCommand(name: keyof SafeFlatCommands, args: unknown[] = []): void {
+    // `hasOwn`, not a plain lookup: a name that happens to match something on
+    // Object.prototype would otherwise be invoked rather than ignored.
+    if (!Object.hasOwn(this.boundCommands, name)) return;
+    this.boundCommands[name]?.(...args);
+  }
+
+  /**
+   * The listable half of the slash menu, ordered by `group` then `order`.
+   *
+   * A host renders these rather than enumerating the formatting commands
+   * itself, so an extension owns the entry that inserts its own node.
+   */
+  getSlashCommands(): SlashCommandSpec[] {
+    return sortSlashCommands(
+      this.manager.buildSlashCommands().flatMap((c) => c.items ?? []),
+    );
+  }
+
+  /**
+   * Ask every registered resolver what matches `query` — the entries that have
+   * to be searched rather than listed, ordered the same way.
+   *
+   * The signal is checked twice: before the resolvers run, so an abandoned
+   * query costs nothing, and again once they answer, so a resolver that
+   * ignores its own signal still cannot hand back entries for a query the
+   * reader has typed past. Either way the call throws `signal.reason` instead
+   * of resolving, which is what lets a caller trust the result it holds.
+   *
+   * A resolver that rejects is dropped from the round with a warning. One
+   * source being down must not empty a menu whose formatting entries are fine.
+   */
+  async resolveSlashCommands(
+    query: string,
+    signal: AbortSignal,
+  ): Promise<SlashCommandSpec[]> {
+    signal.throwIfAborted();
+    const resolvers = this.manager
+      .buildSlashCommands()
+      .flatMap((c) => (c.resolve ? [c.resolve] : []));
+    if (resolvers.length === 0) return [];
+
+    // Raced against the signal: `allSettled` waits for the slowest resolver, so
+    // a resolver that ignores its own signal would leave an abandoned query
+    // pending forever — and the caller awaiting it never learns it was
+    // cancelled.
+    const rounds = await Promise.race([
+      Promise.allSettled(resolvers.map((resolve) => resolve(query, signal))),
+      aborted(signal),
+    ]);
+    signal.throwIfAborted();
+
+    const found: SlashCommandSpec[] = [];
+    for (const round of rounds) {
+      if (round.status === "rejected") {
+        console.warn("[ExtensionManager] A slash-command resolver failed:", round.reason);
+      } else if (Array.isArray(round.value)) {
+        found.push(...round.value);
+      } else {
+        // Answering with something that is not a list is a failure like any
+        // other: degrade to the resolvers that did answer, never to an error.
+        console.warn(
+          "[ExtensionManager] A slash-command resolver answered with something that is not a list:",
+          round.value,
+        );
+      }
+    }
+    return sortSlashCommands(found);
   }
 
   /**
@@ -524,6 +660,8 @@ export class BaseEditor implements IBaseEditor {
   // ── Lifecycle ────────────────────────────────────────────────────────────────
 
   destroy(): void {
+    this.destroyed = true;
+    this.pendingAnchors.clear();
     this.emit("destroy", undefined as EditorEvents["destroy"]);
     // Tear down in reverse of setup so view cleanup (which may read engine
     // state — Y.Doc bindings, plugin state, subscriptions) runs before the
@@ -545,8 +683,56 @@ export class BaseEditor implements IBaseEditor {
    */
   protected applyState(tr: Transaction): void {
     this.editorState = this.editorState.apply(tr);
+    if (tr.docChanged && this.pendingAnchors.size > 0) {
+      for (const anchor of this.pendingAnchors) {
+        if (anchor.pos === null) continue;
+        const mapped = tr.mapping.mapResult(anchor.pos);
+        anchor.pos = mapped.deleted ? null : mapped.pos;
+      }
+    }
     this.emit("update", { docChanged: tr.docChanged });
     this.notifyListeners();
+  }
+
+  /**
+   * Run asynchronous work and write its result at a position that survives
+   * whatever happens meanwhile.
+   *
+   * Three things go wrong when an extension does this itself, and all three
+   * are silent: the position it captured is stale by the time the answer
+   * arrives, so the write lands on text the author has since selected and
+   * replaces it; the editor may have gone read-only, so the write vanishes
+   * with nothing said; and the editor may be destroyed, so the write lands on
+   * a state nobody will ever save. `onAbandoned` is how a caller learns which.
+   */
+  deferEdit<T>(options: DeferredEditOptions<T>): void {
+    const { at, work, edit, onAbandoned } = options;
+    const anchor: PendingAnchor = {
+      pos: at ?? this.getActiveState().selection.head,
+    };
+    this.pendingAnchors.add(anchor);
+
+    const abandon = (reason: DeferredEditAbandonment, error?: unknown): void => {
+      onAbandoned?.(reason, error);
+    };
+
+    work().then(
+      (result) => {
+        this.pendingAnchors.delete(anchor);
+        if (this.destroyed) return abandon("destroyed");
+        if (this.readOnlyValue) return abandon("read-only");
+        if (anchor.pos === null) return abandon("anchor-removed");
+        try {
+          edit(result, anchor.pos);
+        } catch (error: unknown) {
+          abandon("edit-failed", error);
+        }
+      },
+      (error: unknown) => {
+        this.pendingAnchors.delete(anchor);
+        abandon("failed", error);
+      },
+    );
   }
 
   protected notifyListeners(): void {
@@ -587,14 +773,52 @@ export class BaseEditor implements IBaseEditor {
 
   private buildCommands(): SafeFlatCommands {
     const rawCommands = this.manager.buildCommands();
-    const bound: Record<string, (...args: unknown[]) => void> = {};
     for (const [name, factory] of Object.entries(rawCommands)) {
-      bound[name] = (...args: unknown[]) => {
+      this.boundCommands[name] = (...args: unknown[]) => {
         if (this.readOnlyValue) return;
         const cmd = factory(...args);
         cmd(this.getActiveState(), (tr) => this.dispatchToActive(tr));
       };
     }
-    return bound as SafeFlatCommands;
+    return this.boundCommands as SafeFlatCommands;
   }
+}
+
+/** Rejects with the signal's reason the moment it aborts, and never resolves. */
+function aborted(signal: AbortSignal): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}
+
+/**
+ * Order slash entries by `group`, then `order`.
+ *
+ * Groups keep the order they were first contributed in — registration order,
+ * which is what puts an extension's own entries where the kit author placed
+ * them — rather than sorting group names alphabetically, which would reorder a
+ * menu whenever a group was renamed.
+ */
+/**
+ * A spec's sort position. Anything that is not a real number sorts as if it
+ * stated none: a comparator returning `NaN` reads as "equal to everything",
+ * which breaks the ordering of every sibling rather than just the one entry.
+ */
+function orderOf(spec: SlashCommandSpec): number {
+  return Number.isFinite(spec.order) ? spec.order! : DEFAULT_SLASH_ORDER;
+}
+
+function sortSlashCommands(specs: SlashCommandSpec[]): SlashCommandSpec[] {
+  const groupRank = new Map<string, number>();
+  for (const spec of specs) {
+    const group = spec.group ?? "";
+    if (!groupRank.has(group)) groupRank.set(group, groupRank.size);
+  }
+  // Every group in `specs` was ranked above, so a lookup always hits.
+  const rank = (spec: SlashCommandSpec): number => groupRank.get(spec.group ?? "") ?? 0;
+  return [...specs].sort((a, b) => {
+    const byGroup = rank(a) - rank(b);
+    if (byGroup !== 0) return byGroup;
+    return orderOf(a) - orderOf(b);
+  });
 }

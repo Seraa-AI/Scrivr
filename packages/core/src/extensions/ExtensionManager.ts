@@ -11,6 +11,7 @@ import type {
   ResolvedExtension,
   FontModifier,
   ToolbarItemSpec,
+  SlashCommandContribution,
   InputHandler,
   MarkdownBlockRule,
   PasteTransform,
@@ -255,7 +256,7 @@ export class ExtensionManager {
    */
   private readonly docAttrOwners: Record<string, string>;
 
-  constructor(extensions: Extension[]) {
+  constructor(extensions: Extension[], editor?: () => IBaseEditor) {
     // Phase 0: expand bundles. From here on there are no bundles, only
     // extensions — every later phase treats a StarterKit child exactly like an
     // extension the consumer listed themselves.
@@ -267,7 +268,7 @@ export class ExtensionManager {
     this.docAttrOwners = phase1.docAttrOwners;
 
     // Phase 2+: resolve everything else with the built schema in context
-    this.resolved = this.extensions.map((ext) => ext.resolve(this.schema));
+    this.resolved = this.extensions.map((ext) => ext.resolve(this.schema, editor));
   }
 
   /**
@@ -620,6 +621,13 @@ export class ExtensionManager {
    */
   buildToolbarItems(): ToolbarItemSpec[] {
     return this.resolved.flatMap((ext) => ext.toolbarItems);
+  }
+
+  /**
+   * Slash-menu contributions from all extensions, in registration order.
+   */
+  buildSlashCommands(): SlashCommandContribution[] {
+    return this.resolved.flatMap((ext) => ext.slashCommands);
   }
 
   /**

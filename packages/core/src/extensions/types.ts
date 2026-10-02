@@ -45,6 +45,7 @@ import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark, Slice } fro
 import type { MarkdownSerializer, MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
 import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
+import type { DeferredEditOptions } from "../BaseEditor";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
@@ -187,6 +188,46 @@ export interface IBaseEditor {
    * to option shape.
    */
   findExtension(name: string): Extension | null;
+  /**
+   * Run asynchronous work and write its result at a position that survives
+   * whatever happens meanwhile.
+   *
+   * The seam for an extension that must fetch before it can edit. Without it
+   * the position captured at dispatch is stale when the answer arrives — so
+   * the write lands on text the author has since selected, and replaces it —
+   * and a write into a read-only or destroyed editor vanishes or lands on a
+   * state nobody will save. `onAbandoned` says which of those happened.
+   */
+  deferEdit<T>(options: DeferredEditOptions<T>): void;
+  /**
+   * Run a command named by a declared spec — a `ToolbarItemSpec` or a
+   * `SlashCommandSpec` — with the arguments it carries.
+   *
+   * Those specs are data: they name a command rather than closing over one, so
+   * the surface that renders them dispatches by name. Unknown names are
+   * ignored — a spec can name a command from an extension this editor was not
+   * built with.
+   */
+  runCommand(name: keyof SafeFlatCommands, args?: unknown[]): void;
+  /**
+   * The listable half of the menu, ordered by `group` then `order`.
+   *
+   * Entries that must be searched come from `resolveSlashCommands` instead.
+   */
+  getSlashCommands(): SlashCommandSpec[];
+  /**
+   * Ask every registered resolver what matches `query`.
+   *
+   * Throws `signal.reason` if the query was abandoned — before the resolvers
+   * run, and again once they answer, so a resolver that ignores its signal
+   * still cannot replace the entries for the query the reader is now on.
+   * A caller that holds the result is holding entries for a live query.
+   *
+   * A resolver that rejects is dropped from the round with a warning. One
+   * provider being down must not empty the menu — the formatting commands have
+   * to still be there when the network is not.
+   */
+  resolveSlashCommands(query: string, signal: AbortSignal): Promise<SlashCommandSpec[]>;
 }
 
 /**
@@ -464,6 +505,69 @@ export interface ToolbarItemSpec {
   ) => boolean;
 }
 
+// ── Slash commands ─────────────────────────────────────────────────────────────
+
+/**
+ * An entry in the "/" menu, declared by the extension that owns what it
+ * inserts. A command name and arguments, never a closure — the same refusal
+ * `ToolbarItemSpec` makes, and what lets a host sort, filter and render these
+ * without holding editor internals.
+ */
+export interface SlashCommandSpec {
+  /** Namespaced, stable, unique across extensions — e.g. "clause.insert". */
+  id: string;
+  /** The entry's name, as the reader reads it. */
+  label: string;
+  /** Longer text under the label. */
+  description?: string;
+  /** Logical grouping; renderers draw dividers between groups. */
+  group?: string;
+  /** Lower sorts first within a group. Defaults to `DEFAULT_SLASH_ORDER`. */
+  order?: number;
+  /**
+   * The command name to call on editor.commands, typed against the augmented
+   * `Commands<ReturnType>` interface the same way `ToolbarItemSpec.command` is.
+   */
+  command: keyof SafeFlatCommands;
+  /** Extra arguments passed verbatim to the command when the entry is chosen. */
+  args?: unknown[];
+}
+
+/** Where a spec sorts within its group when it states no `order`. */
+export const DEFAULT_SLASH_ORDER = 100;
+
+/**
+ * Answers the entries that have to be searched rather than listed — a clause
+ * library, a document index, anything whose set is not known up front.
+ *
+ * `signal` is required rather than optional: an author typing `conf` issues
+ * four searches, and without cancellation the menu shows whichever response
+ * happens to arrive last.
+ */
+export type SlashCommandResolver = (
+  query: string,
+  signal: AbortSignal,
+) => Promise<SlashCommandSpec[]>;
+
+/**
+ * What one extension contributes to the slash menu.
+ *
+ * Two fields rather than one async function. `items` is known up front and
+ * paints on the first frame; `resolve` is I/O, and only that half needs a
+ * spinner. Folding them together would push the formatting commands through a
+ * promise for no reason, or weaken the synchronous guarantee the static path
+ * gives a renderer.
+ *
+ * An extension returns a list of these, so one fronting several sources gives
+ * each source its own resolver.
+ */
+export interface SlashCommandContribution {
+  /** Always offered; the host filters them against the query. */
+  items?: SlashCommandSpec[];
+  /** Query-driven. Called as the author types; may be cancelled. */
+  resolve?: SlashCommandResolver;
+}
+
 // ── Mark decorator ─────────────────────────────────────────────────────────────
 
 /**
@@ -580,6 +684,20 @@ export interface Phase1Context<Options = object> {
  */
 export interface ExtensionContext<Options = object> extends Phase1Context<Options> {
   readonly schema: Schema;
+  /**
+   * The editor these contributions belong to.
+   *
+   * A thunk, not a value: contexts are built while the editor is still being
+   * constructed, so this is valid inside a command body — which runs later —
+   * and not while `addCommands()` itself is executing.
+   *
+   * Reach for it only when a contribution genuinely needs the editor rather
+   * than the `state` it is handed; the case it exists for is work that
+   * finishes after an await, where the state a command received is stale.
+   * Throws when no editor owns the manager, which is only true in a test that
+   * built one directly.
+   */
+  readonly editor: () => IBaseEditor;
 }
 
 /**
@@ -587,7 +705,8 @@ export interface ExtensionContext<Options = object> extends Phase1Context<Option
  * fully resolved, so the merged markdown parser tokens are available — letting
  * extensions seed the document from markdown without an editor instance.
  */
-export interface InitialDocContext<Options = object> extends ExtensionContext<Options> {
+export interface InitialDocContext<Options = object> extends Phase1Context<Options> {
+  readonly schema: Schema;
   /**
    * Parse a markdown string into a ProseMirror document using the merged token
    * map from all registered extensions. Same algorithm as `editor.parseMarkdown()`.
@@ -881,6 +1000,13 @@ export interface ExtensionConfig<Options = object> {
   addToolbarItems?(this: Phase1Context<Options>): ToolbarItemSpec[];
 
   /**
+   * Slash-menu entries this extension contributes — declared where the node is
+   * defined, so the menu that inserts a thing is owned by whoever owns it.
+   * Data only, like `addToolbarItems`.
+   */
+  addSlashCommands?(this: Phase1Context<Options>): SlashCommandContribution[];
+
+  /**
    * Node actions this extension contributes (contextual operations on its nodes).
    * Actions are registered against a selection kind, evaluated on selection
    * changes, and exposed via `editor.getNodeActions()`.
@@ -1070,6 +1196,7 @@ export interface ResolvedExtension {
   markDecorators: Map<string, MarkDecorator>;
   fontModifiers: Map<string, FontModifier>;
   toolbarItems: ToolbarItemSpec[];
+  slashCommands: SlashCommandContribution[];
   nodeActions: NodeActionContribution[];
   selectionBehaviors: SelectionBehavior[];
   hitTesters: HitTester[];

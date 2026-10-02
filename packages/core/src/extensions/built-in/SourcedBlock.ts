@@ -1,13 +1,19 @@
 import { Extension } from "../Extension";
 import { fnv1aHex, stableStringify } from "../../model/hash";
 import { Slice, Fragment, Node } from "prosemirror-model";
+import { insertPoint } from "prosemirror-transform";
 import {
 	Plugin,
 	PluginKey,
 	type EditorState,
 	type Transaction,
 } from "prosemirror-state";
-import type { CloneHandler, IBaseEditor, IEditor } from "../types";
+import type {
+	CloneHandler,
+	IBaseEditor,
+	IEditor,
+	SlashCommandContribution,
+} from "../types";
 import type {
 	NodeActionContext,
 	NodeActionContribution,
@@ -286,12 +292,40 @@ export interface SourcedBlockOptions {
 	providers?: SourceProvider[];
 }
 
+
 declare module "@scrivr/core" {
 	interface Commands<ReturnType> {
 		sourcedBlock: {
 			insertSourcedBlock: (options: {
 				kind: string;
 				content: SourceContent;
+				/**
+				 * Where to put it. Defaults to replacing the selection, which
+				 * is what a direct insertion means. Content that arrived
+				 * asynchronously passes the position it was asked for, because
+				 * by then the selection is somewhere else.
+				 */
+				at?: number;
+			}) => ReturnType;
+			/**
+			 * Insert by identity rather than content, resolving through
+			 * `provider.fetch` — the method whose own comment already promises
+			 * "full content for insertion".
+			 *
+			 * The sibling that takes full content cannot be named by a menu
+			 * entry, because somebody has to fetch before dispatching; that is
+			 * what turns a contribution back into a callback. This one lets
+			 * `{ kind, resourceId, versionId }` be the whole entry.
+			 *
+			 * Returns true once the request is under way, not once the block
+			 * is in the document. The insert is abandoned, with a reason, if
+			 * the text it was anchored to is gone, the editor has stopped
+			 * accepting writes, or the editor is destroyed.
+			 */
+			insertSourcedBlockFromSource: (options: {
+				kind: string;
+				resourceId: string;
+				versionId: string;
 			}) => ReturnType;
 			/**
 			 * Record which instances hold a version their source has moved past
@@ -539,9 +573,9 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				},
 
 			insertSourcedBlock:
-				(options: { kind: string; content: SourceContent }) =>
+				(options: { kind: string; content: SourceContent; at?: number }) =>
 				(state, dispatch) => {
-					const { kind, content } = options;
+					const { kind, content, at } = options;
 					const schema = state.schema;
 
 					try {
@@ -572,7 +606,16 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 								fragment,
 							);
 
-							tr.replaceSelectionWith(blockNode);
+							if (at === undefined) {
+								tr.replaceSelectionWith(blockNode);
+							} else {
+								// Where a block can legally go near `at` — a
+								// raw insert at a text offset would split the
+								// paragraph the position happened to land in.
+								const point = insertPoint(tr.doc, at, blockType);
+								if (point === null) return false;
+								tr.insert(point, blockNode);
+							}
 							dispatch(tr);
 
 							const providers = this.options.providers ?? [];
@@ -606,7 +649,77 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 						return false;
 					}
 				},
+
+			insertSourcedBlockFromSource:
+				(options: {
+					kind: string;
+					resourceId: string;
+					versionId: string;
+				}) =>
+				() => {
+					const { kind, resourceId, versionId } = options;
+					const provider = (this.options.providers ?? []).find(
+						p => p.kind === kind,
+					);
+					if (!provider) {
+						console.error(
+							`[SourcedBlock] No provider registered for kind "${kind}"`,
+						);
+						return false;
+					}
+					// `deferEdit` owns the three things that go wrong between
+					// asking for content and holding it: the position moves,
+					// the editor may stop accepting writes, and it may be gone.
+					// The insert itself still runs through the content-taking
+					// sibling, so there is one insertion path.
+					const editor = this.editor();
+					editor.deferEdit({
+						work: () => provider.fetch(resourceId, versionId),
+						edit: (content, at) => {
+							editor.runCommand("insertSourcedBlock", [
+								{ kind, content, at },
+							]);
+						},
+						onAbandoned: (reason, error) => {
+							console.error(
+								`[SourcedBlock] Did not insert ${kind} ${resourceId} — ${reason}`,
+								error ?? "",
+							);
+						},
+					});
+
+					return true;
+				},
 		};
+	},
+
+	/**
+	 * One resolver per provider, so a query reaches each source's own `search`.
+	 *
+	 * Entries carry identity and a label, never a body: `SourceSearchResult` is
+	 * already `{ resourceId, versionId, label }`, and that only pays off once
+	 * something fetches on select instead of pulling full text for twenty rows
+	 * to render twenty labels.
+	 */
+	addSlashCommands(): SlashCommandContribution[] {
+		return (this.options.providers ?? []).map(provider => ({
+			async resolve(query: string, signal: AbortSignal) {
+				const hits = await provider.search(query, signal);
+				return hits.map(hit => ({
+					id: `${provider.kind}.insert.${hit.resourceId}`,
+					label: hit.label,
+					group: provider.kind.toUpperCase(),
+					command: "insertSourcedBlockFromSource" as const,
+					args: [
+						{
+							kind: provider.kind,
+							resourceId: hit.resourceId,
+							versionId: hit.versionId,
+						},
+					],
+				}));
+			},
+		}));
 	},
 
 	/**

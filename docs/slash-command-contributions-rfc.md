@@ -212,3 +212,85 @@ callback threaded through four layers, a hook that duplicates
 `provider.search`, and a content builder that duplicates `provider.fetch`. All
 three delete against this RFC, and `SourceProvider.search` runs for the first
 time.
+
+## What shipped
+
+All of it, as specified, with two details the RFC left open.
+
+`SlashCommandSpec` (`id`, `label`, `description?`, `group?`, `order?`, `command`,
+`args?`), `SlashCommandContribution` (`items?` / `resolve?`), and the Phase-1
+`addSlashCommands()` hook returning a list of contributions — so one extension
+fronting several sources gives each its own resolver. `getSlashCommands()` and
+`resolveSlashCommands(query, signal)` read them back, both merged by `group` then
+`order`.
+
+A resolver that rejects is dropped from the round with a `console.warn` and the
+rest still answer (Decision 5). `signal` is required, and the editor checks it
+twice — before the resolvers run and again after they answer — so a resolver that
+ignores its own signal still cannot deliver entries for a query the author has
+typed past. Abandoning throws `signal.reason`, which is how a caller knows a
+result it holds is current.
+
+`insertSourcedBlockFromSource({ kind, resourceId, versionId })` ships with it
+(Decision 4), resolving through `provider.fetch` and then delegating to
+`insertSourcedBlock` so there is one insertion path. `SourcedBlockExtension`
+contributes one resolver per provider, and `SourceProvider.search` runs for the
+first time. Nothing fetches during a search.
+
+**Four seams the RFC did not reach, found in review.**
+
+*Deferred document work.* `insertSourcedBlockFromSource` finishes after an
+await, and nothing in core held the three facts such a write needs: the
+position the author asked at (which has moved), whether the editor still
+accepts writes, and whether it still exists. The first cut had none of them —
+it reached the live selection, so a clause chosen from `/` replaced whatever
+the author had selected while it loaded. `editor.deferEdit({ at, work, edit,
+onAbandoned })` is the primitive: it captures the position, maps it through
+everything that happens meanwhile (the idiom `AiCaret` already used privately),
+and abandons with a reason rather than writing into a read-only or destroyed
+editor. `insertSourcedBlock` takes an optional `at`, resolved through
+`insertPoint` so a block lands where a block can legally go.
+
+*A command reaching its editor.* `addCommands`' context had no editor, so three
+extensions had each invented a `WeakMap` keyed on their options object — which
+identifies the configured extension, not the editor, so one instance shared by
+two editors inserted into the wrong document. `ExtensionContext` now carries an
+`editor()` thunk; each editor resolves its own extensions, so the identity is
+right by construction and the map is gone.
+
+*A resolver that misbehaves.* Decision 5 covers a resolver that rejects. One
+that fulfils with a non-array threw inside `resolveSlashCommands`, losing every
+other resolver's entries and rejecting a call that should have degraded; and an
+abandoned query never settled while a resolver hung, because `allSettled` waits
+for the slowest. Both are now failures like any other: warn, drop, carry on —
+and the fan-out races the signal.
+
+*An order that is not a number.* A `NaN` comparison reads as "equal to
+everything", so one broken `order` reordered its whole group. Anything
+non-finite now sorts as if it stated none.
+
+**Two decisions the RFC did not make.**
+
+*Group ordering.* "Merges by `group` then `order`" did not say how groups order
+against each other. They keep the order they were first contributed in —
+registration order — rather than sorting group names, so renaming a group does
+not reorder the menu.
+
+*Where the glyph comes from.* The spec has `label` and `description` and no icon,
+which is right under §5 ("Scrivr contributes no renderer"). The React menu
+therefore keys a glyph off `spec.command`, the same way the playground toolbar
+keys its Lucide icons off `item.command`. An entry whose command is not in that
+map renders without a glyph rather than a wrong one.
+
+`SlashMenuItem` carries `id` and `group` through to the renderer. Dropping them
+meant the one shipped menu keyed on a title — fine for eight fixed entries, but
+two search hits can share a label — and could not draw the dividers `group`
+exists for. The menu also debounces (150ms by default), clears the previous
+query's entries up front rather than leaving them selectable, and asks no
+resolver when a host supplies its own `items`, so "override" means override.
+
+`editor.runCommand(name, args)` was added to dispatch a declared spec by name.
+Both `ToolbarItemSpec` and `SlashCommandSpec` name a command rather than closing
+over one, and dispatching by name through `commands` needs a cast — the playground
+had grown one, commented "single cast point". It is deleted; the dispatch lives
+once on `BaseEditor`.
