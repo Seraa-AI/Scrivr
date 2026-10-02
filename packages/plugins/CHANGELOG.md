@@ -1,5 +1,336 @@
 # @scrivr/plugins
 
+## 1.0.22
+
+### Patch Changes
+
+- 44e6423: Two things the AI review surface could not express.
+
+  **A marker that proposes no edit.** A finding can be a Pass, or a decision a
+  person has to make. `computeAiSuggestion` drops a block whose proposed text
+  matches what is already there, which is correct — a diff overlay is not where a
+  finding with no change belongs — and there was no other layer, so such a
+  finding existed in the panel and nowhere the reader was looking.
+
+  `BlockMarkers` is that layer. `setBlockMarkers(editor, source, markers)` hangs
+  `{ nodeId, kind, summary }` on a block, `getBlockMarkers` reads them,
+  `activeBlockMarkers` answers the ones on the innermost marked block holding the
+  cursor, and `createBlockMarkerOverlay` — with `useBlockMarkerOverlay` in
+  `@scrivr/react` — gives them the show / move / hide lifecycle the suggestion
+  popover has.
+
+  Every call names its writer, which is what makes the layer additive: several
+  bridges write to the same surface and none owns it, so a writer replaces and
+  clears its own markers without erasing what the others say. Nothing is written
+  to the document and nothing enters history. A marker whose block has left the
+  document is dropped on read, and markers resolve in one pass over the document
+  rather than one walk each. `BLOCK_MARKERS_SET` is public, so a payload whose
+  markers are not markers is refused whole rather than half-applied.
+
+  **Accepting a span rather than a block.** `accept(blockId)` applied every op the
+  block carried, so a finding scoped to one sentence rewrote the clause around it.
+  `applyAiSuggestion` now takes `range`, and `actions.acceptRange(blockId, range,
+mode?)` exposes it. It returns whether it wrote, so a refusal is visible instead
+  of silent — including through `AiToolkit.apply`.
+
+  `range` carries the accepted text its offsets were measured against, and is
+  refused unless the block still holds that text. This is the part that makes a
+  scoped accept safe: settling rewrites a block's `acceptedText`, so comparing the
+  document against it proves nothing, and a caller still holding offsets from
+  before an earlier accept would edit whichever words now sit at those numbers.
+  Also refused: a span that is inverted, collapsed, or reaches outside the block.
+
+  Only groups the span covers are applied; one it merely clips is left pending. A
+  pure insertion is zero-width, so it belongs to the single span that starts at or
+  before its point and ends strictly after — otherwise both neighbouring sentences
+  claimed it. Every covered group is applied in one pass and settled as one set:
+  `rebaseAfterSettle` now takes the set of settled groups, because told one at a
+  time it read the pass's own writes as reader drift and discarded the groups the
+  span deliberately left pending.
+
+  **`docRangeToAcceptedRange`** (`@scrivr/plugins`) converts a document range to
+  the accepted-text offsets `range` wants. Only the forward direction existed, and
+  accepted text omits runs pending deletion, so arithmetic on document positions
+  was wrong in exactly the tracked-changes documents this serves — and wrong
+  silently.
+
+  **Drift has one owner, and it is no longer silent.** `staleBlockIds` had two
+  production readers — the card's `isStale` and the canvas overlay, which dims a
+  stale block — and no writer at all, so both read false for every block forever.
+  The plugin now computes it whenever the answer can change: a new suggestion (a
+  host can hand over one that was already out of date), a settled one (the rebase
+  refreshes each surviving block against the document the settlement left), or an
+  edit. Identical answers return the previous state unchanged, so the card
+  subscription's identity skip still holds.
+
+  Every accept path reads it and refuses a block the reader has edited since the
+  proposal was computed — the unscoped block accept, a group accept, and accept-all
+  as well as the new span accept. Previously only the span accept checked, so one
+  card had a button that refused and a button that wrote the model's words into
+  text that had moved: `"The quick fox"` edited to `"!The quick fox"` and then
+  accepted produced `"!Theslowk fox"`. Accept-all still applies the blocks that do
+  match and leaves the drifted ones pending, because an edit in one block says
+  nothing about the rest.
+
+  `AiSuggestionCardActions` gains a required `acceptRange`, so a hand-written
+  implementation of that interface needs the new member. `applyAiSuggestion` and
+  `AiToolkit.apply` returning `boolean` instead of `void` is a widening and breaks
+  no caller.
+
+- d4fc43d: Header and footer tokens now reserve the space they actually paint.
+
+  Chrome was measured without an inline registry, so an inline atom in a header
+  fell back to whatever width its node spec declared. `pageNumber` declared 7px:
+  a header read "428" but was laid out as though it read "1", overlapping
+  whatever sat beside it and mispositioning every right-aligned or centred band.
+  The date token was worse — a fixed 60px for a string whose width depends on
+  the locale.
+
+  `MiniPipelineOptions` and `PageChromeMeasureInput` now carry `inlineRegistry`,
+  and `runPipeline` populates it, so a chrome contributor measures its atoms with
+  the same strategies that will paint them. `InlineRegistry` is exported from
+  `@scrivr/core` so an extension can build one.
+
+  Two further fixes to the width itself:
+
+  - Digits were counted with `ceil(log10(n))`, which is one short at every exact
+    power of ten. A ten-page document reserved a single digit and painted two.
+  - The token strategies read the page count from a module context that painting
+    also writes, per page, as it draws. `resolveChrome` now seeds it from the
+    flow layout, so a measurement answers from the document rather than from
+    whichever page was painted last, and reports `stable: false` until it has
+    this run's count — a count remembered from the previous run predates the
+    edit being laid out, and during a streamed load belongs to a partial layout.
+
+  To keep that verification cheap, the chrome aggregator no longer re-paginates
+  when the computed page geometry is unchanged, including header and footer
+  band positions. If measuring tokens wraps a band and changes pagination, the
+  contributors see the new flow before the loop accepts convergence.
+
+  Streamed layout now resumes from a replayable snapshot of both the paginated
+  cursor and continuous-flow cursor. A pass owns its growing page buffers, so
+  retries cannot duplicate body blocks. When chrome changes the saved geometry,
+  layout replays the consumed prefix while preserving the chunk's progress — and
+  publishes a new layout version when it does, since pages already painted have
+  moved and their tiles must repaint before the caret is drawn against them. A
+  partial layout's cached tail is never reused: it has a cutoff rather than a
+  tail, and copying from it would truncate the document at the last chunk.
+
+  Chrome painting now receives the editor's font modifiers through the page
+  renderer. Live header/footer measurement uses the same modifiers as stored
+  measurement, preserving custom token typography and line geometry on entry
+  to editing.
+
+  A band is measured once and painted on every page, so a page number's box used
+  to hold the longest number in the document — page 2 of 1040 read "Page 2"
+  followed by three digits of nothing, where Word lays each page's header out
+  separately and closes the gap. A token is sized as widest-digit times digit
+  count, so the only thing that changes between pages is how many digits the
+  number has; the band is now arranged once per width (four times for a
+  thousand-page document) and painting looks the arrangement up. Canvas and PDF
+  read the same one. The band reserves the maximum height across all measured
+  arrangements: a narrower token can distribute tall inline objects over more
+  lines and need more height than the widest-number arrangement.
+
+  Each band measurement scopes both its page number and document total. A total
+  pages token therefore measures against the document being laid out, even if
+  another document was painted most recently. Nested measurements and exceptions
+  restore the enclosing measurement context without changing paint state.
+
+  Inline atoms are also painted in the font **and fill** their own marks resolve
+  to. An atom carries no text for a decorator to colour, so its marks never
+  reached the renderer: canvas painted it in whatever fill the previous span left
+  — the body's colour in a footer holding only a page number, and the page
+  background on a page whose body painted nothing — while PDF chose a colour of
+  its own. Object spans now carry their marks, both surfaces resolve through the
+  same cascade, and an atom with no colour of its own takes the theme's text
+  colour rather than a leftover.
+
+  New surface for this: `PdfNodeContext` carries `color` — the fill an atom's
+  marks resolved to, in the layout's 0-255 channels — so a PDF node handler
+  passes it through instead of choosing one. `PdfTextOp.color` is now optional
+  and defaults to the document's text colour, which is the rule canvas already
+  applies, so no handler has to name a colour to draw text. Inline atom spans
+  carry their `marks`.
+
+  The font half of the same defect:
+  A token carries no marks of its own, so it is measured in the band's base font
+  while the text beside it is often marked smaller; the strategies draw with
+  whatever font the context holds, so a 14px box was being filled with 10px
+  digits.
+
+  **Breaking (schema):** `pageNumber`, `totalPages` and `date` no longer declare
+  `width`/`height` attrs — their `InlineStrategy` measures them. Persisted
+  documents are unaffected, since ProseMirror ignores attrs a spec does not
+  declare. But `inlineRegistry` is now **required** to lay these tokens out, not
+  merely available: a measurement path that omits it drops them entirely and
+  warns, where it previously reserved a wrong-but-visible box. All in-repo paths
+  pass it; direct callers of `runMiniPipeline` must.
+
+- cc42506: A diff op now says where in the proposal it came from, and the ops reconstruct
+  the proposal they were built from.
+
+  `pairReplacements` emits deletes first so a consumer clears a whole deleted
+  range before writing its replacement — that is what keeps document-side offsets
+  correct, and it stays. What follows consumes the proposal, and is now emitted in
+  the proposal's own order. Absorbing a keep that sits inside a replacement turns
+  it into a re-insert, and that re-insert can belong _before_ a boundary keep:
+  rewriting "alpha beta gamma delta" to "beta delta epsilon" moved "beta" behind
+  "delta" and applied as " deltabeta epsilon". The ops described something the
+  proposal never said.
+
+  Each op that consumes the proposal carries `proposedOffset`, stamped where the
+  order still is the proposal's own. A consumer counting as it walks cannot
+  recover it, because the order it walks is the document's — which is how an
+  agent's bold landed on a word it never named.
+
+  Text that did not change is one keep, however long. The quadratic guard answered
+  "delete everything, insert everything" for two identical strings, so a
+  formatting proposal on a paragraph over ~450 characters — ordinary in a
+  contract — rewrote every character to change none of them, taking comment
+  anchors and existing tracked marks with it.
+
+  Generated group ids carry their block. They were an index into one block's ops,
+  so two paragraphs with a change at the same position shared an id, and settling
+  one settled the other.
+
+  Settling one group re-expresses what is left of the proposal against the
+  document that group left behind — but only when that document is the one the
+  settlement produced. If it moved for any other reason, the reader typed or a
+  collaborator edited, the remaining ops describe text that is no longer there and
+  rebuilding from them proposes putting it back: the reader's own edit returns as
+  a suggested deletion, wearing a refreshed `acceptedText` that makes it look
+  current. Nothing can map an intent through an edit it never saw, so the proposal
+  is spent and the block is dropped. The reader asks again. A suggestion's ops are offsets into the block's
+  text as it was when the suggestion was computed, so accepting or rejecting one
+  group invalidated every remaining op: the next accept landed on the wrong
+  characters, or past the end of the old text, where it silently did nothing —
+  accept a rewrite, then accept the formatting alongside it, and the formatting
+  never arrived.
+
+  Marking a group settled and stepping over it does not fix that, because the
+  offsets are still the old ones. So there is no settled-group bookkeeping at all
+  now: the outcome is known where the group is settled, the remaining proposal is
+  rebuilt there, and a settled group simply no longer exists. A block with nothing
+  left to propose is removed, and a suggestion with no blocks left is cleared —
+  an empty proposal used to be reported as a deletion of the whole paragraph.
+
+  Settling dispatches `AI_SUGGESTION_RESOLVE` rather than replacing the
+  suggestion, which used to clear the active block and blank the rest of the
+  overlay until the caret moved.
+
+  `AiSuggestionCardData.kind` gains `"format"`. Additive for a consumer that
+  switches with a default, but a consumer narrowing exhaustively against `never`
+  will stop compiling until it handles the new member — which is the point of
+  writing it that way.
+
+  A card can say `kind: "format"`; a formatting proposal was reported as a
+  deletion labelled with the paragraph's own text. The popover describes it
+  through `formattedText` instead of rendering an empty replaced→inserted pair.
+  `FormatRenderInstruction` is exported, so a consumer can name the arm it
+  narrows to. The underline groups glyphs by `lineY`, so a run of mixed sizes
+  draws one straight rule rather than disjoint stubs.
+
+- f6ff4a2: `isDocAttrEnvelope` and `DocAttrEnvelope` reach the package surface.
+
+  The doc-attrs release notes said both were exported. Only `DOC_ATTRS_MAP_NAME`
+  was: the guard was exported from its own module and never re-exported from the
+  barrel, so it appeared in `dist/index.d.ts` exactly once, inside a comment.
+
+  `seedDocAttrs`/`readDocAttrs` remain the answer for moving attrs across a
+  storage boundary — a caller should not have to know the values are wrapped. The
+  guard is for a host that reads the map directly and has to agree with the live
+  sync about which envelopes are real. The type ships with it: a predicate that
+  narrows to a name the caller cannot import vouches for a value it cannot
+  annotate.
+
+- 297dba9: Agent-proposed formatting is held to the document's own rules.
+
+  `resolveInlineMark` is the one place that decides what an agent's mark may be,
+  and it now refuses review marks and strips `dataTracked` from the ones it
+  allows. Proposed formatting said how text should read; it could also say who
+  reviewed it and when, which let agent output sign a change as another author.
+
+  Marks are also resolved against the textblock that will hold them. A bold run
+  proposed for a code block — which allows no marks — used to survive until
+  dispatch and then throw, taking the whole batch with it; the words land
+  unstyled instead, which is what the proposal meant.
+
+  Formatting comparison runs on one canonical description (`describeInlineMark`),
+  so bookkeeping a document carries and a proposal does not can no longer read as
+  a difference. Restating a block's existing formatting is not a suggestion.
+
+  Tracked formatting is applied with explicit suggestion intent rather than by
+  relying on the engine's ambient status. `mode: "tracked"` on an editor whose
+  tracking is switched off — the default — wrote formatting permanently, with no
+  review record to reject.
+
+  Table row inserts derive width from the grid and the row's spans rather than
+  counting physical cells, so a row anchored to a merged cell no longer drops the
+  content past the first column. Deleting the last child of a list or table
+  removes the container instead of leaving an empty one behind.
+
+- 8098340: Three capabilities a consuming application could not build on its own.
+
+  **Doc attrs across a storage boundary.** `seedDocAttrs` and `readDocAttrs` move a
+  document's own attributes between a plain `attrs` object and a `Y.Doc`. The live
+  binding already syncs them between peers through a map beside the content
+  fragment, which is the whole answer for a host that persists the `Y.Doc` — but a
+  host that persists a ProseMirror-JSON projection had no route in or out, because
+  both conversions walk the fragment's children and `doc.attrs` has no
+  representation in a `Y.XmlFragment` at all. A `.docx` imported with a header lost
+  it the first time the document was opened, and the save after wrote the schema's
+  nulls over the import.
+
+  Seed before the room is live or after it has synced, never in between: the
+  "leave what the room holds alone" check reads the local `Y.Doc`, which knows
+  nothing of a server value still in flight, and Yjs settles two concurrent sets by
+  client id rather than by which is newer. Seeding carries only attrs the reader's
+  extensions declare — which means the editor supplying those names must carry the
+  extensions that own them —
+  skips null values — every document offers one for every declared key, and writing
+  those syncs an absence over a real policy — and leaves keys the room already
+  holds alone, since the room may have been restored from cache before the
+  projection was consulted. `DOC_ATTRS_MAP_NAME` and `isDocAttrEnvelope` are both exported and both now have
+  one owner: the map was named in three places, and the shape had a second, looser
+  check that accepted envelopes the live sync refuses — so a value the editors
+  ignored was being persisted as real state and resurrected on every load.
+
+  **`getActiveFontSize()`.** The counterpart to `getActiveFontFamily`, resolving
+  inline mark then block style the way the family resolves through mark, attr and
+  page config. Styled from the textblock the cursor is in rather than its top-level
+  ancestor, so a heading inside a table cell reports a heading's size — the
+  ancestor is the table, which has no style of its own.
+
+  Returns `null` when the selection spans more than one size. Answering from the
+  first run would name a size the rest of the selection is not drawn at, and a
+  reader confirming it resizes everything else — so the control goes blank, which
+  is what Word and Google Docs do. The playground reads this instead of
+  re-deriving the rule with a hardcoded default, and blanks its box accordingly. A size control previously had to read the `fontSize` mark itself and
+  got `undefined` for every run without one — which is most runs, since a run with
+  no mark still renders at the block style's size — so the control showed "unset"
+  over text the document plainly draws at a size. Always returns a number, because
+  a control needs a value to show.
+
+  **`inlineRegistry` on `BaseEditor`.** Layout reaches an inline node's strategy
+  through a registry the caller supplies, and the registry lived on `Editor` only —
+  so a `ServerEditor` had nothing to pass. `measure()` never ran, the span carried
+  no resolved face, and a PDF node handler that draws its own text was given no
+  font to draw it in. An atom that sizes itself from a font was exactly the case
+  that could not work headlessly. `InlineStrategy.render` still takes a canvas
+  context and stays browser-only: the box is layout, the paint is a surface.
+
+- Updated dependencies [aa8529f]
+- Updated dependencies [297dba9]
+- Updated dependencies [24eccf9]
+- Updated dependencies [d4fc43d]
+- Updated dependencies [80b90e0]
+- Updated dependencies [654c043]
+- Updated dependencies [297dba9]
+- Updated dependencies [490abaf]
+- Updated dependencies [8098340]
+  - @scrivr/core@1.0.22
+
 ## 1.0.21
 
 ### Patch Changes
