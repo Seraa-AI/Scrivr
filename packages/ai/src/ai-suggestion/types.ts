@@ -4,6 +4,7 @@
  * Shared types for the ai-suggestion module.
  */
 import type { InlineMark } from "@scrivr/core";
+import type { AcceptedSpan } from "./groupSpans";
 
 /**
  * Font info for rendering ghost text inline.
@@ -95,6 +96,23 @@ export interface ApplyAiSuggestionOptions {
   groupId?: string;
   /** If provided, only apply changes in this block. */
   blockId?: string;
+  /**
+   * The span of the block's accepted text to apply within — "accept this
+   * sentence", not "accept this block". Requires `blockId`, and cannot be
+   * combined with `groupId`.
+   *
+   * Carries the accepted text its offsets were measured against, which must
+   * equal what the block holds at accept time. That is what makes a scoped
+   * accept safe: every accept rewrites the block, so offsets a caller derived
+   * before an earlier one address different words, and applying them anyway is
+   * the failure this exists to prevent. A mismatch is refused.
+   *
+   * Only groups the span covers are applied; one it merely clips is left
+   * pending. Use `docRangeToAcceptedRange` from `@scrivr/plugins` to turn a
+   * reader's selection into these offsets — accepted text omits runs pending
+   * deletion, so arithmetic on document positions is wrong.
+   */
+  range?: AcceptedSpan;
   mode: "direct" | "tracked";
 }
 

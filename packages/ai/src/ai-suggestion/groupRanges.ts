@@ -9,6 +9,8 @@
  */
 import { acceptedRangeToDocRange, type buildAcceptedTextMap } from "@scrivr/plugins";
 
+import { withAcceptedOffsets } from "./groupSpans";
+
 import type { AiOp } from "./types";
 
 /**
@@ -46,9 +48,10 @@ export function buildGroupRanges(
   }>();
 
   const formatted = new Map<string, { from: number; to: number; formattedText: string }>();
-  let acceptedOffset = 0;
 
-  for (const op of ops) {
+  // Offsets come from `withAcceptedOffsets`, so which ops consume accepted
+  // text is stated once rather than re-derived in each branch below.
+  for (const { op, offset: acceptedOffset } of withAcceptedOffsets(ops)) {
     if (op.type === "keep") {
       // A keep carrying marks is a formatting proposal on text that stays. It
       // has a group of its own so a reader can accept it, and it anchors over
@@ -59,15 +62,11 @@ export function buildGroupRanges(
           formatted.set(op.groupId, { from: range.from, to: range.to, formattedText: op.text });
         }
       }
-      acceptedOffset += op.text.length;
       continue;
     }
 
     const groupId = op.groupId;
-    if (!groupId) {
-      if (op.type === "delete") acceptedOffset += op.text.length;
-      continue;
-    }
+    if (!groupId) continue;
 
     if (!groups.has(groupId)) {
       groups.set(groupId, {
@@ -84,7 +83,6 @@ export function buildGroupRanges(
         g.deleteTo   = Math.max(g.deleteTo,   range.to);
       }
       g.deleteText += op.text;
-      acceptedOffset += op.text.length;
     } else {
       // insert — anchor at current acceptedOffset
       if (!g.hasInsert) {

@@ -91,6 +91,23 @@ describe("subscribeToAiSuggestions — initial call", () => {
 
 describe("subscribeToAiSuggestions — identity optimization", () => {
   it("does NOT re-call callback when unrelated transaction fires", () => {
+    // Unrelated means it changes nothing a card shows. An edit to a block with
+    // no proposal is that; an edit to the proposed block is not, because it
+    // makes the proposal stale — see the next test.
+    const editor = new AiTestEditor(doc(p("Hello world", "n1"), p("Untouched", "n2")));
+    editor.showSuggestion(rewriteSuggestion("n1"));
+
+    const cb = vi.fn();
+    subscribeToAiSuggestions(editor, cb);
+    const callsBefore = cb.mock.calls.length;
+
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.insertText("!", state.doc.child(0).nodeSize + 1));
+
+    expect(cb.mock.calls.length).toBe(callsBefore);
+  });
+
+  it("re-calls callback when an edit makes a proposal stale", () => {
     const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
@@ -98,10 +115,11 @@ describe("subscribeToAiSuggestions — identity optimization", () => {
     subscribeToAiSuggestions(editor, cb);
     const callsBefore = cb.mock.calls.length;
 
-    // A plain text insert has no AI meta — plugin state reference unchanged
-    editor.applyTransaction(editor.getState().tr.insertText("!"));
+    editor.applyTransaction(editor.getState().tr.insertText("!", 1));
 
-    expect(cb.mock.calls.length).toBe(callsBefore);
+    expect(cb.mock.calls.length).toBeGreaterThan(callsBefore);
+    const cards = cb.mock.calls[cb.mock.calls.length - 1]![0];
+    expect(cards[0].isStale).toBe(true);
   });
 
   it("re-calls callback when suggestion changes", () => {

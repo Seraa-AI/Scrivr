@@ -100,10 +100,8 @@ export function createSuggestionPopover(
       const nodeFound = findNodeById(state.doc, block.nodeId);
       if (!nodeFound) continue;
 
-      const { acceptedText: liveText, map } = buildAcceptedTextMap(
-        nodeFound.node, nodeFound.pos, schema,
-      );
-      const isStale = liveText !== block.acceptedText;
+      const { map } = buildAcceptedTextMap(nodeFound.node, nodeFound.pos, schema);
+      const isStale = pluginState.staleBlockIds.has(block.nodeId);
 
       const blockStart = nodeFound.pos;
       const blockEnd   = nodeFound.pos + nodeFound.node.nodeSize;

@@ -21,7 +21,7 @@ import type { AiSuggestion } from "../types";
 
 function makeState() {
   return EditorState.create({
-    doc: doc(p("hello")),
+    doc: doc(p("hello", "node-1")),
     plugins: [aiSuggestionPlugin],
   });
 }
@@ -153,5 +153,53 @@ describe("AiSuggestionPlugin — object identity", () => {
     const next = state.apply(state.tr.insertText("!"));
     const after = aiSuggestionPluginKey.getState(next);
     expect(after).toBe(prev);
+  });
+});
+
+describe("AiSuggestionPlugin — staleBlockIds is computed", () => {
+  it("marks a proposal that arrived already out of date", () => {
+    // A host can hand over a suggestion computed against an older document.
+    // Assuming a fresh proposal is current is how the flag came to be
+    // permanently false for everyone reading it.
+    const state = makeState().apply(
+      makeState().tr.setMeta(AI_SUGGESTION_SET, {
+        payload: {
+          blocks: [{ nodeId: "node-1", acceptedText: "something else", ops: [] }],
+        },
+      }),
+    );
+
+    expect(aiSuggestionPluginKey.getState(state)!.staleBlockIds.has("node-1")).toBe(true);
+  });
+
+  it("marks a block the document no longer holds", () => {
+    const state = makeState().apply(
+      makeState().tr.setMeta(AI_SUGGESTION_SET, {
+        payload: { blocks: [{ nodeId: "gone", acceptedText: "hello", ops: [] }] },
+      }),
+    );
+
+    expect(aiSuggestionPluginKey.getState(state)!.staleBlockIds.has("gone")).toBe(true);
+  });
+
+  it("notices an edit that puts a block out of date", () => {
+    let state = makeState();
+    state = state.apply(state.tr.setMeta(AI_SUGGESTION_SET, { payload: SUGGESTION }));
+    expect(aiSuggestionPluginKey.getState(state)!.staleBlockIds.size).toBe(0);
+
+    state = state.apply(state.tr.insertText("!", 1));
+
+    expect(aiSuggestionPluginKey.getState(state)!.staleBlockIds.has("node-1")).toBe(true);
+  });
+
+  it("keeps plugin state identity when an edit changes no answer", () => {
+    let state = makeState();
+    state = state.apply(state.tr.setMeta(AI_SUGGESTION_SET, { payload: SUGGESTION }));
+    state = state.apply(state.tr.insertText("!", 1));
+    const before = aiSuggestionPluginKey.getState(state);
+
+    state = state.apply(state.tr.insertText("?", 1));
+
+    expect(aiSuggestionPluginKey.getState(state)).toBe(before);
   });
 });

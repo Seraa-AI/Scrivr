@@ -199,3 +199,47 @@ function escapeXml(text: string): string {
 function escapeAttr(text: string): string {
   return escapeXml(text).replace(/"/g, "&quot;");
 }
+
+/**
+ * Convert a document range to the accepted-text offsets it covers — the
+ * inverse of `acceptedRangeToDocRange`.
+ *
+ * A host works in document positions, because that is what a selection gives
+ * it, while the AI suggestion pipeline works in accepted-text offsets. The
+ * conversion cannot be done with arithmetic: accepted text omits every run
+ * pending deletion and every inline atom, so `docPos - blockStart - 1` is
+ * wrong by the length of whatever the range spans — and wrong silently, in
+ * exactly the tracked-changes documents this pipeline exists for.
+ *
+ * Edges that land inside omitted content round outward to the nearest accepted
+ * character, so the returned range covers at least what was asked for. A range
+ * reaching past the block is clamped to it.
+ *
+ * Returns `null` when the range is inverted, or when it covers no accepted
+ * character at all — a selection over nothing but deleted text has no
+ * accepted-text range to name.
+ */
+export function docRangeToAcceptedRange(
+  map: PosMapEntry[],
+  from: number,
+  to: number,
+): { from: number; to: number } | null {
+  if (from > to || map.length === 0) return null;
+
+  // First accepted character at or after `from`, and last at or before `to`.
+  // Scanning rather than binary-searching: `map` is one entry per character of
+  // one block, and the callers are a click and a keystroke.
+  let start: number | null = null;
+  let end: number | null = null;
+  for (const entry of map) {
+    if (start === null && entry.docPos >= from) start = entry.acceptedOffset;
+    if (entry.docPos < to) end = entry.acceptedOffset;
+  }
+  if (start === null || end === null || end < start) {
+    // A collapsed selection names a point, not a character, so it has an
+    // accepted offset even though it covers none.
+    if (from === to && start !== null) return { from: start, to: start };
+    return null;
+  }
+  return { from: start, to: end + 1 };
+}

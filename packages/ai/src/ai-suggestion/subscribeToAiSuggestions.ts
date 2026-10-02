@@ -22,6 +22,7 @@ import {
 import { applyAiSuggestion, rejectAiSuggestion } from "./showHideApply";
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import type { AiSuggestionBlock, AiOp, AiSuggestionPluginState } from "./types";
+import type { AcceptedSpan } from "./groupSpans";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -59,6 +60,16 @@ export interface AiSuggestionCardData {
 export interface AiSuggestionCardActions {
   /** Accept one block. mode defaults to "tracked". */
   accept(blockId: string, mode?: "tracked" | "direct"): void;
+  /**
+   * Accept only the part of a block one span covers — "accept this sentence",
+   * not "accept this block".
+   *
+   * The span states the accepted text its offsets were measured against, and
+   * is refused if the block no longer holds that text. Also refused when it
+   * covers no group, or describes nothing coherent. Returns whether anything
+   * was applied, so a refusal is visible rather than silent.
+   */
+  acceptRange(blockId: string, range: AcceptedSpan, mode?: "tracked" | "direct"): boolean;
   /** Reject one block. */
   reject(blockId: string): void;
   /** Accept all blocks. mode defaults to "tracked". */
@@ -181,6 +192,9 @@ export function subscribeToAiSuggestions(
   const actions: AiSuggestionCardActions = {
     accept(blockId, mode = "tracked") {
       applyAiSuggestion(editor, { blockId, mode });
+    },
+    acceptRange(blockId, range, mode = "tracked") {
+      return applyAiSuggestion(editor, { blockId, range, mode });
     },
     reject(blockId) {
       rejectAiSuggestion(editor, { blockId });

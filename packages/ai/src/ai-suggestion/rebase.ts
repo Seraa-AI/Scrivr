@@ -35,7 +35,7 @@ import { currentMarksAt, sameMarks } from "./marks";
  */
 function remainingProposal(
   block: AiSuggestionBlock,
-  settledGroupId: string,
+  settledGroupIds: ReadonlySet<string>,
   accepted: boolean,
   docMarks: InlineMark[][],
 ): InlineSpan[] {
@@ -62,7 +62,7 @@ function remainingProposal(
   };
 
   for (const op of block.ops) {
-    const settled = op.groupId === settledGroupId;
+    const settled = op.groupId !== undefined && settledGroupIds.has(op.groupId);
     const rejected = settled && !accepted;
 
     if (op.type === "keep") {
@@ -103,20 +103,25 @@ function remainingProposal(
 }
 
 /**
- * The text the block would hold if the settled group — and nothing else — had
+ * The text the block would hold if the settled groups — and nothing else — had
  * been applied to it.
  *
  * Compared against what the document actually holds, this is how a rebase tells
- * "the reader settled a group" from "the reader settled a group *and* typed".
+ * "the reader settled these groups" from "the reader settled them *and* typed".
+ *
+ * Takes a set rather than one id because a span-scoped accept writes every
+ * group its span covers in a single pass. Told about one at a time, this would
+ * read the pass's own writes as reader drift and discard the groups the span
+ * deliberately left pending.
  */
 function expectedAfterSettle(
   block: AiSuggestionBlock,
-  settledGroupId: string,
+  settledGroupIds: ReadonlySet<string>,
   accepted: boolean,
 ): string {
   let text = "";
   for (const op of block.ops) {
-    const applied = op.groupId === settledGroupId && accepted;
+    const applied = op.groupId !== undefined && settledGroupIds.has(op.groupId) && accepted;
     if (op.type === "keep") text += op.text;
     else if (op.type === "delete") { if (!applied) text += op.text; }
     else if (applied) text += op.text;
@@ -125,7 +130,7 @@ function expectedAfterSettle(
 }
 
 /**
- * Re-express a suggestion against the document a settled group left behind.
+ * Re-express a suggestion against the document the settled groups left behind.
  *
  * Returns the suggestion with this block's proposal rebuilt, the block dropped
  * when nothing remains of it, or `null` when no block has anything left to say
@@ -136,7 +141,7 @@ export function rebaseAfterSettle(
   editor: IBaseEditor,
   suggestion: AiSuggestion,
   nodeId: string,
-  settledGroupId: string,
+  settledGroupIds: ReadonlySet<string>,
   accepted: boolean,
 ): AiSuggestion | null {
   const block = suggestion.blocks.find((b) => b.nodeId === nodeId);
@@ -160,11 +165,11 @@ export function rebaseAfterSettle(
   // Nothing here can map the remaining intent through an edit it never saw, so
   // the honest answer is that this proposal is spent. The reader asks again.
   const { acceptedText: liveText } = buildAcceptedTextMap(found.node, found.pos, state.schema);
-  if (liveText !== expectedAfterSettle(block, settledGroupId, accepted)) {
+  if (liveText !== expectedAfterSettle(block, settledGroupIds, accepted)) {
     return others.length > 0 ? { ...suggestion, blocks: others } : null;
   }
 
-  const spans = remainingProposal(block, settledGroupId, accepted, currentMarksAt(found.node));
+  const spans = remainingProposal(block, settledGroupIds, accepted, currentMarksAt(found.node));
   const rebuilt = computeAiSuggestion(state, {
     blocks: [{
       nodeId: block.nodeId,

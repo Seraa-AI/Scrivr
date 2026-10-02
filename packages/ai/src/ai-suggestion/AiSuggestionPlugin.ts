@@ -3,7 +3,11 @@
  *
  * ProseMirror plugin that holds the AiSuggestionPluginState:
  *   - suggestion:    the active AiSuggestion (null when none)
- *   - staleBlockIds: nodeIds whose accepted text has changed since suggestion applied
+ *   - staleBlockIds: nodeIds whose accepted text has changed since the
+ *     proposal was computed. Recomputed here whenever the answer can change —
+ *     a new or settled suggestion, or an edit to the document — so every
+ *     reader gets it for the cost of a set lookup instead of walking the
+ *     document per block per paint.
  *   - hoverBlockId:  nodeId currently hovered in a React edge card
  *   - activeBlockId: nodeId containing the cursor
  *
@@ -15,7 +19,8 @@
  */
 
 import { Plugin, PluginKey } from "@scrivr/core/pm";
-import type { Transaction } from "@scrivr/core/pm";
+import type { EditorState, Transaction } from "@scrivr/core/pm";
+import { driftedBlocks } from "./drift";
 import type { AiSuggestionPluginState } from "./types";
 
 export const aiSuggestionPluginKey = new PluginKey<AiSuggestionPluginState>("aiSuggestion");
@@ -35,6 +40,12 @@ export const AI_SUGGESTION_SET_ACTIVE = "aiSuggestion:setActive";
  */
 export const AI_SUGGESTION_SETTLE    = "aiSuggestion:settle";
 
+function sameIds(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
+}
+
 const EMPTY_STATE: AiSuggestionPluginState = {
   suggestion:    null,
   staleBlockIds: new Set(),
@@ -48,16 +59,23 @@ export const aiSuggestionPlugin = new Plugin<AiSuggestionPluginState>({
   state: {
     init: () => ({ ...EMPTY_STATE }),
 
-    apply(tr: Transaction, prev: AiSuggestionPluginState) {
+    apply(
+      tr: Transaction,
+      prev: AiSuggestionPluginState,
+      _oldState: EditorState,
+      newState: EditorState,
+    ) {
       // Handle AI_SUGGESTION_SET
       const newSuggestion = tr.getMeta(AI_SUGGESTION_SET) as
         | { payload: AiSuggestionPluginState["suggestion"] }
         | undefined;
       if (newSuggestion !== undefined) {
+        // Computed, not assumed empty: a host can hand us a proposal that was
+        // already out of date when it arrived.
         return {
           ...prev,
           suggestion:    newSuggestion.payload,
-          staleBlockIds: new Set<string>(),
+          staleBlockIds: driftedBlocks(newState, newSuggestion.payload),
           hoverBlockId:  null,
           activeBlockId: null,
         };
@@ -68,7 +86,14 @@ export const aiSuggestionPlugin = new Plugin<AiSuggestionPluginState>({
         | { value: AiSuggestionPluginState["suggestion"] }
         | undefined;
       if (settled !== undefined) {
-        return { ...prev, suggestion: settled.value };
+        // The rebase refreshed each surviving block's `acceptedText` against
+        // the document the settlement left, so what was stale a moment ago
+        // need not be.
+        return {
+          ...prev,
+          suggestion: settled.value,
+          staleBlockIds: driftedBlocks(newState, settled.value),
+        };
       }
 
       // Handle AI_SUGGESTION_SET_STALE
@@ -89,6 +114,17 @@ export const aiSuggestionPlugin = new Plugin<AiSuggestionPluginState>({
       const activeMeta = tr.getMeta(AI_SUGGESTION_SET_ACTIVE);
       if (activeMeta !== undefined) {
         return { ...prev, activeBlockId: (activeMeta as string | null) };
+      }
+
+      // An edit to the document is the other way the answer changes. Checked
+      // last so an explicit payload above wins.
+      if (tr.docChanged && prev.suggestion) {
+        const stale = driftedBlocks(newState, prev.suggestion);
+        // Only a different answer produces new state. Returning a fresh Set on
+        // every keystroke would change plugin-state identity, and the card
+        // subscription skips re-rendering on that identity.
+        if (sameIds(stale, prev.staleBlockIds)) return prev;
+        return { ...prev, staleBlockIds: stale };
       }
 
       return prev;
