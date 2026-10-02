@@ -14,7 +14,7 @@
  */
 import type { EditorState } from "@scrivr/core/pm";
 import { findNodeById } from "@scrivr/core";
-import { buildAcceptedTextMap } from "@scrivr/plugins";
+import { acceptedTextMapFor } from "@scrivr/plugins";
 
 import type { AiSuggestion } from "./types";
 
@@ -38,7 +38,7 @@ export function driftedBlocks(
       drifted.add(block.nodeId);
       continue;
     }
-    const { acceptedText } = buildAcceptedTextMap(found.node, found.pos, state.schema);
+    const { acceptedText } = acceptedTextMapFor(found.node, found.pos, state.schema);
     if (acceptedText !== block.acceptedText) drifted.add(block.nodeId);
   }
 
