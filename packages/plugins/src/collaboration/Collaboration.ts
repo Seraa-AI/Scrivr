@@ -36,15 +36,6 @@ interface CollaborationOptions {
 }
 
 /**
- * Per-instance state shared between addCommands/addKeymap and onEditorReady.
- * Keyed by the options object (unique per configured Extension instance).
- */
-interface InstanceState {
-  binding: YBinding | null; // set in onEditorReady, null until then
-}
-const instanceState = new WeakMap<object, InstanceState>();
-
-/**
  * `setReady` suppresses layout/paint during Y.js initial sync — a view-only
  * concern on the browser `Editor`. Headless `ServerEditor` has no `setReady`
  * (and no paint to suppress), so skip it there.
@@ -63,28 +54,22 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     name: "default",
   },
 
-  // Seed instanceState early so addKeymap/addCommands closures can reference it.
-  addProseMirrorPlugins() {
-    instanceState.set(this.options, { binding: null });
-    return [];
-  },
-
   addKeymap() {
     return {
       "Mod-z": (_state, dispatch) => {
-        const binding = instanceState.get(this.options)?.binding;
+        const binding = collaborationRegistry.get(this.editor())?.binding;
         if (!binding?.undoManager.canUndo()) return false;
         if (dispatch) binding.undoManager.undo();
         return true;
       },
       "Mod-y": (_state, dispatch) => {
-        const binding = instanceState.get(this.options)?.binding;
+        const binding = collaborationRegistry.get(this.editor())?.binding;
         if (!binding?.undoManager.canRedo()) return false;
         if (dispatch) binding.undoManager.redo();
         return true;
       },
       "Mod-Shift-z": (_state, dispatch) => {
-        const binding = instanceState.get(this.options)?.binding;
+        const binding = collaborationRegistry.get(this.editor())?.binding;
         if (!binding?.undoManager.canRedo()) return false;
         if (dispatch) binding.undoManager.redo();
         return true;
@@ -95,13 +80,13 @@ export const Collaboration = Extension.create<CollaborationOptions>({
   addCommands() {
     return {
       undo: () => (_state, dispatch) => {
-        const binding = instanceState.get(this.options)?.binding;
+        const binding = collaborationRegistry.get(this.editor())?.binding;
         if (!binding?.undoManager.canUndo()) return false;
         if (dispatch) binding.undoManager.undo();
         return true;
       },
       redo: () => (_state, dispatch) => {
-        const binding = instanceState.get(this.options)?.binding;
+        const binding = collaborationRegistry.get(this.editor())?.binding;
         if (!binding?.undoManager.canRedo()) return false;
         if (dispatch) binding.undoManager.redo();
         return true;
@@ -114,9 +99,6 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     // `ServerEditor` collaboration is a first-class case — `onViewReady` never
     // fires without a view. `YBinding` already depends only on `IBaseEditor`.
     // The `setReady` layout/paint suppression is view-only and guarded below.
-    const inst = instanceState.get(this.options);
-    if (!inst) return;
-
     const ydoc = new Y.Doc();
     const type = ydoc.getXmlFragment("prosemirror");
     // Sibling map for doc-level attrs (e.g. headerFooter policy). Lives next
@@ -133,7 +115,6 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     setReadyIfSupported(editor, false);
 
     const binding = new YBinding(editor, ydoc, type, attrsMap);
-    inst.binding = binding;
     binding.bind();
 
     const provider = new HocuspocusProvider({
@@ -151,14 +132,13 @@ export const Collaboration = Extension.create<CollaborationOptions>({
         : {}),
     });
 
-    // Store provider so CollaborationCursor can read awareness
-    collaborationRegistry.set(editor, { ydoc, provider });
+    collaborationRegistry.set(editor, { ydoc, provider, binding });
 
     return () => {
       binding.destroy();
       provider.destroy();
       ydoc.destroy();
-      inst.binding = null;
+      collaborationRegistry.delete(editor);
     };
   },
 });
