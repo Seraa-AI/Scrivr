@@ -23,7 +23,7 @@
  * `toSemanticUnits(editor)` directly instead.
  */
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor, SemanticUnit } from "@scrivr/core";
+import type { SemanticUnit } from "@scrivr/core";
 import { toSemanticUnits } from "./toSemanticUnits";
 
 interface SemanticExportExtensionOptions {
@@ -59,8 +59,6 @@ export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
       exportSemantic:
         (callOptions?: ExportSemanticCallOptions) =>
         (_state, dispatch) => {
-          const editor = this.editor();
-
           const onExport = callOptions?.onExport;
           if (!onExport && typeof document === "undefined") {
             // Download path is browser-only. Server callers should pass
@@ -78,7 +76,7 @@ export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
             const shortBlockMaxChars =
               callOptions?.shortBlockMaxChars ?? this.options.shortBlockMaxChars;
             const units = toSemanticUnits(
-              editor,
+              this.editor(),
               shortBlockMaxChars !== undefined ? { shortBlockMaxChars } : {},
             );
             if (onExport) {
@@ -105,7 +103,6 @@ export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
       },
     ];
   },
-
 });
 
 function triggerDownload(units: SemanticUnit[], filename: string): void {

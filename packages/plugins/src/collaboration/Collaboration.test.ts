@@ -1,8 +1,8 @@
 /**
- * Headless collaboration: the Collaboration extension must wire its Y binding
- * and provider on `onEditorReady`, which fires in both browser `Editor` and
- * headless `ServerEditor`. Before this, setup lived in `onViewReady` — never
- * fired without a view — so `ServerEditor` never connected.
+ * Collaboration's Y binding: that it wires up headlessly on `onEditorReady`
+ * (`onViewReady` never fires without a view, so `ServerEditor` never
+ * connected), and that it belongs to one editor rather than to the configured
+ * extension several editors can share.
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -17,7 +17,9 @@ vi.mock("@hocuspocus/provider", () => ({
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { Collaboration } from "./Collaboration";
 import { collaborationRegistry } from "./collaborationState";
-import { YBinding } from "./YBinding";
+// Through the barrel: `CollabState["binding"]` is how a host names the binding,
+// so a typecheck fails here if that path stops resolving.
+import type { CollabState } from "../index";
 
 describe("Collaboration — headless (ServerEditor)", () => {
   it("wires the Y binding + provider on onEditorReady, with no view", () => {
@@ -93,49 +95,42 @@ describe("Collaboration — one configured extension, two editors", () => {
 });
 
 describe("Collaboration — undo routes to the editor that asked", () => {
-  /**
-   * Collect the bindings as they are created. A local edit is not captured by
-   * the undo manager headlessly — nothing calls `markSynced` without a real
-   * provider — so capture is stubbed and the assertion is about *which*
-   * manager the command reached, which is the thing that was wrong.
-   */
-  function bindingsFor(build: () => void): YBinding[] {
-    const created: YBinding[] = [];
-    const original = YBinding.prototype.bind;
-    YBinding.prototype.bind = function patched(this: YBinding) {
-      created.push(this);
-      return original.call(this);
-    };
-    try {
-      build();
-    } finally {
-      YBinding.prototype.bind = original;
-    }
-    return created;
-  }
+  /** Y.js only captures local edits once the provider has synced. */
+  const bindingOf = (editor: ServerEditor): CollabState["binding"] => {
+    const binding = collaborationRegistry.get(editor)?.binding;
+    if (!binding) throw new Error("no binding registered for this editor");
+    binding.markSynced();
+    return binding;
+  };
+
+  const append = (editor: ServerEditor, text: string): void => {
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.insertText(text, state.doc.content.size - 1));
+  };
 
   it("undoes in the pane that asked, not the one built last", () => {
     const ext = Collaboration.configure({ url: "ws://test", name: "room-1" });
-    let a!: ServerEditor;
-    const [bindingA, bindingB] = bindingsFor(() => {
-      a = new ServerEditor({
-        content: "hello",
-        extensions: [StarterKit.configure({ history: false }), ext],
-      });
+    const editorWith = () =>
       new ServerEditor({
         content: "hello",
         extensions: [StarterKit.configure({ history: false }), ext],
       });
-    });
 
-    vi.spyOn(bindingA!.undoManager, "canUndo").mockReturnValue(true);
-    vi.spyOn(bindingB!.undoManager, "canUndo").mockReturnValue(true);
-    const undoA = vi.spyOn(bindingA!.undoManager, "undo").mockReturnValue(null);
-    const undoB = vi.spyOn(bindingB!.undoManager, "undo").mockReturnValue(null);
+    const a = editorWith();
+    const b = editorWith();
+    const bindingA = bindingOf(a);
+    bindingOf(b);
+
+    append(a, " one");
+    // Without this the two edits coalesce into one stack item, which undoes to
+    // an empty fragment that cannot produce a schema-valid doc.
+    bindingA.undoManager.stopCapturing();
+    append(a, " two");
+    append(b, " bee");
 
     a.commands.undo();
 
-    expect(undoA).toHaveBeenCalledTimes(1);
-    expect(undoB).not.toHaveBeenCalled();
+    expect(a.getState().doc.textContent).toBe("hello one");
+    expect(b.getState().doc.textContent).toBe("hello bee");
   });
 });

@@ -132,8 +132,6 @@ export const Collaboration = Extension.create<CollaborationOptions>({
         : {}),
     });
 
-    // Keyed by this editor: the cursor extension reads awareness off the
-    // provider, and undo/redo read the binding.
     collaborationRegistry.set(editor, { ydoc, provider, binding });
 
     return () => {

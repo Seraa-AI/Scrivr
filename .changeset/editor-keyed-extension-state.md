@@ -24,19 +24,22 @@ already keyed by the editor and already documented as such.
 editor itself* the same way — so `exportPdf` in one pane saved the other pane's
 document, and `importDocxFromFile` **wrote** into it. All four now read
 `this.editor()`, which resolves per editor, so the map, the `InstanceState`
-type, the seeding plugin and the registration hook all delete. `PdfExport` needs
-a browser editor for layout, which is now a runtime check rather than a hook
-that only ran in one.
+type, the seeding plugin and the registration hook all delete. `PdfExport` needs an
+editor with a layout pipeline, which is now a runtime check on what the export
+actually calls — so any `IEditor` qualifies, not only the concrete browser
+`Editor` the old view-only hook required.
 
 `Image` held the same map with nothing reading it — its `onViewReady` already
 returned the cleanup it needed. Removed.
 
-`CollabState` gains a required `binding`, and `YBinding` is exported as a type
-so a host reading the registry can name it. Teardown now deletes the editor's
-registry entry instead of mutating a shared one.
+`CollabState` gains a required `binding`, which a host names as
+`CollabState["binding"]`. Teardown now deletes the editor's registry entry
+instead of mutating a shared one.
 
-One behaviour change worth knowing: these commands reach their editor through
-`this.editor()`, which throws when an `ExtensionManager` was built without one.
-Previously the lookup returned `undefined` and the command returned `false`. No
-production path builds an editorless manager; a test that drives these keymaps
-through a bare manager now throws instead of falling through.
+Two behaviour changes worth knowing. These commands reach their editor through
+`this.editor()`, which throws when an `ExtensionManager` was built without one,
+where the old lookup returned `undefined` and the command returned `false` — no
+production path builds an editorless manager, so this is latent rather than
+something that happens today. And `exportPdf` now warns on the path it refuses,
+the way `exportDocx` and `exportSemantic` already did, instead of returning
+`false` silently.

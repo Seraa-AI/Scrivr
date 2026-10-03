@@ -3,8 +3,7 @@
  * extension creates, the awareness CollaborationCursor reads from the same
  * provider, and the binding undo and redo drive.
  *
- * Keyed by the editor instance — garbage collected when the editor is
- * destroyed, and correct when one configured extension serves more than one.
+ * Keyed by the editor instance — garbage collected when the editor is destroyed.
  */
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import type * as Y from "yjs";

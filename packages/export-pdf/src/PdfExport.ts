@@ -1,6 +1,7 @@
 /**
  * PdfExport — extension that adds an "Export PDF" toolbar button and
- * `exportPdf` command to any Scrivr editor instance.
+ * `exportPdf` command to a browser editor. Export renders from the live layout
+ * pipeline, so a headless host calls `exportToPdf(editor, opts)` directly.
  *
  * Lives in @scrivr/export (not core) because it depends on pdf-lib.
  *
@@ -35,12 +36,9 @@ interface ExportPdfCallOptions extends PdfExportOptions {
   filename?: string;
 }
 
-/**
- * PDF export reads `layout` and `measurer`, which only a browser editor has —
- * a headless one has no layout pipeline to render from.
- */
+/** Probes what the export calls: a headless editor has no layout pipeline. */
 function isViewEditor(editor: IBaseEditor): editor is IEditor {
-  return "layout" in editor && "measurer" in editor;
+  return "layout" in editor && "ensureFullLayout" in editor;
 }
 
 export const PdfExport = Extension.create<PdfExportExtensionOptions>({
@@ -54,7 +52,15 @@ export const PdfExport = Extension.create<PdfExportExtensionOptions>({
     return {
       exportPdf: (callOptions?: ExportPdfCallOptions) => (_state, dispatch) => {
         const editor = this.editor();
-        if (!isViewEditor(editor)) return false;
+        if (!isViewEditor(editor)) {
+          if (dispatch) {
+            console.warn(
+              "[PdfExport] exportPdf needs an editor with a layout pipeline. " +
+                "Server callers should use the bare `exportToPdf(editor, opts)` function.",
+            );
+          }
+          return false;
+        }
         if (dispatch) {
           const filename =
             callOptions?.filename ?? this.options.filename ?? "document";
@@ -96,7 +102,6 @@ export const PdfExport = Extension.create<PdfExportExtensionOptions>({
       },
     ];
   },
-
 });
 
 declare module "@scrivr/core" {

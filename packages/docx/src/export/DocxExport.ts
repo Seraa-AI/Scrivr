@@ -22,7 +22,6 @@
  */
 
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor } from "@scrivr/core";
 import { exportDocx as runExportDocx } from "./export";
 import type { DocxExportOptions } from "./export";
 
@@ -57,7 +56,6 @@ export const DocxExport = Extension.create<DocxExportExtensionOptions>({
       exportDocx:
         (callOptions?: ExportDocxCallOptions) =>
         (_state, dispatch) => {
-          const editor = this.editor();
           if (typeof document === "undefined") {
             // Toolbar command is browser-only. Server callers should use the
             // bare `exportDocx(editor, opts)` function.
@@ -70,6 +68,7 @@ export const DocxExport = Extension.create<DocxExportExtensionOptions>({
             return false;
           }
           if (dispatch) {
+            const editor = this.editor();
             const filename =
               callOptions?.filename ?? this.options.filename ?? "document";
             const opts = resolveOptions(callOptions, this.options);
@@ -103,7 +102,6 @@ export const DocxExport = Extension.create<DocxExportExtensionOptions>({
       },
     ];
   },
-
 });
 
 function resolveOptions(

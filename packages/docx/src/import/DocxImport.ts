@@ -23,7 +23,6 @@
  */
 
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor } from "@scrivr/core";
 import { applyImportedDocument } from "./applyDocument";
 import { importDocx as runImportDocx } from "./import";
 import type { DocxImportOptions } from "./import";
@@ -57,7 +56,6 @@ export const DocxImport = Extension.create<DocxImportExtensionOptions>({
       importDocxFromFile:
         (callOptions?: ImportDocxCallOptions) =>
         (_state, dispatch) => {
-          const editor = this.editor();
           if (typeof document === "undefined") {
             if (dispatch) {
               console.warn(
@@ -69,6 +67,7 @@ export const DocxImport = Extension.create<DocxImportExtensionOptions>({
             return false;
           }
           if (dispatch) {
+            const editor = this.editor();
             const opts = resolveOptions(callOptions, this.options);
             openFilePicker()
               .then(async (file) => {
@@ -106,7 +105,6 @@ export const DocxImport = Extension.create<DocxImportExtensionOptions>({
       },
     ];
   },
-
 });
 
 function resolveOptions(
