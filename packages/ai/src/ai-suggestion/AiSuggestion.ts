@@ -20,7 +20,7 @@ import { Extension } from "@scrivr/core";
 import type { IBaseEditor, IEditor, OverlayRenderHandler } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { buildAcceptedTextMap } from "@scrivr/plugins";
+import { acceptedTextMapFor } from "@scrivr/plugins";
 
 import {
   aiSuggestionPluginKey,
@@ -114,7 +114,7 @@ export function createSuggestionOverlayHandler(
         // decides which ops draw. Gating on one op type here is how a
         // formatting-only proposal — which has no deletion by definition —
         // used to render as nothing but the margin stripe.
-        const { map } = buildAcceptedTextMap(
+        const { map } = acceptedTextMapFor(
           found.node,
           found.pos,
           state.schema,

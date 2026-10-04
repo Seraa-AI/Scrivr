@@ -14,7 +14,7 @@ import type { IEditor } from "@scrivr/core";
 import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContainer } from "@scrivr/core";
 
 import { findNodeById } from "../ai-toolkit/UniqueId";
-import { buildAcceptedTextMap, acceptedRangeToDocRange } from "@scrivr/plugins";
+import { acceptedTextMapFor, acceptedRangeToDocRange } from "@scrivr/plugins";
 import { aiSuggestionPluginKey } from "./AiSuggestionPlugin";
 import { buildGroupRanges, type GroupRange } from "./groupRanges";
 import type { AiSuggestion, AiOp } from "./types";
@@ -100,7 +100,7 @@ export function createSuggestionPopover(
       const nodeFound = findNodeById(state.doc, block.nodeId);
       if (!nodeFound) continue;
 
-      const { map } = buildAcceptedTextMap(nodeFound.node, nodeFound.pos, schema);
+      const { map } = acceptedTextMapFor(nodeFound.node, nodeFound.pos, schema);
       const isStale = pluginState.staleBlockIds.has(block.nodeId);
 
       const blockStart = nodeFound.pos;

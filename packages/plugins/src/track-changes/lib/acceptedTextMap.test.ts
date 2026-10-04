@@ -6,6 +6,7 @@ import {
   acceptedOffsetToDocPos,
   acceptedRangeToDocRange,
   docRangeToAcceptedRange,
+  acceptedTextMapFor,
 } from "./acceptedTextMap";
 
 // ── Minimal ProseMirror schema for testing ────────────────────────────────────
@@ -260,5 +261,58 @@ describe("docRangeToAcceptedRange", () => {
     const { map } = buildAcceptedTextMap(para, 0, schema);
 
     expect(docRangeToAcceptedRange(map, 0, 999)).toEqual({ from: 0, to: 3 });
+  });
+});
+
+// ── acceptedTextMapFor (memoised) ────────────────────────────────────────────
+
+describe("acceptedTextMapFor", () => {
+  it("answers exactly what the uncached build answers", () => {
+    const para = buildParagraph([
+      { text: "ab" },
+      { text: "cd", marks: [deleteMark()] },
+      { text: "ef", marks: [insertMark()] },
+    ]);
+
+    expect(acceptedTextMapFor(para, 0, schema)).toEqual(buildAcceptedTextMap(para, 0, schema));
+  });
+
+  it("reuses the result for the same block at the same place", () => {
+    // The overlay asks once per suggested block per page per paint frame, and
+    // the build walks every inline child to do it.
+    const para = buildParagraph([{ text: "hello world" }]);
+
+    expect(acceptedTextMapFor(para, 0, schema)).toBe(acceptedTextMapFor(para, 0, schema));
+  });
+
+  it("rebuilds when the block's content changes", () => {
+    // A node is immutable, so an edit produces a different node — which is the
+    // invalidation signal, with nothing to keep in step.
+    const before = buildParagraph([{ text: "hello" }]);
+    const after = buildParagraph([{ text: "hello!" }]);
+
+    expect(acceptedTextMapFor(after, 0, schema).acceptedText).toBe("hello!");
+    expect(acceptedTextMapFor(before, 0, schema).acceptedText).toBe("hello");
+  });
+
+  it("rebuilds when the same block moves", () => {
+    // The map holds absolute document positions, so an unchanged block that
+    // text was inserted in front of needs a fresh one.
+    const para = buildParagraph([{ text: "hi" }]);
+
+    const atZero = acceptedTextMapFor(para, 0, schema);
+    const atTen = acceptedTextMapFor(para, 10, schema);
+
+    expect(atZero.map[0]!.docPos).toBe(1);
+    expect(atTen.map[0]!.docPos).toBe(11);
+    expect(atTen).not.toBe(atZero);
+  });
+
+  it("does not hand a moved block a stale map on the way back", () => {
+    const para = buildParagraph([{ text: "hi" }]);
+    acceptedTextMapFor(para, 0, schema);
+    acceptedTextMapFor(para, 10, schema);
+
+    expect(acceptedTextMapFor(para, 0, schema).map[0]!.docPos).toBe(1);
   });
 });
