@@ -23,7 +23,6 @@
  */
 
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor } from "@scrivr/core";
 import { applyImportedDocument } from "./applyDocument";
 import { importDocx as runImportDocx } from "./import";
 import type { DocxImportOptions } from "./import";
@@ -47,29 +46,16 @@ interface ImportDocxCallOptions {
   media?: DocxImportOptions["media"];
 }
 
-interface InstanceState {
-  editor: IBaseEditor | null;
-}
-const instanceState = new WeakMap<object, InstanceState>();
-
 export const DocxImport = Extension.create<DocxImportExtensionOptions>({
   name: "docxImport",
 
   defaultOptions: {},
-
-  // Seed the WeakMap early so addCommands has it via closure.
-  addProseMirrorPlugins() {
-    instanceState.set(this.options, { editor: null });
-    return [];
-  },
 
   addCommands() {
     return {
       importDocxFromFile:
         (callOptions?: ImportDocxCallOptions) =>
         (_state, dispatch) => {
-          const inst = instanceState.get(this.options);
-          if (!inst?.editor) return false;
           if (typeof document === "undefined") {
             if (dispatch) {
               console.warn(
@@ -81,7 +67,7 @@ export const DocxImport = Extension.create<DocxImportExtensionOptions>({
             return false;
           }
           if (dispatch) {
-            const editor = inst.editor;
+            const editor = this.editor();
             const opts = resolveOptions(callOptions, this.options);
             openFilePicker()
               .then(async (file) => {
@@ -118,15 +104,6 @@ export const DocxImport = Extension.create<DocxImportExtensionOptions>({
         isActive: () => false,
       },
     ];
-  },
-
-  onEditorReady(editor: IBaseEditor) {
-    const inst = instanceState.get(this.options);
-    if (inst) inst.editor = editor;
-    return () => {
-      const i = instanceState.get(this.options);
-      if (i) i.editor = null;
-    };
   },
 });
 

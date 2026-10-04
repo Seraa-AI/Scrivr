@@ -59,3 +59,24 @@ describe("SemanticExport — exportSemantic command", () => {
     warn.mockRestore();
   });
 });
+
+describe("SemanticExport — one configured extension, two editors", () => {
+  const paragraph = (text: string) => ({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+  });
+
+  it("exports the document of the editor that asked", () => {
+    // The extension object is shared, so per-editor state kept beside its
+    // options made the second editor the only one the command could reach.
+    const a = editorWith(paragraph("Alpha"));
+    editorWith(paragraph("Bravo"));
+
+    const onExport = vi.fn();
+    a.commands["exportSemantic"]?.({ onExport });
+
+    const units: SemanticUnit[] = onExport.mock.calls[0]![0];
+    expect(units.map((u) => u.text).join(" ")).toContain("Alpha");
+    expect(units.map((u) => u.text).join(" ")).not.toContain("Bravo");
+  });
+});

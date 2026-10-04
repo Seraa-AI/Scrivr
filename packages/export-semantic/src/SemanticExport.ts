@@ -23,7 +23,7 @@
  * `toSemanticUnits(editor)` directly instead.
  */
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor, SemanticUnit } from "@scrivr/core";
+import type { SemanticUnit } from "@scrivr/core";
 import { toSemanticUnits } from "./toSemanticUnits";
 
 interface SemanticExportExtensionOptions {
@@ -47,11 +47,6 @@ interface ExportSemanticCallOptions {
   onExport?: (units: SemanticUnit[]) => void;
 }
 
-interface InstanceState {
-  editor: IBaseEditor | null;
-}
-const instanceState = new WeakMap<object, InstanceState>();
-
 export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
   name: "semanticExport",
 
@@ -59,20 +54,11 @@ export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
     filename: "semantic-units",
   },
 
-  // Seed the WeakMap early so addCommands has it via closure.
-  addProseMirrorPlugins() {
-    instanceState.set(this.options, { editor: null });
-    return [];
-  },
-
   addCommands() {
     return {
       exportSemantic:
         (callOptions?: ExportSemanticCallOptions) =>
         (_state, dispatch) => {
-          const inst = instanceState.get(this.options);
-          if (!inst?.editor) return false;
-
           const onExport = callOptions?.onExport;
           if (!onExport && typeof document === "undefined") {
             // Download path is browser-only. Server callers should pass
@@ -90,7 +76,7 @@ export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
             const shortBlockMaxChars =
               callOptions?.shortBlockMaxChars ?? this.options.shortBlockMaxChars;
             const units = toSemanticUnits(
-              inst.editor,
+              this.editor(),
               shortBlockMaxChars !== undefined ? { shortBlockMaxChars } : {},
             );
             if (onExport) {
@@ -116,18 +102,6 @@ export const SemanticExport = Extension.create<SemanticExportExtensionOptions>({
         isActive: () => false,
       },
     ];
-  },
-
-  // Layout-free, like DOCX — onEditorReady fires in both browser Editor and
-  // ServerEditor, so the command is available headlessly (the download path
-  // itself still needs a DOM, but `onExport` does not).
-  onEditorReady(editor: IBaseEditor) {
-    const inst = instanceState.get(this.options);
-    if (inst) inst.editor = editor;
-    return () => {
-      const i = instanceState.get(this.options);
-      if (i) i.editor = null;
-    };
   },
 });
 
