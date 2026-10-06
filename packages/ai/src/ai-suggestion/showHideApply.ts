@@ -36,11 +36,9 @@ import { applyTrackedDelete } from "@scrivr/plugins";
 import { acceptedRangeToDocRange } from "@scrivr/plugins";
 
 /**
- * The blocks still in the document, furthest-last so a write cannot move the
- * position of one not yet written.
- *
- * Shared because all three op walkers need it identically, and because getting
- * the order wrong is invisible until two blocks are settled in one pass.
+ * The blocks still in the document, furthest-first so a write cannot move the
+ * position of one not yet written. Getting the order wrong is invisible until
+ * two blocks settle in one pass.
  */
 function resolveBlocksInReverse(
   state: EditorState,
@@ -302,19 +300,16 @@ function applyKeepFormatting(
 
   const state = editor.getState();
   const schema = state.schema;
-  const resolved = blocks.flatMap((block) => {
-    const found = findNodeById(state.doc, block.nodeId);
-    return found ? [{ block, found }] : [];
-  });
-  resolved.sort((a, b) => b.found.pos - a.found.pos);
+  // Mark-only writes shift no positions, so the order is immaterial here — it
+  // reads the shared resolve so a future change to either rule reaches this
+  // walker too.
+  const resolved = resolveBlocksInReverse(state, blocks);
 
   const tr = state.tr;
   let touched = false;
   for (const { block, found } of resolved) {
     const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
-    let acceptedOffset = 0;
-    for (const op of block.ops) {
-      if (op.type === "insert") continue;
+    for (const { op, offset: acceptedOffset } of withAcceptedOffsets(block.ops)) {
       if (op.type === "keep" && op.marks && inScope(scope, op.groupId)) {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
         if (range) {
@@ -322,7 +317,6 @@ function applyKeepFormatting(
           touched = true;
         }
       }
-      acceptedOffset += op.text.length;
     }
   }
 
@@ -363,6 +357,9 @@ function _applyDirect(
   for (const { block, found } of resolved) {
     const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
 
+    // How far this walker's own writes have shifted the doc. Not shareable
+    // with the other walkers: a tracked delete marks text instead of removing
+    // it, so it shifts nothing.
     let insertedChars = 0;
 
     for (const { op, offset: acceptedOffset } of withAcceptedOffsets(block.ops)) {
@@ -376,14 +373,13 @@ function _applyDirect(
           tr.delete(range.from + insertedChars, range.to + insertedChars);
           insertedChars -= tokenLen;
         }
-        } else if (op.type === "insert") {
+      } else if (op.type === "insert") {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         if (range) {
           const content = insertedContent(op, schema);
           tr.insert(range.from + insertedChars, content);
           insertedChars += content.size;
         }
-        // acceptedOffset does NOT advance for inserts
       }
     }
   }
@@ -410,6 +406,9 @@ function _applyTracked(
   for (const { block, found } of resolved) {
     const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
 
+    // How far this walker's own writes have shifted the doc. Not shareable
+    // with the other walkers: a tracked delete marks text instead of removing
+    // it, so it shifts nothing.
     let insertedChars = 0;
 
     for (const { op, offset: acceptedOffset } of withAcceptedOffsets(block.ops)) {
@@ -426,7 +425,7 @@ function _applyTracked(
           if (op.groupId) dataTracked["groupId"] = op.groupId;
           applyTrackedDelete(tr, range.from + insertedChars, range.to + insertedChars, dataTracked, schema);
         }
-        } else if (op.type === "insert") {
+      } else if (op.type === "insert") {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         if (range) {
           const insertMarkType = schema.marks.trackedInsert;
@@ -441,7 +440,6 @@ function _applyTracked(
             insertedChars += content.size;
           }
         }
-        // acceptedOffset does NOT advance for inserts
       }
     }
   }
@@ -476,6 +474,7 @@ export function rejectAiSuggestion(
   }
 
   const schema   = state.schema;
+  // No groupId means reject every group, which is what an unscoped scope says.
   const rejectScope = groupId ? new Set([groupId]) : undefined;
   const resolved = resolveBlocksInReverse(state, affectedBlocks);
 
@@ -484,13 +483,14 @@ export function rejectAiSuggestion(
   for (const { block, found } of resolved) {
     const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
 
+    // How far this walker's own writes have shifted the doc. Not shareable
+    // with the other walkers: a tracked delete marks text instead of removing
+    // it, so it shifts nothing.
     let insertedChars = 0;
 
     for (const { op, offset: acceptedOffset } of withAcceptedOffsets(block.ops)) {
       const tokenLen = op.text.length;
       if (op.type === "keep") continue;
-      // The same scope predicate the apply walkers use — rejecting one group
-      // and applying one group ask the same question of an op.
       if (!inScope(rejectScope, op.groupId)) continue;
 
       if (op.type === "delete") {
@@ -503,7 +503,7 @@ export function rejectAiSuggestion(
             tr.removeMark(range.from + insertedChars, range.to + insertedChars, deleteMarkType);
           }
         }
-        } else if (op.type === "insert") {
+      } else if (op.type === "insert") {
         // Rejecting an insert = remove the trackedInsert text written by
         // applyAiSuggestion(tracked). Guard: only delete if a trackedInsert
         // mark is actually present at this position — if the suggestion was
@@ -522,7 +522,6 @@ export function rejectAiSuggestion(
             insertedChars -= insertLen;
           }
         }
-        // acceptedOffset does NOT advance for inserts
       }
     }
   }
