@@ -284,13 +284,57 @@ The schemas are part of the public API.
   `CHANGE_OPERATION`. The whole batch goes in one transaction, so it is one undo
   step and one review unit.
 
-  What would overturn it: a reviewer has to be able to accept a move as one
+  What overturns it: a reviewer has to be able to accept a move as one
   decision. Delete+insert gives them two tracked changes that corrupt the
-  document if only one is accepted, and nothing in the current representation
-  says they belong together. Phase 3 is therefore the phase that either needs
-  `CHANGE_OPERATION.move_node` (Phase 5 pulled forward) or a grouping the
-  accept path honours. Phase 2's ops do not have this problem: an inserted block
-  and a deleted block each stand alone.
+  document if only one is accepted, and nothing in that representation says they
+  belong together. Phase 2's ops do not have this problem — an inserted block and
+  a deleted block each stand alone — so D6 holds for Phase 2 and stops at
+  Phase 3. See **D7**.
+
+- **D7 — a move produces `CHANGE_OPERATION.move`, not a delete+insert pair.**
+  The primitive this RFC deferred to Phase 5 as `CHANGE_OPERATION.move_node`
+  already exists and is wired end to end; Phase 3 produces it rather than
+  inventing anything:
+
+  - `CHANGE_OPERATION.move` and `NodeMoveAttrs`
+    (`packages/plugins/src/track-changes/types.ts:33,96`), with `moveNodeId`
+    (`:60`) pairing the moved copy to the delete it leaves behind.
+  - Produced in `trackReplaceStep` via `setFragmentAsMoveChange`
+    (`step-trackers/trackReplaceStep.ts:110-119`), from the ids in
+    `trContext.stepsByGroupIDMap`.
+  - Reviewed as one unit: `ChangeSet.shouldDeleteChange` deletes a *rejected*
+    move's copy the way it does a rejected insert (`ChangeSet.ts:243-248`),
+    and `dropStructuralChangeShadow` removes the paired delete
+    (`lib/structuralChange.ts:22-25`). `moveNodeId` is already the repo's idiom
+    for "these changes are one act" — `joinRelatedStructuralChanges` groups by
+    it, though only for `CHANGE_OPERATION.structure`
+    (`ChangeSet.ts:221-233`), so Phase 3 should check whether a move needs the
+    same treatment in `ChangeSet` or whether the shadow-drop is sufficient.
+  - Painted as an insert (`TrackChanges.ts:332`), which is what a reader expects
+    of text that arrived here.
+
+  **The gap is the producer, not the representation.** Today a move id is
+  assigned only for an indentation action — `getIndentationOperationSteps` is
+  the sole writer of `stepsByGroupIDMap`
+  (`engine/transactionProcessing.ts:52-64`), gated on `isIndentationAction`. So
+  Phase 3's work is to let a caller declare "this transaction is a move" and
+  have the engine assign one id across its `ReplaceStep`s — generalising that
+  function rather than adding a parallel one — after which `moveBlock` and
+  `moveListItem` apply as delete-at-old plus insert-at-new in a single
+  transaction and the engine yields one paired move change.
+
+  **Rejected alternative: grouping via `dataTracked.groupId`.** It exists
+  (`types.ts:73`) and the popover already collects a group's ids to accept them
+  together (`createChangePopover.ts:212-226,370`), with `setChangeStatuses`
+  taking an id array. But `groupId` only makes a set of changes *reviewable*
+  together; it does not make rejecting one restore a moved node, because the
+  delete-side shadow still has to be dropped. `moveNodeId` carries that
+  semantics already. Grouping is the UI affordance; the operation is the model.
+
+  Consequence for Phase 5: it is narrower than written. `move` is done,
+  `node_split`, `wrap_with_node` and `structure` exist; only the
+  `insert_node` / `delete_node` pair is genuinely absent, and Phase 2's ops do
+  not need it.
 
 ## Phased implementation
 
@@ -308,15 +352,23 @@ suggestions. Introduce `applySemanticEdits(editor, edits, { asSuggestion })`
 routing rich vs structural.
 
 ### Phase 3 — move ops
-`moveBlock`, `moveListItem` — tracked delete at old + insert at new.
+`moveBlock`, `moveListItem`. Per **D7**: one transaction that declares itself a
+move, so the engine produces a single `CHANGE_OPERATION.move` change with its
+`moveNodeId`-paired delete, rather than two changes a reviewer can half-accept.
+The engine-side work is generalising move-id assignment beyond the indentation
+action.
 
 ### Phase 4 — table columns
 `insertTableColumn`, `deleteTableColumn`. Reject complex merged-cell tables rather
 than corrupt geometry.
 
 ### Phase 5 — first-class structural track-change primitives
-`CHANGE_OPERATION.insert_node` / `delete_node` / `move_node`, replacing the
-delete+insert fallback.
+Narrower than first written (see **D7**): `move`, `node_split`,
+`wrap_with_node` and `structure` already exist in `CHANGE_OPERATION`, and
+Phase 3 consumes `move`. What remains is `insert_node` / `delete_node` for the
+block-level insert and delete ops that Phase 2 ships as ordinary tracked
+delete+insert — and those stand alone under D6, so this phase is an improvement
+rather than a correctness fix.
 
 ## Files to create / modify (Phase 1)
 
