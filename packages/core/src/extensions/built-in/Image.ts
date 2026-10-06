@@ -127,13 +127,6 @@ function getCachedImage(src: string): HTMLImageElement | null {
   return null;
 }
 
-// ── Per-instance state ────────────────────────────────────────────────────────
-
-interface InstanceState {
-  cleanup: () => void;
-}
-const instanceState = new WeakMap<object, InstanceState>();
-
 // ── Inline image strategy ─────────────────────────────────────────────────────
 
 function createInlineImageStrategy(): InlineStrategy {
@@ -712,9 +705,9 @@ export const Image = Extension.create({
     // image swaps in. Headless editors don't run this hook at all.
     const cb = () => editor.redraw();
     redrawCallbacks.add(cb);
-    const state: InstanceState = { cleanup: () => redrawCallbacks.delete(cb) };
-    instanceState.set(this.options, state);
-    return () => state.cleanup();
+    return () => {
+      redrawCallbacks.delete(cb);
+    };
   },
 
   addToolbarItems() {

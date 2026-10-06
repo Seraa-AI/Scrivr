@@ -243,3 +243,35 @@ export function docRangeToAcceptedRange(
   }
   return { from: start, to: end + 1 };
 }
+
+/**
+ * `buildAcceptedTextMap`, memoised on the block node.
+ *
+ * The build walks every inline child of the block, and the AI suggestion
+ * overlay asks for one per suggested block, per page, on every paint frame —
+ * so with `renderMode: "all"` on a long document it is a full inline walk per
+ * block at the frame rate.
+ *
+ * A ProseMirror node is immutable, so the node reference is the invalidation
+ * signal: an edit produces a different node and misses the cache on its own,
+ * with no staleness flag to keep in step. The position is checked too, because
+ * the map holds absolute document positions — an untouched block that text was
+ * inserted in front of needs a fresh one.
+ */
+const acceptedTextMapCache = new WeakMap<
+  PMNode,
+  { nodeStartPos: number; result: AcceptedTextMapResult }
+>();
+
+export function acceptedTextMapFor(
+  node: PMNode,
+  nodeStartPos: number,
+  schema: Schema,
+): AcceptedTextMapResult {
+  const hit = acceptedTextMapCache.get(node);
+  if (hit && hit.nodeStartPos === nodeStartPos) return hit.result;
+
+  const result = buildAcceptedTextMap(node, nodeStartPos, schema);
+  acceptedTextMapCache.set(node, { nodeStartPos, result });
+  return result;
+}
