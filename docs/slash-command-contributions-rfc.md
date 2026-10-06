@@ -256,7 +256,16 @@ extensions had each invented a `WeakMap` keyed on their options object — which
 identifies the configured extension, not the editor, so one instance shared by
 two editors inserted into the wrong document. `ExtensionContext` now carries an
 `editor()` thunk; each editor resolves its own extensions, so the identity is
-right by construction and the map is gone.
+right by construction.
+
+The map outlived this PR, though — the claim above was true of the three
+extensions reviewed here and three more held the same pattern. #219 converted
+the last of them (`Collaboration`'s Y binding into its editor-keyed registry;
+`PdfExport`, `DocxExport`, `DocxImport` and `SemanticExport` onto `this.editor()`
+outright; `Image`'s copy had no reader and was deleted), with tests for the
+consequences they carried: export in one pane saving the other pane's document,
+and `importDocxFromFile` writing into it. No extension in the repo keys state on
+its options object now.
 
 *A resolver that misbehaves.* Decision 5 covers a resolver that rejects. One
 that fulfils with a non-array threw inside `resolveSlashCommands`, losing every

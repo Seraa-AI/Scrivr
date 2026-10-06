@@ -1,6 +1,9 @@
 # RFC: Rich Semantic Editing & the `@scrivr/ai` package
 
-Status: draft (2026-07-07)
+Status: Phases 1-2 shipped (2026-10-06); Phases 3-5 proposed. Drafted
+2026-07-07. See [What shipped](#what-shipped) — where the code and the design
+below disagree, that section says so rather than this document being quietly
+rewritten to match.
 
 ## Problem
 
@@ -274,6 +277,20 @@ The schemas are part of the public API.
   structural create ops.
 - **D5 — `getRichBlocks` returns units-with-nested-`parts`** (agent sees the
   grouping) rather than a flat leaf list.
+- **D6 — structural suggestions are tracked delete+insert, not first-class node
+  ops**, the decision this RFC deferred to Phase 2. The ops apply
+  as an ordinary transaction and the track-changes engine produces the tracked
+  representation from it, which is why `applyStructuralEdits` names no
+  `CHANGE_OPERATION`. The whole batch goes in one transaction, so it is one undo
+  step and one review unit.
+
+  What would overturn it: a reviewer has to be able to accept a move as one
+  decision. Delete+insert gives them two tracked changes that corrupt the
+  document if only one is accepted, and nothing in the current representation
+  says they belong together. Phase 3 is therefore the phase that either needs
+  `CHANGE_OPERATION.move_node` (Phase 5 pulled forward) or a grouping the
+  accept path honours. Phase 2's ops do not have this problem: an inserted block
+  and a deleted block each stand alone.
 
 ## Phased implementation
 
@@ -341,7 +358,6 @@ delete+insert fallback.
 
 ## Open questions
 
-- Structural suggestions as delete+insert vs first-class ops — decide at Phase 2.
 - A constrained tool schema *derived from* the zod schemas so the agent can only
   emit valid edits (nice-to-have; the validator is the safety net regardless).
 - Whether custom extensions contributing new leaf textblock types register their
@@ -356,3 +372,44 @@ delete+insert fallback.
 - Builds on `@scrivr/plugins/track-changes` (tracked-suggestion apply).
 - Source design: the approved Rich Semantic Merge office-hours doc (Approach
   B+C), refined here with the leaf-edit model and the package split.
+
+## What shipped
+
+Updated as each phase lands. Where this disagrees with the design above, this
+section is what is true.
+
+| Phase | Landed | What it changed |
+|---|---|---|
+| **1** | #133, #134, #136 | `@scrivr/ai` extracted from `@scrivr/plugins` as a hard move (D2); leaf-based `RichSemanticEdit` with `getRichBlocks` / `applyRichEdit`; zod edit protocol with `parseSemanticEdits`. #133 first grouped adjacent formatting-mark tracked changes into one, which the leaf merge depends on |
+| **2** | #209, #210, #218 | Six structural ops — `insertBlock`, `deleteBlock`, `insertListItem`, `deleteListItem`, `insertTableRow`, `deleteTableRow` — in `StructuralSemanticEditSchema`, applied by `applyStructuralEdits`; `applySemanticEdits` routes rich vs structural; formatting proposals became visible, addressable and acceptable; a finding may propose no edit at all (block markers) |
+| **3-5** | — | Not built. Move ops, table columns, and first-class structural track-change primitives |
+
+### Where the code differs from the design above
+
+- **`applySemanticEdits` has no `asSuggestion` option.** The phase list specified
+  `applySemanticEdits(editor, edits, { asSuggestion })`; what shipped is
+  `aiToolkit.applySemanticEdits(edits, { authorID })`. Tracked-ness is the
+  track-changes status — the user's mode — not a per-call flag, because AI is not
+  a fourth mode (see [ai-authoring.md](./ai-authoring.md)).
+- **`authorID` names the rich half only.** Structural changes are attributed to
+  the track-changes author, because the engine assigns attribution as it tracks
+  the transaction and takes no per-transaction override.
+- **`deleteTableRow` takes `nodeId`, not `anchorNodeId`.** It names the row it
+  deletes, which is not an anchor. The design listed `anchorNodeId` for it;
+  `deleteBlock` and `deleteListItem` always read `nodeId`.
+- **Phases 3-4 ops are refused, not absent.** `StructuralSemanticEditSchema` has
+  no `moveBlock`, `moveListItem`, `insertTableColumn` or `deleteTableColumn`
+  member, and `packages/ai/src/schema/structural.test.ts` asserts each fails to
+  parse. An agent emitting one gets a validation error rather than a success that
+  changes nothing — which is the only safe "not yet" for a protocol a model
+  writes against.
+
+### Not shipped, and not quietly dropped
+
+- Phase 3 move ops, Phase 4 table columns, Phase 5
+  `CHANGE_OPERATION.insert_node` / `delete_node` / `move_node`.
+- The constrained tool schema derived from the zod schemas, and registration of
+  editability by extensions contributing new leaf textblock types — both still
+  open questions above.
+- `applySemanticEdits` returns `rejected` for ops it refuses; the reviewer-facing
+  grouping that D6 says Phase 3 needs does not exist yet.
