@@ -87,13 +87,13 @@ export class AiTestEditor extends ServerEditor {
    * uses the suggestion lane without review gets, where a tracked apply has no
    * tracked mark to write with.
    */
-  constructor(initialDoc: PmNode, authorID = "user1", options: { trackChanges?: boolean } = {}) {
+  constructor(initialDoc: PmNode, authorID = "user1", options: { trackChanges?: boolean; canAcceptReject?: boolean } = {}) {
     super({
       extensions: [
         StarterKit,
         ...(options.trackChanges === false
           ? []
-          : [TrackChanges.configure({ userID: authorID, initialStatus: TrackChangesStatus.enabled })]),
+          : [TrackChanges.configure({ userID: authorID, initialStatus: TrackChangesStatus.enabled, canAcceptReject: options.canAcceptReject ?? false })]),
         AiSuggestionTestExtension,
       ],
       content: initialDoc.toJSON() as Record<string, unknown>,
