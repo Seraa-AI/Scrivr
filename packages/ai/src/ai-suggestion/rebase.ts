@@ -2,9 +2,9 @@
  * Settling one group rebases what is left onto the document it left behind.
  *
  * A suggestion's ops are offsets into a snapshot of the block's text. Accepting
- * or rejecting one group changes that text, so every remaining op is describing
- * a document that no longer exists — the next accept lands on the wrong
- * characters, or past the end and silently does nothing.
+ * a group can change that text; rejecting one changes only the remaining
+ * proposal. Rebuild from the settlement outcome so subsequent accepts use
+ * current coordinates and never re-offer a rejected group.
  *
  * Marking the settled group and walking around it does not fix that: the
  * offsets are still the old ones. The remaining proposal has to be re-expressed

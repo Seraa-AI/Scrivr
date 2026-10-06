@@ -6,18 +6,18 @@
  * The "apply" path walks each block's ops and commits them to the document
  * as tracked changes (mode: "tracked") or direct mutations (mode: "direct").
  *
- * The "reject" path removes all pending AI insert marks and restores all
- * AI-deleted text back to plain text in the affected blocks.
+ * The "reject" path discards pending proposal ops without editing the document.
+ * Once applied in tracked mode, changes belong to the track-changes review API.
  */
 
 import type { IBaseEditor } from "@scrivr/core";
 import { resolveInlineMarks, describeInlineMark, sameMark, spansToFragment } from "@scrivr/core";
 import type { InlineMark } from "@scrivr/core";
 import { Fragment } from "@scrivr/core/pm";
-import type { Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
+import type { EditorState, Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 import { findNodeById } from "../ai-toolkit/UniqueId";
 import { rebaseAfterSettle } from "./rebase";
-import { groupsWithin, type AcceptedSpan } from "./groupSpans";
+import { groupsWithin, withAcceptedOffsets, type AcceptedSpan } from "./groupSpans";
 import type { AiOp, AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
 import {
   aiSuggestionPluginKey,
@@ -34,6 +34,23 @@ import {
 } from "@scrivr/plugins";
 import { applyTrackedDelete } from "@scrivr/plugins";
 import { acceptedRangeToDocRange } from "@scrivr/plugins";
+
+/**
+ * The blocks still in the document, furthest-first so a write cannot move the
+ * position of one not yet written. Getting the order wrong is invisible until
+ * two blocks settle in one pass.
+ */
+function resolveBlocksInReverse(
+  state: EditorState,
+  blocks: AiSuggestionBlock[],
+): Array<{ block: AiSuggestionBlock; found: { node: PmNode; pos: number } }> {
+  const resolved = blocks.flatMap((block) => {
+    const found = findNodeById(state.doc, block.nodeId);
+    return found ? [{ block, found }] : [];
+  });
+  resolved.sort((a, b) => b.found.pos - a.found.pos);
+  return resolved;
+}
 
 /**
  * Which groups an apply covers. `undefined` means every one in the blocks it
@@ -283,19 +300,16 @@ function applyKeepFormatting(
 
   const state = editor.getState();
   const schema = state.schema;
-  const resolved = blocks.flatMap((block) => {
-    const found = findNodeById(state.doc, block.nodeId);
-    return found ? [{ block, found }] : [];
-  });
-  resolved.sort((a, b) => b.found.pos - a.found.pos);
+  // Mark-only writes shift no positions, so the order is immaterial here — it
+  // reads the shared resolve so a future change to either rule reaches this
+  // walker too.
+  const resolved = resolveBlocksInReverse(state, blocks);
 
   const tr = state.tr;
   let touched = false;
   for (const { block, found } of resolved) {
     const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
-    let acceptedOffset = 0;
-    for (const op of block.ops) {
-      if (op.type === "insert") continue;
+    for (const { op, offset: acceptedOffset } of withAcceptedOffsets(block.ops)) {
       if (op.type === "keep" && op.marks && inScope(scope, op.groupId)) {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
         if (range) {
@@ -303,7 +317,6 @@ function applyKeepFormatting(
           touched = true;
         }
       }
-      acceptedOffset += op.text.length;
     }
   }
 
@@ -337,33 +350,22 @@ function _applyDirect(
   const state  = editor.getState();
   const schema = state.schema;
 
-  // Process blocks in reverse document order to keep positions stable
-  const resolved = blocks.flatMap((b) => {
-    const found = findNodeById(state.doc, b.nodeId);
-    return found ? [{ block: b, found }] : [];
-  });
-  resolved.sort((a, b) => b.found.pos - a.found.pos);
+  const resolved = resolveBlocksInReverse(state, blocks);
 
   const tr = state.tr;
 
   for (const { block, found } of resolved) {
     const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
 
-    let acceptedOffset = 0;
-    let insertedChars  = 0;
+    // How far this walker's own writes have shifted the doc. Not shareable
+    // with the other walkers: a tracked delete marks text instead of removing
+    // it, so it shifts nothing.
+    let insertedChars = 0;
 
-    for (const op of block.ops) {
+    for (const { op, offset: acceptedOffset } of withAcceptedOffsets(block.ops)) {
       const tokenLen = op.text.length;
-
-      if (op.type === "keep") {
-        acceptedOffset += tokenLen;
-        continue;
-      }
-
-      if (!inScope(scope, op.groupId)) {
-        if (op.type === "delete") acceptedOffset += tokenLen;
-        continue;
-      }
+      if (op.type === "keep") continue;
+      if (!inScope(scope, op.groupId)) continue;
 
       if (op.type === "delete") {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
@@ -371,7 +373,6 @@ function _applyDirect(
           tr.delete(range.from + insertedChars, range.to + insertedChars);
           insertedChars -= tokenLen;
         }
-        acceptedOffset += tokenLen;
       } else if (op.type === "insert") {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         if (range) {
@@ -379,7 +380,6 @@ function _applyDirect(
           tr.insert(range.from + insertedChars, content);
           insertedChars += content.size;
         }
-        // acceptedOffset does NOT advance for inserts
       }
     }
   }
@@ -399,32 +399,22 @@ function _applyTracked(
   const authorID = "ai:assistant";
   const now      = Date.now();
 
-  const resolved = blocks.flatMap((b) => {
-    const found = findNodeById(state.doc, b.nodeId);
-    return found ? [{ block: b, found }] : [];
-  });
-  resolved.sort((a, b) => b.found.pos - a.found.pos);
+  const resolved = resolveBlocksInReverse(state, blocks);
 
   const tr = state.tr;
 
   for (const { block, found } of resolved) {
     const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
 
-    let acceptedOffset = 0;
-    let insertedChars  = 0;
+    // How far this walker's own writes have shifted the doc. Not shareable
+    // with the other walkers: a tracked delete marks text instead of removing
+    // it, so it shifts nothing.
+    let insertedChars = 0;
 
-    for (const op of block.ops) {
+    for (const { op, offset: acceptedOffset } of withAcceptedOffsets(block.ops)) {
       const tokenLen = op.text.length;
-
-      if (op.type === "keep") {
-        acceptedOffset += tokenLen;
-        continue;
-      }
-
-      if (!inScope(scope, op.groupId)) {
-        if (op.type === "delete") acceptedOffset += tokenLen;
-        continue;
-      }
+      if (op.type === "keep") continue;
+      if (!inScope(scope, op.groupId)) continue;
 
       const baseAttrs = createNewPendingAttrs(now, authorID);
 
@@ -435,7 +425,6 @@ function _applyTracked(
           if (op.groupId) dataTracked["groupId"] = op.groupId;
           applyTrackedDelete(tr, range.from + insertedChars, range.to + insertedChars, dataTracked, schema);
         }
-        acceptedOffset += tokenLen;
       } else if (op.type === "insert") {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         if (range) {
@@ -451,7 +440,6 @@ function _applyTracked(
             insertedChars += content.size;
           }
         }
-        // acceptedOffset does NOT advance for inserts
       }
     }
   }
@@ -464,11 +452,12 @@ function _applyTracked(
 /**
  * Reject the current AI suggestion.
  *
- * Removes all trackedInsert marks applied by the suggestion and removes
- * trackedDelete marks (restoring the original text).
+ * Discards pending ops without changing document content or review marks.
+ * Applied changes are no longer proposal ops; rejecting them belongs to the
+ * track-changes API (`setChangeStatuses`), which addresses change IDs.
  *
- * If `blockId` is provided, only that block's ops are reversed.
- * If `groupId` is provided, only ops matching that groupId are reversed.
+ * If `blockId` is provided, only that block's pending ops are discarded.
+ * If `groupId` is provided, only that group within the scope is discarded.
  */
 export function rejectAiSuggestion(
   editor: IBaseEditor,
@@ -485,74 +474,10 @@ export function rejectAiSuggestion(
     affectedBlocks = affectedBlocks.filter((b) => b.nodeId === blockId);
   }
 
-  const schema   = state.schema;
-  const resolved = affectedBlocks.flatMap((b) => {
-    const found = findNodeById(state.doc, b.nodeId);
-    return found ? [{ block: b, found }] : [];
-  });
-  resolved.sort((a, b) => b.found.pos - a.found.pos);
-
-  const tr = state.tr;
-
-  for (const { block, found } of resolved) {
-    const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
-
-    let acceptedOffset = 0;
-    let insertedChars  = 0;
-
-    for (const op of block.ops) {
-      const tokenLen = op.text.length;
-
-      if (op.type === "keep") {
-        acceptedOffset += tokenLen;
-        continue;
-      }
-
-      if (groupId && op.groupId !== groupId) {
-        if (op.type === "delete") acceptedOffset += tokenLen;
-        continue;
-      }
-
-      if (op.type === "delete") {
-        // Rejecting a delete = restore the text. The trackedDelete mark
-        // needs to be removed so the text reappears as normal.
-        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
-        if (range) {
-          const deleteMarkType = schema.marks.trackedDelete;
-          if (deleteMarkType) {
-            tr.removeMark(range.from + insertedChars, range.to + insertedChars, deleteMarkType);
-          }
-        }
-        acceptedOffset += tokenLen;
-      } else if (op.type === "insert") {
-        // Rejecting an insert = remove the trackedInsert text written by
-        // applyAiSuggestion(tracked). Guard: only delete if a trackedInsert
-        // mark is actually present at this position — if the suggestion was
-        // never applied (fresh rejection), there is no inserted text to remove
-        // and deleting would mangle the original document content.
-        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
-        if (range) {
-          const fromPos = range.from + insertedChars;
-          const insertMarkType = schema.marks.trackedInsert;
-          const nodeAfter = insertMarkType
-            ? state.doc.resolve(fromPos).nodeAfter
-            : null;
-          if (nodeAfter && nodeAfter.marks.some((m) => m.type === insertMarkType)) {
-            const insertLen = Math.min(op.text.length, nodeAfter.nodeSize);
-            tr.delete(fromPos, fromPos + insertLen);
-            insertedChars -= insertLen;
-          }
-        }
-        // acceptedOffset does NOT advance for inserts
-      }
-    }
-  }
-
-  skipTracking(tr);
-  setAction(tr, TrackChangesAction.refreshChanges, true);
-  editor.applyTransaction(tr);
-
   if (groupId) {
+    // Both selectors constrain the pending proposal. A group outside the
+    // requested block must not settle a different block through the rebase.
+    if (!affectedBlocks.some((block) => block.ops.some((op) => op.groupId === groupId))) return;
     settleGroups(editor, ps.suggestion, new Set([groupId]), false);
     return;
   }

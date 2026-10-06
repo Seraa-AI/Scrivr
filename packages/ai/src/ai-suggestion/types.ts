@@ -53,7 +53,7 @@ export interface AiOp {
 export interface AiSuggestionBlock {
   /** Stable nodeId of the ProseMirror block node */
   nodeId: string;
-  /** The accepted text at the time the suggestion was applied */
+  /** The accepted-text snapshot against which the pending ops were computed */
   acceptedText: string;
   /** The ordered list of diff operations for this block */
   ops: AiOp[];
@@ -117,10 +117,10 @@ export interface ApplyAiSuggestionOptions {
 }
 
 /**
- * Options for rejecting an AI suggestion.
+ * Options for discarding pending AI ops without modifying the document.
  */
 export interface RejectAiSuggestionOptions {
   groupId?: string;
-  /** If provided, reject all changes in this block only. */
+  /** If provided, restrict rejection to this block, including when groupId is set. */
   blockId?: string;
 }

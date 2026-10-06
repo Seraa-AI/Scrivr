@@ -79,6 +79,8 @@ export class AiSuggestionsAPI {
   /**
    * Reject (discard) the current suggestion or a specific group/block.
    * No document changes — the overlay is simply hidden or trimmed.
+   * Changes already applied in tracked mode are reviewed separately through
+   * `editor.commands.setChangeStatuses`, using their tracked-change IDs.
    */
   reject(options?: RejectAiSuggestionOptions): void {
     rejectAiSuggestion(this.editor, options);
