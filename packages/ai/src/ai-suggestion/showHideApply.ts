@@ -15,7 +15,7 @@ import { resolveInlineMarks, describeInlineMark, sameMark, spansToFragment } fro
 import type { InlineMark } from "@scrivr/core";
 import { Fragment } from "@scrivr/core/pm";
 import type { EditorState, Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
-import { findNodeById } from "../ai-toolkit/UniqueId";
+import { findLiveNodeById } from "@scrivr/plugins";
 import { rebaseAfterSettle } from "./rebase";
 import { groupsWithin, withAcceptedOffsets, type AcceptedSpan } from "./groupSpans";
 import type { AiOp, AiSuggestion, AiSuggestionBlock, ApplyAiSuggestionOptions, RejectAiSuggestionOptions } from "./types";
@@ -45,7 +45,7 @@ function resolveBlocksInReverse(
   blocks: AiSuggestionBlock[],
 ): Array<{ block: AiSuggestionBlock; found: { node: PmNode; pos: number } }> {
   const resolved = blocks.flatMap((block) => {
-    const found = findNodeById(state.doc, block.nodeId);
+    const found = findLiveNodeById(state.doc, block.nodeId);
     return found ? [{ block, found }] : [];
   });
   resolved.sort((a, b) => b.found.pos - a.found.pos);
@@ -182,7 +182,7 @@ function applyRange(
   const block = suggestion?.blocks.find((b) => b.nodeId === blockId);
   if (!suggestion || !block) return false;
 
-  const found = findNodeById(state.doc, blockId);
+  const found = findLiveNodeById(state.doc, blockId);
   if (!found) return false;
   const { acceptedText: liveText } = buildAcceptedTextMap(found.node, found.pos, state.schema);
   // Two questions, both required: does the block still match its proposal, and

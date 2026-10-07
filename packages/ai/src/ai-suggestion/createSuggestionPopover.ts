@@ -13,7 +13,7 @@
 import type { IEditor } from "@scrivr/core";
 import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContainer } from "@scrivr/core";
 
-import { findNodeById } from "../ai-toolkit/UniqueId";
+import { findLiveNodeById } from "@scrivr/plugins";
 import { acceptedTextMapFor, acceptedRangeToDocRange } from "@scrivr/plugins";
 import { aiSuggestionPluginKey } from "./AiSuggestionPlugin";
 import { buildGroupRanges, type GroupRange } from "./groupRanges";
@@ -97,7 +97,7 @@ export function createSuggestionPopover(
     let found: (GroupRange & { groupId: string; isStale: boolean }) | null = null;
 
     outer: for (const block of suggestion.blocks) {
-      const nodeFound = findNodeById(state.doc, block.nodeId);
+      const nodeFound = findLiveNodeById(state.doc, block.nodeId);
       if (!nodeFound) continue;
 
       const { map } = acceptedTextMapFor(nodeFound.node, nodeFound.pos, schema);

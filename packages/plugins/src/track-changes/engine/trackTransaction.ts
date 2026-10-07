@@ -54,7 +54,7 @@ export function trackTransaction(
 
   const emptyAttrs = createNewPendingAttrs(tr.time, authorID);
 
-  const deletedNodeMapping = new Mapping();
+  let deletedNodeMapping = new Mapping();
   trContext = { ...trContext, deletedNodeMapping } as TrTrackingContext & {
     deletedNodeMapping: Mapping;
   };
@@ -68,6 +68,8 @@ export function trackTransaction(
     if (!iterationIsValid(iterations, tr, newTr, step)) continue;
 
     if (step instanceof ReplaceStep) {
+      const previousMapping = deletedNodeMapping.slice();
+      const replayStart = newTr.steps.length;
       const { slice } = step;
       if (
         slice?.content?.content?.length === 1 &&
@@ -119,6 +121,24 @@ export function trackTransaction(
       } else if (trContext.selectionPosFromInsertion === undefined) {
         trContext.selectionPosFromInsertion = userSelectionPos;
       }
+
+      // The next reverse iteration reads an earlier document. Bridge from
+      // before this source step through its forward map, the prior bridge,
+      // and every replay step (undo + tracked replacement). Counting only
+      // removed pending inserts loses retained insertions before that position.
+      const bridge = new Mapping([step.getMap()]);
+      bridge.appendMapping(previousMapping);
+      // trackReplaceStep first inverts this source step. Mirror the pair so
+      // positions inside its removed content survive the round trip.
+      if (newTr.steps.length > replayStart) {
+        bridge.appendMap(newTr.mapping.maps[replayStart]!, 0);
+        // appendMapping copies all backing maps, even from a sliced Mapping.
+        for (let j = replayStart + 1; j < newTr.mapping.maps.length; j++) {
+          bridge.appendMap(newTr.mapping.maps[j]!);
+        }
+      }
+      deletedNodeMapping = bridge;
+      (trContext as TrTrackingContext & { deletedNodeMapping: Mapping }).deletedNodeMapping = bridge;
     } else if (step instanceof ReplaceAroundStep) {
       if (isSetNodeMarkupStep(step)) {
         const steps = trackSetNodeMarkupStep(step, newTr, emptyAttrs, tr.docs[i]!);

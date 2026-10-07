@@ -33,7 +33,7 @@
 import type { Schema } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 
-import { findNodeById } from "@scrivr/core";
+import { findLiveNodeById } from "../liveNode";
 import {
   addTrackIdIfDoesntExist,
   createNewDeleteAttrs,
@@ -164,7 +164,7 @@ export interface ApplyDiffResult {
 function applyBlockToTr(
   state: EditorState,
   tr: Transaction,
-  found: ReturnType<typeof findNodeById> & {},
+  found: ReturnType<typeof findLiveNodeById> & {},
   proposedText: string,
   authorID: string,
 ): { applied: boolean; editDensity: number; sourceChars: number } {
@@ -179,7 +179,7 @@ function applyBlockToTr(
   clearAuthorPendingMarks(tr, nodeFrom, nodeTo, authorID, schema);
 
   // Re-resolve the node after mutations (positions may have shifted).
-  const updatedFound = findNodeById(tr.doc, found.node.attrs["nodeId"] as string);
+  const updatedFound = findLiveNodeById(tr.doc, found.node.attrs["nodeId"] as string);
   if (!updatedFound) return { applied: false, editDensity: 0, sourceChars: 0 };
 
   const { acceptedText, map } = buildAcceptedTextMap(updatedFound.node, updatedFound.pos, schema);
@@ -253,7 +253,7 @@ export function applyDiffAsSuggestion(
   dispatch: (tr: Transaction) => void,
   { nodeId, proposedText, authorID }: ApplyDiffOptions,
 ): ApplyDiffResult {
-  const found = findNodeById(state.doc, nodeId);
+  const found = findLiveNodeById(state.doc, nodeId);
   if (!found) return { applied: false, editDensity: 0 };
 
   const tr = state.tr;
@@ -290,7 +290,7 @@ export function applyMultiBlockDiff(
 ): ApplyDiffResult {
   // Resolve nodeIds → drop any blocks whose node is no longer in the doc.
   const resolved = blocks.flatMap(b => {
-    const found = findNodeById(state.doc, b.nodeId);
+    const found = findLiveNodeById(state.doc, b.nodeId);
     return found ? [{ found, proposedText: b.proposedText }] : [];
   });
 

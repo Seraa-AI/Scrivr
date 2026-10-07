@@ -7,7 +7,7 @@ import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
-import { findNodeById } from "./UniqueId";
+import { findLiveNodeById } from "@scrivr/plugins";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
 
@@ -470,8 +470,8 @@ export class AiToolkitAPI {
       : { applied: false, changed: [], stale: [], notFound: [], rejected: [] };
     if (structural.length === 0) return richResult;
 
-    // One transaction for the whole structural batch: one undo step, and one
-    // review unit for the tracked changes it produces.
+    // One undo step for the structural batch. Tracking pairs moves within it;
+    // unrelated changes retain their own review decisions.
     const tr = this.editor.getState().tr;
     const structuralResult = applyStructuralEdits(tr, structural);
     const touched = tr.docChanged;
@@ -507,7 +507,7 @@ export class AiToolkitAPI {
     let accumulated = "";
 
     // Position the AI caret at the end of the anchor block
-    const found = findNodeById(editor.getState().doc, nodeId);
+    const found = findLiveNodeById(editor.getState().doc, nodeId);
     if (found) {
       const endPos = found.pos + found.node.nodeSize;
       editor.applyTransaction(
@@ -606,7 +606,7 @@ export class AiToolkitAPI {
 
     // Phase 3: atomic insert tagged for TrackChanges (Phase 4)
     const state = this.editor.getState();
-    const found = findNodeById(state.doc, nodeId);
+    const found = findLiveNodeById(state.doc, nodeId);
     if (!found) return;
 
     const schema = state.schema as Schema;

@@ -18,7 +18,7 @@ import type { IBaseEditor, InlineMark } from "@scrivr/core";
 
 import { buildAcceptedTextMap } from "@scrivr/plugins";
 
-import { findNodeById } from "../ai-toolkit/UniqueId";
+import { findLiveNodeById } from "@scrivr/plugins";
 import { computeAiSuggestion } from "./computeAiSuggestion";
 import type { AiSuggestion, AiSuggestionBlock } from "./types";
 import type { InlineSpan } from "../schema/edit";
@@ -146,7 +146,7 @@ export function rebaseAfterSettle(
 ): AiSuggestion | null {
   const block = suggestion.blocks.find((b) => b.nodeId === nodeId);
   const state = editor.getState();
-  const found = block ? findNodeById(state.doc, block.nodeId) : null;
+  const found = block ? findLiveNodeById(state.doc, block.nodeId) : null;
   const others = suggestion.blocks.filter((b) => b.nodeId !== nodeId);
 
   // The block is no longer in the document — removed by this edit, by a

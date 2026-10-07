@@ -3,7 +3,7 @@ import type { EditorState, Transaction } from "@scrivr/core/pm";
 import { Extension, renderSelection } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { findNodeById } from "@scrivr/core";
+import { findLiveNodeById } from "../track-changes/liveNode";
 
 /** A document range referenced by an external citation (AI answer, source panel). */
 export interface CitationRange {
@@ -71,7 +71,7 @@ function sanitize(citations: CitationRange[], state: EditorState): CitationRange
 }
 
 function nodeCitation(doc: PmNode, nodeId: string): CitationRange | null {
-  const found = findNodeById(doc, nodeId);
+  const found = findLiveNodeById(doc, nodeId);
   if (!found) return null;
   const from = found.pos + 1;
   const to = found.pos + found.node.nodeSize - 1;

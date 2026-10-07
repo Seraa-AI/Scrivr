@@ -7,7 +7,35 @@
 import { describe, expect, it } from "vitest";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { COLLAB_SYNC_META } from "./UniqueId";
+import { COLLAB_SYNC_META, findNodeById } from "./UniqueId";
+
+describe("findNodeById", () => {
+  it("returns the first accepted match and does not inspect later matches", () => {
+    const ed = editor();
+    const { schema } = ed;
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", { nodeId: "same" }, schema.text("first")),
+      schema.node("paragraph", { nodeId: "same" }, schema.text("second")),
+      schema.node("paragraph", { nodeId: "same" }, schema.text("third")),
+    ]);
+    expect(findNodeById(doc, "same")?.pos).toBe(0);
+    const visited: number[] = [];
+    const found = findNodeById(doc, "same", (_node, pos) => { visited.push(pos); return pos > 0; });
+    expect(found?.node.textContent).toBe("second");
+    expect(visited).toEqual([0, 7]);
+    expect(findNodeById(doc, "same", () => false)).toBeNull();
+  });
+
+  it("continues into a refused ancestor and preserves absolute positions", () => {
+    const { schema } = editor();
+    const doc = schema.node("doc", null, [schema.node("bulletList", { nodeId: "same" }, [schema.node("listItem", null, [
+      schema.node("paragraph", { nodeId: "same" }, schema.text("nested")),
+    ])])]);
+    const found = findNodeById(doc, "same", node => node.isTextblock);
+    expect(found?.pos).toBe(2);
+    expect(found?.node.textContent).toBe("nested");
+  });
+});
 
 function editor(): ServerEditor {
   return new ServerEditor({

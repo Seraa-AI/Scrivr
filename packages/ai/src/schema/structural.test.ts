@@ -18,9 +18,12 @@ const insertBlock = {
 };
 
 describe("StructuralSemanticEditSchema", () => {
-  it("accepts the six Phase 2 ops", () => {
+  it("accepts insert, delete, and move ops", () => {
     const ops: unknown[] = [
       insertBlock,
+      { kind: "structural", op: "moveBlock", nodeId: "p1", position: "after", anchorNodeId: "p2" },
+      { kind: "structural", op: "moveListItem", nodeId: "li1", position: "after", anchorNodeId: "li2" },
+
       { kind: "structural", op: "deleteBlock", nodeId: "p2" },
       { kind: "structural", op: "insertListItem", position: "before", anchorNodeId: "li1", item: { spans: [{ text: "Enterprise tier", marks: [] }] } },
       { kind: "structural", op: "deleteListItem", nodeId: "li2" },
@@ -31,11 +34,9 @@ describe("StructuralSemanticEditSchema", () => {
   });
 
   it("rejects the ops that are designed but not built, rather than half-applying them", () => {
-    // Move and column ops are designed but not built. A schema that accepted
+    // Column ops are designed but not built. A schema that accepted
     // them would report success and change nothing.
     const later: unknown[] = [
-      { kind: "structural", op: "moveBlock", nodeId: "p1", position: "after", anchorNodeId: "p2" },
-      { kind: "structural", op: "moveListItem", nodeId: "li1", position: "after", anchorNodeId: "li2" },
       { kind: "structural", op: "insertTableColumn", position: "after", anchorNodeId: "c1" },
       { kind: "structural", op: "deleteTableColumn", anchorNodeId: "c1" },
     ];

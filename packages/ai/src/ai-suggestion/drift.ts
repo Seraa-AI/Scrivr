@@ -13,7 +13,7 @@
  * the card and the canvas overlay both read, so both were permanently false.
  */
 import type { EditorState } from "@scrivr/core/pm";
-import { findNodeById } from "@scrivr/core";
+import { findLiveNodeById } from "@scrivr/plugins";
 import { acceptedTextMapFor } from "@scrivr/plugins";
 
 import type { AiSuggestion } from "./types";
@@ -33,7 +33,7 @@ export function driftedBlocks(
   if (!suggestion) return drifted;
 
   for (const block of suggestion.blocks) {
-    const found = findNodeById(state.doc, block.nodeId);
+    const found = findLiveNodeById(state.doc, block.nodeId);
     if (!found) {
       drifted.add(block.nodeId);
       continue;

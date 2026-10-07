@@ -42,6 +42,121 @@ const nodeOps = (editor: ServerEditor) =>
   changesOf(editor).filter((c) => c.type === "node-change").map((c) => c.dataTracked.operation);
 const textOf = (editor: ServerEditor) => editor.getState().doc.textBetween(0, editor.getState().doc.content.size, "\n");
 
+describe("tracked moves", () => {
+  for (const direction of ["forward", "backward"] as const) {
+    for (const status of ["accepted", "rejected"] as const) {
+      it(`${direction} block move is reviewed atomically as ${status}`, () => {
+        const { editor, ai } = build([para("a", "alpha"), para("b", "beta"), para("c", "gamma")]);
+        const result = ai.applySemanticEdits([{
+          kind: "structural", op: "moveBlock", nodeId: direction === "forward" ? "a" : "c",
+          anchorNodeId: direction === "forward" ? "c" : "a", position: direction === "forward" ? "after" : "before",
+        }]);
+        expect(result.changed).toEqual([direction === "forward" ? "a" : "c"]);
+        const moves = changesOf(editor).filter(c => c.dataTracked.operation === "move");
+        expect(moves).toHaveLength(1);
+        editor.commands.setChangeStatuses(status, [moves[0]!.id]);
+        expect(textOf(editor)).toBe(status === "rejected" ? "alpha\nbeta\ngamma" : direction === "forward" ? "beta\ngamma\nalpha" : "gamma\nalpha\nbeta");
+        expect(changesOf(editor)).toHaveLength(0);
+        expect(() => editor.getState().doc.check()).not.toThrow();
+      });
+    }
+
+    it(`${direction} move resolves its live copy in a later batch after earlier steps shift shadows`, () => {
+      const { editor, ai } = build([para("a", "alpha"), para("b", "beta"), para("c", "gamma")]);
+      const nodeId = direction === "forward" ? "a" : "c";
+      ai.applySemanticEdits([{ kind: "structural", op: "moveBlock", nodeId, anchorNodeId: direction === "forward" ? "c" : "a", position: direction === "forward" ? "after" : "before" }]);
+      ai.applySemanticEdits([
+        { kind: "structural", op: "insertBlock", anchorNodeId: "b", position: "before", block: { type: "paragraph", spans: [{ text: "shift", marks: [] }] } },
+        { kind: "structural", op: "insertBlock", anchorNodeId: nodeId, position: "after", block: { type: "paragraph", spans: [{ text: "HERE", marks: [] }] } },
+      ]);
+      editor.commands.setChangeStatuses("accepted", changesOf(editor).map(c => c.id));
+      expect(textOf(editor)).toBe(direction === "forward" ? "shift\nbeta\ngamma\nalpha\nHERE" : "gamma\nHERE\nalpha\nshift\nbeta");
+    });
+
+    it(`${direction} list move accepts leaf IDs and rejects atomically`, () => {
+      const { editor, ai } = build([{ type: "bulletList", attrs: { nodeId: "list" }, content: [listItem("i1", "p1", "one"), listItem("i2", "p2", "two"), listItem("i3", "p3", "three")] }]);
+      const result = ai.applySemanticEdits([{ kind: "structural", op: "moveListItem", nodeId: direction === "forward" ? "p1" : "p3", anchorNodeId: direction === "forward" ? "p3" : "p1", position: direction === "forward" ? "after" : "before" }]);
+      expect(result.applied).toBe(true);
+      const moves = changesOf(editor).filter(c => c.dataTracked.operation === "move");
+      expect(moves).toHaveLength(1);
+      editor.commands.setChangeStatuses("rejected", [moves[0]!.id]);
+      expect(editor.getState().doc.firstChild!.textContent).toBe("onetwothree");
+      expect(editor.getState().doc.firstChild!.childCount).toBe(3);
+      expect(changesOf(editor)).toHaveLength(0);
+    });
+  }
+
+  it("resolves an empty moved node through node-level changes", () => {
+    const { editor, ai } = build([{ type: "paragraph", attrs: { nodeId: "empty" } }, para("b", "beta")]);
+    ai.applySemanticEdits([{ kind: "structural", op: "moveBlock", nodeId: "empty", anchorNodeId: "b", position: "after" }]);
+    ai.applySemanticEdits([{ kind: "structural", op: "insertBlock", anchorNodeId: "empty", position: "after", block: { type: "paragraph", spans: [{ text: "HERE", marks: [] }] } }]);
+    editor.commands.setChangeStatuses("accepted", changesOf(editor).map(c => c.id));
+    expect(editor.getState().doc.child(0).textContent).toBe("beta");
+    expect(editor.getState().doc.child(1).attrs.nodeId).toBe("empty");
+    expect(editor.getState().doc.child(2).textContent).toBe("HERE");
+  });
+
+  it("refuses cross-list moves before writing any steps", () => {
+    const { editor, ai } = build([
+      { type: "bulletList", content: [listItem("i1", "p1", "one")] },
+      { type: "bulletList", content: [listItem("i2", "p2", "two")] },
+    ]);
+    const before = editor.getState().doc;
+    const result = ai.applySemanticEdits([{ kind: "structural", op: "moveListItem", nodeId: "p1", anchorNodeId: "p2", position: "after" }]);
+    expect(result.rejected).toEqual(["p1"]);
+    expect(result.applied).toBe(false);
+    expect(editor.getState().doc).toBe(before);
+  });
+
+  it("resolves a moved ID again within the same batch", () => {
+    const { editor, ai } = build([para("a", "alpha"), para("b", "beta"), para("c", "gamma")]);
+    ai.applySemanticEdits([
+      { kind: "structural", op: "moveBlock", nodeId: "c", anchorNodeId: "a", position: "before" },
+      { kind: "structural", op: "insertBlock", anchorNodeId: "c", position: "after", block: { type: "paragraph", spans: [{ text: "HERE", marks: [] }] } },
+    ]);
+    editor.commands.setChangeStatuses("accepted", changesOf(editor).map(c => c.id));
+    expect(textOf(editor)).toBe("gamma\nHERE\nalpha\nbeta");
+  });
+
+  it("refuses shadow-only IDs, including descendants of a deleted container", () => {
+    const { editor, ai } = build([{ type: "bulletList", attrs: { nodeId: "list" }, content: [listItem("i", "p", "one")] }, para("tail", "tail")]);
+    ai.applySemanticEdits([{ kind: "structural", op: "deleteBlock", nodeId: "list" }]);
+    const before = editor.getState().doc;
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "insertListItem", anchorNodeId: "p", position: "after", item: { spans: [{ text: "bad", marks: [] }] } },
+      { kind: "structural", op: "moveBlock", nodeId: "tail", anchorNodeId: "list", position: "before" },
+    ]);
+    expect(result.rejected).toEqual(["p", "list"]);
+    expect(result.applied).toBe(false);
+    expect(editor.getState().doc).toBe(before);
+  });
+
+  it("treats self and already-adjacent moves as no-ops", () => {
+    const { editor, ai } = build([para("a", "alpha"), para("b", "beta")]);
+    const before = editor.getState().doc;
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "a", position: "after" },
+      { kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "b", position: "before" },
+    ]);
+    expect(result.changed).toEqual([]);
+    expect(result.applied).toBe(false);
+    expect(editor.getState().doc).toBe(before);
+  });
+
+  it("keeps content-matched delete and insert review atomic", () => {
+    const { editor, ai } = build([para("a", "foo"), para("b", "keep")]);
+    ai.applySemanticEdits([
+      { kind: "structural", op: "deleteBlock", nodeId: "a" },
+      { kind: "structural", op: "insertBlock", anchorNodeId: "b", position: "after", block: { type: "paragraph", spans: [{ text: "foo", marks: [] }] } },
+    ]);
+    const moves = changesOf(editor).filter(c => c.dataTracked.operation === "move");
+    expect(moves).toHaveLength(1);
+    editor.commands.setChangeStatuses("rejected", [moves[0]!.id]);
+    expect(textOf(editor)).toBe("foo\nkeep");
+    expect(changesOf(editor)).toHaveLength(0);
+  });
+});
+
 describe("insertBlock", () => {
   const edit = (position: "before" | "after"): SemanticEdit => ({
     kind: "structural", op: "insertBlock", position, anchorNodeId: "p2",
@@ -317,4 +432,31 @@ describe("structural destination contracts", () => {
     expect(editor.getState().doc.firstChild!.type.name).toBe(status === "accepted" ? "paragraph" : "table");
     expect(editor.getState().doc.textContent).toBe(status === "accepted" ? "tail" : "onetail");
   });
+});
+
+describe("resolving an id while a move is pending", () => {
+  /**
+   * A pending move leaves a deleted shadow and a live copy under one nodeId.
+   * Document order decides which comes first, so a resolver that takes the
+   * first match writes into the shadow for a move in one direction — the edit
+   * reports success and then evaporates when the move is accepted.
+   */
+  for (const direction of ["forward", "backward"] as const) {
+    it(`a rich edit after a ${direction} move lands on the live copy`, () => {
+      const { editor, ai } = build([para("a", "alpha"), para("b", "beta"), para("c", "gamma")]);
+      const nodeId = direction === "forward" ? "a" : "c";
+      ai.applySemanticEdits([{
+        kind: "structural", op: "moveBlock", nodeId,
+        anchorNodeId: direction === "forward" ? "c" : "a",
+        position: direction === "forward" ? "after" : "before",
+      }]);
+
+      const result = ai.applySemanticEdits([{ kind: "richText", nodeId, spans: [{ text: "EDITED", marks: [] }] }]);
+      expect(result.changed).toEqual([nodeId]);
+
+      editor.commands.setChangeStatuses("accepted", changesOf(editor).map((c) => c.id));
+      // Survives the accept, which is what writing into the shadow would not.
+      expect(textOf(editor)).toBe(direction === "forward" ? "beta\ngamma\nEDITED" : "EDITED\nalpha\nbeta");
+    });
+  }
 });
