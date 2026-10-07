@@ -313,15 +313,28 @@ The schemas are part of the public API.
   - Painted as an insert (`TrackChanges.ts:332`), which is what a reader expects
     of text that arrived here.
 
-  **The gap is the producer, not the representation.** Today a move id is
-  assigned only for an indentation action — `getIndentationOperationSteps` is
-  the sole writer of `stepsByGroupIDMap`
-  (`engine/transactionProcessing.ts:52-64`), gated on `isIndentationAction`. So
-  Phase 3's work is to let a caller declare "this transaction is a move" and
-  have the engine assign one id across its `ReplaceStep`s — generalising that
-  function rather than adding a parallel one — after which `moveBlock` and
-  `moveListItem` apply as delete-at-old plus insert-at-new in a single
-  transaction and the engine yields one paired move change.
+  **Correction (2026-10-07): there is no producer gap.** D7 first said a move id
+  was assigned only for an indentation action, because
+  `getIndentationOperationSteps` looked like the sole writer of
+  `stepsByGroupIDMap`. It is not. `getMoveOperationsSteps`
+  (`engine/transactionProcessing.ts:111-199`, registered beside it in
+  `engine/trackChanges.ts:66`) writes the same map through the local alias
+  `movingAssoc`, and **auto-detects a move**: in any transaction with two or more
+  steps, a delete step whose removed content `nodeContentEquals` an insert
+  step's content gets a shared id. `nodeContentEquals` strips bookkeeping attrs
+  first, so a moved node matches itself.
+
+  Measured, not read — a plain `tr.delete(old)` + `tr.insert(new)` of one
+  paragraph in a single transaction already yields:
+
+  ```
+  ops: ["delete", "delete", "move"]   moveNodeId: one shared id for all three
+  ```
+
+  So Phase 3 needs no engine change. `moveBlock` and `moveListItem` apply as
+  delete-at-old plus insert-at-new in one transaction, and the engine produces
+  the paired move change on its own. The indentation action only supplies
+  `indentationType`, which an AI move does not set.
 
   **Rejected alternative: grouping via `dataTracked.groupId`.** It exists
   (`types.ts:73`) and the popover already collects a group's ids to accept them
@@ -335,6 +348,55 @@ The schemas are part of the public API.
   `node_split`, `wrap_with_node` and `structure` exist; only the
   `insert_node` / `delete_node` pair is genuinely absent, and Phase 2's ops do
   not need it.
+
+## Phase 3 prerequisite — which node an id names during a pending move
+
+Found while starting Phase 3, and it blocks it. A tracked move leaves **two
+nodes carrying the same `nodeId`**: the moved copy, and the shadow the delete
+leaves behind until someone accepts it. `findNodeById` then returns the wrong one
+half the time.
+
+Measured on a three-paragraph document, moving the `x` paragraph:
+
+| Move | Live copy | Shadow (`trackedDelete`) | `findNodeById("x")` |
+|---|---|---|---|
+| forward (first → last) | pos 15 | pos 0 | **pos 15** — live |
+| backward (last → first) | pos 0 | pos 15 | **pos 15** — the shadow |
+
+The cause is that `findNodeById`
+(`packages/core/src/extensions/built-in/UniqueId.ts`) returns the **last**
+match, not the first. Its `return false` is commented "stop traversal", but in
+ProseMirror that only prevents descending into that node's children — the walk
+continues over siblings and overwrites the result. With unique ids the
+distinction is invisible, which is why this has never mattered before.
+
+The consequence for Phase 3 is direct: after a backward move, the next op that
+addresses the moved block — including a later op in the same batch — resolves to
+text that is already deleted, and edits a shadow. Moves are the first operation
+that can produce a duplicate id, so this is Phase 3's problem rather than a
+pre-existing bug with a visible symptom.
+
+**Options, and what each costs.** The resolver has to prefer the live node, and
+the awkwardness is that "live" means "not wholly `trackedDelete`" while
+`trackedDelete` is defined by the TrackChanges extension in `@scrivr/plugins`
+(`TrackChanges.ts:40`), not by core:
+
+1. **`findNodeById` takes an optional predicate.** Core stays ignorant of
+   tracking; the AI layer passes "skip a tracked-delete shadow". 43 call sites
+   keep working unchanged.
+2. **A tracked-aware resolver in `@scrivr/plugins`**, used by the AI layer.
+   Keeps the knowledge where the marks are defined, at the cost of a second
+   resolver that can drift from the first.
+3. **Core checks for a mark named `trackedDelete`.** Smallest diff, and the one
+   that puts a plugin's concept in core — which is the thing this repo's
+   layering exists to prevent.
+
+Recommendation: (1). The duplicate is created by tracking, so tracking should
+be what recognises it, and a predicate lets the caller say which copy it means
+without core learning what a tracked delete is. Either way, the lying comment on
+`findNodeById` is worth correcting in the same change — the behaviour it
+describes and the behaviour it has differ, and under duplicate ids only one of
+them is defensible.
 
 ## Phased implementation
 
@@ -352,11 +414,13 @@ suggestions. Introduce `applySemanticEdits(editor, edits, { asSuggestion })`
 routing rich vs structural.
 
 ### Phase 3 — move ops
-`moveBlock`, `moveListItem`. Per **D7**: one transaction that declares itself a
-move, so the engine produces a single `CHANGE_OPERATION.move` change with its
-`moveNodeId`-paired delete, rather than two changes a reviewer can half-accept.
-The engine-side work is generalising move-id assignment beyond the indentation
-action.
+`moveBlock`, `moveListItem` — delete-at-old plus insert-at-new in one
+transaction. Per **D7** the engine then produces a single
+`CHANGE_OPERATION.move` with its `moveNodeId`-paired delete on its own, so there
+is no engine work for the representation. Settle the id-resolution prerequisite
+above first: a move is the first op that can put two nodes with one `nodeId` in
+the document, and the resolver currently picks the wrong one on a backward
+move.
 
 ### Phase 4 — table columns
 `insertTableColumn`, `deleteTableColumn`. Reject complex merged-cell tables rather
