@@ -27,6 +27,7 @@ export { isTrackedMark } from "./helpers";
 export { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 export { findChanges } from "./findChanges";
 export { findLiveNodeById, isShadowNode, shadowRanges } from "./liveNode";
+export { MAX_TRACKED_STEPS_PER_TR } from "./engine/transactionProcessing";
 export { applyChanges } from "./applyChanges";
 export { ChangeSet } from "./ChangeSet";
 export {

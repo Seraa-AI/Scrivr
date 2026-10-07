@@ -54,10 +54,10 @@ export function trackTransaction(
 
   const emptyAttrs = createNewPendingAttrs(tr.time, authorID);
 
+  // The mapping every replay step is resolved against. Reassigned per source
+  // step, so it is a local rather than part of `trContext` — consumers take it
+  // as a parameter.
   let deletedNodeMapping = new Mapping();
-  trContext = { ...trContext, deletedNodeMapping } as TrTrackingContext & {
-    deletedNodeMapping: Mapping;
-  };
   let iterations = 0;
 
   for (let i = clearedSteps.length - 1; i >= 0; i--) {
@@ -68,7 +68,11 @@ export function trackTransaction(
     if (!iterationIsValid(iterations, tr, newTr, step)) continue;
 
     if (step instanceof ReplaceStep) {
-      const previousMapping = deletedNodeMapping.slice();
+      // `Mapping.slice()` shares its backing array rather than copying, so a
+      // snapshot has to be a count: the callees below append to
+      // `deletedNodeMapping` while this iteration runs, and those maps are
+      // already covered by the replay range.
+      const previousMaps = deletedNodeMapping.maps.length;
       const replayStart = newTr.steps.length;
       const { slice } = step;
       if (
@@ -122,23 +126,22 @@ export function trackTransaction(
         trContext.selectionPosFromInsertion = userSelectionPos;
       }
 
-      // The next reverse iteration reads an earlier document. Bridge from
-      // before this source step through its forward map, the prior bridge,
-      // and every replay step (undo + tracked replacement). Counting only
-      // removed pending inserts loses retained insertions before that position.
+      // The next reverse iteration reads an earlier document, so it needs a
+      // mapping from before this source step into the document as it now
+      // stands: this step's forward map, then what was accumulated before it,
+      // then every step the replay just applied. Counting only removed pending
+      // inserts loses retained insertions before that position.
       const bridge = new Mapping([step.getMap()]);
-      bridge.appendMapping(previousMapping);
-      // trackReplaceStep first inverts this source step. Mirror the pair so
+      for (let j = 0; j < previousMaps; j++) bridge.appendMap(deletedNodeMapping.maps[j]!);
+      // trackReplaceStep inverts this source step first. Mirror the pair so
       // positions inside its removed content survive the round trip.
-      if (newTr.steps.length > replayStart) {
+      if (newTr.mapping.maps.length > replayStart) {
         bridge.appendMap(newTr.mapping.maps[replayStart]!, 0);
-        // appendMapping copies all backing maps, even from a sliced Mapping.
         for (let j = replayStart + 1; j < newTr.mapping.maps.length; j++) {
           bridge.appendMap(newTr.mapping.maps[j]!);
         }
       }
       deletedNodeMapping = bridge;
-      (trContext as TrTrackingContext & { deletedNodeMapping: Mapping }).deletedNodeMapping = bridge;
     } else if (step instanceof ReplaceAroundStep) {
       if (isSetNodeMarkupStep(step)) {
         const steps = trackSetNodeMarkupStep(step, newTr, emptyAttrs, tr.docs[i]!);

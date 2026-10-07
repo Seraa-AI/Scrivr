@@ -11,7 +11,7 @@
  * agent sees leaves, so ops that act on a container climb to it.
  */
 import { findNodeById, spansToFragment, tableColumnCount } from "@scrivr/core";
-import { findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
+import { MAX_TRACKED_STEPS_PER_TR, findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
 import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 
 import type { SemanticBlockInput, SemanticCellInput, StructuralSemanticEdit } from "../schema/edit";
@@ -114,7 +114,13 @@ function deleteContainerChild(tr: Transaction, target: { node: PmNode; pos: numb
  * it could not — a missing anchor and a wrong-shaped anchor are different
  * answers, and a caller routing agent output needs to tell them apart.
  */
-function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: StructuralEditResult, resolve: ResolveNode): void {
+function applyOne(
+  tr: Transaction,
+  edit: StructuralSemanticEdit,
+  result: StructuralEditResult,
+  resolve: ResolveNode,
+  moved: Set<string>,
+): void {
   const schema = tr.doc.type.schema;
 
   switch (edit.op) {
@@ -143,6 +149,10 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
       const anchor = resolveTarget(edit.anchorNodeId);
       if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
+      // A second move of the same node in one transaction emits a second
+      // overlapping delete/insert pair, which tracking pairs wrongly and
+      // replays into a duplicated block. One move per node per batch.
+      if (moved.has(edit.nodeId)) return void result.rejected.push(edit.nodeId);
       if (edit.op === "moveListItem") {
         const source = tr.doc.resolve(target.pos);
         const destination = tr.doc.resolve(anchor.pos);
@@ -156,6 +166,7 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       if (target.pos === anchor.pos || at === target.pos || at === target.pos + target.node.nodeSize) return;
       tr.delete(target.pos, target.pos + target.node.nodeSize);
       tr.insert(at > target.pos ? at - target.node.nodeSize : at, target.node);
+      moved.add(edit.nodeId);
       result.changed.push(edit.nodeId);
       return;
     }
@@ -232,6 +243,17 @@ export function applyStructuralEdits(
 ): StructuralEditResult {
   const result: StructuralEditResult = { changed: [], notFound: [], rejected: [] };
   const resolve = createLiveResolver(tr);
-  for (const edit of edits) applyOne(tr, edit, result, resolve);
+  const moved = new Set<string>();
+  for (const edit of edits) {
+    // A step past the engine's limit is not tracked: replay stops and the
+    // document is left mangled rather than reviewable. A move writes two
+    // steps, so the budget has to be checked before the op, not after.
+    const steps = edit.op === "moveBlock" || edit.op === "moveListItem" ? 2 : 1;
+    if (tr.steps.length + steps > MAX_TRACKED_STEPS_PER_TR) {
+      result.rejected.push("nodeId" in edit ? edit.nodeId : edit.anchorNodeId);
+      continue;
+    }
+    applyOne(tr, edit, result, resolve, moved);
+  }
   return result;
 }

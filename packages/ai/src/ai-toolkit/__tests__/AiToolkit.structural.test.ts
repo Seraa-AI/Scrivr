@@ -460,3 +460,43 @@ describe("resolving an id while a move is pending", () => {
     });
   }
 });
+
+describe("what one batch can ask of tracking", () => {
+  it("refuses a second move of the same node in one batch", () => {
+    // Two overlapping delete/insert pairs for one node are paired wrongly by
+    // tracking and replay into a duplicate carrying a duplicate nodeId.
+    const { editor, ai } = build([para("a", "alpha"), para("b", "beta"), para("c", "gamma")]);
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "c", position: "after" },
+      { kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "b", position: "before" },
+    ]);
+
+    expect(result.changed).toEqual(["a"]);
+    expect(result.rejected).toEqual(["a"]);
+    editor.commands.setChangeStatuses("accepted", changesOf(editor).map((c) => c.id));
+    expect(textOf(editor)).toBe("beta\ngamma\nalpha");
+    // One copy of the id, not two.
+    const ids: string[] = [];
+    editor.getState().doc.descendants((n) => { if (n.attrs["nodeId"] === "a") ids.push("a"); });
+    expect(ids).toHaveLength(1);
+  });
+
+  it("refuses the ops that would pass the engine's step limit", () => {
+    // A move costs two steps, so a long reorder crosses the limit — past it
+    // the engine stops replaying and leaves the document mangled.
+    const blocks = Array.from({ length: 14 }, (_, i) => para(`p${i}`, `t${i}`));
+    const { editor, ai } = build(blocks);
+    const result = ai.applySemanticEdits(
+      Array.from({ length: 12 }, (_, i) => ({
+        kind: "structural" as const, op: "moveBlock" as const,
+        nodeId: `p${i}`, anchorNodeId: "p13", position: "after" as const,
+      })),
+    );
+
+    expect(result.changed).toHaveLength(10);
+    expect(result.rejected).toEqual(["p10", "p11"]);
+    editor.commands.setChangeStatuses("accepted", changesOf(editor).map((c) => c.id));
+    // Every block still present exactly once, which over-cap replay does not do.
+    expect(editor.getState().doc.childCount).toBe(14);
+  });
+});

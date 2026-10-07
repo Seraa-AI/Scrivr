@@ -47,3 +47,12 @@ Three tracking replay defects the moves surfaced:
   forbids them, such as a code block, producing an invalid document. Child marks
   are now filtered through the parent's `allowedMarks`; the node-level change
   stays reviewable.
+
+One batch is also bounded by what tracking can replay. A second move of the same
+node emits a second overlapping delete/insert pair, which the engine pairs
+wrongly and replays into a duplicated block carrying a duplicated `nodeId`; it
+is now refused. And `MAX_TRACKED_STEPS_PER_TR` is exported, because a move costs
+two steps — so twelve moves in one batch used to cross the engine's limit, at
+which point replay stops and the document is left mangled while the result
+claimed every op applied. Ops that would cross it are refused before any step is
+written.
