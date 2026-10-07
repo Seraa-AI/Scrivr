@@ -1,5 +1,228 @@
 # @scrivr/react
 
+## 1.0.22
+
+### Patch Changes
+
+- 44e6423: Two things the AI review surface could not express.
+
+  **A marker that proposes no edit.** A finding can be a Pass, or a decision a
+  person has to make. `computeAiSuggestion` drops a block whose proposed text
+  matches what is already there, which is correct — a diff overlay is not where a
+  finding with no change belongs — and there was no other layer, so such a
+  finding existed in the panel and nowhere the reader was looking.
+
+  `BlockMarkers` is that layer. `setBlockMarkers(editor, source, markers)` hangs
+  `{ nodeId, kind, summary }` on a block, `getBlockMarkers` reads them,
+  `activeBlockMarkers` answers the ones on the innermost marked block holding the
+  cursor, and `createBlockMarkerOverlay` — with `useBlockMarkerOverlay` in
+  `@scrivr/react` — gives them the show / move / hide lifecycle the suggestion
+  popover has.
+
+  Every call names its writer, which is what makes the layer additive: several
+  bridges write to the same surface and none owns it, so a writer replaces and
+  clears its own markers without erasing what the others say. Nothing is written
+  to the document and nothing enters history. A marker whose block has left the
+  document is dropped on read, and markers resolve in one pass over the document
+  rather than one walk each. `BLOCK_MARKERS_SET` is public, so a payload whose
+  markers are not markers is refused whole rather than half-applied.
+
+  **Accepting a span rather than a block.** `accept(blockId)` applied every op the
+  block carried, so a finding scoped to one sentence rewrote the clause around it.
+  `applyAiSuggestion` now takes `range`, and `actions.acceptRange(blockId, range,
+mode?)` exposes it. It returns whether it wrote, so a refusal is visible instead
+  of silent — including through `AiToolkit.apply`.
+
+  `range` carries the accepted text its offsets were measured against, and is
+  refused unless the block still holds that text. This is the part that makes a
+  scoped accept safe: settling rewrites a block's `acceptedText`, so comparing the
+  document against it proves nothing, and a caller still holding offsets from
+  before an earlier accept would edit whichever words now sit at those numbers.
+  Also refused: a span that is inverted, collapsed, or reaches outside the block.
+
+  Only groups the span covers are applied; one it merely clips is left pending. A
+  pure insertion is zero-width, so it belongs to the single span that starts at or
+  before its point and ends strictly after — otherwise both neighbouring sentences
+  claimed it. Every covered group is applied in one pass and settled as one set:
+  `rebaseAfterSettle` now takes the set of settled groups, because told one at a
+  time it read the pass's own writes as reader drift and discarded the groups the
+  span deliberately left pending.
+
+  **`docRangeToAcceptedRange`** (`@scrivr/plugins`) converts a document range to
+  the accepted-text offsets `range` wants. Only the forward direction existed, and
+  accepted text omits runs pending deletion, so arithmetic on document positions
+  was wrong in exactly the tracked-changes documents this serves — and wrong
+  silently.
+
+  **Drift has one owner, and it is no longer silent.** `staleBlockIds` had two
+  production readers — the card's `isStale` and the canvas overlay, which dims a
+  stale block — and no writer at all, so both read false for every block forever.
+  The plugin now computes it whenever the answer can change: a new suggestion (a
+  host can hand over one that was already out of date), a settled one (the rebase
+  refreshes each surviving block against the document the settlement left), or an
+  edit. Identical answers return the previous state unchanged, so the card
+  subscription's identity skip still holds.
+
+  Every accept path reads it and refuses a block the reader has edited since the
+  proposal was computed — the unscoped block accept, a group accept, and accept-all
+  as well as the new span accept. Previously only the span accept checked, so one
+  card had a button that refused and a button that wrote the model's words into
+  text that had moved: `"The quick fox"` edited to `"!The quick fox"` and then
+  accepted produced `"!Theslowk fox"`. Accept-all still applies the blocks that do
+  match and leaves the drifted ones pending, because an edit in one block says
+  nothing about the rest.
+
+  `AiSuggestionCardActions` gains a required `acceptRange`, so a hand-written
+  implementation of that interface needs the new member. `applyAiSuggestion` and
+  `AiToolkit.apply` returning `boolean` instead of `void` is a widening and breaks
+  no caller.
+
+- cc42506: A diff op now says where in the proposal it came from, and the ops reconstruct
+  the proposal they were built from.
+
+  `pairReplacements` emits deletes first so a consumer clears a whole deleted
+  range before writing its replacement — that is what keeps document-side offsets
+  correct, and it stays. What follows consumes the proposal, and is now emitted in
+  the proposal's own order. Absorbing a keep that sits inside a replacement turns
+  it into a re-insert, and that re-insert can belong _before_ a boundary keep:
+  rewriting "alpha beta gamma delta" to "beta delta epsilon" moved "beta" behind
+  "delta" and applied as " deltabeta epsilon". The ops described something the
+  proposal never said.
+
+  Each op that consumes the proposal carries `proposedOffset`, stamped where the
+  order still is the proposal's own. A consumer counting as it walks cannot
+  recover it, because the order it walks is the document's — which is how an
+  agent's bold landed on a word it never named.
+
+  Text that did not change is one keep, however long. The quadratic guard answered
+  "delete everything, insert everything" for two identical strings, so a
+  formatting proposal on a paragraph over ~450 characters — ordinary in a
+  contract — rewrote every character to change none of them, taking comment
+  anchors and existing tracked marks with it.
+
+  Generated group ids carry their block. They were an index into one block's ops,
+  so two paragraphs with a change at the same position shared an id, and settling
+  one settled the other.
+
+  Settling one group re-expresses what is left of the proposal against the
+  document that group left behind — but only when that document is the one the
+  settlement produced. If it moved for any other reason, the reader typed or a
+  collaborator edited, the remaining ops describe text that is no longer there and
+  rebuilding from them proposes putting it back: the reader's own edit returns as
+  a suggested deletion, wearing a refreshed `acceptedText` that makes it look
+  current. Nothing can map an intent through an edit it never saw, so the proposal
+  is spent and the block is dropped. The reader asks again. A suggestion's ops are offsets into the block's
+  text as it was when the suggestion was computed, so accepting or rejecting one
+  group invalidated every remaining op: the next accept landed on the wrong
+  characters, or past the end of the old text, where it silently did nothing —
+  accept a rewrite, then accept the formatting alongside it, and the formatting
+  never arrived.
+
+  Marking a group settled and stepping over it does not fix that, because the
+  offsets are still the old ones. So there is no settled-group bookkeeping at all
+  now: the outcome is known where the group is settled, the remaining proposal is
+  rebuilt there, and a settled group simply no longer exists. A block with nothing
+  left to propose is removed, and a suggestion with no blocks left is cleared —
+  an empty proposal used to be reported as a deletion of the whole paragraph.
+
+  Settling dispatches `AI_SUGGESTION_RESOLVE` rather than replacing the
+  suggestion, which used to clear the active block and blank the rest of the
+  overlay until the caret moved.
+
+  `AiSuggestionCardData.kind` gains `"format"`. Additive for a consumer that
+  switches with a default, but a consumer narrowing exhaustively against `never`
+  will stop compiling until it handles the new member — which is the point of
+  writing it that way.
+
+  A card can say `kind: "format"`; a formatting proposal was reported as a
+  deletion labelled with the paragraph's own text. The popover describes it
+  through `formattedText` instead of rendering an empty replaced→inserted pair.
+  `FormatRenderInstruction` is exported, so a consumer can name the arm it
+  narrows to. The underline groups glyphs by `lineY`, so a run of mixed sizes
+  draws one straight rule rather than disjoint stubs.
+
+- 654c043: An extension declares the slash entries that insert what it owns.
+
+  The slash menu hard-coded its formatting entries in the React hook and asked the
+  source providers directly, so an extension could not contribute to the menu that
+  inserts its own node — the one contribution of its kind that `addToolbarItems`
+  and `addNodeActions` already had.
+
+  `addSlashCommands()` returns `SlashCommandContribution[]`, each with optional
+  `items` (known up front, paints on the first frame) and `resolve` (query-driven
+  I/O, the only half that needs a spinner). A list rather than one contribution, so
+  an extension fronting several sources gives each its own resolver.
+  `getSlashCommands()` and `resolveSlashCommands(query, signal)` read them back,
+  merged by `group` then `order` — groups in the order first contributed, so
+  renaming one does not reorder the menu.
+
+  `SlashCommandSpec` is data only, like `ToolbarItemSpec`: `id`, `label`,
+  `description?`, `group?`, `order?`, `command`, `args?`. A command name and
+  arguments, never a closure. The eight built-in entries now come from `Heading`,
+  `List`, `CodeBlock` and `HorizontalRule`, and the heading entries follow the
+  configured `levels` — a kit built with fewer no longer offers entries it cannot
+  honour. The spec carries no icon, because Scrivr contributes no renderer; the
+  React menu keys a glyph off the command name, as the playground toolbar already
+  does.
+
+  A resolver that rejects is dropped from the round with a warning and the others
+  still answer: one source being down must not empty a menu whose formatting
+  entries are fine. `signal` is required, and is checked both before the resolvers
+  run and after they answer, so a resolver that ignores it still cannot replace the
+  entries for the query the author is now on.
+
+  `insertSourcedBlockFromSource({ kind, resourceId, versionId })` resolves through
+  `provider.fetch` and delegates to `insertSourcedBlock`, so a menu entry can be
+  identity rather than content — without it the contribution would have to be a
+  callback. `SourcedBlockExtension` contributes one resolver per provider, and
+  `SourceProvider.search` runs for the first time.
+
+  `editor.deferEdit({ at, work, edit, onAbandoned })` is the seam for async work
+  that ends in an edit. It captures a position, maps it through everything that
+  happens while the work runs, and abandons with a reason — `anchor-removed`,
+  `read-only`, `destroyed`, `failed`, `edit-failed` — rather than writing blind.
+  `insertSourcedBlockFromSource` is its first consumer: without it a clause chosen
+  from the menu replaced whatever the author had selected while it loaded.
+  `insertSourcedBlock` gains an optional `at`, resolved through `insertPoint`.
+
+  `ExtensionContext` carries an `editor()` thunk, so a contribution that must act
+  after an await can reach the editor it belongs to. Three extensions had each
+  invented a `WeakMap` keyed on their options object, which identifies the
+  configured extension rather than the editor — one instance shared by two editors
+  inserted into the wrong document. `addInitialDoc`'s context no longer inherits
+  it, because that phase genuinely runs before an editor exists.
+
+  `SlashMenuItem` carries the spec's `id` and `group` through to the renderer, and
+  the React menu debounces its searches, clears the previous query's entries up
+  front instead of leaving them selectable, and asks no resolver when a host
+  supplies its own `items`.
+
+  `editor.runCommand(name, args)` dispatches a declared spec by name. Doing that
+  through `commands` means spreading `unknown[]` into a union of fixed-arity
+  signatures, which only typechecks behind a cast; the playground had grown one and
+  it is deleted here.
+
+- Updated dependencies [27a85a2]
+- Updated dependencies [aa8529f]
+- Updated dependencies [44e6423]
+- Updated dependencies [297dba9]
+- Updated dependencies [297dba9]
+- Updated dependencies [24eccf9]
+- Updated dependencies [d4fc43d]
+- Updated dependencies [80b90e0]
+- Updated dependencies [cc42506]
+- Updated dependencies [f6ff4a2]
+- Updated dependencies [0332bcc]
+- Updated dependencies [654c043]
+- Updated dependencies [cc42506]
+- Updated dependencies [bd0c3ae]
+- Updated dependencies [297dba9]
+- Updated dependencies [490abaf]
+- Updated dependencies [8098340]
+  - @scrivr/plugins@1.0.22
+  - @scrivr/ai@1.0.22
+  - @scrivr/core@1.0.22
+
 ## 1.0.21
 
 ### Patch Changes

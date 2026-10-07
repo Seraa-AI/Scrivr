@@ -1,5 +1,79 @@
 # @scrivr/export-docx
 
+## 1.0.22
+
+### Patch Changes
+
+- 9d4077c: `importDocx` returns a doc whose blocks have ids.
+
+  `UniqueId` fires on transactions, and the importer never dispatches one — so
+  every block came back `nodeId: null`, 618 of them in one contract. The
+  docstring's `editor.setContent(doc.toJSON())` would have put the doc through a
+  transaction and minted them, but a server caller that wants the parsed node and
+  its diagnostics has no reason to guess the ids depend on doing so.
+
+  The failure is silent and deferred: id-less content stores fine, and the ids get
+  minted later, per load, wherever the doc is next materialised — so two reads of
+  one unchanged document disagree about what its blocks are called, and a review
+  of an imported contract reports stale sections against a document nothing has
+  changed.
+
+  Assignment is conditioned on the editor carrying `UniqueId` rather than on a new
+  option. The promise is that an import holds what an editor session would, and a
+  session built without `UniqueId` mints no ids when a person types into it
+  either. It runs after the `onImportComplete` hooks, so a contribution's own
+  blocks are addressable too.
+
+- 0332bcc: Per-editor state belongs to the editor, not to a configured extension.
+
+  Six extensions kept per-editor state in a map keyed by their own options object.
+  Options identify a _configured extension_, and one of those can serve several
+  editors — configure once, mount twice is the ordinary split-view shape. So the
+  second editor overwrote the first's entry, a seeding hook reset it on every
+  construction, and teardown nulled it for everyone.
+
+  `Collaboration` stored its Y binding that way, read by undo, redo and three
+  keymap handlers: undo in one pane drove the other pane's history, building a
+  second pane left the first with no binding at all, and closing either pane
+  disarmed its sibling. The binding moves into `collaborationRegistry`, which was
+  already keyed by the editor and already documented as such.
+
+  `PdfExport`, `DocxExport`, `DocxImport` and `SemanticExport` each stored _the
+  editor itself_ the same way — so `exportPdf` in one pane saved the other pane's
+  document, and `importDocxFromFile` **wrote** into it. All four now read
+  `this.editor()`, which resolves per editor, so the map, the `InstanceState`
+  type, the seeding plugin and the registration hook all delete. `PdfExport` needs an
+  editor with a layout pipeline, which is now a runtime check on what the export
+  actually calls — so any `IEditor` qualifies, not only the concrete browser
+  `Editor` the old view-only hook required.
+
+  `Image` held the same map with nothing reading it — its `onViewReady` already
+  returned the cleanup it needed. Removed.
+
+  `CollabState` gains a required `binding`, which a host names as
+  `CollabState["binding"]`. Teardown now deletes the editor's registry entry
+  instead of mutating a shared one.
+
+  Two behaviour changes worth knowing. These commands reach their editor through
+  `this.editor()`, which throws when an `ExtensionManager` was built without one,
+  where the old lookup returned `undefined` and the command returned `false` — no
+  production path builds an editorless manager, so this is latent rather than
+  something that happens today. And `exportPdf` now warns on the path it refuses,
+  the way `exportDocx` and `exportSemantic` already did, instead of returning
+  `false` silently.
+
+- Updated dependencies [aa8529f]
+- Updated dependencies [297dba9]
+- Updated dependencies [24eccf9]
+- Updated dependencies [d4fc43d]
+- Updated dependencies [80b90e0]
+- Updated dependencies [0332bcc]
+- Updated dependencies [654c043]
+- Updated dependencies [297dba9]
+- Updated dependencies [490abaf]
+- Updated dependencies [8098340]
+  - @scrivr/core@1.0.22
+
 ## 1.0.21
 
 ### Patch Changes
