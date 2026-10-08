@@ -76,6 +76,45 @@ describe("selection contract — an explicit selection is carried, not collapsed
   });
 });
 
+describe("selection contract — gestures that restructure without replacing", () => {
+  // The replay only advances its bridge for a ReplaceStep, so a wrap or an
+  // indent — one ReplaceAroundStep, no selection set — has to survive the same
+  // mapping as everything else.
+  const wrapInList = (editor: TestEditor, at: number) => {
+    editor.dispatch(
+      editor.state.tr.setSelection(TextSelection.create(editor.state.doc, at)),
+    );
+    const tr = editor.state.tr;
+    const range = tr.doc.resolve(1).blockRange(tr.doc.resolve(at))!;
+    tr.wrap(range, [
+      { type: schema.nodes.bullet_list! },
+      { type: schema.nodes.list_item! },
+    ]);
+    return editor.dispatch(tr);
+  };
+
+  it("keeps the caret at the end of the text it wrapped", () => {
+    const editor = new TestEditor(doc(p("hello")));
+    wrapInList(editor, 6);
+
+    expect(editor.state.doc.textBetween(1, editor.state.selection.from, "", "")).toBe("hello");
+  });
+
+  // A mid-text caret does not survive precisely: the around-step tracker undoes
+  // and restamps the whole block, so the interior position is genuinely gone by
+  // the time anything could map it. What must hold is that the caret stays in
+  // the text that was wrapped rather than escaping the new list.
+  it("leaves the caret inside the text it wrapped", () => {
+    const editor = new TestEditor(doc(p("hello")));
+    wrapInList(editor, 3);
+
+    const { from } = editor.state.selection;
+    const text = editor.state.doc.resolve(from).parent;
+    expect(text.textContent).toBe("hello");
+    expect(editor.state.doc.textBetween(1, from, "", "").length).toBeLessThanOrEqual(5);
+  });
+});
+
 describe("selection contract — the caret follows an insertion", () => {
   it("lands after typed text", () => {
     const editor = new TestEditor(doc(p("ab")));

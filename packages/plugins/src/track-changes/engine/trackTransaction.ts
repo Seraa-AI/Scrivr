@@ -18,7 +18,7 @@ import {
   passThroughMeta,
   stepIsTrackable,
 } from "./transactionProcessing";
-import { createNewPendingAttrs, genId, getNodeTrackedData } from "../helpers";
+import { createNewPendingAttrs, genId, getNodeTrackedData, NewEmptyAttrs } from "../helpers";
 import { fixAndSetSelectionAfterTracking } from "./fixAndSetSelectionAfterTracking";
 import { updateChangeAttrs } from "./updateAttributes";
 import { diffChangeSteps } from "../lib/structuralChange";
@@ -53,6 +53,30 @@ function stepProducedSelection(tr: Transaction, i: number, step: ReplaceStep) {
   );
 }
 
+/**
+ * Entering an iteration the bridge maps `docs[i+1]` into the replayed document;
+ * leaving it, `docs[i]`. Every step kind must advance it: each tracker begins by
+ * inverting the source step, so the first replay map mirrors the step's own, and
+ * a step the replay declined still happened in the source — its map belongs in
+ * the chain even when no replay steps followed.
+ */
+function advanceBridge(
+  step: Step,
+  previous: Mapping,
+  newTr: Transaction,
+  replayStart: number,
+) {
+  const bridge = new Mapping([step.getMap()]);
+  bridge.appendMapping(previous);
+  if (newTr.mapping.maps.length > replayStart) {
+    bridge.appendMap(newTr.mapping.maps[replayStart]!, 0);
+    for (let j = replayStart + 1; j < newTr.mapping.maps.length; j++) {
+      bridge.appendMap(newTr.mapping.maps[j]!);
+    }
+  }
+  return bridge;
+}
+
 export function trackTransaction(
   tr: Transaction,
   oldState: EditorState,
@@ -71,10 +95,6 @@ export function trackTransaction(
 
   const baseAttrs = createNewPendingAttrs(tr.time, authorID);
 
-  let deletedNodeMapping = new Mapping();
-  trContext = { ...trContext, deletedNodeMapping } as TrTrackingContext & {
-    deletedNodeMapping: Mapping;
-  };
   for (let i = clearedSteps.length - 1; i >= 0; i--) {
     const step = clearedSteps[i];
     if (!step) continue;
@@ -82,15 +102,40 @@ export function trackTransaction(
 
     if (!stepIsTrackable(step)) continue;
 
+    const previousMapping = trContext.deletedNodeMapping.slice();
+    const replayStart = newTr.mapping.maps.length;
+    trackOneStep(i, step, emptyAttrs, tr, oldState, newTr, trContext);
+    trContext.deletedNodeMapping = advanceBridge(
+      step,
+      previousMapping,
+      newTr,
+      replayStart,
+    );
+  }
+
+  newTr = passThroughMeta(tr, newTr);
+  newTr = fixAndSetSelectionAfterTracking(newTr, tr, trContext);
+
+  return newTr;
+}
+
+function trackOneStep(
+  i: number,
+  step: Step,
+  emptyAttrs: NewEmptyAttrs,
+  tr: Transaction,
+  oldState: EditorState,
+  newTr: Transaction,
+  trContext: TrTrackingContext,
+) {
+  const deletedNodeMapping = trContext.deletedNodeMapping;
     if (step instanceof ReplaceStep) {
-      const previousMapping = deletedNodeMapping.slice();
-      const replayStart = newTr.steps.length;
       const { slice } = step;
       if (
         slice?.content?.content?.length === 1 &&
         excludeFromTracking(slice.content.content[0]!)
       ) {
-        continue;
+        return;
       }
 
       const [initialTrackedContent, newSelectionPos] = trackReplaceStep(
@@ -109,7 +154,7 @@ export function trackTransaction(
         if (
           excludeFromTracking(trackedStep?.node || trackedStep?.slice?.content?.content[0])
         ) {
-          continue;
+          return;
         }
       }
       trackedContent = diffChangeSteps(trackedContent);
@@ -128,15 +173,6 @@ export function trackTransaction(
         trContext.selectionPosFromInsertion =
           updatedSelectionPos || newSelectionPos || tr.selection.head;
       }
-      // Bridge the preceding source document into the replayed document.
-      const bridge = new Mapping([step.getMap()]);
-      bridge.appendMapping(previousMapping);
-      if (newTr.steps.length > replayStart) {
-        bridge.appendMap(newTr.mapping.maps[replayStart]!, 0);
-        for (let j = replayStart + 1; j < newTr.mapping.maps.length; j++) bridge.appendMap(newTr.mapping.maps[j]!);
-      }
-      deletedNodeMapping = bridge;
-      (trContext as TrTrackingContext & { deletedNodeMapping: Mapping }).deletedNodeMapping = bridge;
     } else if (step instanceof ReplaceAroundStep) {
       if (isSetNodeMarkupStep(step)) {
         const steps = trackSetNodeMarkupStep(step, newTr, emptyAttrs, tr.docs[i]!);
@@ -195,15 +231,4 @@ export function trackTransaction(
     } else if (step instanceof AddNodeMarkStep) {
       trackAddNodeMarkStep(step, emptyAttrs, newTr, tr.docs[i]!);
     }
-  }
-
-  newTr = passThroughMeta(tr, newTr);
-  newTr = fixAndSetSelectionAfterTracking(
-    newTr,
-    tr,
-    deletedNodeMapping,
-    trContext,
-  );
-
-  return newTr;
 }

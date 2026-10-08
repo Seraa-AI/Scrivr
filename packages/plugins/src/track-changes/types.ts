@@ -1,6 +1,6 @@
 import { Fragment, Mark, Node, NodeType, Slice } from "@scrivr/core/pm";
 import { PluginKey } from "@scrivr/core/pm";
-import { ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
+import { Mapping, ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
 
 import { getAction } from "./actions";
 import { ChangeSet } from "./ChangeSet";
@@ -228,6 +228,8 @@ export type TrTrackingContext = {
   action: ReturnType<typeof getAction>;
   stepsByGroupIDMap: Map<ReplaceStep, string>;
   selectionPosFromInsertion?: number;
+  /** Maps the source document the replay has reached into the replayed one. */
+  deletedNodeMapping: Mapping;
 };
 
 // ── ChangeStep variants ───────────────────────────────────────────────────────

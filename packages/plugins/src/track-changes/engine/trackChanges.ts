@@ -1,4 +1,4 @@
-import { EditorState, PluginKey, Transaction } from "@scrivr/core/pm";
+import { EditorState, Mapping, PluginKey, Transaction } from "@scrivr/core/pm";
 
 import { getAction, TrackChangesAction } from "../actions";
 import { processStepsBeforeTracking } from "./processStepsBeforeTracking";
@@ -76,6 +76,7 @@ export function trackChanges(
   const trContext: TrTrackingContext = {
     action,
     stepsByGroupIDMap: new Map(),
+    deletedNodeMapping: new Mapping(),
   };
 
   const clearedSteps = processStepsBeforeTracking(tx, trContext, [
