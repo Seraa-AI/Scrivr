@@ -10,9 +10,9 @@ import {
 import { ChangeSet } from "../ChangeSet";
 import { findChanges } from "../findChanges";
 import { trackChanges } from "./trackChanges";
-import type { TrackingResult } from "./trackChanges";
 import { fixInconsistentChanges } from "../lib/fixInconsistentChanges";
 import { TrackChangesOptions, TrackChangesStatus } from "../types";
+import type { TrackingResult } from "../types";
 import { trFromHistory } from "./transactionProcessing";
 import { closeDependentCreations } from "./composition";
 import { normalizeMoveShadows } from "./moveIdentity";
@@ -105,12 +105,10 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           const outcome = trackChanges(
             tx, createdTr, oldState, suggestionIntent(tx)?.authorID ?? userID, skipTrsWithMetas,
           );
-          if (outcome.kind === "tracked") {
-            createdTr = outcome.tr;
-            setAction(createdTr, TrackChangesAction.trackingResult, { status: "ready" });
-          } else if (outcome.kind === "refused") {
-            // Nothing was recorded, so there is no partial rewrite to publish —
-            // only the result the host decides on.
+          if (outcome.kind === "tracked") createdTr = outcome.tr;
+          // A refusal recorded nothing, so there is no partial rewrite to
+          // publish — only the result the host decides on.
+          if (outcome.kind !== "skipped") {
             setAction(createdTr, TrackChangesAction.trackingResult, outcome.result);
           }
         }

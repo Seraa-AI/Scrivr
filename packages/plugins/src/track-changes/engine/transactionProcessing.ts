@@ -1,7 +1,16 @@
 import { Node } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { isHistoryTransaction } from "@scrivr/core/pm";
-import { ReplaceStep, Step } from "@scrivr/core/pm";
+import {
+  AddMarkStep,
+  AddNodeMarkStep,
+  AttrStep,
+  RemoveMarkStep,
+  RemoveNodeMarkStep,
+  ReplaceAroundStep,
+  ReplaceStep,
+  Step,
+} from "@scrivr/core/pm";
 
 import { isIndentationAction, TrackChangesAction } from "../actions";
 import { genId } from "../helpers";
@@ -12,6 +21,7 @@ import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
   TrackedAttrs,
+  TrackingRefusal,
   TrTrackingContext,
 } from "../types";
 
@@ -70,38 +80,39 @@ export const excludeFromTracking = (node: Node) => {
 };
 
 /**
- * Upper bound on tracked steps per transaction for typical edits. Cut and
- * mass-replace are exempt because they legitimately produce large step counts.
+ * Step kinds the replay knows how to re-apply as tracked content. A kind that
+ * is not here would fall straight through the replay and land untracked, so the
+ * gesture is refused whole instead of recorded in part.
  */
-export const MAX_TRACKED_STEPS_PER_TR = 20;
-
-/**
- * The ceiling is knowable before the replay runs, so a gesture over it is
- * refused whole rather than recorded in part — a document holding an edit with
- * only some of it reviewable is worse than one holding an untracked edit the
- * host has been told about.
- */
-export function exceedsStepBudget(oldTr: Transaction, steps: readonly Step[]) {
-  return (
-    steps.length > MAX_TRACKED_STEPS_PER_TR &&
-    oldTr.getMeta("uiEvent") !== "cut" &&
-    !oldTr.getMeta("massSearchReplace")
-  );
+function refuseStep(step: Step): TrackingRefusal | null {
+  if (!(step instanceof ReplaceStep) && step.constructor.name === "ReplaceStep") {
+    // Two copies of prosemirror-transform make every instanceof silently false.
+    return { failure: "duplicate-transform-package" };
+  }
+  const trackable =
+    step instanceof ReplaceStep ||
+    step instanceof ReplaceAroundStep ||
+    step instanceof AttrStep ||
+    step instanceof AddMarkStep ||
+    step instanceof RemoveMarkStep ||
+    step instanceof AddNodeMarkStep ||
+    step instanceof RemoveNodeMarkStep;
+  return trackable
+    ? null
+    : { failure: "unsupported-step", stepType: step.constructor.name };
 }
 
 /**
- * Guards against two copies of prosemirror-transform, which makes every
- * `instanceof` check silently false and new steps unusable.
+ * Decided before the replay touches anything, so a gesture is either tracked in
+ * full or refused in full. Size is deliberately not consulted: what matters is
+ * whether every step can be represented, not how many there are.
  */
-export function stepIsTrackable(step: Step) {
-  if (!(step instanceof ReplaceStep) && step.constructor.name === "ReplaceStep") {
-    console.error(
-      "@scrivr/plugins track-changes: Multiple prosemirror-transform packages imported, alias/dedupe them " +
-        "or instanceof checks fail as well as creating new steps",
-    );
-    return false;
+export function planTracking(steps: readonly (Step | null)[]) {
+  for (const step of steps) {
+    const refusal = step && refuseStep(step);
+    if (refusal) return refusal;
   }
-  return true;
+  return null;
 }
 
 export const getMoveOperationsSteps = (

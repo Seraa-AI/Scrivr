@@ -50,6 +50,9 @@ export type {
   ReferenceChange,
   ChangeStep,
   IncompleteChange,
+  TrackingResult,
+  TrackingRefusal,
+  TrackingDiagnostics,
 } from "./types";
 
 // Rich (leaf-based) semantic edits → tracked suggestions. The write-side merge
@@ -60,5 +63,4 @@ export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";
 
 export { planChangeReview, changeEffect } from "./reviewPlan";
 export type { ReviewPlan, ReviewDependency, ChangeEffect } from "./reviewPlan";
-export { MAX_TRACKED_STEPS_PER_TR } from "./engine/transactionProcessing";
-export type { TrackingResult } from "./engine/trackChanges";
+

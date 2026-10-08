@@ -222,6 +222,25 @@ export interface TrackChangesState {
 
 // ── Transaction tracking context ──────────────────────────────────────────────
 
+/**
+ * What tracking did with a gesture. `refused` is the one outcome a host must act
+ * on: the edit stands in the document but nothing was recorded, so undoing it or
+ * warning the author is the host's call.
+ *
+ * Refusal means the gesture cannot be represented, never that it was big. Step
+ * count and elapsed time are diagnostics — a document-wide formatting command
+ * legitimately produces thousands of steps and must still be tracked in full.
+ */
+export type TrackingRefusal =
+  | { failure: "unsupported-step"; stepType: string }
+  | { failure: "duplicate-transform-package" };
+
+export type TrackingDiagnostics = { steps: number; elapsedMs: number };
+
+export type TrackingResult =
+  | ({ status: "ready" } & TrackingDiagnostics)
+  | ({ status: "refused" } & TrackingRefusal & TrackingDiagnostics);
+
 export type TrTrackingContext = {
   prevLiftStep?: ReplaceAroundStep;
   liftFragment?: Fragment;

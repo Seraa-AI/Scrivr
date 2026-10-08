@@ -16,7 +16,6 @@ import { processChangeSteps } from "./processReplaceStep";
 import {
   excludeFromTracking,
   passThroughMeta,
-  stepIsTrackable,
 } from "./transactionProcessing";
 import { createNewPendingAttrs, genId, getNodeTrackedData, NewEmptyAttrs } from "../helpers";
 import { fixAndSetSelectionAfterTracking } from "./fixAndSetSelectionAfterTracking";
@@ -99,8 +98,6 @@ export function trackTransaction(
     const step = clearedSteps[i];
     if (!step) continue;
     const emptyAttrs = compositionAttrs(tr.docs[i]!, step, baseAttrs);
-
-    if (!stepIsTrackable(step)) continue;
 
     const previousMapping = trContext.deletedNodeMapping.slice();
     const replayStart = newTr.mapping.maps.length;

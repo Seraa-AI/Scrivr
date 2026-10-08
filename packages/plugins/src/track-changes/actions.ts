@@ -1,8 +1,7 @@
-import type { TrackingResult } from "./engine/trackChanges";
 import type { ReviewPlan } from "./reviewPlan";
 import { Transaction } from "@scrivr/core/pm";
 
-import { CHANGE_STATUS, StructureAttrs, TrackChangesStatus } from "./types";
+import { CHANGE_STATUS, StructureAttrs, TrackChangesStatus, TrackingResult } from "./types";
 
 export enum TrackChangesAction {
   suggest = "track-changes-suggest",
