@@ -1,7 +1,7 @@
 import { Fragment, Node as PMNode, Schema } from "@scrivr/core/pm";
 import type { Transaction } from "@scrivr/core/pm";
 
-import { canCancelInsertion } from "./deletionPolicy";
+import { alreadyProposedForDeletion, canCancelInsertion } from "./deletionPolicy";
 import { addTrackIdIfDoesntExist, getMergeableMarkTrackedAttrs, NewDeleteAttrs } from "../helpers";
 
 /**
@@ -35,7 +35,8 @@ export function deleteTextIfInserted(
     return start;
   }
 
-  // ── Original grouping logic — unchanged ────────────────────────────────────
+  if (!deleteAttrs.moveNodeId && alreadyProposedForDeletion(node)) return end;
+
   const leftNode = newTr.doc.resolve(start).nodeBefore;
   const leftMarks = getMergeableMarkTrackedAttrs(leftNode, deleteAttrs, schema);
   const rightNode = newTr.doc.resolve(end).nodeAfter;

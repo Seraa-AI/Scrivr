@@ -1,7 +1,7 @@
 import { Fragment, Node as PMNode } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 
-import { canCancelInsertion } from "./deletionPolicy";
+import { alreadyProposedForDeletion, canCancelInsertion } from "./deletionPolicy";
 import { dropStructuralChangeShadow } from "./structuralChange";
 import { addTrackIdIfDoesntExist, getBlockInlineTrackedData, NewDeleteAttrs } from "../helpers";
 import { CHANGE_OPERATION } from "../types";
@@ -37,6 +37,8 @@ export function deleteOrSetNodeDeleted(
     newTr.delete(pos, pos + node.nodeSize);
     return true;
   }
+
+  if (!deleteAttrs.moveNodeId && alreadyProposedForDeletion(node)) return false;
 
   if (!newTr.doc.nodeAt(pos)) {
     console.error("deleteOrSetNodeDeleted: no node found for deletion", { pos, node, newTr });

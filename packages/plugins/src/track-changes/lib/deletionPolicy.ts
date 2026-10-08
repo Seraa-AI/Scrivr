@@ -14,6 +14,21 @@ function records(node: Node): Partial<TrackedAttrs>[] {
 }
 
 /**
+ * Already-struck content is already proposed for deletion, so deleting it again
+ * proposes nothing. Stacking a second record leaves the reviewer two identical
+ * cards that are each other's dependency, resolvable from neither. A move shadow
+ * carries a moveNodeId and is a separate record.
+ */
+export function alreadyProposedForDeletion(node: Node): boolean {
+  return records(node).some(
+    record =>
+      record.operation === CHANGE_OPERATION.delete &&
+      record.status === CHANGE_STATUS.pending &&
+      !record.moveNodeId,
+  );
+}
+
+/**
  * A deletion can cancel one's own pending insertion only while it owns all
  * pending work it would erase. Shared by text and structural writers; storage
  * shape and mark ordering must not change the authorship rule.
