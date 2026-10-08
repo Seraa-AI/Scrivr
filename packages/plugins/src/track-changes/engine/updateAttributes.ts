@@ -5,6 +5,7 @@ import { Mapping } from "@scrivr/core/pm";
 import { ChangeSet } from "../ChangeSet";
 import {
   getBlockInlineTrackedData,
+  excludeFromTracked,
 } from "../helpers";
 import {
   CHANGE_OPERATION,
@@ -172,13 +173,13 @@ export function updateChangeChildrenAttributes(
   mapping: Mapping,
 ) {
   changes.forEach(c => {
-    if (c.type === "node-change" && !ChangeSet.shouldDeleteChange(c)) {
+    if (c.type === "node-change" && c.dataTracked.status !== CHANGE_STATUS.pending && !ChangeSet.shouldDeleteChange(c)) {
       const from = mapping.map(c.from);
       const node = tr.doc.nodeAt(from);
       if (!node) {
         return;
       }
-      const attrs = { ...node.attrs, dataTracked: null };
+      const attrs = { ...node.attrs, dataTracked: excludeFromTracked(node.attrs.dataTracked, c.id) };
       tr.setNodeMarkup(from, undefined, attrs, node.marks);
     }
   });

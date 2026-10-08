@@ -1,3 +1,5 @@
+import type { TrackingResult } from "./engine/trackChanges";
+import type { ReviewPlan } from "./reviewPlan";
 import { Transaction } from "@scrivr/core/pm";
 
 import { CHANGE_STATUS, StructureAttrs, TrackChangesStatus } from "./types";
@@ -8,6 +10,8 @@ export enum TrackChangesAction {
   setUserID = "track-changes-set-user-id",
   setPluginStatus = "track-changes-set-track-status",
   setChangeStatuses = "track-changes-set-change-statuses",
+  reviewResult = "track-changes-review-result",
+  trackingResult = "track-changes-tracking-result",
   refreshChanges = "track-changes-refresh-changes",
   updateMetaNode = "track-changes-update-meta-node",
   structuralChangeAction = "track-changes-structural-change-action",
@@ -23,6 +27,8 @@ export type TrackChangesActionParams = {
     status: CHANGE_STATUS;
     ids: string[];
   };
+  [TrackChangesAction.reviewResult]: ReviewPlan;
+  [TrackChangesAction.trackingResult]: TrackingResult;
   [TrackChangesAction.refreshChanges]: boolean;
   [TrackChangesAction.updateMetaNode]: boolean;
   [TrackChangesAction.structuralChangeAction]: StructureAttrs["action"];

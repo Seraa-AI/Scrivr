@@ -10,12 +10,20 @@ import {
 import { ChangeSet } from "../ChangeSet";
 import { findChanges } from "../findChanges";
 import { trackChanges } from "./trackChanges";
+import type { TrackingResult } from "./trackChanges";
 import { fixInconsistentChanges } from "../lib/fixInconsistentChanges";
 import { TrackChangesOptions, TrackChangesStatus } from "../types";
 import { trFromHistory } from "./transactionProcessing";
+import { closeDependentCreations } from "./composition";
+import { normalizeMoveShadows } from "./moveIdentity";
 import { updateChangesStatus } from "./updateChangesStatus";
 
+import type { ReviewPlan } from "../reviewPlan";
+
 interface TrackChangesPluginState {
+  lastReview: ReviewPlan | null;
+  /** Outcome of the most recent tracked gesture; `refused` needs host action. */
+  lastTracking: TrackingResult | null;
   status: TrackChangesStatus;
   changeSet: ChangeSet;
   userID: string;
@@ -29,7 +37,7 @@ export const trackChangesPluginKey = new PluginKey<TrackChangesPluginState>(
 export const trackChangesPlugin = (options: TrackChangesOptions) => {
   const { userID, skipTrsWithMetas = [], canAcceptReject = true } = options;
 
-  return new Plugin({
+  return new Plugin<TrackChangesPluginState>({
     key: trackChangesPluginKey,
     props: {
       editable: (state: EditorState) =>
@@ -83,7 +91,7 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
         );
         if (setsChangeStatus && pluginState.canAcceptReject) {
           const { status, ids } = setsChangeStatus;
-          updateChangesStatus(
+          const review = updateChangesStatus(
             createdTr,
             changeSet,
             ids,
@@ -91,14 +99,27 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
             userID,
             oldState,
           );
+          if (review) setAction(createdTr, TrackChangesAction.reviewResult, review);
           docChanged = true;
         } else if (!shouldSkipTracking || suggestionIntent(tx)) {
-          createdTr =
-            trackChanges(tx, createdTr, oldState, suggestionIntent(tx)?.authorID ?? userID, skipTrsWithMetas) ??
-            createdTr;
+          const outcome = trackChanges(
+            tx, createdTr, oldState, suggestionIntent(tx)?.authorID ?? userID, skipTrsWithMetas,
+          );
+          if (outcome.kind === "tracked") {
+            createdTr = outcome.tr;
+            setAction(createdTr, TrackChangesAction.trackingResult, { status: "ready" });
+          } else if (outcome.kind === "refused") {
+            // Nothing was recorded, so there is no partial rewrite to publish —
+            // only the result the host decides on.
+            setAction(createdTr, TrackChangesAction.trackingResult, outcome.result);
+          }
         }
         docChanged = docChanged || tx.docChanged;
       });
+      if (createdTr.docChanged) {
+        normalizeMoveShadows(createdTr);
+        closeDependentCreations(createdTr);
+      }
       const changed =
         pluginState.changeSet.hasInconsistentData &&
         fixInconsistentChanges(
@@ -119,6 +140,8 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
     state: {
       init: (_config, state: EditorState) => {
         return {
+          lastReview: null,
+          lastTracking: null,
           status: options.initialStatus || TrackChangesStatus.enabled,
           userID,
           changeSet: findChanges(state),
@@ -129,6 +152,10 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
         if (!tr.docChanged && !hasAction(tr)) {
           return pluginState;
         }
+        const review = getAction(tr, TrackChangesAction.reviewResult);
+        if (review) return { ...pluginState, lastReview: review, changeSet: findChanges(newState) };
+        const tracking = getAction(tr, TrackChangesAction.trackingResult);
+        if (tracking) return { ...pluginState, lastTracking: tracking, changeSet: findChanges(newState) };
         const setUserID = getAction(tr, TrackChangesAction.setUserID);
         const setStatus = getAction(tr, TrackChangesAction.setPluginStatus);
         if (setUserID) {

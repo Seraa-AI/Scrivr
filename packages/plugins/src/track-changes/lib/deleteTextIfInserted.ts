@@ -1,6 +1,7 @@
 import { Fragment, Node as PMNode, Schema } from "@scrivr/core/pm";
 import type { Transaction } from "@scrivr/core/pm";
 
+import { canCancelInsertion } from "./deletionPolicy";
 import { addTrackIdIfDoesntExist, getMergeableMarkTrackedAttrs, NewDeleteAttrs } from "../helpers";
 
 /**
@@ -23,24 +24,15 @@ export function deleteTextIfInserted(
   deleteAttrs: NewDeleteAttrs,
   from?: number,
   to?: number,
+  allowCancellation = true,
 ) {
-  const start = from ? Math.max(pos, from) : pos;
+  const start = from !== undefined ? Math.max(pos, from) : pos;
   const nodeEnd = pos + node.nodeSize;
-  const end = to ? Math.min(nodeEnd, to) : nodeEnd;
+  const end = to !== undefined ? Math.min(nodeEnd, to) : nodeEnd;
 
-  const insertMark = node.marks.find(m => m.type === schema.marks.trackedInsert);
-  if (insertMark) {
-    const insertAuthorID = (insertMark.attrs.dataTracked as { authorID?: string } | null)
-      ?.authorID;
-
-    if (insertAuthorID === deleteAttrs.authorID) {
-      // Same author cancelling their own insertion → remove the text outright.
-      newTr.replaceWith(start, end, Fragment.empty);
-      return start;
-    }
-    // Different author's insert: fall through so we apply trackedDelete on top.
-    // findChanges will compute isConflict when it sees overlapping ranges from
-    // different authors — no mark mutation needed here.
+  if (allowCancellation && canCancelInsertion(node, deleteAttrs.authorID)) {
+    newTr.replaceWith(start, end, Fragment.empty);
+    return start;
   }
 
   // ── Original grouping logic — unchanged ────────────────────────────────────

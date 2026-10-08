@@ -1,9 +1,10 @@
 import { Fragment, Node as PMNode } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 
+import { canCancelInsertion } from "./deletionPolicy";
 import { dropStructuralChangeShadow } from "./structuralChange";
 import { addTrackIdIfDoesntExist, getBlockInlineTrackedData, NewDeleteAttrs } from "../helpers";
-import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
+import { CHANGE_OPERATION } from "../types";
 
 /** Deletes node but tries to leave content intact by merging upward first. */
 export function deleteNode(node: PMNode, pos: number, tr: Transaction) {
@@ -16,42 +17,30 @@ export function deleteNode(node: PMNode, pos: number, tr: Transaction) {
   return tr.delete(pos, pos + node.nodeSize);
 }
 
-/** Deletes an inserted node immediately (same author); otherwise marks it as deleted via dataTracked. */
+/** Apply the shared ownership policy. Returns true only when the node was removed. */
 export function deleteOrSetNodeDeleted(
   node: PMNode,
   pos: number,
   newTr: Transaction,
   deleteAttrs: NewDeleteAttrs,
+  allowCancellation = true,
 ) {
   const dataTracked = getBlockInlineTrackedData(node);
-  const inserted = dataTracked?.find(
-    d =>
-      (d.operation === CHANGE_OPERATION.insert || d.operation === CHANGE_OPERATION.wrap_with_node) &&
-      (d.status === CHANGE_STATUS.pending || d.status === CHANGE_STATUS.accepted),
-  );
-  const updated = dataTracked?.find(
-    d =>
-      d.operation === CHANGE_OPERATION.set_node_attributes ||
-      d.operation === CHANGE_OPERATION.reference ||
-      (d.operation === CHANGE_OPERATION.delete && d.moveNodeId),
-  );
   const structure = dataTracked?.find(c => c.operation === CHANGE_OPERATION.structure);
 
   if (deleteAttrs.moveNodeId && structure && structure.moveNodeId !== deleteAttrs.moveNodeId) {
-    return newTr.delete(pos, pos + node.nodeSize);
+    newTr.delete(pos, pos + node.nodeSize);
+    return true;
   }
 
-  const moved = dataTracked?.find(
-    d => d.operation === CHANGE_OPERATION.move && d.status === CHANGE_STATUS.pending,
-  );
-
-  if (inserted) {
-    return deleteNode(node, pos, newTr);
+  if (!deleteAttrs.moveNodeId && allowCancellation && canCancelInsertion(node, deleteAttrs.authorID)) {
+    newTr.delete(pos, pos + node.nodeSize);
+    return true;
   }
 
   if (!newTr.doc.nodeAt(pos)) {
     console.error("deleteOrSetNodeDeleted: no node found for deletion", { pos, node, newTr });
-    return;
+    return false;
   }
 
   const newDeleted = addTrackIdIfDoesntExist(deleteAttrs);
@@ -60,7 +49,7 @@ export function deleteOrSetNodeDeleted(
     undefined,
     {
       ...node.attrs,
-      dataTracked: updated ? [newDeleted, updated] : moved ? [newDeleted, moved] : [newDeleted],
+      dataTracked: [...(dataTracked ?? []), newDeleted],
     },
     node.marks,
   );
@@ -68,14 +57,5 @@ export function deleteOrSetNodeDeleted(
   if (!deleteAttrs.moveNodeId && structure?.moveNodeId) {
     dropStructuralChangeShadow(structure.moveNodeId, newTr);
   }
+  return false;
 }
-
-/** Keeps changes that are paired with other changes (delete with moveNodeId, reference). */
-export const keepPairedChanges = (node: PMNode) => {
-  const dataTracked = getBlockInlineTrackedData(node)?.filter(
-    c =>
-      (c.operation === CHANGE_OPERATION.delete && c.moveNodeId) ||
-      c.operation === CHANGE_OPERATION.reference,
-  );
-  return dataTracked?.length ? dataTracked : null;
-};

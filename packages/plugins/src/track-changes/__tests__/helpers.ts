@@ -65,6 +65,17 @@ export const schema = new Schema({
         nodeId:      { default: null },
       },
     },
+    // Forbids marks, like core's codeBlock — the schema's say in which
+    // representation a tracked change may use.
+    code_block: {
+      group: "block",
+      content: "text*",
+      marks: "",
+      attrs: {
+        dataTracked: { default: null },
+        nodeId:      { default: null },
+      },
+    },
     text: { group: "inline" },
   },
   marks: {
@@ -102,6 +113,10 @@ export function h(level: number, text: string, attrs?: Record<string, unknown>) 
 
 export function doc(...nodes: PmNode[]) {
   return schema.nodes.doc.create(null, nodes);
+}
+
+export function code(text: string) {
+  return schema.nodes.code_block!.create(null, text ? schema.text(text) : undefined);
 }
 
 export function li(text: string) {

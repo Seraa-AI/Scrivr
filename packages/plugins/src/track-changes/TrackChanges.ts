@@ -6,6 +6,7 @@ import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs } from "./helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus } from "./types";
+import { planChangeReview } from "./reviewPlan";
 import { cloneTrackedChanges } from "./cloneTrackedChanges";
 
 declare module "@scrivr/core" {
@@ -211,7 +212,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         (status: CHANGE_STATUS, ids: string[]) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           const pluginState = trackChangesPluginKey.getState(state);
-          if (!pluginState?.canAcceptReject) return false;
+          if (!pluginState?.canAcceptReject || status === CHANGE_STATUS.pending) return false;
+          if (planChangeReview(pluginState.changeSet, status, ids).status === "blocked") return false;
 
           dispatch?.(
             setAction(state.tr, TrackChangesAction.setChangeStatuses, {

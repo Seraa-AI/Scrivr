@@ -1,81 +1,77 @@
-import { EditorState, Transaction } from "@scrivr/core/pm";
-
+import { EditorState, Mapping, type Transaction } from "@scrivr/core/pm";
+import { findChanges } from "../findChanges";
 import { ChangeSet } from "../ChangeSet";
-import {
-  CHANGE_OPERATION,
-  CHANGE_STATUS,
-  TextChange,
-  TrackedChange,
-} from "../types";
+import { CHANGE_STATUS, type TrackedChange } from "../types";
 import { dropOrphanChanges } from "../lib/structuralChange";
 import { applyChanges } from "../applyChanges";
+import { planChangeReview } from "../reviewPlan";
 
+/** Plan first, evaluate on a private transaction, then publish the whole result. */
 export function updateChangesStatus(
   createdTr: Transaction,
   changeSet: ChangeSet,
   ids: string[],
   status: CHANGE_STATUS,
   userID: string,
-  oldState: EditorState,
+  _oldState: EditorState,
 ) {
-  const change = changeSet.get(ids[0]!);
-  const changeTime = new Date().getTime();
-
-  if (change && status !== CHANGE_STATUS.pending) {
-    const textChanges: TextChange[] = [];
-    const nonTextChanges: TrackedChange[] = [];
-
-    changeSet.changes.forEach(c => {
-      if (ids.includes(c.id)) {
-        c.dataTracked.status = status;
-        if (ChangeSet.isTextChange(c)) {
-          textChanges.push(c);
-        } else {
-          nonTextChanges.push(c);
-
-          if (c.dataTracked.operation === CHANGE_OPERATION.node_split) {
-            const relatedRefChange = changeSet.changes.find(
-              c =>
-                c.dataTracked.operation === "reference" &&
-                c.dataTracked.referenceId === change.id,
-            );
-            if (relatedRefChange) {
-              nonTextChanges.push(relatedRefChange);
-            }
-          }
-          if (c.dataTracked.operation === CHANGE_OPERATION.move) {
-            const oldChange = changeSet.changeTree.find(
-              c =>
-                ChangeSet.isNodeChange(c) &&
-                c.dataTracked.operation === "delete" &&
-                c.dataTracked.moveNodeId === change.dataTracked.moveNodeId,
-            );
-
-            if (oldChange && ChangeSet.isNodeChange(oldChange)) {
-              oldChange.children.forEach(child => {
-                if (ChangeSet.isTextChange(child)) {
-                  textChanges.push(child);
-                } else {
-                  nonTextChanges.push(child);
-                }
-              });
-
-              nonTextChanges.push(oldChange);
-            }
-          }
-        }
+  if (status === CHANGE_STATUS.pending) return;
+  const plan = planChangeReview(changeSet, status, ids);
+  if (plan.status === "blocked") return plan;
+  const selected = new Set(plan.ids);
+  // Review must not mutate cached ChangeSet records or partially publish steps.
+  const reviewed = changeSet.changes.map(change => ({ ...change,
+    dataTracked: selected.has(change.id)
+      ? { ...change.dataTracked, status, reviewedByID: userID, statusUpdateAt: Date.now() }
+      : { ...change.dataTracked },
+  })) as TrackedChange[];
+  const snapshot = new ChangeSet(reviewed);
+  const changes = reviewed.filter(change => selected.has(change.id));
+  const scratch = EditorState.create({ doc: createdTr.doc }).tr;
+  try {
+    const placements = changes.filter(change => change.dataTracked.operation === "move");
+    const ordinary = changes.filter(change => change.dataTracked.operation !== "move");
+    const ordered: TrackedChange[] = [];
+    const visited = new Set<string>();
+    const visit = (change: TrackedChange) => {
+      if (visited.has(change.id)) return;
+      visited.add(change.id);
+      for (const id of change.dataTracked.placementDependsOn ?? []) {
+        const parent = placements.find(other => other.id === id);
+        if (parent) visit(parent);
       }
-    });
-
-    const mapping = applyChanges(
-      createdTr,
-      oldState.schema,
-      nonTextChanges,
-      changeSet,
-    );
-    applyChanges(createdTr, oldState.schema, textChanges, changeSet, mapping);
-    dropOrphanChanges(createdTr);
-  } else {
-    return;
+      ordered.push(change);
+    };
+    placements.forEach(visit);
+    if (status === CHANGE_STATUS.rejected) ordered.reverse();
+    // Restore placement before destructive review of a dependent creation.
+    // Re-read identities afterward: transport cannot be mapped as a plain deletion.
+    if (status === CHANGE_STATUS.rejected) {
+      const placementMapping = new Mapping();
+      for (const change of ordered) applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, placementMapping);
+    }
+    const current = status === CHANGE_STATUS.rejected
+      ? new ChangeSet(findChanges(EditorState.create({ doc: scratch.doc })).changes.map(change => ({
+          ...change,
+          dataTracked: selected.has(change.id)
+            ? { ...change.dataTracked, status, reviewedByID: userID, statusUpdateAt: Date.now() }
+            : { ...change.dataTracked },
+        })) as TrackedChange[])
+      : snapshot;
+    const ordinaryIds = new Set(ordinary.map(change => change.id));
+    const remaining = current.changes.filter(change => ordinaryIds.has(change.id));
+    const mapping = applyChanges(scratch, scratch.doc.type.schema,
+      remaining.filter(change => !ChangeSet.isTextChange(change)), current);
+    applyChanges(scratch, scratch.doc.type.schema,
+      remaining.filter(ChangeSet.isTextChange), current, mapping);
+    if (status === CHANGE_STATUS.accepted) {
+      for (const change of ordered) applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, mapping);
+    }
+    dropOrphanChanges(scratch);
+    scratch.doc.check();
+  } catch {
+    return { ...plan, status: "blocked" as const, failure: "invalid-review-result" as const };
   }
+  for (const step of scratch.steps) createdTr.step(step);
+  return plan;
 }

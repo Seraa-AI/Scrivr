@@ -57,3 +57,8 @@ export type {
 export { applyRichDiffAsSuggestion, pickAgentAttrs } from "./lib/applyRichDiffAsSuggestion";
 export type { RichBlockEdit, RichDiffOptions, RichDiffResult } from "./lib/applyRichDiffAsSuggestion";
 export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";
+
+export { planChangeReview, changeEffect } from "./reviewPlan";
+export type { ReviewPlan, ReviewDependency, ChangeEffect } from "./reviewPlan";
+export { MAX_TRACKED_STEPS_PER_TR } from "./engine/transactionProcessing";
+export type { TrackingResult } from "./engine/trackChanges";

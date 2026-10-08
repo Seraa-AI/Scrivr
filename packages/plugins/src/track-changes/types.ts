@@ -71,6 +71,14 @@ type InsertDeleteAttrs = {
    * as a single atomic operation.
    */
   groupId?: string;
+  /** Representation records belonging to one pending creation. */
+  creationId?: string;
+  /** Independent intents whose targets exist because of these creations. */
+  dependsOn?: string[];
+  /** Persistent: independent work has depended on this creation. */
+  foldingClosed?: boolean;
+  /** A later placement is based on these still-pending placement decisions. */
+  placementDependsOn?: string[];
 };
 
 export type UpdateAttrs = Omit<InsertDeleteAttrs, "operation"> & {

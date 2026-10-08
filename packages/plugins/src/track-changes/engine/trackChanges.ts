@@ -4,13 +4,29 @@ import { getAction, TrackChangesAction } from "../actions";
 import { processStepsBeforeTracking } from "./processStepsBeforeTracking";
 import {
   changeMovedToInsertsOnSourceDeletion,
+  exceedsStepBudget,
   filterMeaninglessMoveSteps,
   getIndentationOperationSteps,
   getMoveOperationsSteps,
+  MAX_TRACKED_STEPS_PER_TR,
   trFromHistory,
 } from "./transactionProcessing";
 import { TrTrackingContext } from "../types";
 import { trackTransaction } from "./trackTransaction";
+
+/**
+ * What tracking did with a transaction. `refused` is the one outcome a host has
+ * to act on: the edit stands in the document but no part of it was recorded, so
+ * undoing it or warning the author is the host's call, not the engine's.
+ */
+export type TrackingResult =
+  | { status: "ready" }
+  | { status: "refused"; failure: "step-budget-exceeded"; steps: number; limit: number };
+
+export type TrackingOutcome =
+  | { kind: "skipped" }
+  | { kind: "tracked"; tr: Transaction }
+  | { kind: "refused"; result: Extract<TrackingResult, { status: "refused" }> };
 
 export function trackChanges(
   tx: Transaction,
@@ -52,7 +68,7 @@ export function trackChanges(
     isPaginationChange ||
     (wasAppended && tx.getMeta("origin") === "paragraphs")
   ) {
-    return null;
+    return { kind: "skipped" } as const;
   }
 
   const indentationAction = getAction(tx, TrackChangesAction.indentationAction);
@@ -68,13 +84,21 @@ export function trackChanges(
     filterMeaninglessMoveSteps,
   ]);
 
+  if (exceedsStepBudget(tx, clearedSteps)) {
+    return {
+      kind: "refused",
+      result: {
+        status: "refused",
+        failure: "step-budget-exceeded",
+        steps: clearedSteps.length,
+        limit: MAX_TRACKED_STEPS_PER_TR,
+      },
+    } as const;
+  }
+
   changeMovedToInsertsOnSourceDeletion(tx, createdTr, trContext);
-  return trackTransaction(
-    tx,
-    oldState,
-    createdTr,
-    userID,
-    clearedSteps,
-    trContext,
-  );
+  return {
+    kind: "tracked",
+    tr: trackTransaction(tx, oldState, createdTr, userID, clearedSteps, trContext),
+  } as const;
 }

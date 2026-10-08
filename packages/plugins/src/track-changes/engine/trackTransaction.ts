@@ -15,8 +15,8 @@ import { TrTrackingContext } from "../types";
 import { processChangeSteps } from "./processReplaceStep";
 import {
   excludeFromTracking,
-  iterationIsValid,
   passThroughMeta,
+  stepIsTrackable,
 } from "./transactionProcessing";
 import { createNewPendingAttrs, genId, getNodeTrackedData } from "../helpers";
 import { fixAndSetSelectionAfterTracking } from "./fixAndSetSelectionAfterTracking";
@@ -33,8 +33,25 @@ import {
   trackRemoveMarkStep,
   trackRemoveNodeMarkStep,
 } from "../step-trackers/trackRemoveMarkStep";
+import { compositionAttrs } from "./composition";
 import { trackReplaceStep } from "../step-trackers/trackReplaceStep";
 
+
+/**
+ * Did this step leave the caret where the gesture ended? A step's positions
+ * belong to the document it applied to, so its result range has to be carried
+ * forward through the steps that followed before it can be compared with the
+ * selection — without that, the two are read in different frames and only
+ * happen to agree for a lone step.
+ */
+function stepProducedSelection(tr: Transaction, i: number, step: ReplaceStep) {
+  const forward = tr.mapping.slice(i + 1);
+  const head = tr.selection.head;
+  return (
+    forward.map(step.from, -1) <= head &&
+    head <= forward.map(step.from + step.slice.size, 1)
+  );
+}
 
 export function trackTransaction(
   tr: Transaction,
@@ -52,22 +69,22 @@ export function trackTransaction(
     return newTr;
   }
 
-  const emptyAttrs = createNewPendingAttrs(tr.time, authorID);
+  const baseAttrs = createNewPendingAttrs(tr.time, authorID);
 
-  const deletedNodeMapping = new Mapping();
+  let deletedNodeMapping = new Mapping();
   trContext = { ...trContext, deletedNodeMapping } as TrTrackingContext & {
     deletedNodeMapping: Mapping;
   };
-  let iterations = 0;
-
   for (let i = clearedSteps.length - 1; i >= 0; i--) {
     const step = clearedSteps[i];
     if (!step) continue;
+    const emptyAttrs = compositionAttrs(tr.docs[i]!, step, baseAttrs);
 
-    iterations++;
-    if (!iterationIsValid(iterations, tr, newTr, step)) continue;
+    if (!stepIsTrackable(step)) continue;
 
     if (step instanceof ReplaceStep) {
+      const previousMapping = deletedNodeMapping.slice();
+      const replayStart = newTr.steps.length;
       const { slice } = step;
       if (
         slice?.content?.content?.length === 1 &&
@@ -107,18 +124,19 @@ export function trackTransaction(
         deletedNodeMapping,
       );
 
-      const finalPos =
-        updatedSelectionPos || newSelectionPos || tr.selection.head;
-      const userSelectionPos = tr.selection.head;
-      const stepOverlapsSelection =
-        (step.from <= userSelectionPos && userSelectionPos <= step.to) ||
-        Math.abs(step.from - userSelectionPos) < 5;
-
-      if (stepOverlapsSelection) {
-        trContext.selectionPosFromInsertion = finalPos;
-      } else if (trContext.selectionPosFromInsertion === undefined) {
-        trContext.selectionPosFromInsertion = userSelectionPos;
+      if (stepProducedSelection(tr, i, step)) {
+        trContext.selectionPosFromInsertion =
+          updatedSelectionPos || newSelectionPos || tr.selection.head;
       }
+      // Bridge the preceding source document into the replayed document.
+      const bridge = new Mapping([step.getMap()]);
+      bridge.appendMapping(previousMapping);
+      if (newTr.steps.length > replayStart) {
+        bridge.appendMap(newTr.mapping.maps[replayStart]!, 0);
+        for (let j = replayStart + 1; j < newTr.mapping.maps.length; j++) bridge.appendMap(newTr.mapping.maps[j]!);
+      }
+      deletedNodeMapping = bridge;
+      (trContext as TrTrackingContext & { deletedNodeMapping: Mapping }).deletedNodeMapping = bridge;
     } else if (step instanceof ReplaceAroundStep) {
       if (isSetNodeMarkupStep(step)) {
         const steps = trackSetNodeMarkupStep(step, newTr, emptyAttrs, tr.docs[i]!);

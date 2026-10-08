@@ -6,7 +6,9 @@ import { revertSplitNodeChange, revertWrapNodeChange } from "./lib/revertChanges
 import { restoreNode, updateChangeChildrenAttributes } from "./engine/updateAttributes";
 import { ChangeSet } from "./ChangeSet";
 import { excludeFromTracked } from "./helpers";
-import { deleteNode, keepPairedChanges } from "./lib/deleteNode";
+import { deleteNode } from "./lib/deleteNode";
+import { clearTextChange } from "./lib/clearTextChange";
+import { rejectMove } from "./engine/moveIdentity";
 import { mergeNode } from "./lib/mergeNode";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs, TrackedChange, UpdateAttrs } from "./types";
 
@@ -77,17 +79,15 @@ export function applyChanges(
     }
 
     if (ChangeSet.isTextChange(change) && noChangeNeeded) {
-      tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedInsert);
-      tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedDelete);
+      clearTextChange(tr, from, deleteMap.map(change.to), change.id);
     } else if (ChangeSet.isTextChange(change)) {
       tr.delete(from, deleteMap.map(change.to));
       deleteMap.appendMap(tr.steps[tr.steps.length - 1]!.getMap());
     } else if (ChangeSet.isNodeChange(change) && noChangeNeeded) {
-      const attrs = { ...node.attrs, dataTracked: keepPairedChanges(node) };
+      const attrs = { ...node.attrs, dataTracked: excludeFromTracked(node.attrs.dataTracked, change.id) };
       tr.setNodeMarkup(from, undefined, attrs, node.marks);
       if (node.isAtom) {
-        tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedInsert);
-        tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedDelete);
+        clearTextChange(tr, from, deleteMap.map(change.to), change.id);
       }
       updateChangeChildrenAttributes(change.children, tr, deleteMap);
     } else if (ChangeSet.isNodeChange(change)) {
@@ -140,6 +140,12 @@ export function applyChanges(
       change.dataTracked.operation !== CHANGE_OPERATION.move &&
       change.dataTracked.operation !== CHANGE_OPERATION.structure
     ) return;
+
+    if (change.type === "node-change" && change.dataTracked.operation === CHANGE_OPERATION.move &&
+        change.dataTracked.status === CHANGE_STATUS.rejected) {
+      rejectMove(tr, change, deleteMap);
+      return;
+    }
 
     const { pos: from, deleted } = deleteMap.mapResult(change.from);
     const node = tr.doc.nodeAt(from);

@@ -4,10 +4,8 @@ import { isHistoryTransaction } from "@scrivr/core/pm";
 import { ReplaceStep, Step } from "@scrivr/core/pm";
 
 import { isIndentationAction, TrackChangesAction } from "../actions";
-import { ChangeSet } from "../ChangeSet";
 import { genId } from "../helpers";
 import {
-  isDeletingPendingMovedNode,
   isDirectPendingMoveDeletion,
 } from "../step-trackers/qualifiers";
 import {
@@ -72,33 +70,31 @@ export const excludeFromTracking = (node: Node) => {
 };
 
 /**
- * Upper bound on tracked steps per transaction for typical edits.
- * Cut operations and mass-replace bypass this limit because they legitimately
- * generate large step counts. If a normal edit exceeds this limit it most
- * likely indicates a loop or unsupported step type — tracking is skipped and
- * an error is logged so the issue can be reproduced and reported.
+ * Upper bound on tracked steps per transaction for typical edits. Cut and
+ * mass-replace are exempt because they legitimately produce large step counts.
  */
-const MAX_TRACKED_STEPS_PER_TR = 20;
+export const MAX_TRACKED_STEPS_PER_TR = 20;
 
-export function iterationIsValid(
-  iterations: number,
-  oldTr: Transaction,
-  newTr: Transaction,
-  step: Step,
-) {
-  const uiEvent = oldTr.getMeta("uiEvent");
-  const isMassReplace = oldTr.getMeta("massSearchReplace");
-  if (iterations > MAX_TRACKED_STEPS_PER_TR && uiEvent != "cut" && !isMassReplace) {
-    console.error(
-      "@scrivr/plugins track-changes: Possible infinite loop in iterating tr.steps, tracking skipped!\n" +
-        "This is probably an error with the library, please report back to maintainers with a reproduction if possible",
-      newTr,
-    );
-    return false;
-  } else if (
-    !(step instanceof ReplaceStep) &&
-    step.constructor.name === "ReplaceStep"
-  ) {
+/**
+ * The ceiling is knowable before the replay runs, so a gesture over it is
+ * refused whole rather than recorded in part — a document holding an edit with
+ * only some of it reviewable is worse than one holding an untracked edit the
+ * host has been told about.
+ */
+export function exceedsStepBudget(oldTr: Transaction, steps: readonly Step[]) {
+  return (
+    steps.length > MAX_TRACKED_STEPS_PER_TR &&
+    oldTr.getMeta("uiEvent") !== "cut" &&
+    !oldTr.getMeta("massSearchReplace")
+  );
+}
+
+/**
+ * Guards against two copies of prosemirror-transform, which makes every
+ * `instanceof` check silently false and new steps unusable.
+ */
+export function stepIsTrackable(step: Step) {
+  if (!(step instanceof ReplaceStep) && step.constructor.name === "ReplaceStep") {
     console.error(
       "@scrivr/plugins track-changes: Multiple prosemirror-transform packages imported, alias/dedupe them " +
         "or instanceof checks fail as well as creating new steps",
@@ -202,51 +198,9 @@ export const filterMeaninglessMoveSteps = (
   tr: Transaction,
   context: TrTrackingContext,
 ) => {
-  const cleanSteps: Array<Step | null> = [];
-
-  for (let i = 0; i < tr.steps.length; i++) {
-    const step = tr.steps[i];
-    const moveID = context.stepsByGroupIDMap.get(step as ReplaceStep);
-
-    if (moveID) {
-      const prevMoveID = isDeletingPendingMovedNode(
-        step as ReplaceStep,
-        tr.docs[i]!,
-      );
-      if (prevMoveID) {
-        context.stepsByGroupIDMap.forEach((replaceStepMoveID, replaceStep) => {
-          if (replaceStep !== step && moveID === replaceStepMoveID) {
-            context.stepsByGroupIDMap.set(replaceStep, prevMoveID);
-          }
-        });
-        cleanSteps.push(null);
-        continue;
-      }
-
-      if (
-        step instanceof ReplaceStep &&
-        !tr.getMeta(TrackChangesAction.structuralChangeAction)
-      ) {
-        const { slice } = step;
-        if (slice?.content?.firstChild) {
-          const insertedNode = slice.content.firstChild;
-          if (insertedNode.attrs.dataTracked) {
-            const isPendingInsert = ChangeSet.isPendingChange(
-              insertedNode.attrs.dataTracked as TrackedAttrs[],
-              CHANGE_OPERATION.insert,
-            );
-            if (isPendingInsert) {
-              cleanSteps.push(null);
-              continue;
-            }
-          }
-        }
-      }
-    }
-
-    cleanSteps.push(step || null);
-  }
-  return cleanSteps;
+  // A second move is a new placement decision. Reusing the previous move ID
+  // loses the intermediate location and silently decides the first author's act.
+  return tr.steps.slice();
 };
 
 

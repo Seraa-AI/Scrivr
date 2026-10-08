@@ -10,7 +10,7 @@ describe("TrackChanges document clone", () => {
         type: "paragraph",
         attrs: {
           nodeId: "p1",
-          dataTracked: [{ id: "change-a", operation: "node_split", referenceId: "change-b", moveNodeId: "move-a" }],
+          dataTracked: [{ id: "change-a", operation: "node_split", referenceId: "change-b", moveNodeId: "move-a", creationId: "change-b", dependsOn: ["change-b"], placementDependsOn: ["change-b"], foldingClosed: true }],
         },
         content: [
           { type: "text", text: "one", marks: [{ type: "trackedInsert", attrs: { dataTracked: { id: "change-b", groupId: "group-a" } } }] },
@@ -31,6 +31,10 @@ describe("TrackChanges document clone", () => {
 
     expect(nodeChange.id).not.toBe("change-a");
     expect(nodeChange.referenceId).toBe(firstMark.id);
+    expect(nodeChange.creationId).toBe(firstMark.id);
+    expect(nodeChange.dependsOn).toEqual([firstMark.id]);
+    expect(nodeChange.placementDependsOn).toEqual([firstMark.id]);
+    expect(nodeChange.foldingClosed).toBe(true);
     expect(firstMark.id).toBe(secondMark.id);
     expect(firstMark.groupId).toBe(secondMark.groupId);
     expect(nodeChange.moveNodeId).toBe(secondMark.moveNodeId);
