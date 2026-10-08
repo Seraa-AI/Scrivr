@@ -18,10 +18,10 @@ import { closeDependentCreations } from "./composition";
 import { normalizeMoveShadows } from "./moveIdentity";
 import { updateChangesStatus } from "./updateChangesStatus";
 
-import type { ReviewPlan } from "../reviewPlan";
+import type { ReviewOutcome } from "../reviewPlan";
 
 interface TrackChangesPluginState {
-  lastReview: ReviewPlan | null;
+  lastReview: ReviewOutcome | null;
   /** Outcome of the most recent tracked gesture; `refused` needs host action. */
   lastTracking: TrackingResult | null;
   status: TrackChangesStatus;

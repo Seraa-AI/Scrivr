@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { doc, p, TestEditor } from "./helpers";
 import { planChangeReview } from "../reviewPlan";
+import type { ReviewDependency, ReviewPlan } from "../reviewPlan";
+
+/** The dependencies a blocked plan reports, or none when it blocked for another reason. */
+const dependenciesOf = (plan: ReviewPlan): ReviewDependency[] =>
+  plan.status === "blocked" && plan.reason === "dependent-changes" ? plan.dependencies : [];
 import { trackChangesPluginKey } from "../engine/trackChangesPlugin";
 
 const set = (editor: TestEditor) => trackChangesPluginKey.getState(editor.state)!.changeSet;
@@ -44,12 +49,12 @@ describe("semantic composition", () => {
     const snapshot = set(editor).changes.map(c => ({ ...c.dataTracked }));
     const plan = planChangeReview(set(editor), "rejected", [id]);
     expect(plan.status).toBe("blocked");
-    expect(plan.dependencies[0]!.relationship).toBe("existence");
+    expect(dependenciesOf(plan)[0]!.relationship).toBe("existence");
     editor.rejectChanges([id]);
     expect(editor.state.doc).toBe(before);
     expect(set(editor).changes.map(c => c.dataTracked)).toEqual(snapshot);
     expect(trackChangesPluginKey.getState(editor.state)!.lastReview?.status).toBe("blocked");
-    editor.rejectChanges([...plan.ids, ...plan.dependencies.flatMap(d => d.dependentIds)]);
+    editor.rejectChanges([...plan.ids, ...dependenciesOf(plan).flatMap(d => d.dependentIds)]);
     expect(editor.text).toBe("tail");
     expect(editor.pendingChanges).toEqual([]);
   });
@@ -63,7 +68,7 @@ describe("semantic composition", () => {
     editor.setUserID("alice").insertAt(4, "?");
     const plan = planChangeReview(set(editor), "rejected", [id]);
     expect(plan.status).toBe("blocked");
-    expect(plan.dependencies.flatMap(d => d.dependentIds)).toEqual(
+    expect(dependenciesOf(plan).flatMap(d => d.dependentIds)).toEqual(
       editor.pendingChanges.filter(c => c.dataTracked.dependsOn?.includes(id)).map(c => c.id),
     );
   });
@@ -136,7 +141,7 @@ describe("placement is transport, not a content snapshot", () => {
     expect(second.dataTracked.placementDependsOn).toEqual([first]);
     const plan = planChangeReview(set(editor), "rejected", [first]);
     expect(plan.status).toBe("blocked");
-    expect(plan.dependencies).toContainEqual({ changeId: first, dependentIds: [second.id], relationship: "placement" });
+    expect(dependenciesOf(plan)).toContainEqual({ changeId: first, dependentIds: [second.id], relationship: "placement" });
     const before = editor.state.doc;
     editor.rejectChanges([first]);
     expect(editor.state.doc).toBe(before);

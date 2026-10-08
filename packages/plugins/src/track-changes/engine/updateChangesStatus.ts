@@ -5,6 +5,7 @@ import { CHANGE_STATUS, type TrackedChange } from "../types";
 import { dropOrphanChanges } from "../lib/structuralChange";
 import { applyChanges } from "../applyChanges";
 import { planChangeReview } from "../reviewPlan";
+import type { ReviewOutcome } from "../reviewPlan";
 
 /**
  * Validates what this review rewrote rather than the whole document. A document
@@ -37,9 +38,10 @@ export function updateChangesStatus(
   ids: string[],
   status: CHANGE_STATUS,
   userID: string,
-) {
+): ReviewOutcome | undefined {
   if (status === CHANGE_STATUS.pending) return;
-  const plan = planChangeReview(changeSet, status, ids);
+  const decision = status === CHANGE_STATUS.accepted ? "accepted" : "rejected";
+  const plan = planChangeReview(changeSet, decision, ids);
   if (plan.status === "blocked") return plan;
   const selected = new Set(plan.ids);
   // One review stamps one time, however many records it touches.
@@ -101,8 +103,8 @@ export function updateChangesStatus(
       "@scrivr/plugins track-changes: review produced an invalid result, no changes applied",
       error,
     );
-    return { ...plan, status: "blocked" as const, failure: "invalid-review-result" as const };
+    return { decision, ids: plan.ids, status: "blocked", reason: "invalid-result" };
   }
   for (const step of scratch.steps) createdTr.step(step);
-  return plan;
+  return { decision, ids: plan.ids, status: "applied" };
 }

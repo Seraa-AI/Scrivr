@@ -1,5 +1,6 @@
 ---
 "@scrivr/plugins": patch
+"@scrivr/react": patch
 ---
 
 Track changes keeps its boundaries: editing content that already holds
@@ -57,3 +58,19 @@ step per block, is tracked in full however many blocks it spans. The outcome is
 readable as `TrackingResult` on plugin state (`lastTracking`), carrying step
 count and elapsed time as diagnostics; acting on a refusal — undoing the edit,
 warning the author — is the host's decision.
+
+Reviewing is answerable. `reviewChanges` carries out a decision and returns what
+actually happened, and `planReview` says what a decision would take without
+doing it — a preview, never proof that execution succeeded. A refusal names its
+own reason (`dependent-changes`, `missing-changes`, `not-permitted`,
+`invalid-result`), because only the first can be resolved by deciding more and
+offering that for the rest would propose work nobody asked for.
+
+React decides through one shared action (`useReviewAction`), so every Accept and
+Reject in the panel and the popovers ends the same way: the decision is carried
+out, or the card says what stopped it. Previously a blocked decision returned
+`false` into a caller that discarded it, so the button did nothing and said
+nothing. Dependent work is listed rather than counted, and is only decided after
+a second explicit confirmation that replans first — if more work came to depend
+on the change in the meantime, the wider set is shown before anything is
+decided, not after.

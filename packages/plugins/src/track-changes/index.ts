@@ -62,5 +62,13 @@ export type { RichBlockEdit, RichDiffOptions, RichDiffResult } from "./lib/apply
 export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";
 
 export { planChangeReview, changeEffect } from "./reviewPlan";
-export type { ReviewPlan, ReviewDependency, ChangeEffect } from "./reviewPlan";
+export { planReview, reviewChanges } from "./reviewChanges";
+export type {
+  ReviewPlan,
+  ReviewOutcome,
+  ReviewRefusal,
+  ReviewDependency,
+  ReviewDecision,
+  ChangeEffect,
+} from "./reviewPlan";
 

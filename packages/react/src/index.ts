@@ -36,6 +36,9 @@ export type {
 export { TrackChangesPanel } from "./components/TrackChangesPanel";
 export { useTrackChangesPanel } from "./hooks/useTrackChangesPanel";
 export type { TrackChangesPanelProps } from "./components/TrackChangesPanel";
+export { useReviewAction } from "./hooks/useReviewAction";
+export type { ReviewAction, ReviewRefusalState } from "./hooks/useReviewAction";
+export { ReviewRefusal } from "./components/ReviewRefusal";
 export { HeaderFooterRibbon } from "./components/HeaderFooterRibbon";
 export { useHeaderFooterRibbon } from "./hooks/useHeaderFooterRibbon";
 export type {

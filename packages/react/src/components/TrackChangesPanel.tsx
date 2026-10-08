@@ -21,6 +21,8 @@ import type {
 import { cx } from "../utils/classNames";
 import { useTrackChangesPanel } from "../hooks/useTrackChangesPanel";
 import type { TrackChangesDisplayItem } from "../hooks/useTrackChangesPanel";
+import { useReviewAction } from "../hooks/useReviewAction";
+import { ReviewRefusal } from "./ReviewRefusal";
 
 function shortName(authorID: string): string {
   const name = authorID.split(":").pop() ?? authorID;
@@ -296,6 +298,7 @@ function ReplacementRow({
   editor: Editor | null;
 }) {
   const { deleteChange: del, insertChange: ins, ids, authorID } = item;
+  const review = useReviewAction(editor);
 
   return (
     <ChangeRow
@@ -304,12 +307,9 @@ function ReplacementRow({
         label: "Replacement",
       }}
       authorID={authorID}
-      onAccept={() =>
-        editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, ids)
-      }
-      onReject={() =>
-        editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, ids)
-      }
+      onAccept={() => review.review("accepted", ids)}
+      onReject={() => review.review("rejected", ids)}
+      refusal={<ReviewRefusal action={review} />}
     >
       <div style={previewLine}>
         <span style={prefixLabel}>Removing</span>
@@ -332,12 +332,13 @@ function SingleRow({
 }) {
   const meta = getChangeMeta(change);
   const authorID = change.dataTracked.authorID;
+  const review = useReviewAction(editor);
 
   function accept() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [change.id]);
+    review.review("accepted", [change.id]);
   }
   function reject() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [change.id]);
+    review.review("rejected", [change.id]);
   }
 
   let preview: React.ReactNode = null;
@@ -385,6 +386,7 @@ function SingleRow({
       authorID={authorID}
       onAccept={accept}
       onReject={reject}
+      refusal={<ReviewRefusal action={review} />}
     >
       {preview}
     </ChangeRow>
@@ -397,12 +399,15 @@ function ChangeRow({
   onAccept,
   onReject,
   children,
+  refusal,
 }: {
   meta: ChangeMeta;
   authorID: string;
   onAccept: () => void;
   onReject: () => void;
   children: React.ReactNode;
+  /** Shown under the row: why this card's last click did not complete. */
+  refusal?: React.ReactNode;
 }) {
   return (
     <div
@@ -452,6 +457,8 @@ function ChangeRow({
 
       {/* Preview */}
       {children}
+
+      {refusal}
     </div>
   );
 }

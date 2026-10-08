@@ -1,4 +1,4 @@
-import type { ReviewPlan } from "./reviewPlan";
+import type { ReviewOutcome } from "./reviewPlan";
 import { Transaction } from "@scrivr/core/pm";
 
 import { CHANGE_STATUS, StructureAttrs, TrackChangesStatus, TrackingResult } from "./types";
@@ -26,7 +26,7 @@ export type TrackChangesActionParams = {
     status: CHANGE_STATUS;
     ids: string[];
   };
-  [TrackChangesAction.reviewResult]: ReviewPlan;
+  [TrackChangesAction.reviewResult]: ReviewOutcome;
   [TrackChangesAction.trackingResult]: TrackingResult;
   [TrackChangesAction.refreshChanges]: boolean;
   [TrackChangesAction.updateMetaNode]: boolean;

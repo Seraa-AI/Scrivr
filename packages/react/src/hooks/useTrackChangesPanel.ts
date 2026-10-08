@@ -5,6 +5,7 @@ import {
   CHANGE_STATUS,
   trackChangesPluginKey,
 } from "@scrivr/plugins";
+import { useReviewAction } from "./useReviewAction";
 import type { TextChange, TrackedChange } from "@scrivr/plugins";
 
 export type TrackChangesDisplayItem =
@@ -38,26 +39,28 @@ export function useTrackChangesPanel(editor: Editor | null) {
 
   const items = buildDisplayItems(changes);
   const allIds = changes.map((c) => c.id);
+  const review = useReviewAction(editor);
 
   function acceptAll() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, allIds);
+    review.review("accepted", allIds);
   }
 
   function rejectAll() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, allIds);
+    review.review("rejected", allIds);
   }
 
   function accept(ids: string[]) {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, ids);
+    review.review("accepted", ids);
   }
 
   function reject(ids: string[]) {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, ids);
+    review.review("rejected", ids);
   }
 
   return {
     changes,
     items,
+    review,
     isEmpty: items.length === 0,
     acceptAll,
     rejectAll,

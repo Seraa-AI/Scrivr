@@ -15,21 +15,42 @@ export interface ReviewDependency {
   dependentIds: string[];
   relationship: "existence" | "placement";
 }
-export type ReviewPlan = {
-  status: "ready" | "blocked";
-  decision: "accepted" | "rejected";
-  ids: string[];
-  dependencies: ReviewDependency[];
-  missingIds: string[];
-  failure?: "invalid-review-result";
-};
+
+export type ReviewDecision = "accepted" | "rejected";
+
+/**
+ * Why a decision cannot be carried out. Each reason needs its own words: only
+ * `dependent-changes` can be resolved by deciding more, and offering that for
+ * the others would propose work the reviewer never asked for.
+ */
+export type ReviewRefusal =
+  | { reason: "dependent-changes"; dependencies: ReviewDependency[] }
+  | { reason: "missing-changes"; missingIds: string[] }
+  | { reason: "not-permitted" }
+  | { reason: "invalid-result" };
+
+type ReviewSubject = { decision: ReviewDecision; ids: string[] };
+
+/** A preflight: what deciding these ids would take. Never an execution result. */
+export type ReviewPlan =
+  | ({ status: "ready" } & ReviewSubject)
+  | ({ status: "blocked" } & ReviewSubject & ReviewRefusal);
+
+/** What actually happened. A ready plan is a preview, not proof of this. */
+export type ReviewOutcome =
+  | ({ status: "applied" } & ReviewSubject)
+  | ({ status: "blocked" } & ReviewSubject & ReviewRefusal);
 
 /**
  * Pure, host-readable preflight. Containment discovers existence dependencies;
  * only explicit representation links authorize automatic review expansion.
  * Passing dependent IDs explicitly authorizes the compound decision.
  */
-export function planChangeReview(changeSet: ChangeSet, decision: "accepted" | "rejected", ids: readonly string[]): ReviewPlan {
+export function planChangeReview(
+  changeSet: ChangeSet,
+  decision: ReviewDecision,
+  ids: readonly string[],
+): ReviewPlan {
   const changes = changeSet.pending;
   const selected = new Set(ids);
   const missingIds = ids.filter(id => !changes.some(change => change.id === id));
@@ -70,6 +91,10 @@ export function planChangeReview(changeSet: ChangeSet, decision: "accepted" | "r
           (other.from < change.from || other.to > change.to))))).map(other => other.id);
     if (dependentIds.length) dependencies.push({ changeId: change.id, dependentIds, relationship: "existence" });
   }
-  return { status: missingIds.length || dependencies.length ? "blocked" : "ready", decision,
-    ids: [...selected], dependencies, missingIds };
+  const subject = { decision, ids: [...selected] };
+  // A named change that is not pending is a different problem from one whose
+  // decision would carry others, and must not be offered the same remedy.
+  if (missingIds.length) return { status: "blocked", ...subject, reason: "missing-changes", missingIds };
+  if (dependencies.length) return { status: "blocked", ...subject, reason: "dependent-changes", dependencies };
+  return { status: "ready", ...subject };
 }

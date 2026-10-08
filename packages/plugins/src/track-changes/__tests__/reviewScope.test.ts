@@ -31,7 +31,7 @@ describe("review is scoped to what it rewrote", () => {
     editor.acceptChanges(pending);
 
     expect(editor.pendingChanges).toEqual([]);
-    expect(lastReview(editor)?.failure).toBeUndefined();
+    expect(lastReview(editor)?.status).toBe("applied");
     expect(editor.text).toContain("hello!");
   });
 
