@@ -1,8 +1,9 @@
-import { Schema } from "@scrivr/core/pm";
+import { Node as PMNode, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { Mapping } from "@scrivr/core/pm";
 
 import { ChangeSet } from "../ChangeSet";
+import { clearTextChange } from "../lib/clearTextChange";
 import {
   getBlockInlineTrackedData,
   excludeFromTracked,
@@ -185,18 +186,21 @@ export function updateChangeChildrenAttributes(
   });
 }
 
+/**
+ * Clears one change's record off a restored node. Anything else the node carries
+ * is another decision — often another author's — and outlives this review.
+ */
 export function restoreNode(
   tr: Transaction,
-  node: any,
+  node: PMNode,
   pos: number,
-  schema: Schema,
+  id: string,
 ): void {
-  const updatedAttrs = {
-    ...node.attrs,
-    dataTracked: null,
-  };
-
-  tr.setNodeMarkup(pos, undefined, updatedAttrs, node.marks);
-  tr.removeMark(pos, pos + node.nodeSize, schema.marks.trackedInsert);
-  tr.removeMark(pos, pos + node.nodeSize, schema.marks.trackedDelete);
+  tr.setNodeMarkup(
+    pos,
+    undefined,
+    { ...node.attrs, dataTracked: excludeFromTracked(node.attrs.dataTracked, id) },
+    node.marks,
+  );
+  clearTextChange(tr, pos, pos + node.nodeSize, id);
 }

@@ -8,10 +8,12 @@ import {
   addTrackIdIfDoesntExist,
   createNewInsertAttrs,
   createNewStructureAttrs,
+  excludeFromTracked,
   getBlockInlineTrackedData,
   NewEmptyAttrs,
   updateBlockNodesAttrs,
 } from "../helpers";
+import { clearTextChange } from "./clearTextChange";
 import { cutFragment, setFragmentAsInserted } from "./fragments";
 import { ChangeStep, ExposedSlice, InsertSliceStep, NodeChange } from "../types";
 import { updateChangeAttrs } from "../engine/updateAttributes";
@@ -108,9 +110,12 @@ export const dropOrphanChanges = (newTr: Transaction) => {
     ) {
       if (c.dataTracked.operation === CHANGE_OPERATION.delete) {
         if (c.type === "text-change") {
-          newTr.removeMark(c.from, c.to, newTr.doc.type.schema.marks.trackedDelete);
+          clearTextChange(newTr, c.from, c.to, c.id);
         } else if (c.type === "node-change") {
-          newTr.setNodeMarkup(c.from, undefined, { ...c.node.attrs, dataTracked: null });
+          newTr.setNodeMarkup(c.from, undefined, {
+            ...c.node.attrs,
+            dataTracked: excludeFromTracked(c.node.attrs.dataTracked, c.id),
+          });
         }
       } else if (c.type === "node-change") {
         const { id, moveNodeId, ...attrs } = c.dataTracked;

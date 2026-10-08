@@ -212,7 +212,7 @@ export function applyChanges(
             return;
           }
 
-          restoreNode(tr, node, pos, schema);
+          restoreNode(tr, node, pos, orig.id);
         });
     }
   });
