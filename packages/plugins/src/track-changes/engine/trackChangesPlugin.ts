@@ -97,7 +97,6 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
             ids,
             status,
             userID,
-            oldState,
           );
           if (review) setAction(createdTr, TrackChangesAction.reviewResult, review);
           docChanged = true;
