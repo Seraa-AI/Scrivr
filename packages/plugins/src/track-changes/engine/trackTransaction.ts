@@ -111,10 +111,10 @@ export function trackTransaction(
     if (!step) continue;
     const emptyAttrs = compositionAttrs(tr.docs[i]!, step, baseAttrs);
 
-    const previousMapping = trContext.deletedNodeMapping.slice();
+    const previousMapping = trContext.replayBridge.slice();
     const replayStart = newTr.mapping.maps.length;
     trackOneStep(i, step, emptyAttrs, tr, oldState, newTr, trContext);
-    trContext.deletedNodeMapping = advanceBridge(
+    trContext.replayBridge = advanceBridge(
       step,
       previousMapping,
       newTr,
@@ -137,7 +137,7 @@ function trackOneStep(
   newTr: Transaction,
   trContext: TrTrackingContext,
 ) {
-  const deletedNodeMapping = trContext.deletedNodeMapping;
+  const replayBridge = trContext.replayBridge;
     if (step instanceof ReplaceStep) {
       const { slice } = step;
       if (
@@ -153,7 +153,7 @@ function trackOneStep(
         newTr,
         emptyAttrs,
         tr,
-        deletedNodeMapping,
+        replayBridge,
         trContext,
       );
 
@@ -170,7 +170,7 @@ function trackOneStep(
           ? { ...emptyAttrs, moveNodeId: trContext.stepsByGroupIDMap.get(step)! }
           : emptyAttrs,
         oldState.schema,
-        deletedNodeMapping,
+        replayBridge,
       );
 
       if (stepProducedSelection(tr, i, step)) {
@@ -180,11 +180,11 @@ function trackOneStep(
     } else if (step instanceof ReplaceAroundStep) {
       if (isSetNodeMarkupStep(step)) {
         const steps = trackSetNodeMarkupStep(step, newTr, emptyAttrs, tr.docs[i]!);
-        if (steps.length > 0) processChangeSteps(steps, newTr, emptyAttrs, oldState.schema, deletedNodeMapping);
+        if (steps.length > 0) processChangeSteps(steps, newTr, emptyAttrs, oldState.schema, replayBridge);
       } else {
         let steps = trackReplaceAroundStep(step, oldState, tr, newTr, emptyAttrs, tr.docs[i]!, trContext);
         steps = diffChangeSteps(steps);
-        processChangeSteps(steps, newTr, emptyAttrs, oldState.schema, deletedNodeMapping);
+        processChangeSteps(steps, newTr, emptyAttrs, oldState.schema, replayBridge);
       }
     } else if (step instanceof AttrStep) {
       const changeSteps = trackAttrsChangeStep(
@@ -200,7 +200,7 @@ function trackOneStep(
         newTr,
         emptyAttrs,
         oldState.schema,
-        deletedNodeMapping,
+        replayBridge,
       );
     } else if (step instanceof AddMarkStep) {
       trackAddMarkStep(step, emptyAttrs, newTr, tr.docs[i]!);

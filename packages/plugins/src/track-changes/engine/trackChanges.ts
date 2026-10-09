@@ -66,7 +66,7 @@ export function trackChanges(
   const trContext: TrTrackingContext = {
     action,
     stepsByGroupIDMap: new Map(),
-    deletedNodeMapping: new Mapping(),
+    replayBridge: new Mapping(),
   };
 
   const clearedSteps = processStepsBeforeTracking(tx, trContext, [

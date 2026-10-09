@@ -4,7 +4,7 @@ import type { EditorState } from "@scrivr/core/pm";
 import { setAction, TrackChangesAction } from "./actions";
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { planChangeReview } from "./reviewPlan";
-import type { ReviewDecision, ReviewOutcome, ReviewPlan } from "./reviewPlan";
+import type { ReviewDecision, ReviewOutcome, ReviewPlan, ReviewPlanResult } from "./reviewPlan";
 import { CHANGE_STATUS } from "./types";
 
 const subject = (decision: ReviewDecision, ids: readonly string[]) => ({
@@ -32,12 +32,19 @@ export function planReviewIn(
   return planChangeReview(pluginState.changeSet, decision, ids);
 }
 
-/** `planReviewIn` for callers holding an editor rather than a state. */
+/**
+ * `planReviewIn` for callers holding an editor rather than a state — including
+ * callers that may not have one yet. An absent editor is reported, never
+ * returned as nothing, so a caller is not left reading absence as refusal.
+ */
 export const planReview = (
-  editor: IBaseEditor,
+  editor: IBaseEditor | null | undefined,
   decision: ReviewDecision,
   ids: readonly string[],
-) => planReviewIn(editor.getState(), decision, ids);
+): ReviewPlanResult =>
+  editor
+    ? planReviewIn(editor.getState(), decision, ids)
+    : { status: "unavailable", reason: "no-editor" };
 
 /**
  * Carries out the decision and reports what actually happened. The engine
@@ -46,12 +53,13 @@ export const planReview = (
  * thing a caller may act on when deciding whether the work is done.
  */
 export function reviewChanges(
-  editor: IBaseEditor,
+  editor: IBaseEditor | null | undefined,
   decision: ReviewDecision,
   ids: readonly string[],
 ): ReviewOutcome {
   const plan = planReview(editor, decision, ids);
-  if (plan.status === "blocked") return plan;
+  if (plan.status !== "ready") return plan;
+  if (!editor) return { status: "unavailable", reason: "no-editor" };
 
   const state = editor.getState();
   editor.applyTransaction(

@@ -19,7 +19,7 @@ export function processChangeSteps(
   newTr: Transaction,
   emptyAttrs: NewEmptyAttrs,
   schema: Schema,
-  deletedNodeMapping: Mapping,
+  replayBridge: Mapping,
 ) {
   const mapping = new Mapping();
   const deleteAttrs = createNewDeleteAttrs(emptyAttrs);
@@ -44,7 +44,7 @@ export function processChangeSteps(
         for (let i = beforeSteps; i < newTr.steps.length; i++) {
           const map = newTr.steps[i]!.getMap();
           mapping.appendMap(map);
-          if (removed) deletedNodeMapping.appendMap(map);
+          if (removed) replayBridge.appendMap(map);
         }
 
         mergeTrackedMarks(mapping.map(c.pos), newTr.doc, newTr, schema);
@@ -102,7 +102,7 @@ export function processChangeSteps(
         const textNewestStep = newTr.steps[newTr.steps.length - 1];
 
         if (newTr.doc.content.size < beforeSize) {
-          deletedNodeMapping.appendMap(textNewestStep!.getMap());
+          replayBridge.appendMap(textNewestStep!.getMap());
         }
 
         if (step !== textNewestStep) {
@@ -128,7 +128,7 @@ export function processChangeSteps(
           const newestStep = newTr.steps[newTr.steps.length - 1];
 
           if (newTr.doc.content.size < beforeSize) {
-            deletedNodeMapping.appendMap(newestStep!.getMap());
+            replayBridge.appendMap(newestStep!.getMap());
           }
 
           if (step !== newestStep) {

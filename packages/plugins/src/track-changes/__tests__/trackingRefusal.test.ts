@@ -7,10 +7,14 @@ import { reportedTracking } from "../engine/transactionProcessing";
 import type { TrackingResult } from "../index";
 
 /**
- * Tracking is all-or-nothing: a gesture is recorded in full, or refused in full
- * with a result the host can act on. What makes a gesture refusable is whether
- * the replay can represent every step that carries content — never how many
- * there are, and never a step that is not content at all.
+ * Tracking refuses a whole gesture rather than recording part of one. What makes
+ * a gesture refusable is whether the replay can represent every step that
+ * carries content — never how many there are, and never a step that is not
+ * content at all.
+ *
+ * The question is answered on step kinds, before anything runs. Whether every
+ * gesture built from supported kinds is then recorded completely is a separate
+ * matter, and not one this file speaks for.
  */
 
 /** A step kind the engine has no tracker for. */

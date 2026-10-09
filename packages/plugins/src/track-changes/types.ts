@@ -241,8 +241,13 @@ export type TrTrackingContext = {
   action: ReturnType<typeof getAction>;
   stepsByGroupIDMap: Map<ReplaceStep, string>;
   selectionPosFromInsertion?: number;
-  /** Maps the source document the replay has reached into the replayed one. */
-  deletedNodeMapping: Mapping;
+  /**
+   * Maps the source document the replay has reached into the replayed one. The
+   * replay walks the gesture's steps backwards, so each iteration re-bases this
+   * onto the document that step applied to; a tracker writing into the replayed
+   * document has to map its source positions through it first.
+   */
+  replayBridge: Mapping;
 };
 
 // ── ChangeStep variants ───────────────────────────────────────────────────────

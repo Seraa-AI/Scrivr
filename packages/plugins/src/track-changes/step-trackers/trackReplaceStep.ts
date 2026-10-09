@@ -28,7 +28,7 @@ export function trackReplaceStep(
   newTr: Transaction,
   attrsTemplate: NewEmptyAttrs,
   tr: Transaction,
-  deletedNodeMapping: Mapping,
+  replayBridge: Mapping,
   trContext: TrTrackingContext,
 ) {
   const step = tr.steps[i] as ReplaceStep;
@@ -37,8 +37,8 @@ export function trackReplaceStep(
   const invertedStep = step.invert(tr.docs[i]!);
 
   const newStep = new ReplaceStep(
-    deletedNodeMapping.map(invertedStep.from),
-    deletedNodeMapping.map(invertedStep.to, invertedStep.from === invertedStep.to ? 1 : -1),
+    replayBridge.map(invertedStep.from),
+    replayBridge.map(invertedStep.to, invertedStep.from === invertedStep.to ? 1 : -1),
     invertedStep.slice,
   );
   const stepResult = newTr.maybeStep(newStep);
@@ -139,8 +139,8 @@ export function trackReplaceStep(
       }
     });
 
-  selectionPos = deletedNodeMapping.map(selectionPos);
-  const doneSteps = mapChangeSteps(changeSteps, deletedNodeMapping);
+  selectionPos = replayBridge.map(selectionPos);
+  const doneSteps = mapChangeSteps(changeSteps, replayBridge);
 
   return [doneSteps, selectionPos] as [ChangeStep[], number];
 }

@@ -157,9 +157,14 @@ export const contentSteps = (steps: readonly (Step | null)[]) =>
   steps.filter((step): step is Step => !!step && !isUntrackedStep(step));
 
 /**
- * Decided before the replay touches anything, so a gesture is either tracked in
- * full or refused in full. Size is deliberately not consulted: what matters is
- * whether every step can be represented, not how many there are.
+ * Decided before the replay touches anything, so a gesture is refused whole
+ * rather than recorded in part. Size is deliberately not consulted: what
+ * matters is whether every step can be represented, not how many there are.
+ *
+ * The question is only about step kinds. A supported kind does not yet promise
+ * the gesture is recorded completely — the mark trackers stamp against
+ * positions the replay bridge never mapped, so a gesture mixing a mark step
+ * with a position-shifting one still under-records.
  */
 export function planTracking(steps: readonly (Step | null)[]) {
   for (const step of steps) {

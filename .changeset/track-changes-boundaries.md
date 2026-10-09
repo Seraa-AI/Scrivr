@@ -58,15 +58,22 @@ text built content the node type rejects, and because `create` does not
 validate, the document stayed broken until a later transaction touched that node
 and threw somewhere unrelated.
 
-Tracking is all-or-nothing. A gesture is checked before the replay touches
-anything and is either recorded in full or refused in full, so the document can
-no longer hold an edit with only part of it reviewable. What makes a gesture
-refusable is whether the replay can represent every one of its steps — size is
-not a tracking failure, and a document-wide formatting command, which emits one
-step per block, is tracked in full however many blocks it spans. The outcome is
-readable as `TrackingResult` on plugin state (`lastTracking`), carrying step
-count and elapsed time as diagnostics; acting on a refusal — undoing the edit,
-warning the author — is the host's decision.
+Tracking decides whether it can record a gesture before the replay touches
+anything, and refuses the whole gesture rather than recording part of it. What
+makes a gesture refusable is whether the replay can represent every one of its
+steps — size is not a tracking failure, and a document-wide formatting command,
+which emits one step per block, is tracked in full however many blocks it spans.
+The outcome is readable as `TrackingResult` on plugin state (`lastTracking`),
+carrying step count and elapsed time as diagnostics; acting on a refusal —
+undoing the edit, warning the author — is the host's decision.
+
+That preflight decides on step kinds, which is not yet the same as a guarantee
+that every supported gesture is recorded in full. A gesture mixing a
+position-shifting step with a mark step still stamps the mark against unmapped
+positions, leaving the tail of the run formatted with no record behind it while
+the gesture reports as tracked. The reproducer ships as a failing test so the
+gap cannot be mistaken for working behaviour; it predates this change set and is
+not fixed here.
 
 Reviewing is answerable. `reviewChanges` carries out a decision and returns what
 actually happened, and `planReview` says what a decision would take without
@@ -111,3 +118,12 @@ the state as it was several fields ago. The React notice is
 `ReviewRefusalNotice`, which no longer collides with the plugins type of the
 same name, and it takes `className`/`itemClassName` and themes through the
 package's own `--scrivr-react-*` tokens like its siblings.
+
+Reviewing is answerable before there is an editor. `planReview`, `reviewChanges`
+and `useReviewAction` accept an absent editor and report
+`{ status: "unavailable", reason: "no-editor" }` rather than returning nothing,
+so a teardown race or an imperative call during initialisation cannot be read as
+a refusal. `useReviewAction` exposes `available` for controls to reflect, and the
+panel's document-wide buttons stay hidden until there is something to decide
+against. `ReviewPlanResult` is a plan or that unavailability; `planChangeReview`
+still returns a plan, because given a change set there is always one.

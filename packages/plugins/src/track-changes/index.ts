@@ -67,6 +67,8 @@ export type {
   ReviewPlan,
   ReviewOutcome,
   ReviewRefusal,
+  ReviewUnavailable,
+  ReviewPlanResult,
   ReviewDependency,
   ReviewDecision,
   ChangeEffect,

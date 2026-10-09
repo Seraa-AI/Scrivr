@@ -224,7 +224,7 @@ export function TrackChangesPanel({
           </span>
         )}
 
-        {!panel.isEmpty && (
+        {!panel.isEmpty && panel.review.available && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
             <button className={cx("scrivr-menu-item", itemClassName)} onClick={panel.rejectAll} style={actionBtn}>
               Reject all

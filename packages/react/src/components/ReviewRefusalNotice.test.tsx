@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
@@ -197,5 +197,40 @@ describe("the shipped panel explains its document-wide decisions", () => {
     } else {
       expect(pending(editor)).toEqual([]);
     }
+  });
+});
+
+describe("review before there is an editor to review against", () => {
+  function Early() {
+    const review = useReviewAction(null);
+    const [status, setStatus] = useState("untried");
+    return (
+      <div>
+        <button type="button" onClick={() => setStatus(review.review("accepted", ["x"]).status)}>
+          Accept
+        </button>
+        <span data-testid="status">{status}</span>
+        <span data-testid="available">{String(review.available)}</span>
+        <ReviewRefusalNotice action={review} />
+      </div>
+    );
+  }
+
+  it("reports unavailable rather than nothing, and shows no refusal", () => {
+    render(<Early />);
+    expect(container.querySelector("[data-testid=available]")?.textContent).toBe("false");
+
+    click("Accept");
+
+    expect(container.querySelector("[data-testid=status]")?.textContent).toBe("unavailable");
+    // Lifecycle is not a refusal: there is nothing to explain to a reviewer.
+    expect(text()).not.toMatch(/permission|no longer pending|could not be completed/i);
+  });
+
+  it("hides the document-wide controls while unavailable", () => {
+    render(<TrackChangesPanel editor={null} />);
+
+    expect([...container.querySelectorAll("button")].map(b => b.textContent))
+      .not.toContain("Accept all");
   });
 });

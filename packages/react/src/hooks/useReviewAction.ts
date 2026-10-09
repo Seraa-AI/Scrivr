@@ -22,6 +22,8 @@ import type {
   TrackedChange,
 } from "@scrivr/plugins";
 
+const unavailable = { status: "unavailable", reason: "no-editor" } as const;
+
 export type ReviewRefusalState = {
   decision: ReviewDecision;
   /** What the reviewer asked to decide, before any dependent work. */
@@ -80,8 +82,13 @@ export function useReviewAction(editor: IBaseEditor | null) {
     [resolve],
   );
 
+  /**
+   * Record the outcome where the surface can show it, and hand it back. Only a
+   * refusal is held: `unavailable` is a lifecycle state for controls to reflect,
+   * not something to tell a reviewer they were refused.
+   */
   const settle = useCallback(
-    (decision: ReviewDecision, ids: string[], outcome: ReviewOutcome) => {
+    (decision: ReviewDecision, ids: string[], outcome: ReviewOutcome): ReviewOutcome => {
       if (outcome.status === "blocked") block(decision, ids, outcome, "explain");
       else setRefusal(null);
       return outcome;
@@ -89,12 +96,14 @@ export function useReviewAction(editor: IBaseEditor | null) {
     [block],
   );
 
-  /** Attempt exactly what the reviewer asked for, and nothing more. */
+  /**
+   * Attempt exactly what the reviewer asked for, and nothing more. Usable
+   * before the editor exists: that answers `unavailable`, which a caller must
+   * be able to tell apart from a refusal, so it is never nothing.
+   */
   const review = useCallback(
-    (decision: ReviewDecision, ids: string[]) => {
-      if (!editor) return;
-      return settle(decision, ids, reviewChanges(editor, decision, ids));
-    },
+    (decision: ReviewDecision, ids: string[]): ReviewOutcome =>
+      settle(decision, ids, reviewChanges(editor, decision, ids)),
     [editor, settle],
   );
 
@@ -111,12 +120,12 @@ export function useReviewAction(editor: IBaseEditor | null) {
    * a set the reviewer has not been shown.
    */
   const replan = useCallback(() => {
-    if (!editor || !refusal) return null;
+    if (!refusal) return null;
     const seen = refusal.dependents.map(c => c.id);
     const asked = [...new Set([...refusal.ids, ...seen])];
     const plan = planReview(editor, refusal.decision, asked);
-    if (plan.status === "blocked") {
-      block(refusal.decision, refusal.ids, plan, "confirm", seen);
+    if (plan.status !== "ready") {
+      if (plan.status === "blocked") block(refusal.decision, refusal.ids, plan, "confirm", seen);
       return null;
     }
     return { asked, decision: refusal.decision };
@@ -129,9 +138,9 @@ export function useReviewAction(editor: IBaseEditor | null) {
   }, [replan, refusal]);
 
   /** Send the compound decision, which `replan` has just re-checked. */
-  const confirm = useCallback(() => {
+  const confirm = useCallback((): ReviewOutcome => {
     const ready = replan();
-    if (!ready || !editor) return;
+    if (!ready) return unavailable;
     return settle(
       ready.decision,
       ready.asked,
@@ -146,14 +155,15 @@ export function useReviewAction(editor: IBaseEditor | null) {
    * committed and no way back.
    */
   const resolveConflict = useCallback(
-    (keepId: string, discardIds: string[]) => {
-      if (!editor) return;
+    (keepId: string, discardIds: string[]): ReviewOutcome => {
       const keep = planReview(editor, "accepted", [keepId]);
-      if (keep.status === "blocked") return settle("accepted", [keepId], keep);
+      if (keep.status !== "ready") return settle("accepted", [keepId], keep);
       const discard = discardIds.length
         ? planReview(editor, "rejected", discardIds)
         : null;
-      if (discard?.status === "blocked") return settle("rejected", discardIds, discard);
+      if (discard && discard.status !== "ready") {
+        return settle("rejected", discardIds, discard);
+      }
 
       const applied = reviewChanges(editor, "accepted", [keepId]);
       if (applied.status !== "applied") return settle("accepted", [keepId], applied);
@@ -167,6 +177,8 @@ export function useReviewAction(editor: IBaseEditor | null) {
 
   return useMemo(
     () => ({
+      /** False while there is no editor to decide against — disable controls. */
+      available: !!editor,
       review,
       refusal,
       listDependents,
@@ -175,7 +187,7 @@ export function useReviewAction(editor: IBaseEditor | null) {
       resolveConflict,
       dismiss,
     }),
-    [review, refusal, listDependents, requestConfirm, confirm, resolveConflict, dismiss],
+    [editor, review, refusal, listDependents, requestConfirm, confirm, resolveConflict, dismiss],
   );
 }
 
