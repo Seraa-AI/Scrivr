@@ -71,6 +71,11 @@ const insertedParagraph = (...content: unknown[]) => ({
   content,
 });
 
+const bulletList = (...items: string[]) => ({
+  type: "bulletList",
+  content: items.map(value => ({ type: "listItem", content: [p(text(value))] })),
+});
+
 const codeBlock = (value: string) => ({
   type: "codeBlock",
   content: [text(value)],
@@ -118,7 +123,22 @@ export const TRACK_CHANGES_DEMO_DOC = {
     p(text("Delete the code block below, then undo. Nothing should throw.")),
     codeBlock("const settled = review.confirm();"),
 
-    h(2, "6 · A document-wide command"),
+    h(2, "6 · Moving a list item"),
+    p(
+      text(
+        "Cut a bullet below and paste it into the paragraph under section 1. In " +
+          "Suggesting mode a cut proposes a deletion rather than performing one, so " +
+          "the original stays struck through and the paste arrives underlined — the " +
+          "text is in both places until someone reviews it.",
+      ),
+    ),
+    bulletList(
+      "First bullet — cut this one.",
+      "Second bullet stays put.",
+      "Third bullet stays put.",
+    ),
+
+    h(2, "7 · A document-wide command"),
     p(text("Select from here to the end of the document and press Bold.")),
     ...scaleParagraphs(30),
   ],
