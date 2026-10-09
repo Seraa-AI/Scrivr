@@ -112,10 +112,15 @@ export const dropOrphanChanges = (newTr: Transaction) => {
         if (c.type === "text-change") {
           clearTextChange(newTr, c.from, c.to, c.id);
         } else if (c.type === "node-change") {
-          newTr.setNodeMarkup(c.from, undefined, {
-            ...c.node.attrs,
-            dataTracked: excludeFromTracked(c.node.attrs.dataTracked, c.id),
-          });
+          // Read live: one node can carry several orphaned records, and this
+          // loop walks a snapshot taken before any of them were cleared.
+          const node = newTr.doc.nodeAt(c.from);
+          if (node) {
+            newTr.setNodeMarkup(c.from, undefined, {
+              ...node.attrs,
+              dataTracked: excludeFromTracked(node.attrs.dataTracked, c.id),
+            });
+          }
         }
       } else if (c.type === "node-change") {
         const { id, moveNodeId, ...attrs } = c.dataTracked;

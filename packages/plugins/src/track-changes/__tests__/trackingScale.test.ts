@@ -9,10 +9,22 @@ import { trackChangesPluginKey } from "../engine/trackChangesPlugin";
  * on a real document — and every one of them has to be recorded and reviewable.
  */
 
-const BLOCKS = 1200;
+const BLOCKS = 300;
+/** Far above any step count a ceiling could plausibly have allowed. */
+const MAX_PLAUSIBLE_CEILING = 100;
 
 const tracking = (editor: TestEditor) =>
   trackChangesPluginKey.getState(editor.state)!.lastTracking;
+
+/** Text nodes carrying the bold mark — zero if the command was never recorded. */
+const bolded = (editor: TestEditor) => {
+  let count = 0;
+  editor.state.doc.descendants(node => {
+    if (node.isText && node.marks.some(m => m.type === schema.marks.bold)) count++;
+    return true;
+  });
+  return count;
+};
 
 const boldWholeDocument = () => {
   const editor = new TestEditor(
@@ -32,39 +44,45 @@ describe("tracking a document-wide command", () => {
   it("records every block, at a step count far past any fixed ceiling", () => {
     const { editor, steps } = boldWholeDocument();
 
-    expect(steps).toBeGreaterThan(1000);
+    expect(steps).toBeGreaterThan(MAX_PLAUSIBLE_CEILING);
     expect(tracking(editor)?.status).toBe("ready");
     expect(editor.pendingChanges.length).toBe(BLOCKS);
   });
 
-  it("accepts the whole command", () => {
+  it("accepts the whole command, leaving every block bold", () => {
     const { editor } = boldWholeDocument();
+    // The precondition is the fix: without it there is nothing to accept, and
+    // the bold would already be sitting in the document unrecorded.
+    expect(editor.pendingChanges.length).toBe(BLOCKS);
     editor.acceptChanges(editor.pendingChanges.map(c => c.id));
 
     expect(editor.pendingChanges).toEqual([]);
+    expect(bolded(editor)).toBe(BLOCKS);
     expect(editor.text).toContain("para 0");
     expect(editor.text).toContain(`para ${BLOCKS - 1}`);
     expect(() => editor.state.doc.check()).not.toThrow();
   });
 
-  it("rejects the whole command", () => {
+  it("rejects the whole command, leaving the text intact and unbold", () => {
     const { editor } = boldWholeDocument();
+    expect(editor.pendingChanges.length).toBe(BLOCKS);
     editor.rejectChanges(editor.pendingChanges.map(c => c.id));
 
     expect(editor.pendingChanges).toEqual([]);
+    expect(bolded(editor)).toBe(0);
+    expect(editor.text).toContain(`para ${BLOCKS - 1}`);
     expect(() => editor.state.doc.check()).not.toThrow();
   });
 
   it("undoes the whole command in one step", () => {
     const { editor } = boldWholeDocument();
+    expect(editor.pendingChanges.length).toBe(BLOCKS);
+    expect(bolded(editor)).toBe(BLOCKS);
+
     editor.undo();
 
     expect(editor.pendingChanges).toEqual([]);
-    let bolded = 0;
-    editor.state.doc.descendants(node => {
-      if (node.isText && node.marks.some(m => m.type === schema.marks.bold)) bolded++;
-      return true;
-    });
-    expect(bolded).toBe(0);
+    expect(bolded(editor)).toBe(0);
+    expect(editor.text).toContain(`para ${BLOCKS - 1}`);
   });
 });

@@ -5,8 +5,9 @@
  *   prevented it — and no click silently decides work the reviewer did not ask
  *   for.
  *
- * Driven through the real panel, a real ServerEditor and real track-changes, so
- * what is asserted is what a reviewer would see.
+ * Driven against a real ServerEditor and real track-changes: the per-change
+ * cases through the shared action a card uses, and the document-wide ones
+ * through the shipped panel itself, so what is asserted is what a reviewer sees.
  */
 
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
@@ -17,6 +18,7 @@ import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr
 import type { TrackedChange } from "@scrivr/plugins";
 import { useReviewAction } from "../hooks/useReviewAction";
 import { ReviewRefusal } from "./ReviewRefusal";
+import { TrackChangesPanel } from "./TrackChangesPanel";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -32,14 +34,14 @@ afterEach(() => {
   container.remove();
 });
 
-const build = () => {
+const build = (canAcceptReject = true) => {
   const editor = new ServerEditor({
     extensions: [
       StarterKit,
       TrackChanges.configure({
         userID: "alice",
         initialStatus: TrackChangesStatus.enabled,
-        canAcceptReject: true,
+        canAcceptReject,
       }),
     ],
     content: {
@@ -166,5 +168,34 @@ describe("every review click resolves or explains", () => {
 
     expect(text()).toMatch(/no longer pending/i);
     expect(text()).not.toMatch(/dependent change/i);
+  });
+});
+
+describe("the shipped panel explains its document-wide decisions", () => {
+  it("says why Accept all did nothing, beside the button that did nothing", () => {
+    const editor = build(false);
+    render(<TrackChangesPanel editor={editor} />);
+
+    click("Accept all");
+
+    expect(text()).toMatch(/do not have permission/i);
+    expect(pending(editor).length).toBeGreaterThan(0);
+  });
+
+  it("explains a blocked Reject all rather than leaving a dead button", () => {
+    const editor = build();
+    editor.commands.setTrackChangesUserID("bob");
+    editor.applyTransaction(editor.getState().tr.insertText("!", 4));
+    render(<TrackChangesPanel editor={editor} />);
+
+    const before = editor.getState().doc;
+    click("Reject all");
+
+    // Either it resolved everything, or it said what stopped it. Never silence.
+    if (editor.getState().doc === before) {
+      expect(text()).toMatch(/pending changes|no longer pending|could not be completed/i);
+    } else {
+      expect(pending(editor)).toEqual([]);
+    }
   });
 });

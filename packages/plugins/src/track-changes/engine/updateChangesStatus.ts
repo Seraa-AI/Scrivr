@@ -1,33 +1,53 @@
-import { EditorState, Mapping, type Transaction } from "@scrivr/core/pm";
+import { EditorState, Mapping, type Node, type Transaction } from "@scrivr/core/pm";
 import { findChanges } from "../findChanges";
 import { ChangeSet } from "../ChangeSet";
 import { CHANGE_STATUS, type TrackedChange } from "../types";
 import { dropOrphanChanges } from "../lib/structuralChange";
+import { stepRange } from "./transactionProcessing";
 import { applyChanges } from "../applyChanges";
 import { planChangeReview } from "../reviewPlan";
 import type { ReviewOutcome } from "../reviewPlan";
+
+/** The node that now holds this span, and the nodes the span covers. */
+function checkAround(doc: Node, from: number, to: number) {
+  const $from = doc.resolve(from);
+  // A container can be left invalid by what was taken out of it, not only by
+  // what remains inside the span.
+  if ($from.depth > 0) $from.parent.check();
+  if (from === to) {
+    // Nothing spans a join site; the nodes it joined sit either side of it.
+    $from.nodeBefore?.check();
+    $from.nodeAfter?.check();
+    return;
+  }
+  doc.nodesBetween(from, to, node => {
+    node.check();
+    return false;
+  });
+}
 
 /**
  * Validates what this review rewrote rather than the whole document. A document
  * can hold invalid content no review touched — written by another author, or by
  * an older defect — and failing on that would make every decision in the
  * document permanently unresolvable.
+ *
+ * The spans come from the steps, not their position maps: review does most of
+ * its work with marks, whose maps are empty, so a map walk would have validated
+ * nothing for accepting an insertion or a deletion.
  */
 function checkRewritten(scratch: Transaction) {
   const doc = scratch.doc;
   if (!doc.type.validContent(doc.content)) {
     throw new RangeError(`Invalid content for node ${doc.type.name}`);
   }
-  scratch.mapping.maps.forEach((map, i) => {
+  const clamp = (pos: number) => Math.max(0, Math.min(pos, doc.content.size));
+  scratch.steps.forEach((step, i) => {
+    const range = stepRange(step);
+    if (!range) return;
     const forward = scratch.mapping.slice(i + 1);
-    map.forEach((_oldFrom, _oldTo, newFrom, newTo) => {
-      const from = Math.max(0, Math.min(forward.map(newFrom, -1), doc.content.size));
-      const to = Math.max(from, Math.min(forward.map(newTo, 1), doc.content.size));
-      doc.nodesBetween(from, to, node => {
-        node.check();
-        return false;
-      });
-    });
+    const from = clamp(forward.map(range.from, -1));
+    checkAround(doc, from, Math.max(from, clamp(forward.map(range.to, 1))));
   });
 }
 

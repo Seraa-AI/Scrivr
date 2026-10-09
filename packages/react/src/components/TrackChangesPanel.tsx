@@ -8,11 +8,8 @@
  * Each row has Accept / Reject buttons. Header has Accept All / Reject All.
  */
 
-import type { Editor } from "@scrivr/core";
-import {
-  CHANGE_OPERATION,
-  CHANGE_STATUS,
-} from "@scrivr/plugins";
+import type { IBaseEditor } from "@scrivr/core";
+import { CHANGE_OPERATION } from "@scrivr/plugins";
 import type {
   TrackedChange,
   MarkChange,
@@ -171,7 +168,7 @@ function describeMarkChange(change: MarkChange): string {
 
 
 export interface TrackChangesPanelProps {
-  editor: Editor | null;
+  editor: IBaseEditor | null;
   className?: string | undefined;
   itemClassName?: string | undefined;
   iconClassName?: string | undefined;
@@ -243,6 +240,10 @@ export function TrackChangesPanel({
         )}
       </div>
 
+      {/* Whatever stopped the last header decision belongs with the buttons
+          that made it, not on a card nobody clicked. */}
+      <ReviewRefusal action={panel.review} />
+
       {/* Body */}
       <div
         style={{
@@ -279,9 +280,9 @@ export function TrackChangesPanel({
         ) : (
           panel.items.map((item, i) =>
             item.kind === "replacement" ? (
-              <ReplacementRow key={i} item={item} editor={editor} />
+              <ReplacementRow key={item.ids.join(":")} item={item} editor={editor} />
             ) : (
-              <SingleRow key={i} change={item.change} editor={editor} />
+              <SingleRow key={item.change.id} change={item.change} editor={editor} />
             ),
           )
         )}
@@ -295,7 +296,7 @@ function ReplacementRow({
   editor,
 }: {
   item: Extract<TrackChangesDisplayItem, { kind: "replacement" }>;
-  editor: Editor | null;
+  editor: IBaseEditor | null;
 }) {
   const { deleteChange: del, insertChange: ins, ids, authorID } = item;
   const review = useReviewAction(editor);
@@ -328,7 +329,7 @@ function SingleRow({
   editor,
 }: {
   change: TrackedChange;
-  editor: Editor | null;
+  editor: IBaseEditor | null;
 }) {
   const meta = getChangeMeta(change);
   const authorID = change.dataTracked.authorID;

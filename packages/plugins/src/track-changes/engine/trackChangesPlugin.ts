@@ -13,7 +13,7 @@ import { trackChanges } from "./trackChanges";
 import { fixInconsistentChanges } from "../lib/fixInconsistentChanges";
 import { TrackChangesOptions, TrackChangesStatus } from "../types";
 import type { TrackingResult } from "../types";
-import { trFromHistory } from "./transactionProcessing";
+import { reportedTracking, trFromHistory } from "./transactionProcessing";
 import { closeDependentCreations } from "./composition";
 import { normalizeMoveShadows } from "./moveIdentity";
 import { updateChangesStatus } from "./updateChangesStatus";
@@ -105,10 +105,18 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
             tx, createdTr, oldState, suggestionIntent(tx)?.authorID ?? userID, skipTrsWithMetas,
           );
           if (outcome.kind === "tracked") createdTr = outcome.tr;
-          // A refusal recorded nothing, so there is no partial rewrite to
-          // publish — only the result the host decides on.
+          // A refusal is the outcome a host has to act on, so it outranks a
+          // sibling success in the same round: one dispatch can carry several
+          // transactions, and the last of them must not speak for all.
           if (outcome.kind !== "skipped") {
-            setAction(createdTr, TrackChangesAction.trackingResult, outcome.result);
+            setAction(
+              createdTr,
+              TrackChangesAction.trackingResult,
+              reportedTracking(
+                getAction(createdTr, TrackChangesAction.trackingResult),
+                outcome.result,
+              ),
+            );
           }
         }
         docChanged = docChanged || tx.docChanged;

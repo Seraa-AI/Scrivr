@@ -5,6 +5,7 @@ import {
   AddMarkStep,
   AddNodeMarkStep,
   AttrStep,
+  DocAttrStep,
   RemoveMarkStep,
   RemoveNodeMarkStep,
   ReplaceAroundStep,
@@ -22,6 +23,7 @@ import {
   CHANGE_STATUS,
   TrackedAttrs,
   TrackingRefusal,
+  TrackingResult,
   TrTrackingContext,
 } from "../types";
 
@@ -79,28 +81,80 @@ export const excludeFromTracking = (node: Node) => {
   return node && !node.type.spec.attrs?.dataTracked;
 };
 
-/**
- * Step kinds the replay knows how to re-apply as tracked content. A kind that
- * is not here would fall straight through the replay and land untracked, so the
- * gesture is refused whole instead of recorded in part.
- */
-function refuseStep(step: Step): TrackingRefusal | null {
-  if (!(step instanceof ReplaceStep) && step.constructor.name === "ReplaceStep") {
-    // Two copies of prosemirror-transform make every instanceof silently false.
-    return { failure: "duplicate-transform-package" };
-  }
-  const trackable =
+/** Step kinds the replay knows how to re-apply as tracked content. */
+function isTrackableStep(step: Step) {
+  return (
     step instanceof ReplaceStep ||
     step instanceof ReplaceAroundStep ||
     step instanceof AttrStep ||
     step instanceof AddMarkStep ||
     step instanceof RemoveMarkStep ||
     step instanceof AddNodeMarkStep ||
-    step instanceof RemoveNodeMarkStep;
-  return trackable
-    ? null
-    : { failure: "unsupported-step", stepType: step.constructor.name };
+    step instanceof RemoveNodeMarkStep
+  );
 }
+
+/**
+ * Not content, so no record can be attached to it and none is missing by its
+ * absence. Doc attributes carry page and section settings, written through
+ * `tr.setDocAttribute`; refusing a gesture for containing one would call a
+ * normal operation untrackable.
+ */
+function isUntrackedStep(step: Step) {
+  return step instanceof DocAttrStep;
+}
+
+/**
+ * The span a step says it affects, in the document it applied to. Mark and
+ * attribute steps carry an empty StepMap, so a position map cannot describe
+ * what they touched — only the step can. Callers that need to know what a
+ * transaction rewrote must ask here rather than walking the maps.
+ */
+export function stepRange(step: Step): { from: number; to: number } | null {
+  if (
+    step instanceof ReplaceStep ||
+    step instanceof ReplaceAroundStep ||
+    step instanceof AddMarkStep ||
+    step instanceof RemoveMarkStep
+  ) {
+    return { from: step.from, to: step.to };
+  }
+  if (
+    step instanceof AttrStep ||
+    step instanceof AddNodeMarkStep ||
+    step instanceof RemoveNodeMarkStep
+  ) {
+    return { from: step.pos, to: step.pos };
+  }
+  return null;
+}
+
+function refuseStep(step: Step): TrackingRefusal | null {
+  if (!(step instanceof ReplaceStep) && step.constructor.name === "ReplaceStep") {
+    // Two copies of prosemirror-transform make every instanceof silently false.
+    return { failure: "duplicate-transform-package" };
+  }
+  if (isUntrackedStep(step) || isTrackableStep(step)) return null;
+  // Anything else would fall straight through the replay and land untracked, so
+  // the gesture is refused whole instead of recorded in part.
+  return { failure: "unsupported-step", stepType: step.constructor.name };
+}
+
+/**
+ * Which outcome speaks for a dispatch. One dispatch can carry several
+ * transactions, and a refusal is the one a host must act on — so the last
+ * transaction must not be allowed to report success on behalf of all of them.
+ */
+export function reportedTracking(
+  reported: TrackingResult | undefined,
+  next: TrackingResult,
+): TrackingResult {
+  return reported?.status === "refused" ? reported : next;
+}
+
+/** Steps that carry authored content, and so count toward what was tracked. */
+export const contentSteps = (steps: readonly (Step | null)[]) =>
+  steps.filter((step): step is Step => !!step && !isUntrackedStep(step));
 
 /**
  * Decided before the replay touches anything, so a gesture is either tracked in

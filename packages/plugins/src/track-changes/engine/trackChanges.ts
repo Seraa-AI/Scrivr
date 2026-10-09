@@ -4,6 +4,7 @@ import { getAction, TrackChangesAction } from "../actions";
 import { processStepsBeforeTracking } from "./processStepsBeforeTracking";
 import {
   changeMovedToInsertsOnSourceDeletion,
+  contentSteps,
   filterMeaninglessMoveSteps,
   getIndentationOperationSteps,
   getMoveOperationsSteps,
@@ -76,7 +77,7 @@ export function trackChanges(
     filterMeaninglessMoveSteps,
   ]);
 
-  const steps = clearedSteps.filter(Boolean).length;
+  const steps = contentSteps(clearedSteps).length;
   const refusal = planTracking(clearedSteps);
   if (refusal) {
     return {

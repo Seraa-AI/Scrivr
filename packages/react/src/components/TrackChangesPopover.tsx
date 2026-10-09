@@ -1,9 +1,6 @@
 import { createPortal } from "react-dom";
 import type { Editor } from "@scrivr/core";
-import {
-  CHANGE_OPERATION,
-  CHANGE_STATUS,
-} from "@scrivr/plugins";
+import { CHANGE_OPERATION } from "@scrivr/plugins";
 import type { ChangePopoverInfo, ReviewDecision } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
 import { useTrackChangesPopover } from "../hooks/useTrackChangesPopover";
@@ -269,9 +266,7 @@ function ConflictPopover({
 
   function acceptOne(id: string) {
     const others = changes.filter((c) => c.id !== id).map((c) => c.id);
-    if (review.review("accepted", [id])?.status !== "applied") return;
-    if (others.length > 0 && review.review("rejected", others)?.status !== "applied") return;
-    onClose();
+    if (review.resolveConflict(id, others)?.status === "applied") onClose();
   }
 
   function rejectAll() {

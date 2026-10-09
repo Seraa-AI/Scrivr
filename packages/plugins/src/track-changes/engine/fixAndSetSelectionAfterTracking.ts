@@ -3,11 +3,13 @@ import { Selection, Transaction } from "@scrivr/core/pm";
 import { TrTrackingContext } from "../types";
 
 /**
- * The replayed transaction already carries the gesture's selection: ProseMirror
- * maps it as each replay step applies, which keeps a range a range, keeps its
- * direction, and keeps whatever kind it was. Re-deriving it from one composed
- * mapping is strictly worse — a structural step's undo-and-restamp destroys
- * interior positions that per-step mapping survives.
+ * The replayed transaction already carries the gesture's selection, mapped
+ * forward through the replay steps, which keeps a range a range, keeps its
+ * direction, and keeps whatever kind it was. Deriving it instead by inverting
+ * the user's own steps and then crossing the replay bridge sends the position
+ * backwards through a structural step's undo-and-restamp, which has no interior
+ * position left to land on — that is what collapsed the caret to the end of the
+ * block.
  *
  * So only one case is left to decide: a caret that trailed an insertion belongs
  * after the content the replay stamped, not at the boundary the undo left. That

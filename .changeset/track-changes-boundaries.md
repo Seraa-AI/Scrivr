@@ -27,11 +27,12 @@ refused rather than silently widened, and the decision is evaluated on a private
 transaction whose result must validate before any step is published.
 
 Selection survives the rewrite instead of being rebuilt from one endpoint. The
-replayed transaction already carries it — ProseMirror maps it as each replay
-step applies — so a range stays a range, a backward selection stays backward,
-and whatever kind it was it stays. Per-step mapping also survives what a single
-composed mapping cannot: a structural step's undo-and-restamp, which is why
-wrapping or indenting no longer walks the caret backwards by a wrapper depth.
+replayed transaction already carries it, mapped forward through the replay, so a
+range stays a range, a backward selection stays backward, and whatever kind it
+was it stays. Deriving it instead by inverting the gesture's own steps and then
+crossing the replay bridge sent the position backwards through a structural
+step's undo-and-restamp, which has no interior position left to land on — that
+is why wrapping or indenting walked the caret backwards by a wrapper depth.
 The caret is overridden only to follow an insertion, and only when the gesture
 left a caret, so it can no longer collapse a range the gesture left standing.
 Deciding which step produced that caret compares the step's result range with
@@ -68,9 +69,25 @@ offering that for the rest would propose work nobody asked for.
 
 React decides through one shared action (`useReviewAction`), so every Accept and
 Reject in the panel and the popovers ends the same way: the decision is carried
-out, or the card says what stopped it. Previously a blocked decision returned
+out, or the surface that was clicked says what stopped it — per-change on the
+card, and for Accept all and Reject all beside the buttons themselves. Previously a blocked decision returned
 `false` into a caller that discarded it, so the button did nothing and said
 nothing. Dependent work is listed rather than counted, and is only decided after
 a second explicit confirmation that replans first — if more work came to depend
 on the change in the meantime, the wider set is shown before anything is
 decided, not after.
+
+Tracking no longer treats a doc-attribute write as untrackable. Page and section
+settings go through `tr.setDocAttribute`, and doc attributes are not tracked
+content, so a gesture carrying one is tracked for its content and reported as
+tracked. A refusal also outranks a sibling success: one dispatch can carry
+several transactions, and the last of them no longer reports on behalf of all.
+
+Review validates the spans its own steps rewrote, taken from the steps rather
+than from their position maps. Review does most of its work with marks, whose
+maps are empty, so a map walk validated nothing for accepting an insertion or a
+deletion.
+
+`MAX_TRACKED_STEPS_PER_TR` is gone from the public surface along with the
+`step-budget-exceeded` refusal it named; `TrackingRefusal` now reports
+`unsupported-step` or `duplicate-transform-package`.

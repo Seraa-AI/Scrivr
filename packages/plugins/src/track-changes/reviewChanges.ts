@@ -22,8 +22,7 @@ export function planReview(
   ids: readonly string[],
 ): ReviewPlan {
   const pluginState = trackChangesPluginKey.getState(editor.getState());
-  if (!pluginState) return { status: "blocked", ...subject(decision, ids), reason: "not-permitted" };
-  if (!pluginState.canAcceptReject) {
+  if (!pluginState?.canAcceptReject) {
     return { status: "blocked", ...subject(decision, ids), reason: "not-permitted" };
   }
   return planChangeReview(pluginState.changeSet, decision, ids);
@@ -51,11 +50,14 @@ export function reviewChanges(
     }),
   );
 
-  return (
-    trackChangesPluginKey.getState(editor.getState())?.lastReview ?? {
-      status: "blocked",
-      ...subject(decision, plan.ids),
-      reason: "invalid-result",
-    }
+  const outcome = trackChangesPluginKey.getState(editor.getState())?.lastReview;
+  if (outcome) return outcome;
+  // The engine records an outcome for every decision it is handed, so reaching
+  // here means it did not. Say so rather than reporting a failure that may not
+  // have happened.
+  console.error(
+    "@scrivr/plugins track-changes: review published no outcome; the document may have changed",
+    { decision, ids: plan.ids },
   );
+  return { status: "blocked", ...subject(decision, plan.ids), reason: "invalid-result" };
 }

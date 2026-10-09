@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Editor } from "@scrivr/core";
+import type { IBaseEditor } from "@scrivr/core";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
@@ -21,7 +21,7 @@ export type TrackChangesDisplayItem =
       change: TrackedChange;
     };
 
-export function useTrackChangesPanel(editor: Editor | null) {
+export function useTrackChangesPanel(editor: IBaseEditor | null) {
   const [changes, setChanges] = useState<TrackedChange[]>([]);
 
   useEffect(() => {
@@ -41,21 +41,12 @@ export function useTrackChangesPanel(editor: Editor | null) {
   const allIds = changes.map((c) => c.id);
   const review = useReviewAction(editor);
 
-  function acceptAll() {
-    review.review("accepted", allIds);
-  }
-
-  function rejectAll() {
-    review.review("rejected", allIds);
-  }
-
-  function accept(ids: string[]) {
-    review.review("accepted", ids);
-  }
-
-  function reject(ids: string[]) {
-    review.review("rejected", ids);
-  }
+  // These return the outcome: a caller driving the hook directly needs the same
+  // answer the panel gets, not a boolean it has to guess at.
+  const acceptAll = () => review.review("accepted", allIds);
+  const rejectAll = () => review.review("rejected", allIds);
+  const accept = (ids: string[]) => review.review("accepted", ids);
+  const reject = (ids: string[]) => review.review("rejected", ids);
 
   return {
     changes,

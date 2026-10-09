@@ -18,7 +18,6 @@ import { planReview, reviewChanges, trackChangesPluginKey } from "@scrivr/plugin
 import type {
   ReviewDecision,
   ReviewOutcome,
-  ReviewPlan,
   ReviewRefusal,
   TrackedChange,
 } from "@scrivr/plugins";
@@ -80,7 +79,7 @@ export function useReviewAction(editor: IBaseEditor | null) {
   );
 
   const settle = useCallback(
-    (decision: ReviewDecision, ids: string[], outcome: ReviewOutcome | ReviewPlan) => {
+    (decision: ReviewDecision, ids: string[], outcome: ReviewOutcome) => {
       if (outcome.status === "blocked") block(decision, ids, outcome, "explain");
       else setRefusal(null);
       return outcome;
@@ -130,11 +129,43 @@ export function useReviewAction(editor: IBaseEditor | null) {
     return settle(refusal.decision, asked, reviewChanges(editor, refusal.decision, asked));
   }, [editor, refusal, block, settle]);
 
+  /**
+   * Keep one change and discard the others — a conflict resolution, which is one
+   * decision even though it is two statuses. Both halves are planned before
+   * either runs, so a refusal cannot arrive with the first half already
+   * committed and no way back.
+   */
+  const resolveConflict = useCallback(
+    (keepId: string, discardIds: string[]) => {
+      if (!editor) return;
+      const keep = planReview(editor, "accepted", [keepId]);
+      if (keep.status === "blocked") return settle("accepted", [keepId], keep);
+      const discard = discardIds.length
+        ? planReview(editor, "rejected", discardIds)
+        : null;
+      if (discard?.status === "blocked") return settle("rejected", discardIds, discard);
+
+      const applied = reviewChanges(editor, "accepted", [keepId]);
+      if (applied.status !== "applied") return settle("accepted", [keepId], applied);
+      if (!discardIds.length) return applied;
+      return settle("rejected", discardIds, reviewChanges(editor, "rejected", discardIds));
+    },
+    [editor, settle],
+  );
+
   const dismiss = useCallback(() => setRefusal(null), []);
 
   return useMemo(
-    () => ({ review, refusal, listDependents, requestConfirm, confirm, dismiss }),
-    [review, refusal, listDependents, requestConfirm, confirm, dismiss],
+    () => ({
+      review,
+      refusal,
+      listDependents,
+      requestConfirm,
+      confirm,
+      resolveConflict,
+      dismiss,
+    }),
+    [review, refusal, listDependents, requestConfirm, confirm, resolveConflict, dismiss],
   );
 }
 
