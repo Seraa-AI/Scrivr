@@ -214,12 +214,6 @@ export interface TrackChangesOptions {
   canAcceptReject?: boolean;
 }
 
-export interface TrackChangesState {
-  status: TrackChangesStatus;
-  userID: string;
-  changeSet: ChangeSet;
-}
-
 // ── Transaction tracking context ──────────────────────────────────────────────
 
 /**
@@ -228,18 +222,18 @@ export interface TrackChangesState {
  * warning the author is the host's call.
  *
  * Refusal means the gesture cannot be represented, never that it was big. Step
- * count and elapsed time are diagnostics — a document-wide formatting command
- * legitimately produces thousands of steps and must still be tracked in full.
+ * count and elapsed time are diagnostics for finding expensive replays — a
+ * document-wide formatting command legitimately produces thousands of steps and
+ * must still be tracked in full.
  */
 export type TrackingRefusal =
   | { failure: "unsupported-step"; stepType: string }
   | { failure: "duplicate-transform-package" };
 
-export type TrackingDiagnostics = { steps: number; elapsedMs: number };
-
 export type TrackingResult =
-  | ({ status: "ready" } & TrackingDiagnostics)
-  | ({ status: "refused" } & TrackingRefusal & TrackingDiagnostics);
+  /** `elapsedMs` is only on this arm: a refusal is decided before anything runs. */
+  | { status: "ready"; steps: number; elapsedMs: number }
+  | ({ status: "refused"; steps: number } & TrackingRefusal);
 
 export type TrTrackingContext = {
   prevLiftStep?: ReplaceAroundStep;

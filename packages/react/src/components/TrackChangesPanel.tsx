@@ -16,15 +16,11 @@ import type {
   NodeAttrChange,
 } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
+import { shortName } from "../utils/authorName";
 import { useTrackChangesPanel } from "../hooks/useTrackChangesPanel";
 import type { TrackChangesDisplayItem } from "../hooks/useTrackChangesPanel";
 import { useReviewAction } from "../hooks/useReviewAction";
-import { ReviewRefusal } from "./ReviewRefusal";
-
-function shortName(authorID: string): string {
-  const name = authorID.split(":").pop() ?? authorID;
-  return name.length > 22 ? name.slice(0, 22) + "…" : name;
-}
+import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
 
 function truncate(text: string, max = 60): string {
   return text.length > max ? text.slice(0, max) + "…" : text;
@@ -242,7 +238,7 @@ export function TrackChangesPanel({
 
       {/* Whatever stopped the last header decision belongs with the buttons
           that made it, not on a card nobody clicked. */}
-      <ReviewRefusal action={panel.review} />
+      <ReviewRefusalNotice action={panel.review} />
 
       {/* Body */}
       <div
@@ -310,7 +306,7 @@ function ReplacementRow({
       authorID={authorID}
       onAccept={() => review.review("accepted", ids)}
       onReject={() => review.review("rejected", ids)}
-      refusal={<ReviewRefusal action={review} />}
+      refusal={<ReviewRefusalNotice action={review} />}
     >
       <div style={previewLine}>
         <span style={prefixLabel}>Removing</span>
@@ -387,7 +383,7 @@ function SingleRow({
       authorID={authorID}
       onAccept={accept}
       onReject={reject}
-      refusal={<ReviewRefusal action={review} />}
+      refusal={<ReviewRefusalNotice action={review} />}
     >
       {preview}
     </ChangeRow>

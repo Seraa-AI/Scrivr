@@ -11,7 +11,7 @@ import {
   Step,
 } from "@scrivr/core/pm";
 
-import { TrTrackingContext } from "../types";
+import { ChangeStep, TrTrackingContext } from "../types";
 import { processChangeSteps } from "./processReplaceStep";
 import {
   excludeFromTracking,
@@ -78,12 +78,22 @@ function advanceBridge(
   return bridge;
 }
 
+/**
+ * The node a single tracked step would write, when it writes one. Used to ask
+ * whether that node can carry a change record at all.
+ */
+function trackedContentNode(step: ChangeStep) {
+  if ("node" in step && step.node) return step.node;
+  if ("slice" in step) return step.slice.content.firstChild ?? undefined;
+  return undefined;
+}
+
 export function trackTransaction(
   tr: Transaction,
   oldState: EditorState,
   newTr: Transaction,
   authorID: string,
-  clearedSteps: Step[],
+  clearedSteps: (Step | null)[],
   trContext: TrTrackingContext,
 ) {
   if (
@@ -148,14 +158,9 @@ function trackOneStep(
       );
 
       let trackedContent = initialTrackedContent;
-      if (trackedContent.length === 1) {
-        const trackedStep = trackedContent[0] as any;
-        if (
-          excludeFromTracking(trackedStep?.node || trackedStep?.slice?.content?.content[0])
-        ) {
-          return;
-        }
-      }
+      const only = trackedContent.length === 1 ? trackedContent[0] : undefined;
+      const onlyNode = only ? trackedContentNode(only) : undefined;
+      if (onlyNode && excludeFromTracking(onlyNode)) return;
       trackedContent = diffChangeSteps(trackedContent);
 
       const [, updatedSelectionPos] = processChangeSteps(

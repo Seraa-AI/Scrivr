@@ -5,7 +5,6 @@ import { processStepsBeforeTracking } from "./processStepsBeforeTracking";
 import {
   changeMovedToInsertsOnSourceDeletion,
   contentSteps,
-  filterMeaninglessMoveSteps,
   getIndentationOperationSteps,
   getMoveOperationsSteps,
   planTracking,
@@ -16,8 +15,8 @@ import { trackTransaction } from "./trackTransaction";
 
 export type TrackingOutcome =
   | { kind: "skipped" }
-  | { kind: "tracked"; tr: Transaction; result: TrackingResult }
-  | { kind: "refused"; result: TrackingResult };
+  | { kind: "tracked"; tr: Transaction; result: Extract<TrackingResult, { status: "ready" }> }
+  | { kind: "refused"; result: Extract<TrackingResult, { status: "refused" }> };
 
 export function trackChanges(
   tx: Transaction,
@@ -25,7 +24,6 @@ export function trackChanges(
   oldState: EditorState,
   userID: string,
   skipTrsWithMetas: (PluginKey | string)[],
-  now: () => number = Date.now,
 ): TrackingOutcome {
   const wasAppended = tx.getMeta("appendedTransaction") as
     | Transaction
@@ -74,19 +72,18 @@ export function trackChanges(
   const clearedSteps = processStepsBeforeTracking(tx, trContext, [
     getMoveOperationsSteps,
     getIndentationOperationSteps,
-    filterMeaninglessMoveSteps,
-  ]);
+    ]);
 
   const steps = contentSteps(clearedSteps).length;
   const refusal = planTracking(clearedSteps);
   if (refusal) {
     return {
       kind: "refused",
-      result: { status: "refused", ...refusal, steps, elapsedMs: 0 },
+      result: { status: "refused", ...refusal, steps },
     };
   }
 
-  const startedAt = now();
+  const startedAt = Date.now();
   changeMovedToInsertsOnSourceDeletion(tx, createdTr, trContext);
   const tr = trackTransaction(
     tx,
@@ -99,6 +96,6 @@ export function trackChanges(
   return {
     kind: "tracked",
     tr,
-    result: { status: "ready", steps, elapsedMs: now() - startedAt },
+    result: { status: "ready", steps, elapsedMs: Date.now() - startedAt },
   };
 }

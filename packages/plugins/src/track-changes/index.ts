@@ -38,6 +38,7 @@ export {
 } from "./actions";
 export type { TrackChangesActionParams } from "./actions";
 export { TrackChangesStatus, CHANGE_STATUS, CHANGE_OPERATION } from "./types";
+export type { TrackChangesState } from "./engine/trackChangesPlugin";
 export type {
   TrackChangesOptions,
   TrackedAttrs,
@@ -52,7 +53,6 @@ export type {
   IncompleteChange,
   TrackingResult,
   TrackingRefusal,
-  TrackingDiagnostics,
 } from "./types";
 
 // Rich (leaf-based) semantic edits → tracked suggestions. The write-side merge
@@ -62,7 +62,7 @@ export type { RichBlockEdit, RichDiffOptions, RichDiffResult } from "./lib/apply
 export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";
 
 export { planChangeReview, changeEffect } from "./reviewPlan";
-export { planReview, reviewChanges } from "./reviewChanges";
+export { planReview, planReviewIn, reviewChanges } from "./reviewChanges";
 export type {
   ReviewPlan,
   ReviewOutcome,

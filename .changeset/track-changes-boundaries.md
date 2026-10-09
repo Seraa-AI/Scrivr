@@ -1,7 +1,15 @@
 ---
+"@scrivr/core": patch
 "@scrivr/plugins": patch
 "@scrivr/react": patch
 ---
+
+Commands answer whether they ran. `editor.commands.*` and `runCommand` returned
+`void` while the ProseMirror commands underneath them already returned a
+boolean, so a caller had no way to tell a refusal from a no-op — which is how a
+blocked Accept could look like a dead button. Read-only now reports `false` like
+any other refusal rather than returning nothing.
+
 
 Track changes keeps its boundaries: editing content that already holds
 suggestions no longer destroys authorship, selection, or unrelated decisions.
@@ -91,3 +99,15 @@ deletion.
 `MAX_TRACKED_STEPS_PER_TR` is gone from the public surface along with the
 `step-budget-exceeded` refusal it named; `TrackingRefusal` now reports
 `unsupported-step` or `duplicate-transform-package`.
+
+`planReviewIn` is the one place that answers whether a state permits a decision
+and what carrying it out would take; the command, the host preflight and the
+plugin's own gate all ask it instead of deriving it separately. A decision the
+gate refuses is reported rather than dropped.
+
+`TrackChangesState` names the plugin state a host reads off
+`trackChangesPluginKey`, replacing a stale three-field copy of it that described
+the state as it was several fields ago. The React notice is
+`ReviewRefusalNotice`, which no longer collides with the plugins type of the
+same name, and it takes `className`/`itemClassName` and themes through the
+package's own `--scrivr-react-*` tokens like its siblings.

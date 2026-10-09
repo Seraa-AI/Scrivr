@@ -1,7 +1,7 @@
 import { EditorState, Mapping, type Node, type Transaction } from "@scrivr/core/pm";
 import { findChanges } from "../findChanges";
 import { ChangeSet } from "../ChangeSet";
-import { CHANGE_STATUS, type TrackedChange } from "../types";
+import { CHANGE_STATUS, type IncompleteChange, type TrackedChange } from "../types";
 import { dropOrphanChanges } from "../lib/structuralChange";
 import { stepRange } from "./transactionProcessing";
 import { applyChanges } from "../applyChanges";
@@ -51,6 +51,26 @@ function checkRewritten(scratch: Transaction) {
   });
 }
 
+/**
+ * The same records, with the reviewed ones stamped. Returns the unvalidated
+ * shape on purpose: spreading a change widens its discriminant, and `ChangeSet`
+ * is the one place records are validated back into changes.
+ */
+function stampReviewed(
+  changes: readonly TrackedChange[],
+  selected: ReadonlySet<string>,
+  status: CHANGE_STATUS,
+  userID: string,
+  reviewedAt: number,
+): IncompleteChange[] {
+  return changes.map(change => ({
+    ...change,
+    dataTracked: selected.has(change.id)
+      ? { ...change.dataTracked, status, reviewedByID: userID, statusUpdateAt: reviewedAt }
+      : { ...change.dataTracked },
+  }));
+}
+
 /** Plan first, evaluate on a private transaction, then publish the whole result. */
 export function updateChangesStatus(
   createdTr: Transaction,
@@ -67,13 +87,10 @@ export function updateChangesStatus(
   // One review stamps one time, however many records it touches.
   const reviewedAt = Date.now();
   // Review must not mutate cached ChangeSet records or partially publish steps.
-  const reviewed = changeSet.changes.map(change => ({ ...change,
-    dataTracked: selected.has(change.id)
-      ? { ...change.dataTracked, status, reviewedByID: userID, statusUpdateAt: reviewedAt }
-      : { ...change.dataTracked },
-  })) as TrackedChange[];
-  const snapshot = new ChangeSet(reviewed);
-  const changes = reviewed.filter(change => selected.has(change.id));
+  const snapshot = new ChangeSet(
+    stampReviewed(changeSet.changes, selected, status, userID, reviewedAt),
+  );
+  const changes = snapshot.changes.filter(change => selected.has(change.id));
   const scratch = EditorState.create({ doc: createdTr.doc }).tr;
   try {
     const placements = changes.filter(change => change.dataTracked.operation === "move");
@@ -98,12 +115,15 @@ export function updateChangesStatus(
       for (const change of ordered) applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, placementMapping);
     }
     const current = status === CHANGE_STATUS.rejected
-      ? new ChangeSet(findChanges(EditorState.create({ doc: scratch.doc })).changes.map(change => ({
-          ...change,
-          dataTracked: selected.has(change.id)
-            ? { ...change.dataTracked, status, reviewedByID: userID, statusUpdateAt: reviewedAt }
-            : { ...change.dataTracked },
-        })) as TrackedChange[])
+      ? new ChangeSet(
+          stampReviewed(
+            findChanges(EditorState.create({ doc: scratch.doc })).changes,
+            selected,
+            status,
+            userID,
+            reviewedAt,
+          ),
+        )
       : snapshot;
     const ordinaryIds = new Set(ordinary.map(change => change.id));
     const remaining = current.changes.filter(change => ordinaryIds.has(change.id));

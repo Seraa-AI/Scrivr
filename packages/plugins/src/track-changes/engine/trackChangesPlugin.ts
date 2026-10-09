@@ -11,7 +11,8 @@ import { ChangeSet } from "../ChangeSet";
 import { findChanges } from "../findChanges";
 import { trackChanges } from "./trackChanges";
 import { fixInconsistentChanges } from "../lib/fixInconsistentChanges";
-import { TrackChangesOptions, TrackChangesStatus } from "../types";
+import { CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus } from "../types";
+import { planReviewIn } from "../reviewChanges";
 import type { TrackingResult } from "../types";
 import { reportedTracking, trFromHistory } from "./transactionProcessing";
 import { closeDependentCreations } from "./composition";
@@ -20,7 +21,12 @@ import { updateChangesStatus } from "./updateChangesStatus";
 
 import type { ReviewOutcome } from "../reviewPlan";
 
-interface TrackChangesPluginState {
+/**
+ * What the plugin knows. A host reads this off `trackChangesPluginKey` — the
+ * outcomes especially, since a refusal is the one a host must act on — so it
+ * needs a name it can write down.
+ */
+export interface TrackChangesState {
   lastReview: ReviewOutcome | null;
   /** Outcome of the most recent tracked gesture; `refused` needs host action. */
   lastTracking: TrackingResult | null;
@@ -30,14 +36,14 @@ interface TrackChangesPluginState {
   canAcceptReject: boolean;
 }
 
-export const trackChangesPluginKey = new PluginKey<TrackChangesPluginState>(
+export const trackChangesPluginKey = new PluginKey<TrackChangesState>(
   "track-changes",
 );
 
 export const trackChangesPlugin = (options: TrackChangesOptions) => {
   const { userID, skipTrsWithMetas = [], canAcceptReject = true } = options;
 
-  return new Plugin<TrackChangesPluginState>({
+  return new Plugin<TrackChangesState>({
     key: trackChangesPluginKey,
     props: {
       editable: (state: EditorState) =>
@@ -89,15 +95,19 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           tx,
           TrackChangesAction.setChangeStatuses,
         );
-        if (setsChangeStatus && pluginState.canAcceptReject) {
+        if (setsChangeStatus) {
           const { status, ids } = setsChangeStatus;
-          const review = updateChangesStatus(
-            createdTr,
-            changeSet,
+          // Permission is the shared rule's to answer, not this gate's — and a
+          // refusal is still an outcome, so it is reported rather than dropped.
+          const permitted = planReviewIn(
+            oldState,
+            status === CHANGE_STATUS.accepted ? "accepted" : "rejected",
             ids,
-            status,
-            userID,
           );
+          const review =
+            permitted.status === "blocked"
+              ? permitted
+              : updateChangesStatus(createdTr, changeSet, ids, status, userID);
           if (review) setAction(createdTr, TrackChangesAction.reviewResult, review);
           docChanged = true;
         } else if (!shouldSkipTracking || suggestionIntent(tx)) {

@@ -29,10 +29,11 @@ export type ReviewRefusalState = {
   refusal: ReviewRefusal;
   /** Dependent work, resolved to changes so it can be listed rather than counted. */
   dependents: TrackedChange[];
-  /** "explain" is the notice on the card; "confirm" is the compound decision. */
-  stage: "explain" | "confirm";
-  /** The reviewer asked to see the dependent work without committing to it. */
-  listed: boolean;
+  /**
+   * How far the reviewer has gone: told what stopped them, shown the dependent
+   * work, or asked to decide it as a whole.
+   */
+  stage: "explain" | "listed" | "confirm";
   /** The set grew between being shown and being confirmed. */
   grew: boolean;
 };
@@ -71,8 +72,9 @@ export function useReviewAction(editor: IBaseEditor | null) {
         refusal: blocked,
         dependents: resolve(dependentIds),
         stage,
-        listed: stage === "confirm",
-        grew: dependentIds.some(id => !seen.includes(id)),
+        // Only meaningful once the set has been shown; nothing has grown the
+        // first time the reviewer is told about it.
+        grew: stage !== "explain" && dependentIds.some(id => !seen.includes(id)),
       });
     },
     [resolve],
@@ -98,36 +100,44 @@ export function useReviewAction(editor: IBaseEditor | null) {
 
   /** Show the dependent work in place. Shows it; authorizes nothing. */
   const listDependents = useCallback(() => {
-    setRefusal(current => (current ? { ...current, listed: true } : current));
+    setRefusal(current =>
+      current?.stage === "explain" ? { ...current, stage: "listed" } : current,
+    );
   }, []);
+
+  /**
+   * Replan the compound decision against the document as it stands. Both the
+   * confirmation and the decision itself go through here, so neither can act on
+   * a set the reviewer has not been shown.
+   */
+  const replan = useCallback(() => {
+    if (!editor || !refusal) return null;
+    const seen = refusal.dependents.map(c => c.id);
+    const asked = [...new Set([...refusal.ids, ...seen])];
+    const plan = planReview(editor, refusal.decision, asked);
+    if (plan.status === "blocked") {
+      block(refusal.decision, refusal.ids, plan, "confirm", seen);
+      return null;
+    }
+    return { asked, decision: refusal.decision };
+  }, [editor, refusal, block]);
 
   /** Open the confirmation for the compound decision, listing what it covers. */
   const requestConfirm = useCallback(() => {
-    if (!editor || !refusal) return;
-    const seen = refusal.dependents.map(c => c.id);
-    const asked = [...new Set([...refusal.ids, ...seen])];
-    const replanned = planReview(editor, refusal.decision, asked);
-    if (replanned.status === "blocked") {
-      return block(refusal.decision, refusal.ids, replanned, "confirm", seen);
-    }
-    setRefusal({ ...refusal, stage: "confirm", listed: true, grew: false });
-  }, [editor, refusal, block]);
+    if (!replan() || !refusal) return;
+    setRefusal({ ...refusal, stage: "confirm", grew: false });
+  }, [replan, refusal]);
 
-  /**
-   * Send the compound decision — after replanning, because the document may
-   * have moved on since the confirmation was opened. A wider set is shown
-   * rather than slipped in behind the confirmation already given.
-   */
+  /** Send the compound decision, which `replan` has just re-checked. */
   const confirm = useCallback(() => {
-    if (!editor || !refusal) return;
-    const seen = refusal.dependents.map(c => c.id);
-    const asked = [...new Set([...refusal.ids, ...seen])];
-    const replanned = planReview(editor, refusal.decision, asked);
-    if (replanned.status === "blocked") {
-      return block(refusal.decision, refusal.ids, replanned, "confirm", seen);
-    }
-    return settle(refusal.decision, asked, reviewChanges(editor, refusal.decision, asked));
-  }, [editor, refusal, block, settle]);
+    const ready = replan();
+    if (!ready || !editor) return;
+    return settle(
+      ready.decision,
+      ready.asked,
+      reviewChanges(editor, ready.decision, ready.asked),
+    );
+  }, [replan, editor, settle]);
 
   /**
    * Keep one change and discard the others — a conflict resolution, which is one

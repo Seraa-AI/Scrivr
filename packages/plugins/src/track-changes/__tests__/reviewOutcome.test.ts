@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TrackChanges } from "../TrackChanges";
 import { TrackChangesStatus } from "../types";
-import { planReview, reviewChanges } from "../reviewChanges";
-import { trackChangesPluginKey } from "../engine/trackChangesPlugin";
+import { planReview, reviewChanges } from "../index";
+import { trackChangesPluginKey } from "../index";
 
 /**
  * Every review call reports what happened. A refusal names its own reason, so a

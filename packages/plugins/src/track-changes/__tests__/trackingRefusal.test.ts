@@ -94,9 +94,9 @@ describe("tracking refuses only what it cannot represent", () => {
     editor.insertAt(1, "x");
     const result = tracking(editor);
 
-    expect(result?.status).toBe("ready");
     expect(result?.steps).toBeGreaterThan(0);
-    expect(result?.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(result?.status === "ready" ? result.elapsedMs : undefined)
+      .toBeGreaterThanOrEqual(0);
     expect(refusal(editor)).toBeUndefined();
   });
 });
@@ -109,7 +109,6 @@ describe("a refusal outranks a sibling success", () => {
     failure: "unsupported-step",
     stepType: "ShoutStep",
     steps: 1,
-    elapsedMs: 0,
   } as const;
 
   it("keeps a refusal already reported in this round", () => {

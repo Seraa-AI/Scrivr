@@ -169,21 +169,24 @@ export function planTracking(steps: readonly (Step | null)[]) {
   return null;
 }
 
+/**
+ * Records which steps belong to one move. A context processor: it groups steps
+ * by id and returns nothing, because the step list is not its to rewrite.
+ */
 export const getMoveOperationsSteps = (
   tr: Transaction,
   context: TrTrackingContext,
-) => {
+): void => {
   const movingAssoc = context.stepsByGroupIDMap;
 
-  if (tr.steps.length < 2) {
-    return movingAssoc;
-  }
+  if (tr.steps.length < 2) return;
 
   if (tr.getMeta(TrackChangesAction.structuralChangeAction)) {
     const commonID = genId();
-    movingAssoc.set(tr.steps[0] as ReplaceStep, commonID);
-    movingAssoc.set(tr.steps[1] as ReplaceStep, commonID);
-    return movingAssoc;
+    for (const step of tr.steps.slice(0, 2)) {
+      if (step instanceof ReplaceStep) movingAssoc.set(step, commonID);
+    }
+    return;
   }
 
   const matched: number[] = [];
@@ -258,16 +261,6 @@ export const getMoveOperationsSteps = (
     }
   }
 };
-
-export const filterMeaninglessMoveSteps = (
-  tr: Transaction,
-  context: TrTrackingContext,
-) => {
-  // A second move is a new placement decision. Reusing the previous move ID
-  // loses the intermediate location and silently decides the first author's act.
-  return tr.steps.slice();
-};
-
 
 export const trFromHistory = (tr: Transaction): boolean => isHistoryTransaction(tr);
 export const changeMovedToInsertsOnSourceDeletion = (

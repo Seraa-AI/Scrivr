@@ -5,7 +5,7 @@ import type { ChangePopoverInfo, ReviewDecision } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
 import { useTrackChangesPopover } from "../hooks/useTrackChangesPopover";
 import { useReviewAction } from "../hooks/useReviewAction";
-import { ReviewRefusal } from "./ReviewRefusal";
+import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
 
 export interface TrackChangesPopoverProps {
   editor: Editor | null;
@@ -235,7 +235,7 @@ function SingleChangePopover({
         </button>
       </div>
       {preview}
-      <ReviewRefusal action={review} />
+      <ReviewRefusalNotice action={review} />
     </>
   );
 }
@@ -279,7 +279,7 @@ function ConflictPopover({
 
   return (
     <>
-      <ReviewRefusal action={review} />
+      <ReviewRefusalNotice action={review} />
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span className={cx("scrivr-menu-icon", iconClassName)} data-part="icon" style={badge}>

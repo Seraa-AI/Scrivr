@@ -6,7 +6,7 @@ import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs } from "./helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus } from "./types";
-import { planChangeReview } from "./reviewPlan";
+import { planReviewIn } from "./reviewChanges";
 import { cloneTrackedChanges } from "./cloneTrackedChanges";
 
 declare module "@scrivr/core" {
@@ -211,9 +211,12 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
       setChangeStatuses:
         (status: CHANGE_STATUS, ids: string[]) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
-          const pluginState = trackChangesPluginKey.getState(state);
-          if (!pluginState?.canAcceptReject || status === CHANGE_STATUS.pending) return false;
-          if (planChangeReview(pluginState.changeSet, status, ids).status === "blocked") return false;
+          if (status === CHANGE_STATUS.pending) return false;
+          const decision = status === CHANGE_STATUS.accepted ? "accepted" : "rejected";
+          // Asks the shared rule rather than re-deriving it. A caller needing to
+          // know *why* a decision was refused reads `reviewChanges` instead; a
+          // command can only say whether it ran.
+          if (planReviewIn(state, decision, ids).status === "blocked") return false;
 
           dispatch?.(
             setAction(state.tr, TrackChangesAction.setChangeStatuses, {

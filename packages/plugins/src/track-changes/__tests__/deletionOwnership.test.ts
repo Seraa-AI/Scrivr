@@ -162,3 +162,24 @@ describe("cancellation policy", () => {
     expect(canCancelInsertion(schema.text("accepted", [mark]), "alice")).toBe(false);
   });
 });
+
+it("reviewing one author's change leaves the other author's record standing", () => {
+  // Review clears the identity it was given. Every other record on the content
+  // it touches is someone else's pending decision, including the marks.
+  const editor = new TestEditor(doc(p("hello world")), "alice");
+  editor.insertAt(6, "A");
+  const alice = editor.pendingChanges.map(c => c.id);
+  editor.setUserID("bob").insertAt(8, "B");
+  const bob = editor.pendingChanges.filter(c => !alice.includes(c.id)).map(c => c.id);
+  expect(bob.length).toBeGreaterThan(0);
+
+  editor.acceptChanges(alice);
+
+  expect(editor.pendingChanges.map(c => c.id).sort()).toEqual(bob.sort());
+  expect(editor.text).toContain("B");
+  expect(() => editor.state.doc.check()).not.toThrow();
+
+  editor.rejectChanges(bob);
+  expect(editor.pendingChanges).toEqual([]);
+  expect(editor.text).toBe("helloA world");
+});

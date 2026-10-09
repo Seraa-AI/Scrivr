@@ -17,7 +17,7 @@ import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 import type { TrackedChange } from "@scrivr/plugins";
 import { useReviewAction } from "../hooks/useReviewAction";
-import { ReviewRefusal } from "./ReviewRefusal";
+import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
 import { TrackChangesPanel } from "./TrackChangesPanel";
 
 let container: HTMLDivElement;
@@ -70,7 +70,7 @@ function Card({ editor, ids }: { editor: ServerEditor; ids: string[] }) {
       <button type="button" onClick={() => review.review("rejected", ids)}>
         Reject
       </button>
-      <ReviewRefusal action={review} />
+      <ReviewRefusalNotice action={review} />
     </div>
   );
 }

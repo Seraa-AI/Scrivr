@@ -336,14 +336,14 @@ export class BaseEditor implements IBaseEditor {
    * signatures, which only typechecks behind a cast — so every such surface
    * grew its own. This is that dispatch, once, where the loose map already is.
    *
-   * Unknown names are ignored: a spec can name a command from an extension
-   * this editor was not built with.
+   * Unknown names report false, like any command that did not run: a spec can
+   * name a command from an extension this editor was not built with.
    */
-  runCommand(name: keyof SafeFlatCommands, args: unknown[] = []): void {
+  runCommand(name: keyof SafeFlatCommands, args: unknown[] = []): boolean {
     // `hasOwn`, not a plain lookup: a name that happens to match something on
     // Object.prototype would otherwise be invoked rather than ignored.
-    if (!Object.hasOwn(this.boundCommands, name)) return;
-    this.boundCommands[name]?.(...args);
+    if (!Object.hasOwn(this.boundCommands, name)) return false;
+    return this.boundCommands[name]?.(...args) ?? false;
   }
 
   /**
@@ -775,9 +775,10 @@ export class BaseEditor implements IBaseEditor {
     const rawCommands = this.manager.buildCommands();
     for (const [name, factory] of Object.entries(rawCommands)) {
       this.boundCommands[name] = (...args: unknown[]) => {
-        if (this.readOnlyValue) return;
+        // Read-only is a refusal like any other, not an absent answer.
+        if (this.readOnlyValue) return false;
         const cmd = factory(...args);
-        cmd(this.getActiveState(), (tr) => this.dispatchToActive(tr));
+        return cmd(this.getActiveState(), (tr) => this.dispatchToActive(tr));
       };
     }
     return this.boundCommands as SafeFlatCommands;

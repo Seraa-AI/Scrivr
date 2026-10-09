@@ -208,7 +208,7 @@ export interface IBaseEditor {
    * ignored — a spec can name a command from an extension this editor was not
    * built with.
    */
-  runCommand(name: keyof SafeFlatCommands, args?: unknown[]): void;
+  runCommand(name: keyof SafeFlatCommands, args?: unknown[]): boolean;
   /**
    * The listable half of the menu, ordered by `group` then `order`.
    *
