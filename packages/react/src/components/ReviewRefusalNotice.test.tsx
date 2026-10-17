@@ -226,6 +226,17 @@ describe("the shipped panel explains its document-wide decisions", () => {
     expect(pending(editor).length).toBeGreaterThan(0);
   });
 
+  it("shows a deletion split by another author's typing as one change", () => {
+    const editor = build();
+    editor.applyTransaction(editor.getState().tr.delete(6, 10));
+    editor.commands.setTrackChangesUserID("bob");
+    editor.applyTransaction(editor.getState().tr.insertText("!", 8));
+    render(<TrackChangesPanel editor={editor} />);
+
+    expect(text().match(/Removing/g)).toHaveLength(1);
+    expect(text()).toContain("ta … il");
+  });
+
   it("does not decide anything in a read-only editor, and says why", () => {
     const editor = build();
     editor.setReadOnly(true);

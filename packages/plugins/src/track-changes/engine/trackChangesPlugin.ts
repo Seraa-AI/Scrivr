@@ -132,17 +132,15 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
         composeGestureRecords(createdTr, oldState.doc);
         closeDependentCreations(createdTr);
       }
+      // Read from the document this round produced, not the change set from
+      // before it: a split made now has to be repaired now, or its second
+      // piece is invisible to review until something else happens.
+      const current = docChanged || createdTr.docChanged
+        ? findChanges(EditorState.create({ doc: createdTr.doc }))
+        : pluginState.changeSet;
       const changed =
-        pluginState.changeSet.hasInconsistentData &&
-        fixInconsistentChanges(
-          pluginState.changeSet,
-          userID,
-          createdTr,
-          oldState.schema,
-        );
-      if (changed) {
-        console.warn("had to fix inconsistent changes in", createdTr);
-      }
+        current.hasInconsistentData &&
+        fixInconsistentChanges(current, userID, createdTr, oldState.schema);
       if (docChanged || createdTr.docChanged || changed) {
         createdTr.setMeta("origin", trackChangesPluginKey);
         return setAction(createdTr, TrackChangesAction.refreshChanges, true);

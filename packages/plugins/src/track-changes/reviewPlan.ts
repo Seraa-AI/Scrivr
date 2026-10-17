@@ -68,13 +68,16 @@ export type ReviewOutcome =
 /** Two changes cover some of the same content. */
 const overlaps = (a: TrackedChange, b: TrackedChange) => a.from < b.to && b.from < a.to;
 
+/** Recorded on a node rather than on text: it covers the node's whole span. */
+const onNode = (change: TrackedChange) => change.type !== "text-change" && change.type !== "mark-change";
+
 /**
- * `outer` is a node-change wrapping `inner` with room to spare — an ancestor,
- * not a dependent. Deciding the inner change does not decide the container it
- * happens to sit in.
+ * `outer` is recorded on a node wrapping `inner` with room to spare — an
+ * ancestor, not a dependent. Deciding the inner change does not decide the
+ * container it happens to sit in, whatever was recorded about that container.
  */
 const strictlyContains = (outer: TrackedChange, inner: TrackedChange) =>
-  outer.type === "node-change" &&
+  onNode(outer) &&
   outer.from <= inner.from &&
   outer.to >= inner.to &&
   (outer.from < inner.from || outer.to > inner.to);
@@ -86,6 +89,12 @@ const representsCreation = (related: TrackedChange, change: TrackedChange) =>
 /** `related` records part of the deletion `change` made in one gesture. */
 const representsDeletion = (related: TrackedChange, change: TrackedChange) =>
   related.dataTracked.deletionId === change.id;
+
+/** Pieces of one record that later work split apart. */
+const samePieces = (related: TrackedChange, change: TrackedChange) => {
+  const root = (c: TrackedChange) => c.dataTracked.continuesId ?? c.id;
+  return (!!related.dataTracked.continuesId || !!change.dataTracked.continuesId) && root(related) === root(change);
+};
 
 /** Two halves of one transport: the copy and the shadow it left behind. */
 const pairedMove = (related: TrackedChange, change: TrackedChange) =>
@@ -181,6 +190,7 @@ export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecision
         if (
           !representsCreation(related, change) &&
           !representsDeletion(related, change) &&
+          !samePieces(related, change) &&
           !pairedMove(related, change) &&
           !splitReference(related, change)
         ) continue;

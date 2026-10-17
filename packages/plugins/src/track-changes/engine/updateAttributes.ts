@@ -60,6 +60,9 @@ export function updateChangeAttrs(
     ) {
       tr.removeMark(change.from, change.to, oldMark);
     } else {
+      // Tracked marks coexist (`excludes: ""`), so adding the updated record
+      // without taking the old one off would leave both on the text.
+      tr.removeMark(change.from, change.to, oldMark);
       tr.addMark(
         change.from,
         change.to,

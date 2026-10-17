@@ -83,6 +83,12 @@ type InsertDeleteAttrs = {
    * deletion is written on the node and again on what it struck inside it.
    */
   deletionId?: string;
+  /**
+   * This record is a piece of the record named here, split apart by later
+   * work — typing inside a deletion. Each piece has its own id because an id
+   * names one contiguous span; the pieces are still one change.
+   */
+  continuesId?: string;
   /** Independent intents whose targets exist because of these creations. */
   dependsOn?: string[];
   /** Persistent: independent work has depended on this creation. */

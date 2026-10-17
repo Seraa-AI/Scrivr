@@ -278,7 +278,7 @@ export function TrackChangesPanel({
             item.kind === "replacement" ? (
               <ReplacementRow key={item.ids.join(":")} item={item} editor={editor} />
             ) : (
-              <SingleRow key={item.change.id} change={item.change} editor={editor} />
+              <SingleRow key={item.change.id} change={item.change} pieces={item.pieces} editor={editor} />
             ),
           )
         )}
@@ -322,9 +322,11 @@ function ReplacementRow({
 
 function SingleRow({
   change,
+  pieces,
   editor,
 }: {
   change: TrackedChange;
+  pieces: TrackedChange[];
   editor: IBaseEditor | null;
 }) {
   const meta = getChangeMeta(change);
@@ -348,7 +350,7 @@ function SingleRow({
         style={previewLine}
       >
         <span style={prefixLabel}>{isDelete ? "Removing" : "Adding"}</span>
-        <em>"{truncate(tc.text)}"</em>
+        <em>"{truncate(pieces.map(piece => (piece.type === "text-change" ? piece.text : "")).join(" … "))}"</em>
       </div>
     );
   } else if (change.type === "mark-change") {

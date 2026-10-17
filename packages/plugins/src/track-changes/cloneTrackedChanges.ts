@@ -1,7 +1,7 @@
 import { Fragment, type Mark, type Node } from "@scrivr/core/pm";
 import type { CloneHandler } from "@scrivr/core";
 
-const TRACKED_ID_FIELDS = ["id", "referenceId", "moveNodeId", "groupId", "creationId", "deletionId"] as const;
+const TRACKED_ID_FIELDS = ["id", "referenceId", "moveNodeId", "groupId", "creationId", "deletionId", "continuesId"] as const;
 
 /** Re-key track-change identity while preserving all internal links. */
 export const cloneTrackedChanges: CloneHandler = ({ doc, newId, recordId }) => {

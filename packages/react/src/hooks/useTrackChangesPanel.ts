@@ -19,6 +19,11 @@ export type TrackChangesDisplayItem =
   | {
       kind: "single";
       change: TrackedChange;
+      /**
+       * Every piece of the change, in document order: more than one when later
+       * work split it apart. Deciding `change` decides them all.
+       */
+      pieces: TrackedChange[];
     };
 
 export function useTrackChangesPanel(editor: IBaseEditor | null) {
@@ -60,6 +65,16 @@ export function useTrackChangesPanel(editor: IBaseEditor | null) {
   };
 }
 
+/** One change split apart by later work is shown once, under its first piece. */
+function singles(changes: TrackedChange[]): TrackChangesDisplayItem[] {
+  const byRecord = new Map<string, TrackedChange[]>();
+  for (const change of changes) {
+    const record = change.dataTracked.continuesId ?? change.id;
+    byRecord.set(record, [...(byRecord.get(record) ?? []), change]);
+  }
+  return [...byRecord.values()].map(pieces => ({ kind: "single", change: pieces[0]!, pieces }));
+}
+
 function buildDisplayItems(changes: TrackedChange[]): TrackChangesDisplayItem[] {
   const byGroupId = new Map<string, TrackedChange[]>();
   const ungrouped: TrackedChange[] = [];
@@ -99,11 +114,11 @@ function buildDisplayItems(changes: TrackedChange[]): TrackChangesDisplayItem[] 
         authorID: del.dataTracked.authorID,
       });
     } else {
-      group.forEach((c) => items.push({ kind: "single", change: c }));
+      items.push(...singles(group));
     }
   }
 
-  ungrouped.forEach((c) => items.push({ kind: "single", change: c }));
+  items.push(...singles(ungrouped));
 
   items.sort((a, b) => {
     const af =

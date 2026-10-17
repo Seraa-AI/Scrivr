@@ -192,6 +192,7 @@ export function shouldMergeTrackedAttributes(
     left.authorID === right.authorID &&
     left.creationId === right.creationId &&
     left.deletionId === right.deletionId &&
+    left.continuesId === right.continuesId &&
     left.foldingClosed === right.foldingClosed &&
     JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? [])
   );
