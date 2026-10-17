@@ -6,7 +6,7 @@
  */
 
 import type { ReviewAction, ReviewRefusalState } from "../hooks/useReviewAction";
-import type { TrackedChange } from "@scrivr/plugins";
+import type { ReviewDecisions, ReviewRefusal, TrackedChange } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
 import { shortName } from "../utils/authorName";
 
@@ -46,8 +46,26 @@ const button: React.CSSProperties = {
 
 const listStyle: React.CSSProperties = { margin: "8px 0 0", paddingLeft: 18 };
 
-const imperative = (decision: ReviewRefusalState["decision"]) =>
-  decision === "accepted" ? "Accept" : "Reject";
+const explanation: Record<Exclude<ReviewRefusal["reason"], "dependent-changes">, string> = {
+  "not-permitted": "You do not have permission to accept or reject changes in this document.",
+  "read-only": "This document is read-only, so its changes cannot be accepted or rejected.",
+  "missing-changes": "This change is no longer pending — it may already have been reviewed.",
+  "contradictory-decisions":
+    "Some of these changes are parts of one change, so they cannot be accepted and rejected separately.",
+  "invalid-result":
+    "This decision could not be completed, so nothing was changed. Try again, and report it if it keeps happening.",
+};
+
+/** How to name the compound decision: one direction, or a resolution of both. */
+const imperative = ({ accepted, rejected }: ReviewDecisions) =>
+  !rejected.length ? "Accept" : !accepted.length ? "Reject" : "Resolve";
+
+const consequence = ({ accepted, rejected }: ReviewDecisions) =>
+  !rejected.length
+    ? "Accepting it would also accept them."
+    : !accepted.length
+      ? "Rejecting it would also remove them."
+      : "Resolving it would also decide them.";
 
 const author = (change: TrackedChange) => shortName(change.dataTracked.authorID);
 
@@ -70,7 +88,7 @@ export function ReviewRefusalNotice({
 }: ReviewRefusalNoticeProps) {
   const state = action.refusal;
   if (!state) return null;
-  const { refusal, decision, dependents, stage, grew } = state;
+  const { refusal, compound, dependents, stage, grew } = state;
 
   const Button = ({ onClick, children }: { onClick: () => void; children: React.ReactNode }) => (
     <button
@@ -90,15 +108,9 @@ export function ReviewRefusalNotice({
   );
 
   if (refusal.reason !== "dependent-changes") {
-    const message =
-      refusal.reason === "not-permitted"
-        ? "You do not have permission to accept or reject changes in this document."
-        : refusal.reason === "missing-changes"
-          ? "This change is no longer pending — it may already have been reviewed."
-          : "This decision could not be completed, so nothing was changed. Try again, and report it if it keeps happening.";
     return (
       <Frame alert={refusal.reason === "invalid-result"}>
-        {message}
+        {explanation[refusal.reason]}
         <div style={actions}>
           <Button onClick={action.dismiss}>Dismiss</Button>
         </div>
@@ -115,12 +127,12 @@ export function ReviewRefusalNotice({
     return (
       <Frame>
         {grew
-          ? `More work now depends on this. ${imperative(decision)} all of the following?`
-          : `${imperative(decision)} this and ${count}?`}
+          ? `More work now depends on this. ${imperative(compound)} all of the following?`
+          : `${imperative(compound)} this and ${count}?`}
         <DependentList dependents={dependents} />
         <div style={actions}>
           <Button onClick={action.confirm}>
-            {imperative(decision)} all {dependents.length + 1}
+            {imperative(compound)} all {compound.accepted.length + compound.rejected.length}
           </Button>
           <Button onClick={action.dismiss}>Cancel</Button>
         </div>
@@ -131,16 +143,14 @@ export function ReviewRefusalNotice({
   return (
     <Frame>
       This contains {whose}.{" "}
-      {decision === "accepted"
-        ? "Accepting it would also accept them."
-        : "Rejecting it would also remove them."}
+      {consequence(compound)}
       {stage === "listed" && <DependentList dependents={dependents} />}
       <div style={actions}>
         {stage === "explain" && (
           <Button onClick={action.listDependents}>Review dependent changes</Button>
         )}
         <Button onClick={action.requestConfirm}>
-          {imperative(decision)} this and {count}…
+          {imperative(compound)} this and {count}…
         </Button>
         <Button onClick={action.dismiss}>Cancel</Button>
       </div>

@@ -145,6 +145,20 @@ describe("every review click resolves or explains", () => {
     expect(editor.getState().doc).not.toBe(before);
   });
 
+  it("counts every change the compound decision will take", () => {
+    const editor = build();
+    const creation = creationId(editor);
+    editor.commands.setTrackChangesUserID("bob");
+    editor.applyTransaction(editor.getState().tr.insertText("!", 4));
+    const all = pending(editor).length;
+    render(<Card editor={editor} ids={[creation]} />);
+
+    click("Reject");
+    click(/^Reject this and/);
+
+    expect(text()).toContain(`Reject all ${all}`);
+  });
+
   it("cancels without deciding anything", () => {
     const editor = build();
     const creation = creationId(editor);
@@ -171,6 +185,36 @@ describe("every review click resolves or explains", () => {
   });
 });
 
+/** A conflict card: keeping one side discards the other, as one decision. */
+function ConflictCard({ editor, keep, discard }: { editor: ServerEditor; keep: string; discard: string[] }) {
+  const review = useReviewAction(editor);
+  return (
+    <div>
+      <button type="button" onClick={() => review.resolveConflict(keep, discard)}>
+        Keep
+      </button>
+      <ReviewRefusalNotice action={review} />
+    </div>
+  );
+}
+
+describe("resolving a conflict", () => {
+  it("keeps one author's change and discards the other's in one decision", () => {
+    const editor = build();
+    const creation = creationId(editor);
+    editor.commands.setTrackChangesUserID("bob");
+    editor.applyTransaction(editor.getState().tr.delete(0, 5));
+    const deletion = pending(editor).find(c => c.type === "node-change" && c.dataTracked.authorID === "bob")!.id;
+    render(<ConflictCard editor={editor} keep={deletion} discard={[creation]} />);
+
+    click("Keep");
+
+    expect(pending(editor)).toEqual([]);
+    expect(editor.getState().doc.textContent).toBe("tail");
+    expect(text()).not.toMatch(/pending changes|could not/i);
+  });
+});
+
 describe("the shipped panel explains its document-wide decisions", () => {
   it("says why Accept all did nothing, beside the button that did nothing", () => {
     const editor = build(false);
@@ -180,6 +224,18 @@ describe("the shipped panel explains its document-wide decisions", () => {
 
     expect(text()).toMatch(/do not have permission/i);
     expect(pending(editor).length).toBeGreaterThan(0);
+  });
+
+  it("does not decide anything in a read-only editor, and says why", () => {
+    const editor = build();
+    editor.setReadOnly(true);
+    const before = editor.getState().doc;
+    render(<TrackChangesPanel editor={editor} />);
+
+    click("Reject all");
+
+    expect(editor.getState().doc).toBe(before);
+    expect(text()).toMatch(/read-only/i);
   });
 
   it("explains a blocked Reject all rather than leaving a dead button", () => {

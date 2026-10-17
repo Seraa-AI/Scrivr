@@ -194,19 +194,13 @@ export class TestEditor {
 
   acceptChanges(ids: string[]) {
     return this.dispatch(
-      setAction(this.state.tr, TrackChangesAction.setChangeStatuses, {
-        status: CHANGE_STATUS.accepted,
-        ids,
-      }),
+      setAction(this.state.tr, TrackChangesAction.setChangeStatuses, { accepted: ids, rejected: [] }),
     );
   }
 
   rejectChanges(ids: string[]) {
     return this.dispatch(
-      setAction(this.state.tr, TrackChangesAction.setChangeStatuses, {
-        status: CHANGE_STATUS.rejected,
-        ids,
-      }),
+      setAction(this.state.tr, TrackChangesAction.setChangeStatuses, { accepted: [], rejected: ids }),
     );
   }
 

@@ -71,6 +71,7 @@ export type {
   ReviewPlanResult,
   ReviewDependency,
   ReviewDecision,
+  ReviewDecisions,
   ChangeEffect,
 } from "./reviewPlan";
 

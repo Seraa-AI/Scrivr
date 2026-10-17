@@ -17,18 +17,24 @@ import type { IBaseEditor } from "@scrivr/core";
 import { planReview, reviewChanges, trackChangesPluginKey } from "@scrivr/plugins";
 import type {
   ReviewDecision,
+  ReviewDecisions,
   ReviewOutcome,
+  ReviewPlanResult,
   ReviewRefusal,
   TrackedChange,
 } from "@scrivr/plugins";
 
-const unavailable = { status: "unavailable", reason: "no-editor" } as const;
+type Blocked = Extract<ReviewOutcome, { status: "blocked" }>;
 
 export type ReviewRefusalState = {
-  decision: ReviewDecision;
   /** What the reviewer asked to decide, before any dependent work. */
-  ids: string[];
+  request: ReviewDecisions;
   refusal: ReviewRefusal;
+  /**
+   * The decision that would cover the request and its dependent work. Each
+   * dependent takes the decision of the change it depends on.
+   */
+  compound: ReviewDecisions;
   /** Dependent work, resolved to changes so it can be listed rather than counted. */
   dependents: TrackedChange[];
   /**
@@ -45,8 +51,27 @@ const dependentIdsOf = (refusal: ReviewRefusal) =>
     ? [...new Set(refusal.dependencies.flatMap(d => d.dependentIds))]
     : [];
 
+const compoundOf = (blocked: Blocked): ReviewDecisions => {
+  const compound = { accepted: [...blocked.accepted], rejected: [...blocked.rejected] };
+  if (blocked.reason !== "dependent-changes") return compound;
+  for (const { changeId, dependentIds } of blocked.dependencies) {
+    const side = compound[blocked.accepted.includes(changeId) ? "accepted" : "rejected"];
+    for (const id of dependentIds) if (!side.includes(id)) side.push(id);
+  }
+  return compound;
+};
+
+const single = (decision: ReviewDecision, ids: string[]): ReviewDecisions =>
+  decision === "accepted" ? { accepted: ids, rejected: [] } : { accepted: [], rejected: ids };
+
 export function useReviewAction(editor: IBaseEditor | null) {
   const [refusal, setRefusal] = useState<ReviewRefusalState | null>(null);
+
+  const pendingIds = useCallback(
+    (): string[] =>
+      (editor && trackChangesPluginKey.getState(editor.getState())?.changeSet.pending.map(c => c.id)) ?? [],
+    [editor],
+  );
 
   const resolve = useCallback(
     (ids: string[]): TrackedChange[] => {
@@ -60,18 +85,12 @@ export function useReviewAction(editor: IBaseEditor | null) {
   );
 
   const block = useCallback(
-    (
-      decision: ReviewDecision,
-      ids: string[],
-      blocked: ReviewRefusal,
-      stage: ReviewRefusalState["stage"],
-      seen: string[] = [],
-    ) => {
+    (request: ReviewDecisions, blocked: Blocked, stage: ReviewRefusalState["stage"], seen: string[] = []) => {
       const dependentIds = dependentIdsOf(blocked);
       setRefusal({
-        decision,
-        ids,
+        request,
         refusal: blocked,
+        compound: compoundOf(blocked),
         dependents: resolve(dependentIds),
         stage,
         // Only meaningful once the set has been shown; nothing has grown the
@@ -88,12 +107,17 @@ export function useReviewAction(editor: IBaseEditor | null) {
    * not something to tell a reviewer they were refused.
    */
   const settle = useCallback(
-    (decision: ReviewDecision, ids: string[], outcome: ReviewOutcome): ReviewOutcome => {
-      if (outcome.status === "blocked") block(decision, ids, outcome, "explain");
+    (request: ReviewDecisions, outcome: ReviewOutcome): ReviewOutcome => {
+      if (outcome.status === "blocked") block(request, outcome, "explain");
       else setRefusal(null);
       return outcome;
     },
     [block],
+  );
+
+  const decide = useCallback(
+    (decisions: ReviewDecisions): ReviewOutcome => settle(decisions, reviewChanges(editor, decisions)),
+    [editor, settle],
   );
 
   /**
@@ -102,9 +126,19 @@ export function useReviewAction(editor: IBaseEditor | null) {
    * be able to tell apart from a refusal, so it is never nothing.
    */
   const review = useCallback(
-    (decision: ReviewDecision, ids: string[]): ReviewOutcome =>
-      settle(decision, ids, reviewChanges(editor, decision, ids)),
-    [editor, settle],
+    (decision: ReviewDecision, ids: string[]): ReviewOutcome => decide(single(decision, ids)),
+    [decide],
+  );
+
+  /**
+   * Keep one change and discard the others — a conflict resolution. It is one
+   * decision even though it is two statuses, so it is planned and carried out
+   * as one: neither half can land without the other.
+   */
+  const resolveConflict = useCallback(
+    (keepId: string, discardIds: string[]): ReviewOutcome =>
+      decide({ accepted: [keepId], rejected: discardIds }),
+    [decide],
   );
 
   /** Show the dependent work in place. Shows it; authorizes nothing. */
@@ -117,61 +151,46 @@ export function useReviewAction(editor: IBaseEditor | null) {
   /**
    * Replan the compound decision against the document as it stands. Both the
    * confirmation and the decision itself go through here, so neither can act on
-   * a set the reviewer has not been shown.
+   * a set the reviewer has not been shown. Dependent work decided elsewhere in
+   * the meantime is no longer part of it; what the reviewer asked for still is.
    */
-  const replan = useCallback(() => {
-    if (!refusal) return null;
-    const seen = refusal.dependents.map(c => c.id);
-    const asked = [...new Set([...refusal.ids, ...seen])];
-    const plan = planReview(editor, refusal.decision, asked);
-    if (plan.status !== "ready") {
-      if (plan.status === "blocked") block(refusal.decision, refusal.ids, plan, "confirm", seen);
-      return null;
-    }
-    return { asked, decision: refusal.decision };
-  }, [editor, refusal, block]);
+  const replan = useCallback(
+    (held: ReviewRefusalState): ReviewPlanResult => {
+      const asked = new Set([...held.request.accepted, ...held.request.rejected]);
+      const pending = new Set(pendingIds());
+      const live = (ids: string[]) => ids.filter(id => asked.has(id) || pending.has(id));
+      const plan = planReview(editor, {
+        accepted: live(held.compound.accepted),
+        rejected: live(held.compound.rejected),
+      });
+      if (plan.status === "blocked") {
+        block(held.request, plan, "confirm", held.dependents.map(c => c.id));
+      }
+      return plan;
+    },
+    [editor, pendingIds, block],
+  );
 
   /** Open the confirmation for the compound decision, listing what it covers. */
   const requestConfirm = useCallback(() => {
-    if (!replan() || !refusal) return;
-    setRefusal({ ...refusal, stage: "confirm", grew: false });
+    if (!refusal) return;
+    const plan = replan(refusal);
+    if (plan.status === "ready") {
+      setRefusal({ ...refusal, compound: { accepted: plan.accepted, rejected: plan.rejected }, stage: "confirm", grew: false });
+    }
   }, [replan, refusal]);
 
-  /** Send the compound decision, which `replan` has just re-checked. */
-  const confirm = useCallback((): ReviewOutcome => {
-    const ready = replan();
-    if (!ready) return unavailable;
-    return settle(
-      ready.decision,
-      ready.asked,
-      reviewChanges(editor, ready.decision, ready.asked),
-    );
-  }, [replan, editor, settle]);
-
   /**
-   * Keep one change and discard the others — a conflict resolution, which is one
-   * decision even though it is two statuses. Both halves are planned before
-   * either runs, so a refusal cannot arrive with the first half already
-   * committed and no way back.
+   * Send the compound decision, which `replan` has just re-checked. A replan
+   * that no longer goes through is handed back as it is — the wider set it
+   * found is now on show for the reviewer to confirm.
    */
-  const resolveConflict = useCallback(
-    (keepId: string, discardIds: string[]): ReviewOutcome => {
-      const keep = planReview(editor, "accepted", [keepId]);
-      if (keep.status !== "ready") return settle("accepted", [keepId], keep);
-      const discard = discardIds.length
-        ? planReview(editor, "rejected", discardIds)
-        : null;
-      if (discard && discard.status !== "ready") {
-        return settle("rejected", discardIds, discard);
-      }
-
-      const applied = reviewChanges(editor, "accepted", [keepId]);
-      if (applied.status !== "applied") return settle("accepted", [keepId], applied);
-      if (!discardIds.length) return applied;
-      return settle("rejected", discardIds, reviewChanges(editor, "rejected", discardIds));
-    },
-    [editor, settle],
-  );
+  const confirm = useCallback((): ReviewOutcome => {
+    if (!refusal) return { status: "applied", accepted: [], rejected: [] };
+    const plan = replan(refusal);
+    if (plan.status !== "ready") return plan;
+    return settle(refusal.request, reviewChanges(editor, { accepted: plan.accepted, rejected: plan.rejected }));
+  }, [refusal, replan, settle, editor]);
 
   const dismiss = useCallback(() => setRefusal(null), []);
 

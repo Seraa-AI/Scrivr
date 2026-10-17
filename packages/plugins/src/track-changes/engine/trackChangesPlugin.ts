@@ -11,11 +11,11 @@ import { ChangeSet } from "../ChangeSet";
 import { findChanges } from "../findChanges";
 import { trackChanges } from "./trackChanges";
 import { fixInconsistentChanges } from "../lib/fixInconsistentChanges";
-import { CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus } from "../types";
+import { TrackChangesOptions, TrackChangesStatus } from "../types";
 import { planReviewIn } from "../reviewChanges";
 import type { TrackingResult } from "../types";
 import { reportedTracking, trFromHistory } from "./transactionProcessing";
-import { closeDependentCreations } from "./composition";
+import { closeDependentCreations, composeGestureRecords } from "./composition";
 import { normalizeMoveShadows } from "./moveIdentity";
 import { updateChangesStatus } from "./updateChangesStatus";
 
@@ -96,19 +96,13 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           TrackChangesAction.setChangeStatuses,
         );
         if (setsChangeStatus) {
-          const { status, ids } = setsChangeStatus;
-          // Permission is the shared rule's to answer, not this gate's — and a
-          // refusal is still an outcome, so it is reported rather than dropped.
-          const permitted = planReviewIn(
-            oldState,
-            status === CHANGE_STATUS.accepted ? "accepted" : "rejected",
-            ids,
-          );
+          // Whether the decision may go ahead is the shared rule's to answer,
+          // not this gate's — and a refusal is still an outcome, so it is
+          // reported rather than dropped.
+          const plan = planReviewIn(oldState, setsChangeStatus);
           const review =
-            permitted.status === "blocked"
-              ? permitted
-              : updateChangesStatus(createdTr, changeSet, ids, status, userID);
-          if (review) setAction(createdTr, TrackChangesAction.reviewResult, review);
+            plan.status === "blocked" ? plan : updateChangesStatus(createdTr, changeSet, plan, userID);
+          setAction(createdTr, TrackChangesAction.reviewResult, review);
           docChanged = true;
         } else if (!shouldSkipTracking || suggestionIntent(tx)) {
           const outcome = trackChanges(
@@ -132,7 +126,10 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
         docChanged = docChanged || tx.docChanged;
       });
       if (createdTr.docChanged) {
+        // Order matters: composition reads which creation encloses a record,
+        // which only holds once a shadow's duplicated records are gone.
         normalizeMoveShadows(createdTr);
+        composeGestureRecords(createdTr, oldState.doc);
         closeDependentCreations(createdTr);
       }
       const changed =

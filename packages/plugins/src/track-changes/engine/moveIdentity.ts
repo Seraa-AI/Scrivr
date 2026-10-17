@@ -1,24 +1,56 @@
-import { EditorState, type Transaction, type Node, type Mapping } from "@scrivr/core/pm";
+import { EditorState, type Transaction, type Node, type Mapping, type Mark } from "@scrivr/core/pm";
 import { findChanges } from "../findChanges";
 import { getBlockInlineTrackedData } from "../helpers";
-import type { NodeChange } from "../types";
+import type { NodeChange, TrackedAttrs } from "../types";
 
-/** Independent review identities live on the transported copy, never its shadow. */
+const markRecords = (mark: Mark): Partial<TrackedAttrs>[] => {
+  const value = mark.attrs.dataTracked;
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+};
+
+/** The record ids each move's transported copy carries, by move. */
+function transportedIds(doc: Node) {
+  const byMove = new Map<string, Set<string>>();
+  doc.descendants(node => {
+    const moveNodeId = getBlockInlineTrackedData(node)?.find(record => record.operation === "move")?.moveNodeId;
+    if (!moveNodeId) return;
+    const ids = byMove.get(moveNodeId) ?? new Set<string>();
+    const collect = (carrier: Node) => {
+      const records = [...(getBlockInlineTrackedData(carrier) ?? []), ...carrier.marks.flatMap(markRecords)];
+      for (const record of records) if (record.id) ids.add(record.id);
+    };
+    collect(node);
+    node.descendants(collect);
+    byMove.set(moveNodeId, ids);
+    return false;
+  });
+  return byMove;
+}
+
+/**
+ * A move leaves the moved content's review records on both the copy and the
+ * shadow. Each identity is reviewed once, on the copy, so the shadow's
+ * duplicates are dropped. A record the copy does not carry is not a duplicate —
+ * it is work done on the shadow afterwards, and stays.
+ */
 export function normalizeMoveShadows(tr: Transaction): void {
+  const transported = transportedIds(tr.doc);
   const clean = (node: Node, pos: number, moveNodeId: string, root: boolean) => {
+    const onCopy = transported.get(moveNodeId) ?? new Set<string>();
+    const ownRecord = (record: Partial<TrackedAttrs>) =>
+      record.operation === "delete" && record.moveNodeId === moveNodeId;
+    const keep = (record: Partial<TrackedAttrs>) =>
+      ownRecord(record) || !record.id || !onCopy.has(record.id);
     const records = getBlockInlineTrackedData(node) ?? [];
-    const retained = records.filter(record =>
-      (record.operation === "delete" && record.moveNodeId === moveNodeId) ||
-      (root && record.operation === "move"),
-    );
+    const retained = records.filter(record => keep(record) || (root && record.operation === "move"));
     if (!node.isText && retained.length !== records.length) {
       tr.setNodeMarkup(pos, undefined, { ...node.attrs, dataTracked: retained.length ? retained : null }, node.marks);
     }
     for (const mark of node.marks) {
-      const value = mark.attrs.dataTracked;
-      if (!value) continue;
-      const entries = Array.isArray(value) ? value : [value];
-      const kept = entries.filter(record => record.operation === "delete" && record.moveNodeId === moveNodeId);
+      const entries = markRecords(mark);
+      if (!entries.length) continue;
+      const kept = entries.filter(keep);
       if (kept.length === entries.length) continue;
       tr.removeMark(pos, pos + node.nodeSize, mark);
       if (mark.type !== node.type.schema.marks.trackedInsert && mark.type !== node.type.schema.marks.trackedDelete) {

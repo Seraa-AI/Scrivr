@@ -124,12 +124,32 @@ describe("selection contract — the caret follows an insertion", () => {
     expect(editor.state.doc.textBetween(1, editor.state.selection.from)).toBe("aX");
   });
 
+  /** Selects `from..to`, then types over it the way the input bridge does. */
+  const typeOver = (editor: TestEditor, from: number, to: number, text: string) => {
+    editor.dispatch(
+      editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, to)),
+    );
+    const { selection } = editor.state;
+    return editor.dispatch(editor.state.tr.insertText(text, selection.from, selection.to));
+  };
+  const typeAtCaret = (editor: TestEditor, text: string) =>
+    editor.dispatch(editor.state.tr.insertText(text));
+
   it("lands after the replacement, not inside the retained deletion", () => {
     const editor = new TestEditor(doc(p("hello world")));
-    editor.dispatch(editor.state.tr.replaceWith(1, 6, editor.state.schema.text("howdy")));
+    typeOver(editor, 1, 6, "howdy");
 
     expect(editor.state.selection.empty).toBe(true);
-    expect(editor.state.doc.textBetween(1, editor.state.selection.from)).toMatch(/howdy$/);
+    expect(editor.state.doc.textBetween(1, editor.state.selection.from)).toBe("howdy");
+  });
+
+  it("keeps typing after a replacement in one run, before the struck text", () => {
+    const editor = new TestEditor(doc(p("hello world")));
+    typeOver(editor, 2, 5, "X");
+    typeAtCaret(editor, "Y");
+
+    expect(editor.state.doc.textBetween(1, editor.state.selection.from)).toBe("hXY");
+    expect(editor.state.doc.textContent).toBe("hXYello world");
   });
 
   it("leaves a caret alone when the edit landed somewhere else", () => {

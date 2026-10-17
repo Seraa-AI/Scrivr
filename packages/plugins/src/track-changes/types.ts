@@ -71,8 +71,18 @@ type InsertDeleteAttrs = {
    * as a single atomic operation.
    */
   groupId?: string;
-  /** Representation records belonging to one pending creation. */
+  /**
+   * Set on each record that is part of an insertion recorded in several
+   * places — the new node and the text inside it. Reviewing the creation
+   * reviews all of them.
+   */
   creationId?: string;
+  /**
+   * The same for a deletion recorded in several places: deleting a node that
+   * holds someone else's pending work keeps that work as a proposal, so the
+   * deletion is written on the node and again on what it struck inside it.
+   */
+  deletionId?: string;
   /** Independent intents whose targets exist because of these creations. */
   dependsOn?: string[];
   /** Persistent: independent work has depended on this creation. */

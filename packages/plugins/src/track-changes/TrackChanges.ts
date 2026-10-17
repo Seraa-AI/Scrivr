@@ -212,18 +212,15 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         (status: CHANGE_STATUS, ids: string[]) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           if (status === CHANGE_STATUS.pending) return false;
-          const decision = status === CHANGE_STATUS.accepted ? "accepted" : "rejected";
+          const decisions = status === CHANGE_STATUS.accepted
+            ? { accepted: ids, rejected: [] }
+            : { accepted: [], rejected: ids };
           // Asks the shared rule rather than re-deriving it. A caller needing to
           // know *why* a decision was refused reads `reviewChanges` instead; a
           // command can only say whether it ran.
-          if (planReviewIn(state, decision, ids).status === "blocked") return false;
+          if (planReviewIn(state, decisions).status === "blocked") return false;
 
-          dispatch?.(
-            setAction(state.tr, TrackChangesAction.setChangeStatuses, {
-              status,
-              ids,
-            }),
-          );
+          dispatch?.(setAction(state.tr, TrackChangesAction.setChangeStatuses, decisions));
           return true;
         },
 

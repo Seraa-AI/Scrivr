@@ -5,8 +5,7 @@ import { CHANGE_STATUS, type IncompleteChange, type TrackedChange } from "../typ
 import { dropOrphanChanges } from "../lib/structuralChange";
 import { stepRange } from "./transactionProcessing";
 import { applyChanges } from "../applyChanges";
-import { planChangeReview } from "../reviewPlan";
-import type { ReviewOutcome } from "../reviewPlan";
+import type { ReviewDecision, ReviewOutcome, ReviewPlan } from "../reviewPlan";
 
 /** The node that now holds this span, and the nodes the span covers. */
 function checkAround(doc: Node, from: number, to: number) {
@@ -58,82 +57,95 @@ function checkRewritten(scratch: Transaction) {
  */
 function stampReviewed(
   changes: readonly TrackedChange[],
-  selected: ReadonlySet<string>,
-  status: CHANGE_STATUS,
+  statusOf: ReadonlyMap<string, CHANGE_STATUS>,
   userID: string,
   reviewedAt: number,
 ): IncompleteChange[] {
-  return changes.map(change => ({
-    ...change,
-    dataTracked: selected.has(change.id)
-      ? { ...change.dataTracked, status, reviewedByID: userID, statusUpdateAt: reviewedAt }
-      : { ...change.dataTracked },
-  }));
+  return changes.map(change => {
+    const status = statusOf.get(change.id);
+    return {
+      ...change,
+      dataTracked: status
+        ? { ...change.dataTracked, status, reviewedByID: userID, statusUpdateAt: reviewedAt }
+        : { ...change.dataTracked },
+    };
+  });
 }
 
-/** Plan first, evaluate on a private transaction, then publish the whole result. */
+/**
+ * Placements in the order they can be settled: one built on an earlier move
+ * comes after it. Rejecting unwinds that order, so it runs backwards.
+ */
+function placementOrder(placements: readonly TrackedChange[], decision: ReviewDecision) {
+  const ordered: TrackedChange[] = [];
+  const visited = new Set<string>();
+  const visit = (change: TrackedChange) => {
+    if (visited.has(change.id)) return;
+    visited.add(change.id);
+    for (const id of change.dataTracked.placementDependsOn ?? []) {
+      const parent = placements.find(other => other.id === id);
+      if (parent) visit(parent);
+    }
+    ordered.push(change);
+  };
+  placements.forEach(visit);
+  return decision === "rejected" ? ordered.reverse() : ordered;
+}
+
+type ReadyPlan = Extract<ReviewPlan, { status: "ready" }>;
+
+/**
+ * Carries out a ready plan on a private transaction, then publishes the whole
+ * result or nothing. Each change is applied by its own decision, so a conflict
+ * resolution — one accepted, the others rejected — is still one review.
+ *
+ * Rejected placements are restored first, so a creation that moved is back
+ * where it began before anything destructive reads it; accepted placements
+ * settle last, once the content they carry is final.
+ */
 export function updateChangesStatus(
   createdTr: Transaction,
   changeSet: ChangeSet,
-  ids: string[],
-  status: CHANGE_STATUS,
+  plan: ReadyPlan,
   userID: string,
-): ReviewOutcome | undefined {
-  if (status === CHANGE_STATUS.pending) return;
-  const decision = status === CHANGE_STATUS.accepted ? "accepted" : "rejected";
-  const plan = planChangeReview(changeSet, decision, ids);
-  if (plan.status === "blocked") return plan;
-  const selected = new Set(plan.ids);
+): ReviewOutcome {
+  const decisions = { accepted: plan.accepted, rejected: plan.rejected };
+  const statusOf = new Map<string, CHANGE_STATUS>([
+    ...plan.accepted.map(id => [id, CHANGE_STATUS.accepted] as const),
+    ...plan.rejected.map(id => [id, CHANGE_STATUS.rejected] as const),
+  ]);
   // One review stamps one time, however many records it touches.
   const reviewedAt = Date.now();
   // Review must not mutate cached ChangeSet records or partially publish steps.
-  const snapshot = new ChangeSet(
-    stampReviewed(changeSet.changes, selected, status, userID, reviewedAt),
-  );
-  const changes = snapshot.changes.filter(change => selected.has(change.id));
+  const snapshot = new ChangeSet(stampReviewed(changeSet.changes, statusOf, userID, reviewedAt));
+  const changes = snapshot.changes.filter(change => statusOf.has(change.id));
+  const placements = (decision: ReviewDecision) =>
+    placementOrder(
+      changes.filter(change =>
+        change.dataTracked.operation === "move" && statusOf.get(change.id) === CHANGE_STATUS[decision]),
+      decision,
+    );
   const scratch = EditorState.create({ doc: createdTr.doc }).tr;
   try {
-    const placements = changes.filter(change => change.dataTracked.operation === "move");
-    const ordinary = changes.filter(change => change.dataTracked.operation !== "move");
-    const ordered: TrackedChange[] = [];
-    const visited = new Set<string>();
-    const visit = (change: TrackedChange) => {
-      if (visited.has(change.id)) return;
-      visited.add(change.id);
-      for (const id of change.dataTracked.placementDependsOn ?? []) {
-        const parent = placements.find(other => other.id === id);
-        if (parent) visit(parent);
-      }
-      ordered.push(change);
-    };
-    placements.forEach(visit);
-    if (status === CHANGE_STATUS.rejected) ordered.reverse();
-    // Restore placement before destructive review of a dependent creation.
-    // Re-read identities afterward: transport cannot be mapped as a plain deletion.
-    if (status === CHANGE_STATUS.rejected) {
-      const placementMapping = new Mapping();
-      for (const change of ordered) applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, placementMapping);
-    }
-    const current = status === CHANGE_STATUS.rejected
-      ? new ChangeSet(
-          stampReviewed(
-            findChanges(EditorState.create({ doc: scratch.doc })).changes,
-            selected,
-            status,
-            userID,
-            reviewedAt,
-          ),
-        )
+    const restored = placements("rejected");
+    const restoreMapping = new Mapping();
+    for (const change of restored) applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, restoreMapping);
+    // Transport cannot be mapped as a plain deletion, so identities are re-read
+    // once a placement has been restored.
+    const current = restored.length
+      ? new ChangeSet(stampReviewed(
+          findChanges(EditorState.create({ doc: scratch.doc })).changes, statusOf, userID, reviewedAt,
+        ))
       : snapshot;
-    const ordinaryIds = new Set(ordinary.map(change => change.id));
+    const ordinaryIds = new Set(
+      changes.filter(change => change.dataTracked.operation !== "move").map(change => change.id),
+    );
     const remaining = current.changes.filter(change => ordinaryIds.has(change.id));
     const mapping = applyChanges(scratch, scratch.doc.type.schema,
       remaining.filter(change => !ChangeSet.isTextChange(change)), current);
     applyChanges(scratch, scratch.doc.type.schema,
       remaining.filter(ChangeSet.isTextChange), current, mapping);
-    if (status === CHANGE_STATUS.accepted) {
-      for (const change of ordered) applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, mapping);
-    }
+    for (const change of placements("accepted")) applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, mapping);
     dropOrphanChanges(scratch);
     checkRewritten(scratch);
   } catch (error) {
@@ -143,8 +155,8 @@ export function updateChangesStatus(
       "@scrivr/plugins track-changes: review produced an invalid result, no changes applied",
       error,
     );
-    return { decision, ids: plan.ids, status: "blocked", reason: "invalid-result" };
+    return { status: "blocked", ...decisions, reason: "invalid-result" };
   }
   for (const step of scratch.steps) createdTr.step(step);
-  return { decision, ids: plan.ids, status: "applied" };
+  return { status: "applied", ...decisions };
 }

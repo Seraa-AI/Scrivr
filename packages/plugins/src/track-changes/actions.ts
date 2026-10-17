@@ -1,7 +1,7 @@
-import type { ReviewOutcome } from "./reviewPlan";
+import type { ReviewDecisions, ReviewOutcome } from "./reviewPlan";
 import { Transaction } from "@scrivr/core/pm";
 
-import { CHANGE_STATUS, StructureAttrs, TrackChangesStatus, TrackingResult } from "./types";
+import { StructureAttrs, TrackChangesStatus, TrackingResult } from "./types";
 
 export enum TrackChangesAction {
   suggest = "track-changes-suggest",
@@ -22,10 +22,7 @@ export type TrackChangesActionParams = {
   [TrackChangesAction.skipTrack]: boolean;
   [TrackChangesAction.setUserID]: string;
   [TrackChangesAction.setPluginStatus]: TrackChangesStatus;
-  [TrackChangesAction.setChangeStatuses]: {
-    status: CHANGE_STATUS;
-    ids: string[];
-  };
+  [TrackChangesAction.setChangeStatuses]: ReviewDecisions;
   [TrackChangesAction.reviewResult]: ReviewOutcome;
   [TrackChangesAction.trackingResult]: TrackingResult;
   [TrackChangesAction.refreshChanges]: boolean;

@@ -32,24 +32,24 @@ import {
   trackRemoveMarkStep,
   trackRemoveNodeMarkStep,
 } from "../step-trackers/trackRemoveMarkStep";
-import { compositionAttrs } from "./composition";
 import { trackReplaceStep } from "../step-trackers/trackReplaceStep";
 
 
 /**
- * Did this step leave the caret where the gesture ended? A step's positions
- * belong to the document it applied to, so its result range has to be carried
- * forward through the steps that followed before it can be compared with the
- * selection — without that, the two are read in different frames and only
- * happen to agree for a lone step.
+ * Did the gesture's caret trail this step? A caret at the end of inserted
+ * content trailed it, whoever placed it there. A deletion leaves nothing to
+ * trail, so only a caret the gesture carried to its edge counts — one the
+ * gesture placed there is its own choice, and is mapped like any other.
+ *
+ * A step's positions belong to the document it applied to, so its end is
+ * carried forward through the steps that followed before it is compared with
+ * the caret.
  */
-function stepProducedSelection(tr: Transaction, i: number, step: ReplaceStep) {
-  const forward = tr.mapping.slice(i + 1);
-  const head = tr.selection.head;
-  return (
-    forward.map(step.from, -1) <= head &&
-    head <= forward.map(step.from + step.slice.size, 1)
-  );
+function caretTrailsStep(tr: Transaction, i: number, step: ReplaceStep) {
+  const { selection } = tr;
+  if (!selection.empty) return false;
+  if (step.slice.size === 0 && tr.selectionSet) return false;
+  return tr.mapping.slice(i + 1).map(step.from + step.slice.size, -1) === selection.head;
 }
 
 /**
@@ -109,11 +109,9 @@ export function trackTransaction(
   for (let i = clearedSteps.length - 1; i >= 0; i--) {
     const step = clearedSteps[i];
     if (!step) continue;
-    const emptyAttrs = compositionAttrs(tr.docs[i]!, step, baseAttrs);
-
     const previousMapping = trContext.replayBridge.slice();
     const replayStart = newTr.mapping.maps.length;
-    trackOneStep(i, step, emptyAttrs, tr, oldState, newTr, trContext);
+    trackOneStep(i, step, baseAttrs, tr, oldState, newTr, trContext);
     trContext.replayBridge = advanceBridge(
       step,
       previousMapping,
@@ -123,7 +121,7 @@ export function trackTransaction(
   }
 
   newTr = passThroughMeta(tr, newTr);
-  newTr = fixAndSetSelectionAfterTracking(newTr, tr, trContext);
+  newTr = fixAndSetSelectionAfterTracking(newTr, trContext);
 
   return newTr;
 }
@@ -173,7 +171,7 @@ function trackOneStep(
         replayBridge,
       );
 
-      if (stepProducedSelection(tr, i, step)) {
+      if (caretTrailsStep(tr, i, step)) {
         trContext.selectionPosFromInsertion =
           updatedSelectionPos || newSelectionPos || tr.selection.head;
       }

@@ -48,7 +48,9 @@ const describeTracking = (result: TrackingResult | null) => {
 
 const describeReview = (outcome: ReviewOutcome | null) => {
   if (!outcome) return "nothing reviewed yet";
-  if (outcome.status === "applied") return `applied · ${outcome.ids.length} change(s)`;
+  if (outcome.status === "applied") {
+    return `applied · ${outcome.accepted.length} accepted, ${outcome.rejected.length} rejected`;
+  }
   if (outcome.status === "unavailable") return "unavailable · no editor";
   if (outcome.reason === "dependent-changes") {
     const dependents = outcome.dependencies.flatMap(d => d.dependentIds).length;

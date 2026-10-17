@@ -5,29 +5,20 @@ import { TrTrackingContext } from "../types";
 /**
  * The replayed transaction already carries the gesture's selection, mapped
  * forward through the replay steps, which keeps a range a range, keeps its
- * direction, and keeps whatever kind it was. Deriving it instead by inverting
- * the user's own steps and then crossing the replay bridge sends the position
- * backwards through a structural step's undo-and-restamp, which has no interior
- * position left to land on — that is what collapsed the caret to the end of the
- * block.
+ * direction, and keeps whatever kind it was.
  *
- * So only one case is left to decide: a caret that trailed an insertion belongs
- * after the content the replay stamped, not at the boundary the undo left. That
- * may move a caret and must never collapse a range the gesture left standing.
+ * One case mapping cannot answer: a caret that trailed a step. The replay undoes
+ * the step before restamping it, and a position at the edge of undone content
+ * maps past whatever the undo put back. Such a caret belongs after the content
+ * the replay stamped, which the tracker reports.
  */
 export function fixAndSetSelectionAfterTracking(
   newTr: Transaction,
-  oldTr: Transaction,
   trContext: TrTrackingContext,
 ) {
   const caretFromInsertion = trContext.selectionPosFromInsertion;
 
-  if (
-    newTr.selection.empty &&
-    !oldTr.selectionSet &&
-    caretFromInsertion !== undefined &&
-    caretFromInsertion <= newTr.doc.content.size
-  ) {
+  if (caretFromInsertion !== undefined && caretFromInsertion <= newTr.doc.content.size) {
     newTr.setSelection(
       Selection.near(newTr.doc.resolve(caretFromInsertion), -1),
     );

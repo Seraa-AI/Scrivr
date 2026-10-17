@@ -49,11 +49,10 @@ describe("deleting already-deleted content", () => {
 
   it("leaves the deletion acceptable as one decision", () => {
     const editor = twice();
-    const plan = planChangeReview(
-      trackChangesPluginKey.getState(editor.state)!.changeSet,
-      "accepted",
-      editor.pendingChanges.map(c => c.id),
-    );
+    const plan = planChangeReview(trackChangesPluginKey.getState(editor.state)!.changeSet, {
+      accepted: editor.pendingChanges.map(c => c.id),
+      rejected: [],
+    });
     expect(plan.status).toBe("ready");
 
     editor.acceptChanges(editor.pendingChanges.map(c => c.id));

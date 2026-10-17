@@ -4,12 +4,11 @@ import type { EditorState } from "@scrivr/core/pm";
 import { setAction, TrackChangesAction } from "./actions";
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { planChangeReview } from "./reviewPlan";
-import type { ReviewDecision, ReviewOutcome, ReviewPlan, ReviewPlanResult } from "./reviewPlan";
-import { CHANGE_STATUS } from "./types";
+import type { ReviewDecisions, ReviewOutcome, ReviewPlan, ReviewPlanResult } from "./reviewPlan";
 
-const subject = (decision: ReviewDecision, ids: readonly string[]) => ({
-  decision,
-  ids: [...ids],
+const subject = ({ accepted, rejected }: ReviewDecisions): ReviewDecisions => ({
+  accepted: [...accepted],
+  rejected: [...rejected],
 });
 
 /**
@@ -20,31 +19,30 @@ const subject = (decision: ReviewDecision, ids: readonly string[]) => ({
  * A preview: it says nothing about whether the decision will succeed, so a
  * caller must replan before executing and must not dismiss its UI on this.
  */
-export function planReviewIn(
-  state: EditorState,
-  decision: ReviewDecision,
-  ids: readonly string[],
-): ReviewPlan {
+export function planReviewIn(state: EditorState, decisions: ReviewDecisions): ReviewPlan {
   const pluginState = trackChangesPluginKey.getState(state);
   if (!pluginState?.canAcceptReject) {
-    return { status: "blocked", ...subject(decision, ids), reason: "not-permitted" };
+    return { status: "blocked", ...subject(decisions), reason: "not-permitted" };
   }
-  return planChangeReview(pluginState.changeSet, decision, ids);
+  return planChangeReview(pluginState.changeSet, decisions);
 }
 
 /**
  * `planReviewIn` for callers holding an editor rather than a state — including
  * callers that may not have one yet. An absent editor is reported, never
  * returned as nothing, so a caller is not left reading absence as refusal.
+ *
+ * Read-only belongs to the editor rather than its state, so this is where it
+ * is answered; the commands already refuse it on their own.
  */
-export const planReview = (
+export function planReview(
   editor: IBaseEditor | null | undefined,
-  decision: ReviewDecision,
-  ids: readonly string[],
-): ReviewPlanResult =>
-  editor
-    ? planReviewIn(editor.getState(), decision, ids)
-    : { status: "unavailable", reason: "no-editor" };
+  decisions: ReviewDecisions,
+): ReviewPlanResult {
+  if (!editor) return { status: "unavailable", reason: "no-editor" };
+  if (editor.readOnly) return { status: "blocked", ...subject(decisions), reason: "read-only" };
+  return planReviewIn(editor.getState(), decisions);
+}
 
 /**
  * Carries out the decision and reports what actually happened. The engine
@@ -54,29 +52,25 @@ export const planReview = (
  */
 export function reviewChanges(
   editor: IBaseEditor | null | undefined,
-  decision: ReviewDecision,
-  ids: readonly string[],
+  decisions: ReviewDecisions,
 ): ReviewOutcome {
-  const plan = planReview(editor, decision, ids);
+  const plan = planReview(editor, decisions);
   if (plan.status !== "ready") return plan;
   if (!editor) return { status: "unavailable", reason: "no-editor" };
 
-  const state = editor.getState();
+  const lastReview = () => trackChangesPluginKey.getState(editor.getState())?.lastReview;
+  const previous = lastReview();
   editor.applyTransaction(
-    setAction(state.tr, TrackChangesAction.setChangeStatuses, {
-      status: decision === "accepted" ? CHANGE_STATUS.accepted : CHANGE_STATUS.rejected,
-      ids: [...ids],
-    }),
+    setAction(editor.getState().tr, TrackChangesAction.setChangeStatuses, subject(decisions)),
   );
 
-  const outcome = trackChangesPluginKey.getState(editor.getState())?.lastReview;
-  if (outcome) return outcome;
-  // The engine records an outcome for every decision it is handed, so reaching
-  // here means it did not. Say so rather than reporting a failure that may not
-  // have happened.
+  const outcome = lastReview();
+  if (outcome && outcome !== previous) return outcome;
+  // The engine records an outcome for every decision it is handed, so none
+  // arriving means the decision never reached it — a host plugin filtered it out.
   console.error(
-    "@scrivr/plugins track-changes: review published no outcome; the document may have changed",
-    { decision, ids: plan.ids },
+    "@scrivr/plugins track-changes: review published no outcome; the decision did not reach the engine",
+    subject(plan),
   );
-  return { status: "blocked", ...subject(decision, plan.ids), reason: "invalid-result" };
+  return { status: "blocked", ...subject(plan), reason: "invalid-result" };
 }

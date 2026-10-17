@@ -19,6 +19,16 @@ export interface ReviewDependency {
 export type ReviewDecision = "accepted" | "rejected";
 
 /**
+ * Which changes to accept and which to reject, carried out as one decision. A
+ * conflict resolution is the case that needs both sides at once: keeping one
+ * author's change is accepting it and rejecting the others together.
+ */
+export interface ReviewDecisions {
+  accepted: string[];
+  rejected: string[];
+}
+
+/**
  * Why a decision cannot be carried out. Each reason needs its own words: only
  * `dependent-changes` can be resolved by deciding more, and offering that for
  * the others would propose work the reviewer never asked for.
@@ -26,10 +36,10 @@ export type ReviewDecision = "accepted" | "rejected";
 export type ReviewRefusal =
   | { reason: "dependent-changes"; dependencies: ReviewDependency[] }
   | { reason: "missing-changes"; missingIds: string[] }
+  | { reason: "contradictory-decisions"; contradictoryIds: string[] }
   | { reason: "not-permitted" }
+  | { reason: "read-only" }
   | { reason: "invalid-result" };
-
-type ReviewSubject = { decision: ReviewDecision; ids: string[] };
 
 /**
  * There is no editor to decide against yet, or no longer. Lifecycle, not
@@ -38,10 +48,10 @@ type ReviewSubject = { decision: ReviewDecision; ids: string[] };
  */
 export type ReviewUnavailable = { status: "unavailable"; reason: "no-editor" };
 
-/** A preflight: what deciding these ids would take. Never an execution result. */
+/** A preflight: what deciding these changes would take. Never an execution result. */
 export type ReviewPlan =
-  | ({ status: "ready" } & ReviewSubject)
-  | ({ status: "blocked" } & ReviewSubject & ReviewRefusal);
+  | ({ status: "ready" } & ReviewDecisions)
+  | ({ status: "blocked" } & ReviewDecisions & ReviewRefusal);
 
 /**
  * A plan, or nothing to plan against. Only the forms that take an editor can
@@ -51,8 +61,8 @@ export type ReviewPlanResult = ReviewPlan | ReviewUnavailable;
 
 /** What actually happened. A ready plan is a preview, not proof of this. */
 export type ReviewOutcome =
-  | ({ status: "applied" } & ReviewSubject)
-  | ({ status: "blocked" } & ReviewSubject & ReviewRefusal)
+  | ({ status: "applied" } & ReviewDecisions)
+  | ({ status: "blocked" } & ReviewDecisions & ReviewRefusal)
   | ReviewUnavailable;
 
 /** Two changes cover some of the same content. */
@@ -73,6 +83,10 @@ const strictlyContains = (outer: TrackedChange, inner: TrackedChange) =>
 const representsCreation = (related: TrackedChange, change: TrackedChange) =>
   related.dataTracked.creationId === change.id;
 
+/** `related` records part of the deletion `change` made in one gesture. */
+const representsDeletion = (related: TrackedChange, change: TrackedChange) =>
+  related.dataTracked.deletionId === change.id;
+
 /** Two halves of one transport: the copy and the shadow it left behind. */
 const pairedMove = (related: TrackedChange, change: TrackedChange) =>
   !!change.dataTracked.moveNodeId &&
@@ -83,11 +97,15 @@ const splitReference = (related: TrackedChange, change: TrackedChange) =>
   related.dataTracked.operation === "reference" &&
   related.dataTracked.referenceId === change.id;
 
-/** Would carrying out this decision take the content away? */
+/**
+ * Would carrying out this decision take the content away? Accepting a move
+ * removes its shadow too: the moved content travelled with the copy, but work
+ * done on the shadow afterwards did not.
+ */
 const removesContent = (change: TrackedChange, decision: ReviewDecision) => {
   const effect = changeEffect(change);
   if (effect === "create") return decision === "rejected";
-  if (effect === "delete") return decision === "accepted" && !change.dataTracked.moveNodeId;
+  if (effect === "delete") return decision === "accepted";
   return false;
 };
 
@@ -132,41 +150,51 @@ const placementDependents = (
       );
 
 /**
- * Pure, host-readable preflight. Containment discovers existence dependencies;
- * only explicit representation links authorize automatic review expansion.
- * Passing dependent IDs explicitly authorizes the compound decision.
+ * Pure, host-readable preflight. Overlap discovers existence dependencies; only
+ * explicit representation links authorize automatic review expansion, and the
+ * linked record takes the decision of the change it belongs to. Naming a change
+ * on either side authorizes deciding it, so it is never reported as a
+ * dependent of another change in the same decision.
  */
-export function planChangeReview(
-  changeSet: ChangeSet,
-  decision: ReviewDecision,
-  ids: readonly string[],
-): ReviewPlan {
+export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecisions): ReviewPlan {
   const changes = changeSet.pending;
-  const selected = new Set(ids);
-  const missingIds = ids.filter(id => !changes.some(change => change.id === id));
+  const decisionOf = new Map<string, ReviewDecision>();
+  const contradictory = new Set<string>();
+  const decide = (id: string, decision: ReviewDecision) => {
+    const existing = decisionOf.get(id);
+    if (existing && existing !== decision) contradictory.add(id);
+    else decisionOf.set(id, decision);
+  };
+  decisions.accepted.forEach(id => decide(id, "accepted"));
+  decisions.rejected.forEach(id => decide(id, "rejected"));
+  const missingIds = [...decisionOf.keys()].filter(id => !changes.some(change => change.id === id));
+
   let expanded = true;
   while (expanded) {
     expanded = false;
     for (const change of changes) {
-      if (!selected.has(change.id)) continue;
+      const decision = decisionOf.get(change.id);
+      if (!decision) continue;
       for (const related of changes) {
-        if (selected.has(related.id)) continue;
         // Representation links, not overlaps: these are the same act recorded
         // in more than one place, so reviewing it covers all of them.
         if (
-          representsCreation(related, change) ||
-          pairedMove(related, change) ||
-          splitReference(related, change)
-        ) {
-          selected.add(related.id);
-          expanded = true;
-        }
+          !representsCreation(related, change) &&
+          !representsDeletion(related, change) &&
+          !pairedMove(related, change) &&
+          !splitReference(related, change)
+        ) continue;
+        if (!decisionOf.has(related.id)) expanded = true;
+        decide(related.id, decision);
       }
     }
   }
+
+  const selected = new Set(decisionOf.keys());
   const dependencies: ReviewDependency[] = [];
   for (const change of changes) {
-    if (!selected.has(change.id)) continue;
+    const decision = decisionOf.get(change.id);
+    if (!decision) continue;
     if (changeEffect(change) === "placement") {
       const placements = placementDependents(change, changes, selected, decision);
       if (placements.length) {
@@ -179,9 +207,16 @@ export function planChangeReview(
       dependencies.push({ changeId: change.id, dependentIds, relationship: "existence" });
     }
   }
-  const subject = { decision, ids: [...selected] };
-  // A named change that is not pending is a different problem from one whose
-  // decision would carry others, and must not be offered the same remedy.
+  const subject: ReviewDecisions = { accepted: [], rejected: [] };
+  for (const [id, decision] of decisionOf) {
+    if (!contradictory.has(id)) subject[decision].push(id);
+  }
+  // A change asked for both ways, a change that is not pending, and one whose
+  // decision would carry others are different problems, and must not be
+  // offered the same remedy.
+  if (contradictory.size) {
+    return { status: "blocked", ...subject, reason: "contradictory-decisions", contradictoryIds: [...contradictory] };
+  }
   if (missingIds.length) return { status: "blocked", ...subject, reason: "missing-changes", missingIds };
   if (dependencies.length) return { status: "blocked", ...subject, reason: "dependent-changes", dependencies };
   return { status: "ready", ...subject };
