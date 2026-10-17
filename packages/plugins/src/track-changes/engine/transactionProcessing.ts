@@ -59,7 +59,8 @@ export function passThroughMeta(oldTr: Transaction, newTr: Transaction) {
   return newTr;
 }
 
-export function getIndentationOperationSteps(
+/** Records an indentation's steps as one move, by grouping them under one id. */
+export function groupIndentationSteps(
   tr: Transaction,
   trContext: TrTrackingContext,
 ) {
@@ -153,8 +154,8 @@ export function reportedTracking(
 }
 
 /** Steps that carry authored content, and so count toward what was tracked. */
-export const contentSteps = (steps: readonly (Step | null)[]) =>
-  steps.filter((step): step is Step => !!step && !isUntrackedStep(step));
+export const contentSteps = (steps: readonly Step[]) =>
+  steps.filter(step => !isUntrackedStep(step));
 
 /**
  * Decided before the replay touches anything, so a gesture is refused whole
@@ -166,19 +167,16 @@ export const contentSteps = (steps: readonly (Step | null)[]) =>
  * positions the replay bridge never mapped, so a gesture mixing a mark step
  * with a position-shifting one still under-records.
  */
-export function planTracking(steps: readonly (Step | null)[]) {
+export function trackingRefusal(steps: readonly Step[]) {
   for (const step of steps) {
-    const refusal = step && refuseStep(step);
+    const refusal = refuseStep(step);
     if (refusal) return refusal;
   }
   return null;
 }
 
-/**
- * Records which steps belong to one move. A context processor: it groups steps
- * by id and returns nothing, because the step list is not its to rewrite.
- */
-export const getMoveOperationsSteps = (
+/** Records which steps belong to one move, by grouping them under one id. */
+export const groupMoveSteps = (
   tr: Transaction,
   context: TrTrackingContext,
 ): void => {

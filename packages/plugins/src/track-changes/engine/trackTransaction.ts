@@ -93,7 +93,6 @@ export function trackTransaction(
   oldState: EditorState,
   newTr: Transaction,
   authorID: string,
-  clearedSteps: (Step | null)[],
   trContext: TrTrackingContext,
 ) {
   if (
@@ -106,9 +105,8 @@ export function trackTransaction(
 
   const baseAttrs = createNewPendingAttrs(tr.time, authorID);
 
-  for (let i = clearedSteps.length - 1; i >= 0; i--) {
-    const step = clearedSteps[i];
-    if (!step) continue;
+  for (let i = tr.steps.length - 1; i >= 0; i--) {
+    const step = tr.steps[i]!;
     const previousMapping = trContext.replayBridge.slice();
     const replayStart = newTr.mapping.maps.length;
     trackOneStep(i, step, baseAttrs, tr, oldState, newTr, trContext);
@@ -168,7 +166,6 @@ function trackOneStep(
           ? { ...emptyAttrs, moveNodeId: trContext.stepsByGroupIDMap.get(step)! }
           : emptyAttrs,
         oldState.schema,
-        replayBridge,
       );
 
       if (caretTrailsStep(tr, i, step)) {
@@ -178,11 +175,11 @@ function trackOneStep(
     } else if (step instanceof ReplaceAroundStep) {
       if (isSetNodeMarkupStep(step)) {
         const steps = trackSetNodeMarkupStep(step, newTr, emptyAttrs, tr.docs[i]!);
-        if (steps.length > 0) processChangeSteps(steps, newTr, emptyAttrs, oldState.schema, replayBridge);
+        if (steps.length > 0) processChangeSteps(steps, newTr, emptyAttrs, oldState.schema);
       } else {
         let steps = trackReplaceAroundStep(step, oldState, tr, newTr, emptyAttrs, tr.docs[i]!, trContext);
         steps = diffChangeSteps(steps);
-        processChangeSteps(steps, newTr, emptyAttrs, oldState.schema, replayBridge);
+        processChangeSteps(steps, newTr, emptyAttrs, oldState.schema);
       }
     } else if (step instanceof AttrStep) {
       const changeSteps = trackAttrsChangeStep(
@@ -198,7 +195,6 @@ function trackOneStep(
         newTr,
         emptyAttrs,
         oldState.schema,
-        replayBridge,
       );
     } else if (step instanceof AddMarkStep) {
       trackAddMarkStep(step, emptyAttrs, newTr, tr.docs[i]!);

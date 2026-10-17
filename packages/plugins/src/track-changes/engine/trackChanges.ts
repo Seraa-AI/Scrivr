@@ -2,13 +2,12 @@ import { NORMALIZATION_META } from "@scrivr/core";
 import { EditorState, Mapping, PluginKey, Transaction } from "@scrivr/core/pm";
 
 import { getAction, TrackChangesAction } from "../actions";
-import { processStepsBeforeTracking } from "./processStepsBeforeTracking";
 import {
   changeMovedToInsertsOnSourceDeletion,
   contentSteps,
-  getIndentationOperationSteps,
-  getMoveOperationsSteps,
-  planTracking,
+  groupIndentationSteps,
+  groupMoveSteps,
+  trackingRefusal,
   trFromHistory,
 } from "./transactionProcessing";
 import { TrackingResult, TrTrackingContext } from "../types";
@@ -73,13 +72,11 @@ export function trackChanges(
     replayBridge: new Mapping(),
   };
 
-  const clearedSteps = processStepsBeforeTracking(tx, trContext, [
-    getMoveOperationsSteps,
-    getIndentationOperationSteps,
-    ]);
+  groupMoveSteps(tx, trContext);
+  groupIndentationSteps(tx, trContext);
 
-  const steps = contentSteps(clearedSteps).length;
-  const refusal = planTracking(clearedSteps);
+  const steps = contentSteps(tx.steps).length;
+  const refusal = trackingRefusal(tx.steps);
   if (refusal) {
     return {
       kind: "refused",
@@ -94,7 +91,6 @@ export function trackChanges(
     oldState,
     createdTr,
     userID,
-    clearedSteps,
     trContext,
   );
   return {

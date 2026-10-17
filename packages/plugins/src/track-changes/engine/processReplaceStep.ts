@@ -19,7 +19,6 @@ export function processChangeSteps(
   newTr: Transaction,
   emptyAttrs: NewEmptyAttrs,
   schema: Schema,
-  replayBridge: Mapping,
 ) {
   const mapping = new Mapping();
   const deleteAttrs = createNewDeleteAttrs(emptyAttrs);
@@ -42,9 +41,7 @@ export function processChangeSteps(
         if (removed) removedNodes.push({ from: c.pos, to: c.nodeEnd });
         else retainedNodes.push({ from: c.pos, to: c.nodeEnd });
         for (let i = beforeSteps; i < newTr.steps.length; i++) {
-          const map = newTr.steps[i]!.getMap();
-          mapping.appendMap(map);
-          if (removed) replayBridge.appendMap(map);
+          mapping.appendMap(newTr.steps[i]!.getMap());
         }
 
         mergeTrackedMarks(mapping.map(c.pos), newTr.doc, newTr, schema);
@@ -87,7 +84,6 @@ export function processChangeSteps(
           return;
         }
 
-        const beforeSize = newTr.doc.content.size;
         const where = deleteTextIfInserted(
           node,
           mapping.map(c.pos),
@@ -100,11 +96,6 @@ export function processChangeSteps(
         );
 
         const textNewestStep = newTr.steps[newTr.steps.length - 1];
-
-        if (newTr.doc.content.size < beforeSize) {
-          replayBridge.appendMap(textNewestStep!.getMap());
-        }
-
         if (step !== textNewestStep) {
           mapping.appendMap(textNewestStep!.getMap());
           step = textNewestStep;
@@ -115,7 +106,6 @@ export function processChangeSteps(
       case "merge-fragment": {
         let insertPos = mapping.map(c.mergePos);
         if (c.node.isText) {
-          const beforeSize = newTr.doc.content.size;
           insertPos = deleteTextIfInserted(
             c.node,
             mapping.map(c.pos),
@@ -126,11 +116,6 @@ export function processChangeSteps(
             mapping.map(c.to),
           );
           const newestStep = newTr.steps[newTr.steps.length - 1];
-
-          if (newTr.doc.content.size < beforeSize) {
-            replayBridge.appendMap(newestStep!.getMap());
-          }
-
           if (step !== newestStep) {
             mapping.appendMap(newestStep!.getMap());
             step = newestStep;
