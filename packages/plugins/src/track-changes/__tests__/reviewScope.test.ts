@@ -10,8 +10,8 @@ import { trackChangesPluginKey } from "../index";
  */
 
 // `create` does not validate, which is exactly how such content gets written.
-const invalidCodeBlock = () =>
-  schema.nodes.code_block!.create(
+const invalidBlock = () =>
+  schema.nodes.unmarked_block!.create(
     null,
     schema.text("x", [schema.marks.bold!.create()]),
   );
@@ -21,7 +21,7 @@ const lastReview = (editor: TestEditor) =>
 
 describe("review is scoped to what it rewrote", () => {
   it("resolves a change in a document holding unrelated invalid content", () => {
-    const editor = new TestEditor(doc(p("hello"), invalidCodeBlock()));
+    const editor = new TestEditor(doc(p("hello"), invalidBlock()));
     expect(() => editor.state.doc.check()).toThrow();
 
     editor.insertAt(6, "!");

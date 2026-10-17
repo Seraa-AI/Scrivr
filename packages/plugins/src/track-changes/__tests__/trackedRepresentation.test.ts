@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { code, doc, p, schema, TestEditor } from "./helpers";
+import { doc, p, schema, TestEditor, unmarked } from "./helpers";
 import { CHANGE_OPERATION } from "../types";
 
 /**
@@ -24,9 +24,9 @@ const trackedMarks = (editor: TestEditor) => {
 };
 
 describe("tracked representation follows the schema", () => {
-  it("stamps an inserted mark-free block on the node, not its text", () => {
+  it("stamps an inserted block that admits no marks on the node, not its text", () => {
     const editor = new TestEditor(doc(p("tail")));
-    editor.dispatch(editor.state.tr.insert(0, code("x = 1")));
+    editor.dispatch(editor.state.tr.insert(0, unmarked("x = 1")));
 
     expect(trackedMarks(editor)).toEqual([]);
     expect(
@@ -39,7 +39,7 @@ describe("tracked representation follows the schema", () => {
 
   it("leaves the document valid for the transaction that comes after", () => {
     const editor = new TestEditor(doc(p("tail")));
-    editor.dispatch(editor.state.tr.insert(0, code("x = 1")));
+    editor.dispatch(editor.state.tr.insert(0, unmarked("x = 1")));
 
     // The invalid content this used to build only surfaced here — any later
     // setNodeMarkup on the block threw rather than the insert that caused it.
@@ -53,8 +53,8 @@ describe("tracked representation follows the schema", () => {
     ).not.toThrow();
   });
 
-  it("stamps a deleted mark-free block on the node, not its text", () => {
-    const editor = new TestEditor(doc(code("x = 1"), p("tail")));
+  it("stamps a deleted block that admits no marks on the node, not its text", () => {
+    const editor = new TestEditor(doc(unmarked("x = 1"), p("tail")));
     editor.deleteRange(0, 7);
 
     expect(trackedMarks(editor)).toEqual([]);
