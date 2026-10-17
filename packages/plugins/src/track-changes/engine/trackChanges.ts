@@ -1,3 +1,4 @@
+import { NORMALIZATION_META } from "@scrivr/core";
 import { EditorState, Mapping, PluginKey, Transaction } from "@scrivr/core/pm";
 
 import { getAction, TrackChangesAction } from "../actions";
@@ -44,6 +45,8 @@ export function trackChanges(
     tx.getMeta("initialContent") === true ||
     wasAppended?.getMeta("initialContent") === true;
 
+  const isNormalization = !!tx.getMeta(NORMALIZATION_META);
+
   const isPaginationChange =
     tx.getMeta("inserting") !== undefined ||
     tx.getMeta("deleting") !== undefined;
@@ -55,6 +58,7 @@ export function trackChanges(
     trFromHistory(tx) ||
     isCollabSync ||
     isInitialLoad ||
+    isNormalization ||
     isPaginationChange ||
     (wasAppended && tx.getMeta("origin") === "paragraphs")
   ) {

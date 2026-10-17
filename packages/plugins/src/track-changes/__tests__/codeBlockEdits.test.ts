@@ -62,4 +62,18 @@ describe("edits inside a code block", () => {
     expect(pending(editor)).toEqual([]);
     expect(editor.getState().doc.childCount).toBe(2);
   });
+
+  it("does not record the paragraph the editor keeps after a final block", () => {
+    const editor = new ServerEditor({
+      extensions: [
+        StarterKit,
+        TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true }),
+      ],
+      content: { type: "doc", content: [{ type: "codeBlock", content: [{ type: "text", text: "x = 1" }] }] },
+    });
+    editor.applyTransaction(editor.getState().tr.insertText("2", 6));
+
+    expect(editor.getState().doc.lastChild!.type.name).toBe("paragraph");
+    expect(pending(editor).map(c => [c.type, c.dataTracked.operation])).toEqual([["text-change", "insert"]]);
+  });
 });

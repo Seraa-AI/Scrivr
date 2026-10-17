@@ -52,6 +52,7 @@ export type {
   SourcedBlockDivergenceState,
 } from "./built-in/SourcedBlock";
 export { UniqueId, findNodeById, COLLAB_SYNC_META } from "./built-in/UniqueId";
+export { NORMALIZATION_META } from "./built-in/TrailingNode";
 export { ClearFormatting } from "./built-in/ClearFormatting";
 export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultContent";
 
