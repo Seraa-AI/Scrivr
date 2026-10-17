@@ -16,9 +16,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 import type { TrackedChange } from "@scrivr/plugins";
-import { useReviewAction } from "../hooks/useReviewAction";
-import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
-import { TrackChangesPanel } from "./TrackChangesPanel";
+// Through the package entry, as a consumer imports them.
+import { ReviewRefusalNotice, TrackChangesPanel, useReviewAction } from "../index";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -157,6 +156,26 @@ describe("every review click resolves or explains", () => {
     click(/^Reject this and/);
 
     expect(text()).toContain(`Reject all ${all}`);
+  });
+
+  it("keeps its buttons across a re-render, so focus stays put", () => {
+    const editor = build();
+    function Parent() {
+      const [, setTick] = useState(0);
+      return (
+        <div>
+          <button type="button" onClick={() => setTick(t => t + 1)}>Rerender</button>
+          <Card editor={editor} ids={["no-such-change"]} />
+        </div>
+      );
+    }
+    render(<Parent />);
+    click("Reject");
+    const dismiss = [...container.querySelectorAll("button")].find(b => b.textContent === "Dismiss");
+
+    click("Rerender");
+
+    expect([...container.querySelectorAll("button")].find(b => b.textContent === "Dismiss")).toBe(dismiss);
   });
 
   it("cancels without deciding anything", () => {

@@ -81,6 +81,38 @@ function DependentList({ dependents }: { dependents: TrackedChange[] }) {
   );
 }
 
+function NoticeButton({
+  className,
+  onClick,
+  children,
+}: {
+  className: string | undefined;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button type="button" className={cx("scrivr-menu-item", className)} style={button} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
+function NoticeFrame({
+  className,
+  alert = false,
+  children,
+}: {
+  className: string | undefined;
+  alert?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={className} style={wrap} role={alert ? "alert" : "status"} data-part="notice">
+      {children}
+    </div>
+  );
+}
+
 export function ReviewRefusalNotice({
   action,
   className,
@@ -90,31 +122,15 @@ export function ReviewRefusalNotice({
   if (!state) return null;
   const { refusal, compound, dependents, stage, grew } = state;
 
-  const Button = ({ onClick, children }: { onClick: () => void; children: React.ReactNode }) => (
-    <button
-      type="button"
-      className={cx("scrivr-menu-item", itemClassName)}
-      style={button}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
-
-  const Frame = ({ children, alert }: { children: React.ReactNode; alert?: boolean }) => (
-    <div className={className} style={wrap} role={alert ? "alert" : "status"} data-part="notice">
-      {children}
-    </div>
-  );
 
   if (refusal.reason !== "dependent-changes") {
     return (
-      <Frame alert={refusal.reason === "invalid-result"}>
+      <NoticeFrame className={className} alert={refusal.reason === "invalid-result"}>
         {explanation[refusal.reason]}
         <div style={actions}>
-          <Button onClick={action.dismiss}>Dismiss</Button>
+          <NoticeButton className={itemClassName} onClick={action.dismiss}>Dismiss</NoticeButton>
         </div>
-      </Frame>
+      </NoticeFrame>
     );
   }
 
@@ -125,35 +141,35 @@ export function ReviewRefusalNotice({
 
   if (stage === "confirm") {
     return (
-      <Frame>
+      <NoticeFrame className={className}>
         {grew
           ? `More work now depends on this. ${imperative(compound)} all of the following?`
           : `${imperative(compound)} this and ${count}?`}
         <DependentList dependents={dependents} />
         <div style={actions}>
-          <Button onClick={action.confirm}>
+          <NoticeButton className={itemClassName} onClick={action.confirm}>
             {imperative(compound)} all {compound.accepted.length + compound.rejected.length}
-          </Button>
-          <Button onClick={action.dismiss}>Cancel</Button>
+          </NoticeButton>
+          <NoticeButton className={itemClassName} onClick={action.dismiss}>Cancel</NoticeButton>
         </div>
-      </Frame>
+      </NoticeFrame>
     );
   }
 
   return (
-    <Frame>
+    <NoticeFrame className={className}>
       This contains {whose}.{" "}
       {consequence(compound)}
       {stage === "listed" && <DependentList dependents={dependents} />}
       <div style={actions}>
         {stage === "explain" && (
-          <Button onClick={action.listDependents}>Review dependent changes</Button>
+          <NoticeButton className={itemClassName} onClick={action.listDependents}>Review dependent changes</NoticeButton>
         )}
-        <Button onClick={action.requestConfirm}>
+        <NoticeButton className={itemClassName} onClick={action.requestConfirm}>
           {imperative(compound)} this and {count}…
-        </Button>
-        <Button onClick={action.dismiss}>Cancel</Button>
+        </NoticeButton>
+        <NoticeButton className={itemClassName} onClick={action.dismiss}>Cancel</NoticeButton>
       </div>
-    </Frame>
+    </NoticeFrame>
   );
 }

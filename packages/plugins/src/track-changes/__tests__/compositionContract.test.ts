@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { doc, p, TestEditor } from "./helpers";
-import { planChangeReview } from "../reviewPlan";
-import type { ReviewDependency, ReviewPlan } from "../reviewPlan";
+import { planChangeReview } from "../index";
+import type { ReviewDependency, ReviewPlan } from "../index";
 
 /** The dependencies a blocked plan reports, or none when it blocked for another reason. */
 const dependenciesOf = (plan: ReviewPlan): ReviewDependency[] =>

@@ -1,8 +1,9 @@
 import { createPortal } from "react-dom";
-import type { Editor } from "@scrivr/core";
+import type { Editor, IBaseEditor } from "@scrivr/core";
 import { CHANGE_OPERATION } from "@scrivr/plugins";
 import type { ChangePopoverInfo, ReviewDecision } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
+import { shortName } from "../utils/authorName";
 import { useTrackChangesPopover } from "../hooks/useTrackChangesPopover";
 import { useReviewAction } from "../hooks/useReviewAction";
 import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
@@ -145,7 +146,7 @@ function SingleChangePopover({
   descriptionClassName,
 }: {
   info: ChangePopoverInfo;
-  editor: Editor | null;
+  editor: IBaseEditor | null;
   onClose: () => void;
   itemClassName?: string | undefined;
   iconClassName?: string | undefined;
@@ -252,7 +253,7 @@ function ConflictPopover({
   descriptionClassName,
 }: {
   info: ChangePopoverInfo;
-  editor: Editor | null;
+  editor: IBaseEditor | null;
   onClose: () => void;
   itemClassName?: string | undefined;
   iconClassName?: string | undefined;
@@ -386,12 +387,6 @@ function ConflictPopover({
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
-
-/** Display name: strip "user:" prefix if present, cap length. */
-function shortName(authorID: string): string {
-  const name = authorID.split(":").pop() ?? authorID;
-  return name.length > 20 ? name.slice(0, 20) + "…" : name;
-}
 
 const badge = {
   display: "inline-flex",
