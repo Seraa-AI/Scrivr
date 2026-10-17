@@ -28,7 +28,10 @@ import type { ReviewOutcome } from "../reviewPlan";
  */
 export interface TrackChangesState {
   lastReview: ReviewOutcome | null;
-  /** Outcome of the most recent tracked gesture; `refused` needs host action. */
+  /**
+   * Outcome of the most recent tracked gesture; `refused` needs host action.
+   * Undo and redo clear it, since they replace what that gesture produced.
+   */
   lastTracking: TrackingResult | null;
   status: TrackChangesStatus;
   changeSet: ChangeSet;
@@ -158,10 +161,13 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           canAcceptReject,
         };
       },
-      apply: (tr, pluginState, _oldState, newState) => {
+      apply: (tr, previous, _oldState, newState) => {
         if (!tr.docChanged && !hasAction(tr)) {
-          return pluginState;
+          return previous;
         }
+        // A history step replaces what the last gesture produced, so that
+        // gesture's outcome no longer describes the document.
+        const pluginState = trFromHistory(tr) ? { ...previous, lastTracking: null } : previous;
         const review = getAction(tr, TrackChangesAction.reviewResult);
         if (review) return { ...pluginState, lastReview: review, changeSet: findChanges(newState) };
         const tracking = getAction(tr, TrackChangesAction.trackingResult);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DocAttrStep, Fragment, Slice, Step, StepMap, StepResult } from "@scrivr/core/pm";
+import { DocAttrStep, Fragment, ReplaceStep, Slice, Step, StepMap, StepResult } from "@scrivr/core/pm";
 import type { Node as PMNode } from "@scrivr/core/pm";
 import { doc, p, TestEditor } from "./helpers";
 import { trackChangesPluginKey } from "../index";
@@ -37,8 +37,8 @@ class ShoutStep extends Step {
   override getMap() {
     return StepMap.empty;
   }
-  override invert() {
-    return this;
+  override invert(doc: PMNode) {
+    return new ReplaceStep(this.from, this.to, doc.slice(this.from, this.to));
   }
   override map() {
     return this;
@@ -105,6 +105,19 @@ describe("tracking refuses only what it cannot represent", () => {
   });
 });
 
+
+describe("a refusal describes the document it was made for", () => {
+  it("stops reporting the refusal once the host undoes that edit", () => {
+    const editor = new TestEditor(doc(p("start")));
+    editor.dispatch(editor.state.tr.step(new ShoutStep(1, 6)));
+    expect(refusal(editor)).toBeDefined();
+
+    editor.undo();
+
+    expect(editor.text).toBe("start");
+    expect(tracking(editor)).toBeNull();
+  });
+});
 
 describe("a refusal outranks a sibling success", () => {
   const ready = { status: "ready", steps: 1, elapsedMs: 0 } as const;
