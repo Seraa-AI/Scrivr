@@ -54,12 +54,10 @@ function caretTrailsStep(tr: Transaction, i: number, step: ReplaceStep) {
 
 /**
  * Entering an iteration the bridge maps `docs[i+1]` into the replayed document;
- * leaving it, `docs[i]`. Every step kind must advance it. The first replay map
- * is marked as mirroring the source step's own, which the position-changing
- * trackers earn by inverting the source step before re-applying it; mark
- * trackers emit empty maps, so the pairing is moot for them. A step the replay
- * declined still happened in the source — its map belongs in the chain even
- * when no replay steps followed.
+ * leaving it, `docs[i]`. Every step kind advances it. The first replay map
+ * mirrors the source step's own, because trackers begin by inverting the source
+ * step. A step the replay declined still happened in the source, so its map
+ * stays in the chain.
  */
 function advanceBridge(
   step: Step,

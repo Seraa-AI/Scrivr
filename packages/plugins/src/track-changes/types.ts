@@ -89,9 +89,17 @@ type InsertDeleteAttrs = {
    * names one contiguous span; the pieces are still one change.
    */
   continuesId?: string;
-  /** Independent intents whose targets exist because of these creations. */
+  /**
+   * Creations this record only makes sense alongside: set when someone edits
+   * inside another author's pending insertion. Rejecting that insertion names
+   * this record as dependent work instead of silently taking it.
+   */
   dependsOn?: string[];
-  /** Persistent: independent work has depended on this creation. */
+  /**
+   * Set on a creation once another author's work has depended on it. From then
+   * on the creator's own later edits inside it record `dependsOn` rather than
+   * folding in, even after that other work is reviewed.
+   */
   foldingClosed?: boolean;
   /** A later placement is based on these still-pending placement decisions. */
   placementDependsOn?: string[];
@@ -232,6 +240,11 @@ export interface TrackChangesOptions {
 
 // ── Transaction tracking context ──────────────────────────────────────────────
 
+/** Why a gesture could not be represented as tracked changes. */
+export type TrackingRefusal =
+  | { failure: "unsupported-step"; stepType: string }
+  | { failure: "duplicate-transform-package" };
+
 /**
  * What tracking did with a gesture. `refused` is the one outcome a host must act
  * on: the edit stands in the document but nothing was recorded, so undoing it or
@@ -240,14 +253,10 @@ export interface TrackChangesOptions {
  * Refusal means the gesture cannot be represented, never that it was big. Step
  * count and elapsed time are diagnostics for finding expensive replays — a
  * document-wide formatting command legitimately produces thousands of steps and
- * must still be tracked in full.
+ * must still be tracked in full. `elapsedMs` is only on `ready`: a refusal is
+ * decided before anything runs.
  */
-export type TrackingRefusal =
-  | { failure: "unsupported-step"; stepType: string }
-  | { failure: "duplicate-transform-package" };
-
 export type TrackingResult =
-  /** `elapsedMs` is only on this arm: a refusal is decided before anything runs. */
   | { status: "ready"; steps: number; elapsedMs: number }
   | ({ status: "refused"; steps: number } & TrackingRefusal);
 

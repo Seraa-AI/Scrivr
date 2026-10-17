@@ -204,9 +204,9 @@ export interface IBaseEditor {
    * `SlashCommandSpec` — with the arguments it carries.
    *
    * Those specs are data: they name a command rather than closing over one, so
-   * the surface that renders them dispatches by name. Unknown names are
-   * ignored — a spec can name a command from an extension this editor was not
-   * built with.
+   * the surface that renders them dispatches by name. An unknown name returns
+   * false, like any command that did not run — a spec can name a command from
+   * an extension this editor was not built with.
    */
   runCommand(name: keyof SafeFlatCommands, args?: unknown[]): boolean;
   /**

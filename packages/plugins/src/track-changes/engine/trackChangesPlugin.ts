@@ -27,6 +27,7 @@ import type { ReviewOutcome } from "../reviewPlan";
  * needs a name it can write down.
  */
 export interface TrackChangesState {
+  /** Outcome of the most recent review decision, applied or refused. */
   lastReview: ReviewOutcome | null;
   /**
    * Outcome of the most recent tracked gesture; `refused` needs host action.

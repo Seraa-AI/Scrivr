@@ -1,16 +1,10 @@
-/**
- * Why a review click did not complete, shown on the surface that was clicked.
- *
- * Each reason gets its own words, and only dependent work is offered a remedy —
- * it is the only one deciding more can resolve.
- */
-
 import type { ReviewAction, ReviewRefusalState } from "../hooks/useReviewAction";
 import type { ReviewDecisions, ReviewRefusal, TrackedChange } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
 import { shortName } from "../utils/authorName";
 
 export interface ReviewRefusalNoticeProps {
+  /** The review action whose refusal to show — the one the clicked surface used. */
   action: ReviewAction;
   className?: string | undefined;
   itemClassName?: string | undefined;
@@ -113,6 +107,12 @@ function NoticeFrame({
   );
 }
 
+/**
+ * Why a review click did not complete, shown on the surface that was clicked.
+ *
+ * Each reason gets its own words, and only dependent work is offered a remedy —
+ * it is the only one deciding more can resolve.
+ */
 export function ReviewRefusalNotice({
   action,
   className,

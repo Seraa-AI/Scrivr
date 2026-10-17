@@ -77,9 +77,8 @@ describe("selection contract — an explicit selection is carried, not collapsed
 });
 
 describe("selection contract — gestures that restructure without replacing", () => {
-  // The replay only advances its bridge for a ReplaceStep, so a wrap or an
-  // indent — one ReplaceAroundStep, no selection set — has to survive the same
-  // mapping as everything else.
+  // A wrap or an indent is one ReplaceAroundStep that sets no selection; the
+  // caret has to survive it like any other step.
   const wrapInList = (editor: TestEditor, at: number) => {
     editor.dispatch(
       editor.state.tr.setSelection(TextSelection.create(editor.state.doc, at)),

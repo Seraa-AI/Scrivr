@@ -1,17 +1,3 @@
-/**
- * The one way this package decides tracked changes.
- *
- * Every Accept and Reject goes through here so a click always ends in one of
- * two places: the decision is carried out, or the reviewer is told what stopped
- * it. A refusal is held as state rather than thrown away, because the card that
- * was clicked is where the explanation belongs.
- *
- * Deciding dependent work is never automatic. The set is computed so it can be
- * shown, named behind a second confirmation, and replanned at the moment of
- * confirming — if it grew since the reviewer saw it, they see the wider set
- * before anything is decided, not after.
- */
-
 import { useCallback, useMemo, useState } from "react";
 import type { IBaseEditor } from "@scrivr/core";
 import { planReview, reviewChanges, trackChangesPluginKey } from "@scrivr/plugins";
@@ -26,6 +12,7 @@ import type {
 
 type Blocked = Extract<ReviewOutcome, { status: "blocked" }>;
 
+/** A refusal held for the surface that was clicked, and how far the reviewer has taken it. */
 export type ReviewRefusalState = {
   /** What the reviewer asked to decide, before any dependent work. */
   request: ReviewDecisions;
@@ -64,6 +51,19 @@ const compoundOf = (blocked: Blocked): ReviewDecisions => {
 const single = (decision: ReviewDecision, ids: string[]): ReviewDecisions =>
   decision === "accepted" ? { accepted: ids, rejected: [] } : { accepted: [], rejected: ids };
 
+/**
+ * The one way this package decides tracked changes.
+ *
+ * Every Accept and Reject goes through here so a click always ends in one of
+ * two places: the decision is carried out, or the reviewer is told what stopped
+ * it. A refusal is held as state rather than thrown away, because the card that
+ * was clicked is where the explanation belongs.
+ *
+ * Deciding dependent work is never automatic. The set is computed so it can be
+ * shown, named behind a second confirmation, and replanned at the moment of
+ * confirming — if it grew since the reviewer saw it, they see the wider set
+ * before anything is decided, not after.
+ */
 export function useReviewAction(editor: IBaseEditor | null) {
   const [refusal, setRefusal] = useState<ReviewRefusalState | null>(null);
 

@@ -1,7 +1,10 @@
 import type { ChangeSet } from "./ChangeSet";
 import type { TrackedChange } from "./types";
 
+/** What deciding a change does to the document, which settles what it can take with it. */
 export type ChangeEffect = "create" | "delete" | "content" | "placement" | "presentation";
+
+/** Classifies a change by its effect — for a host grouping or wording review choices. */
 export function changeEffect(change: TrackedChange): ChangeEffect {
   if (change.type === "mark-change" || change.type === "node-attr-change") return "presentation";
   if (change.dataTracked.operation === "move") return "placement";
@@ -10,12 +13,18 @@ export function changeEffect(change: TrackedChange): ChangeEffect {
   return "content";
 }
 
+/**
+ * Changes that deciding `changeId` would also decide. `existence`: the decision
+ * removes content they live on. `placement`: they build on, or are built on by,
+ * the move being decided.
+ */
 export interface ReviewDependency {
   changeId: string;
   dependentIds: string[];
   relationship: "existence" | "placement";
 }
 
+/** The two ways a pending change can be decided. */
 export type ReviewDecision = "accepted" | "rejected";
 
 /**
@@ -119,7 +128,7 @@ const removesContent = (change: TrackedChange, decision: ReviewDecision) => {
 };
 
 /**
- * Work that would go with the content: either it said so, or it sits inside the
+ * Work that would go with the content: either it said so, or it overlaps the
  * span being removed. A container merely enclosing the change is excluded — it
  * is an ancestor, and deciding its child is not a decision about it.
  */

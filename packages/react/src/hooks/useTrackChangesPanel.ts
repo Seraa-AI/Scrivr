@@ -47,7 +47,7 @@ export function useTrackChangesPanel(editor: IBaseEditor | null) {
   const review = useReviewAction(editor);
 
   // These return the outcome: a caller driving the hook directly needs the same
-  // answer the panel gets, not a boolean it has to guess at.
+  // answer the panel gets.
   const acceptAll = () => review.review("accepted", allIds);
   const rejectAll = () => review.review("rejected", allIds);
   const accept = (ids: string[]) => review.review("accepted", ids);

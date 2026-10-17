@@ -17,7 +17,11 @@ export function deleteNode(node: PMNode, pos: number, tr: Transaction) {
   return tr.delete(pos, pos + node.nodeSize);
 }
 
-/** Apply the shared ownership policy. Returns true only when the node was removed. */
+/**
+ * Removes the node when the shared ownership policy allows cancelling it, or
+ * when a move carries it out from under a different move; otherwise records
+ * the deletion on the node. Returns true only when the node was removed.
+ */
 export function deleteOrSetNodeDeleted(
   node: PMNode,
   pos: number,
