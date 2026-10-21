@@ -649,7 +649,7 @@ describe("SourcedBlock Extension", () => {
 	});
 
 	describe("divergence tracking", () => {
-		function editorWith(text: string, baseHash: string) {
+		function editorWith(text: string, baseHash: string | null) {
 			return new ServerEditor({
 				extensions: [StarterKit, SourcedBlockExtension],
 				content: {
@@ -695,6 +695,14 @@ describe("SourcedBlock Extension", () => {
 		it("leaves an untouched block clean", () => {
 			const pristine = editorWith("Clause text", "placeholder");
 			const editor = editorWith("Clause text", hashOf(pristine));
+			expect(divergedIds(editor)).toEqual([]);
+		});
+
+		it.each([null, ""])("does not call a block modified when its base is %j", baseHash => {
+			const editor = editorWith("Clause text", baseHash);
+			expect(divergedIds(editor)).toEqual([]);
+
+			editor.applyTransaction(editor.getState().tr.insertText("!", 12));
 			expect(divergedIds(editor)).toEqual([]);
 		});
 

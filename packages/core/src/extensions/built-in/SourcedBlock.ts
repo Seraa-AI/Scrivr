@@ -166,9 +166,15 @@ export function isEmptyShell(node: Node): boolean {
 	return empty;
 }
 
-/** Hash the block's current content and compare it against its recorded base. */
+/**
+ * Hash the block's current content and compare it against its recorded base.
+ * Without a base there is nothing to have diverged from, so the block is not
+ * modified. `""` is an absent base too: earlier DOCX imports wrote it.
+ */
 function isDiverged(node: Node): boolean {
-	return computeBlockHash(node.content) !== node.attrs["baseHash"];
+	const baseHash: unknown = node.attrs["baseHash"];
+	if (typeof baseHash !== "string" || baseHash === "") return false;
+	return computeBlockHash(node.content) !== baseHash;
 }
 
 function instanceIdOf(node: Node): string | null {
@@ -790,7 +796,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 
 	onViewReady(editor: IEditor) {
 		const unregister = editor.addOverlayRenderHandler(
-			(ctx, pageIndex, pageConfig, charMap, theme) => {
+			(ctx, pageNumber, pageConfig, charMap, theme) => {
 				const state = editor.getState();
 				const divergenceState =
 					sourcedBlockDivergenceKey.getState(state);
@@ -804,32 +810,22 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					const id = instanceIdOf(node);
 					if (!id || !divergenceState.diverged.has(id)) return false;
 
-					// coordsAtPos returns { x, y, height, page }
-					const startCoords = charMap.coordsAtPos(pos + 1);
-					const endCoords = charMap.coordsAtPos(
-						pos + node.nodeSize - 2,
-					); // end of inner block
+					// The block's own lines on this page. A block boundary is not a
+					// glyph, so coordsAtPos would resolve it to the previous block's
+					// last character; and a block split across pages owns a share of
+					// each page, measured in that page's coordinates.
+					const lines = charMap
+						.linesInRange(pos, pos + node.nodeSize)
+						.filter(line => line.page === pageNumber);
+					if (lines.length === 0) return false;
 
-					// Ensure both coordinates exist and are on the current page being rendered
-					if (
-						startCoords &&
-						endCoords &&
-						(startCoords.page === pageIndex ||
-							endCoords.page === pageIndex)
-					) {
-						ctx.save();
-						// Use divergedGutter from theme if available, otherwise amber fallback
-						ctx.fillStyle = theme.divergedGutter ?? "#FFC107";
+					const top = Math.min(...lines.map(line => line.y));
+					const bottom = Math.max(...lines.map(line => line.y + line.height));
 
-						const gutterWidth = 3;
-						const gutterX = startCoords.x - 12;
-						const top = startCoords.y;
-						const bottom = endCoords.y + endCoords.height;
-						const height = bottom - top;
-
-						ctx.fillRect(gutterX, top, gutterWidth, height);
-						ctx.restore();
-					}
+					ctx.save();
+					ctx.fillStyle = theme.divergedGutter;
+					ctx.fillRect(pageConfig.margins.left - 12, top, 3, bottom - top);
+					ctx.restore();
 					return false;
 				});
 			},
@@ -1146,7 +1142,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				kind: params.get("kind") ?? "",
 				resourceId: params.get("resourceId") ?? "",
 				versionId: params.get("versionId") ?? "",
-				baseHash: params.get("baseHash") ?? "",
+				baseHash: params.get("baseHash"),
 				baseNormalizer: Number(params.get("baseNormalizer")) || 1,
 			};
 
