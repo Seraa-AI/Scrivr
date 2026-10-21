@@ -55,6 +55,7 @@ export interface SourcedBlockEvent {
  *
  * The two facts have different owners. `modified` is the document's: the editor
  * hashes the block's content and compares it to the base it was inserted with.
+ * A block with no recorded base is never modified.
  * `outdated` is the library's — whether the source moved on past `versionId` is
  * not knowable from this document, so the host sets it (from a server check, or
  * from a collaborator who ran one) via `setSourcedBlockOutdated`, and the
@@ -85,6 +86,10 @@ export const NORMALIZER_VERSION = 1;
 
 /** ECMA-376 caps `w:tag/@w:val` (ST_String) at 255 characters. */
 const DOCX_TAG_MAX_LENGTH = 255;
+
+/** The diverged bar sits this far into the left margin, like Word's change bar. */
+const DIVERGED_GUTTER_INSET = 12;
+const DIVERGED_GUTTER_WIDTH = 3;
 
 export function normalizeSourcedBlock(fragment: Fragment): unknown[] {
 	const walkNode = (node: Node): unknown => {
@@ -796,7 +801,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 
 	onViewReady(editor: IEditor) {
 		const unregister = editor.addOverlayRenderHandler(
-			(ctx, pageNumber, pageConfig, charMap, theme) => {
+			(ctx, pageNumber, pageConfig, _charMap, theme) => {
 				const state = editor.getState();
 				const divergenceState =
 					sourcedBlockDivergenceKey.getState(state);
@@ -804,27 +809,30 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				if (!divergenceState || divergenceState.diverged.size === 0)
 					return;
 
+				const page = editor.layout.pages[pageNumber - 1];
+				if (!page) return;
+
 				state.doc.descendants((node, pos) => {
 					if (node.type.name !== "sourcedBlock") return true;
 
 					const id = instanceIdOf(node);
 					if (!id || !divergenceState.diverged.has(id)) return false;
 
-					// The block's own lines on this page. A block boundary is not a
-					// glyph, so coordsAtPos would resolve it to the previous block's
-					// last character; and a block split across pages owns a share of
-					// each page, measured in that page's coordinates.
-					const lines = charMap
-						.linesInRange(pos, pos + node.nodeSize)
-						.filter(line => line.page === pageNumber);
-					if (lines.length === 0) return false;
+					// Layout blocks, not charMap lines: a line's doc range is for caret
+					// placement, and a rule or image beside the block claims positions
+					// inside it.
+					const blocks = page.blocks.filter(
+						block => block.nodePos > pos && block.nodePos < pos + node.nodeSize,
+					);
+					if (blocks.length === 0) return false;
 
-					const top = Math.min(...lines.map(line => line.y));
-					const bottom = Math.max(...lines.map(line => line.y + line.height));
+					const top = Math.min(...blocks.map(block => block.y));
+					const bottom = Math.max(...blocks.map(block => block.y + block.height));
+					const gutterX = pageConfig.margins.left - DIVERGED_GUTTER_INSET;
 
 					ctx.save();
 					ctx.fillStyle = theme.divergedGutter;
-					ctx.fillRect(pageConfig.margins.left - 12, top, 3, bottom - top);
+					ctx.fillRect(gutterX, top, DIVERGED_GUTTER_WIDTH, bottom - top);
 					ctx.restore();
 					return false;
 				});
@@ -1142,6 +1150,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				kind: params.get("kind") ?? "",
 				resourceId: params.get("resourceId") ?? "",
 				versionId: params.get("versionId") ?? "",
+				// Absent stays null: no recorded base, not an empty one.
 				baseHash: params.get("baseHash"),
 				baseNormalizer: Number(params.get("baseNormalizer")) || 1,
 			};

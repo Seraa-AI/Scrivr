@@ -44,9 +44,10 @@ function barsOnPage(editor: Editor, page: number, pageConfig: PageConfig): Bar[]
 	editor.ensurePagePopulated(page);
 	const ctx = document.createElement("canvas").getContext("2d");
 	if (!ctx) throw new Error("no 2d context");
+	const gutterColor = editor.getResolvedTheme().divergedGutter;
 	const bars: Bar[] = [];
 	vi.spyOn(ctx, "fillRect").mockImplementation((x, y, _w, h) => {
-		if (ctx.fillStyle === "#fbbf24") {
+		if (ctx.fillStyle === gutterColor) {
 			bars.push({ x, top: Math.min(y, y + h), bottom: Math.max(y, y + h) });
 		}
 	});
@@ -86,8 +87,28 @@ describe("SourcedBlock diverged gutter", () => {
 
 		expect(bars).toHaveLength(1);
 		expect(bars[0]!.x).toBeLessThan(defaultPageConfig.margins.left);
-		expect(bars[0]!.top).toBe(lines.top);
-		expect(bars[0]!.bottom).toBe(lines.bottom);
+		expect(bars[0]!.top).toBeCloseTo(lines.top);
+		expect(bars[0]!.bottom).toBeCloseTo(lines.bottom);
+	});
+
+	it("stops at the block's edges when a rule sits on either side", () => {
+		const rule = { type: "horizontalRule" };
+		editor = makeEditor(defaultPageConfig, [
+			{ type: "paragraph", content: [{ type: "text", text: "Before" }] },
+			rule,
+			divergedBlock(["Only clause line."]),
+			rule,
+			{ type: "paragraph", content: [{ type: "text", text: "After" }] },
+		]);
+
+		const bars = barsOnPage(editor, 1, defaultPageConfig);
+		const [ruleAbove, ruleBelow] = editor.layout.pages[0]!.blocks.filter(
+			block => block.node.type.name === "horizontalRule",
+		);
+
+		expect(bars).toHaveLength(1);
+		expect(bars[0]!.top).toBeGreaterThanOrEqual(ruleAbove!.y + ruleAbove!.height);
+		expect(bars[0]!.bottom).toBeLessThanOrEqual(ruleBelow!.y);
 	});
 
 	it("covers only this page's share of a block that crosses a page boundary", () => {
@@ -103,8 +124,8 @@ describe("SourcedBlock diverged gutter", () => {
 			const lines = blockLinesOnPage(editor, page);
 			expect(bars).toHaveLength(1);
 			expect(bars[0]!.x).toBeLessThan(pageConfig.margins.left);
-			expect(bars[0]!.top).toBe(lines.top);
-			expect(bars[0]!.bottom).toBe(lines.bottom);
+			expect(bars[0]!.top).toBeCloseTo(lines.top);
+			expect(bars[0]!.bottom).toBeCloseTo(lines.bottom);
 		}
 	});
 });
