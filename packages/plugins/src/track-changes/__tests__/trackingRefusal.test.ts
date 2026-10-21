@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { DocAttrStep, Fragment, ReplaceStep, Slice, Step, StepMap, StepResult } from "@scrivr/core/pm";
+import { EditorState, Plugin, DocAttrStep, Fragment, ReplaceStep, Slice, Step, StepMap, StepResult } from "@scrivr/core/pm";
 import type { Node as PMNode } from "@scrivr/core/pm";
 import { doc, p, TestEditor } from "./helpers";
 import { trackChangesPluginKey } from "../index";
+import { trackChangesPlugin } from "../engine/trackChangesPlugin";
 import { reportedTracking } from "../engine/transactionProcessing";
 import type { TrackingResult } from "../index";
 
@@ -135,5 +136,46 @@ describe("a refusal outranks a sibling success", () => {
   it("reports the latest result when none has refused", () => {
     expect(reportedTracking(ready, ready)).toBe(ready);
     expect(reportedTracking(undefined, refused)).toBe(refused);
+  });
+});
+
+
+describe("tracking outcomes belong to one dispatch", () => {
+  const build = () => EditorState.create({
+    doc: doc(p("start")),
+    plugins: [
+      trackChangesPlugin({ userID: "alice" }),
+      new Plugin({
+        appendTransaction(trs, _old, state) {
+          return trs.some(tr => tr.getMeta("append-edit"))
+            ? state.tr.insertText("!", state.doc.content.size - 1)
+            : null;
+        },
+      }),
+    ],
+  });
+
+  it("keeps a refusal when a later append round succeeds", () => {
+    const initial = build();
+    const state = initial.apply(initial.tr.step(new ShoutStep(1, 6)).setMeta("append-edit", true));
+    expect(state.doc.textContent).toBe("START!");
+    expect(trackChangesPluginKey.getState(state)!.lastTracking).toMatchObject({ status: "refused", failure: "unsupported-step" });
+    const next = state.apply(state.tr.insertText("?", 1));
+    expect(trackChangesPluginKey.getState(next)!.lastTracking?.status).toBe("ready");
+  });
+
+  it("resets the accumulator even when the next root only carries metadata", () => {
+    const initial = build();
+    const state = initial.apply(initial.tr.step(new ShoutStep(1, 6)));
+    const next = state.apply(state.tr.setMeta("append-edit", true));
+    expect(trackChangesPluginKey.getState(next)!.lastTracking?.status).toBe("ready");
+  });
+
+  it("keeps outcomes isolated between editor states", () => {
+    const initial = build();
+    const refused = initial.apply(initial.tr.step(new ShoutStep(1, 6)).setMeta("append-edit", true));
+    const ready = initial.apply(initial.tr.insertText("!", 1));
+    expect(trackChangesPluginKey.getState(refused)!.lastTracking?.status).toBe("refused");
+    expect(trackChangesPluginKey.getState(ready)!.lastTracking?.status).toBe("ready");
   });
 });

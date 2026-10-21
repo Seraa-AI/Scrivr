@@ -36,3 +36,21 @@ describe("review is scoped to what it rewrote", () => {
   });
 
 });
+
+
+it("accepts a deletion without checking a distant invalid sibling", () => {
+  const editor = new TestEditor(doc(p("long paragraph"), p("ok"), invalidBlock()));
+  editor.deleteRange(0, editor.state.doc.firstChild!.nodeSize);
+  editor.acceptChanges(editor.pendingChanges.map(c => c.id));
+  expect(lastReview(editor)?.status).toBe("applied");
+  expect(editor.pendingChanges).toEqual([]);
+  expect(editor.text).toBe("okx");
+});
+
+it("accepts a deletion without checking the untouched adjacent sibling", () => {
+  const editor = new TestEditor(doc(p("long paragraph"), invalidBlock()));
+  editor.deleteRange(0, editor.state.doc.firstChild!.nodeSize);
+  editor.acceptChanges(editor.pendingChanges.map(c => c.id));
+  expect(lastReview(editor)?.status).toBe("applied");
+  expect(editor.text).toBe("x");
+});

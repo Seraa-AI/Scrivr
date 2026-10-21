@@ -34,6 +34,8 @@ export interface TrackChangesState {
    * Undo and redo clear it, since they replace what that gesture produced.
    */
   lastTracking: TrackingResult | null;
+  /** @internal Outcomes accumulated since the root transaction of this dispatch. */
+  trackingInDispatch: TrackingResult | null;
   status: TrackChangesStatus;
   changeSet: ChangeSet;
   userID: string;
@@ -156,6 +158,7 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
         return {
           lastReview: null,
           lastTracking: null,
+          trackingInDispatch: null,
           status: options.initialStatus || TrackChangesStatus.enabled,
           userID,
           changeSet: findChanges(state),
@@ -163,16 +166,28 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
         };
       },
       apply: (tr, previous, _oldState, newState) => {
+        // ProseMirror applies a root once, then tags every appended transaction
+        // with that root. Reset the accumulator here, including selection-only
+        // roots, so append rounds share an outcome without leaking into the
+        // next dispatch. Keep the last published outcome until new work arrives.
+        let pluginState = !tr.getMeta("appendedTransaction") && previous.trackingInDispatch
+          ? { ...previous, trackingInDispatch: null }
+          : previous;
+        if (trFromHistory(tr)) pluginState = { ...pluginState, lastTracking: null, trackingInDispatch: null };
         if (!tr.docChanged && !hasAction(tr)) {
-          return previous;
+          return pluginState;
         }
-        // A history step replaces what the last gesture produced, so that
-        // gesture's outcome no longer describes the document.
-        const pluginState = trFromHistory(tr) ? { ...previous, lastTracking: null } : previous;
         const review = getAction(tr, TrackChangesAction.reviewResult);
-        if (review) return { ...pluginState, lastReview: review, changeSet: findChanges(newState) };
         const tracking = getAction(tr, TrackChangesAction.trackingResult);
-        if (tracking) return { ...pluginState, lastTracking: tracking, changeSet: findChanges(newState) };
+        if (tracking) {
+          const result = reportedTracking(pluginState.trackingInDispatch ?? undefined, tracking);
+          pluginState = { ...pluginState, lastTracking: result, trackingInDispatch: result };
+        }
+        if (review || tracking) return {
+          ...pluginState,
+          ...(review ? { lastReview: review } : {}),
+          changeSet: findChanges(newState),
+        };
         const setUserID = getAction(tr, TrackChangesAction.setUserID);
         const setStatus = getAction(tr, TrackChangesAction.setPluginStatus);
         if (setUserID) {

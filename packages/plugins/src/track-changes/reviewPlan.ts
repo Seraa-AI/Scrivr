@@ -116,14 +116,15 @@ const splitReference = (related: TrackedChange, change: TrackedChange) =>
   related.dataTracked.referenceId === change.id;
 
 /**
- * Would carrying out this decision take the content away? Accepting a move
- * removes its shadow too: the moved content travelled with the copy, but work
- * done on the shadow afterwards did not.
+ * Would carrying out this decision take the content away? A move's shadow is
+ * consumed in either direction: accepting removes it, rejecting replaces it
+ * with the live copy. Work subsequently written on the shadow does not travel
+ * with that copy, so both decisions require its review.
  */
 const removesContent = (change: TrackedChange, decision: ReviewDecision) => {
   const effect = changeEffect(change);
   if (effect === "create") return decision === "rejected";
-  if (effect === "delete") return decision === "accepted";
+  if (effect === "delete") return !!change.dataTracked.moveNodeId || decision === "accepted";
   return false;
 };
 
@@ -136,10 +137,17 @@ const existenceDependents = (
   change: TrackedChange,
   changes: readonly TrackedChange[],
   selected: ReadonlySet<string>,
+  decision: ReviewDecision,
 ) =>
   changes.filter(
     other =>
       !selected.has(other.id) &&
+      // Rejecting transport restores the prior placements stored on the
+      // shadow's root. Those identities survive replacement; its content does
+      // not. They remain placement dependencies, not existence dependencies.
+      !(decision === "rejected" && change.dataTracked.moveNodeId &&
+        change.dataTracked.operation === "delete" && other.dataTracked.operation === "move" &&
+        other.from === change.from && other.to === change.to) &&
       (other.dataTracked.dependsOn?.includes(change.id) ||
         (overlaps(other, change) && !strictlyContains(other, change))),
   );
@@ -221,7 +229,7 @@ export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecision
       }
     }
     if (!removesContent(change, decision)) continue;
-    const dependentIds = existenceDependents(change, changes, selected).map(other => other.id);
+    const dependentIds = existenceDependents(change, changes, selected, decision).map(other => other.id);
     if (dependentIds.length) {
       dependencies.push({ changeId: change.id, dependentIds, relationship: "existence" });
     }

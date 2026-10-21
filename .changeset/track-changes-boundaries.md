@@ -30,19 +30,24 @@ suggestions no longer destroys authorship, selection, or unrelated decisions.
   (`deletionId`), and so is a record split by later typing or a paragraph break
   (`continuesId`, with a unique id per span).
 - Rejecting a move takes the content back with the edits made since. Work done
-  on the moved-from shadow keeps its own record.
+  on the moved-from shadow keeps its own record and must be explicitly reviewed
+  before either accepting or rejecting the move consumes that shadow.
 - Review is planned before it runs. `planChangeReview`, `planReviewIn` and
   `planReview` preview a decision; `reviewChanges` carries it out and returns
   what happened. A decision is `ReviewDecisions` — `{ accepted, rejected }` —
   so resolving a conflict is a single decision. Dependent work is never decided
   silently. A refusal names its reason: `dependent-changes`, `missing-changes`,
   `contradictory-decisions`, `not-permitted`, `read-only` or `invalid-result`.
+- Before publishing, review validates the content it rewrote and checks that
+  selected identities were settled and unselected pending identities survived.
+  Unrelated invalid content does not block the decision.
 - **Changed:** the low-level `setChangeStatuses` action payload is now
   `ReviewDecisions` instead of `{ status, ids }`. The `setChangeStatuses`
   command is unchanged.
 - Tracking refuses a gesture it cannot represent rather than recording part of
-  it, and reports the outcome on plugin state as `lastTracking`. Undo and redo
-  clear it. Gestures of more than 20 steps used to go untracked silently and
+  it, and reports the outcome on plugin state as `lastTracking`. A refusal
+  survives all append rounds in the same dispatch; undo and redo clear it.
+  Gestures of more than 20 steps used to go untracked silently and
   are now tracked in full.
 - Selection survives tracking: a range stays a range in its direction, and the
   caret lands after typed or replacing text.

@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { AddMarkStep, AttrStep, RemoveMarkStep, ReplaceStep, Slice } from "@scrivr/core/pm";
+import { AddMarkStep, AttrStep, EditorState, Fragment, RemoveMarkStep, ReplaceStep, Schema, Slice } from "@scrivr/core/pm";
 import { doc, p, schema, TestEditor } from "./helpers";
 import { stepRange } from "../engine/transactionProcessing";
 import { trackChangesPluginKey } from "../index";
+import { checkReviewTransaction } from "../engine/checkReviewTransaction";
 
 /**
  * Review answers for what it rewrote, so it has to know what that was. Most of
@@ -33,6 +34,59 @@ describe("a step's declared span", () => {
 
   it("covers a content step", () => {
     expect(stepRange(new ReplaceStep(2, 5, Slice.empty))).toEqual({ from: 2, to: 5 });
+  });
+});
+
+describe("review's write boundary", () => {
+  const invalid = () => schema.nodes.unmarked_block!.create(null, schema.text("x", [schema.marks.bold!.create()]));
+
+  it("checks all inserted content, even when longer than the replaced span", () => {
+    const state = EditorState.create({ doc: doc(p("ok")) });
+    const tr = state.tr.step(new ReplaceStep(0, 0, new Slice(Fragment.fromArray([p("valid"), invalid()]), 0, 0)));
+    expect(() => checkReviewTransaction(tr)).toThrow();
+  });
+
+  const invalidAttributes = () => {
+    const checked = new Schema({
+      nodes: schema.spec.nodes,
+      marks: schema.spec.marks.update("bold", { attrs: { weight: { default: 1, validate: "number" } } }),
+    });
+    const text = checked.text("x", [checked.marks.bold!.create({ weight: "invalid" })]);
+    return checked.node("doc", null, checked.node("paragraph", null, text));
+  };
+
+  it("checks mark writes despite their empty position maps", () => {
+    const state = EditorState.create({ doc: invalidAttributes() });
+    const tr = state.tr;
+    // A concrete mark step still addresses this content even if no such mark
+    // is present. Invalid touched content must not pass the boundary.
+    tr.step(new RemoveMarkStep(1, 2, state.schema.marks.trackedInsert!.create()));
+    expect(() => checkReviewTransaction(tr)).toThrow();
+  });
+
+  it("checks attribute writes despite their empty position maps", () => {
+    const state = EditorState.create({ doc: invalidAttributes() });
+    const tr = state.tr.step(new AttrStep(0, "nodeId", "changed"));
+    expect(() => checkReviewTransaction(tr)).toThrow();
+  });
+
+  it("maps each write through subsequent edits", () => {
+    const state = EditorState.create({ doc: doc(p("ok"), invalid()) });
+    const tr = state.tr.removeMark(1, 3, schema.marks.bold!);
+    tr.step(new RemoveMarkStep(1, 3, schema.marks.bold!.create()));
+    tr.insert(0, p("before"));
+    expect(() => checkReviewTransaction(tr)).not.toThrow();
+  });
+
+  it("does not recursively check an untouched cousin in a shared container", () => {
+    const invalidParagraph = schema.nodes.paragraph!.create(null, invalid());
+    const list = schema.nodes.bullet_list!.create(null, [
+      schema.nodes.list_item!.create(null, p("ok")),
+      schema.nodes.list_item!.create(null, invalidParagraph),
+    ]);
+    const state = EditorState.create({ doc: doc(list) });
+    const tr = state.tr.step(new RemoveMarkStep(3, 5, schema.marks.bold!.create()));
+    expect(() => checkReviewTransaction(tr)).not.toThrow();
   });
 });
 

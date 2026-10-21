@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { doc, p, TestEditor } from "./helpers";
 import { planChangeReview } from "../index";
 import type { ReviewDependency, ReviewPlan } from "../index";
+import { updateChangesStatus } from "../engine/updateChangesStatus";
 
 /** The dependencies a blocked plan reports, or none when it blocked for another reason. */
 const dependenciesOf = (plan: ReviewPlan): ReviewDependency[] =>
@@ -216,6 +217,55 @@ describe("placement is transport, not a content snapshot", () => {
     editor.acceptChanges([placement, ...bob]);
     expect(editor.text).toBe("twothreeone");
     expect(editor.pendingChanges).toEqual([]);
+  });
+
+  it.each(["forward", "backward"] as const)("requires shadow edits before rejecting a %s move", direction => {
+    const editor = moved();
+    move(editor, direction === "forward" ? "a" : "c", direction === "forward" ? "c" : "a", direction === "forward" ? "after" : "before");
+    const placement = moves(editor)[0]!;
+    const shadow = editor.pendingChanges.find(c => c.type === "node-change" &&
+      c.dataTracked.operation === "delete" && c.dataTracked.moveNodeId === placement.dataTracked.moveNodeId)!;
+    editor.setUserID("bob").insertAt(shadow.from + 2, "X");
+    const bob = editor.pendingChanges.filter(c => c.dataTracked.authorID === "bob").map(c => c.id);
+    const before = editor.state.doc;
+
+    const plan = planChangeReview(set(editor), { accepted: [], rejected: [placement.id] });
+    expect(plan.status).toBe("blocked");
+    expect(dependenciesOf(plan).flatMap(d => d.dependentIds)).toEqual(bob);
+    editor.rejectChanges([placement.id]);
+    expect(editor.state.doc).toBe(before);
+    expect(editor.pendingChanges.map(c => c.id)).toEqual(expect.arrayContaining(bob));
+
+    editor.rejectChanges([placement.id, ...bob]);
+    expect(editor.text).toBe("onetwothree");
+    expect(editor.pendingChanges).toEqual([]);
+    expect(() => editor.state.doc.check()).not.toThrow();
+  });
+
+  it("publishes nothing if execution consumes an unauthorized identity", () => {
+    const editor = moved();
+    move(editor, "a", "c", "after");
+    const placement = moves(editor)[0]!;
+    editor.setUserID("bob").insertAt(2, "X");
+    const plan = planChangeReview(set(editor), { accepted: [], rejected: [placement.id] });
+    expect(plan.status).toBe("blocked");
+    const tr = editor.state.tr;
+    const before = tr.doc;
+    const ids = editor.pendingChanges.map(c => c.id);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // Exercise the publication boundary independently of the planner: an
+      // executor must not publish an unauthorized loss even with a bad plan.
+      const outcome = updateChangesStatus(tr, set(editor), {
+        status: "ready", accepted: plan.accepted, rejected: plan.rejected,
+      }, "alice");
+      expect(outcome).toMatchObject({ status: "blocked", reason: "invalid-result" });
+      expect(tr.steps).toEqual([]);
+      expect(tr.doc).toBe(before);
+      expect(editor.pendingChanges.map(c => c.id)).toEqual(ids);
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it("keeps a second author's move as a placement dependency", () => {

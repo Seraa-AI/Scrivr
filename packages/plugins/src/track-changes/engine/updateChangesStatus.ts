@@ -1,54 +1,11 @@
-import { EditorState, Mapping, type Node, type Transaction } from "@scrivr/core/pm";
+import { EditorState, Mapping, type Transaction } from "@scrivr/core/pm";
 import { findChanges } from "../findChanges";
 import { ChangeSet } from "../ChangeSet";
 import { CHANGE_STATUS, type IncompleteChange, type TrackedChange } from "../types";
 import { dropOrphanChanges } from "../lib/structuralChange";
-import { stepRange } from "./transactionProcessing";
+import { checkReviewTransaction } from "./checkReviewTransaction";
 import { applyChanges } from "../applyChanges";
 import type { ReviewDecision, ReviewOutcome, ReviewPlan } from "../reviewPlan";
-
-/** The node that now holds this span, and the nodes the span covers. */
-function checkAround(doc: Node, from: number, to: number) {
-  const $from = doc.resolve(from);
-  // A container can be left invalid by what was taken out of it, not only by
-  // what remains inside the span.
-  if ($from.depth > 0) $from.parent.check();
-  if (from === to) {
-    // Nothing spans a join site; the nodes it joined sit either side of it.
-    $from.nodeBefore?.check();
-    $from.nodeAfter?.check();
-    return;
-  }
-  doc.nodesBetween(from, to, node => {
-    node.check();
-    return false;
-  });
-}
-
-/**
- * Validates what this review rewrote rather than the whole document. A document
- * can hold invalid content no review touched — written by another author, or by
- * an older defect — and failing on that would make every decision in the
- * document permanently unresolvable.
- *
- * The spans come from the steps, not their position maps: review does most of
- * its work with marks, whose maps are empty, so a map walk would have validated
- * nothing for accepting an insertion or a deletion.
- */
-function checkRewritten(scratch: Transaction) {
-  const doc = scratch.doc;
-  if (!doc.type.validContent(doc.content)) {
-    throw new RangeError(`Invalid content for node ${doc.type.name}`);
-  }
-  const clamp = (pos: number) => Math.max(0, Math.min(pos, doc.content.size));
-  scratch.steps.forEach((step, i) => {
-    const range = stepRange(step);
-    if (!range) return;
-    const forward = scratch.mapping.slice(i + 1);
-    const from = clamp(forward.map(range.from, -1));
-    checkAround(doc, from, Math.max(from, clamp(forward.map(range.to, 1))));
-  });
-}
 
 /**
  * The same records, with the reviewed ones stamped. Returns the unvalidated
@@ -147,7 +104,16 @@ export function updateChangesStatus(
       remaining.filter(ChangeSet.isTextChange), current, mapping);
     for (const change of placements("accepted")) applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, mapping);
     dropOrphanChanges(scratch);
-    checkRewritten(scratch);
+    checkReviewTransaction(scratch);
+    // The planner authorizes identities, not just document ranges. At the
+    // publication boundary every selected identity must be settled and every
+    // unselected pending identity must survive, even if an executor's effects
+    // drift from the planner's model in a future change.
+    const pending = new Set(findChanges(EditorState.create({ doc: scratch.doc })).pending.map(c => c.id));
+    if ([...statusOf.keys()].some(id => pending.has(id)) ||
+        changeSet.pending.some(c => !statusOf.has(c.id) && !pending.has(c.id))) {
+      throw new Error("Review did not preserve the authorized set of change identities");
+    }
   } catch (error) {
     // Nothing is published, and this is logged rather than only reported: an
     // engine invariant broke here, which is not a decision the reviewer made.
