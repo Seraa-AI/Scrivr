@@ -1,16 +1,21 @@
 import { useEffect, useState } from "react";
 import { createLinkPopover } from "@scrivr/core";
-import type { Editor, LinkPopoverInfo } from "@scrivr/core";
+import type { Editor, HoverOption, LinkPopoverInfo } from "@scrivr/core";
 import { useFloatingPosition } from "./useFloatingPosition";
 
-export function useLinkPopover(editor: Editor | null) {
+export interface UseLinkPopoverOptions {
+  /** Hover peeks. Default true; false shows the popover from the selection only. */
+  hover?: HoverOption;
+}
+
+export function useLinkPopover(editor: Editor | null, options: UseLinkPopoverOptions = {}) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [info, setInfo] = useState<LinkPopoverInfo | null>(null);
   const { ref, position } = useFloatingPosition<HTMLDivElement>(
     rect,
-    [editing],
+    [editing, info?.presentation],
     { offset: 6 },
   );
 
@@ -32,7 +37,9 @@ export function useLinkPopover(editor: Editor | null) {
         setEditing(false);
       },
       getPopoverElement: () => ref.current,
+      ...(options.hover !== undefined ? { hover: options.hover } : {}),
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
 
   function startEdit() {
@@ -67,6 +74,8 @@ export function useLinkPopover(editor: Editor | null) {
     visible: !!rect && !!info,
     rect,
     info,
+    /** "peek" from hover (read-only), "full" when the selection is in the link. */
+    presentation: info?.presentation ?? null,
     position,
     rootRef: ref,
     editing,

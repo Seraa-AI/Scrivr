@@ -133,6 +133,12 @@ export interface SelectionGesture {
 export interface HitTestContext {
   editor: IEditor;
   /**
+   * "pointerdown" for click routing, "hover" for hover resolution. Click keeps
+   * the first non-null tester; hover collects every one. A tester can answer
+   * differently for hover if it needs to. Absent means "pointerdown".
+   */
+  intent?: "pointerdown" | "hover";
+  /**
    * The document state that owns the hit — resolve positions against this, not
    * `editor.getState()`, so a hit tester stays correct if the pointer target
    * belongs to a surface. Consistent with the layout the pointer hit-tested.

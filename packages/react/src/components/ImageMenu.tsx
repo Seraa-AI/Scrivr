@@ -1,15 +1,17 @@
 /**
  * ImageMenu — React wrapper around createImageMenu.
  *
- * Automatically appears below a selected image, showing controls for
- * vertical alignment, dimensions, and (future) text wrapping mode.
+ * Peeks on hover — alt text, size and layout, read-only. Select the image and
+ * the same card expands to controls for layout, alignment and dimensions.
+ * Override either with `renderPeek` / `renderFull`.
  * No configuration required — just mount it alongside your editor.
  *
  * @example
  *   <ImageMenu editor={editor} />
  */
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { Editor } from "@scrivr/core";
+import type { Editor, HoverOption } from "@scrivr/core";
 import { cx } from "../utils/classNames";
 import { useImageMenu } from "../hooks/useImageMenu";
 
@@ -19,7 +21,15 @@ export interface ImageMenuProps {
   itemClassName?: string | undefined;
   titleClassName?: string | undefined;
   descriptionClassName?: string | undefined;
+  /** Hover peeks. Default true; false shows the menu from the selection only. */
+  hover?: HoverOption | undefined;
+  /** Replace the peek's content. */
+  renderPeek?: ((menu: ImageMenuState) => ReactNode) | undefined;
+  /** Replace the full menu's content. */
+  renderFull?: ((menu: ImageMenuState) => ReactNode) | undefined;
 }
+
+export type ImageMenuState = ReturnType<typeof useImageMenu>;
 
 export function ImageMenu({
   editor,
@@ -27,15 +37,22 @@ export function ImageMenu({
   itemClassName,
   titleClassName,
   descriptionClassName,
+  hover,
+  renderPeek,
+  renderFull,
 }: ImageMenuProps) {
-  const menu = useImageMenu(editor);
+  const menu = useImageMenu(editor, hover !== undefined ? { hover } : {});
 
-  if (!menu.visible) return null;
+  if (!menu.visible || !menu.info) return null;
+
+  const peek = menu.presentation === "peek";
+  const custom = peek ? renderPeek : renderFull;
 
   return createPortal(
     <div
       ref={menu.rootRef}
       data-scrivr-popover="image-menu"
+      data-presentation={menu.presentation ?? undefined}
       className={cx("scrivr-menu scrivr-image-menu", className)}
       onMouseDown={(e) => e.preventDefault()}
       style={{
@@ -52,6 +69,12 @@ export function ImageMenu({
         userSelect: "none",
       }}
     >
+      {custom ? (
+        custom(menu)
+      ) : peek ? (
+        <ImagePeek menu={menu} titleClassName={titleClassName} descriptionClassName={descriptionClassName} />
+      ) : (
+      <>
       {/* Layout / wrapping mode */}
       <div style={styles.group}>
         <span className={cx("scrivr-menu-title", titleClassName)} data-part="title" style={styles.label}>
@@ -144,8 +167,41 @@ export function ImageMenu({
           px
         </span>
       </div>
+      </>
+      )}
     </div>,
     document.body,
+  );
+}
+
+function ImagePeek({
+  menu,
+  titleClassName,
+  descriptionClassName,
+}: {
+  menu: ImageMenuState;
+  titleClassName?: string | undefined;
+  descriptionClassName?: string | undefined;
+}) {
+  const attrs = menu.info?.node.attrs ?? {};
+  const alt = typeof attrs["alt"] === "string" && attrs["alt"] ? attrs["alt"] : null;
+  const width = typeof attrs["width"] === "number" ? Math.round(attrs["width"]) : null;
+  const height = typeof attrs["height"] === "number" ? Math.round(attrs["height"]) : null;
+  const layout = menu.wrapOptions.find((o) => o.value === menu.wrappingMode)?.label ?? menu.wrappingMode;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 280 }}>
+      <span
+        className={cx("scrivr-menu-title", titleClassName)}
+        data-part="title"
+        style={{ overflow: "hidden", textOverflow: "ellipsis" }}
+      >
+        {alt ?? "Image"}
+      </span>
+      <span className={cx("scrivr-menu-description", descriptionClassName)} data-part="description">
+        {width !== null && height !== null ? `${width} × ${height} px · ` : ""}
+        {layout}
+      </span>
+    </div>
   );
 }
 

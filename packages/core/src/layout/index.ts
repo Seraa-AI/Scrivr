@@ -4,6 +4,8 @@ export type { AvailableSegment, ExclusionRect, LineSpace } from "./ExclusionMana
 export type { GlyphEntry, LineEntry, CoordsResult, ObjectRectEntry } from "./CharacterMap";
 export { resolvePointOwner } from "./pointOwnership";
 export type { PointOwner, PointOwnershipInput } from "./pointOwnership";
+export { resolvePagePoint, pageRegionAt } from "./pagePoint";
+export type { PagePoint, PageRegion, PagePointContext, PageRegionLayout } from "./pagePoint";
 export { TextMeasurer } from "./TextMeasurer";
 export type {
   FontMetrics,

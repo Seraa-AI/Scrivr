@@ -18,7 +18,7 @@ import {
   StarterKit,
   SurfaceRegistry,
 } from "@scrivr/core";
-import type { DocumentLayout, IEditor, LayoutBlock, LayoutLine, Selection } from "@scrivr/core";
+import type { DocumentLayout, HoverTarget, IEditor, LayoutBlock, LayoutLine, Selection } from "@scrivr/core";
 
 // buildPdf now requires an editor (it collects PDF handlers from extensions).
 // A ServerEditor satisfies the contract; table is enabled so the table handler
@@ -251,6 +251,14 @@ class ExportPdfEditorDouble extends ServerEditor implements IEditor {
 
   getNodeViewportRect(): DOMRect | null {
     return null;
+  }
+
+  getNodeViewportRects(): DOMRect[] {
+    return [];
+  }
+
+  getHoverTargets(): readonly HoverTarget[] {
+    return [];
   }
 
   getScrollContainerRect(): DOMRect | null {

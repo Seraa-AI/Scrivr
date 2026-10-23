@@ -60,6 +60,7 @@ import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
 import type { CloneIdMap } from "../model/assignBlockIds";
+import type { HoverResolver, HoverTarget } from "../hover/types";
 import type {
   SelectionBehavior,
   HitTester,
@@ -284,6 +285,14 @@ export interface IEditor extends IBaseEditor {
    * Returns null if the object has not been rendered yet.
    */
   getNodeViewportRect(docPos: number): DOMRect | null;
+  /**
+   * Viewport rects for every painted fragment of the node at `docPos`, in page
+   * order — a table split across pages has one per page. Image-like nodes have
+   * one. Empty when the node is not laid out.
+   */
+  getNodeViewportRects(docPos: number): DOMRect[];
+  /** What the pointer is over, innermost first. Empty when over nothing. */
+  getHoverTargets(): readonly HoverTarget[];
   /**
    * Current viewport DOMRect of the scrollable container, or null when no
    * scroll container is attached. Popover controllers use this to hide when
@@ -1029,6 +1038,13 @@ export interface ExtensionConfig<Options = object> {
   addHitTester?(this: Phase1Context<Options>): HitTester[];
 
   /**
+   * Hover resolvers — claim a mark (link) or a node (table cell) under the
+   * pointer as a `HoverTarget`. Unlike hit testers, every claim is kept: the
+   * pointer over a link in a cell is over the link, the cell and the table.
+   */
+  addHoverResolvers?(this: Phase1Context<Options>): HoverResolver[];
+
+  /**
    * Pointer-gesture providers — begin a drag for a `HitTarget` this extension
    * owns (e.g. cell drag-select). Kept separate from `addSelectionBehavior` so
    * non-pointer selection kinds need not implement one.
@@ -1200,6 +1216,7 @@ export interface ResolvedExtension {
   nodeActions: NodeActionContribution[];
   selectionBehaviors: SelectionBehavior[];
   hitTesters: HitTester[];
+  hoverResolvers: HoverResolver[];
   selectionGestures: SelectionGestureProvider[];
   inputHandlers: Record<string, InputHandler>;
   markdownRules: MarkdownBlockRule[];

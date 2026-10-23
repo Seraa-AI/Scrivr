@@ -47,6 +47,12 @@ import type {
 	SelectionGesture,
 	SelectionGestureProvider,
 } from "./selection/types";
+import type { HoverEvent, HoverResolver, HoverTarget } from "./hover/types";
+import { sameHoverTargets } from "./hover/types";
+import { resolveHoverTargets } from "./hover/resolveHoverTargets";
+import type { PagePoint } from "./layout/pagePoint";
+import { resolvePointOwner } from "./layout/pointOwnership";
+import { nodeFragmentRects } from "./layout/nodeRects";
 import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
 import type { RecloneOptions } from "./model/assignBlockIds";
@@ -497,6 +503,9 @@ export class Editor extends BaseEditor implements IEditor {
 
 	/** Extension-registered semantic hit testers (highest priority first). */
 	private readonly hitTesters: HitTester[];
+	private readonly hoverResolvers: HoverResolver[];
+	/** What the pointer is over — transient, never editor state. */
+	private hoverTargets: readonly HoverTarget[] = [];
 	/** Extension-registered pointer-gesture providers. */
 	private readonly selectionGestures: SelectionGestureProvider[];
 
@@ -597,6 +606,7 @@ export class Editor extends BaseEditor implements IEditor {
 			defaultSelectionBehavior,
 		);
 		this.hitTesters = this.manager.buildHitTesters();
+		this.hoverResolvers = this.manager.buildHoverResolvers();
 		this.selectionGestures = this.manager.buildSelectionGestures();
 		this.blockRegistry = this.manager.buildBlockRegistry();
 		this.pageChromeContributions =
@@ -1228,6 +1238,30 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
+	 * Every painted fragment of the node at `docPos`, in page order: one rect
+	 * for an image, one per page for a paragraph or table split across pages,
+	 * the cell's own rect for a table cell. `getNodeRect` stays the
+	 * image-only, first-fragment lookup.
+	 */
+	getNodeRects(docPos: number): ObjectRectEntry[] {
+		const object = this.getNodeRect(docPos);
+		if (object) return [object];
+		return nodeFragmentRects(this.layout.pages, this.getState().doc, docPos);
+	}
+
+	getNodeViewportRects(docPos: number): DOMRect[] {
+		const out: DOMRect[] = [];
+		for (const rect of this.getNodeRects(docPos)) {
+			const page = this.ib.lookupPageScreenRect(rect.page);
+			if (!page) continue;
+			out.push(
+				new DOMRect(page.screenLeft + rect.x, page.screenTop + rect.y, rect.width, rect.height),
+			);
+		}
+		return out;
+	}
+
+	/**
 	 * Single-source-of-truth rect lookup for image-like nodes.
 	 *
 	 * Anchored objects (`wrapMode !== "inline"`) are authoritative in
@@ -1572,6 +1606,61 @@ export class Editor extends BaseEditor implements IEditor {
 			if (hit) return hit;
 		}
 		return null;
+	}
+
+	/**
+	 * What is under `point`, innermost first — `[link, table-cell, table]` for a
+	 * link in a cell. Click routing keeps `resolveHitTarget`'s first-wins chain;
+	 * hover wants every layer. Empty outside the body content box, and while a
+	 * header/footer surface is being edited (the body is dimmed then).
+	 */
+	resolveHoverTargets(point: PagePoint): HoverTarget[] {
+		if (point.region !== "content" || this.surfaces?.activeSurface) return [];
+		const state = this.getState();
+		const ctx: HitTestContext = {
+			editor: this,
+			intent: "hover",
+			state,
+			posAtCoords: (x, y, p) => this.charMap.posAtCoords(x, y, p),
+		};
+		return resolveHoverTargets({
+			point,
+			state,
+			surfaceId: "body",
+			owner: resolvePointOwner(point.x, point.y, point.page, {
+				anchoredObjects: this.layout.anchoredObjects ?? [],
+				hasTextAt: (x, y, p) => this.charMap.hasTextAt(x, y, p),
+				objectRectAt: (x, y, p) => this.charMap.objectRectAtPoint(x, y, p),
+			}),
+			glyphAt: (x, y, p) => this.charMap.glyphAtPoint(x, y, p),
+			hitTargets: () =>
+				this.hitTesters
+					.map((t) => t.hitTest(point.x, point.y, point.page, ctx))
+					.filter((h): h is HitTarget => h !== null),
+			resolvers: this.hoverResolvers,
+			nodeKind: (pos) => {
+				try {
+					return this.describeSelection(NodeSelection.create(state.doc, pos)).kind;
+				} catch {
+					return state.doc.nodeAt(pos)?.type.name ?? "node";
+				}
+			},
+		});
+	}
+
+	/** The current hover stack, innermost first. Empty when over nothing. */
+	getHoverTargets(): readonly HoverTarget[] {
+		return this.hoverTargets;
+	}
+
+	/**
+	 * Record what the pointer is over and emit `"hover"` when the stack changed.
+	 * Called by the pointer controller — not intended for external use.
+	 */
+	reportHover(event: HoverEvent): void {
+		if (sameHoverTargets(this.hoverTargets, event.targets)) return;
+		this.hoverTargets = event.targets;
+		this.emit("hover", event);
 	}
 
 	/**

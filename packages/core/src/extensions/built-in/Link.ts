@@ -1,3 +1,5 @@
+import type { Mark } from "prosemirror-model";
+import type { HoverResolver } from "../../hover/types";
 import { Extension } from "../Extension";
 import {
   xml,
@@ -26,6 +28,18 @@ import type { PdfMarkHandler } from "../../exports/pdf";
  */
 export const Link = Extension.create({
   name: "link",
+
+  addHoverResolvers(): HoverResolver[] {
+    return [
+      {
+        mark: "link",
+        resolve: (mark: Mark) => {
+          const href: unknown = mark.attrs["href"];
+          return typeof href === "string" ? { href } : null;
+        },
+      },
+    ];
+  },
 
   addMarks() {
     return {
