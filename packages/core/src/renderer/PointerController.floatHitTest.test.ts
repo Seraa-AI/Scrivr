@@ -72,7 +72,6 @@ function setup(wrapMode: string) {
     slotHeight: () => 1224,
     tileHeight: () => 1200,
     isPageless: () => false,
-    visualYToDocY: (y) => ({ page: Math.floor(y / 1224) + 1, docY: y - Math.floor(y / 1224) * 1224 }),
     scheduleUpdate: () => {},
   };
   const controller = new PointerController(deps);
@@ -268,7 +267,6 @@ describe("a short line's empty tail", () => {
     const deps: PointerControllerDeps = {
       editor, tilesContainer: container, pool: [],
       slotHeight: () => 1224, tileHeight: () => 1200, isPageless: () => false,
-      visualYToDocY: (y) => ({ page: Math.floor(y / 1224) + 1, docY: y - Math.floor(y / 1224) * 1224 }),
       scheduleUpdate: () => {},
     };
     const controller = new PointerController(deps);

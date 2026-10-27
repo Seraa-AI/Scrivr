@@ -1,6 +1,7 @@
 import type { Editor } from "../Editor";
 import type { EditorState } from "prosemirror-state";
 import type { DocumentLayout, LayoutFragment } from "../layout/PageLayout";
+import { pageRegionAt } from "../layout/pagePoint";
 import { setupCanvas, clearCanvas, watchDpr } from "./canvas";
 import { renderPage } from "./PageRenderer";
 import { drawBlock } from "./PageRenderer";
@@ -124,25 +125,12 @@ export function routePageClick(
   docY: number,
   clickCount: number,
 ): boolean {
-  const layout = editor.layout;
-  const metrics = layout.metrics?.[page - 1];
-  if (!metrics) return false;
-  // Fall back to the page's layout margins when no header/footer policy
-  // exists yet (band heights collapse to 0). Word/Docs treat the margin
-  // strip as the hit target for "double-click to create a header"; this
-  // keeps that affordance live before a policy is written. When bands
-  // are rendered, the resolved band bounds take precedence.
-  const { pageConfig } = layout;
-  const headerLowerBound =
-    metrics.headerHeight > 0 ? metrics.contentTop : pageConfig.margins.top;
-  const footerUpperBound =
-    metrics.footerHeight > 0
-      ? metrics.footerTop
-      : pageConfig.pageHeight - pageConfig.margins.bottom;
-  const inHeader = docY >= 0 && docY < headerLowerBound;
-  const inFooter = docY > footerUpperBound && docY <= pageConfig.pageHeight;
+  // Band bounds, including the margin-strip fallback before any header/footer
+  // policy exists, live in `pageRegionAt` so click and hover agree on them.
+  const region = pageRegionAt(editor.layout, page, docX, docY);
+  if (region === null) return false;
 
-  if (!inHeader && !inFooter) {
+  if (region !== "header" && region !== "footer") {
     // Click in the body while a surface is active — deactivate first.
     if (editor.surfaces?.activeSurface) {
       editor.surfaces.activate(null);
@@ -156,8 +144,7 @@ export function routePageClick(
   if (editor.surfaces?.activeSurface !== null) return false;
 
   // No surface active — emit chromeClick for activation (double-click).
-  const band = inHeader ? "header" : "footer";
-  editor.emit("chromeClick", { page, x: docX, y: docY, band, clickCount });
+  editor.emit("chromeClick", { page, x: docX, y: docY, band: region, clickCount });
   return true;
 }
 
@@ -173,7 +160,7 @@ export function routePageClick(
  * Pageless mode: tileHeight = 307px. Small recycled tiles. O(log N) lookup.
  *
  * The two modes differ in exactly two places:
- *   - `visualYToDocY` / `docYToVisualY` — coordinate mapping
+ *   - `docYToVisualY` / `resolvePagePoint` — coordinate mapping
  *   - `paintContent` — paged calls renderPage(); pageless calls drawBlock() with translate
  */
 export class TileManager {
@@ -229,7 +216,6 @@ export class TileManager {
       slotHeight: () => this.slotHeight,
       tileHeight: () => this.tileHeight,
       isPageless: () => this.editor.isPageless,
-      visualYToDocY: (y) => this.visualYToDocY(y),
       scheduleUpdate: () => this.scheduleUpdate(),
       onPageClick: (page, docX, docY, clickCount) =>
         routePageClick(this.editor, page, docX, docY, clickCount),
@@ -301,18 +287,9 @@ export class TileManager {
   }
 
   /**
-   * Convert visual Y (scroll-space) to document-space {page, docY}.
-   * Pageless: identity — visualY === docY, always page 1.
-   * Paged: tile boundaries align with page boundaries.
+   * Convert document-space page + docY to visual Y in the scroll container.
+   * The inverse lives in `resolvePagePoint`, which pointer handling reads.
    */
-  private visualYToDocY(visualY: number): { page: number; docY: number } {
-    if (this.editor.isPageless) return { page: 1, docY: visualY };
-    const tileIndex = Math.floor(visualY / this.slotHeight);
-    const docY = visualY - tileIndex * this.slotHeight;
-    return { page: tileIndex + 1, docY };
-  }
-
-  /** Convert document-space page + docY to visual Y in the scroll container. */
   private docYToVisualY(page: number, docY: number): number {
     if (this.editor.isPageless) return docY;
     return (page - 1) * this.slotHeight + docY;

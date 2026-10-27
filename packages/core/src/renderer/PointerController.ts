@@ -8,6 +8,8 @@ import {
 } from "./ResizeController";
 import { normalizeImageAttrs } from "../layout/AnchoredObjects";
 import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
+import { resolvePagePoint, type PagePoint } from "../layout/pagePoint";
+import { POPOVER_MARKER } from "../menus/subscribeEditorFocusOutside";
 import {
   type PageFlowMetrics,
 } from "../layout/PageMetrics";
@@ -45,7 +47,6 @@ export interface PointerControllerDeps {
   slotHeight: () => number;
   tileHeight: () => number;
   isPageless: () => boolean;
-  visualYToDocY: (y: number) => { page: number; docY: number };
   scheduleUpdate: () => void;
   /**
    * Called before default text-selection on a page click. If the handler
@@ -154,6 +155,9 @@ export class PointerController {
    * one of them is pure style churn.
    */
   private appliedCursor: string | null = null;
+  /** Hover resolution is coalesced to one per animation frame. */
+  private hoverRaf: number | null = null;
+  private pendingHoverPoint: PagePoint | null = null;
 
   constructor(private readonly deps: PointerControllerDeps) {}
 
@@ -162,6 +166,8 @@ export class PointerController {
   /** Attach pointer event listeners. */
   attach(): void {
     this.deps.tilesContainer.addEventListener("pointerdown", this.handlePointerDown);
+    this.deps.tilesContainer.addEventListener("pointerleave", this.clearHover);
+    document.addEventListener("keydown", this.clearHover);
     document.addEventListener("pointermove", this.handlePointerMove);
     document.addEventListener("pointerup", this.handlePointerUp);
     document.addEventListener("pointercancel", this.handlePointerCancel);
@@ -184,7 +190,10 @@ export class PointerController {
         // A broken gesture must not block listener teardown.
       }
     }
+    this.clearHover();
     this.deps.tilesContainer.removeEventListener("pointerdown", this.handlePointerDown);
+    this.deps.tilesContainer.removeEventListener("pointerleave", this.clearHover);
+    document.removeEventListener("keydown", this.clearHover);
     document.removeEventListener("pointermove", this.handlePointerMove);
     document.removeEventListener("pointerup", this.handlePointerUp);
     document.removeEventListener("pointercancel", this.handlePointerCancel);
@@ -252,30 +261,21 @@ export class PointerController {
 
   // ── Hit testing ─────────────────────────────────────────────────────────────
 
-  private hitTest(
-    clientX: number,
-    clientY: number,
-  ): { page: number; docX: number; docY: number; gap?: boolean } | null {
+  /**
+   * Client point → page point. Drag callers treat `region === "gap"` as an
+   * invalid drop target (no transaction, no caret); text-click callers still
+   * get a `y` clamped to the page bottom there, so "click below the text on a
+   * page" keeps working.
+   */
+  private hitTest(clientX: number, clientY: number): PagePoint {
     const containerRect = this.deps.tilesContainer.getBoundingClientRect();
-    const visualX = clientX - containerRect.left;
-    const visualY = clientY - containerRect.top;
-
-    // In paged mode, mark inter-page-gap hits with gap:true. Drag callers
-    // treat gap hits as invalid drop targets (no transaction, no caret);
-    // text-click callers still get a docY clamped to the page bottom so the
-    // existing "click below text in a page" behaviour is preserved.
-    if (!this.deps.isPageless()) {
-      const sh = this.deps.slotHeight();
-      const th = this.deps.tileHeight();
-      const posInSlot = visualY % sh;
-      if (posInSlot >= th) {
-        const tileIndex = Math.floor(visualY / sh);
-        return { page: tileIndex + 1, docX: visualX, docY: th, gap: true };
-      }
-    }
-
-    const { page, docY } = this.deps.visualYToDocY(visualY);
-    return { page, docX: visualX, docY };
+    return resolvePagePoint(clientX, clientY, {
+      origin: containerRect,
+      pageless: this.deps.isPageless(),
+      slotHeight: this.deps.slotHeight(),
+      tileHeight: this.deps.tileHeight(),
+      layout: this.deps.editor.layout,
+    });
   }
 
   /** Get the ProseMirror selection from the active editing target (surface or body). */
@@ -353,18 +353,54 @@ export class PointerController {
    * selected node, not part of the page.
    */
   private hoverCursorFor(
-    hit: { docX: number; docY: number; page: number } | null,
+    hit: PagePoint | null,
   ): string {
     if (!hit) return "default";
 
-    const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
+    const resizeHit = this.hitHandleAt(hit.x, hit.y, hit.page);
     if (resizeHit) return resizeHit.cursor;
 
-    return this.ownerAt(hit.docX, hit.docY, hit.page).kind === "text"
+    return this.ownerAt(hit.x, hit.y, hit.page).kind === "text"
       ? "text"
       : "move";
   }
 
+
+  // ── Hover ───────────────────────────────────────────────────────────────────
+
+  /**
+   * Resolve what is under `point` on the next frame and report it to the
+   * editor, which emits `"hover"` only when the stack changed. Pointer moves
+   * arrive far faster than frames; only the last point in a frame matters.
+   */
+  private scheduleHover(point: PagePoint): void {
+    this.pendingHoverPoint = point;
+    if (this.hoverRaf !== null) return;
+    this.hoverRaf = requestAnimationFrame(() => {
+      this.hoverRaf = null;
+      const p = this.pendingHoverPoint;
+      this.pendingHoverPoint = null;
+      if (!p) return;
+      const { editor } = this.deps;
+      if (typeof editor.resolveHoverTargets !== "function") return;
+      editor.reportHover({ targets: editor.resolveHoverTargets(p), point: p });
+    });
+  }
+
+  /**
+   * Nothing is hovered: the pointer left the editor, a drag began, a key was
+   * pressed (typing hides peeks until the next real move), or teardown.
+   */
+  private clearHover = (): void => {
+    if (this.hoverRaf !== null) {
+      cancelAnimationFrame(this.hoverRaf);
+      this.hoverRaf = null;
+    }
+    this.pendingHoverPoint = null;
+    const { editor } = this.deps;
+    if (typeof editor.reportHover !== "function") return;
+    editor.reportHover({ targets: [], point: null });
+  };
 
   // ── Pointer events ──────────────────────────────────────────────────────────
 
@@ -386,10 +422,13 @@ export class PointerController {
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return;
+    // A press ends hover: it either places a caret (the selection's popover
+    // takes over) or starts a drag.
+    this.clearHover();
     this.activePointerId = e.pointerId;
     this.capturePointer(e.pointerId);
 
-    const { page, docX, docY } = hit;
+    const { page, x: docX, y: docY } = hit;
 
     // Count clicks before resolving a semantic target. Registered gestures get
     // first refusal for every pointerdown (including Shift/double/triple-click
@@ -565,9 +604,10 @@ export class PointerController {
 
     // Extension gesture owns the drag — feed it the target under the cursor.
     if (this.activeGesture) {
+      this.clearHover();
       const h = this.hitTest(e.clientX, e.clientY);
-      const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
-      const point = h ? { page: h.page, docX: h.docX, docY: h.docY } : null;
+      const target = h ? editor.resolveHitTarget(h.x, h.y, h.page) : null;
+      const point = h ? { page: h.page, docX: h.x, docY: h.y } : null;
       try {
         this.activeGesture.update(target, e, point);
       } catch (err) {
@@ -628,14 +668,30 @@ export class PointerController {
     const hit = this.hitTest(e.clientX, e.clientY);
     this.setCursorAll(this.hoverCursorFor(hit));
 
+    // Hover: mouse and pen only — touch reaches the same popovers through the
+    // selection. Any press in flight means a drag, and a drag hovers nothing.
+    // Over a popover, the stack stays as it was so the peek the pointer is
+    // crossing into stays open; anywhere else off the page area hovers nothing.
+    const target = e.target instanceof Element ? e.target : null;
+    if (!target?.closest(`[${POPOVER_MARKER}]`)) {
+      const hovers =
+        !this.isDragging &&
+        this.activePointerId === null &&
+        e.pointerType !== "touch" &&
+        target !== null &&
+        this.deps.tilesContainer.contains(target);
+      if (hovers) this.scheduleHover(hit);
+      else this.clearHover();
+    }
+
     // Text selection drag
     if (!this.isDragging || !hit) return;
-    // Mid-drag in the gap between two pages: hit.gap is true and hit.docY
+    // Mid-drag in the gap between two pages: the region is "gap" and hit.y
     // is clamped to the source page bottom. Letting posAtCoords run on that
     // would re-collapse the selection's head to end-of-source-page on every
     // frame of gap traversal. Skip the update — the last valid selection
     // sticks until the pointer enters real page content again.
-    if (hit.gap) return;
+    if (hit.region === "gap") return;
     // posAtCoords is page-scoped: on a destination page that hasn't been
     // painted yet, its CharacterMap has no lines, the lookup falls through
     // to 0, and setSelection(anchor, 0) collapses the selection to doc
@@ -644,7 +700,7 @@ export class PointerController {
     // anchored-object drag handler below.
     editor.ensurePagePopulated(hit.page);
 
-    const pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
+    const pos = editor.charMap.posAtCoords(hit.x, hit.y, hit.page);
 
     // Word-granularity drag (after double-click)
     if (this.wordAnchor) {
@@ -674,8 +730,8 @@ export class PointerController {
       this.activeGesture = null;
       this.isDragging = false;
       const h = this.hitTest(e.clientX, e.clientY);
-      const target = h ? editor.resolveHitTarget(h.docX, h.docY, h.page) : null;
-      const point = h ? { page: h.page, docX: h.docX, docY: h.docY } : null;
+      const target = h ? editor.resolveHitTarget(h.x, h.y, h.page) : null;
+      const point = h ? { page: h.page, docX: h.x, docY: h.y } : null;
       try {
         gesture.finish(target, e, point);
       } finally {
@@ -817,7 +873,7 @@ export class PointerController {
     // Drop in inter-page gap → no transaction. The ghost was already shown
     // disabled during pointermove; commit must mirror that.
     const finalHit = this.hitTest(e.clientX, e.clientY);
-    if (finalHit?.gap) {
+    if (finalHit.region === "gap") {
       dragDebugLog(editor, "gapDrop", {
         docPos: this.anchoredDrag.docPos,
         page: finalHit.page,
@@ -1006,9 +1062,9 @@ export class PointerController {
   private resolveCrossPageDropYOffset(e: PointerEvent, newDocPos: number): number {
     if (!this.anchoredDrag) return 0;
     const hit = this.hitTest(e.clientX, e.clientY);
-    if (!hit || hit.gap) return 0;
+    if (!hit || hit.region === "gap") return 0;
 
-    const ghostTopLocalY = hit.docY - this.anchoredDrag.grabOffsetY;
+    const ghostTopLocalY = hit.y - this.anchoredDrag.grabOffsetY;
     const ghostGlobalY = this.pageLocalYToGlobal(hit.page, ghostTopLocalY);
     const anchorGlobalY = this.globalYForDocPos(newDocPos, hit.page);
     return ghostGlobalY - anchorGlobalY;
@@ -1107,7 +1163,7 @@ export class PointerController {
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return null;
     // Step 4 invariant: gap drops never resolve a docPos.
-    if (hit.gap) return null;
+    if (hit.region === "gap") return null;
 
     // Cross-page drag: charMap's posAtCoords is page-scoped — `nearestLine`
     // returns undefined on un-populated pages and the lookup falls through
@@ -1119,7 +1175,7 @@ export class PointerController {
     const from = docPos;
     const to = docPos + nodeSize;
 
-    let pos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
+    let pos = editor.charMap.posAtCoords(hit.x, hit.y, hit.page);
     // If the resolved docPos falls inside the source node itself
     // (we're still hovering over the original anchor), use posAbove /
     // posBelow with the image's center X to find the nearest
@@ -1138,7 +1194,7 @@ export class PointerController {
       // page has no charMap data (virtualized page that paintContent hasn't
       // touched yet). Walk layout.pages by Y range so cross-page drag never
       // silently collapses to docPos 0 and moves the image to doc start.
-      const layoutFallback = this.resolveByLayoutFragments(hit.page, hit.docY);
+      const layoutFallback = this.resolveByLayoutFragments(hit.page, hit.y);
       if (layoutFallback !== null) pos = layoutFallback;
     }
 
@@ -1187,13 +1243,13 @@ export class PointerController {
 
     // Ghost top-left = current cursor minus the grab offset captured at
     // pointerdown. Stays anchored to where the user originally grabbed.
-    const ghostX = hit.docX - this.anchoredDrag.grabOffsetX;
-    const ghostY = hit.docY - this.anchoredDrag.grabOffsetY;
+    const ghostX = hit.x - this.anchoredDrag.grabOffsetX;
+    const ghostY = hit.y - this.anchoredDrag.grabOffsetY;
 
     // Inter-page gap: invalid drop target. Keep the ghost rendered (so the
     // user sees what they're dragging) but mark disabled so the renderer
     // fades it and suppresses the caret.
-    if (hit.gap) {
+    if (hit.region === "gap") {
       this.anchoredDrag.overlay = {
         ghostPage: hit.page,
         ghostX,
@@ -1210,7 +1266,7 @@ export class PointerController {
     // page-scoped and falls through to docPos 0 on un-populated pages.
     editor.ensurePagePopulated(hit.page);
     let caret: { page: number; x: number; y: number; height: number } | null = null;
-    const targetDocPos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
+    const targetDocPos = editor.charMap.posAtCoords(hit.x, hit.y, hit.page);
     const from = this.anchoredDrag.docPos;
     const to = from + this.anchoredDrag.nodeSize;
     // Suppress the caret when the cursor is over the source node itself —
@@ -1239,9 +1295,9 @@ export class PointerController {
     const hit = this.hitTest(e.clientX, e.clientY);
     if (!hit) return;
 
-    const ghostX = hit.docX - this.inlineImageDrag.rect.width / 2;
-    const ghostY = hit.docY - this.inlineImageDrag.rect.height / 2;
-    if (hit.gap) {
+    const ghostX = hit.x - this.inlineImageDrag.rect.width / 2;
+    const ghostY = hit.y - this.inlineImageDrag.rect.height / 2;
+    if (hit.region === "gap") {
       this.inlineImageDrag.overlay = {
         ghostPage: hit.page,
         ghostX,
@@ -1255,7 +1311,7 @@ export class PointerController {
 
     editor.ensurePagePopulated(hit.page);
     let caret: { page: number; x: number; y: number; height: number } | null = null;
-    const targetDocPos = editor.charMap.posAtCoords(hit.docX, hit.docY, hit.page);
+    const targetDocPos = editor.charMap.posAtCoords(hit.x, hit.y, hit.page);
     const from = this.inlineImageDrag.docPos;
     const to = from + this.inlineImageDrag.nodeSize;
     if (targetDocPos < from || targetDocPos > to) {

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createImageMenu } from "@scrivr/core";
-import type { Editor, ImageMenuInfo } from "@scrivr/core";
+import type { Editor, HoverOption, ImageMenuInfo } from "@scrivr/core";
 import { useFloatingPosition } from "./useFloatingPosition";
 
 export type ImageVerticalAlign =
@@ -35,19 +35,26 @@ const WRAP_OPTIONS: { value: ImageWrappingMode; label: string; title: string }[]
   { value: "front", label: "Front", title: "Image floats in front of text" },
 ];
 
-export function useImageMenu(editor: Editor | null) {
+export interface UseImageMenuOptions {
+  /** Hover peeks. Default true; false shows the menu from the selection only. */
+  hover?: HoverOption;
+}
+
+export function useImageMenu(editor: Editor | null, options: UseImageMenuOptions = {}) {
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [info, setInfo] = useState<ImageMenuInfo | null>(null);
+  const infoRef = useRef<ImageMenuInfo | null>(null);
   const [width, setWidth] = useState("");
   const [height, setHeight] = useState("");
   const [wrappingMode, setWrappingMode] =
     useState<ImageWrappingMode>("inline");
-  const { ref, position } = useFloatingPosition<HTMLDivElement>(rect);
+  const { ref, position } = useFloatingPosition<HTMLDivElement>(rect, [info?.presentation]);
 
   useEffect(() => {
     if (!editor) return;
     return createImageMenu(editor, {
       onShow: (r, i) => {
+        infoRef.current = i;
         setRect(r);
         setInfo(i);
         setWidth(String(Math.round(i.node.attrs["width"] as number)));
@@ -56,15 +63,25 @@ export function useImageMenu(editor: Editor | null) {
       },
       onMove: (r, i) => {
         setRect(r);
+        // Peek → full: the inputs were never shown, so seed them now.
+        const prev = infoRef.current;
+        if (prev?.presentation !== i.presentation || prev.docPos !== i.docPos) {
+          setWidth(String(Math.round(i.node.attrs["width"] as number)));
+          setHeight(String(Math.round(i.node.attrs["height"] as number)));
+        }
+        infoRef.current = i;
         setInfo(i);
         setWrappingMode(resolveWrappingMode(i.node.attrs));
       },
       onHide: () => {
+        infoRef.current = null;
         setRect(null);
         setInfo(null);
       },
       getPopoverElement: () => ref.current,
+      ...(options.hover !== undefined ? { hover: options.hover } : {}),
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
 
   const currentAlign =
@@ -99,6 +116,8 @@ export function useImageMenu(editor: Editor | null) {
     visible: !!rect && !!info,
     rect,
     info,
+    /** "peek" from hover (read-only), "full" when the image is selected. */
+    presentation: info?.presentation ?? null,
     position,
     rootRef: ref,
     width,

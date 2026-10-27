@@ -24,6 +24,7 @@ import type {
 } from "./types";
 import type { IBaseEditor, IEditor } from "./types";
 import type { SelectionBehavior, HitTester, SelectionGestureProvider, NodeActionContribution } from "../selection/types";
+import type { HoverResolver } from "../hover/types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { FontConfig } from "../layout/FontConfig";
 import type { PageConfig } from "../layout/PageLayout";
@@ -651,6 +652,11 @@ export class ExtensionManager {
     return this.resolved
       .flatMap((ext) => ext.hitTesters)
       .sort((a, b) => b.priority - a.priority);
+  }
+
+  /** Hover resolvers from all extensions, in registration order. */
+  buildHoverResolvers(): HoverResolver[] {
+    return this.resolved.flatMap((ext) => ext.hoverResolvers);
   }
 
   /** Pointer-gesture providers from all extensions, in registration order. */

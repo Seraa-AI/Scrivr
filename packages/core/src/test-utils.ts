@@ -383,11 +383,6 @@ export function makePointerControllerSetup(
     slotHeight: () => slotHeight,
     tileHeight: () => tileHeight,
     isPageless: () => isPageless,
-    visualYToDocY: (y) => {
-      if (isPageless) return { page: 1, docY: y };
-      const tileIndex = Math.floor(y / slotHeight);
-      return { page: tileIndex + 1, docY: y - tileIndex * slotHeight };
-    },
     scheduleUpdate: () => {},
   };
   const controller = new PointerController(deps);

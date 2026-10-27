@@ -1,3 +1,4 @@
+import type { HoverResolver } from "../../hover/types";
 import { Extension } from "../Extension";
 import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
@@ -24,6 +25,7 @@ import { tableDocxExportHandlers } from "../../table/docxExport";
 import { tableDocxImportHandlers } from "../../table/docxImport";
 import { tableSemanticHandler } from "../../table/semanticExport";
 import { expandRowSpans } from "../../table/clipboardHtml";
+import { describeTable } from "../../table/describeTable";
 import {
   readGridSpan,
   readCellHAlign,
@@ -342,6 +344,14 @@ export const Table = Extension.create({
     return [cellHitTester];
   },
 
+  addHoverResolvers(): HoverResolver[] {
+    return [
+      { node: "tableCell", kind: "table-cell", resolve: () => ({ header: false }) },
+      { node: "tableHeader", kind: "table-cell", resolve: () => ({ header: true }) },
+      { node: "table", kind: "table", resolve: (node: Node) => describeTable(node) },
+    ];
+  },
+
   addSelectionGesture() {
     return [cellSelectionGesture];
   },
@@ -503,3 +513,4 @@ declare module "@scrivr/core" {
     };
   }
 }
+
