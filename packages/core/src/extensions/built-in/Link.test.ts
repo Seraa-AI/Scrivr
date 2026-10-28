@@ -11,6 +11,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { DOMParser as PMDOMParser } from "prosemirror-model";
+import { TextSelection } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
 
 function parseHtml(editor: ServerEditor, html: string) {
@@ -126,4 +127,87 @@ describe("Link — setLinkHref command rejects dangerous hrefs", () => {
   // time — no runtime test needed. The runtime typeof-string check
   // inside the command stays as defence in depth against any TS bypass
   // (e.g. JS callers, AI-generated dispatch).
+});
+
+describe("Link — the link at the caret", () => {
+  const link = (text: string, href: string, title: string | null = null) => ({
+    type: "text",
+    text,
+    marks: [{ type: "link", attrs: { href, title } }],
+  });
+
+  function editorWith(content: unknown[], caret: number): ServerEditor {
+    const editor = new ServerEditor({
+      content: { type: "doc", content: [{ type: "paragraph", content }] },
+    });
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, caret)));
+    return editor;
+  }
+
+  function linkedText(editor: ServerEditor): string[] {
+    const texts: string[] = [];
+    editor.getState().doc.descendants((node) => {
+      if (node.isText && node.marks.some((m) => m.type.name === "link")) texts.push(node.text ?? "");
+    });
+    return texts;
+  }
+
+  it("unsetLink with a caret removes the whole link it sits in, and only that link", () => {
+    // "alpha" spans 1..6; the caret sits inside it.
+    const editor = editorWith(
+      [link("alpha", "https://a.example"), { type: "text", text: " and " }, link("beta", "https://b.example")],
+      3,
+    );
+
+    editor.commands.unsetLink();
+
+    expect(linkedText(editor)).toEqual(["beta"]);
+  });
+
+  it("unsetLink removes the whole link when the selection lies inside it", () => {
+    const editor = editorWith([link("alpha", "https://a.example"), { type: "text", text: " after" }], 3);
+    const state = editor.getState();
+    // Select "ph" inside "alpha" (1..6).
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, 3, 5)));
+
+    editor.commands.unsetLink();
+
+    expect(linkedText(editor)).toEqual([]);
+  });
+
+  it("unsetLink removes a link the selection only reaches into, and leaves the others", () => {
+    // "alpha" 1..6, " and " 6..11, "beta" 11..15; select from " and " into "be".
+    const editor = editorWith(
+      [link("alpha", "https://a.example"), { type: "text", text: " and " }, link("beta", "https://b.example")],
+      3,
+    );
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, 8, 13)));
+
+    editor.commands.unsetLink();
+
+    expect(linkedText(editor)).toEqual(["alpha"]);
+  });
+
+  it("setLinkHref takes the title of the first link it replaces, even when that is none", () => {
+    const editor = editorWith(
+      [link("alpha", "https://a.example"), link("beta", "https://b.example", "Beta")],
+      3,
+    );
+
+    editor.commands.setLinkHref(1, 10, "https://c.example");
+
+    const marks = editor.getState().doc.firstChild!.content.content.map((n) => n.marks.find((m) => m.type.name === "link"));
+    expect(marks.map((m) => m?.attrs["title"])).toEqual([null]);
+  });
+
+  it("setLinkHref keeps the title of the link it replaces", () => {
+    const editor = editorWith([link("alpha", "https://a.example", "Alpha")], 3);
+
+    editor.commands.setLinkHref(1, 6, "https://c.example");
+
+    const mark = editor.getState().doc.firstChild!.firstChild!.marks.find((m) => m.type.name === "link");
+    expect(mark?.attrs).toMatchObject({ href: "https://c.example", title: "Alpha" });
+  });
 });
