@@ -19,6 +19,7 @@ import type {
 	NodeActionContribution,
 } from "../../selection/types";
 import type { SemanticNodeHandler } from "../../exports/semantic";
+import type { LayoutBlock } from "../../layout/BlockLayout";
 import { xml, type DocxNodeHandler, type DocxBlockTransform } from "../../exports/docx";
 
 export type SourceCapability =
@@ -55,6 +56,7 @@ export interface SourcedBlockEvent {
  *
  * The two facts have different owners. `modified` is the document's: the editor
  * hashes the block's content and compares it to the base it was inserted with.
+ * A block with no recorded base is never modified.
  * `outdated` is the library's — whether the source moved on past `versionId` is
  * not knowable from this document, so the host sets it (from a server check, or
  * from a collaborator who ran one) via `setSourcedBlockOutdated`, and the
@@ -85,6 +87,28 @@ export const NORMALIZER_VERSION = 1;
 
 /** ECMA-376 caps `w:tag/@w:val` (ST_String) at 255 characters. */
 const DOCX_TAG_MAX_LENGTH = 255;
+
+/** The diverged bar sits this far into the left margin, like Word's change bar. */
+const DIVERGED_GUTTER_INSET = 12;
+const DIVERGED_GUTTER_WIDTH = 3;
+
+interface BlockExtent {
+	nodePos: number;
+	top: number;
+	bottom: number;
+}
+
+/**
+ * The vertical extent of every block on a page, in page coordinates. A table
+ * cell's blocks are measured from their row's top, so they are lifted out here.
+ */
+function blockExtents(blocks: readonly LayoutBlock[], rowTop = 0): BlockExtent[] {
+	return blocks.flatMap(block => {
+		const top = rowTop + block.y;
+		const cellBlocks = (block.cells ?? []).flatMap(cell => blockExtents(cell.blocks, top));
+		return [{ nodePos: block.nodePos, top, bottom: top + block.height }, ...cellBlocks];
+	});
+}
 
 export function normalizeSourcedBlock(fragment: Fragment): unknown[] {
 	const walkNode = (node: Node): unknown => {
@@ -166,9 +190,16 @@ export function isEmptyShell(node: Node): boolean {
 	return empty;
 }
 
-/** Hash the block's current content and compare it against its recorded base. */
+/** The hash the block was inserted with. `""` is no base: earlier DOCX imports wrote it. */
+function recordedBaseHash(node: Node): string | null {
+	const baseHash: unknown = node.attrs["baseHash"];
+	return typeof baseHash === "string" && baseHash !== "" ? baseHash : null;
+}
+
+/** A block with no recorded base has nothing to diverge from. */
 function isDiverged(node: Node): boolean {
-	return computeBlockHash(node.content) !== node.attrs["baseHash"];
+	const baseHash = recordedBaseHash(node);
+	return baseHash !== null && computeBlockHash(node.content) !== baseHash;
 }
 
 function instanceIdOf(node: Node): string | null {
@@ -453,7 +484,7 @@ export function collectSourcedBlocks(doc: Node): SourcedBlockRecord[] {
 				kind: parseStringOrNull(attrs["kind"]),
 				resourceId: parseStringOrNull(attrs["resourceId"]),
 				versionId: parseStringOrNull(attrs["versionId"]),
-				baseHash: parseStringOrNull(attrs["baseHash"]),
+				baseHash: recordedBaseHash(node),
 				baseNormalizer: parseNumberOrNull(attrs["baseNormalizer"]),
 				outdated: attrs["outdated"] === true,
 			});
@@ -790,7 +821,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 
 	onViewReady(editor: IEditor) {
 		const unregister = editor.addOverlayRenderHandler(
-			(ctx, pageIndex, pageConfig, charMap, theme) => {
+			(ctx, pageNumber, pageConfig, _charMap, theme) => {
 				const state = editor.getState();
 				const divergenceState =
 					sourcedBlockDivergenceKey.getState(state);
@@ -798,38 +829,31 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				if (!divergenceState || divergenceState.diverged.size === 0)
 					return;
 
+				const page = editor.layout.pages[pageNumber - 1];
+				if (!page) return;
+
 				state.doc.descendants((node, pos) => {
 					if (node.type.name !== "sourcedBlock") return true;
 
 					const id = instanceIdOf(node);
 					if (!id || !divergenceState.diverged.has(id)) return false;
 
-					// coordsAtPos returns { x, y, height, page }
-					const startCoords = charMap.coordsAtPos(pos + 1);
-					const endCoords = charMap.coordsAtPos(
-						pos + node.nodeSize - 2,
-					); // end of inner block
+					// Layout blocks, not charMap lines: the caret positions of a rule or
+					// image next to the block fall inside its range, so its lines would
+					// stretch the bar over them.
+					const extents = blockExtents(page.blocks).filter(
+						extent => extent.nodePos > pos && extent.nodePos < pos + node.nodeSize,
+					);
+					if (extents.length === 0) return false;
 
-					// Ensure both coordinates exist and are on the current page being rendered
-					if (
-						startCoords &&
-						endCoords &&
-						(startCoords.page === pageIndex ||
-							endCoords.page === pageIndex)
-					) {
-						ctx.save();
-						// Use divergedGutter from theme if available, otherwise amber fallback
-						ctx.fillStyle = theme.divergedGutter ?? "#FFC107";
+					const top = Math.min(...extents.map(extent => extent.top));
+					const bottom = Math.max(...extents.map(extent => extent.bottom));
+					const gutterX = pageConfig.margins.left - DIVERGED_GUTTER_INSET;
 
-						const gutterWidth = 3;
-						const gutterX = startCoords.x - 12;
-						const top = startCoords.y;
-						const bottom = endCoords.y + endCoords.height;
-						const height = bottom - top;
-
-						ctx.fillRect(gutterX, top, gutterWidth, height);
-						ctx.restore();
-					}
+					ctx.save();
+					ctx.fillStyle = theme.divergedGutter;
+					ctx.fillRect(gutterX, top, DIVERGED_GUTTER_WIDTH, bottom - top);
+					ctx.restore();
 					return false;
 				});
 			},
@@ -1146,7 +1170,8 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				kind: params.get("kind") ?? "",
 				resourceId: params.get("resourceId") ?? "",
 				versionId: params.get("versionId") ?? "",
-				baseHash: params.get("baseHash") ?? "",
+				// Absent stays null: no recorded base, not an empty one.
+				baseHash: params.get("baseHash"),
 				baseNormalizer: Number(params.get("baseNormalizer")) || 1,
 			};
 

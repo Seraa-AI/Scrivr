@@ -215,11 +215,14 @@ Two dimensions, computed, never stored as a state enum:
 
 ```ts
 interface SourcedBlockState {
-  modified: boolean;   // contentHash(now) !== baseHash
+  modified: boolean;   // baseHash recorded && contentHash(now) !== baseHash
   outdated: boolean;   // versionId !== source.currentVersionId
   detached: boolean;   // provenance deliberately removed (block is gone)
 }
 ```
+
+A block with no recorded `baseHash` is never `modified`: there is nothing to
+have diverged from. `""` counts as no base, because early DOCX imports wrote it.
 
 Independent dimensions, so we never grow
 `MODIFIED_OUTDATED_ARCHIVED_BUT_ACTIVE`. `modified` is computable offline from
@@ -381,6 +384,27 @@ one-undo-step atomicity, events. Still no clause-specific code.
 usage view. Consumer, not core.
 
 Phases 1–2 are the architecture. Everything after is application.
+
+## What shipped
+
+- **Phases 1–2** (#147, #155). The node, normalization, hashing, id re-minting on
+  paste and clone, `collectSourcedBlocks`, the provider registry,
+  `insertSourcedBlock` / `insertSourcedBlockFromSource`, and
+  `onInstanceChanged`. #155 exported the host half (`collectSourcedBlocks`,
+  `computeBlockHash`, `NORMALIZER_VERSION`, `sourcedBlockDivergenceKey`).
+- **Phase 3, partly.** Node actions `source.update`, `source.reset` and
+  `source.detach`, plus `setSourcedBlocksOutdated`. The divergence gutter is an
+  overlay drawn from layout blocks in the page's left margin, beside the block
+  only, with one bar per page for a block that crosses a page (#226). A block
+  inside a table cell gets a bar because cell layout lays out a `transparent`
+  node as its children, as the body flow does. **Not built:** the compare view.
+- **Phase 4, partly.** DOCX `<w:sdt>` export and import, and the semantic unit
+  handler. A missing `baseHash` round-trips as `null` (#226). PDF draws the
+  content, because the node is transparent to layout. The gutter is editor
+  chrome, so PDF does not draw it.
+- **Slash entries** (#216). The extension declares the slash entry that inserts
+  its node.
+- **Phase 5** belongs to the host app and is not tracked here.
 
 ## Open questions
 
