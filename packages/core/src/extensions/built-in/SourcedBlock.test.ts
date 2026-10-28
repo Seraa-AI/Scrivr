@@ -704,6 +704,7 @@ describe("SourcedBlock Extension", () => {
 
 			editor.applyTransaction(editor.getState().tr.insertText("!", 12));
 			expect(divergedIds(editor)).toEqual([]);
+			expect(collectSourcedBlocks(editor.getState().doc)[0]?.baseHash).toBeNull();
 		});
 
 		it("diverges on edit and clears again when the edit is reverted", () => {

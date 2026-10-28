@@ -34,7 +34,7 @@ function divergedBlock(paragraphs: string[]) {
 function makeEditor(pageConfig: PageConfig, blocks: unknown[]): Editor {
 	return createTestEditor({
 		pageConfig,
-		extensions: [StarterKit, SourcedBlockExtension],
+		extensions: [StarterKit.configure({ table: true }), SourcedBlockExtension],
 		content: { type: "doc", content: blocks },
 	});
 }
@@ -55,15 +55,19 @@ function barsOnPage(editor: Editor, page: number, pageConfig: PageConfig): Bar[]
 	return bars;
 }
 
-/** Vertical extent of the block's lines on one page, read from the charMap. */
+/**
+ * Vertical extent of the document's one sourced block on a page, read from the
+ * charMap. Its lines are a fair oracle only with no rule or image beside the
+ * block, whose caret positions would fall inside its range.
+ */
 function blockLinesOnPage(editor: Editor, page: number) {
 	let from = 0;
 	let to = 0;
-	editor.getState().doc.forEach((node, offset) => {
-		if (node.type.name === "sourcedBlock") {
-			from = offset;
-			to = offset + node.nodeSize;
-		}
+	editor.getState().doc.descendants((node, pos) => {
+		if (node.type.name !== "sourcedBlock") return true;
+		from = pos;
+		to = pos + node.nodeSize;
+		return false;
 	});
 	const lines = editor.charMap.linesInRange(from, to).filter(l => l.page === page);
 	return {
@@ -127,5 +131,48 @@ describe("SourcedBlock diverged gutter", () => {
 			expect(bars[0]!.top).toBeCloseTo(lines.top);
 			expect(bars[0]!.bottom).toBeCloseTo(lines.bottom);
 		}
+	});
+
+	it("marks the middle page of a block that spans three", () => {
+		const pageConfig: PageConfig = { ...defaultPageConfig, pageHeight: 400 };
+		editor = makeEditor(pageConfig, [
+			divergedBlock(Array.from({ length: 16 }, () => LONG.repeat(2))),
+		]);
+		expect(editor.layout.pages.length).toBeGreaterThan(2);
+
+		const bars = barsOnPage(editor, 2, pageConfig);
+		const lines = blockLinesOnPage(editor, 2);
+		expect(bars).toHaveLength(1);
+		expect(bars[0]!.top).toBeCloseTo(lines.top);
+		expect(bars[0]!.bottom).toBeCloseTo(lines.bottom);
+	});
+
+	it("sits beside a block that lives in a table cell", () => {
+		editor = makeEditor(defaultPageConfig, [
+			{ type: "paragraph", content: [{ type: "text", text: "BETWEEN:" }] },
+			{
+				type: "table",
+				attrs: { layout: "fixed", grid: [300] },
+				content: [
+					{
+						type: "tableRow",
+						content: [
+							{
+								type: "tableCell",
+								content: [divergedBlock(["First clause line.", "Second clause paragraph."])],
+							},
+						],
+					},
+				],
+			},
+		]);
+
+		const bars = barsOnPage(editor, 1, defaultPageConfig);
+		const lines = blockLinesOnPage(editor, 1);
+
+		expect(bars).toHaveLength(1);
+		expect(bars[0]!.x).toBeLessThan(defaultPageConfig.margins.left);
+		expect(bars[0]!.top).toBeCloseTo(lines.top);
+		expect(bars[0]!.bottom).toBeCloseTo(lines.bottom);
 	});
 });

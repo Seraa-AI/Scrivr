@@ -19,6 +19,7 @@ import type {
 	NodeActionContribution,
 } from "../../selection/types";
 import type { SemanticNodeHandler } from "../../exports/semantic";
+import type { LayoutBlock } from "../../layout/BlockLayout";
 import { xml, type DocxNodeHandler, type DocxBlockTransform } from "../../exports/docx";
 
 export type SourceCapability =
@@ -90,6 +91,24 @@ const DOCX_TAG_MAX_LENGTH = 255;
 /** The diverged bar sits this far into the left margin, like Word's change bar. */
 const DIVERGED_GUTTER_INSET = 12;
 const DIVERGED_GUTTER_WIDTH = 3;
+
+interface BlockExtent {
+	nodePos: number;
+	top: number;
+	bottom: number;
+}
+
+/**
+ * The vertical extent of every block on a page, in page coordinates. A table
+ * cell's blocks are measured from their row's top, so they are lifted out here.
+ */
+function blockExtents(blocks: readonly LayoutBlock[], rowTop = 0): BlockExtent[] {
+	return blocks.flatMap(block => {
+		const top = rowTop + block.y;
+		const cellBlocks = (block.cells ?? []).flatMap(cell => blockExtents(cell.blocks, top));
+		return [{ nodePos: block.nodePos, top, bottom: top + block.height }, ...cellBlocks];
+	});
+}
 
 export function normalizeSourcedBlock(fragment: Fragment): unknown[] {
 	const walkNode = (node: Node): unknown => {
@@ -171,15 +190,16 @@ export function isEmptyShell(node: Node): boolean {
 	return empty;
 }
 
-/**
- * Hash the block's current content and compare it against its recorded base.
- * Without a base there is nothing to have diverged from, so the block is not
- * modified. `""` is an absent base too: earlier DOCX imports wrote it.
- */
-function isDiverged(node: Node): boolean {
+/** The hash the block was inserted with. `""` is no base: earlier DOCX imports wrote it. */
+function recordedBaseHash(node: Node): string | null {
 	const baseHash: unknown = node.attrs["baseHash"];
-	if (typeof baseHash !== "string" || baseHash === "") return false;
-	return computeBlockHash(node.content) !== baseHash;
+	return typeof baseHash === "string" && baseHash !== "" ? baseHash : null;
+}
+
+/** A block with no recorded base has nothing to diverge from. */
+function isDiverged(node: Node): boolean {
+	const baseHash = recordedBaseHash(node);
+	return baseHash !== null && computeBlockHash(node.content) !== baseHash;
 }
 
 function instanceIdOf(node: Node): string | null {
@@ -464,7 +484,7 @@ export function collectSourcedBlocks(doc: Node): SourcedBlockRecord[] {
 				kind: parseStringOrNull(attrs["kind"]),
 				resourceId: parseStringOrNull(attrs["resourceId"]),
 				versionId: parseStringOrNull(attrs["versionId"]),
-				baseHash: parseStringOrNull(attrs["baseHash"]),
+				baseHash: recordedBaseHash(node),
 				baseNormalizer: parseNumberOrNull(attrs["baseNormalizer"]),
 				outdated: attrs["outdated"] === true,
 			});
@@ -818,16 +838,16 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					const id = instanceIdOf(node);
 					if (!id || !divergenceState.diverged.has(id)) return false;
 
-					// Layout blocks, not charMap lines: a line's doc range is for caret
-					// placement, and a rule or image beside the block claims positions
-					// inside it.
-					const blocks = page.blocks.filter(
-						block => block.nodePos > pos && block.nodePos < pos + node.nodeSize,
+					// Layout blocks, not charMap lines: the caret positions of a rule or
+					// image next to the block fall inside its range, so its lines would
+					// stretch the bar over them.
+					const extents = blockExtents(page.blocks).filter(
+						extent => extent.nodePos > pos && extent.nodePos < pos + node.nodeSize,
 					);
-					if (blocks.length === 0) return false;
+					if (extents.length === 0) return false;
 
-					const top = Math.min(...blocks.map(block => block.y));
-					const bottom = Math.max(...blocks.map(block => block.y + block.height));
+					const top = Math.min(...extents.map(extent => extent.top));
+					const bottom = Math.max(...extents.map(extent => extent.bottom));
 					const gutterX = pageConfig.margins.left - DIVERGED_GUTTER_INSET;
 
 					ctx.save();
