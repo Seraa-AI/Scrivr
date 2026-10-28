@@ -14,7 +14,7 @@
  *     onHide: () => { popover.style.display = "none" },
  *   });
  */
-import type { Node, MarkType } from "prosemirror-model";
+import type { Mark, Node } from "prosemirror-model";
 import type { IEditor } from "../extensions/types";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
@@ -69,8 +69,7 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
       return;
     }
 
-    // Walk outward from cursor to find the full extent of this mark
-    const { from, to } = findMarkRange(state.doc, head, markInstance.type);
+    const { from, to } = findMarkRange(state.doc, head, markInstance);
     const href = markInstance.attrs["href"] as string;
 
     const rect = editor.getViewportRect(from, to);
@@ -110,32 +109,29 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
   };
 }
 
-/** Walk the doc to find the contiguous range covered by a specific mark type around `pos`. */
-function findMarkRange(
-  doc: Node,
-  pos: number,
-  markType: MarkType,
-): { from: number; to: number } {
-  const $pos  = doc.resolve(pos);
-  const start = $pos.start();
-  const end   = $pos.end();
+/**
+ * The run of adjacent text in `pos`'s textblock that carries this exact `mark`.
+ * Matching the instance, not the type, keeps two neighbouring links apart.
+ */
+function findMarkRange(doc: Node, pos: number, mark: Mark): { from: number; to: number } {
+  const $pos = doc.resolve(pos);
+  const parent = $pos.parent;
+  const carriesMark = (index: number) =>
+    index >= 0 && index < parent.childCount && mark.isInSet(parent.child(index).marks);
 
-  let from = pos;
-  let to   = pos;
+  let index = $pos.index();
+  // A caret just past the link's last character resolves to the node after it.
+  if (!carriesMark(index)) index -= 1;
+  if (!carriesMark(index)) return { from: pos, to: pos };
 
-  // Walk backwards to find start of mark
-  doc.nodesBetween(start, pos, (node, nodePos) => {
-    if (node.isText && node.marks.some((m) => m.type === markType)) {
-      from = Math.min(from, nodePos);
-    }
-  });
+  let first = index;
+  let last = index;
+  while (carriesMark(first - 1)) first--;
+  while (carriesMark(last + 1)) last++;
 
-  // Walk forwards to find end of mark
-  doc.nodesBetween(pos, end, (node, nodePos) => {
-    if (node.isText && node.marks.some((m) => m.type === markType)) {
-      to = Math.max(to, nodePos + node.nodeSize);
-    }
-  });
-
+  let from = $pos.start();
+  for (let i = 0; i < first; i++) from += parent.child(i).nodeSize;
+  let to = from;
+  for (let i = first; i <= last; i++) to += parent.child(i).nodeSize;
   return { from, to };
 }
