@@ -1,6 +1,6 @@
 import { Fragment, Mark, Node, NodeType, Slice } from "@scrivr/core/pm";
 import { PluginKey } from "@scrivr/core/pm";
-import { ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
+import { Mapping, ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
 
 import { getAction } from "./actions";
 import { ChangeSet } from "./ChangeSet";
@@ -71,6 +71,38 @@ type InsertDeleteAttrs = {
    * as a single atomic operation.
    */
   groupId?: string;
+  /**
+   * Set on each record that is part of an insertion recorded in several
+   * places — the new node and the text inside it. Reviewing the creation
+   * reviews all of them.
+   */
+  creationId?: string;
+  /**
+   * The same for a deletion recorded in several places: deleting a node that
+   * holds someone else's pending work keeps that work as a proposal, so the
+   * deletion is written on the node and again on what it struck inside it.
+   */
+  deletionId?: string;
+  /**
+   * This record is a piece of the record named here, split apart by later
+   * work — typing inside a deletion. Each piece has its own id because an id
+   * names one contiguous span; the pieces are still one change.
+   */
+  continuesId?: string;
+  /**
+   * Creations this record only makes sense alongside: set when someone edits
+   * inside another author's pending insertion. Rejecting that insertion names
+   * this record as dependent work instead of silently taking it.
+   */
+  dependsOn?: string[];
+  /**
+   * Set on a creation once another author's work has depended on it. From then
+   * on the creator's own later edits inside it record `dependsOn` rather than
+   * folding in, even after that other work is reviewed.
+   */
+  foldingClosed?: boolean;
+  /** A later placement is based on these still-pending placement decisions. */
+  placementDependsOn?: string[];
 };
 
 export type UpdateAttrs = Omit<InsertDeleteAttrs, "operation"> & {
@@ -206,13 +238,27 @@ export interface TrackChangesOptions {
   canAcceptReject?: boolean;
 }
 
-export interface TrackChangesState {
-  status: TrackChangesStatus;
-  userID: string;
-  changeSet: ChangeSet;
-}
-
 // ── Transaction tracking context ──────────────────────────────────────────────
+
+/** Why a gesture could not be represented as tracked changes. */
+export type TrackingRefusal =
+  | { failure: "unsupported-step"; stepType: string }
+  | { failure: "duplicate-transform-package" };
+
+/**
+ * What tracking did with a gesture. `refused` is the one outcome a host must act
+ * on: the edit stands in the document but nothing was recorded, so undoing it or
+ * warning the author is the host's call.
+ *
+ * Refusal means the gesture cannot be represented, never that it was big. Step
+ * count and elapsed time are diagnostics for finding expensive replays — a
+ * document-wide formatting command legitimately produces thousands of steps and
+ * must still be tracked in full. `elapsedMs` is only on `ready`: a refusal is
+ * decided before anything runs.
+ */
+export type TrackingResult =
+  | { status: "ready"; steps: number; elapsedMs: number }
+  | ({ status: "refused"; steps: number } & TrackingRefusal);
 
 export type TrTrackingContext = {
   prevLiftStep?: ReplaceAroundStep;
@@ -220,6 +266,13 @@ export type TrTrackingContext = {
   action: ReturnType<typeof getAction>;
   stepsByGroupIDMap: Map<ReplaceStep, string>;
   selectionPosFromInsertion?: number;
+  /**
+   * Maps the source document the replay has reached into the replayed one. The
+   * replay walks the gesture's steps backwards, so each iteration re-bases this
+   * onto the document that step applied to; a tracker writing into the replayed
+   * document has to map its source positions through it first.
+   */
+  replayBridge: Mapping;
 };
 
 // ── ChangeStep variants ───────────────────────────────────────────────────────

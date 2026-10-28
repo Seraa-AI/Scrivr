@@ -10,7 +10,7 @@ import { ChangeStep } from "../types";
  *
  *   extract → [original coords] → mapChangeSteps → [newTr coords] → apply
  *
- * The cross-step mapping (deletedNodeMapping) is resolved here.
+ * The cross-step mapping (replayBridge) is resolved here.
  * Intra-batch position shifts produced by applying each step are handled
  * separately by the local accumulator inside processChangeSteps.
  */

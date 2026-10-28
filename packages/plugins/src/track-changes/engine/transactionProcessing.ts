@@ -1,19 +1,29 @@
 import { Node } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { isHistoryTransaction } from "@scrivr/core/pm";
-import { ReplaceStep, Step } from "@scrivr/core/pm";
+import {
+  AddMarkStep,
+  AddNodeMarkStep,
+  AttrStep,
+  DocAttrStep,
+  RemoveMarkStep,
+  RemoveNodeMarkStep,
+  ReplaceAroundStep,
+  ReplaceStep,
+  Step,
+} from "@scrivr/core/pm";
 
 import { isIndentationAction, TrackChangesAction } from "../actions";
-import { ChangeSet } from "../ChangeSet";
 import { genId } from "../helpers";
 import {
-  isDeletingPendingMovedNode,
   isDirectPendingMoveDeletion,
 } from "../step-trackers/qualifiers";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
   TrackedAttrs,
+  TrackingRefusal,
+  TrackingResult,
   TrTrackingContext,
 } from "../types";
 
@@ -49,7 +59,8 @@ export function passThroughMeta(oldTr: Transaction, newTr: Transaction) {
   return newTr;
 }
 
-export function getIndentationOperationSteps(
+/** Records an indentation's steps as one move, by grouping them under one id. */
+export function groupIndentationSteps(
   tr: Transaction,
   trContext: TrTrackingContext,
 ) {
@@ -71,58 +82,114 @@ export const excludeFromTracking = (node: Node) => {
   return node && !node.type.spec.attrs?.dataTracked;
 };
 
-/**
- * Upper bound on tracked steps per transaction for typical edits.
- * Cut operations and mass-replace bypass this limit because they legitimately
- * generate large step counts. If a normal edit exceeds this limit it most
- * likely indicates a loop or unsupported step type — tracking is skipped and
- * an error is logged so the issue can be reproduced and reported.
- */
-const MAX_TRACKED_STEPS_PER_TR = 20;
-
-export function iterationIsValid(
-  iterations: number,
-  oldTr: Transaction,
-  newTr: Transaction,
-  step: Step,
-) {
-  const uiEvent = oldTr.getMeta("uiEvent");
-  const isMassReplace = oldTr.getMeta("massSearchReplace");
-  if (iterations > MAX_TRACKED_STEPS_PER_TR && uiEvent != "cut" && !isMassReplace) {
-    console.error(
-      "@scrivr/plugins track-changes: Possible infinite loop in iterating tr.steps, tracking skipped!\n" +
-        "This is probably an error with the library, please report back to maintainers with a reproduction if possible",
-      newTr,
-    );
-    return false;
-  } else if (
-    !(step instanceof ReplaceStep) &&
-    step.constructor.name === "ReplaceStep"
-  ) {
-    console.error(
-      "@scrivr/plugins track-changes: Multiple prosemirror-transform packages imported, alias/dedupe them " +
-        "or instanceof checks fail as well as creating new steps",
-    );
-    return false;
-  }
-  return true;
+/** Step kinds the replay knows how to re-apply as tracked content. */
+function isTrackableStep(step: Step) {
+  return (
+    step instanceof ReplaceStep ||
+    step instanceof ReplaceAroundStep ||
+    step instanceof AttrStep ||
+    step instanceof AddMarkStep ||
+    step instanceof RemoveMarkStep ||
+    step instanceof AddNodeMarkStep ||
+    step instanceof RemoveNodeMarkStep
+  );
 }
 
-export const getMoveOperationsSteps = (
+/**
+ * Not content, so no record can be attached to it and none is missing by its
+ * absence. Doc attributes carry page and section settings, written through
+ * `tr.setDocAttribute`; refusing a gesture for containing one would call a
+ * normal operation untrackable.
+ */
+function isUntrackedStep(step: Step) {
+  return step instanceof DocAttrStep;
+}
+
+/**
+ * The span a step says it affects, in the document it applied to. Mark and
+ * attribute steps carry an empty StepMap, so a position map cannot describe
+ * what they touched — only the step can. Callers that need to know what a
+ * transaction rewrote must ask here rather than walking the maps.
+ */
+export function stepRange(step: Step): { from: number; to: number } | null {
+  if (
+    step instanceof ReplaceStep ||
+    step instanceof ReplaceAroundStep ||
+    step instanceof AddMarkStep ||
+    step instanceof RemoveMarkStep
+  ) {
+    return { from: step.from, to: step.to };
+  }
+  if (
+    step instanceof AttrStep ||
+    step instanceof AddNodeMarkStep ||
+    step instanceof RemoveNodeMarkStep
+  ) {
+    return { from: step.pos, to: step.pos };
+  }
+  return null;
+}
+
+function refuseStep(step: Step): TrackingRefusal | null {
+  if (!(step instanceof ReplaceStep) && step.constructor.name === "ReplaceStep") {
+    // Two copies of prosemirror-transform make every instanceof silently false.
+    return { failure: "duplicate-transform-package" };
+  }
+  if (isUntrackedStep(step) || isTrackableStep(step)) return null;
+  // Anything else would fall straight through the replay and land untracked, so
+  // the gesture is refused whole instead of recorded in part.
+  return { failure: "unsupported-step", stepType: step.constructor.name };
+}
+
+/**
+ * Which outcome speaks for a dispatch. One dispatch can carry several
+ * transactions, and a refusal is the one a host must act on — so the last
+ * transaction must not be allowed to report success on behalf of all of them.
+ */
+export function reportedTracking(
+  reported: TrackingResult | undefined,
+  next: TrackingResult,
+): TrackingResult {
+  return reported?.status === "refused" ? reported : next;
+}
+
+/** Steps that carry authored content, and so count toward what was tracked. */
+export const contentSteps = (steps: readonly Step[]) =>
+  steps.filter(step => !isUntrackedStep(step));
+
+/**
+ * Decided before the replay touches anything, so a gesture is refused whole
+ * rather than recorded in part. Size is deliberately not consulted: what
+ * matters is whether every step can be represented, not how many there are.
+ *
+ * The question is only about step kinds. A supported kind does not yet promise
+ * the gesture is recorded completely — the mark trackers stamp against
+ * positions the replay bridge never mapped, so a gesture mixing a mark step
+ * with a position-shifting one still under-records.
+ */
+export function trackingRefusal(steps: readonly Step[]) {
+  for (const step of steps) {
+    const refusal = refuseStep(step);
+    if (refusal) return refusal;
+  }
+  return null;
+}
+
+/** Records which steps belong to one move, by grouping them under one id. */
+export const groupMoveSteps = (
   tr: Transaction,
   context: TrTrackingContext,
-) => {
+): void => {
   const movingAssoc = context.stepsByGroupIDMap;
 
-  if (tr.steps.length < 2) {
-    return movingAssoc;
-  }
+  if (tr.steps.length < 2) return;
 
   if (tr.getMeta(TrackChangesAction.structuralChangeAction)) {
     const commonID = genId();
-    movingAssoc.set(tr.steps[0] as ReplaceStep, commonID);
-    movingAssoc.set(tr.steps[1] as ReplaceStep, commonID);
-    return movingAssoc;
+    for (const step of tr.steps.slice(0, 2)) {
+      if (step instanceof ReplaceStep) movingAssoc.set(step, commonID);
+    }
+    return;
   }
 
   const matched: number[] = [];
@@ -197,58 +264,6 @@ export const getMoveOperationsSteps = (
     }
   }
 };
-
-export const filterMeaninglessMoveSteps = (
-  tr: Transaction,
-  context: TrTrackingContext,
-) => {
-  const cleanSteps: Array<Step | null> = [];
-
-  for (let i = 0; i < tr.steps.length; i++) {
-    const step = tr.steps[i];
-    const moveID = context.stepsByGroupIDMap.get(step as ReplaceStep);
-
-    if (moveID) {
-      const prevMoveID = isDeletingPendingMovedNode(
-        step as ReplaceStep,
-        tr.docs[i]!,
-      );
-      if (prevMoveID) {
-        context.stepsByGroupIDMap.forEach((replaceStepMoveID, replaceStep) => {
-          if (replaceStep !== step && moveID === replaceStepMoveID) {
-            context.stepsByGroupIDMap.set(replaceStep, prevMoveID);
-          }
-        });
-        cleanSteps.push(null);
-        continue;
-      }
-
-      if (
-        step instanceof ReplaceStep &&
-        !tr.getMeta(TrackChangesAction.structuralChangeAction)
-      ) {
-        const { slice } = step;
-        if (slice?.content?.firstChild) {
-          const insertedNode = slice.content.firstChild;
-          if (insertedNode.attrs.dataTracked) {
-            const isPendingInsert = ChangeSet.isPendingChange(
-              insertedNode.attrs.dataTracked as TrackedAttrs[],
-              CHANGE_OPERATION.insert,
-            );
-            if (isPendingInsert) {
-              cleanSteps.push(null);
-              continue;
-            }
-          }
-        }
-      }
-    }
-
-    cleanSteps.push(step || null);
-  }
-  return cleanSteps;
-};
-
 
 export const trFromHistory = (tr: Transaction): boolean => isHistoryTransaction(tr);
 export const changeMovedToInsertsOnSourceDeletion = (

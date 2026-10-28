@@ -1,71 +1,27 @@
-import {
-  NodeSelection as NodeSelectionClass,
-  Selection,
-  TextSelection,
-  Transaction,
-} from "@scrivr/core/pm";
-import { Mapping, ReplaceStep } from "@scrivr/core/pm";
+import { Selection, Transaction } from "@scrivr/core/pm";
 
-import { isStructuralChange } from "../lib/structuralChange";
 import { TrTrackingContext } from "../types";
 
-export const getSelectionStaticConstructor = (sel: Selection) =>
-  Object.getPrototypeOf(sel).constructor;
-
+/**
+ * The replayed transaction already carries the gesture's selection, mapped
+ * forward through the replay steps, which keeps a range a range, keeps its
+ * direction, and keeps whatever kind it was.
+ *
+ * One case mapping cannot answer: a caret that trailed a step. The replay undoes
+ * the step before restamping it, and a position at the edge of undone content
+ * maps past whatever the undo put back. Such a caret belongs after the content
+ * the replay stamped, which the tracker reports.
+ */
 export function fixAndSetSelectionAfterTracking(
   newTr: Transaction,
-  oldTr: Transaction,
-  deletedNodeMapping: Mapping,
   trContext: TrTrackingContext,
 ) {
-  const wasNodeSelection = oldTr.selection instanceof NodeSelectionClass;
+  const caretFromInsertion = trContext.selectionPosFromInsertion;
 
-  if (
-    !wasNodeSelection &&
-    !oldTr.selectionSet &&
-    trContext.selectionPosFromInsertion
-  ) {
-    const sel: typeof Selection = getSelectionStaticConstructor(
-      oldTr.selection,
+  if (caretFromInsertion !== undefined && caretFromInsertion <= newTr.doc.content.size) {
+    newTr.setSelection(
+      Selection.near(newTr.doc.resolve(caretFromInsertion), -1),
     );
-    const near: Selection = sel.near(
-      newTr.doc.resolve(trContext.selectionPosFromInsertion),
-      -1,
-    );
-    newTr.setSelection(near);
-    return newTr;
-  }
-
-  if (oldTr.selectionSet && oldTr.selection instanceof TextSelection) {
-    let from = oldTr.selection.from;
-
-    if (isStructuralChange(oldTr)) {
-      const selectionMapping = new Mapping();
-      oldTr.steps.map(step => {
-        const isDeleteStep =
-          step instanceof ReplaceStep &&
-          step.from !== step.to &&
-          step.slice.size === 0;
-        if (isDeleteStep) {
-          selectionMapping.appendMap(step.getMap().invert());
-        }
-      });
-      selectionMapping.appendMapping(deletedNodeMapping);
-      from = selectionMapping.map(oldTr.selection.from);
-    }
-
-    const newPos = newTr.doc.resolve(from);
-    newTr.setSelection(new TextSelection(newPos));
-    return newTr;
-  }
-
-  if (wasNodeSelection) {
-    const mappedPos = newTr.mapping.map(oldTr.selection.from, -1);
-    const sel: typeof NodeSelectionClass = getSelectionStaticConstructor(
-      oldTr.selection,
-    );
-    newTr.setSelection(sel.create(newTr.doc, mappedPos));
-    return newTr;
   }
 
   return newTr;

@@ -1,7 +1,7 @@
 import { Fragment, type Mark, type Node } from "@scrivr/core/pm";
 import type { CloneHandler } from "@scrivr/core";
 
-const TRACKED_ID_FIELDS = ["id", "referenceId", "moveNodeId", "groupId"] as const;
+const TRACKED_ID_FIELDS = ["id", "referenceId", "moveNodeId", "groupId", "creationId", "deletionId", "continuesId"] as const;
 
 /** Re-key track-change identity while preserving all internal links. */
 export const cloneTrackedChanges: CloneHandler = ({ doc, newId, recordId }) => {
@@ -24,6 +24,11 @@ export const cloneTrackedChanges: CloneHandler = ({ doc, newId, recordId }) => {
       if (typeof oldId !== "string" || oldId.length === 0) continue;
       next ??= { ...entry };
       next[field] = remap(oldId);
+    }
+    for (const field of ["dependsOn", "placementDependsOn"] as const) {
+      if (!Array.isArray(entry[field])) continue;
+      next ??= { ...entry };
+      next[field] = entry[field].map(id => typeof id === "string" ? remap(id) : id);
     }
     return next ?? value;
   };

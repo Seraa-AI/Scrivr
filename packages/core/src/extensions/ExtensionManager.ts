@@ -31,6 +31,7 @@ import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { ExportContributionMap, ImportContributionMap } from "./export";
 import { parseMarkdownToDoc } from "../model/parseMarkdown";
+import { isTrackedMark } from "../model/spansToFragment";
 
 interface Phase1SchemaContributions {
   nodes: Record<string, NodeSpec>;
@@ -212,6 +213,17 @@ function buildSchemaFromPhase1(contribs: Phase1SchemaContributions): Schema {
       ...baseDoc,
       attrs: { ...(baseDoc.attrs ?? {}), ...contribs.docAttrs },
     };
+  }
+
+  // A node's `marks` restricts formatting. Review marks record who changed the
+  // text rather than how it looks, so an edit inside a node that forbids
+  // formatting — a code block — can still be recorded.
+  const reviewMarks = Object.keys(marks).filter(isTrackedMark);
+  if (reviewMarks.length) {
+    for (const [name, spec] of Object.entries(nodes)) {
+      if (typeof spec.marks !== "string" || spec.marks === "_") continue;
+      nodes[name] = { ...spec, marks: [spec.marks, ...reviewMarks].join(" ").trim() };
+    }
   }
 
   return new Schema({ nodes, marks });

@@ -3,6 +3,13 @@ import { Extension } from "../Extension";
 import { COLLAB_SYNC_META } from "./UniqueId";
 
 /**
+ * Transaction meta for an edit that keeps the document well-formed rather than
+ * changing what it says — nobody authored it. Track changes does not record it
+ * as anyone's suggestion.
+ */
+export const NORMALIZATION_META = "scrivr:normalization";
+
+/**
  * TrailingNode — ensures the document always ends with an empty paragraph.
  *
  * Without this, if the last block is a heading, list, or code block the user
@@ -21,7 +28,9 @@ export const TrailingNode = Extension.create({
         appendTransaction(transactions, __, state) {
           const last = state.doc.lastChild;
           if (!last || last.type === paragraph) return null;
-          const tr = state.tr.insert(state.doc.content.size, paragraph!.create());
+          const tr = state.tr
+            .insert(state.doc.content.size, paragraph!.create())
+            .setMeta(NORMALIZATION_META, true);
           if (transactions.some((tx) => tx.docChanged && tx.getMeta(COLLAB_SYNC_META))) {
             tr.setMeta(COLLAB_SYNC_META, true);
           }

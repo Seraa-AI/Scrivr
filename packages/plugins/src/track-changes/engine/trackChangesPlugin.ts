@@ -12,24 +12,44 @@ import { findChanges } from "../findChanges";
 import { trackChanges } from "./trackChanges";
 import { fixInconsistentChanges } from "../lib/fixInconsistentChanges";
 import { TrackChangesOptions, TrackChangesStatus } from "../types";
-import { trFromHistory } from "./transactionProcessing";
+import { planReviewIn } from "../reviewChanges";
+import type { TrackingResult } from "../types";
+import { reportedTracking, trFromHistory } from "./transactionProcessing";
+import { closeDependentCreations, composeGestureRecords } from "./composition";
+import { normalizeMoveShadows } from "./moveIdentity";
 import { updateChangesStatus } from "./updateChangesStatus";
 
-interface TrackChangesPluginState {
+import type { ReviewOutcome } from "../reviewPlan";
+
+/**
+ * What the plugin knows. A host reads this off `trackChangesPluginKey` — the
+ * outcomes especially, since a refusal is the one a host must act on — so it
+ * needs a name it can write down.
+ */
+export interface TrackChangesState {
+  /** Outcome of the most recent review decision, applied or refused. */
+  lastReview: ReviewOutcome | null;
+  /**
+   * Outcome of the most recent tracked gesture; `refused` needs host action.
+   * Undo and redo clear it, since they replace what that gesture produced.
+   */
+  lastTracking: TrackingResult | null;
+  /** @internal Outcomes accumulated since the root transaction of this dispatch. */
+  trackingInDispatch: TrackingResult | null;
   status: TrackChangesStatus;
   changeSet: ChangeSet;
   userID: string;
   canAcceptReject: boolean;
 }
 
-export const trackChangesPluginKey = new PluginKey<TrackChangesPluginState>(
+export const trackChangesPluginKey = new PluginKey<TrackChangesState>(
   "track-changes",
 );
 
 export const trackChangesPlugin = (options: TrackChangesOptions) => {
   const { userID, skipTrsWithMetas = [], canAcceptReject = true } = options;
 
-  return new Plugin({
+  return new Plugin<TrackChangesState>({
     key: trackChangesPluginKey,
     props: {
       editable: (state: EditorState) =>
@@ -81,35 +101,52 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           tx,
           TrackChangesAction.setChangeStatuses,
         );
-        if (setsChangeStatus && pluginState.canAcceptReject) {
-          const { status, ids } = setsChangeStatus;
-          updateChangesStatus(
-            createdTr,
-            changeSet,
-            ids,
-            status,
-            userID,
-            oldState,
-          );
+        if (setsChangeStatus) {
+          // Whether the decision may go ahead is the shared rule's to answer,
+          // not this gate's — and a refusal is still an outcome, so it is
+          // reported rather than dropped.
+          const plan = planReviewIn(oldState, setsChangeStatus);
+          const review =
+            plan.status === "blocked" ? plan : updateChangesStatus(createdTr, changeSet, plan, userID);
+          setAction(createdTr, TrackChangesAction.reviewResult, review);
           docChanged = true;
         } else if (!shouldSkipTracking || suggestionIntent(tx)) {
-          createdTr =
-            trackChanges(tx, createdTr, oldState, suggestionIntent(tx)?.authorID ?? userID, skipTrsWithMetas) ??
-            createdTr;
+          const outcome = trackChanges(
+            tx, createdTr, oldState, suggestionIntent(tx)?.authorID ?? userID, skipTrsWithMetas,
+          );
+          if (outcome.kind === "tracked") createdTr = outcome.tr;
+          // A refusal is the outcome a host has to act on, so it outranks a
+          // sibling success in the same round: one dispatch can carry several
+          // transactions, and the last of them must not speak for all.
+          if (outcome.kind !== "skipped") {
+            setAction(
+              createdTr,
+              TrackChangesAction.trackingResult,
+              reportedTracking(
+                getAction(createdTr, TrackChangesAction.trackingResult),
+                outcome.result,
+              ),
+            );
+          }
         }
         docChanged = docChanged || tx.docChanged;
       });
-      const changed =
-        pluginState.changeSet.hasInconsistentData &&
-        fixInconsistentChanges(
-          pluginState.changeSet,
-          userID,
-          createdTr,
-          oldState.schema,
-        );
-      if (changed) {
-        console.warn("had to fix inconsistent changes in", createdTr);
+      if (createdTr.docChanged) {
+        // Order matters: composition reads which creation encloses a record,
+        // which only holds once a shadow's duplicated records are gone.
+        normalizeMoveShadows(createdTr);
+        composeGestureRecords(createdTr, oldState.doc);
+        closeDependentCreations(createdTr);
       }
+      // Read from the document this round produced, not the change set from
+      // before it: a split made now has to be repaired now, or its second
+      // piece is invisible to review until something else happens.
+      const current = docChanged || createdTr.docChanged
+        ? findChanges(EditorState.create({ doc: createdTr.doc }))
+        : pluginState.changeSet;
+      const changed =
+        current.hasInconsistentData &&
+        fixInconsistentChanges(current, userID, createdTr, oldState.schema);
       if (docChanged || createdTr.docChanged || changed) {
         createdTr.setMeta("origin", trackChangesPluginKey);
         return setAction(createdTr, TrackChangesAction.refreshChanges, true);
@@ -119,16 +156,38 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
     state: {
       init: (_config, state: EditorState) => {
         return {
+          lastReview: null,
+          lastTracking: null,
+          trackingInDispatch: null,
           status: options.initialStatus || TrackChangesStatus.enabled,
           userID,
           changeSet: findChanges(state),
           canAcceptReject,
         };
       },
-      apply: (tr, pluginState, _oldState, newState) => {
+      apply: (tr, previous, _oldState, newState) => {
+        // ProseMirror applies a root once, then tags every appended transaction
+        // with that root. Reset the accumulator here, including selection-only
+        // roots, so append rounds share an outcome without leaking into the
+        // next dispatch. Keep the last published outcome until new work arrives.
+        let pluginState = !tr.getMeta("appendedTransaction") && previous.trackingInDispatch
+          ? { ...previous, trackingInDispatch: null }
+          : previous;
+        if (trFromHistory(tr)) pluginState = { ...pluginState, lastTracking: null, trackingInDispatch: null };
         if (!tr.docChanged && !hasAction(tr)) {
           return pluginState;
         }
+        const review = getAction(tr, TrackChangesAction.reviewResult);
+        const tracking = getAction(tr, TrackChangesAction.trackingResult);
+        if (tracking) {
+          const result = reportedTracking(pluginState.trackingInDispatch ?? undefined, tracking);
+          pluginState = { ...pluginState, lastTracking: result, trackingInDispatch: result };
+        }
+        if (review || tracking) return {
+          ...pluginState,
+          ...(review ? { lastReview: review } : {}),
+          changeSet: findChanges(newState),
+        };
         const setUserID = getAction(tr, TrackChangesAction.setUserID);
         const setStatus = getAction(tr, TrackChangesAction.setPluginStatus);
         if (setUserID) {

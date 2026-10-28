@@ -1,12 +1,12 @@
 import { createPortal } from "react-dom";
-import type { Editor } from "@scrivr/core";
-import {
-  CHANGE_OPERATION,
-  CHANGE_STATUS,
-} from "@scrivr/plugins";
-import type { ChangePopoverInfo } from "@scrivr/plugins";
+import type { Editor, IBaseEditor } from "@scrivr/core";
+import { CHANGE_OPERATION } from "@scrivr/plugins";
+import type { ChangePopoverInfo, ReviewDecision } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
+import { shortName } from "../utils/authorName";
 import { useTrackChangesPopover } from "../hooks/useTrackChangesPopover";
+import { useReviewAction } from "../hooks/useReviewAction";
+import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
 
 export interface TrackChangesPopoverProps {
   editor: Editor | null;
@@ -146,7 +146,7 @@ function SingleChangePopover({
   descriptionClassName,
 }: {
   info: ChangePopoverInfo;
-  editor: Editor | null;
+  editor: IBaseEditor | null;
   onClose: () => void;
   itemClassName?: string | undefined;
   iconClassName?: string | undefined;
@@ -157,6 +157,13 @@ function SingleChangePopover({
   const author = shortName(info.authorID);
   const isDelete = info.operation === CHANGE_OPERATION.delete;
   const ids = info.groupIds.length > 0 ? info.groupIds : [info.id];
+  const review = useReviewAction(editor);
+
+  // The popover stays open on a refusal: closing it would take the explanation
+  // away with it, leaving a click that silently did nothing.
+  const decide = (decision: ReviewDecision, forIds: string[]) => {
+    if (review.review(decision, forIds).status === "applied") onClose();
+  };
 
   // ── Preview content ────────────────────────────────────────────────────────
   let preview: React.ReactNode = null;
@@ -215,26 +222,21 @@ function SingleChangePopover({
         </span>
         <button
           className={cx("scrivr-menu-item", itemClassName)}
-          onClick={() => {
-            editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, ids);
-            onClose();
-          }}
+          onClick={() => decide("accepted", ids)}
           style={btnStyle}
         >
           Accept
         </button>
         <button
           className={cx("scrivr-menu-item", itemClassName)}
-          onClick={() => {
-            editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, ids);
-            onClose();
-          }}
+          onClick={() => decide("rejected", ids)}
           style={btnStyle}
         >
           Reject
         </button>
       </div>
       {preview}
+      <ReviewRefusalNotice action={review} />
     </>
   );
 }
@@ -251,7 +253,7 @@ function ConflictPopover({
   descriptionClassName,
 }: {
   info: ChangePopoverInfo;
-  editor: Editor | null;
+  editor: IBaseEditor | null;
   onClose: () => void;
   itemClassName?: string | undefined;
   iconClassName?: string | undefined;
@@ -261,24 +263,24 @@ function ConflictPopover({
   const changes =
     info.conflictChanges.length > 0 ? info.conflictChanges : [info];
 
+  const review = useReviewAction(editor);
+
   function acceptOne(id: string) {
     const others = changes.filter((c) => c.id !== id).map((c) => c.id);
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [id]);
-    if (others.length > 0)
-      editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, others);
-    onClose();
+    if (review.resolveConflict(id, others).status === "applied") onClose();
   }
 
   function rejectAll() {
-    editor?.commands.setChangeStatuses?.(
-      CHANGE_STATUS.rejected,
-      changes.map((c) => c.id),
-    );
-    onClose();
+    if (review.review("rejected", changes.map((c) => c.id)).status === "applied") onClose();
+  }
+
+  function rejectOne(id: string) {
+    if (review.review("rejected", [id]).status === "applied") onClose();
   }
 
   return (
     <>
+      <ReviewRefusalNotice action={review} />
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span className={cx("scrivr-menu-icon", iconClassName)} data-part="icon" style={badge}>
@@ -352,12 +354,7 @@ function ConflictPopover({
                 {isDelete ? "Keep deletion" : "Keep insertion"}
               </button>
               <button
-                onClick={() => {
-                  editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [
-                    c.id,
-                  ]);
-                  onClose();
-                }}
+                onClick={() => rejectOne(c.id)}
                 className={cx("scrivr-menu-item", itemClassName)}
                 style={btnStyle}
                 title={`Reject only ${author}'s change`}
@@ -390,12 +387,6 @@ function ConflictPopover({
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
-
-/** Display name: strip "user:" prefix if present, cap length. */
-function shortName(authorID: string): string {
-  const name = authorID.split(":").pop() ?? authorID;
-  return name.length > 20 ? name.slice(0, 20) + "…" : name;
-}
 
 const badge = {
   display: "inline-flex",

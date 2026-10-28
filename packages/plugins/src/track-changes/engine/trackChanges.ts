@@ -1,16 +1,22 @@
-import { EditorState, PluginKey, Transaction } from "@scrivr/core/pm";
+import { NORMALIZATION_META } from "@scrivr/core";
+import { EditorState, Mapping, PluginKey, Transaction } from "@scrivr/core/pm";
 
 import { getAction, TrackChangesAction } from "../actions";
-import { processStepsBeforeTracking } from "./processStepsBeforeTracking";
 import {
   changeMovedToInsertsOnSourceDeletion,
-  filterMeaninglessMoveSteps,
-  getIndentationOperationSteps,
-  getMoveOperationsSteps,
+  contentSteps,
+  groupIndentationSteps,
+  groupMoveSteps,
+  trackingRefusal,
   trFromHistory,
 } from "./transactionProcessing";
-import { TrTrackingContext } from "../types";
+import { TrackingResult, TrTrackingContext } from "../types";
 import { trackTransaction } from "./trackTransaction";
+
+export type TrackingOutcome =
+  | { kind: "skipped" }
+  | { kind: "tracked"; tr: Transaction; result: Extract<TrackingResult, { status: "ready" }> }
+  | { kind: "refused"; result: Extract<TrackingResult, { status: "refused" }> };
 
 export function trackChanges(
   tx: Transaction,
@@ -18,7 +24,7 @@ export function trackChanges(
   oldState: EditorState,
   userID: string,
   skipTrsWithMetas: (PluginKey | string)[],
-) {
+): TrackingOutcome {
   const wasAppended = tx.getMeta("appendedTransaction") as
     | Transaction
     | undefined;
@@ -38,6 +44,8 @@ export function trackChanges(
     tx.getMeta("initialContent") === true ||
     wasAppended?.getMeta("initialContent") === true;
 
+  const isNormalization = !!tx.getMeta(NORMALIZATION_META);
+
   const isPaginationChange =
     tx.getMeta("inserting") !== undefined ||
     tx.getMeta("deleting") !== undefined;
@@ -49,10 +57,11 @@ export function trackChanges(
     trFromHistory(tx) ||
     isCollabSync ||
     isInitialLoad ||
+    isNormalization ||
     isPaginationChange ||
     (wasAppended && tx.getMeta("origin") === "paragraphs")
   ) {
-    return null;
+    return { kind: "skipped" };
   }
 
   const indentationAction = getAction(tx, TrackChangesAction.indentationAction);
@@ -60,21 +69,33 @@ export function trackChanges(
   const trContext: TrTrackingContext = {
     action,
     stepsByGroupIDMap: new Map(),
+    replayBridge: new Mapping(),
   };
 
-  const clearedSteps = processStepsBeforeTracking(tx, trContext, [
-    getMoveOperationsSteps,
-    getIndentationOperationSteps,
-    filterMeaninglessMoveSteps,
-  ]);
+  groupMoveSteps(tx, trContext);
+  groupIndentationSteps(tx, trContext);
 
+  const steps = contentSteps(tx.steps).length;
+  const refusal = trackingRefusal(tx.steps);
+  if (refusal) {
+    return {
+      kind: "refused",
+      result: { status: "refused", ...refusal, steps },
+    };
+  }
+
+  const startedAt = Date.now();
   changeMovedToInsertsOnSourceDeletion(tx, createdTr, trContext);
-  return trackTransaction(
+  const tr = trackTransaction(
     tx,
     oldState,
     createdTr,
     userID,
-    clearedSteps,
     trContext,
   );
+  return {
+    kind: "tracked",
+    tr,
+    result: { status: "ready", steps, elapsedMs: Date.now() - startedAt },
+  };
 }

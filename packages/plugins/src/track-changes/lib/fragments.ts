@@ -1,4 +1,4 @@
-import { Fragment, Node as PMNode, ResolvedPos, Schema } from "@scrivr/core/pm";
+import { Fragment, MarkType, Node as PMNode, NodeType, ResolvedPos, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 
 import {
@@ -42,7 +42,20 @@ export function setFragmentAsMoveChange(fragment: Fragment, moveAttrs: NewMoveAt
   fragment.forEach(node => {
     content.push(
       node.type.create(
-        { ...node.attrs, dataTracked: [addTrackIdIfDoesntExist(moveAttrs)] },
+        { ...node.attrs, dataTracked: [
+          ...(getBlockInlineTrackedData(node) ?? []).filter(record => record.operation !== CHANGE_OPERATION.move),
+          addTrackIdIfDoesntExist({ ...moveAttrs,
+            dependsOn: [...new Set([
+              ...(moveAttrs.dependsOn ?? []),
+              ...(getBlockInlineTrackedData(node) ?? [])
+                .filter(record => record.operation === CHANGE_OPERATION.insert && record.status === CHANGE_STATUS.pending)
+                .flatMap(record => record.creationId ? [record.creationId] : record.id ? [record.id] : []),
+            ])],
+            placementDependsOn: (getBlockInlineTrackedData(node) ?? [])
+              .filter(record => record.operation === CHANGE_OPERATION.move && record.status === CHANGE_STATUS.pending)
+              .flatMap(record => record.id ? [record.id] : []),
+          }),
+        ] },
         node.content,
         node.marks,
       ),
@@ -123,22 +136,25 @@ export function cutFragment(matched: number, deleted: number, content: Fragment)
   return [matched, Fragment.fromArray(newContent)] as [number, ExposedFragment];
 }
 
-function markInlineNodeChange(node: PMNode, newTrackAttrs: NewTrackedAttrs, schema: Schema) {
+/** The mark standing in for this operation on text. */
+function trackedMarkType(newTrackAttrs: NewTrackedAttrs, schema: Schema) {
+  return newTrackAttrs.operation === CHANGE_OPERATION.insert
+    ? schema.marks.trackedInsert
+    : schema.marks.trackedDelete;
+}
+
+function markInlineNodeChange(node: PMNode, mark: MarkType, newTrackAttrs: NewTrackedAttrs, schema: Schema) {
   const filtered = node.marks.filter(
     m => m.type !== schema.marks.trackedInsert && m.type !== schema.marks.trackedDelete,
   );
-  const mark =
-    newTrackAttrs.operation === CHANGE_OPERATION.insert
-      ? schema.marks.trackedInsert
-      : schema.marks.trackedDelete;
-  const createdMark = mark!.create({ dataTracked: addTrackIdIfDoesntExist(newTrackAttrs) });
+  const createdMark = mark.create({ dataTracked: addTrackIdIfDoesntExist(newTrackAttrs) });
   return node.mark(filtered.concat(createdMark));
 }
 
-function loopContentAndMergeText(content: Fragment, newTrackAttrs: NewTrackedAttrs, schema: Schema) {
+function loopContentAndMergeText(content: Fragment, newTrackAttrs: NewTrackedAttrs, schema: Schema, parent?: NodeType) {
   const updatedChildren: PMNode[] = [];
   for (let i = 0; i < content.childCount; i += 1) {
-    const recursed = recurseNodeContent(content.child(i), newTrackAttrs, schema);
+    const recursed = recurseNodeContent(content.child(i), newTrackAttrs, schema, parent);
     const prev = i > 0 ? updatedChildren[i - 1] : null;
     if (
       prev?.isText &&
@@ -154,13 +170,22 @@ function loopContentAndMergeText(content: Fragment, newTrackAttrs: NewTrackedAtt
   return updatedChildren;
 }
 
-function recurseNodeContent(node: PMNode, newTrackAttrs: NewTrackedAttrs, schema: Schema) {
+function recurseNodeContent(node: PMNode, newTrackAttrs: NewTrackedAttrs, schema: Schema, parent?: NodeType) {
+  const mark = trackedMarkType(newTrackAttrs, schema);
   if (node.isText) {
-    return markInlineNodeChange(node, newTrackAttrs, schema);
+    // Marks and node attrs are the two representations, and a parent admitting
+    // no marks has only the second. Its own stamp already records the whole
+    // subtree, so marking the text here would just build content its type
+    // rejects — invisibly, since create() does not validate.
+    if (!mark || (parent && !parent.allowsMarkType(mark))) return node;
+    return markInlineNodeChange(node, mark, newTrackAttrs, schema);
   } else if (node.isBlock || node.isInline) {
-    const updatedChildren = loopContentAndMergeText(node.content, newTrackAttrs, schema);
+    const entry = addTrackIdIfDoesntExist(newTrackAttrs);
+    const creationId = newTrackAttrs.creationId ?? (newTrackAttrs.operation === CHANGE_OPERATION.insert ? entry.id : undefined);
+    const composed = creationId ? { ...newTrackAttrs, creationId } : newTrackAttrs;
+    const updatedChildren = loopContentAndMergeText(node.content, composed, schema, node.type);
     return node.type.create(
-      { ...node.attrs, dataTracked: [addTrackIdIfDoesntExist(newTrackAttrs)] },
+      { ...node.attrs, dataTracked: [{ ...entry, ...(creationId ? { creationId } : {}) }] },
       Fragment.fromArray(updatedChildren),
       node.marks,
     );

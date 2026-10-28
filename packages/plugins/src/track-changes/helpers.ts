@@ -189,7 +189,12 @@ export function shouldMergeTrackedAttributes(
   return (
     left.status === right.status &&
     left.operation === right.operation &&
-    left.authorID === right.authorID
+    left.authorID === right.authorID &&
+    left.creationId === right.creationId &&
+    left.deletionId === right.deletionId &&
+    left.continuesId === right.continuesId &&
+    left.foldingClosed === right.foldingClosed &&
+    JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? [])
   );
 }
 
@@ -225,11 +230,17 @@ export const updateBlockNodesAttrs = (
   return Fragment.fromArray(updatedNodes);
 };
 
+/**
+ * Records without one change's. Accepts either shape `dataTracked` is written
+ * in — an array on a node, a lone object on a mark — because ProseMirror types
+ * the attr `any`, and a `.filter` on the object form throws.
+ */
 export function excludeFromTracked(
-  dataTracked: TrackedAttrs[] | null,
+  dataTracked: Partial<TrackedAttrs> | Partial<TrackedAttrs>[] | null | undefined,
   changeIdToExclude: string,
 ) {
   if (!dataTracked) return null;
-  const newDataTracked = dataTracked.filter(c => c.id !== changeIdToExclude);
-  return newDataTracked.length ? newDataTracked : null;
+  const records = Array.isArray(dataTracked) ? dataTracked : [dataTracked];
+  const remaining = records.filter(c => c.id !== changeIdToExclude);
+  return remaining.length ? remaining : null;
 }

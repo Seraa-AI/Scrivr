@@ -8,24 +8,19 @@
  * Each row has Accept / Reject buttons. Header has Accept All / Reject All.
  */
 
-import type { Editor } from "@scrivr/core";
-import {
-  CHANGE_OPERATION,
-  CHANGE_STATUS,
-} from "@scrivr/plugins";
+import type { IBaseEditor } from "@scrivr/core";
+import { CHANGE_OPERATION } from "@scrivr/plugins";
 import type {
   TrackedChange,
   MarkChange,
   NodeAttrChange,
 } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
+import { shortName } from "../utils/authorName";
 import { useTrackChangesPanel } from "../hooks/useTrackChangesPanel";
 import type { TrackChangesDisplayItem } from "../hooks/useTrackChangesPanel";
-
-function shortName(authorID: string): string {
-  const name = authorID.split(":").pop() ?? authorID;
-  return name.length > 22 ? name.slice(0, 22) + "…" : name;
-}
+import { useReviewAction } from "../hooks/useReviewAction";
+import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
 
 function truncate(text: string, max = 60): string {
   return text.length > max ? text.slice(0, max) + "…" : text;
@@ -169,7 +164,7 @@ function describeMarkChange(change: MarkChange): string {
 
 
 export interface TrackChangesPanelProps {
-  editor: Editor | null;
+  editor: IBaseEditor | null;
   className?: string | undefined;
   itemClassName?: string | undefined;
   iconClassName?: string | undefined;
@@ -229,7 +224,7 @@ export function TrackChangesPanel({
           </span>
         )}
 
-        {!panel.isEmpty && (
+        {!panel.isEmpty && panel.review.available && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
             <button className={cx("scrivr-menu-item", itemClassName)} onClick={panel.rejectAll} style={actionBtn}>
               Reject all
@@ -240,6 +235,10 @@ export function TrackChangesPanel({
           </div>
         )}
       </div>
+
+      {/* Whatever stopped the last header decision belongs with the buttons
+          that made it, not on a card nobody clicked. */}
+      <ReviewRefusalNotice action={panel.review} />
 
       {/* Body */}
       <div
@@ -277,9 +276,9 @@ export function TrackChangesPanel({
         ) : (
           panel.items.map((item, i) =>
             item.kind === "replacement" ? (
-              <ReplacementRow key={i} item={item} editor={editor} />
+              <ReplacementRow key={item.ids.join(":")} item={item} editor={editor} />
             ) : (
-              <SingleRow key={i} change={item.change} editor={editor} />
+              <SingleRow key={item.change.id} change={item.change} pieces={item.pieces} editor={editor} />
             ),
           )
         )}
@@ -293,9 +292,10 @@ function ReplacementRow({
   editor,
 }: {
   item: Extract<TrackChangesDisplayItem, { kind: "replacement" }>;
-  editor: Editor | null;
+  editor: IBaseEditor | null;
 }) {
   const { deleteChange: del, insertChange: ins, ids, authorID } = item;
+  const review = useReviewAction(editor);
 
   return (
     <ChangeRow
@@ -304,12 +304,9 @@ function ReplacementRow({
         label: "Replacement",
       }}
       authorID={authorID}
-      onAccept={() =>
-        editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, ids)
-      }
-      onReject={() =>
-        editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, ids)
-      }
+      onAccept={() => review.review("accepted", ids)}
+      onReject={() => review.review("rejected", ids)}
+      refusal={<ReviewRefusalNotice action={review} />}
     >
       <div style={previewLine}>
         <span style={prefixLabel}>Removing</span>
@@ -325,19 +322,22 @@ function ReplacementRow({
 
 function SingleRow({
   change,
+  pieces,
   editor,
 }: {
   change: TrackedChange;
-  editor: Editor | null;
+  pieces: TrackedChange[];
+  editor: IBaseEditor | null;
 }) {
   const meta = getChangeMeta(change);
   const authorID = change.dataTracked.authorID;
+  const review = useReviewAction(editor);
 
   function accept() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [change.id]);
+    review.review("accepted", [change.id]);
   }
   function reject() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [change.id]);
+    review.review("rejected", [change.id]);
   }
 
   let preview: React.ReactNode = null;
@@ -350,7 +350,7 @@ function SingleRow({
         style={previewLine}
       >
         <span style={prefixLabel}>{isDelete ? "Removing" : "Adding"}</span>
-        <em>"{truncate(tc.text)}"</em>
+        <em>"{truncate(pieces.map(piece => (piece.type === "text-change" ? piece.text : "")).join(" … "))}"</em>
       </div>
     );
   } else if (change.type === "mark-change") {
@@ -385,6 +385,7 @@ function SingleRow({
       authorID={authorID}
       onAccept={accept}
       onReject={reject}
+      refusal={<ReviewRefusalNotice action={review} />}
     >
       {preview}
     </ChangeRow>
@@ -397,12 +398,15 @@ function ChangeRow({
   onAccept,
   onReject,
   children,
+  refusal,
 }: {
   meta: ChangeMeta;
   authorID: string;
   onAccept: () => void;
   onReject: () => void;
   children: React.ReactNode;
+  /** Shown under the row: why this card's last click did not complete. */
+  refusal?: React.ReactNode;
 }) {
   return (
     <div
@@ -452,6 +456,8 @@ function ChangeRow({
 
       {/* Preview */}
       {children}
+
+      {refusal}
     </div>
   );
 }

@@ -65,6 +65,17 @@ export const schema = new Schema({
         nodeId:      { default: null },
       },
     },
+    // Admits no marks at all, review marks included — so a tracked change on
+    // it can only be recorded on the node.
+    unmarked_block: {
+      group: "block",
+      content: "text*",
+      marks: "",
+      attrs: {
+        dataTracked: { default: [] },
+        nodeId:      { default: null },
+      },
+    },
     text: { group: "inline" },
   },
   marks: {
@@ -102,6 +113,10 @@ export function h(level: number, text: string, attrs?: Record<string, unknown>) 
 
 export function doc(...nodes: PmNode[]) {
   return schema.nodes.doc.create(null, nodes);
+}
+
+export function unmarked(text: string) {
+  return schema.nodes.unmarked_block!.create(null, text ? schema.text(text) : undefined);
 }
 
 export function li(text: string) {
@@ -179,19 +194,13 @@ export class TestEditor {
 
   acceptChanges(ids: string[]) {
     return this.dispatch(
-      setAction(this.state.tr, TrackChangesAction.setChangeStatuses, {
-        status: CHANGE_STATUS.accepted,
-        ids,
-      }),
+      setAction(this.state.tr, TrackChangesAction.setChangeStatuses, { accepted: ids, rejected: [] }),
     );
   }
 
   rejectChanges(ids: string[]) {
     return this.dispatch(
-      setAction(this.state.tr, TrackChangesAction.setChangeStatuses, {
-        status: CHANGE_STATUS.rejected,
-        ids,
-      }),
+      setAction(this.state.tr, TrackChangesAction.setChangeStatuses, { accepted: [], rejected: ids }),
     );
   }
 

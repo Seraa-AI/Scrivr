@@ -12,75 +12,36 @@ import {
 import { deleteOrSetNodeDeleted } from "../lib/deleteNode";
 import { deleteTextIfInserted } from "../lib/deleteTextIfInserted";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
-import { ChangeStep, DeleteNodeStep, CHANGE_OPERATION, CHANGE_STATUS, UpdateAttrs } from "../types";
+import { ChangeStep, CHANGE_OPERATION, CHANGE_STATUS, UpdateAttrs } from "../types";
 
 export function processChangeSteps(
   changes: ChangeStep[],
   newTr: Transaction,
   emptyAttrs: NewEmptyAttrs,
   schema: Schema,
-  deletedNodeMapping: Mapping,
 ) {
   const mapping = new Mapping();
   const deleteAttrs = createNewDeleteAttrs(emptyAttrs);
   let selectionPos = undefined;
-  let deletesCounter = 0;
-  let isInserted = false;
-  let prevDelete: DeleteNodeStep;
+  const removedNodes: Array<{ from: number; to: number }> = [];
+  const retainedNodes: Array<{ from: number; to: number }> = [];
 
   changes.forEach(c => {
+    // A physically removed ancestor consumed its descendants. A retained
+    // proposal did not, regardless of whether it carries insertion records.
+    if ((c.type === "delete-node" || c.type === "delete-text") &&
+        removedNodes.some(range => range.from <= c.pos &&
+          (c.type === "delete-node" ? c.nodeEnd : c.to) <= range.to)) return;
     let step = newTr.steps[newTr.steps.length - 1];
     switch (c.type) {
       case "delete-node": {
-        deletesCounter++;
-        const prevDeletedNodeInserted = isInserted;
-        const trackedData = getBlockInlineTrackedData(c.node);
-        const inserted = trackedData?.find(
-          d =>
-            d.operation === CHANGE_OPERATION.insert ||
-            d.operation === CHANGE_OPERATION.wrap_with_node,
-        );
-        const structure = trackedData?.find(
-          c =>
-            c.operation === CHANGE_OPERATION.structure &&
-            deleteAttrs.moveNodeId &&
-            c.moveNodeId !== deleteAttrs.moveNodeId,
-        );
-        let childOfDeleted = false;
-        if (prevDelete) {
-          prevDelete.node.descendants(node => {
-            if (childOfDeleted) {
-              return false;
-            }
-            if (node == c.node) {
-              childOfDeleted = true;
-            }
-          });
-        }
-
-        const isMoveOperation = !!emptyAttrs.moveNodeId;
-        if (
-          (prevDelete &&
-            c.pos < prevDelete.nodeEnd &&
-            isInserted &&
-            deletesCounter > 1 &&
-            !isMoveOperation) ||
-          (childOfDeleted && prevDeletedNodeInserted)
-        ) {
-          return false;
-        }
-
-        deleteOrSetNodeDeleted(c.node, mapping.map(c.pos), newTr, deleteAttrs);
-        prevDelete = c;
-        isInserted = !!inserted || !!structure || (!trackedData && isInserted);
-
-        const newestStep = newTr.steps[newTr.steps.length - 1];
-        if (isInserted || structure) {
-          deletedNodeMapping.appendMap(newestStep!.getMap());
-        }
-        if (step !== newestStep) {
-          mapping.appendMap(newestStep!.getMap());
-          step = newestStep;
+        const beforeSteps = newTr.steps.length;
+        const allowCancellation = !retainedNodes.some(range => range.from <= c.pos && c.nodeEnd <= range.to);
+        const removed = deleteOrSetNodeDeleted(c.node, mapping.map(c.pos), newTr, deleteAttrs, allowCancellation);
+        if (removed) removedNodes.push({ from: c.pos, to: c.nodeEnd });
+        else retainedNodes.push({ from: c.pos, to: c.nodeEnd });
+        for (let i = beforeSteps; i < newTr.steps.length; i++) {
+          mapping.appendMap(newTr.steps[i]!.getMap());
         }
 
         mergeTrackedMarks(mapping.map(c.pos), newTr.doc, newTr, schema);
@@ -131,14 +92,10 @@ export function processChangeSteps(
           deleteAttrs,
           mapping.map(c.from),
           mapping.map(c.to),
+          !retainedNodes.some(range => range.from <= c.pos && c.to <= range.to),
         );
 
         const textNewestStep = newTr.steps[newTr.steps.length - 1];
-
-        if (node.marks.find(m => m.type === schema.marks.trackedInsert)) {
-          deletedNodeMapping.appendMap(textNewestStep!.getMap());
-        }
-
         if (step !== textNewestStep) {
           mapping.appendMap(textNewestStep!.getMap());
           step = textNewestStep;
@@ -159,11 +116,6 @@ export function processChangeSteps(
             mapping.map(c.to),
           );
           const newestStep = newTr.steps[newTr.steps.length - 1];
-
-          if (c.node.marks.find(m => m.type === schema.marks.trackedInsert)) {
-            deletedNodeMapping.appendMap(newestStep!.getMap());
-          }
-
           if (step !== newestStep) {
             mapping.appendMap(newestStep!.getMap());
             step = newestStep;
