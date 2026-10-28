@@ -9,6 +9,66 @@ import type { MarkDecorator, SpanRect } from "../types";
 import { safeUrl } from "../../model/safeUrl";
 import { getMarkAttrs } from "../../model/getNodeAttrs";
 import type { PdfMarkHandler } from "../../exports/pdf";
+import type { Mark, MarkType, Node } from "prosemirror-model";
+
+export interface LinkAtCaret {
+  href: string;
+  title: string | null;
+  from: number;
+  to: number;
+}
+
+function linkHref(mark: Mark): string | null {
+  const href: unknown = mark.attrs["href"];
+  return typeof href === "string" ? href : null;
+}
+
+/**
+ * The link the caret at `pos` is in: the one on the character just before it,
+ * as far as that link runs. A caret at a link's first character is not in it,
+ * as the mark is not inclusive. A link is where it points, so a run split by
+ * other attrs, such as tracking metadata, is still one link.
+ */
+export function linkAt(doc: Node, pos: number, linkType: MarkType): LinkAtCaret | null {
+  const $pos = doc.resolve(pos);
+  const parent = $pos.parent;
+  const linkOf = (index: number): Mark | undefined =>
+    index >= 0 && index < parent.childCount ? linkType.isInSet(parent.child(index).marks) : undefined;
+
+  const index = $pos.textOffset > 0 ? $pos.index() : $pos.index() - 1;
+  const mark = linkOf(index);
+  const href = mark ? linkHref(mark) : null;
+  if (!mark || href === null) return null;
+
+  const sameLink = (i: number) => {
+    const other = linkOf(i);
+    return other !== undefined && linkHref(other) === href;
+  };
+  let first = index;
+  let last = index;
+  while (sameLink(first - 1)) first--;
+  while (sameLink(last + 1)) last++;
+
+  const title: unknown = mark.attrs["title"];
+  return {
+    href,
+    title: typeof title === "string" ? title : null,
+    from: $pos.posAtIndex(first),
+    to: $pos.posAtIndex(last + 1),
+  };
+}
+
+/** The title of the first link in `from..to`, so replacing its href keeps it. */
+function titleIn(doc: Node, from: number, to: number, linkType: MarkType): string | null {
+  let title: string | null = null;
+  doc.nodesBetween(from, to, (node) => {
+    if (title !== null) return false;
+    const value: unknown = linkType.isInSet(node.marks)?.attrs["title"];
+    if (typeof value === "string") title = value;
+    return true;
+  });
+  return title;
+}
 
 /**
  * Link — inline hyperlink via the `link` mark.
@@ -22,7 +82,7 @@ import type { PdfMarkHandler } from "../../exports/pdf";
  *
  * Commands:
  *   setLink()    — prompts for URL then applies the link mark to selection
- *   unsetLink()  — removes the link mark from the selection
+ *   unsetLink()  — removes the link mark from the selection, or the link the caret is in
  */
 export const Link = Extension.create({
   name: "link",
@@ -94,8 +154,9 @@ export const Link = Extension.create({
           const safe = safeUrl(href);
           if (safe === null) return false;
           if (dispatch) {
+            const title = titleIn(state.doc, from, to, markType);
             const tr = state.tr.removeMark(from, to, markType);
-            tr.addMark(from, to, markType.create({ href: safe }));
+            tr.addMark(from, to, markType.create({ href: safe, title }));
             dispatch(tr);
           }
           return true;
@@ -106,8 +167,10 @@ export const Link = Extension.create({
           const markType = this.schema.marks["link"];
           if (!markType) return false;
           if (dispatch) {
-            const { from, to } = state.selection;
-            dispatch(state.tr.removeMark(from, to, markType));
+            const { from, to, empty, head } = state.selection;
+            // A caret removes the link it is in, as Word's Remove Hyperlink does.
+            const range = empty ? linkAt(state.doc, head, markType) : { from, to };
+            if (range) dispatch(state.tr.removeMark(range.from, range.to, markType));
           }
           return true;
         },

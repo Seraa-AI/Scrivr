@@ -10,8 +10,8 @@ function rect(top: number, left: number, w: number, h: number): DOMRect {
   };
 }
 
-function link(text: string, href: string) {
-  return { type: "text", text, marks: [{ type: "link", attrs: { href } }] };
+function link(text: string, href: string, dataTracked: unknown[] = []) {
+  return { type: "text", text, marks: [{ type: "link", attrs: { href, dataTracked } }] };
 }
 
 function editorWithParagraph(content: unknown[]): Editor {
@@ -115,5 +115,30 @@ describe("createLinkPopover", () => {
     const info = linkUnderCaret(editor, whole.from + 2);
 
     expect(info).toEqual({ href: "https://a.example", from: whole.from, to: rangeOf(editor, "bold").to });
+  });
+
+  it("finds a one-character link when the caret sits just past it", () => {
+    const editor = editorWithParagraph([
+      { type: "text", text: "x " },
+      link("b", "https://b.example"),
+      { type: "text", text: " y" },
+    ]);
+    const b = rangeOf(editor, "b");
+
+    const info = linkUnderCaret(editor, b.to);
+
+    expect(info).toEqual({ href: "https://b.example", ...b });
+  });
+
+  it("treats one href split by tracking metadata as one link", () => {
+    const editor = editorWithParagraph([
+      link("foo ", "https://a.example", [{ id: "t1" }]),
+      link("bar", "https://a.example", [{ id: "t2" }]),
+    ]);
+    const foo = rangeOf(editor, "foo ");
+
+    const info = linkUnderCaret(editor, foo.from + 2);
+
+    expect(info).toEqual({ href: "https://a.example", from: foo.from, to: rangeOf(editor, "bar").to });
   });
 });

@@ -1,27 +1,29 @@
 /**
  * createLinkPopover — framework-agnostic controller for a link editing popover.
  *
- * Automatically shows when the cursor (or selection) overlaps a `link` mark.
- * Passes the link's href and the mark's doc range to the callbacks so the
- * consumer can render an "Open / Edit / Remove" popover.
+ * Shows while the caret (the selection's head) is in a link. Passes the link's
+ * href and doc range to the callbacks so the consumer can render an
+ * "Open / Edit / Remove" popover.
  *
  * @example — vanilla JS
+ *   const place = (rect, { href }) => {
+ *     popover.style.cssText = `display:block;left:${rect.left}px;top:${rect.bottom + 8}px`;
+ *     popover.querySelector("a").href = href;
+ *   };
  *   const cleanup = createLinkPopover(editor, {
- *     onShow: (rect, href, range) => {
- *       popover.style.cssText = `display:block;left:${rect.left}px;top:${rect.bottom + 8}px`;
- *       popover.querySelector("a").href = href;
- *     },
+ *     onShow: place,
+ *     onMove: place,
  *     onHide: () => { popover.style.display = "none" },
  *   });
  */
-import type { Mark, Node } from "prosemirror-model";
 import type { IEditor } from "../extensions/types";
+import { linkAt } from "../extensions/built-in/Link";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
 
 export interface LinkPopoverInfo {
-  /** The href attribute of the link mark under the cursor. */
+  /** The href of the link the caret is in. */
   href: string;
   /** Doc position where the link mark starts. */
   from: number;
@@ -52,25 +54,13 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
   function update() {
     const state    = editor.getState();
     const { head } = state.selection;
-    const $pos     = state.doc.resolve(head);
-
-    // Find a link mark at the cursor position
-    const linkMark = state.schema.marks["link"];
-    if (!linkMark) {
+    const linkType = state.schema.marks["link"];
+    const link = linkType ? linkAt(state.doc, head, linkType) : null;
+    if (!link) {
       if (visible) { visible = false; onHide(); }
       return;
     }
-
-    const markInstance = $pos.marks().find((m) => m.type === linkMark)
-      ?? state.doc.resolve(Math.max(0, head - 1)).marks().find((m) => m.type === linkMark);
-
-    if (!markInstance) {
-      if (visible) { visible = false; onHide(); }
-      return;
-    }
-
-    const { from, to } = findMarkRange(state.doc, head, markInstance);
-    const href = markInstance.attrs["href"] as string;
+    const { href, from, to } = link;
 
     const rect = editor.getViewportRect(from, to);
     if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
@@ -107,31 +97,4 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     if (visible) { visible = false; onHide(); }
   };
-}
-
-/**
- * The run of adjacent text in `pos`'s textblock that carries this exact `mark`.
- * Matching the instance, not the type, keeps two neighbouring links apart.
- */
-function findMarkRange(doc: Node, pos: number, mark: Mark): { from: number; to: number } {
-  const $pos = doc.resolve(pos);
-  const parent = $pos.parent;
-  const carriesMark = (index: number) =>
-    index >= 0 && index < parent.childCount && mark.isInSet(parent.child(index).marks);
-
-  let index = $pos.index();
-  // A caret just past the link's last character resolves to the node after it.
-  if (!carriesMark(index)) index -= 1;
-  if (!carriesMark(index)) return { from: pos, to: pos };
-
-  let first = index;
-  let last = index;
-  while (carriesMark(first - 1)) first--;
-  while (carriesMark(last + 1)) last++;
-
-  let from = $pos.start();
-  for (let i = 0; i < first; i++) from += parent.child(i).nodeSize;
-  let to = from;
-  for (let i = first; i <= last; i++) to += parent.child(i).nodeSize;
-  return { from, to };
 }
