@@ -25,9 +25,9 @@ import { isAnchorInsideContainer } from "./anchorVisibility";
 export interface LinkPopoverInfo {
   /** The href of the link the caret is in. */
   href: string;
-  /** Doc position where the link mark starts. */
+  /** Doc position where the link starts. */
   from: number;
-  /** Doc position where the link mark ends. */
+  /** Doc position where the link ends. */
   to: number;
 }
 

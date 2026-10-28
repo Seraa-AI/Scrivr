@@ -22,14 +22,14 @@ function editorWithParagraph(content: unknown[]): Editor {
 
 /** Document range of the first occurrence of `text`. */
 function rangeOf(editor: Editor, text: string): { from: number; to: number } {
-  let found: { from: number; to: number } | null = null;
+  const ranges: { from: number; to: number }[] = [];
   editor.getState().doc.descendants((node, pos) => {
-    if (found || !node.isText) return;
-    const index = node.text?.indexOf(text) ?? -1;
-    if (index >= 0) found = { from: pos + index, to: pos + index + text.length };
+    const index = node.isText ? (node.text?.indexOf(text) ?? -1) : -1;
+    if (index >= 0) ranges.push({ from: pos + index, to: pos + index + text.length });
   });
-  if (!found) throw new Error(`no "${text}" in the document`);
-  return found;
+  const range = ranges[0];
+  if (!range) throw new Error(`no "${text}" in the document`);
+  return range;
 }
 
 // The popover defers its update through requestAnimationFrame; queue the
