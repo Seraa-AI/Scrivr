@@ -1,9 +1,0 @@
----
-"@scrivr/core": patch
----
-
-The link popover, and the commands it calls, act on exactly the link the caret is in.
-
-- **The popover's range is one link.** In a paragraph with two or more links, `LinkPopoverInfo.from`/`to` used to cover everything from the first link to the last. So saving an edited href (`@scrivr/react`'s `LinkPopover`, or `setLinkHref(info.from, info.to, …)`) relinked all of them, and the plain text between them, to the new href. The range now ends where the href changes, so two adjacent links with different hrefs are two links. A one-character link now opens the popover when the caret sits just past it.
-- **`unsetLink` removes whole links, as Word's Remove Hyperlink does.** A caret removes the link it is in, and a selection removes every link it touches, not just the selected part. It used to remove over the selection only, so with a caret the popover's Unlink button did nothing. It returns `false` when there is no link to remove.
-- **`setLinkHref` keeps the link's `title`.** It used to reset it to `null`.
