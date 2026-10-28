@@ -18,7 +18,7 @@
 
 import type { EditorState, Node as PmNode, Schema } from "@scrivr/core/pm";
 
-import { findNodeById } from "../ai-toolkit/UniqueId";
+import { findLiveNodeById } from "@scrivr/plugins";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
 import { diffText, pairReplacements } from "@scrivr/plugins";
 import type { PairedDiffOp } from "@scrivr/plugins";
@@ -166,7 +166,7 @@ export function computeAiSuggestion(
 
   for (const block of inputBlocks) {
     const { nodeId, summary } = block;
-    const found = findNodeById(state.doc, nodeId);
+    const found = findLiveNodeById(state.doc, nodeId);
     if (!found || !found.node.isTextblock) continue;
     const proposal = readProposal(block, schema, found.node);
     if (!proposal) continue;

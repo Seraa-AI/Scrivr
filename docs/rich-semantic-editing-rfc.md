@@ -282,7 +282,8 @@ The schemas are part of the public API.
   as an ordinary transaction and the track-changes engine produces the tracked
   representation from it, which is why `applyStructuralEdits` names no
   `CHANGE_OPERATION`. The whole batch goes in one transaction, so it is one undo
-  step and one review unit.
+  step; review decisions follow tracked-change relationships, not transaction
+  boundaries.
 
   What overturns it: a reviewer has to be able to accept a move as one
   decision. Delete+insert gives them two tracked changes that corrupt the
@@ -313,15 +314,29 @@ The schemas are part of the public API.
   - Painted as an insert (`TrackChanges.ts:332`), which is what a reader expects
     of text that arrived here.
 
-  **The gap is the producer, not the representation.** Today a move id is
-  assigned only for an indentation action — `getIndentationOperationSteps` is
-  the sole writer of `stepsByGroupIDMap`
-  (`engine/transactionProcessing.ts:52-64`), gated on `isIndentationAction`. So
-  Phase 3's work is to let a caller declare "this transaction is a move" and
-  have the engine assign one id across its `ReplaceStep`s — generalising that
-  function rather than adding a parallel one — after which `moveBlock` and
-  `moveListItem` apply as delete-at-old plus insert-at-new in a single
-  transaction and the engine yields one paired move change.
+  **Correction (2026-10-07): there is no producer gap.** D7 first said a move id
+  was assigned only for an indentation action, because
+  `getIndentationOperationSteps` looked like the sole writer of
+  `stepsByGroupIDMap`. It is not. `getMoveOperationsSteps`
+  (`engine/transactionProcessing.ts:111-199`, registered beside it in
+  `engine/trackChanges.ts:66`) writes the same map through the local alias
+  `movingAssoc`, and **auto-detects a move**: in any transaction with two or more
+  steps, a delete step whose removed content `nodeContentEquals` an insert
+  step's content gets a shared id. `nodeContentEquals` strips bookkeeping attrs
+  first, so a moved node matches itself.
+
+  Measured, not read — a plain `tr.delete(old)` + `tr.insert(new)` of one
+  paragraph in a single transaction already yields:
+
+  ```
+  ops: ["delete", "delete", "move"]   moveNodeId: one shared id for all three
+  ```
+
+  No new move representation is needed. Replay mapping corrections discovered
+  during integration are described below. `moveBlock` and `moveListItem` apply as
+  delete-at-old plus insert-at-new in one transaction, and the engine produces
+  the paired move change on its own. The indentation action only supplies
+  `indentationType`, which an AI move does not set.
 
   **Rejected alternative: grouping via `dataTracked.groupId`.** It exists
   (`types.ts:73`) and the popover already collects a group's ids to accept them
@@ -335,6 +350,44 @@ The schemas are part of the public API.
   `node_split`, `wrap_with_node` and `structure` exist; only the
   `insert_node` / `delete_node` pair is genuinely absent, and Phase 2's ops do
   not need it.
+
+## Phase 3 — resolution and tracking boundaries (implemented 2026-10-07)
+
+A pending move retains a deleted shadow and a live copy with the same `nodeId`.
+Core's `findNodeById` now returns the first match accepted by an optional
+predicate, and stops searching once it finds it. Core knows nothing about
+tracking. Structural AI edits build their predicate from
+`findChanges(EditorState.create({ doc }))`: a pending deletion covering the
+node's entire range excludes it. This includes empty nodes and descendants of
+deleted containers; testing text marks alone misses both.
+
+The ChangeSet is scanned once at structural-batch entry. Its shadow ranges are
+mapped through subsequent transaction steps before each lookup, so an earlier
+insertion cannot shift a shadow onto the wrong ID. Tracking runs after dispatch;
+new moves inside the batch still have only one copy. Shadow-only targets are
+reported as rejected, absent IDs as not found.
+
+`moveBlock` addresses top-level blocks. `moveListItem` accepts an item ID or a
+leaf inside it, but source and destination must resolve to the same list.
+Cross-list moves are rejected before writing steps. Self moves and moves to an
+already occupied boundary are no-ops. Moves preserve the node and its identity.
+
+Integration testing also exposed a tracking replay boundary: reverse replay
+must map from each step's document into the current tracked document, including
+retained insertions. The replay now composes that bridge and mirrors the source
+step with its inverse. The inverse's end boundary excludes later insertions so
+moving a block and then inserting beside it does not swallow the second edit.
+
+**Auto-pairing is retained.** Content-matched deletion and insertion in one
+transaction can become a move even when emitted as separate semantic ops.
+Accepting or rejecting the move uses the existing `moveNodeId` relationship to
+resolve its shadow atomically. Identical-content independent intents may thus
+become inseparable review decisions. This is an accepted limitation; explicit
+move intent is not required by the tracking engine.
+
+Verification covers both directions, either transaction-step order, atomic
+accept/reject, empty moved nodes, subsequent structural batches and same-batch
+follow-ups, shifted shadow ranges, deleted containers, and cross-list refusal.
 
 ## Phased implementation
 
@@ -351,12 +404,13 @@ cells) is inline-editable with zero echo churn.
 suggestions. Introduce `applySemanticEdits(editor, edits, { asSuggestion })`
 routing rich vs structural.
 
-### Phase 3 — move ops
-`moveBlock`, `moveListItem`. Per **D7**: one transaction that declares itself a
-move, so the engine produces a single `CHANGE_OPERATION.move` change with its
-`moveNodeId`-paired delete, rather than two changes a reviewer can half-accept.
-The engine-side work is generalising move-id assignment beyond the indentation
-action.
+### Phase 3 — move ops (implemented)
+`moveBlock`, `moveListItem` — delete-at-old plus insert-at-new in one
+transaction. Per **D7** the engine then produces a single
+`CHANGE_OPERATION.move` with its `moveNodeId`-paired delete on its own, so there
+is no new engine representation. Structural resolution excludes pending
+delete shadows in either direction, and replay mapping preserves later edits
+within the same transaction. List-item moves are restricted to the same list.
 
 ### Phase 4 — table columns
 `insertTableColumn`, `deleteTableColumn`. Reject complex merged-cell tables rather
@@ -434,7 +488,8 @@ section is what is true.
 |---|---|---|
 | **1** | #133, #134, #136 | `@scrivr/ai` extracted from `@scrivr/plugins` as a hard move (D2); leaf-based `RichSemanticEdit` with `getRichBlocks` / `applyRichEdit`; zod edit protocol with `parseSemanticEdits`. #133 first grouped adjacent formatting-mark tracked changes into one, which the leaf merge depends on |
 | **2** | #209, #210, #218 | Six structural ops — `insertBlock`, `deleteBlock`, `insertListItem`, `deleteListItem`, `insertTableRow`, `deleteTableRow` — in `StructuralSemanticEditSchema`, applied by `applyStructuralEdits`; `applySemanticEdits` routes rich vs structural; formatting proposals became visible, addressable and acceptable; a finding may propose no edit at all (block markers) |
-| **3-5** | — | Not built. Move ops, table columns, and first-class structural track-change primitives |
+| **3** | this PR | `moveBlock` and `moveListItem`. No new tracked representation — the engine's existing content-pairing yields one `CHANGE_OPERATION.move`. Core's `findNodeById` gained an `accept` predicate so a pending move's shadow is skipped in either direction, and three tracking replay defects the moves exposed are fixed |
+| **4-5** | — | Not built. Table columns, and `CHANGE_OPERATION.insert_node` / `delete_node` |
 
 ### Where the code differs from the design above
 
@@ -449,19 +504,18 @@ section is what is true.
 - **`deleteTableRow` takes `nodeId`, not `anchorNodeId`.** It names the row it
   deletes, which is not an anchor. The design listed `anchorNodeId` for it;
   `deleteBlock` and `deleteListItem` always read `nodeId`.
-- **Phases 3-4 ops are refused, not absent.** `StructuralSemanticEditSchema` has
-  no `moveBlock`, `moveListItem`, `insertTableColumn` or `deleteTableColumn`
-  member, and `packages/ai/src/schema/structural.test.ts` asserts each fails to
-  parse. An agent emitting one gets a validation error rather than a success that
+- **Phase 3 moves parse; Phase 4 columns remain refused.**
+  `StructuralSemanticEditSchema` accepts `moveBlock` and `moveListItem`;
+  `insertTableColumn` and `deleteTableColumn` still fail validation. An agent emitting one gets a validation error rather than a success that
   changes nothing — which is the only safe "not yet" for a protocol a model
   writes against.
 
 ### Not shipped, and not quietly dropped
 
-- Phase 3 move ops, Phase 4 table columns, Phase 5
-  `CHANGE_OPERATION.insert_node` / `delete_node` / `move_node`.
+- Phase 4 table columns and Phase 5 `CHANGE_OPERATION.insert_node` /
+  `delete_node`. Moves use the existing `move` operation.
 - The constrained tool schema derived from the zod schemas, and registration of
   editability by extensions contributing new leaf textblock types — both still
   open questions above.
-- `applySemanticEdits` returns `rejected` for ops it refuses; the reviewer-facing
-  grouping that D6 says Phase 3 needs does not exist yet.
+- `applySemanticEdits` returns `rejected` for ops it refuses; move review uses
+  the existing engine pairing rather than a new grouping representation.

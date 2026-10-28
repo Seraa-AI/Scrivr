@@ -161,7 +161,10 @@ function recurseNodeContent(node: PMNode, newTrackAttrs: NewTrackedAttrs, schema
     const updatedChildren = loopContentAndMergeText(node.content, newTrackAttrs, schema);
     return node.type.create(
       { ...node.attrs, dataTracked: [addTrackIdIfDoesntExist(newTrackAttrs)] },
-      Fragment.fromArray(updatedChildren),
+      // A tracked node insertion already represents the whole subtree. Do not
+      // put inline tracking marks into parents (such as code blocks) whose
+      // schema forbids them; the node-level change remains reviewable.
+      Fragment.fromArray(updatedChildren.map(child => child.mark(node.type.allowedMarks(child.marks)))),
       node.marks,
     );
   }
