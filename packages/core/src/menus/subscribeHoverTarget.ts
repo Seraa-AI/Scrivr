@@ -33,7 +33,8 @@ export interface SubscribeHoverTargetOptions {
  * Resting is per target, not per event: moving across a table's cells changes
  * the stack on every cell but never leaves the table, so the table's wait runs
  * on. Moving from one target of the kind straight onto another swaps
- * immediately once a peek is open — there is nothing left to wait for.
+ * immediately once a peek is open — there is nothing left to wait for. A
+ * shown target that an edit deleted closes at once, even under the pointer.
  */
 export function subscribeHoverTarget(
   editor: IEditor,
@@ -83,9 +84,17 @@ export function subscribeHoverTarget(
     }, hideDelay);
   };
 
-  const off = editor.on("hover", ({ targets }) => {
+  const off = editor.on("hover", ({ targets, fromEdit }) => {
     const target = targets.find((t) => t.kind === kind) ?? null;
 
+    if (!target && shown && fromEdit) {
+      // Waiting would leave the peek holding the deleted range's old
+      // positions, which now point at whatever the edit shifted into them.
+      clearTimer();
+      shown = null;
+      fn(null);
+      return;
+    }
     if (!target) {
       if (shown) scheduleHide();
       else clearTimer();

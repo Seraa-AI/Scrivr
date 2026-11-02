@@ -32,6 +32,12 @@ export interface HoverEvent {
    * began.
    */
   point: PagePoint | null;
+  /**
+   * True when an edit, not the pointer, changed the stack: targets moved with
+   * the text, or one was deleted. A deleted target is gone, not left behind,
+   * so a popover showing it should close without a grace period.
+   */
+  fromEdit?: boolean;
 }
 
 /** Mark-level hover: links today, comments / tracked changes later. */

@@ -17,7 +17,9 @@ a link in a table cell is `[link, table-cell, table]`. Click routing keeps
 Extensions claim marks or nodes through `addHoverResolvers`; `Link` and `Table`
 ship theirs. Text is hovered only inside the content box; an image or table
 cell is hovered wherever its own rect is, so an image hanging into the margin
-still peeks. Hover positions follow edits made while the pointer rests.
+still peeks. Hover positions follow edits made while the pointer rests; those
+events carry `fromEdit: true`, and a peek whose target an edit deleted closes
+at once.
 
 `createLinkPopover` and `createImageMenu` now pass
 `presentation: "peek" | "full"` on `LinkPopoverInfo` and `ImageMenuInfo` — a
@@ -45,8 +47,12 @@ any selection with node actions, which a table-cell selection now has.
 
 `editor.getNodeViewportRects(docPos)` returns one rect per painted fragment, so
 a table split across pages can be anchored on whichever page is on screen.
+Nodes inside table cells are found too, so a table nested in a cell gets its
+own menu.
 `getNodeViewportRect(docPos)` is its first entry, so it now answers for tables
 and paragraphs as well as images.
 
 `IEditor` gains `getNodeViewportRects` and `getHoverTargets`. A hand-written
 `IEditor` test double needs both; returning `[]` from each is enough.
+`ResolvedExtension` gains a required `hoverResolvers` array; code that builds
+one by hand passes `[]`.

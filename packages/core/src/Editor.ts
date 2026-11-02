@@ -1665,7 +1665,7 @@ export class Editor extends BaseEditor implements IEditor {
 			const end = tr.mapping.map(target.end, -1);
 			if (end > pos) targets.push({ ...target, pos, end });
 		}
-		this.reportHover({ targets, point: this.hoverPoint });
+		this.reportHover({ targets, point: this.hoverPoint, fromEdit: true });
 	}
 
 	/**

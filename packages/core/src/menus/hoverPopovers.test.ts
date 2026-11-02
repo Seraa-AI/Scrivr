@@ -179,6 +179,27 @@ describe("hover popovers", () => {
       expect(onHide).toHaveBeenCalledTimes(1);
     });
 
+    it("closes at once when an edit deletes the peeked link, even under the pointer", () => {
+      const editor = makeEditor();
+      const el = document.createElement("div");
+      vi.spyOn(el, "matches").mockReturnValue(true);
+      const onMove = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
+      const onHide = vi.fn();
+      cleanup = createLinkPopover(editor, {
+        onShow: () => {}, onHide, onMove, getPopoverElement: () => el,
+      });
+
+      hover(editor, linkTarget());
+      vi.advanceTimersByTime(400);
+      flushRaf();
+      // A collaborator deletes "there or "; the "here" link shifts into its old range.
+      editor.applyTransaction(editor.getState().tr.delete(4, 13));
+      flushRaf();
+
+      expect(onHide).toHaveBeenCalledTimes(1);
+      expect(onMove.mock.calls.map(([, info]) => info.href)).not.toContain(OTHER);
+    });
+
     it("expands peek → full in place when the selection enters the link", () => {
       const editor = makeEditor();
       const onShow = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();

@@ -1,5 +1,6 @@
 import type { Node } from "prosemirror-model";
 import type { ObjectRectEntry } from "./CharacterMap";
+import type { LayoutBlock } from "./BlockLayout";
 import type { LayoutPage } from "./PageLayout";
 
 /**
@@ -13,6 +14,9 @@ import type { LayoutPage } from "./PageLayout";
  *   2. A table cell — the `CellSubBlock` with that `cellPos`.
  *   3. Blocks laid out for the node's descendants, unioned — a table is laid
  *      out as its rows, a list as its items.
+ *
+ * Each step also searches inside cells, so a table nested in another table's
+ * cell has rects too.
  *
  * Image-like nodes are not here; their rects come from anchored placements and
  * the character map.
@@ -28,31 +32,51 @@ export function nodeFragmentRects(
   const rects: ObjectRectEntry[] = [];
 
   for (const page of pages) {
-    const own: ObjectRectEntry[] = [];
-    let cell: ObjectRectEntry | null = null;
-    let inner: ObjectRectEntry | null = null;
-
-    for (const block of page.blocks) {
-      if ((block.sourceNodePos ?? block.nodePos) === docPos) {
-        own.push(rectOf(docPos, page.pageNumber, block.x, block.y, block.width, block.height));
-        continue;
-      }
-      if (block.nodePos > docPos && block.nodePos < end) {
-        const r = rectOf(docPos, page.pageNumber, block.x, block.y, block.width, block.height);
-        inner = inner ? union(inner, r) : r;
-      }
-      for (const c of block.cells ?? []) {
-        if (c.cellPos === docPos) {
-          cell = rectOf(docPos, page.pageNumber, c.x, block.y + c.y, c.width, c.height);
-        }
-      }
-    }
-
-    if (own.length) rects.push(...own);
-    else if (cell) rects.push(cell);
-    else if (inner) rects.push(inner);
+    const found: Found = { own: [], cell: null, inner: null };
+    collect(page.blocks, 0, page.pageNumber, docPos, end, found);
+    if (found.own.length) rects.push(...found.own);
+    else if (found.cell) rects.push(found.cell);
+    else if (found.inner) rects.push(found.inner);
   }
   return rects;
+}
+
+interface Found {
+  own: ObjectRectEntry[];
+  cell: ObjectRectEntry | null;
+  inner: ObjectRectEntry | null;
+}
+
+/**
+ * One page's blocks, and the blocks inside each of their cells — a table
+ * nested in a cell is laid out there, not on the page. A cell's blocks sit at
+ * `y` relative to their row's top, so `top` carries that row's y down.
+ */
+function collect(
+  blocks: readonly LayoutBlock[],
+  top: number,
+  page: number,
+  docPos: number,
+  end: number,
+  found: Found,
+): void {
+  for (const block of blocks) {
+    const y = top + block.y;
+    if ((block.sourceNodePos ?? block.nodePos) === docPos) {
+      found.own.push(rectOf(docPos, page, block.x, y, block.width, block.height));
+      continue;
+    }
+    if (block.nodePos > docPos && block.nodePos < end) {
+      const r = rectOf(docPos, page, block.x, y, block.width, block.height);
+      found.inner = found.inner ? union(found.inner, r) : r;
+    }
+    for (const c of block.cells ?? []) {
+      if (c.cellPos === docPos) {
+        found.cell = rectOf(docPos, page, c.x, y + c.y, c.width, c.height);
+      }
+      collect(c.blocks, y, page, docPos, end, found);
+    }
+  }
 }
 
 function rectOf(

@@ -33,9 +33,8 @@ export interface HoverResolveInput {
  *                  has no glyph but is still inside the cell).
  *
  * Only the glyph step is held to the content box. An object or a cell claims a
- * point by its own rect, so an image hanging into the margin or a table wider
- * than the content box is still hovered there; a glyph lookup has no rect of
- * its own to say the margin is not text.
+ * point by its own rect, so an image hanging into the margin is still hovered
+ * there; a glyph lookup has no rect of its own to say the margin is not text.
  */
 export function resolveHoverTargets(input: HoverResolveInput): HoverTarget[] {
   const { point, state, surfaceId, owner, resolvers } = input;

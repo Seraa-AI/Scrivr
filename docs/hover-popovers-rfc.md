@@ -490,8 +490,8 @@ min/max over every link run in a textblock made two links in one paragraph
 read as one.
 
 **Deviation: the region gate applies to text only.** §3 says hover requires
-`region === "content"`. That made an anchored image hanging into the margin,
-or a table wider than the content box, show a move cursor but no peek. An
+`region === "content"`. That made an anchored image hanging into the margin
+show a move cursor but no peek. An
 object or a cell claims a point by its own rect, so ownership and hit-tester
 claims are kept anywhere on the page; only the glyph lookup — which has no
 rect of its own to say the margin is not text — is held to the content box.
@@ -509,19 +509,30 @@ round. The scan is one line's glyphs after `lineAtPoint` has found the line.
 **Deviation: node geometry.** `getNodeRects` takes no `surfaceId` and is
 private; `getNodeViewportRects(docPos)` is the public form, and
 `getNodeViewportRect(docPos)` is its first entry, so the two agree for every
-node. Popovers anchor to the first fragment on screen, for hover and
-selection alike, not the fragment nearest the pointer.
+node. The table menu anchors to the table's first fragment on screen, for
+hover and selection alike, not the fragment nearest the pointer; the image
+menu anchors to `getNodeViewportRect`, and the link popover to the link's
+text. Fragments are found inside table cells too, so a table nested in
+another table's cell gets its own menu.
 
 **Deviation: hover positions are mapped.** §1 says positions go stale on the
 next transaction. The editor maps the stack through each body transaction
 while the pointer rests, dropping a target whose range was deleted, so a
-collaborator's edit does not leave a peek on the old range.
+collaborator's edit does not leave a peek on the old range. Those events
+carry `fromEdit: true`, and a peek whose target an edit deleted closes at
+once rather than after the grace period — waiting would leave it holding
+positions that now belong to whatever shifted into them.
 
 **Deviation: hover is off by default for images and tables.** §5 has
 `hover` default true everywhere. Word, Docs and Pages show no card on hovering
 an image or table, so `createImageMenu` and `createTableMenu` default to
 `hover: false`. Links keep it on: reading where a link goes without moving
 the caret is the problem this RFC set out to solve.
+
+**Deviation: existing popover tests changed.** Build order step 6 expected
+`createLinkPopover`'s and `createImageMenu`'s tests to pass untouched. The
+image menu's do; the link popover's needed `presentation: "full"` added to
+their expected info, since the field is required.
 
 **Deviation: no Escape.** §5's "Escape hides a peek" was not built. Any key
 other than a lone modifier clears hover, which hides a peek after its grace

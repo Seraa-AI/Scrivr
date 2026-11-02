@@ -15,7 +15,8 @@ function paragraphs(n: number, text: string) {
   return Array.from({ length: n }, () => ({ type: "paragraph", content: [{ type: "text", text }] }));
 }
 
-function table(rows: number) {
+/** `inFirstCell` is appended to the first cell's content — a nested table, say. */
+function table(rows: number, inFirstCell: unknown[] = []): unknown {
   return {
     type: "table",
     attrs: { layout: "fixed", grid: [150, 150] },
@@ -23,7 +24,10 @@ function table(rows: number) {
       type: "tableRow",
       content: [0, 1].map((c) => ({
         type: "tableCell",
-        content: [{ type: "paragraph", content: [{ type: "text", text: `r${r}c${c}` }] }],
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: `r${r}c${c}` }] },
+          ...(r === 0 && c === 0 ? inFirstCell : []),
+        ],
       })),
     })),
   };
@@ -87,6 +91,16 @@ describe("nodeFragmentRects", () => {
     const pages = rectsOf(editor, nodePos(editor, "table")).map((r) => r.page);
     expect(pages.length).toBeGreaterThan(1);
     expect(pages).toEqual([...new Set(pages)].sort((a, b) => a - b));
+  });
+
+  it("finds a table nested in another table's cell, inside that cell", () => {
+    const editor = makeEditor([table(1, [table(2)])]);
+    const cell = rectsOf(editor, nodePos(editor, "tableCell", 0))[0]!;
+    const inner = rectsOf(editor, nodePos(editor, "table", 1));
+    expect(inner).toHaveLength(1);
+    expect(inner[0]!.x).toBeGreaterThanOrEqual(cell.x);
+    expect(inner[0]!.y).toBeGreaterThan(cell.y);
+    expect(inner[0]!.y + inner[0]!.height).toBeLessThanOrEqual(cell.y + cell.height);
   });
 
   it("is empty for a position that is not a node", () => {

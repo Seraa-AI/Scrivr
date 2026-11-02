@@ -349,8 +349,8 @@ export class PointerController {
   }
 
   /**
-   * The cursor for a hover position: a resize handle's own cursor, `move` over
-   * something draggable, `text` over the page, `default` off it.
+   * The cursor for a hover position: a resize handle's own cursor, `text` over
+   * text, `move` over an object.
    *
    * Resize handles sit above ownership — they are chrome painted over the
    * selected node, not part of the page.
