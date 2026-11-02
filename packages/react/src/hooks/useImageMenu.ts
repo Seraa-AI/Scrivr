@@ -36,7 +36,7 @@ const WRAP_OPTIONS: { value: ImageWrappingMode; label: string; title: string }[]
 ];
 
 export interface UseImageMenuOptions {
-  /** Hover peeks. Default true; false shows the menu from the selection only. */
+  /** Hover peeks. Default false; true or delays peek a hovered image. */
   hover?: HoverOption;
 }
 
@@ -57,8 +57,8 @@ export function useImageMenu(editor: Editor | null, options: UseImageMenuOptions
         infoRef.current = i;
         setRect(r);
         setInfo(i);
-        setWidth(String(Math.round(i.node.attrs["width"] as number)));
-        setHeight(String(Math.round(i.node.attrs["height"] as number)));
+        setWidth(dimension(i.node.attrs["width"]));
+        setHeight(dimension(i.node.attrs["height"]));
         setWrappingMode(resolveWrappingMode(i.node.attrs));
       },
       onMove: (r, i) => {
@@ -66,8 +66,8 @@ export function useImageMenu(editor: Editor | null, options: UseImageMenuOptions
         // Peek → full: the inputs were never shown, so seed them now.
         const prev = infoRef.current;
         if (prev?.presentation !== i.presentation || prev.docPos !== i.docPos) {
-          setWidth(String(Math.round(i.node.attrs["width"] as number)));
-          setHeight(String(Math.round(i.node.attrs["height"] as number)));
+          setWidth(dimension(i.node.attrs["width"]));
+          setHeight(dimension(i.node.attrs["height"]));
         }
         infoRef.current = i;
         setInfo(i);
@@ -79,8 +79,10 @@ export function useImageMenu(editor: Editor | null, options: UseImageMenuOptions
         setInfo(null);
       },
       getPopoverElement: () => ref.current,
-      ...(options.hover !== undefined ? { hover: options.hover } : {}),
+      hover: options.hover,
     });
+    // `hover` is read once, at mount: an inline `{ showDelay }` is a new object
+    // every render, and resubscribing would restart a peek's wait each time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
 
@@ -133,6 +135,11 @@ export function useImageMenu(editor: Editor | null, options: UseImageMenuOptions
     setAlign,
     setWrapMode,
   };
+}
+
+/** A width or height attr as the dimension inputs show it; empty when unset. */
+function dimension(value: unknown): string {
+  return typeof value === "number" ? String(Math.round(value)) : "";
 }
 
 function resolveWrappingMode(attrs: Record<string, unknown>): ImageWrappingMode {

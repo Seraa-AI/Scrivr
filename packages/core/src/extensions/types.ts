@@ -278,11 +278,10 @@ export interface IEditor extends IBaseEditor {
    */
   getViewportRect(from: number, to: number): DOMRect | null;
   /**
-   * Returns the full visual viewport rect of the inline object at docPos
-   * (image, widget). Unlike getViewportRect, this uses the actual object
-   * render bounds — not the cursor-sized glyph — so the rect height matches
-   * the real image height and rect.bottom is the correct anchor for a popover.
-   * Returns null if the object has not been rendered yet.
+   * The first of `getNodeViewportRects(docPos)`, or null when the node has no
+   * fragment on a mounted page. For an image this is its full render bounds —
+   * not the cursor-sized glyph `getViewportRect` gives — so rect.bottom is the
+   * correct anchor for a popover.
    */
   getNodeViewportRect(docPos: number): DOMRect | null;
   /**

@@ -14,16 +14,25 @@ import type { HoverEvent } from "./types";
  */
 
 const HREF = "https://example.com/docs";
+const OTHER = "https://example.com/other";
 
-function link(text: string) {
-  return { type: "text", text, marks: [{ type: "link", attrs: { href: HREF } }] };
+function link(text: string, href = HREF) {
+  return { type: "text", text, marks: [{ type: "link", attrs: { href } }] };
 }
 
 function content() {
   return {
     type: "doc",
     content: [
-      { type: "paragraph", content: [{ type: "text", text: "see " }, link("the docs"), { type: "text", text: " here" }] },
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: "see " },
+          link("the docs"),
+          { type: "text", text: " here" },
+          link("other", OTHER),
+        ],
+      },
       {
         type: "table",
         attrs: { layout: "fixed", grid: [200, 200] },
@@ -87,7 +96,15 @@ describe("Editor.resolveHoverTargets", () => {
     const from = posOf(editor, "the docs");
     const targets = editor.resolveHoverTargets(pointOver(editor, from + 2));
     expect(targets).toEqual([
-      { kind: "link", surfaceId: "body", pos: from, end: from + "the docs".length, payload: { href: HREF } },
+      { kind: "link", surfaceId: "body", pos: from, end: from + "the docs".length },
+    ]);
+  });
+
+  it("reports the second of two links in a paragraph as its own range", () => {
+    const editor = makeEditor();
+    const from = posOf(editor, "other");
+    expect(editor.resolveHoverTargets(pointOver(editor, from + 1))).toEqual([
+      { kind: "link", surfaceId: "body", pos: from, end: from + "other".length },
     ]);
   });
 
@@ -105,28 +122,61 @@ describe("Editor.resolveHoverTargets", () => {
     ]);
   });
 
-  it("carries the table's shape on the table target", () => {
-    const editor = makeEditor();
-    const table = editor.resolveHoverTargets(pointOver(editor, posOf(editor, "plain"))).at(-1);
-    expect(table?.kind).toBe("table");
-    expect(table?.payload).toEqual({ rows: 2, columns: 2, headerRow: true });
-  });
-
   it("does not snap: blank space past the end of a line hovers nothing", () => {
     const editor = makeEditor();
-    const end = editor.charMap.coordsAtPos(posOf(editor, "here") + 4)!;
+    const lineEnd = posOf(editor, "other") + "other".length;
+    const end = editor.charMap.coordsAtPos(lineEnd)!;
     const point: PagePoint = { page: 1, x: end.x + 200, y: end.y + end.height / 2, region: "content" };
     expect(editor.resolveHoverTargets(point)).toEqual([]);
     // Click still snaps there — posAtCoords is unchanged.
-    expect(editor.charMap.posAtCoords(point.x, point.y, 1)).toBe(posOf(editor, "here") + 4);
+    expect(editor.charMap.posAtCoords(point.x, point.y, 1)).toBe(lineEnd);
   });
 
-  it("reports nothing outside the content region", () => {
+  it("reports no text outside the content region", () => {
     const editor = makeEditor();
     const over = pointOver(editor, posOf(editor, "the docs") + 2);
     for (const region of ["margin", "header", "footer", "gap", "outside"] as const) {
       expect(editor.resolveHoverTargets({ ...over, region })).toEqual([]);
     }
+  });
+
+  it("lets a cell claim a point outside the content box by its own rect", () => {
+    const editor = makeEditor();
+    // A table wider than the content box: the part in the margin is still the
+    // cell and the table, but not the link painted there.
+    const over = pointOver(editor, posOf(editor, "cell link") + 1);
+    expect(kinds(editor, { ...over, region: "margin" })).toEqual(["table-cell", "table"]);
+    expect(kinds(editor, { ...over, region: "gap" })).toEqual([]);
+  });
+});
+
+describe("Editor hover through transactions", () => {
+  function hoverLink(editor: Editor) {
+    const point = pointOver(editor, posOf(editor, "the docs") + 2);
+    editor.reportHover({ targets: editor.resolveHoverTargets(point), point });
+  }
+
+  it("maps a hovered range through an edit before it", () => {
+    const editor = makeEditor();
+    hoverLink(editor);
+    const events: HoverEvent[] = [];
+    editor.on("hover", (e) => events.push(e));
+
+    editor.applyTransaction(editor.getState().tr.insertText("ab", 1));
+
+    const from = posOf(editor, "the docs");
+    expect(editor.getHoverTargets()).toEqual([
+      { kind: "link", surfaceId: "body", pos: from, end: from + "the docs".length },
+    ]);
+    expect(events).toHaveLength(1);
+  });
+
+  it("drops a hovered range the edit deleted", () => {
+    const editor = makeEditor();
+    hoverLink(editor);
+    const from = posOf(editor, "the docs");
+    editor.applyTransaction(editor.getState().tr.delete(from, from + "the docs".length));
+    expect(editor.getHoverTargets()).toEqual([]);
   });
 });
 
@@ -205,6 +255,8 @@ describe("PointerController hover events", () => {
     const over = pointOver(editor, posOf(editor, "the docs") + 1);
 
     move(over);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Meta" }));
+    expect(events.at(-1)!.targets.map((t) => t.kind)).toEqual(["link"]);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }));
     expect(events.at(-1)!.targets).toEqual([]);
 

@@ -4,7 +4,8 @@ import type { LayoutPage } from "./PageLayout";
 
 /**
  * Every painted fragment of the block-level node at `docPos`, one rect per
- * page, in page order. See docs/hover-popovers-rfc.md §4.
+ * page, in page order — what a popover anchors to when the node it serves
+ * is not an image.
  *
  * Per page, the first of these that matches wins:
  *   1. Blocks laid out for the node itself (`sourceNodePos ?? nodePos`) — a

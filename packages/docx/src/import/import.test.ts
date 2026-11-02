@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { ServerEditor, StarterKit } from "@scrivr/core";
+import { ServerEditor, StarterKit, SourcedBlockExtension } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import { exportDocxBytes } from "../export/export";
 import { importDocx } from "./import";
@@ -734,6 +734,35 @@ describe("importDocx — extension dispatch", () => {
     });
     
     expect(foundControlContent).toBe(true);
+  });
+});
+
+describe("importDocx — sourced blocks", () => {
+  it("brings back a block with no recorded base without inventing one", async () => {
+    const extensions = [StarterKit, SourcedBlockExtension];
+    const source = new ServerEditor({
+      extensions,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "sourcedBlock",
+            attrs: { instanceId: "src_1", kind: "clause", resourceId: "cl_1", versionId: "v1" },
+            content: [{ type: "paragraph", content: [{ type: "text", text: "Clause" }] }],
+          },
+        ],
+      },
+    });
+
+    const { doc } = await importDocx(
+      new ServerEditor({ extensions }),
+      await exportDocxBytes(source),
+    );
+
+    const block = doc.child(0);
+    expect(block.type.name).toBe("sourcedBlock");
+    expect(block.attrs["resourceId"]).toBe("cl_1");
+    expect(block.attrs["baseHash"]).toBeNull();
   });
 });
 

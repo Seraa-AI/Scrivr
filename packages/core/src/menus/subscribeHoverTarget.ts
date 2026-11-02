@@ -11,15 +11,17 @@ export interface HoverDelays {
   hideDelay?: number;
 }
 
-/** A controller's `hover` option: on by default, `false` disables peeks. */
+/** A controller's `hover` option: `true` or delays turn peeks on, `false` turns them off. */
 export type HoverOption = boolean | HoverDelays;
 
 export const DEFAULT_HOVER_SHOW_DELAY = 350;
 export const DEFAULT_HOVER_HIDE_DELAY = 150;
 
-export interface SubscribeHoverTargetOptions extends HoverDelays {
+export interface SubscribeHoverTargetOptions {
+  /** `false` subscribes to nothing. Default true. */
+  hover?: HoverOption | undefined;
   /** The popover's root; while the pointer is over it, the peek stays open. */
-  getPopoverElement?: () => HTMLElement | null;
+  getPopoverElement?: (() => HTMLElement | null) | undefined;
 }
 
 /**
@@ -28,8 +30,10 @@ export interface SubscribeHoverTargetOptions extends HoverDelays {
  * once it has been off it for `hideDelay` — unless the pointer is over the
  * popover itself, which keeps the peek open.
  *
- * Moving from one target of the kind straight onto another swaps immediately:
- * the peek is already open, so there is nothing to wait for.
+ * Resting is per target, not per event: moving across a table's cells changes
+ * the stack on every cell but never leaves the table, so the table's wait runs
+ * on. Moving from one target of the kind straight onto another swaps
+ * immediately once a peek is open — there is nothing left to wait for.
  */
 export function subscribeHoverTarget(
   editor: IEditor,
@@ -37,10 +41,15 @@ export function subscribeHoverTarget(
   fn: (target: HoverTarget | null) => void,
   opts: SubscribeHoverTargetOptions = {},
 ): () => void {
-  const showDelay = opts.showDelay ?? DEFAULT_HOVER_SHOW_DELAY;
-  const hideDelay = opts.hideDelay ?? DEFAULT_HOVER_HIDE_DELAY;
+  const hover = opts.hover ?? true;
+  if (hover === false) return () => {};
+  const delays = hover === true ? {} : hover;
+  const showDelay = delays.showDelay ?? DEFAULT_HOVER_SHOW_DELAY;
+  const hideDelay = delays.hideDelay ?? DEFAULT_HOVER_HIDE_DELAY;
 
   let shown: HoverTarget | null = null;
+  /** The target the show timer is waiting on. */
+  let pending: HoverTarget | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const clearTimer = (): void => {
@@ -48,6 +57,7 @@ export function subscribeHoverTarget(
       clearTimeout(timer);
       timer = null;
     }
+    pending = null;
   };
 
   const overPopover = (): boolean => {
@@ -81,20 +91,21 @@ export function subscribeHoverTarget(
       else clearTimer();
       return;
     }
-    if (shown && sameTarget(shown, target)) {
-      clearTimer();
-      return;
-    }
     if (shown) {
       clearTimer();
-      shown = target;
-      fn(target);
+      if (!sameTarget(shown, target)) {
+        shown = target;
+        fn(target);
+      }
       return;
     }
+    if (pending && sameTarget(pending, target)) return;
     clearTimer();
+    pending = target;
     timer = setTimeout(() => {
       timer = null;
       shown = target;
+      pending = null;
       fn(target);
     }, showDelay);
   });
@@ -104,13 +115,6 @@ export function subscribeHoverTarget(
     clearTimer();
     shown = null;
   };
-}
-
-/** Resolve a controller's `hover` option to delays, or null when hover is off. */
-export function resolveHoverOption(option: HoverOption | undefined): HoverDelays | null {
-  if (option === false) return null;
-  if (option === undefined || option === true) return {};
-  return option;
 }
 
 function sameTarget(a: HoverTarget, b: HoverTarget): boolean {

@@ -1,9 +1,9 @@
 /**
  * ImageMenu — React wrapper around createImageMenu.
  *
- * Peeks on hover — alt text, size and layout, read-only. Select the image and
- * the same card expands to controls for layout, alignment and dimensions.
- * Override either with `renderPeek` / `renderFull`.
+ * Select an image for controls for layout, alignment and dimensions. With
+ * `hover` on, resting the pointer on an image peeks the same card — alt text,
+ * size and layout, read-only. Override either with `renderPeek` / `renderFull`.
  * No configuration required — just mount it alongside your editor.
  *
  * @example
@@ -21,7 +21,7 @@ export interface ImageMenuProps {
   itemClassName?: string | undefined;
   titleClassName?: string | undefined;
   descriptionClassName?: string | undefined;
-  /** Hover peeks. Default true; false shows the menu from the selection only. */
+  /** Hover peeks. Default false; true or delays peek a hovered image. */
   hover?: HoverOption | undefined;
   /** Replace the peek's content. */
   renderPeek?: ((menu: ImageMenuState) => ReactNode) | undefined;

@@ -1,11 +1,12 @@
-import type { Mark, Node } from "prosemirror-model";
+import type { Node } from "prosemirror-model";
 import type { PagePoint } from "../layout/pagePoint";
 
 /**
- * One layer of what is under the pointer. See docs/hover-popovers-rfc.md §1.
+ * One layer of what is under the pointer.
  *
- * Positions go stale on the next transaction, so a target never carries a live
- * `Node`; consumers re-resolve `pos` against current state.
+ * The editor maps `pos` and `end` through each transaction while the pointer
+ * rests, but a target never carries a live `Node`: what is at `pos` can change
+ * without the range moving, so consumers re-resolve it against current state.
  */
 export interface HoverTarget {
   /**
@@ -20,22 +21,29 @@ export interface HoverTarget {
   pos: number;
   /** Mark range end, or pos + node.nodeSize. */
   end: number;
-  /** Kind-specific metadata from the resolver that produced the target. */
-  payload?: unknown;
 }
 
 export interface HoverEvent {
   /** Innermost first: [link, table-cell, table]. Empty when over nothing. */
   targets: readonly HoverTarget[];
-  /** Null when the pointer left the editor. */
+  /**
+   * The point the targets were resolved at. Null when hover was cleared rather
+   * than resolved — the pointer left, a key or press ended hover, or a drag
+   * began.
+   */
   point: PagePoint | null;
 }
 
 /** Mark-level hover: links today, comments / tracked changes later. */
 export interface MarkHoverResolver {
   mark: string;
-  /** Payload for the target; return null to decline this instance. */
-  resolve(mark: Mark, range: { from: number; to: number }): unknown | null;
+  /**
+   * The range the mark covers around the character at `pos` (the character's
+   * own position), or null to decline. The extension answers because only it
+   * knows when two adjacent runs are one instance — a link runs as far as its
+   * href does.
+   */
+  range(doc: Node, pos: number): { from: number; to: number } | null;
 }
 
 /**
@@ -47,8 +55,6 @@ export interface NodeHoverResolver {
   node: string;
   /** Target kind to report. */
   kind: string;
-  /** Payload for the target; return null to decline this instance. */
-  resolve(node: Node, pos: number): unknown | null;
 }
 
 export type HoverResolver = MarkHoverResolver | NodeHoverResolver;

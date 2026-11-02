@@ -506,6 +506,7 @@ export class Editor extends BaseEditor implements IEditor {
 	private readonly hoverResolvers: HoverResolver[];
 	/** What the pointer is over — transient, never editor state. */
 	private hoverTargets: readonly HoverTarget[] = [];
+	private hoverPoint: PagePoint | null = null;
 	/** Extension-registered pointer-gesture providers. */
 	private readonly selectionGestures: SelectionGestureProvider[];
 
@@ -1225,25 +1226,16 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	getNodeViewportRect(docPos: number): DOMRect | null {
-		const rect = this.getNodeRect(docPos);
-		if (!rect) return null;
-		const pageScreenRect = this.ib.lookupPageScreenRect(rect.page);
-		if (!pageScreenRect) return null;
-		return new DOMRect(
-			pageScreenRect.screenLeft + rect.x,
-			pageScreenRect.screenTop + rect.y,
-			rect.width,
-			rect.height,
-		);
+		return this.getNodeViewportRects(docPos)[0] ?? null;
 	}
 
 	/**
 	 * Every painted fragment of the node at `docPos`, in page order: one rect
 	 * for an image, one per page for a paragraph or table split across pages,
 	 * the cell's own rect for a table cell. `getNodeRect` stays the
-	 * image-only, first-fragment lookup.
+	 * image-only lookup.
 	 */
-	getNodeRects(docPos: number): ObjectRectEntry[] {
+	private getNodeRects(docPos: number): ObjectRectEntry[] {
 		const object = this.getNodeRect(docPos);
 		if (object) return [object];
 		return nodeFragmentRects(this.layout.pages, this.getState().doc, docPos);
@@ -1611,18 +1603,15 @@ export class Editor extends BaseEditor implements IEditor {
 	/**
 	 * What is under `point`, innermost first — `[link, table-cell, table]` for a
 	 * link in a cell. Click routing keeps `resolveHitTarget`'s first-wins chain;
-	 * hover wants every layer. Empty outside the body content box, and while a
-	 * header/footer surface is being edited (the body is dimmed then).
+	 * hover wants every layer. Empty while a header/footer surface is being
+	 * edited: hover resolves against the body only, which is dimmed then.
+	 *
+	 * @internal — the pointer controller's; read `getHoverTargets` or the
+	 * `"hover"` event instead.
 	 */
 	resolveHoverTargets(point: PagePoint): HoverTarget[] {
-		if (point.region !== "content" || this.surfaces?.activeSurface) return [];
+		if (this.surfaces?.activeSurface) return [];
 		const state = this.getState();
-		const ctx: HitTestContext = {
-			editor: this,
-			intent: "hover",
-			state,
-			posAtCoords: (x, y, p) => this.charMap.posAtCoords(x, y, p),
-		};
 		return resolveHoverTargets({
 			point,
 			state,
@@ -1633,10 +1622,7 @@ export class Editor extends BaseEditor implements IEditor {
 				objectRectAt: (x, y, p) => this.charMap.objectRectAtPoint(x, y, p),
 			}),
 			glyphAt: (x, y, p) => this.charMap.glyphAtPoint(x, y, p),
-			hitTargets: () =>
-				this.hitTesters
-					.map((t) => t.hitTest(point.x, point.y, point.page, ctx))
-					.filter((h): h is HitTarget => h !== null),
+			hitTarget: () => this.resolveHitTarget(point.x, point.y, point.page),
 			resolvers: this.hoverResolvers,
 			nodeKind: (pos) => {
 				try {
@@ -1655,12 +1641,31 @@ export class Editor extends BaseEditor implements IEditor {
 
 	/**
 	 * Record what the pointer is over and emit `"hover"` when the stack changed.
-	 * Called by the pointer controller — not intended for external use.
+	 *
+	 * @internal — the pointer controller's; read `getHoverTargets` or the
+	 * `"hover"` event instead.
 	 */
 	reportHover(event: HoverEvent): void {
 		if (sameHoverTargets(this.hoverTargets, event.targets)) return;
 		this.hoverTargets = event.targets;
+		this.hoverPoint = event.point;
 		this.emit("hover", event);
+	}
+
+	/**
+	 * Carry the hover stack through an edit made while the pointer rests, so a
+	 * collaborator typing above a link does not leave its peek on the old
+	 * range. A target whose range the edit deleted drops out.
+	 */
+	private mapHover(tr: Transaction): void {
+		if (!tr.docChanged || this.hoverTargets.length === 0) return;
+		const targets: HoverTarget[] = [];
+		for (const target of this.hoverTargets) {
+			const pos = tr.mapping.map(target.pos, 1);
+			const end = tr.mapping.map(target.end, -1);
+			if (end > pos) targets.push({ ...target, pos, end });
+		}
+		this.reportHover({ targets, point: this.hoverPoint });
 	}
 
 	/**
@@ -1839,6 +1844,7 @@ export class Editor extends BaseEditor implements IEditor {
 		this.lc.invalidate();
 		// applyState is in BaseEditor: applies tr, emits "update", notifyListeners
 		this.applyState(tr);
+		this.mapHover(tr);
 		// resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
 		// Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.
 		this.cursorManager.resetSilent();

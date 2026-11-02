@@ -3,10 +3,11 @@ import { createTestEditor } from "../test-utils";
 import { StarterKit } from "../extensions/StarterKit";
 import { DefaultContent } from "../extensions/built-in/DefaultContent";
 import { defaultPageConfig } from "./PageLayout";
+import { nodeFragmentRects } from "./nodeRects";
 import type { Editor } from "../Editor";
 
 /**
- * Node geometry for popovers (`getNodeRects`) and strict glyph lookup for
+ * Node geometry for popovers (`nodeFragmentRects`) and strict glyph lookup for
  * hover (`glyphAtPoint`), against real layout.
  */
 
@@ -45,10 +46,14 @@ function nodePos(editor: Editor, name: string, nth = 0): number {
   return found[nth]!;
 }
 
-describe("Editor.getNodeRects", () => {
+function rectsOf(editor: Editor, docPos: number) {
+  return nodeFragmentRects(editor.layout.pages, editor.getState().doc, docPos);
+}
+
+describe("nodeFragmentRects", () => {
   it("returns one rect for a paragraph on one page", () => {
     const editor = makeEditor([...paragraphs(1, "hello"), table(2)]);
-    const rects = editor.getNodeRects(nodePos(editor, "paragraph"));
+    const rects = rectsOf(editor, nodePos(editor, "paragraph"));
     expect(rects).toHaveLength(1);
     expect(rects[0]).toMatchObject({ page: 1, x: defaultPageConfig.margins.left });
     expect(rects[0]!.height).toBeGreaterThan(0);
@@ -57,7 +62,7 @@ describe("Editor.getNodeRects", () => {
   it("unions a table's rows into one rect per page", () => {
     const editor = makeEditor([...paragraphs(1, "before"), table(3)]);
     const tablePos = nodePos(editor, "table");
-    const rects = editor.getNodeRects(tablePos);
+    const rects = rectsOf(editor, tablePos);
     expect(rects).toHaveLength(1);
 
     const rows = editor.layout.pages[0]!.blocks.filter((b) => b.kind === "tableRow");
@@ -68,9 +73,9 @@ describe("Editor.getNodeRects", () => {
 
   it("returns a cell's own rect, inside its table's", () => {
     const editor = makeEditor([table(2)]);
-    const [tableRect] = editor.getNodeRects(nodePos(editor, "table"));
-    const first = editor.getNodeRects(nodePos(editor, "tableCell", 0))[0]!;
-    const second = editor.getNodeRects(nodePos(editor, "tableCell", 1))[0]!;
+    const [tableRect] = rectsOf(editor, nodePos(editor, "table"));
+    const first = rectsOf(editor, nodePos(editor, "tableCell", 0))[0]!;
+    const second = rectsOf(editor, nodePos(editor, "tableCell", 1))[0]!;
     expect(second.x).toBeGreaterThan(first.x);
     expect(first.y).toBe(second.y);
     expect(first.x).toBeGreaterThanOrEqual(tableRect!.x);
@@ -79,14 +84,14 @@ describe("Editor.getNodeRects", () => {
 
   it("returns one rect per page for a table split across pages", () => {
     const editor = makeEditor([...paragraphs(1, "x"), table(80)]);
-    const pages = editor.getNodeRects(nodePos(editor, "table")).map((r) => r.page);
+    const pages = rectsOf(editor, nodePos(editor, "table")).map((r) => r.page);
     expect(pages.length).toBeGreaterThan(1);
     expect(pages).toEqual([...new Set(pages)].sort((a, b) => a - b));
   });
 
   it("is empty for a position that is not a node", () => {
     const editor = makeEditor(paragraphs(1, "x"));
-    expect(editor.getNodeRects(10_000)).toEqual([]);
+    expect(rectsOf(editor, 10_000)).toEqual([]);
   });
 });
 
@@ -112,7 +117,7 @@ describe("CharacterMap.glyphAtPoint", () => {
 
   it("returns null in a cell's padding", () => {
     const editor = makeEditor([table(1)]);
-    const cell = editor.getNodeRects(nodePos(editor, "tableCell"))[0]!;
+    const cell = rectsOf(editor, nodePos(editor, "tableCell"))[0]!;
     expect(editor.charMap.glyphAtPoint(cell.x + 1, cell.y + 1, 1)).toBeNull();
   });
 });

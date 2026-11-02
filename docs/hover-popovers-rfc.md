@@ -1,6 +1,8 @@
 # RFC: Hover inspection — popovers that peek on hover and expand on select
 
-Status: draft (2026-10-21)
+Status: v1 shipped (2026-11-02) — see [What shipped](#what-shipped), which
+records where the code departs from the proposal below. Decision 8 is
+deferred, not built.
 
 ## Problem
 
@@ -368,6 +370,9 @@ metadata without rebuilding positioning.
 
 ## 6. Surfaces
 
+> Not built in v1 — hover resolves against the body only and is empty while a
+> surface is active. See [What shipped](#what-shipped).
+
 `resolveHitTarget` and the new `resolveHoverTargets` build their context from
 the state that owns the point:
 
@@ -402,8 +407,8 @@ would resolve against the body doc.
    hover and drags.
 7. **`getNodeRects` returns fragments.** Single-rect methods stay as
    first-fragment wrappers.
-8. **Surface-owned state, body fallback**, for both hover and click hit
-   testing.
+8. **Deferred: surface-owned state, body fallback**, for both hover and
+   click hit testing. Not built in v1; see What shipped.
 9. **`HoverTarget.payload` never holds a live `Node`.** Positions go stale on
    the next transaction; controllers re-resolve against current state on every
    update, as `createImageMenu` already does.
@@ -448,3 +453,86 @@ existing image-menu-style popovers) and can land before hover itself.
   next consumers (`TrackChangesPopover` is selection-driven today). Confirm the
   `MarkHoverResolver` shape fits them before locking it.
 - **Delays.** 350 / 150 ms are guesses from Docs' feel; tune in the playground.
+
+## What shipped
+
+Where the code and the proposal above disagree, this section says so rather
+than the proposal being quietly rewritten to match.
+
+### v1 — shipped
+
+Build-order steps 1–3 and 5–7 landed together. Step 4 (surface-aware hit
+testing) did not.
+
+**Deviation: no surfaces (decision 8 deferred).** Hover resolves against the
+body only, and returns an empty stack while a header or footer surface is
+active — the body is dimmed then, so there is nothing in it to peek. Click
+routing still builds its hit-test context from the body, so the click-routing
+fix §6 promises has not happened either. Surface-owned hover needs surface
+geometry (`CharacterMap`, layout pages) to resolve against, which chrome
+surfaces do not expose yet.
+
+**Deviation: `intent` was dropped.** §2 step 4 runs every hit tester with
+`intent: "hover"` and collects them all. In practice structure needs one
+position to walk ancestors from, and click routing's first-wins
+`resolveHitTarget` already gives it, so hover calls that and nothing reads an
+intent.
+
+**Deviation: mark resolvers own their range, and there is no payload.** §1's
+`HoverTarget.payload` and §2's `resolve(mark, range)` are gone: every popover
+re-derived what it shows from current state, so a payload was computed on
+every frame and never read. A mark resolver answers
+`range(doc, pos) → { from, to } | null` instead, because only the extension
+knows when two adjacent runs are one instance. `Link`'s resolver is `linkAt`,
+the same lookup the caret uses, so hover and the caret agree on where a link
+starts and ends. `findMarkRange` (§2's last paragraph) is gone: taking the
+min/max over every link run in a textblock made two links in one paragraph
+read as one.
+
+**Deviation: the region gate applies to text only.** §3 says hover requires
+`region === "content"`. That made an anchored image hanging into the margin,
+or a table wider than the content box, show a move cursor but no peek. An
+object or a cell claims a point by its own rect, so ownership and hit-tester
+claims are kept anywhere on the page; only the glyph lookup — which has no
+rect of its own to say the margin is not text — is held to the content box.
+A gap or off-page point is still empty.
+
+**Deviation: `resolvePagePoint` never returns null**, and it is internal along
+with `pageRegionAt` and their context types. They need tile geometry only the
+pointer controller has. `PagePoint` and `PageRegion` stay public because
+`HoverEvent.point` is one.
+
+**Deviation: `glyphAtPoint` scans, it does not binary-search**, and
+`hasTextAt` is unchanged — `glyphAtPoint` calls it first, not the other way
+round. The scan is one line's glyphs after `lineAtPoint` has found the line.
+
+**Deviation: node geometry.** `getNodeRects` takes no `surfaceId` and is
+private; `getNodeViewportRects(docPos)` is the public form, and
+`getNodeViewportRect(docPos)` is its first entry, so the two agree for every
+node. Popovers anchor to the first fragment on screen, for hover and
+selection alike, not the fragment nearest the pointer.
+
+**Deviation: hover positions are mapped.** §1 says positions go stale on the
+next transaction. The editor maps the stack through each body transaction
+while the pointer rests, dropping a target whose range was deleted, so a
+collaborator's edit does not leave a peek on the old range.
+
+**Deviation: hover is off by default for images and tables.** §5 has
+`hover` default true everywhere. Word, Docs and Pages show no card on hovering
+an image or table, so `createImageMenu` and `createTableMenu` default to
+`hover: false`. Links keep it on: reading where a link goes without moving
+the caret is the problem this RFC set out to solve.
+
+**Deviation: no Escape.** §5's "Escape hides a peek" was not built. Any key
+other than a lone modifier clears hover, which hides a peek after its grace
+period; a modifier alone does not, so a shortcut or a modifier-click can begin
+over a peek.
+
+**Table actions are node actions.** The full table menu renders
+`editor.getNodeActions()`, which the `Table` extension contributes for the
+`table-cell` kind — row and column inserts and deletes, and Delete table. A
+non-React consumer gets them the same way.
+
+**Open question answered: read-only.** Node actions that edit are hidden in a
+read-only editor, so a cell selection there has nothing to offer: the table
+menu shows its peek instead of an empty full menu.

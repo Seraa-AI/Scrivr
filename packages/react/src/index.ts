@@ -29,7 +29,7 @@ export type { UseLinkPopoverOptions } from "./hooks/useLinkPopover";
 export type { ImageMenuProps, ImageMenuState } from "./components/ImageMenu";
 export type { UseImageMenuOptions } from "./hooks/useImageMenu";
 export type { TableMenuProps, TableMenuState } from "./components/TableMenu";
-export type { UseTableMenuOptions, TableCommandId } from "./hooks/useTableMenu";
+export type { UseTableMenuOptions } from "./hooks/useTableMenu";
 export type { ImageVerticalAlign, ImageWrappingMode } from "./hooks/useImageMenu";
 export type { TrackChangesPopoverProps } from "./components/TrackChangesPopover";
 export type { AiSuggestionPopoverProps } from "./components/AiSuggestionPopover";

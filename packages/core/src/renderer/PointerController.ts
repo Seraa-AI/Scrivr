@@ -27,6 +27,9 @@ const DRAG_THRESHOLD_PX = 3;
 const AXIS_STILL_THRESHOLD_PX = 3;
 const RE_ANCHOR_THRESHOLD_PX = 24;
 
+/** `KeyboardEvent.key` for a modifier pressed on its own. */
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock"]);
+
 /**
  * Minimal view of a tile entry — PointerController only needs access to
  * wrapper elements for cursor style updates.
@@ -167,7 +170,7 @@ export class PointerController {
   attach(): void {
     this.deps.tilesContainer.addEventListener("pointerdown", this.handlePointerDown);
     this.deps.tilesContainer.addEventListener("pointerleave", this.clearHover);
-    document.addEventListener("keydown", this.clearHover);
+    document.addEventListener("keydown", this.handleKeyDown);
     document.addEventListener("pointermove", this.handlePointerMove);
     document.addEventListener("pointerup", this.handlePointerUp);
     document.addEventListener("pointercancel", this.handlePointerCancel);
@@ -193,7 +196,7 @@ export class PointerController {
     this.clearHover();
     this.deps.tilesContainer.removeEventListener("pointerdown", this.handlePointerDown);
     this.deps.tilesContainer.removeEventListener("pointerleave", this.clearHover);
-    document.removeEventListener("keydown", this.clearHover);
+    document.removeEventListener("keydown", this.handleKeyDown);
     document.removeEventListener("pointermove", this.handlePointerMove);
     document.removeEventListener("pointerup", this.handlePointerUp);
     document.removeEventListener("pointercancel", this.handlePointerCancel);
@@ -352,11 +355,7 @@ export class PointerController {
    * Resize handles sit above ownership — they are chrome painted over the
    * selected node, not part of the page.
    */
-  private hoverCursorFor(
-    hit: PagePoint | null,
-  ): string {
-    if (!hit) return "default";
-
+  private hoverCursorFor(hit: PagePoint): string {
     const resizeHit = this.hitHandleAt(hit.x, hit.y, hit.page);
     if (resizeHit) return resizeHit.cursor;
 
@@ -382,7 +381,6 @@ export class PointerController {
       this.pendingHoverPoint = null;
       if (!p) return;
       const { editor } = this.deps;
-      if (typeof editor.resolveHoverTargets !== "function") return;
       editor.reportHover({ targets: editor.resolveHoverTargets(p), point: p });
     });
   }
@@ -397,9 +395,16 @@ export class PointerController {
       this.hoverRaf = null;
     }
     this.pendingHoverPoint = null;
-    const { editor } = this.deps;
-    if (typeof editor.reportHover !== "function") return;
-    editor.reportHover({ targets: [], point: null });
+    this.deps.editor.reportHover({ targets: [], point: null });
+  };
+
+  /**
+   * Typing hides peeks. A modifier alone is not typing — it is how a
+   * shortcut, or a Cmd/Ctrl-click on the hovered link, begins.
+   */
+  private handleKeyDown = (e: KeyboardEvent): void => {
+    if (MODIFIER_KEYS.has(e.key)) return;
+    this.clearHover();
   };
 
   // ── Pointer events ──────────────────────────────────────────────────────────
@@ -421,7 +426,6 @@ export class PointerController {
     }
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
-    if (!hit) return;
     // A press ends hover: it either places a caret (the selection's popover
     // takes over) or starts a drag.
     this.clearHover();
@@ -606,8 +610,8 @@ export class PointerController {
     if (this.activeGesture) {
       this.clearHover();
       const h = this.hitTest(e.clientX, e.clientY);
-      const target = h ? editor.resolveHitTarget(h.x, h.y, h.page) : null;
-      const point = h ? { page: h.page, docX: h.x, docY: h.y } : null;
+      const target = editor.resolveHitTarget(h.x, h.y, h.page);
+      const point = { page: h.page, docX: h.x, docY: h.y };
       try {
         this.activeGesture.update(target, e, point);
       } catch (err) {
@@ -685,7 +689,7 @@ export class PointerController {
     }
 
     // Text selection drag
-    if (!this.isDragging || !hit) return;
+    if (!this.isDragging) return;
     // Mid-drag in the gap between two pages: the region is "gap" and hit.y
     // is clamped to the source page bottom. Letting posAtCoords run on that
     // would re-collapse the selection's head to end-of-source-page on every
@@ -730,8 +734,8 @@ export class PointerController {
       this.activeGesture = null;
       this.isDragging = false;
       const h = this.hitTest(e.clientX, e.clientY);
-      const target = h ? editor.resolveHitTarget(h.x, h.y, h.page) : null;
-      const point = h ? { page: h.page, docX: h.x, docY: h.y } : null;
+      const target = editor.resolveHitTarget(h.x, h.y, h.page);
+      const point = { page: h.page, docX: h.x, docY: h.y };
       try {
         gesture.finish(target, e, point);
       } finally {
@@ -1062,7 +1066,7 @@ export class PointerController {
   private resolveCrossPageDropYOffset(e: PointerEvent, newDocPos: number): number {
     if (!this.anchoredDrag) return 0;
     const hit = this.hitTest(e.clientX, e.clientY);
-    if (!hit || hit.region === "gap") return 0;
+    if (hit.region === "gap") return 0;
 
     const ghostTopLocalY = hit.y - this.anchoredDrag.grabOffsetY;
     const ghostGlobalY = this.pageLocalYToGlobal(hit.page, ghostTopLocalY);
@@ -1161,7 +1165,6 @@ export class PointerController {
     const { editor } = this.deps;
 
     const hit = this.hitTest(e.clientX, e.clientY);
-    if (!hit) return null;
     // Step 4 invariant: gap drops never resolve a docPos.
     if (hit.region === "gap") return null;
 
@@ -1239,7 +1242,6 @@ export class PointerController {
     if (!this.anchoredDrag) return;
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
-    if (!hit) return;
 
     // Ghost top-left = current cursor minus the grab offset captured at
     // pointerdown. Stays anchored to where the user originally grabbed.
@@ -1293,7 +1295,6 @@ export class PointerController {
     if (!this.inlineImageDrag) return;
     const { editor } = this.deps;
     const hit = this.hitTest(e.clientX, e.clientY);
-    if (!hit) return;
 
     const ghostX = hit.x - this.inlineImageDrag.rect.width / 2;
     const ghostY = hit.y - this.inlineImageDrag.rect.height / 2;

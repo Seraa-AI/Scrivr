@@ -1,10 +1,14 @@
 /**
  * createTableMenu — framework-agnostic controller for a table popover.
  *
- * Two presentations (docs/hover-popovers-rfc.md §5):
- *   - "peek" when the pointer rests on a table — rows × columns, header row.
- *   - "full" when cells are selected — the consumer adds the selection's node
- *     actions (`editor.getNodeActions()`).
+ * Two presentations:
+ *   - "full" when cells are selected in an editable table — the consumer
+ *     renders the selection's node actions (`editor.getNodeActions()`), which
+ *     the Table extension contributes.
+ *   - "peek" when the pointer rests on a table, with `hover` on — rows ×
+ *     columns, header row. Off by default: Word, Docs and Pages show no card
+ *     on hover. A cell selection in a read-only editor peeks too, since it has
+ *     no actions to offer.
  * Selection wins: while cells are selected, hover is ignored.
  *
  * The rect passed to the callbacks is the table's top edge on the first page
@@ -26,7 +30,6 @@ import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
 import {
-  resolveHoverOption,
   subscribeHoverTarget,
   type HoverOption,
   type PopoverPresentation,
@@ -35,7 +38,7 @@ import {
 export interface TableMenuInfo extends TableShape {
   /** Doc position of the table node. */
   docPos: number;
-  /** "peek" when shown from hover, "full" when cells are selected. */
+  /** "full" when cells are selected and editable, else "peek". */
   presentation: PopoverPresentation;
 }
 
@@ -47,9 +50,9 @@ export interface TableMenuCallbacks {
 
 export interface TableMenuOptions extends TableMenuCallbacks {
   /** The popover's root; keeps a peek open while the pointer is over it. */
-  getPopoverElement?: () => HTMLElement | null;
-  /** Hover peeks. Default true; false shows the menu from the selection only. */
-  hover?: HoverOption;
+  getPopoverElement?: (() => HTMLElement | null) | undefined;
+  /** Hover peeks. Default false; true or delays peek a hovered table. */
+  hover?: HoverOption | undefined;
 }
 
 export function createTableMenu(editor: IEditor, options: TableMenuOptions): () => void {
@@ -64,12 +67,13 @@ export function createTableMenu(editor: IEditor, options: TableMenuOptions): () 
     if (visible) { visible = false; lastDocPos = -1; onHide(); }
   }
 
-  /** The table holding a cell selection — the full presentation. */
-  function selectedTable(): number | null {
+  /** The table holding a cell selection, and whether its cells can be edited. */
+  function selectedTable(): { docPos: number; editable: boolean } | null {
     if (editor.surfaces.activeSurface) return null;
     const descriptor = editor.getSelectionDescriptor();
     if (descriptor.kind !== "table-cell") return null;
-    return tableAround(editor.getState().doc, descriptor.from);
+    const docPos = tableAround(editor.getState().doc, descriptor.from);
+    return docPos === null ? null : { docPos, editable: descriptor.capabilities.delete };
   }
 
   function hoveredTable(): number | null {
@@ -79,8 +83,8 @@ export function createTableMenu(editor: IEditor, options: TableMenuOptions): () 
   }
 
   function update() {
-    const full = selectedTable();
-    const docPos = full ?? hoveredTable();
+    const selected = selectedTable();
+    const docPos = selected?.docPos ?? hoveredTable();
     const table = docPos === null ? null : nodeAt(editor.getState().doc, docPos);
     if (docPos === null || !table) { hide(); return; }
 
@@ -95,7 +99,7 @@ export function createTableMenu(editor: IEditor, options: TableMenuOptions): () 
     const info: TableMenuInfo = {
       docPos,
       ...describeTable(table),
-      presentation: full !== null ? "full" : "peek",
+      presentation: selected?.editable ? "full" : "peek",
     };
 
     if (visible && lastDocPos === docPos) {
@@ -113,15 +117,12 @@ export function createTableMenu(editor: IEditor, options: TableMenuOptions): () 
   }
 
   const unsubscribe = subscribeViewUpdates(editor, scheduleUpdate);
-  const hoverDelays = resolveHoverOption(options.hover);
-  const offHover = hoverDelays
-    ? subscribeHoverTarget(
-        editor,
-        "table",
-        (target) => { hovered = target; scheduleUpdate(); },
-        { ...hoverDelays, ...(options.getPopoverElement ? { getPopoverElement: options.getPopoverElement } : {}) },
-      )
-    : () => {};
+  const offHover = subscribeHoverTarget(
+    editor,
+    "table",
+    (target) => { hovered = target; scheduleUpdate(); },
+    { hover: options.hover ?? false, getPopoverElement: options.getPopoverElement },
+  );
   const offFocusOutside = subscribeEditorFocusOutside(
     editor,
     () => {

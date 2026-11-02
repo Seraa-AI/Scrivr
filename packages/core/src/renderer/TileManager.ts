@@ -159,9 +159,11 @@ export function routePageClick(
  * Paged mode:   tileHeight = pageHeight. One tile = one full page. O(1) lookup.
  * Pageless mode: tileHeight = 307px. Small recycled tiles. O(log N) lookup.
  *
- * The two modes differ in exactly two places:
- *   - `docYToVisualY` / `resolvePagePoint` — coordinate mapping
+ * Within this class the two modes differ in:
+ *   - `docYToVisualY` — page-local y to scroll-space y
  *   - `paintContent` — paged calls renderPage(); pageless calls drawBlock() with translate
+ * The inverse mapping, and where a pageless page ends, are `resolvePagePoint`
+ * and `pageRegionAt` in layout/pagePoint.ts.
  */
 export class TileManager {
   private readonly tilesContainer: HTMLDivElement;

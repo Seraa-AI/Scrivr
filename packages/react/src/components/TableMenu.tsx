@@ -1,14 +1,15 @@
 /**
  * TableMenu — React wrapper around createTableMenu.
  *
- * Peeks on hover: rest the pointer on a table and a compact card above it
- * shows its size. Select cells and the same card expands to row / column
- * edits. Override either with `renderPeek` / `renderFull`.
+ * Select cells and a card above the table shows its size and the row /
+ * column edits the Table extension contributes as node actions. With `hover`
+ * on, resting the pointer on a table peeks the same card, read-only. Override
+ * either with `renderPeek` / `renderFull`.
  *
  * @example
  *   <TableMenu editor={editor} />
  */
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { Editor, HoverOption } from "@scrivr/core";
 import { useTableMenu } from "../hooks/useTableMenu";
@@ -20,7 +21,7 @@ export interface TableMenuProps {
   itemClassName?: string | undefined;
   titleClassName?: string | undefined;
   descriptionClassName?: string | undefined;
-  /** Hover peeks. Default true; false shows the menu from the selection only. */
+  /** Hover peeks. Default false; true or delays peek a hovered table. */
   hover?: HoverOption | undefined;
   /** Replace the peek's content. */
   renderPeek?: ((menu: TableMenuState) => ReactNode) | undefined;
@@ -87,21 +88,25 @@ export function TableMenu({
       ) : (
         <>
           {summary}
-          <span style={{ width: 1, alignSelf: "stretch" }} data-part="divider" />
-          {menu.commands.map((c) => (
-            <button
-              key={c.id}
-              className={cx("scrivr-menu-item", itemClassName)}
-              data-danger={"danger" in c ? "" : undefined}
-              title={c.title}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                menu.run(c.id);
-              }}
-              style={{ border: "none", cursor: "pointer" }}
-            >
-              {c.label}
-            </button>
+          {menu.actions.map((action, i) => (
+            <Fragment key={action.id}>
+              {(i === 0 || menu.actions[i - 1]!.group !== action.group) && (
+                <span style={{ width: 1, alignSelf: "stretch" }} data-part="divider" />
+              )}
+              <button
+                className={cx("scrivr-menu-item", itemClassName)}
+                data-danger={action.danger ? "" : undefined}
+                title={action.disabledReason || action.title || action.label}
+                disabled={action.disabledReason !== false}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  if (action.disabledReason === false) menu.run(action.id);
+                }}
+                style={{ border: "none", cursor: "pointer" }}
+              >
+                {action.label}
+              </button>
+            </Fragment>
           ))}
         </>
       )}

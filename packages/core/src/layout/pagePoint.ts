@@ -5,7 +5,7 @@ import type { DocumentLayout } from "./PageLayout";
  *
  * Click routing mostly ignores this — a click anywhere on a page places a
  * caret. Hover cannot: a pointer in the margin beside a link must not peek
- * the link. See docs/hover-popovers-rfc.md §3.
+ * the link.
  */
 export type PageRegion =
   /** Inside the content box. */
@@ -23,11 +23,12 @@ export type PageRegion =
 
 export interface PagePoint {
   page: number;
-  /**
-   * Page-local. In a gap, `y` is clamped to the bottom of the page above so
-   * click callers keep today's "click below the text" behaviour.
-   */
+  /** Page-local. */
   x: number;
+  /**
+   * Page-local. In a gap, clamped to the bottom of the page above so click
+   * callers keep today's "click below the text" behaviour.
+   */
   y: number;
   region: PageRegion;
 }

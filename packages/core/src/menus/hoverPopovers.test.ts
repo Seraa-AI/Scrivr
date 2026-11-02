@@ -10,12 +10,13 @@ import type { Editor } from "../Editor";
 import type { HoverTarget } from "../hover/types";
 
 /**
- * Popovers peek on hover and expand on select (docs/hover-popovers-rfc.md §5).
- * Hover is driven through `reportHover`, the same entry the pointer controller
- * uses, so these tests own the timing without a pointer.
+ * Popovers peek on hover and expand on select. Hover is driven through
+ * `reportHover`, the same entry the pointer controller uses, so these tests own
+ * the timing without a pointer.
  */
 
 const HREF = "https://example.com/a";
+const OTHER = "https://example.com/b";
 
 function rect(top: number, left: number, w: number, h: number): DOMRect {
   return {
@@ -37,6 +38,8 @@ function makeEditor(): Editor {
               content: [
                 { type: "text", text: "go " },
                 { type: "text", text: "there", marks: [{ type: "link", attrs: { href: HREF } }] },
+                { type: "text", text: " or " },
+                { type: "text", text: "here", marks: [{ type: "link", attrs: { href: OTHER } }] },
               ],
             },
             { type: "paragraph", content: [{ type: "image", attrs: { src: "x.png", width: 80, height: 60 } }] },
@@ -74,7 +77,23 @@ function find(editor: Editor, pred: (name: string) => boolean): { pos: number; s
 
 function linkTarget(): HoverTarget {
   // "go " is 3 chars, the paragraph opens at 0 → text starts at 1.
-  return { kind: "link", surfaceId: "body", pos: 4, end: 9, payload: { href: HREF } };
+  return { kind: "link", surfaceId: "body", pos: 4, end: 9 };
+}
+
+function cellPositions(editor: Editor): number[] {
+  const cells: number[] = [];
+  editor.getState().doc.descendants((n, p) => {
+    if (n.type.name === "tableCell") cells.push(p);
+  });
+  return cells;
+}
+
+function selectCells(editor: Editor): void {
+  const [first, second] = cellPositions(editor);
+  const state = editor.getState();
+  editor.applyTransaction(
+    state.tr.setSelection(new CellSelection(state.doc.resolve(first!), state.doc.resolve(second!))),
+  );
 }
 
 function hover(editor: Editor, ...targets: HoverTarget[]): void {
@@ -195,6 +214,18 @@ describe("hover popovers", () => {
       expect(onHide).not.toHaveBeenCalled();
     });
 
+    it("peeks the second of two links in a paragraph with its own href", () => {
+      const editor = makeEditor();
+      const onShow = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
+      cleanup = createLinkPopover(editor, { onShow, onHide: () => {}, onMove: () => {} });
+
+      // "there" ends at 9, " or " runs to 13, "here" is 13–17.
+      hover(editor, { kind: "link", surfaceId: "body", pos: 13, end: 17 });
+      vi.advanceTimersByTime(400);
+      flushRaf();
+      expect(onShow.mock.calls[0]![1]).toEqual({ href: OTHER, from: 13, to: 17, presentation: "peek" });
+    });
+
     it("does not peek when hover is disabled", () => {
       const editor = makeEditor();
       const onShow = vi.fn();
@@ -212,7 +243,7 @@ describe("hover popovers", () => {
       const image = find(editor, (n) => n === "image");
       const onShow = vi.fn<(r: DOMRect, i: ImageMenuInfo) => void>();
       const onMove = vi.fn<(r: DOMRect, i: ImageMenuInfo) => void>();
-      cleanup = createImageMenu(editor, { onShow, onHide: () => {}, onMove });
+      cleanup = createImageMenu(editor, { onShow, onHide: () => {}, onMove, hover: true });
 
       hover(editor, { kind: "image", surfaceId: "body", pos: image.pos, end: image.pos + image.size });
       vi.advanceTimersByTime(400);
@@ -224,6 +255,29 @@ describe("hover popovers", () => {
       expect(onShow).toHaveBeenCalledTimes(1);
       expect(onMove.mock.calls.at(-1)![1].presentation).toBe("full");
     });
+
+    it("does not peek by default", () => {
+      const editor = makeEditor();
+      const image = find(editor, (n) => n === "image");
+      const onShow = vi.fn();
+      cleanup = createImageMenu(editor, { onShow, onHide: () => {}, onMove: () => {} });
+
+      hover(editor, { kind: "image", surfaceId: "body", pos: image.pos, end: image.pos + image.size });
+      vi.advanceTimersByTime(1000);
+      flushRaf();
+      expect(onShow).not.toHaveBeenCalled();
+    });
+
+    it("stays hidden for a selection that is not an image", () => {
+      const editor = makeEditor();
+      const onShow = vi.fn();
+      cleanup = createImageMenu(editor, { onShow, onHide: () => {}, onMove: () => {} });
+
+      // Cell selections have node actions too; they are not images.
+      selectCells(editor);
+      flushRaf();
+      expect(onShow).not.toHaveBeenCalled();
+    });
   });
 
   describe("table", () => {
@@ -231,7 +285,7 @@ describe("hover popovers", () => {
       const editor = makeEditor();
       const table = find(editor, (n) => n === "table");
       const onShow = vi.fn<(r: DOMRect, i: TableMenuInfo) => void>();
-      cleanup = createTableMenu(editor, { onShow, onHide: () => {}, onMove: () => {} });
+      cleanup = createTableMenu(editor, { onShow, onHide: () => {}, onMove: () => {}, hover: true });
 
       hover(editor, { kind: "table", surfaceId: "body", pos: table.pos, end: table.pos + table.size });
       vi.advanceTimersByTime(400);
@@ -240,26 +294,86 @@ describe("hover popovers", () => {
       expect(onShow).toHaveBeenCalledTimes(1);
       const [anchor, info] = onShow.mock.calls[0]!;
       expect(info).toEqual({ docPos: table.pos, rows: 2, columns: 3, headerRow: false, presentation: "peek" });
-      // Anchored to the table's top edge.
-      expect(anchor.top).toBe(300);
       expect(anchor.height).toBe(1);
     });
 
-    it("shows full for a cell selection", () => {
+    it("peeks while the pointer keeps moving between cells", () => {
+      const editor = makeEditor();
+      const table = find(editor, (n) => n === "table");
+      const tableTarget: HoverTarget = { kind: "table", surfaceId: "body", pos: table.pos, end: table.pos + table.size };
+      const onShow = vi.fn();
+      cleanup = createTableMenu(editor, { onShow, onHide: () => {}, onMove: () => {}, hover: true });
+
+      // Each cell is a new stack, but the table under it never changes.
+      const [a, b] = cellPositions(editor);
+      for (const cell of [a!, b!, a!]) {
+        hover(editor, { kind: "table-cell", surfaceId: "body", pos: cell, end: cell + 1 }, tableTarget);
+        vi.advanceTimersByTime(200);
+      }
+      flushRaf();
+      expect(onShow).toHaveBeenCalledTimes(1);
+    });
+
+    it("anchors to the first fragment on screen, clamped to the container", () => {
+      const editor = makeEditor();
+      const table = find(editor, (n) => n === "table");
+      const onShow = vi.fn<(r: DOMRect, i: TableMenuInfo) => void>();
+      // The first page's fragment is scrolled away; the next starts above the container top.
+      vi.spyOn(editor, "getNodeViewportRects").mockReturnValue([
+        rect(-900, 72, 300, 80),
+        rect(-40, 72, 300, 400),
+      ]);
+      cleanup = createTableMenu(editor, { onShow, onHide: () => {}, onMove: () => {}, hover: true });
+
+      hover(editor, { kind: "table", surfaceId: "body", pos: table.pos, end: table.pos + table.size });
+      vi.advanceTimersByTime(400);
+      flushRaf();
+
+      const [anchor] = onShow.mock.calls[0]!;
+      expect(anchor.top).toBe(0);
+      expect(anchor.left).toBe(72);
+    });
+
+    it("shows full for a cell selection, with the Table extension's actions", () => {
       const editor = makeEditor();
       const table = find(editor, (n) => n === "table");
       const onShow = vi.fn<(r: DOMRect, i: TableMenuInfo) => void>();
       cleanup = createTableMenu(editor, { onShow, onHide: () => {}, onMove: () => {} });
 
-      const cells: number[] = [];
-      editor.getState().doc.descendants((n, p) => {
-        if (n.type.name === "tableCell") cells.push(p);
-      });
-      const state = editor.getState();
-      editor.applyTransaction(state.tr.setSelection(new CellSelection(state.doc.resolve(cells[0]!), state.doc.resolve(cells[1]!))));
+      selectCells(editor);
       flushRaf();
 
       expect(onShow.mock.calls.at(-1)![1]).toMatchObject({ docPos: table.pos, presentation: "full" });
+      expect(editor.getNodeActions().map((a) => a.id)).toEqual([
+        "table.addRowBefore",
+        "table.addRowAfter",
+        "table.deleteRow",
+        "table.addColumnBefore",
+        "table.addColumnAfter",
+        "table.deleteColumn",
+        "table.delete",
+      ]);
+    });
+
+    it("peeks a cell selection in a read-only editor, which has no actions", () => {
+      const editor = makeEditor();
+      const onShow = vi.fn<(r: DOMRect, i: TableMenuInfo) => void>();
+      cleanup = createTableMenu(editor, { onShow, onHide: () => {}, onMove: () => {} });
+
+      selectCells(editor);
+      editor.setReadOnly(true);
+      flushRaf();
+
+      expect(onShow.mock.calls.at(-1)![1].presentation).toBe("peek");
+      expect(editor.getNodeActions()).toEqual([]);
+    });
+
+    it("runs a table action through the editor", async () => {
+      const editor = makeEditor();
+      selectCells(editor);
+      await editor.runNodeAction("table.addRowAfter");
+      const table = editor.getState().doc.nodeAt(find(editor, (n) => n === "table").pos)!;
+      expect(table.childCount).toBe(3);
     });
   });
 });
