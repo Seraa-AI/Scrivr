@@ -9,6 +9,61 @@ import type { MarkDecorator, SpanRect } from "../types";
 import { safeUrl } from "../../model/safeUrl";
 import { getMarkAttrs } from "../../model/getNodeAttrs";
 import type { PdfMarkHandler } from "../../exports/pdf";
+import type { Mark, MarkType, Node } from "prosemirror-model";
+
+export interface LinkRange {
+  href: string;
+  from: number;
+  to: number;
+}
+
+function linkHref(mark: Mark): string | null {
+  const href: unknown = mark.attrs["href"];
+  return typeof href === "string" ? href : null;
+}
+
+function linkTitle(mark: Mark): string | null {
+  const title: unknown = mark.attrs["title"];
+  return typeof title === "string" ? title : null;
+}
+
+/**
+ * The link the caret at `pos` is in: the one on the character just before it,
+ * as far as that link runs, so a caret just before a link is not in it. A link
+ * is where it points, so a run split by other attrs, such as tracking
+ * metadata, is still one link.
+ */
+export function linkAt(doc: Node, pos: number, linkType: MarkType): LinkRange | null {
+  const $pos = doc.resolve(pos);
+  const parent = $pos.parent;
+  const linkOf = (index: number): Mark | undefined =>
+    index >= 0 && index < parent.childCount ? linkType.isInSet(parent.child(index).marks) : undefined;
+
+  const index = $pos.textOffset > 0 ? $pos.index() : $pos.index() - 1;
+  const mark = linkOf(index);
+  const href = mark ? linkHref(mark) : null;
+  if (!mark || href === null) return null;
+
+  const sameLink = (i: number) => {
+    const other = linkOf(i);
+    return other !== undefined && linkHref(other) === href;
+  };
+  let first = index;
+  let last = index;
+  while (sameLink(first - 1)) first--;
+  while (sameLink(last + 1)) last++;
+
+  return { href, from: $pos.posAtIndex(first), to: $pos.posAtIndex(last + 1) };
+}
+
+function firstLinkIn(doc: Node, from: number, to: number, linkType: MarkType): Mark | undefined {
+  const links: Mark[] = [];
+  doc.nodesBetween(from, to, (node) => {
+    const mark = linkType.isInSet(node.marks);
+    if (mark) links.push(mark);
+  });
+  return links[0];
+}
 
 /**
  * Link — inline hyperlink via the `link` mark.
@@ -19,10 +74,6 @@ import type { PdfMarkHandler } from "../../exports/pdf";
  *
  * The `setLink` command prompts for a URL via window.prompt so the toolbar
  * button works without needing a separate dialog component.
- *
- * Commands:
- *   setLink()    — prompts for URL then applies the link mark to selection
- *   unsetLink()  — removes the link mark from the selection
  */
 export const Link = Extension.create({
   name: "link",
@@ -68,9 +119,8 @@ export const Link = Extension.create({
           const { from, to } = state.selection;
           if (from === to) return false; // need a selection
           if (dispatch) {
-            // Prompt is intentionally simple — consumers can override with a
-            // custom dialog by registering their own setLink command before
-            // this extension resolves.
+            // Kept simple: an extension registered after this one can replace
+            // `setLink` with a real dialog, since the last registration wins.
             const raw = window.prompt("Enter URL:", "https://");
             const href = safeUrl(raw);
             if (href === null) return true; // user cancelled or unsafe — no-op
@@ -94,8 +144,10 @@ export const Link = Extension.create({
           const safe = safeUrl(href);
           if (safe === null) return false;
           if (dispatch) {
+            const replaced = firstLinkIn(state.doc, from, to, markType);
+            const title = replaced ? linkTitle(replaced) : null;
             const tr = state.tr.removeMark(from, to, markType);
-            tr.addMark(from, to, markType.create({ href: safe }));
+            tr.addMark(from, to, markType.create({ href: safe, title }));
             dispatch(tr);
           }
           return true;
@@ -105,10 +157,17 @@ export const Link = Extension.create({
         (state, dispatch) => {
           const markType = this.schema.marks["link"];
           if (!markType) return false;
-          if (dispatch) {
-            const { from, to } = state.selection;
-            dispatch(state.tr.removeMark(from, to, markType));
-          }
+          // Like Word's Remove Hyperlink: a caret removes the link it is in, and
+          // a selection removes every link it touches, not just the selected part.
+          const { from, to, empty, head } = state.selection;
+          const range = empty
+            ? linkAt(state.doc, head, markType)
+            : {
+                from: linkAt(state.doc, from + 1, markType)?.from ?? from,
+                to: linkAt(state.doc, to, markType)?.to ?? to,
+              };
+          if (!range) return false;
+          if (dispatch) dispatch(state.tr.removeMark(range.from, range.to, markType));
           return true;
         },
     };
@@ -267,9 +326,9 @@ declare module "@scrivr/core" {
     link: {
       /** Prompt for a URL and apply a link mark to the selection. */
       setLink: () => ReturnType;
-      /** Update the href of an existing link at [from, to]. */
+      /** Point the link at [from, to] at `href`, keeping its title. */
       setLinkHref: (from: number, to: number, href: string) => ReturnType;
-      /** Remove the link mark from the selection. */
+      /** Remove every link the selection touches, or the link a caret is in. */
       unsetLink: () => ReturnType;
     };
   }
