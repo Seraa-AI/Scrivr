@@ -100,6 +100,14 @@ export type {
   SelectionRect,
   SelectionRole,
 } from "../selection/types";
+export type {
+  HoverTarget,
+  HoverEvent,
+  HoverResolver,
+  MarkHoverResolver,
+  NodeHoverResolver,
+} from "../hover/types";
+export type { TableShape } from "../table/describeTable";
 // The seam's public API speaks ProseMirror `Selection`; re-export it so
 // extension authors get the whole selection vocabulary from "@scrivr/core".
 export type { Selection } from "prosemirror-state";

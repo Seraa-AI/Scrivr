@@ -145,6 +145,7 @@ export class Extension<Options extends object = object> {
       nodeActions: config.addNodeActions?.call(p1) ?? [],
       selectionBehaviors: config.addSelectionBehavior?.call(p1) ?? [],
       hitTesters: config.addHitTester?.call(p1) ?? [],
+      hoverResolvers: config.addHoverResolvers?.call(p1) ?? [],
       selectionGestures: config.addSelectionGesture?.call(p1) ?? [],
       inputHandlers: config.addInputHandlers?.call(p1) ?? {},
       markdownRules: config.addMarkdownRules?.call(p1) ?? [],

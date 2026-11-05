@@ -4,6 +4,9 @@ export type { AvailableSegment, ExclusionRect, LineSpace } from "./ExclusionMana
 export type { GlyphEntry, LineEntry, CoordsResult, ObjectRectEntry } from "./CharacterMap";
 export { resolvePointOwner } from "./pointOwnership";
 export type { PointOwner, PointOwnershipInput } from "./pointOwnership";
+// `HoverEvent.point` is a PagePoint. Resolving one needs tile geometry only
+// the pointer controller has, so the functions that build it stay internal.
+export type { PagePoint, PageRegion } from "./pagePoint";
 export { TextMeasurer } from "./TextMeasurer";
 export type {
   FontMetrics,

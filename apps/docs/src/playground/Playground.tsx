@@ -7,6 +7,7 @@ import {
   LinkPopover,
   SlashMenu,
   ImageMenu,
+  TableMenu,
   HeaderFooterRibbon,
 } from "@scrivr/react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -582,6 +583,7 @@ export function Playground() {
       <SlashMenu editor={editor} />
       <LinkPopover editor={editor} />
       <ImageMenu editor={editor} />
+      <TableMenu editor={editor} />
       <TrackChangesPopover editor={editor} />
     </div>
   );

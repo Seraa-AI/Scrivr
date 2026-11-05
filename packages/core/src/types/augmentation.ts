@@ -1,3 +1,4 @@
+import type { HoverEvent } from "../hover/types";
 /**
  * augmentation.ts
  *
@@ -122,6 +123,11 @@ export interface EditorEvents {
   viewport: void;
   /** Fired when a click lands in a chrome band (header/footer area). */
   chromeClick: { page: number; x: number; y: number; band: "header" | "footer"; clickCount: number };
+  /**
+   * Fired when what is under the pointer changes — see `HoverEvent`. Transient:
+   * never in editor state, never sent to collaborators. Mouse and pen only.
+   */
+  hover: HoverEvent;
 }
 
 /**

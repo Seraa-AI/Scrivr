@@ -482,6 +482,25 @@ export class CharacterMap {
   }
 
   /**
+   * The glyph painted under (x, y), or null. Never snaps: trailing line space,
+   * paragraph spacing, cell padding, list-marker gutters and margins all return
+   * null. `docPos` is the character's own position, so its marks are
+   * `doc.resolve(docPos + 1).marks()` — no left/right ambiguity at a boundary.
+   *
+   * Hover asks this; caret placement asks `posAtCoords`, which snaps.
+   */
+  glyphAtPoint(x: number, y: number, page: number): GlyphEntry | null {
+    if (!this.hasTextAt(x, y, page)) return null;
+    const line = this.lineAtPoint(x, y, page);
+    if (!line) return null;
+    for (const g of this.glyphs) {
+      if (g.page !== page || g.lineIndex !== line.lineIndex || g.width <= 0) continue;
+      if (x >= g.x && x < g.x + g.width) return g;
+    }
+    return null;
+  }
+
+  /**
    * The line whose box contains (x, y). Resolving in 2D disambiguates lines
    * that share a y band but occupy different x ranges — cells in the same table
    * row — so each cell owns its own hit region.

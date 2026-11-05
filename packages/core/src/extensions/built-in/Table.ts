@@ -1,3 +1,5 @@
+import type { HoverResolver } from "../../hover/types";
+import type { NodeAction, NodeActionContext, NodeActionContribution } from "../../selection/types";
 import { Extension } from "../Extension";
 import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
@@ -340,6 +342,56 @@ export const Table = Extension.create({
 
   addHitTester() {
     return [cellHitTester];
+  },
+
+  addHoverResolvers(): HoverResolver[] {
+    return [
+      { node: "tableCell", kind: "table-cell" },
+      { node: "tableHeader", kind: "table-cell" },
+      { node: "table", kind: "table" },
+    ];
+  },
+
+  addNodeActions(): NodeActionContribution[] {
+    // Hidden, not disabled, in a read-only editor: none of them could ever run.
+    const editable = ({ readOnly }: NodeActionContext) => !readOnly;
+    const structure = (
+      id: string,
+      command: "addRowBefore" | "addRowAfter" | "deleteRow" | "addColumnBefore" | "addColumnAfter" | "deleteColumn",
+      label: string,
+      title: string,
+      order: number,
+    ): NodeAction => ({
+      id,
+      label,
+      title,
+      group: "structure",
+      order,
+      when: editable,
+      run: ({ editor }) => editor.runCommand(command),
+    });
+    return [
+      {
+        kind: "table-cell",
+        actions: [
+          structure("table.addRowBefore", "addRowBefore", "Row ↑", "Insert row above", 10),
+          structure("table.addRowAfter", "addRowAfter", "Row ↓", "Insert row below", 20),
+          structure("table.deleteRow", "deleteRow", "− Row", "Delete row", 30),
+          structure("table.addColumnBefore", "addColumnBefore", "Col ←", "Insert column left", 40),
+          structure("table.addColumnAfter", "addColumnAfter", "Col →", "Insert column right", 50),
+          structure("table.deleteColumn", "deleteColumn", "− Col", "Delete column", 60),
+          {
+            id: "table.delete",
+            label: "Delete table",
+            title: "Delete the whole table",
+            group: "table",
+            danger: true,
+            when: editable,
+            run: ({ editor }) => editor.runCommand("deleteTable"),
+          },
+        ],
+      },
+    ];
   },
 
   addSelectionGesture() {

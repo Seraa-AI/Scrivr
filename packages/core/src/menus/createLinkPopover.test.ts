@@ -76,7 +76,7 @@ describe("createLinkPopover", () => {
 
     const info = linkUnderCaret(editor, beta.from + 2);
 
-    expect(info).toEqual({ href: "https://b.example", ...beta });
+    expect(info).toEqual({ presentation: "full", href: "https://b.example", ...beta });
   });
 
   it("finds the link when the caret sits just past its last character", () => {
@@ -89,7 +89,7 @@ describe("createLinkPopover", () => {
 
     const info = linkUnderCaret(editor, alpha.to);
 
-    expect(info).toEqual({ href: "https://a.example", ...alpha });
+    expect(info).toEqual({ presentation: "full", href: "https://a.example", ...alpha });
   });
 
   it("stops where an adjacent link with a different href begins", () => {
@@ -101,7 +101,7 @@ describe("createLinkPopover", () => {
 
     const info = linkUnderCaret(editor, alpha.from + 2);
 
-    expect(info).toEqual({ href: "https://a.example", ...alpha });
+    expect(info).toEqual({ presentation: "full", href: "https://a.example", ...alpha });
   });
 
   it("spans a link whose text carries other marks part of the way", () => {
@@ -114,7 +114,7 @@ describe("createLinkPopover", () => {
 
     const info = linkUnderCaret(editor, whole.from + 2);
 
-    expect(info).toEqual({ href: "https://a.example", from: whole.from, to: rangeOf(editor, "bold").to });
+    expect(info).toEqual({ presentation: "full", href: "https://a.example", from: whole.from, to: rangeOf(editor, "bold").to });
   });
 
   it("finds a one-character link when the caret sits just past it", () => {
@@ -127,7 +127,7 @@ describe("createLinkPopover", () => {
 
     const info = linkUnderCaret(editor, b.to);
 
-    expect(info).toEqual({ href: "https://b.example", ...b });
+    expect(info).toEqual({ presentation: "full", href: "https://b.example", ...b });
   });
 
   it("treats one href split by tracking metadata as one link", () => {
@@ -139,6 +139,6 @@ describe("createLinkPopover", () => {
 
     const info = linkUnderCaret(editor, foo.from + 2);
 
-    expect(info).toEqual({ href: "https://a.example", from: foo.from, to: rangeOf(editor, "bar").to });
+    expect(info).toEqual({ presentation: "full", href: "https://a.example", from: foo.from, to: rangeOf(editor, "bar").to });
   });
 });

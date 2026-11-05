@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createImageMenu } from "@scrivr/core";
-import type { Editor, ImageMenuInfo } from "@scrivr/core";
+import type { Editor, HoverOption, ImageMenuInfo } from "@scrivr/core";
 import { useFloatingPosition } from "./useFloatingPosition";
 
 export type ImageVerticalAlign =
@@ -35,36 +35,55 @@ const WRAP_OPTIONS: { value: ImageWrappingMode; label: string; title: string }[]
   { value: "front", label: "Front", title: "Image floats in front of text" },
 ];
 
-export function useImageMenu(editor: Editor | null) {
+export interface UseImageMenuOptions {
+  /** Hover peeks. Default false; true or delays peek a hovered image. */
+  hover?: HoverOption;
+}
+
+export function useImageMenu(editor: Editor | null, options: UseImageMenuOptions = {}) {
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [info, setInfo] = useState<ImageMenuInfo | null>(null);
+  const infoRef = useRef<ImageMenuInfo | null>(null);
   const [width, setWidth] = useState("");
   const [height, setHeight] = useState("");
   const [wrappingMode, setWrappingMode] =
     useState<ImageWrappingMode>("inline");
-  const { ref, position } = useFloatingPosition<HTMLDivElement>(rect);
+  const { ref, position } = useFloatingPosition<HTMLDivElement>(rect, [info?.presentation]);
 
   useEffect(() => {
     if (!editor) return;
     return createImageMenu(editor, {
       onShow: (r, i) => {
+        infoRef.current = i;
         setRect(r);
         setInfo(i);
-        setWidth(String(Math.round(i.node.attrs["width"] as number)));
-        setHeight(String(Math.round(i.node.attrs["height"] as number)));
+        setWidth(dimension(i.node.attrs["width"]));
+        setHeight(dimension(i.node.attrs["height"]));
         setWrappingMode(resolveWrappingMode(i.node.attrs));
       },
       onMove: (r, i) => {
         setRect(r);
+        // Peek → full: the inputs were never shown, so seed them now.
+        const prev = infoRef.current;
+        if (prev?.presentation !== i.presentation || prev.docPos !== i.docPos) {
+          setWidth(dimension(i.node.attrs["width"]));
+          setHeight(dimension(i.node.attrs["height"]));
+        }
+        infoRef.current = i;
         setInfo(i);
         setWrappingMode(resolveWrappingMode(i.node.attrs));
       },
       onHide: () => {
+        infoRef.current = null;
         setRect(null);
         setInfo(null);
       },
       getPopoverElement: () => ref.current,
+      hover: options.hover,
     });
+    // `hover` is read once, at mount: an inline `{ showDelay }` is a new object
+    // every render, and resubscribing would restart a peek's wait each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
 
   const currentAlign =
@@ -99,6 +118,8 @@ export function useImageMenu(editor: Editor | null) {
     visible: !!rect && !!info,
     rect,
     info,
+    /** "peek" from hover (read-only), "full" when the image is selected. */
+    presentation: info?.presentation ?? null,
     position,
     rootRef: ref,
     width,
@@ -114,6 +135,11 @@ export function useImageMenu(editor: Editor | null) {
     setAlign,
     setWrapMode,
   };
+}
+
+/** A width or height attr as the dimension inputs show it; empty when unset. */
+function dimension(value: unknown): string {
+  return typeof value === "number" ? String(Math.round(value)) : "";
 }
 
 function resolveWrappingMode(attrs: Record<string, unknown>): ImageWrappingMode {
