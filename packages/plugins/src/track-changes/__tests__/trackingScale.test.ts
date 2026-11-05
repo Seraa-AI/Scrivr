@@ -10,7 +10,7 @@ import { trackChangesPluginKey } from "../engine/trackChangesPlugin";
  */
 
 const BLOCKS = 300;
-/** Far above any step count a ceiling could plausibly have allowed. */
+/** Well above what a gesture needs to be, to show that size alone is never a refusal. */
 const MAX_PLAUSIBLE_CEILING = 100;
 
 const tracking = (editor: TestEditor) =>
@@ -45,14 +45,14 @@ describe("tracking a document-wide command", () => {
     const { editor, steps } = boldWholeDocument();
 
     expect(steps).toBeGreaterThan(MAX_PLAUSIBLE_CEILING);
-    expect(tracking(editor)?.status).toBe("ready");
+    expect(tracking(editor)?.status).toBe("tracked");
     expect(editor.pendingChanges.length).toBe(BLOCKS);
   });
 
   it("accepts the whole command, leaving every block bold", () => {
     const { editor } = boldWholeDocument();
-    // The precondition is the fix: without it there is nothing to accept, and
-    // the bold would already be sitting in the document unrecorded.
+    // Every step of the command has a record: if any went unrecorded, its bold
+    // would already be in the document with nothing here to accept.
     expect(editor.pendingChanges.length).toBe(BLOCKS);
     editor.acceptChanges(editor.pendingChanges.map(c => c.id));
 

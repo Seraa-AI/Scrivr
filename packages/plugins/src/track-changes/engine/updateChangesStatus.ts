@@ -5,6 +5,7 @@ import { CHANGE_STATUS, type IncompleteChange, type TrackedChange } from "../typ
 import { dropOrphanChanges } from "../lib/structuralChange";
 import { checkReviewTransaction } from "./checkReviewTransaction";
 import { applyChanges } from "../applyChanges";
+import { revertSplitNodeChange } from "../lib/revertChanges";
 import type { ReviewDecision, ReviewOutcome, ReviewPlan } from "../reviewPlan";
 
 /**
@@ -49,6 +50,39 @@ function placementOrder(placements: readonly TrackedChange[], decision: ReviewDe
   return decision === "rejected" ? ordered.reverse() : ordered;
 }
 
+/**
+ * The order rejected moves and paragraph breaks can be undone in. A moved block
+ * has to go back before it can rejoin the block it was split from. A move
+ * restores one block, so a break made in its shadow has to be gone first.
+ */
+function restorationOrder(
+  placements: readonly TrackedChange[],
+  breaks: readonly TrackedChange[],
+  changeSet: ChangeSet,
+) {
+  const inShadowOf = (breakRecord: TrackedChange, placement: TrackedChange) =>
+    changeSet.changes.some(reference =>
+      reference.dataTracked.operation === "reference" &&
+      reference.dataTracked.referenceId === breakRecord.id &&
+      changeSet.changes.some(shadow =>
+        shadow.dataTracked.operation === "delete" &&
+        shadow.dataTracked.moveNodeId === placement.dataTracked.moveNodeId &&
+        shadow.from === reference.from));
+  const waitsFor = (change: TrackedChange, other: TrackedChange) =>
+    change.dataTracked.operation === "node_split"
+      ? other.dataTracked.operation === "move" && other.from === change.from
+      : other.dataTracked.operation === "node_split" && inShadowOf(other, change);
+
+  const remaining = [...placements, ...breaks];
+  const ordered: TrackedChange[] = [];
+  while (remaining.length) {
+    const next = remaining.findIndex(change => !remaining.some(other => waitsFor(change, other)));
+    if (next < 0) throw new Error("These moves and paragraph breaks depend on one another");
+    ordered.push(...remaining.splice(next, 1));
+  }
+  return ordered;
+}
+
 type ReadyPlan = Extract<ReviewPlan, { status: "ready" }>;
 
 /**
@@ -56,9 +90,11 @@ type ReadyPlan = Extract<ReviewPlan, { status: "ready" }>;
  * result or nothing. Each change is applied by its own decision, so a conflict
  * resolution — one accepted, the others rejected — is still one review.
  *
- * Rejected placements are restored first, so a creation that moved is back
- * where it began before anything destructive reads it; accepted placements
- * settle last, once the content they carry is final.
+ * Rejected placements and paragraph breaks are restored first, so content is
+ * back where it began before anything destructive reads it. Restoring transports
+ * content rather than shifting it, so nothing can be mapped across it: every
+ * later stage reads its records from the document as restored. Accepted
+ * placements settle last, once the content they carry is final.
  */
 export function updateChangesStatus(
   createdTr: Transaction,
@@ -75,34 +111,34 @@ export function updateChangesStatus(
   const reviewedAt = Date.now();
   // Review must not mutate cached ChangeSet records or partially publish steps.
   const snapshot = new ChangeSet(stampReviewed(changeSet.changes, statusOf, userID, reviewedAt));
-  const changes = snapshot.changes.filter(change => statusOf.has(change.id));
-  const placements = (decision: ReviewDecision) =>
+  const decided = (set: ChangeSet) => set.changes.filter(change => statusOf.has(change.id));
+  const placements = (set: ChangeSet, decision: ReviewDecision) =>
     placementOrder(
-      changes.filter(change =>
+      decided(set).filter(change =>
         change.dataTracked.operation === "move" && statusOf.get(change.id) === CHANGE_STATUS[decision]),
       decision,
     );
   const scratch = EditorState.create({ doc: createdTr.doc }).tr;
   try {
-    const restored = placements("rejected");
+    const restoredPlacements = placements(snapshot, "rejected");
+    const restoredBreaks = decided(snapshot).filter(change =>
+      change.dataTracked.operation === "node_split" && statusOf.get(change.id) === CHANGE_STATUS.rejected);
     const restoreMapping = new Mapping();
-    for (const change of restored) applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, restoreMapping);
-    // Transport cannot be mapped as a plain deletion, so identities are re-read
-    // once a placement has been restored.
-    const current = restored.length
+    for (const change of restorationOrder(restoredPlacements, restoredBreaks, snapshot)) {
+      if (change.dataTracked.operation === "node_split") revertSplitNodeChange(scratch, change);
+      else applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, restoreMapping);
+    }
+    const current = restoredPlacements.length || restoredBreaks.length
       ? new ChangeSet(stampReviewed(
           findChanges(EditorState.create({ doc: scratch.doc })).changes, statusOf, userID, reviewedAt,
         ))
       : snapshot;
-    const ordinaryIds = new Set(
-      changes.filter(change => change.dataTracked.operation !== "move").map(change => change.id),
-    );
-    const remaining = current.changes.filter(change => ordinaryIds.has(change.id));
+    const remaining = decided(current).filter(change => change.dataTracked.operation !== "move");
     const mapping = applyChanges(scratch, scratch.doc.type.schema,
       remaining.filter(change => !ChangeSet.isTextChange(change)), current);
     applyChanges(scratch, scratch.doc.type.schema,
       remaining.filter(ChangeSet.isTextChange), current, mapping);
-    for (const change of placements("accepted")) applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, mapping);
+    for (const change of placements(current, "accepted")) applyChanges(scratch, scratch.doc.type.schema, [change], current, mapping);
     dropOrphanChanges(scratch);
     checkReviewTransaction(scratch);
     // The planner authorizes identities, not just document ranges. At the

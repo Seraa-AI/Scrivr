@@ -1,3 +1,4 @@
+import type { GestureComposition } from "./engine/composeGesture";
 import { Fragment, Mark, Node, NodeType, Slice } from "@scrivr/core/pm";
 import { PluginKey } from "@scrivr/core/pm";
 import { Mapping, ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
@@ -90,15 +91,15 @@ type InsertDeleteAttrs = {
    */
   continuesId?: string;
   /**
-   * Creations this record only makes sense alongside: set when someone edits
-   * inside another author's pending insertion. Rejecting that insertion names
-   * this record as dependent work instead of silently taking it.
+   * Creations this record relies on: set when work inside a pending insertion
+   * does not fold into it, and when a pending insertion moves. Rejecting that
+   * insertion names this record as dependent work instead of silently taking it.
    */
   dependsOn?: string[];
   /**
-   * Set on a creation once another author's work has depended on it. From then
-   * on the creator's own later edits inside it record `dependsOn` rather than
-   * folding in, even after that other work is reviewed.
+   * Set on a creation once separate work has depended on it. From then on the
+   * creator's own later edits inside it record `dependsOn` rather than folding
+   * in, and deleting it no longer cancels it, even after that work is reviewed.
    */
   foldingClosed?: boolean;
   /** A later placement is based on these still-pending placement decisions. */
@@ -242,8 +243,10 @@ export interface TrackChangesOptions {
 
 /** Why a gesture could not be represented as tracked changes. */
 export type TrackingRefusal =
-  | { failure: "unsupported-step"; stepType: string }
-  | { failure: "duplicate-transform-package" };
+  | { reason: "unsupported-step"; stepType: string }
+  | { reason: "duplicate-transform-package" }
+  /** A later step writes both inside what an earlier step inserted and outside it. */
+  | { reason: "overlapping-steps" };
 
 /**
  * What tracking did with a gesture. `refused` is the one outcome a host must act
@@ -253,11 +256,11 @@ export type TrackingRefusal =
  * Refusal means the gesture cannot be represented, never that it was big. Step
  * count and elapsed time are diagnostics for finding expensive replays — a
  * document-wide formatting command legitimately produces thousands of steps and
- * must still be tracked in full. `elapsedMs` is only on `ready`: a refusal is
+ * must still be tracked in full. `elapsedMs` is only on `tracked`: a refusal is
  * decided before anything runs.
  */
 export type TrackingResult =
-  | { status: "ready"; steps: number; elapsedMs: number }
+  | { status: "tracked"; steps: number; elapsedMs: number }
   | ({ status: "refused"; steps: number } & TrackingRefusal);
 
 export type TrTrackingContext = {
@@ -265,12 +268,14 @@ export type TrTrackingContext = {
   liftFragment?: Fragment;
   action: ReturnType<typeof getAction>;
   stepsByGroupIDMap: Map<ReplaceStep, string>;
-  selectionPosFromInsertion?: number;
+  /** Where the caret belongs, in the replayed document after `replayedMaps` maps. */
+  caretAfterStep?: { pos: number; replayedMaps: number };
+  composition: GestureComposition;
   /**
    * Maps the source document the replay has reached into the replayed one. The
    * replay walks the gesture's steps backwards, so each iteration re-bases this
-   * onto the document that step applied to; a tracker writing into the replayed
-   * document has to map its source positions through it first.
+   * onto the document that step applied to; every tracker writing into the
+   * replayed document maps its source positions through it first.
    */
   replayBridge: Mapping;
 };

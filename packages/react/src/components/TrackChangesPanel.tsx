@@ -17,6 +17,8 @@ import type {
 } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
 import { shortName } from "../utils/authorName";
+import { getChangeMeta, MARK_LABELS } from "../utils/changeMeta";
+import type { ChangeMeta } from "../utils/changeMeta";
 import { useTrackChangesPanel } from "../hooks/useTrackChangesPanel";
 import type { TrackChangesDisplayItem } from "../hooks/useTrackChangesPanel";
 import { useReviewAction } from "../hooks/useReviewAction";
@@ -26,35 +28,6 @@ function truncate(text: string, max = 60): string {
   return text.length > max ? text.slice(0, max) + "…" : text;
 }
 
-interface ChangeMeta {
-  icon: string;
-  label: string;
-}
-
-const MARK_ICONS: Record<string, string> = {
-  bold: "B",
-  italic: "I",
-  underline: "U",
-  strikethrough: "S",
-  highlight: "H",
-  color: "●",
-  fontSize: "Aa",
-  fontFamily: "Ff",
-  link: "↗",
-};
-
-const MARK_LABELS: Record<string, string> = {
-  bold: "Bold",
-  italic: "Italic",
-  underline: "Underline",
-  strikethrough: "Strikethrough",
-  highlight: "Highlight",
-  color: "Color",
-  fontSize: "Font Size",
-  fontFamily: "Font Family",
-  link: "Link",
-};
-
 const ATTR_LABELS: Record<string, string> = {
   align: "Alignment",
   level: "Heading level",
@@ -62,75 +35,6 @@ const ATTR_LABELS: Record<string, string> = {
   fontSize: "Font size",
   indent: "Indent",
 };
-
-function getChangeMeta(change: TrackedChange): ChangeMeta {
-  const op = change.dataTracked.operation;
-
-  if (change.type === "text-change") {
-    if (op === CHANGE_OPERATION.insert)
-      return {
-        icon: "+",
-        label: "Insertion",
-      };
-    return {
-      icon: "−",
-      label: "Deletion",
-    };
-  }
-
-  if (change.type === "mark-change") {
-    const mc = change as MarkChange;
-    const name = mc.mark.type.name;
-    const isRemoval = op === CHANGE_OPERATION.delete;
-    return {
-      icon: MARK_ICONS[name] ?? "M",
-      label: `${MARK_LABELS[name] ?? name} ${isRemoval ? "removed" : "added"}`,
-    };
-  }
-
-  if (change.type === "node-attr-change") {
-    return {
-      icon: "≡",
-      label: "Style changed",
-    };
-  }
-
-  if (change.type === "wrap-change") {
-    return {
-      icon: "⊞",
-      label: "Structure",
-    };
-  }
-
-  if (change.type === "node-change") {
-    if (op === CHANGE_OPERATION.insert)
-      return {
-        icon: "□+",
-        label: "Block added",
-      };
-    if (op === CHANGE_OPERATION.delete)
-      return {
-        icon: "□−",
-        label: "Block removed",
-      };
-    return {
-      icon: "□",
-      label: "Block changed",
-    };
-  }
-
-  if (change.type === "reference-change") {
-    return {
-      icon: "↗",
-      label: "Reference",
-    };
-  }
-
-  return {
-    icon: "?",
-    label: op ?? "Change",
-  };
-}
 
 /** Describe what changed in a NodeAttrChange. */
 function describeAttrChange(change: NodeAttrChange): string {
@@ -213,14 +117,14 @@ export function TrackChangesPanel({
         >
           Track Changes
         </span>
-        {panel.changes.length > 0 && (
+        {panel.items.length > 0 && (
           <span
             className={cx("scrivr-menu-icon", iconClassName)}
             data-part="icon"
             style={{
             }}
           >
-            {panel.changes.length}
+            {panel.items.length}
           </span>
         )}
 
@@ -294,7 +198,7 @@ function ReplacementRow({
   item: Extract<TrackChangesDisplayItem, { kind: "replacement" }>;
   editor: IBaseEditor | null;
 }) {
-  const { deleteChange: del, insertChange: ins, ids, authorID } = item;
+  const { deletedText, insertedText, ids, authorID } = item;
   const review = useReviewAction(editor);
 
   return (
@@ -304,17 +208,17 @@ function ReplacementRow({
         label: "Replacement",
       }}
       authorID={authorID}
-      onAccept={() => review.review("accepted", ids)}
-      onReject={() => review.review("rejected", ids)}
+      onAccept={() => review.decide("accepted", ids)}
+      onReject={() => review.decide("rejected", ids)}
       refusal={<ReviewRefusalNotice action={review} />}
     >
       <div style={previewLine}>
         <span style={prefixLabel}>Removing</span>
-        <em style={{ fontStyle: "italic" }}>"{truncate(del.text)}"</em>
+        <em style={{ fontStyle: "italic" }}>"{truncate(deletedText)}"</em>
       </div>
       <div style={previewLine}>
         <span style={prefixLabel}>Adding</span>
-        <em style={{ fontStyle: "italic" }}>"{truncate(ins.text)}"</em>
+        <em style={{ fontStyle: "italic" }}>"{truncate(insertedText)}"</em>
       </div>
     </ChangeRow>
   );
@@ -334,10 +238,10 @@ function SingleRow({
   const review = useReviewAction(editor);
 
   function accept() {
-    review.review("accepted", [change.id]);
+    review.decide("accepted", [change.id]);
   }
   function reject() {
-    review.review("rejected", [change.id]);
+    review.decide("rejected", [change.id]);
   }
 
   let preview: React.ReactNode = null;

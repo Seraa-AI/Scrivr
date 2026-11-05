@@ -1,4 +1,5 @@
 import type { Mark, Transaction } from "@scrivr/core/pm";
+import { markRecords } from "../helpers";
 
 /** Review removes the selected identity, never every author's mark of a type. */
 export function clearTextChange(tr: Transaction, from: number, to: number, id: string): void {
@@ -7,7 +8,7 @@ export function clearTextChange(tr: Transaction, from: number, to: number, id: s
     for (const mark of node.marks) {
       if ((mark.type === tr.doc.type.schema.marks.trackedInsert ||
            mark.type === tr.doc.type.schema.marks.trackedDelete) &&
-          mark.attrs.dataTracked?.id === id) {
+          markRecords(mark).some(record => record.id === id)) {
         ranges.push({ from: Math.max(from, pos), to: Math.min(to, pos + node.nodeSize), mark });
       }
     }

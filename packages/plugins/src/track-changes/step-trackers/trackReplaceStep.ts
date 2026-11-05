@@ -1,6 +1,6 @@
 import { Fragment, Slice } from "@scrivr/core/pm";
 import { EditorState, Transaction } from "@scrivr/core/pm";
-import { Mapping, ReplaceStep } from "@scrivr/core/pm";
+import { ReplaceStep } from "@scrivr/core/pm";
 
 import { ChangeStep, ExposedReplaceStep, ExposedSlice, TrTrackingContext } from "../types";
 import { getAction, TrackChangesAction } from "../actions";
@@ -28,14 +28,16 @@ export function trackReplaceStep(
   newTr: Transaction,
   attrsTemplate: NewEmptyAttrs,
   tr: Transaction,
-  replayBridge: Mapping,
   trContext: TrTrackingContext,
 ) {
+  const { replayBridge } = trContext;
   const step = tr.steps[i] as ReplaceStep;
   const moveID = trContext.stepsByGroupIDMap.get(step);
 
   const invertedStep = step.invert(tr.docs[i]!);
 
+  // A pure insertion's undo is a point, and has to stay on the far side of work
+  // a later step put there. A real range must not swallow that work.
   const newStep = new ReplaceStep(
     replayBridge.map(invertedStep.from),
     replayBridge.map(invertedStep.to, invertedStep.from === invertedStep.to ? 1 : -1),
@@ -58,7 +60,7 @@ export function trackReplaceStep(
   step
     .getMap()
     .forEach((fromA: number, toA: number, fromB: number, _toB: number) => {
-      const { slice } = step as ExposedReplaceStep;
+      const { slice } = (trContext.composition.composed.get(step) ?? step) as ExposedReplaceStep;
       const {
         sliceWasSplit,
         newSliceContent,

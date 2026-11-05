@@ -61,9 +61,10 @@ export { applyRichDiffAsSuggestion, pickAgentAttrs } from "./lib/applyRichDiffAs
 export type { RichBlockEdit, RichDiffOptions, RichDiffResult } from "./lib/applyRichDiffAsSuggestion";
 export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";
 
-export { planChangeReview, changeEffect } from "./reviewPlan";
+export { planChangeReview, changeActs } from "./reviewPlan";
 export { planReview, planReviewIn, reviewChanges } from "./reviewChanges";
 export type {
+  ChangeAct,
   ReviewPlan,
   ReviewOutcome,
   ReviewRefusal,
@@ -72,6 +73,5 @@ export type {
   ReviewDependency,
   ReviewDecision,
   ReviewDecisions,
-  ChangeEffect,
 } from "./reviewPlan";
 

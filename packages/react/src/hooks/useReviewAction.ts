@@ -16,7 +16,7 @@ type Blocked = Extract<ReviewOutcome, { status: "blocked" }>;
 export type ReviewRefusalState = {
   /** What the reviewer asked to decide, before any dependent work. */
   request: ReviewDecisions;
-  refusal: ReviewRefusal;
+  why: ReviewRefusal;
   /**
    * The decision that would cover the request and its dependent work. Each
    * dependent takes the decision of the change it depends on.
@@ -54,9 +54,9 @@ const single = (decision: ReviewDecision, ids: string[]): ReviewDecisions =>
 /**
  * The one way this package decides tracked changes.
  *
- * Every Accept and Reject goes through here so a click always ends in one of
- * two places: the decision is carried out, or the reviewer is told what stopped
- * it. A refusal is held as state rather than thrown away, because the card that
+ * Every Accept and Reject goes through here so a click on a live editor ends in
+ * one of two places: the decision is carried out, or the reviewer is told what
+ * stopped it. A refusal is held as state rather than thrown away, because the card that
  * was clicked is where the explanation belongs.
  *
  * Deciding dependent work is never automatic. The set is computed so it can be
@@ -73,7 +73,7 @@ export function useReviewAction(editor: IBaseEditor | null) {
     [editor],
   );
 
-  const resolve = useCallback(
+  const changesById = useCallback(
     (ids: string[]): TrackedChange[] => {
       const all =
         (editor && trackChangesPluginKey.getState(editor.getState())?.changeSet.changes) ?? [];
@@ -84,21 +84,23 @@ export function useReviewAction(editor: IBaseEditor | null) {
     [editor],
   );
 
-  const block = useCallback(
+  const holdRefusal = useCallback(
     (request: ReviewDecisions, blocked: Blocked, stage: ReviewRefusalState["stage"], seen: string[] = []) => {
       const dependentIds = dependentIdsOf(blocked);
       setRefusal({
         request,
-        refusal: blocked,
+        why: blocked,
         compound: compoundOf(blocked),
-        dependents: resolve(dependentIds),
+        // A replan reports only what lies outside the set it was given, and that
+        // set is still being decided, so what the reviewer already saw stays listed.
+        dependents: changesById([...new Set([...seen, ...dependentIds])]),
         stage,
         // Only meaningful once the set has been shown; nothing has grown the
         // first time the reviewer is told about it.
         grew: stage !== "explain" && dependentIds.some(id => !seen.includes(id)),
       });
     },
-    [resolve],
+    [changesById],
   );
 
   /**
@@ -108,14 +110,14 @@ export function useReviewAction(editor: IBaseEditor | null) {
    */
   const settle = useCallback(
     (request: ReviewDecisions, outcome: ReviewOutcome): ReviewOutcome => {
-      if (outcome.status === "blocked") block(request, outcome, "explain");
+      if (outcome.status === "blocked") holdRefusal(request, outcome, "explain");
       else setRefusal(null);
       return outcome;
     },
-    [block],
+    [holdRefusal],
   );
 
-  const decide = useCallback(
+  const carryOut = useCallback(
     (decisions: ReviewDecisions): ReviewOutcome => settle(decisions, reviewChanges(editor, decisions)),
     [editor, settle],
   );
@@ -125,9 +127,9 @@ export function useReviewAction(editor: IBaseEditor | null) {
    * before the editor exists: that answers `unavailable`, which a caller must
    * be able to tell apart from a refusal, so it is never nothing.
    */
-  const review = useCallback(
-    (decision: ReviewDecision, ids: string[]): ReviewOutcome => decide(single(decision, ids)),
-    [decide],
+  const decide = useCallback(
+    (decision: ReviewDecision, ids: string[]): ReviewOutcome => carryOut(single(decision, ids)),
+    [carryOut],
   );
 
   /**
@@ -137,8 +139,8 @@ export function useReviewAction(editor: IBaseEditor | null) {
    */
   const resolveConflict = useCallback(
     (keepId: string, discardIds: string[]): ReviewOutcome =>
-      decide({ accepted: [keepId], rejected: discardIds }),
-    [decide],
+      carryOut({ accepted: [keepId], rejected: discardIds }),
+    [carryOut],
   );
 
   /** Show the dependent work in place. Shows it; authorizes nothing. */
@@ -150,8 +152,8 @@ export function useReviewAction(editor: IBaseEditor | null) {
 
   /**
    * Replan the compound decision against the document as it stands. Both the
-   * confirmation and the decision itself go through here, so neither can act on
-   * a set the reviewer has not been shown. Dependent work decided elsewhere in
+   * confirmation and the decision itself go through here, so neither can decide
+   * dependent work the reviewer has not been shown. Dependent work decided elsewhere in
    * the meantime is no longer part of it; what the reviewer asked for still is.
    */
   const replan = useCallback(
@@ -164,11 +166,11 @@ export function useReviewAction(editor: IBaseEditor | null) {
         rejected: live(held.compound.rejected),
       });
       if (plan.status === "blocked") {
-        block(held.request, plan, "confirm", held.dependents.map(c => c.id));
+        holdRefusal(held.request, plan, "confirm", held.dependents.map(c => c.id));
       }
       return plan;
     },
-    [editor, pendingIds, block],
+    [editor, pendingIds, holdRefusal],
   );
 
   /** Open the confirmation for the compound decision, listing what it covers. */
@@ -183,10 +185,11 @@ export function useReviewAction(editor: IBaseEditor | null) {
   /**
    * Send the compound decision, which `replan` has just re-checked. A replan
    * that no longer goes through is handed back as it is — the wider set it
-   * found is now on show for the reviewer to confirm.
+   * found is now on show for the reviewer to confirm. With no refusal held there
+   * is nothing to confirm, which is not the same as something having happened.
    */
-  const confirm = useCallback((): ReviewOutcome => {
-    if (!refusal) return { status: "applied", accepted: [], rejected: [] };
+  const confirm = useCallback((): ReviewOutcome | null => {
+    if (!refusal) return null;
     const plan = replan(refusal);
     if (plan.status !== "ready") return plan;
     return settle(refusal.request, reviewChanges(editor, { accepted: plan.accepted, rejected: plan.rejected }));
@@ -198,7 +201,7 @@ export function useReviewAction(editor: IBaseEditor | null) {
     () => ({
       /** False while there is no editor to decide against — disable controls. */
       available: !!editor,
-      review,
+      decide,
       refusal,
       listDependents,
       requestConfirm,
@@ -206,8 +209,12 @@ export function useReviewAction(editor: IBaseEditor | null) {
       resolveConflict,
       dismiss,
     }),
-    [editor, review, refusal, listDependents, requestConfirm, confirm, resolveConflict, dismiss],
+    [editor, decide, refusal, listDependents, requestConfirm, confirm, resolveConflict, dismiss],
   );
 }
 
+/**
+ * What a review surface holds. `decide` and `resolveConflict` report the outcome;
+ * `refusal` is what stopped the last one, for `ReviewRefusalNotice` to show.
+ */
 export type ReviewAction = ReturnType<typeof useReviewAction>;

@@ -18,8 +18,9 @@ declare module "@scrivr/core" {
        */
       setTrackingStatus: (status?: TrackChangesStatus) => ReturnType;
       /**
-       * Accept or reject a set of tracked changes by their IDs.
-       * status: "accepted" | "rejected"
+       * Accept or reject a set of tracked changes by their IDs. Returns false,
+       * deciding nothing, when the plan is blocked — dependent work included. A
+       * host that needs to know why calls `reviewChanges`.
        */
       setChangeStatuses: (status: "accepted" | "rejected", ids: string[]) => ReturnType;
       /** Update the userID attributed to future tracked changes. */
@@ -97,7 +98,7 @@ function deleteColor(authorID: string): string {
  *
  * Commands:
  *   setTrackingStatus(status?)  — toggle or set tracking status
- *   setChangeStatuses(status, ids) — accept or reject changes (gated by canAcceptReject)
+ *   setChangeStatuses(status, ids) — accept or reject changes; false when the plan is blocked
  *   setTrackChangesUserID(userID) — update the current user ID
  *   refreshChanges()             — force-rebuild the ChangeSet
  */
@@ -217,7 +218,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
             : { accepted: [], rejected: ids };
           // Asks the shared rule rather than re-deriving it. A caller needing to
           // know *why* a decision was refused reads `reviewChanges` instead; a
-          // command can only say whether it ran.
+          // command can only say whether it dispatched.
           if (planReviewIn(state, decisions).status === "blocked") return false;
 
           dispatch?.(setAction(state.tr, TrackChangesAction.setChangeStatuses, decisions));

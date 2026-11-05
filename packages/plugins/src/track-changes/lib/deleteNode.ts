@@ -20,7 +20,8 @@ export function deleteNode(node: PMNode, pos: number, tr: Transaction) {
 /**
  * Removes the node when the shared ownership policy allows cancelling it, or
  * when a move carries it out from under a different move; otherwise records
- * the deletion on the node. Returns true only when the node was removed.
+ * the deletion on the node, unless one is already proposed. Returns true only
+ * when the node was removed.
  */
 export function deleteOrSetNodeDeleted(
   node: PMNode,

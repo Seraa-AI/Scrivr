@@ -36,6 +36,7 @@ export type {
 export { TrackChangesPanel } from "./components/TrackChangesPanel";
 export { useTrackChangesPanel } from "./hooks/useTrackChangesPanel";
 export type { TrackChangesPanelProps } from "./components/TrackChangesPanel";
+export type { TrackChangesDisplayItem } from "./hooks/useTrackChangesPanel";
 export { useReviewAction } from "./hooks/useReviewAction";
 export type { ReviewAction, ReviewRefusalState } from "./hooks/useReviewAction";
 export { ReviewRefusalNotice } from "./components/ReviewRefusalNotice";

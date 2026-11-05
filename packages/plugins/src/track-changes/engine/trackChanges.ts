@@ -10,12 +10,13 @@ import {
   trackingRefusal,
   trFromHistory,
 } from "./transactionProcessing";
+import { composeGesture } from "./composeGesture";
 import { TrackingResult, TrTrackingContext } from "../types";
 import { trackTransaction } from "./trackTransaction";
 
 export type TrackingOutcome =
   | { kind: "skipped" }
-  | { kind: "tracked"; tr: Transaction; result: Extract<TrackingResult, { status: "ready" }> }
+  | { kind: "tracked"; tr: Transaction; result: Extract<TrackingResult, { status: "tracked" }> }
   | { kind: "refused"; result: Extract<TrackingResult, { status: "refused" }> };
 
 export function trackChanges(
@@ -66,17 +67,20 @@ export function trackChanges(
 
   const indentationAction = getAction(tx, TrackChangesAction.indentationAction);
   const action = indentationAction?.action;
+  const composition = composeGesture(tx, oldState.selection);
   const trContext: TrTrackingContext = {
     action,
     stepsByGroupIDMap: new Map(),
     replayBridge: new Mapping(),
+    composition,
   };
 
   groupMoveSteps(tx, trContext);
   groupIndentationSteps(tx, trContext);
 
   const steps = contentSteps(tx.steps).length;
-  const refusal = trackingRefusal(tx.steps);
+  const refusal = trackingRefusal(tx.steps) ??
+    (composition.straddled ? { reason: "overlapping-steps" as const } : null);
   if (refusal) {
     return {
       kind: "refused",
@@ -96,6 +100,6 @@ export function trackChanges(
   return {
     kind: "tracked",
     tr,
-    result: { status: "ready", steps, elapsedMs: Date.now() - startedAt },
+    result: { status: "tracked", steps, elapsedMs: Date.now() - startedAt },
   };
 }

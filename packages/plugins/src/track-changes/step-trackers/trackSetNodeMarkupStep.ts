@@ -1,6 +1,6 @@
 import { Node as PMNode } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
-import { ReplaceAroundStep } from "@scrivr/core/pm";
+import { type Mapping, ReplaceAroundStep } from "@scrivr/core/pm";
 
 import { NewEmptyAttrs } from "../helpers";
 import { ChangeStep } from "../types";
@@ -22,6 +22,7 @@ export function trackSetNodeMarkupStep(
   newTr: Transaction,
   _attrs: NewEmptyAttrs,
   currentDoc: PMNode,
+  replayBridge: Mapping,
 ): ChangeStep[] {
   const currentNode = currentDoc.nodeAt(step.from);
   const newNode = step.slice.content.firstChild;
@@ -37,8 +38,8 @@ export function trackSetNodeMarkupStep(
     return [];
   }
 
-  const inverted = step.invert(currentDoc);
-  if (newTr.maybeStep(inverted).failed) return [];
+  const inverted = step.invert(currentDoc).map(replayBridge);
+  if (!inverted || newTr.maybeStep(inverted).failed) return [];
 
   const { dataTracked: _dt, nodeId, ...currentAttrs } = currentNode.attrs as Record<string, unknown>;
   const { dataTracked: _dt2, nodeId: _nid, ...sliceAttrs } = newNode.attrs as Record<string, unknown>;
@@ -51,7 +52,7 @@ export function trackSetNodeMarkupStep(
     : { ...currentAttrs, ...sliceAttrs, nodeId };
 
   return [{
-    pos: step.from,
+    pos: replayBridge.map(step.from, 1),
     type: "update-node-attrs",
     node: currentNode,
     newAttrs,

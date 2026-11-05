@@ -36,13 +36,13 @@ function read(editor: Editor | null): Snapshot {
 
 const describeTracking = (result: TrackingResult | null) => {
   if (!result) return "nothing tracked yet";
-  if (result.status === "ready") {
+  if (result.status === "tracked") {
     return `tracked · ${result.steps} step${result.steps === 1 ? "" : "s"} · ${result.elapsedMs}ms`;
   }
   const detail =
-    result.failure === "unsupported-step"
+    result.reason === "unsupported-step"
       ? `unsupported step: ${result.stepType}`
-      : result.failure;
+      : result.reason;
   return `REFUSED · ${detail} · ${result.steps} step${result.steps === 1 ? "" : "s"}`;
 };
 

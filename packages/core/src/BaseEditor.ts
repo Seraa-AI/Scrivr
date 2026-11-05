@@ -178,7 +178,7 @@ export class BaseEditor implements IBaseEditor {
    * argument list into `commands` does not typecheck, because it is a union of
    * fixed-arity signatures; `runCommand` reads this instead.
    */
-  private readonly boundCommands: Record<string, (...args: unknown[]) => void> = {};
+  private readonly boundCommands: Record<string, (...args: unknown[]) => boolean> = {};
 
   /**
    * Per-extension storage. Augment `ExtensionStorage` in your extension
@@ -341,7 +341,7 @@ export class BaseEditor implements IBaseEditor {
    */
   runCommand(name: keyof SafeFlatCommands, args: unknown[] = []): boolean {
     // `hasOwn`, not a plain lookup: a name that happens to match something on
-    // Object.prototype would otherwise be invoked rather than ignored.
+    // Object.prototype would otherwise be invoked rather than reporting false.
     if (!Object.hasOwn(this.boundCommands, name)) return false;
     return this.boundCommands[name]?.(...args) ?? false;
   }

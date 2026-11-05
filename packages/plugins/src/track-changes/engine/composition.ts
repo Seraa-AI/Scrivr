@@ -1,15 +1,9 @@
-import { EditorState, type Mark, type Node, type Transaction } from "@scrivr/core/pm";
+import { EditorState, type Node, type Transaction } from "@scrivr/core/pm";
 import { findChanges } from "../findChanges";
-import { getBlockInlineTrackedData } from "../helpers";
+import { getBlockInlineTrackedData, markRecords, replaceMarkRecords } from "../helpers";
 import type { TrackedAttrs } from "../types";
 
 type TrackedRecord = Partial<TrackedAttrs>;
-
-const markRecords = (mark: Mark): TrackedRecord[] => {
-  const value = mark.attrs.dataTracked;
-  if (!value) return [];
-  return Array.isArray(value) ? value : [value];
-};
 
 /** Every record id a document carries, on node attrs or marks. */
 function recordIds(doc: Node) {
@@ -60,8 +54,10 @@ export function composeGestureRecords(tr: Transaction, before: Node): void {
     if (deletion?.id && record.operation === "delete" && !record.moveNodeId && deletion.authorID === record.authorID) {
       next = { ...next, deletionId: deletion.id };
     }
-    if (creation && !(record.creationId && record.creationId !== record.id)) {
-      const id = creation.creationId ?? creation.id!;
+    // A writer that built a creation has already said which one this belongs to.
+    const foldedElsewhere = !!record.creationId && record.creationId !== record.id;
+    const id = creation?.creationId ?? creation?.id;
+    if (creation && id && !foldedElsewhere) {
       next = creation.authorID === record.authorID && !creation.foldingClosed
         ? { ...next, creationId: id }
         : { ...next, dependsOn: [...new Set([...(record.dependsOn ?? []), id])] };
@@ -88,16 +84,15 @@ export function composeGestureRecords(tr: Transaction, before: Node): void {
       const entries = markRecords(mark);
       const next = composeAll(entries, acts);
       if (next === entries) continue;
-      tr.removeMark(pos, pos + node.nodeSize, mark);
-      tr.addMark(pos, pos + node.nodeSize, mark.type.create({
-        ...mark.attrs,
-        dataTracked: Array.isArray(mark.attrs.dataTracked) ? next : next[0],
-      }));
+      replaceMarkRecords(tr, pos, node, mark, next);
     }
   });
 }
 
-/** Persist the boundary: reviewing a dependent later must not reopen folding. */
+/**
+ * Once separate work has depended on a creation, its creator's later edits stop
+ * folding into it. Persisted so that reviewing that work does not reopen it.
+ */
 export function closeDependentCreations(tr: Transaction): void {
   const changes = findChanges(EditorState.create({ doc: tr.doc })).pending;
   const closed = new Set<string>();
@@ -108,23 +103,18 @@ export function closeDependentCreations(tr: Transaction): void {
       other.dataTracked.authorID !== change.dataTracked.authorID)) closed.add(change.dataTracked.creationId ?? change.id);
   }
   if (!closed.size) return;
-  const close = (record: Partial<TrackedAttrs>): Partial<TrackedAttrs> =>
-    !record.foldingClosed && closed.has(record.creationId ?? record.id ?? "")
-      ? { ...record, foldingClosed: true } : record;
-  const update = (value: Partial<TrackedAttrs> | Partial<TrackedAttrs>[] | null | undefined) => {
-    if (!value) return value;
-    if (!Array.isArray(value)) return close(value);
-    const next = value.map(close);
-    return next.some((entry, i) => entry !== value[i]) ? next : value;
-  };
+  const needsClosing = (record: TrackedRecord) =>
+    !record.foldingClosed && closed.has(record.creationId ?? record.id ?? "");
+  const close = (record: TrackedRecord): TrackedRecord =>
+    needsClosing(record) ? { ...record, foldingClosed: true } : record;
   tr.doc.descendants((node, pos) => {
-    const dataTracked = update(node.attrs.dataTracked);
-    if (!node.isText && dataTracked !== node.attrs.dataTracked) tr.setNodeMarkup(pos, undefined, { ...node.attrs, dataTracked }, node.marks);
+    const records = getBlockInlineTrackedData(node) ?? [];
+    if (!node.isText && records.some(needsClosing)) {
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, dataTracked: records.map(close) }, node.marks);
+    }
     for (const mark of node.marks) {
-      const next = update(mark.attrs.dataTracked);
-      if (next === mark.attrs.dataTracked) continue;
-      tr.removeMark(pos, pos + node.nodeSize, mark);
-      tr.addMark(pos, pos + node.nodeSize, mark.type.create({ ...mark.attrs, dataTracked: next }));
+      const entries = markRecords(mark);
+      if (entries.some(needsClosing)) replaceMarkRecords(tr, pos, node, mark, entries.map(close));
     }
   });
 }

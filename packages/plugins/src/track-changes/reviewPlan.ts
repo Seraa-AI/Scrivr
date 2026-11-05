@@ -24,7 +24,6 @@ export interface ReviewDependency {
   relationship: "existence" | "placement";
 }
 
-/** The two ways a pending change can be decided. */
 export type ReviewDecision = "accepted" | "rejected";
 
 /**
@@ -57,7 +56,7 @@ export type ReviewRefusal =
  */
 export type ReviewUnavailable = { status: "unavailable"; reason: "no-editor" };
 
-/** A preflight: what deciding these changes would take. Never an execution result. */
+/** A preflight: what deciding these changes would take. `ready` is never an execution result. */
 export type ReviewPlan =
   | ({ status: "ready" } & ReviewDecisions)
   | ({ status: "blocked" } & ReviewDecisions & ReviewRefusal);
@@ -74,7 +73,6 @@ export type ReviewOutcome =
   | ({ status: "blocked" } & ReviewDecisions & ReviewRefusal)
   | ReviewUnavailable;
 
-/** Two changes cover some of the same content. */
 const overlaps = (a: TrackedChange, b: TrackedChange) => a.from < b.to && b.from < a.to;
 
 /** Recorded on a node rather than on text: it covers the node's whole span. */
@@ -91,13 +89,13 @@ const strictlyContains = (outer: TrackedChange, inner: TrackedChange) =>
   outer.to >= inner.to &&
   (outer.from < inner.from || outer.to > inner.to);
 
-/** `related` only exists as part of `change`, so reviewing one reviews both. */
-const representsCreation = (related: TrackedChange, change: TrackedChange) =>
-  related.dataTracked.creationId === change.id;
+/** `part` only exists as part of the insertion `whole` created. */
+const representsCreation = (part: TrackedChange, whole: TrackedChange) =>
+  part.dataTracked.creationId === whole.id;
 
-/** `related` records part of the deletion `change` made in one gesture. */
-const representsDeletion = (related: TrackedChange, change: TrackedChange) =>
-  related.dataTracked.deletionId === change.id;
+/** `part` records some of the deletion `whole` made in one gesture. */
+const representsDeletion = (part: TrackedChange, whole: TrackedChange) =>
+  part.dataTracked.deletionId === whole.id;
 
 /** Pieces of one record that later work split apart. */
 const samePieces = (related: TrackedChange, change: TrackedChange) => {
@@ -111,9 +109,62 @@ const pairedMove = (related: TrackedChange, change: TrackedChange) =>
   related.dataTracked.moveNodeId === change.dataTracked.moveNodeId;
 
 /** The record pointing back at what a split was split from. */
-const splitReference = (related: TrackedChange, change: TrackedChange) =>
-  related.dataTracked.operation === "reference" &&
-  related.dataTracked.referenceId === change.id;
+const splitReference = (reference: TrackedChange, split: TrackedChange) =>
+  reference.dataTracked.operation === "reference" &&
+  reference.dataTracked.referenceId === split.id;
+
+/**
+ * Two records of one act. Whichever a reviewer reaches, they are deciding the
+ * act, so the relation holds in both directions.
+ */
+const sameAct = (a: TrackedChange, b: TrackedChange) =>
+  representsCreation(a, b) || representsCreation(b, a) ||
+  representsDeletion(a, b) || representsDeletion(b, a) ||
+  samePieces(a, b) ||
+  pairedMove(a, b) ||
+  splitReference(a, b) || splitReference(b, a);
+
+/** A record that is secondary within its act: others name the act, this one follows it. */
+const isPartOfAct = ({ id, dataTracked }: TrackedChange) =>
+  dataTracked.operation === "reference" ||
+  !!dataTracked.continuesId ||
+  (dataTracked.operation === "delete" && !!dataTracked.moveNodeId) ||
+  (!!dataTracked.creationId && dataTracked.creationId !== id) ||
+  (!!dataTracked.deletionId && dataTracked.deletionId !== id);
+
+/**
+ * One thing someone did, however many records it took to represent. `primary`
+ * is the record to show and to name when deciding it; deciding any record of an
+ * act decides the whole act.
+ */
+export interface ChangeAct {
+  primary: TrackedChange;
+  /** Every record of the act, in the order given. */
+  records: TrackedChange[];
+}
+
+/** Groups changes into acts. The one answer to "what does one decision cover?" */
+export function changeActs(changes: readonly TrackedChange[]): ChangeAct[] {
+  const remaining = new Set(changes);
+  const acts: ChangeAct[] = [];
+  for (const change of changes) {
+    if (!remaining.delete(change)) continue;
+    const records = [change];
+    for (const record of records) {
+      for (const other of remaining) {
+        if (!sameAct(record, other)) continue;
+        remaining.delete(other);
+        records.push(other);
+      }
+    }
+    const inOrder = changes.filter(c => records.includes(c));
+    acts.push({ primary: inOrder.find(c => !isPartOfAct(c)) ?? inOrder[0]!, records: inOrder });
+  }
+  return acts;
+}
+
+const isMoveShadow = ({ dataTracked }: TrackedChange) =>
+  dataTracked.operation === "delete" && !!dataTracked.moveNodeId;
 
 /**
  * Would carrying out this decision take the content away? A move's shadow is
@@ -121,8 +172,15 @@ const splitReference = (related: TrackedChange, change: TrackedChange) =>
  * with the live copy. Work subsequently written on the shadow does not travel
  * with that copy, so both decisions require its review.
  */
-const removesContent = (change: TrackedChange, decision: ReviewDecision) => {
+const removesContent = (change: TrackedChange, decision: ReviewDecision, changes: readonly TrackedChange[]) => {
   const effect = changeEffect(change);
+  // Rejoining a shadow's split-off half hands its content to the shadow, which
+  // is then consumed.
+  if (change.dataTracked.operation === "node_split" && decision === "rejected") {
+    return changes.some(reference =>
+      splitReference(reference, change) &&
+      changes.some(shadow => isMoveShadow(shadow) && shadow.from === reference.from));
+  }
   if (effect === "create") return decision === "rejected";
   if (effect === "delete") return !!change.dataTracked.moveNodeId || decision === "accepted";
   return false;
@@ -133,6 +191,18 @@ const removesContent = (change: TrackedChange, decision: ReviewDecision) => {
  * span being removed. A container merely enclosing the change is excluded — it
  * is an ancestor, and deciding its child is not a decision about it.
  */
+/**
+ * Rejecting transport restores the prior placements stored on the shadow's root.
+ * Those identities survive replacement; its content does not. They remain
+ * placement dependencies, not existence dependencies.
+ */
+const restoredPriorPlacement = (other: TrackedChange, change: TrackedChange, decision: ReviewDecision) =>
+  decision === "rejected" &&
+  isMoveShadow(change) &&
+  other.dataTracked.operation === "move" &&
+  other.from === change.from &&
+  other.to === change.to;
+
 const existenceDependents = (
   change: TrackedChange,
   changes: readonly TrackedChange[],
@@ -142,12 +212,7 @@ const existenceDependents = (
   changes.filter(
     other =>
       !selected.has(other.id) &&
-      // Rejecting transport restores the prior placements stored on the
-      // shadow's root. Those identities survive replacement; its content does
-      // not. They remain placement dependencies, not existence dependencies.
-      !(decision === "rejected" && change.dataTracked.moveNodeId &&
-        change.dataTracked.operation === "delete" && other.dataTracked.operation === "move" &&
-        other.from === change.from && other.to === change.to) &&
+      !restoredPriorPlacement(other, change, decision) &&
       (other.dataTracked.dependsOn?.includes(change.id) ||
         (overlaps(other, change) && !strictlyContains(other, change))),
   );
@@ -204,13 +269,7 @@ export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecision
       for (const related of changes) {
         // Representation links, not overlaps: these are the same act recorded
         // in more than one place, so reviewing it covers all of them.
-        if (
-          !representsCreation(related, change) &&
-          !representsDeletion(related, change) &&
-          !samePieces(related, change) &&
-          !pairedMove(related, change) &&
-          !splitReference(related, change)
-        ) continue;
+        if (!sameAct(related, change)) continue;
         if (!decisionOf.has(related.id)) expanded = true;
         decide(related.id, decision);
       }
@@ -222,29 +281,32 @@ export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecision
   for (const change of changes) {
     const decision = decisionOf.get(change.id);
     if (!decision) continue;
-    if (changeEffect(change) === "placement") {
-      const placements = placementDependents(change, changes, selected, decision);
-      if (placements.length) {
-        dependencies.push({ changeId: change.id, dependentIds: placements, relationship: "placement" });
-      }
+    const placements = changeEffect(change) === "placement"
+      ? placementDependents(change, changes, selected, decision)
+      : decision === "rejected" && change.dataTracked.operation === "node_split"
+        // The split-off half cannot rejoin its block from wherever it was moved to.
+        ? changes.filter(other => changeEffect(other) === "placement" && other.from === change.from && !selected.has(other.id)).map(other => other.id)
+        : [];
+    if (placements.length) {
+      dependencies.push({ changeId: change.id, dependentIds: placements, relationship: "placement" });
     }
-    if (!removesContent(change, decision)) continue;
+    if (!removesContent(change, decision, changes)) continue;
     const dependentIds = existenceDependents(change, changes, selected, decision).map(other => other.id);
     if (dependentIds.length) {
       dependencies.push({ changeId: change.id, dependentIds, relationship: "existence" });
     }
   }
-  const subject: ReviewDecisions = { accepted: [], rejected: [] };
+  const decided: ReviewDecisions = { accepted: [], rejected: [] };
   for (const [id, decision] of decisionOf) {
-    if (!contradictory.has(id)) subject[decision].push(id);
+    if (!contradictory.has(id)) decided[decision].push(id);
   }
   // A change asked for both ways, a change that is not pending, and one whose
   // decision would carry others are different problems, and must not be
   // offered the same remedy.
   if (contradictory.size) {
-    return { status: "blocked", ...subject, reason: "contradictory-decisions", contradictoryIds: [...contradictory] };
+    return { status: "blocked", ...decided, reason: "contradictory-decisions", contradictoryIds: [...contradictory] };
   }
-  if (missingIds.length) return { status: "blocked", ...subject, reason: "missing-changes", missingIds };
-  if (dependencies.length) return { status: "blocked", ...subject, reason: "dependent-changes", dependencies };
-  return { status: "ready", ...subject };
+  if (missingIds.length) return { status: "blocked", ...decided, reason: "missing-changes", missingIds };
+  if (dependencies.length) return { status: "blocked", ...decided, reason: "dependent-changes", dependencies };
+  return { status: "ready", ...decided };
 }

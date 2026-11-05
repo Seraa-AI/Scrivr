@@ -3,6 +3,7 @@ import type { IBaseEditor } from "@scrivr/core";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
+  changeActs,
   trackChangesPluginKey,
 } from "@scrivr/plugins";
 import { useReviewAction } from "./useReviewAction";
@@ -13,6 +14,9 @@ export type TrackChangesDisplayItem =
       kind: "replacement";
       deleteChange: TextChange;
       insertChange: TextChange;
+      /** The replaced and replacing text, joined when later work split them apart. */
+      deletedText: string;
+      insertedText: string;
       ids: string[];
       authorID: string;
     }
@@ -20,8 +24,9 @@ export type TrackChangesDisplayItem =
       kind: "single";
       change: TrackedChange;
       /**
-       * Every piece of the change, in document order: more than one when later
-       * work split it apart. Deciding `change` decides them all.
+       * Every record of the act, in document order: more than one when later
+       * work split it apart, or when it covers a node and the text inside.
+       * Deciding `change` decides them all.
        */
       pieces: TrackedChange[];
     };
@@ -48,10 +53,10 @@ export function useTrackChangesPanel(editor: IBaseEditor | null) {
 
   // These return the outcome: a caller driving the hook directly needs the same
   // answer the panel gets.
-  const acceptAll = () => review.review("accepted", allIds);
-  const rejectAll = () => review.review("rejected", allIds);
-  const accept = (ids: string[]) => review.review("accepted", ids);
-  const reject = (ids: string[]) => review.review("rejected", ids);
+  const acceptAll = () => review.decide("accepted", allIds);
+  const rejectAll = () => review.decide("rejected", allIds);
+  const accept = (ids: string[]) => review.decide("accepted", ids);
+  const reject = (ids: string[]) => review.decide("rejected", ids);
 
   return {
     changes,
@@ -65,15 +70,16 @@ export function useTrackChangesPanel(editor: IBaseEditor | null) {
   };
 }
 
-/** One change split apart by later work is shown once, under its first piece. */
+/** One act is one card, whatever it took to record it. */
 function singles(changes: TrackedChange[]): TrackChangesDisplayItem[] {
-  const byRecord = new Map<string, TrackedChange[]>();
-  for (const change of changes) {
-    const record = change.dataTracked.continuesId ?? change.id;
-    byRecord.set(record, [...(byRecord.get(record) ?? []), change]);
-  }
-  return [...byRecord.values()].map(pieces => ({ kind: "single", change: pieces[0]!, pieces }));
+  return changeActs(changes).map(({ primary, records }) => ({ kind: "single", change: primary, pieces: records }));
 }
+
+const textOf = (changes: TrackedChange[], operation: CHANGE_OPERATION) =>
+  changes
+    .filter((c): c is TextChange => c.type === "text-change" && c.dataTracked.operation === operation)
+    .map(c => c.text)
+    .join("");
 
 function buildDisplayItems(changes: TrackedChange[]): TrackChangesDisplayItem[] {
   const byGroupId = new Map<string, TrackedChange[]>();
@@ -110,6 +116,8 @@ function buildDisplayItems(changes: TrackedChange[]): TrackChangesDisplayItem[] 
         kind: "replacement",
         deleteChange: del,
         insertChange: ins,
+        deletedText: textOf(group, CHANGE_OPERATION.delete),
+        insertedText: textOf(group, CHANGE_OPERATION.insert),
         ids: group.map((c) => c.id),
         authorID: del.dataTracked.authorID,
       });

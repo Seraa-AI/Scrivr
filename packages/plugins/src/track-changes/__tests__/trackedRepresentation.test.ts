@@ -41,8 +41,8 @@ describe("tracked representation follows the schema", () => {
     const editor = new TestEditor(doc(p("tail")));
     editor.dispatch(editor.state.tr.insert(0, unmarked("x = 1")));
 
-    // The invalid content this used to build only surfaced here — any later
-    // setNodeMarkup on the block threw rather than the insert that caused it.
+    // Invalid content would surface here, in the next setNodeMarkup on the block,
+    // rather than in the insert that caused it.
     expect(() =>
       editor.dispatch(
         editor.state.tr.setNodeMarkup(0, undefined, {

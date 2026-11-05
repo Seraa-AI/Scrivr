@@ -3,6 +3,7 @@ import { Transaction } from "@scrivr/core/pm";
 import {
   AddMarkStep,
   AddNodeMarkStep,
+  type Mapping,
   RemoveMarkStep,
   RemoveNodeMarkStep,
 } from "@scrivr/core/pm";
@@ -23,8 +24,13 @@ function markHasOp(mark: Mark, operation: CHANGE_OPERATION) {
   }
 }
 
+/**
+ * `step` says what was removed, so it is read in the document it applied to;
+ * `placed` is the same step in the replayed document, which is where it writes.
+ */
 export function trackRemoveMarkStep(
   step: RemoveMarkStep,
+  placed: RemoveMarkStep,
   emptyAttrs: NewEmptyAttrs,
   newTr: Transaction,
   doc: PMNode,
@@ -58,16 +64,16 @@ export function trackRemoveMarkStep(
     ...existingAttrs,
     dataTracked: [{ ...newDataTracked, id: genId() }],
   });
-  let newStep = new AddMarkStep(step.from, step.to, newMark);
+  let newStep = new AddMarkStep(placed.from, placed.to, newMark);
 
   if (sameMark) {
     if (markHasOp(sameMark, CHANGE_OPERATION.delete)) {
       // Mark was already pending delete — clear the tracking data.
-      newStep = new AddMarkStep(step.from, step.to, markSource!.create({ ...existingAttrs, dataTracked: [] }));
+      newStep = new AddMarkStep(placed.from, placed.to, markSource!.create({ ...existingAttrs, dataTracked: [] }));
     }
     if (markHasOp(sameMark, CHANGE_OPERATION.insert)) {
       // Mark was a pending insert — removing it cancels the insert entirely.
-      newStep = new RemoveMarkStep(step.from, step.to, sameMark);
+      newStep = new RemoveMarkStep(placed.from, placed.to, sameMark);
     }
   }
 
@@ -83,6 +89,7 @@ export function trackRemoveNodeMarkStep(
   emptyAttrs: NewEmptyAttrs,
   newTr: Transaction,
   doc: PMNode,
+  replayBridge: Mapping,
 ) {
   if (!isValidTrackableMark(step.mark)) return;
 
@@ -103,19 +110,21 @@ export function trackRemoveNodeMarkStep(
     ...existingAttrs,
     dataTracked: [{ ...newDataTracked, id: genId() }],
   });
-  let newStep = new AddNodeMarkStep(step.pos, newMark);
+  const pos = replayBridge.map(step.pos, 1);
+  let newStep = new AddNodeMarkStep(pos, newMark);
 
   if (sameMark) {
     if (markHasOp(sameMark, CHANGE_OPERATION.delete)) {
-      newStep = new AddNodeMarkStep(step.pos, markSource!.create({ ...existingAttrs, dataTracked: [] }));
+      newStep = new AddNodeMarkStep(pos, markSource!.create({ ...existingAttrs, dataTracked: [] }));
     }
     if (markHasOp(sameMark, CHANGE_OPERATION.insert)) {
-      newStep = new AddNodeMarkStep(step.pos, sameMark);
+      newStep = new AddNodeMarkStep(pos, sameMark);
     }
   }
 
   try {
-    const inverted = step.invert(doc);
+    const inverted = step.invert(doc).map(replayBridge);
+    if (!inverted) return;
     newTr.step(inverted);
     newTr.step(newStep);
   } catch (e) {
@@ -127,7 +136,6 @@ export function trackAddMarkStep(
   step: AddMarkStep,
   emptyAttrs: NewEmptyAttrs,
   newTr: Transaction,
-  _doc: PMNode,
 ) {
   if (!isValidTrackableMark(step.mark)) return;
 
@@ -156,6 +164,7 @@ export function trackAddNodeMarkStep(
   emptyAttrs: NewEmptyAttrs,
   newTr: Transaction,
   stepDoc: PMNode,
+  replayBridge: Mapping,
 ) {
   if (!isValidTrackableMark(step.mark)) return;
 
@@ -165,9 +174,10 @@ export function trackAddNodeMarkStep(
     ...step.mark.attrs,
     dataTracked: [{ ...newDataTracked, id: genId() }],
   });
-  const newStep = new AddNodeMarkStep(step.pos, newMark);
+  const newStep = new AddNodeMarkStep(replayBridge.map(step.pos, 1), newMark);
   try {
-    const inverted = step.invert(stepDoc);
+    const inverted = step.invert(stepDoc).map(replayBridge);
+    if (!inverted) return;
     newTr.step(inverted);
     newTr.step(newStep);
   } catch (e) {

@@ -17,7 +17,8 @@ import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 import type { TrackedChange } from "@scrivr/plugins";
 // Through the package entry, as a consumer imports them.
-import { ReviewRefusalNotice, TrackChangesPanel, useReviewAction } from "../index";
+import { ReviewRefusalNotice, TrackChangesPanel, useReviewAction, useTrackChangesPanel } from "../index";
+import type { ReviewAction, ReviewRefusalNoticeProps, ReviewRefusalState, TrackChangesDisplayItem } from "../index";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -63,13 +64,15 @@ const creationId = (editor: ServerEditor) =>
 
 /** A card that rejects `ids` on click and shows whatever stopped it. */
 function Card({ editor, ids }: { editor: ServerEditor; ids: string[] }) {
-  const review = useReviewAction(editor);
+  const review: ReviewAction = useReviewAction(editor);
+  const held: ReviewRefusalState | null = review.refusal;
+  const notice: ReviewRefusalNoticeProps = { action: review };
   return (
-    <div>
-      <button type="button" onClick={() => review.review("rejected", ids)}>
+    <div data-held={held?.stage}>
+      <button type="button" onClick={() => review.decide("rejected", ids)}>
         Reject
       </button>
-      <ReviewRefusalNotice action={review} />
+      <ReviewRefusalNotice {...notice} />
     </div>
   );
 }
@@ -286,13 +289,71 @@ describe("the shipped panel explains its document-wide decisions", () => {
   });
 });
 
+describe("one card per act", () => {
+  const cards = () => [...container.querySelectorAll("button")].filter(b => b.textContent === "✗").length;
+
+  it("shows an inserted paragraph, recorded on the node and its text, once", () => {
+    const editor = build();
+    expect(pending(editor).length).toBeGreaterThan(1);
+
+    render(<TrackChangesPanel editor={editor} />);
+
+    expect(cards()).toBe(1);
+    expect(container.querySelector('[data-part="icon"]')?.textContent).toBe("1");
+  });
+
+  it("names the act's records on the item a headless host renders", () => {
+    function Items({ editor }: { editor: ServerEditor }) {
+      const { items } = useTrackChangesPanel(editor);
+      const item: TrackChangesDisplayItem | undefined = items[0];
+      return <span data-testid="pieces">{item?.kind === "single" ? item.pieces.length : 0}</span>;
+    }
+    const editor = build();
+    render(<Items editor={editor} />);
+
+    expect(container.querySelector("[data-testid=pieces]")?.textContent).toBe(String(pending(editor).length));
+  });
+
+  it("removes the whole paragraph from that one card", () => {
+    const editor = build();
+    render(<TrackChangesPanel editor={editor} />);
+
+    click("✗");
+
+    expect(pending(editor)).toEqual([]);
+    expect(editor.getState().doc.textContent).toBe("tail");
+  });
+});
+
+describe("work that grows while it is being confirmed", () => {
+  it("still lists what the reviewer already saw beside what is new", () => {
+    const editor = build();
+    const id = creationId(editor);
+    const editAs = (author: string, pos: number) => {
+      editor.commands.setTrackChangesUserID(author);
+      editor.applyTransaction(editor.getState().tr.insertText("x", pos));
+    };
+    editAs("bob", 4);
+    render(<Card editor={editor} ids={[id]} />);
+    click("Reject");
+    click(/^Reject this and/);
+    act(() => editAs("carol", 2));
+
+    click(/^Reject all/);
+
+    expect(text()).toMatch(/More work now depends/);
+    expect(text()).toMatch(/bob/);
+    expect(text()).toMatch(/carol/);
+  });
+});
+
 describe("review before there is an editor to review against", () => {
   function Early() {
     const review = useReviewAction(null);
     const [status, setStatus] = useState("untried");
     return (
       <div>
-        <button type="button" onClick={() => setStatus(review.review("accepted", ["x"]).status)}>
+        <button type="button" onClick={() => setStatus(review.decide("accepted", ["x"]).status)}>
           Accept
         </button>
         <span data-testid="status">{status}</span>

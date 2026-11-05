@@ -63,8 +63,8 @@ describe("tracking refuses only what it cannot represent", () => {
     editor.dispatch(editor.state.tr.step(new ShoutStep(1, 6)));
 
     const result = refusal(editor);
-    expect(result?.failure).toBe("unsupported-step");
-    expect(result?.failure === "unsupported-step" ? result.stepType : undefined)
+    expect(result?.reason).toBe("unsupported-step");
+    expect(result?.reason === "unsupported-step" ? result.stepType : undefined)
       .toBe("ShoutStep");
   });
 
@@ -90,7 +90,7 @@ describe("tracking refuses only what it cannot represent", () => {
     editor.dispatch(tr);
 
     expect(editor.pendingChanges.length).toBeGreaterThan(0);
-    expect(tracking(editor)?.status).toBe("ready");
+    expect(tracking(editor)?.status).toBe("tracked");
     expect(tracking(editor)?.steps).toBe(1);
   });
 
@@ -100,7 +100,7 @@ describe("tracking refuses only what it cannot represent", () => {
     const result = tracking(editor);
 
     expect(result?.steps).toBeGreaterThan(0);
-    expect(result?.status === "ready" ? result.elapsedMs : undefined)
+    expect(result?.status === "tracked" ? result.elapsedMs : undefined)
       .toBeGreaterThanOrEqual(0);
     expect(refusal(editor)).toBeUndefined();
   });
@@ -121,10 +121,10 @@ describe("a refusal describes the document it was made for", () => {
 });
 
 describe("a refusal outranks a sibling success", () => {
-  const ready = { status: "ready", steps: 1, elapsedMs: 0 } as const;
+  const ready = { status: "tracked", steps: 1, elapsedMs: 0 } as const;
   const refused = {
     status: "refused",
-    failure: "unsupported-step",
+    reason: "unsupported-step",
     stepType: "ShoutStep",
     steps: 1,
   } as const;
@@ -159,16 +159,16 @@ describe("tracking outcomes belong to one dispatch", () => {
     const initial = build();
     const state = initial.apply(initial.tr.step(new ShoutStep(1, 6)).setMeta("append-edit", true));
     expect(state.doc.textContent).toBe("START!");
-    expect(trackChangesPluginKey.getState(state)!.lastTracking).toMatchObject({ status: "refused", failure: "unsupported-step" });
+    expect(trackChangesPluginKey.getState(state)!.lastTracking).toMatchObject({ status: "refused", reason: "unsupported-step" });
     const next = state.apply(state.tr.insertText("?", 1));
-    expect(trackChangesPluginKey.getState(next)!.lastTracking?.status).toBe("ready");
+    expect(trackChangesPluginKey.getState(next)!.lastTracking?.status).toBe("tracked");
   });
 
   it("resets the accumulator even when the next root only carries metadata", () => {
     const initial = build();
     const state = initial.apply(initial.tr.step(new ShoutStep(1, 6)));
     const next = state.apply(state.tr.setMeta("append-edit", true));
-    expect(trackChangesPluginKey.getState(next)!.lastTracking?.status).toBe("ready");
+    expect(trackChangesPluginKey.getState(next)!.lastTracking?.status).toBe("tracked");
   });
 
   it("keeps outcomes isolated between editor states", () => {
@@ -176,6 +176,6 @@ describe("tracking outcomes belong to one dispatch", () => {
     const refused = initial.apply(initial.tr.step(new ShoutStep(1, 6)).setMeta("append-edit", true));
     const ready = initial.apply(initial.tr.insertText("!", 1));
     expect(trackChangesPluginKey.getState(refused)!.lastTracking?.status).toBe("refused");
-    expect(trackChangesPluginKey.getState(ready)!.lastTracking?.status).toBe("ready");
+    expect(trackChangesPluginKey.getState(ready)!.lastTracking?.status).toBe("tracked");
   });
 });

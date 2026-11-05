@@ -101,15 +101,14 @@ function isTrackableStep(step: Step) {
  * `tr.setDocAttribute`; refusing a gesture for containing one would call a
  * normal operation untrackable.
  */
-function isUntrackedStep(step: Step) {
+function isNonContentStep(step: Step) {
   return step instanceof DocAttrStep;
 }
 
 /**
  * The span a step says it affects, in the document it applied to. Mark and
  * attribute steps carry an empty StepMap, so a position map cannot describe
- * what they touched — only the step can. Callers that need to know what a
- * transaction rewrote must ask here rather than walking the maps.
+ * what they touched — only the step can.
  */
 export function stepRange(step: Step): { from: number; to: number } | null {
   if (
@@ -130,15 +129,15 @@ export function stepRange(step: Step): { from: number; to: number } | null {
   return null;
 }
 
-function refuseStep(step: Step): TrackingRefusal | null {
+function refusalFor(step: Step): TrackingRefusal | null {
   if (!(step instanceof ReplaceStep) && step.constructor.name === "ReplaceStep") {
     // Two copies of prosemirror-transform make every instanceof silently false.
-    return { failure: "duplicate-transform-package" };
+    return { reason: "duplicate-transform-package" };
   }
-  if (isUntrackedStep(step) || isTrackableStep(step)) return null;
+  if (isNonContentStep(step) || isTrackableStep(step)) return null;
   // Anything else would fall straight through the replay and land untracked, so
   // the gesture is refused whole instead of recorded in part.
-  return { failure: "unsupported-step", stepType: step.constructor.name };
+  return { reason: "unsupported-step", stepType: step.constructor.name };
 }
 
 /**
@@ -155,21 +154,19 @@ export function reportedTracking(
 
 /** Steps that carry authored content, and so count toward what was tracked. */
 export const contentSteps = (steps: readonly Step[]) =>
-  steps.filter(step => !isUntrackedStep(step));
+  steps.filter(step => !isNonContentStep(step));
 
 /**
  * Decided before the replay touches anything, so a gesture is refused whole
  * rather than recorded in part. Size is deliberately not consulted: what
  * matters is whether every step can be represented, not how many there are.
  *
- * The question is only about step kinds. A supported kind does not yet promise
- * the gesture is recorded completely — the mark trackers stamp against
- * positions the replay bridge never mapped, so a gesture mixing a mark step
- * with a position-shifting one still under-records.
+ * The question here is only about step kinds; whether the steps fit together is
+ * `composeGesture`'s to answer.
  */
 export function trackingRefusal(steps: readonly Step[]) {
   for (const step of steps) {
-    const refusal = refuseStep(step);
+    const refusal = refusalFor(step);
     if (refusal) return refusal;
   }
   return null;

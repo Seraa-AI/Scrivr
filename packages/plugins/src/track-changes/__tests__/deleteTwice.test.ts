@@ -47,6 +47,18 @@ describe("deleting already-deleted content", () => {
     expect(shape(twice())).toEqual(shape(once));
   });
 
+  it("leaves the same change set when a second author deletes it", () => {
+    const once = new TestEditor(doc(p("one"), p("two")));
+    deleteFirstParagraph(once);
+
+    const shape = (editor: TestEditor) =>
+      editor.pendingChanges
+        .map(c => `${c.type} ${c.dataTracked.operation} ${c.dataTracked.authorID} ${c.from}-${c.to}`)
+        .sort();
+
+    expect(shape(twice("bob"))).toEqual(shape(once));
+  });
+
   it("leaves the deletion acceptable as one decision", () => {
     const editor = twice();
     const plan = planChangeReview(trackChangesPluginKey.getState(editor.state)!.changeSet, {

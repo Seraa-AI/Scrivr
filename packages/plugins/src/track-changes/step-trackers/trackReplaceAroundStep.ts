@@ -3,6 +3,7 @@ import type { EditorState, Transaction } from "@scrivr/core/pm";
 import { ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
 
 import { TrackChangesAction } from "../actions";
+import { advanceBridge } from "../engine/replayBridge";
 import { createNewInsertAttrs, NewEmptyAttrs } from "../helpers";
 import { deleteAndMergeSplitNodes } from "../lib/deleteAndMergeSplitNodes";
 import {
@@ -47,6 +48,31 @@ export function trackReplaceAroundStep(
   currentStepDoc: PMNode,
   trContext: TrTrackingContext,
 ) {
+  const previousBridge = trContext.replayBridge;
+  const replayStart = newTr.mapping.maps.length;
+  const newStep = step.invert(currentStepDoc).map(previousBridge);
+  if (!(newStep instanceof ReplaceAroundStep)) return [];
+
+  const {
+    gapFrom: sourceGapFrom,
+    gapTo: sourceGapTo,
+  }: { gapFrom: number; gapTo: number } = step;
+  const gap = currentStepDoc.slice(sourceGapFrom, sourceGapTo);
+
+  const stepResult = newTr.maybeStep(newStep);
+  if (stepResult.failed) {
+    console.error(
+      `inverting ReplaceAroundStep failed: "${stepResult.failed}"`,
+      newStep,
+    );
+    return [];
+  }
+
+  preserveDataTrackedFromPreviousStep(newTr, step, newStep);
+
+  // What this step did, in the replayed document as it stands with the step undone.
+  const placed = step.map(advanceBridge(step, previousBridge, newTr, replayStart));
+  if (!(placed instanceof ReplaceAroundStep)) return [];
   // @ts-expect-error ProseMirror ReplaceAroundStep typing misses slice fields
   const {
     from,
@@ -64,22 +90,7 @@ export function trackReplaceAroundStep(
     insert: number;
     structure?: boolean;
     slice: ExposedSlice;
-  } = step;
-
-  const gap = currentStepDoc.slice(gapFrom, gapTo);
-
-  const newStep = step.invert(currentStepDoc);
-
-  const stepResult = newTr.maybeStep(newStep);
-  if (stepResult.failed) {
-    console.error(
-      `inverting ReplaceAroundStep failed: "${stepResult.failed}"`,
-      newStep,
-    );
-    return [];
-  }
-
-  preserveDataTrackedFromPreviousStep(newTr, step, newStep);
+  } = placed;
 
   const {
     sliceWasSplit,

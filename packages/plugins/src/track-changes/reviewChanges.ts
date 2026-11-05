@@ -6,7 +6,7 @@ import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { planChangeReview } from "./reviewPlan";
 import type { ReviewDecisions, ReviewOutcome, ReviewPlan, ReviewPlanResult } from "./reviewPlan";
 
-const subject = ({ accepted, rejected }: ReviewDecisions): ReviewDecisions => ({
+const decisionsOf = ({ accepted, rejected }: ReviewDecisions): ReviewDecisions => ({
   accepted: [...accepted],
   rejected: [...rejected],
 });
@@ -22,7 +22,7 @@ const subject = ({ accepted, rejected }: ReviewDecisions): ReviewDecisions => ({
 export function planReviewIn(state: EditorState, decisions: ReviewDecisions): ReviewPlan {
   const pluginState = trackChangesPluginKey.getState(state);
   if (!pluginState?.canAcceptReject) {
-    return { status: "blocked", ...subject(decisions), reason: "not-permitted" };
+    return { status: "blocked", ...decisionsOf(decisions), reason: "not-permitted" };
   }
   return planChangeReview(pluginState.changeSet, decisions);
 }
@@ -40,7 +40,7 @@ export function planReview(
   decisions: ReviewDecisions,
 ): ReviewPlanResult {
   if (!editor) return { status: "unavailable", reason: "no-editor" };
-  if (editor.readOnly) return { status: "blocked", ...subject(decisions), reason: "read-only" };
+  if (editor.readOnly) return { status: "blocked", ...decisionsOf(decisions), reason: "read-only" };
   return planReviewIn(editor.getState(), decisions);
 }
 
@@ -54,14 +54,14 @@ export function reviewChanges(
   editor: IBaseEditor | null | undefined,
   decisions: ReviewDecisions,
 ): ReviewOutcome {
+  if (!editor) return { status: "unavailable", reason: "no-editor" };
   const plan = planReview(editor, decisions);
   if (plan.status !== "ready") return plan;
-  if (!editor) return { status: "unavailable", reason: "no-editor" };
 
   const lastReview = () => trackChangesPluginKey.getState(editor.getState())?.lastReview;
   const previous = lastReview();
   editor.applyTransaction(
-    setAction(editor.getState().tr, TrackChangesAction.setChangeStatuses, subject(decisions)),
+    setAction(editor.getState().tr, TrackChangesAction.setChangeStatuses, decisionsOf(decisions)),
   );
 
   const outcome = lastReview();
@@ -70,7 +70,7 @@ export function reviewChanges(
   // arriving means the decision never reached it — a host plugin filtered it out.
   console.error(
     "@scrivr/plugins track-changes: review published no outcome; the decision did not reach the engine",
-    subject(plan),
+    decisionsOf(plan),
   );
-  return { status: "blocked", ...subject(plan), reason: "invalid-result" };
+  return { status: "blocked", ...decisionsOf(plan), reason: "invalid-result" };
 }

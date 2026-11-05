@@ -3,7 +3,9 @@
  * every surface that shows one wants the name, bounded so it cannot push a
  * layout around.
  */
-export function shortName(authorID: string, max = 22): string {
+const MAX_NAME_LENGTH = 22;
+
+export function shortName(authorID: string): string {
   const name = authorID.split(":").pop() ?? authorID;
-  return name.length > max ? name.slice(0, max) + "…" : name;
+  return name.length > MAX_NAME_LENGTH ? name.slice(0, MAX_NAME_LENGTH) + "…" : name;
 }

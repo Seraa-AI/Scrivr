@@ -162,7 +162,7 @@ function SingleChangePopover({
   // The popover stays open on a refusal: closing it would take the explanation
   // away with it, leaving a click that silently did nothing.
   const decide = (decision: ReviewDecision, forIds: string[]) => {
-    if (review.review(decision, forIds).status === "applied") onClose();
+    if (review.decide(decision, forIds).status === "applied") onClose();
   };
 
   // ── Preview content ────────────────────────────────────────────────────────
@@ -271,11 +271,11 @@ function ConflictPopover({
   }
 
   function rejectAll() {
-    if (review.review("rejected", changes.map((c) => c.id)).status === "applied") onClose();
+    if (review.decide("rejected", changes.map((c) => c.id)).status === "applied") onClose();
   }
 
   function rejectOne(id: string) {
-    if (review.review("rejected", [id]).status === "applied") onClose();
+    if (review.decide("rejected", [id]).status === "applied") onClose();
   }
 
   return (

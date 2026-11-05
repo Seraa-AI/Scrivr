@@ -1,15 +1,12 @@
 import type { Node } from "@scrivr/core/pm";
-import { getBlockInlineTrackedData } from "../helpers";
+import { getBlockInlineTrackedData, markRecords } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, type TrackedAttrs } from "../types";
 
 /** Read all records, including stacked inline and formatting changes. */
 function records(node: Node): Partial<TrackedAttrs>[] {
   return [
     ...(getBlockInlineTrackedData(node) ?? []),
-    ...node.marks.flatMap(mark => {
-      const value = mark.attrs.dataTracked;
-      return value ? (Array.isArray(value) ? value : [value]) : [];
-    }),
+    ...node.marks.flatMap(markRecords),
   ];
 }
 
@@ -38,7 +35,7 @@ export function canCancelInsertion(node: Node, authorID: string): boolean {
   // Only the content's own representation can establish cancellable ownership.
   const insertions: Partial<TrackedAttrs>[] = node.isText
     ? node.marks.filter(mark => mark.type === node.type.schema.marks.trackedInsert)
-      .flatMap(mark => mark.attrs.dataTracked ? [mark.attrs.dataTracked] : [])
+      .flatMap(markRecords)
     : getBlockInlineTrackedData(node) ?? [];
   const ownInsertion = insertions.some(record =>
     !record.foldingClosed && record.authorID === authorID && record.status === CHANGE_STATUS.pending &&

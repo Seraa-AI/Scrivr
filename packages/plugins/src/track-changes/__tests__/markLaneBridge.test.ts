@@ -3,22 +3,10 @@ import { doc, p, schema, TestEditor } from "./helpers";
 import { trackChangesPluginKey } from "../index";
 
 /**
- * A known defect, recorded so it cannot be mistaken for working behaviour.
- *
- * The replay keeps a bridge from the document a step applied to into the
- * replayed one, and advances it for every step. Only the replace tracker maps
- * through it: the mark, attribute and wrap trackers use raw positions. So a
- * gesture mixing a position-shifting step with a mark step stamps the mark in
- * the wrong place, and the tail of the run ends up formatted with an empty
- * record — formatting no reviewer can reach, because no change describes it.
- *
- * This matters to the promise that a gesture is tracked in full or not at all:
- * the preflight decides that on step kinds before anything runs, and these
- * steps are all kinds it supports, so it reports the gesture tracked while part
- * of the formatting goes unrecorded.
- *
- * `it.fails` is deliberate. When the trackers are fixed these flip to failing,
- * which is the signal to delete them.
+ * Every tracker writes in the replayed document's frame. A gesture mixing a
+ * position-shifting step with a mark step stamps the mark over the text the
+ * gesture formatted, with a record behind all of it, so no formatting ends up
+ * out of a reviewer's reach.
  */
 
 const marked = (editor: TestEditor) => {
@@ -44,23 +32,59 @@ const boldThenInsert = () => {
   return editor;
 };
 
-describe("mark trackers ignore the replay bridge", () => {
-  it.fails("stamps the mark over the text the gesture formatted", () => {
+describe("trackers write through the replay bridge", () => {
+  it("stamps the mark over the text the gesture formatted", () => {
+    expect(marked(boldThenInsert()).map(run => run.text)).toEqual(["world"]);
+  });
+
+  it("leaves no formatting without a record behind it", () => {
+    expect(marked(boldThenInsert()).filter(run => !run.tracked)).toEqual([]);
+  });
+
+  it("rejecting the formatting removes it from the text it was on", () => {
     const editor = boldThenInsert();
+    const formatting = editor.pendingChanges.filter(c => c.type === "mark-change").map(c => c.id);
+    expect(formatting).toHaveLength(1);
+    editor.rejectChanges(formatting);
+    expect(marked(editor)).toEqual([]);
+  });
+
+  it("records removing formatting over the text it came off", () => {
+    const start = doc(p("hello world"));
+    const editor = new TestEditor(start);
+    const bold = schema.marks.bold!.create();
+    const setup = editor.state.tr.addMark(7, 12, bold);
+    editor.dispatch(setup);
+    editor.acceptChanges(editor.pendingChanges.map(c => c.id));
+    const tr = editor.state.tr.removeMark(7, 12, schema.marks.bold!);
+    tr.insertText("XX", 1);
+    editor.dispatch(tr);
     expect(marked(editor).map(run => run.text)).toEqual(["world"]);
+    expect(editor.pendingChanges.some(c => c.type === "mark-change" && c.dataTracked.operation === "delete")).toBe(true);
   });
 
-  it.fails("leaves no formatting without a record behind it", () => {
-    const editor = boldThenInsert();
-    expect(marked(editor).filter(run => !run.tracked)).toEqual([]);
+  it("records an attribute change on the block the gesture changed", () => {
+    const editor = new TestEditor(doc(p("first"), p("second", { nodeId: "b" })));
+    const tr = editor.state.tr.setNodeAttribute(7, "align", "center");
+    tr.insert(0, p("top"));
+    editor.dispatch(tr);
+    expect(editor.state.doc.child(2).attrs.align).toBe("center");
+    const change = editor.pendingChanges.find(c => c.type === "node-attr-change");
+    expect(change?.from).toBe(editor.state.doc.child(0).nodeSize + editor.state.doc.child(1).nodeSize);
   });
 
-  it("reports the gesture as tracked even so, which is what needs resolving", () => {
-    const editor = boldThenInsert();
-    const tracking = trackChangesPluginKey.getState(editor.state)!.lastTracking;
+  it("records a block-type change on the block the gesture changed", () => {
+    const editor = new TestEditor(doc(p("first"), p("second")));
+    const tr = editor.state.tr.setNodeMarkup(7, schema.nodes.heading, { level: 2 });
+    tr.insertText("XX", 1);
+    editor.dispatch(tr);
+    expect(editor.state.doc.child(1).type.name).toBe("heading");
+    expect(editor.pendingChanges.some(c => c.type === "node-attr-change" && c.from === editor.state.doc.child(0).nodeSize)).toBe(true);
+  });
 
-    expect(tracking?.status).toBe("ready");
-    // The contradiction, stated: formatting with no record, under a ready report.
-    expect(marked(editor).some(run => !run.tracked)).toBe(true);
+  it("reports a mixed gesture as tracked, and now it is", () => {
+    const editor = boldThenInsert();
+    expect(trackChangesPluginKey.getState(editor.state)!.lastTracking?.status).toBe("tracked");
+    expect(marked(editor).every(run => run.tracked)).toBe(true);
   });
 });

@@ -3,7 +3,6 @@ import {
   AddMarkStep,
   AddNodeMarkStep,
   AttrStep,
-  Mapping,
   RemoveMarkStep,
   RemoveNodeMarkStep,
   ReplaceAroundStep,
@@ -13,13 +12,13 @@ import {
 
 import { ChangeStep, TrTrackingContext } from "../types";
 import { processChangeSteps } from "./processReplaceStep";
+import { advanceBridge } from "./replayBridge";
 import {
   excludeFromTracking,
   passThroughMeta,
 } from "./transactionProcessing";
-import { createNewPendingAttrs, genId, getNodeTrackedData, NewEmptyAttrs } from "../helpers";
+import { createNewPendingAttrs, NewEmptyAttrs } from "../helpers";
 import { fixAndSetSelectionAfterTracking } from "./fixAndSetSelectionAfterTracking";
-import { updateChangeAttrs } from "./updateAttributes";
 import { diffChangeSteps } from "../lib/structuralChange";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
 import { isSetNodeMarkupStep } from "../step-trackers/qualifiers";
@@ -53,27 +52,16 @@ function caretTrailsStep(tr: Transaction, i: number, step: ReplaceStep) {
 }
 
 /**
- * Entering an iteration the bridge maps `docs[i+1]` into the replayed document;
- * leaving it, `docs[i]`. Every step kind advances it. The first replay map
- * mirrors the source step's own, because trackers begin by inverting the source
- * step. A step the replay declined still happened in the source, so its map
- * stays in the chain.
+ * Where a caret inside an insertion the gesture went on to edit sits, counted
+ * back from the insertion's end, which is what the replay reports.
  */
-function advanceBridge(
-  step: Step,
-  previous: Mapping,
-  newTr: Transaction,
-  replayStart: number,
-) {
-  const bridge = new Mapping([step.getMap()]);
-  bridge.appendMapping(previous);
-  if (newTr.mapping.maps.length > replayStart) {
-    bridge.appendMap(newTr.mapping.maps[replayStart]!, 0);
-    for (let j = replayStart + 1; j < newTr.mapping.maps.length; j++) {
-      bridge.appendMap(newTr.mapping.maps[j]!);
-    }
-  }
-  return bridge;
+function caretInsideComposedInsertion(tr: Transaction, i: number, step: ReplaceStep) {
+  const { selection } = tr;
+  if (!selection.empty) return undefined;
+  const later = tr.mapping.slice(i + 1);
+  const end = later.map(step.from + step.slice.size, -1);
+  if (selection.head < later.map(step.from, 1) || selection.head > end) return undefined;
+  return end - selection.head;
 }
 
 /**
@@ -107,7 +95,9 @@ export function trackTransaction(
     const step = tr.steps[i]!;
     const previousMapping = trContext.replayBridge.slice();
     const replayStart = newTr.mapping.maps.length;
-    trackOneStep(i, step, baseAttrs, tr, oldState, newTr, trContext);
+    if (!trContext.composition.folded.has(step)) {
+      trackOneStep(i, step, baseAttrs, tr, oldState, newTr, trContext);
+    }
     trContext.replayBridge = advanceBridge(
       step,
       previousMapping,
@@ -125,106 +115,99 @@ export function trackTransaction(
 function trackOneStep(
   i: number,
   step: Step,
-  emptyAttrs: NewEmptyAttrs,
+  baseAttrs: NewEmptyAttrs,
   tr: Transaction,
   oldState: EditorState,
   newTr: Transaction,
   trContext: TrTrackingContext,
 ) {
   const replayBridge = trContext.replayBridge;
-    if (step instanceof ReplaceStep) {
-      const { slice } = step;
-      if (
-        slice?.content?.content?.length === 1 &&
-        excludeFromTracking(slice.content.content[0]!)
-      ) {
-        return;
-      }
-
-      const [initialTrackedContent, newSelectionPos] = trackReplaceStep(
-        i,
-        oldState,
-        newTr,
-        emptyAttrs,
-        tr,
-        replayBridge,
-        trContext,
-      );
-
-      let trackedContent = initialTrackedContent;
-      const only = trackedContent.length === 1 ? trackedContent[0] : undefined;
-      const onlyNode = only ? trackedContentNode(only) : undefined;
-      if (onlyNode && excludeFromTracking(onlyNode)) return;
-      trackedContent = diffChangeSteps(trackedContent);
-
-      const [, updatedSelectionPos] = processChangeSteps(
-        trackedContent,
-        newTr,
-        trContext.stepsByGroupIDMap.has(step)
-          ? { ...emptyAttrs, moveNodeId: trContext.stepsByGroupIDMap.get(step)! }
-          : emptyAttrs,
-        oldState.schema,
-      );
-
-      if (caretTrailsStep(tr, i, step)) {
-        trContext.selectionPosFromInsertion =
-          updatedSelectionPos || newSelectionPos || tr.selection.head;
-      }
-    } else if (step instanceof ReplaceAroundStep) {
-      if (isSetNodeMarkupStep(step)) {
-        const steps = trackSetNodeMarkupStep(step, newTr, emptyAttrs, tr.docs[i]!);
-        if (steps.length > 0) processChangeSteps(steps, newTr, emptyAttrs, oldState.schema);
-      } else {
-        let steps = trackReplaceAroundStep(step, oldState, tr, newTr, emptyAttrs, tr.docs[i]!, trContext);
-        steps = diffChangeSteps(steps);
-        processChangeSteps(steps, newTr, emptyAttrs, oldState.schema);
-      }
-    } else if (step instanceof AttrStep) {
-      const changeSteps = trackAttrsChangeStep(
-        step,
-        oldState,
-        tr,
-        newTr,
-        emptyAttrs,
-        tr.docs[i]!,
-      );
-      processChangeSteps(
-        changeSteps,
-        newTr,
-        emptyAttrs,
-        oldState.schema,
-      );
-    } else if (step instanceof AddMarkStep) {
-      trackAddMarkStep(step, emptyAttrs, newTr, tr.docs[i]!);
-      const dataTracked = getNodeTrackedData(
-        newTr.doc.nodeAt(step.from),
-        oldState.schema,
-      )?.pop();
-      if (dataTracked) {
-        updateChangeAttrs(
-          newTr,
-          {
-            id: dataTracked.id as string,
-            from: step.from,
-            to: step.to,
-            type: "text-change",
-            dataTracked,
-          },
-          { ...dataTracked, id: genId() },
-          oldState.schema,
-        );
-      }
-      // Fuse this tracked mark with same-author/same-attrs neighbours so a run
-      // built from several edits stays one change (as typing already does).
-      mergeTrackedMarks(step.from, newTr.doc, newTr, oldState.schema);
-      mergeTrackedMarks(step.to, newTr.doc, newTr, oldState.schema);
-    } else if (step instanceof RemoveMarkStep) {
-      trackRemoveMarkStep(step, emptyAttrs, newTr, tr.docs[i]!);
-      mergeTrackedMarks(step.from, newTr.doc, newTr, oldState.schema);
-      mergeTrackedMarks(step.to, newTr.doc, newTr, oldState.schema);
-    } else if (step instanceof RemoveNodeMarkStep) {
-      trackRemoveNodeMarkStep(step, emptyAttrs, newTr, tr.docs[i]!);
-    } else if (step instanceof AddNodeMarkStep) {
-      trackAddNodeMarkStep(step, emptyAttrs, newTr, tr.docs[i]!);
+  if (step instanceof ReplaceStep) {
+    const { slice } = step;
+    if (
+      slice?.content?.content?.length === 1 &&
+      excludeFromTracking(slice.content.content[0]!)
+    ) {
+      return;
     }
+
+    const [initialTrackedContent, newSelectionPos] = trackReplaceStep(
+      i,
+      oldState,
+      newTr,
+      baseAttrs,
+      tr,
+      trContext,
+    );
+
+    let trackedContent = initialTrackedContent;
+    const only = trackedContent.length === 1 ? trackedContent[0] : undefined;
+    const onlyNode = only ? trackedContentNode(only) : undefined;
+    if (onlyNode && excludeFromTracking(onlyNode)) return;
+    trackedContent = diffChangeSteps(trackedContent);
+
+    const [, updatedSelectionPos] = processChangeSteps(
+      trackedContent,
+      newTr,
+      trContext.stepsByGroupIDMap.has(step)
+        ? { ...baseAttrs, moveNodeId: trContext.stepsByGroupIDMap.get(step)! }
+        : baseAttrs,
+      oldState.schema,
+    );
+
+    const placeCaret = (pos: number) => {
+      trContext.caretAfterStep = { pos, replayedMaps: newTr.mapping.maps.length };
+    };
+    if (caretTrailsStep(tr, i, step)) {
+      placeCaret(updatedSelectionPos || newSelectionPos || tr.selection.head);
+    } else if (updatedSelectionPos && trContext.composition.composed.has(step)) {
+      const fromEnd = caretInsideComposedInsertion(tr, i, step);
+      if (fromEnd !== undefined) placeCaret(updatedSelectionPos - fromEnd);
+    }
+  } else if (step instanceof ReplaceAroundStep) {
+    if (isSetNodeMarkupStep(step)) {
+      const steps = trackSetNodeMarkupStep(step, newTr, baseAttrs, tr.docs[i]!, replayBridge);
+      if (steps.length > 0) processChangeSteps(steps, newTr, baseAttrs, oldState.schema);
+    } else {
+      let steps = trackReplaceAroundStep(step, oldState, tr, newTr, baseAttrs, tr.docs[i]!, trContext);
+      steps = diffChangeSteps(steps);
+      processChangeSteps(steps, newTr, baseAttrs, oldState.schema);
+    }
+  } else if (step instanceof AttrStep) {
+    const changeSteps = trackAttrsChangeStep(
+      step,
+      oldState,
+      tr,
+      newTr,
+      baseAttrs,
+      tr.docs[i]!,
+      replayBridge,
+    );
+    processChangeSteps(
+      changeSteps,
+      newTr,
+      baseAttrs,
+      oldState.schema,
+    );
+  } else if (step instanceof AddMarkStep) {
+    // Mark steps shift nothing, so the source step's positions are already
+    // those of the document this iteration's bridge maps from.
+    const placed = step.map(replayBridge);
+    if (!(placed instanceof AddMarkStep)) return;
+    trackAddMarkStep(placed, baseAttrs, newTr);
+    // Fuse this tracked mark with same-author/same-attrs neighbours so a run
+    // built from several edits stays one change (as typing already does).
+    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema);
+    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema);
+  } else if (step instanceof RemoveMarkStep) {
+    const placed = step.map(replayBridge);
+    if (!(placed instanceof RemoveMarkStep)) return;
+    trackRemoveMarkStep(step, placed, baseAttrs, newTr, tr.docs[i]!);
+    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema);
+    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema);
+  } else if (step instanceof RemoveNodeMarkStep) {
+    trackRemoveNodeMarkStep(step, baseAttrs, newTr, tr.docs[i]!, replayBridge);
+  } else if (step instanceof AddNodeMarkStep) {
+    trackAddNodeMarkStep(step, baseAttrs, newTr, tr.docs[i]!, replayBridge);
+  }
 }

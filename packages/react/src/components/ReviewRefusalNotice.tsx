@@ -1,7 +1,8 @@
-import type { ReviewAction, ReviewRefusalState } from "../hooks/useReviewAction";
+import type { ReviewAction } from "../hooks/useReviewAction";
 import type { ReviewDecisions, ReviewRefusal, TrackedChange } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
 import { shortName } from "../utils/authorName";
+import { getChangeMeta } from "../utils/changeMeta";
 
 export interface ReviewRefusalNoticeProps {
   /** The review action whose refusal to show — the one the clicked surface used. */
@@ -68,7 +69,7 @@ function DependentList({ dependents }: { dependents: TrackedChange[] }) {
     <ul style={listStyle}>
       {dependents.map(change => (
         <li key={change.id}>
-          {author(change)} — {change.type.replace(/-/g, " ")}
+          {author(change)} — {getChangeMeta(change).label}
         </li>
       ))}
     </ul>
@@ -118,15 +119,14 @@ export function ReviewRefusalNotice({
   className,
   itemClassName,
 }: ReviewRefusalNoticeProps) {
-  const state = action.refusal;
-  if (!state) return null;
-  const { refusal, compound, dependents, stage, grew } = state;
+  const held = action.refusal;
+  if (!held) return null;
+  const { why, compound, dependents, stage, grew } = held;
 
-
-  if (refusal.reason !== "dependent-changes") {
+  if (why.reason !== "dependent-changes") {
     return (
-      <NoticeFrame className={className} alert={refusal.reason === "invalid-result"}>
-        {explanation[refusal.reason]}
+      <NoticeFrame className={className} alert={why.reason === "invalid-result"}>
+        {explanation[why.reason]}
         <div style={actions}>
           <NoticeButton className={itemClassName} onClick={action.dismiss}>Dismiss</NoticeButton>
         </div>

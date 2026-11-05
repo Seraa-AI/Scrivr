@@ -40,20 +40,19 @@ export function setFragmentAsWrapChange(inserted: Fragment, attrs: NewEmptyAttrs
 export function setFragmentAsMoveChange(fragment: Fragment, moveAttrs: NewMoveAttrs) {
   const content: PMNode[] = [];
   fragment.forEach(node => {
+    const records = getBlockInlineTrackedData(node) ?? [];
+    const pending = (operation: CHANGE_OPERATION) =>
+      records.filter(record => record.operation === operation && record.status === CHANGE_STATUS.pending);
+    const pendingCreations = pending(CHANGE_OPERATION.insert)
+      .flatMap(record => record.creationId ? [record.creationId] : record.id ? [record.id] : []);
+    const earlierPlacements = pending(CHANGE_OPERATION.move).flatMap(record => record.id ? [record.id] : []);
     content.push(
       node.type.create(
         { ...node.attrs, dataTracked: [
-          ...(getBlockInlineTrackedData(node) ?? []).filter(record => record.operation !== CHANGE_OPERATION.move),
+          ...records.filter(record => record.operation !== CHANGE_OPERATION.move),
           addTrackIdIfDoesntExist({ ...moveAttrs,
-            dependsOn: [...new Set([
-              ...(moveAttrs.dependsOn ?? []),
-              ...(getBlockInlineTrackedData(node) ?? [])
-                .filter(record => record.operation === CHANGE_OPERATION.insert && record.status === CHANGE_STATUS.pending)
-                .flatMap(record => record.creationId ? [record.creationId] : record.id ? [record.id] : []),
-            ])],
-            placementDependsOn: (getBlockInlineTrackedData(node) ?? [])
-              .filter(record => record.operation === CHANGE_OPERATION.move && record.status === CHANGE_STATUS.pending)
-              .flatMap(record => record.id ? [record.id] : []),
+            dependsOn: [...new Set([...(moveAttrs.dependsOn ?? []), ...pendingCreations])],
+            placementDependsOn: earlierPlacements,
           }),
         ] },
         node.content,

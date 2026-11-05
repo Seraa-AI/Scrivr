@@ -1,4 +1,4 @@
-import { EditorState, Plugin, PluginKey, Transaction } from "@scrivr/core/pm";
+import { closeHistory, EditorState, Plugin, PluginKey, Transaction } from "@scrivr/core/pm";
 
 import {
   getAction,
@@ -34,13 +34,16 @@ export interface TrackChangesState {
    * Undo and redo clear it, since they replace what that gesture produced.
    */
   lastTracking: TrackingResult | null;
-  /** @internal Outcomes accumulated since the root transaction of this dispatch. */
-  trackingInDispatch: TrackingResult | null;
   status: TrackChangesStatus;
   changeSet: ChangeSet;
   userID: string;
   canAcceptReject: boolean;
 }
+
+type TrackChangesPluginState = TrackChangesState & {
+  /** The outcome that speaks for this dispatch so far: see `reportedTracking`. */
+  trackingInDispatch: TrackingResult | null;
+};
 
 export const trackChangesPluginKey = new PluginKey<TrackChangesState>(
   "track-changes",
@@ -49,7 +52,7 @@ export const trackChangesPluginKey = new PluginKey<TrackChangesState>(
 export const trackChangesPlugin = (options: TrackChangesOptions) => {
   const { userID, skipTrsWithMetas = [], canAcceptReject = true } = options;
 
-  return new Plugin<TrackChangesState>({
+  return new Plugin<TrackChangesPluginState>({
     key: trackChangesPluginKey,
     props: {
       editable: (state: EditorState) =>
@@ -109,6 +112,9 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           const review =
             plan.status === "blocked" ? plan : updateChangesStatus(createdTr, changeSet, plan, userID);
           setAction(createdTr, TrackChangesAction.reviewResult, review);
+          // A decision is its own undo step. History never opens a group for an
+          // appended transaction by itself, so it would join the preceding edit.
+          closeHistory(createdTr);
           docChanged = true;
         } else if (!shouldSkipTracking || suggestionIntent(tx)) {
           const outcome = trackChanges(

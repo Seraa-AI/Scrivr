@@ -25,18 +25,19 @@ export function processChangeSteps(
   let selectionPos = undefined;
   const removedNodes: Array<{ from: number; to: number }> = [];
   const retainedNodes: Array<{ from: number; to: number }> = [];
+  const within = (ranges: Array<{ from: number; to: number }>, from: number, to: number) =>
+    ranges.some(range => range.from <= from && to <= range.to);
 
   changes.forEach(c => {
     // A physically removed ancestor consumed its descendants. A retained
     // proposal did not, regardless of whether it carries insertion records.
     if ((c.type === "delete-node" || c.type === "delete-text") &&
-        removedNodes.some(range => range.from <= c.pos &&
-          (c.type === "delete-node" ? c.nodeEnd : c.to) <= range.to)) return;
+        within(removedNodes, c.pos, c.type === "delete-node" ? c.nodeEnd : c.to)) return;
     let step = newTr.steps[newTr.steps.length - 1];
     switch (c.type) {
       case "delete-node": {
         const beforeSteps = newTr.steps.length;
-        const allowCancellation = !retainedNodes.some(range => range.from <= c.pos && c.nodeEnd <= range.to);
+        const allowCancellation = !within(retainedNodes, c.pos, c.nodeEnd);
         const removed = deleteOrSetNodeDeleted(c.node, mapping.map(c.pos), newTr, deleteAttrs, allowCancellation);
         if (removed) removedNodes.push({ from: c.pos, to: c.nodeEnd });
         else retainedNodes.push({ from: c.pos, to: c.nodeEnd });
@@ -92,7 +93,7 @@ export function processChangeSteps(
           deleteAttrs,
           mapping.map(c.from),
           mapping.map(c.to),
-          !retainedNodes.some(range => range.from <= c.pos && c.to <= range.to),
+          !within(retainedNodes, c.pos, c.to),
         );
 
         const textNewestStep = newTr.steps[newTr.steps.length - 1];
