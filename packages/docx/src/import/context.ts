@@ -14,6 +14,7 @@ import type {
   DocxFidelity,
   DocxUnsupportedPolicy,
 } from "@scrivr/core";
+import { bindReportRecorder, createReportRecorder } from "../report";
 
 export interface DocxImportOptions {
   unsupported?: DocxUnsupportedPolicy;
@@ -48,7 +49,10 @@ export function createDocxImportContext(
   const sharedStore = new Map<string, unknown>();
   const resolveImage = input.resolveImage ?? (() => undefined);
   const resolveHyperlink = input.resolveHyperlink ?? (() => undefined);
-  return {
+  const recorder = createReportRecorder({
+    warn: (d) => diagnostics.push({ level: "warning", ...d }),
+  });
+  const ctx: DocxImportContext = {
     options,
     schema: input.schema,
     diagnostics: {
@@ -56,6 +60,7 @@ export function createDocxImportContext(
       error(d) { diagnostics.push({ level: "error", ...d }); },
       list() { return diagnostics.slice(); },
     },
+    report: recorder.reporter,
     media: {
       resolveImage,
     },
@@ -96,6 +101,8 @@ export function createDocxImportContext(
       },
     },
   };
+  bindReportRecorder(ctx, recorder);
+  return ctx;
 }
 
 export type {

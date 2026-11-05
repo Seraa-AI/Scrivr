@@ -42,7 +42,7 @@ export function collectHandlers(
   const nodes: Record<string, SemanticNodeHandler> = {};
   const marks: Record<string, SemanticMarkHandler> = {};
 
-  for (const contrib of editor.getExportContributions()) {
+  for (const { exports: contrib } of editor.getFormatContributions()) {
     const semantic = semanticOf(contrib);
     if (!semantic) continue;
     if (semantic.nodes) Object.assign(nodes, semantic.nodes);

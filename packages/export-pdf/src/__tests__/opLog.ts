@@ -8,6 +8,7 @@ import {
   PDFString,
   PDFHexString,
 } from "pdf-lib";
+import { normalizeDrawNumber } from "@scrivr/core";
 
 /**
  * Records every drawing call an export makes, in order, as data.
@@ -40,18 +41,6 @@ export interface DrawOp {
   /** Which page received it — ops are recorded across pages in call order. */
   page: number;
   [field: string]: unknown;
-}
-
-/**
- * Rounds away arithmetic noise while keeping every difference a reader could
- * see. Without it a baseline fills up with `41.9999999998` diffs from
- * reassociated float math, and a harness that cries wolf gets ignored — which
- * is the same as not having one.
- */
-export function normalizeDrawNumber(value: number): number {
-  if (!Number.isFinite(value)) return value;
-  const rounded = Math.round(value * 1e3) / 1e3;
-  return Object.is(rounded, -0) ? 0 : rounded;
 }
 
 const PAGE_METHODS = ["drawText", "drawLine", "drawRectangle", "drawImage"] as const;

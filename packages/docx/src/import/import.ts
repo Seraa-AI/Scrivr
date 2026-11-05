@@ -3,7 +3,7 @@
  * `Node` constructed against the editor's schema.
  *
  * Pipeline:
- *   1. Collect handlers via `editor.getImportContributions()` + overrides.
+ *   1. Collect handlers via `editor.getFormatContributions()` + overrides.
  *   2. Create `DocxImportContext` with the editor's schema.
  *   3. Unzip OPC bytes, parse `word/document.xml`.
  *   4. Stage 1: walk into the normalized intermediate model.
@@ -11,8 +11,9 @@
  *   6. Stage 2: dispatch via extension handlers → ProseMirror `Node`.
  *   7. Run `onImportComplete` hooks.
  *
- * Returns `{ doc, diagnostics }` — DOCX import is inherently lossy.
- * Fatal failures throw `DocxImportError` with the same diagnostics.
+ * Returns `{ doc, diagnostics, report }` — DOCX import is inherently lossy,
+ * and the report counts what was kept and dropped. Fatal failures throw
+ * `DocxImportError` with the same diagnostics.
  *
  * The editor is required because nodes/marks are constructed against its
  * schema. Use `new ServerEditor()` for server-side imports — no view, no
@@ -25,6 +26,7 @@ import type {
   DocxImports,
   IBaseEditor,
   DocxDiagnostic,
+  DocxReport,
 } from "@scrivr/core";
 import { readDocxPackage, resolveOpcTarget } from "./opc";
 import { parseOoxml, findChild, attr } from "./xml";
@@ -49,10 +51,20 @@ import {
   type DocxImportOptions,
 } from "./context";
 import { DocxImportError } from "./error";
+import type { ParserDiagnostics } from "./parser";
+import {
+  assignOwned,
+  ownedBundles,
+  reportRecorderOf,
+  type HandlerOwner,
+  type OwnedHook,
+} from "../report";
 
 export interface DocxImportResult {
   doc: PmNode;
   diagnostics: DocxDiagnostic[];
+  /** What the import built and what it could not — see `DocxReporter`. */
+  report: DocxReport;
 }
 
 export interface DocxImportCallOptions extends DocxImportOptions {
@@ -89,6 +101,13 @@ export async function importDocx(
     schema: editor.schema,
     ...options,
   });
+  const recorder = reportRecorderOf(ctx);
+  // The parser warns through the diagnostics and records what it could not
+  // read in the report — the two channels a drop belongs in.
+  const parserSink: ParserDiagnostics = {
+    warn: (d) => ctx.diagnostics.warn(d),
+    dropped: (element, reason) => recorder.unhandled(element, reason),
+  };
 
   try {
     const pkg = readDocxPackage(bytes);
@@ -192,7 +211,7 @@ export async function importDocx(
       };
       try {
         const model = reconstructLists(
-          parseBlockContainer(partRoot, ctx.diagnostics),
+          parseBlockContainer(partRoot, parserSink),
           numbering,
         );
         return transformToProseMirror(model, ctx, handlers);
@@ -202,16 +221,17 @@ export async function importDocx(
       }
     };
 
-    for (const hook of lifecycleHooks.onBeforeImport) {
-      await hook(ctx);
+    for (const { owner, hook } of lifecycleHooks.onBeforeImport) {
+      await recorder.attributeAsync(owner, () => hook(ctx));
     }
 
-    const rawModel = parseDocumentBody(root, ctx.diagnostics);
+    const rawModel = parseDocumentBody(root, parserSink);
     const model = reconstructLists(rawModel, numbering);
     let doc = transformToProseMirror(model, ctx, handlers);
 
-    for (const hook of lifecycleHooks.onImportComplete) {
-      doc = await hook(doc, ctx);
+    for (const { owner, hook } of lifecycleHooks.onImportComplete) {
+      const current = doc;
+      doc = await recorder.attributeAsync(owner, () => hook(current, ctx));
     }
 
     // After the hooks, so a contribution's own blocks are addressable too.
@@ -256,7 +276,7 @@ export async function importDocx(
         throw new DocxImportError(fatal.message, finalDiagnostics);
       }
     }
-    return { doc, diagnostics: finalDiagnostics };
+    return { doc, diagnostics: finalDiagnostics, report: recorder.snapshot() };
   } catch (err) {
     if (err instanceof DocxImportError) throw err;
     const message = err instanceof Error ? err.message : String(err);
@@ -299,38 +319,39 @@ function readEvenAndOddHeaders(settingsXml: string | undefined): boolean {
 
 // ── Handler collection ──────────────────────────────────────────────────────
 
+function docxImportBundles(
+  editor: IBaseEditor,
+  overrides: DocxImports | undefined,
+): Array<{ owner: HandlerOwner; bundle: DocxImports }> {
+  return ownedBundles(editor.getFormatContributions(), (c) => c.imports.docx, overrides);
+}
+
 function collectHandlers(
   editor: IBaseEditor,
   overrides?: DocxImports,
 ): ResolvedImportHandlers {
-  const blocks: ResolvedImportHandlers["blocks"] = {};
-  const paragraphStyles: ResolvedImportHandlers["paragraphStyles"] = {};
-  const marks: ResolvedImportHandlers["marks"] = {};
-  const inlines: ResolvedImportHandlers["inlines"] = {};
+  const resolved: ResolvedImportHandlers = {
+    blocks: {},
+    paragraphStyles: {},
+    marks: {},
+    inlines: {},
+    owners: { blocks: {}, paragraphStyles: {}, marks: {}, inlines: {} },
+  };
 
-  for (const contrib of editor.getImportContributions()) {
-    const docx = contrib.docx;
-    if (!docx) continue;
-    if (docx.blocks) Object.assign(blocks, docx.blocks);
-    if (docx.paragraphStyles) Object.assign(paragraphStyles, docx.paragraphStyles);
-    if (docx.marks) Object.assign(marks, docx.marks);
-    if (docx.inlines) Object.assign(inlines, docx.inlines);
+  for (const { owner, bundle: docx } of docxImportBundles(editor, overrides)) {
+    const { owners } = resolved;
+    assignOwned(resolved.blocks, owners.blocks, docx.blocks, owner);
+    assignOwned(resolved.paragraphStyles, owners.paragraphStyles, docx.paragraphStyles, owner);
+    assignOwned(resolved.marks, owners.marks, docx.marks, owner);
+    assignOwned(resolved.inlines, owners.inlines, docx.inlines, owner);
   }
 
-  if (overrides) {
-    if (overrides.blocks) Object.assign(blocks, overrides.blocks);
-    if (overrides.paragraphStyles)
-      Object.assign(paragraphStyles, overrides.paragraphStyles);
-    if (overrides.marks) Object.assign(marks, overrides.marks);
-    if (overrides.inlines) Object.assign(inlines, overrides.inlines);
-  }
-
-  return { blocks, paragraphStyles, marks, inlines };
+  return resolved;
 }
 
 interface LifecycleHooks {
-  onBeforeImport: Array<NonNullable<DocxImports["onBeforeImport"]>>;
-  onImportComplete: Array<NonNullable<DocxImports["onImportComplete"]>>;
+  onBeforeImport: Array<OwnedHook<NonNullable<DocxImports["onBeforeImport"]>>>;
+  onImportComplete: Array<OwnedHook<NonNullable<DocxImports["onImportComplete"]>>>;
 }
 
 function collectLifecycleHooks(
@@ -338,15 +359,11 @@ function collectLifecycleHooks(
   overrides?: DocxImports,
 ): LifecycleHooks {
   const hooks: LifecycleHooks = { onBeforeImport: [], onImportComplete: [] };
-  for (const contrib of editor.getImportContributions()) {
-    const docx = contrib.docx;
-    if (!docx) continue;
-    if (docx.onBeforeImport) hooks.onBeforeImport.push(docx.onBeforeImport);
-    if (docx.onImportComplete) hooks.onImportComplete.push(docx.onImportComplete);
-  }
-  if (overrides) {
-    if (overrides.onBeforeImport) hooks.onBeforeImport.push(overrides.onBeforeImport);
-    if (overrides.onImportComplete) hooks.onImportComplete.push(overrides.onImportComplete);
+  for (const { owner, bundle: docx } of docxImportBundles(editor, overrides)) {
+    if (docx.onBeforeImport) hooks.onBeforeImport.push({ owner, hook: docx.onBeforeImport });
+    if (docx.onImportComplete) {
+      hooks.onImportComplete.push({ owner, hook: docx.onImportComplete });
+    }
   }
   return hooks;
 }

@@ -13,7 +13,7 @@ import type {
   SlashCommandSpec,
 } from "./extensions/types";
 import { DEFAULT_SLASH_ORDER } from "./extensions/types";
-import type { ExportContributionMap, ImportContributionMap } from "./extensions/export";
+import type { ExportContributionMap, FormatContribution, ImportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
 import {
@@ -525,6 +525,10 @@ export class BaseEditor implements IBaseEditor {
 
   getImportContributions(): ImportContributionMap[] {
     return this.manager.getImportContributions();
+  }
+
+  getFormatContributions(): FormatContribution[] {
+    return this.manager.getFormatContributions();
   }
 
   getDocAttrNames(): string[] {

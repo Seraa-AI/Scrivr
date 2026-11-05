@@ -21,6 +21,7 @@ import type {
   XmlNode,
 } from "./context";
 import type { DocxDiagnostic } from "./handlers";
+import { bindReportRecorder, createReportRecorder } from "../report";
 
 /** Content types + relationship types for header/footer parts. */
 const HEADER_CONTENT_TYPE =
@@ -109,6 +110,9 @@ export function createDocxContext(
   };
 
   const sharedStore = new Map<string, unknown>();
+  const recorder = createReportRecorder({
+    warn: (d) => state.diagnostics.push({ level: "warning", ...d }),
+  });
 
   // OOXML relationships are part-scoped: a rel referenced from header1.xml must
   // live in word/_rels/header1.xml.rels, not the document's. `currentRels` is
@@ -191,6 +195,7 @@ export function createDocxContext(
         return state.diagnostics.slice();
       },
     },
+    report: recorder.reporter,
     document: xml("w:document"),
     walkContent(doc: PmNode): XmlNode[] {
       return walkDocument(doc, ctx, opts.handlers ?? { nodes: {}, marks: {} });
@@ -244,6 +249,7 @@ export function createDocxContext(
     },
   };
 
+  bindReportRecorder(ctx, recorder);
   return { ctx, state };
 }
 

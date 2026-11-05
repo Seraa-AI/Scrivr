@@ -145,7 +145,7 @@ export async function exportToPdf(
  * for server-side rendering or testing).
  *
  * `editor` is required: extension nodes (e.g. `table`) contribute their PDF
- * handler through `editor.getExportContributions()`, so without it those blocks
+ * handler through `editor.getFormatContributions()`, so without it those blocks
  * would render blank. A `ServerEditor` is sufficient (it satisfies the needed
  * surface). A block whose node type still has no handler is skipped with a
  * one-time warning.
@@ -178,7 +178,7 @@ async function writePdf(
     after: Array<(ctx: PdfContext) => void | Promise<void>>;
   } = { before: [], after: [] };
 
-  for (const contrib of editor.getExportContributions()) {
+  for (const { exports: contrib } of editor.getFormatContributions()) {
     const pdfContrib = contrib.pdf;
     if (!pdfContrib) continue;
     for (const [name, handler] of Object.entries(pdfContrib.nodes ?? {})) {

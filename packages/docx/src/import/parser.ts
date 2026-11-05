@@ -36,20 +36,23 @@ import type {
   DocxTableRow,
 } from "@scrivr/core";
 import { emuToPx, twipsToPx } from "@scrivr/core";
+import { NO_PARSER } from "../report";
 
 /** Matches the bound the paste path applies in `@scrivr/core`. */
 const MAX_GRID_SPAN = 64;
 
 /**
- * Minimal diagnostics sink — same shape `DocxImportContext.diagnostics`
- * exposes, but accepted as a standalone arg so parser tests can supply a
- * no-op without spinning up a full context.
+ * Where the parser says what it could not read: a warning for the
+ * diagnostics, and an entry for the import's report. A standalone argument so
+ * parser tests can supply a no-op without spinning up a full context.
  */
 export interface ParserDiagnostics {
   warn(d: Omit<DocxDiagnostic, "level">): void;
+  /** Record a Word element the parser has no reading for. */
+  dropped(element: string, reason: string): void;
 }
 
-const NULL_DIAGNOSTICS: ParserDiagnostics = { warn: () => {} };
+const NULL_DIAGNOSTICS: ParserDiagnostics = { warn: () => {}, dropped: () => {} };
 
 export function parseDocumentBody(
   documentRoot: OoxmlElement,
@@ -119,6 +122,7 @@ export function parseBlockContainer(
         message: `No parser for top-level body element <${child.name}> — dropped`,
         nodeType: child.name,
       });
+      diagnostics.dropped(child.name, NO_PARSER);
     }
   }
   return { blocks };

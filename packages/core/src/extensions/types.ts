@@ -55,7 +55,7 @@ import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { SurfaceRegistry } from "../surfaces/SurfaceRegistry";
-import type { ExportContributionMap, ImportContributionMap } from "./export";
+import type { ExportContributionMap, FormatContribution, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
@@ -161,10 +161,24 @@ export interface IBaseEditor {
   getMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec>;
   /** Parse a markdown string into a ProseMirror document node. */
   parseMarkdown(text: string): Node;
-  /** Export contributions from all extensions, in registration order. */
+  /**
+   * Export contributions from all extensions, in registration order.
+   * @deprecated Use `getFormatContributions()`, which also names each
+   * contribution's extension.
+   */
   getExportContributions(): ExportContributionMap[];
-  /** Import contributions from all extensions, in registration order. */
+  /**
+   * Import contributions from all extensions, in registration order.
+   * @deprecated Use `getFormatContributions()`, which also names each
+   * contribution's extension.
+   */
   getImportContributions(): ImportContributionMap[];
+  /**
+   * Export and import contributions from all extensions, each with the name of
+   * the extension that made it, in registration order. What a format package
+   * reads to collect handlers, so it can say which extension handled what.
+   */
+  getFormatContributions(): FormatContribution[];
   /**
    * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
    *
