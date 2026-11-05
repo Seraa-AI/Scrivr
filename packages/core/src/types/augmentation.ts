@@ -38,10 +38,13 @@ export type FlatCommands<R> = UnionToIntersection<Commands<R>[keyof Commands<R>]
  * Safe fallback: if no `Commands` augmentations have been declared the
  * keyof is `never`, so we fall back to a permissive record instead of
  * collapsing to `unknown`.
+ *
+ * Commands answer whether they ran. A ProseMirror command already returns that,
+ * and a caller that cannot see it has no way to tell a refusal from a no-op.
  */
-export type SafeFlatCommands = [keyof Commands<void>] extends [never]
-  ? Record<string, (...args: unknown[]) => void>
-  : FlatCommands<void>;
+export type SafeFlatCommands = [keyof Commands<boolean>] extends [never]
+  ? Record<string, (...args: unknown[]) => boolean>
+  : FlatCommands<boolean>;
 
 // ── Augmentable interfaces ────────────────────────────────────────────────────
 

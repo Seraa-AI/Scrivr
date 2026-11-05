@@ -134,23 +134,4 @@ export const isDirectPendingMoveDeletion = (
   );
 };
 
-export const isDeletingPendingMovedNode = (step: ReplaceStep, doc: PMNode) => {
-  if (!step.slice || step.from === step.to || step.slice.content.size > 0) {
-    return undefined;
-  }
 
-  const node = doc.nodeAt(step.from);
-  if (!node) {
-    return undefined;
-  }
-  const trackedAttrs = node.attrs.dataTracked as TrackedAttrs[];
-  const found = trackedAttrs?.find(
-    tracked =>
-      tracked.operation === CHANGE_OPERATION.move &&
-      tracked.status === CHANGE_STATUS.pending,
-  );
-  if (found?.moveNodeId) {
-    return found.moveNodeId;
-  }
-  return undefined;
-};

@@ -39,6 +39,7 @@ import {
 } from "@scrivr/react";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent } from "./demoContent";
+import { TrackChangesInspector } from "./TrackChangesInspector";
 import { env } from "../lib/env";
 import {
   ChevronLeft,
@@ -537,6 +538,7 @@ export function Playground() {
                 }}
               >
                 <TrackChangesPanel editor={editor} className="playground-track-panel" />
+                <TrackChangesInspector editor={editor} />
               </div>
             </>
           ) : (
@@ -549,6 +551,7 @@ export function Playground() {
               }}
             >
               <TrackChangesPanel editor={editor} className="playground-track-panel" />
+              <TrackChangesInspector editor={editor} />
             </div>
           )}
         </aside>

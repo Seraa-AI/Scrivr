@@ -1,5 +1,7 @@
 import { DefaultContent } from "@scrivr/core";
 
+import { TRACK_CHANGES_DEMO_DOC } from "./trackChangesDemo";
+
 // ── Table builders ────────────────────────────────────────────────────────────
 // Compact helpers so the demo table stays readable. Each cell holds one
 // left-aligned paragraph; headers are bold on a light fill.
@@ -849,6 +851,23 @@ function performancePages(pageCount: number): Record<string, unknown>[] {
 
 const performancePageCount = requestedPageCount();
 
+/** `?demo=track-changes` loads the document for exercising review by hand. */
+function requestedDemo(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("demo");
+}
+
+function startingDoc() {
+  if (requestedDemo() === "track-changes") return TRACK_CHANGES_DEMO_DOC;
+  if (performancePageCount > 0) {
+    return {
+      ...DEMO_DOC,
+      content: [...DEMO_DOC.content, ...performancePages(performancePageCount)],
+    };
+  }
+  return DEMO_DOC;
+}
+
 /**
  * DemoContent — seeds the editor with the playground demo document.
  * Drop this extension to start with an empty document instead.
@@ -856,13 +875,8 @@ const performancePageCount = requestedPageCount();
  * Append a long deterministic tail with `?pages=<n>` — e.g. `?pages=200` or
  * `?pages=1000` — to exercise streamed layout, virtualization, and late-page
  * editing at whatever size you want to measure.
+ *
+ * `?demo=track-changes` loads a document that already holds another author's
+ * pending changes, so reviewing and multi-author editing can be driven by hand.
  */
-export const DemoContent = DefaultContent.configure({
-  json:
-    performancePageCount > 0
-      ? {
-          ...DEMO_DOC,
-          content: [...DEMO_DOC.content, ...performancePages(performancePageCount)],
-        }
-      : DEMO_DOC,
-});
+export const DemoContent = DefaultContent.configure({ json: startingDoc() });

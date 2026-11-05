@@ -2,6 +2,7 @@ import type { IEditor } from "@scrivr/core";
 import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContainer } from "@scrivr/core";
 
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
+import { changeActs } from "./reviewPlan";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
@@ -383,7 +384,10 @@ export function createChangePopover(
 
     const primaryInfo = toInfo(primary);
     primaryInfo.isConflict = isConflict;
-    primaryInfo.conflictChanges = isConflict ? conflictGroup.map(toInfo) : [];
+    // One party per act: a whole-paragraph change is recorded on the node and on
+    // its text, and those are one thing to keep or to discard.
+    const parties = changeActs(conflictGroup).map((act) => act.primary);
+    primaryInfo.conflictChanges = isConflict ? parties.map(toInfo) : [];
 
     // Stable key: use groupId when available (so moving across chars within the
     // same replacement group doesn't re-trigger onShow), or sorted ids for conflicts.

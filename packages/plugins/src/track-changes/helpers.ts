@@ -1,4 +1,4 @@
-import { Attrs, Fragment, Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
+import { Attrs, Fragment, Mark, Node as PMNode, Schema, type Transaction } from "@scrivr/core/pm";
 
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs } from "./types";
 
@@ -189,7 +189,12 @@ export function shouldMergeTrackedAttributes(
   return (
     left.status === right.status &&
     left.operation === right.operation &&
-    left.authorID === right.authorID
+    left.authorID === right.authorID &&
+    left.creationId === right.creationId &&
+    left.deletionId === right.deletionId &&
+    left.continuesId === right.continuesId &&
+    left.foldingClosed === right.foldingClosed &&
+    JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? [])
   );
 }
 
@@ -225,11 +230,51 @@ export const updateBlockNodesAttrs = (
   return Fragment.fromArray(updatedNodes);
 };
 
+const isTrackedRecord = (value: unknown): value is Partial<TrackedAttrs> =>
+  typeof value === "object" && value !== null;
+
+/**
+ * The records a mark carries. It holds an array or a lone object depending on
+ * the mark, and this data arrives from saved and synced documents, so each
+ * entry is checked rather than assumed.
+ */
+export function markRecords(mark: Mark): Partial<TrackedAttrs>[] {
+  const value: unknown = mark.attrs.dataTracked;
+  return (Array.isArray(value) ? value : [value]).filter(isTrackedRecord);
+}
+
+/**
+ * Replaces the records on a mark across one text node, in the shape the mark
+ * already stores them. A review mark is nothing without its record, so losing
+ * the last one removes it; a formatting mark stays, with none left to review.
+ */
+export function replaceMarkRecords(
+  tr: Transaction,
+  pos: number,
+  node: PMNode,
+  mark: Mark,
+  records: Partial<TrackedAttrs>[],
+) {
+  const storedAsArray = Array.isArray(mark.attrs.dataTracked);
+  tr.removeMark(pos, pos + node.nodeSize, mark);
+  if (!storedAsArray && !records.length) return;
+  tr.addMark(pos, pos + node.nodeSize, mark.type.create({
+    ...mark.attrs,
+    dataTracked: storedAsArray ? records : records[0],
+  }));
+}
+
+/**
+ * Records without one change's. Accepts either shape `dataTracked` is written
+ * in — an array on a node, a lone object on a mark — because ProseMirror types
+ * the attr `any`, and a `.filter` on the object form throws.
+ */
 export function excludeFromTracked(
-  dataTracked: TrackedAttrs[] | null,
+  dataTracked: Partial<TrackedAttrs> | Partial<TrackedAttrs>[] | null | undefined,
   changeIdToExclude: string,
 ) {
   if (!dataTracked) return null;
-  const newDataTracked = dataTracked.filter(c => c.id !== changeIdToExclude);
-  return newDataTracked.length ? newDataTracked : null;
+  const records = Array.isArray(dataTracked) ? dataTracked : [dataTracked];
+  const remaining = records.filter(c => c.id !== changeIdToExclude);
+  return remaining.length ? remaining : null;
 }

@@ -1,10 +1,12 @@
-import { Schema } from "@scrivr/core/pm";
+import { Node as PMNode, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { Mapping } from "@scrivr/core/pm";
 
 import { ChangeSet } from "../ChangeSet";
+import { clearTextChange } from "../lib/clearTextChange";
 import {
   getBlockInlineTrackedData,
+  excludeFromTracked,
 } from "../helpers";
 import {
   CHANGE_OPERATION,
@@ -58,6 +60,9 @@ export function updateChangeAttrs(
     ) {
       tr.removeMark(change.from, change.to, oldMark);
     } else {
+      // Tracked marks coexist (`excludes: ""`), so adding the updated record
+      // without taking the old one off would leave both on the text.
+      tr.removeMark(change.from, change.to, oldMark);
       tr.addMark(
         change.from,
         change.to,
@@ -172,30 +177,33 @@ export function updateChangeChildrenAttributes(
   mapping: Mapping,
 ) {
   changes.forEach(c => {
-    if (c.type === "node-change" && !ChangeSet.shouldDeleteChange(c)) {
+    if (c.type === "node-change" && c.dataTracked.status !== CHANGE_STATUS.pending && !ChangeSet.shouldDeleteChange(c)) {
       const from = mapping.map(c.from);
       const node = tr.doc.nodeAt(from);
       if (!node) {
         return;
       }
-      const attrs = { ...node.attrs, dataTracked: null };
+      const attrs = { ...node.attrs, dataTracked: excludeFromTracked(node.attrs.dataTracked, c.id) };
       tr.setNodeMarkup(from, undefined, attrs, node.marks);
     }
   });
 }
 
+/**
+ * Clears one change's record off a restored node. Anything else the node carries
+ * is another decision — often another author's — and outlives this review.
+ */
 export function restoreNode(
   tr: Transaction,
-  node: any,
+  node: PMNode,
   pos: number,
-  schema: Schema,
+  id: string,
 ): void {
-  const updatedAttrs = {
-    ...node.attrs,
-    dataTracked: null,
-  };
-
-  tr.setNodeMarkup(pos, undefined, updatedAttrs, node.marks);
-  tr.removeMark(pos, pos + node.nodeSize, schema.marks.trackedInsert);
-  tr.removeMark(pos, pos + node.nodeSize, schema.marks.trackedDelete);
+  tr.setNodeMarkup(
+    pos,
+    undefined,
+    { ...node.attrs, dataTracked: excludeFromTracked(node.attrs.dataTracked, id) },
+    node.marks,
+  );
+  clearTextChange(tr, pos, pos + node.nodeSize, id);
 }

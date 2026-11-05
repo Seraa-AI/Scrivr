@@ -6,6 +6,7 @@ import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs } from "./helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus } from "./types";
+import { planReviewIn } from "./reviewChanges";
 import { cloneTrackedChanges } from "./cloneTrackedChanges";
 
 declare module "@scrivr/core" {
@@ -17,8 +18,9 @@ declare module "@scrivr/core" {
        */
       setTrackingStatus: (status?: TrackChangesStatus) => ReturnType;
       /**
-       * Accept or reject a set of tracked changes by their IDs.
-       * status: "accepted" | "rejected"
+       * Accept or reject a set of tracked changes by their IDs. Returns false,
+       * deciding nothing, when the plan is blocked — dependent work included. A
+       * host that needs to know why calls `reviewChanges`.
        */
       setChangeStatuses: (status: "accepted" | "rejected", ids: string[]) => ReturnType;
       /** Update the userID attributed to future tracked changes. */
@@ -96,7 +98,7 @@ function deleteColor(authorID: string): string {
  *
  * Commands:
  *   setTrackingStatus(status?)  — toggle or set tracking status
- *   setChangeStatuses(status, ids) — accept or reject changes (gated by canAcceptReject)
+ *   setChangeStatuses(status, ids) — accept or reject changes; false when the plan is blocked
  *   setTrackChangesUserID(userID) — update the current user ID
  *   refreshChanges()             — force-rebuild the ChangeSet
  */
@@ -210,15 +212,16 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
       setChangeStatuses:
         (status: CHANGE_STATUS, ids: string[]) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
-          const pluginState = trackChangesPluginKey.getState(state);
-          if (!pluginState?.canAcceptReject) return false;
+          if (status === CHANGE_STATUS.pending) return false;
+          const decisions = status === CHANGE_STATUS.accepted
+            ? { accepted: ids, rejected: [] }
+            : { accepted: [], rejected: ids };
+          // Asks the shared rule rather than re-deriving it. A caller needing to
+          // know *why* a decision was refused reads `reviewChanges` instead; a
+          // command can only say whether it dispatched.
+          if (planReviewIn(state, decisions).status === "blocked") return false;
 
-          dispatch?.(
-            setAction(state.tr, TrackChangesAction.setChangeStatuses, {
-              status,
-              ids,
-            }),
-          );
+          dispatch?.(setAction(state.tr, TrackChangesAction.setChangeStatuses, decisions));
           return true;
         },
 
