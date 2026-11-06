@@ -19,7 +19,7 @@
 import { Extension } from "@scrivr/core";
 import type { IBaseEditor, IEditor, OverlayRenderHandler } from "@scrivr/core";
 
-import { findNodeById } from "../ai-toolkit/UniqueId";
+import { findLiveNodeById } from "@scrivr/plugins";
 import { acceptedTextMapFor } from "@scrivr/plugins";
 
 import {
@@ -80,7 +80,7 @@ export function createSuggestionOverlayHandler(
         // "active-only": idle blocks render nothing — sidebar card is the affordance.
         if (renderMode === "active-only" && !isActive) continue;
 
-        const found = findNodeById(state.doc, block.nodeId);
+        const found = findLiveNodeById(state.doc, block.nodeId);
         if (!found) continue;
 
         const isStale = ps.staleBlockIds.has(block.nodeId);
@@ -176,7 +176,7 @@ export const AiSuggestion = Extension.create<AiSuggestionOptions>({
       let newActive: string | null = null;
 
       for (const block of ps.suggestion.blocks) {
-        const found = findNodeById(state.doc, block.nodeId);
+        const found = findLiveNodeById(state.doc, block.nodeId);
         if (!found) continue;
         if (head >= found.pos && head <= found.pos + found.node.nodeSize) {
           newActive = block.nodeId;

@@ -27,7 +27,6 @@
 import { Fragment, type Mark, type Node as PMNode, type Schema } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 import {
-  findNodeById,
   describeInlineMark,
   isTrackedMark,
   resolveInlineMark,
@@ -47,6 +46,7 @@ import {
   type NewEmptyAttrs,
 } from "../helpers";
 import { CHANGE_STATUS } from "../types";
+import { findLiveNodeById } from "../liveNode";
 import { acceptedRangeToDocRange, type PosMapEntry } from "./acceptedTextMap";
 import { clearAuthorPendingMarks } from "./applyDiffAsSuggestion";
 import { diffText, expandCharLevel, pairReplacements } from "./diffText";
@@ -125,7 +125,7 @@ export function applyRichDiffAsSuggestion(
   const notFound: string[] = [];
   const rejected: string[] = [];
   const resolved = edits.flatMap((edit) => {
-    const found = findNodeById(state.doc, edit.nodeId);
+    const found = findLiveNodeById(state.doc, edit.nodeId);
     if (!found) {
       notFound.push(edit.nodeId);
       return [];
@@ -172,13 +172,13 @@ function applyRichBlockToTr(
 ): boolean {
   // Replacing inline intent supersedes this author's earlier inline suggestion.
   // Attribute-only edits are independent and must preserve pending text edits.
-  const found = findNodeById(tr.doc, edit.nodeId);
+  const found = findLiveNodeById(tr.doc, edit.nodeId);
   if (!found) return false;
   if (edit.spans) {
     clearAuthorPendingMarks(tr, found.pos, found.pos + found.node.nodeSize, authorID, schema);
   }
 
-  const updated = findNodeById(tr.doc, edit.nodeId);
+  const updated = findLiveNodeById(tr.doc, edit.nodeId);
   if (!updated) return false;
 
   const now = Date.now();
@@ -239,7 +239,7 @@ function applyInlineChange(
   base: () => NewEmptyAttrs,
   onWarn?: (message: string) => void,
 ): boolean {
-  const found = findNodeById(tr.doc, nodeId);
+  const found = findLiveNodeById(tr.doc, nodeId);
   if (!found) return false;
 
   const { acceptedText, map, charMarks } = buildAcceptedRichMap(found.node, found.pos, schema);

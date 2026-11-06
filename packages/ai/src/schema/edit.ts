@@ -79,11 +79,12 @@ const anchored = { position: EditPositionSchema, anchorNodeId: z.string().min(1)
  * item after this one", and the engine resolves that to a position.
  *
  * Discriminated on `op` so a malformed edit is reported against the one op it
- * claimed to be, rather than against all six.
+ * claimed to be, rather than against every operation.
  */
 export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
   structuralOp("insertBlock", { ...anchored, block: SemanticBlockInputSchema }),
   structuralOp("deleteBlock", { nodeId: z.string().min(1) }),
+  structuralOp("moveBlock", { ...anchored, nodeId: z.string().min(1) }),
   structuralOp("insertListItem", {
     ...anchored,
     item: z.strictObject({
@@ -92,6 +93,7 @@ export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
     }),
   }),
   structuralOp("deleteListItem", { nodeId: z.string().min(1) }),
+  structuralOp("moveListItem", { ...anchored, nodeId: z.string().min(1) }),
   structuralOp("insertTableRow", { ...anchored, cells: z.array(SemanticCellInputSchema).optional() }),
   structuralOp("deleteTableRow", { nodeId: z.string().min(1) }),
 ]);

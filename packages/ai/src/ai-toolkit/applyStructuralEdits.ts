@@ -11,9 +11,8 @@
  * agent sees leaves, so ops that act on a container climb to it.
  */
 import { findNodeById, spansToFragment, tableColumnCount } from "@scrivr/core";
-import { pickAgentAttrs } from "@scrivr/plugins";
-import type { Fragment, Node as PmNode, NodeType, Schema, Transaction } from "@scrivr/core/pm";
-import type { InlineSpan } from "@scrivr/core";
+import { MAX_TRACKED_STEPS_PER_TR, findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
+import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 
 import type { SemanticBlockInput, SemanticCellInput, StructuralSemanticEdit } from "../schema/edit";
 import { toCoreSpans } from "./spans";
@@ -23,8 +22,29 @@ export interface StructuralEditResult {
   changed: string[];
   /** nodeIds naming a node the document does not hold. */
   notFound: string[];
-  /** nodeIds that resolved, but to a node the op cannot act on. */
+  /** nodeIds that resolved, but only to deleted content or a shape the op cannot act on. */
   rejected: string[];
+}
+
+type ResolveNode = (nodeId: string) => { node: PmNode; pos: number } | null;
+
+/**
+ * Shadow ranges are read once, from the document the batch starts on, and
+ * mapped through the batch's own steps before each lookup — re-sliced per
+ * lookup because later ops keep appending steps. The tracking engine runs
+ * after dispatch, so a node this batch moved still has only one copy; the
+ * entry shadows are the ones resolution has to exclude.
+ */
+function createLiveResolver(tr: Transaction): ResolveNode {
+  const start = tr.mapping.maps.length;
+  const entryShadows = shadowRanges(tr.doc);
+  return (nodeId) => {
+    const mapping = tr.mapping.slice(start);
+    const mapped = entryShadows.map(
+      ([from, to]) => [mapping.map(from, 1), mapping.map(to, -1)] as const,
+    );
+    return findLiveNodeById(tr.doc, nodeId, mapped);
+  };
 }
 
 /** The node an id names, plus the ancestor of `type` that encloses it. */
@@ -32,8 +52,9 @@ function resolveAncestor(
   doc: PmNode,
   nodeId: string,
   typeName: string,
+  resolve: ResolveNode,
 ): { node: PmNode; pos: number } | null {
-  const found = findNodeById(doc, nodeId);
+  const found = resolve(nodeId);
   if (!found) return null;
   if (found.node.type.name === typeName) return found;
   const $pos = doc.resolve(found.pos);
@@ -53,8 +74,8 @@ function resolveAncestor(
  * would turn "delete this clause" into deleting the whole table — so a nested id
  * is refused, and `deleteListItem` / `deleteTableRow` are how those are reached.
  */
-function resolveTopLevel(doc: PmNode, nodeId: string): { node: PmNode; pos: number } | null {
-  const found = findNodeById(doc, nodeId);
+function resolveTopLevel(doc: PmNode, nodeId: string, resolve: ResolveNode): { node: PmNode; pos: number } | null {
+  const found = resolve(nodeId);
   if (!found) return null;
   return doc.resolve(found.pos).depth === 0 ? found : null;
 }
@@ -93,12 +114,18 @@ function deleteContainerChild(tr: Transaction, target: { node: PmNode; pos: numb
  * it could not — a missing anchor and a wrong-shaped anchor are different
  * answers, and a caller routing agent output needs to tell them apart.
  */
-function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: StructuralEditResult): void {
+function applyOne(
+  tr: Transaction,
+  edit: StructuralSemanticEdit,
+  result: StructuralEditResult,
+  resolve: ResolveNode,
+  moved: Set<string>,
+): void {
   const schema = tr.doc.type.schema;
 
   switch (edit.op) {
     case "insertBlock": {
-      const anchor = resolveTopLevel(tr.doc, edit.anchorNodeId);
+      const anchor = resolveTopLevel(tr.doc, edit.anchorNodeId, resolve);
       if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
       const node = buildBlock(schema, edit.block);
       if (!node) return void result.rejected.push(edit.anchorNodeId);
@@ -107,14 +134,44 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       return;
     }
     case "deleteBlock": {
-      const target = resolveTopLevel(tr.doc, edit.nodeId);
+      const target = resolveTopLevel(tr.doc, edit.nodeId, resolve);
       if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
       tr.delete(target.pos, target.pos + target.node.nodeSize);
       result.changed.push(edit.nodeId);
       return;
     }
+    case "moveBlock":
+    case "moveListItem": {
+      const resolveTarget = (id: string) => edit.op === "moveBlock"
+        ? resolveTopLevel(tr.doc, id, resolve)
+        : resolveAncestor(tr.doc, id, "listItem", resolve);
+      const target = resolveTarget(edit.nodeId);
+      if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      const anchor = resolveTarget(edit.anchorNodeId);
+      if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
+      // A second move of the same node in one transaction emits a second
+      // overlapping delete/insert pair, which tracking pairs wrongly and
+      // replays into a duplicated block. One move per node per batch.
+      if (moved.has(edit.nodeId)) return void result.rejected.push(edit.nodeId);
+      if (edit.op === "moveListItem") {
+        const source = tr.doc.resolve(target.pos);
+        const destination = tr.doc.resolve(anchor.pos);
+        if (source.depth !== destination.depth || source.start() !== destination.start()) {
+          result.rejected.push(edit.nodeId);
+          return;
+        }
+      }
+      const at = edit.position === "before" ? anchor.pos : anchor.pos + anchor.node.nodeSize;
+      // Moving beside oneself or to the current boundary is already satisfied.
+      if (target.pos === anchor.pos || at === target.pos || at === target.pos + target.node.nodeSize) return;
+      tr.delete(target.pos, target.pos + target.node.nodeSize);
+      tr.insert(at > target.pos ? at - target.node.nodeSize : at, target.node);
+      moved.add(edit.nodeId);
+      result.changed.push(edit.nodeId);
+      return;
+    }
     case "insertListItem": {
-      const item = resolveAncestor(tr.doc, edit.anchorNodeId, "listItem");
+      const item = resolveAncestor(tr.doc, edit.anchorNodeId, "listItem", resolve);
       if (!item) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
       const itemType = schema.nodes["listItem"];
       const paragraph = schema.nodes["paragraph"];
@@ -130,14 +187,14 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       return;
     }
     case "deleteListItem": {
-      const item = resolveAncestor(tr.doc, edit.nodeId, "listItem");
+      const item = resolveAncestor(tr.doc, edit.nodeId, "listItem", resolve);
       if (!item) return void rejectOrMiss(tr.doc, edit.nodeId, result);
       deleteContainerChild(tr, item);
       result.changed.push(edit.nodeId);
       return;
     }
     case "insertTableRow": {
-      const row = resolveAncestor(tr.doc, edit.anchorNodeId, "tableRow");
+      const row = resolveAncestor(tr.doc, edit.anchorNodeId, "tableRow", resolve);
       if (!row) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
       const rowType = schema.nodes["tableRow"];
       if (!rowType) return void result.rejected.push(edit.anchorNodeId);
@@ -159,7 +216,7 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       return;
     }
     case "deleteTableRow": {
-      const row = resolveAncestor(tr.doc, edit.nodeId, "tableRow");
+      const row = resolveAncestor(tr.doc, edit.nodeId, "tableRow", resolve);
       if (!row) return void rejectOrMiss(tr.doc, edit.nodeId, result);
       deleteContainerChild(tr, row);
       result.changed.push(edit.nodeId);
@@ -175,8 +232,9 @@ function rejectOrMiss(doc: PmNode, nodeId: string, result: StructuralEditResult)
 }
 
 /**
- * Apply structural edits in one transaction, so a batch is one undo step and one
- * review unit. Later edits resolve against the document the earlier ones left,
+ * Apply structural edits in one transaction, so a batch is one undo step.
+ * Tracking pairs matching move steps; unrelated edits remain separate review
+ * decisions. Later edits resolve against the document the earlier ones left,
  * which is why each op re-reads `tr.doc` rather than a position captured up front.
  */
 export function applyStructuralEdits(
@@ -184,6 +242,18 @@ export function applyStructuralEdits(
   edits: StructuralSemanticEdit[],
 ): StructuralEditResult {
   const result: StructuralEditResult = { changed: [], notFound: [], rejected: [] };
-  for (const edit of edits) applyOne(tr, edit, result);
+  const resolve = createLiveResolver(tr);
+  const moved = new Set<string>();
+  for (const edit of edits) {
+    // A step past the engine's limit is not tracked: replay stops and the
+    // document is left mangled rather than reviewable. A move writes two
+    // steps, so the budget has to be checked before the op, not after.
+    const steps = edit.op === "moveBlock" || edit.op === "moveListItem" ? 2 : 1;
+    if (tr.steps.length + steps > MAX_TRACKED_STEPS_PER_TR) {
+      result.rejected.push("nodeId" in edit ? edit.nodeId : edit.anchorNodeId);
+      continue;
+    }
+    applyOne(tr, edit, result, resolve, moved);
+  }
   return result;
 }

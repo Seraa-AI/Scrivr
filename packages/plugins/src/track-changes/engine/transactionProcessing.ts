@@ -78,7 +78,12 @@ export const excludeFromTracking = (node: Node) => {
  * likely indicates a loop or unsupported step type — tracking is skipped and
  * an error is logged so the issue can be reproduced and reported.
  */
-const MAX_TRACKED_STEPS_PER_TR = 20;
+/**
+ * Source steps one transaction may contribute before tracking gives up. A
+ * producer batching edits has to respect it: beyond this the engine stops
+ * replaying and the document is left mangled rather than tracked.
+ */
+export const MAX_TRACKED_STEPS_PER_TR = 20;
 
 export function iterationIsValid(
   iterations: number,

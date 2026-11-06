@@ -38,7 +38,9 @@ export function trackReplaceStep(
 
   const newStep = new ReplaceStep(
     deletedNodeMapping.map(invertedStep.from),
-    deletedNodeMapping.map(invertedStep.to),
+    // A later insertion at this range's end belongs to the later step, not
+    // to the content this inverse removes. A collapsed range stays collapsed.
+    deletedNodeMapping.map(invertedStep.to, invertedStep.from === invertedStep.to ? 1 : -1),
     invertedStep.slice,
   );
   const stepResult = newTr.maybeStep(newStep);
