@@ -623,10 +623,23 @@ describe("float beside a table — the table moves below the float", () => {
       expect(floatsOverlap(floatOf(l, 0), floatOf(l, 1))).toBe(false);
     });
 
-    it("30: a float with no fixed point does not drag later floats off their anchors", () => {
-      const l = layout(docOf(...Array.from({ length: 6 }, (_, i) => para(`P${i} ${words(25)}`,
+    // Each float's own wrap grows the paragraph above it, which moves its
+    // anchor: no fixed point. Each is locked where it was placed, so it sits
+    // at most one displaced paragraph above its anchor, with no text under it.
+    it("30: floats with no fixed point lock in place without dragging later ones", () => {
+      const l = expectStable(docOf(...Array.from({ length: 6 }, (_, i) => para(`P${i} ${words(25)}`,
         image({ wrapMode: "square", xAlign: i % 2 ? "left" : "right", width: 120, height: 30, yOffset: -40 })))));
-      (l.anchoredObjects ?? []).forEach((f, i) => expectOnAnchor(l, f, `P${i} `, -40));
+      expect(textUnderFloats(l)).toEqual([]);
+      expectFloatsOnAnchorPages(l);
+      const blocks = blocksOf(l);
+      (l.anchoredObjects ?? []).forEach((f, i) => {
+        const anchorIndex = blocks.findIndex((b) => b.text.startsWith(`P${i} `));
+        const anchor = must(blocks[anchorIndex], "anchor");
+        const above = blocks[anchorIndex - 1];
+        if (f.clamped) return;
+        expect(f.y).toBeLessThanOrEqual(anchor.y - 40 + 1e-6);
+        expect(f.y).toBeGreaterThanOrEqual(anchor.y - 40 - (above?.height ?? 0));
+      });
     });
 
     it("31: settling scales with the floats, not their square", () => {
@@ -750,6 +763,74 @@ describe("float beside a table — the table moves below the float", () => {
       expectBelowFloat(rowsOf(l, "T"), floatOf(l, 0));
       expect(blockWith(l, "Carried").page).toBe(2);
       expectOnAnchor(l, floatOf(l, 1), "Carried", 0);
+    });
+
+    /** Text lines that run under a square or top-bottom float. */
+    function textUnderFloats(l: DocumentLayout): string[] {
+      const out: string[] = [];
+      for (const f of l.anchoredObjects ?? []) {
+        if (f.wrapMode !== "square" && f.wrapMode !== "top-bottom") continue;
+        for (const page of l.pages) {
+          if (page.pageNumber !== f.page) continue;
+          for (const b of page.blocks) {
+            if (b.kind !== "text") continue;
+            let y = b.y;
+            for (const line of b.lines) {
+              for (const s of line.spans) {
+                if (s.kind !== "text" || s.text.trim() === "") continue;
+                const left = b.x + s.x;
+                const beside = f.wrapMode === "square" && (left + s.width <= f.x + 0.5 || left >= f.x + f.width - 0.5);
+                const below = y + line.lineHeight <= f.y + 0.5 || y >= f.y + f.height - 0.5;
+                if (!beside && !below) out.push(`${b.node.textContent.slice(0, 3)}@${y.toFixed(0)}`);
+              }
+              y += line.lineHeight;
+            }
+          }
+        }
+      }
+      return [...new Set(out)];
+    }
+
+    /** Two layouts of the same document agree, so the settle is deterministic. */
+    function expectStable(d: Node): DocumentLayout {
+      const first = layout(d);
+      expect(blocksOf(layout(d))).toEqual(blocksOf(first));
+      return first;
+    }
+
+    it("39: a float with no fixed point never leaves text under it (seed 51)", () => {
+      const l = expectStable(docOf(
+        sized("P0", 57, image({ wrapMode: "square", xAlign: "left", width: 124, height: 213 })),
+        sized("P1", 122, image({ wrapMode: "top-bottom", xAlign: "left", width: 219, height: 78, yOffset: -100 })),
+        sized("P2", 207, image({ wrapMode: "square", width: 75, height: 124 })),
+        sized("P3", 57), table("T0", 3), table("T1", 4), para("P6"),
+      ));
+      expect(textUnderFloats(l)).toEqual([]);
+      expectFloatsOnAnchorPages(l);
+    });
+
+    it("40: reach-back floats that chase each other leave no text under them (seed 21)", () => {
+      const l = expectStable(docOf(
+        sized("P0", 362, image({ wrapMode: "square", xAlign: "left", width: 199, height: 196 })),
+        sized("P1", 122, image({ wrapMode: "square", width: 210, height: 76, yOffset: -100 })),
+        sized("P2", 197, image({ wrapMode: "top-bottom", xAlign: "left", width: 162, height: 205, yOffset: -100 })),
+        sized("P3", 122, image({ wrapMode: "top-bottom", xAlign: "left", width: 133, height: 62 })),
+        sized("P4", 37), sized("P5", 167), table("T1", 3), sized("P6", 157), table("T0", 3),
+        sized("P8", 387), sized("P9", 167),
+      ));
+      expect(textUnderFloats(l)).toEqual([]);
+      expectFloatsOnAnchorPages(l);
+    });
+
+    it("41: a float whose own zone covers the paragraph it would push leaves no text under it", () => {
+      const l = expectStable(docOf(
+        para(`P0 ${words(3)}`),
+        table("T", 4),
+        para("A2", image({ wrapMode: "top-bottom", xAlign: "left", width: 200, height: 250 })),
+        para(`A3 ${words(40)}`, image({ wrapMode: "top-bottom", xAlign: "left", width: 200, height: 150, yOffset: -120 })),
+      ));
+      expect(textUnderFloats(l)).toEqual([]);
+      expectFloatsOnAnchorPages(l);
     });
   });
 });

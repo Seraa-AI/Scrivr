@@ -649,14 +649,15 @@ function createPageBarrierProvider(geometry: PageGeometry): PageBarrierProvider 
 }
 
 /**
- * How many passes one settle may take. Each pass reflows the floats the last
- * pass moved, then places every float whose inputs changed. Convergence is
- * the normal case and takes one extra pass; the cap bounds a float with no
- * fixed point (a zone that reflows the text its own anchor sits under). The
- * last pass always ends by placing, so every placement agrees with its
- * anchor; only that float's wrap rect may lag its image.
+ * How many times one settle may place a wrapping float again before locking
+ * it. Convergence is the normal case and takes one extra placement; the cap
+ * catches a float whose own wrap keeps moving its anchor, which has no fixed
+ * point and is locked instead (see `settleFrom`).
  */
 const MAX_ANCHOR_SETTLE_PASSES = 4;
+
+/** A backstop on passes per settle; locking normally ends a settle first. */
+const MAX_SETTLE_ROUNDS = 64;
 
 /** A vertical span in continuous-flow coordinates. */
 interface Band {
@@ -677,6 +678,11 @@ interface PlacedFloat {
   /** Square and top-bottom floats carve a wrap zone; behind and front do not. */
   wraps: boolean;
   placement: AnchoredObjectPlacement;
+  /**
+   * Set when the float's own wrap kept moving its anchor: it stays where it
+   * was last placed unless its anchor leaves that page.
+   */
+  locked: boolean;
   /** Place the float from where its anchor flow would start on its own. */
   place(anchorFlowStart: number): FloatPlace;
   zoneOf(placement: AnchoredObjectPlacement): Band;
@@ -721,18 +727,22 @@ function resolveAnchoredObjects(
     placed,
     startOf: (index, naturalStart) => {
       let start = naturalStart;
-      for (const float of floatsByFlow.get(index) ?? []) start = float.place(start).anchorStart;
+      for (const float of floatsByFlow.get(index) ?? []) {
+        if (!float.locked) start = float.place(start).anchorStart;
+      }
       return start;
     },
-    currentPlacement: (float, current) =>
-      float.place(naturalStartOf(current, float.anchorFlowIndex, pageConfig, geometry)).placement,
+    currentPlacement: (float, current) => {
+      const next = float.place(naturalStartOf(current, float.anchorFlowIndex, pageConfig, geometry)).placement;
+      return float.locked && next.page === float.placement.page ? float.placement : next;
+    },
   };
 
-  const reflow = (page: number, band: Band | undefined, fromIndex: number): { from: number; to: number } =>
+  const reflow = (page: number, band: Band | undefined): { from: number; to: number } =>
     reflowFlowsAgainstExclusions(
       flows,
       exclusionsFor(page),
-      { pageNumber: page, band, fromIndex, contentX, contentWidth },
+      { pageNumber: page, band, contentX, contentWidth },
       floatSet,
       pageConfig,
       geometry,
@@ -769,17 +779,20 @@ function resolveAnchoredObjects(
     exclusionsFor(first.placement.page).addRect(first.exclusionOf(first.placement));
     markBand(first.placement.page, first.zoneOf(first.placement));
 
-    // The last pass reflows only from the first float it re-carved onward, so
-    // no anchor it is about to place can move again: it ends consistent.
-    let lockedFrom = 0;
+    // A float whose own wrap keeps moving its anchor has no layout where text,
+    // float and anchor all agree. After MAX_ANCHOR_SETTLE_PASSES re-placements
+    // it is locked where it stands, and text wraps around it there — Word's
+    // single-pass positioning (LibreOffice: "consider wrapping style when
+    // positioning objects", which locks a positioned object). A locked float
+    // still follows its anchor onto another page.
+    const replacements = new Map<PlacedFloat, number>();
     for (let pass = 0; ; pass++) {
-      const capped = pass >= MAX_ANCHOR_SETTLE_PASSES;
       let firstMoved = flows.length;
       while (dirty.size > 0) {
         const page = Math.min(...dirty.keys());
         const band = dirty.get(page);
         dirty.delete(page);
-        const moved = reflow(page, band, capped ? lockedFrom : 0);
+        const moved = reflow(page, band);
         if (moved.to > moved.from) {
           firstMoved = Math.min(firstMoved, moved.from);
           markMoved(moved, page);
@@ -787,11 +800,8 @@ function resolveAnchoredObjects(
       }
 
       // Place again every float whose anchor flow may have moved, or that
-      // stacks on a page where a float moved. The last pass only places, so
-      // every placement agrees with its anchor; a float with no fixed point
-      // keeps the wrap rect the text was last laid out against.
+      // stacks on a page where a float moved.
       const restacked = new Set<number>();
-      let reCarvedFrom = flows.length;
       for (const float of placed) {
         const index = float.anchorFlowIndex;
         if (index < firstMoved && !restacked.has(float.placement.page)) continue;
@@ -807,19 +817,24 @@ function resolveAnchoredObjects(
         }
         const next = float.place(start).placement;
         if (samePlacement(next, float.placement)) continue;
+        if (float.locked && next.page === float.placement.page) continue;
+        const times = replacements.get(float) ?? 0;
+        if (float.wraps && times >= MAX_ANCHOR_SETTLE_PASSES && next.page === float.placement.page) {
+          float.locked = true;
+          continue;
+        }
+        replacements.set(float, times + 1);
         const previous = float.placement;
         float.placement = next;
         restacked.add(previous.page);
         restacked.add(next.page);
-        if (!float.wraps || capped) continue;
+        if (!float.wraps) continue;
         exclusionsFor(previous.page).removeRectsFor(float.docPos);
         exclusionsFor(next.page).addRect(float.exclusionOf(next));
         markBand(previous.page, float.zoneOf(previous));
         markBand(next.page, float.zoneOf(next));
-        reCarvedFrom = Math.min(reCarvedFrom, index);
       }
-      if (capped || dirty.size === 0) return;
-      lockedFrom = reCarvedFrom;
+      if (dirty.size === 0 || pass >= MAX_SETTLE_ROUNDS) return;
     }
   };
 
@@ -958,6 +973,7 @@ function resolveAnchoredObjects(
       anchorFlowIndex,
       docPos: anchor.docPos,
       wraps,
+      locked: false,
       placement: place(flows[anchorFlowIndex]?.globalY ?? 0).placement,
       place,
       zoneOf,
@@ -1009,8 +1025,6 @@ function reflowFlowsAgainstExclusions(
   zone: {
     pageNumber: number;
     band: Band | undefined;
-    /** Flows before this index are left as they are. */
-    fromIndex: number;
     contentX: number;
     contentWidth: number;
   },
@@ -1036,7 +1050,6 @@ function reflowFlowsAgainstExclusions(
     if (!flow) break;
     const flowY = flow.globalY ?? 0;
     if (flowY >= pageBottom) break;
-    if (idx < zone.fromIndex) continue;
     // Leaf flows (image/HR/pageBreak) cannot be re-broken around a wrap zone.
     if (flow.kind === "leaf" || flowY + flow.height <= pageTop) continue;
     // A table cannot be re-broken either, so it moves below the float instead.
