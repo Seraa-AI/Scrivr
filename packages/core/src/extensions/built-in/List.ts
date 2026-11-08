@@ -7,6 +7,7 @@ import type { Node as PmNode, NodeType } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
 import { ListItemStrategy } from "../../layout/ListItemStrategy";
+import { isListType, listKind, type ListKind } from "../../model/lists";
 import type { SlashCommandContribution, ToolbarItemSpec } from "../types";
 import { KeymapPriority } from "../types";
 import {
@@ -73,7 +74,7 @@ function makeToggleList(listType: NodeType, itemType: NodeType): Command {
         return liftListItem(itemType)(state, dispatch);
       }
 
-      if (ancestor.type.name === "bulletList" || ancestor.type.name === "orderedList") {
+      if (isListType(ancestor.type)) {
         // Different list type — convert
         if (dispatch) {
           dispatch(state.tr.setNodeMarkup($from.before(d), listType));
@@ -323,12 +324,10 @@ export const List = Extension.create({
         return orderedNumId;
       };
 
-      const walk = (node: PmNode, stack: ("bullet" | "ordered")[]) => {
-        let next = stack;
-        const name = node.type.name;
-        if (name === "bulletList") next = [...stack, "bullet"];
-        else if (name === "orderedList") next = [...stack, "ordered"];
-        else if (name === "listItem" && stack.length > 0) {
+      const walk = (node: PmNode, stack: ListKind[]) => {
+        const kind = listKind(node);
+        const next = kind ? [...stack, kind] : stack;
+        if (!kind && node.type.name === "listItem" && stack.length > 0) {
           const ilvl = Math.min(stack.length - 1, 2);
           const enclosing = stack[stack.length - 1]!;
           const numId = enclosing === "bullet" ? getBulletNumId() : getOrderedNumId();

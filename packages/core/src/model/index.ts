@@ -53,6 +53,17 @@ export {
   previousSection,
   sectionAt,
 } from "./sections";
+export {
+  LIST_LEVELS,
+  bulletBox,
+  bulletShape,
+  isListType,
+  listKind,
+  listLevel,
+  listMarker,
+  listStart,
+} from "./lists";
+export type { BulletShape, ListKind, ListLevelStyle, OrderedFormat } from "./lists";
 export type {
   Section,
   SectionBreakType,

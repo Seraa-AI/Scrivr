@@ -1,11 +1,8 @@
+import { isListType } from "@scrivr/core";
 import type { BlockEntry } from "./id";
 
 const DEFAULT_SHORT_MAX = 200;
 
-function isList(node: BlockEntry["node"]): boolean {
-  const n = node.type.name;
-  return n === "bulletList" || n === "orderedList";
-}
 function isHeading(node: BlockEntry["node"]): boolean {
   return node.type.name === "heading";
 }
@@ -44,7 +41,7 @@ export function groupBlocks(
     const entry = blocks[i]!;
     const node = entry.node;
 
-    if (isList(node)) {
+    if (isListType(node.type)) {
       groups.push([entry]);
       i += 1;
       continue;

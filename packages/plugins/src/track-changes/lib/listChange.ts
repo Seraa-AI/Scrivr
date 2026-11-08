@@ -1,8 +1,9 @@
+import { isListType } from "@scrivr/core";
 import { Node as PMNode, ReplaceAroundStep, Transaction } from "@scrivr/core/pm";
 
 import { addTrackIdIfDoesntExist, getBlockInlineTrackedData, NewEmptyAttrs } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, ListLevel } from "../types";
-import { buildLists, isListType, listLeaves, sameList, topLevelRange } from "./listStructure";
+import { buildLists, listLeaves, sameList, topLevelRange } from "./listStructure";
 
 /** A former place names lists, not the changes recorded on them then. */
 const withoutRecords = (level: ListLevel): ListLevel => ({
