@@ -1,6 +1,6 @@
 # RFC: Lists that behave like Word
 
-Status: Draft (2026-11-08). Nothing here ships until it is agreed.
+Status: Approved (2026-11-08), including D4 and D5. Being built as L1–L3.
 Workstream W2, after #229 (`main` @ 288119e).
 
 ## Goal
@@ -370,9 +370,10 @@ numbering through paragraph styles (4 fixtures), formats beyond
   the list; the fixtures show both kinds of interruption.
 - **D4 — Tab on a list's first item is consumed and changes nothing.** Word
   instead moves the whole list's indent, which our lists have no attribute for.
-  Revisit if a list-level indent is added.
+  Revisit if a list-level indent is added. Approved by the user on 2026-11-08.
 - **D5 — Word geometry for the level table** (0.5in per level, 0.25in hanging,
-  left-aligned marker). Open for review: it is the most visible change here.
+  left-aligned marker). It is the most visible change here. Approved by the
+  user on 2026-11-08.
 
 ## Alternatives rejected
 
