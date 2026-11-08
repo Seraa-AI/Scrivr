@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ExclusionManager } from "./ExclusionManager";
+import type { ExclusionRect } from "./ExclusionManager";
 
 describe("ExclusionManager — available segments", () => {
   it("returns full content width when no exclusion overlaps the line", () => {
@@ -105,7 +106,7 @@ describe("ExclusionManager — addFullWidthRect (Phase 5)", () => {
       skipToY: 220,
     });
     // getNextFreeY also chains.
-    expect(mgr.getNextFreeY(1, 120)).toBe(220);
+    expect(mgr.getNextFreeY(1, 120, 18, 72, 650)).toBe(220);
   });
 
   it("addFullWidthRect produces skipToY where a hand-set side:'full' rect with mismatched bounds would silently fail", () => {
@@ -137,72 +138,52 @@ describe("ExclusionManager — addFullWidthRect (Phase 5)", () => {
 });
 
 describe("ExclusionManager — getNextFreeY", () => {
-  it("returns the input y when no full-width exclusion overlaps", () => {
-    const mgr = new ExclusionManager();
-    mgr.addRect({
-      page: 1,
-      x: 100,
-      right: 200,
-      y: 50,
-      bottom: 150,
-      side: "left",
-      docPos: 1,
-    });
+  const side = (y: number, bottom: number, x = 100, right = 200): ExclusionRect =>
+    ({ page: 1, x, right, y, bottom, side: "left", docPos: 1 });
+  const full = (y: number, bottom: number, docPos = 1): ExclusionRect =>
+    ({ page: 1, x: 0, right: 600, y, bottom, side: "full", docPos });
 
-    expect(mgr.getNextFreeY(1, 80)).toBe(80);
+  it("returns the input y when no exclusion meets the band", () => {
+    const mgr = new ExclusionManager();
+    mgr.addRect(side(50, 150));
+
+    expect(mgr.getNextFreeY(1, 160, 40, 0, 600)).toBe(160);
   });
 
-  it("jumps past a full-width exclusion that contains y", () => {
+  it("jumps past a full-width exclusion the band meets", () => {
     const mgr = new ExclusionManager();
-    mgr.addRect({
-      page: 1,
-      x: 0,
-      right: 600,
-      y: 100,
-      bottom: 220,
-      side: "full",
-      docPos: 1,
-    });
+    mgr.addRect(full(100, 220));
 
-    expect(mgr.getNextFreeY(1, 120)).toBe(220);
+    expect(mgr.getNextFreeY(1, 120, 10, 0, 600)).toBe(220);
   });
 
-  it("chains through stacked full-width exclusions", () => {
+  it("jumps past a rect that starts inside the band, not only one containing its top", () => {
     const mgr = new ExclusionManager();
-    mgr.addRect({
-      page: 1,
-      x: 0,
-      right: 600,
-      y: 100,
-      bottom: 200,
-      side: "full",
-      docPos: 1,
-    });
-    mgr.addRect({
-      page: 1,
-      x: 0,
-      right: 600,
-      y: 200,
-      bottom: 300,
-      side: "full",
-      docPos: 2,
-    });
+    mgr.addRect(full(100, 220));
 
-    expect(mgr.getNextFreeY(1, 120)).toBe(300);
+    expect(mgr.getNextFreeY(1, 60, 60, 0, 600)).toBe(220);
   });
 
-  it("ignores side='left' exclusions even when they overlap y", () => {
+  it("chains through stacked exclusions", () => {
     const mgr = new ExclusionManager();
-    mgr.addRect({
-      page: 1,
-      x: 100,
-      right: 200,
-      y: 50,
-      bottom: 150,
-      side: "left",
-      docPos: 1,
-    });
+    mgr.addRect(full(100, 200, 1));
+    mgr.addRect(full(200, 300, 2));
 
-    expect(mgr.getNextFreeY(1, 80)).toBe(80);
+    expect(mgr.getNextFreeY(1, 120, 10, 0, 600)).toBe(300);
+  });
+
+  it("counts a side rect: a band that cannot wrap cannot share its rows with one", () => {
+    const mgr = new ExclusionManager();
+    mgr.addRect(side(50, 150));
+
+    expect(mgr.getNextFreeY(1, 80, 10, 0, 600)).toBe(150);
+  });
+
+  it("ignores a rect outside the content width and on other pages", () => {
+    const mgr = new ExclusionManager();
+    mgr.addRect(side(50, 150, 0, 60));
+    mgr.addRect({ ...full(50, 150), page: 2 });
+
+    expect(mgr.getNextFreeY(1, 80, 10, 72, 650)).toBe(80);
   });
 });
