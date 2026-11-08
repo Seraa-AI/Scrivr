@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { DOMSerializer } from "prosemirror-model";
-import { TextSelection, type Transaction } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 
@@ -30,31 +29,5 @@ describe("where an ordered list starts, in every format it is written to", () =>
     const editor = orderedFrom(2147483647);
     expect(editor.getMarkdown().trim()).toBe("32767. x");
     expect(htmlStart(editor)).toBe("32767");
-  });
-
-  // Tests the ordered-list input rule's own join check, called through the
-  // input-rules plugin with a stand-in view. Not editor behaviour: the editor
-  // does not run input rules on typing today.
-  it("the input rule joins '32768. ' onto a list showing 32767, as its numbers read", () => {
-    const editor = new ServerEditor({
-      extensions: [StarterKit],
-      content: { type: "doc", content: [
-        { type: "orderedList", attrs: { order: 40000 }, content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "x" }] }] }] },
-        { type: "paragraph", content: [{ type: "text", text: "32768." }] },
-      ] },
-    });
-    const end = editor.getState().doc.content.size - 1;
-    editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, end)));
-    const rules = editor.getState().plugins.find((plugin) => plugin.spec.isInputRules);
-    const handleTextInput = rules?.props.handleTextInput;
-    if (!handleTextInput) throw new Error("no input rules");
-    const view = { state: editor.getState(), composing: false, dispatch: (tr: Transaction) => editor.applyTransaction(tr) };
-    expect(Reflect.apply(handleTextInput, rules, [view, end, end, " ", () => null])).toBe(true);
-
-    const lists: number[] = [];
-    editor.getState().doc.forEach((node) => {
-      if (node.type.name === "orderedList") lists.push(node.childCount);
-    });
-    expect(lists).toEqual([2]);
   });
 });

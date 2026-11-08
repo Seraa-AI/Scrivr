@@ -715,7 +715,7 @@ export function layoutBlock(
     blockType: node.type.name,
     align: resolvedAlign,
     availableWidth,
-    // listMarker and listMarkerX are set by pagination for a list item's first block
+    // listMarker and listMarkerX are set by layoutBlockWithMarker for a list item's first block
   };
 }
 

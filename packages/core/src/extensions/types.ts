@@ -805,7 +805,10 @@ export interface ExtensionConfig<Options = object> {
    * `{ kind: "block" }` (the default) and registers a painter through
    * `addLayoutHandlers`. A node that exists structurally but has no visual box
    * of its own is `{ kind: "transparent" }`: it stays in the tree, and its
-   * children are laid out into the enclosing flow as if it weren't there.
+   * children are laid out into the enclosing flow as if it weren't there. A
+   * node whose content is blocks must declare `{ kind: "block" }` explicitly to
+   * keep its own box and painter; left undeclared, its blocks are laid out in
+   * its place.
    */
   addNodes?(this: Phase1Context<Options>): Record<string, ScrivrNodeSpec>;
 

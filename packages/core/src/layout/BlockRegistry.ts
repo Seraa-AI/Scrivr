@@ -173,7 +173,10 @@ export class BlockRegistry {
  * - `block` — the node occupies its own box in the flow. Today its painter
  *   comes from `addLayoutHandlers()`; the strategy is expected to move onto
  *   this declaration, at which point the text-block fallback for undeclared
- *   nodes can become an error instead of a guess.
+ *   nodes can become an error instead of a guess. A node that holds blocks
+ *   keeps its box only when it declares `{ kind: "block" }` explicitly; left
+ *   undeclared, it has no lines of its own and its blocks are laid out in its
+ *   place.
  * - `transparent` — the node contributes no box of its own. It stays in the
  *   editor tree, but its children are collected into the parent's layout flow
  *   as if the boundary weren't there.
@@ -200,4 +203,10 @@ function isNodeLayout(value: unknown): value is NodeLayout {
 export function nodeLayout(type: NodeType): NodeLayout {
   const declared: unknown = type.spec["layout"];
   return isNodeLayout(declared) ? declared : DEFAULT_NODE_LAYOUT;
+}
+
+/** Whether a node type declares, on its spec, a box of its own (`{ kind: "block" }`). */
+export function declaresOwnBox(type: NodeType): boolean {
+  const declared: unknown = type.spec["layout"];
+  return isNodeLayout(declared) && declared.kind === "block";
 }

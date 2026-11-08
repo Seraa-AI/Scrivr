@@ -37,8 +37,10 @@ import {
 import { LIST_MARKER_HANGING } from "../model/lists";
 import {
   collectLayoutItems,
-  fitIndent,
+  itemSpacing,
   layoutBlockWithMarker,
+  listMarkerXOf,
+  resolveItem,
   type LayoutItem,
   type MarkerPlacement,
 } from "./layoutItems";
@@ -1884,24 +1886,6 @@ function blockHasAnchoredObject(lines: LayoutLine[]): boolean {
   return false;
 }
 
-function isAnchorOnlyFlowEntry(entry: Pick<MeasureCacheEntry, "kind" | "height" | "lines">): boolean {
-  // Anchor-only flow is a text-kind paragraph whose only content is hidden
-  // anchor sentinels — leaf blocks can never qualify, even when their height
-  // happens to be zero.
-  if (entry.kind !== "text" || entry.height !== 0) return false;
-  return entry.lines.every((line) =>
-    line.lineHeight === 0 &&
-    line.cursorHeight === 0 &&
-    line.spans.length > 0 &&
-    line.spans.every((span) => span.kind === "object" && span.width === 0 && span.height === 0),
-  );
-}
-
-/** Where a block's text goes. */
-function blockGeometry(item: LayoutItem, config: FlowConfig): { indentLeft: number; blockWidth: number; blockX: number } {
-  const indentLeft = fitIndent(item.indentLeft, config.contentWidth);
-  return { indentLeft, blockWidth: config.contentWidth - indentLeft, blockX: config.margins.left + indentLeft };
-}
 
 /**
  * Whether a cached measurement still describes a block: the same width, and
@@ -1956,11 +1940,9 @@ export function buildBlockFlow(
       return { flows, reachedCutoff: true, cutoffIndex: itemIdx };
     }
 
-    const { node, nodePos, styleKey } = item;
-    const level = node.attrs["level"] as number | undefined;
-    const blockStyle = getBlockStyle(fontConfig, styleKey ?? node.type.name, level);
-    const { indentLeft, blockWidth, blockX } = blockGeometry(item, config);
-    const marker = item.listMarker !== undefined ? { text: item.listMarker, indentLeft } : undefined;
+    const { node, nodePos } = item;
+    const resolved = resolveItem(item, { x: config.margins.left, width: config.contentWidth }, fontConfig);
+    const { indentLeft, marker, x: blockX, width: blockWidth } = resolved;
 
     // Phase 1b: capture cache snapshot BEFORE resolveBlockEntry may update it.
     const preCached = measureCache?.get(node);
@@ -1970,8 +1952,7 @@ export function buildBlockFlow(
     const entry = resolveBlockEntry(
       node, nodePos, blockX, 0, blockWidth, 1, ctx, item.tableColumns, marker,
     );
-    const anchorOnlyFlow = isAnchorOnlyFlowEntry(entry);
-    const listMarker = marker?.text;
+    const spacing = itemSpacing(resolved, entry);
 
     flows.push({
       node,
@@ -1981,15 +1962,12 @@ export function buildBlockFlow(
       ...(entry.cells ? { cells: entry.cells } : {}),
       ...(item.isLastRow ? { isLastRow: true } : {}),
       height: entry.height,
-      spaceBefore: anchorOnlyFlow ? 0 : blockStyle.spaceBefore,
-      spaceAfter: anchorOnlyFlow ? 0 : blockStyle.spaceAfter,
+      spaceBefore: spacing.spaceBefore,
+      spaceAfter: spacing.spaceAfter,
       availableWidth: blockWidth,
       blockType: entry.blockType,
       align: entry.align,
-      ...(listMarker !== undefined ? {
-        listMarker,
-        listMarkerX: blockX - LIST_MARKER_HANGING,
-      } : {}),
+      ...(marker ? { listMarker: marker.text, listMarkerX: listMarkerXOf(blockX, marker) } : {}),
       indentLeft,
       hasAnchoredObject: blockHasAnchoredObject(entry.lines),
       inputHash: computeInputHash(nodePos, node, blockWidth),

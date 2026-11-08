@@ -25,11 +25,11 @@ import type { Node } from "prosemirror-model";
 import { cellBackground, cellGridSpan, cellVMerge } from "../table/attrs";
 import type { LayoutBlock, CellSubBlock } from "./BlockLayout";
 import type { TextMeasurerLike } from "./TextMeasurer";
-import type { FontConfig } from "./FontConfig";
+import { defaultFontConfig, type FontConfig } from "./FontConfig";
 import type { FontModifier } from "../extensions/types";
 import type { InlineRegistry } from "./BlockRegistry";
 import type { LayoutFontResolver } from "../fonts/layoutResolver";
-import { collectChildItems, fitIndent, layoutBlockWithMarker } from "./layoutItems";
+import { collectChildItems, layoutItem } from "./layoutItems";
 
 /** Horizontal cell padding (left + right) in CSS px. */
 export const CELL_PADDING_H = 6;
@@ -101,28 +101,23 @@ export function layoutTableRowCells(
     const cellPos = ctx.rowNodePos + 1 + offsetInRow;
 
     // Lay out the cell's child blocks, stacking `y` relative to the row top.
-    // A page break has no meaning inside a cell.
+    // Each is resolved as the page body resolves it. A page break has no
+    // meaning inside a cell.
     const blocks: LayoutBlock[] = [];
     let relY = CELL_PADDING_V;
     for (const item of collectChildItems(cellNode, cellPos + 1)) {
       if (item.isPageBreak) continue;
-      const indent = fitIndent(item.indentLeft, contentWidth);
-      const marker = item.listMarker !== undefined ? { text: item.listMarker, indentLeft: indent } : undefined;
-      const childBlock = layoutBlockWithMarker(item.node, {
-        nodePos: item.nodePos,
-        x: contentX + indent,
+      const childBlock = layoutItem(item, { x: contentX, width: contentWidth }, {
         y: relY,
-        availableWidth: contentWidth - indent,
         page: ctx.page,
         measurer: ctx.measurer,
         // No `map`: the CharacterMap is populated at paint time (TableRowStrategy),
         // matching the convention for cached, position-independent layouts.
-        ...(ctx.fontConfig ? { fontConfig: ctx.fontConfig } : {}),
+        fontConfig: ctx.fontConfig ?? defaultFontConfig,
         ...(ctx.fontModifiers ? { fontModifiers: ctx.fontModifiers } : {}),
         ...(ctx.inlineRegistry ? { inlineRegistry: ctx.inlineRegistry } : {}),
         ...(ctx.fonts ? { fonts: ctx.fonts } : {}),
-        ...(item.tableColumns ? { tableColumns: item.tableColumns } : {}),
-      }, marker);
+      });
       blocks.push(childBlock);
       relY += childBlock.spaceBefore + childBlock.height + childBlock.spaceAfter;
     }

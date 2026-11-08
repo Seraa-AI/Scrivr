@@ -17,7 +17,8 @@ import {
   listStart,
 } from "../model/lists";
 import { layoutBlock, ownFirstLineIndent, type BlockLayoutOptions, type LayoutBlock } from "./BlockLayout";
-import { nodeLayout } from "./BlockRegistry";
+import { declaresOwnBox, nodeLayout } from "./BlockRegistry";
+import { getBlockStyle, type BlockStyle, type FontConfig } from "./FontConfig";
 import type { LayoutLine } from "./LineBreaker";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import { listMarkerFont } from "./listMarkers";
@@ -67,8 +68,8 @@ interface ListPlace {
  * declares (see `NodeLayout`): a `block` node contributes one item, a
  * `transparent` node contributes none of its own and its children are
  * collected in its place. A block that holds blocks but is neither a list nor
- * a table has no lines of its own either, so its blocks are laid out in its
- * place too.
+ * a table, and does not declare a box of its own, has no lines of its own, so
+ * its blocks are laid out in its place too.
  *
  * Lists and tables are expanded ahead of that, because their expansion is not
  * merely transparent — they carry markers, indents and column widths down to
@@ -140,7 +141,9 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
       return;
     }
 
-    const holdsBlocks = !node.isTextblock && node.firstChild !== null && node.firstChild.isBlock;
+    // A node that declares a box of its own keeps it, and its painter draws it.
+    const holdsBlocks = !node.isTextblock && node.firstChild !== null && node.firstChild.isBlock
+      && !declaresOwnBox(node.type);
     if (nodeLayout(node.type).kind === "transparent" || holdsBlocks) {
       walk(node, offset + 1, list);
       return;
@@ -172,15 +175,77 @@ export function collectLayoutItems(doc: Node): LayoutItem[] {
 /** However deep a block is indented, an inch of the line is left for its text. */
 const MIN_TEXT_WIDTH = 96;
 
-/** A block's indent within `contentWidth`, bounded so an inch is left for its text. */
-export function fitIndent(indentLeft: number, contentWidth: number): number {
-  return Math.min(indentLeft, Math.max(0, contentWidth - MIN_TEXT_WIDTH));
-}
-
-/** A list marker to measure a block against, and how far in its text is. */
+/** A list marker to measure a block against: its text, how far in the block's text is, and how far the marker hangs before it. */
 export interface MarkerPlacement {
   text: string;
   indentLeft: number;
+  /**
+   * How far the marker's left edge sits before the text: a quarter inch, or
+   * less where the content box leaves less, so the number never leaves it.
+   */
+  hanging: number;
+}
+
+/** The marker's left edge, for text that starts at `textX`. */
+export function listMarkerXOf(textX: number, marker: MarkerPlacement): number {
+  return textX - marker.hanging;
+}
+
+/** An item placed in a content box: where its text goes, its marker, and the style it is spaced by. */
+export interface ResolvedItem {
+  /** The item's indent, bounded so an inch of the box is left for its text. */
+  indentLeft: number;
+  /** Absolute x of the item's text. */
+  x: number;
+  width: number;
+  marker?: MarkerPlacement;
+  style: BlockStyle;
+}
+
+/**
+ * Resolves an item against the content box it is laid out in — the page body
+ * or a table cell — so both lay a list out by the same rules: the indent fits
+ * the box, the marker stays inside it, and a list paragraph takes the list's
+ * spacing (`styleKey`) rather than a paragraph's.
+ */
+export function resolveItem(item: LayoutItem, box: { x: number; width: number }, fontConfig: FontConfig): ResolvedItem {
+  const indentLeft = Math.min(item.indentLeft, Math.max(0, box.width - MIN_TEXT_WIDTH));
+  const level = item.node.attrs["level"];
+  const style = getBlockStyle(fontConfig, item.styleKey ?? item.node.type.name, typeof level === "number" ? level : undefined);
+  return {
+    indentLeft,
+    x: box.x + indentLeft,
+    width: box.width - indentLeft,
+    ...(item.listMarker !== undefined
+      ? { marker: { text: item.listMarker, indentLeft, hanging: Math.min(LIST_MARKER_HANGING, indentLeft) } }
+      : {}),
+    style,
+  };
+}
+
+/**
+ * Whether a measured block holds only floating images' anchors: a text block
+ * with no height whose every line is a hidden anchor line. Leaf blocks never
+ * qualify, even when their height happens to be zero.
+ */
+export function isAnchorOnly(block: Pick<LayoutBlock, "kind" | "height" | "lines">): boolean {
+  if (block.kind !== "text" || block.height !== 0) return false;
+  return block.lines.every((line) =>
+    line.lineHeight === 0 &&
+    line.cursorHeight === 0 &&
+    line.spans.length > 0 &&
+    line.spans.every((span) => span.kind === "object" && span.width === 0 && span.height === 0),
+  );
+}
+
+/** The space an item keeps above and below: its style's, or none for a block that holds only anchors. */
+export function itemSpacing(
+  resolved: ResolvedItem,
+  measured: Pick<LayoutBlock, "kind" | "height" | "lines">,
+): { spaceBefore: number; spaceAfter: number } {
+  return isAnchorOnly(measured)
+    ? { spaceBefore: 0, spaceAfter: 0 }
+    : { spaceBefore: resolved.style.spaceBefore, spaceAfter: resolved.style.spaceAfter };
 }
 
 /**
@@ -204,7 +269,7 @@ function markerFirstLineOffset(
     ? bulletBox(size).size
     : measurer.measureWidth(marker.text, font);
   const textStart = marker.indentLeft + ownIndent;
-  const markerEnd = marker.indentLeft - LIST_MARKER_HANGING + width;
+  const markerEnd = marker.indentLeft - marker.hanging + width;
   if (markerEnd < textStart) return 0;
   const nextStop = (Math.floor(markerEnd / DEFAULT_TAB_STOP) + 1) * DEFAULT_TAB_STOP;
   const lastTextStart = marker.indentLeft + blockWidth - LIST_MARKER_HANGING;
@@ -217,7 +282,7 @@ function markerFirstLineOffset(
  * line's font, which only measuring tells, so a number too wide for its
  * hanging re-breaks the lines past it; a list item's first block keeps a line
  * for its number even when it holds only a floating image's anchor, as Word
- * draws it. The marker's left edge hangs a quarter inch before the text.
+ * draws it.
  */
 export function layoutBlockWithMarker(
   node: Node,
@@ -233,5 +298,30 @@ export function layoutBlockWithMarker(
   const first = measure(0);
   const offset = markerFirstLineOffset(marker, first.lines[0], options.measurer, ownFirstLineIndent(node), options.availableWidth);
   const measured = offset > 0 ? measure(offset) : first;
-  return { ...measured, listMarker: marker.text, listMarkerX: options.x - LIST_MARKER_HANGING };
+  return { ...measured, listMarker: marker.text, listMarkerX: listMarkerXOf(options.x, marker) };
+}
+
+/**
+ * Lays an item out in a content box that has no pagination of its own — a
+ * table cell — fully resolved: indent, marker, the item's spacing, and a
+ * table row's columns and last-row edge, as the page body resolves them.
+ */
+export function layoutItem(
+  item: LayoutItem,
+  box: { x: number; width: number },
+  options: Omit<BlockLayoutOptions, "x" | "availableWidth" | "nodePos" | "fontConfig"> & { fontConfig: FontConfig },
+): LayoutBlock {
+  const resolved = resolveItem(item, box, options.fontConfig);
+  const block = layoutBlockWithMarker(item.node, {
+    ...options,
+    nodePos: item.nodePos,
+    x: resolved.x,
+    availableWidth: resolved.width,
+    ...(item.tableColumns ? { tableColumns: item.tableColumns } : {}),
+  }, resolved.marker);
+  return {
+    ...block,
+    ...itemSpacing(resolved, block),
+    ...(item.isLastRow ? { isLastRow: true } : {}),
+  };
 }

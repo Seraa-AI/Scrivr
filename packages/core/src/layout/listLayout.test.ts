@@ -603,6 +603,42 @@ describe("a list inside a table cell", () => {
     expect(blocks.map((block) => block.lines.flatMap((line) => line.spans).filter((span) => span.kind === "text").length > 0))
       .toEqual([true, true]);
   });
+
+  it("spaces its items as a list in the body is spaced", () => {
+    const inCell = blockOf(cellBlocks([ul(item("alpha"), item("beta"))]), "alpha");
+    const inBody = blockOf(laidOut([ul(item("alpha"), item("beta"))]), "alpha");
+    expect([inCell.spaceBefore, inCell.spaceAfter]).toEqual([inBody.spaceBefore, inBody.spaceAfter]);
+  });
+
+  it("closes a table nested in the cell with its last row", () => {
+    const cell = (text: string): Json => ({ type: "tableCell", content: [p(text)] });
+    const nested: Json = {
+      type: "table",
+      attrs: { grid: [100, 100] },
+      content: [{ type: "tableRow", content: [cell("a"), cell("b")] }, { type: "tableRow", content: [cell("c"), cell("d")] }],
+    };
+    const rows = cellBlocks([p("before"), nested]).filter((block) => block.node.type.name === "tableRow");
+    expect(rows.map((row) => row.isLastRow === true)).toEqual([false, true]);
+  });
+
+  it("keeps the number inside a narrow cell, clear of its text", () => {
+    const narrowCell = (content: Json[]): Json => ({ type: "tableCell", content });
+    const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [
+      { type: "table", attrs: { grid: [100, 100, 100, 100, 100, 100] }, content: [{ type: "tableRow", content: [
+        narrowCell([ol(item("first"))]),
+        ...Array.from({ length: 5 }, () => narrowCell([p("x")])),
+      ] }] },
+      { type: "paragraph" },
+    ] });
+    const row = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
+      .pages.flatMap((page) => page.blocks).find((block) => block.cells !== undefined);
+    const cell = row?.cells?.[0];
+    if (!cell) throw new Error("no cell");
+    const first = blockOf(cell.blocks, "first");
+    const markerX = first.listMarkerX ?? Number.NEGATIVE_INFINITY;
+    expect(markerX).toBeGreaterThanOrEqual(cell.x);
+    expect(first.x + firstLineStart(first)).toBeGreaterThan(markerX + measureTextWidth("1.", fontOf(first)));
+  });
 });
 
 describe("a block container that is not a list", () => {
@@ -621,5 +657,21 @@ describe("a block container that is not a list", () => {
       .pages.flatMap((page) => page.blocks);
     expect(blocks.map((block) => block.node.textContent)).toEqual(["in an item", "loose"]);
     expect(blocks.map((block) => block.listMarker)).toEqual([undefined, undefined]);
+  });
+
+  it("keeps its own box when it declares one, so its painter draws it", () => {
+    const Boxed = Extension.create({
+      name: "boxedContainer",
+      addNodes() {
+        return {
+          boxedContainer: { group: "block", content: "paragraph+", layout: { kind: "block" }, toDOM: () => ["div", 0] },
+        };
+      },
+    });
+    const manager = new ExtensionManager([StarterKit, Boxed]);
+    const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [{ type: "boxedContainer", content: [p("inside")] }] });
+    const blocks = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
+      .pages.flatMap((page) => page.blocks);
+    expect(blocks.map((block) => block.node.type.name)).toEqual(["boxedContainer"]);
   });
 });
