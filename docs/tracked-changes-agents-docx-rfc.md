@@ -1,6 +1,6 @@
 # RFC: Tracked changes for agents, and Word revisions in DOCX
 
-Status: proposed (2026-11-08). Nothing here is built until it is agreed.
+Status: approved by the user on 2026-11-08, including D1–D12.
 
 Builds on, and does not repeat:
 
@@ -636,6 +636,9 @@ main onto it. Both touch `List.ts` and `packages/docx`. It may split as B
 
 ## Decisions
 
+**D1–D12 were approved by the user on 2026-11-08**, as recommended below,
+including the NEW pieces in D7, D8 and D12.
+
 - **D1: Report the record id, merged by root.** *Recommended.* Pieces of one
   record merge into one entry and report the root's id. Pieces are a split
   deletion, or a block and the text it created or deleted. The root is
@@ -663,13 +666,13 @@ main onto it. Both touch `List.ts` and `packages/docx`. It may split as B
 - **D6: A hard break counts as 1 in `at`.** *Recommended.* It is `"\n"` in
   `text` and in `spans`, so offsets index the string the agent holds.
 - **D7: `"suggestedAttrs"` is a new value of `SemanticChange.type`.** NEW, and
-  needs sign-off. An attribute or list change adds no text and removes none.
+  approved (2026-11-08). An attribute or list change adds no text and removes none.
   Reporting it as `suggestedInsert` with `oldAttrs` would make "inserted text"
   mean two things, and an agent counting proposed words would count headings.
-  The fallback, if refused: `suggestedInsert` with `text: ""`, `length` covering
+  The fallback, had it been refused: `suggestedInsert` with `text: ""`, `length` covering
   the block, and `oldAttrs` present.
 - **D8: `SemanticHandlers.nodeChanges` and `SemanticPart.changes`.** NEW, and
-  need sign-off. `nodeChanges` is justified in the PR A design: no existing
+  approved (2026-11-08). `nodeChanges` is justified in the PR A design: no existing
   contribution sees node attrs on TrackChanges' behalf. `SemanticPart.changes`
   exists because an offset is meaningful only against the text it indexes, and
   a part is what an agent edits. It mirrors `TableCell.changes`.
@@ -685,7 +688,7 @@ main onto it. Both touch `List.ts` and `packages/docx`. It may split as B
   someone types over a selection. It is what D8 makes our export write. It also
   keeps scenario 3 at one act. Different authors or dates stay separate.
 - **D12: `insertParagraphProperty`, a `CT_PPr`-ordered `w:pPr` writer in core
-  `exports/docx.ts`.** NEW, and needs sign-off. Two contributors patch one
+  `exports/docx.ts`.** NEW, and approved (2026-11-08). Two contributors patch one
   `w:pPr`, and Word enforces the order (rules 1 and 2). One place knows it.
   List's `addNumPrToParagraph` (`List.ts:35-56`) moves onto it. W2's L3 rewrites
   that function, so whichever PR lands second adopts the helper.
