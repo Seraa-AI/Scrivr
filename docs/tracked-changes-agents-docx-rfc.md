@@ -740,3 +740,36 @@ including the NEW pieces in D7, D8 and D12.
   counter lives in `ctx.shared` under one documented key.
 
 ## What shipped
+
+Updated as each PR lands. Where this disagrees with the design above, this
+section is what is true.
+
+| PR | Landed | What it changed |
+|---|---|---|
+| **A** | branch `feat/agents-read-tracked-changes` (not yet merged) | `SemanticChange` gained `suggestedInsert`, `suggestedAttrs`, `at`, `length`, `moveId` and `oldAttrs`. `SemanticPart` gained `changes`. `SemanticHandlers` gained `nodeChanges`. `extractSemantic` places every change by offset into unit, part and cell text, and merges the pieces of one record. TrackChanges reports insertions, block insertions and deletions, joins, splits, heading and list changes, rows and moves (`track-changes/semanticChanges.ts`). The rich hashes cover `changes` only when there are some. `getRichBlocks` keeps a block proposed for deletion that has no live copy (D9). The auto-diff ignores the `changes` an agent hands back. `AiToolkit.reviewChanges` passes decisions through. Scenarios 10–13 (agent half) and 15–18 are covered in `plugins/.../__tests__/semanticReview.test.ts` and `ai/.../__tests__/AiToolkit.review.test.ts` |
+| **B** | — | Not built. DOCX revisions |
+
+### Where PR A differs from the design above
+
+- **Roots resolve through the whole chain, not one hop.** A deleted row's text
+  names its paragraph, which names its cell, which names the row (`deletionId`
+  at each level). So `rootId` remembers, for each read, the root every record
+  id resolved to. The walker now reads a node's own records *before* its
+  content, so an enclosing record is always resolved first.
+- **`nodeChanges` receives the `UnitCtx`**, like a node handler does:
+  `(node, ctx) => SemanticNodeChange[]`. The context is needed to describe a
+  former block through `attrsOf`. `SemanticNodeChange`, the
+  `{ change, place }` pair, is exported as a named type.
+- **A deleted row's text reads without cell separators** (`"a1b1"`). The cells'
+  deletions merge into the row's one change. Its pieces have no proposed text
+  to join with a newline.
+- **A covering insertion takes its text from the walker**, which sets it to the
+  node's proposed text. TrackChanges reports `""` for it.
+
+### Not shipped in PR A
+
+- A deleted hard break still reads as `"\n"` in `text`, as it did before. The
+  proposed view leaves out deleted text but not a deleted break. Left as it
+  was to keep PR A within its scope.
+- The root-names-no-record case (Risks) did not arise in the scenarios. The
+  reported id is still the root.
