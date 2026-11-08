@@ -1,5 +1,6 @@
 import { Extension, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
 import type { IBaseEditor, IEditor, SemanticImage, SemanticPart, SemanticUnit } from "@scrivr/core";
+import type { ReviewDecisions, ReviewOutcome } from "@scrivr/plugins";
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
 import { SemanticImageAttrsSchema, type SemanticEdit, type StructuralSemanticEdit } from "../schema/edit";
 import { applyStructuralEdits } from "./applyStructuralEdits";
@@ -8,7 +9,7 @@ import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
-import { findLiveNodeById, isShadowNode, shadowRanges, trackAsSuggestion } from "@scrivr/plugins";
+import { findLiveNodeById, isShadowNode, reviewChanges, shadowRanges, trackAsSuggestion } from "@scrivr/plugins";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
 
@@ -113,10 +114,14 @@ function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
     return true;
   });
   const seen = new Map<string, number>();
+  // Only a copy whose id is live elsewhere — a move's shadow — is left out; a
+  // block proposed for deletion stays, so an agent can read and review it.
   const isLive = (id: string) => {
     const nth = seen.get(id) ?? 0;
     seen.set(id, nth + 1);
-    return live.get(id)?.[nth] ?? true;
+    const copies = live.get(id) ?? [];
+    if (copies[nth] ?? true) return true;
+    return !copies.some(Boolean);
   };
   return units.flatMap((unit) => {
     const unitIsLive = isLive(unit.id);
@@ -139,6 +144,21 @@ function changedImageFields(current: SemanticImage | undefined, proposed: unknow
 /** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
 function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUnit {
   return "nodeIds" in item && Array.isArray(item.nodeIds);
+}
+
+/**
+ * `changes` are read-only to an agent: it proposes through spans, attrs and
+ * structural ops. So whatever it hands back there is replaced by what the
+ * document has before deciding whether it edited anything.
+ */
+function unitWithChanges(unit: SemanticUnit, current: SemanticUnit): SemanticUnit {
+  const { changes: _ignored, ...rest } = unit;
+  return current.changes ? { ...rest, changes: current.changes } : rest;
+}
+
+function partWithChanges(part: SemanticPart, current: SemanticPart): SemanticPart {
+  const { changes: _ignored, ...rest } = part;
+  return current.changes ? { ...rest, changes: current.changes } : rest;
 }
 
 /** A caller-pinned source hash on a unit (optional stale-edit guard). */
@@ -374,6 +394,20 @@ export class AiToolkitAPI {
   }
 
   /**
+   * Accept or reject pending changes by the ids `getRichBlocks` reports.
+   * Deciding one record decides its whole act — both halves of a replacement
+   * or a move. Whether an agent may review at all is the host's call
+   * (`TrackChanges.configure({ canAcceptReject })`); a refusal says why.
+   *
+   * @example
+   * const change = ai.getRichBlocks()[0]?.changes?.[0];
+   * if (change?.id) ai.reviewChanges({ accepted: [change.id], rejected: [] });
+   */
+  reviewChanges(decisions: ReviewDecisions): ReviewOutcome {
+    return reviewChanges(this.editor, decisions);
+  }
+
+  /**
    * Apply the agent's rich edits as tracked-change suggestions, preserving
    * untouched formatting.
    *
@@ -438,7 +472,7 @@ export class AiToolkitAPI {
           stale.push(nodeId);
           continue;
         }
-        if (unitRichHash(item) === current) continue; // unchanged — skip
+        if (unitRichHash(unitWithChanges(item, currentUnit)) === current) continue; // unchanged — skip
         if (currentUnit.type === "image") {
           if (stableStringify(item.attrs ?? {}) === stableStringify(currentUnit.attrs ?? {})) queueImageLayout(nodeId, item.image);
           else rejected.push(nodeId);
@@ -456,7 +490,7 @@ export class AiToolkitAPI {
               notFound.push(part.nodeId);
               continue;
             }
-            if (semanticPartRichHash(part) === semanticPartRichHash(currentPart)) continue;
+            if (semanticPartRichHash(partWithChanges(part, currentPart)) === semanticPartRichHash(currentPart)) continue;
             resolved.push(editForPart(part));
             changed.push(part.nodeId);
           }
