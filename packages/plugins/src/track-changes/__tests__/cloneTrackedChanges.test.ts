@@ -25,9 +25,9 @@ describe("TrackChanges document clone", () => {
       clone: { generate: ({ kind, typeName, oldId }) => `${kind}:${typeName}:${oldId}:clone` },
     });
     const paragraph = editor.getState().doc.firstChild!;
-    const nodeChange = paragraph.attrs["dataTracked"][0] as Record<string, string>;
-    const firstMark = paragraph.child(0).marks[0]!.attrs["dataTracked"] as Record<string, string>;
-    const secondMark = paragraph.child(1).marks[0]!.attrs["dataTracked"] as Record<string, string>;
+    const nodeChange: Record<string, unknown> = paragraph.attrs["dataTracked"][0];
+    const firstMark: Record<string, unknown> = paragraph.child(0).marks[0]!.attrs["dataTracked"];
+    const secondMark: Record<string, unknown> = paragraph.child(1).marks[0]!.attrs["dataTracked"];
 
     expect(nodeChange.id).not.toBe("change-a");
     expect(nodeChange.referenceId).toBe(firstMark.id);

@@ -857,8 +857,16 @@ function requestedDemo(): string | null {
   return new URLSearchParams(window.location.search).get("demo");
 }
 
+/** Which demo the playground shows: everyday editing, or suggestions to review. */
+export type DemoKind = "editing" | "track-changes";
+
+export const startingDemo = (): DemoKind => requestedDemo() === "track-changes" ? "track-changes" : "editing";
+
+/** The document for a demo, as JSON the editor can load. */
+export const demoDoc = (kind: DemoKind) => kind === "track-changes" ? TRACK_CHANGES_DEMO_DOC : DEMO_DOC;
+
 function startingDoc() {
-  if (requestedDemo() === "track-changes") return TRACK_CHANGES_DEMO_DOC;
+  if (startingDemo() === "track-changes") return TRACK_CHANGES_DEMO_DOC;
   if (performancePageCount > 0) {
     return {
       ...DEMO_DOC,

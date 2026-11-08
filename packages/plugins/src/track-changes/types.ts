@@ -1,4 +1,5 @@
 import type { GestureComposition } from "./engine/composeGesture";
+import type { ReplayedSelection } from "./engine/fixAndSetSelectionAfterTracking";
 import { Fragment, Mark, Node, NodeType, Slice } from "@scrivr/core/pm";
 import { PluginKey } from "@scrivr/core/pm";
 import { Mapping, ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
@@ -30,6 +31,10 @@ export enum CHANGE_OPERATION {
   set_node_attributes = "set_attrs",
   wrap_with_node = "wrap_with_node",
   node_split = "node_split",
+  /** The break ending this block was deleted: accepting it joins the next block on. */
+  node_join = "node_join",
+  /** The lists this block sits in changed; the record keeps where it sat before. */
+  list_change = "list_change",
   reference = "reference",
   move = "move",
   structure = "structure",
@@ -59,6 +64,12 @@ type InsertDeleteAttrs = {
   createdAt: number;
   updatedAt: number;
   moveNodeId?: string;
+  /**
+   * Links the two halves of moved content that is not carried as a block: its
+   * deletion where it was and its insertion where it went, as Word's
+   * `moveFrom` and `moveTo`. Deciding either decides both.
+   */
+  moveId?: string;
   /**
    * True when another author's mark overlaps this exact segment.
    * Drives amber conflict rendering and the conflict popover.
@@ -121,6 +132,25 @@ export type NodeSplitAttrs = Omit<InsertDeleteAttrs, "operation"> & {
   operation: CHANGE_OPERATION.node_split;
 };
 
+export type NodeJoinAttrs = Omit<InsertDeleteAttrs, "operation"> & {
+  operation: CHANGE_OPERATION.node_join;
+};
+
+/** One list a block sits in, and the item holding it there: an entry of a list change's `oldList`. */
+export type ListLevel = {
+  type: string;
+  attrs: Record<string, unknown>;
+  item: Record<string, unknown>;
+  /** The block is the first in its item, so the item starts with it. */
+  startsItem: boolean;
+};
+
+export type ListChangeAttrs = Omit<InsertDeleteAttrs, "operation"> & {
+  operation: CHANGE_OPERATION.list_change;
+  /** The lists the block sat in before, outermost first; empty when in none. */
+  oldList: ListLevel[];
+};
+
 export type ReferenceAttrs = Omit<InsertDeleteAttrs, "operation"> & {
   operation: CHANGE_OPERATION.reference;
   referenceId: string;
@@ -141,6 +171,8 @@ export type TrackedAttrs =
   | UpdateAttrs
   | WrapAttrs
   | NodeSplitAttrs
+  | NodeJoinAttrs
+  | ListChangeAttrs
   | ReferenceAttrs
   | NodeMoveAttrs
   | StructureAttrs;
@@ -163,6 +195,8 @@ export type TextChange = Change & {
 export type NodeChange = Change & {
   type: "node-change";
   node: Node;
+  /** For a deleted paragraph break: where the block it joins onto starts. */
+  joinsAt?: number;
   attrs: Record<string, any>;
   children: TrackedChange[];
 };
@@ -214,21 +248,6 @@ export type IncompleteChange = Omit<TrackedChange, "dataTracked"> & {
 export type RootChanges = TrackedChange[][];
 export type RootChange = TrackedChange[];
 
-// ── Exposed PM types ──────────────────────────────────────────────────────────
-
-export type ExposedReplaceStep = ReplaceStep & {
-  slice: ExposedSlice;
-};
-
-export type ExposedSlice = Slice & {
-  content: ExposedFragment;
-  insertAt(pos: number, fragment: Fragment | ExposedFragment): ExposedSlice;
-};
-
-export type ExposedFragment = Fragment & {
-  content: Node[];
-};
-
 // ── Plugin options / state ────────────────────────────────────────────────────
 
 export interface TrackChangesOptions {
@@ -237,6 +256,11 @@ export interface TrackChangesOptions {
   skipTrsWithMetas?: (PluginKey | string)[];
   initialStatus?: TrackChangesStatus;
   canAcceptReject?: boolean;
+  /**
+   * Called with the reason when an edit is stopped because it could not be
+   * recorded as a suggestion. The edit is not applied, so tell the person why.
+   */
+  onRefused?: (refusal: TrackingRefusal) => void;
 }
 
 // ── Transaction tracking context ──────────────────────────────────────────────
@@ -245,7 +269,7 @@ export interface TrackChangesOptions {
 export type TrackingRefusal =
   | { reason: "unsupported-step"; stepType: string }
   | { reason: "duplicate-transform-package" }
-  /** A later step writes both inside what an earlier step inserted and outside it. */
+  /** A later step writes across the edge of an earlier step's insertion where it can't be split. */
   | { reason: "overlapping-steps" };
 
 /**
@@ -268,8 +292,11 @@ export type TrTrackingContext = {
   liftFragment?: Fragment;
   action: ReturnType<typeof getAction>;
   stepsByGroupIDMap: Map<ReplaceStep, string>;
-  /** Where the caret belongs, in the replayed document after `replayedMaps` maps. */
-  caretAfterStep?: { pos: number; replayedMaps: number };
+  /** Steps moving text: the deletion and the insertion of one move share an id. */
+  textMoves: Map<ReplaceStep, string>;
+  /** The move a paste completes: what it inserts is that move's destination. */
+  pastedMove?: string;
+  replayedSelection: ReplayedSelection;
   composition: GestureComposition;
   /**
    * Maps the source document the replay has reached into the replayed one. The
@@ -306,7 +333,7 @@ export interface MergeFragmentStep {
   to: number;
   type: "merge-fragment";
   node: Node;
-  fragment: ExposedFragment;
+  fragment: Fragment;
 }
 
 export interface InsertSliceStep {
@@ -314,7 +341,11 @@ export interface InsertSliceStep {
   to: number;
   sliceWasSplit: boolean;
   type: "insert-slice";
-  slice: ExposedSlice;
+  slice: Slice;
+  /** The replay map that undid this content, when this writes back the same size. */
+  undoMapIndex?: number;
+  /** Where the step left the caret, when not at the end of what this writes. */
+  caretAt?: number;
 }
 
 export interface UpdateNodeAttrsStep {
@@ -326,7 +357,17 @@ export interface UpdateNodeAttrsStep {
   newNodeType?: NodeType;
 }
 
+/** A deleted break between a block and the one after it. */
+export interface JoinNodeStep {
+  pos: number;
+  type: "join-node";
+  node: Node;
+  /** The deletion leaves the next block to join onto, rather than taking it whole. */
+  joinsNext: boolean;
+}
+
 export type ChangeStep =
+  | JoinNodeStep
   | DeleteNodeStep
   | DeleteTextStep
   | MergeFragmentStep

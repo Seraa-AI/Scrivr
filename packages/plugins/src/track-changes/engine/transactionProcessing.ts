@@ -1,4 +1,4 @@
-import { Node } from "@scrivr/core/pm";
+import { Node, Slice } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { isHistoryTransaction } from "@scrivr/core/pm";
 import {
@@ -49,6 +49,18 @@ function nodeContentEquals(a: Node, b: Node): boolean {
     if (!nodeContentEquals(a.child(i), b.child(i))) return false;
   }
   return true;
+}
+
+/** Content taken or written whole; a slice cut open is part of something else. */
+const whole = (slice: Slice) => slice.openStart === 0 && slice.openEnd === 0;
+
+/**
+ * Is `inserted` what `deleted` took away? A floating object alone in its
+ * paragraph leaves with the paragraph, which holds nothing else to move.
+ */
+function movedContent(inserted: Node, deleted: Node): boolean {
+  return nodeContentEquals(inserted, deleted) ||
+    (deleted.isTextblock && deleted.childCount === 1 && nodeContentEquals(inserted, deleted.firstChild!));
 }
 
 export function passThroughMeta(oldTr: Transaction, newTr: Transaction) {
@@ -172,6 +184,12 @@ export function trackingRefusal(steps: readonly Step[]) {
   return null;
 }
 
+/** A step that replaces a range with a slice. */
+type ContentStep = ReplaceStep | ReplaceAroundStep;
+
+const contentStep = (step: Step | undefined): ContentStep | undefined =>
+  step instanceof ReplaceStep || step instanceof ReplaceAroundStep ? step : undefined;
+
 /** Records which steps belong to one move, by grouping them under one id. */
 export const groupMoveSteps = (
   tr: Transaction,
@@ -190,15 +208,23 @@ export const groupMoveSteps = (
   }
 
   const matched: number[] = [];
+  // Text has no node to carry, so its move is the deletion and insertion
+  // linked; a node is carried, keeping its identity.
+  const pair = (a: ContentStep, b: ContentStep, moved: Node) => {
+    const moves = moved.isText ? context.textMoves : movingAssoc;
+    const id = genId();
+    if (a instanceof ReplaceStep) moves.set(a, id);
+    if (b instanceof ReplaceStep) moves.set(b, id);
+  };
 
   for (let i = 0; i < tr.steps.length; i++) {
     if (matched.includes(i)) {
       continue;
     }
-    const step = tr.steps[i] as ReplaceStep;
+    const step = contentStep(tr.steps[i]);
     const doc = tr.docs[i];
 
-    if (!step.slice) {
+    if (!step) {
       continue;
     }
     const stepDeletesContent = step.from !== step.to && step.slice.size === 0;
@@ -209,9 +235,9 @@ export const groupMoveSteps = (
       if (g === i || matched.includes(g)) {
         continue;
       }
-      const peerStep = tr.steps[g] as ReplaceStep;
+      const peerStep = contentStep(tr.steps[g]);
 
-      if (!peerStep.slice) {
+      if (!peerStep) {
         continue;
       }
       const peerStepInsertsContent =
@@ -224,15 +250,15 @@ export const groupMoveSteps = (
 
         if (
           peerStepInsertsContent &&
+          whole(peerStep.slice) &&
+          whole(deletedContent) &&
           deletedContent.content.firstChild &&
-          nodeContentEquals(
+          movedContent(
             peerStep.slice.content.firstChild,
             deletedContent.content.firstChild,
           )
         ) {
-          const commonID = genId();
-          movingAssoc.set(peerStep, commonID);
-          movingAssoc.set(step, commonID);
+          pair(peerStep, step, deletedContent.content.firstChild);
           matched.push(i, g);
         }
         continue;
@@ -245,16 +271,16 @@ export const groupMoveSteps = (
           peerStep.to,
         );
         if (
+          whole(insertedContent) &&
+          whole(deletedPeerContent) &&
           insertedContent.content.firstChild &&
           deletedPeerContent.content.firstChild &&
-          nodeContentEquals(
+          movedContent(
             insertedContent.content.firstChild,
             deletedPeerContent.content.firstChild,
           )
         ) {
-          const commonID = genId();
-          movingAssoc.set(peerStep, commonID);
-          movingAssoc.set(step, commonID);
+          pair(peerStep, step, insertedContent.content.firstChild);
         }
         matched.push(i, g);
       }

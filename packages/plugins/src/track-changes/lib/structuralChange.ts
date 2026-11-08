@@ -14,8 +14,8 @@ import {
   updateBlockNodesAttrs,
 } from "../helpers";
 import { clearTextChange } from "./clearTextChange";
-import { cutFragment, setFragmentAsInserted } from "./fragments";
-import { ChangeStep, ExposedSlice, InsertSliceStep, NodeChange } from "../types";
+import { setFragmentAsInserted } from "./fragments";
+import { ChangeStep, InsertSliceStep, NodeChange } from "../types";
 import { updateChangeAttrs } from "../engine/updateAttributes";
 import { CHANGE_OPERATION } from "../types";
 import { matchInserted } from "./mergeTrackedMarks";
@@ -24,10 +24,10 @@ import { matchInserted } from "./mergeTrackedMarks";
 export const dropStructuralChangeShadow = (moveNodeId: string | undefined, tr: Transaction) => {
   const changeSet = findChanges(EditorState.create({ doc: tr.doc }));
   const changes = changeSet.changes.filter(
-    c => c.type === "node-change" && c.dataTracked.moveNodeId === moveNodeId,
+    (c): c is NodeChange => c.type === "node-change" && c.dataTracked.moveNodeId === moveNodeId,
   );
   const shadow = changes.filter(c => c.dataTracked.operation === CHANGE_OPERATION.delete);
-  const structures = changes.filter(c => c.dataTracked.operation === CHANGE_OPERATION.structure) as NodeChange[];
+  const structures = changes.filter(c => c.dataTracked.operation === CHANGE_OPERATION.structure);
 
   structures.map(c => {
     tr.setNodeMarkup(c.from, undefined, { ...c.node.attrs, dataTracked: null });
@@ -140,11 +140,12 @@ export const dropOrphanChanges = (newTr: Transaction) => {
 
 const groupStructureChanges = (tr: Transaction, toNode: PMNode | null) => {
   const moveNodeIds = new Set<string>();
-  const [insertStep, deleteStep] = tr.steps as ReplaceStep[];
-  const fromNodes = tr.docs[1]!.slice(deleteStep!.from, deleteStep!.to).content;
+  const [insertStep, deleteStep] = tr.steps;
+  if (!(insertStep instanceof ReplaceStep) || !(deleteStep instanceof ReplaceStep)) return moveNodeIds;
+  const fromNodes = tr.docs[1]!.slice(deleteStep.from, deleteStep.to).content;
 
   Fragment.from(toNode)
-    .append(insertStep!.slice.content)
+    .append(insertStep.slice.content)
     .append(fromNodes)
     .descendants(node => {
       const moveNodeId = (getBlockInlineTrackedData(node) || []).find(
@@ -165,7 +166,9 @@ export const joinStructureChanges = (
   newTr: Transaction,
 ) => {
   const moveNodeId = attrs.moveNodeId;
-  let toNode: PMNode | null = tr.docs[0]!.resolve((tr.steps[0] as ReplaceStep).from).node();
+  const firstStep = tr.steps[0];
+  if (!(firstStep instanceof ReplaceStep)) return content;
+  let toNode: PMNode | null = tr.docs[0]!.resolve(firstStep.from).node();
   toNode = toNode?.type.spec.attrs?.dataTracked ? toNode : null;
 
   const idsSet = groupStructureChanges(tr, toNode);
@@ -203,7 +206,7 @@ export const isStructuralChange = (tr: Transaction) =>
 /** Finds text changes that overlap and creates a single change for them. */
 export function diffChangeSteps(steps: ChangeStep[]) {
   const deleted = steps.filter(s => s.type !== "insert-slice");
-  const inserted = steps.filter(s => s.type === "insert-slice") as InsertSliceStep[];
+  const inserted = steps.filter((s): s is InsertSliceStep => s.type === "insert-slice");
 
   const updated: ChangeStep[] = [];
   let updatedDeleted: ChangeStep[] = [...deleted];
@@ -220,16 +223,34 @@ export function diffChangeSteps(steps: ChangeStep[]) {
     }, Number.MAX_SAFE_INTEGER);
 
     const [matchedDeleted, updatedDel] = matchInserted(deleteStart, updatedDeleted, ins.slice.content);
-    if (matchedDeleted === deleteStart) {
+    const shared = matchedDeleted - deleteStart;
+    // Matching inside a block keeps that block, so the rest goes in where the
+    // match stopped, open as deep as it reached. An open slice's edges belong
+    // to neighbouring blocks, which a kept block would stand between.
+    const depth = depthAt(ins.slice.content, shared);
+    if (shared === 0 || (depth > 0 && (ins.slice.openStart || ins.slice.openEnd))) {
       updated.push(ins);
       return;
     }
     updatedDeleted = updatedDel;
-    const [, newInserted] = cutFragment(0, matchedDeleted - deleteStart, ins.slice.content);
-    if (newInserted.size > 0) {
-      updated.push({ ...ins, slice: new Slice(newInserted, ins.slice.openStart, ins.slice.openEnd) as ExposedSlice });
+    const rest = ins.slice.content.cut(shared);
+    if (rest.size > 0) {
+      updated.push(depth > 0
+        ? { ...ins, from: matchedDeleted, to: matchedDeleted, slice: new Slice(rest, depth, depth) }
+        : { ...ins, slice: new Slice(rest, ins.slice.openStart, ins.slice.openEnd) });
     }
   });
 
   return [...updatedDeleted, ...updated];
+}
+
+/** How many nodes enclose `pos` within `content`. */
+function depthAt(content: Fragment, pos: number): number {
+  let depth = 0;
+  content.forEach((child, offset) => {
+    if (!child.isText && offset < pos && pos < offset + child.nodeSize) {
+      depth = 1 + depthAt(child.content, pos - offset - 1);
+    }
+  });
+  return depth;
 }

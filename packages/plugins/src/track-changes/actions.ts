@@ -42,8 +42,8 @@ export function hasAction(tr: Transaction) {
 export function getAction<K extends keyof TrackChangesActionParams>(
   tr: Transaction,
   action: K,
-) {
-  return tr.getMeta(action) as TrackChangesActionParams[K] | undefined;
+): TrackChangesActionParams[K] | undefined {
+  return tr.getMeta(action);
 }
 
 /** Sets a track-changes action meta on a transaction. */
@@ -69,6 +69,6 @@ export function trackAsSuggestion(tr: Transaction, authorID: string): Transactio
 
 /** Appended normalization steps belong to the same proposal as their root transaction. */
 export function suggestionIntent(tr: Transaction): { authorID: string } | undefined {
-  const root = tr.getMeta("appendedTransaction") as Transaction | undefined;
+  const root: Transaction | undefined = tr.getMeta("appendedTransaction");
   return getAction(tr, TrackChangesAction.suggest) ?? (root && getAction(root, TrackChangesAction.suggest));
 }

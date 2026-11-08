@@ -92,7 +92,7 @@ export function clearAuthorPendingMarks(
     const to = pos + child.nodeSize;
 
     for (const mark of child.marks) {
-      const data = mark.attrs.dataTracked as { authorID?: string; status?: string } | null;
+      const data: { authorID?: string; status?: string } | null = mark.attrs.dataTracked;
       if (!data || data.authorID !== authorID || data.status !== CHANGE_STATUS.pending) continue;
 
       if (mark.type === insertType) {
@@ -179,7 +179,7 @@ function applyBlockToTr(
   clearAuthorPendingMarks(tr, nodeFrom, nodeTo, authorID, schema);
 
   // Re-resolve the node after mutations (positions may have shifted).
-  const updatedFound = findNodeById(tr.doc, found.node.attrs["nodeId"] as string);
+  const updatedFound = findNodeById(tr.doc, found.node.attrs["nodeId"]);
   if (!updatedFound) return { applied: false, editDensity: 0, sourceChars: 0 };
 
   const { acceptedText, map } = buildAcceptedTextMap(updatedFound.node, updatedFound.pos, schema);
@@ -211,7 +211,7 @@ function applyBlockToTr(
     if (op.type === "delete") {
       const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
       if (range) {
-        const dataTracked = addTrackIdIfDoesntExist(createNewDeleteAttrs(baseAttrs)) as Record<string, unknown>;
+        const dataTracked: Record<string, unknown> = addTrackIdIfDoesntExist(createNewDeleteAttrs(baseAttrs));
         if (op.groupId) dataTracked["groupId"] = op.groupId;
         applyTrackedDelete(tr, range.from + insertedChars, range.to + insertedChars, dataTracked, schema);
         applied = true;
@@ -223,7 +223,7 @@ function applyBlockToTr(
       if (range) {
         const insertMarkType = schema.marks.trackedInsert;
         if (insertMarkType) {
-          const dataTracked = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs)) as Record<string, unknown>;
+          const dataTracked: Record<string, unknown> = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs));
           if (op.groupId) dataTracked["groupId"] = op.groupId;
           const safeText = op.text.replace(/\n/g, " ");
           tr.insert(range.from + insertedChars, schema.text(safeText, [insertMarkType.create({ dataTracked })]));

@@ -1,10 +1,10 @@
-import { Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
+import { Fragment, Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { stableStringify } from "@scrivr/core";
 
 import { genId, isValidTrackableMark, shouldMergeTrackedAttributes } from "../helpers";
 import { ChangeStep, DeleteNodeStep, DeleteTextStep } from "../types";
-import { ExposedFragment, TrackedAttrs } from "../types";
+import { TrackedAttrs } from "../types";
 
 /**
  * Matches deleted to inserted content and returns the first pos they differ and the updated ChangeStep list.
@@ -13,35 +13,37 @@ import { ExposedFragment, TrackedAttrs } from "../types";
 export function matchInserted(
   matchedDeleted: number,
   deleted: ChangeStep[],
-  inserted: ExposedFragment,
+  inserted: Fragment,
 ): [number, ChangeStep[]] {
   let matched: [number, ChangeStep[]] = [matchedDeleted, deleted];
   for (let i = 0; ; i += 1) {
     if (inserted.childCount === i) return matched;
 
     const insNode = inserted.child(i);
-    // @ts-expect-error union narrowing
-    const adjDeleted: DeleteTextStep | DeleteNodeStep | undefined = matched[1].find(
-      d =>
-        (d.type === "delete-text" && Math.max(d.pos, d.from) === matched[0]) ||
-        (d.type === "delete-node" && d.pos === matched[0]),
-    );
+    const at = matched[0];
+    const adjDeleted = matched[1].find((d): d is DeleteTextStep | DeleteNodeStep =>
+      (d.type === "delete-text" && Math.max(d.pos, d.from) === at) ||
+      (d.type === "delete-node" && d.pos === at));
 
-    if (insNode.type !== adjDeleted?.node?.type) {
+    if (!adjDeleted || insNode.type !== adjDeleted.node.type) {
       return matched;
-    } else if (insNode.isText && adjDeleted?.node) {
+    } else if (insNode.isText) {
       continue;
-    } else if (insNode.content.size > 0 || adjDeleted?.node.content.size > 0) {
+    } else if (insNode.content.size > 0 || adjDeleted.node.content.size > 0) {
       matched = matchInserted(
         matched[0] + 1,
         matched[1].filter(d => d !== adjDeleted),
-        insNode.content as ExposedFragment,
+        insNode.content,
       );
     } else {
       matched = [matched[0] + insNode.nodeSize, matched[1].filter(d => d !== adjDeleted)];
     }
 
-    const { dataTracked, ...newAttrs } = insNode.attrs || {};
+    const { dataTracked, ...insertedAttrs } = insNode.attrs || {};
+    // The matched block is kept, so it keeps its identity.
+    const newAttrs = "nodeId" in adjDeleted.node.attrs
+      ? { ...insertedAttrs, nodeId: adjDeleted.node.attrs.nodeId }
+      : insertedAttrs;
     matched[1].push({
       pos: adjDeleted.pos,
       type: "update-node-attrs",

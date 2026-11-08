@@ -511,6 +511,33 @@ describe("TileManager — overlay generation guard", () => {
   });
 });
 
+describe("TileManager — overlay follows the content it sits on", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Repainting a page resizes its overlay canvas, which clears it; whatever the
+  // overlay showed has to be drawn again over the new pixels.
+  it("redraws the overlay whenever the page under it is repainted", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    const spy = vi.spyOn(setup.editor, "runOverlayHandlers");
+    setup.editor.redraw();
+    tm.update();
+
+    expect(spy).toHaveBeenCalled();
+
+    tm.destroy();
+    setup.cleanup();
+  });
+});
+
 describe("TileManager — body click deactivates surface", () => {
   beforeEach(() => {
     vi.useFakeTimers();

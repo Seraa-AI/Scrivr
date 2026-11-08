@@ -9,6 +9,9 @@ const dependenciesOf = (plan: ReviewPlan): ReviewDependency[] =>
   plan.status === "blocked" && plan.reason === "dependent-changes" ? plan.dependencies : [];
 import { trackChangesPluginKey } from "../engine/trackChangesPlugin";
 
+const decisions: Array<"accepted" | "rejected"> = ["accepted", "rejected"];
+const directions: Array<"forward" | "backward"> = ["forward", "backward"];
+
 const set = (editor: TestEditor) => trackChangesPluginKey.getState(editor.state)!.changeSet;
 const creation = (editor: TestEditor) => editor.pendingChanges.find(c => c.type === "node-change" && c.dataTracked.operation === "insert")!;
 const insertParagraph = () => {
@@ -49,7 +52,7 @@ describe("semantic composition", () => {
     expect(dependenciesOf(plan).flatMap(d => d.dependentIds)).not.toContain(outside.id);
   });
 
-  it.each(["accepted", "rejected"] as const)("folds the author's edits into the creation, then %s", decision => {
+  it.each(decisions)("folds the author's edits into the creation, then %s", decision => {
     const editor = insertParagraph();
     const id = creation(editor).id;
     editor.insertAt(4, "!");
@@ -163,7 +166,7 @@ describe("placement is transport, not a content snapshot", () => {
     expect(editor.text).toBe("onetwothree");
     expect(editor.pendingChanges).toEqual([]);
   });
-  it.each(["forward", "backward"] as const)("rejects a %s move while preserving Bob's subsequent edit and identity", direction => {
+  it.each(directions)("rejects a %s move while preserving Bob's subsequent edit and identity", direction => {
     const editor = moved();
     const id = direction === "forward" ? "a" : "c";
     move(editor, id, direction === "forward" ? "c" : "a", direction === "forward" ? "after" : "before");
@@ -219,7 +222,7 @@ describe("placement is transport, not a content snapshot", () => {
     expect(editor.pendingChanges).toEqual([]);
   });
 
-  it.each(["forward", "backward"] as const)("requires shadow edits before rejecting a %s move", direction => {
+  it.each(directions)("requires shadow edits before rejecting a %s move", direction => {
     const editor = moved();
     move(editor, direction === "forward" ? "a" : "c", direction === "forward" ? "c" : "a", direction === "forward" ? "after" : "before");
     const placement = moves(editor)[0]!;
@@ -290,7 +293,7 @@ describe("placement is transport, not a content snapshot", () => {
     expect(editor.pendingChanges).toEqual([]);
   });
 
-  it.each(["accepted", "rejected"] as const)("resolves two explicitly selected moves in dependency order: %s", decision => {
+  it.each(decisions)("resolves two explicitly selected moves in dependency order: %s", decision => {
     const editor = moved();
     move(editor, "a", "c", "after");
     editor.setUserID("bob");

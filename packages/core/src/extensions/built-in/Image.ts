@@ -602,6 +602,12 @@ const imagePdf: PdfNodeHandler = (block, ctx) => {
   ctx.draw.image({ ...box, image: { src } });
 };
 
+/**
+ * Attrs that only place an anchored image on its page. Dragging an image within
+ * its page writes these and nothing else, so a change to them alone is a move.
+ */
+export const IMAGE_PLACEMENT_ATTRS: readonly string[] = ["xAlign", "x", "yOffset"];
+
 export const Image = Extension.create({
   name: "image",
 

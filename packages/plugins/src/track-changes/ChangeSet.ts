@@ -29,17 +29,18 @@ export class ChangeSet {
    */
   get changes(): TrackedChange[] {
     const iteratedIds = new Set();
-    return this.#changes.filter(c => {
+    return this.#changes.filter((c): c is TrackedChange => {
       const valid =
         !iteratedIds.has(c.dataTracked.id) &&
         ChangeSet.isValidDataTracked(c.dataTracked);
       iteratedIds.add(c.dataTracked.id);
       return valid;
-    }) as TrackedChange[];
+    });
   }
 
   get invalidChanges() {
-    return this.#changes.filter(c => !this.changes.includes(c as TrackedChange));
+    const valid: ReadonlyArray<TrackedChange | IncompleteChange> = this.changes;
+    return this.#changes.filter(c => !valid.includes(c));
   }
 
   /**
@@ -166,7 +167,7 @@ export class ChangeSet {
   getIn(ids: string[]) {
     return ids
       .map(id => this.#changes.find(c => c.id === id))
-      .filter(c => c !== undefined) as (TrackedChange | IncompleteChange)[];
+      .filter((c): c is TrackedChange | IncompleteChange => c !== undefined);
   }
 
   getNotIn(ids: string[]) {
@@ -175,9 +176,9 @@ export class ChangeSet {
 
   matchAndAddToRootChange(rootNodes: TrackedChange[], change: TrackedChange) {
     for (let i = 0; i < rootNodes.length; i++) {
-      const root = rootNodes[i] as NodeChange;
+      const root = rootNodes[i];
       if (
-        root.type === "node-change" &&
+        root?.type === "node-change" &&
         change.from < root.to &&
         change.dataTracked.authorID === root.dataTracked.authorID
       ) {
@@ -257,25 +258,26 @@ export class ChangeSet {
     if ("dataTracked" in dataTracked) {
       console.warn('passed "dataTracked" as property to isValidTrackedAttrs()', dataTracked);
     }
-    const trackedKeys: (keyof TrackedAttrs)[] = ["id", "authorID", "operation", "status", "createdAt", "updatedAt"];
-    const optionalKeys: (keyof TrackedAttrs)[] = ["reviewedByID"];
+    const trackedKeys: ReadonlyArray<string> =
+      ["id", "authorID", "operation", "status", "createdAt", "updatedAt"] satisfies Array<keyof TrackedAttrs>;
+    const optionalKeys: ReadonlyArray<string> = ["reviewedByID"] satisfies Array<keyof TrackedAttrs>;
     const entries = Object.entries(dataTracked).filter(([key]) =>
-      trackedKeys.includes(key as keyof TrackedAttrs),
+      trackedKeys.includes(key),
     );
     const optionalEntries = Object.entries(dataTracked).filter(([key]) =>
-      optionalKeys.includes(key as keyof TrackedAttrs),
+      optionalKeys.includes(key),
     );
     return (
       entries.length === trackedKeys.length &&
-      entries.every(([key, val]) => trackedKeys.includes(key as keyof TrackedAttrs) && val !== undefined) &&
-      optionalEntries.every(([key, val]) => optionalKeys.includes(key as keyof TrackedAttrs) && val !== undefined) &&
+      entries.every(([key, val]) => trackedKeys.includes(key) && val !== undefined) &&
+      optionalEntries.every(([key, val]) => optionalKeys.includes(key) && val !== undefined) &&
       (dataTracked.id || "").length > 0
     );
   }
 
   static isInlineMarkChange(change: TrackedChange) {
     if (ChangeSet.isMarkChange(change)) {
-      return change.nodeType.isInline || change.nodeType.isText;
+      return change.nodeType.isInline;
     }
     return false;
   }

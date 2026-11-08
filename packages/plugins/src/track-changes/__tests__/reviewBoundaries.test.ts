@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TextSelection } from "@scrivr/core/pm";
 import type { Node as PmNode } from "@scrivr/core/pm";
@@ -22,6 +22,9 @@ const editorWith = (userID: string, content: Record<string, unknown>[]) =>
 
 const handOver = (editor: ServerEditor, userID: string) =>
   editorWith(userID, editor.getState().doc.toJSON().content);
+
+const decisions: Array<"accepted" | "rejected"> = ["accepted", "rejected"];
+const changeTypes: Array<"text-change" | "node-change"> = ["text-change", "node-change"];
 
 const pending = (editor: ServerEditor) => findChanges(editor.getState()).pending;
 const ids = (editor: ServerEditor) => pending(editor).map(c => c.id);
@@ -126,17 +129,19 @@ describe("a gesture's later steps inside its own insertion", () => {
     expect(after.doc.textBetween(after.selection.from - 1, after.selection.from)).toBe("X");
   });
 
-  it("refuses a step straddling the insertion's edge rather than misrecording it", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("splits a step straddling the insertion's edge: taking back its own text, proposing to delete the rest", () => {
     const editor = editorWith("alice", [paragraph("a", "hello world")]);
     const tr = editor.getState().tr.insertText("abc", 3);
-    tr.delete(4, 8);
-    const after = tr.doc.textContent;
+    tr.delete(4, 8); // "bc" of the insertion, then "ll" that was already there
     editor.applyTransaction(tr);
-    expect(lastTracking(editor)).toMatchObject({ status: "refused", reason: "overlapping-steps" });
-    expect(texts(editor)).toEqual([after]);
-    expect(pending(editor)).toEqual([]);
-    spy.mockRestore();
+
+    expect(lastTracking(editor)).toMatchObject({ status: "tracked" });
+    const doc = editor.getState().doc;
+    expect(pending(editor).map(c => [c.dataTracked.operation, doc.textBetween(c.from, c.to)]))
+      .toEqual([["insert", "a"], ["delete", "ll"]]);
+
+    expect(reviewChanges(editor, { accepted: [], rejected: ids(editor) }).status).toBe("applied");
+    expect(texts(editor)).toEqual(["hello world"]);
   });
 });
 
@@ -219,7 +224,7 @@ describe("rejecting a paragraph break", () => {
 
   it("decides the break from either of its records", () => {
     for (const operation of ["reference", "node_split"]) {
-      for (const decision of ["accepted", "rejected"] as const) {
+      for (const decision of decisions) {
         const editor = editorWith("u1", [paragraph("a", "alpha beta")]);
         pressEnter(editor, 6);
         const record = pending(editor).find(c => c.dataTracked.operation === operation)!;
@@ -301,7 +306,7 @@ describe("one act, however many records it took", () => {
     expect(plan).toMatchObject({ status: "blocked", reason: "contradictory-decisions" });
   });
 
-  it.each(["text-change", "node-change"] as const)("rejecting an inserted paragraph from its %s removes all of it", type => {
+  it.each(changeTypes)("rejecting an inserted paragraph from its %s removes all of it", type => {
     const editor = editorWith("u1", [paragraph("a", "one")]);
     const state = editor.getState();
     editor.applyTransaction(state.tr.insert(5, state.schema.nodes.paragraph!.create({ nodeId: "n" }, state.schema.text("two"))));
@@ -311,7 +316,7 @@ describe("one act, however many records it took", () => {
     expect(pending(editor)).toEqual([]);
   });
 
-  it.each(["text-change", "node-change"] as const)("rejecting a deleted paragraph from its %s restores all of it", type => {
+  it.each(changeTypes)("rejecting a deleted paragraph from its %s restores all of it", type => {
     const editor = editorWith("u1", [paragraph("a", "one"), paragraph("b", "two")]);
     const from = posOfBlock(editor, 1);
     editor.applyTransaction(editor.getState().tr.delete(from, from + 5));
@@ -429,5 +434,67 @@ describe("what a host writes down", () => {
     expect(acts).toEqual([]);
     expect(absent).toEqual({ status: "unavailable", reason: "no-editor" });
     expect(planReviewIn(editor.getState(), { accepted: [], rejected: [] }).status).toBe("ready");
+  });
+});
+
+describe("one formatting change stamped in pieces", () => {
+  const bold = (id: string) => ({
+    type: "bold",
+    attrs: { dataTracked: [{ id, authorID: "alice", reviewedByID: null, operation: "insert", status: "pending", createdAt: 1, updatedAt: 1, statusUpdateAt: 0 }] },
+  });
+  // Two neighbouring runs carrying the same formatting under different ids, as a
+  // word-by-word diff stamps them.
+  const pieces = () => editorWith("bob", [{
+    type: "paragraph",
+    content: [
+      { type: "text", text: "thirty " , marks: [bold("piece-1")] },
+      { type: "text", text: "days", marks: [bold("piece-2")] },
+      { type: "text", text: " later" },
+    ],
+  }]);
+
+  it("is one card", () => {
+    expect(changeActs(pending(pieces()))).toHaveLength(1);
+  });
+
+  it.each(decisions)("is %s whole from either piece", decision => {
+    for (const id of ["piece-1", "piece-2"]) {
+      const editor = pieces();
+      const outcome = reviewChanges(editor, decision === "accepted" ? { accepted: [id], rejected: [] } : { accepted: [], rejected: [id] });
+      expect(outcome.status).toBe("applied");
+      expect(pending(editor)).toEqual([]);
+      expect(JSON.stringify(editor.getState().doc.toJSON()).includes('"bold"')).toBe(decision === "accepted");
+    }
+  });
+});
+
+describe("a break deleted between two list items", () => {
+  const record = (id: string, authorID: string, operation: string, extra: Record<string, unknown> = {}) =>
+    ({ id, authorID, operation, status: "pending", createdAt: 1, updatedAt: 1, statusUpdateAt: 0, ...extra });
+  const item = (paragraphNode: Record<string, unknown>) => ({ type: "listItem", content: [paragraphNode] });
+  const joined = () => editorWith("carol", [{
+    type: "bulletList",
+    content: [
+      item({ type: "paragraph", attrs: { nodeId: "a", dataTracked: [record("join", "bob", "node_join")] }, content: [{ type: "text", text: "one" }] }),
+      item({
+        type: "paragraph",
+        attrs: { nodeId: "b", align: "center", dataTracked: [record("centred", "alice", "set_attrs", { oldAttrs: { nodeId: "b", align: "left" } })] },
+        content: [{ type: "text", text: "two" }],
+      }),
+    ],
+  }]);
+
+  it("names a change recorded on the item it joins, rather than losing it", () => {
+    const plan = planReviewIn(joined().getState(), { accepted: ["join"], rejected: [] });
+    expect(plan.status === "blocked" && plan.reason === "dependent-changes" ? plan.dependencies : plan)
+      .toEqual([{ changeId: "join", dependentIds: ["centred"], relationship: "existence" }]);
+  });
+
+  it("joins the items once that change is decided with it", () => {
+    const editor = joined();
+    const outcome = reviewChanges(editor, { accepted: ["join", "centred"], rejected: [] });
+    expect(outcome.status).toBe("applied");
+    expect(editor.getState().doc.textContent).toBe("onetwo");
+    expect(pending(editor)).toEqual([]);
   });
 });

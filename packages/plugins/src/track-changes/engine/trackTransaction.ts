@@ -1,4 +1,4 @@
-import { EditorState, Transaction } from "@scrivr/core/pm";
+import { EditorState, Selection, Transaction } from "@scrivr/core/pm";
 import {
   AddMarkStep,
   AddNodeMarkStep,
@@ -18,7 +18,6 @@ import {
   passThroughMeta,
 } from "./transactionProcessing";
 import { createNewPendingAttrs, NewEmptyAttrs } from "../helpers";
-import { fixAndSetSelectionAfterTracking } from "./fixAndSetSelectionAfterTracking";
 import { diffChangeSteps } from "../lib/structuralChange";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
 import { isSetNodeMarkupStep } from "../step-trackers/qualifiers";
@@ -35,33 +34,24 @@ import { trackReplaceStep } from "../step-trackers/trackReplaceStep";
 
 
 /**
- * Did the gesture's caret trail this step? A caret at the end of inserted
- * content trailed it, whoever placed it there. A deletion leaves nothing to
- * trail, so only a caret the gesture carried to its edge counts — one the
- * gesture placed there is its own choice, and is mapped like any other.
- *
- * A step's positions belong to the document it applied to, so its end is
- * carried forward through the steps that followed before it is compared with
- * the caret.
+ * How far before this step's end the gesture left its caret, or null. Counted
+ * from the end because the replay writes the content back, not always the way
+ * the gesture did. Covers a caret at the end, inside the last block (a paste
+ * ending in a table), or, after a deletion, at the nearest valid place. A
+ * caret the gesture placed itself after a deletion is mapped like any other.
  */
-function caretTrailsStep(tr: Transaction, i: number, step: ReplaceStep) {
+function caretBeforeStepEnd(tr: Transaction, i: number, step: ReplaceStep): number | null {
   const { selection } = tr;
-  if (!selection.empty) return false;
-  if (step.slice.size === 0 && tr.selectionSet) return false;
-  return tr.mapping.slice(i + 1).map(step.from + step.slice.size, -1) === selection.head;
-}
-
-/**
- * Where a caret inside an insertion the gesture went on to edit sits, counted
- * back from the insertion's end, which is what the replay reports.
- */
-function caretInsideComposedInsertion(tr: Transaction, i: number, step: ReplaceStep) {
-  const { selection } = tr;
-  if (!selection.empty) return undefined;
+  if (!selection.empty) return null;
+  if (step.slice.size === 0 && tr.selectionSet) return null;
   const later = tr.mapping.slice(i + 1);
   const end = later.map(step.from + step.slice.size, -1);
-  if (selection.head < later.map(step.from, 1) || selection.head > end) return undefined;
-  return end - selection.head;
+  if (end === selection.head) return 0;
+  if (step.slice.size === 0) return Selection.near(tr.doc.resolve(end)).head === selection.head ? 0 : null;
+  const insertedFrom = later.map(step.from, 1);
+  return insertedFrom < selection.head && selection.head < end && !tr.doc.resolve(selection.head).sameParent(tr.doc.resolve(end))
+    ? end - selection.head
+    : null;
 }
 
 /**
@@ -106,10 +96,7 @@ export function trackTransaction(
     );
   }
 
-  newTr = passThroughMeta(tr, newTr);
-  newTr = fixAndSetSelectionAfterTracking(newTr, trContext);
-
-  return newTr;
+  return passThroughMeta(tr, newTr);
 }
 
 function trackOneStep(
@@ -133,6 +120,7 @@ function trackOneStep(
 
     const [initialTrackedContent, newSelectionPos] = trackReplaceStep(
       i,
+      step,
       oldState,
       newTr,
       baseAttrs,
@@ -146,32 +134,37 @@ function trackOneStep(
     if (onlyNode && excludeFromTracking(onlyNode)) return;
     trackedContent = diffChangeSteps(trackedContent);
 
+    const moveNodeId = trContext.stepsByGroupIDMap.get(step);
+    const moveId = trContext.textMoves.get(step);
+    const recordedFrom = newTr.mapping.maps.length;
     const [, updatedSelectionPos] = processChangeSteps(
       trackedContent,
       newTr,
-      trContext.stepsByGroupIDMap.has(step)
-        ? { ...baseAttrs, moveNodeId: trContext.stepsByGroupIDMap.get(step)! }
-        : baseAttrs,
+      { ...baseAttrs, ...(moveNodeId ? { moveNodeId } : {}), ...(moveId ? { moveId } : {}) },
       oldState.schema,
+      trContext.replayedSelection.restamps,
     );
 
     const placeCaret = (pos: number) => {
-      trContext.caretAfterStep = { pos, replayedMaps: newTr.mapping.maps.length };
+      trContext.replayedSelection.caretAfterStep = { pos, replayedMaps: newTr.mapping.maps.length };
     };
-    if (caretTrailsStep(tr, i, step)) {
-      placeCaret(updatedSelectionPos || newSelectionPos || tr.selection.head);
-    } else if (updatedSelectionPos && trContext.composition.composed.has(step)) {
-      const fromEnd = caretInsideComposedInsertion(tr, i, step);
-      if (fromEnd !== undefined) placeCaret(updatedSelectionPos - fromEnd);
+    const fromEnd = caretBeforeStepEnd(tr, i, step);
+    if (fromEnd !== null) {
+      // The step's own caret predates what recording wrote, such as joining a break back.
+      const stepCaret = newSelectionPos === undefined ? undefined : newTr.mapping.slice(recordedFrom).map(newSelectionPos);
+      const end = updatedSelectionPos ?? stepCaret ?? tr.selection.head;
+      // An end already inside text is where the caret was; one between blocks
+      // is past the content the caret was left in.
+      placeCaret(newTr.doc.resolve(end).parent.inlineContent ? end : end - fromEnd);
     }
   } else if (step instanceof ReplaceAroundStep) {
     if (isSetNodeMarkupStep(step)) {
       const steps = trackSetNodeMarkupStep(step, newTr, baseAttrs, tr.docs[i]!, replayBridge);
-      if (steps.length > 0) processChangeSteps(steps, newTr, baseAttrs, oldState.schema);
+      if (steps.length > 0) processChangeSteps(steps, newTr, baseAttrs, oldState.schema, trContext.replayedSelection.restamps);
     } else {
       let steps = trackReplaceAroundStep(step, oldState, tr, newTr, baseAttrs, tr.docs[i]!, trContext);
       steps = diffChangeSteps(steps);
-      processChangeSteps(steps, newTr, baseAttrs, oldState.schema);
+      processChangeSteps(steps, newTr, baseAttrs, oldState.schema, trContext.replayedSelection.restamps);
     }
   } else if (step instanceof AttrStep) {
     const changeSteps = trackAttrsChangeStep(
@@ -188,6 +181,7 @@ function trackOneStep(
       newTr,
       baseAttrs,
       oldState.schema,
+      trContext.replayedSelection.restamps,
     );
   } else if (step instanceof AddMarkStep) {
     // Mark steps shift nothing, so the source step's positions are already

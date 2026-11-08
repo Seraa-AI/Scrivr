@@ -1,4 +1,4 @@
-import { Node as PMNode, Slice } from "@scrivr/core/pm";
+import { Fragment, Node as PMNode, Slice } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 import { ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
 
@@ -10,8 +10,42 @@ import {
   setFragmentAsInserted,
   setFragmentAsWrapChange,
 } from "../lib/fragments";
-import { ExposedSlice, TrTrackingContext, ChangeStep } from "../types";
+import { TrTrackingContext, ChangeStep } from "../types";
 import { isLiftStep, isWrapStep } from "./qualifiers";
+
+/** The child of `content` that `pos` falls in, or the child boundary it sits on. */
+function childAt(content: Fragment, pos: number): { index: number; offset: number } {
+  let offset = 0;
+  for (let index = 0; index < content.childCount; index++) {
+    const end = offset + content.child(index).nodeSize;
+    if (end === pos) return { index: index + 1, offset: end };
+    if (end > pos) return { index, offset };
+    offset = end;
+  }
+  if (pos === offset) return { index: content.childCount, offset };
+  throw new RangeError(`Position ${pos} outside of fragment`);
+}
+
+function insertIntoFragment(content: Fragment, dist: number, insert: Fragment, parent?: PMNode): Fragment | null {
+  const { index, offset } = childAt(content, dist);
+  const child = content.maybeChild(index);
+  if (offset === dist || !child || child.isText) {
+    if (parent && !parent.canReplace(index, index, insert)) return null;
+    return content.cut(0, dist).append(insert).append(content.cut(dist));
+  }
+  const inner = insertIntoFragment(child.content, dist - offset - 1, insert, child);
+  return inner && content.replaceChild(index, child.copy(inner));
+}
+
+/**
+ * Inserts `insert` at `pos` inside `slice`, keeping its open sides. ProseMirror's
+ * own `Slice.insertAt` is internal and untyped, so it is written out here.
+ */
+function insertIntoSlice(slice: Slice, pos: number, insert: Fragment): Slice {
+  const content = insertIntoFragment(slice.content, pos + slice.openStart, insert);
+  if (!content) throw new RangeError(`Cannot insert the gap content at ${pos}`);
+  return new Slice(content, slice.openStart, slice.openEnd);
+}
 
 function preserveDataTrackedFromPreviousStep(
   newTr: Transaction,
@@ -73,7 +107,6 @@ export function trackReplaceAroundStep(
   // What this step did, in the replayed document as it stands with the step undone.
   const placed = step.map(advanceBridge(step, previousBridge, newTr, replayStart));
   if (!(placed instanceof ReplaceAroundStep)) return [];
-  // @ts-expect-error ProseMirror ReplaceAroundStep typing misses slice fields
   const {
     from,
     to,
@@ -89,7 +122,7 @@ export function trackReplaceAroundStep(
     gapTo: number;
     insert: number;
     structure?: boolean;
-    slice: ExposedSlice;
+    slice: Slice;
   } = placed;
 
   const {
@@ -144,10 +177,11 @@ export function trackReplaceAroundStep(
       slice.openStart !== slice.openEnd || newSliceContent.size === 0
         ? 0
         : slice.openEnd;
-    let insertedSlice = new Slice(fragment, openStart, openEnd) as ExposedSlice;
+    let insertedSlice = new Slice(fragment, openStart, openEnd);
     if (gap.size > 0 || tr.getMeta(TrackChangesAction.updateMetaNode)) {
       const sliceContent = gap.content;
-      insertedSlice = insertedSlice.insertAt(
+      insertedSlice = insertIntoSlice(
+        insertedSlice,
         insertedSlice.size === 0 ? 0 : insert,
         sliceContent,
       );
@@ -168,10 +202,14 @@ export function trackReplaceAroundStep(
           type: "insert-slice",
           from: from,
           to: from,
-          slice: new Slice(fragmentTracked, 0, 0) as ExposedSlice,
+          slice: new Slice(fragmentTracked, 0, 0),
           sliceWasSplit: true,
         });
       }
+    } else if (isWrapStep(step)) {
+      // Re-applied as a wrap, so the content it wraps and any position inside it
+      // are carried rather than removed and written back.
+      newTr.step(new ReplaceAroundStep(from, to, gapFrom, gapTo, new Slice(fragment, 0, 0), insert, structure));
     } else {
       steps.push({
         type: "insert-slice",

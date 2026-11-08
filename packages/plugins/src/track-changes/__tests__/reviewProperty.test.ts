@@ -68,6 +68,8 @@ function blockTexts(doc: PmNode, shown: boolean) {
   return out;
 }
 
+const decisions: Array<"accepted" | "rejected"> = ["accepted", "rejected"];
+
 const pending = (editor: ServerEditor) => findChanges(editor.getState()).pending;
 
 const textblockRanges = (doc: PmNode) => {
@@ -172,7 +174,7 @@ describe("any pending document can be decided", () => {
     restore();
   });
 
-  it.each(["accepted", "rejected"] as const)("every card can be %s", decision => {
+  it.each(decisions)("every card can be %s", decision => {
     const restore = silenced();
     for (let seed = 1; seed <= SEEDS; seed++) {
       const cards = changeActs(pending(scenario(seed).editor)).length;

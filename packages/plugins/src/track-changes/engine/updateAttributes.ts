@@ -1,4 +1,4 @@
-import { Node as PMNode, Schema } from "@scrivr/core/pm";
+import { Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { Mapping } from "@scrivr/core/pm";
 
@@ -14,9 +14,18 @@ import {
   DataTrackedAttrs,
   IncompleteChange,
   MarkChange,
+  PartialChange,
   TrackedAttrs,
   TrackedChange,
 } from "../types";
+
+const isMarkChange = (change: IncompleteChange): change is PartialChange<MarkChange> =>
+  change.type === "mark-change";
+
+function trackedId(mark: Mark): string | undefined {
+  const dataTracked: { id?: string } | null = mark.attrs.dataTracked;
+  return dataTracked?.id;
+}
 
 export function updateChangeAttrs(
   tr: Transaction,
@@ -42,7 +51,7 @@ export function updateChangeAttrs(
     const oldMark = node.marks.find(
       m =>
         (m.type === schema.marks.trackedInsert || m.type === schema.marks.trackedDelete) &&
-        (m.attrs.dataTracked as { id?: string } | null)?.id === change.id,
+        trackedId(m) === change.id,
     ) ?? node.marks.find(
       m => m.type === schema.marks.trackedInsert || m.type === schema.marks.trackedDelete,
     );
@@ -133,11 +142,10 @@ export function updateChangeAttrs(
       },
       node.marks,
     );
-  } else if (change.type === "mark-change") {
-    const markChange = change as MarkChange;
-    if (markChange.mark && markChange.from && markChange.to) {
-      const markDataTracked = Array.isArray(markChange.mark.attrs.dataTracked)
-        ? (markChange.mark.attrs.dataTracked as DataTrackedAttrs[])
+  } else if (isMarkChange(change)) {
+    if (change.mark && change.from && change.to) {
+      const markDataTracked: DataTrackedAttrs[] = Array.isArray(change.mark.attrs.dataTracked)
+        ? change.mark.attrs.dataTracked
         : [];
       const newDT = markDataTracked?.map(dt => {
         if (
@@ -151,16 +159,16 @@ export function updateChangeAttrs(
         }
         return dt;
       });
-      const newMark = markChange.mark.type.create({
-        ...markChange.mark.attrs,
+      const newMark = change.mark.type.create({
+        ...change.mark.attrs,
         dataTracked: newDT,
       });
-      if (ChangeSet.isInlineMarkChange(markChange)) {
-        tr.removeMark(markChange.from, markChange.to, markChange.mark);
-        tr.addMark(markChange.from, markChange.to, newMark);
+      if (change.nodeType.isInline) {
+        tr.removeMark(change.from, change.to, change.mark);
+        tr.addMark(change.from, change.to, newMark);
       } else {
-        tr.removeNodeMark(markChange.from, markChange.mark);
-        tr.addNodeMark(markChange.from, newMark);
+        tr.removeNodeMark(change.from, change.mark);
+        tr.addNodeMark(change.from, newMark);
       }
     } else {
       console.warn(

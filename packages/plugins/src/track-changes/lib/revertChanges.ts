@@ -1,15 +1,17 @@
-import { Slice } from "@scrivr/core/pm";
+import { Node as PMNode, Slice } from "@scrivr/core/pm";
 import { EditorState, Transaction } from "@scrivr/core/pm";
-import { liftTarget, Mapping, ReplaceAroundStep } from "@scrivr/core/pm";
+import { canJoin, liftTarget, Mapping, ReplaceAroundStep } from "@scrivr/core/pm";
 
 import { findChanges } from "../findChanges";
 import { getBlockInlineTrackedData } from "../helpers";
-import { IncompleteChange, NodeChange } from "../types";
+import { IncompleteChange } from "../types";
 
 /**
  * Undo a paragraph break by giving the split-off content back to the block it
- * came from. Records are read live: the content is transported rather than
- * mapped, so a position taken before this runs says nothing about after it.
+ * came from. Halves that still sit side by side are joined, which leaves the
+ * content, and the caret in it, where it is. Halves pulled apart have their
+ * content carried across instead. Records are read live either way: carried
+ * content can't be mapped across.
  */
 export function revertSplitNodeChange(tr: Transaction, change: IncompleteChange) {
   const current = findChanges(EditorState.create({ doc: tr.doc })).changes;
@@ -24,16 +26,21 @@ export function revertSplitNodeChange(tr: Transaction, change: IncompleteChange)
     c => c.from === live.from && c.dataTracked.operation === "reference",
   );
 
-  tr.delete(live.from, live.to);
-  const removal = tr.steps[tr.steps.length - 1]!.getMap();
-  const sourceFrom = removal.map(source.from);
-  const sourceEnd = removal.map(source.to) - 1;
-  tr.insert(sourceEnd, splitOff.content);
-  if (splitOff.type.name === "list_item") tr.join(sourceEnd);
+  let sourceFrom = source.from;
+  if (source.to === live.from && canJoin(tr.doc, live.from)) {
+    tr.join(live.from);
+  } else {
+    tr.delete(live.from, live.to);
+    const removal = tr.steps[tr.steps.length - 1]!.getMap();
+    sourceFrom = removal.map(source.from);
+    tr.insert(removal.map(source.to) - 1, splitOff.content);
+  }
 
   const sourceNode = tr.doc.nodeAt(sourceFrom)!;
-  // A later break's other half now hangs off the block this content rejoined.
+  // A later break's other half now hangs off the block this content rejoined,
+  // and a deletion of this break has nothing left to delete.
   const records = (getBlockInlineTrackedData(sourceNode) ?? [])
+    .filter(record => record.operation !== "node_join")
     .map(record => (carriedReference && record.operation === "reference" ? carriedReference.dataTracked : record));
   tr.setNodeMarkup(
     sourceFrom,
@@ -41,6 +48,10 @@ export function revertSplitNodeChange(tr: Transaction, change: IncompleteChange)
     { ...sourceNode.attrs, dataTracked: records.length ? records : null },
     sourceNode.marks,
   );
+}
+
+function changedNode(change: IncompleteChange): PMNode | undefined {
+  return "node" in change && change.node instanceof PMNode ? change.node : undefined;
 }
 
 export function revertWrapNodeChange(
@@ -63,7 +74,7 @@ export function revertWrapNodeChange(
       const $toPos = tr.doc.resolve(sinceStart.map(pos + node.nodeSize - 1));
       const nodeRange = $fromPos.blockRange(
         $toPos,
-        node => !!(change as NodeChange).node?.type.contentMatch.matchType(node.type),
+        node => !!changedNode(change)?.type.contentMatch.matchType(node.type),
       );
       if (!nodeRange) return;
       const targetLiftDepth = liftTarget(nodeRange);

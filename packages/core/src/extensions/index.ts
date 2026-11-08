@@ -22,7 +22,7 @@ export { Alignment } from "./built-in/Alignment";
 export { Indent, INDENT_STEP, TEXT_INDENT_STEP } from "./built-in/Indent";
 export { List } from "./built-in/List";
 export { Pagination } from "./built-in/Pagination";
-export { Image, prepareDocxImages } from "./built-in/Image";
+export { Image, prepareDocxImages, IMAGE_PLACEMENT_ATTRS } from "./built-in/Image";
 export { CodeBlock } from "./built-in/CodeBlock";
 export { HorizontalRule } from "./built-in/HorizontalRule";
 export { PageBreak } from "./built-in/PageBreak";
@@ -51,8 +51,9 @@ export type {
   SourcedBlockRecord,
   SourcedBlockDivergenceState,
 } from "./built-in/SourcedBlock";
-export { UniqueId, findNodeById, COLLAB_SYNC_META } from "./built-in/UniqueId";
-export { NORMALIZATION_META } from "./built-in/TrailingNode";
+export { UniqueId, findNodeById, COLLAB_SYNC_META, NORMALIZATION_META } from "./built-in/UniqueId";
+export { TrailingNode } from "./built-in/TrailingNode";
+export { Typography } from "./built-in/Typography";
 export { ClearFormatting } from "./built-in/ClearFormatting";
 export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultContent";
 

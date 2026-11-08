@@ -58,14 +58,22 @@ export function normalizeMoveShadows(tr: Transaction): void {
   });
 }
 
-/** Reject placement by transporting the current identity back to its shadow. */
+/**
+ * Reject placement by transporting the current identity back to its shadow.
+ * Blocks moved together keep their order, so the nth block placed goes back to
+ * the nth place it left.
+ */
 export function rejectMove(tr: Transaction, change: NodeChange, mapping: Mapping): void {
   const current = findChanges(EditorState.create({ doc: tr.doc })).changes;
   const live = current.find(c => c.id === change.id && c.type === "node-change");
-  const sources = current.filter((c): c is NodeChange => c.type === "node-change" &&
-    c.dataTracked.operation === "delete" && c.dataTracked.moveNodeId === change.dataTracked.moveNodeId);
-  const roots = sources.filter(c => !sources.some(parent => parent !== c && parent.from <= c.from && parent.to >= c.to));
-  const source = roots.length === 1 ? roots[0] : undefined;
+  const ofThisMove = (operation: "move" | "delete") => {
+    const records = current.filter((c): c is NodeChange => c.type === "node-change" &&
+      c.dataTracked.operation === operation && c.dataTracked.moveNodeId === change.dataTracked.moveNodeId);
+    return records.filter(c => !records.some(parent => parent !== c && parent.from <= c.from && parent.to >= c.to));
+  };
+  const placed = ofThisMove("move");
+  const left = ofThisMove("delete");
+  const source = left.length === placed.length ? left[placed.findIndex(c => c.id === change.id)] : undefined;
   const node = live && tr.doc.nodeAt(live.from);
   const sourceNode = source && tr.doc.nodeAt(source.from);
   if (!live || !source || !node || !sourceNode) throw new Error("Cannot resolve the live identity and original placement of this move");

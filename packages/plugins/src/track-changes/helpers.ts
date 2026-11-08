@@ -51,6 +51,10 @@ export type NewSplitNodeAttrs = Omit<TrackedAttrs, "id" | "operation"> & {
   operation: CHANGE_OPERATION.node_split;
 };
 
+export type NewJoinAttrs = Omit<TrackedAttrs, "id" | "operation"> & {
+  operation: CHANGE_OPERATION.node_join;
+};
+
 export type NewMoveAttrs = Omit<TrackedAttrs, "id" | "operation"> & {
   operation: CHANGE_OPERATION.move;
   indentationType?: "indent" | "unindent";
@@ -73,6 +77,10 @@ export function createNewWrapAttrs(attrs: NewEmptyAttrs): NewInsertAttrs {
 
 export function createNewSplitAttrs(attrs: NewEmptyAttrs): NewSplitNodeAttrs {
   return { ...attrs, operation: CHANGE_OPERATION.node_split };
+}
+
+export function createNewJoinAttrs(attrs: NewEmptyAttrs): NewJoinAttrs {
+  return { ...attrs, operation: CHANGE_OPERATION.node_join };
 }
 
 export function createNewReferenceAttrs(attrs: NewEmptyAttrs, id: string): NewReferenceAttrs {
@@ -106,7 +114,7 @@ export function createNewStructureAttrs(attrs: NewEmptyAttrs): NewInsertAttrs {
   return { ...attrs, operation: CHANGE_OPERATION.structure };
 }
 
-export function createNewPendingAttrs(time: number, authorID: string) {
+export function createNewPendingAttrs(time: number, authorID: string): NewEmptyAttrs {
   return {
     authorID,
     reviewedByID: null,
@@ -114,7 +122,7 @@ export function createNewPendingAttrs(time: number, authorID: string) {
     updatedAt: time,
     statusUpdateAt: 0,
     status: CHANGE_STATUS.pending,
-  } as NewEmptyAttrs;
+  };
 }
 
 export function addTrackIdIfDoesntExist(attrs: Partial<TrackedAttrs>) {
@@ -193,6 +201,7 @@ export function shouldMergeTrackedAttributes(
     left.creationId === right.creationId &&
     left.deletionId === right.deletionId &&
     left.continuesId === right.continuesId &&
+    left.moveId === right.moveId &&
     left.foldingClosed === right.foldingClosed &&
     JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? [])
   );

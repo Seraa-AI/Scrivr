@@ -1,7 +1,6 @@
 import { EditorState, Plugin, type Transaction } from "prosemirror-state";
 import type { Node, NodeType, Schema } from "prosemirror-model";
-import { NORMALIZATION_META } from "../extensions/built-in/TrailingNode";
-import { COLLAB_SYNC_META } from "../extensions/built-in/UniqueId";
+import { COLLAB_SYNC_META, NORMALIZATION_META } from "../extensions/built-in/UniqueId";
 import { cellGridSpan, cellVMerge, tableGrid } from "./attrs";
 
 /**

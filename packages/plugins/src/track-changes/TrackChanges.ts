@@ -1,9 +1,26 @@
-import { Extension, renderTrackedInsert, renderTrackedDelete, renderTrackedConflict, renderTrackedAttrChange } from "@scrivr/core";
-import type { GlyphEntry, IEditor, LineEntry, OverlayRenderHandler, SemanticMarkHandler } from "@scrivr/core";
-import type { EditorState, Transaction } from "@scrivr/core/pm";
+import {
+  Extension,
+  renderTrackedInsert,
+  renderTrackedDelete,
+  renderTrackedConflict,
+  renderTrackedAttrChange,
+  renderTrackedObject,
+  renderTrackedFormatting,
+} from "@scrivr/core";
+import type {
+  CharacterMap,
+  GlyphEntry,
+  IEditor,
+  LineEntry,
+  OverlayRenderHandler,
+  SemanticChange,
+  SemanticMarkHandler,
+} from "@scrivr/core";
+import type { EditorState, Node, Transaction } from "@scrivr/core/pm";
 
 import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
+import { lastCutPlugin } from "./lib/cutAndPaste";
 import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs } from "./helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus } from "./types";
 import { planReviewIn } from "./reviewChanges";
@@ -63,6 +80,51 @@ const DELETE_COLORS = ["#dc2626", "#b91c1c", "#e11d48", "#be185d", "#c2410c", "#
  * immediately recognise "formatting was changed here".
  */
 const ATTR_CHANGE_COLOR = "#d97706";
+
+type Box = { x: number; y: number; width: number; height: number };
+
+/**
+ * Where a leaf node — an image, a rule, a page break — is drawn on this page: an
+ * anchored image's own box, an inline object's painted box, or a block leaf's line.
+ */
+function objectBox(
+  pos: number,
+  node: Node,
+  placements: ReadonlyArray<Box & { docPos: number }>,
+  charMap: CharacterMap,
+  pageNumber: number,
+  lines: LineEntry[],
+): Box | null {
+  const placed = placements.find(placement => placement.docPos === pos);
+  if (placed) return { x: placed.x, y: placed.y, width: placed.width, height: placed.height };
+  const painted = charMap.getObjectRect(pos);
+  if (node.isInline && painted?.page === pageNumber) return painted;
+  const line = lines[0];
+  if (node.isBlock && line) return { x: line.x, y: line.y, width: line.contentWidth, height: line.height };
+  return null;
+}
+
+/** How a change to an object is coloured, by what it did. */
+const OBJECT_COLOR: Partial<Record<CHANGE_OPERATION, (author: string) => string>> = {
+  [CHANGE_OPERATION.insert]: author => insertColor(author),
+  [CHANGE_OPERATION.move]: author => insertColor(author),
+  [CHANGE_OPERATION.delete]: author => deleteColor(author),
+  [CHANGE_OPERATION.set_node_attributes]: () => ATTR_CHANGE_COLOR,
+};
+
+/**
+ * Changes to a block rather than its text — its attributes, the break that ends
+ * it, its place in a list — have no glyphs of their own to colour, so they are
+ * marked with a bar beside the block.
+ */
+const BLOCK_CHANGES: ReadonlySet<CHANGE_OPERATION> = new Set([
+  CHANGE_OPERATION.set_node_attributes,
+  CHANGE_OPERATION.node_split,
+  CHANGE_OPERATION.node_join,
+  CHANGE_OPERATION.list_change,
+  CHANGE_OPERATION.wrap_with_node,
+  CHANGE_OPERATION.structure,
+]);
 
 /**
  * Stable first-seen assignment: each new authorID gets the next available
@@ -160,8 +222,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         text: "",
         changes: [
           ...(run.changes ?? []),
-          ...entries.map((entry: Record<string, unknown>) => ({
-            type: "suggestedDelete" as const,
+          ...entries.map((entry: Record<string, unknown>): SemanticChange => ({
+            type: "suggestedDelete",
             text: run.text,
             ...(typeof entry.id === "string" ? { id: entry.id } : {}),
             ...(typeof entry.authorID === "string" ? { authorId: entry.authorID } : {}),
@@ -181,8 +243,10 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
     if (this.options.initialStatus !== undefined) opts.initialStatus = this.options.initialStatus;
     if (this.options.canAcceptReject !== undefined) opts.canAcceptReject = this.options.canAcceptReject;
     if (this.options.skipTrsWithMetas !== undefined) opts.skipTrsWithMetas = this.options.skipTrsWithMetas;
+    if (this.options.onRefused !== undefined) opts.onRefused = this.options.onRefused;
     return [
       trackChangesPlugin(opts),
+      lastCutPlugin(),
     ];
   },
 
@@ -319,18 +383,39 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
       // same pixels and produce a solid opaque orange block.
       const conflictGlyphsMap = new Map<number, GlyphEntry>();
       const conflictLinesMap = new Map<number, LineEntry>();
-      // Attribute changes: keyed by lineIndex to avoid duplicate bars.
-      const attrChangeLines = new Map<number, LineEntry>();
+      // Block changes: keyed by lineIndex to avoid duplicate bars.
+      const blockChangeLines = new Map<number, LineEntry>();
+
+      const objects: Array<{ box: Box; color: string; removed: boolean }> = [];
+      // Formatting changes how text looks, not whether it is there: washed and
+      // barred in the margin as Word marks it, never struck or underlined.
+      const formattedGlyphs = new Map<number, GlyphEntry>();
+      const placements = (editor.layout.anchoredObjects ?? []).filter(placement => placement.page === pageNumber);
 
       for (const change of changeSet.changes) {
         const { operation, authorID } = change.dataTracked;
         const author = authorID ?? "unknown";
-        const isConflict = !!(change.dataTracked as { isConflict?: boolean }).isConflict;
+        const isConflict = !!change.dataTracked.isConflict;
 
         const glyphs = charMap.glyphsInRange(change.from, change.to)
           .filter(g => g.page === pageNumber);
         const lines = charMap.linesInRange(change.from, change.to)
           .filter(l => l.page === pageNumber);
+
+        // An object has no text to underline or strike, so it is framed where it
+        // is drawn: added or moved in, removed or moved out, or only changed.
+        const objectColor = OBJECT_COLOR[operation]?.(author);
+        const node = change.type === "node-change" || change.type === "node-attr-change" ? change.node : null;
+        const box = objectColor && node?.isLeaf ? objectBox(change.from, node, placements, charMap, pageNumber, lines) : null;
+        if (objectColor && box) {
+          objects.push({ box, color: objectColor, removed: operation === CHANGE_OPERATION.delete });
+          continue;
+        }
+        if (change.type === "mark-change") {
+          for (const g of glyphs) formattedGlyphs.set(g.docPos, g);
+          for (const l of lines) if (!blockChangeLines.has(l.lineIndex)) blockChangeLines.set(l.lineIndex, l);
+          continue;
+        }
 
         if (operation === CHANGE_OPERATION.insert || operation === CHANGE_OPERATION.move) {
           const color = insertColor(author);
@@ -348,10 +433,10 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
           for (const l of lines) {
             if (!deleteLines.has(l.lineIndex)) deleteLines.set(l.lineIndex, { line: l, color });
           }
-        } else if (operation === CHANGE_OPERATION.set_node_attributes) {
+        } else if (BLOCK_CHANGES.has(operation)) {
           // Draw a left-margin bar for every line of the changed block.
           for (const l of lines) {
-            if (!attrChangeLines.has(l.lineIndex)) attrChangeLines.set(l.lineIndex, l);
+            if (!blockChangeLines.has(l.lineIndex)) blockChangeLines.set(l.lineIndex, l);
           }
         }
 
@@ -405,9 +490,12 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         renderTrackedConflict(ctx, conflictGlyphs, conflictLines);
       }
 
-      // Attribute-change bars — rendered last so they're always visible
-      if (attrChangeLines.size > 0) {
-        renderTrackedAttrChange(ctx, [...attrChangeLines.values()], ATTR_CHANGE_COLOR);
+      for (const { box, color, removed } of objects) renderTrackedObject(ctx, box, color, removed);
+      if (formattedGlyphs.size > 0) renderTrackedFormatting(ctx, [...formattedGlyphs.values()], ATTR_CHANGE_COLOR);
+
+      // Block-change bars — rendered last so they're always visible
+      if (blockChangeLines.size > 0) {
+        renderTrackedAttrChange(ctx, [...blockChangeLines.values()], ATTR_CHANGE_COLOR);
       }
     };
 

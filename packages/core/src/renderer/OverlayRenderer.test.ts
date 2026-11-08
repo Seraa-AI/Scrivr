@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { snapRect, setActiveDpr } from "./OverlayRenderer";
+import { snapRect, setActiveDpr, renderTrackedFormatting, renderTrackedObject } from "./OverlayRenderer";
+import type { GlyphEntry } from "../layout/CharacterMap";
 
 describe("snapRect — pixel-grid snapping", () => {
   beforeEach(() => {
@@ -49,5 +50,39 @@ describe("snapRect — pixel-grid snapping", () => {
     expect(Math.abs(r.y * 3 - Math.round(r.y * 3))).toBeLessThan(eps);
     expect(Math.abs((r.x + r.w) * 3 - Math.round((r.x + r.w) * 3))).toBeLessThan(eps);
     expect(Math.abs((r.y + r.h) * 3 - Math.round((r.y + r.h) * 3))).toBeLessThan(eps);
+  });
+});
+
+describe("a formatting change", () => {
+  it("is washed, never underlined, so it is not mistaken for underlining", () => {
+    const calls: string[] = [];
+    const ctx = document.createElement("canvas").getContext("2d")!;
+    ctx.fillRect = () => calls.push("fillRect");
+    ctx.stroke = () => calls.push("stroke");
+    const glyph = (docPos: number): GlyphEntry => ({ docPos, x: docPos * 8, y: 0, lineY: 0, width: 8, height: 16, page: 1, lineIndex: 0 });
+
+    renderTrackedFormatting(ctx, [glyph(1), glyph(2)], "#d97706");
+
+    expect(calls).toEqual(["fillRect", "fillRect"]);
+  });
+});
+
+describe("a changed object", () => {
+  const painted = (removed: boolean) => {
+    const calls: string[] = [];
+    const ctx = document.createElement("canvas").getContext("2d")!;
+    ctx.fillRect = () => calls.push("fill");
+    ctx.strokeRect = () => calls.push("frame");
+    ctx.stroke = () => calls.push("strike");
+    renderTrackedObject(ctx, { x: 10, y: 10, width: 120, height: 80 }, "#16a34a", removed);
+    return calls;
+  };
+
+  it("is framed where it is drawn", () => {
+    expect(painted(false)).toEqual(["fill", "frame"]);
+  });
+
+  it("is also struck through when removed, as Word marks a deleted object", () => {
+    expect(painted(true)).toEqual(["fill", "frame", "strike"]);
   });
 });

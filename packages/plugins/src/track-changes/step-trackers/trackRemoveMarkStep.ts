@@ -19,7 +19,7 @@ import { CHANGE_OPERATION, DataTrackedAttrs } from "../types";
 
 function markHasOp(mark: Mark, operation: CHANGE_OPERATION) {
   if (mark.attrs.dataTracked && Array.isArray(mark.attrs.dataTracked)) {
-    const dtAttrs = mark.attrs.dataTracked as DataTrackedAttrs[];
+    const dtAttrs: DataTrackedAttrs[] = mark.attrs.dataTracked;
     return dtAttrs.some(at => at.operation === operation);
   }
 }
@@ -99,12 +99,12 @@ export function trackRemoveNodeMarkStep(
 
   const targetNode = doc.nodeAt(step.pos);
   if (targetNode) {
-    targetNode.marks.forEach(mark => {
+    for (const mark of targetNode.marks) {
       if (mark.type.name === markName && mark.attrs.dataTracked?.length) sameMark = mark;
-    });
+    }
   }
 
-  const existingAttrs = (sameMark as Mark | null)?.attrs ?? targetNode?.marks.find(m => m.type.name === markName)?.attrs ?? {};
+  const existingAttrs = sameMark?.attrs ?? targetNode?.marks.find(m => m.type.name === markName)?.attrs ?? {};
   const newDataTracked = createNewDeleteAttrs(emptyAttrs);
   const newMark = markSource!.create({
     ...existingAttrs,

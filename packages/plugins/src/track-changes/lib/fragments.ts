@@ -16,7 +16,7 @@ import {
   NewMoveAttrs,
   NewTrackedAttrs,
 } from "../helpers";
-import { CHANGE_OPERATION, CHANGE_STATUS, ExposedFragment } from "../types";
+import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 
 export function setFragmentAsInserted(inserted: Fragment, insertAttrs: NewInsertAttrs, schema: Schema) {
   const updatedInserted = loopContentAndMergeText(inserted, insertAttrs, schema);
@@ -26,10 +26,12 @@ export function setFragmentAsInserted(inserted: Fragment, insertAttrs: NewInsert
 export function setFragmentAsWrapChange(inserted: Fragment, attrs: NewEmptyAttrs, schema: Schema) {
   const content: PMNode[] = [];
   inserted.forEach(node => {
+    const wrap = addTrackIdIfDoesntExist(createNewWrapAttrs(attrs));
     content.push(
       node.type.create(
-        { ...node.attrs, dataTracked: [addTrackIdIfDoesntExist(createNewWrapAttrs(attrs))] },
-        setFragmentAsInserted(node.content, createNewInsertAttrs(attrs), schema),
+        { ...node.attrs, dataTracked: [wrap] },
+        // What the wrapper brought with it exists only as part of wrapping.
+        setFragmentAsInserted(node.content, { ...createNewInsertAttrs(attrs), ...(wrap.id ? { creationId: wrap.id } : {}) }, schema),
         node.marks,
       ),
     );
@@ -87,52 +89,14 @@ export function setFragmentAsNodeSplit(
   const splitSource = oldDataTracked.find(c => c.operation === "reference");
   const dataTracked = { ...createNewSplitAttrs({ ...attrs }), id: referenceId };
 
-  if (lastChild.type.name === "list_item") {
-    let firstChild = lastChild.content.firstChild!;
-    firstChild = firstChild.type.create(
+  inserted = inserted.replaceChild(
+    inserted.childCount - 1,
+    lastChild.type.create(
       { ...lastChild.attrs, dataTracked: splitSource ? [dataTracked, splitSource] : [dataTracked] },
-      firstChild.content,
-    );
-    inserted = inserted.replaceChild(
-      inserted.childCount - 1,
-      lastChild.type.create(
-        lastChild.attrs,
-        lastChild.content.cut(firstChild.nodeSize).addToStart(firstChild),
-      ),
-    );
-  } else {
-    inserted = inserted.replaceChild(
-      inserted.childCount - 1,
-      lastChild.type.create(
-        { ...lastChild.attrs, dataTracked: splitSource ? [dataTracked, splitSource] : [dataTracked] },
-        lastChild.content,
-      ),
-    );
-  }
+      lastChild.content,
+    ),
+  );
   return inserted;
-}
-
-/** Cuts a fragment similar to Fragment.cut but also removes the parent node. */
-export function cutFragment(matched: number, deleted: number, content: Fragment) {
-  const newContent: PMNode[] = [];
-  for (let i = 0; matched <= deleted && i < content.childCount; i += 1) {
-    const child = content.child(i);
-    if (!child.isText && child.content.size > 0) {
-      const cut = cutFragment(matched + 1, deleted, child.content);
-      matched = cut[0];
-      newContent.push(...cut[1].content);
-    } else if (child.isText && matched + child.nodeSize > deleted) {
-      if (deleted - matched > 0) {
-        newContent.push(child.cut(deleted - matched));
-      } else {
-        newContent.push(child);
-      }
-      matched = deleted + 1;
-    } else {
-      matched += child.nodeSize;
-    }
-  }
-  return [matched, Fragment.fromArray(newContent)] as [number, ExposedFragment];
 }
 
 /** The mark standing in for this operation on text. */

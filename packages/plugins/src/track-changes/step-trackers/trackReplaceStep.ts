@@ -2,7 +2,7 @@ import { Fragment, Slice } from "@scrivr/core/pm";
 import { EditorState, Transaction } from "@scrivr/core/pm";
 import { ReplaceStep } from "@scrivr/core/pm";
 
-import { ChangeStep, ExposedReplaceStep, ExposedSlice, TrTrackingContext } from "../types";
+import { ChangeStep, TrTrackingContext } from "../types";
 import { getAction, TrackChangesAction } from "../actions";
 import {
   createNewInsertAttrs,
@@ -21,18 +21,20 @@ import {
   setFragmentAsNodeSplit,
 } from "../lib/fragments";
 import { mapChangeSteps } from "../engine/changeStep";
+import { advanceBridge } from "../engine/replayBridge";
 
 export function trackReplaceStep(
   i: number,
+  step: ReplaceStep,
   oldState: EditorState,
   newTr: Transaction,
   attrsTemplate: NewEmptyAttrs,
   tr: Transaction,
   trContext: TrTrackingContext,
-) {
+): [ChangeStep[], number | undefined] {
   const { replayBridge } = trContext;
-  const step = tr.steps[i] as ReplaceStep;
   const moveID = trContext.stepsByGroupIDMap.get(step);
+  const textMove = trContext.textMoves.get(step) ?? trContext.pastedMove;
 
   const invertedStep = step.invert(tr.docs[i]!);
 
@@ -43,12 +45,17 @@ export function trackReplaceStep(
     replayBridge.map(invertedStep.to, invertedStep.from === invertedStep.to ? 1 : -1),
     invertedStep.slice,
   );
+  // Later work inside this insertion is already in the replay, records and all.
+  const slice = trContext.composition.composed.has(step)
+    ? newTr.doc.slice(newStep.from, newStep.to)
+    : step.slice;
+  const replayStart = newTr.mapping.maps.length;
   const stepResult = newTr.maybeStep(newStep);
 
-  let selectionPos = 0;
+  let selectionPos: number | undefined;
   const changeSteps: ChangeStep[] = [];
   if (stepResult.failed) {
-    return [changeSteps, undefined] as [ChangeStep[], number | undefined];
+    return [changeSteps, undefined];
   }
 
   const attrs = { ...attrsTemplate };
@@ -56,11 +63,11 @@ export function trackReplaceStep(
   if (moveID) {
     attrs.moveNodeId = moveID;
   }
+  if (textMove) attrs.moveId = textMove;
 
   step
     .getMap()
     .forEach((fromA: number, toA: number, fromB: number, _toB: number) => {
-      const { slice } = (trContext.composition.composed.get(step) ?? step) as ExposedReplaceStep;
       const {
         sliceWasSplit,
         newSliceContent,
@@ -97,7 +104,7 @@ export function trackReplaceStep(
             newTr,
           );
         } else if (
-          isSplitStep(step, oldState.selection, tr.getMeta("uiEvent"))
+          isSplitStep(step, tr.docs[i]!, tr.getMeta("uiEvent"))
         ) {
           // Pass newSliceContent (not fragment) so that text carried into the
           // new paragraph ("lo" from splitting "hel|lo") is NOT marked as a
@@ -113,7 +120,7 @@ export function trackReplaceStep(
           const indentationType = getAction(
             tr,
             TrackChangesAction.indentationAction,
-          )?.action as "indent" | "unindent" | undefined;
+          )?.action;
 
           fragment = setFragmentAsMoveChange(
             newSliceContent,
@@ -125,26 +132,39 @@ export function trackReplaceStep(
         const openEnd = slice.openStart !== slice.openEnd ? 0 : slice.openEnd;
         const textWasDeleted = !!changeSteps.length && !(fromA === fromB);
         const isBlock = !!fragment.firstChild?.isBlock;
+        // Blocks go after what was deleted, unless that ends inside a block's
+        // text: then only the block's opening was replaced, and they go before it.
+        const blocksAt = tr.docs[i]!.resolve(toA).parent.inlineContent ? fromA : toA;
+        const at = textWasDeleted ? fromB : isBlock ? blocksAt : fromA;
+        const caretAt = isBlock && blocksAt !== toA ? { caretAt: toA } : {};
 
         changeSteps.push({
           type: "insert-slice",
-          from: textWasDeleted ? fromB : isBlock ? toA : fromA,
-          to: textWasDeleted ? fromB : isBlock ? toA : fromA,
+          from: at,
+          to: at,
           sliceWasSplit,
-          slice: new Slice(fragment, openStart, openEnd) as ExposedSlice,
+          slice: new Slice(fragment, openStart, openEnd),
+          ...(fragment.size === slice.size ? { undoMapIndex: replayStart } : {}),
+          ...caretAt,
         });
       } else {
-        const uiEventMeta = tr.getMeta("uiEvent") as string | undefined;
+        const uiEventMeta: string | undefined = tr.getMeta("uiEvent");
         const isDeleteEvent = uiEventMeta === "Delete";
         const isDeleteContentForward = uiEventMeta === "deleteContentForward";
         selectionPos = isDeleteEvent || isDeleteContentForward ? toA : fromA;
       }
     });
 
-  selectionPos = replayBridge.map(selectionPos);
-  const doneSteps = mapChangeSteps(changeSteps, replayBridge);
+  // Positions above are in the document before this step; advancing the bridge
+  // past the undo reaches the replay. A pure insertion's undo moves nothing, so
+  // its position stands.
+  const restored = step.from === step.to
+    ? { map: () => newStep.from }
+    : advanceBridge(step, replayBridge, newTr, replayStart);
+  if (selectionPos !== undefined) selectionPos = restored.map(selectionPos);
+  const doneSteps = mapChangeSteps(changeSteps, restored);
 
-  return [doneSteps, selectionPos] as [ChangeStep[], number];
+  return [doneSteps, selectionPos];
 }
 
 function sameThingBackSpaced(

@@ -4,7 +4,7 @@ import { createNewInsertAttrs, NewEmptyAttrs } from "../helpers";
 import { setFragmentAsInserted } from "./fragments";
 import { splitSliceIntoMergedParts } from "./splitSliceIntoMergedParts";
 import { isLiftStepForGap } from "../step-trackers/qualifiers";
-import { ChangeStep, ExposedFragment, ExposedSlice } from "../types";
+import { ChangeStep } from "../types";
 
 /**
  * Applies deletion to the doc without actually deleting nodes that have not been inserted.
@@ -20,7 +20,7 @@ export function deleteAndMergeSplitNodes(
   startDoc: PMNode,
   schema: Schema,
   trackAttrs: NewEmptyAttrs,
-  insertSlice: ExposedSlice,
+  insertSlice: Slice,
 ) {
   const steps: ChangeStep[] = [];
 
@@ -33,6 +33,9 @@ export function deleteAndMergeSplitNodes(
     splitSliceIntoMergedParts(insertSlice, gap !== undefined);
 
   let mergingStartSide = true;
+  // Content arriving as blocks brings its own breaks; inline content leaves the
+  // blocks either side of the deletion to run together.
+  const bringsBlocks = openStart > 0 || !!insertSlice.content.firstChild?.isBlock;
 
   startDoc.nodesBetween(from, to, (node, pos) => {
     const nodeEnd = pos + node.nodeSize;
@@ -65,6 +68,11 @@ export function deleteAndMergeSplitNodes(
         const mergeEndNode = startTokenDeleted && openEnd > 0 && depth === openEnd && mergeContent;
         const mergeEndNodeNotEmpty = mergeEndNode && mergeContent.size;
 
+        if (!gap && !bringsBlocks && node.isTextblock && endTokenDeleted && !startTokenDeleted) {
+          const next = startDoc.nodeAt(nodeEnd);
+          steps.push({ type: "join-node", pos, node, joinsNext: !!next && nodeEnd + next.nodeSize > to });
+        }
+
         if (mergeEndNode && !mergeEndNodeNotEmpty && gap) {
           if (isLiftStepForGap(gap, node, to)) {
             gap.slice.content.forEach((node, offset) => {
@@ -90,7 +98,7 @@ export function deleteAndMergeSplitNodes(
               mergeContent,
               createNewInsertAttrs(trackAttrs),
               schema,
-            ) as ExposedFragment,
+            ),
           });
         } else if (node.isText) {
           steps.push({

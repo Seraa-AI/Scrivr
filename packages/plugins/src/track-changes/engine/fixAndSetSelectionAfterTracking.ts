@@ -1,29 +1,62 @@
-import { Selection, Transaction } from "@scrivr/core/pm";
+import { Mapping, NodeSelection, Selection, Transaction, type Node } from "@scrivr/core/pm";
 
-import { TrTrackingContext } from "../types";
+/** What one round of replay learned about where the selection belongs. */
+export type ReplayedSelection = {
+  /** Replay map index of each restamp, to the index of the undo it mirrors. */
+  restamps: Map<number, number>;
+  /** Where the caret belongs, in the replayed document after `replayedMaps` maps. */
+  caretAfterStep?: { pos: number; replayedMaps: number };
+};
 
 /**
- * The replayed transaction already carries the gesture's selection, mapped
- * forward through the replay steps, which keeps a range a range, keeps its
- * direction, and keeps whatever kind it was.
+ * The same node written back: everything but its tracking records matches. An
+ * id counts only once both have one; the copy can predate the id's assignment.
+ */
+const writtenBack = (copy: Node | null, node: Node) => {
+  if (!copy || copy.type !== node.type || !copy.content.eq(node.content)) return false;
+  const { dataTracked: _, nodeId: copyId, ...copyAttrs } = copy.attrs;
+  const { dataTracked: __, nodeId: selectedId, ...nodeAttrs } = node.attrs;
+  return JSON.stringify(copyAttrs) === JSON.stringify(nodeAttrs) && (!copyId || !selectedId || copyId === selectedId);
+};
+
+/**
+ * Carries the selection through a round of replay. The replay undoes a step and
+ * writes the same content back, so the two are declared mirrors: a position
+ * inside that content comes out inside it, which keeps a range a range and a
+ * selected node selected.
  *
- * One case mapping cannot answer: a caret that trailed a step. The replay undoes
- * the step before restamping it, and a position at the edge of undone content
- * maps past whatever the undo put back. Such a caret belongs after the content
- * the replay stamped, which the tracker reports. The replay is not finished at
- * that point, so the position is carried through the steps replayed after it.
+ * A caret that trailed a step is the case mapping cannot answer: at the edge of
+ * undone content it maps past what the undo put back, so it goes where the
+ * tracker reports. A selected node taken out and written back is re-selected.
+ * Runs once per round, since a round can replay several transactions.
  */
 export function fixAndSetSelectionAfterTracking(
   newTr: Transaction,
-  trContext: TrTrackingContext,
+  selection: Selection,
+  { restamps, caretAfterStep: caret }: ReplayedSelection,
 ) {
-  const caret = trContext.caretAfterStep;
-  if (!caret) return newTr;
+  if (restamps.size) {
+    const mapping = new Mapping();
+    newTr.mapping.maps.forEach((map, index) => mapping.appendMap(map, restamps.get(index)));
+    newTr.setSelection(selection.map(newTr.doc, mapping));
+  }
+  if (selection instanceof NodeSelection && !(newTr.selection instanceof NodeSelection)) {
+    // Either edge can sit inside what the undo spanned; the other then still
+    // lands against the copy.
+    const candidates = [
+      newTr.mapping.map(selection.from, -1),
+      newTr.mapping.map(selection.to, 1) - selection.node.nodeSize,
+    ];
+    const pos = candidates.find(at => writtenBack(newTr.doc.nodeAt(at), selection.node));
+    if (pos !== undefined) {
+      newTr.setSelection(NodeSelection.create(newTr.doc, pos));
+      return;
+    }
+  }
+  if (!caret) return;
 
   const pos = newTr.mapping.slice(caret.replayedMaps).map(caret.pos, -1);
   if (pos <= newTr.doc.content.size) {
     newTr.setSelection(Selection.near(newTr.doc.resolve(pos), -1));
   }
-
-  return newTr;
 }

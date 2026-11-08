@@ -1,16 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { EditorState, Plugin, DocAttrStep, Fragment, ReplaceStep, Slice, Step, StepMap, StepResult } from "@scrivr/core/pm";
 import type { Node as PMNode } from "@scrivr/core/pm";
+import { COLLAB_SYNC_META } from "@scrivr/core";
 import { doc, p, TestEditor } from "./helpers";
-import { trackChangesPluginKey } from "../index";
+import { TrackChangesStatus, trackChangesPluginKey } from "../index";
 import { trackChangesPlugin } from "../engine/trackChangesPlugin";
 import { reportedTracking } from "../engine/transactionProcessing";
-import type { TrackingResult } from "../index";
+import type { TrackingRefusal, TrackingResult } from "../index";
 
 /**
- * Tracking refuses a whole gesture rather than recording part of one. What makes
- * a gesture refusable is whether the replay can represent every step that
- * carries content — never how many there are, and never a step that is not
+ * Tracking refuses a whole gesture rather than recording part of one, and stops
+ * it before it applies: someone suggesting must not change the text directly.
+ * What makes a gesture refusable is whether the replay can represent every step
+ * that carries content — never how many there are, and never a step that is not
  * content at all.
  *
  * The question is answered on step kinds, before anything runs. Whether every
@@ -52,35 +54,98 @@ class ShoutStep extends Step {
 const tracking = (editor: TestEditor): TrackingResult | null =>
   trackChangesPluginKey.getState(editor.state)!.lastTracking;
 
-const refusal = (editor: TestEditor) => {
-  const result = tracking(editor);
-  return result?.status === "refused" ? result : undefined;
-};
+/** A tracked editor state that reports what it stops. */
+const suggesting = (refused: TrackingRefusal[], status = TrackChangesStatus.enabled) => EditorState.create({
+  doc: doc(p("start")),
+  plugins: [trackChangesPlugin({ userID: "alice", initialStatus: status, onRefused: refusal => refused.push(refusal) })],
+});
+
+describe("an edit tracking cannot record is stopped, and the host is told why", () => {
+  it("stops a step kind the replay has no tracker for", () => {
+    const refused: TrackingRefusal[] = [];
+    const state = suggesting(refused);
+    const next = state.apply(state.tr.step(new ShoutStep(1, 6)));
+
+    expect(next.doc.textContent).toBe("start");
+    expect(refused).toEqual([{ reason: "unsupported-step", stepType: "ShoutStep" }]);
+    expect(trackChangesPluginKey.getState(next)!.changeSet.pending).toEqual([]);
+  });
+
+  it("stops nothing while suggestions are off", () => {
+    const refused: TrackingRefusal[] = [];
+    const state = suggesting(refused, TrackChangesStatus.disabled);
+    const next = state.apply(state.tr.step(new ShoutStep(1, 6)));
+
+    expect(next.doc.textContent).toBe("START");
+    expect(refused).toEqual([]);
+  });
+
+  it("stops nothing that arrives from a collaborator", () => {
+    const refused: TrackingRefusal[] = [];
+    const state = suggesting(refused);
+    const next = state.apply(state.tr.step(new ShoutStep(1, 6)).setMeta("y-sync$", {}));
+
+    expect(next.doc.textContent).toBe("START");
+    expect(refused).toEqual([]);
+  });
+
+  it("records nothing of a collaborator's edit that Scrivr's own sync applies", () => {
+    const refused: TrackingRefusal[] = [];
+    const state = suggesting(refused);
+    const next = state.apply(state.tr.insertText(" there", 6).setMeta(COLLAB_SYNC_META, true));
+
+    expect(next.doc.textContent).toBe("start there");
+    expect(trackChangesPluginKey.getState(next)!.changeSet.pending).toEqual([]);
+  });
+
+  it("stops what the same gesture's other plugins would have added too", () => {
+    const refused: TrackingRefusal[] = [];
+    const state = EditorState.create({
+      doc: doc(p("start")),
+      plugins: [
+        trackChangesPlugin({ userID: "alice", onRefused: refusal => refused.push(refusal) }),
+        new Plugin({
+          appendTransaction: (trs, _old, current) => trs.some(tr => tr.getMeta("append-edit"))
+            ? current.tr.insertText("!", current.doc.content.size - 1)
+            : null,
+        }),
+      ],
+    });
+    const next = state.apply(state.tr.step(new ShoutStep(1, 6)).setMeta("append-edit", true));
+
+    expect(next.doc.textContent).toBe("start");
+    expect(refused).toHaveLength(1);
+  });
+
+  it("records an edit another plugin adds across the edge of an insertion, as it was let through", () => {
+    const refused: TrackingRefusal[] = [];
+    const typed = EditorState.create({
+      doc: doc(p("hello world")),
+      plugins: [
+        new Plugin({
+          appendTransaction: (trs, _old, current) => trs.some(tr => tr.getMeta("append-edit"))
+            ? current.tr.insertText("abc", 8).delete(10, 13)
+            : null,
+        }),
+        trackChangesPlugin({ userID: "alice", onRefused: refusal => refused.push(refusal) }),
+      ],
+    });
+    // "Xhello abcworld": the deletion takes back its own "c" and proposes removing "wo".
+    const next = typed.apply(typed.tr.insertText("X", 1).setMeta("append-edit", true));
+
+    expect(refused).toEqual([]);
+    expect(next.doc.textContent).toBe("Xhello abworld");
+    const pending = trackChangesPluginKey.getState(next)!.changeSet.pending;
+    expect(pending.some(change => change.dataTracked.operation === "delete")).toBe(true);
+  });
+});
 
 describe("tracking refuses only what it cannot represent", () => {
-  it("refuses a step kind the replay has no tracker for", () => {
-    const editor = new TestEditor(doc(p("start")));
-    editor.dispatch(editor.state.tr.step(new ShoutStep(1, 6)));
-
-    const result = refusal(editor);
-    expect(result?.reason).toBe("unsupported-step");
-    expect(result?.reason === "unsupported-step" ? result.stepType : undefined)
-      .toBe("ShoutStep");
-  });
-
-  it("records nothing when it refuses, rather than part of the gesture", () => {
-    const editor = new TestEditor(doc(p("start")));
-    editor.dispatch(editor.state.tr.step(new ShoutStep(1, 6)));
-
-    expect(editor.pendingChanges).toEqual([]);
-    expect(() => editor.state.doc.check()).not.toThrow();
-  });
-
   it("does not refuse a doc-attribute write, which is not tracked content", () => {
     const editor = new TestEditor(doc(p("start")));
     editor.dispatch(editor.state.tr.step(new DocAttrStep("anAttr", "v")));
 
-    expect(refusal(editor)).toBeUndefined();
+    expect(tracking(editor)?.status).not.toBe("refused");
   });
 
   it("tracks the content of a gesture that also writes a doc attribute", () => {
@@ -94,40 +159,19 @@ describe("tracking refuses only what it cannot represent", () => {
     expect(tracking(editor)?.steps).toBe(1);
   });
 
-  it("reports diagnostics on a gesture it tracked, without refusing it", () => {
+  it("reports diagnostics on a gesture it tracked", () => {
     const editor = new TestEditor(doc(p("start")));
     editor.insertAt(1, "x");
     const result = tracking(editor);
 
     expect(result?.steps).toBeGreaterThan(0);
-    expect(result?.status === "tracked" ? result.elapsedMs : undefined)
-      .toBeGreaterThanOrEqual(0);
-    expect(refusal(editor)).toBeUndefined();
-  });
-});
-
-
-describe("a refusal describes the document it was made for", () => {
-  it("stops reporting the refusal once the host undoes that edit", () => {
-    const editor = new TestEditor(doc(p("start")));
-    editor.dispatch(editor.state.tr.step(new ShoutStep(1, 6)));
-    expect(refusal(editor)).toBeDefined();
-
-    editor.undo();
-
-    expect(editor.text).toBe("start");
-    expect(tracking(editor)).toBeNull();
+    expect(result?.status === "tracked" ? result.elapsedMs : undefined).toBeGreaterThanOrEqual(0);
   });
 });
 
 describe("a refusal outranks a sibling success", () => {
-  const ready = { status: "tracked", steps: 1, elapsedMs: 0 } as const;
-  const refused = {
-    status: "refused",
-    reason: "unsupported-step",
-    stepType: "ShoutStep",
-    steps: 1,
-  } as const;
+  const ready: TrackingResult = { status: "tracked", steps: 1, elapsedMs: 0 };
+  const refused: TrackingResult = { status: "refused", reason: "unsupported-step", stepType: "ShoutStep", steps: 1 };
 
   it("keeps a refusal already reported in this round", () => {
     expect(reportedTracking(refused, ready)).toBe(refused);
@@ -139,43 +183,14 @@ describe("a refusal outranks a sibling success", () => {
   });
 });
 
-
-describe("tracking outcomes belong to one dispatch", () => {
-  const build = () => EditorState.create({
-    doc: doc(p("start")),
-    plugins: [
-      trackChangesPlugin({ userID: "alice" }),
-      new Plugin({
-        appendTransaction(trs, _old, state) {
-          return trs.some(tr => tr.getMeta("append-edit"))
-            ? state.tr.insertText("!", state.doc.content.size - 1)
-            : null;
-        },
-      }),
-    ],
+describe("viewing snapshots", () => {
+  it("keeps the document as it is", () => {
+    const state = suggesting([], TrackChangesStatus.viewSnapshots);
+    expect(state.apply(state.tr.insertText("x", 1)).doc.textContent).toBe("start");
   });
 
-  it("keeps a refusal when a later append round succeeds", () => {
-    const initial = build();
-    const state = initial.apply(initial.tr.step(new ShoutStep(1, 6)).setMeta("append-edit", true));
-    expect(state.doc.textContent).toBe("START!");
-    expect(trackChangesPluginKey.getState(state)!.lastTracking).toMatchObject({ status: "refused", reason: "unsupported-step" });
-    const next = state.apply(state.tr.insertText("?", 1));
-    expect(trackChangesPluginKey.getState(next)!.lastTracking?.status).toBe("tracked");
-  });
-
-  it("resets the accumulator even when the next root only carries metadata", () => {
-    const initial = build();
-    const state = initial.apply(initial.tr.step(new ShoutStep(1, 6)));
-    const next = state.apply(state.tr.setMeta("append-edit", true));
-    expect(trackChangesPluginKey.getState(next)!.lastTracking?.status).toBe("tracked");
-  });
-
-  it("keeps outcomes isolated between editor states", () => {
-    const initial = build();
-    const refused = initial.apply(initial.tr.step(new ShoutStep(1, 6)).setMeta("append-edit", true));
-    const ready = initial.apply(initial.tr.insertText("!", 1));
-    expect(trackChangesPluginKey.getState(refused)!.lastTracking?.status).toBe("refused");
-    expect(trackChangesPluginKey.getState(ready)!.lastTracking?.status).toBe("tracked");
+  it("still takes in a collaborator's edit", () => {
+    const state = suggesting([], TrackChangesStatus.viewSnapshots);
+    expect(state.apply(state.tr.insertText("x", 1).setMeta("y-sync$", {})).doc.textContent).toBe("xstart");
   });
 });

@@ -6,7 +6,11 @@ import { dropStructuralChangeShadow } from "./structuralChange";
 import { addTrackIdIfDoesntExist, getBlockInlineTrackedData, NewDeleteAttrs } from "../helpers";
 import { CHANGE_OPERATION } from "../types";
 
-/** Deletes node but tries to leave content intact by merging upward first. */
+/**
+ * Deletes node but tries to leave content intact by merging upward first. A
+ * container that cannot be left empty, such as a list losing its only item,
+ * goes with it.
+ */
 export function deleteNode(node: PMNode, pos: number, tr: Transaction) {
   const resPos = tr.doc.resolve(pos);
   const canMergeToNodeAbove =
@@ -14,7 +18,7 @@ export function deleteNode(node: PMNode, pos: number, tr: Transaction) {
   if (canMergeToNodeAbove) {
     return tr.replaceWith(pos - 1, pos + 1, Fragment.empty);
   }
-  return tr.delete(pos, pos + node.nodeSize);
+  return tr.deleteRange(pos, pos + node.nodeSize);
 }
 
 /**

@@ -15,7 +15,7 @@
  * Used by applyDiffAsSuggestion for the AI suggestion pipeline.
  */
 
-import type { Mark, MarkType, Node as PMNode, Schema } from "@scrivr/core/pm";
+import type { Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
 import type { Transaction } from "@scrivr/core/pm";
 
 export interface SplitRangeOptions {
@@ -23,6 +23,11 @@ export interface SplitRangeOptions {
   from: number;
   to: number;
   schema: Schema;
+}
+
+function markAuthorID(mark: Mark): string | undefined {
+  const dataTracked: { authorID?: string } | null = mark.attrs.dataTracked;
+  return dataTracked?.authorID;
 }
 
 /**
@@ -42,8 +47,7 @@ export function splitRangeForNewMark(
     return true;
   }
 
-  const newAuthorID: string =
-    (mark.attrs.dataTracked as { authorID?: string } | null)?.authorID ?? "";
+  const newAuthorID: string = markAuthorID(mark) ?? "";
 
   const isTrackedMark = (m: Mark): boolean =>
     m.type === insertType || m.type === deleteType;
@@ -66,7 +70,7 @@ export function splitRangeForNewMark(
     const isDuplicate = existingTracked.some(
       m =>
         m.type === mark.type &&
-        (m.attrs.dataTracked as { authorID?: string } | null)?.authorID === newAuthorID,
+        markAuthorID(m) === newAuthorID,
     );
 
     if (!isDuplicate) {
@@ -94,7 +98,7 @@ export function applyTrackedDelete(
   dataTracked: Record<string, unknown>,
   schema: Schema,
 ): boolean {
-  const deleteType = schema.marks.trackedDelete as MarkType | undefined;
+  const deleteType = schema.marks.trackedDelete;
   if (!deleteType) return false;
   const mark = deleteType.create({ dataTracked });
   return splitRangeForNewMark(tr, { mark, from, to, schema });
@@ -110,7 +114,7 @@ export function applyTrackedInsert(
   dataTracked: Record<string, unknown>,
   schema: Schema,
 ): boolean {
-  const insertType = schema.marks.trackedInsert as MarkType | undefined;
+  const insertType = schema.marks.trackedInsert;
   if (!insertType) return false;
   const mark = insertType.create({ dataTracked });
   return splitRangeForNewMark(tr, { mark, from, to, schema });

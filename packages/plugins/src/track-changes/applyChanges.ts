@@ -10,7 +10,7 @@ import { deleteNode } from "./lib/deleteNode";
 import { clearTextChange } from "./lib/clearTextChange";
 import { rejectMove } from "./engine/moveIdentity";
 import { mergeNode } from "./lib/mergeNode";
-import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs, TrackedChange, UpdateAttrs } from "./types";
+import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs, TrackedChange } from "./types";
 
 function collectMoveNodeIds(containerNode: PMNode, primaryMoveNodeId: string): Set<string> {
   const moveNodeIds = new Set<string>();
@@ -33,7 +33,8 @@ function collectMoveNodeIds(containerNode: PMNode, primaryMoveNodeId: string): S
  */
 function isEntirelyGone(change: TrackedChange, deleteMap: Mapping) {
   const { pos, deleted } = deleteMap.mapResult(change.from);
-  return deleted && !(ChangeSet.isTextChange(change) && deleteMap.map(change.to, -1) > pos);
+  const spansText = ChangeSet.isTextChange(change) || ChangeSet.isInlineMarkChange(change);
+  return deleted && !(spansText && deleteMap.map(change.to, -1) > pos);
 }
 
 /**
@@ -67,6 +68,12 @@ export function applyChanges(
     if (
       change.dataTracked.operation === CHANGE_OPERATION.delete &&
       change.dataTracked.moveNodeId
+    ) return;
+
+    // Joining reshapes the blocks around it, so it settles after everything else.
+    if (
+      change.dataTracked.operation === CHANGE_OPERATION.node_join &&
+      change.dataTracked.status === CHANGE_STATUS.accepted
     ) return;
 
     const from = deleteMap.map(change.from);
@@ -109,7 +116,7 @@ export function applyChanges(
         node.marks,
       );
     } else if (ChangeSet.isNodeAttrChange(change) && change.dataTracked.status === CHANGE_STATUS.rejected) {
-      const oldTypeName = (change.dataTracked as UpdateAttrs).oldNodeTypeName;
+      const oldTypeName = "oldNodeTypeName" in change.dataTracked ? change.dataTracked.oldNodeTypeName : undefined;
       const oldType = oldTypeName ? node.type.schema.nodes[oldTypeName] : undefined;
       tr.setNodeMarkup(
         from, oldType,
@@ -123,7 +130,9 @@ export function applyChanges(
         node.marks,
       );
     } else if (ChangeSet.isMarkChange(change)) {
+      // The mark keeps what it says — a colour, a size, a link — and loses only this record.
       const newMark = change.mark.type.create({
+        ...change.mark.attrs,
         dataTracked: excludeFromTracked(change.mark.attrs.dataTracked, change.id),
       });
       const isInsert = change.dataTracked.operation === CHANGE_OPERATION.insert;

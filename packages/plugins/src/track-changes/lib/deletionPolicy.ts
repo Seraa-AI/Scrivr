@@ -17,7 +17,11 @@ function records(node: Node): Partial<TrackedAttrs>[] {
  * carries a moveNodeId and is a separate record.
  */
 export function alreadyProposedForDeletion(node: Node): boolean {
-  return records(node).some(
+  // A formatting deletion proposes taking a mark off, not the text under it.
+  const proposals: Partial<TrackedAttrs>[] = node.isText
+    ? node.marks.filter(mark => mark.type === node.type.schema.marks.trackedDelete).flatMap(markRecords)
+    : records(node);
+  return proposals.some(
     record =>
       record.operation === CHANGE_OPERATION.delete &&
       record.status === CHANGE_STATUS.pending &&

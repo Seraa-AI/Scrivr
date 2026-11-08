@@ -58,8 +58,8 @@ function describeAttrChange(change: NodeAttrChange): string {
 
 /** Describe a MarkChange for display. */
 function describeMarkChange(change: MarkChange): string {
-  const text = (change.node as { text?: string }).text;
-  const colorAttr = (change.mark.attrs as Record<string, unknown>).color;
+  const text = change.node.text;
+  const colorAttr: unknown = change.mark.attrs.color;
   if (colorAttr && typeof colorAttr === "string") {
     return text ? `"${truncate(text)}" → ${colorAttr}` : colorAttr;
   }
@@ -247,14 +247,16 @@ function SingleRow({
   let preview: React.ReactNode = null;
 
   if (change.type === "text-change") {
-    const tc = change
-    const isDelete = tc.dataTracked.operation === CHANGE_OPERATION.delete;
+    // A move is shown once, by where it went, not as both of its halves.
+    const moving = !!change.dataTracked.moveId;
+    const verb = moving ? "Moving" : change.dataTracked.operation === CHANGE_OPERATION.delete ? "Removing" : "Adding";
+    const shown = moving ? pieces.filter(piece => piece.dataTracked.operation === CHANGE_OPERATION.insert) : pieces;
     preview = (
       <div
         style={previewLine}
       >
-        <span style={prefixLabel}>{isDelete ? "Removing" : "Adding"}</span>
-        <em>"{truncate(pieces.map(piece => (piece.type === "text-change" ? piece.text : "")).join(" … "))}"</em>
+        <span style={prefixLabel}>{verb}</span>
+        <em>"{truncate(shown.map(piece => (piece.type === "text-change" ? piece.text : "")).join(" … "))}"</em>
       </div>
     );
   } else if (change.type === "mark-change") {

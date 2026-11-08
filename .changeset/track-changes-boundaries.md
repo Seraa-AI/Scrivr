@@ -15,8 +15,18 @@ suggestions no longer destroys authorship, selection, or unrelated decisions.
   admitted wherever track changes is installed, so edits inside a code block
   are tracked like any other text.
 - `NORMALIZATION_META` marks an edit that keeps the document well-formed rather
-  than changing it. `TrailingNode` and the table normalizer set it, so what they
-  add is no longer recorded as the author's suggestion.
+  than changing it. `UniqueId`, `TrailingNode` and the table normalizer set it,
+  so ids, trailing paragraphs and table repairs are never recorded as anyone's
+  suggestion.
+- `TrailingNode` takes away the empty paragraph it added once the document ends
+  in a paragraph again, unless someone typed in it or put the caret in it.
+- Cut and paste mark their transactions `uiEvent: "cut"` and `uiEvent: "paste"`,
+  so a plugin can tell them from deleting and typing.
+- `renderTrackedObject` frames an image, rule or other object a change covers;
+  `renderTrackedFormatting` washes text whose formatting changed.
+  `TrailingNode`, `Typography` and `IMAGE_PLACEMENT_ATTRS` are exported.
+- The overlay repaints after every content repaint, so overlay marks drawn over
+  a freshly painted tile no longer go missing.
 
 **Track changes**
 
@@ -35,8 +45,9 @@ suggestions no longer destroys authorship, selection, or unrelated decisions.
   node or its text, and a paragraph break from either of its halves.
 - Later steps inside what the same gesture inserted are now part of that
   insertion, so inserting a block and typing in it no longer loses the typing. A
-  step that writes both inside and outside an insertion is refused with
-  `overlapping-steps`.
+  step that writes both inside and outside an insertion is split at its edge
+  where it can be (otherwise it is refused): inside, it takes back your own
+  text; outside, it proposes deleting what was there.
 - Every tracker writes through the replay, so a gesture mixing formatting or
   attribute changes with a position-shifting step records them on the right text.
 - Formatting across someone else's insertion no longer spreads that insertion
@@ -61,17 +72,45 @@ suggestions no longer destroys authorship, selection, or unrelated decisions.
   `false` and decides nothing when the plan is blocked, including when other work
   depends on the change. A host ignoring the result sees a click that does
   nothing; use `reviewChanges` to learn why.
-- Tracking refuses a gesture it cannot represent rather than recording part of
-  it. The edit itself stands, unrecorded, and `lastTracking` reports `refused`
-  with a `reason` so the host can undo or warn. A refusal survives all append
-  rounds in the same dispatch; undo and redo clear it. `lastReview` reports the
-  last decision the same way. Gestures of more than 20 steps used to be partly
-  untracked and are now tracked in full.
+- An edit tracking cannot represent is stopped before it applies, so someone
+  suggesting never changes the text directly. `onRefused` on
+  `TrackChanges.configure` receives the reason (`overlapping-steps`,
+  `unsupported-step`, `duplicate-transform-package`) so the host can say why.
+  Gestures of more than 20 steps used to be partly untracked and are now
+  tracked in full. `lastReview` reports the last decision.
+- Nothing can be edited while viewing a snapshot of the changes.
+- Deleting a paragraph break is a change of its own, `node_join`: the
+  paragraphs stay apart until it is accepted. Deleting a break you added
+  yourself takes it back instead.
+- Moving paragraphs into, out of or between lists is a change to each
+  paragraph's place, `list_change`, kept as `oldList`; rejecting it rebuilds the
+  lists around it.
+- Moved content is one change: a drag of text, or a cut pasted back by the same
+  author while the cut is still pending, links its deletion and insertion with
+  `moveId`, and deciding either decides both. Dragging a block, several blocks
+  at once, or a floating image alone in its paragraph is one move too. Undoing
+  the paste and pasting again is still the move.
+- Pasted paragraphs are recorded as inserted, not as a paragraph break, so
+  rejecting a paste removes it. Enter at the end of a paragraph records the new
+  paragraph as inserted.
+- Reviewing a formatting change keeps the mark's value, so colour, size and
+  link changes can be accepted and rejected. Neighbouring pieces of one
+  formatting change by the same author are one card, decided together.
+- Changed objects are framed. Formatting changes are washed and barred in the
+  margin, as Word marks them, instead of looking like an insertion or a deletion.
+- A collaborator's edit arriving through Scrivr's own sync is never recorded as
+  the local author's suggestion.
+- Accepting a deleted break between list items names any change recorded on the
+  item it joins as dependent work, instead of failing; `joinsAt` on the change
+  says where the joined block starts.
 - Selection survives tracking: a range stays a range in its direction, and the
   caret lands where the gesture left it, through every step of a multi-step
   gesture.
 - `TrackChangesState`, `TrackingResult` and `TrackingRefusal` name what a host
   reads from `trackChangesPluginKey`.
+- `CHANGE_OPERATION` gains `node_join` and `list_change`, with `ListLevel` naming
+  an entry of a list change's `oldList`. A host that switches on the operation
+  should name them.
 
 **React**
 
@@ -85,3 +124,9 @@ suggestions no longer destroys authorship, selection, or unrelated decisions.
   `pieces`; its `review` is the card's `useReviewAction`, and `accept`, `reject`,
   `acceptAll` and `rejectAll` return the outcome. The panel's badge counts cards.
   It takes any `IBaseEditor`, and `TrackChangesDisplayItem` names an item's type.
+- Changes are named from one table, in the panel and the popover alike:
+  "Paragraph break added" and "removed", "List changed", "Moved", and "Image
+  moved" for an image dragged on its page. `ChangePopoverInfo.moveId` marks
+  either half of a move.
+- `describeSuggestionRefusal` gives the message and remedy, as
+  `SuggestionRefusalText`, for a refusal passed to `onRefused`.

@@ -1,4 +1,4 @@
-import { EditorState, Mapping, type Transaction } from "@scrivr/core/pm";
+import { EditorState, Mapping, TextSelection, type Transaction } from "@scrivr/core/pm";
 import { findChanges } from "../findChanges";
 import { ChangeSet } from "../ChangeSet";
 import { CHANGE_STATUS, type IncompleteChange, type TrackedChange } from "../types";
@@ -6,6 +6,8 @@ import { dropOrphanChanges } from "../lib/structuralChange";
 import { checkReviewTransaction } from "./checkReviewTransaction";
 import { applyChanges } from "../applyChanges";
 import { revertSplitNodeChange } from "../lib/revertChanges";
+import { acceptBreakDeletion } from "../lib/deleteBreak";
+import { restoreListPlaces } from "../lib/listChange";
 import type { ReviewDecision, ReviewOutcome, ReviewPlan } from "../reviewPlan";
 
 /**
@@ -90,11 +92,12 @@ type ReadyPlan = Extract<ReviewPlan, { status: "ready" }>;
  * result or nothing. Each change is applied by its own decision, so a conflict
  * resolution — one accepted, the others rejected — is still one review.
  *
- * Rejected placements and paragraph breaks are restored first, so content is
+ * Rejected placements, paragraph breaks and list changes are restored first, so content is
  * back where it began before anything destructive reads it. Restoring transports
  * content rather than shifting it, so nothing can be mapped across it: every
  * later stage reads its records from the document as restored. Accepted
- * placements settle last, once the content they carry is final.
+ * placements settle last, once the content they carry is final, and accepted
+ * break deletions after them, once the blocks either side are final.
  */
 export function updateChangesStatus(
   createdTr: Transaction,
@@ -104,8 +107,8 @@ export function updateChangesStatus(
 ): ReviewOutcome {
   const decisions = { accepted: plan.accepted, rejected: plan.rejected };
   const statusOf = new Map<string, CHANGE_STATUS>([
-    ...plan.accepted.map(id => [id, CHANGE_STATUS.accepted] as const),
-    ...plan.rejected.map(id => [id, CHANGE_STATUS.rejected] as const),
+    ...plan.accepted.map((id): [string, CHANGE_STATUS] => [id, CHANGE_STATUS.accepted]),
+    ...plan.rejected.map((id): [string, CHANGE_STATUS] => [id, CHANGE_STATUS.rejected]),
   ]);
   // One review stamps one time, however many records it touches.
   const reviewedAt = Date.now();
@@ -119,6 +122,7 @@ export function updateChangesStatus(
       decision,
     );
   const scratch = EditorState.create({ doc: createdTr.doc }).tr;
+  let caret: { pos: number; stepsAfter: number } | undefined;
   try {
     const restoredPlacements = placements(snapshot, "rejected");
     const restoredBreaks = decided(snapshot).filter(change =>
@@ -128,7 +132,14 @@ export function updateChangesStatus(
       if (change.dataTracked.operation === "node_split") revertSplitNodeChange(scratch, change);
       else applyChanges(scratch, scratch.doc.type.schema, [change], snapshot, restoreMapping);
     }
-    const current = restoredPlacements.length || restoredBreaks.length
+    const restoredLists = decided(snapshot).filter(change =>
+      change.dataTracked.operation === "list_change" && statusOf.get(change.id) === CHANGE_STATUS.rejected);
+    if (restoredLists.length) {
+      const before = scratch.mapping.map(createdTr.selection.head);
+      const placeOf = restoreListPlaces(scratch, new Set(restoredLists.map(change => change.id)));
+      if (createdTr.selection.empty) caret = { pos: placeOf(before), stepsAfter: scratch.steps.length };
+    }
+    const current = restoredPlacements.length || restoredBreaks.length || restoredLists.length
       ? new ChangeSet(stampReviewed(
           findChanges(EditorState.create({ doc: scratch.doc })).changes, statusOf, userID, reviewedAt,
         ))
@@ -139,6 +150,10 @@ export function updateChangesStatus(
     applyChanges(scratch, scratch.doc.type.schema,
       remaining.filter(ChangeSet.isTextChange), current, mapping);
     for (const change of placements(current, "accepted")) applyChanges(scratch, scratch.doc.type.schema, [change], current, mapping);
+    const acceptedBreaks = remaining
+      .filter(change => change.dataTracked.operation === "node_join" && statusOf.get(change.id) === CHANGE_STATUS.accepted)
+      .sort((a, b) => b.from - a.from);
+    for (const change of acceptedBreaks) acceptBreakDeletion(scratch, change.id);
     dropOrphanChanges(scratch);
     checkReviewTransaction(scratch);
     // The planner authorizes identities, not just document ranges. At the
@@ -160,5 +175,10 @@ export function updateChangesStatus(
     return { status: "blocked", ...decisions, reason: "invalid-result" };
   }
   for (const step of scratch.steps) createdTr.step(step);
+  // Rebuilding a list maps the caret past it; it belongs in the text it was in.
+  if (caret) {
+    const pos = scratch.mapping.slice(caret.stepsAfter).map(caret.pos);
+    createdTr.setSelection(TextSelection.near(createdTr.doc.resolve(pos)));
+  }
   return { status: "applied", ...decisions };
 }

@@ -9,6 +9,7 @@ import {
   getBlockInlineTrackedData,
   NewEmptyAttrs,
 } from "../helpers";
+import { deleteBreak } from "../lib/deleteBreak";
 import { deleteOrSetNodeDeleted } from "../lib/deleteNode";
 import { deleteTextIfInserted } from "../lib/deleteTextIfInserted";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
@@ -19,7 +20,8 @@ export function processChangeSteps(
   newTr: Transaction,
   emptyAttrs: NewEmptyAttrs,
   schema: Schema,
-) {
+  restamps: Map<number, number>,
+): [Mapping, number | undefined] {
   const mapping = new Mapping();
   const deleteAttrs = createNewDeleteAttrs(emptyAttrs);
   let selectionPos = undefined;
@@ -35,6 +37,14 @@ export function processChangeSteps(
         within(removedNodes, c.pos, c.type === "delete-node" ? c.nodeEnd : c.to)) return;
     let step = newTr.steps[newTr.steps.length - 1];
     switch (c.type) {
+      case "join-node": {
+        const beforeSteps = newTr.steps.length;
+        deleteBreak(mapping.map(c.pos), c.joinsNext, newTr, emptyAttrs);
+        for (let i = beforeSteps; i < newTr.steps.length; i++) {
+          mapping.appendMap(newTr.steps[i]!.getMap());
+        }
+        break;
+      }
       case "delete-node": {
         const beforeSteps = newTr.steps.length;
         const allowCancellation = !within(retainedNodes, c.pos, c.nodeEnd);
@@ -64,6 +74,7 @@ export function processChangeSteps(
           );
           return;
         }
+        if (c.undoMapIndex !== undefined) restamps.set(newTr.mapping.maps.length - 1, c.undoMapIndex);
         mergeTrackedMarks(mapping.map(c.from), newTr.doc, newTr, schema);
         const to = mapping.map(c.to) + c.slice.size;
         mergeTrackedMarks(
@@ -72,11 +83,14 @@ export function processChangeSteps(
           newTr,
           schema,
         );
-        selectionPos = mapping.map(c.to) + c.slice.size;
+        selectionPos = mapping.map(c.caretAt ?? c.to) + c.slice.size;
         break;
       }
       case "delete-text": {
-        const node = newTr.doc.nodeAt(mapping.map(c.pos));
+        // Read at the deletion itself: a stamp from a later step can have split
+        // the text node this deletion was computed against.
+        const from = mapping.map(c.from);
+        const node = newTr.doc.nodeAt(from);
         if (!node) {
           console.error(
             `processChangeSteps: no text node found for text-change`,
@@ -87,7 +101,7 @@ export function processChangeSteps(
 
         const where = deleteTextIfInserted(
           node,
-          mapping.map(c.pos),
+          from - newTr.doc.resolve(from).textOffset,
           newTr,
           schema,
           deleteAttrs,
@@ -129,7 +143,7 @@ export function processChangeSteps(
       }
       case "update-node-attrs": {
         const oldDataTracked = getBlockInlineTrackedData(c.node) || [];
-        const oldUpdate = oldDataTracked.reverse().find(d => {
+        const oldUpdate = oldDataTracked.reverse().find((d): d is Partial<UpdateAttrs> => {
           if (
             d.operation === CHANGE_OPERATION.set_node_attributes &&
             d.status === CHANGE_STATUS.pending
@@ -137,7 +151,7 @@ export function processChangeSteps(
             return true;
           }
           return false;
-        }) as UpdateAttrs;
+        });
 
         const { dataTracked, ...restAttrs } = c.node.attrs;
         const oldAttrs = restAttrs;
@@ -191,5 +205,5 @@ export function processChangeSteps(
     }
   });
 
-  return [mapping, selectionPos] as [Mapping, number | undefined];
+  return [mapping, selectionPos];
 }

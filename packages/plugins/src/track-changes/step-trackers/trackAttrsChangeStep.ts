@@ -3,7 +3,7 @@ import { EditorState, Transaction } from "@scrivr/core/pm";
 import { AttrStep, type Mapping } from "@scrivr/core/pm";
 
 import { NewEmptyAttrs } from "../helpers";
-import { ChangeStep } from "../types";
+import { ChangeStep, UpdateNodeAttrsStep } from "../types";
 
 function trackAttrsChangeStep(
   step: AttrStep,
@@ -13,7 +13,7 @@ function trackAttrsChangeStep(
   _attrs: NewEmptyAttrs,
   currentStepDoc: PMNode,
   replayBridge: Mapping,
-) {
+): ChangeStep[] {
   const newStep = step.invert(currentStepDoc).map(replayBridge);
   if (!newStep) return [];
   const stepResult = newTr.maybeStep(newStep);
@@ -32,7 +32,7 @@ function trackAttrsChangeStep(
 
   const { dataTracked, ...newAttrs } = node.attrs || {};
 
-  const changeStep = {
+  const changeStep: UpdateNodeAttrsStep = {
     pos: replayBridge.map(step.pos, 1),
     type: "update-node-attrs",
     node,
@@ -40,7 +40,7 @@ function trackAttrsChangeStep(
       ...newAttrs,
       [step.attr]: step.value,
     },
-  } as ChangeStep;
+  };
 
   return [changeStep];
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Editor } from "@scrivr/core";
 import { TrackChangesStatus } from "@scrivr/plugins";
 
@@ -17,20 +17,27 @@ const MODE_STATUS: Record<EditorMode, TrackChangesStatus> = {
 };
 
 interface ModeSwitcherProps {
-  editor: Editor | null;
+  mode: EditorMode;
+  onChange: (mode: EditorMode) => void;
 }
 
-export function ModeSwitcher({ editor }: ModeSwitcherProps) {
-  const [mode, setMode] = useState<EditorMode>("editing");
+/** Puts the editor in a mode: whether edits are made, suggested, or not allowed. */
+export function useEditorMode(editor: Editor | null, mode: EditorMode) {
+  useEffect(() => {
+    if (!editor) return;
+    editor.commands.setTrackingStatus?.(MODE_STATUS[mode]);
+    editor.setReadOnly(mode === "viewOnly");
+  }, [editor, mode]);
+}
+
+export function ModeSwitcher({ mode, onChange }: ModeSwitcherProps) {
   const [open, setOpen] = useState(false);
 
   const current = MODES.find((m) => m.value === mode)!;
 
   const handleSelect = (next: EditorMode) => {
-    setMode(next);
     setOpen(false);
-    editor?.commands.setTrackingStatus?.(MODE_STATUS[next]);
-    editor?.setReadOnly(next === "viewOnly");
+    onChange(next);
   };
 
   return (

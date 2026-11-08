@@ -99,18 +99,15 @@ describe("selection contract — gestures that restructure without replacing", (
     expect(editor.state.doc.textBetween(1, editor.state.selection.from, "", "")).toBe("hello");
   });
 
-  // A mid-text caret does not survive precisely: the around-step tracker undoes
-  // and restamps the whole block, so the interior position is genuinely gone by
-  // the time anything could map it. What must hold is that the caret stays in
-  // the text that was wrapped rather than escaping the new list.
-  it("leaves the caret inside the text it wrapped", () => {
+  // The wrap is re-applied as a wrap, so the content it wraps is carried, not
+  // removed and written back, and a caret inside it keeps its place.
+  it("keeps a caret in the middle of the text it wrapped", () => {
     const editor = new TestEditor(doc(p("hello")));
     wrapInList(editor, 3);
 
     const { from } = editor.state.selection;
-    const text = editor.state.doc.resolve(from).parent;
-    expect(text.textContent).toBe("hello");
-    expect(editor.state.doc.textBetween(1, from, "", "").length).toBeLessThanOrEqual(5);
+    expect(editor.state.doc.resolve(from).parent.textContent).toBe("hello");
+    expect(editor.state.doc.textBetween(1, from, "", "")).toBe("he");
   });
 });
 
